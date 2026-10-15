@@ -42,6 +42,8 @@
 | Validação de escrita de fato | precisa gravar e ouvir/medir |
 | Endereço USB completo / strings / interface HID | precisa enumerar |
 
+Plano de sondagem para fechar cada linha, com prioridade e receita: [`probing.md`](probing.md).
+
 ## Divergência conhecida e ainda não explicada
 
 O bundle do kuba usa `0xCB` / `"EQ1#"` / Q27 / CRC16, que **não bate** com o

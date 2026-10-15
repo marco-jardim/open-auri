@@ -123,6 +123,8 @@ de ~10 kHz).
 
 Confiança: ❌ (precisa do cabo) · Esforço: médio
 
+→ Plano completo de sondagem (B1–B11): [`probing.md`](probing.md).
+
 ### X8 — Curadoria distribuída ("curvas assinadas")
 
 Com X1, um revisor/artista publica a curva dele como um link. O cabo vira o
@@ -173,3 +175,5 @@ Duas incógnitas derrubam várias ideias se derem errado:
 
 1. **O firmware aceita biquads fora de RBJ?** (L1) ⇒ C6, C7, X6
 2. **O `FS` é mesmo 96 kHz?** ⇒ C7, X3, e a precisão de tudo acima de ~10 kHz
+
+Plano de sondagem para fechar as duas, com prioridade: [`probing.md`](probing.md).

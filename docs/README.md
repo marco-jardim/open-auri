@@ -31,6 +31,7 @@ está marcado como hipótese ou pendência — não como fato.
 | [`verification.md`](verification.md) | Teste de equivalência do payload (`npm test`) e o que ele prova. |
 | [`ideas.md`](ideas.md) | Usos previstos, excêntricos e não previstos abertos pelo protocolo. |
 | [`social.md`](social.md) | Camada social: formato compacto, proveniência, versionamento, hospedagem. |
+| [`probing.md`](probing.md) | Plano técnico: sondagem do firmware, testes cegos, otimizações de qualidade. |
 | [`open-questions.md`](open-questions.md) | O que está confirmado, o que é hipótese e o que falta. |
 
 ## Créditos
