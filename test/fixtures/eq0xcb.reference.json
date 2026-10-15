@@ -6,11 +6,11 @@
     "note": "Reference bytes produced by the Kuba page DSP implementation, evaluated from a pinned local copy (not vendored)."
   },
   "constants": {
-    "VENDOR_ID": 13058,
-    "PRODUCT_ID": 35074,
-    "REPORT_ID": 203,
-    "FS": 96000,
-    "HEADER": [
+    "usbVid": 13058,
+    "usbPid": 35074,
+    "hidReportId": 203,
+    "sampleRate": 96000,
+    "preamble": [
       69,
       81,
       49,
@@ -26,7 +26,7 @@
       0,
       0
     ],
-    "APPLY": [
+    "commitCommand": [
       1,
       101,
       0,
@@ -36,70 +36,70 @@
   },
   "presets": {
     "padrao": {
-      "pre": -2.8,
-      "bands": [
+      "preampDb": -2.8,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 25,
-          "g": -0.8,
-          "q": 0.3
+          "kind": "PK",
+          "freqHz": 25,
+          "gainDb": -0.8,
+          "qFactor": 0.3
         },
         {
-          "type": "PK",
-          "f": 150,
-          "g": -3,
-          "q": 0.69
+          "kind": "PK",
+          "freqHz": 150,
+          "gainDb": -3,
+          "qFactor": 0.69
         },
         {
-          "type": "PK",
-          "f": 2237,
-          "g": -10,
-          "q": 1.41
+          "kind": "PK",
+          "freqHz": 2237,
+          "gainDb": -10,
+          "qFactor": 1.41
         },
         {
-          "type": "PK",
-          "f": 4348,
-          "g": -6.1,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 4348,
+          "gainDb": -6.1,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 4958,
-          "g": -8.3,
-          "q": 2.72
+          "kind": "PK",
+          "freqHz": 4958,
+          "gainDb": -8.3,
+          "qFactor": 2.72
         },
         {
-          "type": "PK",
-          "f": 7178,
-          "g": -10,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 7178,
+          "gainDb": -10,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 11063,
-          "g": -10,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 11063,
+          "gainDb": -10,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 520,
-          "g": 3.1,
-          "q": 0.81
+          "kind": "PK",
+          "freqHz": 520,
+          "gainDb": 3.1,
+          "qFactor": 0.81
         },
         {
-          "type": "PK",
-          "f": 3046,
-          "g": 5.7,
-          "q": 1.51
+          "kind": "PK",
+          "freqHz": 3046,
+          "gainDb": 5.7,
+          "qFactor": 1.51
         },
         {
-          "type": "PK",
-          "f": 5995,
-          "g": 3.4,
-          "q": 0.59
+          "kind": "PK",
+          "freqHz": 5995,
+          "gainDb": 3.4,
+          "qFactor": 0.59
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -321,7 +321,7 @@
         112,
         25
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -622,70 +622,70 @@
       ]
     },
     "pref6": {
-      "pre": -3,
-      "bands": [
+      "preampDb": -3,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 25,
-          "g": -2,
-          "q": 0.4
+          "kind": "PK",
+          "freqHz": 25,
+          "gainDb": -2,
+          "qFactor": 0.4
         },
         {
-          "type": "PK",
-          "f": 167,
-          "g": -6.2,
-          "q": 0.53
+          "kind": "PK",
+          "freqHz": 167,
+          "gainDb": -6.2,
+          "qFactor": 0.53
         },
         {
-          "type": "PK",
-          "f": 2560,
-          "g": -8,
-          "q": 1.03
+          "kind": "PK",
+          "freqHz": 2560,
+          "gainDb": -8,
+          "qFactor": 1.03
         },
         {
-          "type": "PK",
-          "f": 4911,
-          "g": -8,
-          "q": 4
+          "kind": "PK",
+          "freqHz": 4911,
+          "gainDb": -8,
+          "qFactor": 4
         },
         {
-          "type": "PK",
-          "f": 7838,
-          "g": -6.7,
-          "q": 4
+          "kind": "PK",
+          "freqHz": 7838,
+          "gainDb": -6.7,
+          "qFactor": 4
         },
         {
-          "type": "PK",
-          "f": 11523,
-          "g": -6.5,
-          "q": 4
+          "kind": "PK",
+          "freqHz": 11523,
+          "gainDb": -6.5,
+          "qFactor": 4
         },
         {
-          "type": "PK",
-          "f": 270,
-          "g": 0.1,
-          "q": 4
+          "kind": "PK",
+          "freqHz": 270,
+          "gainDb": 0.1,
+          "qFactor": 4
         },
         {
-          "type": "PK",
-          "f": 404,
-          "g": 4.1,
-          "q": 0.48
+          "kind": "PK",
+          "freqHz": 404,
+          "gainDb": 4.1,
+          "qFactor": 0.48
         },
         {
-          "type": "PK",
-          "f": 2930,
-          "g": 7,
-          "q": 2.94
+          "kind": "PK",
+          "freqHz": 2930,
+          "gainDb": 7,
+          "qFactor": 2.94
         },
         {
-          "type": "PK",
-          "f": 3537,
-          "g": 4.5,
-          "q": 4
+          "kind": "PK",
+          "freqHz": 3537,
+          "gainDb": 4.5,
+          "qFactor": 4
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -907,7 +907,7 @@
         184,
         133
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -1208,70 +1208,70 @@
       ]
     },
     "emv": {
-      "pre": -7.8,
-      "bands": [
+      "preampDb": -7.8,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 1084,
-          "g": -1.1,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 1084,
+          "gainDb": -1.1,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 1930,
-          "g": -1.9,
-          "q": 2.39
+          "kind": "PK",
+          "freqHz": 1930,
+          "gainDb": -1.9,
+          "qFactor": 2.39
         },
         {
-          "type": "PK",
-          "f": 2334,
-          "g": -8,
-          "q": 1.93
+          "kind": "PK",
+          "freqHz": 2334,
+          "gainDb": -8,
+          "qFactor": 1.93
         },
         {
-          "type": "PK",
-          "f": 4454,
-          "g": -8,
-          "q": 2.63
+          "kind": "PK",
+          "freqHz": 4454,
+          "gainDb": -8,
+          "qFactor": 2.63
         },
         {
-          "type": "PK",
-          "f": 5568,
-          "g": -4.2,
-          "q": 1.55
+          "kind": "PK",
+          "freqHz": 5568,
+          "gainDb": -4.2,
+          "qFactor": 1.55
         },
         {
-          "type": "PK",
-          "f": 7504,
-          "g": -7.2,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 7504,
+          "gainDb": -7.2,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 107,
-          "g": 0.7,
-          "q": 0.5
+          "kind": "PK",
+          "freqHz": 107,
+          "gainDb": 0.7,
+          "qFactor": 0.5
         },
         {
-          "type": "PK",
-          "f": 473,
-          "g": 2.4,
-          "q": 0.5
+          "kind": "PK",
+          "freqHz": 473,
+          "gainDb": 2.4,
+          "qFactor": 0.5
         },
         {
-          "type": "PK",
-          "f": 6814,
-          "g": 7.7,
-          "q": 1.48
+          "kind": "PK",
+          "freqHz": 6814,
+          "gainDb": 7.7,
+          "qFactor": 1.48
         },
         {
-          "type": "PK",
-          "f": 8862,
-          "g": 8,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 8862,
+          "gainDb": 8,
+          "qFactor": 3
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -1493,7 +1493,7 @@
         169,
         20
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -1794,70 +1794,70 @@
       ]
     },
     "basshead": {
-      "pre": -5.7,
-      "bands": [
+      "preampDb": -5.7,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 4613,
-          "g": -12,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 4613,
+          "gainDb": -12,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 2246,
-          "g": -12,
-          "q": 1.31
+          "kind": "PK",
+          "freqHz": 2246,
+          "gainDb": -12,
+          "qFactor": 1.31
         },
         {
-          "type": "PK",
-          "f": 6746,
-          "g": -7.9,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 6746,
+          "gainDb": -7.9,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 1122,
-          "g": -2.6,
-          "q": 1.73
+          "kind": "PK",
+          "freqHz": 1122,
+          "gainDb": -2.6,
+          "qFactor": 1.73
         },
         {
-          "type": "PK",
-          "f": 10302,
-          "g": -6.1,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 10302,
+          "gainDb": -6.1,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 20,
-          "g": -5,
-          "q": 0.42
+          "kind": "PK",
+          "freqHz": 20,
+          "gainDb": -5,
+          "qFactor": 0.42
         },
         {
-          "type": "PK",
-          "f": 223,
-          "g": -4.9,
-          "q": 0.84
+          "kind": "PK",
+          "freqHz": 223,
+          "gainDb": -4.9,
+          "qFactor": 0.84
         },
         {
-          "type": "PK",
-          "f": 3184,
-          "g": 2.5,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 3184,
+          "gainDb": 2.5,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 3116,
-          "g": 9.2,
-          "q": 0.3
+          "kind": "PK",
+          "freqHz": 3116,
+          "gainDb": 9.2,
+          "qFactor": 0.3
         },
         {
-          "type": "LS",
-          "f": 286,
-          "g": 8.2,
-          "q": 0.47
+          "kind": "LS",
+          "freqHz": 286,
+          "gainDb": 8.2,
+          "qFactor": 0.47
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -2079,7 +2079,7 @@
         43,
         147
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -2380,70 +2380,70 @@
       ]
     },
     "energico": {
-      "pre": -3.3,
-      "bands": [
+      "preampDb": -3.3,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 25,
-          "g": -3.1,
-          "q": 0.5
+          "kind": "PK",
+          "freqHz": 25,
+          "gainDb": -3.1,
+          "qFactor": 0.5
         },
         {
-          "type": "PK",
-          "f": 97,
-          "g": -1.4,
-          "q": 0.68
+          "kind": "PK",
+          "freqHz": 97,
+          "gainDb": -1.4,
+          "qFactor": 0.68
         },
         {
-          "type": "PK",
-          "f": 2445,
-          "g": -8,
-          "q": 0.87
+          "kind": "PK",
+          "freqHz": 2445,
+          "gainDb": -8,
+          "qFactor": 0.87
         },
         {
-          "type": "PK",
-          "f": 4725,
-          "g": -8,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 4725,
+          "gainDb": -8,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 6920,
-          "g": -8,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 6920,
+          "gainDb": -8,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 12439,
-          "g": -8,
-          "q": 1.96
+          "kind": "PK",
+          "freqHz": 12439,
+          "gainDb": -8,
+          "qFactor": 1.96
         },
         {
-          "type": "PK",
-          "f": 1838,
-          "g": 5,
-          "q": 0.92
+          "kind": "PK",
+          "freqHz": 1838,
+          "gainDb": 5,
+          "qFactor": 0.92
         },
         {
-          "type": "PK",
-          "f": 2904,
-          "g": 4.5,
-          "q": 2.62
+          "kind": "PK",
+          "freqHz": 2904,
+          "gainDb": 4.5,
+          "qFactor": 2.62
         },
         {
-          "type": "PK",
-          "f": 3665,
-          "g": 3.7,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 3665,
+          "gainDb": 3.7,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 8376,
-          "g": 8,
-          "q": 2.42
+          "kind": "PK",
+          "freqHz": 8376,
+          "gainDb": 8,
+          "qFactor": 2.42
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -2665,7 +2665,7 @@
         78,
         190
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -2966,70 +2966,70 @@
       ]
     },
     "musical": {
-      "pre": -2.3,
-      "bands": [
+      "preampDb": -2.3,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 24,
-          "g": -3.2,
-          "q": 0.1
+          "kind": "PK",
+          "freqHz": 24,
+          "gainDb": -3.2,
+          "qFactor": 0.1
         },
         {
-          "type": "PK",
-          "f": 2277,
-          "g": -8,
-          "q": 1.69
+          "kind": "PK",
+          "freqHz": 2277,
+          "gainDb": -8,
+          "qFactor": 1.69
         },
         {
-          "type": "PK",
-          "f": 4588,
-          "g": -9.4,
-          "q": 2.8
+          "kind": "PK",
+          "freqHz": 4588,
+          "gainDb": -9.4,
+          "qFactor": 2.8
         },
         {
-          "type": "PK",
-          "f": 5979,
-          "g": -3.8,
-          "q": 2
+          "kind": "PK",
+          "freqHz": 5979,
+          "gainDb": -3.8,
+          "qFactor": 2
         },
         {
-          "type": "PK",
-          "f": 7184,
-          "g": -3.2,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 7184,
+          "gainDb": -3.2,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 10638,
-          "g": -10.4,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 10638,
+          "gainDb": -10.4,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 840,
-          "g": 2.2,
-          "q": 1.54
+          "kind": "PK",
+          "freqHz": 840,
+          "gainDb": 2.2,
+          "qFactor": 1.54
         },
         {
-          "type": "PK",
-          "f": 1393,
-          "g": 2,
-          "q": 1.85
+          "kind": "PK",
+          "freqHz": 1393,
+          "gainDb": 2,
+          "qFactor": 1.85
         },
         {
-          "type": "PK",
-          "f": 3224,
-          "g": 1.1,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 3224,
+          "gainDb": 1.1,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 15808,
-          "g": 2.2,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 15808,
+          "gainDb": 2.2,
+          "qFactor": 2.5
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -3251,7 +3251,7 @@
         166,
         126
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -3552,70 +3552,70 @@
       ]
     },
     "analitico": {
-      "pre": -0.8,
-      "bands": [
+      "preampDb": -0.8,
+      "eqBands": [
         {
-          "type": "LS",
-          "f": 120,
-          "g": -9.3,
-          "q": 0.44
+          "kind": "LS",
+          "freqHz": 120,
+          "gainDb": -9.3,
+          "qFactor": 0.44
         },
         {
-          "type": "PK",
-          "f": 7007,
-          "g": -9.1,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 7007,
+          "gainDb": -9.1,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 147,
-          "g": -3.5,
-          "q": 0.48
+          "kind": "PK",
+          "freqHz": 147,
+          "gainDb": -3.5,
+          "qFactor": 0.48
         },
         {
-          "type": "PK",
-          "f": 4561,
-          "g": -12,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 4561,
+          "gainDb": -12,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 2198,
-          "g": -12,
-          "q": 1.42
+          "kind": "PK",
+          "freqHz": 2198,
+          "gainDb": -12,
+          "qFactor": 1.42
         },
         {
-          "type": "PK",
-          "f": 255,
-          "g": -0.4,
-          "q": 1.78
+          "kind": "PK",
+          "freqHz": 255,
+          "gainDb": -0.4,
+          "qFactor": 1.78
         },
         {
-          "type": "PK",
-          "f": 11291,
-          "g": -7.8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 11291,
+          "gainDb": -7.8,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 1093,
-          "g": -2.7,
-          "q": 1.17
+          "kind": "PK",
+          "freqHz": 1093,
+          "gainDb": -2.7,
+          "qFactor": 1.17
         },
         {
-          "type": "PK",
-          "f": 3226,
-          "g": 6.2,
-          "q": 0.3
+          "kind": "PK",
+          "freqHz": 3226,
+          "gainDb": 6.2,
+          "qFactor": 0.3
         },
         {
-          "type": "PK",
-          "f": 3028,
-          "g": 1.8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 3028,
+          "gainDb": 1.8,
+          "qFactor": 2.5
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -3837,7 +3837,7 @@
         108,
         131
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -4138,70 +4138,70 @@
       ]
     },
     "referencia": {
-      "pre": -4,
-      "bands": [
+      "preampDb": -4,
+      "eqBands": [
         {
-          "type": "LS",
-          "f": 297,
-          "g": -3.4,
-          "q": 0.81
+          "kind": "LS",
+          "freqHz": 297,
+          "gainDb": -3.4,
+          "qFactor": 0.81
         },
         {
-          "type": "PK",
-          "f": 11107,
-          "g": -4.8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 11107,
+          "gainDb": -4.8,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 1027,
-          "g": -1.7,
-          "q": 1.98
+          "kind": "PK",
+          "freqHz": 1027,
+          "gainDb": -1.7,
+          "qFactor": 1.98
         },
         {
-          "type": "PK",
-          "f": 20,
-          "g": -3.6,
-          "q": 0.57
+          "kind": "PK",
+          "freqHz": 20,
+          "gainDb": -3.6,
+          "qFactor": 0.57
         },
         {
-          "type": "PK",
-          "f": 7055,
-          "g": -3.8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 7055,
+          "gainDb": -3.8,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 4588,
-          "g": -8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 4588,
+          "gainDb": -8,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 2208,
-          "g": -8.2,
-          "q": 1.83
+          "kind": "PK",
+          "freqHz": 2208,
+          "gainDb": -8.2,
+          "qFactor": 1.83
         },
         {
-          "type": "PK",
-          "f": 595,
-          "g": 3.5,
-          "q": 0.42
+          "kind": "PK",
+          "freqHz": 595,
+          "gainDb": 3.5,
+          "qFactor": 0.42
         },
         {
-          "type": "PK",
-          "f": 3144,
-          "g": 5.6,
-          "q": 1.69
+          "kind": "PK",
+          "freqHz": 3144,
+          "gainDb": 5.6,
+          "qFactor": 1.69
         },
         {
-          "type": "PK",
-          "f": 3031,
-          "g": 0.5,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 3031,
+          "gainDb": 0.5,
+          "qFactor": 2.5
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -4423,7 +4423,7 @@
         25,
         236
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -4724,70 +4724,70 @@
       ]
     },
     "harman": {
-      "pre": -0.5,
-      "bands": [
+      "preampDb": -0.5,
+      "eqBands": [
         {
-          "type": "LS",
-          "f": 199,
-          "g": -5.6,
-          "q": 0.94
+          "kind": "LS",
+          "freqHz": 199,
+          "gainDb": -5.6,
+          "qFactor": 0.94
         },
         {
-          "type": "PK",
-          "f": 399,
-          "g": -1.4,
-          "q": 1.62
+          "kind": "PK",
+          "freqHz": 399,
+          "gainDb": -1.4,
+          "qFactor": 1.62
         },
         {
-          "type": "PK",
-          "f": 2271,
-          "g": -8,
-          "q": 1.32
+          "kind": "PK",
+          "freqHz": 2271,
+          "gainDb": -8,
+          "qFactor": 1.32
         },
         {
-          "type": "PK",
-          "f": 256,
-          "g": -4.2,
-          "q": 1.17
+          "kind": "PK",
+          "freqHz": 256,
+          "gainDb": -4.2,
+          "qFactor": 1.17
         },
         {
-          "type": "PK",
-          "f": 7566,
-          "g": -7.6,
-          "q": 0.43
+          "kind": "PK",
+          "freqHz": 7566,
+          "gainDb": -7.6,
+          "qFactor": 0.43
         },
         {
-          "type": "PK",
-          "f": 4662,
-          "g": -6.8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 4662,
+          "gainDb": -6.8,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 9138,
-          "g": 3.8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 9138,
+          "gainDb": 3.8,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 3318,
-          "g": 7.8,
-          "q": 1.32
+          "kind": "PK",
+          "freqHz": 3318,
+          "gainDb": 7.8,
+          "qFactor": 1.32
         },
         {
-          "type": "PK",
-          "f": 5767,
-          "g": 5.8,
-          "q": 2.5
+          "kind": "PK",
+          "freqHz": 5767,
+          "gainDb": 5.8,
+          "qFactor": 2.5
         },
         {
-          "type": "PK",
-          "f": 3209,
-          "g": 1.1,
-          "q": 1.33
+          "kind": "PK",
+          "freqHz": 3209,
+          "gainDb": 1.1,
+          "qFactor": 1.33
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -5009,7 +5009,7 @@
         56,
         199
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -5310,70 +5310,70 @@
       ]
     },
     "vdsf": {
-      "pre": -2.2,
-      "bands": [
+      "preampDb": -2.2,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 25,
-          "g": -8,
-          "q": 0.5
+          "kind": "PK",
+          "freqHz": 25,
+          "gainDb": -8,
+          "qFactor": 0.5
         },
         {
-          "type": "PK",
-          "f": 80,
-          "g": -5,
-          "q": 0.52
+          "kind": "PK",
+          "freqHz": 80,
+          "gainDb": -5,
+          "qFactor": 0.52
         },
         {
-          "type": "PK",
-          "f": 210,
-          "g": -2,
-          "q": 0.79
+          "kind": "PK",
+          "freqHz": 210,
+          "gainDb": -2,
+          "qFactor": 0.79
         },
         {
-          "type": "PK",
-          "f": 1286,
-          "g": -5.9,
-          "q": 1.34
+          "kind": "PK",
+          "freqHz": 1286,
+          "gainDb": -5.9,
+          "qFactor": 1.34
         },
         {
-          "type": "PK",
-          "f": 1978,
-          "g": -7.4,
-          "q": 1.67
+          "kind": "PK",
+          "freqHz": 1978,
+          "gainDb": -7.4,
+          "qFactor": 1.67
         },
         {
-          "type": "PK",
-          "f": 2375,
-          "g": -5.4,
-          "q": 2.4
+          "kind": "PK",
+          "freqHz": 2375,
+          "gainDb": -5.4,
+          "qFactor": 2.4
         },
         {
-          "type": "PK",
-          "f": 4384,
-          "g": -4.7,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 4384,
+          "gainDb": -4.7,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 4833,
-          "g": -6,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 4833,
+          "gainDb": -6,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 7252,
-          "g": -7.6,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 7252,
+          "gainDb": -7.6,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 1718,
-          "g": 8,
-          "q": 0.5
+          "kind": "PK",
+          "freqHz": 1718,
+          "gainDb": 8,
+          "qFactor": 0.5
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -5595,7 +5595,7 @@
         106,
         92
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,
@@ -5896,70 +5896,70 @@
       ]
     },
     "etymotic": {
-      "pre": -2.2,
-      "bands": [
+      "preampDb": -2.2,
+      "eqBands": [
         {
-          "type": "PK",
-          "f": 25,
-          "g": -8,
-          "q": 0.97
+          "kind": "PK",
+          "freqHz": 25,
+          "gainDb": -8,
+          "qFactor": 0.97
         },
         {
-          "type": "PK",
-          "f": 45,
-          "g": -8,
-          "q": 0.5
+          "kind": "PK",
+          "freqHz": 45,
+          "gainDb": -8,
+          "qFactor": 0.5
         },
         {
-          "type": "PK",
-          "f": 105,
-          "g": -5.3,
-          "q": 0.51
+          "kind": "PK",
+          "freqHz": 105,
+          "gainDb": -5.3,
+          "qFactor": 0.51
         },
         {
-          "type": "PK",
-          "f": 226,
-          "g": -1.4,
-          "q": 0.91
+          "kind": "PK",
+          "freqHz": 226,
+          "gainDb": -1.4,
+          "qFactor": 0.91
         },
         {
-          "type": "PK",
-          "f": 2190,
-          "g": -8,
-          "q": 1.39
+          "kind": "PK",
+          "freqHz": 2190,
+          "gainDb": -8,
+          "qFactor": 1.39
         },
         {
-          "type": "PK",
-          "f": 4276,
-          "g": -5,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 4276,
+          "gainDb": -5,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 4847,
-          "g": -7.2,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 4847,
+          "gainDb": -7.2,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 7260,
-          "g": -6.8,
-          "q": 3
+          "kind": "PK",
+          "freqHz": 7260,
+          "gainDb": -6.8,
+          "qFactor": 3
         },
         {
-          "type": "PK",
-          "f": 785,
-          "g": 1.8,
-          "q": 1.42
+          "kind": "PK",
+          "freqHz": 785,
+          "gainDb": 1.8,
+          "qFactor": 1.42
         },
         {
-          "type": "PK",
-          "f": 3120,
-          "g": 6.5,
-          "q": 1.01
+          "kind": "PK",
+          "freqHz": 3120,
+          "gainDb": 6.5,
+          "qFactor": 1.01
         }
       ],
-      "blob": [
+      "payload": [
         69,
         81,
         49,
@@ -6181,7 +6181,7 @@
         142,
         182
       ],
-      "packets": [
+      "reports": [
         [
           0,
           69,

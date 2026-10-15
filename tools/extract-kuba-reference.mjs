@@ -111,13 +111,17 @@ async function buildFixture(path, expectedSha) {
     throw new CliError(`sha256 mismatch: expected ${expectedSha}, got ${hash}`);
   }
 
+  // The identifiers below (DSP, PRESETS, blob, packets, type/f/g/q, ...) belong to
+  // the reference script and are only read here. The fixture is written in this
+  // project's own vocabulary.
   const dspSrc = between(text, 'const DSP = {', 'module.exports = DSP;', true);
   const presetsSrc = between(text, 'const PK = ', '// Medição', false);
-  const { DSP, PRESETS } = vm.runInContext(
-    `${dspSrc}\n${presetsSrc}\n({ DSP, PRESETS })`,
+  const reference = vm.runInContext(
+    `${dspSrc}\n${presetsSrc}\n({ codec: DSP, presets: PRESETS })`,
     vm.createContext({}),
     { timeout: 5000 },
   );
+  const toBand = (ref) => ({ kind: ref.type, freqHz: ref.f, gainDb: ref.g, qFactor: ref.q });
 
   const fixture = {
     _provenance: {
@@ -130,22 +134,22 @@ async function buildFixture(path, expectedSha) {
         + 'evaluated from a pinned local copy (not vendored).',
     },
     constants: {
-      VENDOR_ID: DSP.VENDOR_ID,
-      PRODUCT_ID: DSP.PRODUCT_ID,
-      REPORT_ID: DSP.REPORT_ID,
-      FS: DSP.FS,
-      HEADER: DSP.HEADER,
-      APPLY: DSP.APPLY,
+      usbVid: reference.codec.VENDOR_ID,
+      usbPid: reference.codec.PRODUCT_ID,
+      hidReportId: reference.codec.REPORT_ID,
+      sampleRate: reference.codec.FS,
+      preamble: reference.codec.HEADER,
+      commitCommand: reference.codec.APPLY,
     },
     presets: {},
   };
 
-  for (const p of PRESETS.auri) {
-    fixture.presets[p.id] = {
-      pre: p.pre,
-      bands: p.bands,
-      blob: DSP.blob(p.bands, p.pre),
-      packets: DSP.packets(p.bands, p.pre).map((pk) => Array.from(pk)),
+  for (const preset of reference.presets.auri) {
+    fixture.presets[preset.id] = {
+      preampDb: preset.pre,
+      eqBands: preset.bands.map(toBand),
+      payload: reference.codec.blob(preset.bands, preset.pre),
+      reports: reference.codec.packets(preset.bands, preset.pre).map((report) => Array.from(report)),
     };
   }
 
