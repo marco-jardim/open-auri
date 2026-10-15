@@ -10,18 +10,23 @@
 // Credit: presets and reference implementation by Kuba (kuba.audio). The page
 // itself attributes its default curve to Leonardo ("Padrão = filtros do Leonardo").
 //
-// Safety: the reference is third-party code. It is never run straight from the
-// network. --fetch only downloads and saves it; --template runs a local copy
-// whose SHA-256 is recorded in the fixture (and can be pinned with
-// --expect-sha256), inside a separate V8 context with a timeout. node:vm is not
-// a security boundary; reviewing and pinning the file is the actual control.
+// Safety: the reference is third-party code. It only ever runs if its SHA-256
+// matches a hash a human reviewed and pinned (the one recorded in the fixture,
+// or --expect-sha256), inside a separate V8 context with a timeout. node:vm is
+// not a security boundary; reviewing and pinning the file is the actual control.
 //
 // Usage:
+//   node tools/extract-kuba-reference.mjs
+//       Refresh: download the live page and rebuild the fixture, only if the
+//       page still matches the sha256 pinned in the fixture.
 //   node tools/extract-kuba-reference.mjs --fetch <out.html>
+//       Download and save only; nothing is run. Use it to review a new version.
 //   node tools/extract-kuba-reference.mjs --template <file> [--expect-sha256 <hex>]
+//       Build from a local copy (and re-pin, if the hash is new).
 import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
@@ -30,15 +35,20 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, '../test/fixtures/eq0xcb.reference.json');
 const USAGE = [
   'usage:',
+  '  node tools/extract-kuba-reference.mjs',
   '  node tools/extract-kuba-reference.mjs --fetch <out.html>',
   '  node tools/extract-kuba-reference.mjs --template <file> [--expect-sha256 <hex>]',
 ].join('\n');
+
+/** An expected failure: printed as a message, without a stack trace. */
+class CliError extends Error {}
 
 const sha256 = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
 
 function option(argv, name) {
   const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
+  const v = i >= 0 ? argv[i + 1] : undefined;
+  return v && !v.startsWith('--') ? v : undefined;
 }
 
 // The page is a bundled artifact: the app lives in a JSON-encoded template tag.
@@ -56,21 +66,49 @@ function between(src, start, end, inclusiveEnd) {
   return src.slice(a, inclusiveEnd ? b + end.length : b);
 }
 
-async function fetchTemplate(out) {
+/** Downloads the page, saves the decoded template and returns its sha256. Runs nothing. */
+async function download(out) {
   const res = await fetch(URL_DEFAULT);
-  if (!res.ok) throw new Error(`GET ${URL_DEFAULT} -> HTTP ${res.status}`);
+  if (!res.ok) throw new CliError(`GET ${URL_DEFAULT} -> HTTP ${res.status}`);
   const text = decodeTemplate(await res.text());
   await writeFile(out, text);
-  console.log(`wrote ${out}`);
-  console.log(`sha256 ${sha256(text)}`);
-  console.log('Review the file, then run --template with --expect-sha256.');
+  return sha256(text);
+}
+
+async function pinnedSha() {
+  try {
+    return JSON.parse(await readFile(OUT, 'utf8'))._provenance?.templateSha256;
+  } catch (e) {
+    if (e.code === 'ENOENT') return undefined;
+    throw e;
+  }
+}
+
+async function refresh() {
+  const pinned = await pinnedSha();
+  if (!pinned) {
+    throw new CliError('No sha256 pinned in the fixture. Bootstrap with --fetch <file>, '
+      + 'review it, then --template <file> --expect-sha256 <hash>.');
+  }
+  const tmp = join(tmpdir(), 'open-auri-kuba-template.html');
+  const hash = await download(tmp);
+  if (hash !== pinned) {
+    throw new CliError([
+      'The reference page changed; nothing was run.',
+      `  downloaded sha256 ${hash}`,
+      `  pinned     sha256 ${pinned}`,
+      `Review ${tmp}. If it is safe, re-pin with:`,
+      `  node tools/extract-kuba-reference.mjs --template "${tmp}" --expect-sha256 ${hash}`,
+    ].join('\n'));
+  }
+  await buildFixture(tmp, pinned);
 }
 
 async function buildFixture(path, expectedSha) {
   const text = decodeTemplate(await readFile(path, 'utf8'));
   const hash = sha256(text);
   if (expectedSha && expectedSha.toLowerCase() !== hash) {
-    throw new Error(`sha256 mismatch: expected ${expectedSha}, got ${hash}`);
+    throw new CliError(`sha256 mismatch: expected ${expectedSha}, got ${hash}`);
   }
 
   const dspSrc = between(text, 'const DSP = {', 'module.exports = DSP;', true);
@@ -121,15 +159,23 @@ async function buildFixture(path, expectedSha) {
 
 async function main() {
   const argv = process.argv.slice(2);
+  if (argv.length === 0) return refresh();
   const fetchOut = option(argv, '--fetch');
   const template = option(argv, '--template');
-  if (fetchOut) return fetchTemplate(fetchOut);
+  if (fetchOut) {
+    const hash = await download(fetchOut);
+    console.log(`wrote ${fetchOut}`);
+    console.log(`sha256 ${hash}`);
+    console.log('Review the file, then run --template with --expect-sha256.');
+    return undefined;
+  }
   if (template) return buildFixture(template, option(argv, '--expect-sha256'));
   console.error(USAGE);
   process.exitCode = 2;
+  return undefined;
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error(e instanceof CliError ? e.message : e);
   process.exit(1);
 });

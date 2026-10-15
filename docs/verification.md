@@ -68,11 +68,19 @@ coeficientes **que o chip vai executar**.
 `test/fixtures/eq0xcb.reference.json` é **dado derivado**: os bytes corretos para
 cada preset, gerados rodando a implementação de referência.
 
-- Gerador: `tools/extract-kuba-reference.mjs`, em duas etapas:
-  `--fetch <arquivo>` só baixa e salva; `--template <arquivo> [--expect-sha256 <hash>]`
-  executa uma cópia local, num contexto V8 separado e com timeout.
+- Gerador: `tools/extract-kuba-reference.mjs`. O código da referência só é
+  executado se o sha256 dele bater com um hash revisado e pinado, num contexto
+  V8 separado e com timeout.
+  - `npm run fixtures:reference` — baixa a página e regenera o fixture **só se**
+    ela bater com o hash pinado no fixture; se mudou, sai com erro sem executar
+    nada e explica como revisar e pinar de novo;
+  - `--fetch <arquivo>` — só baixa e salva;
+  - `--template <arquivo> [--expect-sha256 <hash>]` — usa uma cópia local (e pina
+    um hash novo).
 - O sha256 do template usado fica em `_provenance.templateSha256`; com ele o
   fixture é reproduzível e determinístico (não há data de geração).
+  Verificado em 2026-10-15: `npm run fixtures:reference` contra a página ao vivo
+  regenerou o fixture sem nenhuma diferença.
 - O código da referência **não** é vendorizado no repositório.
 
 ## Sobre a origem do codec

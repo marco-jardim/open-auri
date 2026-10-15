@@ -278,7 +278,17 @@ low-pass, high-pass e `OFF`, verificados por propriedades do próprio cookbook
 
 A página é um artifact empacotado; o app inteiro vive num
 `<script type="__bundler/template">` codificado em JSON. O gerador do fixture
-faz isso em duas etapas, sem executar código vindo direto da rede:
+só executa esse código se o sha256 dele bater com um hash revisado e pinado:
+
+```powershell
+npm run fixtures:reference
+```
+
+Baixa a página e regenera o fixture **somente se** ela ainda bater com o sha256
+pinado no próprio fixture. Se a página mudou, nada é executado: o comando sai
+com erro, diz onde salvou a versão nova e como pinar de novo depois de revisar.
+
+Para revisar uma versão nova manualmente:
 
 ```powershell
 node tools/extract-kuba-reference.mjs --fetch "$env:TEMP\kuba-template.html"
