@@ -66,7 +66,7 @@ Duas consequências, ambas a confirmar no cabo:
 - se o firmware respeitar os bytes 7/11, pode aceitar **menos (ou mais) de 10
   seções**, com o comprimento do byte 4–5 ajustado.
 
-O teste `header bytes 4..5 are a u16 LE length` fixa a parte verificável.
+O teste `preamble bytes 4..5 are a u16 LE length` fixa a parte verificável.
 
 ### Pré-amp
 
@@ -150,7 +150,7 @@ O commit faz o chip **persistir o preset na própria flash** — depois disso va
 em qualquer aparelho, sem software.
 
 **Tamanho do commit.** A referência envia **5 bytes** num report declarado com
-31. O codec expõe `applyPacket()`, que completa com zeros até 31, para que
+31. O codec expõe `commitReport()`, que completa com zeros até 31, para que
 qualquer transporte (WebHID, hidapi, Windows) envie os mesmos bytes. Se o
 firmware distingue os dois casos é 🟡.
 
@@ -226,7 +226,7 @@ nunca é o que restringe uma curva real.
 
 ### Banda desligada
 
-Use a **identidade exata**: `{ type: 'OFF' }` ⇒ `[2^27, 0, 0, 0, 0]`. Um peaking
+Use a **identidade exata**: `{ kind: 'OFF' }` ⇒ `[2^27, 0, 0, 0, 0]`. Um peaking
 com `g = 0` também tem resposta plana, mas mantém polos perto do círculo unitário
 (em baixa frequência e Q alto); em ponto fixo, o ruído de arredondamento passa
 por esses polos. A identidade exata não custa nada. `NEUTRAL_BANDS` são 10
@@ -234,7 +234,7 @@ seções `OFF` — o preset neutro garantido.
 
 ## Validação no codec
 
-`blob()` é a última barreira antes da flash, e a flash não pode ser lida de
+`encodePayload()` é a última barreira antes da flash, e a flash não pode ser lida de
 volta. Ele recusa:
 
 | Entrada | Sem validação, gravaria |
@@ -252,9 +252,31 @@ explicitamente por quem importa o arquivo.
 ## Design dos biquads (RBJ)
 
 A página calcula os coeficientes com as fórmulas do **RBJ cookbook** (peak e
-low-shelf) em `FS = 96 kHz` e normaliza por `a0`. O codec acrescenta high-shelf,
-low-pass, high-pass e `OFF`, verificados por propriedades do próprio cookbook
-(ganho em f0, DC e Nyquist), não pela referência.
+low-shelf) em `FS = 96 kHz` e normaliza por `a0`.
+
+O codec do projeto não usa o código da página:
+
+| Parte | Origem |
+|---|---|
+| peaking, low shelf, high shelf | porte do **AutoEq** (MIT), `autoeq/peq.py`, na mesma ordem de operações |
+| low pass, high pass | RBJ cookbook diretamente (o AutoEq não tem) |
+| `OFF` | identidade exata |
+| magnitude (`magnitudeDb`) | própria: expansão em torno de z⁻¹ = 1 |
+
+O AutoEq segue o cookbook na mesma ordem de operações que a página, e a convenção
+de sinal dele (realimentação negada) difere só por negações, que são exatas em
+IEEE 754. Por isso os bytes são idênticos — verificado no fixture e em 196 mil
+bandas aleatórias ([`verification.md`](verification.md)).
+
+A magnitude **não** vem do AutoEq: a fórmula dele (`PEQFilter.fr`, com
+φ = 4·sin²(ω/2)) é 35× menos precisa em baixa frequência com Q alto. Medido
+contra a avaliação exata dos mesmos coeficientes:
+
+| Método | Pior erro |
+|---|---|
+| forma direta (versão anterior) | 4,4·10⁻⁹ dB |
+| AutoEq (φ) | 1,5·10⁻⁷ dB |
+| **expansão em u = 1 − z⁻¹ (atual)** | **5,7·10⁻¹⁴ dB** |
 
 ## Duas observações sobre a página analisada
 

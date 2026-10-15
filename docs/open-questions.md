@@ -72,7 +72,7 @@ parentesco) / ❌ (a causa)
    implementações: `0xCB` (do bundle) e `0x4B` (dos projetos abertos).
 2. **Dummy device** (ideia do `glacier-eq`) para desenvolver tudo sem cabo.
 3. **Teste de equivalência de payload** ✅ **feito** — ver [`verification.md`](verification.md).
-4. **Validação antes da flash** ✅ **feita no codec** — nada nocivo chega ao `blob()`.
+4. **Validação antes da flash** ✅ **feita no codec** — nada nocivo chega ao `encodePayload()`.
 5. **Console de pacotes TX/RX** para quando o cabo chegar.
 6. Formato de arquivo `.txt` (EqualizerAPO / eq.hangout.audio) para import/export,
    com mapeamento **explícito** de `LSQ`/`HSQ`.
@@ -88,9 +88,9 @@ parentesco) / ❌ (a causa)
 - **Desgaste da flash.** Cada commit grava; o teste cego e a gravação em lote
   multiplicam as gravações. Achar o modo só-RAM (B12) vem antes de usar X2/X9 em
   escala.
-- **Licenças.** `eqloader` sem licença e `equalizer.js` proprietário; o AutoEq é
-  **MIT** (verificado), então portar a matemática a partir dele é limpo. O codec
-  segue a estrutura da referência do kuba, com crédito no arquivo.
+- **Licenças.** `eqloader` sem licença e `equalizer.js` proprietário — nada deles
+  foi usado. O codec porta o projeto de PK/LS/HS do AutoEq (**MIT**, aviso em
+  `THIRD_PARTY_NOTICES.md`) e não contém código nem nomes da referência do kuba.
 
 ## Errata
 
@@ -98,7 +98,8 @@ Correções da revisão de 2026-10-15. O texto antigo estava errado ou superesti
 
 | Onde | Antes | Agora | Base |
 |---|---|---|---|
-| codec | `blob()` aceitava `q = 0`, `f = NaN` (seção muda), `q < 0`, `f > Nyquist` (seção instável) e pré-amp `NaN` | recusa todos, e verifica estabilidade nos coeficientes quantizados | testes |
+| codec | `blob()` (hoje `encodePayload()`) aceitava `q = 0`, `f = NaN` (seção muda), `q < 0`, `f > Nyquist` (seção instável) e pré-amp `NaN` | recusa todos, e verifica estabilidade nos coeficientes quantizados | testes |
+| codec | seguia a estrutura e os nomes do código da referência | projeto dos filtros portado do AutoEq (MIT), nomes próprios; mesmos bytes | diferencial de 196 mil bandas |
 | codec | tipo desconhecido virava peaking em silêncio | erro | testes |
 | `protocol-0xcb.md` | "~±24 dB por seção" | limite depende do tipo; cortes nunca estouram | medido |
 | `protocol-0xcb.md` | reordenar as bandas tem efeito "desprezível" | o pico interno vai de −0,20 dB a +9,13 dB conforme a ordem | medido |

@@ -76,8 +76,11 @@ têm um **buffer de hardware** (ex.: `-5 dB` no CrinEar Protocol Micro) somado a
 > AutoEQ) não são protegidos por direito autoral; **implementações** são. O
 > próprio `equalizer.js` declara que tirou os biquads do
 > [`AutoEq`](https://github.com/jaakkopasanen/AutoEq), que é **MIT** (verificado
-> em 2026-10-15) — portar a partir do AutoEq é o caminho limpo. O `open-auri` é
-> AGPL-3.0.
+> em 2026-10-15) — e é de onde o codec do `open-auri` porta o projeto de PK, LS e
+> HS, com o aviso em [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md). A
+> fórmula de magnitude do AutoEq não foi portada: é 35× menos precisa em baixa
+> frequência ([`protocol-0xcb.md`](protocol-0xcb.md#design-dos-biquads-rbj)). O
+> `open-auri` é AGPL-3.0.
 
 ## Matemática reusável (sem protocolo)
 

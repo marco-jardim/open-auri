@@ -22,7 +22,7 @@ receita (S5) e agregação sem servidor (S6).
 | **S1** | Formato compacto canônico | ✅ **adotar** — 48 B (64 caracteres), campo fixo, zero codec |
 | **S2** | Assinatura criptográfica | ❌ **descartada** — proveniência por link basta |
 | **S3** | Curvas versionadas (git) | ✅ **adotar** — 100% estático, sem backend |
-| **S4** | Distância entre curvas | ✅ **adotar** — barato, `response()` já existe |
+| **S4** | Distância entre curvas | ✅ **adotar** — barato, `magnitudeDb()` já existe |
 | **S5** | Envelope: números **+** receita | ✅ **adotar** — os dois, não um ou outro |
 | **S6** | Preferência crowdsourced | ✅ **adotar** — via GitHub Actions (pseudônimo) ou Worker (anônimo) |
 | **S7** | "Blind trade" | 🟡 opcional |
@@ -179,7 +179,7 @@ Comparação exata: amostrar as duas respostas numa grade log e reportar delta R
 delta máximo e **onde** divergem ("+2,3 dB a 150 Hz; acima de 4 kHz idênticas").
 
 Usos: escolher entre 3 curvas compartilhadas, saber se vale baixar, e "esta é a
-minha com mais grave". A `response()` do codec já faz o trabalho pesado.
+minha com mais grave". A `magnitudeDb()` do codec já faz o trabalho pesado.
 
 ---
 

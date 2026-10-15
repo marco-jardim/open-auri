@@ -40,9 +40,10 @@ está marcado como hipótese ou pendência — não como fato.
   (`kuba.audio`). A própria página credita a curva padrão a **Leonardo**
   ("Padrão = filtros do Leonardo"). Os bytes de referência em
   `test/fixtures/` derivam dessa implementação — ver
-  [`verification.md`](verification.md). O codec (`src/dsp/eq0xcb.mjs`) segue o
-  layout do formato e a estrutura do código de projeto dos filtros da mesma
-  referência.
+  [`verification.md`](verification.md). O codec implementa o layout de bytes
+  aprendido dessa referência, sem código nem nomes dela.
+- **Projeto dos filtros PK/LS/HS:** porte do [AutoEq](https://github.com/jaakkopasanen/AutoEq)
+  (MIT, Jaakko Pasanen) — ver [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
 - **Fórmulas dos filtros:** Robert Bristow-Johnson, *Audio EQ Cookbook*.
 
 ## Resumo executivo

@@ -15,7 +15,7 @@ Os testes se dividem em quatro grupos, e a separação importa: só os
 
 | Verificação | Origem |
 |---|---|
-| `crc16("123456789") == 0x29B1` | catálogo de CRCs (CRC-16/CCITT-FALSE) |
+| `crc16Ccitt("123456789") == 0x29B1` | catálogo de CRCs (CRC-16/CCITT-FALSE) |
 | `preampWord(0) == 2^23` | definição do Q23 |
 | peaking: ganho em `f0` == `g` | RBJ cookbook |
 | peaking com `g = 0`: zeros coincidem com polos | RBJ cookbook |
@@ -30,9 +30,9 @@ erro. É por ele que HS, LP e HP — que a referência não usa — estão cober
 
 | Verificação | Escopo |
 |---|---|
-| `HEADER`, `APPLY`, `REPORT_ID`, `FS`, `VID`, `PID` | constantes |
-| `blob(bands, pre)` byte a byte | 11 presets |
-| `packets(bands, pre)` byte a byte | 11 presets |
+| `PREAMBLE`, `COMMIT_COMMAND`, `HID_REPORT_ID`, `SAMPLE_RATE`, `USB_VID`, `USB_PID` | constantes |
+| `encodePayload(eqBands, preampDb)` byte a byte | 11 presets |
+| `encodeReports(eqBands, preampDb)` byte a byte | 11 presets |
 
 ### 3. Estrutura
 
@@ -40,8 +40,8 @@ erro. É por ele que HS, LP e HP — que a referência não usa — estão cober
 |---|
 | 9 relatórios de 31 bytes, índice no byte 0 |
 | bytes 4–5 do header == comprimento do restante (u16 LE) |
-| `applyPacket()` == APPLY + zeros até 31 bytes |
-| `HEADER`, `APPLY`, `NEUTRAL_BANDS` não podem ser alterados |
+| `commitReport()` == `COMMIT_COMMAND` + zeros até 31 bytes |
+| `PREAMBLE`, `COMMIT_COMMAND`, `NEUTRAL_BANDS` não podem ser alterados |
 | `OFF` == seção identidade exata `[2^27, 0, 0, 0, 0]` |
 | preset neutro: 10 seções identidade e resposta plana |
 
@@ -85,11 +85,30 @@ cada preset, gerados rodando a implementação de referência.
 
 ## Sobre a origem do codec
 
-`src/dsp/eq0xcb.mjs` segue de perto a estrutura da implementação de referência
-(o layout do formato e a forma do código de projeto dos filtros), com crédito no
-cabeçalho do arquivo. As fórmulas são as do RBJ cookbook; as funções de fio são
-ditadas pelo formato. O que é próprio do projeto: validação, `OFF`/neutro,
-HS/LP/HP e `applyPacket()`.
+`src/dsp/eq0xcb.mjs` não contém código nem nomes da implementação de referência:
+
+| Parte | Origem |
+|---|---|
+| peaking, low shelf, high shelf | porte do **AutoEq** (MIT) — aviso em [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) |
+| low pass, high pass | RBJ cookbook |
+| magnitude, validação, `OFF`/neutro, framing, `commitReport()` | próprios |
+| layout dos bytes | aprendido da referência (fato do formato, não código) |
+
+Os únicos identificadores em comum com o script da referência são `b0`, `b1`,
+`b2`, `a0`, `a1`, `a2` — a notação do RBJ cookbook. Verificado tokenizando os dois
+arquivos e cruzando os identificadores, fora palavras da linguagem.
+
+### Prova de não-regressão da troca para o AutoEq
+
+Feita em 2026-10-15, contra a versão anterior do codec (a que seguia a referência):
+
+| Verificação | Resultado |
+|---|---|
+| bytes dos 11 presets (fixture) | idênticos |
+| bytes de 200 mil bandas aleatórias (PK/LS/HS/LP/HP, ±24 dB, Q 0,1–10, pré-amp 0 a −12 dB) | **196 245 comparadas, 0 diferentes**; 3 755 recusadas pelas duas versões, 0 recusadas por só uma |
+| erro da magnitude contra avaliação exata (200 bits) dos mesmos coeficientes | 4,4·10⁻⁹ dB → **5,7·10⁻¹⁴ dB** (melhorou) |
+
+As tolerâncias dos testes não foram alteradas.
 
 ## O que os testes **não** provam
 
