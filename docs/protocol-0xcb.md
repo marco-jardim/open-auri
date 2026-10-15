@@ -1,7 +1,8 @@
 # Protocolo `0xCB` — wire format
 
 Reconstruído a partir de uma implementação que **grava na flash** e é pública:
-a página `https://equalizador.kuba.audio/` (artefato empacotado; analisado em 2026-10-14).
+a página `https://equalizador.kuba.audio/` (artefato empacotado; analisado em
+2026-10-14, revisado em 2026-10-15).
 
 > **Status.** O *formato do byte-stream* abaixo é ✅ (vem de código que funciona).
 > A execução real no chip é ❌ até termos o cabo — nenhum byte foi transmitido
@@ -15,8 +16,17 @@ a página `https://equalizador.kuba.audio/` (artefato empacotado; analisado em 2
 | VID / PID | `0x3302` / `0x8902` | ✅ |
 | Report ID | **`0xCB`** | ✅ |
 | Tamanho do relatório | **31 bytes** | ✅ |
-| Taxa de amostragem do DSP | **96 000 Hz** (`FS`) | ✅ |
+| Taxa de amostragem do DSP | **96 000 Hz** (`FS`) — ver nota abaixo | ✅ (formato) / 🟡 (chip) |
 | Requisitos | Chrome/Edge desktop, contexto seguro (HTTPS), gesto do usuário | ✅ |
+
+**Sobre o `FS`.** Três implementações independentes projetam os coeficientes em
+96 kHz: a página do kuba (`0xCB`), o `eqloader` (`DEVICE_SAMPLE_RATE = 96000`,
+*"Rate the device's biquad coefficients are designed at"*) e os testes do
+`frost-tune` (`0x4B`). Se o núcleo seguisse a taxa do stream, um conteúdo a
+44,1 kHz deslocaria toda a curva por 2,18× — algo que não passaria despercebido
+em três ferramentas. A hipótese mais provável é um núcleo em **taxa fixa de
+96 kHz**. Ainda assim é inferência; a confirmação é a sonda B10
+([`probing.md`](probing.md)).
 
 ## Estrutura do payload (blob)
 
@@ -24,21 +34,39 @@ O blob enviado ao chip tem **220 bytes**, montados assim:
 
 | Campo | Bytes | Formato | Confiança |
 |---|---|---|---|
-| Chave fixa (HEADER) | 14 | bytes literais | ✅ |
+| Header | 14 | ver abaixo | ✅ |
 | Pré-amp | 4 | `int32` LE, **Q23** (`2^23 = 8388608`) | ✅ |
 | 10 bandas × 5 coef. | 200 | `int32` LE, **Q27** (`2^27 = 134217728`) | ✅ |
 | CRC | 2 | CRC16-CCITT, LE | ✅ |
 | **Total** | **220** | | ✅ |
 
-### Chave fixa — 14 bytes
+### Header — 14 bytes
 
 ```
 45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00
 ```
 
-Os primeiros quatro bytes são ASCII **`EQ1#`** (`0x45 0x51 0x31 0x23`).
-O `0x0A` aparece nos offsets **7** e **11** — plausivelmente o número de bandas
-(10). O significado dos demais bytes é 🟡 (não documentado).
+| Offset | Bytes | Leitura | Confiança |
+|---|---|---|---|
+| 0–3 | `45 51 31 23` | ASCII **`EQ1#`** — *magic* (talvez "formato EQ, versão 1") | ✅ (ASCII) / 🟡 (significado) |
+| 4–5 | `D6 00` | **u16 LE = 214 = 220 − 6**: comprimento de tudo que vem depois, CRC incluído | 🟡 (bate exatamente) |
+| 6 | `00` | ? | ❌ |
+| 7 | `0A` | 10 — nº de seções? | 🟡 |
+| 8 | `04` | 4 — bytes por coeficiente (`int32`)? | 🟡 |
+| 9 | `05` | 5 — coeficientes por seção? | 🟡 |
+| 10 | `01` | 1 — nº de canais? nº de palavras de pré-amp? | 🟡 |
+| 11 | `0A` | 10 — nº de seções (de novo; talvez "ativas" vs "máximo")? | 🟡 |
+| 12–13 | `00 00` | reservado? | ❌ |
+
+O padrão sugere um **header autodescritivo**: comprimento + geometria do bloco.
+Duas consequências, ambas a confirmar no cabo:
+
+- se o byte 10 for **nº de canais**, pode existir **EQ independente por canal**
+  (10 seções × 2) — o que hoje está listado como impossível;
+- se o firmware respeitar os bytes 7/11, pode aceitar **menos (ou mais) de 10
+  seções**, com o comprimento do byte 4–5 ajustado.
+
+O teste `header bytes 4..5 are a u16 LE length` fixa a parte verificável.
 
 ### Pré-amp
 
@@ -48,7 +76,8 @@ Ganho linear em Q23:
 pre_i32 = round(10^(pre_dB / 20) * 2^23)
 ```
 
-1.0 ⇒ `0x00800000`. Escrito em little-endian (4 bytes).
+1.0 ⇒ `0x00800000`. Escrito em little-endian (4 bytes). O codec recusa pré-amp
+não finito; o sinal não é restringido (a sonda B9 precisa de pré-amp positivo).
 
 ### Bandas — ordem dos coeficientes
 
@@ -59,11 +88,13 @@ Cada banda grava **5 inteiros** `int32` LE, em Q27, nesta ordem exata:
 ```
 
 com `a0` **implícito = 1** (coeficientes normalizados por `a0`).
-`n = round(v * 134217728)`; se `n` não couber em `int32`, a gravação é rejeitada.
+`n = round(v * 134217728)`.
 
 ### CRC
 
-**CRC16-CCITT** — polinômio `0x1021`, valor inicial `0xFFFF`, sem reflexão:
+**CRC16-CCITT** (variante *CCITT-FALSE*) — polinômio `0x1021`, valor inicial
+`0xFFFF`, sem reflexão, sem XOR final. Vetor de verificação: `"123456789"` ⇒
+`0x29B1` ✅ (testado de forma independente da referência).
 
 ```
 c = 0xFFFF
@@ -73,8 +104,8 @@ para cada byte x:
         c = (c & 0x8000) ? ((c << 1) ^ 0x1021) & 0xFFFF : (c << 1) & 0xFFFF
 ```
 
-Anexado ao **fim do blob** como 2 bytes little-endian. ✔️ (o CRC *entra* no
-stream transmitido, pois é calculado sobre o blob e incluído nele antes do fatiamento.)
+Calculado sobre os 218 bytes anteriores e anexado ao **fim do blob** como 2 bytes
+little-endian. ✅ Se o firmware **valida** o CRC é outra questão (sonda B7).
 
 ## Fatiamento em relatórios
 
@@ -107,76 +138,146 @@ device.sendReport(0xCB, [0x01, 0x65, 0x00, 0x01, 0xFF])   // COMMIT
 | Settle | 150 ms | ✅ |
 | **Commit / APPLY** | `[0x01, 0x65, 0x00, 0x01, 0xFF]` | ✅ |
 
-O comando de commit faz o chip **persistir o preset na própria flash** — depois
-disso vale em qualquer aparelho, sem software.
+O commit faz o chip **persistir o preset na própria flash** — depois disso vale
+em qualquer aparelho, sem software.
 
-## Importante: o wire format é **biquad cru**
+**Tamanho do commit.** A referência envia **5 bytes** num report declarado com
+31. O codec expõe `applyPacket()`, que completa com zeros até 31, para que
+qualquer transporte (WebHID, hidapi, Windows) envie os mesmos bytes. Se o
+firmware distingue os dois casos é 🟡.
+
+**Desgaste.** Cada commit é uma gravação na flash, cuja durabilidade é
+desconhecida, e um corte de energia no meio da gravação tem efeito desconhecido.
+Não existe, até onde se sabe, um modo "só RAM" no `0xCB` (o `0x4B` tem
+`TEMP_WRITE`). Os bytes `01 FF` no fim do APPLY são candidatos a flags 🟡.
+
+## Parentesco com o `0x4B`
+
+Duas coincidências sugerem que os dois formatos vêm do **mesmo SDK**:
+
+| Observação | Valor | Confiança |
+|---|---|---|
+| Report ID | `0xCB = 0x4B \| 0x80` — e `0x80` é a flag de **leitura** do `0x4B` | ✅ (aritmética) / 🟡 (significado) |
+| Commit | contém `0x65 = 101`, o mesmo `FILTER_SLOT` do `0x4B` | ✅ (aritmética) / 🟡 (significado) |
+
+Consequência prática: o cabo pode expor **também** o report `0x4B` — e então
+leitura, versão, ganho e slots poderiam funcionar com as ferramentas existentes.
+É verificável sem risco, lendo `HIDDevice.collections` (sonda B1).
+
+## O wire format é **biquad cru**
 
 Não há **byte de tipo de filtro** por banda — só os 5 coeficientes. Logo, o chip
-aplica *qualquer* biquad estável; o `type` (`PK`/`LS`) usado pela página é apenas
-conveniência de cálculo no JS.
+aplica *qualquer* biquad estável; o `type` usado pela página é conveniência de
+cálculo no JS.
 
 ⇒ É possível enviar **HS, HP, LP, notch, band-pass, all-pass, shelf de 1ª ordem**,
-etc., contanto que os coeficientes passem na validação. 🟡 (o formato permite;
-o firmware aceitar de fato é ❌)
+etc. 🟡 (o formato permite; o firmware aceitar de fato é ❌)
 
-## Ordenação das bandas
+## Ordenação das bandas — **cortes antes dos reforços**
 
-As bandas são **biquads em série**, e filtros lineares invariantes no tempo
-**comutam**: a resposta não depende da ordem. ✅
+A resposta em frequência **ideal** não depende da ordem das seções (filtros
+lineares invariantes no tempo comutam). ✅ O **pico interno** da cadeia depende.
 
-Consequência prática: qualquer preset pode ser **canonizado ordenado por `f`**,
-o que torna diff, hash e comparação determinísticos de graça. Os coeficientes
-são calculados por banda e não mudam com a reordenação — só mudam de posição no
-blob.
+A fonte da referência diz, na linha que antecede os presets:
 
-> ⚠️ A comutatividade é exata para o filtro ideal; a implementação em ponto fixo
-> do chip pode diferir em arredondamento conforme a ordem interna, o que é
-> desprezível. Na dúvida, não reordene o que já funciona.
+> *"Pré-amps igualam o volume dos presets entre 300 Hz e 3 kHz, **sem clipping
+> (cortes antes dos reforços)**."*
 
-Uso: [`social.md`](social.md) (S1).
+E todos os 11 presets seguem a regra. Medição do pico interno (pior estágio da
+cadeia, senoide em 0 dBFS na entrada, pré-amp incluído):
 
-## Limites práticos do formato
+| Ordem | Pior pico interno (11 presets) | Presets acima de 0 dBFS |
+|---|---|---|
+| da referência (cortes primeiro) | **−0,20 dB** | 0 |
+| ordenada por `f` | **+4,79 dB** | 7 |
+| invertida (reforços primeiro) | **+9,13 dB** | 11 |
+
+Consequências:
+
+- **A ordem enviada ao chip tem que manter cortes antes dos reforços.** O codec
+  escreve na ordem recebida; quem monta o preset é responsável por ela.
+- **Ordenar por `f` serve só para forma canônica** (compartilhar, comparar, hash)
+  — nunca para o envio. Ver [`social.md`](social.md) (S1).
+- Se o chip tem bits de guarda internos é desconhecido; a regra vale como padrão
+  seguro de qualquer forma.
+
+## Limites práticos do formato (medidos)
 
 | Constrição | Valor | Confiança |
 |---|---|---|
-| Seções | **exatamente 10** | ✅ |
+| Seções | **10** no formato conhecido (header pode permitir outras contagens) | ✅ / 🟡 |
 | Ordem por seção | 1 biquad (2ª ordem) | ✅ |
-| Faixa do coeficiente | \|coef\| < 16 (Q27 → int32) ⇒ **~±24 dB** por seção | 🟡 |
-| Estabilidade | polos dentro do círculo unitário | 🟡 |
-| Frequência | `> 0` e `< 48 kHz` (Nyquist de 96 k) | ✅ |
+| Faixa do coeficiente | \|coef\| < 16 (Q27 em `int32`). **Depende do tipo**: o primeiro estouro aparece em PK **+31 dB** (20 kHz, Q 0,1), LS **+48,5 dB**, HS **+18,5 dB** (20 Hz, Q 0,1). **Cortes nunca estouram** (−80 dB passa) | ✅ (medido) |
+| Erro de quantização Q27 | pior caso nos 11 presets **0,0036 dB**; caso extremo (PK 20 Hz, Q 10, −12 dB) **0,017 dB** — irrelevante | ✅ (medido) |
+| Estabilidade | polos estritamente dentro do círculo unitário — **verificado pelo codec nos coeficientes já quantizados** | ✅ |
+| Frequência | `0 < f < 48 kHz` (Nyquist de 96 k) — verificado pelo codec | ✅ |
 | Ganho global | **1** pré-amp por preset | ✅ |
 
-Banda "desligada": com `g = 0` o biquad RBJ vira identidade
-(`b0 = 1, b1 = a1, b2 = a2`), então 10 bandas cobrem de 1 a 10 seções reais. 🟡
+O antigo "~±24 dB por seção" estava errado: o limite depende do tipo e quase
+nunca é o que restringe uma curva real.
+
+### Banda desligada
+
+Use a **identidade exata**: `{ type: 'OFF' }` ⇒ `[2^27, 0, 0, 0, 0]`. Um peaking
+com `g = 0` também tem resposta plana, mas mantém polos perto do círculo unitário
+(em baixa frequência e Q alto); em ponto fixo, o ruído de arredondamento passa
+por esses polos. A identidade exata não custa nada. `NEUTRAL_BANDS` são 10
+seções `OFF` — o preset neutro garantido.
+
+## Validação no codec
+
+`blob()` é a última barreira antes da flash, e a flash não pode ser lida de
+volta. Ele recusa:
+
+| Entrada | Sem validação, gravaria |
+|---|---|
+| `q = 0`, `f = NaN` | uma seção toda zero ⇒ **cabo mudo** |
+| `q < 0`, `f > Nyquist` | uma seção **instável** ⇒ oscilação em volume máximo |
+| `g` ou pré-amp não finitos | valores arbitrários |
+| tipo desconhecido (`LSQ`, `HSQ`, ausente) | um peaking no lugar de um shelf |
+| coeficiente fora de `int32` | — (já era recusado) |
+
+Nomes como `LSQ`/`HSQ` (EqualizerAPO, hangout.audio) precisam ser mapeados
+explicitamente por quem importa o arquivo.
 
 ## Design dos biquads (RBJ)
 
-A página calcula os coeficientes com as fórmulas de **RBJ cookbook** (peak e
-low-shelf) em `FS = 96 kHz` e normaliza por `a0`. Ver
-[`ecosystem.md`](ecosystem.md) para as implementações de referência equivalentes.
+A página calcula os coeficientes com as fórmulas do **RBJ cookbook** (peak e
+low-shelf) em `FS = 96 kHz` e normaliza por `a0`. O codec acrescenta high-shelf,
+low-pass, high-pass e `OFF`, verificados por propriedades do próprio cookbook
+(ganho em f0, DC e Nyquist), não pela referência.
 
 ## Duas observações sobre a página analisada
 
 1. **`show` vs `bands`.** A curva **desenhada** usa `p.show || p.bands`, mas o
-   que é **gravado** usa `p.bands`. No preset `pref6` ("Natural") os dois conjuntos
-   são diferentes — logo gráfico e preset gravado **não coincidem** nesse caso. ✅
-2. **`pre` por preset.** Cada preset traz um pré-amp único, usado para igualar o
-   volume entre presets entre 300 Hz e 3 kHz. ✅
+   que é **gravado** usa `p.bands`. No preset `pref6` ("Natural") os dois
+   conjuntos diferem — medido, com alinhamento em 300 Hz–3 kHz como a página faz:
+
+   | Faixa | Maior diferença |
+   |---|---|
+   | 20–300 Hz | 0,88 dB |
+   | 300 Hz–3 kHz | 1,34 dB |
+   | 3–8 kHz | **3,87 dB** (faixa que a referência diz priorizar) |
+   | 8–16 kHz | **7,29 dB** @ 11,5 kHz |
+
+2. **`pre` por preset.** Cada preset traz um pré-amp que iguala o volume entre
+   300 Hz e 3 kHz. Medido: a saída de todos fica ≤ −0,47 dB (senoide em 0 dBFS),
+   ou seja, a afirmação "sem clipping" da referência se confirma para regime
+   permanente. Sinais de banda larga podem ter overshoot acima disso.
 
 ## Como reproduzir a extração
 
 A página é um artifact empacotado; o app inteiro vive num
-`<script type="__bundler/template">` codificado em JSON.
+`<script type="__bundler/template">` codificado em JSON. O gerador do fixture
+faz isso em duas etapas, sem executar código vindo direto da rede:
 
 ```powershell
-$out = "$env:TEMP\kuba"
-New-Item -ItemType Directory -Force -Path $out | Out-Null
-$raw = (Invoke-WebRequest -Uri "https://equalizador.kuba.audio/" -UseBasicParsing).Content
-$m = [regex]::Match($raw, '<script type="__bundler/template">([\s\S]*?)</script>')
-[IO.File]::WriteAllText("$out\template.html", ($m.Groups[1].Value.Trim() | ConvertFrom-Json))
+node tools/extract-kuba-reference.mjs --fetch "$env:TEMP\kuba-template.html"
+# revisar o arquivo; anotar o sha256 impresso
+node tools/extract-kuba-reference.mjs --template "$env:TEMP\kuba-template.html" --expect-sha256 <hash>
 ```
 
 O objeto `DSP` no template contém `HEADER`, `APPLY`, `FS`, `VENDOR_ID`,
 `PRODUCT_ID`, `REPORT_ID` e as funções `peak`/`lowShelf`/`coeffs`/`crc16`/`blob`/
-`packets`/`response`.
+`packets`/`response`. O sha256 do template usado está em
+`test/fixtures/eq0xcb.reference.json` (`_provenance.templateSha256`).

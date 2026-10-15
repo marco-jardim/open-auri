@@ -8,21 +8,35 @@ registra os dois e o que dá para reusar de cada um.
 
 | | **`0x4B`** (padrão documentado) | **`0xCB`** (o do cabo analisado) |
 |---|---|---|
-| Report ID | `0x4B` | `0xCB` |
+| Report ID | `0x4B` | `0xCB` (= `0x4B \| 0x80`) |
 | Tamanho do relatório | 64 bytes | 31 bytes |
-| Header | por-comando | chave fixa `"EQ1#"` + 10 bytes |
+| Header | por-comando (com campo de comprimento) | `"EQ1#"` + comprimento u16 + geometria do bloco 🟡 |
 | Fatiamento | **1 pacote por banda** | **bloco de 10 bandas** em 9 pacotes |
-| Escala dos coeficientes | **Q30** (`2^30`) | **Q27** (`2^27`) |
+| Escala dos coeficientes | **Q30** (`2^30`) ⇒ \|coef\| < 2 | **Q27** (`2^27`) ⇒ \|coef\| < 16 |
 | Ordem dos coeficientes | `[b0, b1, b2, -a1, -a2]` | `[b0, b2, -a1, b1, -a2]` |
-| Byte de tipo de filtro | **sim** (`LSQ=1, PK=2, HSQ=3, LP=4, HP=5`) | **não** |
+| Byte de tipo de filtro | **sim** (`LSQ=1, PK=2, HSQ=3, LP=4, HP=5`), mais `f`, `Q` e ganho no pacote | **não** — só coeficientes |
 | CRC | não | **CRC16-CCITT** |
 | Leitura (*read*) | documentada (`0x80`) | **desconhecida** |
-| Commit | `TEMP_WRITE` → `FLASH_EQ` | `[01 65 00 01 FF]` |
+| Gravação só na RAM | `TEMP_WRITE` (`0x0A`) | desconhecida |
+| Commit | `TEMP_WRITE` → `FLASH_EQ` (slot `101` no frost-tune); o eqloader envia antes `0x05` e `0x17`, não documentados | `[01 65 00 01 FF]` (contém `0x65 = 101`) |
+| `FS` de projeto | 96 kHz (eqloader, frost-tune) | 96 kHz (kuba) |
 | **Confiança** | ✅ (código aberto) | ✅ (formato) / ❌ (device) |
 
 Consequência de projeto: um `core` agnóstico + **camada de protocolo plugável**
 com duas implementações (`0xCB`, `0x4B`) — porque **não sabemos** qual o cabo usa
-até plugá-lo.
+até plugá-lo. As duas coincidências na tabela (report ID e slot `101`) sugerem
+um SDK comum; o cabo pode expor **os dois** reports (sonda B1).
+
+**Faixa dos coeficientes.** Em Q30 nenhum coeficiente chega a 2: reforços
+grandes em frequências altas não cabem, e as ferramentas `0x4B` fazem *clamp*
+silencioso (`clamp_i32` no frost-tune) — o filtro gravado deixa de ser o
+projetado. O Q27 do `0xCB` dá 8× mais margem.
+
+**Projeto dos coeficientes no `0x4B`.** O `eqloader` comenta que calcula
+*"always a peaking design, whatever the band's type, matching the vendor tool"*.
+Como o pacote também leva `f`, `Q`, ganho e tipo, é provável que o firmware
+`0x4B` recalcule os coeficientes a partir dos parâmetros. No `0xCB` isso é
+impossível — só os coeficientes viajam.
 
 ## Comandos do `0x4B` (referência)
 
@@ -58,8 +72,12 @@ têm um **buffer de hardware** (ex.: `-5 dB` no CrinEar Protocol Micro) somado a
 | [`eq.hangout.audio`](https://eq.hangout.audio) (Crinacle's EQ Tool) | **Só a matemática** (`shared/equalizer.js`): biquads RBJ, otimizador AutoEQ, graphic EQ. `DefaultSampleRate = 48000`. | — | site proprietário |
 
 > **Licença é bloqueador.** Antes de copiar código: `eqloader` **não tem licença**
-> e o `equalizer.js` é de um site proprietário. Algoritmos (RBJ, AutoEQ) são de
-> domínio público; **implementações** não necessariamente. O `open-auri` é AGPL-3.0.
+> e o `equalizer.js` é de um site proprietário. Algoritmos e fórmulas (RBJ,
+> AutoEQ) não são protegidos por direito autoral; **implementações** são. O
+> próprio `equalizer.js` declara que tirou os biquads do
+> [`AutoEq`](https://github.com/jaakkopasanen/AutoEq), que é **MIT** (verificado
+> em 2026-10-15) — portar a partir do AutoEq é o caminho limpo. O `open-auri` é
+> AGPL-3.0.
 
 ## Matemática reusável (sem protocolo)
 
@@ -88,3 +106,8 @@ Filter 2: ON LS Fc 80.0 Hz Gain -2.0 dB Q 0.707
 
 Tipos: `PK`, `LS`/`LSC`/`LSQ`, `HS`/`HSC`/`HSQ`, `LP`, `HP`.
 Bom candidato a formato de import/export por ser interoperável.
+
+O codec só aceita `PK`, `LS`, `HS`, `LP`, `HP` e `OFF`, e recusa qualquer outro
+nome. Um importador precisa mapear `LSC`/`LSQ` → `LS` e `HSC`/`HSQ` → `HS`
+explicitamente — antes, o codec transformava silenciosamente um shelf
+desconhecido em peaking.

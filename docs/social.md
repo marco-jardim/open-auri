@@ -19,12 +19,12 @@ receita (S5) e agregação sem servidor (S6).
 
 | ID | Ideia | Decisão |
 |---|---|---|
-| **S1** | Formato compacto canônico | ✅ **adotar** — 46 B, campo fixo, zero codec |
+| **S1** | Formato compacto canônico | ✅ **adotar** — 48 B (64 caracteres), campo fixo, zero codec |
 | **S2** | Assinatura criptográfica | ❌ **descartada** — proveniência por link basta |
 | **S3** | Curvas versionadas (git) | ✅ **adotar** — 100% estático, sem backend |
 | **S4** | Distância entre curvas | ✅ **adotar** — barato, `response()` já existe |
 | **S5** | Envelope: números **+** receita | ✅ **adotar** — os dois, não um ou outro |
-| **S6** | Preferência crowdsourced | ✅ **adotar** — agregável via GitHub Actions |
+| **S6** | Preferência crowdsourced | ✅ **adotar** — via GitHub Actions (pseudônimo) ou Worker (anônimo) |
 | **S7** | "Blind trade" | 🟡 opcional |
 | **S8** | Curva como identidade | 🟡 opcional |
 | **S9** | Packs curados e licenciáveis | ✅ **adotar** — resolve licença de curva |
@@ -57,18 +57,28 @@ algoritmo nenhum (4,8×). Comprimir algoritmicamente por cima rende no máximo
 ~1,5×, ao custo de um codec, de fragilidade e de perder a depurabilidade. Aos
 46 bytes, os 33% de overhead do base64 já dominam.
 
-### Domínio canônico (46 B)
+### Domínio canônico (48 B = 64 caracteres)
+
+Os 46 B medidos acima são só o conteúdo. O código final acrescenta 2 bytes:
 
 | Campo | Bits | Domínio | Racional |
 |---|---|---|---|
-| `type` | 3 | 5 valores | hoje só `PK`/`LS` aparecem (entropia real 0,23 bit) |
-| `f` | 15 | Hz inteiro < 32768 | **exato**, e é como a referência já grava |
-| `g` | 8 | int8 a 0,1 dB | cobre −12,7..+12,7 (observado: −12,0..+9,2) |
-| `q` | 10 | a 0,01 | cobre ≤ 10,23 (observado: 0,10..4,00) |
-| `preamp` | 8 | int8 a 0,1 dB | 1 por preset |
-| **total** | **368 bits = 46 B** | 10 × 36 bits + 8 bits | |
+| versão + sabor | 8 | 4 bits cada | evolução do formato; distingue `parametric` de `raw` |
+| `type` (× 10) | 3 | 6 valores: PK, LS, HS, LP, HP, OFF | hoje só `PK`/`LS` aparecem (entropia real 0,23 bit) |
+| `f` (× 10) | 15 | Hz inteiro < 32768 | **exato** para os presets de referência, que usam Hz inteiro; é também como o `0x4B` guarda `f` (u16). O `0xCB` não guarda `f` — só coeficientes |
+| `g` (× 10) | 8 | int8 a 0,1 dB | cobre −12,8..+12,7 (observado: −12,0..+9,2) |
+| `q` (× 10) | 10 | guarda `q·100 − 1` | cobre 0,01..10,24; `q = 0` não existe (o codec recusa) |
+| `preamp` | 8 | **sem sinal**, 0 a −25,5 dB em passos de 0,1 | o pré-amp é ≤ 0; com sinal, o piso seria só −12,8 dB |
+| CRC-8 | 8 | sobre os 47 bytes anteriores | uma URL truncada ou um caractere trocado viraria uma curva válida, porém errada |
+| **total** | **384 bits = 48 B** | | **exatamente 64** caracteres base64url, sem padding |
 
 O range observado é **estreito** — é aí que está o ganho, não em algoritmo.
+
+**"Lossless" dentro do domínio.** Hz inteiro, 0,1 dB e Q com 2 casas cobrem todos
+os presets de referência e a saída do AutoEQ do hangout.audio (que arredonda
+para esses passos). **Não** cobrem tudo: o `eqloader` arredonda `f` a 0,1 Hz e o
+ganho a 0,01 dB. Uma curva fora do domínio vai para o sabor `raw` — nunca é
+arredondada em silêncio.
 
 **Variante de 39 B rejeitada:** `f` numa grade de 1/96 oitava (925 passos) tem erro
 máximo de **0,36%** em `f`. Economiza 7 bytes = 12 caracteres, e cobra o adjetivo
@@ -78,28 +88,38 @@ máximo de **0,36%** em `f`. Economiza 7 bytes = 12 caracteres, e cobra o adjeti
 
 | Sabor | Conteúdo | Tamanho | Quando |
 |---|---|---|---|
-| `parametric` | 10 × `(type, f, g, q)` + preamp | 46 B | curvas RBJ — praticamente tudo |
-| `raw` | 10 × 5 coeficientes int32 | 200 B | biquad que não é expressável como RBJ |
+| `parametric` | 10 × `(type, f, g, q)` + preamp | 48 B | curvas RBJ dentro do domínio — praticamente tudo |
+| `raw` | 10 × 5 coeficientes int32 + preamp | ~203 B | biquad que não é expressável como RBJ, ou parâmetros fora do domínio |
 
-Um byte de discriminador resolve. Sem ele, o formato compacto mentiria sobre
+O byte de versão/sabor resolve. Sem ele, o formato compacto mentiria sobre
 curvas desenhadas direto em coeficientes.
 
-### Canonicalização por ordenação ✅
+### Forma canônica para compartilhar ≠ ordem de envio ⚠️
 
-Bandas em série **comutam** (LTI). Portanto qualquer preset pode ser **ordenado
-por `f`** para virar forma canônica — o que torna diff, hash e comparação
-determinísticos de graça. A resposta em frequência é idêntica.
+Bandas em série **comutam** na resposta ideal. Então qualquer preset pode ser
+**ordenado** para virar forma canônica — por `f`, desempatando por tipo, Q e
+ganho — o que torna diff, hash e comparação determinísticos de graça.
 
-> ⚠️ Só não reordene o **envio** sem motivo: os coeficientes são calculados por
-> banda e não mudam, mas a ordem de processamento interna do chip é fixa.
+**Mas essa ordem nunca vai para o cabo.** O **pico interno** da cadeia depende da
+ordem, e a referência ordena **cortes antes dos reforços** de propósito. Medido
+nos 11 presets ([`protocol-0xcb.md`](protocol-0xcb.md#ordenação-das-bandas--cortes-antes-dos-reforços)):
+
+| Ordem | Pior pico interno | Presets acima de 0 dBFS |
+|---|---|---|
+| da referência (cortes primeiro) | −0,20 dB | 0 |
+| ordenada por `f` (canônica) | **+4,79 dB** | 7 |
+
+Logo: a forma canônica é para **guardar e comparar**; ao gravar, a ferramenta
+reconstrói a ordem de envio (cortes primeiro).
 
 ---
 
 ## S2 — Proveniência, não assinatura ❌ descartada
 
 Assinatura criptográfica foi **descartada**, e o argumento é bom: o pior caso de
-uma curva adulterada é um EQ diferente — sem dano. E sem leitura não há como
-verificar nada de qualquer forma.
+uma curva adulterada é um EQ diferente — sem dano (e o codec recusa curvas que
+gravariam silêncio ou instabilidade). E, sem leitura conhecida, não há como
+verificar o que está no cabo de qualquer forma.
 
 Substituto: campo **`source`** apontando para a origem canônica (commit, PR,
 gist). É verificável de graça e é a identidade real.
@@ -128,12 +148,17 @@ o correto é assinar **a receita** (medição + alvo + versão do solver), não 
 job agendado recalcula o alvo da comunidade e publica o JSON. Sem servidor, sem
 custo — e **o dataset inteiro fica auditável**, o que é vantagem, não remédio.
 
+⚠️ **Isso não é anônimo.** Enviar por PR ou issue expõe o usuário do GitHub junto
+com os dados, num repositório público: é **pseudônimo e público**. Serve para
+quem aceita isso; coleta anônima de verdade exige um servidor (próxima seção).
+
 ### Quando o backend é inevitável
 
 | Necessidade | Por quê |
 |---|---|
 | escrita por usuário não-técnico | git é barreira real |
 | identidade / conta | OAuth do GitHub exige troca de token → Worker mínimo |
+| S6 **anônimo** | envio sem conta GitHub; o servidor descarta identidade e IP |
 | S7 (pareamento anônimo) | precisa de estado do servidor |
 | ranking/voto além do GitHub | idem |
 | telemetria e antabuso | idem |
@@ -193,11 +218,21 @@ Só receita deixa o app refém da base de dados; só números, ninguém audita.
 ## S6 — Preferência crowdsourced ✅
 
 O teste cego (X2 em [`ideas.md`](ideas.md)) gera pares A/B **localmente**. Com
-opt-in, sobe só o resultado anônimo dos pares — e a comunidade constrói um **alvo
+opt-in, sobe só o resultado dos pares — e a comunidade constrói um **alvo
 derivado de dados reais**, continuamente. É como a curva Harman nasceu, mas
 aberto e sem parar. Transforma usuários em corpus.
 
-Agregável pelo truque do S3 (Actions). Depende do X2 e do cabo ❌.
+Dois caminhos, com garantias diferentes:
+
+| Caminho | Privacidade | Infra |
+|---|---|---|
+| PR/issue + Actions (S3) | **pseudônimo e público** (usuário do GitHub visível) | nenhuma |
+| Worker | **anônimo** (sem conta; identidade e IP descartados) | Cloudflare Worker |
+
+Preferência auditiva pode revelar perda de audição. Pela LGPD, isso pede
+**consentimento explícito** e dados minimizados (só os pares, sem perfil).
+
+Depende do X2 e do cabo ❌.
 
 ---
 

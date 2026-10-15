@@ -11,7 +11,7 @@ Marcas de confiança: ✅ confirmado · 🟡 hipótese · ❌ só com o cabo.
 |---|---|---|---|
 | L1 | Aceita **biquad cru**, sem byte de tipo | Qualquer filtro estável cabe — não só PK/LS | ✅ (formato) / 🟡 (firmware) |
 | L2 | Pré-amp é **Q23 contínuo** dentro do blob | Ganho de entrada praticamente contínuo, não passo de 1 dB | ✅ |
-| L3 | Gravação é **barata e persistente** (~0,3 s, vai para a flash) | Dá para escrever muitas curvas em sequência; e o preset sobrevive a qualquer aparelho | ✅ |
+| L3 | Gravação é **rápida e persistente** (~0,3 s, vai para a flash) | Dá para escrever muitas curvas em sequência; e o preset sobrevive a qualquer aparelho. **Rápida não é barata:** cada gravação desgasta a flash, cuja durabilidade é desconhecida | ✅ (tempo) / ❌ (desgaste) |
 
 Cálculo do ~0,3 s: 9 pacotes × 16 ms (144 ms) + 150 ms de settle + commit.
 
@@ -27,8 +27,8 @@ Cálculo do ~0,3 s: 9 pacotes × 16 ms (144 ms) + 150 ms de settle + commit.
 | **C4** | **Importar tuning existente** — `.txt` do EqualizerAPO / AutoEq / Wavelet / Poweramp | L1 + formato `.txt` interoperável | ✅ |
 | **C5** | **Curvas de loudness (ISO 226)** — presets para escuta em volume baixo | normalização ISO 226 já implementada no motor de referência | ✅ (motor) / 🟡 (posição do volume no chip) |
 | **C6** | **Filtros que a página não expressa**: HPF sub-sônico, notch de ressonância, shelf de 1ª ordem, 4ª ordem empilhada | L1 | ✅ (formato) / 🟡 (firmware) |
-| **C7** | **Curva que mostra o que o chip *realmente* faz** — simular o arredondamento Q27 e exibir a resposta pós-quantização | sabemos a escala exata | ✅ |
-| **C8** | **Garantia "o que você vê é o que é gravado"** | a página de referência **falha** nisso: desenha a curva de `show` (quando existe) mas grava `bands`, e os dois divergem no preset `pref6` | ✅ (defeito observado) |
+| **C7** | ~~Curva pós-quantização Q27~~ — **sem valor**: medido, o arredondamento muda a resposta em no máximo 0,017 dB (caso extremo) e 0,0036 dB nos presets. O que vale mostrar é o **pico interno** da cadeia (D1/D8 em [`probing.md`](probing.md)) | sabemos a escala exata | ✅ (medido) |
+| **C8** | **Garantia "o que você vê é o que é gravado"** | a página de referência **falha** nisso: desenha a curva de `show` (quando existe) mas grava `bands`. No `pref6` a diferença chega a **3,87 dB** entre 3 e 8 kHz e **7,29 dB** em 11,5 kHz | ✅ (medido) |
 
 ### C6 em detalhe — os filtros que faltam
 
@@ -56,38 +56,61 @@ Por isso ele precisa de um *wrapper* para circular com contexto.
 
 Confiança: ✅ · Esforço: baixo
 
-→ Forma compacta canônica (46 B) e envelope: [`social.md`](social.md) (S1, S5).
+→ Forma compacta canônica (48 B) e envelope: [`social.md`](social.md) (S1, S5).
 
 ### X2 — Teste cego automatizado de preferência ⭐
 
-A ideia mais original, e ela nasce **da limitação**: não dá para ler, mas dá para
-**escrever rápido e persistir** (L3).
+A ideia mais original, e ela nasce **da limitação**: não se sabe ler, mas dá para
+**escrever rápido** (L3).
 
 1. a ferramenta gera candidatos ao redor de um alvo (C1/C2);
 2. escreve A, escreve B, **embaralha**, o usuário responde só "prefiro 1 ou 2";
 3. um torneio converge para a **curva pessoal** dele.
 
-Resultado: um "Harman pessoal", medido no próprio ouvido. O protocolo é
-write-only; nós transformamos isso em **método**.
+Resultado: um "Harman pessoal", medido no próprio ouvido. O protocolo parece
+só de escrita; nós transformamos isso em **método**.
+
+**Três pré-requisitos antes de rodar em escala:**
+
+- **desgaste** — um torneio faz dezenas de gravações na flash. Achar o modo
+  só-RAM (B12 em [`probing.md`](probing.md)) vem antes;
+- **estalo na troca** — se a gravação durante a reprodução estalar ou mutar
+  (B13), o estalo denuncia a troca e o teste deixa de ser cego;
+- **volume casado** entre A e B (C4), senão o teste mede volume.
 
 Confiança: ✅ (viabilidade) / ❌ (precisa do cabo) · Esforço: alto
 
-### X3 — Pré-escuta bit-exata offline
+### X3 — Pré-escuta com os coeficientes exatos
 
 Como conhecemos os coeficientes exatos (mesmo `FS`, mesma escala Q27), dá para
-**renderizar um trecho de música com exatamente o filtro que será gravado** e
-entregar um WAV.
+**processar música com os mesmos coeficientes que serão gravados**. Não é
+"bit-exata": a aritmética interna do chip (largura de palavra, acumulador,
+arredondamento) é desconhecida — mas, com erro de quantização ≤ 0,017 dB, a
+diferença de resposta é desprezível.
 
-É o mais perto de "ouvir antes de gravar" que existe **sem o cabo** — e o único
-preview fiel, já que o preview no navegador não passa pelo chip.
+Como fazer no navegador, sem gerar WAV:
+
+- `IIRFilterNode` com os coeficientes quantizados, num
+  `AudioContext({ sampleRate: 96000 })`. A taxa precisa ser **96 kHz**, ou a curva
+  se desloca;
+- **não** usar `BiquadFilterNode`: ele calcula os próprios coeficientes, com
+  fórmulas diferentes.
+
+⚠️ **Armadilha:** ouvir a prévia **através do próprio cabo** soma a EQ que já está
+gravada nele. Gravar o neutro antes (`NEUTRAL_BANDS`), ou ouvir por outra saída.
 
 Confiança: ✅ · Esforço: médio
 
 ### X4 — Botão de resgate (requisito, não enfeite)
 
-Sem leitura, um estado ruim é **irreversível**. Um "neutro garantido"
-(10 bandas identidade + pré-amp 0, bytes conhecidos-bons) é a única saída.
-Deve ser o primeiro botão da UI.
+Se não houver leitura, um estado ruim só se desfaz regravando. Dois botões:
+
+| Botão | O que grava | Confiança |
+|---|---|---|
+| **Neutro** | `NEUTRAL_BANDS` (10 seções identidade exata) + pré-amp 0 — já implementado e testado no codec | ✅ |
+| **Restaurar fábrica** | o preset `padrao` ("a assinatura do Auri"), cujos bytes exatos estão no fixture | 🟡 (supondo que seja o de fábrica) |
+
+Devem ser os primeiros botões da UI.
 
 Confiança: ✅ · Esforço: baixo
 
@@ -98,9 +121,13 @@ Com o pré-amp contínuo (L2), expor os dois modos que ninguém expõe:
 | Modo | Fórmula | Para quê |
 |---|---|---|
 | **Igualar volume** | o que a página faz manualmente por preset | comparar presets sem viés de volume |
-| **Máximo sem clipping** | `pre = −max(curva somada)` | usar todo o headroom disponível |
+| **Máximo sem clipping** | `pre = −max(curva somada) − margem` | usar todo o headroom disponível |
 
 Há um trade-off real entre os dois, e ele é **tomada de decisão do usuário**.
+
+A **margem** é necessária: `−max(curva)` protege senoides, mas sinais de banda
+larga podem ultrapassar a magnitude por causa da fase, e os estágios internos da
+cadeia podem passar da saída (D1/D2 em [`probing.md`](probing.md)).
 
 Confiança: ✅ · Esforço: baixo
 
@@ -149,9 +176,9 @@ Confiança: ✅ · Esforço: baixo
 | Limite | Detalhe | Confiança |
 |---|---|---|
 | **Só filtros lineares e invariantes no tempo** | Nada de compressor, exciter, harmônicos, reverb, bass virtual. Não há como gerar frequência que não entrou. | ✅ |
-| **Uma curva só, sem L/R independente** | O blob tem 10 bandas e **nenhuma dimensão de canal** ⇒ crossfeed, mono-bass e balanço de canais são impossíveis. | ✅ |
+| **Uma curva só, sem L/R independente** | No formato conhecido, 10 bandas valem para os dois canais. Mas o header tem um byte (`01`, offset 10) que pode ser a **contagem de canais** — se for, EQ por canal e balanço podem existir. **Crossfeed e mono-bass continuam impossíveis** de qualquer forma: exigem misturar canais, e não há matriz de mistura no formato. | 🟡 (L/R) / ✅ (sem mistura) |
 | **Estático** | Não muda com volume nem com conteúdo. | ✅ |
-| **Sem leitura** | Sem undo/verify automáticos; toda a segurança é do host. | ✅ |
+| **Leitura desconhecida** | Até prova em contrário, sem undo/verify automáticos; toda a segurança é do host. O cabo pode expor o report `0x4B`, que tem leitura (B1). | ❌ |
 | **Escrita é bloco inteiro** | Não existe "atualizar uma banda"; cada gravação reescreve as 10. | ✅ |
 | **Sem modo só-RAM conhecido** | A única sequência conhecida grava na flash. | 🟡 |
 
@@ -163,7 +190,7 @@ Tudo assumindo o formato reconstruído — o autoteste (X7) pode derrubar alguma
 
 | Ordem | O que | Por quê |
 |---|---|---|
-| 1 | **X4 + validação + journal** | confiança antes de features — é o que a ausência de leitura exige |
+| 1 | **X4 + journal** (validação ✅ já no codec) | confiança antes de features — é o que a falta de leitura conhecida exige |
 | 2 | **C4 + C1** | valor percebido imediato, motor já pronto |
 | 3 | **C6** | a curva que a página não sabe fazer |
 | 4 | **X1 + X8** | barato, e cria rede: o preset vira conteúdo |
@@ -173,7 +200,9 @@ Tudo assumindo o formato reconstruído — o autoteste (X7) pode derrubar alguma
 
 Duas incógnitas derrubam várias ideias se derem errado:
 
-1. **O firmware aceita biquads fora de RBJ?** (L1) ⇒ C6, C7, X6
-2. **O `FS` é mesmo 96 kHz?** ⇒ C7, X3, e a precisão de tudo acima de ~10 kHz
+1. **O firmware aceita biquads fora de PK/LS?** (L1) ⇒ C6, X6
+2. **O `FS` é mesmo 96 kHz?** ⇒ X3 e a precisão de tudo acima de ~10 kHz.
+   Três implementações independentes projetam a 96 kHz, então é o resultado
+   mais provável.
 
 Plano de sondagem para fechar as duas, com prioridade: [`probing.md`](probing.md).

@@ -3,13 +3,14 @@
 ## Resumo
 
 O PEQ roda **dentro do bridge chip USB**, não no DAC decodificador. Na família
-que estamos tratando, esse bridge é o **Savitech CB5100**.
+que estamos tratando, esse bridge é o **CB5100**, atribuído pela comunidade à
+**Savitech**.
 
 | Camada | Componente | Confiança |
 |---|---|---|
-| Bridge USB + DSP/PEQ | **Savitech CB5100** (linha S-Core) | ✅ |
+| Bridge USB + DSP/PEQ | **CB5100** | ✅ (nome) |
 | Variantes do mesmo bridge | **CB5100PRO**, **SPV5048PRO** | ✅ |
-| Fabricante do chip | **Savitech Corp. (盛微先進科技)**, Taiwan | ✅ |
+| Fabricante do chip | **Savitech Corp. (盛微先進科技)**, Taiwan | 🟡 (fonte única, ver abaixo) |
 | Integrador do módulo / dono do app *WalkPlay* | **Shenzhen TTGK Technology (通通高科)**, Shenzhen, desde 2014 | ✅ |
 | DAC decodificador (a jusante) | Cirrus Logic **CS43131** / **CS43198** (comum); AKM **AK4493S** | ✅ |
 
@@ -32,6 +33,14 @@ compartilhado pela família Walkplay. Quem o registrou não foi identificado.
 O PID `0x8902` não aparece em nenhuma tabela pública de dispositivos.
 
 ## Evidências
+
+> **Sobre o fabricante.** Os briefs da TTGK nomeiam o chip (CB5100) mas **nunca
+> o fabricante**. A atribuição "Savitech CB5100" vem de **uma única fonte, e
+> secundária**: a tabela do AuraPEQ (projeto de hobby). Outros projetos falam em
+> "Walkplay/Savitech" para o protocolo, não para o chip. O indício a favor é
+> indireto: o Fosi DS2, que o AuraPEQ chama de "CB5100 series", enumera com o
+> VID registrado da Savitech (`0x262A`) — e essa informação também vem do
+> AuraPEQ. Confirmação real: foto da marcação do chip, ou a imagem de firmware (A2).
 
 ### 1. Datasheets de módulo da TTGK (públicos)
 
@@ -79,8 +88,12 @@ Moondrop/FiiO. ✅ Fonte: `dist/assets/index.js` do AuraPEQ (`n === "SAVITECH" ?
 ## FCC — beco sem saída
 
 **Não** há FCC ID esperado para um cabo/dongle DAC USB **sem rádio** (FCC cobre
-emissor intencional). Nenhum arquivamento foi encontrado para Savitech, TTGK ou
-CB5100, e não deveria existir. ✅ (ausência verificada em busca 2026-10-14)
+emissor intencional). Nenhum arquivamento relacionado foi encontrado para
+Savitech, TTGK ou o chip CB5100, e não deveria existir. ✅ (busca 2026-10-14/15)
+
+> ⚠️ **Armadilha de homônimo.** Existe o `FCC ID 2AVJ8-CB5100`, mas é uma
+> *control box* Bluetooth da **DewertOkin** (atuador de móveis), com modelo
+> "CB5100" por coincidência. **Não tem relação com o chip de áudio.** Não citar.
 
 Para tentar FCC seria preciso o **modelo/marca exato** do cabo e, ainda assim,
 só valeria se houvesse versão com Bluetooth.
