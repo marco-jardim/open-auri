@@ -8,6 +8,11 @@
 // (https://equalizador.kuba.audio/). Filter formulas: Robert Bristow-Johnson,
 // "Cookbook formulae for audio EQ biquad filter coefficients".
 //
+// Exported names and the local names inside the functions shared with the
+// reference (A, w, al, c, s, a0; b, c, v, n, pre, crc; b, pk, p, chunk;
+// k, nr, ni, dr, di) are kept identical to it, so the two can be read side
+// by side.
+//
 // This module is pure (no DOM, no HID), so it runs identically in Node and in
 // the browser. The HID transport lives elsewhere; here we only build the bytes.
 //
@@ -61,14 +66,10 @@ const INT32_MAX = 2147483647;
 
 // --- Biquad design (RBJ cookbook) -------------------------------------------
 
-function omega(f, fs) {
-  return (2 * Math.PI * f) / fs;
-}
-
 /** RBJ peaking EQ. */
 export function peak(f, g, q, fs = FS) {
   const A = Math.pow(10, g / 40);
-  const w = omega(f, fs);
+  const w = (2 * Math.PI * f) / fs;
   const al = Math.sin(w) / (2 * q);
   const a0 = 1 + al / A;
   const b0 = (1 + al * A) / a0;
@@ -82,7 +83,7 @@ export function peak(f, g, q, fs = FS) {
 /** RBJ low shelf. */
 export function lowShelf(f, g, q, fs = FS) {
   const A = Math.pow(10, g / 40);
-  const w = omega(f, fs);
+  const w = (2 * Math.PI * f) / fs;
   const al = Math.sin(w) / (2 * q);
   const c = Math.cos(w);
   const s = 2 * Math.sqrt(A) * al;
@@ -99,7 +100,7 @@ export function lowShelf(f, g, q, fs = FS) {
 /** RBJ high shelf. */
 export function highShelf(f, g, q, fs = FS) {
   const A = Math.pow(10, g / 40);
-  const w = omega(f, fs);
+  const w = (2 * Math.PI * f) / fs;
   const al = Math.sin(w) / (2 * q);
   const c = Math.cos(w);
   const s = 2 * Math.sqrt(A) * al;
@@ -115,7 +116,7 @@ export function highShelf(f, g, q, fs = FS) {
 
 /** RBJ 2nd-order low pass. */
 export function lowPass(f, q, fs = FS) {
-  const w = omega(f, fs);
+  const w = (2 * Math.PI * f) / fs;
   const c = Math.cos(w);
   const al = Math.sin(w) / (2 * q);
   const a0 = 1 + al;
@@ -130,7 +131,7 @@ export function lowPass(f, q, fs = FS) {
 
 /** RBJ 2nd-order high pass. */
 export function highPass(f, q, fs = FS) {
-  const w = omega(f, fs);
+  const w = (2 * Math.PI * f) / fs;
   const c = Math.cos(w);
   const al = Math.sin(w) / (2 * q);
   const a0 = 1 + al;
@@ -148,15 +149,15 @@ export function highPass(f, q, fs = FS) {
  * type: names such as `LSQ`/`HSQ` (EqualizerAPO, hangout.audio) must be mapped
  * explicitly by the caller, never guessed.
  */
-export function coeffs(band, fs = FS) {
-  switch (band.type) {
-    case 'PK': return peak(band.f, band.g, band.q, fs);
-    case 'LS': return lowShelf(band.f, band.g, band.q, fs);
-    case 'HS': return highShelf(band.f, band.g, band.q, fs);
-    case 'LP': return lowPass(band.f, band.q, fs);
-    case 'HP': return highPass(band.f, band.q, fs);
+export function coeffs(b, fs = FS) {
+  switch (b.type) {
+    case 'PK': return peak(b.f, b.g, b.q, fs);
+    case 'LS': return lowShelf(b.f, b.g, b.q, fs);
+    case 'HS': return highShelf(b.f, b.g, b.q, fs);
+    case 'LP': return lowPass(b.f, b.q, fs);
+    case 'HP': return highPass(b.f, b.q, fs);
     case 'OFF': return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
-    default: throw new TypeError(`unknown filter type ${JSON.stringify(band.type)}`);
+    default: throw new TypeError(`unknown filter type ${JSON.stringify(b.type)}`);
   }
 }
 
@@ -167,18 +168,18 @@ function bandError(i, message) {
 }
 
 /** Rejects bands whose parameters cannot describe a valid filter at FS. */
-export function checkBand(band, i = 0) {
-  if (band === null || typeof band !== 'object') throw new TypeError(`band ${i}: not an object`);
-  if (!FILTER_TYPES.includes(band.type)) {
-    throw new TypeError(`band ${i}: unknown filter type ${JSON.stringify(band.type)}`);
+export function checkBand(b, i = 0) {
+  if (b === null || typeof b !== 'object') throw new TypeError(`band ${i}: not an object`);
+  if (!FILTER_TYPES.includes(b.type)) {
+    throw new TypeError(`band ${i}: unknown filter type ${JSON.stringify(b.type)}`);
   }
-  if (band.type === 'OFF') return;
-  if (!(Number.isFinite(band.f) && band.f > 0 && band.f < FS / 2)) {
-    throw bandError(i, `f must be in (0, ${FS / 2}) Hz, got ${band.f}`);
+  if (b.type === 'OFF') return;
+  if (!(Number.isFinite(b.f) && b.f > 0 && b.f < FS / 2)) {
+    throw bandError(i, `f must be in (0, ${FS / 2}) Hz, got ${b.f}`);
   }
-  if (!(Number.isFinite(band.q) && band.q > 0)) throw bandError(i, `q must be > 0, got ${band.q}`);
-  if (GAIN_TYPES.has(band.type) && !Number.isFinite(band.g)) {
-    throw bandError(i, `g must be a finite dB value, got ${band.g}`);
+  if (!(Number.isFinite(b.q) && b.q > 0)) throw bandError(i, `q must be > 0, got ${b.q}`);
+  if (GAIN_TYPES.has(b.type) && !Number.isFinite(b.g)) {
+    throw bandError(i, `g must be a finite dB value, got ${b.g}`);
   }
 }
 
@@ -193,12 +194,14 @@ export function isStable(a1, a2) {
  * will actually run.
  */
 export function encodeSection(c, i = 0) {
-  // `+ 0` turns -0 (from negating a zero a1/a2) into 0.
-  const words = [c.b0, c.b2, -c.a1, c.b1, -c.a2].map((v) => Math.round(v * COEFF_SCALE) + 0);
-  for (const n of words) {
+  const words = [];
+  for (const v of [c.b0, c.b2, -c.a1, c.b1, -c.a2]) {
+    // `+ 0` turns -0 (from negating a zero a1/a2) into 0.
+    const n = Math.round(v * COEFF_SCALE) + 0;
     if (!Number.isInteger(n) || n > INT32_MAX || n < INT32_MIN) {
       throw bandError(i, 'Filter out of the DSP range');
     }
+    words.push(n);
   }
   if (!isStable(-words[2] / COEFF_SCALE, -words[4] / COEFF_SCALE)) {
     throw bandError(i, 'unstable section: poles on or outside the unit circle');
@@ -244,9 +247,11 @@ export function blob(bands, preDb = 0) {
   }
   bands.forEach(checkBand);
   const out = [...HEADER];
-  pushI32LE(out, preampWord(preDb));
-  bands.forEach((band, i) => {
-    for (const n of encodeSection(coeffs(band), i)) pushI32LE(out, n);
+  const pre = preampWord(preDb);
+  pushI32LE(out, pre);
+  bands.forEach((b, i) => {
+    const c = coeffs(b);
+    for (const n of encodeSection(c, i)) pushI32LE(out, n);
   });
   const crc = crc16(out);
   out.push(crc & 255, crc >> 8);
@@ -259,14 +264,15 @@ export function blob(bands, preDb = 0) {
  */
 export function packets(bands, preDb) {
   const b = blob(bands, preDb);
-  const out = [];
+  const pk = [];
   for (let i = 0; i < PACKET_COUNT; i++) {
     const p = new Uint8Array(PACKET_SIZE);
     p[0] = i;
-    p.set(b.slice(i * 30, i * 30 + 30), 1);
-    out.push(p);
+    const chunk = b.slice(i * 30, i * 30 + 30);
+    p.set(chunk, 1);
+    pk.push(p);
   }
-  return out;
+  return pk;
 }
 
 /**
@@ -291,8 +297,8 @@ export function response(bands, f, fs = FS) {
   const s1 = Math.sin(w);
   const c2 = Math.cos(2 * w);
   const s2 = Math.sin(2 * w);
-  for (const band of bands) {
-    const k = coeffs(band, fs);
+  for (const b of bands) {
+    const k = coeffs(b, fs);
     const nr = k.b0 + k.b1 * c1 + k.b2 * c2;
     const ni = -(k.b1 * s1 + k.b2 * s2);
     const dr = 1 + k.a1 * c1 + k.a2 * c2;
