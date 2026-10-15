@@ -1,10 +1,21 @@
 // 0xCB wire format — open implementation.
 //
-// Reconstructed from a working implementation of the Kuba equalizer page.
 // Spec: ../../docs/protocol-0xcb.md
+//
+// Credit: the wire layout (header, Q23 preamp, Q27 sections in
+// [b0, b2, -a1, b1, -a2] order, CRC, framing and commit) and the structure of
+// the filter-design code follow the reference implementation by Kuba
+// (https://equalizador.kuba.audio/). Filter formulas: Robert Bristow-Johnson,
+// "Cookbook formulae for audio EQ biquad filter coefficients".
 //
 // This module is pure (no DOM, no HID), so it runs identically in Node and in
 // the browser. The HID transport lives elsewhere; here we only build the bytes.
+//
+// blob() is the last gate before the chip's flash, and the flash cannot be
+// read back. It therefore refuses anything that could write silence or an
+// unstable filter: unknown types, non-finite or out-of-range parameters,
+// coefficients that do not fit int32, and sections whose *quantized* poles are
+// not strictly inside the unit circle.
 
 export const VENDOR_ID = 0x3302;
 export const PRODUCT_ID = 0x8902;
@@ -16,13 +27,13 @@ export const FS = 96000;
 /** Number of biquad sections the firmware stores. */
 export const BAND_COUNT = 10;
 
-/** Fixed 14-byte prologue (ASCII "EQ1#" followed by 10 bytes). */
-export const HEADER = [
+/** Fixed 14-byte prologue: ASCII "EQ1#", then (hypothesis) a u16 LE length and layout bytes. */
+export const HEADER = Object.freeze([
   0x45, 0x51, 0x31, 0x23, 0xd6, 0x00, 0x00, 0x0a, 0x04, 0x05, 0x01, 0x0a, 0x00, 0x00,
-];
+]);
 
-/** Commit packet: persists the preset to the chip's flash. */
-export const APPLY = [0x01, 0x65, 0x00, 0x01, 0xff];
+/** Commit packet as the reference sends it (5 bytes): persists the preset to flash. */
+export const APPLY = Object.freeze([0x01, 0x65, 0x00, 0x01, 0xff]);
 
 /** Blob size in bytes: 14 header + 4 preamp + 10*5*4 coefficients + 2 CRC. */
 export const BLOB_SIZE = 220;
@@ -30,6 +41,19 @@ export const BLOB_SIZE = 220;
 export const PACKET_SIZE = 31;
 export const PACKET_COUNT = 9;
 
+/**
+ * Supported band types. `OFF` is an exact pass-through section
+ * ([b0, b2, -a1, b1, -a2] = [1, 0, 0, 0, 0]); prefer it to a 0 dB peaking band,
+ * which still runs poles close to the unit circle.
+ */
+export const FILTER_TYPES = Object.freeze(['PK', 'LS', 'HS', 'LP', 'HP', 'OFF']);
+
+export const OFF = Object.freeze({ type: 'OFF' });
+
+/** Ten exact pass-through sections: the known-good neutral preset. */
+export const NEUTRAL_BANDS = Object.freeze(Array.from({ length: BAND_COUNT }, () => OFF));
+
+const GAIN_TYPES = new Set(['PK', 'LS', 'HS']);
 const PREAMP_SCALE = 2 ** 23; // Q23
 const COEFF_SCALE = 2 ** 27; // Q27
 const INT32_MIN = -2147483648;
@@ -119,20 +143,75 @@ export function highPass(f, q, fs = FS) {
   };
 }
 
-/** Coeffs for a band `{type, f, g, q}`. Returns `{b0,b1,b2,a1,a2}` normalized by a0. */
+/**
+ * Coeffs for a band `{type, f, g, q}`, normalized by a0. Throws on an unknown
+ * type: names such as `LSQ`/`HSQ` (EqualizerAPO, hangout.audio) must be mapped
+ * explicitly by the caller, never guessed.
+ */
 export function coeffs(band, fs = FS) {
-  if (band.type === 'LS') return lowShelf(band.f, band.g, band.q, fs);
-  if (band.type === 'HS') return highShelf(band.f, band.g, band.q, fs);
-  if (band.type === 'LP') return lowPass(band.f, band.q, fs);
-  if (band.type === 'HP') return highPass(band.f, band.q, fs);
-  return peak(band.f, band.g, band.q, fs);
+  switch (band.type) {
+    case 'PK': return peak(band.f, band.g, band.q, fs);
+    case 'LS': return lowShelf(band.f, band.g, band.q, fs);
+    case 'HS': return highShelf(band.f, band.g, band.q, fs);
+    case 'LP': return lowPass(band.f, band.q, fs);
+    case 'HP': return highPass(band.f, band.q, fs);
+    case 'OFF': return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
+    default: throw new TypeError(`unknown filter type ${JSON.stringify(band.type)}`);
+  }
+}
+
+// --- Validation -------------------------------------------------------------
+
+function bandError(i, message) {
+  return new RangeError(`band ${i}: ${message}`);
+}
+
+/** Rejects bands whose parameters cannot describe a valid filter at FS. */
+export function checkBand(band, i = 0) {
+  if (band === null || typeof band !== 'object') throw new TypeError(`band ${i}: not an object`);
+  if (!FILTER_TYPES.includes(band.type)) {
+    throw new TypeError(`band ${i}: unknown filter type ${JSON.stringify(band.type)}`);
+  }
+  if (band.type === 'OFF') return;
+  if (!(Number.isFinite(band.f) && band.f > 0 && band.f < FS / 2)) {
+    throw bandError(i, `f must be in (0, ${FS / 2}) Hz, got ${band.f}`);
+  }
+  if (!(Number.isFinite(band.q) && band.q > 0)) throw bandError(i, `q must be > 0, got ${band.q}`);
+  if (GAIN_TYPES.has(band.type) && !Number.isFinite(band.g)) {
+    throw bandError(i, `g must be a finite dB value, got ${band.g}`);
+  }
+}
+
+/** Jury criterion for 1 + a1 z^-1 + a2 z^-2: both poles strictly inside the unit circle. */
+export function isStable(a1, a2) {
+  return Math.abs(a2) < 1 && Math.abs(a1) < 1 + a2;
+}
+
+/**
+ * Quantizes one section to its 5 wire words `[b0, b2, -a1, b1, -a2]` (Q27).
+ * Stability is checked on the quantized feedback words, which is what the chip
+ * will actually run.
+ */
+export function encodeSection(c, i = 0) {
+  // `+ 0` turns -0 (from negating a zero a1/a2) into 0.
+  const words = [c.b0, c.b2, -c.a1, c.b1, -c.a2].map((v) => Math.round(v * COEFF_SCALE) + 0);
+  for (const n of words) {
+    if (!Number.isInteger(n) || n > INT32_MAX || n < INT32_MIN) {
+      throw bandError(i, 'Filter out of the DSP range');
+    }
+  }
+  if (!isStable(-words[2] / COEFF_SCALE, -words[4] / COEFF_SCALE)) {
+    throw bandError(i, 'unstable section: poles on or outside the unit circle');
+  }
+  return words;
 }
 
 // --- Wire encoding ----------------------------------------------------------
 
 /** Q23 linear-gain word for a preamp in dB. */
-export function preampWord(preDb) {
-  return Math.round(Math.pow(10, (preDb || 0) / 20) * PREAMP_SCALE);
+export function preampWord(preDb = 0) {
+  if (!Number.isFinite(preDb)) throw new RangeError(`preamp must be a finite dB value, got ${preDb}`);
+  return Math.round(Math.pow(10, preDb / 20) * PREAMP_SCALE);
 }
 
 /** CRC16-CCITT (poly 0x1021, init 0xFFFF, no reflection). */
@@ -148,24 +227,27 @@ export function crc16(bytes) {
 }
 
 function pushI32LE(out, n) {
-  if (n > INT32_MAX || n < INT32_MIN) throw new Error('Filter out of the DSP range');
+  if (!Number.isInteger(n) || n > INT32_MAX || n < INT32_MIN) {
+    throw new RangeError('Filter out of the DSP range');
+  }
   out.push(n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255);
 }
 
 /**
- * Builds the 220-byte blob for 10 bands and a preamp.
- * Band coefficient order on the wire: `[b0, b2, -a1, b1, -a2]`, each int32 LE in Q27.
+ * Builds the 220-byte blob for 10 bands and a preamp. Bands are written in the
+ * order given: keep cuts before boosts (see docs/protocol-0xcb.md), the
+ * ordering the reference uses to avoid internal clipping.
  */
-export function blob(bands, preDb) {
-  if (bands.length !== BAND_COUNT) throw new Error(`${BAND_COUNT} bands are required`);
+export function blob(bands, preDb = 0) {
+  if (!Array.isArray(bands) || bands.length !== BAND_COUNT) {
+    throw new RangeError(`${BAND_COUNT} bands are required`);
+  }
+  bands.forEach(checkBand);
   const out = [...HEADER];
   pushI32LE(out, preampWord(preDb));
-  for (const band of bands) {
-    const c = coeffs(band);
-    for (const v of [c.b0, c.b2, -c.a1, c.b1, -c.a2]) {
-      pushI32LE(out, Math.round(v * COEFF_SCALE));
-    }
-  }
+  bands.forEach((band, i) => {
+    for (const n of encodeSection(coeffs(band), i)) pushI32LE(out, n);
+  });
   const crc = crc16(out);
   out.push(crc & 255, crc >> 8);
   return out;
@@ -188,8 +270,19 @@ export function packets(bands, preDb) {
 }
 
 /**
+ * The commit packet zero-padded to the 31-byte report size, so every transport
+ * sends the same bytes. The reference sends the bare 5 bytes; whether the
+ * firmware distinguishes the two is unverified.
+ */
+export function applyPacket() {
+  const p = new Uint8Array(PACKET_SIZE);
+  p.set(APPLY);
+  return p;
+}
+
+/**
  * Magnitude response (dB) of `bands` at frequency `f`, summed across sections.
- * Mirrors docs/protocol-0xcb.md; used for the curve preview.
+ * Used for the curve preview.
  */
 export function response(bands, f, fs = FS) {
   let db = 0;

@@ -1,9 +1,9 @@
 {
   "_provenance": {
     "source": "https://equalizador.kuba.audio/",
+    "templateSha256": "96d957897af6913b867c395c637a76d5c638d3a4ec5785092c801ee20dbe45e5",
     "credit": "Presets and reference implementation: Kuba (kuba.audio). The reference page attributes its default curve to Leonardo (\"Padrão = filtros do Leonardo\").",
-    "note": "Reference bytes produced by the Kuba page DSP implementation (not vendored).",
-    "generatedAt": "2026-10-15T03:39:50.200Z"
+    "note": "Reference bytes produced by the Kuba page DSP implementation, evaluated from a pinned local copy (not vendored)."
   },
   "constants": {
     "VENDOR_ID": 13058,
