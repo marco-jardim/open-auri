@@ -30,7 +30,16 @@ está marcado como hipótese ou pendência — não como fato.
 | [`ecosystem.md`](ecosystem.md) | Implementações abertas de referência e o formato `0x4B` (irmão). |
 | [`verification.md`](verification.md) | Teste de equivalência do payload (`npm test`) e o que ele prova. |
 | [`ideas.md`](ideas.md) | Usos previstos, excêntricos e não previstos abertos pelo protocolo. |
+| [`social.md`](social.md) | Camada social: formato compacto, proveniência, versionamento, hospedagem. |
 | [`open-questions.md`](open-questions.md) | O que está confirmado, o que é hipótese e o que falta. |
+
+## Créditos
+
+- **Presets e implementação de referência:** [Kuba](https://equalizador.kuba.audio/)
+  (`kuba.audio`). A própria página credita a curva padrão a **Leonardo**
+  ("Padrão = filtros do Leonardo"). Os bytes de referência em
+  `test/fixtures/` derivam dessa implementação — ver
+  [`verification.md`](verification.md).
 
 ## Resumo executivo
 

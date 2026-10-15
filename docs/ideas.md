@@ -56,6 +56,8 @@ Por isso ele precisa de um *wrapper* para circular com contexto.
 
 Confiança: ✅ · Esforço: baixo
 
+→ Forma compacta canônica (46 B) e envelope: [`social.md`](social.md) (S1, S5).
+
 ### X2 — Teste cego automatizado de preferência ⭐
 
 A ideia mais original, e ela nasce **da limitação**: não dá para ler, mas dá para
@@ -127,6 +129,9 @@ Com X1, um revisor/artista publica a curva dele como um link. O cabo vira o
 **meio** de distribuição de assinaturas sonoras. É produto/rede, não técnica.
 
 Confiança: ✅ · Esforço: baixo (dado X1)
+
+→ Detalhado em [`social.md`](social.md) (S3, S9), incluindo o recuo sobre
+assinatura criptográfica (S2).
 
 ### X9 — Lote multi-dispositivo
 

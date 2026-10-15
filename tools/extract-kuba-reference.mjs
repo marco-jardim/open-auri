@@ -8,6 +8,9 @@
 // preset), used to assert that our own implementation in src/dsp/eq0xcb.mjs
 // reproduces the format byte for byte.
 //
+// Credit: presets and reference implementation by Kuba (kuba.audio). The page
+// itself attributes its default curve to Leonardo ("Padrão = filtros do Leonardo").
+//
 // Usage:
 //   node tools/extract-kuba-reference.mjs                       # fetch the live page
 //   node tools/extract-kuba-reference.mjs --template <file>     # use a saved HTML/template
@@ -54,6 +57,9 @@ async function main() {
   const fixture = {
     _provenance: {
       source: URL_DEFAULT,
+      credit: 'Presets and reference implementation: Kuba (kuba.audio). '
+        + 'The reference page attributes its default curve to Leonardo '
+        + '("Padrão = filtros do Leonardo").',
       note: 'Reference bytes produced by the Kuba page DSP implementation (not vendored).',
       generatedAt: new Date().toISOString(),
     },

@@ -120,6 +120,22 @@ conveniência de cálculo no JS.
 etc., contanto que os coeficientes passem na validação. 🟡 (o formato permite;
 o firmware aceitar de fato é ❌)
 
+## Ordenação das bandas
+
+As bandas são **biquads em série**, e filtros lineares invariantes no tempo
+**comutam**: a resposta não depende da ordem. ✅
+
+Consequência prática: qualquer preset pode ser **canonizado ordenado por `f`**,
+o que torna diff, hash e comparação determinísticos de graça. Os coeficientes
+são calculados por banda e não mudam com a reordenação — só mudam de posição no
+blob.
+
+> ⚠️ A comutatividade é exata para o filtro ideal; a implementação em ponto fixo
+> do chip pode diferir em arredondamento conforme a ordem interna, o que é
+> desprezível. Na dúvida, não reordene o que já funciona.
+
+Uso: [`social.md`](social.md) (S1).
+
 ## Limites práticos do formato
 
 | Constrição | Valor | Confiança |
