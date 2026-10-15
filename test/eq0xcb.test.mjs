@@ -171,6 +171,13 @@ test('blob rejects a non-finite preamp', () => {
   assert.throws(() => eq.blob(eq.NEUTRAL_BANDS, Infinity), RangeError);
 });
 
+test('blob rejects a positive preamp and accepts 0 dB and cuts', () => {
+  assert.throws(() => eq.blob(eq.NEUTRAL_BANDS, 0.1), /<= 0 dB/);
+  assert.throws(() => eq.preampWord(6), /<= 0 dB/);
+  assert.equal(eq.preampWord(-0), 1 << 23);
+  assert.ok(eq.preampWord(-6) < 1 << 23);
+});
+
 test('blob rejects coefficients outside int32 (Q27)', () => {
   assert.throws(() => eq.blob(withNeutral(PK(20000, 40, 0.1)), 0), /out of the DSP range/);
 });

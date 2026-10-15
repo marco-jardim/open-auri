@@ -17,10 +17,11 @@
 // the browser. The HID transport lives elsewhere; here we only build the bytes.
 //
 // blob() is the last gate before the chip's flash, and the flash cannot be
-// read back. It therefore refuses anything that could write silence or an
-// unstable filter: unknown types, non-finite or out-of-range parameters,
-// coefficients that do not fit int32, and sections whose *quantized* poles are
-// not strictly inside the unit circle.
+// read back. It therefore refuses anything that could write silence, an
+// unstable filter or gain before the bands: unknown types, non-finite or
+// out-of-range parameters, a positive preamp, coefficients that do not fit
+// int32, and sections whose *quantized* poles are not strictly inside the unit
+// circle.
 
 export const VENDOR_ID = 0x3302;
 export const PRODUCT_ID = 0x8902;
@@ -211,9 +212,13 @@ export function encodeSection(c, i = 0) {
 
 // --- Wire encoding ----------------------------------------------------------
 
-/** Q23 linear-gain word for a preamp in dB. */
+/**
+ * Q23 linear-gain word for a preamp in dB. The preamp runs before the bands,
+ * so a positive value clips full-scale content: it is refused.
+ */
 export function preampWord(preDb = 0) {
   if (!Number.isFinite(preDb)) throw new RangeError(`preamp must be a finite dB value, got ${preDb}`);
+  if (preDb > 0) throw new RangeError(`preamp must be <= 0 dB, got ${preDb}`);
   return Math.round(Math.pow(10, preDb / 20) * PREAMP_SCALE);
 }
 

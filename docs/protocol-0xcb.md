@@ -76,8 +76,16 @@ Ganho linear em Q23:
 pre_i32 = round(10^(pre_dB / 20) * 2^23)
 ```
 
-1.0 ⇒ `0x00800000`. Escrito em little-endian (4 bytes). O codec recusa pré-amp
-não finito; o sinal não é restringido (a sonda B9 precisa de pré-amp positivo).
+1.0 ⇒ `0x00800000`. Escrito em little-endian (4 bytes).
+
+O codec recusa pré-amp **não finito** e **positivo**. O pré-amp atua antes das
+bandas, então qualquer ganho acima de 0 dB clipa conteúdo em escala cheia. Todos
+os 11 presets da referência usam pré-amp entre −7,8 e −0,5 dB.
+
+Consequência: uma curva só de cortes sai mais baixa que o original, e o codec não
+deixa compensar isso com pré-amp positivo — o volume se recupera no volume do
+sistema. A sonda B9 de pré-amp positivo, se um dia for feita, terá de montar os
+bytes fora do codec, de propósito.
 
 ### Bandas — ordem dos coeficientes
 
@@ -234,6 +242,7 @@ volta. Ele recusa:
 | `q = 0`, `f = NaN` | uma seção toda zero ⇒ **cabo mudo** |
 | `q < 0`, `f > Nyquist` | uma seção **instável** ⇒ oscilação em volume máximo |
 | `g` ou pré-amp não finitos | valores arbitrários |
+| pré-amp **> 0 dB** | ganho antes das bandas ⇒ clipping de conteúdo em escala cheia |
 | tipo desconhecido (`LSQ`, `HSQ`, ausente) | um peaking no lugar de um shelf |
 | coeficiente fora de `int32` | — (já era recusado) |
 

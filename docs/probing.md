@@ -49,7 +49,7 @@ AuraPEQ expõe a tabela de VID/PID e os comandos `0x4B` no bundle.
 | **B6** | **Mapeamento do quadro** | 8 em vez de 9 pacotes (o 9º vai vazio), fora de ordem, índice duplicado. Mostra se o firmware acumula-e-commita ou escreve incremental | médio | 🟡 |
 | **B7** | **CRC como oráculo** | Gravar a curva **A** válida; depois uma curva **B ≠ A** com CRC errado. Se o som continua A, o firmware **valida** o CRC; se vira B, o CRC é decorativo | baixo | 🟡 |
 | **B8** | **Precisão interna** | Perturbar uma seção sensível (baixa frequência, Q alto) por 2^k LSB, com k crescente, até a saída mudar de forma mensurável: o limiar revela truncamento interno. **Baixa prioridade**: a quantização Q27 em si é irrelevante (≤ 0,017 dB, medido) | baixo | 🟡 |
-| **B9** | **Faixa / pré-amp positivo** | Empurrar \|coef\| rumo a 16 e pré-amp acima de 0 dB. Revela **clamp vs wrap vs rejeição** e o headroom interno | **alto** | 🟡 |
+| **B9** | **Faixa / pré-amp positivo** | Empurrar \|coef\| rumo a 16 e pré-amp acima de 0 dB. Revela **clamp vs wrap vs rejeição** e o headroom interno. O codec recusa pré-amp positivo: essa parte exige montar o blob à mão, fora do codec | **alto** | 🟡 |
 | **B10** | **Sonda do notch → o `FS` real** | Ver abaixo | baixo | 🟡 |
 | **B11** | **Varredura de timing** | Reduzir os 16 ms/150 ms até quebrar. Mapeia o buffer e acelera a escrita; quebra = gravação parcial | **alto** | 🟡 |
 | **B12** | **Modo só-RAM** | Variar os bytes `01 FF` do APPLY (e procurar um análogo de `TEMP_WRITE`). Um modo sem flash destrava o teste cego (X2) sem desgaste | médio | 🟡 |

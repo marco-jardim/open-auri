@@ -18,7 +18,7 @@
 | Existem dois wire formats distintos na mesma família de VID | comparação cruzada |
 | O caminho "Savitech" do AuraPEQ usa pré-amp em passo de **1,0 dB** | AuraPEQ |
 | **Nosso codec reproduz o byte-stream da referência byte a byte**, nos 11 presets | `test/eq0xcb.test.mjs` |
-| **O codec recusa entradas que gravariam silêncio ou filtro instável** | `test/eq0xcb.test.mjs` |
+| **O codec recusa entradas que gravariam silêncio, filtro instável ou pré-amp positivo** | `test/eq0xcb.test.mjs` |
 | Erro de quantização Q27 é irrelevante (≤ 0,017 dB no pior caso extremo) | medido |
 | O limite de `int32` depende do tipo (PK +31 dB, LS +48,5 dB, HS +18,5 dB); cortes nunca estouram | medido |
 | A curva desenhada do `pref6` difere da gravada em até 3,87 dB (3–8 kHz) e 7,29 dB (11,5 kHz) | medido |

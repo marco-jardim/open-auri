@@ -4,7 +4,7 @@
 npm test          # node --test
 ```
 
-Resultado observado: **51/51 passando**.
+Resultado observado: **52/52 passando**.
 
 ## O que é verificado
 
@@ -54,6 +54,7 @@ erro. É por ele que HS, LP e HP — que a referência não usa — estão cober
 | `f = 0`, `f = Nyquist`, `g` não finito | valores arbitrários |
 | tipo desconhecido (`LSQ`, ausente, `null`) | peaking no lugar de outro filtro |
 | pré-amp não finito | 0 dB silenciosamente |
+| pré-amp **> 0 dB** | ganho antes das bandas, clipping em escala cheia |
 | coeficiente fora de `int32` | — |
 | polos instáveis **após** a quantização | seção marginal que a verificação ideal deixaria passar |
 | contagem de bandas ≠ 10 | — |

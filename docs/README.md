@@ -58,7 +58,7 @@ está marcado como hipótese ou pendência — não como fato.
 - Entre os projetos abertos pesquisados, nenhum descreve o `0xCB`; a única fonte é
   a própria página do kuba. ✅
 - O codec reproduz a referência byte a byte e **recusa entradas que gravariam
-  silêncio ou um filtro instável** na flash. ✅
+  silêncio, um filtro instável ou pré-amp positivo** na flash. ✅
 - A ordem das bandas importa: a referência põe **cortes antes dos reforços**, e
   inverter isso cria até +9 dB de pico interno (medido). ✅
 - A spec oficial do PEQ **não é pública** (gated por NDA); FCC não se aplica a
