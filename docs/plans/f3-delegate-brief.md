@@ -36,3 +36,11 @@ Leia antes de qualquer tarefa da F3, junto com `D:\git\open-auri\docs\plans\f2-d
 - Segredos só por `wrangler secret`/`.dev.vars` (ignorado). Nada do `.env` em arquivo versionado, log, teste ou mensagem. Logs sem PII (nada de e-mail, IP, token, user-agent completo).
 - Consultas SQL sempre parametrizadas (`prepare(...).bind(...)`).
 - Nunca commite. Nunca `Co-Authored-By` nem "Generated with".
+
+## Lições da W3.3–W3.4
+
+- **vent.platform:** o adapter-cloudflare 8 (Kit 3) não passa platform; o primeiro passo do hooks.server.ts o reconstrói a partir de cloudflare:workers (nv, waitUntil). Código de servidor continua usando vent.platform + getServerEnv(platform). ctx só tem waitUntil.
+- **Vitest 5:** 	oHaveTextContent(texto) compara o texto inteiro; para trecho ou regex use 	oMatchTextContent.
+- **Migrações:** 0001 auth, 0002 e-mail, 0003 admin, 0007 access log, 0008 política, 0009 perfil; 0004–0006 reservadas à F4 (rodam antes da 0009 num banco novo).
+- **e2e com banco:** antes do Playwright, 
+px wrangler d1 migrations apply DB --local no web.

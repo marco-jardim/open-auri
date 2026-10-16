@@ -115,6 +115,13 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | T3.3 | commitada | 904b750 | heavy; limites da auth contados em D1 (o binding só tem 10/60 s); IPv6 por /64; mensagens da fila já cifradas; `ACCESS_LOG_KEY` como chaveiro `kid:segredo`; S6 só com o dia; `web/_headers` gerado de `renderStaticHeadersFile()`; CSP do Kit com `challenges.cloudflare.com` e `frame-ancestors 'none'` |
 | T3.4 | commitada | 16d9b62 | data de vigência aceita `AAAA/MM/DD` e é normalizada; `PUBLIC_ORIGIN` obrigatório; primeira visita anônima conta como vista |
 
+| T3.5 | commitada | 3736a4d, c41731a | heavy; handler único via `locals.auth.handler`; apelido 3–24 (§3.7); marcador `twoFactorVerifiedAt`; checagem de origem; token do Turnstile em `x-turnstile-token`; endpoints HTTP do plugin admin escondidos (404); troca de apelido só pelo /conta; apelido retido recusado no cadastro; `event.platform` reconstruído de `cloudflare:workers` (o adapter 8 não o passa: 42 e2e falharam com 500 até a correção, feita pelo orquestrador) |
+| T3.6 | commitada | f9eef25 | acento `#7FA7D9`; páginas com ações de formulário sem JS; e2e de teclado esperava hidratação |
+| T3.7 | commitada | e68188d | migração 0009 (perfil, retenções, pedidos de troca de e-mail e de encerramento) |
+| T3.8 | commitada | 63a7be8 | `grant-admin --create` cria conta sem senha (o operador usa "esqueci a senha"); busca por e-mail só por POST |
+
+Verificação central da W3.3–W3.4: raiz 660/660; `check:web` 0/0; `check:int` ok; unidade web 1 446/1 446; integração 242/242; jobs 16/16; build e orçamentos ok; e2e completo 284 (1 instável corrigido: espera de hidratação).
+
 Verificação central da W3.2: raiz 652/652; `check:web` 0 erros; `check:int` ok; unidade web 1 229/1 229 (14 snapshots de e-mail gravados); integração 87/87; jobs 16/16; build ok; orçamentos ok; e2e smoke + a11y + i18n + offline 96/96.
 
 Verificação central da W2.4: `check:web` 0 erros; `test:web:unit` 61 arquivos, 586 testes; lint do web limpo; build ok; e2e smoke 2/2; raiz 613/613.
