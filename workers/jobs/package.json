@@ -10,10 +10,14 @@
     "deploy": "wrangler deploy",
     "gen": "node ../../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc && wrangler types --strict-vars=false",
     "dev-vars": "node ../../tools/render-wrangler.mjs --dev-vars .dev.vars --worker jobs",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "pretest": "node ../../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc",
+    "test": "vitest run"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.4",
     "typescript": "^6.0.3",
+    "vitest": "^5.0.5",
     "wrangler": "^4.151.1"
   }
 }

@@ -1,6 +1,10 @@
 // Typed job registry of the jobs Worker. Jobs are added by T3.3 (salt rotation, access-log
 // consumer and retention). An event with no registered job fails loudly: a cron that silently does
 // nothing, or a queue batch that is acknowledged without being processed, would lose work.
+import { accessLogConsumerJob } from './access-log-consumer.ts';
+import { accessLogRetentionJob } from './access-log-retention.ts';
+import { rateLimitGcJob } from './rate-limit-gc.ts';
+import { rotateSaltJob } from './rotate-salt.ts';
 
 /** Cron expressions declared in wrangler.template.jsonc (`triggers.crons`). */
 export const CRONS = { daily: '5 0 * * *' } as const;
@@ -42,10 +46,17 @@ export class JobFailedError extends Error {
   }
 }
 
-/** Empty until T3.3 registers the jobs. */
+/**
+ * Daily (00:05 UTC): salt rotation first (tomorrow's salt must exist before midnight), then the
+ * rate-limit and access-log retention sweeps. Queue: the access-log consumer.
+ */
 export const registry: JobRegistry = {
-  scheduled: {},
-  queues: {},
+  scheduled: {
+    [CRONS.daily]: [rotateSaltJob, rateLimitGcJob, accessLogRetentionJob],
+  },
+  queues: {
+    'access-log': accessLogConsumerJob,
+  },
 };
 
 function isCron(value: string): value is CronExpression {
