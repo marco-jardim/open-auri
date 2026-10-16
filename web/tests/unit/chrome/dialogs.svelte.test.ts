@@ -3,7 +3,14 @@ import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { createRawSnippet, tick } from 'svelte';
 import { setLocale } from '#lib/paraglide/runtime.js';
-import { ConfirmDialog, createToastStore, HelpOverlay } from '#lib/components/chrome/index.ts';
+import {
+	appShortcuts,
+	ConfirmDialog,
+	createToastStore,
+	HelpOverlay
+} from '#lib/components/chrome/index.ts';
+import { isLayerKeyEvent, layerFromKey, LAYERS } from '#lib/components/pages/curva/layers.ts';
+import { isSearchShortcut } from '#lib/components/pages/docs/search.ts';
 import ChromeFixture from './ChromeFixture.svelte';
 
 const locales = [
@@ -88,6 +95,57 @@ for (const copy of locales) {
 		expect(onResult.mock.calls).toEqual([[false], [true]]);
 	});
 }
+
+const shortcutCopy = {
+	'pt-BR': {
+		help: 'Atalhos de teclado',
+		layers: 'Curva: trocar a camada (Ouvir, Ajustar, Engenharia)',
+		search: 'Docs: abrir a busca no caderno'
+	},
+	'en-US': {
+		help: 'Keyboard shortcuts',
+		layers: 'Curve: switch the layer (Listen, Adjust, Engineering)',
+		search: 'Docs: open the journal search'
+	}
+} as const;
+
+for (const locale of ['pt-BR', 'en-US'] as const) {
+	test(`app help lists every global and page shortcut in ${locale}`, async () => {
+		await setLocale(locale, { reload: false });
+		const shortcuts = appShortcuts();
+		expect(shortcuts.map((shortcut) => shortcut.keys)).toEqual([
+			'?',
+			'Esc',
+			'Ctrl / ⌘ + Z',
+			'Ctrl / ⌘ + Shift + Z',
+			'1 / 2 / 3',
+			'Ctrl / ⌘ + K'
+		]);
+		await render(HelpOverlay, { shortcuts, open: true });
+		const dialog = page.getByRole('dialog', { name: shortcutCopy[locale].help });
+		await expect.element(dialog).toBeVisible();
+		await expect.element(dialog.getByText('1 / 2 / 3', { exact: true })).toBeVisible();
+		await expect
+			.element(dialog.getByText(shortcutCopy[locale].layers, { exact: true }))
+			.toBeVisible();
+		await expect.element(dialog.getByText('Ctrl / ⌘ + K', { exact: true })).toBeVisible();
+		await expect
+			.element(dialog.getByText(shortcutCopy[locale].search, { exact: true }))
+			.toBeVisible();
+	});
+}
+
+test('documented page shortcuts match the real Curva and Docs key handlers', () => {
+	const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
+	for (const digit of ['1', '2', '3']) {
+		expect(isLayerKeyEvent(key({ key: digit }))).toBe(true);
+	}
+	expect(['1', '2', '3'].map((digit) => layerFromKey(digit))).toEqual([...LAYERS]);
+	expect(isLayerKeyEvent(key({ key: '4' }))).toBe(false);
+	expect(isSearchShortcut(key({ key: 'k', ctrlKey: true }))).toBe(true);
+	expect(isSearchShortcut(key({ key: 'K', metaKey: true }))).toBe(true);
+	expect(isSearchShortcut(key({ key: 'k' }))).toBe(false);
+});
 
 test('does not open help when typing ?, using modifiers, composing, or another modal is open', async () => {
 	await render(ChromeFixture, { store: createToastStore() });

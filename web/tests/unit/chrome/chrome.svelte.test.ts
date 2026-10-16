@@ -4,7 +4,15 @@ import { cleanup, render } from 'vitest-browser-svelte';
 import { createRawSnippet } from 'svelte';
 import { getLocale, overwriteSetLocale, setLocale } from '#lib/paraglide/runtime.js';
 import { DEFAULT_GITHUB_URL } from '#lib/components/chrome/Footer.svelte';
-import { CableBar, EmBreve, Footer, LanguageToggle, Nav } from '#lib/components/chrome/index.ts';
+import {
+	CableBar,
+	EmBreve,
+	Footer,
+	LANG_BOOT_ATTRIBUTE,
+	LanguageToggle,
+	Nav,
+	revealLocale
+} from '#lib/components/chrome/index.ts';
 
 const locales = [
 	{
@@ -98,7 +106,7 @@ test('only invokes cable/audio callbacks on explicit clicks and honors writeDisa
 	const onWrite = vi.fn();
 	const onAudio = vi.fn();
 	const screen = await render(CableBar, {
-		unsavedCount: 3,
+		unsaved: true,
 		onNeutro,
 		onPadraoAuri,
 		onWrite,
@@ -106,7 +114,9 @@ test('only invokes cable/audio callbacks on explicit clicks and honors writeDisa
 		writeDisabled: true
 	});
 	expect(onWrite).not.toHaveBeenCalled();
-	await expect.element(page.getByText('3 alterações não gravadas')).toBeVisible();
+	await expect
+		.element(page.getByText('Alterações não gravadas no cabo', { exact: true }))
+		.toBeVisible();
 	await expect.element(page.getByRole('button', { name: 'Gravar no cabo' })).toBeDisabled();
 	await page.getByRole('button', { name: 'Neutro' }).click();
 	await page.getByRole('button', { name: 'Padrão Auri' }).click();
@@ -122,12 +132,30 @@ test('only invokes cable/audio callbacks on explicit clicks and honors writeDisa
 	expect(page.getByRole('banner').element().getBoundingClientRect().height).toBe(56);
 });
 
+test('renders the unsaved indicator as a boolean, never as a count', async () => {
+	const screen = await render(CableBar);
+	const indicator = screen.container.querySelector('.dirty');
+	if (!(indicator instanceof HTMLElement)) throw new Error('Missing unsaved indicator');
+	expect(indicator.textContent?.trim()).toBe('');
+	expect(indicator.classList.contains('has')).toBe(false);
+	await screen.rerender({ unsaved: true });
+	await expect.element(indicator).toHaveTextContent('Alterações não gravadas no cabo');
+	expect(indicator.classList.contains('has')).toBe(true);
+	expect(indicator.textContent).not.toMatch(/\d/);
+	await setLocale('en-US', { reload: false });
+	await cleanup();
+	await render(CableBar, { unsaved: true });
+	await expect
+		.element(page.getByText('Unsaved changes on the cable', { exact: true }))
+		.toBeVisible();
+});
+
 test('renders navigation, status, unsaved, audio and actions snippets instead of fallbacks', async () => {
 	const snippet = (html: string) => createRawSnippet(() => ({ render: () => html }));
 	await render(CableBar, {
 		navigation: snippet('<nav aria-label="Custom navigation"><a href="/docs">Manual</a></nav>'),
 		status: snippet('<span>USB DSP Audio</span>'),
-		unsaved: snippet('<span>Local draft</span>'),
+		unsavedIndicator: snippet('<span>Local draft</span>'),
 		audio: snippet('<button type="button">Preview audio</button>'),
 		actions: snippet('<button type="button">Custom action</button>')
 	});
@@ -156,6 +184,20 @@ test('switches locale through Paraglide and lets its runtime persist both prefer
 	} finally {
 		overwriteSetLocale(original);
 	}
+});
+
+test('revealLocale syncs lang/dir and clears the lang-boot hide only when it was set', () => {
+	const root = document.createElement('div');
+	revealLocale(root, 'pt-BR', 'ltr');
+	expect(root.lang).toBe('pt-BR');
+	expect(root.dir).toBe('ltr');
+	expect(root.getAttribute('style')).toBeNull();
+	root.setAttribute(LANG_BOOT_ATTRIBUTE, 'en-US');
+	root.style.visibility = 'hidden';
+	revealLocale(root, 'en-US', 'ltr');
+	expect(root.lang).toBe('en-US');
+	expect(root.hasAttribute(LANG_BOOT_ATTRIBUTE)).toBe(false);
+	expect(root.style.visibility).toBe('');
 });
 
 test('keeps PT · EN on a single mobile line', async () => {

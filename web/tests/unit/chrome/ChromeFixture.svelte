@@ -18,7 +18,7 @@
 	let confirmOpen = $state(false);
 </script>
 
-<CableBar currentPath="/docs" unsavedCount={2} />
+<CableBar currentPath="/docs" unsaved={true} />
 <main>
 	<h1>open-auri</h1>
 	<label>Curve name <input type="text" /></label>

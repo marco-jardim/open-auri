@@ -109,13 +109,63 @@ for (const status of ['ok', 'simulated', 'interrupted'] as const) {
 	});
 }
 
+/** Manual clock + frame queue: the rehearsal only advances when the test steps it. */
+function manualFrames() {
+	let time = 1000;
+	let nextHandle = 0;
+	const queue = new Map<number, FrameRequestCallback>();
+	return {
+		now: () => time,
+		frame: (callback: FrameRequestCallback) => {
+			nextHandle += 1;
+			queue.set(nextHandle, callback);
+			return nextHandle;
+		},
+		cancel: (handle: number) => {
+			queue.delete(handle);
+		},
+		get pending() {
+			return queue.size;
+		},
+		step(ms: number) {
+			time += ms;
+			const callbacks = [...queue.values()];
+			queue.clear();
+			for (const callback of callbacks) callback(time);
+		}
+	};
+}
+
 test('transport rehearsal can be stopped, and journal without a loader remains read-only', async () => {
-	await render(TransportTape, { curve: NEUTRO });
+	const clock = manualFrames();
+	await render(TransportTape, {
+		curve: NEUTRO,
+		now: clock.now,
+		frame: clock.frame,
+		cancel: clock.cancel
+	});
+	const stop = page.getByRole('button', { name: m.cabo_stop(), exact: true });
+	await expect.element(stop).toBeDisabled();
 	await page.getByRole('button', { name: m.cabo_rehearse(), exact: true }).click();
-	await page.getByRole('button', { name: m.cabo_stop(), exact: true }).click();
-	await expect
-		.element(page.getByRole('button', { name: m.cabo_stop(), exact: true }))
-		.toBeDisabled();
+	// Time is frozen: the rehearsal stays running until stopped, whatever the machine speed.
+	await expect.element(stop).toBeEnabled();
+	expect(clock.pending).toBe(1);
+	clock.step(16);
+	await expect.element(stop).toBeEnabled();
+	expect(clock.pending).toBe(1);
+	await stop.click();
+	await expect.element(stop).toBeDisabled();
+	expect(clock.pending).toBe(0);
+	// A late step after Stop schedules nothing (the frame was cancelled).
+	clock.step(10_000);
+	expect(clock.pending).toBe(0);
+	await expect.element(stop).toBeDisabled();
+	// Without Stop, the rehearsal ends by itself once the clock passes the tape duration.
+	await page.getByRole('button', { name: m.cabo_rehearse(), exact: true }).click();
+	await expect.element(stop).toBeEnabled();
+	clock.step(10_000);
+	await expect.element(stop).toBeDisabled();
+	expect(clock.pending).toBe(0);
 	await cleanup();
 	const screen = await render(Journal, { entries: [{ ...entry(), preampDb: 1 }] });
 	await expect

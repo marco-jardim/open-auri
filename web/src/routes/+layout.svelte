@@ -14,7 +14,9 @@
 		Footer,
 		HelpOverlay,
 		Toast,
-		createToastStore
+		appShortcuts,
+		createToastStore,
+		revealLocale
 	} from '#lib/components/chrome/index.ts';
 	import { AudioLoader } from '#lib/components/audio/index.ts';
 	import { CableStatus, PreWriteChecklist, RescueNotice } from '#lib/components/cable/index.ts';
@@ -62,12 +64,7 @@
 			href: source.href
 		}))
 	});
-	const shortcuts = $derived([
-		{ keys: '?', description: m.layout_shortcut_help() },
-		{ keys: 'Esc', description: m.layout_shortcut_close() },
-		{ keys: 'Ctrl / ⌘ + Z', description: m.layout_shortcut_undo() },
-		{ keys: 'Ctrl / ⌘ + Shift + Z', description: m.layout_shortcut_redo() }
-	]);
+	const shortcuts = $derived(appShortcuts());
 	const statusText = $derived(
 		!app
 			? m.layout_initializing()
@@ -113,11 +110,11 @@
 		else app.state.curve.undo();
 	}
 
-	// Prerendered HTML carries the base locale; keep <html lang/dir> in sync with the client locale.
+	// Prerendered HTML carries the base locale; /lang-boot.js hides it when the visitor resolves to
+	// another locale. Once hydrated in the client locale, sync <html lang/dir> and reveal the page.
 	$effect(() => {
 		const locale = getLocale();
-		document.documentElement.lang = locale;
-		document.documentElement.dir = getTextDirection(locale);
+		revealLocale(document.documentElement, locale, getTextDirection(locale));
 	});
 </script>
 
@@ -130,7 +127,7 @@
 		<CableBar
 			currentPath={page.url.pathname}
 			connected={app?.cableState.connection === 'connected'}
-			unsavedCount={app?.state.curve.dirty ? 1 : 0}
+			unsaved={app?.state.curve.unsaved ?? false}
 			writeDisabled={!app || app.cableState.writing}
 			onNeutro={app ? () => loadEditor('neutral') : undefined}
 			onPadraoAuri={app ? () => loadEditor('auri') : undefined}

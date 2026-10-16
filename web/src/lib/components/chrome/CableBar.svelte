@@ -8,7 +8,8 @@
 		currentPath?: string;
 		statusText?: string;
 		connected?: boolean;
-		unsavedCount?: number;
+		/** Current curve differs from what is on the cable (boolean; there is no change count). */
+		unsaved?: boolean;
 		writeDisabled?: boolean;
 		onNeutro?: () => void;
 		onPadraoAuri?: () => void;
@@ -16,7 +17,7 @@
 		onAudio?: () => void;
 		navigation?: Snippet;
 		status?: Snippet;
-		unsaved?: Snippet;
+		unsavedIndicator?: Snippet;
 		audio?: Snippet;
 		actions?: Snippet;
 	}
@@ -25,7 +26,7 @@
 		currentPath = '/',
 		statusText = m.chrome_cable_disconnected(),
 		connected = false,
-		unsavedCount = 0,
+		unsaved = false,
 		writeDisabled = false,
 		onNeutro,
 		onPadraoAuri,
@@ -33,7 +34,7 @@
 		onAudio,
 		navigation,
 		status,
-		unsaved,
+		unsavedIndicator,
 		audio,
 		actions
 	}: Props = $props();
@@ -58,11 +59,11 @@
 					<span>{statusText}</span>
 				{/if}
 			</div>
-			<div class="dirty" class:has={unsavedCount > 0} aria-live="polite" aria-atomic="true">
-				{#if unsaved}
-					{@render unsaved()}
-				{:else}
-					{m.chrome_unsaved_changes({ count: unsavedCount })}
+			<div class="dirty" class:has={unsaved} aria-live="polite" aria-atomic="true">
+				{#if unsavedIndicator}
+					{@render unsavedIndicator()}
+				{:else if unsaved}
+					{m.chrome_unsaved()}
 				{/if}
 			</div>
 			{#if audio}

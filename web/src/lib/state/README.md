@@ -8,8 +8,8 @@ separate SSR requests cannot share mutable state. Locale remains exclusively in 
 All store properties are rune-backed getters. Do not destructure reactive properties outside a
 reactive context. All stores expose `error: StorageFailure | null` and `dispose()`.
 
-- `createCurveStore({storage?, now?})`: properties `current`, `dirty`, `lastWritten`, `canUndo`,
-  `canRedo`, `undoCount`, `redoCount`; actions `set(CurveData)`, `update(Partial<CurveData>)`,
+- `createCurveStore({storage?, now?})`: properties `current`, `dirty`, `unsaved`, `lastWritten`,
+  `canUndo`, `canRedo`, `undoCount`, `redoCount`; actions `set(CurveData)`, `update(Partial<CurveData>)`,
   `loadPreset(id)`, `undo()`, `redo()`, `markWritten(snapshot?)`.
 - `createJournalStore({storage?})`: properties `entries`, `dropped`; action `append(entry)`.
 - `createFlashStore({storage?, now?})`: property `state`; actions `canWriteNow(at?)`,
@@ -36,6 +36,15 @@ adapter do not dispose that adapter themselves.
 - `dirty` starts true because cable contents are unknown. `markWritten` is explicit and must
   receive the snapshot actually sent after a **real successful** write. It never runs on edit,
   preview, journal append, or simulated write. Metadata changes do not make DSP bytes dirty.
+- The written snapshot persists in `oa.curve.written` (same schema-1 contract as `oa.current`,
+  parsed defensively: invalid values are dropped and reported as `invalid`), so reloading after
+  a real write stays clean. Other tabs pick it up through the storage event.
+- `unsaved` is the boolean the chrome renders ("unsaved changes on the cable"). Decision
+  (FX2.3/E1): `dirty` keeps its conservative meaning, but `unsaved` is true only when `dirty`
+  **and** either a real write was ever recorded (`lastWritten !== null`) or the user changed the
+  curve in this session (`set`/`update`/`loadPreset`/`undo`/`redo` that actually changed it). A
+  fresh profile that never wrote shows no indicator on first load; the pre-write checklist still
+  treats unknown cable contents as unknown. Use `dirty` for safety logic, `unsaved` for chrome.
 - Journal parsing, validation, serialization and its 500-entry FIFO belong to the core.
   Cross-tab appends merge validated unique records in timestamp order.
 - Flash parsing, counters, cooldown rebasing and the daily notice belong to the core. Session

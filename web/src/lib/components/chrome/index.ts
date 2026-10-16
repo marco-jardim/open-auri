@@ -7,4 +7,6 @@ export { default as HelpOverlay, type Shortcut } from './HelpOverlay.svelte';
 export { default as Toast } from './Toast.svelte';
 export { default as ConfirmDialog } from './ConfirmDialog.svelte';
 export { toast, createToastStore } from './toast.ts';
+export { appShortcuts } from './shortcuts.ts';
+export { LANG_BOOT_ATTRIBUTE, revealLocale } from './lang-boot.ts';
 export type { ToastMessage, ToastOptions, ToastStore, ToastTone } from './toast.ts';

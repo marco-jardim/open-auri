@@ -4,6 +4,8 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
+		<!-- Blocking and external on purpose (CSP script-src 'self'): avoids a locale flash. -->
+		<script src="%sveltekit.assets%/lang-boot.js"></script>
 		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
 		<meta name="theme-color" content="#171715" />
 		<link rel="icon" href="%sveltekit.assets%/icons/icon.svg" type="image/svg+xml" />

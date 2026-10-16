@@ -110,6 +110,54 @@ test.describe('Language selection', () => {
 			).toBeVisible();
 			await expectNoRawKeys(page);
 		});
+
+		// FX2.3/I1: plan §3.5 keeps preferredLanguage, so /lang-boot.js hides the prerendered
+		// pt-BR document until the layout hydrates in English; the base locale never paints.
+		test('prerendered pt-BR never shows before hydration switches to English', async ({ page }) => {
+			// Hold the client entry so the prerendered document is observed before hydration.
+			const gate = { open: (): void => undefined };
+			const hydration = new Promise<void>((resolve) => {
+				gate.open = resolve;
+			});
+			await page.route('**/_app/immutable/entry/**', async (route) => {
+				await hydration;
+				await route.continue();
+			});
+			await page.goto('/docs', { waitUntil: 'commit' });
+			const html = page.locator('html');
+			await expect(html).toHaveAttribute('data-lang-boot', 'en-US');
+			await expect(html).toHaveAttribute('lang', 'pt-BR');
+			expect(await page.evaluate(() => getComputedStyle(document.documentElement).visibility)).toBe(
+				'hidden'
+			);
+			await expect(page.locator('#main-content')).toBeHidden();
+			gate.open();
+			await waitForApp(page);
+			await expect(html).toHaveAttribute('lang', 'en-US');
+			await expect(html).not.toHaveAttribute('data-lang-boot');
+			expect(await page.evaluate(() => getComputedStyle(document.documentElement).visibility)).toBe(
+				'visible'
+			);
+			await expect(
+				page.getByRole('navigation', { name: 'Main', exact: true }).getByRole('link', {
+					name: 'Library',
+					exact: true
+				})
+			).toBeVisible();
+		});
+	});
+
+	test('a pt-BR browser keeps the prerendered page visible with no boot hide', async ({ page }) => {
+		await page.goto('/docs', { waitUntil: 'domcontentloaded' });
+		const html = page.locator('html');
+		await expect(html).toHaveAttribute('lang', 'pt-BR');
+		await expect(html).not.toHaveAttribute('data-lang-boot');
+		await expect(page.locator('#main-content')).toBeVisible();
+		expect(await page.evaluate(() => getComputedStyle(document.documentElement).visibility)).toBe(
+			'visible'
+		);
+		await waitForApp(page);
+		await expect(html).toHaveAttribute('lang', 'pt-BR');
 	});
 });
 

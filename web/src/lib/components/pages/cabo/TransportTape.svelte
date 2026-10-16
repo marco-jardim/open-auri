@@ -8,7 +8,22 @@
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import { tapeTimeline } from './model.ts';
 
-	let { curve, outcome = null }: { curve: Curve; outcome?: WriteOutcome | null } = $props();
+	interface Props {
+		curve: Curve;
+		outcome?: WriteOutcome | null;
+		/** Injectable clock and frame scheduler; defaults are the browser's (tests drive them). */
+		now?: () => number;
+		frame?: (callback: FrameRequestCallback) => number;
+		cancel?: (handle: number) => void;
+	}
+
+	let {
+		curve,
+		outcome = null,
+		now = () => performance.now(),
+		frame: requestFrame = (callback) => requestAnimationFrame(callback),
+		cancel: cancelFrame = (handle) => cancelAnimationFrame(handle)
+	}: Props = $props();
 	let snapshot = $state.raw<ReturnType<typeof tapeTimeline> | null>(null);
 	const tape = $derived(snapshot ?? tapeTimeline(curve));
 	let selected = $state(0);
@@ -31,7 +46,7 @@
 	const inspected = $derived(selected === 9 ? tape.commitBytes : tape.reports[selected].bytes);
 
 	function stop() {
-		cancelAnimationFrame(frame);
+		cancelFrame(frame);
 		running = false;
 	}
 
@@ -44,15 +59,15 @@
 			return;
 		}
 		running = true;
-		const startedAt = performance.now();
+		const startedAt = now();
 		const factor = slow ? 10 : 1;
 		const duration = snapshot.durationMs;
-		function advance(now: number) {
-			elapsed = Math.min(duration, (now - startedAt) / factor);
-			if (elapsed < duration) frame = requestAnimationFrame(advance);
+		function advance(at: number) {
+			elapsed = Math.min(duration, Math.max(0, at - startedAt) / factor);
+			if (elapsed < duration) frame = requestFrame(advance);
 			else running = false;
 		}
-		frame = requestAnimationFrame(advance);
+		frame = requestFrame(advance);
 	}
 
 	// A completed service result can replay, but this effect never performs I/O.
@@ -62,7 +77,7 @@
 			untrack(() => play(result));
 		}
 	});
-	$effect(() => () => cancelAnimationFrame(frame));
+	$effect(() => () => cancelFrame(frame));
 	$effect(() => {
 		if (!prefersReducedMotion.current) return;
 		untrack(() => {

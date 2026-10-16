@@ -5,33 +5,51 @@ import type { Clock, CurrentCurve, CurveData } from './model.ts';
 import { storageStatus } from './status.svelte.ts';
 
 export const CURRENT_STORAGE_KEY = 'oa.current';
+export const WRITTEN_STORAGE_KEY = 'oa.curve.written';
 export const UNDO_LIMIT = 100;
 
 export function createCurveStore(options: { storage?: ClientStorage; now?: Clock } = {}) {
 	const storage = options.storage ?? createStorage();
 	const status = storageStatus(storage);
 	const now = options.now ?? Date.now;
-	function parse(raw: string | null): CurrentCurve | null {
+	function parse(raw: string | null, key = CURRENT_STORAGE_KEY): CurrentCurve | null {
 		if (raw === null) return null;
 		try {
 			return checkedCurve(JSON.parse(raw));
 		} catch (cause) {
-			storage.report(cause, CURRENT_STORAGE_KEY, true);
+			storage.report(cause, key, true);
 			return null;
 		}
+	}
+	function readWritten() {
+		return parse(storage.read('local', WRITTEN_STORAGE_KEY), WRITTEN_STORAGE_KEY);
 	}
 	let value = $state.raw<CurrentCurve>(
 		parse(storage.read('local', CURRENT_STORAGE_KEY)) ?? neutralCurve()
 	);
 	let past = $state.raw<CurrentCurve[]>([]);
 	let future = $state.raw<CurrentCurve[]>([]);
-	let written = $state.raw<CurrentCurve | null>(null);
+	// Last snapshot really written to the cable; persisted so a reload after a write stays clean.
+	let written = $state.raw<CurrentCurve | null>(readWritten());
+	// True once the user changed the curve in this session (set/update/preset/undo/redo).
+	let edited = $state(false);
 	function persist(next: CurrentCurve) {
 		value = next;
+		edited = true;
 		storage.write('local', CURRENT_STORAGE_KEY, JSON.stringify(next));
 	}
 	const stop = storage.onStorage((event) => {
-		if (event.area !== 'local' || (event.key !== CURRENT_STORAGE_KEY && event.key !== null)) return;
+		if (event.area !== 'local') return;
+		if (event.key === WRITTEN_STORAGE_KEY || event.key === null) {
+			// Another tab wrote (or the storage was cleared): its snapshot is authoritative.
+			written = parse(
+				event.key === null ? storage.readPersisted('local', WRITTEN_STORAGE_KEY) : event.newValue,
+				WRITTEN_STORAGE_KEY
+			);
+			storage.acceptExternal('local', WRITTEN_STORAGE_KEY);
+			if (event.key !== null) return;
+		}
+		if (event.key !== CURRENT_STORAGE_KEY && event.key !== null) return;
 		let incoming = parse(event.key === null ? null : event.newValue);
 		const persisted = parse(storage.readPersisted('local', CURRENT_STORAGE_KEY));
 		// The backend breaks equal-timestamp races; delayed events cannot roll a tab back.
@@ -54,6 +72,9 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 			value = persisted;
 		}
 	});
+	function isDirty() {
+		return written === null || curveSignature(value) !== curveSignature(written);
+	}
 	function timestamp() {
 		const latest = parse(storage.read('local', CURRENT_STORAGE_KEY));
 		return nextTimestamp(now, Math.max(value.updatedAt, latest?.updatedAt ?? 0));
@@ -82,7 +103,15 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 			return value;
 		},
 		get dirty() {
-			return written === null || curveSignature(value) !== curveSignature(written);
+			return isDirty();
+		},
+		/**
+		 * Chrome indicator: `dirty`, but only once there is something to compare against (a real
+		 * write was ever recorded) or the user edited the curve in this session. A fresh profile
+		 * that only loaded the default curve does not claim unsaved changes.
+		 */
+		get unsaved() {
+			return (written !== null || edited) && isDirty();
 		},
 		get lastWritten() {
 			return written;
@@ -136,7 +165,9 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 		/** Call only after a real successful write, with the snapshot actually sent. */
 		markWritten(snapshot: CurrentCurve = value) {
 			try {
-				written = checkedCurve(snapshot);
+				const next = checkedCurve(snapshot);
+				written = next;
+				storage.write('local', WRITTEN_STORAGE_KEY, JSON.stringify(next));
 				return true;
 			} catch (cause) {
 				storage.report(cause, 'curve:markWritten', true);
