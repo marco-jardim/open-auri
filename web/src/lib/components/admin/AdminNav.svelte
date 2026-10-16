@@ -6,6 +6,7 @@
 	const links = $derived([
 		{ href: '/admin', label: m.admin_nav_dashboard() },
 		{ href: '/admin/usuarios', label: m.admin_nav_users() },
+		{ href: '/admin/moderacao', label: m.admin_nav_moderation() },
 		{ href: '/admin/auditoria', label: m.admin_nav_audit() }
 	]);
 </script>
