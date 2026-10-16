@@ -342,6 +342,11 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{m.curva_title()} · open-auri</title>
+	<meta name="description" content={m.curva_lede()} />
+</svelte:head>
+
 <svelte:window onkeydown={onKeydown} />
 
 <main class="curva" data-layer={layer} aria-labelledby={titleId}>

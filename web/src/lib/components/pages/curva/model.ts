@@ -24,9 +24,19 @@ export function activeCount(bands: readonly Band[]): number {
 
 /** Full-grid verdict, the same one a write uses. Experimental kinds pass only with the flag. */
 export function verdictFor(curve: Curve): GateVerdict {
-	return gateForWrite(curve.bands, curve.preampDb, {
+	const verdict = gateForWrite(curve.bands, curve.preampDb, {
 		experimental: hasExperimental(curve.bands)
 	});
+	// The aggregate prefix reason has no stage field in core; its measured maximum does.
+	// Preserve that location when presenting a rejected order, without changing the verdict.
+	const stage = verdict.metrics.internalAudible?.stage;
+	if (stage === undefined) return verdict;
+	return {
+		...verdict,
+		reasons: verdict.reasons.map((reason) =>
+			reason.code === 'd:prefix-peak' && reason.stage === undefined ? { ...reason, stage } : reason
+		)
+	};
 }
 
 export function replaceBand(bands: readonly Band[], index: number, band: Band): Band[] {

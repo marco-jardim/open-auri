@@ -21,6 +21,7 @@
 <style>
 	a {
 		color: #8c2f2f;
+		text-decoration-line: underline;
 		text-underline-offset: 3px;
 		overflow-wrap: anywhere;
 	}

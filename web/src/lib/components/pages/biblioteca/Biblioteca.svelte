@@ -994,8 +994,30 @@
 			align-items: flex-start;
 			flex-direction: column;
 		}
+		.shelf-group {
+			/* Keep narrow shelf headers and their hit targets out of skipped/clipped layout. */
+			content-visibility: visible;
+			contain-intrinsic-size: none;
+		}
 		.shelf-title {
-			flex-wrap: wrap;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 16px;
+		}
+		.shelf-title h3 {
+			min-width: 0;
+			margin-right: 0;
+			overflow-wrap: anywhere;
+		}
+		.shelf-title > button {
+			/* Give the action its own full-width row, never the remainder beside the title. */
+			grid-column: 1 / -1;
+			box-sizing: border-box;
+			width: 100%;
+			min-width: 44px;
+			min-height: 44px;
+			white-space: normal;
+			overflow-wrap: anywhere;
 		}
 	}
 	@media (max-width: 440px) {

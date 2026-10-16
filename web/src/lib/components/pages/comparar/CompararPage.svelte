@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import '@fontsource/oswald/400.css';
-	import '@fontsource/oswald/500.css';
-	import '@fontsource/special-elite/400.css';
+	import './fonts.css';
 	import { curveResponseDb } from 'open-auri/dsp';
 	import { getPreset } from 'open-auri/catalog';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
