@@ -87,7 +87,7 @@
 	aria-valuemin={shown === null ? undefined : VU_MIN}
 	aria-valuemax={shown === null ? undefined : VU_MAX}
 	aria-valuenow={ariaNow}
-	aria-valuetext={text(shown)}
+	aria-valuetext={shown === null ? undefined : text(shown)}
 >
 	<svg viewBox="0 0 200 124" aria-hidden="true" focusable="false">
 		<path

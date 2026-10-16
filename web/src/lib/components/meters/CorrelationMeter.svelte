@@ -55,7 +55,7 @@
 	aria-valuemin={shown === null ? undefined : -1}
 	aria-valuemax={shown === null ? undefined : 1}
 	aria-valuenow={shown === null ? undefined : Math.round(shown * 100) / 100}
-	aria-valuetext={text(shown)}
+	aria-valuetext={shown === null ? undefined : text(shown)}
 >
 	{#if !reduced}
 		<span class="oa-corr-track" aria-hidden="true">

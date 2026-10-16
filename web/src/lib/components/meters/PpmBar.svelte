@@ -58,7 +58,7 @@
 	aria-valuemin={shown === null ? undefined : min}
 	aria-valuemax={shown === null ? undefined : max}
 	aria-valuenow={shown === null ? undefined : clamp(Math.round(shown * 10) / 10, min, max)}
-	aria-valuetext={text(shown)}
+	aria-valuetext={shown === null ? undefined : text(shown)}
 >
 	<span class="oa-ppm-name">{label}</span>
 	{#if !reduced}

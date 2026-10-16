@@ -91,7 +91,7 @@
 	aria-valuemin={shown === null ? undefined : min}
 	aria-valuemax={shown === null ? undefined : max}
 	aria-valuenow={shown === null ? undefined : clamp(Math.round(shown * 10) / 10, min, max)}
-	aria-valuetext={valueText}
+	aria-valuetext={shown === null ? undefined : valueText}
 >
 	<ol class="oa-leds-list" aria-hidden="true">
 		{#each steps as step, index (step)}

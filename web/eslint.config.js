@@ -25,8 +25,9 @@ export default defineConfig(
 			// see: https://typescript-eslint.io/troubleshooting/faqs/eslint/#i-get-errors-from-the-no-undef-rule-about-global-variables-not-being-defined-even-though-there-are-no-typescript-errors
 			'no-undef': 'off',
 			// Served at the origin root without a base path, so resolve() adds nothing; it also needs
-			// the SvelteKit runtime, which isolated component tests do not have.
-			'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
+			// the SvelteKit runtime, which isolated component tests do not have. goto() targets are built
+			// from page.url (same route, new query), already absolute within the origin.
+			'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true, ignoreGoto: true }]
 		}
 	},
 	{

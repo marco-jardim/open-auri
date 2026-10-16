@@ -3,6 +3,7 @@
 	import { onMount, type Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { m } from '#lib/paraglide/messages.js';
+	import { getLocale, getTextDirection } from '#lib/paraglide/runtime.js';
 	import { PUBLIC_GITHUB_URL } from '#lib/config/public.ts';
 	import { setAppContext } from '#lib/app/index.ts';
 	import { getFooterHonoree, getPageMeta } from '#lib/page-meta.ts';
@@ -109,6 +110,13 @@
 		if (event.shiftKey) app.state.curve.redo();
 		else app.state.curve.undo();
 	}
+
+	// Prerendered HTML carries the base locale; keep <html lang/dir> in sync with the client locale.
+	$effect(() => {
+		const locale = getLocale();
+		document.documentElement.lang = locale;
+		document.documentElement.dir = getTextDirection(locale);
+	});
 </script>
 
 <svelte:window onkeydown={onKeydown} />
