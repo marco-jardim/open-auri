@@ -10,6 +10,8 @@ import {
 
 // Manifest/JS-size budgets are checked separately by scripts/check-budgets.mjs.
 test.describe('Browser performance budgets', () => {
+	// One measurement at a time inside each perf project (see playwright.config.ts).
+	test.describe.configure({ mode: 'serial' });
 	test.use({ reducedMotion: 'reduce' });
 	test.setTimeout(60000);
 	test.beforeEach(({ browserName }) => {

@@ -13,6 +13,10 @@ import { defineConfig, devices } from '@playwright/test';
 // Servers start one after the other (in array order), so only the first one builds.
 // tests/e2e/global-setup.ts applies the local D1 migrations to both databases.
 const AUTH_FLOW_SPECS = ['**/auth.spec.ts', '**/account.spec.ts'];
+// Timing budgets are measured after every other project has finished, so 8 parallel browsers do
+// not steal the main thread from the page under measurement.
+const PERF_SPECS = ['**/perf.spec.ts'];
+const FUNCTIONAL_PROJECTS = ['desktop', 'mobile', 'auth-flow'];
 
 export default defineConfig({
 	testDir: 'tests/e2e',
@@ -28,7 +32,8 @@ export default defineConfig({
 			timeout: 180000
 		},
 		{
-			command: 'npm run preview:auth-flow',
+			// Starts after the first server is listening, i.e. after its build has finished.
+			command: 'node scripts/wait-for-port.mjs 4173 && npm run preview:auth-flow',
 			port: 4174,
 			reuseExistingServer: !process.env.CI,
 			timeout: 120000
@@ -37,12 +42,12 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'desktop',
-			testIgnore: AUTH_FLOW_SPECS,
+			testIgnore: [...AUTH_FLOW_SPECS, ...PERF_SPECS],
 			use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } }
 		},
 		{
 			name: 'mobile',
-			testIgnore: AUTH_FLOW_SPECS,
+			testIgnore: [...AUTH_FLOW_SPECS, ...PERF_SPECS],
 			use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } }
 		},
 		{
@@ -54,6 +59,18 @@ export default defineConfig({
 				viewport: { width: 1440, height: 900 },
 				baseURL: 'http://localhost:4174'
 			}
+		},
+		{
+			name: 'perf-desktop',
+			testMatch: PERF_SPECS,
+			dependencies: FUNCTIONAL_PROJECTS,
+			use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } }
+		},
+		{
+			name: 'perf-mobile',
+			testMatch: PERF_SPECS,
+			dependencies: FUNCTIONAL_PROJECTS,
+			use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } }
 		}
 	]
 });

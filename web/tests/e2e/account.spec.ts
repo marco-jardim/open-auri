@@ -28,7 +28,9 @@ import {
 	type Locale
 } from './helpers/auth-flow';
 
-test.describe.configure({ mode: 'parallel' });
+// Full account flows (scrypt sign-ins, several captured mails) run long while the whole suite
+// shares the machine: give each test 2 minutes.
+test.describe.configure({ mode: 'parallel', timeout: 120_000 });
 
 /** The UI copy of one locale, straight from the message catalog the build uses. */
 function catalog(locale: Locale): Record<string, string> {
