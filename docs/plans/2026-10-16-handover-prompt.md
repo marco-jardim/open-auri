@@ -24,7 +24,7 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 
 **Ordem:**
 1. Leia `D:\git\open-auri\docs\plans\2026-10-16-handover.md`, **começando pela seção 0** (retomada após reinício, pendências e despacho do Q2) e depois a §5b. Em seguida leia o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (seção "Decisões durante a execução") e o brief dos delegados `D:\git\open-auri\docs\plans\f2-delegate-brief.md`.
-2. Gere os dados AutoEq com cache persistente, porque o cache em `%TEMP%` foi apagado: crie `/.cache/` no `.gitignore` e rode `node tools/import-autoeq.mjs --cache D:\git\open-auri\.cache\autoeq`. Depois rode o smoke e2e da `/soe-como-x`.
+2. Termine os dados AutoEq a partir do download parcial preservado em `.cache\autoeq` (`/.cache/` já está no `.gitignore`): rode `node tools/import-autoeq.mjs --cache D:\git\open-auri\.cache\autoeq`. Depois rode o smoke e2e da `/soe-como-x`.
 3. Estabilize os testes de componente instáveis sob carga, depois rode a verificação central completa (ver "Troubleshooting").
 4. Rode o **Q2** heavy (rodada 1) e siga o ciclo da §0.5. Com PASS: push para `origin/main`, marque e feche a issue #2, comente na #7.
 5. Siga para a **F3** (PF3 primeiro) e depois F4 e F5, **sem pausar entre waves ou fases**. Plano: F3 a partir da linha ~1615, F4 ~1976, F5 ~2269.

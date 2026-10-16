@@ -168,3 +168,6 @@ test-results/
 
 # Generated audio fixtures (web/scripts/gen-fixtures.mjs)
 /web/tests/fixtures/*.wav
+
+# Persistent local caches (e.g. AutoEq git cache: tools/import-autoeq.mjs --cache .cache/autoeq)
+/.cache/
