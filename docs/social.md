@@ -19,7 +19,7 @@ receita (S5) e agregação sem servidor (S6).
 
 | ID | Ideia | Decisão |
 |---|---|---|
-| **S1** | Formato compacto canônico | ✅ **adotar** — 48 B (64 caracteres), campo fixo, zero codec |
+| **S1** | Formato compacto canônico | ✅ **adotar** — S1 v1, ver [`s1-format.md`](s1-format.md) |
 | **S2** | Assinatura criptográfica | ❌ **descartada** — proveniência por link basta |
 | **S3** | Curvas versionadas (git) | ✅ **adotar** — 100% estático, sem backend |
 | **S4** | Distância entre curvas | ✅ **adotar** — barato, `magnitudeDb()` já existe |
@@ -57,20 +57,12 @@ algoritmo nenhum (4,8×). Comprimir algoritmicamente por cima rende no máximo
 ~1,5×, ao custo de um codec, de fragilidade e de perder a depurabilidade. Aos
 46 bytes, os 33% de overhead do base64 já dominam.
 
-### Domínio canônico (48 B = 64 caracteres)
+### Domínio canônico: S1 v1
 
-Os 46 B medidos acima são só o conteúdo. O código final acrescenta 2 bytes:
-
-| Campo | Bits | Domínio | Racional |
-|---|---|---|---|
-| versão + sabor | 8 | 4 bits cada | evolução do formato; distingue `parametric` de `raw` |
-| `type` (× 10) | 3 | 6 valores: PK, LS, HS, LP, HP, OFF | hoje só `PK`/`LS` aparecem (entropia real 0,23 bit) |
-| `f` (× 10) | 15 | Hz inteiro < 32768 | **exato** para os presets de referência, que usam Hz inteiro; é também como o `0x4B` guarda `f` (u16). O `0xCB` não guarda `f` — só coeficientes |
-| `g` (× 10) | 8 | int8 a 0,1 dB | cobre −12,8..+12,7 (observado: −12,0..+9,2) |
-| `q` (× 10) | 10 | guarda `q·100 − 1` | cobre 0,01..10,24; `q = 0` não existe (o codec recusa) |
-| `preamp` | 8 | **sem sinal**, 0 a −25,5 dB em passos de 0,1 | o pré-amp é ≤ 0; com sinal, o piso seria só −12,8 dB |
-| CRC-8 | 8 | sobre os 47 bytes anteriores | uma URL truncada ou um caractere trocado viraria uma curva válida, porém errada |
-| **total** | **384 bits = 48 B** | | **exatamente 64** caracteres base64url, sem padding |
+O desenho inicial (48 B, 64 caracteres, CRC-8) foi substituído. O formato
+congelado é o **S1 v1**, definido em [`s1-format.md`](s1-format.md): 51 B
+(68 caracteres base64url), grade da UI sem perda (ganho de −25,6 a +12,7 dB, Q
+até 20,47) e CRC-16/CCITT-FALSE.
 
 O range observado é **estreito** — é aí que está o ganho, não em algoritmo.
 
@@ -88,7 +80,7 @@ máximo de **0,36%** em `f`. Economiza 7 bytes = 12 caracteres, e cobra o adjeti
 
 | Sabor | Conteúdo | Tamanho | Quando |
 |---|---|---|---|
-| `parametric` | 10 × `(type, f, g, q)` + preamp | 48 B | curvas RBJ dentro do domínio — praticamente tudo |
+| `parametric` | 10 × `(type, f, g, q)` + preamp | 51 B | curvas RBJ dentro do domínio — praticamente tudo |
 | `raw` | 10 × 5 coeficientes int32 + preamp | ~203 B | biquad que não é expressável como RBJ, ou parâmetros fora do domínio |
 
 O byte de versão/sabor resolve. Sem ele, o formato compacto mentiria sobre
