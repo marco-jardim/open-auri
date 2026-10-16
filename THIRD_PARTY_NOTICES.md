@@ -7,6 +7,16 @@ high-shelf biquad design from AutoEq
 (`autoeq/peq.py`: `Peaking`, `LowShelf` and `HighShelf.biquad_coefficients`),
 <https://github.com/jaakkopasanen/AutoEq>.
 
+`src/solver/peq.mjs` reimplements in JavaScript, without copying code, the
+parametric-EQ initialization and loss from AutoEq's `autoeq/peq.py` (file at
+commit `853360a1626b387e1d3d87f3f7ad8c7514d30839`, 2023-10-29): peaking-filter
+initialization from the largest peak or dip by width × height, applied one
+filter at a time; shelf initialization from the 40 Hz–10 kHz level split with
+Q 0.7; the RMSE loss over 20 Hz–20 kHz with averaging above 10 kHz; and the
+peaking sharpness penalty. The optimizer, gate projection, perceptual
+weighting, opposite-neighbour penalty and treble-detail term are this
+project's own work.
+
 ```
 MIT License
 
