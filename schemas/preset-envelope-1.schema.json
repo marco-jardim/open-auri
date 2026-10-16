@@ -122,8 +122,18 @@
   },
   "$defs": {
     "singleLine": { "type": "string", "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$" },
-    "recipeSource": { "type": "string", "$ref": "#/$defs/singleLine", "minLength": 1, "maxLength": 64 },
-    "recipeName": { "type": "string", "$ref": "#/$defs/singleLine", "minLength": 1, "maxLength": 96 },
+    "recipeSource": {
+      "type": "string",
+      "$ref": "#/$defs/singleLine",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "recipeName": {
+      "type": "string",
+      "$ref": "#/$defs/singleLine",
+      "minLength": 1,
+      "maxLength": 96
+    },
     "frequency": { "type": "integer", "minimum": 1, "maximum": 20000 },
     "gain": { "type": "number", "minimum": -25.6, "maximum": 12.7, "multipleOf": 0.1 },
     "q": { "type": "number", "minimum": 0.01, "maximum": 20.47, "multipleOf": 0.01 },
