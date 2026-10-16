@@ -40,3 +40,13 @@ Leia antes de qualquer tarefa da F2. Plano: `D:\git\open-auri\docs\plans\2026-10
 - Você só consegue rodar `npm test`, `npm run lint` e `npm run typecheck` da raiz pelo `router_run`. A verificação do web (`check:web`, `test:web:unit`, build, e2e, lint do web, cobertura) é feita centralmente pelo orquestrador depois da wave. Escreva os testes e diga no relatório o que não pôde rodar.
 - Nunca edite fora do seu conjunto de escrita (W). Se precisar, pare e reporte.
 - Nunca commite. Nunca adicione `Co-Authored-By` nem "Generated with".
+
+## Páginas (W2.4)
+
+- **Fonte de verdade:** o mock da página em `D:\git\open-auri\design\mocks\v2\<página>.html` e as capturas em `design\mocks\v2\_qa\`. Porte definitivo em Svelte 5 + TS, fiel ao visual (desktop 1440 e mobile 390), sem duplicar matemática do núcleo.
+- **O layout já cuida** de barra superior, rodapé com homenagem, `data-page`, áudio, checklist e toasts. A página só renderiza o conteúdo principal.
+- **Contexto do app:** `const context = getAppContext()` (de `#lib/app/index.ts`, na inicialização do componente); `const app = $derived(context.client)` (é `null` no SSR e antes do mount). Use `app.state` (curve, journal, flash, meterRef, library, outbox), `app.audio` (engine: `buildChain`, `createAB`, `start`/`stop` só em gesto do usuário, `getChainOutput`), `app.cableState`, `app.cable` (status e conexão). Para gravar, só `app.requestWrite()`, que abre o checklist. Nunca chame `write()` nem `createGesture()`. Leia `D:\git\open-auri\web\src\lib\app\README.md`.
+- **Reuso:** gráficos (`#lib/charts/index.ts`), workers (`#lib/workers/...`: `createGateWorker`, `createSolverWorker`), medidores (`#lib/components/meters/index.ts` + `#lib/audio/meters.ts`: `tap`, `tapStages`, `subscribe`; modo AO VIVO/DADOS sempre rotulado; sem dado, apagado), chrome (`EmBreve`, `ConfirmDialog`, `toast`), cabo (`#lib/components/cable/index.ts`), dados AutoEq (`#lib/data/autoeq.ts`).
+- **Escopo:** rota em `web/src/routes/<rota>/` (ou `+page.svelte` na raiz para a Curva), componentes em `web/src/lib/components/pages/<página>/`, testes em `web/tests/unit/pages/<página>/`, mensagens em `web/messages/_staging/<TASK>.*.json` com prefixo da página. Não edite nada compartilhado (layout, chrome, state, audio, cable, charts, workers, styles); se precisar, descreva a mudança no relatório.
+- **Rótulos dos presets:** de `open-auri/catalog` (`label`, `description` com "descrição da Kuba", `licenseStatus: 'a confirmar'`).
+- **Componentes que importam `$app/*`** não rodam em teste de componente isolado; passe dados por prop.
