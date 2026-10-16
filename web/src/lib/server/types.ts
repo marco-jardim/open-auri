@@ -52,23 +52,35 @@ export interface WorkerPlatform {
 	cf?: IncomingRequestCfProperties;
 }
 
-// Minimal request-scoped auth shapes for `App.Locals`. T3.5 maps Better Auth's user/session onto
-// these (and may extend them); nothing here carries secrets or tokens.
+// Minimal request-scoped auth shapes for `App.Locals`. hooks.server.ts maps Better Auth's
+// user/session onto these (web/src/lib/server/auth.ts `toAuthLocals`); nothing here carries
+// secrets or tokens (the session token is deliberately left out).
 
 export type UserRole = 'user' | 'admin';
 
 export interface AuthUser {
 	id: string;
 	email: string;
+	/** Private account name (never shown publicly; the public name is `username`). */
 	name: string;
 	emailVerified: boolean;
 	role: UserRole;
+	/** Public nickname, normalized (NFKC + lowercase); null until chosen. */
+	username: string | null;
+	displayUsername: string | null;
+	banned: boolean;
+	twoFactorEnabled: boolean;
 }
 
 export interface AuthSession {
 	id: string;
 	userId: string;
+	createdAt: Date;
 	expiresAt: Date;
-	/** Set when the session passed the second factor (T3.5 defines how it is recorded). */
+	/** When the second factor was passed in this session (TOTP or backup code), else null. */
+	twoFactorVerifiedAt: Date | null;
+	/** Shorthand for `twoFactorVerifiedAt !== null`. */
 	twoFactorVerified: boolean;
+	/** Admin id when this is an impersonation session (admin plugin). */
+	impersonatedBy: string | null;
 }

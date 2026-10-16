@@ -1,5 +1,6 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
+import type { Auth } from '#lib/server/auth.ts';
 import type { AuthSession, AuthUser, WorkerPlatform } from '#lib/server/types.ts';
 
 declare global {
@@ -12,8 +13,10 @@ declare global {
 			caches: WorkerPlatform['caches'];
 			cf?: WorkerPlatform['cf'];
 		}
-		// Filled by hooks.server.ts on every request (T3.5); null when signed out.
+		// Filled by hooks.server.ts on every request (T3.5). `user`/`session` are null when signed
+		// out; `auth` (per-request Better Auth instance) is null only while prerendering.
 		interface Locals {
+			auth: Auth | null;
 			user: AuthUser | null;
 			session: AuthSession | null;
 		}
