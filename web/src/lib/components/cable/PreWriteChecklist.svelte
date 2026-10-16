@@ -98,6 +98,26 @@
 		}
 	});
 
+	/** Index of the write target in `devices`, or '' when none is chosen (explicit choice needed). */
+	const targetIndex = $derived.by(() => {
+		const index = cable.device === null ? -1 : cable.devices.indexOf(cable.device);
+		return index < 0 ? '' : String(index);
+	});
+	/** Label of the cable `write()` will use, shown next to the write button. */
+	const targetLabel = $derived(
+		cable.device === null
+			? null
+			: (cable.deviceLabel ?? cable.deviceLabels[cable.devices.indexOf(cable.device)] ?? null)
+	);
+
+	/** Selecting a target never writes: the write button still needs its own click. */
+	function onSelectTarget(event: Event) {
+		const value = (event.currentTarget as HTMLSelectElement).value;
+		if (value === '') return;
+		const device = cable.devices[Number(value)];
+		if (device !== undefined) service.selectDevice(device);
+	}
+
 	function onCancel(event: Event) {
 		// Never close the dialog in the middle of a write.
 		if (cable.writing) event.preventDefault();
@@ -267,11 +287,41 @@
 				/>
 			{/if}
 
+			<section aria-labelledby={`${id}-target`} class="flex flex-col gap-1">
+				<h3 id={`${id}-target`} class="font-semibold">{m.cable_target_heading()}</h3>
+				{#if cable.devices.length === 0}
+					<p class="text-sm">{m.cable_refused_no_device()}</p>
+				{:else}
+					{#if targetLabel !== null}
+						<p class="font-mono text-sm" data-target-device>
+							{m.cable_target_device({ device: targetLabel })}
+						</p>
+					{:else}
+						<p class="text-sm" role="note">{m.cable_target_required()}</p>
+					{/if}
+					{#if cable.devices.length > 1 || targetIndex === ''}
+						<label class="flex flex-col gap-1 text-sm">
+							<span>{m.cable_select_device()}</span>
+							<select
+								class="rounded border border-current bg-transparent px-2 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
+								disabled={cable.writing}
+								value={targetIndex}
+								onchange={onSelectTarget}
+							>
+								{#if targetIndex === ''}
+									<option value="" disabled>{m.cable_target_choose()}</option>
+								{/if}
+								{#each cable.deviceLabels as label, index (index)}
+									<option value={String(index)}>{label}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
+				{/if}
+			</section>
+
 			{#if !checklist.canWrite}
 				<p class="text-sm">{m.cable_write_blocked()}</p>
-			{/if}
-			{#if cable.device === null}
-				<p class="text-sm">{m.cable_refused_no_device()}</p>
 			{/if}
 			{#if message !== null}
 				<p role="status" class="text-sm">{message}</p>

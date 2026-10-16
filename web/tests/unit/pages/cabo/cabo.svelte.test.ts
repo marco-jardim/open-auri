@@ -4,6 +4,7 @@ import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
 import { setLocale } from '#lib/paraglide/runtime.js';
+import { m } from '#lib/paraglide/messages.js';
 import { createClientApp, type ClientApp } from '#lib/app/client.svelte.ts';
 import type { JournalEntry } from '#lib/cable/types.ts';
 import CaboPage from '#lib/components/pages/cabo/CaboPage.svelte';
@@ -116,6 +117,45 @@ test('HID picker only on a click; only final confirmation in the shared checklis
 			)
 		)
 		.toEqual(['1', '1', '1']);
+});
+
+test('simulated mode: rack counters are the checklist counters, real flash stays untouched', async () => {
+	await setLocale('pt-BR', { reload: false });
+	const fake = fakeAppOptions();
+	active = createClientApp({ ...fake.options, cable: { ...fake.options.cable, hid: null } });
+	const app = active;
+	const screen = await render(CaboHarness, { app });
+	const drums = () =>
+		[...screen.container.querySelectorAll('.counters [role="img"]')].map((node) =>
+			node.getAttribute('aria-label')
+		);
+	const checklistCounters = () =>
+		app.cable.checklist({
+			bands: app.state.curve.current.bands,
+			preampDb: app.state.curve.current.preampDb,
+			experimental: false,
+			confirmations: { volumeLowered: false, keepConnected: false, experimental: false }
+		}).counters;
+	await expect.poll(drums).toEqual(['0', '0', '0']);
+	expect(app.cable.counters()).toEqual(checklistCounters());
+	await app.cable.connect();
+	await page.getByRole('button', { name: 'Levantar tampa do checklist' }).click();
+	await page.getByRole('button', { name: 'Revisar e gravar' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect.element(dialog).toBeVisible();
+	await dialog.getByRole('checkbox').nth(0).click();
+	await dialog.getByRole('checkbox').nth(1).click();
+	await dialog.getByRole('button', { name: m.cable_write_simulated(), exact: true }).click();
+	await expect.poll(() => app.cableState.lastOutcome?.status).toBe('simulated');
+	const expected = checklistCounters();
+	expect(expected).toEqual({ session: 1, day: 1, total: 1 });
+	expect(app.cable.counters()).toEqual(expected);
+	await expect
+		.poll(drums)
+		.toEqual([String(expected.session), String(expected.day), String(expected.total)]);
+	// Simulated writes never touch the real flash bookkeeping.
+	expect(app.state.flash.state).toMatchObject({ session: 0, total: 0 });
+	expect(fake.device.sent).toHaveLength(0);
 });
 
 test('preset selection, rehearsal and journal loading never request a write or connect', async () => {

@@ -80,6 +80,54 @@ test('refusal preserves confirmations, success clears them, and closing/reopenin
 	expect(page.getByRole('status').elements()).toHaveLength(0);
 });
 
+test('the target cable is shown next to the write button; without one the user must choose', async () => {
+	const left = new FakeHIDDevice();
+	const right = new FakeHIDDevice();
+	const fake = cableUi({
+		connection: 'connected',
+		devices: [left, right],
+		deviceLabels: ['Left cable', 'Right cable'],
+		device: null,
+		deviceLabel: null
+	});
+	const write = vi.fn<typeof fake.service.write>();
+	fake.service.write = write;
+	const screen = await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose: vi.fn()
+	});
+	const button = page.getByRole('button', { name: m.cable_write_simulated(), exact: true });
+	await expect.element(page.getByText(m.cable_target_required())).toBeVisible();
+	expect(screen.container.querySelector('[data-target-device]')).toBeNull();
+	expect(page.getByText(m.cable_refused_no_device(), { exact: true }).elements()).toHaveLength(0);
+	await confirm();
+	await expect.element(button).toBeDisabled();
+	const select = page.getByRole('dialog').getByRole('combobox', { name: m.cable_select_device() });
+	expect((select.element() as HTMLSelectElement).value).toBe('');
+	await select.selectOptions('1');
+	expect(fake.selectDevice).toHaveBeenCalledExactlyOnceWith(right);
+	// Selecting never writes.
+	expect(write).not.toHaveBeenCalled();
+	fake.publish({ device: right, deviceLabel: 'Right cable' });
+	await expect
+		.element(page.getByText(m.cable_target_device({ device: 'Right cable' }), { exact: true }))
+		.toBeVisible();
+	expect(screen.container.querySelector('[data-target-device]')?.textContent?.trim()).toBe(
+		m.cable_target_device({ device: 'Right cable' })
+	);
+	expect((select.element() as HTMLSelectElement).value).toBe('1');
+	await expect.element(button).toBeEnabled();
+	expect(write).not.toHaveBeenCalled();
+	// One cable: the label is shown and no selector is needed.
+	fake.publish({ devices: [right], deviceLabels: ['Right cable'] });
+	await expect
+		.element(page.getByText(m.cable_target_device({ device: 'Right cable' }), { exact: true }))
+		.toBeVisible();
+	expect(page.getByRole('dialog').getByRole('combobox').elements()).toHaveLength(0);
+});
+
 test('diagnostics show failed/unknown lamps, loudness, experimental consent and cooldown; cancellation is blocked during writes', async () => {
 	const fake = cableUi();
 	const original = fake.service.checklist;

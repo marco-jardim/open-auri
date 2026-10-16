@@ -368,12 +368,20 @@ describe('loudness and flash notices through the service', () => {
 describe('interruption and rescue', () => {
 	test('disconnect mid-write: journal interrupted, rescue state, no event', async () => {
 		const h = await setup({ deviceOptions: { disconnectAtReport: 4 } });
+		// The attempt is counted before its first byte (a tab closed mid-write still counts it).
+		const sentAtRecord: number[] = [];
+		const record = h.flash.record.bind(h.flash);
+		h.flash.record = (at) => {
+			sentAtRecord.push(h.device.sent.length);
+			record(at);
+		};
 		const outcome = await writePadrao(h);
 		expect(outcome.status).toBe('interrupted');
 		expect(h.device.sent).toHaveLength(4);
 		expect(bytesOf(h.device).some((bytes) => bytes.every((b, i) => b === COMMIT[i]))).toBe(false);
 		expect(h.journal.last()?.status).toBe('interrupted');
 		expect(h.flash.records).toEqual([T0]);
+		expect(sentAtRecord).toEqual([0]);
 		expect(h.written).toEqual([]);
 		const state = h.service.getState();
 		expect(state.rescue).toEqual({ at: T0, deviceLabel: 'USB DSP Audio', reportsSent: 4 });
@@ -508,7 +516,7 @@ describe('connection events', () => {
 		expect(h.service.getState().connection).toBe('disconnected');
 	});
 
-	test('getDevices() restores already-permitted cables', async () => {
+	test('getDevices() restores a single permitted cable as the visible target', async () => {
 		const h = await setup();
 		const other = createCableService({
 			hid: h.hid,
@@ -516,13 +524,77 @@ describe('connection events', () => {
 			flash: h.flash,
 			now: () => h.time.value,
 			lastWrittenLevelDb: () => null,
-			sessionWriteCount: () => 0
+			sessionWriteCount: () => 0,
+			locks: null,
+			inflight: null
 		});
 		expect(other.getState().connection).toBe('disconnected');
 		await other.restore();
+		// Exactly one cable: it is the target, and the checklist shows its label (deviceLabel).
 		expect(other.getState().device).toBe(h.device);
+		expect(other.getState().deviceLabel).toBe('USB DSP Audio');
 		expect(other.getState().connection).toBe('connected');
 		other.dispose();
+	});
+
+	test('restoring several cables never picks a target silently', async () => {
+		const h = await setup({ connect: false });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		// Both cables were granted on an earlier visit.
+		h.hid.choose = (matching) => matching;
+		await h.hid.requestDevice({ filters: [] });
+		const other = createCableService({
+			hid: h.hid,
+			journal: h.journal,
+			flash: h.flash,
+			now: () => h.time.value,
+			lastWrittenLevelDb: () => null,
+			sessionWriteCount: () => 0,
+			userActivation: () => ({ isActive: true }),
+			locks: null,
+			inflight: null
+		});
+		expect(await other.restore()).toEqual([h.device, second]);
+		const state = other.getState();
+		expect(state.connection).toBe('connected');
+		expect(state.devices).toEqual([h.device, second]);
+		expect(state.device).toBeNull();
+		expect(state.deviceLabel).toBeNull();
+		const request = {
+			bands: padrao.eqBands,
+			preampDb: padrao.preampDb,
+			experimental: false,
+			confirmations: CONFIRMED
+		};
+		expect(
+			await other.write({ ...request, gesture: other.createGesture(TRUSTED_CLICK) })
+		).toMatchObject({ status: 'refused', reason: 'no-device' });
+		expect(h.device.attempts + second.attempts).toBe(0);
+		// An explicit selection makes it the target; selecting never writes by itself.
+		expect(other.selectDevice(second)).toBe(true);
+		expect(other.getState().deviceLabel).toBe('USB DSP Audio #2');
+		expect(h.device.attempts + second.attempts).toBe(0);
+		expect(
+			(await other.write({ ...request, gesture: other.createGesture(TRUSTED_CLICK) })).status
+		).toBe('ok');
+		expect(second.sent).toHaveLength(10);
+		expect(h.device.attempts).toBe(0);
+		other.dispose();
+	});
+
+	test('unplugging the target of several cables leaves no target until the user chooses', async () => {
+		const h = await setup();
+		const second = new FakeHIDDevice({ clock: h.clock });
+		const third = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		h.hid.addDevice(third);
+		expect(h.service.getState().device).toBe(h.device);
+		h.hid.disconnect(h.device);
+		expect(h.service.getState()).toMatchObject({ device: null, connection: 'connected' });
+		h.hid.disconnect(second);
+		// A single remaining cable is the visible target again.
+		expect(h.service.getState().device).toBe(third);
 	});
 
 	test('subscribe follows the store contract', async () => {

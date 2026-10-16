@@ -17,8 +17,10 @@ import type {
 	ChecklistInput,
 	ChecklistItem,
 	ChecklistResult,
+	FlashState,
 	GateReason,
 	GateResult,
+	JournalEntry,
 	Lamp,
 	LampId,
 	LampLabelKey,
@@ -131,6 +133,33 @@ function safeCount(value: unknown): number {
 	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
+/** Session / local day / total counters shown by the checklist (one source for every view). */
+export function flashCountersOf(flash: FlashState, nowMs: number): ChecklistResult['counters'] {
+	const today = localDateKey(nowMs);
+	return {
+		session: safeCount(flash.session),
+		day: flash.day.date === today ? safeCount(flash.day.count) : 0,
+		total: safeCount(flash.total)
+	};
+}
+
+/** `levelDb` of a journaled curve, computed exactly like the checklist's `newLevelDb`. */
+export function writtenLevelDb(entry: Pick<JournalEntry, 'bands' | 'preampDb'>): number | null {
+	return safeLevelDb(entry.bands, entry.preampDb);
+}
+
+/**
+ * `levelDb` of the last curve that reached the cable: the newest `ok` journal entry (real
+ * writes only; `simulated` and `interrupted` entries are skipped). Null when there is none.
+ */
+export function lastWrittenLevelDbOf(entries: readonly JournalEntry[]): number | null {
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry !== undefined && entry.status === 'ok') return writtenLevelDb(entry);
+	}
+	return null;
+}
+
 /**
  * Evaluates the checklist. `gate` may be passed to reuse a verdict computed for the
  * same input (display only; `write()` always re-evaluates).
@@ -157,8 +186,6 @@ export function evaluateChecklist(
 
 	const experimentalRequired = safeExperimentalKinds(verdict, input.bands);
 	const spacing = canWriteNow(context.flash, context.nowMs);
-	const today = localDateKey(context.nowMs);
-	const day = context.flash.day.date === today ? safeCount(context.flash.day.count) : 0;
 	const confirmations = input.confirmations;
 
 	const items: ChecklistItem[] = [
@@ -184,11 +211,7 @@ export function evaluateChecklist(
 		experimentalRequired,
 		experimentalText: EXPERIMENTAL_CONFIRMATION_TEXT,
 		spacing,
-		counters: {
-			session: safeCount(context.flash.session),
-			day,
-			total: safeCount(context.flash.total)
-		},
+		counters: flashCountersOf(context.flash, context.nowMs),
 		dailyNotice: { show: dailyNotice(context.flash, context.nowMs), text: FLASH_NOTICE_TEXT },
 		items,
 		canWrite: items.every((item) => !item.required || item.satisfied)

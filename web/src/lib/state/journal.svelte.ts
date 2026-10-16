@@ -37,6 +37,17 @@ export function createJournalStore(options: { storage?: ClientStorage } = {}) {
 		get dropped() {
 			return dropped;
 		},
+		/**
+		 * Newest entry with status `ok` (a curve that reached the cable), or null. Reactive and
+		 * cross-tab like `entries`, without cloning the whole journal.
+		 */
+		get lastOk(): Entry | null {
+			for (let index = entries.length - 1; index >= 0; index--) {
+				const entry = entries[index];
+				if (entry !== undefined && entry.status === 'ok') return structuredClone(entry);
+			}
+			return null;
+		},
 		get error() {
 			return status.error;
 		},

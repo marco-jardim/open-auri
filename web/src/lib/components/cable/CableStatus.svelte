@@ -21,7 +21,9 @@
 				? m.cable_status_connecting()
 				: cable.connection === 'connected' && cable.deviceLabel !== null
 					? m.cable_status_connected({ device: cable.deviceLabel })
-					: m.cable_status_disconnected()
+					: cable.connection === 'connected' && cable.devices.length > 0
+						? m.cable_status_no_target()
+						: m.cable_status_disconnected()
 	);
 	const errorText = $derived(
 		cable.error === 'request-failed'
@@ -42,9 +44,20 @@
 		void service.disconnect();
 	}
 
+	/** Index of the write target, or '' when none is chosen (e.g. several restored cables). */
+	const targetIndex = $derived.by(() => {
+		const index = cable.device === null ? -1 : cable.devices.indexOf(cable.device);
+		return index < 0 ? '' : String(index);
+	});
+	// Always offer the choice when there is no explicit target, even for a single cable.
+	const showSelect = $derived(
+		cable.devices.length > 1 || (cable.devices.length > 0 && cable.device === null)
+	);
+
 	function onSelect(event: Event) {
-		const index = Number((event.currentTarget as HTMLSelectElement).value);
-		const device = cable.devices[index];
+		const value = (event.currentTarget as HTMLSelectElement).value;
+		if (value === '') return;
+		const device = cable.devices[Number(value)];
 		if (device !== undefined) service.selectDevice(device);
 	}
 </script>
@@ -64,15 +77,18 @@
 		<p class="text-sm opacity-80">{m.cable_simulated_hint()}</p>
 	{/if}
 
-	{#if cable.devices.length > 1}
+	{#if showSelect}
 		<label class="flex flex-col gap-1 text-sm">
 			<span>{m.cable_select_device()}</span>
 			<select
 				class="rounded border border-current bg-transparent px-2 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
 				disabled={cable.writing}
-				value={String(cable.device === null ? 0 : Math.max(0, cable.devices.indexOf(cable.device)))}
+				value={targetIndex}
 				onchange={onSelect}
 			>
+				{#if targetIndex === ''}
+					<option value="" disabled>{m.cable_target_choose()}</option>
+				{/if}
 				{#each cable.deviceLabels as label, index (index)}
 					<option value={String(index)}>{label}</option>
 				{/each}

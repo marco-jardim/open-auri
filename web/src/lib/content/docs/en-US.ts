@@ -117,7 +117,7 @@ export const enUS: DocsContent = {
 			title: 'Data in this browser',
 			paragraphs: [
 				'Curves, the journal, settings and MP3 stay on the device. Erase local data removes only oa.* localStorage and sessionStorage keys and the open-auri IndexedDB database (audio, library, outbox), after confirmation. It sends nothing, does not delete an account and does not affect the cable: its written preset stays there.',
-				'localStorage: oa.lang (language), oa.current (editor), oa.journal (last 500 entries), oa.flash.day, oa.flash.total and oa.flash.lastWriteAt (counters and interval), oa.meter.ref (reference). sessionStorage: oa.flash.session. IndexedDB: library, offline outbox and audio. The essential oa_lang cookie and offline cache are not removed by this action.',
+				'localStorage: oa.lang (language), oa.current (editor), oa.journal (last 500 entries), oa.flash.day, oa.flash.total and oa.flash.lastWriteAt (counters and interval), oa.meter.ref (reference), oa.curve.written (last curve written to the cable), oa.cable.inflight (write in progress, removed when it ends). sessionStorage: oa.flash.session. IndexedDB: library, offline outbox and audio. The essential oa_lang cookie and offline cache are not removed by this action.',
 				'Export anything you want to keep first. Close other tabs if the database is blocked. Accounts and social features are optional; see the privacy policy for server requests and access records. MP3 is never uploaded.'
 			],
 			links: [{ label: 'Privacy policy', href: '/privacidade' }]

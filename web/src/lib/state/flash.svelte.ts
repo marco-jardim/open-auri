@@ -80,7 +80,10 @@ export function createFlashStore(options: { storage?: ClientStorage; now?: Clock
 		dailyNotice(at = now()) {
 			return dailyNotice(state, at);
 		},
-		/** Bookkeeping for a completed real write, never a simulated or attempted write. */
+		/**
+		 * Counts one real write attempt that is about to reach the cable (called before its first
+		 * byte, so a tab closed mid-write still counts it). Never for simulated writes.
+		 */
 		recordWrite(at = now()) {
 			observe(at);
 			state = recordWrite(state, at);
@@ -89,6 +92,20 @@ export function createFlashStore(options: { storage?: ClientStorage; now?: Clock
 			storage.write('local', FLASH_STORAGE_KEYS.total, raw.total);
 			storage.write('local', FLASH_STORAGE_KEYS.lastWriteAt, raw.lastWriteAt);
 			storage.write('session', FLASH_STORAGE_KEYS.session, raw.session);
+		},
+		/**
+		 * The cable was last touched at `at` (end of a write sequence): moves `lastWriteAt` forward
+		 * so the 2 s spacing runs from the end of the write. Counters are not changed.
+		 */
+		touchWrite(at = now()) {
+			observe(at);
+			if (state.lastWriteAt !== null && state.lastWriteAt >= at) return;
+			state = { ...state, lastWriteAt: at };
+			storage.write(
+				'local',
+				FLASH_STORAGE_KEYS.lastWriteAt,
+				serializeFlashState(state).lastWriteAt
+			);
 		},
 		dispose() {
 			stop();

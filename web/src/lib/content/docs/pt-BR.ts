@@ -117,7 +117,7 @@ export const ptBR: DocsContent = {
 			title: 'Dados neste navegador',
 			paragraphs: [
 				'Curvas, diário, configurações e MP3 ficam no aparelho. Apagar dados locais remove somente chaves oa.* de localStorage e sessionStorage e o banco IndexedDB open-auri (audio, library, outbox), após confirmação. Não envia nada, não apaga a conta e não altera o cabo: o preset gravado nele continua lá.',
-				'localStorage: oa.lang (idioma), oa.current (editor), oa.journal (últimas 500 entradas), oa.flash.day, oa.flash.total e oa.flash.lastWriteAt (contadores e intervalo), oa.meter.ref (referência). sessionStorage: oa.flash.session. IndexedDB: biblioteca, fila offline e áudio. O cookie essencial oa_lang e o cache offline não são apagados por esta ação.',
+				'localStorage: oa.lang (idioma), oa.current (editor), oa.journal (últimas 500 entradas), oa.flash.day, oa.flash.total e oa.flash.lastWriteAt (contadores e intervalo), oa.meter.ref (referência), oa.curve.written (última curva gravada no cabo), oa.cable.inflight (gravação em curso, removido ao terminar). sessionStorage: oa.flash.session. IndexedDB: biblioteca, fila offline e áudio. O cookie essencial oa_lang e o cache offline não são apagados por esta ação.',
 				'Exporte o que quiser guardar antes de apagar. Feche outras abas se o banco estiver bloqueado. A conta e as funções sociais são opcionais; consulte a política de privacidade para requisições ao servidor e registros de acesso. MP3 nunca é enviado.'
 			],
 			links: [{ label: 'Política de privacidade', href: '/privacidade' }]

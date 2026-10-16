@@ -25,8 +25,18 @@
   freezes that selection, opens PreWriteChecklist and lets only its confirmation handler mint the
   gesture and call the service. `requestRescue()` selects NEUTRAL_CURVE without changing the editor.
 - `app.loadNeutral()` and `app.loadAuriDefault()` are editor-only actions and never write.
-- Real `cable:written` events feed back `levelDb`, mark the actual snapshot written and retain the
-  journal/flash updates; simulated writes do not mark a real cable or clear editor dirtiness.
+- Real `cable:written` events mark the actual snapshot written; simulated writes do not mark a real
+  cable or clear editor dirtiness. The last written level (loudness "jump" warning) is derived from
+  the newest `ok` journal entry (`journal.lastOk`), so it survives reloads and other tabs.
+- Writes are exclusive across tabs: the service holds the Web Lock `oa-cable-write` from the
+  in-lock checklist through settle and refuses `busy` otherwise. Before any I/O it persists the
+  `localStorage` marker `oa.cable.inflight` and records the flash attempt (counters + lastWriteAt);
+  when the sequence ends it only moves `lastWriteAt` to that time (`flash.touchWrite`), so the 2 s
+  spacing runs from the end of the write. A marker left by a tab closed mid-write becomes an
+  `interrupted` journal entry and the rescue notice on the next start.
+- A restored cable is never chosen silently: with several cables the target stays unset until the
+  user selects one (CableStatus or the checklist); the checklist always shows the target label.
+- Cabo/rack flash counters come from `app.cable.counters()`, the same source as the checklist.
 - `app.toasts.push(message, options)` uses the layout's per-app toast region.
 
 Metadata deliberately leaves auth/account/profile/admin homages unset until F3/F4. Footer currently

@@ -25,7 +25,7 @@
 	import TransportTape from './TransportTape.svelte';
 	import Journal from './Journal.svelte';
 	import FlashCounters from './FlashCounters.svelte';
-	import { encoderData, flashCounters, rackState, RACK_STATES, type RackState } from './model.ts';
+	import { encoderData, rackState, RACK_STATES, type RackState } from './model.ts';
 
 	let { app }: { app: ClientApp | null } = $props();
 	const fallback = neutralCurve();
@@ -51,13 +51,17 @@
 			}) ?? null
 		);
 	});
-	let now = $state(0);
+	// Wall clock for the local-day rollover of the counters; refreshed every 30 s after mount.
+	let now = $state(Date.now());
 	let realRequested = $state(false);
 	let coverOpen = $state(false);
 	const rackStatus = $derived(rackState(cable, realRequested));
-	const counters = $derived(
-		app === null ? { session: 0, day: 0, total: 0 } : flashCounters(app.state.flash.state, now)
-	);
+	const counters = $derived.by(() => {
+		// The counters the pre-write checklist shows (simulated mode included): one source.
+		void now;
+		void cable;
+		return app === null ? { session: 0, day: 0, total: 0 } : app.cable.counters();
+	});
 	const id = $props.id();
 	const stateLabels: Record<RackState, () => string> = {
 		unsupported: () => m.cabo_state_unsupported(),

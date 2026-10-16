@@ -9,7 +9,8 @@ export function cableUi(initial: Partial<CableState> = {}) {
 		journal: { append: () => undefined, last: () => null },
 		flash: {
 			get: () => ({ day: { date: null, count: 0 }, total: 0, lastWriteAt: 0, session: 0 }),
-			record: () => undefined
+			record: () => undefined,
+			touch: () => undefined
 		},
 		now: () => 10_000,
 		lastWrittenLevelDb: () => null,

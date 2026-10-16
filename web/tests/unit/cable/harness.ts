@@ -4,6 +4,12 @@ import { FakeHID, FakeHIDDevice, createFakeClock } from 'open-auri/transport';
 import { appendEntry, recordWrite } from 'open-auri/policy';
 import { commitReport } from 'open-auri/dsp';
 import { createCableService } from '../../../src/lib/cable/service.ts';
+import {
+	memoryInflight,
+	memoryLocks,
+	type MemoryInflight,
+	type MemoryLocks
+} from './locks-fake.ts';
 import type {
 	Band,
 	CableServiceDeps,
@@ -67,14 +73,24 @@ export function memoryFlash(initial: Partial<FlashState> = {}) {
 		...initial
 	};
 	const records: number[] = [];
+	const touches: number[] = [];
 	return {
+		/** Attempts counted (before the first byte). */
 		records,
+		/** End-of-sequence times (lastWriteAt only, no counter change). */
+		touches,
 		get(): FlashState {
 			return state;
 		},
 		record(nowMs: number) {
 			records.push(nowMs);
 			state = recordWrite(state, nowMs);
+		},
+		touch(nowMs: number) {
+			touches.push(nowMs);
+			if (state.lastWriteAt === null || state.lastWriteAt < nowMs) {
+				state = { ...state, lastWriteAt: nowMs };
+			}
 		}
 	};
 }
@@ -87,6 +103,13 @@ export interface SetupOptions {
 	sessionWriteCount?: number;
 	connect?: boolean;
 	hid?: 'fake' | null;
+	/** Lock manager (default: a fresh one; share `held` to emulate tabs). `null`: no Web Locks. */
+	locks?: MemoryLocks | null;
+	/** In-flight marker storage (default: a fresh one). */
+	inflight?: MemoryInflight;
+	tabId?: string;
+	/** Initial epoch ms (default T0). */
+	now?: number;
 }
 
 export async function setup(options: SetupOptions = {}) {
@@ -95,7 +118,9 @@ export async function setup(options: SetupOptions = {}) {
 	const hid = new FakeHID({ devices: [device] });
 	const journal = memoryJournal(options.journal);
 	const flash = memoryFlash(options.flash);
-	const time = { value: T0 };
+	const locks = options.locks === undefined ? memoryLocks() : options.locks;
+	const inflight = options.inflight ?? memoryInflight();
+	const time = { value: options.now ?? T0 };
 	const levels = {
 		lastWrittenLevelDb: options.lastWrittenLevelDb ?? null,
 		sessionWriteCount: options.sessionWriteCount ?? 0
@@ -108,15 +133,19 @@ export async function setup(options: SetupOptions = {}) {
 		lastWrittenLevelDb: () => levels.lastWrittenLevelDb,
 		sessionWriteCount: () => levels.sessionWriteCount,
 		clock,
-		userActivation: () => ({ isActive: true })
+		userActivation: () => ({ isActive: true }),
+		locks,
+		inflight,
+		tabId: options.tabId
 	};
 	const service = createCableService(deps);
 	const written: CableWrittenDetail[] = [];
 	service.events.addEventListener('cable:written', (event) => {
 		written.push((event as CustomEvent<CableWrittenDetail>).detail);
 	});
+	await service.ready;
 	if (options.connect !== false) await service.connect();
-	return { clock, device, hid, journal, flash, time, levels, service, written };
+	return { clock, device, hid, journal, flash, time, levels, service, written, locks, inflight };
 }
 
 export function bytesOf(device: FakeHIDDevice): number[][] {

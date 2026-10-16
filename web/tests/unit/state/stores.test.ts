@@ -231,6 +231,25 @@ describe('core policies', () => {
 		expect(store.entries).toHaveLength(500);
 	});
 
+	it('exposes the newest ok entry (skipping interrupted/simulated) from persisted storage', () => {
+		const local = new MemoryStorage();
+		const store = own(createJournalStore({ storage: adapter(local) }));
+		expect(store.lastOk).toBeNull();
+		store.append({ ...entry(1), status: 'simulated' });
+		expect(store.lastOk).toBeNull();
+		store.append({ ...entry(2), preampDb: -4 });
+		store.append({ ...entry(3), status: 'interrupted' });
+		store.append({ ...entry(4), status: 'simulated' });
+		expect(store.lastOk).toMatchObject({ at: 2, preampDb: -4, status: 'ok' });
+		const copy = store.lastOk;
+		if (copy === null) throw new Error('missing ok entry');
+		copy.preampDb = 0;
+		expect(store.lastOk?.preampDb).toBe(-4);
+		// A new instance (reload or another tab) reads the same answer from storage.
+		const reopened = own(createJournalStore({ storage: adapter(local) }));
+		expect(reopened.lastOk).toMatchObject({ at: 2, preampDb: -4 });
+	});
+
 	it('tracks cooldown, real writes, rollover, sessions and the advisory notice', () => {
 		const local = new MemoryStorage();
 		const session = new MemoryStorage();
@@ -353,6 +372,34 @@ describe('two tabs', () => {
 		tabs.deliver();
 		expect(a.flash.state.total).toBe(2);
 		expect(a.flash.state.session).toBe(1);
+	});
+
+	it('end-of-write touch moves lastWriteAt (also in other tabs) without counting again', () => {
+		const tabs = createTabs();
+		let now = 10_000;
+		const a = own(createClientState({ ...tabs.options(0), now: () => now }));
+		const b = own(createClientState({ ...tabs.options(1), now: () => now }));
+		// Attempt counted before the first byte, then the write ends 400 ms later.
+		a.flash.recordWrite();
+		now += 400;
+		a.flash.touchWrite();
+		expect(a.flash.state).toMatchObject({ total: 1, session: 1, lastWriteAt: 10_400 });
+		expect(a.flash.state.day.count).toBe(1);
+		// A repeated touch at the same instant changes nothing and never counts.
+		a.flash.touchWrite(10_400);
+		expect(a.flash.state).toMatchObject({ total: 1, session: 1, lastWriteAt: 10_400 });
+		tabs.deliver();
+		expect(b.flash.state).toMatchObject({ total: 1, session: 0, lastWriteAt: 10_400 });
+		// 2 s after the start but only 1.6 s after the end: still waiting, in both tabs.
+		now = 12_000;
+		expect(a.flash.canWriteNow()).toEqual({ ok: false, waitMs: 400 });
+		expect(b.flash.canWriteNow()).toEqual({ ok: false, waitMs: 400 });
+		now = 12_400;
+		expect(b.flash.canWriteNow().ok).toBe(true);
+		// A touch alone from the other tab is merged as well.
+		b.flash.touchWrite(12_500);
+		tabs.deliver();
+		expect(a.flash.state).toMatchObject({ total: 1, session: 1, lastWriteAt: 12_500 });
 	});
 
 	it('syncs library/outbox changes by BroadcastChannel and rejects stale updatedAt', async () => {

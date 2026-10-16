@@ -3,9 +3,11 @@ import { isExperimentalKind } from 'open-auri/safety';
 import { parseFlashState, serializeFlashState } from 'open-auri/policy';
 import { getAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
 import {
+	CABLE_INFLIGHT_KEY,
 	CABLE_WRITTEN_EVENT,
 	NEUTRAL_CURVE,
 	createCableService,
+	writtenLevelDb,
 	type CableServiceDeps,
 	type CableWrittenDetail,
 	type QueueOutcome,
@@ -19,7 +21,7 @@ export interface ClientAppOptions {
 	now?: () => number;
 	/** Browser singleton by default; tests supply an isolated engine. */
 	audio?: AudioEngine;
-	cable?: Pick<CableServiceDeps, 'hid' | 'clock' | 'userActivation'>;
+	cable?: Pick<CableServiceDeps, 'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId'>;
 }
 
 /** Explicit factory: the layout calls this only on mount, never during SSR. */
@@ -28,7 +30,6 @@ export function createClientApp(options: ClientAppOptions = {}) {
 	const state = createClientState({ ...options.storage, now });
 	const audio = options.audio ?? getAudioEngine();
 	const toasts = createToastStore();
-	let lastWrittenLevelDb: number | null = null;
 	let pending = $state.raw<CurrentCurve | null>(null);
 	let disposed = false;
 	let started: Promise<void> | undefined;
@@ -49,17 +50,31 @@ export function createClientApp(options: ClientAppOptions = {}) {
 				// updates arrive through the flash store's storage-event subscription.
 				return parseFlashState(serializeFlashState(state.flash.state), now());
 			},
-			record: (at) => state.flash.recordWrite(at)
+			record: (at) => state.flash.recordWrite(at),
+			touch: (at) => state.flash.touchWrite(at),
+			// Inside the write lock only: adopt counters/spacing another tab persisted.
+			sync: (at) => {
+				state.flash.canWriteNow(at);
+			}
 		},
-		lastWrittenLevelDb: () => lastWrittenLevelDb,
-		sessionWriteCount: () => state.flash.state.session
+		// Persisted source: the last `ok` journal entry, so a reload or another tab keeps the
+		// loudness jump warning (journal updates from other tabs arrive via storage events).
+		lastWrittenLevelDb: () => {
+			const entry = state.journal.lastOk;
+			return entry === null ? null : writtenLevelDb(entry);
+		},
+		sessionWriteCount: () => state.flash.state.session,
+		// Same localStorage (and failure reporting) as the rest of the app state.
+		inflight: {
+			read: () => state.storage.readPersisted('local', CABLE_INFLIGHT_KEY),
+			write: (value) => state.storage.write('local', CABLE_INFLIGHT_KEY, value)
+		}
 	});
 	let cableState = $state.raw(cable.getState());
 	const unsubscribe = cable.subscribe((next) => (cableState = next));
 
 	function written(event: Event) {
 		const detail = (event as CustomEvent<CableWrittenDetail>).detail;
-		lastWrittenLevelDb = detail.levelDb;
 		// Mark exactly the sent snapshot, not an editor value changed during the write.
 		state.curve.markWritten({
 			...(pending ?? state.curve.current),
@@ -107,15 +122,19 @@ export function createClientApp(options: ClientAppOptions = {}) {
 		closeChecklist() {
 			if (!cableState.writing) pending = null;
 		},
-		/** Called by PreWriteChecklist; simulated/interrupted writes never clean the editor. */
+		/**
+		 * Called by PreWriteChecklist. Nothing to feed back: the last written level comes from the
+		 * persisted journal, and simulated/interrupted writes never clean the editor.
+		 */
 		onWriteResult(outcome: WriteOutcome | QueueOutcome) {
-			if (outcome.status === 'ok') lastWrittenLevelDb = outcome.levelDb;
+			void outcome;
 		},
 		/** Idempotent restore only: neither restore may play audio or write a curve. */
 		start() {
 			// getAudioEngine restores its singleton on creation; don't attach its stored file twice.
 			return (started ??= Promise.all([
 				state.ready,
+				cable.ready,
 				cable.restore(),
 				options.audio ? audio.restore() : undefined
 			]).then(() => undefined));

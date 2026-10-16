@@ -43,14 +43,70 @@ export interface JournalPort {
 	last(): JournalEntry | null;
 }
 
-/** Flash bookkeeping port: `get()` returns the current state, `record(nowMs)` persists one write. */
+/**
+ * Flash bookkeeping port: `get()` returns the current state (pure: it may run inside a
+ * derived), `record(nowMs)` persists one write attempt (called before the first byte).
+ */
 export interface FlashPort {
 	get(): FlashState;
 	record(nowMs: number): void;
+	/**
+	 * A write sequence that sent bytes ended at `nowMs` (ok or interrupted): advance
+	 * `lastWriteAt` to it without counting another write, so the 2 s spacing is measured from
+	 * the end of the write, not from its start.
+	 */
+	touch(nowMs: number): void;
+	/**
+	 * Optional: re-reads state other tabs persisted. Called inside the write lock, right before
+	 * the second checklist evaluation (never from a derived).
+	 */
+	sync?(nowMs: number): void;
 }
 
 export interface UserActivationLike {
 	readonly isActive: boolean;
+}
+
+/** A granted Web Lock (only its name is read). */
+export interface WriteLock {
+	readonly name?: string;
+}
+
+/**
+ * Subset of the Web Locks API (`navigator.locks`) used for cross-tab write exclusion.
+ * `request` is always called with `{ ifAvailable: true }`: the callback receives `null`
+ * when another tab holds the lock, and the lock is held until the callback settles.
+ */
+export interface WriteLockManager {
+	request<T>(
+		name: string,
+		options: { ifAvailable: true },
+		callback: (lock: WriteLock | null) => Promise<T>
+	): Promise<T>;
+	query?(): Promise<{ held?: readonly WriteLock[] }>;
+}
+
+/**
+ * Persisted in-flight write marker port (one `localStorage` key shared by every tab).
+ * `write(null)` removes it; `write` returns false when the value could not be persisted.
+ */
+export interface InflightPort {
+	read(): string | null;
+	write(value: string | null): boolean;
+}
+
+/** In-flight marker: written before any I/O, removed when the write settles. */
+export interface InflightMarker {
+	/** Epoch ms when the marker was written (or the current device sequence started). */
+	at: number;
+	crc: number;
+	name: string;
+	preampDb: number;
+	bands: Band[];
+	/** Label of the device being written. */
+	device: string;
+	/** Service instance (tab/page load) that owns the write. */
+	tabId: string;
 }
 
 export interface CableServiceDeps {
@@ -63,7 +119,10 @@ export interface CableServiceDeps {
 	flash: FlashPort;
 	/** Epoch milliseconds (integer). */
 	now(): number;
-	/** `levelDb` of the last curve actually written to the cable, if known. */
+	/**
+	 * `levelDb` of the last curve actually written to the cable, if known. Derive it from the
+	 * persisted journal (last `ok` entry, `writtenLevelDb`) so it survives tabs and reloads.
+	 */
 	lastWrittenLevelDb(): number | null;
 	/** Real writes in this browser session. */
 	sessionWriteCount(): number;
@@ -71,6 +130,18 @@ export interface CableServiceDeps {
 	clock?: Clock;
 	/** Reads `navigator.userActivation`; `null` when unavailable. Defaults to the browser's. */
 	userActivation?: () => UserActivationLike | null;
+	/**
+	 * Cross-tab write lock. `undefined`: `navigator.locks` in a browser window (none elsewhere).
+	 * `null`: no Web Locks; the persisted in-flight marker is then the cross-tab guard.
+	 */
+	locks?: WriteLockManager | null;
+	/**
+	 * In-flight marker storage. `undefined`: `localStorage` key `oa.cable.inflight` in a browser
+	 * window (none elsewhere). `null`: no marker.
+	 */
+	inflight?: InflightPort | null;
+	/** Identifies this service instance in the in-flight marker; random by default. */
+	tabId?: string;
 }
 
 export type CableMode = 'real' | 'simulated';
@@ -218,7 +289,7 @@ export interface Written {
 	entry: JournalEntry | null;
 	deviceLabel: string;
 	crc: number;
-	/** `levelDb` of the written curve (feed it back as `lastWrittenLevelDb` after an `ok`). */
+	/** `levelDb` of the written curve (the journal entry of an `ok` write carries it implicitly). */
 	levelDb: number | null;
 }
 

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
-import { NEUTRAL_CURVE } from '../../../src/lib/cable/index.ts';
+import { levelDb } from 'open-auri/safety';
+import { CABLE_INFLIGHT_KEY, NEUTRAL_CURVE } from '../../../src/lib/cable/index.ts';
 import { createClientApp, createAppContext, type ClientApp } from '../../../src/lib/app/index.ts';
-import { fakeAppOptions } from './fakes.ts';
+import { MemoryStorage, fakeAppOptions } from './fakes.ts';
 
 const apps: ClientApp[] = [];
 afterEach(() => {
@@ -128,6 +129,86 @@ describe('browser app wiring with fake persistence and HID', () => {
 		expect(app.state.curve.lastWritten?.bands).toEqual(NEUTRO.bands);
 		expect(app.state.curve.current.bands).toEqual(PADRAO_AURI.bands);
 		expect(app.state.curve.dirty).toBe(true);
+	});
+
+	test('the last written level comes from the persisted journal: a reload keeps the jump warning', async () => {
+		const fake = fakeAppOptions();
+		const first = createClientApp(fake.options);
+		apps.push(first);
+		await first.start();
+		await first.cable.connect();
+		const quiet = { bands: NEUTRAL_CURVE.bands, preampDb: -4, experimental: false, confirmations };
+		const outcome = await first.cable.write({
+			...quiet,
+			name: 'Quiet',
+			gesture: first.cable.createGesture(click)
+		});
+		first.onWriteResult(outcome);
+		expect(outcome.status).toBe('ok');
+		expect(first.state.journal.lastOk?.preampDb).toBe(-4);
+		const louder = { ...quiet, preampDb: -0.5 };
+		fake.time.value += 3000;
+		expect(first.cable.checklist(louder).loudness.reasons).toContain('jump');
+		first.dispose();
+		apps.splice(apps.indexOf(first), 1);
+
+		// Same localStorage, fresh sessionStorage: a reload or a second tab.
+		const reloaded = createClientApp({
+			...fake.options,
+			storage: { ...fake.options.storage, session: new MemoryStorage() }
+		});
+		apps.push(reloaded);
+		await reloaded.start();
+		const checklist = reloaded.cable.checklist(louder);
+		expect(checklist.loudness.reasons).toContain('jump');
+		expect(checklist.loudness.reasons).toContain('unknown-state');
+		expect(checklist.loudness.deltaDb).toBeCloseTo(
+			levelDb(NEUTRAL_CURVE.bands, -0.5) - levelDb(NEUTRAL_CURVE.bands, -4),
+			6
+		);
+		// A simulated or interrupted entry after it does not replace the last real level.
+		reloaded.state.journal.append({
+			schema: 1,
+			at: fake.time.value + 1,
+			name: 'Rehearsal',
+			crc: 0x4fff,
+			preampDb: -0.5,
+			bands: NEUTRAL_CURVE.bands.map((band) => ({ ...band })),
+			status: 'simulated',
+			device: 'USB DSP Audio (simulado)'
+		});
+		expect(reloaded.cable.checklist(louder).loudness.reasons).toContain('jump');
+	});
+
+	test('a marker left by a tab closed mid-write becomes an interrupted entry and rescue on start', async () => {
+		const fake = fakeAppOptions();
+		fake.local.setItem(
+			CABLE_INFLIGHT_KEY,
+			JSON.stringify({
+				at: fake.time.value - 60_000,
+				crc: 0x4fff,
+				name: 'Neutro',
+				preampDb: NEUTRAL_CURVE.preampDb,
+				bands: NEUTRAL_CURVE.bands,
+				device: 'USB DSP Audio',
+				tabId: 'closed-tab'
+			})
+		);
+		const app = createClientApp(fake.options);
+		apps.push(app);
+		await app.start();
+		expect(app.state.journal.entries.at(-1)).toMatchObject({
+			status: 'interrupted',
+			at: fake.time.value - 60_000,
+			device: 'USB DSP Audio'
+		});
+		expect(app.cableState.rescue).toEqual({
+			at: fake.time.value - 60_000,
+			deviceLabel: 'USB DSP Audio',
+			reportsSent: null
+		});
+		expect(fake.local.getItem(CABLE_INFLIGHT_KEY)).toBeNull();
+		expect(fake.device.attempts).toBe(0);
 	});
 
 	test('simulated writes never clean the editor or increment real flash counters', async () => {

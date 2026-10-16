@@ -73,7 +73,13 @@ test('device selection handles no primary, a selected primary and an invalid cha
 	const fake = cableUi({ devices: [first, second], deviceLabels: ['Left', 'Right'] });
 	const screen = await render(CableStatus, { service: fake.service });
 	const select = screen.container.querySelector<HTMLSelectElement>('select')!;
-	expect(select.value).toBe('0');
+	// No target yet (e.g. several restored cables): a disabled placeholder, nothing preselected.
+	expect(select.value).toBe('');
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_status_disconnected());
+	expect(fake.selectDevice).not.toHaveBeenCalled();
+	// Choosing the placeholder never selects a cable.
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	expect(fake.selectDevice).not.toHaveBeenCalled();
 	select.value = '1';
 	select.dispatchEvent(new Event('change', { bubbles: true }));
 	expect(fake.selectDevice).toHaveBeenCalledExactlyOnceWith(second);
@@ -88,11 +94,35 @@ test('device selection handles no primary, a selected primary and an invalid cha
 	fake.publish({ device: second, writing: true });
 	await expect.element(page.getByRole('combobox')).toBeDisabled();
 	expect(select.value).toBe('1');
+	// A target that is not among the devices is never shown as one of them.
 	fake.publish({ device: new FakeHIDDevice(), writing: false });
 	await tick();
-	expect(select.value).toBe('0');
+	expect(select.value).toBe('');
 	fake.publish({ devices: [first], deviceLabels: ['Left'] });
 	await tick();
+	expect(page.getByRole('combobox').elements()).toHaveLength(0);
+});
+
+test('a single connected cable with no target still offers the selector', async () => {
+	const only = new FakeHIDDevice();
+	const fake = cableUi({
+		connection: 'connected',
+		devices: [only],
+		deviceLabels: ['Only cable'],
+		device: null,
+		deviceLabel: null
+	});
+	await render(CableStatus, { service: fake.service });
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_status_no_target());
+	const select = page.getByRole('combobox', { name: m.cable_select_device() });
+	await expect.element(select).toBeVisible();
+	expect((select.element() as HTMLSelectElement).value).toBe('');
+	await select.selectOptions('0');
+	expect(fake.selectDevice).toHaveBeenCalledExactlyOnceWith(only);
+	fake.publish({ device: only, deviceLabel: 'Only cable' });
+	await expect
+		.element(page.getByRole('status'))
+		.toHaveTextContent(m.cable_status_connected({ device: 'Only cable' }));
 	expect(page.getByRole('combobox').elements()).toHaveLength(0);
 });
 
