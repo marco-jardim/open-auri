@@ -25,6 +25,10 @@
 // out-of-range parameters, a positive preamp, coefficients that do not fit
 // int32, and sections whose *quantized* poles are not strictly inside the unit
 // circle.
+//
+// Every entry point that takes a band list first copies it with snapshotBands()
+// (one read per field), so validation and the encoded bytes always see the same
+// values, even when the caller passes getters or Proxies.
 
 /**
  * @typedef {{kind: 'PK' | 'LS' | 'HS', freqHz: number, gainDb: number, qFactor: number}} GainBand
@@ -236,6 +240,63 @@ export function designSection(band, sampleRate = SAMPLE_RATE) {
   }
 }
 
+// --- Snapshot ---------------------------------------------------------------
+
+/**
+ * One-read copy of a band list, taken before any check, so every later check and
+ * the encoded bytes see the same values whatever the caller passes (getters,
+ * Proxies, objects mutated in between).
+ *
+ * Reads `bands.length` once, then each index 0..length−1 once, in order, and of
+ * each element `kind`, `freqHz`, `gainDb` and `qFactor` exactly once each, in
+ * that order, even for OFF. Each element becomes a new frozen plain object:
+ * `{kind: 'OFF'}` for OFF, otherwise `kind` plus the other three fields as read,
+ * omitting those that read as `undefined`. Nothing is coerced or validated
+ * here: the codec rejects invalid values.
+ *
+ * Throws a TypeError for a non-array (`bands must be an array`), for a hole
+ * (`band <i>: missing (hole in a sparse array)`; holes are never skipped) and for
+ * a non-object element (`band <i>: not an object`, the codec's own message).
+ * With `expectedLength`, a different length throws `RangeError('expected <n>
+ * bands')` before any element is read. Errors thrown by getters or Proxy traps
+ * propagate unchanged.
+ * @param {unknown} bands
+ * @param {number} [expectedLength]
+ * @returns {readonly Readonly<Band>[]} A frozen array of frozen bands.
+ */
+export function snapshotBands(bands, expectedLength) {
+  if (!Array.isArray(bands)) throw new TypeError('bands must be an array');
+  const length = bands.length;
+  if (expectedLength !== undefined && length !== expectedLength) {
+    throw new RangeError(`expected ${expectedLength} bands`);
+  }
+  if (!(Number.isSafeInteger(length) && length >= 0)) {
+    throw new RangeError(`invalid band count ${String(length)}`);
+  }
+  /** @type {Readonly<Band>[]} */
+  const copies = [];
+  for (let index = 0; index < length; index++) {
+    if (!(index in bands)) throw new TypeError(`band ${index}: missing (hole in a sparse array)`);
+    /** @type {unknown} */
+    const band = bands[index];
+    if (band === null || typeof band !== 'object') {
+      throw new TypeError(`band ${index}: not an object`);
+    }
+    const { kind, freqHz, gainDb, qFactor } = /** @type {Record<string, unknown>} */ (band);
+    if (kind === 'OFF') {
+      copies.push(Object.freeze({ kind: 'OFF' }));
+      continue;
+    }
+    /** @type {Record<string, unknown>} */
+    const copy = { kind };
+    if (freqHz !== undefined) copy.freqHz = freqHz;
+    if (gainDb !== undefined) copy.gainDb = gainDb;
+    if (qFactor !== undefined) copy.qFactor = qFactor;
+    copies.push(/** @type {Readonly<Band>} */ (/** @type {unknown} */ (Object.freeze(copy))));
+  }
+  return Object.freeze(copies);
+}
+
 // --- Validation -------------------------------------------------------------
 
 /**
@@ -346,38 +407,73 @@ function appendInt32LE(buffer, value) {
  * Builds the 220-byte payload for 10 bands and a preamp. Bands are written in
  * the order given: keep cuts before boosts (see docs/protocol-0xcb.md), the
  * ordering the reference uses to avoid internal clipping.
+ *
+ * The bands are copied once with {@link snapshotBands} before anything else, so
+ * every check and every byte comes from the same read of each field. Throws a
+ * RangeError for a non-array or a count other than 10, a TypeError for holes,
+ * non-object elements and unknown kinds, and a RangeError for invalid values;
+ * it never returns anything but a 220-byte payload.
  * @param {readonly Band[]} eqBands
- * @param {number} [preampDb]
+ * @param {number} [preampDb] Must be a finite number <= 0 (nothing is coerced).
+ * @returns {number[]}
  */
 export function encodePayload(eqBands, preampDb = 0) {
-  if (!Array.isArray(eqBands) || eqBands.length !== BAND_COUNT) {
-    throw new RangeError(`expected ${BAND_COUNT} bands`);
-  }
-  eqBands.forEach(checkBand);
+  if (!Array.isArray(eqBands)) throw new RangeError(`expected ${BAND_COUNT} bands`);
+  const bands = snapshotBands(eqBands, BAND_COUNT);
+  for (let index = 0; index < BAND_COUNT; index++) checkBand(bands[index], index);
   const payload = [...PREAMBLE];
   appendInt32LE(payload, preampWord(preampDb));
-  eqBands.forEach((band, index) => {
-    for (const word of encodeSection(designSection(band), index)) appendInt32LE(payload, word);
-  });
+  for (let index = 0; index < BAND_COUNT; index++) {
+    for (const word of encodeSection(designSection(bands[index]), index)) {
+      appendInt32LE(payload, word);
+    }
+  }
   const checksum = crc16Ccitt(payload);
   payload.push(checksum & 0xff, checksum >>> 8);
   return payload;
 }
 
 /**
- * Splits the payload into the 9 HID reports: byte 0 is the report index,
- * bytes 1..30 carry 30 bytes of the payload.
+ * Splits an already encoded payload into the 9 HID reports: byte 0 is the report
+ * index, bytes 1..30 carry 30 bytes of the payload (the last report is
+ * zero-padded). Throws a RangeError unless `payload` holds exactly 220 bytes
+ * (integers 0..255) whose last two are the little-endian CRC-16 of the rest, so
+ * a transport can send exactly the bytes a gate approved, without re-encoding.
+ * @param {ArrayLike<number>} payload
+ * @returns {Uint8Array[]}
+ */
+export function reportsFromPayload(payload) {
+  if (payload === null || typeof payload !== 'object' || payload.length !== PAYLOAD_SIZE) {
+    throw new RangeError(`payload must be ${PAYLOAD_SIZE} bytes`);
+  }
+  const bytes = new Uint8Array(PAYLOAD_SIZE);
+  for (let index = 0; index < PAYLOAD_SIZE; index++) {
+    const byte = payload[index];
+    if (!(Number.isInteger(byte) && byte >= 0 && byte <= 0xff)) {
+      throw new RangeError(`payload byte ${index} is not a byte: ${byte}`);
+    }
+    bytes[index] = byte;
+  }
+  const crc = bytes[PAYLOAD_SIZE - 2] | (bytes[PAYLOAD_SIZE - 1] << 8);
+  if (crc !== crc16Ccitt(bytes.subarray(0, PAYLOAD_SIZE - 2))) {
+    throw new RangeError('payload CRC mismatch');
+  }
+  return Array.from({ length: REPORT_COUNT }, (_, index) => {
+    const report = new Uint8Array(REPORT_SIZE);
+    report[0] = index;
+    report.set(bytes.subarray(index * REPORT_DATA_SIZE, (index + 1) * REPORT_DATA_SIZE), 1);
+    return report;
+  });
+}
+
+/**
+ * The 9 HID reports for 10 bands and a preamp:
+ * `reportsFromPayload(encodePayload(eqBands, preampDb))`.
  * @param {readonly Band[]} eqBands
  * @param {number} [preampDb]
  */
 export function encodeReports(eqBands, preampDb) {
-  const payload = encodePayload(eqBands, preampDb);
-  return Array.from({ length: REPORT_COUNT }, (_, index) => {
-    const report = new Uint8Array(REPORT_SIZE);
-    report[0] = index;
-    report.set(payload.slice(index * REPORT_DATA_SIZE, (index + 1) * REPORT_DATA_SIZE), 1);
-    return report;
-  });
+  return reportsFromPayload(encodePayload(eqBands, preampDb));
 }
 
 /**

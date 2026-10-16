@@ -9,7 +9,7 @@
 //
 // Pure ESM: no DOM, no Node-only APIs.
 
-import { designSection, encodeSection, preampWord, SAMPLE_RATE } from './eq0xcb.mjs';
+import { designSection, encodeSection, preampWord, SAMPLE_RATE, snapshotBands } from './eq0xcb.mjs';
 
 /**
  * @typedef {import('./eq0xcb.mjs').Band} Band
@@ -121,13 +121,16 @@ export function quantizedPreampDb(preampDb) {
 /**
  * Effective level (dB) of `bands` with `preampDb`: Q23 preamp plus the mean, over
  * MEAN_FREQUENCIES, of the summed Q27 section gains. Throws on bands or preamps
- * the codec cannot encode.
+ * the codec cannot encode. Any number of bands is accepted; they are copied
+ * once with `snapshotBands` (one read per field), so a non-array, a hole in a
+ * sparse array or a non-object element throws a TypeError (holes are never
+ * silently skipped).
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @returns {number}
  */
 export function levelDb(bands, preampDb) {
-  const sections = bands.map(quantizedSection);
+  const sections = snapshotBands(bands).map(quantizedSection);
   return (
     quantizedPreampDb(preampDb) +
     MEAN_FREQUENCIES.reduce(

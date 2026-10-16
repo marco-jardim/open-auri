@@ -60,24 +60,63 @@ function referenceCode(r) {
 }
 const isPolicyCode = (code) => code.startsWith('k:') || code.startsWith('d7:');
 
-/** Metrics without `grid`, with section reasons mapped to the reference strings. */
+/**
+ * Metrics without `grid`, `bands` and `payload` (not in the reference), with
+ * section reasons mapped to the reference strings.
+ */
 function referenceMetrics(metrics) {
-  const { grid, ...rest } = metrics;
+  const { grid, bands, payload, ...rest } = metrics;
   assert.ok(grid === 'full' || grid === 'drag');
   if (!rest.sections) return rest;
+  assert.ok(Object.isFrozen(bands) && bands.length === 10);
+  assert.equal(payload.length, 220);
+  assert.ok(payload instanceof Uint8Array);
   return {
     ...rest,
     sections: rest.sections.map((s) => ({ ...s, reasons: s.reasons.map((r) => r.code) })),
   };
 }
 
-/** Asserts full-mode bit-identical parity with design/analysis/gate.mjs. */
+const SCAN_PEAKS = ['internalAudible', 'outputAudible', 'outputFull'];
+/** Edge-refinement exceptions to exact parity (see GRID_INTERVALS in gate.mjs). */
+const parityStats = { cases: 0, raisedCases: 0, raisedPeaks: 0, maxDeltaDb: 0 };
+
+/**
+ * Asserts full-mode parity with design/analysis/gate.mjs: bit-identical metrics
+ * and reasons, except the documented edge refinement, which may only raise a
+ * scan peak (src ≥ reference, never laxer); such peaks are counted in
+ * `parityStats` and then compared on the remaining metrics.
+ */
 function assertParity(bands, preampDb, label) {
   const mine = gate(bands, preampDb, { experimental: true });
   const theirs = reference.gate(bands, preampDb);
   assert.equal(mine.metrics.grid, 'full');
-  assert.deepEqual(referenceMetrics(mine.metrics), theirs.metrics, label);
+  const metrics = referenceMetrics(mine.metrics);
+  parityStats.cases++;
+  let raised = 0;
+  const adopt = (peak, theirsPeak) => {
+    assert.ok(peak.db >= theirsPeak.db, `${label}: src ${peak.db} < reference ${theirsPeak.db}`);
+    if (peak.db === theirsPeak.db) return peak;
+    raised++;
+    parityStats.maxDeltaDb = Math.max(parityStats.maxDeltaDb, peak.db - theirsPeak.db);
+    return theirsPeak;
+  };
+  if (metrics.prefixAudible) {
+    metrics.prefixAudible = metrics.prefixAudible.map((p, i) =>
+      adopt(p, theirs.metrics.prefixAudible[i]),
+    );
+    for (const key of SCAN_PEAKS) metrics[key] = adopt(metrics[key], theirs.metrics[key]);
+  }
+  assert.deepEqual(metrics, theirs.metrics, label);
   const core = mine.reasons.filter((r) => !isPolicyCode(r.code));
+  if (raised > 0) {
+    parityStats.raisedCases++;
+    parityStats.raisedPeaks += raised;
+    // Stricter only: every reference reason is still reported.
+    const mineCodes = core.map(referenceCode);
+    for (const code of theirs.reasons) assert.ok(mineCodes.includes(code), `${label}: ${code}`);
+    return { mine, theirs };
+  }
   assert.deepEqual(core.map(referenceCode), theirs.reasons, label);
   assert.equal(core.length === 0, theirs.ok, label);
   assert.equal(mine.ok, theirs.ok && core.length === mine.reasons.length, label);
@@ -277,8 +316,10 @@ test('HS/LP/HP need experimental; unknown kinds and non-objects are always refus
   const unknown = gateForWrite(first({ kind: 'XX' }), -0.5, { experimental: true });
   assert.deepEqual(codes(unknown), ['k:kind-not-allowed', 'f:codec']);
   assert.match(unknown.reasons[1].value, /unknown filter kind/);
+  // A non-object element cannot be snapshotted: f:codec alone (the snapshot
+  // happens before the kind checks, which only ever see the snapshot).
   const notObject = gateForWrite([null, ...NEUTRAL_BANDS.slice(1)], -0.5);
-  assert.deepEqual(codes(notObject), ['k:kind-not-allowed', 'f:codec']);
+  assert.deepEqual(notObject.reasons, [{ code: 'f:codec', value: 'band 0: not an object' }]);
   assert.deepEqual(notObject.metrics, { thresholds: THRESHOLDS, grid: 'full' });
   const notArray = gateForWrite('nope', -0.5);
   assert.deepEqual(codes(notArray), ['f:codec']);
@@ -371,10 +412,13 @@ test('NaN, ±Infinity, −0 and subnormal inputs never pass by accident', () => 
     assert.ok(!gateForWrite(first({ ...base, gainDb: value }), -0.5).ok, `gainDb=${value}`);
     assert.ok(!gateForWrite(first({ ...base, gainDb: value, qFactor: 5 }), -0.5).ok);
   }
-  // −0 and ±subnormal gains design exactly the 0 dB section: same verdict and metrics.
+  // −0 and ±subnormal gains design exactly the 0 dB section: same verdict and
+  // metrics (and bytes); only the snapshot in metrics.bands keeps the gain as given.
   for (const value of [-0, 5e-324, -5e-324]) {
     const result = gateForWrite(first({ ...base, gainDb: value }), -0.5);
-    assert.deepEqual(result, reference0, `gainDb=${value}`);
+    assert.ok(Object.is(result.metrics.bands[0].gainDb, value));
+    const withoutBands = (r) => ({ ...r, metrics: { ...r.metrics, bands: undefined } });
+    assert.deepEqual(withoutBands(result), withoutBands(reference0), `gainDb=${value}`);
   }
   for (const value of [NaN, Infinity, -Infinity, -0, 0, 5e-324, -5e-324, -1e-300]) {
     const result = gateForWrite(NEUTRAL_BANDS, value);
@@ -414,17 +458,25 @@ test('parity: 126 analytic single-section cases (analysis, auto preamp, full gat
   assert.ok(encodable > 100);
 });
 
-test('parity: 11 presets, reversed and sorted by frequency (full gate)', () => {
+test('parity: 11 presets, reversed and sorted by frequency (full gate)', (t) => {
   for (const [id, p] of presets) {
-    assertParity(p.eqBands, p.preampDb, id);
+    const { mine } = assertParity(p.eqBands, p.preampDb, id);
+    assert.ok(mine.ok, id); // edge refinement does not make any official preset fail
     assertParity([...p.eqBands].reverse(), p.preampDb, `${id} reversed`);
     assertParity(byFrequency(p.eqBands), p.preampDb, `${id} sorted`);
   }
   assertParity(counterexample, -0.5, 'counterexample');
-  assertParity(NEUTRAL_BANDS, -0.5, 'neutro');
+  assert.ok(assertParity(NEUTRAL_BANDS, -0.5, 'neutro').mine.ok);
   assertParity(NEUTRAL_BANDS, 0, 'neutro @ 0');
   assertParity(NEUTRAL_BANDS, 0.1, 'neutro @ 0.1');
   assertParity(first({ kind: 'XX' }), -0.5, 'unknown kind');
+  // Sanity bound on how much stricter the edge refinement may be on this corpus.
+  assert.ok(parityStats.maxDeltaDb <= 1e-6, String(parityStats.maxDeltaDb));
+  t.diagnostic(
+    `parity corpus so far: ${parityStats.cases} cases, ${parityStats.raisedCases} with an ` +
+      `edge-refined peak (${parityStats.raisedPeaks} peaks), max src − reference ` +
+      `${parityStats.maxDeltaDb} dB`,
+  );
 });
 
 test('parity: sectionPeaks and poleRadius on hand-made sections (degenerate branches)', () => {
@@ -509,42 +561,63 @@ test('drag tracks full on a sampled corpus; gateForWrite always runs full', (t) 
   t.diagnostic(`drag vs full: ${compared} curves, worst laxness ${worst} dB, same verdicts`);
 });
 
-test('full prevails: a curve that drag approves and full (gateForWrite) rejects', (t) => {
-  // A resonant LP whose peak lies between the last drag grid point (≈19932.6 Hz)
-  // and the 20 kHz edge: the coarse scan sees a monotone rise, does not refine,
-  // and reports the edge value; the full grid brackets and refines the peak.
-  // (LP Q 2 peaks at ≈0.95 × fc here: fc 20000 → 19024 Hz, fc 21000 → 20007 Hz.)
-  const lpPeakHz = (freqHz) =>
-    sectionAnalysis({ kind: 'LP', freqHz, qFactor: 2 }).fullPeak.frequencyHz;
+// LP Q 2 peaks at ≈0.95 × fc here (fc 20000 → 19024 Hz, fc 21000 → 20007 Hz).
+const lpPeakHz = (freqHz) =>
+  sectionAnalysis({ kind: 'LP', freqHz, qFactor: 2 }).fullPeak.frequencyHz;
+/** Smallest fc (0.25 Hz steps from 20900) whose LP Q 2 peak lies in [lo, hi]. */
+function lpWithPeakIn(lo, hi) {
   let fcHz = 20900;
-  while (fcHz < 21000 && !(lpPeakHz(fcHz) >= 19975 && lpPeakHz(fcHz) <= 19995)) fcHz += 2;
-  assert.ok(lpPeakHz(fcHz) >= 19975 && lpPeakHz(fcHz) <= 19995);
+  while (fcHz < 21200 && !(lpPeakHz(fcHz) >= lo && lpPeakHz(fcHz) <= hi)) fcHz += 0.25;
+  assert.ok(lpPeakHz(fcHz) >= lo && lpPeakHz(fcHz) <= hi, String(fcHz));
+  return fcHz;
+}
+
+test('edge refinement: drag no longer misses a peak next to the 20 kHz edge', (t) => {
+  // Contract change: drag used to report the 20 kHz edge value for a resonant
+  // LP peaking between its last grid point (≈19932.6 Hz) and 20 kHz, approving
+  // a curve full rejected. Both modes now refine the edge intervals.
+  const fcHz = lpWithPeakIn(19975, 19995);
   const curve = [
     { kind: 'PK', freqHz: 1000, gainDb: -1, qFactor: 1 },
     { kind: 'LP', freqHz: fcHz, qFactor: 2 },
     ...Array.from({ length: 8 }, () => OFF),
   ];
   const opts = { experimental: true };
-  const probeFull = gate(curve, -6, opts);
-  const probeDrag = gate(curve, -6, { ...opts, grid: 'drag' });
-  assert.equal(probeDrag.metrics.outputAudible.frequencyHz, 20000);
-  assert.ok(probeFull.metrics.outputAudible.frequencyHz < 20000);
-  const relDrag = probeDrag.metrics.outputAudible.db - probeDrag.metrics.quantizedPreampDb;
-  // Largest Q23 preamp word for which drag still approves.
-  const word = Math.floor(10 ** ((THRESHOLDS.outputAudibleDb - relDrag) / 20) * 2 ** 23) + 3;
-  let preampDb = 0;
-  let drag = probeDrag;
-  for (let i = 0; i < 10; i++) {
-    preampDb = 20 * Math.log10((word - i) / 2 ** 23);
-    drag = gate(curve, preampDb, { ...opts, grid: 'drag' });
-    if (drag.ok) break;
-  }
-  assert.ok(drag.ok, JSON.stringify(drag.reasons));
-  const full = gateForWrite(curve, preampDb, opts);
-  assert.deepEqual(codes(full), ['e:output-audible']);
-  assert.ok(!gate(curve, preampDb, opts).ok);
-  const laxness = full.metrics.outputAudible.db - drag.metrics.outputAudible.db;
-  t.diagnostic(`LP ${fcHz} Hz Q 2, preamp ${preampDb} dB: drag laxer by ${laxness} dB`);
+  const full = gateForWrite(curve, -6, opts);
+  const drag = gate(curve, -6, { ...opts, grid: 'drag' });
+  assert.ok(drag.metrics.outputAudible.frequencyHz < 20000);
+  assert.ok(full.metrics.outputAudible.frequencyHz < 20000);
+  const gap = Math.abs(full.metrics.outputAudible.db - drag.metrics.outputAudible.db);
+  assert.ok(gap <= 1e-9, String(gap));
+  // At the largest Q23 preamp full approves, drag agrees; one word above, both refuse.
+  const rel = full.metrics.outputAudible.db - full.metrics.quantizedPreampDb;
+  let word = Math.floor(10 ** ((THRESHOLDS.outputAudibleDb - rel) / 20) * 2 ** 23) + 3;
+  while (!gateForWrite(curve, 20 * Math.log10(word / 2 ** 23), opts).ok) word--;
+  const atEdge = 20 * Math.log10(word / 2 ** 23);
+  const above = 20 * Math.log10((word + 1) / 2 ** 23);
+  assert.ok(gate(curve, atEdge, { ...opts, grid: 'drag' }).ok);
+  assert.deepEqual(codes(gateForWrite(curve, above, opts)), ['e:output-audible']);
+  assert.deepEqual(codes(gate(curve, above, { ...opts, grid: 'drag' })), ['e:output-audible']);
+  t.diagnostic(`LP ${fcHz} Hz Q 2: drag and full peaks ${gap} dB apart`);
+});
+
+test('edge refinement: a peak in the last full-grid interval is found (stricter)', (t) => {
+  // Two identical LPs: the cascade peaks exactly where one LP does.
+  const lastGridHz = 20 * 1000 ** (16383 / 16384); // ≈19991.57 Hz
+  const fcHz = lpWithPeakIn(19997.5, 19999.5);
+  const lp = { kind: 'LP', freqHz: fcHz, qFactor: 2 };
+  const curve = [lp, lp, ...Array.from({ length: 8 }, () => OFF)];
+  const mine = gateForWrite(curve, -6, { experimental: true });
+  const theirs = reference.gate(curve, -6);
+  // The reference sees a monotone rise on its grid and reports the edge value.
+  assert.equal(theirs.metrics.outputAudible.frequencyHz, 20000);
+  const peakHz = mine.metrics.outputAudible.frequencyHz;
+  assert.ok(peakHz > lastGridHz && peakHz < 20000, String(peakHz));
+  const delta = mine.metrics.outputAudible.db - theirs.metrics.outputAudible.db;
+  assert.ok(delta > 0 && delta < 1e-3, String(delta));
+  assert.ok(mine.metrics.internalAudible.db >= theirs.metrics.internalAudible.db);
+  assert.ok(mine.metrics.outputFull.db >= theirs.metrics.outputFull.db);
+  t.diagnostic(`LP ${fcHz} Hz ×2: src peak ${peakHz} Hz, ${delta} dB above the reference`);
 });
 
 test('timing: drag vs full for a 10-band PK curve', (t) => {
@@ -594,11 +667,15 @@ test('autoPreamp: highest 0.1 dB preamp accepted by gateForWrite', () => {
 
 // --- Properties ------------------------------------------------------------------
 
-/** gate.ok ⇒ the codec accepts the curve and every quantized |coef| is within limit a. */
+/**
+ * gate.ok ⇒ the codec accepts the curve, the gate's payload is those bytes and
+ * every quantized |coef| is within limit a. Returns whether the gate accepted.
+ */
 function assertAcceptedIsEncodable(bands, preampDb, opts) {
   const result = gateForWrite(bands, preampDb, opts);
-  if (!result.ok) return;
+  if (!result.ok) return false;
   const payload = encodePayload(bands, preampDb);
+  assert.deepEqual([...result.metrics.payload], payload);
   const view = new DataView(Uint8Array.from(payload).buffer);
   for (let band = 0; band < 10; band++) {
     for (let i = 0; i < 5; i++) {
@@ -607,7 +684,12 @@ function assertAcceptedIsEncodable(bands, preampDb, opts) {
       assert.ok(Math.abs(word / 2 ** 27) <= THRESHOLDS.coefficientAbs[i]);
     }
   }
+  return true;
 }
+
+// Minimum accepted curves for the 10-band property (seed 7, 40 runs); set
+// from the observed count so the property can never pass vacuously.
+const ACCEPTED_MINIMUM_10_BAND = 10;
 
 test('property: single section with auto preamp, gate.ok ⇒ encodable within limit a', () => {
   const singleArb = fc.record({
@@ -630,7 +712,7 @@ test('property: single section with auto preamp, gate.ok ⇒ encodable within li
   assert.ok(accepted > 50);
 });
 
-test('property: 10-band curves, gate.ok ⇒ encodable within limit a', () => {
+test('property: 10-band curves, gate.ok ⇒ encodable within limit a', (t) => {
   const softArb = fc.array(
     fc.oneof(
       fc.constant(OFF),
@@ -643,12 +725,201 @@ test('property: 10-band curves, gate.ok ⇒ encodable within limit a', () => {
     ),
     { minLength: 10, maxLength: 10 },
   );
+  // Count the accepted curves: the implication is only exercised on those.
+  let accepted = 0;
   fc.assert(
     fc.property(softArb, fc.integer({ min: -255, max: -5 }), (bands, tenths) => {
-      assertAcceptedIsEncodable(bands, tenths / 10, {});
+      if (assertAcceptedIsEncodable(bands, tenths / 10, {})) accepted++;
     }),
     { numRuns: 40, seed: 7 },
   );
+  assert.ok(accepted >= ACCEPTED_MINIMUM_10_BAND, `only ${accepted} of 40 curves accepted`);
+  t.diagnostic(`10-band property: ${accepted} of 40 curves accepted`);
+});
+
+// --- C1: one read per band field ----------------------------------------------------
+
+const offTail = () => Array.from({ length: 9 }, () => ({ kind: 'OFF' }));
+
+test('C1: a getter gain is read once; D7 cannot be bypassed', () => {
+  // Reviewer repro: cut on the first read, +3 dB at 18 kHz afterwards.
+  let reads = 0;
+  const cutFirst = {
+    kind: 'PK',
+    freqHz: 18000,
+    qFactor: 1,
+    get gainDb() {
+      return reads++ === 0 ? -1 : 3;
+    },
+  };
+  const verdict = gateForWrite([cutFirst, ...offTail()], -4);
+  assert.equal(reads, 1);
+  assert.ok(verdict.ok, JSON.stringify(verdict.reasons));
+  const seen = { kind: 'PK', freqHz: 18000, gainDb: -1, qFactor: 1 };
+  assert.deepEqual(verdict.metrics.bands[0], seen);
+  assert.ok(Object.isFrozen(verdict.metrics.bands[0]));
+  // What was approved is the −1 dB cut, byte for byte; never the +3 dB boost.
+  assert.deepEqual([...verdict.metrics.payload], encodePayload([seen, ...offTail()], -4));
+  assert.notDeepEqual(
+    [...verdict.metrics.payload],
+    encodePayload([{ ...seen, gainDb: 3 }, ...offTail()], -4),
+  );
+  // Boost on the first read: D7 refuses.
+  let boostReads = 0;
+  const boostFirst = { ...cutFirst };
+  Object.defineProperty(boostFirst, 'gainDb', {
+    get: () => (boostReads++ === 0 ? 3 : -1),
+  });
+  const refused = gateForWrite([boostFirst, ...offTail()], -4);
+  assert.equal(boostReads, 1);
+  assert.deepEqual(codes(refused), ['d7:pk-boost-above-16k']);
+});
+
+test('C1: a getter kind is read once; HS cannot pass without experimental', () => {
+  let reads = 0;
+  const pkFirst = {
+    get kind() {
+      return reads++ === 0 ? 'PK' : 'HS';
+    },
+    freqHz: 8000,
+    gainDb: -6,
+    qFactor: 0.7,
+  };
+  const verdict = gateForWrite([pkFirst, ...offTail()], -1);
+  assert.equal(reads, 1);
+  assert.ok(verdict.ok);
+  const asPk = { kind: 'PK', freqHz: 8000, gainDb: -6, qFactor: 0.7 };
+  assert.deepEqual(verdict.metrics.bands[0], asPk);
+  assert.deepEqual([...verdict.metrics.payload], encodePayload([asPk, ...offTail()], -1));
+  let hsReads = 0;
+  const hsFirst = { ...asPk };
+  Object.defineProperty(hsFirst, 'kind', { get: () => (hsReads++ === 0 ? 'HS' : 'PK') });
+  const refused = gateForWrite([hsFirst, ...offTail()], -1);
+  assert.equal(hsReads, 1);
+  assert.deepEqual(refused.reasons, [{ code: 'k:kind-not-allowed', stage: 1, value: 'HS' }]);
+  assert.equal(refused.metrics.bands[0].kind, 'HS');
+});
+
+test('C1: a Proxy band with per-read random values is read once per field', () => {
+  let seed = 20261016;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    return seed / 2 ** 31;
+  };
+  for (let run = 0; run < 20; run++) {
+    const log = [];
+    const band = new Proxy(
+      {},
+      {
+        get(_, key) {
+          const value = {
+            kind: 'PK',
+            freqHz: 200 + 5000 * random(),
+            gainDb: -6 * random(),
+            qFactor: 0.5 + random(),
+          }[key];
+          log.push([key, value]);
+          return value;
+        },
+      },
+    );
+    const verdict = gateForWrite([band, ...offTail()], -3);
+    assert.deepEqual(
+      log.map(([key]) => key),
+      ['kind', 'freqHz', 'gainDb', 'qFactor'],
+    );
+    const plain = Object.fromEntries(log);
+    assert.ok(verdict.ok);
+    assert.deepEqual(verdict.metrics.bands[0], plain);
+    assert.deepEqual([...verdict.metrics.payload], encodePayload([plain, ...offTail()], -3));
+    assert.deepEqual(verdict, gateForWrite([plain, ...offTail()], -3));
+  }
+});
+
+test('C1: autoPreamp reads the bands once', () => {
+  let reads = 0;
+  const band = {
+    kind: 'PK',
+    freqHz: 1000,
+    qFactor: 1,
+    get gainDb() {
+      reads += 1;
+      return reads === 1 ? 6 : -6;
+    },
+  };
+  const preamp = autoPreamp([band, ...offTail()]);
+  assert.equal(reads, 1);
+  const plain = { kind: 'PK', freqHz: 1000, gainDb: 6, qFactor: 1 };
+  assert.equal(preamp, autoPreamp([plain, ...offTail()]));
+  assert.ok(preamp < -0.5);
+});
+
+// --- M2: sparse and malformed band lists -------------------------------------------
+
+test('M2: sparse arrays, non-arrays and throwing getters give f:codec, never a throw', () => {
+  const bare = { thresholds: THRESHOLDS, grid: 'full' };
+  for (const index of [0, 5, 9]) {
+    const sparse = [...NEUTRAL_BANDS];
+    delete sparse[index];
+    const result = gateForWrite(sparse, -0.5);
+    assert.deepEqual(result, {
+      ok: false,
+      reasons: [{ code: 'f:codec', value: `band ${index}: missing (hole in a sparse array)` }],
+      metrics: bare,
+    });
+  }
+  assert.deepEqual(codes(gateForWrite(new Array(10), -0.5)), ['f:codec']);
+  for (const value of [undefined, null, 42, 'x', {}, { length: 10 }, new Uint8Array(10)]) {
+    const result = gateForWrite(value, -0.5);
+    assert.deepEqual(result.reasons, [{ code: 'f:codec', value: 'bands must be an array' }]);
+  }
+  const thrower = (thrown) => [
+    {
+      get kind() {
+        throw thrown;
+      },
+    },
+    ...offTail(),
+  ];
+  assert.deepEqual(gateForWrite(thrower(new Error('boom')), -0.5).reasons, [
+    { code: 'f:codec', value: 'boom' },
+  ]);
+  assert.deepEqual(gateForWrite(thrower(42), -0.5).reasons, [{ code: 'f:codec', value: '42' }]);
+  const unprintable = {
+    toString() {
+      throw new Error('no');
+    },
+  };
+  assert.deepEqual(gateForWrite(thrower(unprintable), -0.5).reasons, [
+    { code: 'f:codec', value: 'the bands could not be read' },
+  ]);
+  const trapped = new Proxy([...NEUTRAL_BANDS], {
+    get(target, key) {
+      if (key === 'length') throw new Error('length trap');
+      return Reflect.get(target, key);
+    },
+  });
+  assert.deepEqual(codes(gateForWrite(trapped, -0.5)), ['f:codec']);
+  // Non-number fields are never coerced (no valueOf/Symbol conversion runs).
+  let coerced = 0;
+  const sneaky = {
+    valueOf() {
+      coerced++;
+      return -1;
+    },
+  };
+  const objectGain = gateForWrite(
+    [{ kind: 'PK', freqHz: 1000, gainDb: sneaky, qFactor: 1 }, ...offTail()],
+    -1,
+  );
+  assert.equal(coerced, 0);
+  assert.ok(codes(objectGain).includes('f:codec'));
+  const symbolGain = gateForWrite(
+    [{ kind: 'PK', freqHz: 1000, gainDb: Symbol('g'), qFactor: 1 }, ...offTail()],
+    -1,
+  );
+  assert.ok(codes(symbolGain).includes('f:codec'));
+  assert.equal(autoPreamp(new Array(10)), null);
 });
 
 test('gate is pure: same input, same output; arguments are not mutated', () => {

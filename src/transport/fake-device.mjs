@@ -32,6 +32,8 @@ export const FAKE_PRODUCT_NAME = 'USB DSP Audio';
  *   unplugged (that report is not delivered).
  * @property {number} [throwAtReport] 0-based sendReport attempt that fails (not delivered).
  * @property {unknown} [throwError] What that attempt rejects with (default: NotAllowedError).
+ * @property {number} [hangAtReport] 0-based sendReport attempt that never settles (not
+ *   delivered), like a cable that stops responding.
  * @property {unknown} [openError] If set, open() rejects with it.
  * @property {number} [delayMs] Virtual time each delivered report takes to complete.
  *
@@ -158,6 +160,7 @@ export class FakeHIDDevice extends EventTarget {
     disconnectAtReport,
     throwAtReport,
     throwError,
+    hangAtReport,
     openError,
     delayMs = 0,
   } = {}) {
@@ -181,7 +184,14 @@ export class FakeHIDDevice extends EventTarget {
       }),
     ]);
     /** Fault injection; may be changed between writes. */
-    this.faults = { disconnectAtReport, throwAtReport, throwError, openError, delayMs };
+    this.faults = {
+      disconnectAtReport,
+      throwAtReport,
+      throwError,
+      hangAtReport,
+      openError,
+      delayMs,
+    };
     disconnectHooks.set(this, new Set());
   }
 
@@ -232,6 +242,9 @@ export class FakeHIDDevice extends EventTarget {
       throw new DOMException('Failed to write the report.', 'NetworkError');
     }
     if (attempt === this.faults.throwAtReport) throw this.faults.throwError ?? writeFailure();
+    if (attempt === this.faults.hangAtReport) {
+      return /** @type {Promise<void>} */ (new Promise(() => undefined));
+    }
     this.#sent.push({ reportId, bytes, at: this.clock.now() });
     if (this.faults.delayMs > 0) await this.clock.sleep(this.faults.delayMs);
   }

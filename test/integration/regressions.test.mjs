@@ -13,38 +13,44 @@ test('regression: true-peak phases retain the published non-unity DC gains', () 
   );
 });
 
-test('regression: LP 20968 Hz Q 2 drag approval cannot authorize a write', async (t) => {
+test('regression: LP 20968 Hz Q 2 edge peak is seen by drag and full; above the cap nothing is written', async (t) => {
   const bands = [
     { kind: 'PK', freqHz: 1000, gainDb: -1, qFactor: 1 },
     { kind: 'LP', freqHz: 20968, qFactor: 2 },
     ...Array.from({ length: 8 }, () => ({ kind: 'OFF' })),
   ];
-  const options = { experimental: true, grid: 'drag' };
-  const probe = gate(bands, -6, options);
-  assert.equal(probe.metrics.outputAudible.frequencyHz, 20000);
+  const options = { experimental: true };
+  const probe = gateForWrite(bands, -6, options);
+  assert.ok(probe.metrics.outputAudible.frequencyHz < 20000, 'edge interval peak must be refined');
   const relativePeak = probe.metrics.outputAudible.db - probe.metrics.quantizedPreampDb;
   const preampCapDb = THRESHOLDS.outputAudibleDb - relativePeak;
   const highestWord = Math.floor(10 ** (preampCapDb / 20) * 2 ** 23);
-  const preampDb = 20 * Math.log10(highestWord / 2 ** 23);
-  const drag = gate(bands, preampDb, options);
-  assert.equal(drag.ok, true, JSON.stringify(drag.reasons));
-  const full = gateForWrite(bands, preampDb, options);
-  assert.equal(full.metrics.grid, 'full');
-  assert.equal(full.ok, false);
-  assert.deepEqual(
-    full.reasons.map(({ code }) => code),
-    ['e:output-audible'],
+  const acceptedDb = 20 * Math.log10(highestWord / 2 ** 23);
+  const preampDb = 20 * Math.log10((highestWord + 1) / 2 ** 23);
+  const fullAtCap = gateForWrite(bands, acceptedDb, options);
+  const dragAtCap = gate(bands, acceptedDb, { ...options, grid: 'drag' });
+  assert.equal(fullAtCap.ok, true, JSON.stringify(fullAtCap.reasons));
+  assert.equal(dragAtCap.ok, true, JSON.stringify(dragAtCap.reasons));
+  assert.ok(
+    Math.abs(dragAtCap.metrics.outputAudible.db - fullAtCap.metrics.outputAudible.db) < 1e-9,
   );
-  assert.ok(full.metrics.outputAudible.frequencyHz < 20000);
-  assert.ok(full.metrics.outputAudible.db > drag.metrics.outputAudible.db);
+  const full = gateForWrite(bands, preampDb, options);
+  const drag = gate(bands, preampDb, { ...options, grid: 'drag' });
+  assert.equal(full.metrics.grid, 'full');
+  for (const verdict of [full, drag]) {
+    assert.equal(verdict.ok, false);
+    assert.deepEqual(
+      verdict.reasons.map(({ code }) => code),
+      ['e:output-audible'],
+    );
+  }
   const clock = createFakeClock();
   const device = new FakeHIDDevice({ clock });
   await assert.rejects(
     writeCurve(device, bands, preampDb, {
       clock,
       experimental: true,
-      gate: (curve, preamp, gateOptions) =>
-        gateForWrite(curve, preamp, { ...gateOptions, ...options }),
+      gate: () => ({ ok: true, reasons: [] }),
     }),
     GateRejectedError,
   );

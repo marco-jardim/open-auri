@@ -8,13 +8,22 @@
 // or unknown firmware arithmetic.
 //
 // Port of design/analysis/gate.mjs with the same math and the same order of
-// summations: in `full` mode the metrics are bit-identical to the reference.
-// Two implementation details do not change any value: the per-frequency
-// trigonometric terms of the scan grids are computed once, and prefix sums are
-// accumulated incrementally (prefix k adds sections in the same order, starting
-// from 0, as the reference's per-prefix reduce does).
+// summations: in `full` mode the metrics are bit-identical to the reference,
+// with one deliberate exception (see GRID_INTERVALS): the first and last scan
+// intervals are also refined, so a scan peak can only be higher (stricter) than
+// the reference's, never lower. Two implementation details do not change any
+// value: the per-frequency trigonometric terms of the scan grids are computed
+// once, and prefix sums are accumulated incrementally (prefix k adds sections in
+// the same order, starting from 0, as the reference's per-prefix reduce does).
+//
+// One read per field: gate() copies the bands once with snapshotBands() on
+// entry and evaluates only that frozen copy (policy, codec, analysis). The copy
+// and the exact payload bytes are returned in `metrics.bands` and
+// `metrics.payload`, so a transport can send exactly what was gated.
 //
 // Reason order (deterministic):
+//   0. `f:codec` alone when the bands cannot even be copied (not an array, not
+//      10 elements, a hole, a non-object element, a throwing getter/trap);
 //   1. `k:kind-not-allowed`, per stage in stage order;
 //   2. `d7:pk-boost-above-16k` then `d7:boost-q`, per stage in stage order;
 //   3. `f:codec` (if the codec refuses the curve, evaluation stops here);
@@ -29,7 +38,14 @@
 //
 // Pure ESM: no DOM, no Node-only APIs.
 
-import { designSection, encodePayload, encodeSection, SAMPLE_RATE } from '../dsp/eq0xcb.mjs';
+import {
+  BAND_COUNT,
+  designSection,
+  encodePayload,
+  encodeSection,
+  SAMPLE_RATE,
+  snapshotBands,
+} from '../dsp/eq0xcb.mjs';
 import {
   fromWords,
   isIdentitySection,
@@ -66,6 +82,8 @@ export { THRESHOLDS, PROVENANCE } from './thresholds.mjs';
  *   thresholds: Readonly<Thresholds>,
  *   grid: Grid,
  *   payloadCrc?: string,
+ *   payload?: Uint8Array,
+ *   bands?: readonly Readonly<Band>[],
  *   preampDb?: number,
  *   quantizedPreampDb?: number,
  *   sections?: SectionAnalysis[],
@@ -81,12 +99,18 @@ export { THRESHOLDS, PROVENANCE } from './thresholds.mjs';
 /**
  * Log intervals of the multi-section scans per grid mode (`full` = reference).
  *
- * `drag` is advisory only. It matches `full` to ~1e-12 dB wherever a peak is
- * bracketed by the coarse grid, but a peak lying between a domain edge (20 Hz,
- * 20 kHz) and the first grid point is not refined, so `drag` can be laxer by
- * ~1e-4 dB there: test/safety/gate.test.mjs builds a resonant-LP curve that
- * `drag` approves and `full` rejects (1.6e-4 dB apart). Writes must use
- * `gateForWrite`.
+ * Both modes scan the grid, refine every interior local maximum by
+ * golden-section search (as the reference), and also always refine the first
+ * and the last interval. The reference does not refine those two, so a peak
+ * lying between a domain edge (DC, 20 Hz, 20 kHz, 48 kHz) and the nearest grid
+ * point was reported at the edge value; here it is found. This makes the gate
+ * stricter than the reference (never laxer), by at most ~1e-4 dB in practice;
+ * test/safety/gate.test.mjs records the deltas on the parity corpus and builds
+ * a resonant-LP curve where the difference shows.
+ *
+ * `drag` is advisory only: it matches `full` to ~1e-12 dB wherever a peak is
+ * bracketed by the coarse grid, but it can still be laxer where two features
+ * share one coarse interval. Writes must use `gateForWrite`.
  */
 export const GRID_INTERVALS = Object.freeze({ drag: 2048, full: 16384 });
 
@@ -359,13 +383,24 @@ class CascadeScan {
         if (candidate.db > best.db) best = candidate;
       }
     }
+    // Not in the reference (see GRID_INTERVALS): a peak inside the first or last
+    // interval has no bracketing interior grid point, so refine both edges too.
+    // A candidate only replaces `best` when strictly higher: never laxer.
+    const last = fs.length - 1;
+    for (const [a, b] of [
+      [0, 1],
+      [last - 1, last],
+    ]) {
+      const candidate = refine(fn, fs[a], fs[b]);
+      if (candidate.db > best.db) best = candidate;
+    }
     return best;
   }
 }
 
 /**
- * Policy reasons (kinds and D7) for each band, in stage order.
- * @param {unknown} bands
+ * Policy reasons (kinds and D7) for each band of a snapshot, in stage order.
+ * @param {readonly Readonly<Band>[]} bands Output of `snapshotBands` (plain, frozen).
  * @param {boolean} experimental
  * @returns {Reason[]}
  */
@@ -374,15 +409,18 @@ function policyReasons(bands, experimental) {
   const kinds = [];
   /** @type {Reason[]} */
   const d7 = [];
-  if (!Array.isArray(bands)) return kinds;
   const layer = experimental ? 'engenharia' : 'ajustar';
-  bands.forEach((band, i) => {
+  // Non-numbers count as NaN (they fail every check) and are never converted, so
+  // no caller code (valueOf, Symbol coercion) runs here; the codec rejects them.
+  const numeric = (/** @type {unknown} */ value) => (typeof value === 'number' ? value : NaN);
+  for (let i = 0; i < bands.length; i++) {
     const stage = i + 1;
-    const kind = band !== null && typeof band === 'object' ? band.kind : undefined;
+    const band = /** @type {Record<string, unknown>} */ (bands[i]);
+    const kind = band.kind;
     if (!isKindAllowed(kind, layer)) kinds.push({ code: 'k:kind-not-allowed', stage, value: kind });
-    if (kind !== 'PK' && kind !== 'LS' && kind !== 'HS') return;
-    if (!(band.gainDb <= 0)) {
-      if (kind === 'PK' && !(band.freqHz <= ABS_RANGES.pkBoostMaxHz)) {
+    if (kind !== 'PK' && kind !== 'LS' && kind !== 'HS') continue;
+    if (!(numeric(band.gainDb) <= 0)) {
+      if (kind === 'PK' && !(numeric(band.freqHz) <= ABS_RANGES.pkBoostMaxHz)) {
         d7.push({
           code: 'd7:pk-boost-above-16k',
           stage,
@@ -390,11 +428,11 @@ function policyReasons(bands, experimental) {
           limit: ABS_RANGES.pkBoostMaxHz,
         });
       }
-      if (!(band.qFactor <= ABS_RANGES.boostQMax)) {
+      if (!(numeric(band.qFactor) <= ABS_RANGES.boostQMax)) {
         d7.push({ code: 'd7:boost-q', stage, value: band.qFactor, limit: ABS_RANGES.boostQMax });
       }
     }
-  });
+  }
   return [...kinds, ...d7];
 }
 
@@ -408,12 +446,31 @@ function payloadCrc(payload) {
 }
 
 /**
+ * Message of anything thrown while copying or encoding the bands; never throws.
+ * @param {unknown} error
+ * @returns {string}
+ */
+function errorMessage(error) {
+  try {
+    return error instanceof Error ? String(error.message) : String(error);
+  } catch {
+    return 'the bands could not be read';
+  }
+}
+
+/**
  * Gate v2 verdict for `bands` (wire order) and `preampDb`.
  *
  * `grid: 'drag'` scans multi-section responses on 2048 log intervals (same
  * refinement) for interactive feedback; `'full'` (default) uses the reference
  * 16384. Single sections always use the analytic peak. Only `full` decides a
  * write: call `gateForWrite`. HS/LP/HP need `experimental: true`.
+ *
+ * The bands are copied once on entry (`snapshotBands`: one read per field) and
+ * only that copy is evaluated. When the codec accepts it, `metrics.bands` is the
+ * frozen copy and `metrics.payload` a copy of the exact 220 payload bytes, so
+ * callers send what was gated. Never throws because of `bands` (anything that
+ * cannot be copied or encoded is `f:codec`); only an invalid `grid` throws.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {GateOptions} [options]
@@ -424,18 +481,27 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
     throw new RangeError(`grid must be 'drag' or 'full', got ${JSON.stringify(grid)}`);
   }
   const intervals = GRID_INTERVALS[grid];
-  const reasons = policyReasons(bands, experimental === true);
   /** @type {GateMetrics} */
   const metrics = { thresholds: THRESHOLDS, grid };
+  /** @type {readonly Readonly<Band>[]} */
+  let snapshot;
+  try {
+    snapshot = snapshotBands(bands, BAND_COUNT);
+  } catch (error) {
+    return { ok: false, reasons: [{ code: 'f:codec', value: errorMessage(error) }], metrics };
+  }
+  const reasons = policyReasons(snapshot, experimental === true);
   /** @type {number[]} */
   let payload;
   try {
-    payload = encodePayload(bands, preampDb);
+    payload = encodePayload(snapshot, preampDb);
   } catch (error) {
-    reasons.push({ code: 'f:codec', value: /** @type {Error} */ (error).message });
+    reasons.push({ code: 'f:codec', value: errorMessage(error) });
     return { ok: false, reasons, metrics };
   }
   metrics.payloadCrc = payloadCrc(payload);
+  metrics.payload = Uint8Array.from(payload);
+  metrics.bands = snapshot;
   if (!(preampDb >= THRESHOLDS.preampMinDb && preampDb <= THRESHOLDS.preampMaxDb)) {
     const limit =
       preampDb < THRESHOLDS.preampMinDb ? THRESHOLDS.preampMinDb : THRESHOLDS.preampMaxDb;
@@ -444,13 +510,15 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
   const preamp = quantizedPreampDb(preampDb);
   metrics.preampDb = preampDb;
   metrics.quantizedPreampDb = preamp;
-  const sections = bands.map((band, i) => {
-    const s = sectionAnalysis(band);
+  /** @type {SectionAnalysis[]} */
+  const sections = [];
+  for (let i = 0; i < snapshot.length; i++) {
+    const s = sectionAnalysis(snapshot[i]);
     for (const { code, value, limit } of s.reasons) {
       reasons.push({ code, stage: i + 1, value, limit });
     }
-    return s;
-  });
+    sections.push(s);
+  }
   metrics.sections = sections;
 
   // Identity sections (OFF) are skipped, as in the reference. The scan grids
@@ -525,7 +593,8 @@ const PREAMP_STEPS_PER_DB = 10;
  *
  * A candidate is derived analytically from the metrics at the top preamp,
  * rounded down to the grid, then verified with the gate and stepped down by
- * 0.1 dB while refused (the verdict is monotone in the preamp).
+ * 0.1 dB while refused (the verdict is monotone in the preamp). The bands are
+ * read once: every later verification runs on the first verdict's snapshot.
  * @param {readonly Band[]} bands
  * @param {{experimental?: boolean}} [options]
  * @returns {number | null}
@@ -536,6 +605,7 @@ export function autoPreamp(bands, { experimental = false } = {}) {
   const fixable = new Set(['d:prefix-peak', 'e:output-audible', 'e:output-full']);
   if (!top.reasons.every((r) => fixable.has(r.code))) return null;
   const m = /** @type {Required<GateMetrics>} */ (top.metrics);
+  const snapshot = m.bands;
   const relative = (/** @type {number} */ db) => db - m.quantizedPreampDb;
   const internalPeak = Math.max(0, ...m.prefixAudible.slice(1).map((p) => relative(p.db)));
   const cap = Math.min(
@@ -551,7 +621,7 @@ export function autoPreamp(bands, { experimental = false } = {}) {
   if (!(step >= minStep)) return null;
   for (; step >= minStep; step--) {
     const preampDb = step / PREAMP_STEPS_PER_DB;
-    if (gateForWrite(bands, preampDb, { experimental }).ok) return preampDb;
+    if (gateForWrite(snapshot, preampDb, { experimental }).ok) return preampDb;
   }
   return null;
 }

@@ -8,6 +8,7 @@ export {
   GateRejectedError,
   ConcurrentWriteError,
   DeviceDisconnectedError,
+  DeviceUnusableError,
   systemClock,
   requestCable,
   writeCurve,

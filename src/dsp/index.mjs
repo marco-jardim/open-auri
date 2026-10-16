@@ -27,6 +27,8 @@ export {
   crc16Ccitt,
   encodePayload,
   encodeReports,
+  reportsFromPayload,
+  snapshotBands,
   commitReport,
   magnitudeDb,
 } from './eq0xcb.mjs';

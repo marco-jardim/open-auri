@@ -4,12 +4,19 @@
 //
 // The cable (VID 0x3302, PID 0x8902, "USB DSP Audio") is write-only and every
 // commit is persisted to the chip's flash, which cannot be read back. Hence:
-// - writeCurve() requires a safety gate (gateForWrite, injected by the caller)
-//   and re-runs it itself, immediately before encoding; nothing is sent unless
-//   the gate approves;
+// - writeCurve() always runs the real safety gate (gateForWrite from
+//   src/safety/gate.mjs) itself, immediately before sending; a caller-supplied
+//   `gate` is only an additional check (both must approve). Nothing is sent
+//   unless the gate approves;
+// - the gate reads the caller's bands exactly once (one snapshot) and returns
+//   the payload bytes it evaluated; those bytes, split into reports, are what
+//   is sent. Nothing is ever re-encoded from the caller's objects;
 // - writes are never retried;
 // - after any interruption (disconnect, abort, I/O failure) the commit is never
-//   sent, so the chip keeps its previous preset in flash.
+//   sent, so the chip keeps its previous preset in flash;
+// - a device whose open()/sendReport() had to be abandoned while still pending
+//   (hung, then aborted or unplugged) is refused (DeviceUnusableError) until
+//   the page obtains it again through requestCable().
 //
 // The WebHID surface used here is typed locally (no DOM HID types), so the same
 // code drives navigator.hid in the browser and FakeHID (./fake-device.mjs) in
@@ -20,11 +27,11 @@ import {
   USB_PID,
   HID_REPORT_ID,
   PAYLOAD_SIZE,
-  encodeReports,
   commitReport,
   encodePayload,
-  crc16Ccitt,
+  reportsFromPayload,
 } from '../dsp/eq0xcb.mjs';
+import { gateForWrite } from '../safety/gate.mjs';
 
 /**
  * @typedef {import('../dsp/eq0xcb.mjs').Band} Band
@@ -50,11 +57,16 @@ import {
  *   `signal.reason` when the signal aborts.
  *
  * @typedef {{ok: boolean, reasons?: readonly unknown[]}} GateVerdict
- * @typedef {(bands: readonly Band[], preampDb: number, options: {experimental: boolean}) => GateVerdict} Gate
+ * @typedef {(
+ *   bands: readonly Band[],
+ *   preampDb: number,
+ *   options: {experimental: boolean},
+ * ) => GateVerdict} Gate
  *
  * @typedef {object} WriteOptions
- * @property {Gate} gate Required: `gateForWrite` from src/safety/gate.mjs in production.
- * @property {boolean} [experimental] Passed to the gate; only `true` enables it.
+ * @property {Gate} [gate] Optional additional check, called with the gate's frozen
+ *   snapshot of the bands after `gateForWrite` approved them; it can only refuse.
+ * @property {boolean} [experimental] Passed to the gates; only `true` enables it.
  * @property {AbortSignal} [signal]
  * @property {Clock} [clock] Defaults to {@link systemClock}.
  * @property {CableHID} [hid] Source of 'disconnect' events; defaults to `navigator.hid`.
@@ -64,13 +76,16 @@ import {
  * @property {number} crc Payload CRC-16 (payload bytes 218..219, little-endian).
  * @property {number} startedAt `clock.now()` when the I/O started.
  * @property {number} finishedAt `clock.now()` when the write ended.
- * @property {number} reportsSent Data reports (0..9) the device accepted; the commit is not counted.
- * @property {boolean} committed Whether the commit report was accepted.
+ * @property {number} reportsSent Data reports (0..9) the device accepted; the commit is not
+ *   counted.
+ * @property {boolean} committed Whether the commit report was confirmed as accepted.
  * @property {unknown} [error] Why the write was interrupted (only when status is 'interrupted').
  *
  * @typedef {(WriteResult & {device: CableDevice})
  *   | {device: CableDevice, status: 'failed', error: unknown}
  *   | {device: CableDevice, status: 'skipped'}} ManyResult
+ *
+ * @typedef {{snapshot: readonly Readonly<Band>[], payload: Uint8Array, crc: number}} Approved
  */
 
 export const PRODUCT_NAME = 'USB DSP Audio';
@@ -113,6 +128,21 @@ export class DeviceDisconnectedError extends Error {
 }
 
 /**
+ * A previous write had to abandon a pending open()/sendReport() on this device
+ * (it hung, then the write was aborted or the device disconnected). The pending
+ * operation may still complete at any time, so the device is refused, before
+ * any I/O, until the page obtains it again with {@link requestCable}.
+ */
+export class DeviceUnusableError extends Error {
+  constructor() {
+    super(
+      'this device stopped responding during a previous write; reconnect it and choose it again',
+    );
+    this.name = 'DeviceUnusableError';
+  }
+}
+
+/**
  * Real-time clock: `performance.now()` and `setTimeout`, available in browsers,
  * Workers and Node.
  * @type {Clock}
@@ -140,6 +170,13 @@ export const systemClock = Object.freeze({
 /** Devices with a write in flight (per-device mutex). @type {WeakMap<object, true>} */
 const inFlight = new WeakMap();
 
+/**
+ * Devices with an abandoned, possibly still pending, open()/sendReport().
+ * Cleared only by requestCable() returning the device again.
+ * @type {WeakSet<object>}
+ */
+const poisoned = new WeakSet();
+
 /** @param {unknown} reason */
 function describeReason(reason) {
   return typeof reason === 'string' ? reason : JSON.stringify(reason);
@@ -155,34 +192,60 @@ function navigatorHid() {
 
 /**
  * @param {unknown} gate
- * @returns {asserts gate is Gate}
+ * @returns {asserts gate is Gate | undefined}
  */
-function requireGate(gate) {
-  if (typeof gate !== 'function') {
-    throw new TypeError('a safety gate is required (inject gateForWrite); nothing was sent');
+function checkExtraGate(gate) {
+  if (gate !== undefined && typeof gate !== 'function') {
+    throw new TypeError('options.gate must be a function when given; nothing was sent');
   }
 }
 
 /**
- * Runs the gate and throws unless it approves.
- * @param {Gate} gate
+ * Runs the real gate (always) and then `extraGate` (if any) on the gate's
+ * snapshot; throws GateRejectedError unless both approve. Returns the snapshot
+ * and the exact payload the gate evaluated, re-derived once from the frozen
+ * snapshot as a consistency check.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {boolean} experimental
+ * @param {Gate | undefined} extraGate
+ * @returns {Approved}
  */
-function enforceGate(gate, bands, preampDb, experimental) {
-  const verdict = gate(bands, preampDb, { experimental });
-  if (verdict === null || typeof verdict !== 'object') {
-    throw new TypeError('the safety gate must return {ok, reasons}');
+function approve(bands, preampDb, experimental, extraGate) {
+  const verdict = gateForWrite(bands, preampDb, { experimental });
+  if (!verdict.ok) throw new GateRejectedError(verdict.reasons);
+  const { bands: snapshot, payload, payloadCrc } = verdict.metrics;
+  if (snapshot === undefined || payload === undefined || payloadCrc === undefined) {
+    throw new Error('the safety gate returned no payload; nothing was sent');
   }
-  if (verdict.ok !== true) {
-    throw new GateRejectedError(Array.isArray(verdict.reasons) ? verdict.reasons : []);
+  if (extraGate !== undefined) {
+    const extra = extraGate(snapshot, preampDb, { experimental });
+    if (extra === null || typeof extra !== 'object') {
+      throw new TypeError('the safety gate must return {ok, reasons}');
+    }
+    if (extra.ok !== true) {
+      throw new GateRejectedError(Array.isArray(extra.reasons) ? extra.reasons : []);
+    }
   }
+  // The snapshot is frozen plain data: encoding it again must give the same bytes.
+  const again = encodePayload(snapshot, preampDb);
+  const crc = payload[PAYLOAD_SIZE - 2] | (payload[PAYLOAD_SIZE - 1] << 8);
+  if (
+    payload.length !== PAYLOAD_SIZE ||
+    again.length !== PAYLOAD_SIZE ||
+    again.some((byte, index) => byte !== payload[index]) ||
+    crc !== Number(payloadCrc)
+  ) {
+    throw new Error('payload does not match the gated curve; nothing was sent');
+  }
+  return { snapshot, payload, crc };
 }
 
 /**
  * Asks the user to pick the cable. Must run inside a user gesture (the browser
- * enforces it). Resolves to the chosen device, or null if none was chosen.
+ * enforces it). Resolves to the chosen device, or null if none was chosen. A
+ * device returned here is usable again even if a previous write left it
+ * refused (see {@link DeviceUnusableError}).
  * @param {CableHID} [hid] Defaults to `navigator.hid`.
  * @returns {Promise<CableDevice | null>}
  */
@@ -191,24 +254,34 @@ export async function requestCable(hid = navigatorHid()) {
   const devices = await hid.requestDevice({
     filters: [{ vendorId: USB_VID, productId: USB_PID }],
   });
-  return devices[0] ?? null;
+  const device = devices[0] ?? null;
+  if (device !== null) poisoned.delete(device);
+  return device;
 }
 
 /**
  * Writes a curve to the cable's flash: 9 data reports 16 ms apart, 150 ms of
  * settle, then the commit.
  *
- * Throws, before any I/O, when the gate is missing (TypeError) or rejects
- * (GateRejectedError), when the bands cannot be encoded, when `signal` is
- * already aborted, or when the device is busy (ConcurrentWriteError).
+ * `gateForWrite` always runs on a one-read snapshot of `bands`; the reports sent
+ * are built from the exact payload it approved. `options.gate`, if given, must
+ * also approve (it receives the frozen snapshot).
+ *
+ * Throws, before any I/O, when a gate rejects (GateRejectedError), when
+ * `options.gate` is not a function or returns a non-object (TypeError), when
+ * `signal` is already aborted, when the device is busy (ConcurrentWriteError)
+ * or refused after an abandoned operation (DeviceUnusableError).
  * An interruption once I/O has started (disconnect, device closed, abort,
- * sendReport/open failure) is returned as `status: 'interrupted'` with the
- * cause in `error`, and the commit is not sent. TypeErrors (programming
- * errors) are rethrown.
+ * sendReport/open failure or hang) is returned as `status: 'interrupted'` with
+ * the cause in `error`, and the commit is not sent. A pending open()/sendReport()
+ * is abandoned as soon as the write is aborted or the device disconnects (the
+ * device is then refused, see DeviceUnusableError). A TypeError (programming
+ * error) is rethrown only while no data report has been accepted; after that
+ * it is returned as an interruption, so `reportsSent` is never lost.
  * @param {CableDevice} device
  * @param {readonly Band[]} bands
  * @param {number} preampDb
- * @param {WriteOptions} options
+ * @param {WriteOptions} [options]
  * @returns {Promise<WriteResult>}
  */
 export async function writeCurve(device, bands, preampDb, options) {
@@ -219,19 +292,15 @@ export async function writeCurve(device, bands, preampDb, options) {
     clock = systemClock,
     hid = navigatorHid(),
   } = /** @type {Partial<WriteOptions>} */ (options ?? {});
-  requireGate(gate);
+  checkExtraGate(gate);
   signal?.throwIfAborted();
   if (inFlight.has(device)) throw new ConcurrentWriteError();
+  if (poisoned.has(device)) throw new DeviceUnusableError();
 
-  // Gate and encoding run synchronously, back to back: the bytes sent are
-  // exactly those of the curve the gate approved.
-  enforceGate(gate, bands, preampDb, experimental === true);
-  const payload = encodePayload(bands, preampDb);
-  const crc = payload[PAYLOAD_SIZE - 2] | (payload[PAYLOAD_SIZE - 1] << 8);
-  if (crc !== crc16Ccitt(payload.slice(0, PAYLOAD_SIZE - 2))) {
-    throw new Error('payload CRC mismatch; nothing was sent');
-  }
-  const reports = encodeReports(bands, preampDb);
+  // Gate, snapshot and payload come from one synchronous step: the reports are
+  // split from the very bytes the gate evaluated.
+  const { payload, crc } = approve(bands, preampDb, experimental === true, gate);
+  const reports = reportsFromPayload(payload);
 
   inFlight.set(device, true);
   try {
@@ -239,6 +308,52 @@ export async function writeCurve(device, bands, preampDb, options) {
   } finally {
     inFlight.delete(device);
   }
+}
+
+/**
+ * Settles like `operation()`, unless `stop` aborts first: then the operation
+ * gets one macrotask to settle, after which it is abandoned (the device is
+ * marked unusable) and the promise rejects with the stop reason.
+ * @param {CableDevice} device
+ * @param {() => Promise<void>} operation
+ * @param {AbortSignal} stop Not aborted on entry.
+ * @returns {Promise<void>}
+ */
+function guardIo(device, operation, stop) {
+  return new Promise((resolve, reject) => {
+    let decided = false;
+    const onStop = () => {
+      setTimeout(() => {
+        if (decided) return;
+        decided = true;
+        poisoned.add(device);
+        reject(stop.reason);
+      }, 0);
+    };
+    /** Claims the outcome; false when the operation was already abandoned. */
+    const claim = () => {
+      stop.removeEventListener('abort', onStop);
+      if (decided) return false;
+      decided = true;
+      return true;
+    };
+    stop.addEventListener('abort', onStop, { once: true });
+    /** @type {Promise<void>} */
+    let pending;
+    try {
+      pending = Promise.resolve(operation());
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+    pending.then(
+      () => {
+        if (claim()) resolve();
+      },
+      (error) => {
+        if (claim()) reject(error);
+      },
+    );
+  });
 }
 
 /**
@@ -253,7 +368,7 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
   let reportsSent = 0;
   let committed = false;
 
-  // One signal for every stop condition, so pending sleeps end at once.
+  // One signal for every stop condition, so pending sleeps and I/O end at once.
   const stop = new AbortController();
   const onAbort = () => stop.abort(signal?.reason);
   /** @param {Event} event */
@@ -269,6 +384,8 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
     stop.signal.throwIfAborted();
     if (!device.opened) throw new DeviceDisconnectedError('device closed during the write');
   };
+  /** @param {() => Promise<void>} operation */
+  const io = (operation) => guardIo(device, operation, stop.signal);
   /** @param {'ok' | 'interrupted'} status */
   const result = (status) => ({
     status,
@@ -280,20 +397,22 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
   });
 
   try {
-    if (!device.opened) await device.open();
+    if (!device.opened) await io(() => device.open());
     for (const report of reports) {
       ensureLive();
-      await device.sendReport(HID_REPORT_ID, report);
+      await io(() => device.sendReport(HID_REPORT_ID, report));
       reportsSent += 1;
       await clock.sleep(REPORT_GAP_MS, stop.signal);
     }
     await clock.sleep(SETTLE_MS, stop.signal);
     ensureLive();
-    await device.sendReport(HID_REPORT_ID, commitReport());
+    await io(() => device.sendReport(HID_REPORT_ID, commitReport()));
     committed = true;
     return result('ok');
   } catch (error) {
-    if (error instanceof TypeError) throw error;
+    // Programming errors surface only while the device holds none of this curve;
+    // once a report was accepted the caller must learn how far the write got.
+    if (error instanceof TypeError && reportsSent === 0) throw error;
     return { ...result('interrupted'), error };
   } finally {
     signal?.removeEventListener('abort', onAbort);
@@ -305,21 +424,23 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
  * Writes the same curve to several cables, one at a time, waiting at least
  * {@link WRITE_SPACING_MS} between the end of one write and the start of the
  * next. Stops at the first write that is not 'ok'; the remaining devices are
- * reported as 'skipped'. A write that throws before any I/O (busy device,
- * abort) is reported as 'failed' with its error. The gate is checked up front,
- * so a rejected curve throws before any device is touched.
+ * reported as 'skipped'. A write that throws before any I/O (busy or unusable
+ * device, abort) is reported as 'failed' with its error. The gates are checked
+ * up front, so a rejected curve throws before any device is touched; every
+ * device then receives the gate's snapshot (re-gated by writeCurve), so the
+ * caller's bands are read only once.
  * @param {readonly CableDevice[]} devices
  * @param {readonly Band[]} bands
  * @param {number} preampDb
- * @param {WriteOptions} options
+ * @param {WriteOptions} [options]
  * @returns {Promise<ManyResult[]>}
  */
 export async function writeMany(devices, bands, preampDb, options) {
   const opts = /** @type {Partial<WriteOptions>} */ (options ?? {});
   const { gate, experimental = false, signal, clock = systemClock } = opts;
-  requireGate(gate);
+  checkExtraGate(gate);
   signal?.throwIfAborted();
-  enforceGate(gate, bands, preampDb, experimental === true);
+  const { snapshot } = approve(bands, preampDb, experimental === true, gate);
 
   /** @type {ManyResult[]} */
   const results = [];
@@ -335,7 +456,7 @@ export async function writeMany(devices, bands, preampDb, options) {
     /** @type {ManyResult} */
     let outcome;
     try {
-      const result = await writeCurve(device, bands, preampDb, { ...opts, gate, clock });
+      const result = await writeCurve(device, snapshot, preampDb, { ...opts, clock });
       outcome = { device, ...result };
     } catch (error) {
       if (error instanceof TypeError) throw error;

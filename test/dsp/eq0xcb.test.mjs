@@ -211,3 +211,149 @@ test('stability is checked on the quantized coefficients, not the ideal ones', (
   assert.equal(codec.isStable(nearlyMarginal.a1, nearlyMarginal.a2), true);
   assert.throws(() => codec.encodeSection(nearlyMarginal), /unstable/);
 });
+
+// --- One read per field (snapshotBands) --------------------------------------
+
+/** A band whose every property read is logged; values come from `values`. */
+function loggedBand(values, log) {
+  return new Proxy(
+    {},
+    {
+      get(_, key) {
+        log.push(key);
+        return values[key];
+      },
+    },
+  );
+}
+
+test('snapshotBands reads length once, each index once and each field once', () => {
+  const fieldLog = [];
+  const band = loggedBand({ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 }, fieldLog);
+  const off = loggedBand({ kind: 'OFF', freqHz: 5, gainDb: 1 }, fieldLog);
+  const arrayLog = [];
+  const bands = new Proxy([band, off], {
+    get(target, key, receiver) {
+      arrayLog.push(String(key));
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  const snapshot = codec.snapshotBands(bands);
+  assert.deepEqual(arrayLog, ['length', '0', '1']);
+  assert.deepEqual(fieldLog, [
+    ...['kind', 'freqHz', 'gainDb', 'qFactor'],
+    ...['kind', 'freqHz', 'gainDb', 'qFactor'],
+  ]);
+  assert.deepEqual(snapshot, [peaking(1000, -3, 1), { kind: 'OFF' }]);
+  assert.ok(Object.isFrozen(snapshot) && snapshot.every((b) => Object.isFrozen(b)));
+  assert.ok(Array.isArray(snapshot));
+  // Undefined fields are omitted; nothing is coerced.
+  const lp = codec.snapshotBands([{ kind: 'LP', freqHz: '1000', qFactor: 0.7 }])[0];
+  assert.deepEqual(lp, { kind: 'LP', freqHz: '1000', qFactor: 0.7 });
+  assert.ok(!Object.hasOwn(lp, 'gainDb'));
+});
+
+test('snapshotBands: holes, non-objects, non-arrays and bad lengths throw', () => {
+  const sparse = [...codec.NEUTRAL_BANDS];
+  delete sparse[4];
+  assert.throws(() => codec.snapshotBands(sparse), {
+    name: 'TypeError',
+    message: 'band 4: missing (hole in a sparse array)',
+  });
+  assert.throws(() => codec.snapshotBands(new Array(3)), /band 0: missing/);
+  assert.throws(() => codec.snapshotBands([codec.OFF, null]), {
+    name: 'TypeError',
+    message: 'band 1: not an object',
+  });
+  assert.throws(() => codec.snapshotBands([() => codec.OFF]), /band 0: not an object/);
+  assert.throws(() => codec.snapshotBands({ length: 0 }), /bands must be an array/);
+  assert.throws(() => codec.snapshotBands('PK'), TypeError);
+  assert.throws(() => codec.snapshotBands([codec.OFF], 10), {
+    name: 'RangeError',
+    message: 'expected 10 bands',
+  });
+  const reads = [];
+  const lying = new Proxy([], {
+    get: (target, key) => (key === 'length' ? 1.5 : Reflect.get(target, key)),
+  });
+  assert.throws(() => codec.snapshotBands(lying), /invalid band count 1.5/);
+  const tooLong = new Proxy([], {
+    get(target, key) {
+      reads.push(key);
+      return key === 'length' ? 11 : Reflect.get(target, key);
+    },
+  });
+  assert.throws(() => codec.snapshotBands(tooLong, 10), /expected 10 bands/);
+  assert.deepEqual(reads, ['length']);
+  const getterError = new Error('getter failed');
+  const throwing = {
+    get kind() {
+      throw getterError;
+    },
+  };
+  assert.throws(() => codec.snapshotBands([throwing]), getterError);
+  assert.deepEqual(codec.snapshotBands([]), []);
+});
+
+test('C1: encodePayload reads each band field once (getter cannot change the bytes)', () => {
+  let reads = 0;
+  const flipping = {
+    kind: 'PK',
+    freqHz: 1000,
+    qFactor: 1,
+    get gainDb() {
+      reads += 1;
+      return reads === 1 ? -3 : 12;
+    },
+  };
+  const payload = codec.encodePayload(withNeutral(flipping), -1);
+  assert.equal(reads, 1);
+  assert.deepEqual(payload, codec.encodePayload(withNeutral(peaking(1000, -3, 1)), -1));
+});
+
+test('M2: encodePayload never returns a short payload for sparse arrays', () => {
+  for (const index of [0, 4, 9]) {
+    const sparse = [...codec.NEUTRAL_BANDS];
+    delete sparse[index];
+    assert.equal(sparse.length, 10);
+    assert.throws(() => codec.encodePayload(sparse, 0), {
+      name: 'TypeError',
+      message: `band ${index}: missing (hole in a sparse array)`,
+    });
+  }
+  assert.throws(() => codec.encodePayload(new Array(10), 0), TypeError);
+  assert.throws(() => codec.encodeReports(new Array(10), 0), TypeError);
+});
+
+test('reportsFromPayload splits a payload exactly like encodeReports', () => {
+  for (const id of presetIds) {
+    const { eqBands, preampDb, payload, reports } = fixture.presets[id];
+    const split = codec.reportsFromPayload(payload);
+    assert.deepEqual(
+      split.map((report) => [...report]),
+      reports,
+      id,
+    );
+    assert.deepEqual(split, codec.encodeReports(eqBands, preampDb), id);
+    assert.deepEqual(codec.reportsFromPayload(Uint8Array.from(payload)), split, id);
+  }
+});
+
+test('reportsFromPayload refuses wrong sizes, non-bytes and bad CRCs', () => {
+  const payload = codec.encodePayload(codec.NEUTRAL_BANDS, -0.5);
+  assert.throws(() => codec.reportsFromPayload(payload.slice(0, 200)), {
+    name: 'RangeError',
+    message: 'payload must be 220 bytes',
+  });
+  assert.throws(() => codec.reportsFromPayload([...payload, 0]), RangeError);
+  assert.throws(() => codec.reportsFromPayload(null), RangeError);
+  assert.throws(() => codec.reportsFromPayload('x'.repeat(220)), RangeError);
+  for (const bad of [256, -1, 1.5, NaN, '1']) {
+    const copy = [...payload];
+    copy[17] = bad;
+    assert.throws(() => codec.reportsFromPayload(copy), /payload byte 17 is not a byte/);
+  }
+  const corrupted = [...payload];
+  corrupted[20] ^= 1;
+  assert.throws(() => codec.reportsFromPayload(corrupted), /payload CRC mismatch/);
+});

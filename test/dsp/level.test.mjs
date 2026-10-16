@@ -63,6 +63,34 @@ test('levelDb accepts any number of bands and throws like the codec on invalid i
   assert.throws(() => levelDb([{ kind: 'XX' }], -1), TypeError);
 });
 
+test('M2: levelDb throws a TypeError for holes and non-objects instead of skipping them', () => {
+  const sparse = [...NEUTRAL_BANDS];
+  delete sparse[2];
+  assert.throws(() => levelDb(sparse, -1), {
+    name: 'TypeError',
+    message: 'band 2: missing (hole in a sparse array)',
+  });
+  assert.throws(() => levelDb(new Array(1), -1), TypeError);
+  assert.throws(() => levelDb([null], -1), { name: 'TypeError', message: 'band 0: not an object' });
+  assert.throws(() => levelDb('PK', -1), TypeError);
+});
+
+test('levelDb reads each band field once', () => {
+  let reads = 0;
+  const flipping = {
+    kind: 'PK',
+    freqHz: 1000,
+    qFactor: 1,
+    get gainDb() {
+      reads += 1;
+      return reads === 1 ? -3 : 9;
+    },
+  };
+  const level = levelDb([flipping], -1);
+  assert.equal(reads, 1);
+  assert.equal(level, levelDb([{ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 }], -1));
+});
+
 test('fromWords / quantizedSection / identity', () => {
   assert.equal(Q27, 2 ** 27);
   assert.deepEqual(fromWords([Q27, 0, 0, 0, 0]), { b0: 1, b2: 0, a1: -0, b1: 0, a2: -0 });

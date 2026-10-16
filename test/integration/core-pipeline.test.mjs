@@ -58,6 +58,9 @@ async function simulateWrite(curve) {
   const payload = encodePayload(curve.bands, curve.preampDb);
   const receivedPayload = device.sent.slice(0, 9).flatMap(({ bytes }) => [...bytes.slice(1)]);
   assert.deepEqual(receivedPayload.slice(0, payload.length), payload);
+  // The bytes on the wire are exactly the payload the gate evaluated.
+  const gated = gateForWrite(curve.bands, curve.preampDb).metrics.payload;
+  assert.deepEqual(receivedPayload.slice(0, payload.length), [...gated]);
   assert.ok(receivedPayload.slice(payload.length).every((byte) => byte === 0));
   const crc = payload.at(-2) | (payload.at(-1) << 8);
   assert.equal(crc, crc16Ccitt(payload.slice(0, -2)));
@@ -136,20 +139,24 @@ for (const preset of OFFICIAL_PRESETS) {
     const verdict = gateForWrite(imported.bands, imported.preampDb);
     assert.equal(verdict.ok, false);
     assert.ok(verdict.reasons.some(({ code }) => code === 'd:prefix-peak'));
-    const clock = createFakeClock();
-    const device = new FakeHIDDevice({ clock });
-    await assert.rejects(
-      writeCurve(device, imported.bands, imported.preampDb, { gate: gateForWrite, clock }),
-      (error) => {
-        assert.ok(error instanceof GateRejectedError);
-        assert.deepEqual(error.reasons, verdict.reasons);
-        return true;
-      },
-    );
-    assert.equal(device.opened, false);
-    assert.equal(device.attempts, 0);
-    assert.deepEqual(device.sent, []);
-    assert.equal(clock.pending(), 0);
+    // The transport always runs the real gate: an approving extra gate (or none)
+    // cannot let the reversed curve through.
+    for (const gate of [gateForWrite, () => ({ ok: true, reasons: [] }), undefined]) {
+      const clock = createFakeClock();
+      const device = new FakeHIDDevice({ clock });
+      await assert.rejects(
+        writeCurve(device, imported.bands, imported.preampDb, { gate, clock }),
+        (error) => {
+          assert.ok(error instanceof GateRejectedError);
+          assert.deepEqual(error.reasons, verdict.reasons);
+          return true;
+        },
+      );
+      assert.equal(device.opened, false);
+      assert.equal(device.attempts, 0);
+      assert.deepEqual(device.sent, []);
+      assert.equal(clock.pending(), 0);
+    }
   });
 }
 
