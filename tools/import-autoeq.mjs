@@ -1,8 +1,10 @@
-import { spawn, execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile, mkdir, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
 import { GRID } from '../src/dsp/grid.mjs';
 import { MeasurementError, parseMeasurement, toGrid, normalize } from '../src/io/measurement.mjs';
@@ -180,33 +182,61 @@ export function createTreeReader(directory) {
   };
 }
 
-/** @param {string} directory @param {string[]} args @param {string} [input] @returns {Promise<string>} */
-async function git(directory, args, input) {
+/** Keep Git's diagnostic even when a closed stdin also produces EPIPE/EOF on Windows.
+ * @param {string} command @param {string} stderr @param {Error} [error]
+ */
+function gitFailure(command, stderr, error) {
+  const details = [stderr.trim(), error?.message].filter(Boolean).join('\n');
+  return new Error(`${command} failed${details ? `: ${details}` : '.'}`, { cause: error });
+}
+
+/** @param {string} directory @param {string[]} args @returns {Promise<string>} */
+async function git(directory, args) {
   return new Promise((resolve, reject) => {
-    const child = execFile(
-      'git',
-      ['--git-dir', directory, ...args],
-      { maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' },
-      (error, stdout) => {
-        if (error) reject(error);
-        else resolve(stdout);
-      },
-    );
-    child.stdin?.on('error', reject);
-    child.stdin?.end(input);
+    let stdout = '';
+    let stderr = '';
+    let bytes = 0;
+    /** @type {Error | undefined} */
+    let processError;
+    const child = spawn('git', ['--git-dir', path.resolve(directory), ...args], {
+      cwd: directory,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.stdout.setEncoding('utf8').on('data', (data) => {
+      bytes += Buffer.byteLength(data);
+      if (bytes > 64 * 1024 * 1024) {
+        processError ??= new Error('Git stdout exceeded 64 MiB.');
+        child.kill();
+      } else stdout += data;
+    });
+    child.stderr.on('data', (data) => {
+      stderr = (stderr + data.toString()).slice(-65536);
+    });
+    child.on('error', (error) => {
+      processError = error;
+    });
+    child.on('close', (code) => {
+      if (processError || code !== 0)
+        reject(gitFailure(`git ${args.join(' ')} (exit ${code})`, stderr, processError));
+      else resolve(stdout);
+    });
   });
 }
 
 /** Stream the length-delimited cat-file protocol. No CSV, including differently cased
  * paths, is ever checked out. Requests are bounded to keep stdin and memory small.
  * @param {string} directory @param {string} sha @param {string[]} paths
+ * @param {(message: string) => void} [report]
  */
-export async function* readGitBlobs(directory, sha, paths) {
+export async function* readGitBlobs(directory, sha, paths, report = console.warn) {
+  if (paths.length)
+    report(`AutoEq: reading 0/${paths.length} Git blobs (missing objects are fetched lazily).`);
   for (let start = 0; start < paths.length; start += 128) {
     const batch = paths.slice(start, start + 128);
     if (batch.some((file) => /[\r\n\0]/.test(file)))
       throw new Error('Unsupported newline in Git path.');
-    const child = spawn('git', ['--git-dir', directory, 'cat-file', '--batch'], {
+    const child = spawn('git', ['--git-dir', path.resolve(directory), 'cat-file', '--batch'], {
+      cwd: directory,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
@@ -221,48 +251,65 @@ export async function* readGitBlobs(directory, sha, paths) {
     const completion = new Promise((resolve) => {
       child.on('error', (error) => {
         processError = error;
-        resolve(-1);
       });
       child.on('close', resolve);
     });
-    child.stdin.end(batch.map((file) => `${sha}:${file}\n`).join(''));
+    // Feed and consume concurrently: pipeline waits for drain, ends stdin, and observes
+    // errors/early close without rejecting before Git's stderr has been collected.
+    const input = pipeline(
+      Readable.from(batch.map((file) => `${sha}:${file}\n`)),
+      child.stdin,
+    ).catch((error) => {
+      processError ??= error;
+    });
     let pending = Buffer.alloc(0);
     let size = -1;
     let index = 0;
     try {
-      for await (const chunk of child.stdout) {
-        pending = Buffer.concat([pending, chunk]);
-        while (true) {
-          if (size < 0) {
-            const end = pending.indexOf(10);
-            if (end < 0) break;
-            const header = pending.subarray(0, end).toString('utf8');
-            const match = /^[a-f0-9]+ blob (\d+)$/.exec(header);
-            if (!match) throw new Error(`Cannot read Git blob ${batch[index]}: ${header}`);
-            size = Number(match[1]);
-            pending = pending.subarray(end + 1);
+      try {
+        for await (const chunk of child.stdout) {
+          pending = Buffer.concat([pending, chunk]);
+          while (true) {
+            if (size < 0) {
+              const end = pending.indexOf(10);
+              if (end < 0) break;
+              const header = pending.subarray(0, end).toString('utf8');
+              const match = /^[a-f0-9]+ blob (\d+)$/.exec(header);
+              if (!match) throw new Error(`Cannot read Git blob ${batch[index]}: ${header}`);
+              size = Number(match[1]);
+              pending = pending.subarray(end + 1);
+            }
+            if (pending.length < size + 1) break;
+            if (index >= batch.length || pending[size] !== 10)
+              throw new Error('Invalid git cat-file framing.');
+            yield { path: batch[index++], data: pending.subarray(0, size) };
+            pending = pending.subarray(size + 1);
+            size = -1;
           }
-          if (pending.length < size + 1) break;
-          if (index >= batch.length || pending[size] !== 10)
-            throw new Error('Invalid git cat-file framing.');
-          yield { path: batch[index++], data: pending.subarray(0, size) };
-          pending = pending.subarray(size + 1);
-          size = -1;
         }
+      } catch (error) {
+        if (child.exitCode === null) child.kill();
+        await completion;
+        throw gitFailure('git cat-file', stderr, /** @type {Error} */ (error));
       }
+      await input;
       const code = await completion;
       if (processError || code !== 0)
-        throw new Error(`git cat-file failed: ${processError?.message ?? stderr}`);
+        throw gitFailure(`git cat-file (exit ${code})`, stderr, processError);
       if (index !== batch.length || pending.length || size !== -1)
-        throw new Error('Truncated git cat-file output.');
+        throw gitFailure('git cat-file', stderr, new Error('Truncated git cat-file output.'));
+      report(`AutoEq: read ${start + batch.length}/${paths.length} Git blobs.`);
     } finally {
+      child.stdin.destroy();
       if (child.exitCode === null) child.kill();
+      await input;
+      await completion;
     }
   }
 }
 
-/** @param {string} directory @param {string} sha @returns {TreeReader} */
-export function createGitReader(directory, sha) {
+/** @param {string} directory @param {string} sha @param {(message: string) => void} [report] @returns {TreeReader} */
+export function createGitReader(directory, sha, report = console.warn) {
   return {
     async list() {
       const text = await git(directory, [
@@ -277,7 +324,7 @@ export function createGitReader(directory, sha) {
       ]);
       return text.split('\0').filter(Boolean).sort(compare);
     },
-    read: (paths) => readGitBlobs(directory, sha, paths),
+    read: (paths) => readGitBlobs(directory, sha, paths, report),
   };
 }
 
@@ -381,50 +428,18 @@ async function prepareGitCache(cache, sha) {
   } catch {
     await git(directory, ['fetch', '--filter=blob:none', '--depth=1', 'origin', sha]);
   }
+  // Also repair older/incomplete caches: cat-file must be able to fetch missing blobs
+  // from origin. Never disable this remote for a batch-check or fetch blob OIDs ourselves.
+  await git(directory, ['config', 'core.repositoryformatversion', '1']);
+  await git(directory, ['config', 'extensions.partialClone', 'origin']);
+  await git(directory, ['config', 'remote.origin.promisor', 'true']);
+  await git(directory, ['config', 'remote.origin.partialclonefilter', 'blob:none']);
   const commitDate = (await git(directory, ['show', '-s', '--format=%cI', sha])).trim();
   await writeFile(
     path.join(directory, 'autoeq-cache.json'),
     `${JSON.stringify({ sha, commitDate })}\n`,
   );
   return { directory, commitDate };
-}
-
-/** Prefetch only selected blobs, in bounded batches, rather than one network request
- * per CSV through the partial clone's lazy fetch. Already-present objects are reused.
- * @param {string} directory @param {string} sha @param {string[]} paths
- */
-async function prefetchBlobs(directory, sha, paths) {
-  const wanted = new Set(paths);
-  const tree = await git(directory, ['ls-tree', '-r', '-z', sha, '--', 'measurements', 'targets']);
-  const objects = [
-    ...new Set(
-      tree.split('\0').flatMap((record) => {
-        const tab = record.indexOf('\t');
-        return wanted.has(record.slice(tab + 1)) ? [record.slice(0, tab).split(' ')[2]] : [];
-      }),
-    ),
-  ];
-  // Disabling the promisor remote for this local presence check prevents lazy fetches.
-  // Unlike an unconditional fetch, a complete cache therefore also works offline.
-  const checked = await git(
-    directory,
-    ['-c', 'remote.origin.promisor=false', 'cat-file', '--batch-check'],
-    objects.map((object) => `${object}\n`).join(''),
-  );
-  const missing = checked
-    .split('\n')
-    .filter((line) => line.endsWith(' missing'))
-    .map((line) => line.split(' ')[0]);
-  for (let start = 0; start < missing.length; start += 128) {
-    await git(directory, [
-      'fetch',
-      '--no-tags',
-      '--no-write-fetch-head',
-      '--filter=blob:none',
-      'origin',
-      ...missing.slice(start, start + 128),
-    ]);
-  }
 }
 
 /** Convert an abstract tree, so tests need neither a network nor a case-sensitive disk.
@@ -568,20 +583,10 @@ export async function importAutoEq({
     });
   }
   const revision = await resolveRevision({ sha, cache, fetchImpl, report });
+  report(`AutoEq: preparing Git cache for ${revision.sha}.`);
   const prepared = await prepareGitCache(cache, revision.sha);
-  const reader = createGitReader(prepared.directory, revision.sha);
-  const paths = await reader.list();
-  const entries = inferEntries(paths, excluded);
-  const sources = new Set(entries.map((entry) => entry.source));
-  await prefetchBlobs(prepared.directory, revision.sha, [
-    ...entries.map((entry) => entry.path),
-    ...paths.filter(
-      (file) =>
-        /^measurements\/[^/]+\/name_index\.tsv$/.test(file) && sources.has(file.split('/')[1]),
-    ),
-  ]);
   return buildDataset({
-    reader: { ...reader, list: async () => paths },
+    reader: createGitReader(prepared.directory, revision.sha, report),
     out,
     sha: revision.sha,
     commitDate: prepared.commitDate,

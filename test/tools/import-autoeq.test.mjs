@@ -3,7 +3,7 @@ import test from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, access, rename } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { GRID } from '../../src/dsp/grid.mjs';
 import { normalize, parseMeasurement, toGrid } from '../../src/io/measurement.mjs';
 import {
@@ -29,6 +29,14 @@ async function temporary(t) {
   const directory = await mkdtemp(path.join(import.meta.dirname, '.autoeq-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
+}
+
+function git(repository, args, input) {
+  return execFileSync('git', ['--git-dir', repository, ...args], {
+    input,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
 }
 
 test('infers both layouts, all types, case collisions and model slug collisions deterministically', () => {
@@ -232,12 +240,7 @@ test('resolves master with injected fetch, falls back to the newest complete cac
 test('bare Git plumbing preserves Rtings/rtings blobs without any checkout, across read batches', async (t) => {
   const root = await temporary(t);
   const repository = path.join(root, 'bare.git');
-  const run = (args, input) =>
-    execFileSync('git', ['--git-dir', repository, ...args], {
-      input,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+  const run = (args, input) => git(repository, args, input);
   run(['init', '--bare']);
   const csv = 'frequency,raw\n20,3.1234\n1000,0\n20000,-1.2345\n';
   const blob = run(['hash-object', '-w', '--stdin'], csv);
@@ -306,6 +309,176 @@ test('bare Git plumbing preserves Rtings/rtings blobs without any checkout, acro
   });
   assert.equal(cached.manifest.sha, revision);
   assert.deepEqual(cached.index, index);
+});
+
+test('cat-file handles stdin/stdout backpressure across batches', { timeout: 30000 }, async (t) => {
+  const root = await temporary(t);
+  const repository = path.join(root, 'bare.git');
+  git(repository, ['init', '--bare']);
+  const data = 'blob content\n'.repeat(4096);
+  const blob = git(repository, ['hash-object', '-w', '--stdin'], data);
+  // Git paths need not fit the host filesystem: no checkout is involved. These
+  // requests exceed stdin's high-water mark while stdout also exceeds pipe capacity.
+  const name = `${'long-name-'.repeat(256)}.csv`;
+  const tree = git(repository, ['mktree'], `100644 blob ${blob}\t${name}\n`);
+  const paths = Array(130).fill(name);
+  const reports = [];
+  let count = 0;
+  for await (const item of readGitBlobs(repository, tree, paths, (message) =>
+    reports.push(message),
+  )) {
+    assert.equal(item.path, name);
+    assert.equal(item.data.toString('utf8'), data);
+    count++;
+  }
+  assert.equal(count, paths.length);
+  assert.ok(reports.some((message) => /read 128\/130 Git blobs/.test(message)));
+  assert.ok(reports.some((message) => /read 130\/130 Git blobs/.test(message)));
+  assert.ok(reports.every((message) => !message.includes(data)));
+});
+
+test('cat-file retains stderr when Git exits early', { timeout: 30000 }, async (t) => {
+  const root = await temporary(t);
+  const paths = Array(128).fill(`measurements/${'long-name-'.repeat(256)}.csv`);
+  await assert.rejects(
+    async () => {
+      for await (const item of readGitBlobs(root, sha, paths, () => {})) void item;
+    },
+    (error) => {
+      assert.match(error.message, /git cat-file/);
+      assert.match(error.message, /not a git repository/i);
+      return true;
+    },
+  );
+});
+
+test('a failed initial fetch reports the Git command and remote stderr', async (t) => {
+  const root = await temporary(t);
+  const cache = path.join(root, 'cache');
+  const repository = path.join(cache, sha);
+  await mkdir(repository, { recursive: true });
+  git(repository, ['init', '--bare']);
+  git(repository, ['remote', 'add', 'origin', path.join(root, 'absent.git')]);
+  await assert.rejects(
+    importAutoEq({ sha, cache, out: path.join(root, 'out'), report: () => {} }),
+    (error) => {
+      assert.match(error.message, /git fetch --filter=blob:none --depth=1/);
+      assert.match(error.message, /could not read from remote repository/i);
+      return true;
+    },
+  );
+});
+
+test('partial bare caches fetch lazily and work offline', { timeout: 30000 }, async (t) => {
+  const root = await temporary(t);
+  const remote = path.join(root, 'origin.git');
+  const run = (args, input) => git(remote, args, input);
+  run(['init', '--bare']);
+  run(['config', 'uploadpack.allowFilter', 'true']);
+  run(['config', 'uploadpack.allowAnySHA1InWant', 'true']);
+  const csv = 'frequency,raw\n20,3\n1000,0\n20000,-1\n';
+  const blob = run(['hash-object', '-w', '--stdin'], csv);
+  const names = run(['hash-object', '-w', '--stdin'], 'name\tbrand\nAcme Bud\tAcme Audio\n');
+  const ignored = run(['hash-object', '-w', '--stdin'], 'do not download results');
+  const typeTree = run(['mktree'], `100644 blob ${blob}\tAcme Bud.csv\n`);
+  const sourceTree = run(
+    ['mktree'],
+    `040000 tree ${typeTree}\tin-ear\n100644 blob ${names}\tname_index.tsv\n`,
+  );
+  const sourcesTree = run(
+    ['mktree'],
+    `040000 tree ${sourceTree}\tRtings\n040000 tree ${sourceTree}\trtings\n`,
+  );
+  const resultsTree = run(['mktree'], `100644 blob ${ignored}\tignored.csv\n`);
+  const tree = run(
+    ['mktree'],
+    `040000 tree ${sourcesTree}\tmeasurements\n040000 tree ${resultsTree}\tresults\n`,
+  );
+  const revision = run([
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=fixture@example.invalid',
+    'commit-tree',
+    tree,
+    '-m',
+    'partial clone fixture',
+  ]);
+  const cache = path.join(root, 'cache');
+  const repository = path.join(cache, revision);
+  await mkdir(repository, { recursive: true });
+  git(repository, ['init', '--bare']);
+  git(repository, ['remote', 'add', 'origin', pathToFileURL(remote).href]);
+  git(repository, ['fetch', '--filter=blob:none', '--depth=1', 'origin', revision]);
+  const missing = () => git(repository, ['rev-list', '--objects', '--missing=print', revision]);
+  assert.ok(missing().includes(`?${blob}`));
+  assert.ok(missing().includes(`?${names}`));
+
+  // A failed lazy fetch can emit a "missing" protocol header as well as stderr.
+  // The parser must not discard the remote's diagnostic in favor of that header.
+  git(repository, ['remote', 'set-url', 'origin', path.join(root, 'absent.git')]);
+  await assert.rejects(
+    async () => {
+      for await (const item of readGitBlobs(
+        repository,
+        revision,
+        ['measurements/Rtings/in-ear/Acme Bud.csv'],
+        () => {},
+      ))
+        void item;
+    },
+    (error) => {
+      assert.match(error.message, /git cat-file/);
+      assert.match(error.message, /could not read from remote repository/i);
+      return true;
+    },
+  );
+  git(repository, ['remote', 'set-url', 'origin', pathToFileURL(remote).href]);
+  git(repository, ['config', 'remote.origin.promisor', 'false']);
+  const reports = [];
+  const options = {
+    sha: revision,
+    cache,
+    out: path.join(root, 'out'),
+    fetchImpl: async () => {
+      throw new Error('must not call GitHub');
+    },
+    report: (message) => reports.push(message),
+  };
+  const imported = await importAutoEq(options);
+  assert.equal(imported.index.length, 2);
+  assert.ok(imported.index.every((entry) => entry.brand === 'Acme Audio'));
+  assert.equal(git(repository, ['config', 'remote.origin.promisor']), 'true');
+  assert.equal(git(repository, ['config', 'extensions.partialClone']), 'origin');
+  assert.equal(git(repository, ['config', 'remote.origin.partialclonefilter']), 'blob:none');
+  assert.ok(!missing().includes(`?${blob}`));
+  assert.ok(!missing().includes(`?${names}`));
+  assert.ok(missing().includes(`?${ignored}`));
+  assert.ok(reports.some((message) => /read 2\/2 Git blobs/.test(message)));
+  await assert.rejects(access(path.join(repository, 'measurements')), /ENOENT/);
+
+  // Exercise the importer's initial shallow filtered fetch too, not just a cache
+  // whose commit and trees were already populated by this test.
+  const freshCache = path.join(root, 'fresh-cache');
+  const freshRepository = path.join(freshCache, revision);
+  await mkdir(freshRepository, { recursive: true });
+  git(freshRepository, ['init', '--bare']);
+  git(freshRepository, ['remote', 'add', 'origin', pathToFileURL(remote).href]);
+  const fresh = await importAutoEq({
+    ...options,
+    cache: freshCache,
+    out: path.join(root, 'fresh-out'),
+  });
+  assert.deepEqual(fresh.index, imported.index);
+  assert.ok(
+    git(freshRepository, ['rev-list', '--objects', '--missing=print', revision]).includes(
+      `?${ignored}`,
+    ),
+  );
+
+  await rename(remote, path.join(root, 'unavailable-origin.git'));
+  const offline = await importAutoEq({ ...options, out: path.join(root, 'offline-out') });
+  assert.deepEqual(offline.index, imported.index);
 });
 
 test('from-tree import and CLI fixture run never call the network', async (t) => {
