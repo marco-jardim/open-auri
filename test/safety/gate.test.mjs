@@ -349,9 +349,91 @@ test('D7: no PK boost above 16 kHz, boost Q ≤ 4', () => {
     at({ kind: 'PK', freqHz: 17000, gainDb: 1, qFactor: 5 }).map((r) => r.code),
     ['d7:pk-boost-above-16k', 'd7:boost-q'],
   );
-  // LP/HP have no gain: D7 does not apply.
-  const lp = at({ kind: 'LP', freqHz: 17000, gainDb: 3, qFactor: 0.7 }, { experimental: true });
+  // LP/HP have no gain: D7 does not apply. Contract change (B7): a non-zero LP/HP
+  // gain is no longer silently ignored (S1 and the envelope refuse it): f:codec.
+  const experimental = { experimental: true };
+  const lp = at({ kind: 'LP', freqHz: 17000, qFactor: 0.7 }, experimental);
   assert.deepEqual(lp, []);
+  const lpGain = at({ kind: 'LP', freqHz: 17000, gainDb: 3, qFactor: 0.7 }, experimental);
+  assert.deepEqual(
+    lpGain.map((r) => r.code),
+    ['f:codec'],
+  );
+});
+
+test('B7: LP/HP gain must be absent or exactly 0; zero is dropped from the snapshot', () => {
+  const opts = { experimental: true };
+  for (const kind of ['LP', 'HP']) {
+    const freqHz = kind === 'LP' ? 17000 : 40;
+    const absent = gateForWrite(first({ kind, freqHz, qFactor: 0.7 }), -1, opts);
+    assert.ok(absent.ok, kind);
+    for (const zero of [0, -0]) {
+      const result = gateForWrite(first({ kind, freqHz, gainDb: zero, qFactor: 0.7 }), -1, opts);
+      assert.deepEqual(result, absent, `${kind} gainDb=${Object.is(zero, -0) ? '-0' : '0'}`);
+      assert.ok(!Object.hasOwn(result.metrics.bands[0], 'gainDb'));
+    }
+    for (const bad of [6, -3, 1e-9, NaN, Infinity, '0', null, true, 0n, {}, Symbol('g')]) {
+      const result = gateForWrite(first({ kind, freqHz, gainDb: bad, qFactor: 0.7 }), -1, opts);
+      assert.deepEqual(codes(result), ['f:codec'], `${kind} gainDb=${typeof bad}`);
+      assert.equal(result.metrics.bands, undefined);
+      assert.equal(result.metrics.payload, undefined);
+    }
+  }
+});
+
+test('N2: the gate never coerces caller values, not even to format codec errors', () => {
+  let calls = 0;
+  const trap = () => ({
+    [Symbol.toPrimitive]() {
+      calls++;
+      throw new Error('ran');
+    },
+    toString() {
+      calls++;
+      return 'ran';
+    },
+    valueOf() {
+      calls++;
+      return 0;
+    },
+    toJSON() {
+      calls++;
+      return 'ran';
+    },
+  });
+  const base = { kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 };
+  for (const field of ['kind', 'freqHz', 'gainDb', 'qFactor']) {
+    const result = gateForWrite(first({ ...base, [field]: trap() }), -1);
+    assert.equal(codes(result).at(-1), 'f:codec', field);
+    assert.ok(!JSON.stringify(result.reasons).includes('ran'), field);
+  }
+  const lpBand = { kind: 'LP', freqHz: 1000, gainDb: trap(), qFactor: 1 };
+  const lp = gateForWrite(first(lpBand), -1, { experimental: true });
+  assert.deepEqual(codes(lp), ['f:codec']);
+  assert.deepEqual(codes(gateForWrite(NEUTRAL_BANDS, trap())), ['f:codec']);
+  // Reasons carry only JSON-safe primitives, never the caller's objects.
+  for (const [kind, value] of [
+    [undefined, undefined],
+    [null, null],
+    [true, true],
+    [7n, '7n'],
+    [() => 'PK', '(function)'],
+    [trap(), '(object)'],
+  ]) {
+    const result = gateForWrite(first({ kind, freqHz: 1000, gainDb: -3, qFactor: 1 }), -1);
+    assert.deepEqual(result.reasons[0], { code: 'k:kind-not-allowed', stage: 1, value });
+    assert.equal(typeof JSON.stringify(result.reasons), 'string');
+  }
+  const symbolKind = gateForWrite(first({ kind: Symbol('k'), freqHz: 1000, qFactor: 1 }), -1);
+  assert.equal(symbolKind.reasons[0].value, '(symbol)');
+  const boostBand = { kind: 'PK', freqHz: trap(), gainDb: 3, qFactor: trap() };
+  const boost = gateForWrite(first(boostBand), -6);
+  assert.deepEqual(boost.reasons.slice(0, 2), [
+    { code: 'd7:pk-boost-above-16k', stage: 1, value: '(object)', limit: 16000 },
+    { code: 'd7:boost-q', stage: 1, value: '(object)', limit: 4 },
+  ]);
+  assert.equal(codes(boost).at(-1), 'f:codec');
+  assert.equal(calls, 0);
 });
 
 test('reasons follow the documented order', () => {
@@ -538,6 +620,7 @@ test('drag tracks full on a sampled corpus; gateForWrite always runs full', (t) 
     ...fc.sample(curveArb, { numRuns: 200, seed: 20261016 }).map((bands) => [bands, -12]),
   ];
   let worst = 0;
+  let maxAbs = 0;
   let compared = 0;
   let verdictsDiffer = 0;
   for (const [bands, preampDb] of corpus) {
@@ -552,13 +635,17 @@ test('drag tracks full on a sampled corpus; gateForWrite always runs full', (t) 
     for (const key of PEAK_KEYS) {
       const laxness = full.metrics[key].db - drag.metrics[key].db;
       worst = Math.max(worst, laxness);
+      maxAbs = Math.max(maxAbs, Math.abs(laxness));
       assert.ok(laxness <= DRAG_CORPUS_BOUND_DB, `${key}: ${laxness}`);
     }
     if (codes(drag).join() !== codes(full).join()) verdictsDiffer++;
   }
   assert.ok(compared > 150);
   assert.equal(verdictsDiffer, 0);
-  t.diagnostic(`drag vs full: ${compared} curves, worst laxness ${worst} dB, same verdicts`);
+  t.diagnostic(
+    `drag vs full: ${compared} curves, worst laxness ${worst} dB, ` +
+      `max |full − drag| ${maxAbs} dB, same verdicts`,
+  );
 });
 
 // LP Q 2 peaks at ≈0.95 × fc here (fc 20000 → 19024 Hz, fc 21000 → 20007 Hz).

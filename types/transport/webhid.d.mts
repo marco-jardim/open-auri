@@ -207,10 +207,15 @@ export declare function requestCable(hid?: CableHID): Promise<CableDevice | null
  * are built from the exact payload it approved. `options.gate`, if given, must
  * also approve (it receives the frozen snapshot).
  *
+ * The device's lock is taken before the gates (or any other caller code) run
+ * and is released only by this call, so a nested write to the same device
+ * started from a band getter, a Proxy trap or the extra gate is refused.
+ *
  * Throws, before any I/O, when a gate rejects (GateRejectedError), when
  * `options.gate` is not a function or returns a non-object (TypeError), when
- * `signal` is already aborted, when the device is busy (ConcurrentWriteError)
- * or refused after an abandoned operation (DeviceUnusableError).
+ * `signal` is aborted before or during gating, when the device is busy
+ * (ConcurrentWriteError) or refused after an abandoned operation
+ * (DeviceUnusableError).
  * An interruption once I/O has started (disconnect, device closed, abort,
  * sendReport/open failure or hang) is returned as `status: 'interrupted'` with
  * the cause in `error`, and the commit is not sent. A pending open()/sendReport()
@@ -229,11 +234,21 @@ export declare function writeCurve(device: CableDevice, bands: readonly Band[], 
  * Writes the same curve to several cables, one at a time, waiting at least
  * {@link WRITE_SPACING_MS} between the end of one write and the start of the
  * next. Stops at the first write that is not 'ok'; the remaining devices are
- * reported as 'skipped'. A write that throws before any I/O (busy or unusable
- * device, abort) is reported as 'failed' with its error. The gates are checked
- * up front, so a rejected curve throws before any device is touched; every
- * device then receives the gate's snapshot (re-gated by writeCurve), so the
- * caller's bands are read only once.
+ * reported as 'skipped'.
+ *
+ * `devices` must be an array (a Set or other iterable is refused with a
+ * TypeError before anything is read or sent); it is copied once, by index.
+ * The gates are checked up front, so a rejected curve throws before any device
+ * is touched; every device then receives the gate's snapshot (re-gated by
+ * writeCurve, under that device's lock), so the caller's bands are read only
+ * once.
+ *
+ * Only that up-front phase throws (invalid arguments, gate rejection, signal
+ * already aborted). Once the first device write has started, writeMany never
+ * throws, so results of devices already committed are never lost: anything a
+ * device write or the spacing sleep throws (busy or unusable device, abort,
+ * TypeError, a broken clock) is that device's `{status: 'failed', error}`, and
+ * the remaining devices are 'skipped'.
  * @param {readonly CableDevice[]} devices
  * @param {readonly Band[]} bands
  * @param {number} preampDb

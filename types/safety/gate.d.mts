@@ -95,13 +95,20 @@ export type GateOptions = {
  * and the last interval. The reference does not refine those two, so a peak
  * lying between a domain edge (DC, 20 Hz, 20 kHz, 48 kHz) and the nearest grid
  * point was reported at the edge value; here it is found. This makes the gate
- * stricter than the reference (never laxer), by at most ~1e-4 dB in practice;
- * test/safety/gate.test.mjs records the deltas on the parity corpus and builds
- * a resonant-LP curve where the difference shows.
+ * stricter than the reference, never laxer. Measured (test/safety/gate.test.mjs):
+ * at most 4.4e-15 dB above the reference on the parity corpus (presets, reversed
+ * and sorted, analytic single sections), and 3.06e-6 dB on a resonant LP built
+ * to peak inside the last full-grid interval.
  *
- * `drag` is advisory only: it matches `full` to ~1e-12 dB wherever a peak is
- * bracketed by the coarse grid, but it can still be laxer where two features
- * share one coarse interval. Writes must use `gateForWrite`.
+ * `drag` is advisory only. Since the edge intervals are refined in both modes,
+ * drag can no longer miss a peak next to a domain edge; interior peaks between
+ * grid points are refined too, so drag and full differ only by the density of
+ * the grid that brackets each peak before refinement. What remains: two
+ * features sharing one coarse interval can still leave drag bracketing (and
+ * refining) only one of them, so drag may be slightly laxer. On the sampled
+ * corpus (11 presets in 3 orders, the counterexample and 200 random curves,
+ * seed 20261016) the largest observed |full − drag| is 2.9e-14 dB, with the
+ * same verdicts. Writes must use `gateForWrite`.
  */
 export declare const GRID_INTERVALS: Readonly<{
     drag: 2048;

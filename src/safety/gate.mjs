@@ -104,13 +104,20 @@ export { THRESHOLDS, PROVENANCE } from './thresholds.mjs';
  * and the last interval. The reference does not refine those two, so a peak
  * lying between a domain edge (DC, 20 Hz, 20 kHz, 48 kHz) and the nearest grid
  * point was reported at the edge value; here it is found. This makes the gate
- * stricter than the reference (never laxer), by at most ~1e-4 dB in practice;
- * test/safety/gate.test.mjs records the deltas on the parity corpus and builds
- * a resonant-LP curve where the difference shows.
+ * stricter than the reference, never laxer. Measured (test/safety/gate.test.mjs):
+ * at most 4.4e-15 dB above the reference on the parity corpus (presets, reversed
+ * and sorted, analytic single sections), and 3.06e-6 dB on a resonant LP built
+ * to peak inside the last full-grid interval.
  *
- * `drag` is advisory only: it matches `full` to ~1e-12 dB wherever a peak is
- * bracketed by the coarse grid, but it can still be laxer where two features
- * share one coarse interval. Writes must use `gateForWrite`.
+ * `drag` is advisory only. Since the edge intervals are refined in both modes,
+ * drag can no longer miss a peak next to a domain edge; interior peaks between
+ * grid points are refined too, so drag and full differ only by the density of
+ * the grid that brackets each peak before refinement. What remains: two
+ * features sharing one coarse interval can still leave drag bracketing (and
+ * refining) only one of them, so drag may be slightly laxer. On the sampled
+ * corpus (11 presets in 3 orders, the counterexample and 200 random curves,
+ * seed 20261016) the largest observed |full − drag| is 2.9e-14 dB, with the
+ * same verdicts. Writes must use `gateForWrite`.
  */
 export const GRID_INTERVALS = Object.freeze({ drag: 2048, full: 16384 });
 
@@ -413,23 +420,41 @@ function policyReasons(bands, experimental) {
   // Non-numbers count as NaN (they fail every check) and are never converted, so
   // no caller code (valueOf, Symbol coercion) runs here; the codec rejects them.
   const numeric = (/** @type {unknown} */ value) => (typeof value === 'number' ? value : NaN);
+  // Reasons carry only JSON-safe primitives, never a caller object whose toJSON
+  // or toString a consumer (e.g. an error message) would end up running.
+  const shown = (/** @type {unknown} */ value) => {
+    switch (typeof value) {
+      case 'number':
+      case 'string':
+      case 'boolean':
+      case 'undefined':
+        return value;
+      case 'bigint':
+        return `${String(value)}n`;
+      default:
+        return value === null ? null : `(${typeof value})`;
+    }
+  };
   for (let i = 0; i < bands.length; i++) {
     const stage = i + 1;
     const band = /** @type {Record<string, unknown>} */ (bands[i]);
     const kind = band.kind;
-    if (!isKindAllowed(kind, layer)) kinds.push({ code: 'k:kind-not-allowed', stage, value: kind });
+    if (!isKindAllowed(kind, layer)) {
+      kinds.push({ code: 'k:kind-not-allowed', stage, value: shown(kind) });
+    }
     if (kind !== 'PK' && kind !== 'LS' && kind !== 'HS') continue;
     if (!(numeric(band.gainDb) <= 0)) {
       if (kind === 'PK' && !(numeric(band.freqHz) <= ABS_RANGES.pkBoostMaxHz)) {
         d7.push({
           code: 'd7:pk-boost-above-16k',
           stage,
-          value: band.freqHz,
+          value: shown(band.freqHz),
           limit: ABS_RANGES.pkBoostMaxHz,
         });
       }
       if (!(numeric(band.qFactor) <= ABS_RANGES.boostQMax)) {
-        d7.push({ code: 'd7:boost-q', stage, value: band.qFactor, limit: ABS_RANGES.boostQMax });
+        const value = shown(band.qFactor);
+        d7.push({ code: 'd7:boost-q', stage, value, limit: ABS_RANGES.boostQMax });
       }
     }
   }

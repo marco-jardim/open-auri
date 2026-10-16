@@ -116,8 +116,12 @@ export declare function designSection(band: Band, sampleRate?: number): Section;
  * each element `kind`, `freqHz`, `gainDb` and `qFactor` exactly once each, in
  * that order, even for OFF. Each element becomes a new frozen plain object:
  * `{kind: 'OFF'}` for OFF, otherwise `kind` plus the other three fields as read,
- * omitting those that read as `undefined`. Nothing is coerced or validated
- * here: the codec rejects invalid values.
+ * omitting those that read as `undefined`. LP/HP carry no gain: a `gainDb` that
+ * reads as exactly 0 (or −0) is dropped, so an accepted LP/HP snapshot never
+ * has `gainDb`; any other LP/HP gain is kept so that {@link checkBand} refuses
+ * it. Nothing is coerced or validated here: the codec rejects invalid values,
+ * including non-primitive ones (kept by reference, never converted; consumers
+ * such as the S1 codec map them to their own errors).
  *
  * Throws a TypeError for a non-array (`bands must be an array`), for a hole
  * (`band <i>: missing (hole in a sparse array)`; holes are never skipped) and for
@@ -132,6 +136,12 @@ export declare function designSection(band: Band, sampleRate?: number): Section;
 export declare function snapshotBands(bands: unknown, expectedLength?: number): readonly Readonly<Band>[];
 /**
  * Rejects bands whose parameters cannot describe a valid filter at SAMPLE_RATE.
+ *
+ * Throws a TypeError for a non-object band, an unknown kind or a field that is
+ * not a primitive (object, function, symbol), and a RangeError for out-of-range
+ * or non-finite values. LP/HP take no gain: `gainDb` must be absent or exactly
+ * 0 (−0 included); anything else (non-zero, NaN, a string) is a RangeError.
+ * Each field is read once; values are never coerced, not even for messages.
  * @param {Band} band
  * @param {number} [index]
  */

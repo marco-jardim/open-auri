@@ -29,6 +29,11 @@
 // Every entry point that takes a band list first copies it with snapshotBands()
 // (one read per field), so validation and the encoded bytes always see the same
 // values, even when the caller passes getters or Proxies.
+//
+// No caller code runs after the snapshot: values are never coerced. Checks use
+// typeof / Number.isFinite, non-primitive fields are refused by checkBand, and
+// every error message formats caller values with describeValue(), which never
+// calls toString, valueOf, toJSON or Symbol.toPrimitive.
 
 /**
  * @typedef {{kind: 'PK' | 'LS' | 'HS', freqHz: number, gainDb: number, qFactor: number}} GainBand
@@ -75,11 +80,51 @@ export const OFF = Object.freeze({ kind: 'OFF' });
 export const NEUTRAL_BANDS = Object.freeze(Array.from({ length: BAND_COUNT }, () => OFF));
 
 const KINDS_WITH_GAIN = new Set(['PK', 'LS', 'HS']);
+const PRIMITIVE_TYPES = new Set(['number', 'string', 'boolean', 'undefined', 'bigint']);
+const DESCRIBED_STRING_MAX = 40;
 const REPORT_DATA_SIZE = REPORT_SIZE - 1; // byte 0 of every report is its index
 const Q23_ONE = 2 ** 23;
 const Q27_ONE = 2 ** 27;
 const INT32_MIN = -2147483648;
 const INT32_MAX = 2147483647;
+
+/**
+ * Whether `value` is a primitive that can be copied and checked without running
+ * caller code (symbols are excluded: they are never valid band values).
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isPlainPrimitive(value) {
+  return value === null || PRIMITIVE_TYPES.has(typeof value);
+}
+
+/**
+ * Text for a caller value in an error message. Never runs caller code: objects,
+ * functions and symbols are described by their type only, never converted.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function describeValue(value) {
+  switch (typeof value) {
+    case 'string':
+      return value.length > DESCRIBED_STRING_MAX
+        ? `${JSON.stringify(value.slice(0, DESCRIBED_STRING_MAX))}…`
+        : JSON.stringify(value);
+    case 'number':
+      return Object.is(value, -0) ? '-0' : String(value);
+    case 'bigint':
+      return `${String(value)}n`;
+    case 'boolean':
+    case 'undefined':
+      return String(value);
+    case 'symbol':
+      return 'a symbol';
+    case 'function':
+      return 'a function';
+    default:
+      return value === null ? 'null' : 'an object';
+  }
+}
 
 // --- Biquad design ----------------------------------------------------------
 //
@@ -236,7 +281,7 @@ export function designSection(band, sampleRate = SAMPLE_RATE) {
     case 'OFF':
       return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
     default:
-      throw new TypeError(`unknown filter kind ${JSON.stringify(/** @type {Band} */ (band).kind)}`);
+      throw new TypeError(`unknown filter kind ${describeValue(/** @type {Band} */ (band).kind)}`);
   }
 }
 
@@ -251,8 +296,12 @@ export function designSection(band, sampleRate = SAMPLE_RATE) {
  * each element `kind`, `freqHz`, `gainDb` and `qFactor` exactly once each, in
  * that order, even for OFF. Each element becomes a new frozen plain object:
  * `{kind: 'OFF'}` for OFF, otherwise `kind` plus the other three fields as read,
- * omitting those that read as `undefined`. Nothing is coerced or validated
- * here: the codec rejects invalid values.
+ * omitting those that read as `undefined`. LP/HP carry no gain: a `gainDb` that
+ * reads as exactly 0 (or −0) is dropped, so an accepted LP/HP snapshot never
+ * has `gainDb`; any other LP/HP gain is kept so that {@link checkBand} refuses
+ * it. Nothing is coerced or validated here: the codec rejects invalid values,
+ * including non-primitive ones (kept by reference, never converted; consumers
+ * such as the S1 codec map them to their own errors).
  *
  * Throws a TypeError for a non-array (`bands must be an array`), for a hole
  * (`band <i>: missing (hole in a sparse array)`; holes are never skipped) and for
@@ -268,10 +317,10 @@ export function snapshotBands(bands, expectedLength) {
   if (!Array.isArray(bands)) throw new TypeError('bands must be an array');
   const length = bands.length;
   if (expectedLength !== undefined && length !== expectedLength) {
-    throw new RangeError(`expected ${expectedLength} bands`);
+    throw new RangeError(`expected ${describeValue(expectedLength)} bands`);
   }
   if (!(Number.isSafeInteger(length) && length >= 0)) {
-    throw new RangeError(`invalid band count ${String(length)}`);
+    throw new RangeError(`invalid band count ${describeValue(length)}`);
   }
   /** @type {Readonly<Band>[]} */
   const copies = [];
@@ -290,7 +339,8 @@ export function snapshotBands(bands, expectedLength) {
     /** @type {Record<string, unknown>} */
     const copy = { kind };
     if (freqHz !== undefined) copy.freqHz = freqHz;
-    if (gainDb !== undefined) copy.gainDb = gainDb;
+    const passWithoutGain = (kind === 'LP' || kind === 'HP') && gainDb === 0;
+    if (gainDb !== undefined && !passWithoutGain) copy.gainDb = gainDb;
     if (qFactor !== undefined) copy.qFactor = qFactor;
     copies.push(/** @type {Readonly<Band>} */ (/** @type {unknown} */ (Object.freeze(copy))));
   }
@@ -309,25 +359,51 @@ function bandError(index, message) {
 
 /**
  * Rejects bands whose parameters cannot describe a valid filter at SAMPLE_RATE.
+ *
+ * Throws a TypeError for a non-object band, an unknown kind or a field that is
+ * not a primitive (object, function, symbol), and a RangeError for out-of-range
+ * or non-finite values. LP/HP take no gain: `gainDb` must be absent or exactly
+ * 0 (−0 included); anything else (non-zero, NaN, a string) is a RangeError.
+ * Each field is read once; values are never coerced, not even for messages.
  * @param {Band} band
  * @param {number} [index]
  */
 export function checkBand(band, index = 0) {
-  if (band === null || typeof band !== 'object')
+  if (band === null || typeof band !== 'object') {
     throw new TypeError(`band ${index}: not an object`);
-  if (!FILTER_KINDS.includes(band.kind)) {
-    throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
   }
-  if (band.kind === 'OFF') return;
+  const { kind, freqHz, gainDb, qFactor } = /** @type {Record<string, unknown>} */ (band);
+  if (!FILTER_KINDS.includes(/** @type {string} */ (kind))) {
+    throw new TypeError(`band ${index}: unknown filter kind ${describeValue(kind)}`);
+  }
+  const filterKind = /** @type {Band['kind']} */ (kind);
+  if (filterKind === 'OFF') return;
+  /** @type {[string, unknown][]} */
+  const fields = [
+    ['freqHz', freqHz],
+    ['gainDb', gainDb],
+    ['qFactor', qFactor],
+  ];
+  for (const [field, value] of fields) {
+    if (!isPlainPrimitive(value)) {
+      throw new TypeError(`band ${index}: ${field} must be a number, got ${describeValue(value)}`);
+    }
+  }
   const nyquist = SAMPLE_RATE / 2;
-  if (!(Number.isFinite(band.freqHz) && band.freqHz > 0 && band.freqHz < nyquist)) {
-    throw bandError(index, `freqHz must be in (0, ${nyquist}), got ${band.freqHz}`);
+  // NaN fails both comparisons and ±Infinity fails one: no Number.isFinite needed.
+  if (!(typeof freqHz === 'number' && freqHz > 0 && freqHz < nyquist)) {
+    throw bandError(index, `freqHz must be in (0, ${nyquist}), got ${describeValue(freqHz)}`);
   }
-  if (!(Number.isFinite(band.qFactor) && band.qFactor > 0)) {
-    throw bandError(index, `qFactor must be > 0, got ${band.qFactor}`);
+  if (!(typeof qFactor === 'number' && Number.isFinite(qFactor) && qFactor > 0)) {
+    throw bandError(index, `qFactor must be > 0, got ${describeValue(qFactor)}`);
   }
-  if (KINDS_WITH_GAIN.has(band.kind) && !Number.isFinite(band.gainDb)) {
-    throw bandError(index, `gainDb must be finite, got ${band.gainDb}`);
+  if (KINDS_WITH_GAIN.has(filterKind)) {
+    if (!Number.isFinite(gainDb)) {
+      throw bandError(index, `gainDb must be finite, got ${describeValue(gainDb)}`);
+    }
+  } else if (gainDb !== undefined && gainDb !== 0) {
+    const got = describeValue(gainDb);
+    throw bandError(index, `${filterKind} takes no gain: gainDb must be absent or 0, got ${got}`);
   }
 }
 
@@ -371,9 +447,11 @@ export function encodeSection(section, index = 0) {
  */
 export function preampWord(preampDb = 0) {
   if (!Number.isFinite(preampDb)) {
-    throw new RangeError(`preamp must be a finite dB value, got ${preampDb}`);
+    throw new RangeError(`preamp must be a finite dB value, got ${describeValue(preampDb)}`);
   }
-  if (preampDb > 0) throw new RangeError(`preamp must be <= 0 dB, got ${preampDb}`);
+  if (preampDb > 0) {
+    throw new RangeError(`preamp must be <= 0 dB, got ${describeValue(preampDb)}`);
+  }
   return Math.round(Math.pow(10, preampDb / 20) * Q23_ONE);
 }
 
@@ -398,7 +476,7 @@ export function crc16Ccitt(data) {
  */
 function appendInt32LE(buffer, value) {
   if (!Number.isInteger(value) || value > INT32_MAX || value < INT32_MIN) {
-    throw new RangeError(`value does not fit int32: ${value}`);
+    throw new RangeError(`value does not fit int32: ${describeValue(value)}`);
   }
   buffer.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
 }
@@ -450,7 +528,7 @@ export function reportsFromPayload(payload) {
   for (let index = 0; index < PAYLOAD_SIZE; index++) {
     const byte = payload[index];
     if (!(Number.isInteger(byte) && byte >= 0 && byte <= 0xff)) {
-      throw new RangeError(`payload byte ${index} is not a byte: ${byte}`);
+      throw new RangeError(`payload byte ${index} is not a byte: ${describeValue(byte)}`);
     }
     bytes[index] = byte;
   }

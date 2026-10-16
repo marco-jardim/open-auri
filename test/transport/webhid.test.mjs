@@ -703,6 +703,309 @@ test('writes to different devices may run concurrently', async () => {
   assert.deepEqual(bytesOf(a), bytesOf(b));
 });
 
+// --- B1: the lock is taken before any caller code runs ---------------------------
+
+/** Settles to {value} or {error} without ever being an unhandled rejection. */
+const outcome = (promise) =>
+  promise.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+const commits = (device) => bytesOf(device).filter(isCommit).length;
+const CUT = [{ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 }, ...offTail()];
+
+/**
+ * Runs an outer write whose gating calls `reenter()` (a nested writeCurve on the
+ * same device) and checks: the nested writes are refused, the outer write sends
+ * exactly one stream and one commit, holds the lock until it ends, and releases
+ * it exactly once (a later write succeeds).
+ */
+async function assertReentryRefused(label, build) {
+  const { clock, device, hid } = setup();
+  const inner = [];
+  const reenter = () => {
+    inner.push(outcome(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid })));
+  };
+  const { bands, gate } = build(reenter);
+  const outer = writeCurve(device, bands, -4, { gate, clock, hid });
+  // The nested call's failure did not release the outer lock.
+  const during = await outcome(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }));
+  assert.ok(during.error instanceof ConcurrentWriteError, label);
+  assert.ok(inner.length >= 1, label);
+  for (const nested of inner) {
+    assert.ok((await nested).error instanceof ConcurrentWriteError, label);
+  }
+  const result = await outer;
+  assert.equal(result.status, 'ok', label);
+  assert.equal(result.reportsSent, 9, label);
+  assert.equal(device.sent.length, 10, label);
+  assert.equal(commits(device), 1, label);
+  assert.deepEqual(sentPayload(device), encodePayload(CUT, -4), label);
+  const after = await writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid });
+  assert.equal(after.status, 'ok', label);
+  assert.equal(device.sent.length, 20, label);
+  assert.equal(commits(device), 2, label);
+}
+
+test('B1: a nested write from a band getter is refused; one stream is sent', async () => {
+  await assertReentryRefused('getter', (reenter) => ({
+    bands: [
+      {
+        kind: 'PK',
+        freqHz: 1000,
+        qFactor: 1,
+        get gainDb() {
+          reenter();
+          return -3;
+        },
+      },
+      ...offTail(),
+    ],
+  }));
+});
+
+test('B1: a nested write from a Proxy trap is refused; one stream is sent', async () => {
+  await assertReentryRefused('proxy', (reenter) => ({
+    bands: [
+      new Proxy(
+        { ...CUT[0] },
+        {
+          get(target, key) {
+            if (key === 'qFactor') reenter();
+            return Reflect.get(target, key);
+          },
+        },
+      ),
+      ...offTail(),
+    ],
+  }));
+});
+
+test('B1: a nested write from the extra gate (or its verdict) is refused', async () => {
+  await assertReentryRefused('extra gate', (reenter) => ({
+    bands: CUT,
+    gate: () => {
+      reenter();
+      return { ok: true, reasons: [] };
+    },
+  }));
+  await assertReentryRefused('verdict getter', (reenter) => ({
+    bands: CUT,
+    gate: () => ({
+      get ok() {
+        reenter();
+        return true;
+      },
+    }),
+  }));
+});
+
+test('B1/N2: a coercion hook is never called, so it cannot re-enter', async () => {
+  const { clock, device, hid } = setup();
+  let calls = 0;
+  const inner = [];
+  const hook = {
+    [Symbol.toPrimitive]() {
+      calls++;
+      inner.push(outcome(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid })));
+      return -3;
+    },
+  };
+  const bands = [{ ...CUT[0], gainDb: hook }, ...offTail()];
+  await assert.rejects(
+    writeCurve(device, bands, -4, { clock, hid }),
+    (error) =>
+      error instanceof GateRejectedError &&
+      error.reasons.at(-1).code === 'f:codec' &&
+      /gainDb must be a number, got an object/.test(error.reasons.at(-1).value),
+  );
+  await assert.rejects(writeCurve(device, CUT, hook, { clock, hid }), GateRejectedError);
+  assert.equal(calls, 0);
+  assert.equal(inner.length, 0);
+  assert.equal(device.attempts, 0);
+  // The lock was released: the next write goes through.
+  assert.equal((await writeCurve(device, CUT, -4, { clock, hid })).status, 'ok');
+  assert.equal(commits(device), 1);
+});
+
+test('B1: inside writeMany, a nested write to the device being written is refused', async () => {
+  const { clock, devices, hid } = manyDevices(2);
+  const inner = [];
+  let call = 0;
+  const gate = () => {
+    call += 1;
+    // Call 1 is writeMany's up-front check; calls 2 and 3 run under devices[0] and [1]'s locks.
+    if (call > 1) {
+      inner.push(outcome(writeCurve(devices[call - 2], NEUTRAL_BANDS, PRE, { clock, hid })));
+    }
+    return { ok: true, reasons: [] };
+  };
+  const results = await writeMany(devices, CUT, -4, { gate, clock, hid });
+  assert.deepEqual(
+    results.map(({ status }) => status),
+    ['ok', 'ok'],
+  );
+  assert.equal(inner.length, 2);
+  for (const nested of inner) assert.ok((await nested).error instanceof ConcurrentWriteError);
+  for (const device of devices) {
+    assert.equal(device.sent.length, 10);
+    assert.equal(commits(device), 1);
+  }
+});
+
+// --- B2: aborts during gating and right before the commit -------------------------
+
+test('B2: an abort raised inside the extra gate sends nothing', async () => {
+  const { clock, device, hid } = setup();
+  const controller = new AbortController();
+  const gate = () => {
+    controller.abort();
+    return { ok: true, reasons: [] };
+  };
+  await assert.rejects(
+    writeCurve(device, NEUTRAL_BANDS, PRE, { gate, clock, hid, signal: controller.signal }),
+    { name: 'AbortError' },
+  );
+  assert.equal(device.attempts, 0);
+  assert.equal(device.opened, false);
+
+  const many = manyDevices(2);
+  const manyController = new AbortController();
+  await assert.rejects(
+    writeMany(many.devices, NEUTRAL_BANDS, PRE, {
+      gate: () => {
+        manyController.abort();
+        return { ok: true, reasons: [] };
+      },
+      clock: many.clock,
+      hid: many.hid,
+      signal: manyController.signal,
+    }),
+    { name: 'AbortError' },
+  );
+  assert.ok(many.devices.every((d) => d.attempts === 0 && !d.opened));
+  // The lock was released.
+  assert.equal((await writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid })).status, 'ok');
+});
+
+test('B2: an abort raised as the I/O starts opens and sends nothing', async () => {
+  for (const preopened of [false, true]) {
+    const { clock, device, hid } = setup();
+    if (preopened) await device.open();
+    const controller = new AbortController();
+    // The injected clock is caller code too; it aborts on the first now() call.
+    const abortingClock = {
+      now: () => {
+        controller.abort();
+        return clock.now();
+      },
+      sleep: clock.sleep,
+    };
+    const result = await writeCurve(device, NEUTRAL_BANDS, PRE, {
+      clock: abortingClock,
+      hid,
+      signal: controller.signal,
+    });
+    assert.equal(result.status, 'interrupted');
+    assert.equal(result.error.name, 'AbortError');
+    assert.equal(result.reportsSent, 0);
+    assert.equal(result.committed, false);
+    assert.equal(device.opened, preopened);
+    assert.equal(device.attempts, 0);
+  }
+});
+
+test('B2: an abort between the last report and the commit prevents the commit', async () => {
+  const { clock, device, hid } = setup();
+  const controller = new AbortController();
+  const realOpened = Object.getOwnPropertyDescriptor(FakeHIDDevice.prototype, 'opened').get;
+  // `opened` is read right before the commit; abort at that very moment.
+  Object.defineProperty(device, 'opened', {
+    get() {
+      if (device.sent.length === 9) controller.abort();
+      return realOpened.call(device);
+    },
+  });
+  const result = await writeCurve(device, NEUTRAL_BANDS, PRE, {
+    clock,
+    hid,
+    signal: controller.signal,
+  });
+  assert.equal(result.status, 'interrupted');
+  assert.equal(result.error.name, 'AbortError');
+  assert.equal(result.reportsSent, 9);
+  assert.equal(result.committed, false);
+  assert.equal(device.sent.length, 9);
+  assert.equal(commits(device), 0);
+});
+
+// --- B3: an abandoned operation that settles later frees the device -------------
+
+test('B3: a device abandoned mid-send is usable again once that send completes', async () => {
+  const { clock, device, hid } = setup({ delayMs: 5 }, { autoAdvance: false });
+  const controller = new AbortController();
+  const pending = writeCurve(device, NEUTRAL_BANDS, PRE, {
+    clock,
+    hid,
+    signal: controller.signal,
+  });
+  await clock.advance(1);
+  assert.equal(device.attempts, 1); // report 0 is still pending (5 ms)
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.status, 'interrupted');
+  assert.equal(result.error.name, 'AbortError');
+  assert.equal(result.reportsSent, 0);
+  await assert.rejects(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }), DeviceUnusableError);
+  await clock.advance(5); // the abandoned sendReport resolves
+  const again = writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid });
+  await clock.advance(400);
+  assert.equal((await again).status, 'ok');
+});
+
+test('B3: a device abandoned mid-open is usable again once that open rejects', async () => {
+  const { clock, device, hid } = setup({}, { autoAdvance: false });
+  let fail;
+  device.open = () =>
+    new Promise((_, reject) => {
+      fail = reject;
+    });
+  const controller = new AbortController();
+  const pending = writeCurve(device, NEUTRAL_BANDS, PRE, {
+    clock,
+    hid,
+    signal: controller.signal,
+  });
+  await clock.advance(1);
+  controller.abort();
+  assert.equal((await pending).status, 'interrupted');
+  await assert.rejects(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }), DeviceUnusableError);
+  fail(new Error('late failure'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  delete device.open; // back to the prototype's open()
+  const again = writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid });
+  await clock.advance(400);
+  assert.equal((await again).status, 'ok');
+});
+
+test('B3: an abandoned operation settling after requestCable changes nothing', async () => {
+  const { clock, device, hid } = setup({ delayMs: 5 }, { autoAdvance: false });
+  const controller = new AbortController();
+  const pending = writeCurve(device, NEUTRAL_BANDS, PRE, {
+    clock,
+    hid,
+    signal: controller.signal,
+  });
+  await clock.advance(1);
+  controller.abort();
+  assert.equal((await pending).status, 'interrupted');
+  assert.equal(await requestCable(hid), device); // clears the refusal first
+  await clock.advance(5); // then the abandoned sendReport settles
+  const again = writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid });
+  await clock.advance(400);
+  assert.equal((await again).status, 'ok');
+});
+
 // --- writeMany ---------------------------------------------------------------
 
 function manyDevices(count, faultsByIndex = {}, { autoAdvance = true } = {}) {
@@ -823,29 +1126,82 @@ test('writeMany: abort before start throws, abort between writes fails the next'
   assert.equal(devices[1].attempts, 0);
 });
 
-test('writeMany rethrows TypeErrors and unexpected clock errors', async () => {
+// Contract change (B4): once a device write has started, writeMany never throws,
+// so the results of devices already committed are never discarded. TypeErrors
+// and clock errors are the failing device's 'failed' result; the rest are skipped.
+test('B4: writeMany keeps committed results when a later device or the clock throws', async () => {
   const bug = new TypeError('bug');
-  const first = manyDevices(2, { 1: { throwAtReport: 0, throwError: bug } });
-  await assert.rejects(
-    writeMany(first.devices, NEUTRAL_BANDS, PRE, {
-      gate: approve,
-      clock: first.clock,
-      hid: first.hid,
-    }),
-    bug,
+  const first = manyDevices(3, { 1: { throwAtReport: 0, throwError: bug } });
+  const results = await writeMany(first.devices, NEUTRAL_BANDS, PRE, {
+    gate: approve,
+    clock: first.clock,
+    hid: first.hid,
+  });
+  assert.deepEqual(
+    results.map(({ status }) => status),
+    ['ok', 'failed', 'skipped'],
   );
+  assert.equal(results[0].committed, true);
+  assert.equal(results[1].error, bug);
+  assert.equal(first.devices[0].sent.length, 10);
+  assert.equal(first.devices[2].attempts, 0);
 
   const clockError = new Error('clock broke');
-  const { devices, hid } = manyDevices(2);
+  const { devices, hid } = manyDevices(3);
   const brokenClock = {
     now: () => 0,
     sleep: (ms) => (ms === WRITE_SPACING_MS ? Promise.reject(clockError) : Promise.resolve()),
   };
-  await assert.rejects(
-    writeMany(devices, NEUTRAL_BANDS, PRE, { gate: approve, clock: brokenClock, hid }),
-    clockError,
+  const broken = await writeMany(devices, NEUTRAL_BANDS, PRE, {
+    gate: approve,
+    clock: brokenClock,
+    hid,
+  });
+  assert.deepEqual(
+    broken.map(({ status }) => status),
+    ['ok', 'failed', 'skipped'],
   );
+  assert.equal(broken[0].committed, true);
+  assert.equal(broken[1].error, clockError);
   assert.equal(devices[1].attempts, 0);
+  assert.equal(devices[2].attempts, 0);
+
+  // A TypeError from the very first device is a result too, not a throw.
+  const lone = manyDevices(2, { 0: { throwAtReport: 0, throwError: bug } });
+  const loneResults = await writeMany(lone.devices, NEUTRAL_BANDS, PRE, {
+    clock: lone.clock,
+    hid: lone.hid,
+  });
+  assert.deepEqual(
+    loneResults.map(({ status }) => status),
+    ['failed', 'skipped'],
+  );
+  assert.equal(loneResults[0].error, bug);
+});
+
+// N4: writeMany takes an array only. A Set's entries() yields [device, device],
+// which used to skip the 2 s spacing; non-arrays are now refused before any I/O.
+test('N4: writeMany refuses a Set (or any non-array) before reading or sending', async () => {
+  const { clock, devices, hid } = manyDevices(2);
+  const { gate, calls } = countingGate();
+  for (const notArray of [new Set(devices), devices[0], { length: 2, 0: devices[0] }, null]) {
+    await assert.rejects(
+      writeMany(notArray, NEUTRAL_BANDS, PRE, { gate, clock, hid }),
+      (error) => error instanceof TypeError && /devices must be an array/.test(error.message),
+    );
+  }
+  assert.equal(calls.length, 0);
+  assert.ok(devices.every((device) => device.attempts === 0 && !device.opened));
+  // The array is copied once: later mutations by the caller do not change the batch.
+  const list = [...devices];
+  const pending = writeMany(list, NEUTRAL_BANDS, PRE, { clock, hid });
+  list.length = 1;
+  const results = await pending;
+  assert.deepEqual(
+    results.map(({ device }) => device),
+    devices,
+  );
+  assert.ok(results[1].startedAt - results[0].finishedAt >= WRITE_SPACING_MS);
 });
 
 test('writeMany with no devices returns an empty list', async () => {

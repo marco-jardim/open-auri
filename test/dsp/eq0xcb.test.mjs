@@ -295,6 +295,123 @@ test('snapshotBands: holes, non-objects, non-arrays and bad lengths throw', () =
   assert.deepEqual(codec.snapshotBands([]), []);
 });
 
+test('B7: LP/HP gainDb must be absent or exactly 0, and 0 is dropped from the snapshot', () => {
+  for (const kind of ['LP', 'HP']) {
+    const plain = { kind, freqHz: 1000, qFactor: 0.7 };
+    const reference = codec.encodePayload(withNeutral(plain), -1);
+    codec.checkBand(plain);
+    for (const zero of [0, -0]) {
+      const snap = codec.snapshotBands([{ ...plain, gainDb: zero }])[0];
+      assert.deepEqual(snap, plain);
+      assert.ok(!Object.hasOwn(snap, 'gainDb'));
+      codec.checkBand({ ...plain, gainDb: zero });
+      assert.deepEqual(codec.encodePayload(withNeutral({ ...plain, gainDb: zero }), -1), reference);
+    }
+    for (const bad of [6, -0.1, 5e-324, NaN, Infinity, '0', null, false, 0n]) {
+      const band = { ...plain, gainDb: bad };
+      // Kept by the snapshot (never coerced) so that the codec refuses it.
+      assert.ok(Object.is(codec.snapshotBands([band])[0].gainDb, bad));
+      assert.throws(() => codec.checkBand(band), {
+        name: 'RangeError',
+        message: new RegExp(`^band 0: ${kind} takes no gain: gainDb must be absent or 0, got `),
+      });
+      assert.throws(() => codec.encodePayload(withNeutral(band), -1), RangeError);
+    }
+    for (const bad of [{}, [], Symbol('g'), () => 0]) {
+      assert.throws(() => codec.encodePayload(withNeutral({ ...plain, gainDb: bad }), -1), {
+        name: 'TypeError',
+        message: /^band 0: gainDb must be a number, got (an object|a symbol|a function)$/,
+      });
+    }
+  }
+  assert.throws(() => codec.checkBand({ kind: 'LP', freqHz: 1000, gainDb: 6, qFactor: 1 }, 3), {
+    message: 'band 3: LP takes no gain: gainDb must be absent or 0, got 6',
+  });
+  // Gain kinds keep the gain exactly as given (−0 included).
+  const pk = codec.snapshotBands([{ kind: 'PK', freqHz: 1000, gainDb: -0, qFactor: 1 }])[0];
+  assert.ok(Object.is(pk.gainDb, -0));
+});
+
+test('N2: codec errors never run caller code (no coercion, no toJSON) to format values', () => {
+  let calls = 0;
+  const trap = {
+    [Symbol.toPrimitive]() {
+      calls++;
+      throw new Error('ran');
+    },
+    toString() {
+      calls++;
+      return 'ran';
+    },
+    valueOf() {
+      calls++;
+      return 0;
+    },
+    toJSON() {
+      calls++;
+      return 'ran';
+    },
+  };
+  const base = peaking(1000, -3, 1);
+  for (const field of ['freqHz', 'gainDb', 'qFactor']) {
+    assert.throws(() => codec.encodePayload(withNeutral({ ...base, [field]: trap }), -1), {
+      name: 'TypeError',
+      message: `band 0: ${field} must be a number, got an object`,
+    });
+  }
+  assert.throws(() => codec.checkBand({ ...base, kind: trap }), {
+    name: 'TypeError',
+    message: 'band 0: unknown filter kind an object',
+  });
+  assert.throws(() => codec.designSection({ kind: trap }), {
+    name: 'TypeError',
+    message: 'unknown filter kind an object',
+  });
+  assert.throws(() => codec.preampWord(trap), {
+    name: 'RangeError',
+    message: 'preamp must be a finite dB value, got an object',
+  });
+  assert.throws(() => codec.encodePayload(codec.NEUTRAL_BANDS, trap), RangeError);
+  const payload = codec.encodePayload(codec.NEUTRAL_BANDS, -0.5);
+  payload[3] = trap;
+  assert.throws(() => codec.reportsFromPayload(payload), {
+    message: 'payload byte 3 is not a byte: an object',
+  });
+  const lying = new Proxy([], {
+    get: (target, key) => (key === 'length' ? trap : Reflect.get(target, key)),
+  });
+  assert.throws(() => codec.snapshotBands(lying), {
+    name: 'RangeError',
+    message: 'invalid band count an object',
+  });
+  assert.equal(calls, 0);
+
+  // Every kind of value has a description that needs no conversion.
+  const message = (band) => {
+    try {
+      codec.checkBand({ ...base, ...band });
+    } catch (error) {
+      return error.message;
+    }
+    return 'accepted';
+  };
+  assert.equal(message({ freqHz: () => 1 }), 'band 0: freqHz must be a number, got a function');
+  const symbolQ = message({ qFactor: Symbol('q') });
+  assert.equal(symbolQ, 'band 0: qFactor must be a number, got a symbol');
+  assert.equal(message({ freqHz: 1n }), 'band 0: freqHz must be in (0, 48000), got 1n');
+  assert.equal(message({ freqHz: -0 }), 'band 0: freqHz must be in (0, 48000), got -0');
+  assert.equal(message({ freqHz: '1000' }), 'band 0: freqHz must be in (0, 48000), got "1000"');
+  assert.equal(message({ qFactor: null }), 'band 0: qFactor must be > 0, got null');
+  assert.equal(message({ qFactor: true }), 'band 0: qFactor must be > 0, got true');
+  assert.equal(message({ gainDb: undefined }), 'band 0: gainDb must be finite, got undefined');
+  assert.equal(
+    message({ freqHz: 'x'.repeat(60) }),
+    `band 0: freqHz must be in (0, 48000), got "${'x'.repeat(40)}"…`,
+  );
+  assert.equal(message({}), 'accepted');
+  assert.throws(() => codec.designSection({ kind: 2n }), { message: 'unknown filter kind 2n' });
+});
+
 test('C1: encodePayload reads each band field once (getter cannot change the bytes)', () => {
   let reads = 0;
   const flipping = {
