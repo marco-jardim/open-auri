@@ -14,7 +14,9 @@
 		"verbatimModuleSyntax": true,
 		"allowImportingTsExtensions": true,
 		"resolveJsonModule": true,
-		"skipLibCheck": true
+		"skipLibCheck": true,
+		// Route modules import their generated ./$types (run svelte-kit sync first).
+		"rootDirs": ["../..", "../../.svelte-kit/types"]
 	},
 	"include": ["./**/*.ts", "../../src/app.d.ts"]
 }

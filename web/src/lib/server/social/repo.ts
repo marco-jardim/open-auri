@@ -209,6 +209,8 @@ export function canViewLineage(facts: VisibilityFacts, viewer: Viewer, listing =
 
 export type CursorPart = string | number;
 export type CursorShape = readonly ('string' | 'number')[];
+/** One decoded part per shape entry (a tuple when the shape is a literal). */
+export type CursorParts<S extends CursorShape> = { -readonly [K in keyof S]: CursorPart };
 
 const CURSOR_MAX = 512;
 
@@ -222,10 +224,10 @@ export function encodeCursor(parts: readonly CursorPart[]): string {
 }
 
 /** Decodes and validates a cursor against `shape`; null for no cursor, throws 'invalid-cursor'. */
-export function decodeCursor(
+export function decodeCursor<const S extends CursorShape>(
 	cursor: string | null | undefined,
-	shape: CursorShape
-): CursorPart[] | null {
+	shape: S
+): CursorParts<S> | null {
 	if (cursor === null || cursor === undefined || cursor === '') return null;
 	if (cursor.length > CURSOR_MAX || !/^[A-Za-z0-9_-]+$/.test(cursor)) {
 		throw new SocialRepoError('invalid-cursor');
@@ -253,7 +255,7 @@ export function decodeCursor(
 			throw new SocialRepoError('invalid-cursor');
 		}
 	});
-	return parts;
+	return parts as CursorParts<S>;
 }
 
 /** Page size within [1, PAGE_SIZE_MAX]; anything invalid gives PAGE_SIZE_DEFAULT. */
@@ -280,7 +282,11 @@ function toPage<R, T>(
 const NO_FILTER: SqlFragment = { text: '1 = 1', params: [] };
 
 /** Keyset for ORDER BY first DESC, second DESC. Columns are internal constants. */
-function before2(first: string, second: string, cursor: CursorPart[] | null): SqlFragment {
+function before2(
+	first: string,
+	second: string,
+	cursor: readonly [CursorPart, CursorPart] | null
+): SqlFragment {
 	if (!cursor) return NO_FILTER;
 	return {
 		text: `(${first} < ? OR (${first} = ? AND ${second} < ?))`,
