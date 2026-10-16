@@ -17,11 +17,11 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 
 ## Primeira ação
 
-**Estado em 2026-10-16:** a F1 (núcleo) está concluída, com QA heavy aprovado (PASS), push feito (`25b2ee1`) e issue #1 fechada. Os minors adiados estão nas issues #8 a #13 (`qa-minor`). A próxima ação é o **PF2**.
+**Estado em 2026-10-16:** F1 concluída (PASS, push ``25b2ee1``, #1 fechada; minors #8–#13). F2 em andamento: T2.1–T2.16 e o código da T2.19 commitados até ``af4061c`` (sem push; push só ao fim da fase aprovada). Próximo: corrigir o pipeline real do AutoEq (``write EOF``), W2.5 (T2.17, T2.18), W2.6 (T2.T) e Q2 heavy. Leia o handover §5b e o registro de progresso antes de agir.
 
 1. Leia o plano: §0 (diretivas 0.1 a 0.21), §3, §4, §5, §6 e a **Fase 2** completa (linhas ~1103–1614).
 2. Leia o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md`, principalmente a seção "Decisões durante a execução".
-3. Execute o **PF2** e marque o item na issue #2.
+3. Continue a F2 a partir da próxima ação do handover (issue #2: marque T2.2 a T2.16 se ainda não estiverem marcadas).
 4. Siga wave após wave na F2, depois F3, F4 e F5, **sem pausar entre waves ou fases**.
 
 ## Regras inegociáveis

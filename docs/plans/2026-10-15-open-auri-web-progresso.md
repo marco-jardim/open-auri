@@ -2,7 +2,7 @@
 
 ## Estado
 
-Fase atual: F2 · Wave: W2.3 (T2.9) · Último commit: cd07501
+Fase atual: F2 · Wave: W2.5 (T2.17, T2.18) · Último commit: af4061c
 
 ## Locks ativos
 
@@ -81,6 +81,18 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | T2.8 | commitada | 5afd7c1 | |
 | T2.19 | commitada | 54afef7, cd07501 | pipeline real rodando (pacotes gerados não versionados) |
 | msgs | commitada | 298db8e | T2.3, T2.5, T2.6, T2.7 mescladas |
+| T2.9 | commitada | 4bfbb67, 4080a5d | adaptador `flash.get` do layout sem efeito colateral (rodava dentro de `\`: `state_unsafe_mutation`) |
+| T2.10 | commitada | ebc5dc0 | heavy; 2 retomadas por orçamento |
+| T2.11 | commitada | 62af6a8 | QR com `uqr` (MIT) |
+| T2.12 | commitada | 25ea899 | |
+| T2.13 | commitada | 7dfc7a4 | |
+| T2.14 | commitada | 36ecc5c | |
+| T2.15 | commitada | 4ea5b62 | |
+| T2.16 | commitada | 187be25 | Escape no campo de busca fecha o diálogo (o Chrome consumia o 1º Escape para limpar o campo), corrigido pelo orquestrador |
+| W2.4 fix | commitada | 83c244b, af4061c | env LGPD público, ARIA dos medidores em repouso, `lang` do `<html>` sincronizado no cliente, `PENDING_ROUTES` só com `/comunidade`, e2e com `locale: 'pt-BR'` |
+| T2.19 (pipeline real) | pendente | — | `node tools/import-autoeq.mjs` falha com `write EOF` (stdin do `git cat-file --batch`); corrigir antes da T2.T |
+
+Verificação central da W2.4: `check:web` 0 erros; `test:web:unit` 61 arquivos, 586 testes; lint do web limpo; build ok; e2e smoke 2/2; raiz 613/613.
 
 Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos, 284 testes; lint do web limpo; build ok; raiz 613/613.
 
@@ -167,6 +179,8 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 
 - 2026-10-16 · W2.2: nenhum delegado consegue rodar os testes do web (o `router_run` só aceita `test`, `lint` e `typecheck` da raiz). O orquestrador roda `check:web`, `test:web:unit`, lint do web e build depois de cada wave e devolve as falhas com a saída colada. O WASM do `@lix-js/sdk` corrompeu no disco durante instalações concorrentes (erro `Invalid opcode` no compile do Paraglide); remover a pasta e rodar `npm install` resolve.
 - 2026-10-16 · Lint do web: `svelte/no-navigation-without-resolve` com `ignoreLinks: true` (app servido na raiz da origem, sem `base`; `resolve()` exige o runtime do Kit, ausente nos testes de componente).
+
+- 2026-10-16 · W2.4: testes de componente que navegam ou recarregam a página derrubam o runner do Vitest browser ("failed to find the runner") nas execuções combinadas; o export da Comparar trocou o clique em link por callback e `location.assign` por link. Lint: `ignoreGoto: true` junto de `ignoreLinks` (mesma justificativa: sem `base`). Achados para o Q2: `1 unsaved changes` já no primeiro carregamento (curva `dirty` sem gravação anterior); estratégia `preferredLanguage` faz a página prerenderizada em pt-BR trocar para en-US no cliente em navegadores en-US (comportamento do plano, mas há flash de idioma).
 
 ## Bloqueios e perguntas ao humano
 
