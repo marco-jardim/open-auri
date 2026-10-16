@@ -44,11 +44,14 @@ export interface Env {
 	RESEND_WEBHOOK_SECRET?: string;
 }
 
-/** `event.platform` as provided by @sveltejs/adapter-cloudflare. */
+/**
+ * `event.platform`. Kit 3's adapter-cloudflare does not pass one: hooks.server.ts rebuilds it from
+ * `cloudflare:workers` (`env`, `waitUntil`). Only `ctx.waitUntil` is used by the app.
+ */
 export interface WorkerPlatform {
 	env: Env;
-	ctx: ExecutionContext;
-	caches: CacheStorage;
+	ctx: Pick<ExecutionContext, 'waitUntil'>;
+	caches?: CacheStorage;
 	cf?: IncomingRequestCfProperties;
 }
 

@@ -2,10 +2,15 @@
 // `auth.handler` and for server-side `auth.api.*` calls alike.
 //
 // before, in order:
+//   0. the admin plugin's endpoints (`/admin/*`, impersonation included) answer 404 over HTTP;
+//      server-side `auth.api.*` calls (no request) keep working for the guarded /admin area (T3.8);
 //   1. strict origin: state-changing HTTP requests must come from PUBLIC_ORIGIN (Origin, or
 //      Referer when Origin is absent), on top of Better Auth's own CSRF/origin checks;
 //   2. SIGNUP_ENABLED=false → `/sign-up/email` answers 403 `SIGNUP_DISABLED`;
-//   3. nickname rules on `/sign-up/email` and `/update-user` (format, reserved, skeleton unique);
+//   3. nickname rules: `/update-user` never changes the nickname (400
+//      `USERNAME_CHANGE_NOT_ALLOWED`; /conta changes it through account/nickname.ts, which writes
+//      D1 directly with the 30-day and hold rules); `/sign-up/email` checks format, reserved
+//      names, skeleton uniqueness and active holds (held looks taken);
 //   4. `/delete-user` without the confirmation token requires the password;
 //   5. the T3.3 guard (RL_AUTH → D1 windows → Turnstile) on the guarded paths. The Turnstile
 //      token travels in the `x-turnstile-token` request header.
@@ -13,6 +18,7 @@
 //   - 2FA session marker after a successful TOTP / backup-code verification;
 //   - "password changed" notice after `/change-password`.
 import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from 'better-auth/api';
+import { isNicknameHeld } from '../account/nickname.ts';
 import { first, sql } from '../db.ts';
 import type { ServerEnv } from '../env.ts';
 import type { AuthGuard } from '../security/auth-guard.ts';
@@ -27,6 +33,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const STATUS_NAME = {
 	400: 'BAD_REQUEST',
 	403: 'FORBIDDEN',
+	404: 'NOT_FOUND',
 	429: 'TOO_MANY_REQUESTS',
 	503: 'SERVICE_UNAVAILABLE'
 } as const;
@@ -78,12 +85,22 @@ function guardIdentifier(path: string, body: Body): string | null {
 }
 
 const USERNAME_TAKEN = 'USERNAME_IS_ALREADY_TAKEN';
+export const USERNAME_CHANGE_NOT_ALLOWED = 'USERNAME_CHANGE_NOT_ALLOWED';
+
+/** Endpoints of Better Auth's admin plugin (all live under `/admin/`). */
+export function isAdminPluginPath(path: string | undefined): boolean {
+	return typeof path === 'string' && (path === '/admin' || path.startsWith('/admin/'));
+}
 
 export function createBeforeHook(deps: AuthHookDeps) {
 	return createAuthMiddleware(async (ctx) => {
 		const request = ctx.request;
 		const path = ctx.path;
 		const body = asBody(ctx.body);
+
+		if (request && isAdminPluginPath(path)) {
+			throw fail(404, 'NOT_FOUND', 'Not found');
+		}
 
 		if (request && !SAFE_METHODS.has(request.method)) {
 			if (requestOrigin(request.headers) !== deps.env.publicOrigin) {
@@ -95,7 +112,11 @@ export function createBeforeHook(deps: AuthHookDeps) {
 			throw fail(403, 'SIGNUP_DISABLED', 'Sign-up is disabled');
 		}
 
-		if (path === '/sign-up/email' || path === '/update-user') {
+		if (path === '/update-user' && ('username' in body || 'displayUsername' in body)) {
+			throw fail(400, USERNAME_CHANGE_NOT_ALLOWED, 'The nickname changes only in the account area');
+		}
+
+		if (path === '/sign-up/email') {
 			const username = typeof body.username === 'string' ? body.username : undefined;
 			const display = typeof body.displayUsername === 'string' ? body.displayUsername : undefined;
 			if (
@@ -116,11 +137,10 @@ export function createBeforeHook(deps: AuthHookDeps) {
 						usernameSkeleton(username)
 					)
 				);
-				if (row) {
-					const current = path === '/update-user' ? await getSessionFromCtx(ctx) : null;
-					if (row.id !== current?.user.id) {
-						throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
-					}
+				const now = (deps.now?.() ?? new Date()).getTime();
+				// A nickname on its 90-day hold answers exactly like a taken one.
+				if (row || (await isNicknameHeld(deps.env.db, username, now))) {
+					throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
 				}
 			}
 		}

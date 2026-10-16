@@ -10,7 +10,7 @@ declare global {
 		interface Platform {
 			env: WorkerPlatform['env'];
 			ctx: WorkerPlatform['ctx'];
-			caches: WorkerPlatform['caches'];
+			caches?: WorkerPlatform['caches'];
 			cf?: WorkerPlatform['cf'];
 		}
 		// Filled by hooks.server.ts on every request (T3.5). `user`/`session` are null when signed

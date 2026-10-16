@@ -6,23 +6,28 @@ Better Auth 1.7.10 on Cloudflare Workers with D1. Server-only modules; nothing h
 
 ## Modules
 
-| File                         | What it does                                                                                                                                                                                    |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `../auth.ts`                 | `createAuth(env, { waitUntil, plugins?, baseURL?, beforeDeleteUser? })`: one instance per request. `toAuthLocals()` maps `getSession()` to `App.Locals`. Re-exports the session-policy helpers. |
-| `password.ts`                | scrypt `N=2^14 r=8 p=5`, 16-byte salt, 64-byte key, NFKC, constant-time compare. Format `scrypt$16384$8$5$<saltHex>$<hashHex>`; malformed or out-of-bounds hashes never verify; `needsRehash`.  |
-| `username.ts`, `reserved.ts` | Nickname rules (§3.7): NFKC + lowercase, 3 to 24 chars of `[a-z0-9._-]`, confusable skeleton, reserved names.                                                                                   |
-| `hooks.ts`                   | `hooks.before` (origin, sign-up switch, nickname rules, delete needs password, T3.3 guard + Turnstile) and `hooks.after` (2FA marker, "password changed" notice).                               |
-| `emails.ts`                  | Auth e-mails through the T3.2 provider under `waitUntil`; the change-email confirmation to the current address has its own copy here.                                                           |
-| `session-policy.ts`          | `isAdminEffective`, `isFreshSession` / `requireFreshSession`, `hasTwoFactorMarker`.                                                                                                             |
-| `guards.ts`, `kit.ts`        | `checkUser` / `checkVerified` (typed results) and the SvelteKit `requireUser` / `requireVerified` (`error(401 \| 403)`).                                                                        |
-| `logger.ts`, `user-agent.ts` | Better Auth logger without personal data (warn level, redacted messages, error names only); session user agent reduced to "browser on OS".                                                      |
+| File                         | What it does                                                                                                                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `../auth.ts`                 | `createAuth(env, { waitUntil, plugins?, baseURL?, beforeDeleteUser? })`: one instance per request. `toAuthLocals()` maps `getSession()` to `App.Locals`. Re-exports the session-policy helpers.  |
+| `password.ts`                | scrypt `N=2^14 r=8 p=5`, 16-byte salt, 64-byte key, NFKC, constant-time compare. Format `scrypt$16384$8$5$<saltHex>$<hashHex>`; malformed or out-of-bounds hashes never verify; `needsRehash`.   |
+| `username.ts`, `reserved.ts` | Nickname rules (§3.7): NFKC + lowercase, 3 to 24 chars of `[a-z0-9._-]`, confusable skeleton, reserved names.                                                                                    |
+| `compose.ts`                 | Order of the server hooks (`HOOK_ORDER`, read-only first) and `createReadOnlyHandle`.                                                                                                            |
+| `hooks.ts`                   | `hooks.before` (admin plugin closed over HTTP, origin, sign-up switch, nickname rules, delete needs password, T3.3 guard + Turnstile) and `hooks.after` (2FA marker, "password changed" notice). |
+| `emails.ts`                  | Auth e-mails through the T3.2 provider under `waitUntil`; the change-email confirmation to the current address has its own copy here.                                                            |
+| `session-policy.ts`          | `isAdminEffective`, `isFreshSession` / `requireFreshSession`, `hasTwoFactorMarker`.                                                                                                              |
+| `guards.ts`, `kit.ts`        | `checkUser` / `checkVerified` (typed results) and the SvelteKit `requireUser` / `requireVerified` (`error(401 \| 403)`).                                                                         |
+| `logger.ts`, `user-agent.ts` | Better Auth logger without personal data (warn level, redacted messages, error names only); session user agent reduced to "browser on OS".                                                       |
 
 ## Wiring
 
-- `src/hooks.server.ts`: `sequence(paraglide, auth, securityHeaders, accessLog)`. The auth step builds
-  the instance (`sveltekitCookies(getRequestEvent)` as the last plugin), puts it in `locals.auth`
-  and fills `locals.user` / `locals.session` (null on failure; never throws for anonymous users).
-  It steps aside while prerendering.
+- `src/hooks.server.ts`: `sequence(readOnly, paraglide, auth, securityHeaders, accessLog)`; the
+  order lives in `compose.ts` (unit-tested). `readOnly` (T3.8 switch) answers 503 `READ_ONLY` to
+  writes outside its allowlist before anything else runs, so that response carries neither the
+  security headers nor an access-log record. The auth step builds the instance
+  (`sveltekitCookies(getRequestEvent)` as the last plugin, `beforeDeleteUser:
+accountDeletionHook(env)` from T3.7), puts it in `locals.auth` and fills `locals.user` /
+  `locals.session` (null on failure; never throws for anonymous users). Everything steps aside
+  while prerendering.
 - `/api/auth/*` is served only by `src/routes/api/auth/[...all]/+server.ts` with `locals.auth.handler`
   (no `svelteKitHandler`), so auth responses get a route id in the access log and pass through the
   header and access-log hooks.
@@ -44,8 +49,18 @@ Better Auth 1.7.10 on Cloudflare Workers with D1. Server-only modules; nothing h
   verification, change-email steps and account deletion → Better Auth GET endpoints under
   `/api/auth/` that redirect to the `callbackURL` sent by the page (relative paths or
   `PUBLIC_ORIGIN` only). "Secure my account" links → `/esqueci-senha`.
-- **Nickname:** `displayUsername` may differ from `username` only in case/compatibility forms.
-  Not done here: change once per 30 days and the 90-day hold of the old nickname (§3.7, T3.7).
+- **Nickname:** set at sign-up (`displayUsername` may differ from `username` only in
+  case/compatibility forms; a nickname on its 90-day hold answers `USERNAME_IS_ALREADY_TAKEN`, like
+  a taken one). Every later change goes through `account/nickname.ts` (/conta: 30-day interval,
+  holds), which writes D1 directly. `/update-user` with `username` or `displayUsername` answers
+  400 `USERNAME_CHANGE_NOT_ALLOWED`, over HTTP and server-side alike, and
+  `databaseHooks.user.update.before` refuses a nickname write from any Better Auth endpoint
+  (including the admin plugin's `/admin/update-user`). Only writes outside Better Auth endpoints
+  (none today) could bypass the rules; new code must use `changeNickname`.
+- **Admin plugin:** its endpoints (`/admin/*`: set-role, ban/unban, create/update/remove user,
+  set-user-password, sessions, impersonate/stop-impersonating, has-permission) answer 404 over
+  HTTP. The /admin area (T3.8) calls them server-side (`locals.auth.api.banUser({ headers, body })`,
+  no request object) after its own role + 2FA + freshness guard.
 
 ## Decisions
 

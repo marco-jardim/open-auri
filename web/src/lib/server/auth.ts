@@ -14,6 +14,7 @@
 // - Session freshness 10 min for sensitive endpoints; no cookie cache (every request reads D1,
 //   so revocation and bans apply immediately).
 import { betterAuth, type BetterAuthPlugin } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { admin } from 'better-auth/plugins/admin';
 import { twoFactor } from 'better-auth/plugins/two-factor';
 import { username } from 'better-auth/plugins/username';
@@ -24,7 +25,7 @@ import { deleteAcceptancesStatement } from './legal/acceptance.ts';
 import { createAuthGuard, type AuthGuard } from './security/auth-guard.ts';
 import type { AuthSession, AuthUser } from './types.ts';
 import { createAuthMailer, LINK_TTL_SECONDS } from './auth/emails.ts';
-import { createAfterHook, createBeforeHook } from './auth/hooks.ts';
+import { createAfterHook, createBeforeHook, USERNAME_CHANGE_NOT_ALLOWED } from './auth/hooks.ts';
 import { createAuthLogger, type AuthLogEntry } from './auth/logger.ts';
 import { passwordHasher } from './auth/password.ts';
 import { FRESH_SESSION_MS } from './auth/session-policy.ts';
@@ -45,7 +46,7 @@ export {
 	requireFreshSession,
 	StaleSessionError
 } from './auth/session-policy.ts';
-export { TURNSTILE_HEADER } from './auth/hooks.ts';
+export { isAdminPluginPath, TURNSTILE_HEADER, USERNAME_CHANGE_NOT_ALLOWED } from './auth/hooks.ts';
 
 export const AUTH_BASE_PATH = '/api/auth';
 export const MIN_PASSWORD_LENGTH = 10;
@@ -202,7 +203,21 @@ export function createAuth(env: ServerEnv, options: CreateAuthOptions) {
 		databaseHooks: {
 			user: {
 				create: { before: async (user) => ({ data: withSkeleton(user) }) },
-				update: { before: async (user) => ({ data: withSkeleton(user) }) }
+				// Nickname changes must go through account/nickname.ts (30-day interval, 90-day holds),
+				// which writes D1 directly. Any Better Auth endpoint that would write the nickname
+				// (`/update-user`, the admin plugin's `/admin/update-user`, even server-side) is
+				// refused here; internal updates outside an endpoint keep the skeleton in sync.
+				update: {
+					before: async (user, context) => {
+						if (context && ('username' in user || 'displayUsername' in user)) {
+							throw APIError.from('BAD_REQUEST', {
+								code: USERNAME_CHANGE_NOT_ALLOWED,
+								message: 'The nickname changes only in the account area'
+							});
+						}
+						return { data: withSkeleton(user) };
+					}
+				}
 			},
 			session: {
 				create: {
