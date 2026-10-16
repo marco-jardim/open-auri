@@ -57,11 +57,18 @@
  * gate refuses it (a, b, c on the quantized section), pulled back with
  * `boundarySearch` along the step; when the fit peaks above 18 dB the whole curve
  * is projected with `gate(..., {grid: 'drag'})` at the lowest preamp, again with
- * `boundarySearch` along the step. Stopping: `maxTimeMs`, `maxIterations`,
+ * `boundarySearch` along the step. Stopping: `maxIterations` (the primary,
+ * deterministic work bound; default 400 LM trials), `maxTimeMs`,
  * `targetLoss`, or the AutoEq rule (std of the last 8 accepted losses < `minStd`).
  * After convergence small sections are pruned and free sections are re-seeded
  * from the residual (at most 3 rounds). No randomness is used: the result is
- * deterministic unless `stopReason === 'time'`; `seed` is validated and reserved.
+ * deterministic when `stopReason !== 'time'` (except `elapsedMs`); a time-limited
+ * result depends on CPU load. `seed` is validated and reserved. All searches,
+ * re-seeding and finalization loops also have finite bounds independent of time.
+ * The injectable `clock` defaults to performance.now(), or Date.now() if absent.
+ * In Cloudflare Workers, time does not advance during synchronous execution:
+ * servers must rely on `maxIterations`, not `maxTimeMs`, and should not run this
+ * solver per request.
  *
  * Output (`finalizeBands`): bands rounded to the UI grid (`roundToGrid`, then
  * `snapToGridAccepted` against the section predicate), ordered cuts first then
@@ -90,6 +97,9 @@ export type TargetPoint = {
 export type WeightMode = 'iso226' | 'flat';
 export type RangeMode = 'abs' | 'soft';
 export type StopReason = 'flat' | 'converged' | 'targetLoss' | 'time' | 'iterations';
+export type Clock = {
+    now: () => number;
+};
 export type Box = {
     fMin: number;
     fMax: number;
@@ -158,11 +168,18 @@ export type SolveOptions = {
      */
     levelMatch?: boolean;
     /**
-     * optimization time budget (default 1200)
+     * best-effort optimization time budget (default 1200),
+     * only effective when `clock` advances during synchronous execution
      */
     maxTimeMs?: number;
     /**
-     * LM trial budget (default 400)
+     * nondecreasing finite milliseconds from now(); defaults to
+     * performance.now() when available, otherwise Date.now()
+     */
+    clock?: Clock;
+    /**
+     * primary LM trial bound, a positive safe integer
+     * shared across re-seeding rounds (default 400)
      */
     maxIterations?: number;
     /**
@@ -200,7 +217,7 @@ export type SolveResult = {
      */
     iterations: number;
     /**
-     * wall time of the whole solve
+     * whole-solve duration measured by `clock`
      */
     elapsedMs: number;
     stopReason: StopReason;
@@ -222,6 +239,7 @@ export type SolveResult = {
  * @typedef {'iso226' | 'flat'} WeightMode
  * @typedef {'abs' | 'soft'} RangeMode
  * @typedef {'flat' | 'converged' | 'targetLoss' | 'time' | 'iterations'} StopReason
+ * @typedef {{now: () => number}} Clock
  * @typedef {{fMin: number, fMax: number, qMin: number, qMax: number, gMin: number,
  *   gMax: number}} Box
  */
@@ -243,8 +261,12 @@ export type SolveResult = {
  *   (0 = AutoEq's treble averaging, 1 = plain error; default 0.5)
  * @property {number} [speed] correction speed 0–100 (default 50)
  * @property {boolean} [levelMatch] remove the weighted mean error (default true)
- * @property {number} [maxTimeMs] optimization time budget (default 1200)
- * @property {number} [maxIterations] LM trial budget (default 400)
+ * @property {number} [maxTimeMs] best-effort optimization time budget (default 1200),
+ *   only effective when `clock` advances during synchronous execution
+ * @property {Clock} [clock] nondecreasing finite milliseconds from now(); defaults to
+ *   performance.now() when available, otherwise Date.now()
+ * @property {number} [maxIterations] primary LM trial bound, a positive safe integer
+ *   shared across re-seeding rounds (default 400)
  * @property {number} [minStd] std of the last 8 accepted losses to stop (default 0.002)
  * @property {number} [targetLoss] stop when the loss is at or below this value
  * @property {number} [seed] integer, reserved (the solver uses no randomness)
@@ -256,7 +278,7 @@ export type SolveResult = {
  * @property {number} rmsDb level-matched unweighted RMS of fit - correction, 20 Hz–20 kHz
  * @property {number} loss sqrt of the objective at the returned bands
  * @property {number} iterations LM trials
- * @property {number} elapsedMs wall time of the whole solve
+ * @property {number} elapsedMs whole-solve duration measured by `clock`
  * @property {StopReason} stopReason
  * @property {{ok: true, reasons: Reason[]}} gate `gateForWrite` verdict of the result
  */
@@ -367,6 +389,7 @@ export type State = {
     f: number;
 };
 export type Budget = {
+    clock: Clock;
     deadline: number;
     maxIterations: number;
     iterations: number;
@@ -401,6 +424,12 @@ export declare function finalizeBands(bands: readonly Band[], { experimental, ra
  * given, `target` is the target curve and the correction is target - measurement
  * (both on `grid`, e.g. from io/measurement `toGrid` + `normalize`). The result
  * always passes `gateForWrite(bands, preampDb)`.
+ * Results (excluding `elapsedMs`) are deterministic when `stopReason !== 'time'`;
+ * stopping on time depends on CPU load. `maxIterations` is the primary work bound,
+ * shared across all LM/re-seeding rounds; other searches have fixed finite caps.
+ * `clock` controls both the best-effort `maxTimeMs` budget and `elapsedMs`.
+ * In Cloudflare Workers, time does not advance during synchronous code: servers
+ * must rely on `maxIterations` and should not run this solver per request.
  * @param {SolveOptions} options
  * @returns {SolveResult}
  */

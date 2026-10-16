@@ -108,6 +108,29 @@ export declare function designHighPass(freqHz: number, qFactor: number, sampleRa
  */
 export declare function designSection(band: Band, sampleRate?: number): Section;
 /**
+ * One-read copy of a band list, taken before any check, so every later check and
+ * the encoded bytes see the same values whatever the caller passes (getters,
+ * Proxies, objects mutated in between).
+ *
+ * Reads `bands.length` once, then each index 0..length−1 once, in order, and of
+ * each element `kind`, `freqHz`, `gainDb` and `qFactor` exactly once each, in
+ * that order, even for OFF. Each element becomes a new frozen plain object:
+ * `{kind: 'OFF'}` for OFF, otherwise `kind` plus the other three fields as read,
+ * omitting those that read as `undefined`. Nothing is coerced or validated
+ * here: the codec rejects invalid values.
+ *
+ * Throws a TypeError for a non-array (`bands must be an array`), for a hole
+ * (`band <i>: missing (hole in a sparse array)`; holes are never skipped) and for
+ * a non-object element (`band <i>: not an object`, the codec's own message).
+ * With `expectedLength`, a different length throws `RangeError('expected <n>
+ * bands')` before any element is read. Errors thrown by getters or Proxy traps
+ * propagate unchanged.
+ * @param {unknown} bands
+ * @param {number} [expectedLength]
+ * @returns {readonly Readonly<Band>[]} A frozen array of frozen bands.
+ */
+export declare function snapshotBands(bands: unknown, expectedLength?: number): readonly Readonly<Band>[];
+/**
  * Rejects bands whose parameters cannot describe a valid filter at SAMPLE_RATE.
  * @param {Band} band
  * @param {number} [index]
@@ -141,17 +164,34 @@ export declare function crc16Ccitt(data: Iterable<number>): number;
  * Builds the 220-byte payload for 10 bands and a preamp. Bands are written in
  * the order given: keep cuts before boosts (see docs/protocol-0xcb.md), the
  * ordering the reference uses to avoid internal clipping.
+ *
+ * The bands are copied once with {@link snapshotBands} before anything else, so
+ * every check and every byte comes from the same read of each field. Throws a
+ * RangeError for a non-array or a count other than 10, a TypeError for holes,
+ * non-object elements and unknown kinds, and a RangeError for invalid values;
+ * it never returns anything but a 220-byte payload.
  * @param {readonly Band[]} eqBands
- * @param {number} [preampDb]
+ * @param {number} [preampDb] Must be a finite number <= 0 (nothing is coerced).
+ * @returns {number[]}
  */
 export declare function encodePayload(eqBands: readonly Band[], preampDb?: number): number[];
 /**
- * Splits the payload into the 9 HID reports: byte 0 is the report index,
- * bytes 1..30 carry 30 bytes of the payload.
+ * Splits an already encoded payload into the 9 HID reports: byte 0 is the report
+ * index, bytes 1..30 carry 30 bytes of the payload (the last report is
+ * zero-padded). Throws a RangeError unless `payload` holds exactly 220 bytes
+ * (integers 0..255) whose last two are the little-endian CRC-16 of the rest, so
+ * a transport can send exactly the bytes a gate approved, without re-encoding.
+ * @param {ArrayLike<number>} payload
+ * @returns {Uint8Array[]}
+ */
+export declare function reportsFromPayload(payload: ArrayLike<number>): Uint8Array[];
+/**
+ * The 9 HID reports for 10 bands and a preamp:
+ * `reportsFromPayload(encodePayload(eqBands, preampDb))`.
  * @param {readonly Band[]} eqBands
  * @param {number} [preampDb]
  */
-export declare function encodeReports(eqBands: readonly Band[], preampDb?: number): Uint8Array<ArrayBuffer>[];
+export declare function encodeReports(eqBands: readonly Band[], preampDb?: number): Uint8Array<ArrayBufferLike>[];
 /**
  * The commit command zero-padded to the 31-byte report size, so every transport
  * sends the same bytes. The reference sends the bare 5 bytes; whether the

@@ -4,14 +4,7 @@
 /** localStorage JSON array, oldest entry first. */
 export declare const JOURNAL_STORAGE_KEY = "oa.journal";
 export declare const JOURNAL_MAX = 500;
-export type JournalBand = {
-    kind: 'PK' | 'LS' | 'HS' | 'LP' | 'HP';
-    freqHz: number;
-    gainDb: number;
-    qFactor: number;
-} | {
-    kind: 'OFF';
-};
+export type JournalBand = import('../dsp/eq0xcb.mjs').Band;
 export type JournalEntry = {
     schema: 1;
     at: number;
@@ -23,9 +16,10 @@ export type JournalEntry = {
     device: string | null;
 };
 /**
- * Active bands require all four fields, positive freqHz/qFactor and finite
- * gainDb. Supported kinds are PK, LS, HS, LP, HP and OFF. No safety-gate limits
- * are applied. Extra properties are ignored and stripped when storing records.
+ * Active bands require positive finite freqHz/qFactor. PK/LS/HS require finite
+ * gainDb; LP/HP may omit it, but it must be finite when present. OFF ignores all
+ * other fields. No safety-gate limits are applied. Extra properties are ignored
+ * and stripped when storing records. Text limits count Unicode code points.
  * @param {unknown} entry
  * @returns {{ok: boolean, errors: string[]}}
  */

@@ -32,6 +32,8 @@ export type GateMetrics = {
     thresholds: Readonly<Thresholds>;
     grid: Grid;
     payloadCrc?: string;
+    payload?: Uint8Array;
+    bands?: readonly Readonly<Band>[];
     preampDb?: number;
     quantizedPreampDb?: number;
     sections?: SectionAnalysis[];
@@ -72,6 +74,8 @@ export type GateOptions = {
  *   thresholds: Readonly<Thresholds>,
  *   grid: Grid,
  *   payloadCrc?: string,
+ *   payload?: Uint8Array,
+ *   bands?: readonly Readonly<Band>[],
  *   preampDb?: number,
  *   quantizedPreampDb?: number,
  *   sections?: SectionAnalysis[],
@@ -86,12 +90,18 @@ export type GateOptions = {
 /**
  * Log intervals of the multi-section scans per grid mode (`full` = reference).
  *
- * `drag` is advisory only. It matches `full` to ~1e-12 dB wherever a peak is
- * bracketed by the coarse grid, but a peak lying between a domain edge (20 Hz,
- * 20 kHz) and the first grid point is not refined, so `drag` can be laxer by
- * ~1e-4 dB there: test/safety/gate.test.mjs builds a resonant-LP curve that
- * `drag` approves and `full` rejects (1.6e-4 dB apart). Writes must use
- * `gateForWrite`.
+ * Both modes scan the grid, refine every interior local maximum by
+ * golden-section search (as the reference), and also always refine the first
+ * and the last interval. The reference does not refine those two, so a peak
+ * lying between a domain edge (DC, 20 Hz, 20 kHz, 48 kHz) and the nearest grid
+ * point was reported at the edge value; here it is found. This makes the gate
+ * stricter than the reference (never laxer), by at most ~1e-4 dB in practice;
+ * test/safety/gate.test.mjs records the deltas on the parity corpus and builds
+ * a resonant-LP curve where the difference shows.
+ *
+ * `drag` is advisory only: it matches `full` to ~1e-12 dB wherever a peak is
+ * bracketed by the coarse grid, but it can still be laxer where two features
+ * share one coarse interval. Writes must use `gateForWrite`.
  */
 export declare const GRID_INTERVALS: Readonly<{
     drag: 2048;
@@ -147,6 +157,12 @@ export type ScanGrid = {
  * refinement) for interactive feedback; `'full'` (default) uses the reference
  * 16384. Single sections always use the analytic peak. Only `full` decides a
  * write: call `gateForWrite`. HS/LP/HP need `experimental: true`.
+ *
+ * The bands are copied once on entry (`snapshotBands`: one read per field) and
+ * only that copy is evaluated. When the codec accepts it, `metrics.bands` is the
+ * frozen copy and `metrics.payload` a copy of the exact 220 payload bytes, so
+ * callers send what was gated. Never throws because of `bands` (anything that
+ * cannot be copied or encoded is `f:codec`); only an invalid `grid` throws.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {GateOptions} [options]
@@ -169,7 +185,8 @@ export declare function gateForWrite(bands: readonly Band[], preampDb: number, o
  *
  * A candidate is derived analytically from the metrics at the top preamp,
  * rounded down to the grid, then verified with the gate and stepped down by
- * 0.1 dB while refused (the verdict is monotone in the preamp).
+ * 0.1 dB while refused (the verdict is monotone in the preamp). The bands are
+ * read once: every later verification runs on the first verdict's snapshot.
  * @param {readonly Band[]} bands
  * @param {{experimental?: boolean}} [options]
  * @returns {number | null}

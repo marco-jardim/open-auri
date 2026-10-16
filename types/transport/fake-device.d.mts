@@ -46,6 +46,11 @@ export type FakeDeviceOptions = {
      */
     throwError?: unknown;
     /**
+     * 0-based sendReport attempt that never settles (not
+     * delivered), like a cable that stops responding.
+     */
+    hangAtReport?: number;
+    /**
      * If set, open() rejects with it.
      */
     openError?: unknown;
@@ -78,6 +83,8 @@ export type FakeFilter = {
  *   unplugged (that report is not delivered).
  * @property {number} [throwAtReport] 0-based sendReport attempt that fails (not delivered).
  * @property {unknown} [throwError] What that attempt rejects with (default: NotAllowedError).
+ * @property {number} [hangAtReport] 0-based sendReport attempt that never settles (not
+ *   delivered), like a cable that stops responding.
  * @property {unknown} [openError] If set, open() rejects with it.
  * @property {number} [delayMs] Virtual time each delivered report takes to complete.
  *
@@ -120,11 +127,12 @@ export declare class FakeHIDDevice extends EventTarget {
         disconnectAtReport: number | undefined;
         throwAtReport: number | undefined;
         throwError: unknown;
+        hangAtReport: number | undefined;
         openError: unknown;
         delayMs: number;
     };
     /** @param {FakeDeviceOptions} [options] */
-    constructor({ clock, vendorId, productId, productName, disconnectAtReport, throwAtReport, throwError, openError, delayMs, }?: FakeDeviceOptions);
+    constructor({ clock, vendorId, productId, productName, disconnectAtReport, throwAtReport, throwError, hangAtReport, openError, delayMs, }?: FakeDeviceOptions);
     get opened(): boolean;
     get connected(): boolean;
     /** sendReport calls made while open, delivered or not. */

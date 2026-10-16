@@ -89,8 +89,9 @@ export declare function validateEnvelope(obj: unknown): EnvelopeResult;
  */
 export declare function serializeEnvelope(value: unknown): string;
 /**
- * Parse JSON, then normalize/validate (one collected-error pass). The 8 KiB cap
- * applies to deterministic normalized serialization, not insignificant whitespace.
+ * Refuse raw text above 65536 UTF-16 units before JSON.parse, then normalize and
+ * validate (one collected-error pass). The separate 8 KiB cap applies to
+ * deterministic normalized serialization, not insignificant whitespace.
  * @param {string} json
  * @returns {EnvelopeResult}
  */
