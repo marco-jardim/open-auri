@@ -2,7 +2,7 @@
 
 ## Estado
 
-Fase atual: F3 · Etapa: PF3 · F2 concluída (Q2 PASS, push 008315f)
+Fase atual: F4 · Etapa: PF4 · F3 concluída (Q3 PASS, push 34f01f5)
 
 ## Locks ativos
 
@@ -120,6 +120,17 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | T3.7 | commitada | e68188d | migração 0009 (perfil, retenções, pedidos de troca de e-mail e de encerramento) |
 | T3.8 | commitada | 63a7be8 | `grant-admin --create` cria conta sem senha (o operador usa "esqueci a senha"); busca por e-mail só por POST |
 
+| T3.T | commitada | 5297a6a, ede3555, f0baee7 | matriz de autorização, fluxos completos com caixa de e-mail capturada (só localhost) e stub do Turnstile (só no modo local), corridas e expirações, e2e de auth e conta nos dois idiomas, cobertura istanbul do servidor 98/94/99/99, login com mediana 157 ms; bug real achado: `auth.api` com `request` devolvia Response e as páginas tratavam 4xx como sucesso (`asResponse: false`) |
+| Q3.1 | concluída | — | FAIL: 6 major (adivinhação ilimitada de 2FA/senha por quem tem sessão, bloqueio de conta sem Turnstile, GET que escrevem no modo somente leitura, enxurrada de e-mails pelo link de troca, frescor só no /conta, tokens e e-mails nos logs da plataforma), 4 minor, 3 nit → FX3.1, FX3.2 |
+| FX3.1 | commitada | 4a6ec5e | guarda de segredos por usuário, ordem do guard, links de uso único, teto diário de reenvio, frescor ou senha, endpoints fechados, idioma do e-mail |
+| FX3.2 | commitada | 536616a | GETs bloqueados no somente leitura, logs de invocação desligados e query strings redigidas, grant-admin, CAS do apelido |
+| Q3.2 | concluída | — | FAIL: 3 major (claim do link pela forma bruta do token, redirecionamento aberto, sem UI de 2FA), 2 minor, 4 nit → FX3.3, FX3.4 |
+| FX3.3 | commitada | 890ab43 | claim pela parte assinada, callbacks só canônicos e da mesma origem, limite por IP nos links, sem escrita de refresh no somente leitura |
+| FX3.4 | commitada | 86ff820, cc4b633 | seção de verificação em duas etapas no /conta; e2e: segundo servidor espera o build, perf depois dos projetos funcionais |
+| Q3.3 | PASS | c215b9d, 34f01f5 | verificação: 1 major de regressão (chave por conta virou oráculo de existência) e 1 major anterior (oráculo de apelido no cadastro) corrigidos com testes; minors → issues #20–#24 |
+
+Verificação central final da F3: raiz 663/663; `check:web` 0/0; `check:int` ok; unidade web 1 462/1 462; integração 487/487 (cobertura 97,3/93,3/98,7/98,5); jobs 16/16; build e orçamentos ok; e2e 294/294.
+
 Verificação central da W3.3–W3.4: raiz 660/660; `check:web` 0/0; `check:int` ok; unidade web 1 446/1 446; integração 242/242; jobs 16/16; build e orçamentos ok; e2e completo 284 (1 instável corrigido: espera de hidratação).
 
 Verificação central da W3.2: raiz 652/652; `check:web` 0 erros; `check:int` ok; unidade web 1 229/1 229 (14 snapshots de e-mail gravados); integração 87/87; jobs 16/16; build ok; orçamentos ok; e2e smoke + a11y + i18n + offline 96/96.
@@ -193,6 +204,9 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 | Q2 | 1 | FAIL | S1, A1, M1, M2 major + 13 minor → FX2.1–FX2.4 |
 | Q2 | 2 | FAIL | R2-01, R2-02 major + 6 minor + 5 nit → FX2.5, FX2.6; unidade web 1 051/1 051, e2e 256 (5 falhas corrigidas e reexecutadas), raiz 625/625, cobertura lib 97,4 % linhas e 88,1 % branches |
 | Q2 | 3 (verificação) | **PASS** | minors N-1…N-5, T-1 → issues #14–#19 |
+| Q3 | 1 | FAIL | 6 major → FX3.1, FX3.2 |
+| Q3 | 2 | FAIL | 3 major → FX3.3, FX3.4 |
+| Q3 | 3 (verificação) | **PASS** | 2 major corrigidos (FX3.5, FX3.6); minors → #20–#24 |
 
 ## Achados do Q2 rodada 1 (a corrigir: FX2.k)
 

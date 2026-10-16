@@ -44,3 +44,6 @@ Leia antes de qualquer tarefa da F3, junto com `D:\git\open-auri\docs\plans\f2-d
 - **Migrações:** 0001 auth, 0002 e-mail, 0003 admin, 0007 access log, 0008 política, 0009 perfil; 0004–0006 reservadas à F4 (rodam antes da 0009 num banco novo).
 - **e2e com banco:** antes do Playwright, 
 px wrangler d1 migrations apply DB --local no web.
+- **Better Auth com `request`:** `auth.api.*` com `request` devolve Response; use `asResponse: false` quando o resultado é tratado como sucesso.
+- **Playwright:** dois servidores (4173 normal; 4174 com cadastro aberto, e-mail capturado e stub do Turnstile, só localhost); o segundo espera o primeiro (`scripts/wait-for-port.mjs`); perf roda depois dos projetos funcionais. Testes que tocam rate limit usam `cf-connecting-ip` aleatório por contexto.
+- **Nunca rode dois `wrangler dev`/build ao mesmo tempo no `web`**: o watcher recompila no meio e o servidor cai.
