@@ -1,0 +1,59 @@
+/*
+ * Tailwind 4 mapping (T2.2). `inline` makes utilities emit var(--token) directly, so a
+ * [data-page] accent override reaches bg-accent, text-accent, ring-accent, etc.
+ * Usage: bg-ink, bg-ink-2, text-text, text-muted, border-rule, text-danger, bg-accent,
+ * text-accent-ink, bg-paper, font-serif, font-sans, font-mono, font-cond, font-type,
+ * font-plate, font-tape, font-journal, font-marker, font-crt, text-label, h-bar,
+ * rounded-xs/sm/md/lg/xl/pill, max-w-frame.
+ */
+
+@theme inline {
+	/* Colours */
+	--color-ink: var(--ink);
+	--color-ink-2: var(--ink-2);
+	--color-text: var(--text);
+	--color-muted: var(--muted);
+	--color-rule: var(--rule);
+	--color-danger: var(--danger);
+	--color-accent: var(--accent);
+	--color-accent-hi: var(--accent-hi);
+	--color-accent-ink: var(--accent-ink);
+	--color-accent-soft: var(--accent-soft);
+	--color-paper: var(--paper);
+	--color-paper-ink: var(--paper-ink);
+	--color-paper-muted: var(--paper-muted);
+	--color-paper-rule: var(--paper-rule);
+
+	/* Font families: core (override Tailwind defaults) */
+	--font-serif: var(--serif);
+	--font-sans: var(--sans);
+	--font-mono: var(--mono);
+	--font-ui: var(--ui);
+
+	/* Font families: period fonts */
+	--font-cond: var(--cond);
+	--font-type: var(--type);
+	--font-plate: var(--plate);
+	--font-tape: var(--tape);
+	--font-journal: var(--journal);
+	--font-marker: var(--marker);
+	--font-crt: var(--crt);
+
+	/* Type */
+	--text-label: var(--label-min);
+	--text-label--line-height: 1.35;
+	--text-ui: var(--fs-ui);
+	--text-body: var(--fs-body);
+
+	/* Radii */
+	--radius-xs: var(--rad-xs);
+	--radius-sm: var(--rad-sm);
+	--radius-md: var(--rad-md);
+	--radius-lg: var(--rad-lg);
+	--radius-xl: var(--rad-xl);
+	--radius-pill: var(--rad-pill);
+
+	/* Layout */
+	--spacing-bar: var(--bar-h);
+	--container-frame: var(--frame-max);
+}

@@ -1,0 +1,131 @@
+/*
+ * Base styles (T2.2): typography, focus, selection, reduced motion, label minimums.
+ * Lives in Tailwind's base layer so utilities can override it.
+ */
+
+@layer base {
+	/* :where keeps specificity at 0 so [data-page='docs'] can switch to light */
+	:where(:root) {
+		color-scheme: dark;
+		-webkit-text-size-adjust: 100%;
+		text-size-adjust: 100%;
+	}
+
+	html {
+		scroll-padding-top: calc(var(--bar-h) + var(--space-5));
+	}
+
+	body {
+		margin: 0;
+		background: var(--ink);
+		color: var(--text);
+		font-family: var(--sans);
+		font-size: var(--fs-body);
+		line-height: 1.5;
+		font-optical-sizing: auto;
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+
+	button,
+	input,
+	select,
+	textarea {
+		font: inherit;
+		color: inherit;
+	}
+
+	button,
+	a,
+	input,
+	select,
+	summary,
+	[role='button'] {
+		touch-action: manipulation;
+	}
+
+	a {
+		color: inherit;
+		text-underline-offset: 4px;
+	}
+
+	button:disabled,
+	[aria-disabled='true'] {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	/* Display: Instrument Serif (one weight only, never synthesise bold) */
+	h1,
+	.display {
+		font-family: var(--serif);
+		font-weight: 400;
+		font-synthesis-weight: none;
+		letter-spacing: -0.02em;
+		line-height: 1;
+	}
+
+	.wordmark {
+		font: italic 400 var(--fs-wordmark) / 1 var(--serif);
+		font-synthesis-weight: none;
+	}
+
+	/* Numerals and readouts: JetBrains Mono with tabular figures */
+	.mono,
+	code,
+	kbd,
+	samp,
+	output,
+	[data-num] {
+		font-family: var(--mono);
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* Label minimums: >= 11px desktop, >= 10px mobile (--label-min switches in tokens.css) */
+	small {
+		font-size: max(var(--label-min), 0.8em);
+	}
+
+	.label,
+	.caps {
+		font-size: var(--label-min);
+		line-height: 1.35;
+		letter-spacing: var(--tracking-caps);
+		text-transform: uppercase;
+	}
+
+	/* Visible focus ring (WCAG 2.4.7 / 2.4.11) */
+	:focus-visible {
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
+	}
+
+	::selection {
+		background: var(--accent);
+		color: var(--accent-ink);
+	}
+
+	/* Paper surfaces (Docs body, track sheets) read as light */
+	[data-surface='paper'] {
+		color-scheme: light;
+		background: var(--paper);
+		color: var(--paper-ink);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		html {
+			scroll-behavior: auto;
+		}
+
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			animation-delay: 0s !important;
+			transition-duration: 0.01ms !important;
+			transition-delay: 0s !important;
+			scroll-behavior: auto !important;
+		}
+	}
+}

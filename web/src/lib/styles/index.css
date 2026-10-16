@@ -1,0 +1,12 @@
+/*
+ * open-auri web styles entry (T2.2). Imported once by the root layout (T2.9).
+ * Order: Tailwind, self-hosted fonts, tokens, page accents, Tailwind theme mapping, base.
+ * No external font or CDN requests: all fonts load from /fonts/**.
+ */
+
+@import 'tailwindcss';
+@import './fonts.css';
+@import './tokens.css';
+@import './accents.css';
+@import './theme.css';
+@import './base.css';

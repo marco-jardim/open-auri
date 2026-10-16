@@ -1,0 +1,100 @@
+/*
+ * Design tokens (T2.2). Values copied from the :root of design/mocks/v2/*.html
+ * (identical across the 8 mocks). Page accents live in accents.css.
+ * Token names deliberately avoid Tailwind's theme namespaces (--color-*, --font-*,
+ * --radius-*, --spacing-*, --text-*) so theme.css can map them without cycles.
+ */
+
+@layer base {
+	:root {
+		/* Chrome */
+		--ink: #0f0f0e;
+		--ink-2: #171715;
+		--text: #ece7dd;
+		--muted: #8f8a80;
+		--rule: rgba(236, 231, 221, 0.12);
+		--danger: #e5484d;
+
+		/* Chrome surfaces seen in the mocks (bar, popovers, footer) */
+		--bar-bg: #171715;
+		--pop-bg: #1b1b19;
+		--pop-rule: #34332f;
+		--footer-bg: rgba(15, 15, 14, 0.9);
+		--nav-link: #cfc9be;
+		--state-text: #b5afa4;
+
+		/* Neutral accent (admin and pages without an honoree); pages override in accents.css */
+		--accent: #ece7dd;
+		--accent-hi: #ffffff;
+		--accent-ink: #0f0f0e;
+
+		/* Docs paper (also used by any "paper" surface) */
+		--paper: #efe6d2;
+		--paper-ink: #29251f;
+		--paper-muted: #6b5e4c;
+		--paper-rule: rgba(66, 47, 28, 0.29);
+
+		/* Font stacks: core */
+		--serif: 'Instrument Serif', Georgia, serif;
+		--sans: 'Geist', system-ui, Arial, sans-serif;
+		--ui: var(--sans);
+		--mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+		/* Font stacks: period fonts (at most 2 per page, plan 3.4) */
+		--cond: 'Barlow Condensed', 'Arial Narrow', 'Geist', sans-serif; /* Curva, Cabo (--panel) */
+		--panel: var(--cond);
+		--type: 'Courier Prime', Courier, monospace; /* Biblioteca */
+		--plate: 'Oswald', 'Geist', sans-serif; /* Comparar */
+		--tape: 'Special Elite', 'Courier New', monospace; /* Comparar */
+		--journal: 'EB Garamond', Georgia, serif; /* Docs */
+		--marker: 'Permanent Marker', 'Comic Sans MS', cursive; /* Comunidade */
+		--crt: 'VT323', ui-monospace, monospace; /* Comunidade */
+
+		/* Type sizes used by the chrome */
+		--fs-body: 14px;
+		--fs-ui: 13px;
+		--label-min: 11px; /* minimum label size on desktop; 10px on mobile (below) */
+		--fs-wordmark: 27px;
+		--fs-honoree: 30px;
+		--tracking-caps: 0.14em;
+
+		/* Spacing scale (px values recurring in the mocks) */
+		--space-1: 4px;
+		--space-2: 8px;
+		--space-3: 12px;
+		--space-4: 16px;
+		--space-5: 24px;
+		--space-6: 32px;
+		--space-7: 48px;
+		--space-8: 80px;
+
+		/* Radii */
+		--rad-xs: 2px;
+		--rad-sm: 3px;
+		--rad-md: 4px;
+		--rad-lg: 6px;
+		--rad-xl: 10px;
+		--rad-pill: 999px;
+
+		/* Layout */
+		--bar-h: 56px;
+		--frame-max: 1480px;
+		--gutter: 24px;
+
+		/* Focus ring */
+		--focus-width: 2px;
+		--focus-offset: 3px;
+
+		/* Motion */
+		--dur-fast: 0.12s;
+		--dur-base: 0.2s;
+		--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+
+	@media (max-width: 640px) {
+		:root {
+			--label-min: 10px; /* minimum label size on mobile */
+			--gutter: 16px;
+		}
+	}
+}
