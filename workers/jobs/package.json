@@ -1,0 +1,19 @@
+{
+  "name": "open-auri-jobs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "prebuild": "node ../../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "predeploy": "node ../../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc",
+    "deploy": "wrangler deploy",
+    "gen": "node ../../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc && wrangler types --strict-vars=false",
+    "dev-vars": "node ../../tools/render-wrangler.mjs --dev-vars .dev.vars --worker jobs",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "wrangler": "^4.151.1"
+  }
+}

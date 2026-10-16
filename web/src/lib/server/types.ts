@@ -1,0 +1,74 @@
+// Server-side shapes shared by hooks, endpoints and server modules.
+//
+// `Env` is written by hand instead of using `wrangler types`: the generated file declares the
+// Workers runtime as globals (clashing with lib.dom used by client code and component tests) and
+// pulls the build output into the program. The module form of @cloudflare/workers-types exports
+// the same types without touching globals. test/tools/render-wrangler.test.mjs fails when this
+// interface drifts from web/wrangler.template.jsonc (bindings + vars, every environment) or from
+// the secret list in tools/render-wrangler.mjs.
+import type {
+	CacheStorage,
+	D1Database,
+	ExecutionContext,
+	Fetcher,
+	IncomingRequestCfProperties,
+	KVNamespace,
+	Queue,
+	R2Bucket,
+	RateLimit
+} from '@cloudflare/workers-types';
+
+export interface Env {
+	// Bindings (wrangler.template.jsonc)
+	ASSETS: Fetcher;
+	DB: D1Database;
+	CONFIG: KVNamespace;
+	MEDIA: R2Bucket;
+	ACCESS_LOG_QUEUE: Queue;
+	RL_AUTH: RateLimit;
+	RL_API: RateLimit;
+	RL_WRITE: RateLimit;
+	// Vars (wrangler.template.jsonc), always strings
+	PUBLIC_ORIGIN: string;
+	GITHUB_URL: string;
+	ACCESS_LOG_ENABLED: string;
+	SIGNUP_ENABLED: string;
+	ADMIN_2FA_REQUIRED: string;
+	RESEND_FROM: string;
+	// Secrets (wrangler secret / .dev.vars; tools/render-wrangler.mjs SECRETS)
+	BETTER_AUTH_SECRET: string;
+	RESEND_API_KEY: string;
+	TURNSTILE_SECRET: string;
+	IPHASH_PEPPER: string;
+	ACCESS_LOG_KEY: string;
+	RESEND_WEBHOOK_SECRET?: string;
+}
+
+/** `event.platform` as provided by @sveltejs/adapter-cloudflare. */
+export interface WorkerPlatform {
+	env: Env;
+	ctx: ExecutionContext;
+	caches: CacheStorage;
+	cf?: IncomingRequestCfProperties;
+}
+
+// Minimal request-scoped auth shapes for `App.Locals`. T3.5 maps Better Auth's user/session onto
+// these (and may extend them); nothing here carries secrets or tokens.
+
+export type UserRole = 'user' | 'admin';
+
+export interface AuthUser {
+	id: string;
+	email: string;
+	name: string;
+	emailVerified: boolean;
+	role: UserRole;
+}
+
+export interface AuthSession {
+	id: string;
+	userId: string;
+	expiresAt: Date;
+	/** Set when the session passed the second factor (T3.5 defines how it is recorded). */
+	twoFactorVerified: boolean;
+}

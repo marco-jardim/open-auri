@@ -1,0 +1,110 @@
+// Versioned template: only dollar-brace placeholders, values come from the repository .env (or CI
+// process.env) through tools/render-wrangler.mjs, which writes the ignored wrangler.jsonc.
+//
+// Jobs Worker: no HTTP surface (workers_dev off), a daily cron and the consumer of the access-log
+// queue (failed batches retry, then land in the dead-letter queue). Same D1/KV/R2 resources as the
+// web Worker; D1 migrations live in web/migrations and are applied from web/ only. The top level is
+// production; `env.production` mirrors it with the same name so that `--env production` commands
+// resolve to the same Worker (see web/wrangler.template.jsonc), and `env.staging` uses the _STAGING
+// resources. Bindings, vars, triggers and queue consumers are not inherited by named environments,
+// so they are repeated.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "${WORKER_NAME_JOBS}",
+  "account_id": "${CLOUDFLARE_ACCOUNT_ID}",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "triggers": { "crons": ["5 0 * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "${D1_DATABASE_NAME}",
+      "database_id": "${D1_DATABASE_ID}",
+      "migrations_dir": "../../web/migrations"
+    }
+  ],
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "${KV_CONFIG_ID}" }],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "${R2_BUCKET}" }],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "${ACCESS_LOG_QUEUE}",
+        "dead_letter_queue": "${ACCESS_LOG_DLQ}",
+        "max_batch_size": 100,
+        "max_batch_timeout": 30
+      }
+    ]
+  },
+  "vars": {
+    "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
+    "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE}"
+  },
+  "env": {
+    "production": {
+      "name": "${WORKER_NAME_JOBS}",
+      "workers_dev": false,
+      "preview_urls": false,
+      "observability": { "enabled": true },
+      "triggers": { "crons": ["5 0 * * *"] },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "${D1_DATABASE_NAME}",
+          "database_id": "${D1_DATABASE_ID}",
+          "migrations_dir": "../../web/migrations"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "CONFIG", "id": "${KV_CONFIG_ID}" }],
+      "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "${R2_BUCKET}" }],
+      "queues": {
+        "consumers": [
+          {
+            "queue": "${ACCESS_LOG_QUEUE}",
+            "dead_letter_queue": "${ACCESS_LOG_DLQ}",
+            "max_batch_size": 100,
+            "max_batch_timeout": 30
+          }
+        ]
+      },
+      "vars": {
+        "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
+        "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE}"
+      }
+    },
+    "staging": {
+      "name": "${WORKER_NAME_JOBS}-staging",
+      "workers_dev": false,
+      "preview_urls": false,
+      "observability": { "enabled": true },
+      "triggers": { "crons": ["5 0 * * *"] },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "${D1_DATABASE_NAME_STAGING}",
+          "database_id": "${D1_DATABASE_ID_STAGING}",
+          "migrations_dir": "../../web/migrations"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "CONFIG", "id": "${KV_CONFIG_ID_STAGING}" }],
+      "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "${R2_BUCKET_STAGING}" }],
+      "queues": {
+        "consumers": [
+          {
+            "queue": "${ACCESS_LOG_QUEUE_STAGING}",
+            "dead_letter_queue": "${ACCESS_LOG_DLQ_STAGING}",
+            "max_batch_size": 100,
+            "max_batch_timeout": 30
+          }
+        ]
+      },
+      "vars": {
+        "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
+        "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE_STAGING}"
+      }
+    }
+  }
+}

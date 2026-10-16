@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Open protocol for the 0xCB firmware of the CB5100 chip family",
   "workspaces": [
-    "web"
+    "web",
+    "workers/jobs"
   ],
   "engines": {
     "node": ">=22.12"

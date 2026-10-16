@@ -1,13 +1,119 @@
+// Versioned template: only dollar-brace placeholders, values come from the repository .env (or CI
+// process.env) through tools/render-wrangler.mjs, which writes the ignored wrangler.jsonc.
+//
+// Environments: the top level is production (what `wrangler deploy`, `wrangler types`,
+// `getPlatformProxy` in `vite dev` and the Vitest integration project use). `env.production` is
+// not strictly required, but it mirrors the top level with the same Worker name so that every
+// `--env production` command (deploy, `d1 migrations apply`, tools/sync-secrets.mjs) resolves to
+// the same Worker and resources instead of failing on an unknown environment. Keep both in sync.
+// `env.staging` is a separate Worker (name suffix -staging) with its own D1/KV/R2/queue and rate
+// limit namespaces; its origin is derived from the workers.dev subdomain. Wrangler does not
+// inherit bindings or vars into named environments (only main, assets, compatibility settings and
+// account_id are inherited), so every binding and var is repeated per environment.
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "${WORKER_NAME_WEB}",
+	"account_id": "${CLOUDFLARE_ACCOUNT_ID}",
 	"compatibility_date": "2026-10-16",
-	"compatibility_flags": ["nodejs_als"],
+	"compatibility_flags": ["nodejs_compat", "nodejs_als"],
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"workers_dev": true,
-	"preview_urls": true
+	"preview_urls": true,
+	"observability": { "enabled": true },
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "${D1_DATABASE_NAME}",
+			"database_id": "${D1_DATABASE_ID}",
+			"migrations_dir": "migrations"
+		}
+	],
+	"kv_namespaces": [{ "binding": "CONFIG", "id": "${KV_CONFIG_ID}" }],
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "${R2_BUCKET}" }],
+	"queues": {
+		"producers": [{ "binding": "ACCESS_LOG_QUEUE", "queue": "${ACCESS_LOG_QUEUE}" }]
+	},
+	"ratelimits": [
+		{ "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
+		{ "name": "RL_API", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+		{ "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
+	],
+	"vars": {
+		"PUBLIC_ORIGIN": "${PUBLIC_ORIGIN}",
+		"GITHUB_URL": "${PUBLIC_GITHUB_URL}",
+		"ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
+		"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
+		"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
+		"RESEND_FROM": "${RESEND_FROM}"
+	},
+	"env": {
+		"production": {
+			"name": "${WORKER_NAME_WEB}",
+			"workers_dev": true,
+			"preview_urls": true,
+			"observability": { "enabled": true },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "${D1_DATABASE_NAME}",
+					"database_id": "${D1_DATABASE_ID}",
+					"migrations_dir": "migrations"
+				}
+			],
+			"kv_namespaces": [{ "binding": "CONFIG", "id": "${KV_CONFIG_ID}" }],
+			"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "${R2_BUCKET}" }],
+			"queues": {
+				"producers": [{ "binding": "ACCESS_LOG_QUEUE", "queue": "${ACCESS_LOG_QUEUE}" }]
+			},
+			"ratelimits": [
+				{ "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
+				{ "name": "RL_API", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+				{ "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
+			],
+			"vars": {
+				"PUBLIC_ORIGIN": "${PUBLIC_ORIGIN}",
+				"GITHUB_URL": "${PUBLIC_GITHUB_URL}",
+				"ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
+				"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
+				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
+				"RESEND_FROM": "${RESEND_FROM}"
+			}
+		},
+		"staging": {
+			"name": "${WORKER_NAME_WEB}-staging",
+			"workers_dev": true,
+			"preview_urls": true,
+			"observability": { "enabled": true },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "${D1_DATABASE_NAME_STAGING}",
+					"database_id": "${D1_DATABASE_ID_STAGING}",
+					"migrations_dir": "migrations"
+				}
+			],
+			"kv_namespaces": [{ "binding": "CONFIG", "id": "${KV_CONFIG_ID_STAGING}" }],
+			"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "${R2_BUCKET_STAGING}" }],
+			"queues": {
+				"producers": [{ "binding": "ACCESS_LOG_QUEUE", "queue": "${ACCESS_LOG_QUEUE_STAGING}" }]
+			},
+			"ratelimits": [
+				{ "name": "RL_AUTH", "namespace_id": "2001", "simple": { "limit": 20, "period": 60 } },
+				{ "name": "RL_API", "namespace_id": "2002", "simple": { "limit": 120, "period": 60 } },
+				{ "name": "RL_WRITE", "namespace_id": "2003", "simple": { "limit": 30, "period": 60 } }
+			],
+			"vars": {
+				"PUBLIC_ORIGIN": "https://${WORKER_NAME_WEB}-staging.${CLOUDFLARE_WORKERS_SUBDOMAIN}.workers.dev",
+				"GITHUB_URL": "${PUBLIC_GITHUB_URL}",
+				"ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
+				"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
+				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
+				"RESEND_FROM": "${RESEND_FROM}"
+			}
+		}
+	}
 }

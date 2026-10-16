@@ -1,0 +1,12 @@
+# Local secrets for `vite dev` / `wrangler dev` (platformProxy). Do not edit web/.dev.vars by
+# hand: generate it from the repository .env with `npm run -w web dev-vars`
+# (node ../tools/render-wrangler.mjs --dev-vars .dev.vars). web/.dev.vars is git-ignored.
+# Deployed Workers get the same names through `node tools/sync-secrets.mjs`.
+BETTER_AUTH_SECRET=<segredo-aleatorio-32-bytes-base64url>
+RESEND_API_KEY=<re_...>
+# Source key in .env: TURNSTILE_SECRET_KEY
+TURNSTILE_SECRET=<chave-secreta-do-turnstile>
+IPHASH_PEPPER=<pepper-aleatorio-32-bytes-base64url>
+ACCESS_LOG_KEY=<chave-aleatoria-32-bytes-base64url>
+# Optional until F5 (Resend webhooks); omitted when absent from .env.
+RESEND_WEBHOOK_SECRET=<whsec_...>

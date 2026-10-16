@@ -4,6 +4,14 @@
 		"strict": true,
 		"types": ["$app/types", "node"]
 	},
-	"include": ["src", "tests", "vite.config.ts", "playwright.config.ts"],
-	"exclude": ["src/service-worker", "src/service-worker.ts"]
+	"include": [
+		"src",
+		"tests",
+		"vite.config.ts",
+		"vitest.integration.config.ts",
+		"playwright.config.ts"
+	],
+	// tests/integration runs in workerd with the Workers runtime as globals: it is type-checked by
+	// its own project (tests/integration/tsconfig.json, `npm run check:int`), without lib.dom.
+	"exclude": ["src/service-worker", "src/service-worker.ts", "tests/integration"]
 }
