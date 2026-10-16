@@ -1,0 +1,632 @@
+<script lang="ts">
+	// "Minha biblioteca" (T4.14): the account shelves (creations with visibility controls,
+	// favorites, installed, packs), the audience and share funnel of each creation, and the
+	// explicit merge of the local library after sign-in. Signed out it is a single sign-in line;
+	// offline it says so and the local library of the page keeps working. Never writes to a cable:
+	// "Abrir" leads to /c/[id], where installing goes through `app.requestWrite`.
+	import { untrack } from 'svelte';
+	import { m } from '#lib/paraglide/messages.js';
+	import {
+		rememberOrigin,
+		requireLoginHref,
+		type LibraryItem,
+		type SocialApi,
+		type SocialSession
+	} from '#lib/social/index.ts';
+	import CreationInsights from './CreationInsights.svelte';
+	import MergeBanner from './MergeBanner.svelte';
+	import {
+		accountKey,
+		defaultStorage,
+		errorKind,
+		isAbort,
+		type ErrorKind,
+		type KeyValueStorage,
+		type LocalLibraryItem
+	} from './social.ts';
+
+	type Shelf = 'created' | 'favorites' | 'installed';
+	type Tab = Shelf | 'packs';
+	type Visibility = LibraryItem['visibility'];
+	interface PackRow {
+		id: string;
+		name: string;
+		description: string;
+		visibility: Visibility;
+		moderation: LibraryItem['moderation'];
+	}
+	interface ShelfState<T> {
+		items: T[];
+		cursor: string | null;
+		status: 'idle' | 'loading' | 'ready' | 'error';
+		error: ErrorKind | null;
+	}
+
+	let {
+		session,
+		api,
+		localItems = [],
+		origin,
+		locale,
+		currentPath = '/biblioteca',
+		storage = defaultStorage(),
+		remember = rememberOrigin
+	}: {
+		session: Pick<SocialSession, 'signedIn' | 'verified' | 'nickname' | 'account' | 'known'>;
+		api: Pick<
+			SocialApi,
+			| 'myLibrary'
+			| 'myPacks'
+			| 'myShares'
+			| 'setVisibility'
+			| 'retractLineage'
+			| 'restoreLineage'
+			| 'mergeLibrary'
+			| 'audience'
+			| 'shareStats'
+			| 'createShare'
+		>;
+		localItems?: readonly LocalLibraryItem[];
+		origin: string;
+		locale: string;
+		currentPath?: string;
+		storage?: KeyValueStorage | null;
+		remember?: typeof rememberOrigin;
+	} = $props();
+	const id = $props.id();
+
+	function empty<T>(): ShelfState<T> {
+		return { items: [], cursor: null, status: 'idle', error: null };
+	}
+	let shelves = $state.raw<Record<Shelf, ShelfState<LibraryItem>>>({
+		created: empty(),
+		favorites: empty(),
+		installed: empty()
+	});
+	let packs = $state.raw<ShelfState<PackRow>>(empty());
+	let tab = $state<Tab>('created');
+	let visibilityFilter = $state<Visibility | 'all'>('all');
+	let open = $state<string | null>(null);
+	let busy = $state<string | null>(null);
+	let notice = $state('');
+	let reload = $state(0);
+	let online = $state(typeof navigator === 'undefined' ? true : navigator.onLine !== false);
+
+	const shelfTab = $derived<Shelf | null>(tab === 'packs' ? null : tab);
+	const signedIn = $derived(session.signedIn);
+	const verified = $derived(session.verified);
+	const account = $derived(accountKey(session.account));
+	const offline = $derived(
+		!online ||
+			[shelves.created, shelves.favorites, shelves.installed, packs].some(
+				(shelf) => shelf.error === 'offline'
+			)
+	);
+	const tabs = $derived([
+		{ key: 'created', label: m.biblioteca_social_shelf_created() },
+		{ key: 'favorites', label: m.biblioteca_social_shelf_favorites() },
+		{ key: 'installed', label: m.biblioteca_social_shelf_installed() },
+		{ key: 'packs', label: m.biblioteca_social_shelf_packs() }
+	] as const);
+	const visibilityLabels = $derived<Record<Visibility, string>>({
+		public: m.biblioteca_social_visibility_public(),
+		unlisted: m.biblioteca_social_visibility_unlisted(),
+		private: m.biblioteca_social_visibility_private()
+	});
+
+	$effect(() => {
+		const up = () => {
+			online = true;
+			// Retry what failed offline once the network is back (never in a loop).
+			reload += 1;
+		};
+		const down = () => {
+			online = false;
+		};
+		window.addEventListener('online', up);
+		window.addEventListener('offline', down);
+		return () => {
+			window.removeEventListener('online', up);
+			window.removeEventListener('offline', down);
+		};
+	});
+
+	function setShelf(shelf: Shelf, next: ShelfState<LibraryItem>) {
+		shelves = { ...shelves, [shelf]: next };
+	}
+
+	function track(items: readonly LibraryItem[]) {
+		for (const item of items) {
+			void remember({ s1: item.curve.s1, lineageId: item.id, versionId: item.head.id });
+		}
+	}
+
+	async function loadShelf(shelf: Shelf, signal: AbortSignal, cursor: string | null = null) {
+		const previous = shelves[shelf];
+		setShelf(shelf, { ...previous, status: 'loading', error: null });
+		try {
+			const page = await api.myLibrary(
+				{
+					shelf,
+					...(shelf === 'created' && visibilityFilter !== 'all'
+						? { visibility: visibilityFilter }
+						: {}),
+					cursor
+				},
+				{ signal }
+			);
+			track(page.items);
+			setShelf(shelf, {
+				items: cursor === null ? page.items : [...shelves[shelf].items, ...page.items],
+				cursor: page.nextCursor,
+				status: 'ready',
+				error: null
+			});
+		} catch (error) {
+			if (isAbort(error)) return;
+			setShelf(shelf, { ...shelves[shelf], status: 'error', error: errorKind(error) });
+		}
+	}
+
+	async function loadPacks(signal: AbortSignal, cursor: string | null = null) {
+		packs = { ...packs, status: 'loading', error: null };
+		try {
+			// All own packs, any visibility (`GET /me/packs`).
+			const page = await api.myPacks({ cursor }, { signal });
+			const rows = page.items.map((pack) => ({
+				id: pack.id,
+				name: pack.name,
+				description: pack.description,
+				visibility: pack.visibility,
+				moderation: pack.moderation
+			}));
+			packs = {
+				items: cursor === null ? rows : [...packs.items, ...rows],
+				cursor: page.nextCursor,
+				status: 'ready',
+				error: null
+			};
+		} catch (error) {
+			if (isAbort(error)) return;
+			packs = { ...packs, status: 'error', error: errorKind(error) };
+		}
+	}
+
+	// The loaders read and write `shelves`/`packs`: run them untracked so only the listed inputs
+	// (session, filter, reload) re-run the effects.
+	$effect(() => {
+		void reload;
+		if (!signedIn) return;
+		const controller = new AbortController();
+		untrack(() => {
+			void loadShelf('favorites', controller.signal);
+			void loadShelf('installed', controller.signal);
+			void loadPacks(controller.signal);
+		});
+		return () => controller.abort();
+	});
+
+	$effect(() => {
+		void reload;
+		void visibilityFilter;
+		if (!signedIn) return;
+		const controller = new AbortController();
+		untrack(() => {
+			void loadShelf('created', controller.signal);
+		});
+		return () => controller.abort();
+	});
+
+	function more(target: Tab) {
+		const controller = new AbortController();
+		if (target === 'packs') void loadPacks(controller.signal, packs.cursor);
+		else void loadShelf(target, controller.signal, shelves[target].cursor);
+	}
+
+	function errorText(kind: ErrorKind): string {
+		switch (kind) {
+			case 'offline':
+				return m.biblioteca_social_offline();
+			case 'auth':
+				return m.biblioteca_social_error_auth();
+			case 'verify':
+				return m.biblioteca_social_verify();
+			case 'gate':
+				return m.biblioteca_social_error_gate();
+			case 'rate':
+				return m.biblioteca_social_error_rate();
+			case 'missing':
+				return m.biblioteca_social_error_missing();
+			default:
+				return m.biblioteca_social_error_generic();
+		}
+	}
+
+	function patch(
+		lineageId: string,
+		state: Pick<LibraryItem, 'status' | 'visibility' | 'moderation'>
+	) {
+		const update = (item: LibraryItem) =>
+			item.id === lineageId
+				? {
+						...item,
+						status: state.status,
+						visibility: state.visibility,
+						moderation: state.moderation
+					}
+				: item;
+		shelves = {
+			created: { ...shelves.created, items: shelves.created.items.map(update) },
+			favorites: { ...shelves.favorites, items: shelves.favorites.items.map(update) },
+			installed: { ...shelves.installed, items: shelves.installed.items.map(update) }
+		};
+	}
+
+	async function act(
+		item: LibraryItem,
+		action: 'visibility' | 'retract' | 'restore',
+		value?: Visibility
+	) {
+		if (busy) return;
+		busy = item.id;
+		notice = '';
+		try {
+			if (action === 'visibility' && value) {
+				patch(item.id, await api.setVisibility(item.id, value));
+				notice = m.biblioteca_social_saved_visibility();
+			} else if (action === 'retract') {
+				patch(item.id, await api.retractLineage(item.id));
+				notice = m.biblioteca_social_retracted_done();
+			} else if (action === 'restore') {
+				patch(item.id, await api.restoreLineage(item.id));
+				notice = m.biblioteca_social_restored_done();
+			}
+		} catch (error) {
+			notice = errorText(errorKind(error));
+		} finally {
+			busy = null;
+		}
+	}
+
+	function current(tabKey: Tab): ShelfState<LibraryItem | PackRow> {
+		return tabKey === 'packs' ? packs : shelves[tabKey];
+	}
+
+	function emptyText(tabKey: Tab): string {
+		switch (tabKey) {
+			case 'created':
+				return m.biblioteca_social_empty_created();
+			case 'favorites':
+				return m.biblioteca_social_empty_favorites();
+			case 'installed':
+				return m.biblioteca_social_empty_installed();
+			default:
+				return m.biblioteca_social_empty_packs_own();
+		}
+	}
+</script>
+
+<section class="mine" aria-labelledby="{id}-title">
+	<div class="mine-head">
+		<h2 id="{id}-title">{m.biblioteca_social_title()}</h2>
+		{#if signedIn}<p>{m.biblioteca_social_note()}</p>{/if}
+	</div>
+	{#if !session.known}
+		<p aria-busy="true">{m.biblioteca_social_loading()}</p>
+	{:else if !signedIn}
+		<p class="invite">
+			{m.biblioteca_social_signin()}
+			<a href={requireLoginHref(currentPath)}>{m.biblioteca_social_signin_link()}</a>
+		</p>
+	{:else}
+		{#if offline}<p class="offline" role="status">{m.biblioteca_social_offline()}</p>{/if}
+		{#if !offline}
+			<MergeBanner
+				items={localItems}
+				{account}
+				{verified}
+				{api}
+				{storage}
+				{locale}
+				onMerged={() => {
+					reload += 1;
+				}}
+			/>
+		{/if}
+		<div class="tabs" role="tablist" aria-label={m.biblioteca_social_shelves()}>
+			{#each tabs as entry (entry.key)}
+				<button
+					type="button"
+					class="tab"
+					role="tab"
+					id="{id}-tab-{entry.key}"
+					aria-controls="{id}-panel"
+					aria-selected={tab === entry.key}
+					tabindex={tab === entry.key ? 0 : -1}
+					onclick={() => {
+						tab = entry.key;
+					}}
+					onkeydown={(event) => {
+						if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+						const index = tabs.findIndex((other) => other.key === tab);
+						const step = event.key === 'ArrowRight' ? 1 : tabs.length - 1;
+						tab = tabs[(index + step) % tabs.length]?.key ?? 'created';
+						document.getElementById(`${id}-tab-${tab}`)?.focus();
+					}}
+					>{entry.label}
+					<span class="badge">{current(entry.key).items.length}</span></button
+				>
+			{/each}
+		</div>
+		<div class="panel" role="tabpanel" id="{id}-panel" aria-labelledby="{id}-tab-{tab}">
+			{#if tab === 'created'}
+				<label class="filter"
+					>{m.biblioteca_social_filter_visibility()}
+					<select bind:value={visibilityFilter}>
+						<option value="all">{m.biblioteca_social_filter_all()}</option>
+						<option value="public">{visibilityLabels.public}</option>
+						<option value="unlisted">{visibilityLabels.unlisted}</option>
+						<option value="private">{visibilityLabels.private}</option>
+					</select></label
+				>
+				{#if !verified}<p class="hint">{m.biblioteca_social_verify()}</p>{/if}
+			{/if}
+			{#if current(tab).status === 'error' && current(tab).error !== 'offline'}
+				<p role="alert">{errorText(current(tab).error ?? 'generic')}</p>
+				<button
+					type="button"
+					onclick={() => {
+						reload += 1;
+					}}>{m.biblioteca_social_retry()}</button
+				>
+			{:else if current(tab).status === 'error'}
+				<!-- The offline notice above stands in for the list: never an empty state. -->
+			{:else if current(tab).status !== 'ready' && current(tab).items.length === 0}
+				<p aria-busy="true">{m.biblioteca_social_loading()}</p>
+			{:else if current(tab).items.length === 0}
+				<p class="empty">{emptyText(tab)}</p>
+			{:else if tab === 'packs'}
+				<ul class="rows">
+					{#each packs.items as pack (pack.id)}
+						<li class="row">
+							<div class="row-head">
+								<strong>{pack.name}</strong>
+								<span class="badge vis-{pack.visibility}">{visibilityLabels[pack.visibility]}</span>
+								{#if pack.moderation !== 'visible'}<span class="badge warn"
+										>{m.biblioteca_social_moderated()}</span
+									>{/if}
+							</div>
+							{#if pack.description}<span class="desc">{pack.description}</span>{/if}
+						</li>
+					{/each}
+				</ul>
+			{:else if shelfTab}
+				{@const shelf = shelfTab}
+				<ul class="rows">
+					{#each shelves[shelf].items as item (item.id)}
+						<li class="row">
+							<div class="row-head">
+								<strong>{item.head.name}</strong>
+								{#if shelf === 'created'}<span class="badge vis-{item.visibility}"
+										>{visibilityLabels[item.visibility]}</span
+									>{/if}
+								{#if item.status === 'retracted'}<span class="badge warn"
+										>{m.biblioteca_social_retracted()}</span
+									>{/if}
+								{#if item.moderation !== 'visible'}<span class="badge warn"
+										>{m.biblioteca_social_moderated()}</span
+									>{/if}
+								{#if !item.curve.gateOk}<span class="badge warn"
+										>{m.biblioteca_social_gate_failed()}</span
+									>{/if}
+							</div>
+							{#if shelf !== 'created'}<span class="desc"
+									>{#if item.author}{m.biblioteca_social_by({
+											name: item.author.displayUsername
+										})}{:else}{m.biblioteca_social_author_removed()}{/if}</span
+								>{/if}
+							<div class="row-actions">
+								{#if item.status === 'active'}<a
+										href="/c/{encodeURIComponent(item.id)}"
+										aria-label={m.biblioteca_social_open_label({ name: item.head.name })}
+										>{m.biblioteca_social_open()}</a
+									>{/if}
+								{#if shelf === 'created' && item.own}
+									<label
+										>{m.biblioteca_social_visibility()}
+										<select
+											value={item.visibility}
+											disabled={!verified || busy !== null || item.status === 'retracted'}
+											aria-label={m.biblioteca_social_change_visibility({ name: item.head.name })}
+											onchange={(event) => {
+												const next = event.currentTarget.value;
+												if (next === 'public' || next === 'unlisted' || next === 'private') {
+													void act(item, 'visibility', next);
+												}
+											}}
+										>
+											<option value="public">{visibilityLabels.public}</option>
+											<option value="unlisted">{visibilityLabels.unlisted}</option>
+											<option value="private">{visibilityLabels.private}</option>
+										</select></label
+									>
+									{#if item.status === 'active'}
+										<button
+											type="button"
+											disabled={busy !== null}
+											onclick={() => act(item, 'retract')}>{m.biblioteca_social_retract()}</button
+										>
+									{:else}
+										<button
+											type="button"
+											disabled={!verified || busy !== null}
+											onclick={() => act(item, 'restore')}>{m.biblioteca_social_restore()}</button
+										>
+									{/if}
+									<button
+										type="button"
+										aria-expanded={open === item.id}
+										onclick={() => {
+											open = open === item.id ? null : item.id;
+										}}>{m.biblioteca_social_insights()}</button
+									>
+								{/if}
+							</div>
+							{#if shelf === 'created' && open === item.id}
+								<CreationInsights
+									lineageId={item.id}
+									name={item.head.name}
+									{verified}
+									{api}
+									{origin}
+								/>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if current(tab).cursor && current(tab).status === 'ready'}
+				<button type="button" onclick={() => more(tab)}>{m.biblioteca_social_more()}</button>
+			{/if}
+		</div>
+		<p class="notice" role="status">{notice}</p>
+	{/if}
+</section>
+
+<style>
+	.mine {
+		margin: 0 0 26px;
+		padding: 18px 0 8px;
+		border-top: 1px solid #b99c6a44;
+		color: #e0cdae;
+		font:
+			12px/1.6 'JetBrains Mono',
+			monospace;
+	}
+	.mine-head {
+		margin-bottom: 14px;
+	}
+	h2 {
+		margin: 0;
+		color: #ede0bf;
+		font:
+			30px/1.1 'Instrument Serif',
+			Georgia,
+			serif;
+	}
+	p {
+		margin: 6px 0;
+	}
+	.invite a,
+	.row a {
+		color: #f4c66e;
+		text-underline-offset: 3px;
+	}
+	.offline {
+		color: #ffdf9d;
+	}
+	.tabs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-bottom: 12px;
+	}
+	.tab {
+		min-height: 36px;
+		padding: 6px 10px;
+		background: linear-gradient(#454b3e, #282e24);
+		border: 1px solid #171c15;
+		color: #f3efd9;
+		font:
+			11px 'JetBrains Mono',
+			monospace;
+		cursor: pointer;
+	}
+	.tab[aria-selected='true'] {
+		background: linear-gradient(#edc57a, #bc8e3a);
+		color: #211e15;
+	}
+	.badge {
+		display: inline-block;
+		padding: 0 6px;
+		margin-left: 6px;
+		border: 1px solid currentColor;
+		border-radius: 2px;
+		font-size: 10px;
+	}
+	.badge.warn {
+		color: #ffb48a;
+	}
+	.vis-public {
+		color: #b7e3a1;
+	}
+	.vis-unlisted {
+		color: #f4c66e;
+	}
+	.vis-private {
+		color: #d8cfc0;
+	}
+	.filter,
+	.row-actions label {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+	}
+	select {
+		padding: 6px 4px;
+		color: #f3eed5;
+		background: #293023;
+		border: 1px solid #abb28c66;
+		font: inherit;
+	}
+	.rows {
+		list-style: none;
+		margin: 10px 0;
+		padding: 0;
+	}
+	.row {
+		padding: 12px 0;
+		border-top: 1px solid #b99c6a33;
+	}
+	.row strong {
+		color: #ede0bf;
+		font:
+			700 17px 'Courier Prime',
+			monospace;
+		overflow-wrap: anywhere;
+	}
+	.desc {
+		display: block;
+		color: #cdbb98;
+		overflow-wrap: anywhere;
+	}
+	.row-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 10px;
+		margin-top: 8px;
+	}
+	button:not(.tab) {
+		min-height: 36px;
+		padding: 8px 12px;
+		border: 1px solid #b5ae9477;
+		border-radius: 2px;
+		background: #272d23;
+		color: #ece7dd;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	button:disabled,
+	select:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.notice:empty {
+		margin: 0;
+	}
+	:where(button, a, select):focus-visible {
+		outline: 3px solid #f6bd55;
+		outline-offset: 4px;
+	}
+</style>

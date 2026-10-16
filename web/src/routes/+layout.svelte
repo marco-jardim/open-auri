@@ -29,6 +29,9 @@
 		writePolicySeen
 	} from '#lib/components/legal/index.ts';
 	import { POLICY_VERSION } from '#lib/content/legal/version.ts';
+	import SocialSync from '#lib/components/social/SocialSync.svelte';
+	import { startOutboxBridge } from '#lib/cable/outbox-bridge.ts';
+	import { createSocialApi, createSocialOutbox, createSocialSession } from '#lib/social/index.ts';
 	import type { LayoutProps } from './$types';
 
 	let { children, data }: LayoutProps = $props();
@@ -61,6 +64,23 @@
 	const meta = $derived(getPageMeta(page.route.id ?? page.url.pathname));
 	const homage = $derived(getFooterHonoree(meta));
 	const pending = $derived(app?.pendingWrite);
+	// Social activity (F4): one outbox over the app's store, flushed by SocialSync; real cable
+	// writes of a remembered community curve enqueue an installed event through the bridge.
+	const socialSession = createSocialSession();
+	const socialApi = createSocialApi();
+	const socialOutbox = $derived(
+		app ? createSocialOutbox({ store: app.state.outbox, session: socialSession }) : null
+	);
+	$effect(() => {
+		const client = app;
+		const outbox = socialOutbox;
+		if (!client || !outbox) return;
+		return startOutboxBridge({
+			app: client,
+			outbox,
+			onqueued: () => void outbox.flush(socialApi)
+		});
+	});
 	const statusId = $props.id();
 
 	// References resolve after the integration queue merges T2.9's staging catalogs.
@@ -235,6 +255,13 @@
 		<HelpOverlay {shortcuts} />
 	</div>
 	<Toast store={app?.toasts ?? emptyToasts} />
+	<SocialSync
+		{app}
+		account={accountSession.known ? accountSession.current : undefined}
+		session={socialSession}
+		api={socialApi}
+		outbox={socialOutbox}
+	/>
 	<div data-chrome="footer">
 		<Footer {honoree} githubUrl={PUBLIC_GITHUB_URL} />
 	</div>

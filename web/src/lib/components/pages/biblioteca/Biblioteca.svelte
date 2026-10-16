@@ -11,7 +11,9 @@
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
+	import type { SocialApi, SocialSession } from '#lib/social/index.ts';
 	import MeterBridge from './MeterBridge.svelte';
+	import MinhaBiblioteca from './MinhaBiblioteca.svelte';
 	import ReelHousing from './ReelHousing.svelte';
 	import {
 		archiveTapes,
@@ -25,7 +27,20 @@
 		type GateResult
 	} from './archive.ts';
 
-	let { app = null, origin }: { app?: ClientApp | null; origin: string } = $props();
+	let {
+		app = null,
+		origin,
+		social = null
+	}: {
+		app?: ClientApp | null;
+		origin: string;
+		/** Account shelves (T4.14); without it the page is the local library only. */
+		social?: {
+			session: SocialSession;
+			api: SocialApi;
+			currentPath?: string;
+		} | null;
+	} = $props();
 	const id = $props.id();
 	const locale = $derived(getLocale());
 	const fallback = neutralCurve();
@@ -180,6 +195,14 @@
 	</section>
 	<MeterBridge curve={monitor} {current} {verdict} update={meterUpdate} {locale} />
 	<section class="archive" aria-labelledby="{id}-vault">
+		{#if social}<MinhaBiblioteca
+				session={social.session}
+				api={social.api}
+				localItems={app?.state.library.items ?? []}
+				{origin}
+				{locale}
+				currentPath={social.currentPath ?? '/biblioteca'}
+			/>{/if}
 		<div class="archive-head">
 			<div>
 				<h2 id="{id}-vault">{m.biblioteca_vault()}</h2>
