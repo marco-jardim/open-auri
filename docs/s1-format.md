@@ -94,7 +94,8 @@ bits finais que possam variar, o que mantém o texto canônico. Qualquer outro
 caractere, inclusive `=`, `+`, `/` e espaço, é recusado.
 
 O primeiro caractere carrega a versão e a variante. Na v1 paramétrica ele é
-sempre `Q`, `R`, `S` ou `T` (os 2 bits finais são o começo do tipo da banda 0).
+`Q` para `PK`/`LS`, `R` para `HS`/`LP` ou `S` para `HP`/`OFF`: os 2 bits finais
+são o começo do tipo da banda 0. `T` indicaria um tipo inválido (código 6 ou 7).
 
 ## Regras canônicas
 
@@ -152,10 +153,14 @@ truncado.
 
 | Código | Quando |
 |---|---|
-| `s1:bands` | entrada não é objeto, ou `bands` não é uma lista de exatamente 10 bandas |
-| `s1:kind` | banda não é objeto, ou tipo desconhecido (por exemplo `LSQ`) |
+| `s1:bands` | entrada não é objeto, ou `bands` não é uma lista de exatamente 10 objetos legíveis, sem lacunas |
+| `s1:kind` | tipo desconhecido (por exemplo `LSQ`) |
 | `s1:range` | valor não numérico ou não finito, fora da faixa, pré-amp positivo, ou `LP`/`HP` com ganho |
 | `s1:grid` | valor fora da grade (por exemplo 100,5 Hz, −2,85 dB, Q 0,695) |
+
+As duas APIs copiam a lista com `snapshotBands`: comprimento, cada índice e cada
+campo de banda são lidos uma única vez. Lacunas, elementos que não são objetos
+e falhas de leitura viram `S1Error` com código `s1:bands`.
 
 ## API
 

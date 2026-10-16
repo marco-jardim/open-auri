@@ -55,9 +55,15 @@ const PARAM_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,31}$(?![\s\S])/;
 // Calendar validity is checked separately, including leap years. UTC only, no offsets.
 const UTC =
   /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$(?![\s\S])/;
-const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
-const URL = /https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|net|org|io|br|app|dev|xyz|ly|me|co)\b/i;
+const INVISIBLE =
+  /[\p{Default_Ignorable_Code_Point}\p{Cf}\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
+// Detection only: retain the normalized punctuation in published text.
+const URL_DOTS = /[\u3002\uff0e\uff61\u2024\ufe52]/gu;
+// A letter-only TLD of at least two letters permits decimals, Sr. and e.g., not x.co.
+const URL =
+  /\b[a-z][a-z0-9+.-]*:\/\/|\bhxxps?\b|www\.|(?:^|[^\p{L}\p{N}_-])[\p{L}\p{N}-]{1,63}\.[\p{L}]{2,24}(?=$|[^\p{L}\p{N}_-])/iu;
 const MAX_BYTES = 8192;
+const MAX_RAW_UNITS = 65536;
 
 /** A thrown normalization/serialization error; validation APIs return these issues instead. */
 export class EnvelopeError extends Error {
@@ -110,7 +116,7 @@ export function normalizeText(text, { multiline = false, path = '' } = {}) {
   if (multiline && value.split('\n').length > 5) {
     errors.push(issue(path, 'env:length', 'Description must have at most five lines'));
   }
-  if (URL.test(value)) {
+  if (URL.test(value.replace(URL_DOTS, '.'))) {
     errors.push(issue(path, 'env:url', 'URLs and domain-like text are forbidden'));
   }
   if (errors.length) throw new EnvelopeError(errors);
@@ -429,14 +435,18 @@ export function serializeEnvelope(value) {
 }
 
 /**
- * Parse JSON, then normalize/validate (one collected-error pass). The 8 KiB cap
- * applies to deterministic normalized serialization, not insignificant whitespace.
+ * Refuse raw text above 65536 UTF-16 units before JSON.parse, then normalize and
+ * validate (one collected-error pass). The separate 8 KiB cap applies to
+ * deterministic normalized serialization, not insignificant whitespace.
  * @param {string} json
  * @returns {EnvelopeResult}
  */
 export function parseEnvelope(json) {
   if (typeof json !== 'string') {
     return { ok: false, errors: [issue('', 'env:type', 'Expected JSON text')] };
+  }
+  if (json.length > MAX_RAW_UNITS) {
+    return { ok: false, errors: [issue('', 'env:size', 'Raw JSON exceeds 65536 UTF-16 units')] };
   }
   let value;
   try {

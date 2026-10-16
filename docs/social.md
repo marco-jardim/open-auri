@@ -83,8 +83,9 @@ máximo de **0,36%** em `f`. Economiza 7 bytes = 12 caracteres, e cobra o adjeti
 | `parametric` | 10 × `(type, f, g, q)` + preamp | 51 B | curvas RBJ dentro do domínio — praticamente tudo |
 | `raw` | 10 × 5 coeficientes int32 + preamp | ~203 B | biquad que não é expressável como RBJ, ou parâmetros fora do domínio |
 
-O byte de versão/sabor resolve. Sem ele, o formato compacto mentiria sobre
-curvas desenhadas direto em coeficientes.
+O cabeçalho de 4 bits (2 de versão + 2 de variante) resolve. Na v1, só a variante
+paramétrica está definida; `raw` fica reservado. Sem esse discriminador, o
+formato compacto mentiria sobre curvas desenhadas direto em coeficientes.
 
 ### Forma canônica para compartilhar ≠ ordem de envio ⚠️
 
@@ -125,13 +126,13 @@ o correto é assinar **a receita** (medição + alvo + versão do solver), não 
 
 **S1, S3, S4, S5, S8, S10 rodam 100% estáticos.** Três mecanismos:
 
-1. **Fragmento de URL** (`#p=<código>`, 64 chars) — zero armazenamento.
+1. **Fragmento de URL** (`#p=<código>`, 68 caracteres): zero armazenamento.
    Compartilhar é mandar um link.
 2. **Repo-como-banco** — presets como arquivos de texto. A **UI do GitHub é a
    camada social**: PR = contribuição, issue = discussão, blame = atribuição,
    fork = remix, stars = curadoria, licença por arquivo = S9. Versionamento,
    histórico e revisão saem de graça.
-3. **Busca no cliente** — 10.000 presets × 64 chars ≈ **640 KB**. Nada.
+3. **Busca no cliente**: 10.000 presets × 68 caracteres ≈ **680 KB**. Nada.
    Fuse.js client-side, que é o que o próprio `eq.hangout.audio` usa.
 
 ### Agregação sem servidor (destrava o S6) ✅
@@ -186,6 +187,25 @@ O envelope carrega **as duas coisas**, e cada uma resolve um problema distinto:
 
 Só receita deixa o app refém da base de dados; só números, ninguém audita.
 
+O validador de publicação normaliza texto com NFKC, remove caracteres das
+classes Unicode `Default_Ignorable_Code_Point` e `Cf`, incluindo controles bidi,
+e recusa URLs em todo texto livre. Só a descrição preserva LF (até cinco linhas).
+Na detecção de URLs, `。`, `．`, `｡`, `․` e `﹒` equivalem a ponto; isso não altera a
+pontuação publicada além da própria NFKC. São recusados esquemas com `://`,
+`hxxp`/`hxxps`, `www.` e domínios com um rótulo de 1 a 63 letras, números ou
+hífens seguido de ponto e de 2 a 24 letras Unicode. Não há lista fixa de TLDs.
+Assim, `x.co` é recusado, mas `1.5 dB`, `v2.0`, `Sr.` e `e.g. graves` são aceitos:
+um sufixo de uma só letra não basta, e não há junção através de espaços.
+
+O limite do envelope normalizado continua em **8 KiB de JSON UTF-8**.
+`parseEnvelope` também recusa texto bruto acima de **65536 unidades UTF-16** com
+`env:size`, antes de chamar `JSON.parse`, incluindo espaços e escapes nesse teto.
+Bandas `LP`/`HP` do envelope têm `kind`, `freqHz` e `qFactor`, sem `gainDb`;
+até `gainDb: 0` é recusado como `env:extra`.
+
+Esboço conceitual da receita (o esquema normativo é
+[`preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json)):
+
 ```json
 {
   "format": "open-auri/preset@1",
@@ -194,7 +214,7 @@ Só receita deixa o app refém da base de dados; só números, ninguém audita.
   "author": "…",
   "source": "https://github.com/<org>/<repo>/commit/<sha>",
   "license": "CC0-1.0",
-  "code": "<S1, 64 chars>",
+  "code": "<S1 v1, 51 B, 68 caracteres>",
   "preamp": -3.4,
   "bands": [{ "type": "PK", "f": 150, "g": -3.0, "q": 0.69 }],
   "recipe": {

@@ -10,7 +10,7 @@
 // Pure ESM with no DOM or Node built-ins, so it runs unchanged in Node, browsers
 // and Workers. curveId() uses WebCrypto (globalThis.crypto.subtle).
 
-import { BAND_COUNT, crc16Ccitt } from '../dsp/eq0xcb.mjs';
+import { BAND_COUNT, crc16Ccitt, snapshotBands } from '../dsp/eq0xcb.mjs';
 
 /** @import { Band } from '../dsp/eq0xcb.mjs' */
 
@@ -87,7 +87,7 @@ export class S1Error extends Error {
  */
 function toSteps(value, scale, min, max, what) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new S1Error('s1:range', `${what} must be a finite number, got ${String(value)}`);
+    throw new S1Error('s1:range', `${what} must be a finite number`);
   }
   const steps = Math.round(value * scale) + 0;
   if (Math.abs(value - steps / scale) > GRID_TOLERANCE) {
@@ -106,12 +106,9 @@ function toSteps(value, scale, min, max, what) {
  */
 function toWireBand(band, index) {
   const where = `band ${index}`;
-  if (band === null || typeof band !== 'object') {
-    throw new S1Error('s1:kind', `${where}: not an object`);
-  }
   const code = S1_KIND_CODES.indexOf(band.kind);
   if (code < 0) {
-    throw new S1Error('s1:kind', `${where}: unknown filter kind ${JSON.stringify(band.kind)}`);
+    throw new S1Error('s1:kind', `${where}: unknown filter kind`);
   }
   if (band.kind === 'OFF') return { code, freq: 0, gain: 0, q: 0 };
   const freq = toSteps(band.freqHz, 1, FREQ_MIN, FREQ_MAX, `${where} freqHz`);
@@ -134,10 +131,14 @@ function toWireBand(band, index) {
  * @param {number} preampDb
  */
 function toWireCurve(bands, preampDb) {
-  if (!Array.isArray(bands) || bands.length !== BAND_COUNT) {
-    throw new S1Error('s1:bands', `expected exactly ${BAND_COUNT} bands`);
+  /** @type {readonly Readonly<Band>[]} */
+  let snapshot;
+  try {
+    snapshot = snapshotBands(bands, BAND_COUNT);
+  } catch {
+    throw new S1Error('s1:bands', `expected exactly ${BAND_COUNT} readable band objects, no holes`);
   }
-  const wireBands = bands.map(toWireBand);
+  const wireBands = snapshot.map(toWireBand);
   const preamp = -toSteps(preampDb, 10, -PREAMP_MAX, 0, 'preampDb') + 0;
   return { wireBands, preamp };
 }

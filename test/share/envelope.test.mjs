@@ -12,6 +12,7 @@ import {
   parseEnvelope,
 } from '../../src/share/envelope.mjs';
 import { encodeS1 } from '../../src/share/s1.mjs';
+import { parseEqualizerApo } from '../../src/io/equalizer-apo.mjs';
 
 const { presets } = JSON.parse(
   readFileSync(new URL('../fixtures/eq0xcb.reference.json', import.meta.url), 'utf8'),
@@ -172,6 +173,7 @@ for (const band of [
   { kind: 'BAD' },
   { kind: 'OFF', gainDb: 0 },
   { kind: 'LP', freqHz: 100, gainDb: 0, qFactor: 1 },
+  { kind: 'HP', freqHz: 100, gainDb: 0, qFactor: 1 },
   { kind: 'HP', freqHz: 100 },
   { kind: 'PK', freqHz: 100, qFactor: 1 },
   { kind: 'PK', freqHz: 0, gainDb: 0, qFactor: 1 },
@@ -319,13 +321,67 @@ test('official base and complete recipe round-trip; optional description is defa
   }
 });
 
+test('APO pass filters fit the envelope without gainDb; even zero gain is an extra field', () => {
+  const parsed = parseEqualizerApo(
+    [
+      'Preamp: -3 dB',
+      'Filter 1: ON LPQ Fc 18000 Hz Gain 0 dB Q 0.71',
+      'Filter 2: ON HPQ Fc 20 Hz Gain 0 dB Q 0.71',
+    ].join('\n'),
+  );
+  const value = { ...copy(), bands: parsed.bands, preampDb: parsed.preampDb };
+  value.code = encodeS1(value);
+  assert.deepEqual(value.bands.slice(0, 2), [
+    { kind: 'LP', freqHz: 18000, qFactor: 0.71 },
+    { kind: 'HP', freqHz: 20, qFactor: 0.71 },
+  ]);
+  assert.equal(validateEnvelope(value).ok, true);
+  assert.equal(schemaValidate(value), true);
+  assert.deepEqual(parseEnvelope(serializeEnvelope(value)).value, value);
+  for (const index of [0, 1]) {
+    const extra = structuredClone(value);
+    extra.bands[index].gainDb = 0;
+    assert.equal(encodeS1(extra), value.code); // S1 is less strict than publication data.
+    expectIssue(extra, 'env:extra', `/bands/${index}/gainDb`);
+    assert.equal(schemaValidate(extra), false);
+  }
+});
+
 test('text strips every listed invisible and applies NFKC before URL checking', () => {
   const invisibles = [
-    0x061c, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2060,
-    0x2066, 0x2067, 0x2068, 0x2069, 0xfeff,
+    0x00ad,
+    0x034f,
+    0x0600,
+    0x061c,
+    0x180e,
+    0x200b,
+    0x200c,
+    0x200d,
+    0x200e,
+    0x200f,
+    0x202a,
+    0x202b,
+    0x202c,
+    0x202d,
+    0x202e,
+    0x2060,
+    0x2066,
+    0x2067,
+    0x2068,
+    0x2069,
+    0xfe0f,
+    0xfeff,
+    0xe0001,
+    ...Array.from({ length: 4 }, (_, i) => 0x2061 + i),
+    ...Array.from({ length: 6 }, (_, i) => 0x206a + i),
+    ...Array.from({ length: 96 }, (_, i) => 0xe0020 + i),
   ];
   for (const point of invisibles) {
-    assert.equal(normalizeText(`Pa${String.fromCodePoint(point)}drão`), 'Padrão');
+    const invisible = String.fromCodePoint(point);
+    assert.equal(normalizeText(`Pa${invisible}drão`), 'Padrão');
+    assert.equal(normalizeText(`a${invisible}\nb`, { multiline: true }), 'a\nb');
+    expectIssue(withField('name', `example.c${invisible}om`), 'env:url', '/name');
+    expectIssue(withField('description', `https${invisible}://x`), 'env:url', '/description');
   }
   assert.equal(normalizeText('  Ｐａｄｒａ̃ｏ　  mix  '), 'Padrão mix');
   assert.equal(normalizeText('e\u0301'), 'é');
@@ -373,11 +429,46 @@ test('all C0/C1 controls are refused; description alone allows LF and at most fi
   assert.equal(normalizeText('\na\n\nb\n', { multiline: true }), 'a\n\nb');
 });
 
-test('URLs and every banned domain suffix are refused across all free-text fields', () => {
-  const domains = ['com', 'net', 'org', 'io', 'br', 'app', 'dev', 'xyz', 'ly', 'me', 'co'].map(
-    (tld) => `EXAMPLE.${tld.toUpperCase()}`,
-  );
-  for (const text of ['http://host', 'HTTPS://host', 'www.host', ...domains]) {
+test('schemes, obfuscated dots and general domains are refused across all free-text fields', () => {
+  const domains = [
+    'com',
+    'net',
+    'org',
+    'io',
+    'br',
+    'app',
+    'dev',
+    'xyz',
+    'ly',
+    'me',
+    'co',
+    'tv',
+  ].map((tld) => `EXAMPLE.${tld.toUpperCase()}`);
+  const dotted = ['。', '．', '｡', '․', '﹒'].flatMap((dot) => [
+    `evil${dot}com`,
+    `www${dot}evil${dot}com`,
+  ]);
+  for (const text of [
+    'http://host',
+    'HTTPS://host',
+    'ftp://host',
+    'git+ssh://host',
+    'custom.scheme-2://x',
+    'hxxp://host',
+    'HXXPS://host',
+    'www.host',
+    'entre em discord.gg/abc',
+    'evil.tv',
+    'loja.shop',
+    'x.co',
+    'ação.música',
+    '例子.中国',
+    '(abc-123.online)',
+    '123.ab',
+    `x.${'a'.repeat(24)}`,
+    ...domains,
+    ...dotted,
+  ]) {
     for (const key of ['name', 'description', 'author']) {
       expectIssue(withField(key, text), 'env:url', `/${key}`);
     }
@@ -393,10 +484,23 @@ test('URLs and every banned domain suffix are refused across all free-text field
     }
     expectIssue(withRecipe({ params: { note: text } }), 'env:url', '/recipe/params/note');
   }
-  assert.equal(
-    validateEnvelope(withField('description', 'A warm mix, version 1.2; no advertising')).ok,
-    true,
-  );
+});
+
+test('decimals, abbreviations and punctuation without domain labels remain allowed', () => {
+  for (const text of [
+    '1.5 dB',
+    'v2.0',
+    'A warm mix, version 1.2; no advertising',
+    'Sr. Silva',
+    'e.g. graves',
+    'i.e. médios',
+    'x.c',
+    `x.${'a'.repeat(25)}`,
+    'a。 b｡ c． d․ e﹒',
+  ]) {
+    assert.equal(validateEnvelope(withField('description', text)).ok, true, text);
+  }
+  assert.equal(normalizeText('a。 b｡'), 'a。 b。'); // NFKC applies; URL-only mapping does not.
 });
 
 test('normalization is nonmutating and clones every supported object level', () => {
@@ -564,6 +668,30 @@ test('parse reports JSON errors, normalizes text and enforces the UTF-8 size lim
   assert.equal(parseEnvelope(`${exact} `).ok, true);
   // The limit is serialized normalized bytes, not raw insignificant whitespace.
   assert.equal(parseEnvelope(` ${exact} `).ok, true);
+});
+
+test('raw JSON is capped at 65536 UTF-16 units before parsing, independently of UTF-8 size', () => {
+  const json = serializeEnvelope(base);
+  const exact = `${json}${' '.repeat(65536 - json.length)}`;
+  assert.equal(exact.length, 65536);
+  assert.equal(parseEnvelope(exact).ok, true);
+  expectIssue(`${exact} `, 'env:size', '', parseEnvelope);
+  // Invalid JSON must hit the raw-size refusal, not the JSON parser.
+  const errors = expectIssue('{'.repeat(65537), 'env:size', '', parseEnvelope);
+  assert.deepEqual(
+    errors.map((error) => error.code),
+    ['env:size'],
+  );
+  expectIssue('{'.repeat(65536), 'env:json', '', parseEnvelope);
+  const escaped = json.replace('Padrão', '\\u0050'.repeat(48));
+  const padded = `${escaped}${' '.repeat(65536 - escaped.length)}`;
+  assert.equal(parseEnvelope(padded).ok, true);
+  const astral = JSON.stringify(withField('name', '🎧'));
+  const astralExact = `${astral}${' '.repeat(65536 - astral.length)}`;
+  assert.equal(astralExact.length, 65536);
+  assert.equal(Buffer.byteLength(astralExact) > 65536, true);
+  assert.equal(parseEnvelope(astralExact).ok, true);
+  expectIssue(`${astralExact} `, 'env:size', '', parseEnvelope);
 });
 
 test('the serialized UTF-8 limit is inclusive at exactly 8192 bytes', () => {

@@ -221,8 +221,12 @@ test('wire order is preserved', () => {
   assert.deepEqual(decodeS1(s1).bands, reversed);
 });
 
-test('kind codes are frozen in wire order', () => {
+test('kind codes are frozen in wire order and valid first characters are Q, R or S', () => {
   assert.deepEqual([...S1_KIND_CODES], ['PK', 'LS', 'HS', 'LP', 'HP', 'OFF']);
+  for (const [index, kind] of S1_KIND_CODES.entries()) {
+    const band = kind === 'OFF' ? { kind } : { kind, freqHz: 100, gainDb: 0, qFactor: 1 };
+    assert.equal(encodeS1(padraoWith(0, band))[0], ['Q', 'Q', 'R', 'R', 'S', 'S'][index]);
+  }
 });
 
 // --- Encoding rules -------------------------------------------------------------
@@ -288,7 +292,113 @@ test('exactly 10 bands and known kinds are required', () => {
   expectCode(() => canonKey(PADRAO.eqBands.slice(1), 0), 's1:bands');
   expectCode(() => encodeS1(padraoWith(0, { kind: 'LSQ', freqHz: 100, qFactor: 1 })), 's1:kind');
   expectCode(() => encodeS1(padraoWith(0, { freqHz: 100 })), 's1:kind');
-  expectCode(() => encodeS1(padraoWith(0, null)), 's1:kind');
+  expectCode(() => encodeS1(padraoWith(0, null)), 's1:bands');
+});
+
+test('holes and non-object bands always fail with s1:bands in both writing APIs', () => {
+  for (const invalid of [undefined, null, 0, false, 'PK', 1n, Symbol('band'), () => 1]) {
+    const bands = [...NEUTRAL.eqBands];
+    bands[4] = invalid;
+    expectCode(() => encodeS1({ bands, preampDb: 0 }), 's1:bands');
+    expectCode(() => canonKey(bands, 0), 's1:bands');
+  }
+  fc.assert(
+    fc.property(fc.sparseArray(bandArb, { maxLength: 10, maxNumElements: 9 }), (bands) => {
+      bands.length = 10; // At least one hole, including trailing holes.
+      expectCode(() => encodeS1({ bands, preampDb: 0 }), 's1:bands');
+      expectCode(() => canonKey(bands, 0), 's1:bands');
+    }),
+    { numRuns: 1000 },
+  );
+});
+
+test('property: arbitrary inputs and band fields throw only S1Error, never raw TypeError', () => {
+  fc.assert(
+    fc.property(fc.anything({ withBigInt: true, withNullPrototype: true }), (value) => {
+      const arbitraryBands = Array.from({ length: 10 }, () => value);
+      const fieldBands = ['kind', 'freqHz', 'gainDb', 'qFactor'].map((field) => [
+        { kind: 'PK', freqHz: 100, gainDb: 0, qFactor: 1, [field]: value },
+        ...NEUTRAL.eqBands.slice(1),
+      ]);
+      const operations = [
+        () => encodeS1(value),
+        () => encodeS1({ bands: value, preampDb: 0 }),
+        () => canonKey(value, 0),
+        () => encodeS1({ bands: NEUTRAL.eqBands, preampDb: value }),
+        () => canonKey(NEUTRAL.eqBands, value),
+        ...[arbitraryBands, ...fieldBands].flatMap((bands) => [
+          () => encodeS1({ bands, preampDb: 0 }),
+          () => canonKey(bands, 0),
+        ]),
+      ];
+      for (const run of operations) {
+        try {
+          assert.equal(typeof run(), 'string');
+        } catch (error) {
+          assert.ok(error instanceof S1Error, String(error));
+        }
+      }
+    }),
+    { numRuns: 1000 },
+  );
+});
+
+test('invalid fields need no coercion or JSON serialization to produce typed errors', () => {
+  const circular = {};
+  circular.self = circular;
+  for (const value of [Object.create(null), circular, 1n, Symbol('value')]) {
+    const bands = [{ kind: value }, ...NEUTRAL.eqBands.slice(1)];
+    expectCode(() => encodeS1({ bands, preampDb: 0 }), 's1:kind');
+    expectCode(() => canonKey(bands, 0), 's1:kind');
+    expectCode(() => encodeS1({ bands: NEUTRAL.eqBands, preampDb: value }), 's1:range');
+    expectCode(() => canonKey(NEUTRAL.eqBands, value), 's1:range');
+  }
+});
+
+test('both writing APIs snapshot length, indices and fields once and map read failures', () => {
+  for (const write of [
+    (bands) => encodeS1({ bands, preampDb: PADRAO.preampDb }),
+    (bands) => canonKey(bands, PADRAO.preampDb),
+  ]) {
+    const reads = [];
+    const bands = new Proxy(
+      PADRAO.eqBands.map(
+        (band, index) =>
+          new Proxy(band, {
+            get(target, key) {
+              reads.push(`${index}.${String(key)}`);
+              return Reflect.get(target, key);
+            },
+          }),
+      ),
+      {
+        get(target, key) {
+          reads.push(String(key));
+          return Reflect.get(target, key);
+        },
+      },
+    );
+    assert.equal(write(bands), write(PADRAO.eqBands));
+    assert.deepEqual(reads, [
+      'length',
+      ...PADRAO.eqBands.flatMap((_, index) => [
+        String(index),
+        ...['kind', 'freqHz', 'gainDb', 'qFactor'].map((field) => `${index}.${field}`),
+      ]),
+    ]);
+    const throwing = new Proxy([...NEUTRAL.eqBands], {
+      get() {
+        throw new TypeError('unreadable bands');
+      },
+    });
+    expectCode(() => write(throwing), 's1:bands');
+    const unreadable = new Proxy(NEUTRAL.eqBands[0], {
+      get() {
+        throw new Error('unreadable field');
+      },
+    });
+    expectCode(() => write([unreadable, ...NEUTRAL.eqBands.slice(1)]), 's1:bands');
+  }
 });
 
 test('LP/HP carry no gain: absent and 0 encode the same and decode without gainDb', () => {
@@ -366,6 +476,9 @@ test('decode refuses invalid kind codes', () => {
   for (const code of [6, 7]) {
     const s1 = mutate(padraoS1(), (bytes) => setBits(bytes, bandOffset(3), 3, code));
     expectCode(() => decodeS1(s1), 's1:kind');
+    const invalidFirst = mutate(padraoS1(), (bytes) => setBits(bytes, bandOffset(0), 3, code));
+    assert.equal(invalidFirst[0], 'T');
+    expectCode(() => decodeS1(invalidFirst), 's1:kind');
   }
 });
 
