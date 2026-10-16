@@ -1,0 +1,613 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`templates > account-deleted (en-US) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en-US" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Your open-auri account was closed</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Your open-auri account was closed" lang="en-US" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Account closed</h1>
+<p style="margin:0 0 16px">Hi Ana,</p>
+<p style="margin:0 0 16px">Your open-auri account was closed, as you requested. Personal data linked to it is deleted as described in the privacy policy.</p>
+<p style="margin:0 0 16px">Thank you for using open-auri. This is the last message you will receive about this account.</p>
+<p style="margin:0 0 16px">Details in the privacy policy: <a href="https://open-auri.example/privacidade" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/privacidade</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Automated message from open-auri about an account linked to this address.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Your open-auri account was closed",
+  "text": "Account closed
+
+Hi Ana,
+
+Your open-auri account was closed, as you requested. Personal data linked to it is deleted as described in the privacy policy.
+
+Thank you for using open-auri. This is the last message you will receive about this account.
+
+Details in the privacy policy: https://open-auri.example/privacidade
+
+--
+Automated message from open-auri about an account linked to this address.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > account-deleted (pt-BR) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Sua conta no open-auri foi encerrada</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Sua conta no open-auri foi encerrada" lang="pt-BR" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Conta encerrada</h1>
+<p style="margin:0 0 16px">Olá, Ana.</p>
+<p style="margin:0 0 16px">Sua conta no open-auri foi encerrada, como você pediu. Os dados pessoais ligados a ela são apagados conforme a política de privacidade.</p>
+<p style="margin:0 0 16px">Obrigado por ter usado o open-auri. Esta é a última mensagem que você recebe sobre esta conta.</p>
+<p style="margin:0 0 16px">Detalhes na política de privacidade: <a href="https://open-auri.example/privacidade" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/privacidade</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Mensagem automática do open-auri sobre uma conta ligada a este endereço.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Sua conta no open-auri foi encerrada",
+  "text": "Conta encerrada
+
+Olá, Ana.
+
+Sua conta no open-auri foi encerrada, como você pediu. Os dados pessoais ligados a ela são apagados conforme a política de privacidade.
+
+Obrigado por ter usado o open-auri. Esta é a última mensagem que você recebe sobre esta conta.
+
+Detalhes na política de privacidade: https://open-auri.example/privacidade
+
+--
+Mensagem automática do open-auri sobre uma conta ligada a este endereço.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > confirm-account-deletion (en-US) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en-US" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Confirm closing your open-auri account</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Confirm closing your open-auri account" lang="en-US" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Confirm account closure</h1>
+<p style="margin:0 0 16px">Hi Ana,</p>
+<p style="margin:0 0 16px">We received a request to close your open-auri account. Once you confirm, the account is closed and the personal data linked to it is deleted as described in the privacy policy. This cannot be undone.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/conta/encerrar/confirmar?token=tok_delete" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Close my account</a></p>
+<p style="margin:0 0 16px">If the link above does not open, copy this address into your browser:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/conta/encerrar/confirmar?token=tok_delete" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/conta/encerrar/confirmar?token=tok_delete</a></p>
+<p style="margin:0 0 16px">This link expires in 1 hour.</p>
+<p style="margin:0 0 16px">If you did not request this, ignore this message and consider changing your password. Your account stays active.</p>
+<p style="margin:0 0 16px">Details in the privacy policy: <a href="https://open-auri.example/privacidade" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/privacidade</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Automated message from open-auri about an account linked to this address.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Confirm closing your open-auri account",
+  "text": "Confirm account closure
+
+Hi Ana,
+
+We received a request to close your open-auri account. Once you confirm, the account is closed and the personal data linked to it is deleted as described in the privacy policy. This cannot be undone.
+
+Close my account:
+https://open-auri.example/conta/encerrar/confirmar?token=tok_delete
+
+This link expires in 1 hour.
+
+If you did not request this, ignore this message and consider changing your password. Your account stays active.
+
+Details in the privacy policy: https://open-auri.example/privacidade
+
+--
+Automated message from open-auri about an account linked to this address.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > confirm-account-deletion (pt-BR) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Confirme o encerramento da sua conta no open-auri</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Confirme o encerramento da sua conta no open-auri" lang="pt-BR" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Confirme o encerramento da conta</h1>
+<p style="margin:0 0 16px">Olá, Ana.</p>
+<p style="margin:0 0 16px">Recebemos um pedido para encerrar sua conta no open-auri. Ao confirmar, a conta é encerrada e os dados pessoais ligados a ela são apagados conforme a política de privacidade. Isso não pode ser desfeito.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/conta/encerrar/confirmar?token=tok_delete" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Encerrar minha conta</a></p>
+<p style="margin:0 0 16px">Se o link acima não abrir, copie este endereço no navegador:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/conta/encerrar/confirmar?token=tok_delete" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/conta/encerrar/confirmar?token=tok_delete</a></p>
+<p style="margin:0 0 16px">Este link vale por 1 hora.</p>
+<p style="margin:0 0 16px">Se você não pediu isso, ignore esta mensagem e considere trocar sua senha. A conta continua ativa.</p>
+<p style="margin:0 0 16px">Detalhes na política de privacidade: <a href="https://open-auri.example/privacidade" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/privacidade</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Mensagem automática do open-auri sobre uma conta ligada a este endereço.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Confirme o encerramento da sua conta no open-auri",
+  "text": "Confirme o encerramento da conta
+
+Olá, Ana.
+
+Recebemos um pedido para encerrar sua conta no open-auri. Ao confirmar, a conta é encerrada e os dados pessoais ligados a ela são apagados conforme a política de privacidade. Isso não pode ser desfeito.
+
+Encerrar minha conta:
+https://open-auri.example/conta/encerrar/confirmar?token=tok_delete
+
+Este link vale por 1 hora.
+
+Se você não pediu isso, ignore esta mensagem e considere trocar sua senha. A conta continua ativa.
+
+Detalhes na política de privacidade: https://open-auri.example/privacidade
+
+--
+Mensagem automática do open-auri sobre uma conta ligada a este endereço.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > confirm-new-email (en-US) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en-US" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Confirm your new email for open-auri</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Confirm your new email for open-auri" lang="en-US" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Confirm your new email</h1>
+<p style="margin:0 0 16px">Hi Ana,</p>
+<p style="margin:0 0 16px">We received a request to change the email of your open-auri account to this address. To complete the change, confirm with the link below.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/conta/email/confirmar?token=tok_change" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Confirm new email</a></p>
+<p style="margin:0 0 16px">If the link above does not open, copy this address into your browser:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/conta/email/confirmar?token=tok_change" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/conta/email/confirmar?token=tok_change</a></p>
+<p style="margin:0 0 16px">This link expires in 1 day.</p>
+<p style="margin:0 0 16px">If you did not request this change, ignore this message. The account email will not change.</p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Automated message from open-auri about an account linked to this address.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Confirm your new email for open-auri",
+  "text": "Confirm your new email
+
+Hi Ana,
+
+We received a request to change the email of your open-auri account to this address. To complete the change, confirm with the link below.
+
+Confirm new email:
+https://open-auri.example/conta/email/confirmar?token=tok_change
+
+This link expires in 1 day.
+
+If you did not request this change, ignore this message. The account email will not change.
+
+--
+Automated message from open-auri about an account linked to this address.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > confirm-new-email (pt-BR) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Confirme seu novo e-mail no open-auri</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Confirme seu novo e-mail no open-auri" lang="pt-BR" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Confirme seu novo e-mail</h1>
+<p style="margin:0 0 16px">Olá, Ana.</p>
+<p style="margin:0 0 16px">Recebemos um pedido para trocar o e-mail da sua conta no open-auri para este endereço. Para concluir a troca, confirme pelo link abaixo.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/conta/email/confirmar?token=tok_change" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Confirmar novo e-mail</a></p>
+<p style="margin:0 0 16px">Se o link acima não abrir, copie este endereço no navegador:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/conta/email/confirmar?token=tok_change" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/conta/email/confirmar?token=tok_change</a></p>
+<p style="margin:0 0 16px">Este link vale por 1 dia.</p>
+<p style="margin:0 0 16px">Se você não pediu a troca, ignore esta mensagem. O e-mail da conta não será alterado.</p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Mensagem automática do open-auri sobre uma conta ligada a este endereço.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Confirme seu novo e-mail no open-auri",
+  "text": "Confirme seu novo e-mail
+
+Olá, Ana.
+
+Recebemos um pedido para trocar o e-mail da sua conta no open-auri para este endereço. Para concluir a troca, confirme pelo link abaixo.
+
+Confirmar novo e-mail:
+https://open-auri.example/conta/email/confirmar?token=tok_change
+
+Este link vale por 1 dia.
+
+Se você não pediu a troca, ignore esta mensagem. O e-mail da conta não será alterado.
+
+--
+Mensagem automática do open-auri sobre uma conta ligada a este endereço.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > email-change-notice (en-US) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en-US" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Email change requested for your open-auri account</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Email change requested for your open-auri account" lang="en-US" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Email change requested</h1>
+<p style="margin:0 0 16px">Hi Ana,</p>
+<p style="margin:0 0 16px">We received a request to move your open-auri account to a different email address. Once the new address is confirmed, account messages will no longer come here.</p>
+<p style="margin:0 0 16px">If it was you, there is nothing else to do. If it was not you, secure your account with the link below.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Secure my account</a></p>
+<p style="margin:0 0 16px">If the link above does not open, copy this address into your browser:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/esqueci-senha</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Automated message from open-auri about an account linked to this address.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Email change requested for your open-auri account",
+  "text": "Email change requested
+
+Hi Ana,
+
+We received a request to move your open-auri account to a different email address. Once the new address is confirmed, account messages will no longer come here.
+
+If it was you, there is nothing else to do. If it was not you, secure your account with the link below.
+
+Secure my account:
+https://open-auri.example/esqueci-senha
+
+--
+Automated message from open-auri about an account linked to this address.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > email-change-notice (pt-BR) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Pedido de troca do e-mail da sua conta no open-auri</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Pedido de troca do e-mail da sua conta no open-auri" lang="pt-BR" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Troca de e-mail solicitada</h1>
+<p style="margin:0 0 16px">Olá, Ana.</p>
+<p style="margin:0 0 16px">Recebemos um pedido para trocar o e-mail da sua conta no open-auri para outro endereço. Depois que o novo endereço for confirmado, as mensagens da conta deixam de chegar aqui.</p>
+<p style="margin:0 0 16px">Se foi você, não precisa fazer nada. Se não foi você, proteja a conta pelo link abaixo.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Proteger minha conta</a></p>
+<p style="margin:0 0 16px">Se o link acima não abrir, copie este endereço no navegador:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/esqueci-senha</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Mensagem automática do open-auri sobre uma conta ligada a este endereço.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Pedido de troca do e-mail da sua conta no open-auri",
+  "text": "Troca de e-mail solicitada
+
+Olá, Ana.
+
+Recebemos um pedido para trocar o e-mail da sua conta no open-auri para outro endereço. Depois que o novo endereço for confirmado, as mensagens da conta deixam de chegar aqui.
+
+Se foi você, não precisa fazer nada. Se não foi você, proteja a conta pelo link abaixo.
+
+Proteger minha conta:
+https://open-auri.example/esqueci-senha
+
+--
+Mensagem automática do open-auri sobre uma conta ligada a este endereço.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > password-changed (en-US) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en-US" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Your open-auri password was changed</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Your open-auri password was changed" lang="en-US" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Password changed</h1>
+<p style="margin:0 0 16px">Hi Ana,</p>
+<p style="margin:0 0 16px">The password of your open-auri account was just changed.</p>
+<p style="margin:0 0 16px">If it was you, there is nothing else to do. If it was not you, secure your account with the link below.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Secure my account</a></p>
+<p style="margin:0 0 16px">If the link above does not open, copy this address into your browser:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/esqueci-senha</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Automated message from open-auri about an account linked to this address.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Your open-auri password was changed",
+  "text": "Password changed
+
+Hi Ana,
+
+The password of your open-auri account was just changed.
+
+If it was you, there is nothing else to do. If it was not you, secure your account with the link below.
+
+Secure my account:
+https://open-auri.example/esqueci-senha
+
+--
+Automated message from open-auri about an account linked to this address.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > password-changed (pt-BR) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Sua senha do open-auri foi alterada</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Sua senha do open-auri foi alterada" lang="pt-BR" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Senha alterada</h1>
+<p style="margin:0 0 16px">Olá, Ana.</p>
+<p style="margin:0 0 16px">A senha da sua conta no open-auri acabou de ser alterada.</p>
+<p style="margin:0 0 16px">Se foi você, não precisa fazer nada. Se não foi você, proteja a conta pelo link abaixo.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Proteger minha conta</a></p>
+<p style="margin:0 0 16px">Se o link acima não abrir, copie este endereço no navegador:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/esqueci-senha" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/esqueci-senha</a></p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Mensagem automática do open-auri sobre uma conta ligada a este endereço.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Sua senha do open-auri foi alterada",
+  "text": "Senha alterada
+
+Olá, Ana.
+
+A senha da sua conta no open-auri acabou de ser alterada.
+
+Se foi você, não precisa fazer nada. Se não foi você, proteja a conta pelo link abaixo.
+
+Proteger minha conta:
+https://open-auri.example/esqueci-senha
+
+--
+Mensagem automática do open-auri sobre uma conta ligada a este endereço.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > reset-password (en-US) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en-US" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Reset your open-auri password</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Reset your open-auri password" lang="en-US" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Reset your password</h1>
+<p style="margin:0 0 16px">Hi Ana,</p>
+<p style="margin:0 0 16px">We received a request to reset the password of your open-auri account. Use the link below to choose a new password.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/redefinir-senha?token=tok_reset" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Reset password</a></p>
+<p style="margin:0 0 16px">If the link above does not open, copy this address into your browser:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/redefinir-senha?token=tok_reset" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/redefinir-senha?token=tok_reset</a></p>
+<p style="margin:0 0 16px">This link expires in 30 minutes.</p>
+<p style="margin:0 0 16px">If you did not ask for a reset, ignore this message. Your password stays the same.</p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Automated message from open-auri about an account linked to this address.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Reset your open-auri password",
+  "text": "Reset your password
+
+Hi Ana,
+
+We received a request to reset the password of your open-auri account. Use the link below to choose a new password.
+
+Reset password:
+https://open-auri.example/redefinir-senha?token=tok_reset
+
+This link expires in 30 minutes.
+
+If you did not ask for a reset, ignore this message. Your password stays the same.
+
+--
+Automated message from open-auri about an account linked to this address.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > reset-password (pt-BR) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Redefinição de senha do open-auri</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Redefinição de senha do open-auri" lang="pt-BR" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Redefina sua senha</h1>
+<p style="margin:0 0 16px">Olá, Ana.</p>
+<p style="margin:0 0 16px">Recebemos um pedido para redefinir a senha da sua conta no open-auri. Para escolher uma nova senha, use o link abaixo.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/redefinir-senha?token=tok_reset" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Redefinir senha</a></p>
+<p style="margin:0 0 16px">Se o link acima não abrir, copie este endereço no navegador:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/redefinir-senha?token=tok_reset" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/redefinir-senha?token=tok_reset</a></p>
+<p style="margin:0 0 16px">Este link vale por 30 minutos.</p>
+<p style="margin:0 0 16px">Se você não pediu a redefinição, ignore esta mensagem. Sua senha continua a mesma.</p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Mensagem automática do open-auri sobre uma conta ligada a este endereço.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Redefinição de senha do open-auri",
+  "text": "Redefina sua senha
+
+Olá, Ana.
+
+Recebemos um pedido para redefinir a senha da sua conta no open-auri. Para escolher uma nova senha, use o link abaixo.
+
+Redefinir senha:
+https://open-auri.example/redefinir-senha?token=tok_reset
+
+Este link vale por 30 minutos.
+
+Se você não pediu a redefinição, ignore esta mensagem. Sua senha continua a mesma.
+
+--
+Mensagem automática do open-auri sobre uma conta ligada a este endereço.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > verify-email (en-US) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en-US" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Confirm your email for open-auri</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Confirm your email for open-auri" lang="en-US" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Confirm your email</h1>
+<p style="margin:0 0 16px">Hi,</p>
+<p style="margin:0 0 16px">We received a request to create an open-auri account with this address. To activate the account, confirm your email with the link below.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/verificar-email?token=tok_verify" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Confirm email</a></p>
+<p style="margin:0 0 16px">If the link above does not open, copy this address into your browser:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/verificar-email?token=tok_verify" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/verificar-email?token=tok_verify</a></p>
+<p style="margin:0 0 16px">This link expires in 1 hour.</p>
+<p style="margin:0 0 16px">If you did not request this, ignore this message. No account will be activated.</p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Automated message from open-auri about an account linked to this address.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Confirm your email for open-auri",
+  "text": "Confirm your email
+
+Hi,
+
+We received a request to create an open-auri account with this address. To activate the account, confirm your email with the link below.
+
+Confirm email:
+https://open-auri.example/verificar-email?token=tok_verify
+
+This link expires in 1 hour.
+
+If you did not request this, ignore this message. No account will be activated.
+
+--
+Automated message from open-auri about an account linked to this address.
+https://open-auri.example/
+",
+}
+`;
+
+exports[`templates > verify-email (pt-BR) matches the snapshot 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Confirme seu e-mail no open-auri</title>
+</head>
+<body style="margin:0;padding:24px 16px;background-color:#ffffff;color:#1a1a1a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
+<div role="article" aria-label="Confirme seu e-mail no open-auri" lang="pt-BR" style="max-width:560px;margin:0 auto">
+<h1 style="font-size:22px;line-height:1.3;margin:0 0 16px;color:#1a1a1a">Confirme seu e-mail</h1>
+<p style="margin:0 0 16px">Olá.</p>
+<p style="margin:0 0 16px">Recebemos um pedido para criar uma conta no open-auri com este endereço. Para ativar a conta, confirme o e-mail pelo link abaixo.</p>
+<p style="margin:0 0 16px"><a href="https://open-auri.example/verificar-email?token=tok_verify" style="color:#0b57d0;text-decoration:underline;font-weight:600;font-size:18px">Confirmar e-mail</a></p>
+<p style="margin:0 0 16px">Se o link acima não abrir, copie este endereço no navegador:</p>
+<p style="margin:0 0 16px;font-size:14px;word-break:break-all"><a href="https://open-auri.example/verificar-email?token=tok_verify" style="color:#0b57d0;text-decoration:underline">https://open-auri.example/verificar-email?token=tok_verify</a></p>
+<p style="margin:0 0 16px">Este link vale por 1 hora.</p>
+<p style="margin:0 0 16px">Se você não pediu isso, ignore esta mensagem. Nenhuma conta será ativada.</p>
+<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #d0d0d0;font-size:14px;color:#4a4a4a">Mensagem automática do open-auri sobre uma conta ligada a este endereço.<br><a href="https://open-auri.example/" style="color:#0b57d0;text-decoration:underline">open-auri</a></p>
+</div>
+</body>
+</html>",
+  "subject": "Confirme seu e-mail no open-auri",
+  "text": "Confirme seu e-mail
+
+Olá.
+
+Recebemos um pedido para criar uma conta no open-auri com este endereço. Para ativar a conta, confirme o e-mail pelo link abaixo.
+
+Confirmar e-mail:
+https://open-auri.example/verificar-email?token=tok_verify
+
+Este link vale por 1 hora.
+
+Se você não pediu isso, ignore esta mensagem. Nenhuma conta será ativada.
+
+--
+Mensagem automática do open-auri sobre uma conta ligada a este endereço.
+https://open-auri.example/
+",
+}
+`;
