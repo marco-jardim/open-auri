@@ -390,5 +390,26 @@ describe('Q3 round 3: sign-in limits never reveal whether an account exists', ()
 			answers.push(seen);
 		}
 		expect(answers[0]).toEqual(answers[1]);
+		// Turnstile is required each time; the 4th hits the requester's ip+name window.
+		expect(answers[0]).toEqual([400, 400, 400, 429]);
+	});
+
+	it('token-less sign-ups answer the same for a taken and a free nickname', async () => {
+		const h = harness();
+		const taken = uniqueUsername('t');
+		await createVerifiedUser(h, uniqueEmail('r3-owner'), { username: taken });
+		const statuses: number[] = [];
+		for (const username of [taken, uniqueUsername('f')]) {
+			const response = await h
+				.client()
+				.post(
+					'/sign-up/email',
+					{ email: uniqueEmail('r3-probe'), password: 'long enough pw 1', name: 'x', username },
+					{ turnstile: null }
+				);
+			statuses.push(response.status);
+			expect(await errorCode(response)).toBe('TURNSTILE_REQUIRED');
+		}
+		expect(statuses).toEqual([400, 400]);
 	});
 });

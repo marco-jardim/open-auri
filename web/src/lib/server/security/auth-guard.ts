@@ -46,8 +46,8 @@ export interface AuthGuardInput {
 	ip: string | null;
 	/**
 	 * Identifier of the per-account rules: e-mail (or username for `/sign-in/username`; the new
-	 * e-mail for `/change-email`). The auth hook passes `user:<id>` for a sign-in to an existing
-	 * account, so both sign-in paths share one budget per account.
+	 * e-mail for `/change-email`), always as submitted: keying on whether an account exists would
+	 * make the pre-Turnstile windows an account-existence oracle.
 	 */
 	email?: string | null;
 	/** Signed-in user, when there is one (`/change-email`). */

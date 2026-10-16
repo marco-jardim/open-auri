@@ -380,6 +380,7 @@ export function createBeforeHook(deps: AuthHookDeps) {
 			}
 		}
 
+		let signUpNickname: string | undefined;
 		if (path === '/sign-up/email') {
 			const username = typeof body.username === 'string' ? body.username : undefined;
 			const display = typeof body.displayUsername === 'string' ? body.displayUsername : undefined;
@@ -394,17 +395,9 @@ export function createBeforeHook(deps: AuthHookDeps) {
 				if (problem === 'invalid') throw fail(400, 'INVALID_USERNAME', 'Invalid nickname');
 				// A reserved nickname looks taken: no list probing.
 				if (problem === 'reserved') throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
-				const row = await first<{ id: string }>(
-					sql(
-						db,
-						'SELECT id FROM "user" WHERE usernameSkeleton = ? LIMIT 1',
-						usernameSkeleton(username)
-					)
-				);
-				// A nickname on its 90-day hold answers exactly like a taken one.
-				if (row || (await isNicknameHeld(db, username, now().getTime()))) {
-					throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
-				}
+				// Taken/held is answered only after the guard (Turnstile, limits): otherwise token-less
+				// sign-ups would be an unthrottled nickname-existence oracle (Q3 round 3).
+				signUpNickname = username;
 			}
 		}
 
@@ -436,6 +429,20 @@ export function createBeforeHook(deps: AuthHookDeps) {
 					{ code: result.code, message: result.code },
 					result.retryAfter === undefined ? undefined : { 'Retry-After': String(result.retryAfter) }
 				);
+			}
+		}
+
+		if (signUpNickname !== undefined) {
+			const row = await first<{ id: string }>(
+				sql(
+					db,
+					'SELECT id FROM "user" WHERE usernameSkeleton = ? LIMIT 1',
+					usernameSkeleton(signUpNickname)
+				)
+			);
+			// A nickname on its 90-day hold answers exactly like a taken one.
+			if (row || (await isNicknameHeld(db, signUpNickname, now().getTime()))) {
+				throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
 			}
 		}
 
