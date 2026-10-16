@@ -4,7 +4,7 @@
 // through `listRankings`, which re-checks visibility, so a lineage hidden after the last run drops
 // out at once. Nothing here touches SQL: every rule lives in repo.ts.
 import type { D1Database } from '@cloudflare/workers-types';
-import { ApiError } from '#lib/server/api/index.ts';
+import { ApiError } from '#lib/server/api/errors.ts';
 import {
 	getRankingState,
 	listPublicFeed,

@@ -1,13 +1,30 @@
 // Typed job registry of the jobs Worker. Jobs are added by T3.3 (salt rotation, access-log
-// consumer and retention). An event with no registered job fails loudly: a cron that silently does
-// nothing, or a queue batch that is acknowledged without being processed, would lose work.
+// consumer and retention) and T4.12 (rankings, S6 aggregation, trade expiry, re-gate). An event
+// with no registered job fails loudly: a cron that silently does nothing, or a queue batch that is
+// acknowledged without being processed, would lose work.
+//
+// Every cron is UTC (Cloudflare cron triggers always are). Each job is idempotent for a given
+// `scheduledTime` (a retried or duplicated tick redoes the same work or finds nothing left), logs
+// one JSON line with counts only on success, and the dispatcher logs one JSON line per failure.
+import { runRankingsJob } from '../../../../web/src/lib/server/social/rankings.ts';
 import { accessLogConsumerJob } from './access-log-consumer.ts';
 import { accessLogRetentionJob } from './access-log-retention.ts';
+import { createRankingsJob } from './rankings.ts';
 import { rateLimitGcJob } from './rate-limit-gc.ts';
+import { regateJob } from './regate.ts';
 import { rotateSaltJob } from './rotate-salt.ts';
+import { s6AggregateJob } from './s6-aggregate.ts';
+import { tradesExpireJob } from './trades-expire.ts';
 
-/** Cron expressions declared in wrangler.template.jsonc (`triggers.crons`). */
-export const CRONS = { daily: '5 0 * * *' } as const;
+/** Cron expressions declared in wrangler.template.jsonc (`triggers.crons`), all UTC. */
+export const CRONS = {
+  /** 00:05 UTC every day. */
+  daily: '5 0 * * *',
+  /** Minute 0 of every hour. */
+  hourly: '0 * * * *',
+  /** Minutes 0, 15, 30 and 45 of every hour. */
+  quarterHour: '*/15 * * * *',
+} as const;
 export type CronExpression = (typeof CRONS)[keyof typeof CRONS];
 
 /** Logical queues consumed by this Worker; physical names come from `vars`. */
@@ -47,12 +64,26 @@ export class JobFailedError extends Error {
 }
 
 /**
- * Daily (00:05 UTC): salt rotation first (tomorrow's salt must exist before midnight), then the
- * rate-limit and access-log retention sweeps. Queue: the access-log consumer.
+ * - Daily (00:05 UTC): salt rotation first (tomorrow's salt must exist before midnight), then the
+ *   rate-limit and access-log retention sweeps, the S6 aggregation and, last, the re-gate of
+ *   curves cached under an older gate version (the most CPU-heavy step, ~150 ms per curve, and
+ *   only non-zero after a threshold change: if it ever hits the CPU limit, the jobs before it have
+ *   already finished, and the next day continues where it stopped).
+ * - Hourly: S7 trade expiry and re-pairing.
+ * - Every 15 minutes: rankings materialization.
+ * Queue: the access-log consumer.
  */
 export const registry: JobRegistry = {
   scheduled: {
-    [CRONS.daily]: [rotateSaltJob, rateLimitGcJob, accessLogRetentionJob],
+    [CRONS.daily]: [
+      rotateSaltJob,
+      rateLimitGcJob,
+      accessLogRetentionJob,
+      s6AggregateJob,
+      regateJob,
+    ],
+    [CRONS.hourly]: [tradesExpireJob],
+    [CRONS.quarterHour]: [createRankingsJob(runRankingsJob)],
   },
   queues: {
     'access-log': accessLogConsumerJob,
@@ -71,9 +102,16 @@ export function queueKind(
   return queueName === env.ACCESS_LOG_QUEUE_NAME ? 'access-log' : null;
 }
 
+/** Error class name only: messages may carry data (SQL values, ids) and are never logged. */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
 /**
- * Runs every job registered for the controller's cron, one after another. A failing job does not
- * stop the others; the failures are reported together afterwards (job names only).
+ * Runs every job registered for the controller's cron, one after another, in registration order.
+ * A failing job does not stop the others: it is logged as one JSON line (job name, cron and error
+ * class, no message, no payload) and the failures are rethrown together afterwards, so the
+ * invocation is still reported as failed.
  */
 export async function dispatchScheduled(
   controller: ScheduledController,
@@ -93,6 +131,14 @@ export async function dispatchScheduled(
     } catch (error) {
       failed.push(job.name);
       firstError ??= error;
+      console.error(
+        JSON.stringify({
+          event: 'job.failed',
+          job: job.name,
+          cron: controller.cron,
+          error: errorName(error),
+        }),
+      );
     }
   }
   if (failed.length) throw new JobFailedError(failed, { cause: firstError });

@@ -1,23 +1,86 @@
+/// <reference types="vite/client" />
 import { createExecutionContext, createScheduledController } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
+import templateSource from '../wrangler.template.jsonc?raw';
 import { utcDay } from '../src/jobs/dates.ts';
 import {
   dayPrefix,
   enforceAccessLogRetention,
   RETENTION_DAYS,
 } from '../src/jobs/access-log-retention.ts';
+import { RANKINGS_CRON } from '../src/jobs/rankings.ts';
 import { pruneRateLimitCounters } from '../src/jobs/rate-limit-gc.ts';
-import { CRONS, dispatchScheduled, registry } from '../src/jobs/registry.ts';
+import {
+  type CronExpression,
+  CRONS,
+  dispatchScheduled,
+  JobFailedError,
+  type JobRegistry,
+  registry,
+  type ScheduledJob,
+} from '../src/jobs/registry.ts';
+
+/** The template only has whole-line `//` comments, so dropping them leaves plain JSON. */
+function templateCrons(): Record<string, string[]> {
+  const json = templateSource
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//'))
+    .join('\n');
+  const config = JSON.parse(json) as {
+    triggers?: { crons?: string[] };
+    env?: Record<string, { triggers?: { crons?: string[] } }>;
+  };
+  const crons: Record<string, string[]> = { top: config.triggers?.crons ?? [] };
+  for (const name of ['production', 'staging']) {
+    crons[name] = config.env?.[name]?.triggers?.crons ?? [];
+  }
+  return crons;
+}
+
+function scheduledNames(cron: CronExpression): string[] {
+  return registry.scheduled[cron]?.map((job) => job.name) ?? [];
+}
 
 describe('job registry', () => {
-  it('registers the daily jobs (salt first) and the access-log consumer', () => {
-    expect(registry.scheduled[CRONS.daily]?.map((job) => job.name)).toEqual([
+  it('registers the jobs per UTC cron (salt first, re-gate last) and the access-log consumer', () => {
+    expect(scheduledNames(CRONS.daily)).toEqual([
       'rotate-salt',
       'rate-limit-gc',
       'access-log-retention',
+      's6-aggregate',
+      'regate',
     ]);
+    expect(scheduledNames(CRONS.hourly)).toEqual(['trades-expire']);
+    expect(scheduledNames(CRONS.quarterHour)).toEqual(['rankings']);
+    expect(CRONS).toEqual({
+      daily: '5 0 * * *',
+      hourly: '0 * * * *',
+      quarterHour: '*/15 * * * *',
+    });
+    expect(CRONS.quarterHour).toBe(RANKINGS_CRON);
     expect(registry.queues['access-log']?.name).toBe('access-log-consumer');
+  });
+
+  it('gives every job a unique name', () => {
+    const names = [
+      ...Object.values(registry.scheduled).flatMap((jobs) => (jobs ?? []).map((job) => job.name)),
+      ...Object.values(registry.queues).map((job) => job.name),
+    ];
+    expect(names.length).toBeGreaterThan(0);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('keeps the template crons and the registry in sync in every environment', () => {
+    const registered = Object.keys(registry.scheduled).sort();
+    expect(registered).toEqual(Object.values(CRONS).sort());
+    const crons = templateCrons();
+    expect(Object.keys(crons)).toEqual(['top', 'production', 'staging']);
+    for (const list of Object.values(crons)) {
+      expect(new Set(list).size).toBe(list.length);
+      expect([...list].sort()).toEqual(registered);
+    }
+    for (const cron of Object.values(CRONS)) expect(scheduledNames(cron).length).toBeGreaterThan(0);
   });
 
   it('runs every daily job from the cron trigger', async () => {
@@ -31,9 +94,75 @@ describe('job registry', () => {
     const events = logs.mock.calls.map((call) => JSON.parse(String(call[0])).event);
     logs.mockRestore();
     expect(events).toEqual(
-      expect.arrayContaining(['job.rotate_salt', 'job.rate_limit_gc', 'job.access_log_retention']),
+      expect.arrayContaining([
+        'job.rotate_salt',
+        'job.rate_limit_gc',
+        'job.access_log_retention',
+        'job.s6_aggregate',
+        'job.regate',
+      ]),
     );
     expect(await env.CONFIG.get(`salt:${utcDay(now, 1)}`, 'text')).not.toBeNull();
+  });
+
+  it('runs the hourly and quarter-hour jobs from their cron triggers', async () => {
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const ctx = createExecutionContext();
+    const at = new Date();
+    at.setUTCMinutes(0, 0, 0);
+    await dispatchScheduled(
+      createScheduledController({ cron: CRONS.hourly, scheduledTime: at }),
+      env,
+      ctx,
+    );
+    await dispatchScheduled(
+      createScheduledController({ cron: CRONS.quarterHour, scheduledTime: at }),
+      env,
+      ctx,
+    );
+    const events = logs.mock.calls.map((call) => JSON.parse(String(call[0])).event);
+    logs.mockRestore();
+    expect(events).toEqual(expect.arrayContaining(['job.trades_expire', 'job.rankings']));
+  });
+
+  it('keeps running the other jobs of a tick when one fails and logs the failure without data', async () => {
+    const ran: string[] = [];
+    const secret = 'secret-value-that-must-not-be-logged';
+    const job = (name: string, fail: boolean): ScheduledJob => ({
+      name,
+      async run() {
+        ran.push(name);
+        if (fail) throw new TypeError(secret);
+      },
+    });
+    const jobs: JobRegistry = {
+      scheduled: { [CRONS.hourly]: [job('first', true), job('second', false), job('third', true)] },
+      queues: {},
+    };
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const outcome = await dispatchScheduled(
+      createScheduledController({ cron: CRONS.hourly, scheduledTime: new Date() }),
+      env,
+      createExecutionContext(),
+      jobs,
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    const lines = errors.mock.calls.map((call) => String(call[0]));
+    errors.mockRestore();
+
+    expect(ran).toEqual(['first', 'second', 'third']);
+    expect(outcome).toBeInstanceOf(JobFailedError);
+    expect(outcome instanceof JobFailedError ? outcome.jobs : null).toEqual(['first', 'third']);
+    const failures = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.event === 'job.failed');
+    expect(failures).toEqual([
+      { event: 'job.failed', job: 'first', cron: CRONS.hourly, error: 'TypeError' },
+      { event: 'job.failed', job: 'third', cron: CRONS.hourly, error: 'TypeError' },
+    ]);
+    expect(lines.join('\n')).not.toContain(secret);
   });
 });
 
