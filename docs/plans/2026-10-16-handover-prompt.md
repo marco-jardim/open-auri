@@ -17,10 +17,12 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 
 ## Primeira ação
 
-1. Leia o plano: §0 (diretivas 0.1 a 0.21), §3, §4, §5, §6 e a Fase 1 completa.
-2. Crie o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (modelo no §14 do plano).
-3. Execute o **PF1** e marque o item na issue #1.
-4. Siga wave após wave (W1.1 → W1.2 em paralelo → W1.3 → W1.4 → T1.T → Q1 heavy), depois F2, F3, F4 e F5, **sem pausar entre waves ou fases**.
+**Estado em 2026-10-16:** a F1 (núcleo) está concluída, com QA heavy aprovado (PASS), push feito (`25b2ee1`) e issue #1 fechada. Os minors adiados estão nas issues #8 a #13 (`qa-minor`). A próxima ação é o **PF2**.
+
+1. Leia o plano: §0 (diretivas 0.1 a 0.21), §3, §4, §5, §6 e a **Fase 2** completa (linhas ~1103–1614).
+2. Leia o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md`, principalmente a seção "Decisões durante a execução".
+3. Execute o **PF2** e marque o item na issue #2.
+4. Siga wave após wave na F2, depois F3, F4 e F5, **sem pausar entre waves ou fases**.
 
 ## Regras inegociáveis
 
@@ -72,7 +74,8 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 - **O MCP do chrome-devtools não conecta** sem Chrome com `--remote-debugging-port=9222`. Use Chrome headless por CLI com CDP via Node 24, reaproveitando `D:\git\open-auri\design\analysis\qa-parity.mjs --browser` e `qa-audio.mjs --all` (`--autoplay-policy=no-user-gesture-required`, `DOM.setFileInputFiles`).
 - **Researcher:** se o websearch vier vazio, use webfetch nas documentações oficiais. Itens UNVERIFIED se confirmam no PF.
 - **npm workspaces falham com pasta inexistente:** acrescente `web` na T2.1 e `workers/jobs` na T3.1.
-- **Glob do teste:** `node --test` hoje descobre `design\analysis\gate.test.mjs`; a T1.1 restringe a `test\**`.
+- **Allowlist do `router_run` (medido na F1):** só `npm test`, `npm run lint` e `npm run typecheck` passam. `test:<área>`, `test:coverage`, `format:check`, `types`, `check:sensitive`, `node` e `npm install` são recusados. Depois de cada wave, rode direto a verificação central: `npx prettier --write`, `npm run test:coverage`, `npm run lint`, `npm run typecheck`, `npm run types` e `node tools/check-sensitive.mjs`. Dependências novas são instaladas por você (fila de integração).
+- **Barris de export:** os `src\<área>\index.mjs` têm um teste de completude (`test\index.test.mjs`). Export novo num módulo exige atualizar o barril, o que é feito pela fila de integração.
 - **Gate:** o limite `c` é 9.200000050722664 dB (máximo quantizado). Com 9,2 literal o Basshead oficial reprova.
 - **Better Auth no Workers:** medir a CPU do hash no PF3 (scrypt em JS puro já estourou CPU; alternativa `node:crypto` com `nodejs_compat`); D1 não tem transações; `disableIpTracking: true`; rate limit interno desligado.
 - **Testes de Worker:** `@cloudflare/vitest-plugin` (substituiu o `vitest-pool-workers`).
