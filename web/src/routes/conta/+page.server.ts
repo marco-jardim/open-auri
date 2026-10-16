@@ -5,7 +5,12 @@
 //     `locals.user.id`; profile actions also need a verified e-mail;
 //   - CSRF: SvelteKit's origin check on form actions (kept on; never disabled for this route);
 //   - sensitive actions: password change needs the current password, e-mail change a fresh
-//     session or the password, closure the password plus the mailed confirmation link.
+//     session or the password, closure the password plus the mailed confirmation link;
+//   - two-step verification (FX3.4): start and disable need the password, confirm the first code
+//     (admins with 2FA on also need the session's 2FA marker, enforced by the auth hooks). The
+//     otpauth URI and the backup codes go out only in the `?/twoFactorStart` action result;
+//   - responses are `Cache-Control: private, no-store` (load, and the 2FA actions' own JSON
+//     results when enhanced; set once per request, as SvelteKit refuses a second set).
 import { error, fail, redirect, type ActionFailure, type RequestEvent } from '@sveltejs/kit';
 import type { D1Database } from '@cloudflare/workers-types';
 import type { FormFeedback, FormId } from '#lib/components/account/types.ts';
@@ -14,6 +19,8 @@ import {
 	BIO_MAX,
 	changeAccountPassword,
 	changeNickname,
+	confirmEnrolment,
+	disableTwoFactor,
 	getAccountProfile,
 	isDeletionMode,
 	listAccountSessions,
@@ -23,11 +30,13 @@ import {
 	pendingEmailChange,
 	policyBannerState,
 	readDeletionRequest,
+	readTwoFactorStatus,
 	requestAccountClosure,
 	requestEmailChange,
 	revokeAccountSession,
 	revokeOtherAccountSessions,
 	signInRedirect,
+	startEnrolment,
 	updateBio,
 	updateVisibility,
 	type AuthFailure
@@ -39,7 +48,22 @@ import { TURNSTILE_ACTIONS } from '#lib/server/security/turnstile.ts';
 import type { AuthSession, AuthUser } from '#lib/server/types.ts';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, platform, url }) => {
+const NO_STORE = { 'cache-control': 'private, no-store' } as const;
+/** Requests whose response already got NO_STORE (an action and the load share one request). */
+const noStoreSent = new WeakSet<Request>();
+
+function noStore(event: {
+	request: Request;
+	setHeaders: (headers: Record<string, string>) => void;
+}): void {
+	if (noStoreSent.has(event.request)) return;
+	noStoreSent.add(event.request);
+	event.setHeaders(NO_STORE);
+}
+
+export const load: PageServerLoad = async (event) => {
+	const { locals, platform, url } = event;
+	noStore(event);
 	const access = accountAccess(locals);
 	if (!access.ok) {
 		if (access.status === 401) redirect(303, signInRedirect(url.pathname));
@@ -50,12 +74,14 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	const now = Date.now();
 	const profile = await getAccountProfile(db, user.id, now);
 	if (!profile) redirect(303, signInRedirect(url.pathname));
-	const [sessions, pendingEmail, holds, closure, policy] = await Promise.all([
+	const [sessions, pendingEmail, holds, closure, policy, twoFactorStatus] = await Promise.all([
 		listAccountSessions(db, user.id, session.id, now),
 		pendingEmailChange(db, user.id, profile.email, now),
 		listNicknameHolds(db, user.id, now),
 		readDeletionRequest(db, user.id),
-		policyBannerState(db, user.id)
+		policyBannerState(db, user.id),
+		// From D1: `locals.user` predates a 2FA action run in this same request.
+		readTwoFactorStatus(db, user.id)
 	]);
 	return {
 		profile: {
@@ -73,6 +99,7 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 		holds,
 		closure,
 		policy,
+		twoFactor: { status: twoFactorStatus, admin: user.role === 'admin' },
 		fresh: isFreshSession(session, undefined, now),
 		emailChanged: url.searchParams.get('email') === 'alterado',
 		limits: {
@@ -244,5 +271,49 @@ export const actions: Actions = {
 		});
 		if (!result.ok) return authFailure('close', result);
 		return { form: 'close', ok: true };
+	},
+
+	/** Password → pending setup; the URI and backup codes go out in this result only. */
+	twoFactorStart: async (event): Result => {
+		noStore(event);
+		const ctx = open(event, 'twoFactor');
+		if (!('db' in ctx)) return ctx;
+		const auth = event.locals.auth;
+		if (!auth) return reject(503, { form: 'twoFactor', error: 'unavailable' });
+		const password = field(await event.request.formData(), 'password');
+		const result = await startEnrolment(auth, event.request.headers, password);
+		if (!result.ok) return authFailure('twoFactor', result);
+		return {
+			form: 'twoFactor',
+			ok: true,
+			detail: 'started',
+			enrolment: { totpURI: result.totpURI, backupCodes: result.backupCodes }
+		};
+	},
+
+	/** First code from the app → 2FA on (the session rotates and gets the 2FA marker). */
+	twoFactorConfirm: async (event): Result => {
+		noStore(event);
+		const ctx = open(event, 'twoFactor');
+		if (!('db' in ctx)) return ctx;
+		const auth = event.locals.auth;
+		if (!auth) return reject(503, { form: 'twoFactor', error: 'unavailable' });
+		const code = field(await event.request.formData(), 'code', 16);
+		const result = await confirmEnrolment(auth, event.request.headers, code);
+		if (!result.ok) return authFailure('twoFactor', result);
+		return { form: 'twoFactor', ok: true, detail: 'enabled' };
+	},
+
+	/** Password → 2FA off, or a pending setup cancelled (admins: needs the 2FA marker). */
+	twoFactorDisable: async (event): Result => {
+		noStore(event);
+		const ctx = open(event, 'twoFactor');
+		if (!('db' in ctx)) return ctx;
+		const auth = event.locals.auth;
+		if (!auth) return reject(503, { form: 'twoFactor', error: 'unavailable' });
+		const password = field(await event.request.formData(), 'password');
+		const result = await disableTwoFactor(auth, event.request.headers, password);
+		if (!result.ok) return authFailure('twoFactor', result);
+		return { form: 'twoFactor', ok: true, detail: 'disabled' };
 	}
 };

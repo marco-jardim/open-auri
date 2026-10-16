@@ -10,3 +10,4 @@ export * from './nickname.ts';
 export * from './policy.ts';
 export * from './profile.ts';
 export * from './sessions.ts';
+export * from './two-factor.ts';

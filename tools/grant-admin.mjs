@@ -11,7 +11,9 @@
 // e-mail marked verified (the address is the operator's own, from .env or typed by the operator)
 // and the admin role. Nothing is sent. To take it over, the operator opens /esqueci-senha and
 // requests a reset for that address: only its mailbox receives the link, and the reset creates
-// the password. Then 2FA must be enabled in /conta before /admin opens (ADMIN_2FA_REQUIRED).
+// the password. Then 2FA must be enabled in /conta ("Verificação em duas etapas") before /admin
+// opens (ADMIN_2FA_REQUIRED). Re-running on an account that is already admin reports exactly that
+// (also for an unverified address without --force) and changes nothing.
 // Printing a generated password was rejected: it would land in terminal scrollback and logs.
 // An existing account is promoted only when its e-mail is verified: anyone can sign up with an
 // address they do not own, and an unverified row proves nothing about who holds it. --force
@@ -57,6 +59,10 @@ const OPERATOR = /^[\p{L}\p{N} ._@-]{2,80}$/u;
 const LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
 const EMAIL = new RegExp(`^[a-z0-9.!#$%&*+/=?^_\`{|}~-]{1,64}@${LABEL}(?:\\.${LABEL})+$`);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Where the operator turns on 2FA (the /conta section, `#duas-etapas`); /admin requires it. */
+export const TWO_STEP_GUIDANCE =
+  'enable two-step verification in /conta#duas-etapas ("Verificação em duas etapas", if not on ' +
+  'yet); /admin requires it.';
 
 /** @typedef {'staging' | 'production'} TargetEnv */
 /**
@@ -307,6 +313,13 @@ export async function grantAdmin(args, deps) {
     );
   }
   const target = parsed.local ? 'local D1' : `remote D1${parsed.env ? ` (${parsed.env})` : ''}`;
+  // An account that is already admin is reported as such even when the run would have been
+  // refused (unverified address, no --force): nothing changed either way, and the role is there.
+  if (outcome.previousRole === 'admin') {
+    log(`The account already had the admin role on ${target} (audit ${auditId}).`);
+    log(TWO_STEP_GUIDANCE);
+    return { auditId, ...outcome };
+  }
   if (!outcome.granted) {
     throw new RenderError(
       `The account's e-mail address is not verified; nothing changed (audit ${auditId}). ` +
@@ -316,16 +329,14 @@ export async function grantAdmin(args, deps) {
   if (outcome.created) {
     log(`Created the admin account on ${target} without a password (audit ${auditId}).`);
     log('Next: open /esqueci-senha, request a reset for the admin address, set the password,');
-    log('then enable two-step verification in /conta; /admin requires it.');
-  } else if (outcome.previousRole === 'admin') {
-    log(`The account already had the admin role on ${target} (audit ${auditId}).`);
+    log(`then ${TWO_STEP_GUIDANCE}`);
   } else {
     log(`Granted the admin role on ${target} (audit ${auditId}).`);
     if (!outcome.emailVerified) log('--force: the e-mail address was NOT verified.');
     log(`Signed the account out everywhere (${outcome.sessionsRevoked} session(s) deleted).`);
     log('Next: open /esqueci-senha ("esqueci a senha"), request a reset for that address and set');
-    log('a new password, so only the mailbox owner holds one; then enable two-step');
-    log('verification in /conta; /admin requires it.');
+    log('a new password, so only the mailbox owner holds one; then');
+    log(TWO_STEP_GUIDANCE);
   }
   return { auditId, ...outcome };
 }

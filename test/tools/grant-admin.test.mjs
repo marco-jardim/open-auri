@@ -366,6 +366,26 @@ test('grantAdmin refuses an unverified account unless --force, and revokes sessi
   assert.deepEqual(refusedLogs, []);
   assert.doesNotMatch(refused.files[0] ?? '', /'forced', json\('true'\)/);
 
+  // Re-run on an account that is already admin, address unverified, no --force: "already admin",
+  // not "not verified; nothing changed", with the pointer to the /conta 2FA section.
+  /** @type {string[]} */
+  const againLogs = [];
+  const again = await grantAdmin([], {
+    ...deps,
+    run: fakeWrangler({
+      outcome: [
+        { detail: detailOf({ previousRole: 'admin', emailVerified: false, granted: false }) },
+      ],
+    }).run,
+    log: (line) => againLogs.push(line),
+  });
+  assert.equal(again.previousRole, 'admin');
+  assert.equal(again.granted, false);
+  const againPrinted = againLogs.join('\n');
+  assert.match(againPrinted, /already had the admin role/);
+  assert.match(againPrinted, /\/conta#duas-etapas/);
+  assert.doesNotMatch(againPrinted, /not verified|Granted|session\(s\) deleted|example|operador/i);
+
   // A verified account: granted, sessions revoked, guidance to reset the password.
   /** @type {string[]} */
   const logs = [];

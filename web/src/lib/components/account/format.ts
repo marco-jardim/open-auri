@@ -88,6 +88,15 @@ function errorMessage(feedback: FormFeedback): string {
 			return m.conta_close_error_mode();
 		case 'version':
 			return m.conta_policy_error();
+		case 'invalid-code':
+			return m.conta_2fa_error_code();
+		case 'two-factor-required':
+		case 'TWO_FACTOR_REQUIRED':
+			return m.conta_2fa_error_marker();
+		case 'already-enabled':
+			return m.conta_2fa_error_already();
+		case 'not-enrolling':
+			return m.conta_2fa_error_not_enrolling();
 		default:
 			return m.conta_error_generic();
 	}
@@ -115,6 +124,12 @@ function successMessage(feedback: FormFeedback): string {
 			return m.conta_close_requested();
 		case 'policy':
 			return m.conta_policy_saved();
+		case 'twoFactor':
+			return feedback.detail === 'started'
+				? m.conta_2fa_started()
+				: feedback.detail === 'disabled'
+					? m.conta_2fa_disabled()
+					: m.conta_2fa_enabled();
 	}
 }
 

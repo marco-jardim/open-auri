@@ -46,7 +46,33 @@ export interface ClosureView {
 }
 
 export type FormId =
-	'nickname' | 'bio' | 'visibility' | 'password' | 'sessions' | 'email' | 'close' | 'policy';
+	| 'nickname'
+	| 'bio'
+	| 'visibility'
+	| 'password'
+	| 'sessions'
+	| 'email'
+	| 'close'
+	| 'policy'
+	| 'twoFactor';
+
+/** 2FA state of the account: off, enrolment started but not confirmed, or on. */
+export type TwoFactorStatus = 'off' | 'pending' | 'on';
+
+/**
+ * What `?/twoFactorStart` returns once: the otpauth URI (QR + manual key) and the backup codes.
+ * Only ever in the action result of that request: never in a cookie, the URL or storage.
+ */
+export interface TwoFactorEnrolmentView {
+	totpURI: string;
+	backupCodes: string[];
+}
+
+export interface TwoFactorView {
+	status: TwoFactorStatus;
+	/** The account has the admin role (2FA required for /admin; disabling needs the 2FA marker). */
+	admin: boolean;
+}
 
 /** What every /conta form action returns (success or `fail()` data). */
 export interface FormFeedback {
@@ -63,6 +89,8 @@ export interface FormFeedback {
 	count?: number;
 	/** Echo of a non-secret field to refill the form (nickname, bio, new e-mail). */
 	value?: string;
+	/** `?/twoFactorStart` success only: shown once (see TwoFactorEnrolmentView). */
+	enrolment?: TwoFactorEnrolmentView;
 }
 
 /** `use:enhance` from `$app/forms` in the page; a no-op in tests and without JavaScript. */

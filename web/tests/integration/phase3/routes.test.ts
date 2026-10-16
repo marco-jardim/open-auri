@@ -98,7 +98,10 @@ const CONTA_ACTIONS: Record<
 	revokeSession: { form: { sessionId: 'no-such-session' }, verifiedOnly: false, allowed: 404 },
 	revokeOthers: { form: {}, verifiedOnly: false, allowed: 200 },
 	email: { form: { newEmail: 'not-an-email' }, verifiedOnly: false, allowed: 400 },
-	close: { form: { mode: 'bogus', password: PASSWORD }, verifiedOnly: false, allowed: 400 }
+	close: { form: { mode: 'bogus', password: PASSWORD }, verifiedOnly: false, allowed: 400 },
+	twoFactorStart: { form: { password: '' }, verifiedOnly: false, allowed: 400 },
+	twoFactorConfirm: { form: { code: '12' }, verifiedOnly: false, allowed: 400 },
+	twoFactorDisable: { form: { password: '' }, verifiedOnly: false, allowed: 400 }
 };
 
 function expectedContaStatus(name: PersonaName, verifiedOnly: boolean, allowed: number): number {

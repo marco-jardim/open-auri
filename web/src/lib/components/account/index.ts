@@ -9,6 +9,7 @@ export { default as NicknameForm } from './NicknameForm.svelte';
 export { default as PasswordForm } from './PasswordForm.svelte';
 export { default as Section } from './Section.svelte';
 export { default as SessionList } from './SessionList.svelte';
+export { default as TwoFactorForm } from './TwoFactorForm.svelte';
 export { default as VisibilityForm } from './VisibilityForm.svelte';
 export { deviceLabel, feedbackMessage, formatDate, formatDateTime } from './format.ts';
 export * from './types.ts';

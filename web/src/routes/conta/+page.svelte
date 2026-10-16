@@ -10,6 +10,7 @@
 		PasswordForm,
 		Section,
 		SessionList,
+		TwoFactorForm,
 		VisibilityForm,
 		type FormEnhance,
 		type FormFeedback
@@ -42,6 +43,7 @@
 	const sections = [
 		{ id: 'perfil', label: () => m.conta_nav_profile() },
 		{ id: 'seguranca', label: () => m.conta_nav_security() },
+		{ id: 'duas-etapas', label: () => m.conta_2fa_nav() },
 		{ id: 'email', label: () => m.conta_nav_email() },
 		{ id: 'dados', label: () => m.conta_nav_data() },
 		{ id: 'encerrar', label: () => m.conta_nav_close() }
@@ -129,6 +131,15 @@
 			<p class="acc-hint">{m.conta_sessions_description()}</p>
 			<SessionList sessions={data.sessions} {feedback} enhance={plain} />
 		</div>
+	</Section>
+
+	<Section id="duas-etapas" title={m.conta_2fa_title()} description={m.conta_2fa_description()}>
+		<TwoFactorForm
+			status={data.twoFactor.status}
+			admin={data.twoFactor.admin}
+			{feedback}
+			enhance={plain}
+		/>
 	</Section>
 
 	<Section id="email" title={m.conta_email_title()} description={m.conta_email_description()}>
