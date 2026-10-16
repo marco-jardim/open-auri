@@ -80,7 +80,8 @@
     "build:web": "npm run -w web build",
     "check:web": "npm run -w web check",
     "test:all": "npm test && npm run test:web:unit",
-    "check:all": "npm run lint && npm run typecheck && npm run check:web"
+    "check:all": "npm run lint && npm run typecheck && npm run check:web",
+    "data:autoeq": "node tools/import-autoeq.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

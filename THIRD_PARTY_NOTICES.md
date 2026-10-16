@@ -77,3 +77,33 @@ The 0xCB byte layout and the reference presets come from
 <https://equalizador.kuba.audio/>. No code from it is included in this
 repository; `test/fixtures/eq0xcb.reference.json` holds derived data (the
 expected bytes for each preset), credited there and in `docs/README.md`.
+
+## Fonts
+
+The web app self-hosts the following fonts (latin subset, WOFF2, from the
+Fontsource npm packages) under `web/static/fonts/<family>/`. Each folder
+contains the full license text as `LICENSE.txt`. No font is loaded from Google
+Fonts or any CDN. The files are unmodified apart from the latin subsetting done
+upstream by Fontsource.
+
+| Family | Styles/weights | License | Copyright |
+|---|---|---|---|
+| Instrument Serif | 400 normal, 400 italic | SIL OFL 1.1 | Copyright 2022 The Instrument Serif Project Authors |
+| Geist (variable) | wght 100–900 | SIL OFL 1.1 | Copyright 2024 The Geist Project Authors |
+| JetBrains Mono | 400, 500 | SIL OFL 1.1 | Copyright 2020 The JetBrains Mono Project Authors |
+| Courier Prime | 400, 700 | SIL OFL 1.1 | Copyright 2015 The Courier Prime Project Authors |
+| Barlow Condensed | 400, 500, 600, 700 | SIL OFL 1.1 | Copyright 2017 The Barlow Project Authors |
+| Oswald | 400, 500, 600 | SIL OFL 1.1 | Copyright 2016 The Oswald Project Authors |
+| EB Garamond | 400, 500, 600; italic 400, 500 | SIL OFL 1.1 | Copyright 2017 The EB Garamond Project Authors |
+| VT323 | 400 | SIL OFL 1.1 | Copyright 2011, The VT323 Project Authors |
+| Special Elite | 400 | Apache License 2.0 | Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI) |
+| Permanent Marker | 400 | Apache License 2.0 | Copyright (c) 2010 by Font Diner, Inc. |
+
+## AutoEq measurement and target data
+
+`tools/import-autoeq.mjs` converts headphone measurements and targets from the
+AutoEq repository (<https://github.com/jaakkopasanen/AutoEq>, MIT, Copyright
+(c) 2018-2022 Jaakko Pasanen) into compact packs generated at build time under
+`web/static/data/autoeq/` (not versioned). Each measurement keeps its original
+source attribution; see `docs/autoeq-data.md` for sources and the removal
+process.
