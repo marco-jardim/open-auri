@@ -213,15 +213,16 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 	await volume.fill('-40');
 	await expect(volume).toHaveAttribute('aria-valuetext', '−40 dB');
 	// Pre-volume: −40 dB of preview volume would move a post-volume VU by ~40; here the reading only
-	// has to settle back within 0.5 (VU ballistics and the throttled readout, slower under load).
+	// has to stay within 1 VU (ballistics, throttled readout and audio-thread underruns when the e2e
+	// suite runs 8 browsers in parallel; a dependency on the volume would be ~40× larger).
 	await expect(bridge.locator('.mode')).toHaveText('AO VIVO');
 	await expect
 		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })
-		.toBeLessThanOrEqual(0.5);
+		.toBeLessThanOrEqual(1);
 	await volume.fill('0');
 	await expect
 		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })
-		.toBeLessThanOrEqual(0.5);
+		.toBeLessThanOrEqual(1);
 
 	// 0 VU at −20 dBFS: the same −18 dBFS tone reads about +2 VU on every tap.
 	await popover.getByRole('radio', { name: '−20 dBFS' }).check();
@@ -232,7 +233,7 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 	await popover.getByRole('radio', { name: '−18 dBFS' }).check();
 	await expect
 		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })
-		.toBeLessThanOrEqual(0.5);
+		.toBeLessThanOrEqual(1);
 });
 
 test('stopping audio returns meters to DADOS and leaves the DOM at rest', async ({ page }) => {

@@ -300,6 +300,16 @@ function assertTemplateHygiene(source, keys) {
   );
 }
 
+/**
+ * Our own console lines stay; the platform's invocation logs (full request URLs, with tokens in
+ * the query of e-mailed links) are off and query strings are redacted, in every environment.
+ */
+const OBSERVABILITY = {
+  enabled: true,
+  redact_query_string: true,
+  logs: { enabled: true, invocation_logs: false },
+};
+
 test('web template declares every binding at the top level and in each environment', (t) => {
   const { source, keys, config } = renderReal(t, 'web/wrangler.template.jsonc');
   assertTemplateHygiene(source, keys);
@@ -317,7 +327,7 @@ test('web template declares every binding at the top level and in each environme
       target.name,
       label === 'staging' ? 'fixture:WORKER_NAME_WEB-staging' : 'fixture:WORKER_NAME_WEB',
     );
-    assert.deepEqual(target.observability, { enabled: true }, label);
+    assert.deepEqual(target.observability, OBSERVABILITY, label);
     assert.deepEqual(target.d1_databases, [
       {
         binding: 'DB',
@@ -423,6 +433,7 @@ test('jobs template consumes the access-log queue with a DLQ and runs the daily 
       target.name,
       label === 'staging' ? 'fixture:WORKER_NAME_JOBS-staging' : 'fixture:WORKER_NAME_JOBS',
     );
+    assert.deepEqual(target.observability, OBSERVABILITY, label);
     assert.deepEqual(target.triggers, { crons: ['5 0 * * *'] });
     assert.deepEqual(
       target.d1_databases.map((db) => [db.binding, db.database_id]),

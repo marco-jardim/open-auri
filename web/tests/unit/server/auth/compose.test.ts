@@ -76,6 +76,36 @@ describe('hook composition', () => {
 		expect((await off(event('POST', '/api/auth/sign-up/email'))).status).toBe(200);
 	});
 
+	it('runs `finish` (security headers, access log) on the 503 only', async () => {
+		const finished: { path: string; status: number }[] = [];
+		const finish = (current: Event, response: Response): Response => {
+			finished.push({ path: new URL(current.request.url).pathname, status: response.status });
+			const copy = new Response(response.body, response);
+			copy.headers.set('x-content-type-options', 'nosniff');
+			return copy;
+		};
+		const handle = chain(
+			[createReadOnlyHandle({ building: false, env: () => kv('1'), finish })],
+			() => new Response('ok')
+		);
+		const blocked = await handle(event('POST', '/api/auth/sign-up/email'));
+		expect(blocked.status).toBe(503);
+		expect(blocked.headers.get('x-content-type-options')).toBe('nosniff');
+		expect(blocked.headers.get('x-error-code')).toBe(READ_ONLY_CODE);
+		expect(((await blocked.json()) as { code: string }).code).toBe(READ_ONLY_CODE);
+
+		const link = await handle(event('GET', '/api/auth/verify-email?token=t'));
+		expect(link.status).toBe(503);
+
+		// Not blocked: reads, the allowlist (including the LGPD export) go on without `finish`.
+		expect((await handle(event('GET', '/conta'))).status).toBe(200);
+		expect((await handle(event('POST', '/conta/exportar'))).status).toBe(200);
+		expect(finished).toEqual([
+			{ path: '/api/auth/sign-up/email', status: 503 },
+			{ path: '/api/auth/verify-email', status: 503 }
+		]);
+	});
+
 	it('steps aside while building or without a platform', async () => {
 		const neverCalled = () => {
 			throw new Error('env must not be read');

@@ -142,6 +142,100 @@ describe('30-day change clock', () => {
 		});
 	});
 
+	it('two concurrent changes: the loser gets too-soon and changes nothing', async () => {
+		const user = await seedUser({ username: nick('rc') });
+		const winner = nick('wi');
+		const loser = nick('lo');
+		// The loser reads the row, then the winner's whole change runs before the loser's batch.
+		let raced = false;
+		const racing = new Proxy(env.DB, {
+			get(target, property) {
+				if (property === 'batch') {
+					return async (statements: Parameters<typeof target.batch>[0]) => {
+						if (!raced) {
+							raced = true;
+							expect(await changeNickname(env.DB, user.id, winner, T0)).toMatchObject({
+								ok: true,
+								kind: 'change'
+							});
+						}
+						return target.batch(statements);
+					};
+				}
+				const value: unknown = Reflect.get(target, property);
+				return typeof value === 'function' ? value.bind(target) : value;
+			}
+		});
+		expect(await changeNickname(racing, user.id, loser, T0)).toEqual({
+			ok: false,
+			error: 'too-soon',
+			retryAt: T0 + NICKNAME_CHANGE_INTERVAL_MS
+		});
+		expect(raced).toBe(true);
+		const row = await userRow(user.id);
+		expect(row?.username).toBe(winner);
+		expect(row?.username_changed_at).toBe(T0);
+		// Only the winner's hold (the original nickname, redirecting to the winner); the loser
+		// neither held anything nor touched the redirects.
+		const holds = await env.DB.prepare(
+			'SELECT username, redirect_to FROM username_holds WHERE user_id = ?'
+		)
+			.bind(user.id)
+			.all<{ username: string; redirect_to: string }>();
+		expect(holds.results).toHaveLength(1);
+		expect(holds.results[0]?.redirect_to).toBe(winner);
+		expect(await resolveNickname(env.DB, loser, T0 + DAY)).toBeNull();
+	});
+
+	it('Promise.all of two changes: exactly one wins', async () => {
+		const user = await seedUser({ username: nick('pa') });
+		const a = nick('pb');
+		const b = nick('pc');
+		const results = await Promise.all([
+			changeNickname(env.DB, user.id, a, T0),
+			changeNickname(env.DB, user.id, b, T0)
+		]);
+		expect(results.filter((result) => result.ok)).toHaveLength(1);
+		expect(results.filter((result) => !result.ok)).toEqual([
+			{ ok: false, error: 'too-soon', retryAt: T0 + NICKNAME_CHANGE_INTERVAL_MS }
+		]);
+		const won = results.find((result) => result.ok);
+		expect((await userRow(user.id))?.username).toBe(won?.ok ? won.username : null);
+		expect(await count('SELECT count(*) AS n FROM username_holds WHERE user_id = ?', user.id)).toBe(
+			1
+		);
+	});
+
+	it('a cosmetic change racing a real change does not overwrite it', async () => {
+		const name = nick('cr');
+		const user = await seedUser({ username: name });
+		const next = nick('cn');
+		let raced = false;
+		const racing = new Proxy(env.DB, {
+			get(target, property) {
+				if (property === 'batch') {
+					return async (statements: Parameters<typeof target.batch>[0]) => {
+						if (!raced) {
+							raced = true;
+							await changeNickname(env.DB, user.id, next, T0);
+						}
+						return target.batch(statements);
+					};
+				}
+				const value: unknown = Reflect.get(target, property);
+				return typeof value === 'function' ? value.bind(target) : value;
+			}
+		});
+		expect(await changeNickname(racing, user.id, name.toUpperCase(), T0)).toEqual({
+			ok: false,
+			error: 'too-soon',
+			retryAt: T0 + NICKNAME_CHANGE_INTERVAL_MS
+		});
+		const row = await userRow(user.id);
+		expect(row?.username).toBe(next);
+		expect(row?.displayUsername).toBe(next);
+	});
+
 	it('nextNicknameChangeAt', () => {
 		expect(nextNicknameChangeAt({ username: null, changedAt: null }, T0)).toBeNull();
 		expect(nextNicknameChangeAt({ username: 'abc', changedAt: null }, T0)).toBeNull();

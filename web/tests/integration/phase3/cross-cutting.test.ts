@@ -78,7 +78,8 @@ describe('read-only switch in front of the real handlers', () => {
 		const row = await env.DB.prepare('SELECT id FROM "user" WHERE email = ?').bind(email).first();
 		expect(row).toBeNull();
 
-		const writes = ['/conta', '/conta/exportar', '/conta/politica', '/api/auth/change-password'];
+		// /conta/exportar only reads (LGPD access right) and stays allowed in read-only (Q3-10).
+		const writes = ['/conta', '/conta/politica', '/api/auth/change-password'];
 		for (const path of writes) {
 			const response = await through(post(path, {}));
 			expect(response.status, path).toBe(503);

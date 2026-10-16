@@ -1,7 +1,7 @@
 // Operator-only: gives the admin role to an account (plan T3.8). The role is never granted by the
 // UI; this tool is the only way in.
 //
-//   node tools/grant-admin.mjs [--email <address>] [--create] [--operator <label>]
+//   node tools/grant-admin.mjs [--email <address>] [--create] [--force] [--operator <label>]
 //                              [--env staging|production] [--local]
 //
 // --email defaults to ADMIN_EMAIL from the repository .env. The address is never printed: the
@@ -13,6 +13,13 @@
 // requests a reset for that address: only its mailbox receives the link, and the reset creates
 // the password. Then 2FA must be enabled in /conta before /admin opens (ADMIN_2FA_REQUIRED).
 // Printing a generated password was rejected: it would land in terminal scrollback and logs.
+// An existing account is promoted only when its e-mail is verified: anyone can sign up with an
+// address they do not own, and an unverified row proves nothing about who holds it. --force
+// overrides that (the operator vouches for the address; the audit detail records it). On a grant
+// every session of the account is deleted (a session opened before the grant, possibly by
+// someone else, must not inherit the role) and the tool tells the operator to reset the password
+// through /esqueci-senha ("esqueci a senha"), so only the mailbox owner holds a working password.
+// A refused grant still writes an audit row ('user.grant_admin.refused') and changes nothing.
 // --operator is an optional label recorded as the audit row's actor_id (actor_kind 'operator').
 // --local targets the local D1 of `wrangler dev` (no account check); otherwise --remote, with the
 // Wrangler login pinned to CLOUDFLARE_ACCOUNT_ID and checked with `wrangler whoami`, as in
@@ -24,9 +31,12 @@
 // strict patterns and quoted with sqlString() (Wrangler has no bind parameters). The outcome is
 // read back with a SELECT on the audit row id only. Statements, in order:
 //   1. (--create) INSERT the user when no row has that e-mail;
-//   2. INSERT the audit row ('user.grant_admin', target the user id, detail with the previous
-//      role and whether it was created), only when the user exists;
-//   3. UPDATE the role to 'admin'.
+//   2. INSERT the audit row, only when the user exists: 'user.grant_admin' (or
+//      'user.grant_admin.refused' for an unverified address without --force), target the user
+//      id, detail with the previous role, whether it was created, emailVerified, forced, granted
+//      and the number of sessions revoked;
+//   3. (granted, role not yet admin) DELETE the user's sessions;
+//   4. (granted) UPDATE the role to 'admin'.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,8 +48,8 @@ import { RenderError, isEntryPoint, loadValues, renderTemplate } from './render-
 import { whoamiIncludesAccount } from './sync-secrets.mjs';
 
 export const USAGE =
-  'Usage: node tools/grant-admin.mjs [--email <address>] [--create] [--operator <label>] ' +
-  '[--env staging|production] [--local]';
+  'Usage: node tools/grant-admin.mjs [--email <address>] [--create] [--force] ' +
+  '[--operator <label>] [--env staging|production] [--local]';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUTPUT_LIMIT = 1024 * 1024;
 const OPERATOR = /^[\p{L}\p{N} ._@-]{2,80}$/u;
@@ -50,8 +60,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** @typedef {'staging' | 'production'} TargetEnv */
 /**
- * @typedef {{ email: string | undefined, create: boolean, operator: string | undefined,
- *   env: TargetEnv | undefined, local: boolean }} GrantArgs
+ * @typedef {{ email: string | undefined, create: boolean, force: boolean,
+ *   operator: string | undefined, env: TargetEnv | undefined, local: boolean }} GrantArgs
  */
 /**
  * @typedef {(args: string[], options: { cwd: string, env: NodeJS.ProcessEnv })
@@ -67,6 +77,7 @@ export function parseArgs(args) {
   const parsed = {
     email: undefined,
     create: false,
+    force: false,
     operator: undefined,
     env: undefined,
     local: false,
@@ -75,6 +86,10 @@ export function parseArgs(args) {
     const flag = args[index];
     if (flag === '--create' && !parsed.create) {
       parsed.create = true;
+      continue;
+    }
+    if (flag === '--force' && !parsed.force) {
+      parsed.force = true;
       continue;
     }
     if (flag === '--local' && !parsed.local) {
@@ -115,7 +130,7 @@ export function normalizeEmail(value) {
 
 /**
  * The statements of one grant (see the header comment). All values validated and quoted.
- * @param {{ email: string, create: boolean, userId: string, auditId: string,
+ * @param {{ email: string, create: boolean, force?: boolean, userId: string, auditId: string,
  *   operator: string | undefined, now: Date }} grant
  */
 export function grantSql(grant) {
@@ -128,6 +143,12 @@ export function grantSql(grant) {
   const iso = sqlString(grant.now.toISOString());
   const userId = sqlString(grant.userId);
   const actor = grant.operator === undefined ? 'NULL' : sqlString(grant.operator);
+  const force = grant.force === true;
+  // Whether the grant goes ahead for a row of "user" (evaluated per statement, same data).
+  const allowed = force ? '1' : '"emailVerified" = 1';
+  const promotes = `${allowed} AND COALESCE(role, 'user') <> 'admin'`;
+  const bool = (/** @type {string} */ condition) =>
+    `CASE WHEN ${condition} THEN json('true') ELSE json('false') END`;
   /** @type {string[]} */
   const statements = [];
   if (grant.create) {
@@ -139,11 +160,19 @@ export function grantSql(grant) {
   }
   statements.push(
     'INSERT INTO audit_log (id, actor_id, actor_kind, action, target_kind, target_id, detail, ' +
-      `created_at) SELECT ${sqlString(grant.auditId)}, ${actor}, 'operator', 'user.grant_admin', ` +
-      "'user', id, json_object('previousRole', COALESCE(role, 'user'), 'created', " +
-      `CASE WHEN id = ${userId} THEN json('true') ELSE json('false') END), ${ms} ` +
-      `FROM "user" WHERE email = ${email}`,
-    `UPDATE "user" SET role = 'admin', updatedAt = ${iso} WHERE email = ${email}`,
+      `created_at) SELECT ${sqlString(grant.auditId)}, ${actor}, 'operator', ` +
+      `CASE WHEN ${allowed} THEN 'user.grant_admin' ELSE 'user.grant_admin.refused' END, ` +
+      "'user', id, json_object('previousRole', COALESCE(role, 'user'), " +
+      `'created', ${bool(`id = ${userId}`)}, ` +
+      `'emailVerified', ${bool('"emailVerified" = 1')}, ` +
+      `'forced', json('${force}'), ` +
+      `'granted', ${bool(allowed)}, ` +
+      `'sessionsRevoked', CASE WHEN ${promotes} THEN ` +
+      '(SELECT COUNT(*) FROM "session" WHERE "session"."userId" = "user".id) ELSE 0 END), ' +
+      `${ms} FROM "user" WHERE email = ${email}`,
+    'DELETE FROM "session" WHERE "userId" IN ' +
+      `(SELECT id FROM "user" WHERE email = ${email} AND ${promotes})`,
+    `UPDATE "user" SET role = 'admin', updatedAt = ${iso} WHERE email = ${email} AND ${allowed}`,
   );
   return `${statements.join(';\n')};\n`;
 }
@@ -156,7 +185,8 @@ export function outcomeSql(auditId) {
 
 /**
  * @param {Record<string, unknown>[]} rows
- * @returns {{ found: false } | { found: true, created: boolean, previousRole: string }}
+ * @returns {{ found: false } | { found: true, created: boolean, previousRole: string,
+ *   emailVerified: boolean, forced: boolean, granted: boolean, sessionsRevoked: number }}
  */
 export function parseOutcome(rows) {
   const row = rows[0];
@@ -169,13 +199,20 @@ export function parseOutcome(rows) {
     throw new RenderError('Unexpected D1 output');
   }
   if (typeof detail !== 'object' || detail === null) throw new RenderError('Unexpected D1 output');
-  const { previousRole, created } = /** @type {{ previousRole?: unknown, created?: unknown }} */ (
-    detail
-  );
+  const { previousRole, created, emailVerified, forced, granted, sessionsRevoked } =
+    /** @type {Record<string, unknown>} */ (detail);
   return {
     found: true,
     created: created === true,
     previousRole: typeof previousRole === 'string' ? previousRole : 'user',
+    emailVerified: emailVerified === true,
+    forced: forced === true,
+    // Strict: anything but an explicit true means nothing was granted.
+    granted: granted === true,
+    sessionsRevoked:
+      typeof sessionsRevoked === 'number' && Number.isSafeInteger(sessionsRevoked)
+        ? sessionsRevoked
+        : 0,
   };
 }
 
@@ -241,6 +278,7 @@ export async function grantAdmin(args, deps) {
   const sql = grantSql({
     email,
     create: parsed.create,
+    force: parsed.force,
     userId,
     auditId,
     operator: parsed.operator,
@@ -269,6 +307,12 @@ export async function grantAdmin(args, deps) {
     );
   }
   const target = parsed.local ? 'local D1' : `remote D1${parsed.env ? ` (${parsed.env})` : ''}`;
+  if (!outcome.granted) {
+    throw new RenderError(
+      `The account's e-mail address is not verified; nothing changed (audit ${auditId}). ` +
+        'Have the owner verify it, or pass --force only if you are sure the address is yours.',
+    );
+  }
   if (outcome.created) {
     log(`Created the admin account on ${target} without a password (audit ${auditId}).`);
     log('Next: open /esqueci-senha, request a reset for the admin address, set the password,');
@@ -277,6 +321,11 @@ export async function grantAdmin(args, deps) {
     log(`The account already had the admin role on ${target} (audit ${auditId}).`);
   } else {
     log(`Granted the admin role on ${target} (audit ${auditId}).`);
+    if (!outcome.emailVerified) log('--force: the e-mail address was NOT verified.');
+    log(`Signed the account out everywhere (${outcome.sessionsRevoked} session(s) deleted).`);
+    log('Next: open /esqueci-senha ("esqueci a senha"), request a reset for that address and set');
+    log('a new password, so only the mailbox owner holds one; then enable two-step');
+    log('verification in /conta; /admin requires it.');
   }
   return { auditId, ...outcome };
 }

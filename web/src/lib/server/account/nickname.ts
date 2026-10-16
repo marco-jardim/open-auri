@@ -6,8 +6,10 @@
 //   - the previous nickname is held for 90 days (username_holds, by skeleton) and redirects to the
 //     owner's current one; only the previous owner may take it back during the hold;
 //   - uniqueness against current nicknames AND active holds, both by skeleton.
-// The write is a single D1 batch (hold + redirects + user row); the unique index on
-// "user"."usernameSkeleton" settles races between two accounts.
+// The write is a single D1 batch (user row + hold + redirects); the unique index on
+// "user"."usernameSkeleton" settles races between two accounts, and a compare-and-set on
+// "username_changed_at" / "usernameSkeleton" settles races between two changes of the same
+// account (the loser gets `too-soon` and changes nothing).
 import type { D1Database } from '@cloudflare/workers-types';
 import { all, batch, first, sql, type BoundStatement } from '../db.ts';
 import { checkUsername, normalizeUsername, usernameSkeleton } from '../auth/username.ts';
@@ -122,16 +124,21 @@ export async function changeNickname(
 			return { ok: false, error: 'unchanged' };
 		}
 		// Same skeleton: nobody else can hold it, no hold to create, no clock to restart.
-		await batch(db, [
+		// Compare-and-set on the skeleton read above: a concurrent real change must not be
+		// overwritten by a cosmetic form of the previous nickname.
+		const [cosmetic] = await batch(db, [
 			sql(
 				db,
-				'UPDATE "user" SET "username" = ?, "displayUsername" = ?, "updatedAt" = ? WHERE "id" = ?',
+				'UPDATE "user" SET "username" = ?, "displayUsername" = ?, "updatedAt" = ? ' +
+					'WHERE "id" = ? AND "usernameSkeleton" IS ?',
 				username,
 				display,
 				nowIso,
-				userId
+				userId,
+				row.usernameSkeleton
 			)
 		]);
+		if (cosmetic?.meta.changes === 0) return lostRace(db, userId, now);
 		return { ok: true, username, displayUsername: display, kind: 'cosmetic' };
 	}
 
@@ -147,14 +154,39 @@ export async function changeNickname(
 	if (owner) return { ok: false, error: 'taken' };
 	if (await isNicknameHeld(db, username, now, userId)) return { ok: false, error: 'taken' };
 
+	// Compare-and-set: the user row changes only if the clock and skeleton are still the ones read
+	// above, so two concurrent changes cannot both pass the 30-day check. The hold statements run
+	// after it, inside the same batch, and only when the row now carries this change (`landed`);
+	// a lost race leaves everything untouched and reads as `too-soon`.
+	const landed =
+		'EXISTS (SELECT 1 FROM "user" WHERE "id" = ? AND "usernameSkeleton" = ? ' +
+		'AND "username_changed_at" = ?)';
 	const statements: BoundStatement[] = [
+		sql(
+			db,
+			'UPDATE "user" SET "username" = ?, "displayUsername" = ?, "usernameSkeleton" = ?, ' +
+				'"username_changed_at" = ?, "updatedAt" = ? WHERE "id" = ? ' +
+				'AND "username_changed_at" IS ? AND "usernameSkeleton" IS ?',
+			username,
+			display,
+			skeleton,
+			now,
+			nowIso,
+			userId,
+			row.username_changed_at,
+			row.usernameSkeleton
+		),
 		// An expired hold on the new name, or the user's own hold (taking an old nickname back).
 		sql(
 			db,
-			'DELETE FROM username_holds WHERE skeleton = ? AND (released_at <= ? OR user_id = ?)',
+			'DELETE FROM username_holds WHERE skeleton = ? AND (released_at <= ? OR user_id = ?) ' +
+				`AND ${landed}`,
 			skeleton,
 			now,
-			userId
+			userId,
+			userId,
+			skeleton,
+			now
 		)
 	];
 	if (current !== null && currentSkeleton !== null) {
@@ -162,46 +194,58 @@ export async function changeNickname(
 			sql(
 				db,
 				'INSERT INTO username_holds (skeleton, username, user_id, released_at, redirect_to) ' +
-					'VALUES (?, ?, ?, ?, ?) ON CONFLICT (skeleton) DO UPDATE SET ' +
+					`SELECT ?, ?, ?, ?, ? WHERE ${landed} ON CONFLICT (skeleton) DO UPDATE SET ` +
 					'username = excluded.username, user_id = excluded.user_id, ' +
 					'released_at = excluded.released_at, redirect_to = excluded.redirect_to',
 				currentSkeleton,
 				current,
 				userId,
 				now + NICKNAME_HOLD_MS,
-				username
+				username,
+				userId,
+				skeleton,
+				now
 			),
 			// Older nicknames still on hold now redirect to the newest one.
 			sql(
 				db,
-				'UPDATE username_holds SET redirect_to = ? WHERE user_id = ? AND released_at > ?',
+				'UPDATE username_holds SET redirect_to = ? WHERE user_id = ? AND released_at > ? ' +
+					`AND ${landed}`,
 				username,
 				userId,
+				now,
+				userId,
+				skeleton,
 				now
 			)
 		);
 	}
-	statements.push(
-		sql(
-			db,
-			'UPDATE "user" SET "username" = ?, "displayUsername" = ?, "usernameSkeleton" = ?, ' +
-				'"username_changed_at" = ?, "updatedAt" = ? WHERE "id" = ?',
-			username,
-			display,
-			skeleton,
-			now,
-			nowIso,
-			userId
-		)
-	);
+	let changed: number | undefined;
 	try {
-		await batch(db, statements);
+		const [update] = await batch(db, statements);
+		changed = update?.meta.changes;
 	} catch (error) {
 		if (isUniqueViolation(error)) return { ok: false, error: 'taken' };
 		throw error;
 	}
+	if (changed === 0) return lostRace(db, userId, now);
 	const kind = current === null ? 'first' : 'change';
 	return { ok: true, username, displayUsername: display, kind };
+}
+
+/**
+ * A concurrent change won the compare-and-set: answer `too-soon` with the winner's clock (when
+ * it set one) so the form shows the same message as a sequential second change.
+ */
+async function lostRace(db: D1Database, userId: string, now: number): Promise<NicknameResult> {
+	const fresh = await first<{ username: string | null; username_changed_at: number | null }>(
+		sql(db, 'SELECT "username", "username_changed_at" FROM "user" WHERE "id" = ?', userId)
+	);
+	const retryAt = fresh
+		? nextNicknameChangeAt({ username: fresh.username, changedAt: fresh.username_changed_at }, now)
+		: null;
+	if (retryAt === null) return { ok: false, error: 'too-soon' };
+	return { ok: false, error: 'too-soon', retryAt };
 }
 
 export type NicknameLookup =

@@ -12,6 +12,10 @@
 // account_id are inherited), so every binding and var is repeated per environment.
 // EMAIL_TRANSPORT defaults to "resend" when unset (tools/render-wrangler.mjs DEFAULTS); "capture"
 // is the local e2e mailbox and the Worker refuses it unless PUBLIC_ORIGIN is localhost.
+// Observability: our own console lines stay (PII-free by design), but the platform's invocation
+// logs are off and query strings are redacted: invocation logs record full request URLs, and
+// e-mailed links carry tokens in the query (/api/auth/verify-email?token=<JWT with the address>,
+// /api/auth/delete-user/callback?token=, /redefinir-senha?token=). Same in every environment.
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "${WORKER_NAME_WEB}",
@@ -25,7 +29,11 @@
 	},
 	"workers_dev": true,
 	"preview_urls": true,
-	"observability": { "enabled": true },
+	"observability": {
+		"enabled": true,
+		"redact_query_string": true,
+		"logs": { "enabled": true, "invocation_logs": false }
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -58,7 +66,11 @@
 			"name": "${WORKER_NAME_WEB}",
 			"workers_dev": true,
 			"preview_urls": true,
-			"observability": { "enabled": true },
+			"observability": {
+				"enabled": true,
+				"redact_query_string": true,
+				"logs": { "enabled": true, "invocation_logs": false }
+			},
 			"d1_databases": [
 				{
 					"binding": "DB",
@@ -91,7 +103,11 @@
 			"name": "${WORKER_NAME_WEB}-staging",
 			"workers_dev": true,
 			"preview_urls": true,
-			"observability": { "enabled": true },
+			"observability": {
+				"enabled": true,
+				"redact_query_string": true,
+				"logs": { "enabled": true, "invocation_logs": false }
+			},
 			"d1_databases": [
 				{
 					"binding": "DB",

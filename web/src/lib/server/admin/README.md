@@ -6,16 +6,16 @@ TypeScript without `$app/*` or SvelteKit imports, tested inside workerd
 
 ## Modules
 
-| File           | What it does                                                                                                                                                                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `guard.ts`     | `requireAdmin(locals, env, { destructive, request, rawEnv })` → typed result. 1) `isAdminEffective` (role admin, not banned, not impersonating, 2FA marker when `ADMIN_2FA_REQUIRED`), 2) Access JWT when configured, 3) fresh session if destructive. |
-| `access.ts`    | Optional Cloudflare Access: `readAccessConfig(rawEnv)`, `verifyAccessJwt(token, config, { fetch, now })`, `checkAccess(request, rawEnv)`. RS256 via WebCrypto, JWKS cache 5 min, fail closed.                                                          |
-| `audit.ts`     | `audit`, `auditStatement` (for `batch`), `audited` (audit-first mutation), `listAudit` (newest first, paginated, optional target filter), `parsePage`, `AUDIT_ACTIONS`.                                                                                |
-| `users.ts`     | `searchUsers` (nickname prefix, exact e-mail, exact id; e-mail masked), `getAdminUser`, `banUser` / `unbanUser` through `auth.api.banUser` / `unbanUser`, form parsers.                                                                                |
-| `read-only.ts` | KV `CONFIG` key `mode:read-only` (`"1"` = on): `isReadOnly` (≤ 10 s isolate cache), `setReadOnly` (audited), `enforceWritable` (write middleware), allowlist.                                                                                          |
-| `reauth.ts`    | TOTP re-authentication (`auth.api.verifyTOTP` on the admin's own session → the auth after-hook refreshes `twoFactorVerifiedAt`), rate limited through `RL_AUTH` (fail closed), every attempt audited.                                                  |
-| `kit.ts`       | `requireAdminPage(event)` (404) and `requireAdminAction(event)` (404, or `fail(403, { reauth: true, code: 'REAUTH_REQUIRED' })`), `ADMIN_HEADERS`.                                                                                                     |
-| `actions.ts`   | Shared form actions: `reauthAction`, `readOnlyAction`, `banAction`, `unbanAction`.                                                                                                                                                                     |
+| File           | What it does                                                                                                                                                                                                                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `guard.ts`     | `requireAdmin(locals, env, { destructive, request, rawEnv })` → typed result. 1) `isAdminEffective` (role admin, not banned, not impersonating, 2FA marker when `ADMIN_2FA_REQUIRED`), 2) Access JWT when configured, 3) fresh session if destructive.                                                                                      |
+| `access.ts`    | Optional Cloudflare Access: `readAccessConfig(rawEnv)`, `verifyAccessJwt(token, config, { fetch, now })`, `checkAccess(request, rawEnv)`. RS256 via WebCrypto, JWKS cache 5 min, fail closed.                                                                                                                                               |
+| `audit.ts`     | `audit`, `auditStatement` (for `batch`), `audited` (audit-first mutation), `listAudit` (newest first, paginated, optional target filter), `parsePage`, `AUDIT_ACTIONS`.                                                                                                                                                                     |
+| `users.ts`     | `searchUsers` (nickname prefix, exact e-mail, exact id; e-mail masked), `getAdminUser`, `banUser` / `unbanUser` through `auth.api.banUser` / `unbanUser`, form parsers.                                                                                                                                                                     |
+| `read-only.ts` | KV `CONFIG` key `mode:read-only` (`"1"` = on): `isReadOnly` (≤ 10 s isolate cache), `setReadOnly` (audited), `enforceWritable` (write middleware), allowlist.                                                                                                                                                                               |
+| `reauth.ts`    | TOTP re-authentication (`auth.api.verifyTOTP` on the admin's own session → the auth after-hook refreshes `twoFactorVerifiedAt`), rate limited by the per-user secret guard of the auth hooks (`auth/secret-guard.ts`: 5 attempts per 5 min, 20 wrong secrets per day) plus `RL_AUTH` as a burst guard (fail closed), every attempt audited. |
+| `kit.ts`       | `requireAdminPage(event)` (404) and `requireAdminAction(event)` (404, or `fail(403, { reauth: true, code: 'REAUTH_REQUIRED' })`), `ADMIN_HEADERS`.                                                                                                                                                                                          |
+| `actions.ts`   | Shared form actions: `reauthAction`, `readOnlyAction`, `banAction`, `unbanAction`.                                                                                                                                                                                                                                                          |
 
 Routes: `src/routes/admin/` (dashboard + read-only toggle), `admin/usuarios` (search, ban/unban),
 `admin/auditoria` (trail). All SSR, `prerender = false`, `x-robots-tag: noindex, nofollow`,
@@ -30,8 +30,8 @@ action runs the guard itself (SvelteKit does not make them wait for the layout l
 - **Freshness.** Destructive = ban, unban, read-only toggle. Fresh = signed in, or second factor
   verified, in the last 10 minutes (`isFreshSession`). Re-authentication posts a TOTP code; admins
   without 2FA (only possible with `ADMIN_2FA_REQUIRED=false`) sign out and in again. Better Auth
-  does not count TOTP failures for an existing session, hence the `RL_AUTH` limit keyed
-  `admin-reauth:<userId>`.
+  does not count TOTP failures for an existing session, hence the per-user secret guard in the
+  auth hooks (it also covers direct calls to `/api/auth/two-factor/verify-totp`).
 - **Cloudflare Access (optional).** Set `ACCESS_AUD` (application audience tag) and
   `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`) as Worker vars to require
   `Cf-Access-Jwt-Assertion` on every `/admin` request. Only one of the two set = everything denied
@@ -56,22 +56,43 @@ action runs the guard itself (SvelteKit does not make them wait for the layout l
   take about a minute to propagate. A KV read failure keeps the last known value (or off) and logs
   `admin.read_only_lookup_failed` with the error class only. While on, `enforceWritable` answers
   every non-GET/HEAD/OPTIONS request with 503 `{"code":"READ_ONLY"}`, `Retry-After: 300`,
-  `Cache-Control: no-store`, except: `/api/auth/sign-in/email`, `/api/auth/sign-in/username`,
-  `/api/auth/two-factor/verify-totp`, `/api/auth/two-factor/verify-backup-code`,
-  `/api/auth/sign-out`, `/admin` and `/admin/*` (guarded and audited; moderation keeps working
-  during an incident). Webhooks get 503 and are retried by the sender.
+  `Cache-Control: no-store`, `x-error-code: READ_ONLY`, except: `/api/auth/sign-in/email`,
+  `/api/auth/sign-in/username`, `/api/auth/two-factor/verify-totp`,
+  `/api/auth/two-factor/verify-backup-code`, `/api/auth/sign-out`, `/conta/exportar` (the LGPD
+  export is a POST but only reads: the access right stays available), `/admin` and `/admin/*`
+  (guarded and audited; moderation keeps working during an incident). Webhooks get 503 and are
+  retried by the sender.
+- **State-changing GETs.** Better Auth changes state on two e-mailed GET links:
+  `/api/auth/verify-email` (marks verified, switches the address, creates a session, sends mail)
+  and `/api/auth/delete-user/callback` (runs the deletion policy, deletes the user, sessions and
+  accounts). While on, GET/HEAD on those paths get the same 503; matching is lenient (decoded,
+  dot segments resolved, repeated/trailing slashes dropped, case-insensitive), since blocking more
+  is harmless. The token is not consumed, so the link works again once the switch is off (unless
+  it expired). Every other GET/HEAD/OPTIONS never reads KV.
+- **Response format.** JSON `{"code":"READ_ONLY"}` by default; browser navigations
+  (`Sec-Fetch-Mode: navigate` or `Accept` with `text/html`, e.g. a clicked e-mail link or a form
+  posted without JavaScript) get a static bilingual HTML page (pt-BR / en-US, no scripts, no
+  request data, `data-code="READ_ONLY"`). The page is static because the step runs before
+  paraglide (no locale yet).
+- **Headers and access log.** The step runs first (before auth, whose session lookup can write),
+  so the later hooks never see its 503. `createReadOnlyHandle({ finish })` applies the same
+  security headers and access-log record to it; the access record of a blocked request has no
+  user id (auth did not run).
 
 ## Wiring (outside this directory)
 
-- `src/hooks.server.ts`, first step of the sequence:
+- `src/hooks.server.ts`, first step of the sequence (order in `auth/compose.ts`):
 
   ```ts
-  import { enforceWritable } from '#lib/server/admin/read-only.ts';
-  const readOnly: Handle = async ({ event, resolve }) =>
-  	(building || !event.platform
-  		? null
-  		: await enforceWritable(event.request, getServerEnv(event.platform))) ?? resolve(event);
-  export const handle = sequence(readOnly, paraglide, auth, securityHeaders, accessLog);
+  const readOnly = createReadOnlyHandle({
+  	building,
+  	env: getServerEnv,
+  	finish: (event, response) => withSecurityHeaders(event, recordAccess(event, response))
+  });
+  export const handle = sequence(
+  	platformShim,
+  	...orderedHandles({ readOnly, paraglide, auth, securityHeaders, accessLog })
+  );
   ```
 
 - Better Auth's own `/api/auth/admin/*` HTTP endpoints check only the role. The auth `before` hook
@@ -81,11 +102,16 @@ action runs the guard itself (SvelteKit does not make them wait for the layout l
 ## Operator tools
 
 - `tools/grant-admin.mjs` is the only way to get the admin role:
-  `node tools/grant-admin.mjs [--email <a>] [--create] [--operator <label>] [--env staging|production] [--local]`.
+  `node tools/grant-admin.mjs [--email <a>] [--create] [--force] [--operator <label>] [--env staging|production] [--local]`.
   `--email` defaults to `ADMIN_EMAIL` from `.env` and is never printed. `--create` creates the
   account without a password (e-mail marked verified, role admin, nothing sent); the operator then
-  uses `/esqueci-senha` (only that mailbox receives the link) and enables 2FA in `/conta`. Writes
-  `audit_log` (`user.grant_admin`, actor_kind `operator`, detail `previousRole` / `created`).
+  uses `/esqueci-senha` (only that mailbox receives the link) and enables 2FA in `/conta`. An
+  existing account is promoted only when its e-mail is verified (anyone can sign up with an
+  address they do not own); `--force` overrides that and is recorded. A grant deletes every
+  session of the account and the tool tells the operator to reset the password through
+  `/esqueci-senha`. Writes `audit_log` (`user.grant_admin`, or `user.grant_admin.refused` when
+  nothing changed; actor_kind `operator`; detail `previousRole`, `created`, `emailVerified`,
+  `forced`, `granted`, `sessionsRevoked`).
 - `tools/access-log-query.mjs` mirrors each judicial request into `audit_log`
   (`access_log.query`, actor_kind `operator`, target the request id, detail request id + window).
 - Other tools writing audit rows: `INSERT INTO audit_log (id, actor_id, actor_kind, action,

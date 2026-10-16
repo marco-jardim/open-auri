@@ -159,8 +159,81 @@ describe('enforceWritable', () => {
 		expect(await enforceWritable(request('POST', '/api/curvas'), target)).toBeNull();
 	});
 
+	it('blocks the state-changing Better Auth GET links while on, and only those', async () => {
+		const links = [
+			'/api/auth/verify-email?token=abc&callbackURL=%2Fconta',
+			'/api/auth/delete-user/callback?token=abc',
+			'/api/auth/verify-email/',
+			'/api/auth//verify-email',
+			'/API/Auth/Verify-Email',
+			'/api/auth/verify%2Demail',
+			'/api/auth/x/%2e%2e/delete-user/callback'
+		];
+		// Off: the links work (and no KV-free shortcut hides a bug: the switch is really read).
+		for (const path of links) {
+			expect(await enforceWritable(request('GET', path), target), path).toBeNull();
+		}
+
+		await setReadOnly(target, true, `admin-${crypto.randomUUID()}`);
+		for (const method of ['GET', 'HEAD'] as const) {
+			for (const path of links) {
+				const response = await enforceWritable(request(method, path), target);
+				expect(response?.status, `${method} ${path}`).toBe(503);
+				expect(response?.headers.get('x-error-code')).toBe(READ_ONLY_CODE);
+				expect(response?.headers.get('retry-after')).toBe('300');
+				expect(response?.headers.get('cache-control')).toBe('no-store');
+			}
+		}
+		const json = await enforceWritable(request('GET', links[0] ?? ''), target);
+		expect(((await json?.json()) as { code?: string }).code).toBe(READ_ONLY_CODE);
+
+		// Other GETs, OPTIONS on the links and sibling paths stay readable.
+		for (const [method, path] of [
+			['OPTIONS', '/api/auth/verify-email'],
+			['GET', '/api/auth/get-session'],
+			['GET', '/api/auth/verify-email-x'],
+			['GET', '/api/auth/delete-user'],
+			['GET', '/redefinir-senha?token=abc']
+		] as const) {
+			expect(await enforceWritable(request(method, path), target), `${method} ${path}`).toBeNull();
+		}
+	});
+
+	it('answers browser navigations with a small HTML page that keeps the code', async () => {
+		await setReadOnly(target, true, `admin-${crypto.randomUUID()}`);
+		const navigation = new Request(`${ORIGIN}/api/auth/verify-email?token=abc`, {
+			headers: { accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8' }
+		});
+		const response = await enforceWritable(navigation, target);
+		expect(response?.status).toBe(503);
+		expect(response?.headers.get('content-type')).toBe('text/html; charset=utf-8');
+		expect(response?.headers.get('x-error-code')).toBe(READ_ONLY_CODE);
+		const html = (await response?.text()) ?? '';
+		expect(html).toContain(`data-code="${READ_ONLY_CODE}"`);
+		expect(html).toContain('somente leitura');
+		expect(html).not.toContain('abc');
+		expect(html).not.toContain('<script');
+
+		const form = new Request(`${ORIGIN}/conta`, {
+			method: 'POST',
+			headers: { 'sec-fetch-mode': 'navigate' },
+			body: 'a=1'
+		});
+		const formResponse = await enforceWritable(form, target);
+		expect(formResponse?.headers.get('content-type')).toBe('text/html; charset=utf-8');
+	});
+
+	it('keeps the LGPD export available while on', async () => {
+		await setReadOnly(target, true, `admin-${crypto.randomUUID()}`);
+		expect(await enforceWritable(request('POST', '/conta/exportar'), target)).toBeNull();
+		expect((await enforceWritable(request('POST', '/conta/politica'), target))?.status).toBe(503);
+		expect((await enforceWritable(request('POST', '/conta/exportar/x'), target))?.status).toBe(503);
+	});
+
 	it('matches the allowlist exactly', () => {
 		expect(isWriteAllowlisted('/admin')).toBe(true);
+		expect(isWriteAllowlisted('/conta/exportar')).toBe(true);
+		expect(isWriteAllowlisted('/conta/exportar/')).toBe(false);
 		expect(isWriteAllowlisted('/admin/auditoria')).toBe(true);
 		expect(isWriteAllowlisted('/admin.json')).toBe(false);
 		expect(isWriteAllowlisted('/api/auth/sign-in/email/')).toBe(false);

@@ -7,7 +7,8 @@
 // production; `env.production` mirrors it with the same name so that `--env production` commands
 // resolve to the same Worker (see web/wrangler.template.jsonc), and `env.staging` uses the _STAGING
 // resources. Bindings, vars, triggers and queue consumers are not inherited by named environments,
-// so they are repeated.
+// so they are repeated. Observability keeps our own (PII-free) console lines but turns the
+// platform's invocation logs off and redacts query strings, as in web/wrangler.template.jsonc.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "${WORKER_NAME_JOBS}",
@@ -17,7 +18,11 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "invocation_logs": false }
+  },
   "triggers": { "crons": ["5 0 * * *"] },
   "d1_databases": [
     {
@@ -48,7 +53,11 @@
       "name": "${WORKER_NAME_JOBS}",
       "workers_dev": false,
       "preview_urls": false,
-      "observability": { "enabled": true },
+      "observability": {
+        "enabled": true,
+        "redact_query_string": true,
+        "logs": { "enabled": true, "invocation_logs": false }
+      },
       "triggers": { "crons": ["5 0 * * *"] },
       "d1_databases": [
         {
@@ -79,7 +88,11 @@
       "name": "${WORKER_NAME_JOBS}-staging",
       "workers_dev": false,
       "preview_urls": false,
-      "observability": { "enabled": true },
+      "observability": {
+        "enabled": true,
+        "redact_query_string": true,
+        "logs": { "enabled": true, "invocation_logs": false }
+      },
       "triggers": { "crons": ["5 0 * * *"] },
       "d1_databases": [
         {

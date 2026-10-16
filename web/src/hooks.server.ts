@@ -1,6 +1,8 @@
 // Server hooks, composed in this order (each wraps the ones after it; the order lives in
 // #lib/server/auth/compose.ts, unit-tested):
-//   0. read-only switch (T3.8): while on, writes outside the allowlist get 503 `READ_ONLY` first.
+//   0. read-only switch (T3.8): while on, writes outside the allowlist (and Better Auth's two
+//      state-changing GET links) get 503 `READ_ONLY` first; that response still gets the
+//      security headers and the access-log record (steps 3 and 4, through `finish`).
 //   1. paraglide: locale from cookie/headers; fills %lang% / %dir% in app.html.
 //   2. auth: per-request Better Auth instance (`locals.auth`) and `locals.user` / `locals.session`
 //      from `auth.api.getSession` (null when signed out; a lookup failure never breaks a page).
@@ -78,14 +80,14 @@ const auth: Handle = async ({ event, resolve }) => {
 	return resolve(event);
 };
 
-const securityHeaders: Handle = async ({ event, resolve }) => {
-	const response = await resolve(event);
+type HookEvent = Parameters<Handle>[0]['event'];
+
+function withSecurityHeaders(event: HookEvent, response: Response): Response {
 	if (building) return response;
 	return applySecurityHeaders(response, { origin: getServerEnv(event.platform).publicOrigin });
-};
+}
 
-const accessLog: Handle = async ({ event, resolve }) => {
-	const response = await resolve(event);
+function recordAccess(event: HookEvent, response: Response): Response {
 	const platform = event.platform;
 	if (building || !platform) return response;
 	const env = getServerEnv(platform);
@@ -98,9 +100,20 @@ const accessLog: Handle = async ({ event, resolve }) => {
 		userId: event.locals.user?.id ?? null
 	});
 	return response;
-};
+}
 
-const readOnly = createReadOnlyHandle({ building, env: getServerEnv });
+const securityHeaders: Handle = async ({ event, resolve }) =>
+	withSecurityHeaders(event, await resolve(event));
+
+const accessLog: Handle = async ({ event, resolve }) => recordAccess(event, await resolve(event));
+
+// The 503 READ_ONLY skips the steps below, so it gets the same headers and access record here
+// (locals.user is still null: the record carries no user id).
+const readOnly = createReadOnlyHandle({
+	building,
+	env: getServerEnv,
+	finish: (event, response) => withSecurityHeaders(event, recordAccess(event, response))
+});
 
 export const handle: Handle = sequence(
 	platformShim,
