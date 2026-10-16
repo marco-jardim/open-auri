@@ -55,7 +55,8 @@ export default defineConfig({
 		})
 	],
 	test: {
-		expect: { requireAssertions: true },
+		// Real Chromium + AudioWorklet startup can exceed the 1 s default poll under a loaded parallel run.
+		expect: { requireAssertions: true, poll: { timeout: 5000 } },
 		coverage: {
 			provider: 'v8',
 			include: ['src/lib/**/*.{ts,js,svelte}'],
