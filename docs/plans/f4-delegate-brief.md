@@ -40,4 +40,13 @@ Leia antes de qualquer tarefa da F4, junto com `D:\git\open-auri\docs\plans\f2-d
 - Testes dividem o mesmo D1 entre arquivos: use ids e apelidos únicos por teste (prefixo do serviço + aleatório) e nunca dependa de contagem global.
 - Não rode testes (o orquestrador roda); informe no relatório o que não rodou. Linhas no padrão do Prettier do projeto (tabs, aspas simples, largura 100).
 
+## W4.4 (UI social): como trabalhar
+
+- Prontos e **só leitura**: toda a API v1 (`web/src/routes/api/v1/**`, serviços em `web/src/lib/server/social/**`, commits `7a8975b`…`f942519`), o cliente do navegador `web/src/lib/social/**` (`createSocialApi`, `SocialApiError`, `createSocialOutbox`, `createSocialSession`, `rememberOrigin`/`originOf`; leia o `README.md` de lá), `/c/[id]` (T4.5), `/u/[apelido]` (T4.11), imagens OG (`/og/<versionId>.png`).
+- **Origem das curvas:** toda tela que abre ou toca uma curva publicada chama `rememberOrigin({ s1, lineageId, versionId })`. Eventos de atividade só são enviados com a origem achada por `originOf(s1)` (bytes exatos): `previewed` depois de ≥ 10 s de prévia audível; `installed` só depois de gravação **real** bem-sucedida (`cable:written`, nunca simulada). Os eventos vão pela outbox (`enqueue`), nunca direto.
+- **Sem conta:** navegar e ouvir funcionam; ações sociais mostram o convite de login (`requireLoginHref`). **Offline ou API fora:** a página continua usável e mostra um aviso discreto; nada quebra (plano §3.9).
+- **Segurança (§0.12):** nenhuma tela grava no cabo; instalar sempre via `app.requestWrite(curve)` (checklist + gesto; o navegador revalida o gate). Publicar mostra o resultado do gate do servidor (`GATE_REJECTED` com os motivos) e a lâmpada "NO AR" só acende com aprovação. Medidores e LEDs só com dado real: os LEDs decorativos do mock da Comunidade **não** entram.
+- Texto de usuário só por `{texto}`; `{@html}` proibido. Mensagens por staging. Testes de componente em `web/tests/unit/pages/<página>/**` (Chromium real, `vitest-browser-svelte`, `page` de `vitest/browser`; veja `web/tests/unit/pages/shared-curve/` e `web/tests/unit/social/`). E2E só na T4.T.
+- Arquivos de integração (layout, `vite.config.ts`, mensagens, `hooks.server.ts`) são do orquestrador: se precisar de algo neles (ex.: montar um componente no layout, tirar `/comunidade` de `PENDING_ROUTES`), entregue o componente e descreva a linha no relatório.
+
 - **Regras gerais:** nunca commitar; nunca `Co-Authored-By` nem "Generated with"; sem `as any`, `@ts-ignore`, `@ts-expect-error`; sem `catch` vazio; nada do `.env` em arquivo, teste ou log; logs sem PII.

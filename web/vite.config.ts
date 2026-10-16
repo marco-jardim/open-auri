@@ -6,7 +6,7 @@ import adapter from '@sveltejs/adapter-cloudflare';
 import { sveltekit } from '@sveltejs/kit/vite';
 import paraglideOptions from './project.inlang/paraglide.config.mjs';
 
-const PENDING_ROUTES = new Set(['/comunidade']);
+const PENDING_ROUTES = new Set<string>();
 
 export default defineConfig({
 	envDir: '..',
