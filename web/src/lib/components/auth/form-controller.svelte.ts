@@ -1,6 +1,6 @@
 // Busy state, Turnstile refresh and focus handling shared by the enhanced auth forms.
 import { tick } from 'svelte';
-import type { FormEnhancer } from './types.ts';
+import type { FormEnhancer } from './enhancer-types.ts';
 
 export class FormController {
 	/** True while an enhanced submission is in flight. */

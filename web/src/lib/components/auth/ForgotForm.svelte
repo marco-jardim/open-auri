@@ -9,7 +9,8 @@
 	import { AUTH_TURNSTILE_ACTIONS } from './fields.ts';
 	import { FormController } from './form-controller.svelte.ts';
 	import { errorMessage } from './messages.ts';
-	import type { AuthFormState, FormEnhancer } from './types.ts';
+	import type { AuthFormState } from './types.ts';
+	import type { FormEnhancer } from './enhancer-types.ts';
 
 	interface Props {
 		result?: AuthFormState | null;

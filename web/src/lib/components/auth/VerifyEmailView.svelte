@@ -8,7 +8,8 @@
 	import ResendForm from './ResendForm.svelte';
 	import { withNext } from './next.ts';
 	import type { VerifyStatus } from './status.ts';
-	import type { AuthFormState, FormEnhancer } from './types.ts';
+	import type { AuthFormState } from './types.ts';
+	import type { FormEnhancer } from './enhancer-types.ts';
 
 	interface Props {
 		status: VerifyStatus;

@@ -12,7 +12,8 @@
 	import SubmitSwitch from './SubmitSwitch.svelte';
 	import { FormController } from './form-controller.svelte.ts';
 	import { errorMessage, formatWait } from './messages.ts';
-	import type { AuthFormState, FormEnhancer } from './types.ts';
+	import type { AuthFormState } from './types.ts';
+	import type { FormEnhancer } from './enhancer-types.ts';
 
 	interface Props {
 		result?: AuthFormState | null;

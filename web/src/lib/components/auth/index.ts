@@ -24,4 +24,5 @@ export {
 	type StrengthLevel
 } from './password-strength.ts';
 export { resetToken, signInNotice, verifyStatus, type VerifyStatus } from './status.ts';
-export type { AuthErrorKind, AuthFormState, FieldIssue, FormEnhancer } from './types.ts';
+export type { AuthErrorKind, AuthFormState, FieldIssue } from './types.ts';
+export type { FormEnhancer } from './enhancer-types.ts';

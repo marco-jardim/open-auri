@@ -2,7 +2,7 @@
 // the forms without it, as plain HTML forms). Wraps Kit's `enhance` with start/end hooks so the
 // forms can show a busy state and refresh the single-use Turnstile token after each attempt.
 import { enhance } from '$app/forms';
-import type { FormEnhancer } from './types.ts';
+import type { FormEnhancer } from './enhancer-types.ts';
 
 export const kitEnhancer: FormEnhancer = (form, hooks) =>
 	enhance(form, () => {
