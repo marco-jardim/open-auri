@@ -1,0 +1,358 @@
+/**
+ * VU and PPM (peak programme meter) ballistics as allocation-free block processors.
+ *
+ * Sources and deviations
+ * - IEC 60268-17 (VU) and IEC 60268-10 (PPM) are paywalled and were not consulted; the secondary
+ *   sources below were used instead.
+ * - VU dynamics: ITU-R BS.2054-4 §2, "99 % of final reading in 300 ms"; Wikipedia "VU meter",
+ *   overshoot 1–1.5 % and a fall time of about 300 ms as well
+ *   (https://en.wikipedia.org/wiki/VU_meter). Modelled as a linear
+ *   2nd-order low-pass on the full-wave rectified signal (ζ = 0.81, ωn = 13.422 rad/s, derivation
+ *   at {@link VU_OMEGA_N}), discretised with the bilinear transform pre-warped at ωn. Being linear,
+ *   the fall mirrors the rise (1 % residue after 300 ms); the needle may swing slightly below the
+ *   rest position after a sudden stop, which the dB reading clamps to FLOOR_DB (−120).
+ * - VU alignment: 0 VU = −18 dBFS (EBU R68, default), −20 dBFS (SMPTE RP155) or −14 dBFS (product
+ *   option: no standard source found). dBFS is the sine peak level (a full-scale sine is 0 dBFS).
+ *   The needle follows the average-rectified value (it is a full-wave rectifier instrument), so the
+ *   0 VU point is the average-rectified value of the reference sine, (2/π)·10^(ref/20). For a sine,
+ *   RMS and average-rectified calibration differ only by this constant.
+ * - PPM Type II (BBC/EBU): EBU Tech 3205 Table 2 (https://tech.ebu.ch/docs/tech/tech3205.pdf):
+ *   tone-burst readings relative to a continuous tone 100 ms 0 dB, 10 ms −2 ± 0.5 dB,
+ *   5 ms −4 ± 0.75 dB, 1.5 ms −9 ± 1 dB, 0.5 ms −17 ± 2 dB; return 24 dB in 2.8 s.
+ * - PPM Type I (DIN): Wikipedia "Peak programme meter"
+ *   (https://en.wikipedia.org/wiki/Peak_programme_meter): 10 ms −1 dB, 5 ms −2 dB, 3 ms −4 dB,
+ *   0.4 ms −15 dB relative to a continuous tone; return 20 dB in 1.7 s. That source gives no
+ *   tolerances (deviation: the tests use ±0.5 dB at 10 ms, ±0.75 dB at 5 ms, ±1 dB at 3 ms and
+ *   ±2 dB at 0.4 ms).
+ * - PPM model: quasi-peak rectifiers (charge through an attack time constant whenever |x| exceeds
+ *   the held value, exponential discharge that is linear in dB). Type I uses one rectifier. For
+ *   Type II a single rectifier cannot meet both the 1.5 ms and the 10 ms points with margin once the
+ *   continuous-tone droop is accounted for, so the reading is the mean of a fast and a slow
+ *   rectifier with the same discharge (decay stays exactly linear in dB). Attack constants were
+ *   tuned to the burst tables with the averaged rectifier equation dv/dt = (2/π)·h(v)/τ − k·v,
+ *   h(v) = √(1−v²) − v·acos v (see {@link quasiPeakEquilibrium}).
+ * - Deviation: readings are calibrated so a steady sine reads its peak level in dBFS; the raw
+ *   rectifier settles slightly below the crest (0.19–0.24 dB) because the discharge never stops.
+ *   Burst readings relative to the continuous tone are unaffected.
+ * @module
+ */
+
+import {
+  amplitudeToDb,
+  blockLength,
+  checkSampleRate,
+  checkState,
+  flush,
+  readArray,
+} from './common.mjs';
+
+/** @import { Samples } from './common.mjs' */
+
+/**
+ * VU damping ratio. Wikipedia "VU meter" gives 1–1.5 % overshoot; the overshoot of a 2nd-order
+ * step response is exp(−πζ/√(1−ζ²)), which is 1.5 % at ζ = 0.8008 and 1.0 % at ζ = 0.8261.
+ * ζ = 0.81 gives 1.30 %.
+ */
+export const VU_ZETA = 0.81;
+
+/**
+ * VU natural angular frequency, in rad/s. ITU-R BS.2054-4 §2: 99 % of the final reading in 300 ms.
+ * The underdamped step response y(t) = 1 − e^(−ζωn t)/√(1−ζ²)·sin(ωd t + acos ζ) first reaches 0.99
+ * at ωn·t = 4.02665 for ζ = 0.81 (solved by iteration on the closed form; the test re-solves it on a
+ * 10 µs grid), so ωn = 4.02665 / 0.300 s = 13.422 rad/s. (ωn = 13.7–14 rad/s would reach 99 % at
+ * 288–294 ms, also inside ±10 %.)
+ */
+export const VU_OMEGA_N = 13.422;
+
+/** Selectable 0 VU alignment levels in dBFS: EBU R68, SMPTE RP155, product option (no source). */
+export const VU_REFERENCE_LEVELS = Object.freeze([-18, -20, -14]);
+
+/** Default 0 VU alignment, in dBFS (EBU R68). */
+export const VU_DEFAULT_REFERENCE = -18;
+
+/** Average-rectified value of a unit-peak sine, 2/π. */
+const SINE_AVERAGE_RECTIFIED = 2 / Math.PI;
+
+/**
+ * Analytic VU step response (continuous time), as a fraction of the final deflection.
+ * @param {number} seconds
+ * @param {number} [zeta]
+ * @param {number} [omegaN]
+ * @returns {number}
+ */
+export function vuStepResponse(seconds, zeta = VU_ZETA, omegaN = VU_OMEGA_N) {
+  const damped = Math.sqrt(1 - zeta * zeta);
+  return (
+    1 -
+    (Math.exp(-zeta * omegaN * seconds) / damped) *
+      Math.sin(damped * omegaN * seconds + Math.acos(zeta))
+  );
+}
+
+/**
+ * @typedef {object} VuReading
+ * @property {number} left Left reading in VU (dB re the alignment level), floor FLOOR_DB (−120).
+ * @property {number} right Right reading in VU, floor FLOOR_DB (−120).
+ * @property {number} leftDeflection Left needle deflection, 1 = 0 VU (may dip below 0 after a stop).
+ * @property {number} rightDeflection Right needle deflection, 1 = 0 VU.
+ */
+
+/**
+ * @typedef {object} VuState
+ * @property {'vu'} kind
+ * @property {number} sampleRate
+ * @property {number} reference
+ * @property {number[]} filter
+ */
+
+/**
+ * @typedef {object} VuMeter
+ * @property {(left: Samples, right?: Samples) => void} process Processes one block (any length);
+ *   without `right` the left samples feed both needles.
+ * @property {() => VuReading} read
+ * @property {() => void} reset
+ * @property {() => VuState} getState
+ * @property {(state: unknown) => void} setState
+ * @property {readonly Float64Array[]} buffers Preallocated internal buffers (identity never changes).
+ */
+
+/**
+ * Creates a stereo VU meter.
+ * @param {{ sampleRate: number, reference?: number }} options
+ * @returns {VuMeter}
+ */
+export function createVuMeter(options) {
+  const sampleRate = checkSampleRate(options.sampleRate);
+  const reference = options.reference ?? VU_DEFAULT_REFERENCE;
+  if (!VU_REFERENCE_LEVELS.includes(reference)) {
+    throw new RangeError(`VU reference must be one of ${VU_REFERENCE_LEVELS.join(', ')} dBFS`);
+  }
+  const w = VU_OMEGA_N;
+  const k = w / Math.tan(w / (2 * sampleRate));
+  const a0 = k * k + 2 * VU_ZETA * w * k + w * w;
+  const b0 = (w * w) / a0;
+  const b1 = 2 * b0;
+  const b2 = b0;
+  const a1 = (2 * (w * w - k * k)) / a0;
+  const a2 = (k * k - 2 * VU_ZETA * w * k + w * w) / a0;
+  const zeroVu = SINE_AVERAGE_RECTIFIED * 10 ** (reference / 20);
+  // [s1 left, s2 left, y left, s1 right, s2 right, y right] (transposed direct form II)
+  const filter = new Float64Array(6);
+  const buffers = Object.freeze([filter]);
+
+  /**
+   * @param {Samples} left
+   * @param {Samples} [right]
+   */
+  function process(left, right) {
+    const n = blockLength(left, right);
+    const r = right === undefined ? left : right;
+    let s1l = filter[0];
+    let s2l = filter[1];
+    let yl = filter[2];
+    let s1r = filter[3];
+    let s2r = filter[4];
+    let yr = filter[5];
+    for (let i = 0; i < n; i++) {
+      const xl = left[i] < 0 ? -left[i] : left[i];
+      yl = b0 * xl + s1l;
+      s1l = b1 * xl - a1 * yl + s2l;
+      s2l = b2 * xl - a2 * yl;
+      const xr = r[i] < 0 ? -r[i] : r[i];
+      yr = b0 * xr + s1r;
+      s1r = b1 * xr - a1 * yr + s2r;
+      s2r = b2 * xr - a2 * yr;
+    }
+    filter[0] = flush(s1l);
+    filter[1] = flush(s2l);
+    filter[2] = flush(yl);
+    filter[3] = flush(s1r);
+    filter[4] = flush(s2r);
+    filter[5] = flush(yr);
+  }
+
+  return {
+    process,
+    read() {
+      const leftDeflection = filter[2] / zeroVu;
+      const rightDeflection = filter[5] / zeroVu;
+      return {
+        left: amplitudeToDb(leftDeflection),
+        right: amplitudeToDb(rightDeflection),
+        leftDeflection,
+        rightDeflection,
+      };
+    },
+    reset() {
+      filter.fill(0);
+    },
+    getState() {
+      return { kind: 'vu', sampleRate, reference, filter: Array.from(filter) };
+    },
+    setState(state) {
+      const record = checkState(state, 'vu', sampleRate);
+      if (record.reference !== reference) {
+        throw new RangeError(`VU state uses reference ${String(record.reference)} dBFS`);
+      }
+      filter.set(readArray(record.filter, filter.length, 'vu filter'));
+    },
+    buffers,
+  };
+}
+
+/**
+ * @typedef {object} PpmType
+ * @property {number} fastAttack Attack time constant of the fast rectifier, in seconds.
+ * @property {number} slowAttack Attack time constant of the slow rectifier, in seconds.
+ * @property {number} fastWeight Weight of the fast rectifier in the reading (slow gets 1 − weight).
+ * @property {number} decayDbPerSecond Return rate, in dB/s (linear in dB).
+ */
+
+/**
+ * PPM ballistics per type.
+ * - `I` (DIN): one rectifier, τ = 1.42 ms (tuned to the Wikipedia Type I burst table; predicted
+ *   readings at 48 kHz ≈ −0.8, −2.1, −3.8 and −15.9 dB for 10, 5, 3 and 0.4 ms), return
+ *   20 dB / 1.7 s (Wikipedia "Peak programme meter").
+ * - `II` (BBC/EBU): mean of rectifiers with τ = 1.1 ms and τ = 5.0 ms (tuned to EBU Tech 3205
+ *   Table 2; predicted ≈ −2.0, −3.9, −9.2 and −16.4 dB for 10, 5, 1.5 and 0.5 ms), return
+ *   24 dB / 2.8 s (EBU Tech 3205).
+ * @type {Readonly<Record<'I' | 'II', Readonly<PpmType>>>}
+ */
+export const PPM_TYPES = Object.freeze({
+  I: Object.freeze({
+    fastAttack: 1.42e-3,
+    slowAttack: 1.42e-3,
+    fastWeight: 1,
+    decayDbPerSecond: 20 / 1.7,
+  }),
+  II: Object.freeze({
+    fastAttack: 1.1e-3,
+    slowAttack: 5e-3,
+    fastWeight: 0.5,
+    decayDbPerSecond: 24 / 2.8,
+  }),
+});
+
+/**
+ * Steady-state level, as a fraction of the crest, of a continuous-time quasi-peak rectifier driven
+ * by a sine. Averaged over a half cycle the rectifier obeys dv/dt = (2/π)·h(v)/τ − k·v with
+ * h(v) = √(1−v²) − v·acos v and k = decay·ln(10)/20, so equilibrium solves h(v) = (π/2)·k·τ·v.
+ * @param {number} attackSeconds
+ * @param {number} decayDbPerSecond
+ * @returns {number}
+ */
+export function quasiPeakEquilibrium(attackSeconds, decayDbPerSecond) {
+  const c = (Math.PI / 2) * attackSeconds * decayDbPerSecond * (Math.LN10 / 20);
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 60; i++) {
+    const v = (lo + hi) / 2;
+    if (Math.sqrt(1 - v * v) - v * Math.acos(v) > c * v) lo = v;
+    else hi = v;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * @typedef {object} PpmReading
+ * @property {number} left Left reading in dBFS (sine peak), floor FLOOR_DB (−120).
+ * @property {number} right Right reading in dBFS (sine peak), floor FLOOR_DB (−120).
+ */
+
+/**
+ * @typedef {object} PpmState
+ * @property {'ppm'} kind
+ * @property {number} sampleRate
+ * @property {'I' | 'II'} type
+ * @property {number[]} rectifiers
+ */
+
+/**
+ * @typedef {object} PpmMeter
+ * @property {(left: Samples, right?: Samples) => void} process Processes one block (any length);
+ *   without `right` the left samples feed both channels.
+ * @property {() => PpmReading} read
+ * @property {() => void} reset
+ * @property {() => PpmState} getState
+ * @property {(state: unknown) => void} setState
+ * @property {readonly Float64Array[]} buffers Preallocated internal buffers (identity never changes).
+ */
+
+/**
+ * Creates a stereo PPM.
+ * @param {{ sampleRate: number, type?: 'I' | 'II' }} options
+ * @returns {PpmMeter}
+ */
+export function createPpmMeter(options) {
+  const sampleRate = checkSampleRate(options.sampleRate);
+  const type = options.type ?? 'II';
+  if (type !== 'I' && type !== 'II') {
+    throw new RangeError(`PPM type must be 'I' or 'II', got ${String(type)}`);
+  }
+  const spec = PPM_TYPES[type];
+  const fastAlpha = 1 - Math.exp(-1 / (spec.fastAttack * sampleRate));
+  const slowAlpha = 1 - Math.exp(-1 / (spec.slowAttack * sampleRate));
+  const decay = 10 ** (-spec.decayDbPerSecond / (20 * sampleRate));
+  const fastWeight = spec.fastWeight;
+  const slowWeight = 1 - fastWeight;
+  const gain =
+    1 /
+    (fastWeight * quasiPeakEquilibrium(spec.fastAttack, spec.decayDbPerSecond) +
+      slowWeight * quasiPeakEquilibrium(spec.slowAttack, spec.decayDbPerSecond));
+  // [fast left, slow left, fast right, slow right]
+  const rectifiers = new Float64Array(4);
+  const buffers = Object.freeze([rectifiers]);
+
+  /**
+   * @param {Samples} left
+   * @param {Samples} [right]
+   */
+  function process(left, right) {
+    const n = blockLength(left, right);
+    const r = right === undefined ? left : right;
+    let fl = rectifiers[0];
+    let sl = rectifiers[1];
+    let fr = rectifiers[2];
+    let sr = rectifiers[3];
+    for (let i = 0; i < n; i++) {
+      const xl = left[i] < 0 ? -left[i] : left[i];
+      fl *= decay;
+      sl *= decay;
+      if (xl > fl) fl += fastAlpha * (xl - fl);
+      if (xl > sl) sl += slowAlpha * (xl - sl);
+      const xr = r[i] < 0 ? -r[i] : r[i];
+      fr *= decay;
+      sr *= decay;
+      if (xr > fr) fr += fastAlpha * (xr - fr);
+      if (xr > sr) sr += slowAlpha * (xr - sr);
+    }
+    rectifiers[0] = flush(fl);
+    rectifiers[1] = flush(sl);
+    rectifiers[2] = flush(fr);
+    rectifiers[3] = flush(sr);
+  }
+
+  return {
+    process,
+    read() {
+      return {
+        left: amplitudeToDb(gain * (fastWeight * rectifiers[0] + slowWeight * rectifiers[1])),
+        right: amplitudeToDb(gain * (fastWeight * rectifiers[2] + slowWeight * rectifiers[3])),
+      };
+    },
+    reset() {
+      rectifiers.fill(0);
+    },
+    getState() {
+      return { kind: 'ppm', sampleRate, type, rectifiers: Array.from(rectifiers) };
+    },
+    setState(state) {
+      const record = checkState(state, 'ppm', sampleRate);
+      if (record.type !== type) {
+        throw new RangeError(`PPM state is for type ${String(record.type)}`);
+      }
+      rectifiers.set(readArray(record.rectifiers, rectifiers.length, 'ppm rectifiers'));
+    },
+    buffers,
+  };
+}
