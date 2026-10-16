@@ -1,0 +1,113 @@
+import { m } from '#lib/paraglide/messages.js';
+
+export function copy(locale: 'pt-BR' | 'en-US') {
+	const options = { locale };
+	return {
+		title: m.comparar_title({}, options),
+		kicker: m.comparar_kicker({}, options),
+		titleOne: m.comparar_title_one({}, options),
+		titleTwo: m.comparar_title_two({}, options),
+		lede: m.comparar_lede({}, options),
+		deck: m.comparar_deck({}, options),
+		transport: m.comparar_transport({}, options),
+		play: m.comparar_play({}, options),
+		stop: m.comparar_stop({}, options),
+		rec: m.comparar_rec({}, options),
+		sourceNote: m.comparar_source_note({}, options),
+		tracks: m.comparar_tracks({}, options),
+		tracksNote: m.comparar_tracks_note({}, options),
+		track: m.comparar_track({}, options),
+		curveSource: m.comparar_curve_source({}, options),
+		current: m.comparar_current({}, options),
+		neutral: m.comparar_neutral({}, options),
+		presets: m.comparar_presets({}, options),
+		library: m.comparar_library({}, options),
+		descriptionCredit: m.comparar_description_credit({}, options),
+		descriptionOriginal: m.comparar_description_original({}, options),
+		snapshot: m.comparar_snapshot({}, options),
+		experimental: m.comparar_experimental({}, options),
+		overlay: m.comparar_overlay({}, options),
+		responseNote: m.comparar_response_note({}, options),
+		where: m.comparar_where({}, options),
+		before: m.comparar_before({}, options),
+		after: m.comparar_after({}, options),
+		swap: m.comparar_swap({}, options),
+		match: m.comparar_match({}, options),
+		matchNote: m.comparar_match_note({}, options),
+		threshold: m.comparar_threshold({}, options),
+		max: m.comparar_max({}, options),
+		regions: m.comparar_regions({}, options),
+		noRegions: m.comparar_no_regions({}, options),
+		delta: m.comparar_delta({}, options),
+		bay: m.comparar_bay({}, options),
+		bayNote: m.comparar_bay_note({}, options),
+		pair: m.comparar_pair({}, options),
+		empty: m.comparar_empty({}, options),
+		blend: m.comparar_blend({}, options),
+		blendNote: m.comparar_blend_note({}, options),
+		heads: m.comparar_heads({}, options),
+		base: m.comparar_base({}, options),
+		mix: m.comparar_mix({}, options),
+		preamp: m.comparar_preamp({}, options),
+		auto: m.comparar_auto({}, options),
+		exact: m.comparar_exact({}, options),
+		solve: m.comparar_solve({}, options),
+		busy: m.comparar_busy({}, options),
+		ready: m.comparar_ready({}, options),
+		refused: m.comparar_refused({}, options),
+		pending: m.comparar_pending({}, options),
+		gateNote: m.comparar_gate_note({}, options),
+		gateReason: m.comparar_gate_reason({}, options),
+		reasonCoefficient: m.comparar_reason_coefficient({}, options),
+		reasonPole: m.comparar_reason_pole({}, options),
+		reasonSection: m.comparar_reason_section({}, options),
+		reasonPrefix: m.comparar_reason_prefix({}, options),
+		reasonOutput: m.comparar_reason_output({}, options),
+		reasonPreamp: m.comparar_reason_preamp({}, options),
+		reasonCodec: m.comparar_reason_codec({}, options),
+		reasonKind: m.comparar_reason_kind({}, options),
+		reasonBoost: m.comparar_reason_boost({}, options),
+		failed: m.comparar_failed({}, options),
+		audioFailed: m.comparar_audio_failed({}, options),
+		rateNote: m.comparar_rate_note({}, options),
+		result: m.comparar_result({}, options),
+		target: m.comparar_target({}, options),
+		fit: m.comparar_fit({}, options),
+		level: m.comparar_level({}, options),
+		sections: m.comparar_sections({}, options),
+		kind: m.comparar_kind({}, options),
+		frequency: m.comparar_frequency({}, options),
+		gain: m.comparar_gain({}, options),
+		open: m.comparar_open({}, options),
+		save: m.comparar_save({}, options),
+		saved: m.comparar_saved({}, options),
+		write: m.comparar_write({}, options),
+		bounce: m.comparar_bounce({}, options),
+		export: m.comparar_export({}, options),
+		exportNote: m.comparar_export_note({}, options),
+		exportSvg: m.comparar_export_svg({}, options),
+		exportPng: m.comparar_export_png({}, options),
+		exportPreview: m.comparar_export_preview({}, options),
+		exportDelta: m.comparar_export_delta({}, options),
+		invalidCurve: m.comparar_invalid_curve({}, options),
+		newName: m.comparar_new_name({}, options),
+		peak: m.comparar_peak({}, options),
+		live: m.comparar_live({}, options),
+		data: m.comparar_data({}, options)
+	};
+}
+
+export type Copy = ReturnType<typeof copy>;
+
+export function reasonText(code: string, t: Copy): string {
+	if (code.startsWith('a:')) return t.reasonCoefficient;
+	if (code.startsWith('b:')) return t.reasonPole;
+	if (code.startsWith('c:')) return t.reasonSection;
+	if (code.startsWith('d:')) return t.reasonPrefix;
+	if (code.startsWith('e:')) return t.reasonOutput;
+	if (code.startsWith('f:')) return t.reasonCodec;
+	if (code.startsWith('g:')) return t.reasonPreamp;
+	if (code.startsWith('k:')) return t.reasonKind;
+	if (code.startsWith('d7:')) return t.reasonBoost;
+	return t.gateReason;
+}
