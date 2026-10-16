@@ -9,5 +9,6 @@ export const variables = defineEnvVars({
 	PUBLIC_LGPD_CNPJ: { public: true, static: true },
 	PUBLIC_LGPD_ADDRESS: { public: true, static: true },
 	PUBLIC_LGPD_DPO_NAME: { public: true, static: true },
-	PUBLIC_POLICY_EFFECTIVE_DATE: { public: true, static: true }
+	PUBLIC_POLICY_EFFECTIVE_DATE: { public: true, static: true },
+	PUBLIC_TURNSTILE_SITE_KEY: { public: true, static: true }
 });

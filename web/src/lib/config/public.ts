@@ -6,7 +6,8 @@ import {
 	PUBLIC_LGPD_CNPJ as lgpdCnpj,
 	PUBLIC_LGPD_ADDRESS as lgpdAddress,
 	PUBLIC_LGPD_DPO_NAME as lgpdDpoName,
-	PUBLIC_POLICY_EFFECTIVE_DATE as policyEffectiveDate
+	PUBLIC_POLICY_EFFECTIVE_DATE as policyEffectiveDate,
+	PUBLIC_TURNSTILE_SITE_KEY as turnstileSiteKey
 } from '$app/env/public';
 
 export const PUBLIC_ORIGIN: string = origin;
@@ -17,3 +18,4 @@ export const PUBLIC_LGPD_CNPJ: string = lgpdCnpj;
 export const PUBLIC_LGPD_ADDRESS: string = lgpdAddress;
 export const PUBLIC_LGPD_DPO_NAME: string = lgpdDpoName;
 export const PUBLIC_POLICY_EFFECTIVE_DATE: string = policyEffectiveDate;
+export const PUBLIC_TURNSTILE_SITE_KEY: string = turnstileSiteKey;

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import '#lib/styles/index.css';
-	import { onMount, type Snippet } from 'svelte';
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale, getTextDirection } from '#lib/paraglide/runtime.js';
@@ -10,18 +10,51 @@
 	import UpdatePrompt from '#lib/pwa/UpdatePrompt.svelte';
 	import { getFooterHonoree, getPageMeta } from '#lib/page-meta.ts';
 	import {
+		AccountEntry,
+		AccountSession,
 		CableBar,
 		Footer,
 		HelpOverlay,
 		Toast,
 		appShortcuts,
 		createToastStore,
+		postPolicyAcceptance,
 		revealLocale
 	} from '#lib/components/chrome/index.ts';
 	import { AudioLoader } from '#lib/components/audio/index.ts';
 	import { CableStatus, PreWriteChecklist, RescueNotice } from '#lib/components/cable/index.ts';
+	import {
+		PolicyBanner,
+		resolveAnonymousSeen,
+		writePolicySeen
+	} from '#lib/components/legal/index.ts';
+	import { POLICY_VERSION } from '#lib/content/legal/version.ts';
+	import type { LayoutProps } from './$types';
 
-	let { children }: { children: Snippet } = $props();
+	let { children, data }: LayoutProps = $props();
+	const accountSession = new AccountSession(() => ({
+		user: data.user,
+		resolved: data.sessionResolved,
+		path: page.url.pathname
+	}));
+	// Policy banner: anonymous visitors use localStorage (resolved after mount); signed-in users
+	// use their latest acknowledgement from the server and record a new one at /conta/politica.
+	let anonymousSeen = $state<string | null>(POLICY_VERSION);
+	const policyBanner = $derived.by(() => {
+		if (accountSession.current) {
+			return data.sessionResolved && data.policy
+				? { seen: data.policy.seen, accept: (version: string) => postPolicyAcceptance(version) }
+				: null;
+		}
+		if (!accountSession.known) return null;
+		return {
+			seen: anonymousSeen,
+			accept: (version: string) => {
+				writePolicySeen(version);
+				anonymousSeen = version;
+			}
+		};
+	});
 	const context = setAppContext();
 	const app = $derived(context.client);
 	const emptyToasts = createToastStore();
@@ -40,6 +73,7 @@
 		meta_teste_cego_curiosity: m.meta_teste_cego_curiosity,
 		meta_cabo_curiosity: m.meta_cabo_curiosity,
 		meta_docs_curiosity: m.meta_docs_curiosity,
+		meta_auth_curiosity: m.meta_auth_curiosity,
 		meta_source: m.meta_source,
 		meta_source_patent: m.meta_source_patent,
 		meta_source_wikipedia: m.meta_source_wikipedia,
@@ -76,6 +110,10 @@
 						? m.cable_status_connected({ device: app.cableState.deviceLabel ?? '' })
 						: m.cable_status_disconnected()
 	);
+
+	onMount(() => {
+		anonymousSeen = resolveAnonymousSeen(POLICY_VERSION);
+	});
 
 	onMount(() => {
 		const client = context.mount();
@@ -148,8 +186,25 @@
 					>
 				{/if}
 			{/snippet}
+			{#snippet account()}
+				<AccountEntry
+					user={accountSession.current}
+					currentPath={page.url.pathname}
+					pending={!accountSession.known}
+				/>
+			{/snippet}
 		</CableBar>
 	</div>
+
+	{#if policyBanner}
+		<div data-chrome="policy">
+			<PolicyBanner
+				version={POLICY_VERSION}
+				seenVersion={policyBanner.seen}
+				onAccept={policyBanner.accept}
+			/>
+		</div>
+	{/if}
 
 	<div id={statusId} popover="auto" class="cable-popover" data-chrome="status">
 		{#if app}

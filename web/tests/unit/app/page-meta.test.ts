@@ -18,6 +18,13 @@ function messages(locale: string): Record<string, string> {
 
 const pt = messages('pt-BR');
 const en = messages('en-US');
+const AUTH_ROUTES = [
+	'/entrar',
+	'/criar-conta',
+	'/verificar-email',
+	'/esqueci-senha',
+	'/redefinir-senha'
+] as const;
 const routes = [
 	'/',
 	'/biblioteca',
@@ -97,9 +104,32 @@ describe('route chrome metadata', () => {
 		expect(getPageMeta('/missing').page).toBe('erro');
 	});
 
+	test('gives the five auth pages the channel-strip accent and the Rupert Neve homage', () => {
+		for (const route of AUTH_ROUTES) {
+			const meta = getPageMeta(route);
+			expect(meta).toBe(PAGE_META['/entrar']);
+			expect(meta.page).toBe('auth');
+			expect(meta.accent).toBe('#7FA7D9');
+			expect(meta.honoree?.name).toBe('Rupert Neve');
+			expect(meta.honoree?.years).toBe('1926–2021');
+			expect(meta.honoree?.curiosity).toBe('meta_auth_curiosity');
+			expect(meta.honoree?.sources).toEqual([
+				{
+					label: 'fonte: Wikipedia',
+					labelKey: 'meta_source_wikipedia',
+					href: 'https://en.wikipedia.org/wiki/Rupert_Neve'
+				}
+			]);
+			expect(getFooterHonoree(meta)).toBe(meta.honoree);
+		}
+		expect(getPageMeta('/entrar?next=/cabo').page).toBe('auth');
+	});
+
 	test('keeps future homages absent and neutral, with the permitted Footer fallback', () => {
-		for (const route of routes.filter((route) =>
-			/conta|senha|entrar|email|admin|^\/u\//.test(route)
+		for (const route of routes.filter(
+			(route) =>
+				/conta|senha|entrar|email|admin|^\/u\//.test(route) &&
+				!(AUTH_ROUTES as readonly string[]).includes(route)
 		)) {
 			const meta = getPageMeta(route);
 			expect(meta.accent).toBe('#ECE7DD');

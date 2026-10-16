@@ -20,6 +20,8 @@
 		unsavedIndicator?: Snippet;
 		audio?: Snippet;
 		actions?: Snippet;
+		/** Header account entry (the layout renders AccountEntry here). */
+		account?: Snippet;
 	}
 
 	let {
@@ -36,7 +38,8 @@
 		status,
 		unsavedIndicator,
 		audio,
-		actions
+		actions,
+		account
 	}: Props = $props();
 </script>
 
@@ -92,6 +95,7 @@
 					{m.chrome_write()}
 				</button>
 			{/if}
+			{#if account}{@render account()}{/if}
 			<LanguageToggle />
 		</div>
 	</div>

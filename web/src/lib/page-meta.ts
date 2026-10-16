@@ -78,6 +78,27 @@ const docs: PageMeta = {
 		]
 	}
 };
+/**
+ * /entrar, /criar-conta, /verificar-email, /esqueci-senha, /redefinir-senha (T3.6): console
+ * channel strip in homage to Rupert Neve (name in text only; never a maker's mark). Accent: the
+ * painted steel blue-grey of a channel strip, #7FA7D9 (7.6:1 against --ink and --accent-ink).
+ */
+const auth: PageMeta = {
+	page: 'auth',
+	accent: '#7FA7D9',
+	honoree: {
+		name: 'Rupert Neve',
+		years: '1926–2021',
+		curiosity: 'meta_auth_curiosity',
+		sources: [
+			source(
+				'fonte: Wikipedia',
+				'meta_source_wikipedia',
+				'https://en.wikipedia.org/wiki/Rupert_Neve'
+			)
+		]
+	}
+};
 const placeholder = (page: string): PageMeta => ({ page, accent: '#ECE7DD' });
 
 export const PAGE_META = {
@@ -185,11 +206,11 @@ export const PAGE_META = {
 	'/termos': docs,
 	'/c/[id]': biblioteca,
 	'/u/[apelido]': placeholder('perfil'),
-	'/entrar': placeholder('entrar'),
-	'/criar-conta': placeholder('criar-conta'),
-	'/verificar-email': placeholder('verificar-email'),
-	'/esqueci-senha': placeholder('esqueci-senha'),
-	'/redefinir-senha': placeholder('redefinir-senha'),
+	'/entrar': auth,
+	'/criar-conta': auth,
+	'/verificar-email': auth,
+	'/esqueci-senha': auth,
+	'/redefinir-senha': auth,
 	'/conta': placeholder('conta'),
 	'/conta/**': placeholder('conta'),
 	'/admin': placeholder('admin'),
