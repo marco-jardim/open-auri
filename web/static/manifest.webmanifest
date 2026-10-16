@@ -1,0 +1,20 @@
+{
+	"id": "./",
+	"name": "Open Auri",
+	"short_name": "Open Auri",
+	"description": "Editor local de curvas de equalização e prévia de áudio.",
+	"lang": "pt-BR",
+	"start_url": "./",
+	"scope": "./",
+	"display": "standalone",
+	"background_color": "#0f0f0e",
+	"theme_color": "#171715",
+	"icons": [
+		{
+			"src": "icons/icon.svg",
+			"sizes": "any",
+			"type": "image/svg+xml",
+			"purpose": "any maskable"
+		}
+	]
+}
