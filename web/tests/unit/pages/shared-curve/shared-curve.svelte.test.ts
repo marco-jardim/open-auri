@@ -64,7 +64,7 @@ test('renders the card, the #p= fallback link and the OG meta tags', async () =>
 	await expect.element(page.getByTestId('shared-curve-license')).toHaveTextContent('CC-BY-4.0');
 	await expect
 		.element(page.getByRole('link', { name: m.shared_curve_open() }))
-		.toHaveAttribute('href', `/#p=${S1}`);
+		.toHaveAttribute('href', `/?l=lin-abcdef123456&v=ver-abcdef123456#p=${S1}`);
 	expect(document.querySelector('figure, svg')).not.toBeNull();
 
 	const metaOf = (selector: string) =>

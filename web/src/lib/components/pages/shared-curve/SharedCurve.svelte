@@ -56,7 +56,10 @@
 			return null;
 		}
 	});
-	const curvaHref = $derived(`/#p=${shared.s1}`);
+	// The Curva page checks l/v against the S1 before remembering the origin (T4.15).
+	const curvaHref = $derived(
+		`/?l=${encodeURIComponent(shared.lineageId)}&v=${encodeURIComponent(shared.versionId)}#p=${shared.s1}`
+	);
 	const authorName = $derived(
 		shared.author ? shared.author.displayUsername : m.shared_curve_author_removed()
 	);
