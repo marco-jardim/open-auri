@@ -7,8 +7,7 @@ export const JOURNAL_STORAGE_KEY = 'oa.journal';
 export const JOURNAL_MAX = 500;
 
 /**
- * @typedef {{kind: 'PK' | 'LS' | 'HS' | 'LP' | 'HP', freqHz: number,
- *   gainDb: number, qFactor: number} | {kind: 'OFF'}} JournalBand
+ * @typedef {import('../dsp/eq0xcb.mjs').Band} JournalBand
  * @typedef {{schema: 1, at: number, name: string, crc: number, preampDb: number,
  *   bands: JournalBand[], status: 'ok' | 'interrupted' | 'simulated',
  *   device: string | null}} JournalEntry
@@ -28,9 +27,10 @@ function isFiniteNumber(value) {
 }
 
 /**
- * Active bands require all four fields, positive freqHz/qFactor and finite
- * gainDb. Supported kinds are PK, LS, HS, LP, HP and OFF. No safety-gate limits
- * are applied. Extra properties are ignored and stripped when storing records.
+ * Active bands require positive finite freqHz/qFactor. PK/LS/HS require finite
+ * gainDb; LP/HP may omit it, but it must be finite when present. OFF ignores all
+ * other fields. No safety-gate limits are applied. Extra properties are ignored
+ * and stripped when storing records. Text limits count Unicode code points.
  * @param {unknown} entry
  * @returns {{ok: boolean, errors: string[]}}
  */
@@ -47,7 +47,7 @@ export function validateEntry(entry) {
   ) {
     errors.push('at must be a valid nonnegative epoch millisecond');
   }
-  if (typeof entry.name !== 'string' || entry.name.length > 48) {
+  if (typeof entry.name !== 'string' || [...entry.name].length > 48) {
     errors.push('name must be a string of at most 48 characters');
   }
   if (
@@ -62,7 +62,10 @@ export function validateEntry(entry) {
   if (typeof entry.status !== 'string' || !STATUSES.has(entry.status)) {
     errors.push('status must be ok, interrupted or simulated');
   }
-  if (entry.device !== null && (typeof entry.device !== 'string' || entry.device.length > 64)) {
+  if (
+    entry.device !== null &&
+    (typeof entry.device !== 'string' || [...entry.device].length > 64)
+  ) {
     errors.push('device must be null or a string of at most 64 characters');
   }
   if (!Array.isArray(entry.bands) || entry.bands.length !== 10) {
@@ -78,7 +81,12 @@ export function validateEntry(entry) {
         if (!isFiniteNumber(band.freqHz) || band.freqHz <= 0) {
           errors.push(`bands[${index}].freqHz must be positive and finite`);
         }
-        if (!isFiniteNumber(band.gainDb)) errors.push(`bands[${index}].gainDb must be finite`);
+        if (
+          !isFiniteNumber(band.gainDb) &&
+          ((band.kind !== 'LP' && band.kind !== 'HP') || 'gainDb' in band)
+        ) {
+          errors.push(`bands[${index}].gainDb must be finite`);
+        }
         if (!isFiniteNumber(band.qFactor) || band.qFactor <= 0) {
           errors.push(`bands[${index}].qFactor must be positive and finite`);
         }
@@ -101,11 +109,18 @@ function checkedCopy(value) {
     name: entry.name,
     crc: entry.crc,
     preampDb: entry.preampDb,
-    bands: entry.bands.map((band) =>
-      band.kind === 'OFF'
-        ? { kind: 'OFF' }
-        : { kind: band.kind, freqHz: band.freqHz, gainDb: band.gainDb, qFactor: band.qFactor },
-    ),
+    bands: entry.bands.map((band) => {
+      if (band.kind === 'OFF') return { kind: 'OFF' };
+      if (band.kind === 'PK' || band.kind === 'LS' || band.kind === 'HS') {
+        return { kind: band.kind, freqHz: band.freqHz, gainDb: band.gainDb, qFactor: band.qFactor };
+      }
+      return {
+        kind: band.kind,
+        freqHz: band.freqHz,
+        ...(band.gainDb === undefined ? {} : { gainDb: band.gainDb }),
+        qFactor: band.qFactor,
+      };
+    }),
     status: entry.status,
     device: entry.device,
   };

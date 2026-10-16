@@ -52,6 +52,57 @@ test('all supported kinds and statuses validate without imposing the safety gate
   assert.equal(validateEntry(entry({ bands: activeBands({ gainDb: 100, qFactor: 25 }) })).ok, true);
 });
 
+test('LP/HP bands shaped like decoded S1 output round trip without adding gainDb', () => {
+  const original = entry({
+    bands: [
+      { kind: 'LP', freqHz: 20000, qFactor: 0.7 },
+      { kind: 'HP', freqHz: 20, qFactor: 0.7 },
+      ...Array.from({ length: 8 }, () => ({ kind: 'OFF' })),
+    ],
+  });
+  assert.deepEqual(validateEntry(original), { ok: true, errors: [] });
+  const appended = appendEntry([], original);
+  assert.deepEqual(appended, [original]);
+  for (const index of [0, 1]) {
+    assert.equal(Object.hasOwn(appended[0].bands[index], 'gainDb'), false);
+    assert.notEqual(appended[0].bands[index], original.bands[index]);
+  }
+  assert.deepEqual(parseJournal(serializeJournal(appended)), { entries: [original], dropped: 0 });
+});
+
+test('LP/HP allow only absent or finite gainDb, while PK/LS/HS require it', () => {
+  for (const kind of ['LP', 'HP']) {
+    for (const gainDb of [0, -2, 100]) {
+      const original = entry({ bands: activeBands({ kind, gainDb }) });
+      assert.deepEqual(appendEntry([], original), [original]);
+      assert.deepEqual(parseJournal(serializeJournal([original])), {
+        entries: [original],
+        dropped: 0,
+      });
+    }
+    for (const gainDb of [undefined, null, '0', NaN, Infinity, -Infinity]) {
+      const original = entry({ bands: activeBands({ kind, gainDb }) });
+      const result = validateEntry(original);
+      assert.equal(result.ok, false, `${kind}: ${String(gainDb)}`);
+      assert.ok(result.errors.includes('bands[0].gainDb must be finite'));
+      assert.throws(() => appendEntry([], original), /gainDb must be finite/);
+    }
+  }
+  for (const kind of ['PK', 'LS', 'HS']) {
+    const bands = Array.from({ length: 10 }, () => ({ kind, freqHz: 1000, qFactor: 0.7 }));
+    assert.equal(validateEntry(entry({ bands })).ok, false, kind);
+  }
+});
+
+test('OFF ignores and strips all other band fields', () => {
+  const original = entry({
+    bands: activeBands({ kind: 'OFF', freqHz: NaN, gainDb: Infinity, qFactor: null }),
+  });
+  assert.deepEqual(validateEntry(original), { ok: true, errors: [] });
+  assert.deepEqual(appendEntry([], original), [entry()]);
+  assert.deepEqual(parseJournal(serializeJournal([original])), { entries: [entry()], dropped: 0 });
+});
+
 test('schema boundaries for time, text, CRC and device are inclusive', () => {
   assert.equal(validateEntry(entry({ at: 0, crc: 0, name: '', device: '', preampDb: 0 })).ok, true);
   assert.equal(
@@ -60,6 +111,28 @@ test('schema boundaries for time, text, CRC and device are inclusive', () => {
     ).ok,
     true,
   );
+});
+
+test('name and device limits count Unicode code points, including mixed surrogate pairs', () => {
+  for (const name of ['😀'.repeat(48), 'A😀'.repeat(24)]) {
+    for (const device of ['🎧'.repeat(64), 'D🎧'.repeat(32)]) {
+      const original = entry({ name, device });
+      assert.deepEqual(validateEntry(original), { ok: true, errors: [] });
+      assert.deepEqual(appendEntry([], original), [original]);
+      assert.deepEqual(parseJournal(serializeJournal([original])), {
+        entries: [original],
+        dropped: 0,
+      });
+    }
+  }
+  for (const name of ['😀'.repeat(49), `${'A😀'.repeat(24)}x`]) {
+    assert.equal(validateEntry(entry({ name })).ok, false);
+    assert.throws(() => appendEntry([], entry({ name })), /name must be a string of at most 48/);
+  }
+  for (const device of ['🎧'.repeat(65), `${'D🎧'.repeat(32)}x`]) {
+    assert.equal(validateEntry(entry({ device })).ok, false);
+    assert.throws(() => appendEntry([], entry({ device })), /device must be null or a string/);
+  }
 });
 
 test('invalid top-level entries and every invalid scalar are rejected with diagnostics', () => {

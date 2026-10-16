@@ -13,7 +13,12 @@ export {
   parseFlashState,
   serializeFlashState,
 } from './flash.mjs';
-export { LOUDNESS_JUMP_DB, LOUDNESS_WARNING_TEXT, loudnessWarning } from './loudness.mjs';
+export {
+  LOUDNESS_JUMP_DB,
+  LOUDNESS_TOLERANCE_DB,
+  LOUDNESS_WARNING_TEXT,
+  loudnessWarning,
+} from './loudness.mjs';
 export {
   JOURNAL_STORAGE_KEY,
   JOURNAL_MAX,

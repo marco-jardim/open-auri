@@ -1,6 +1,8 @@
 /** Pure warning policy. Level estimates are supplied by the caller, not computed here. */
 
 export const LOUDNESS_JUMP_DB = 3;
+/** Allow for Q23 quantization of the preamp when comparing level differences. */
+export const LOUDNESS_TOLERANCE_DB = 1e-6;
 export const LOUDNESS_WARNING_TEXT =
   'A nova curva pode soar mais alta. Abaixe o volume antes de gravar.';
 
@@ -25,7 +27,9 @@ export function loudnessWarning({
   const deltaDb = finiteLevels ? difference : null;
   /** @type {('jump' | 'unknown-state')[]} */
   const reasons = [];
-  if (deltaDb !== null && deltaDb >= LOUDNESS_JUMP_DB) reasons.push('jump');
+  if (deltaDb !== null && deltaDb >= LOUDNESS_JUMP_DB - LOUDNESS_TOLERANCE_DB) {
+    reasons.push('jump');
+  }
   if (
     !finiteLevels ||
     !Number.isSafeInteger(sessionWriteCount) ||
