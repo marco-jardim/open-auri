@@ -1,5 +1,8 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
+	import { m } from '#lib/paraglide/messages.js';
+	import SocialSources from './SocialSources.svelte';
+	import { createCurveSocial, type CurveSocial } from './social.svelte.ts';
 	import { SvelteMap } from 'svelte/reactivity';
 	import './fonts.css';
 	import { curveResponseDb } from 'open-auri/dsp';
@@ -26,8 +29,17 @@
 	import BlendPanel from './BlendPanel.svelte';
 	import './comparar.css';
 
-	let { app = null, locale = 'pt-BR' }: { app?: ClientApp | null; locale?: 'pt-BR' | 'en-US' } =
-		$props();
+	let {
+		app = null,
+		locale = 'pt-BR',
+		social = createCurveSocial()
+	}: {
+		app?: ClientApp | null;
+		locale?: 'pt-BR' | 'en-US';
+		social?: CurveSocial;
+	} = $props();
+	let socialTrack = $state(1);
+	onMount(() => social.mount());
 	const t = $derived(copy(locale));
 	let tracks = $state.raw(initialTracks());
 	let selected = $state(1);
@@ -267,6 +279,13 @@
 		<section class="panel" aria-labelledby="comparar-tracks-title">
 			<h2 class="plate" id="comparar-tracks-title">{t.tracks}</h2>
 			<p class="note">{t.tracksNote}</p>
+			<label class="field"
+				>{m.curve_social_track()}<select bind:value={socialTrack}>
+					{#each tracks as track (track.id)}<option value={track.id}>{t.track} {track.id}</option
+						>{/each}
+				</select></label
+			>
+			<SocialSources {social} path="/comparar" onload={(curve) => bounce(socialTrack, curve)} />
 			<div class="lanes">
 				{#each tracks as track (track.id)}
 					<TrackLane
@@ -455,7 +474,7 @@
 				</div>
 			{:else}<p class="note">{t.empty}</p>{/if}
 		</section>
-		<BlendPanel {tracks} {t} {locale} {app} onBounce={bounce} />
+		<BlendPanel {tracks} {t} {locale} {app} {social} onBounce={bounce} />
 		<section class="panel" aria-labelledby="comparar-export-title">
 			<h2 class="plate" id="comparar-export-title">{t.export}</h2>
 			<div class="grid-ex">

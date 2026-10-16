@@ -15,7 +15,7 @@ export type TargetPoint = Parameters<typeof targetFromPoints>[0][number];
 export interface Trace {
 	name: string;
 	values: number[];
-	kind: 'autoeq' | 'csv' | 'preset' | 'drawn';
+	kind: 'autoeq' | 'csv' | 'preset' | 'drawn' | 'community';
 	credit?: { source: string; detail?: string; link?: string };
 }
 export const INITIAL_POINTS: readonly TargetPoint[] = [

@@ -17,6 +17,10 @@
 	import TargetEditor from './TargetEditor.svelte';
 	import TracePlot from './TracePlot.svelte';
 	import Preview from './Preview.svelte';
+	import SocialSources from '../comparar/SocialSources.svelte';
+	import SocialPublish from '../comparar/SocialPublish.svelte';
+	import { createCurveSocial, type CurveSocial } from '../comparar/social.svelte.ts';
+	import { socialTarget, solverRecipe } from './social.ts';
 	import {
 		autoEqTrace,
 		drawnTarget,
@@ -45,7 +49,8 @@
 		reference = -18,
 		onuse = () => false,
 		dataClient,
-		solverFactory = createSolverWorker
+		solverFactory = createSolverWorker,
+		social = createCurveSocial()
 	}: {
 		current?: CurveData | null;
 		audio?: AudioEngine | null;
@@ -53,6 +58,7 @@
 		onuse?: (curve: CurveData) => boolean;
 		dataClient?: AutoEqClient;
 		solverFactory?: () => PageSolver;
+		social?: CurveSocial;
 	} = $props();
 	let station = $state.raw<StationState>(initialStation());
 	let entries = $state.raw<AutoEqEntry[]>([]);
@@ -63,7 +69,7 @@
 	let targetQuery = $state('');
 	let measurementId = $state('');
 	let targetId = $state('');
-	let targetKind = $state<'autoeq' | 'preset' | 'drawn' | 'csv'>('autoeq');
+	let targetKind = $state<'autoeq' | 'preset' | 'drawn' | 'csv' | 'community'>('autoeq');
 	let presetId = $state(PADRAO_AURI.id);
 	let points = $state.raw<TargetPoint[]>(INITIAL_POINTS.map((point) => ({ ...point })));
 	let importedTarget: Trace | null = null;
@@ -165,8 +171,10 @@
 	}
 	onMount(() => {
 		alive = true;
+		const stopSocial = social.mount();
 		void loadIndex();
 		return () => {
+			stopSocial();
 			alive = false;
 			measurementSequence++;
 			targetSequence++;
@@ -379,7 +387,13 @@
 					value={targetKind}
 					onchange={(event) => {
 						const value = event.currentTarget.value;
-						if (value === 'autoeq' || value === 'preset' || value === 'drawn' || value === 'csv') {
+						if (
+							value === 'autoeq' ||
+							value === 'preset' ||
+							value === 'drawn' ||
+							value === 'csv' ||
+							value === 'community'
+						) {
 							targetKind = value;
 							chooseKind();
 						}
@@ -389,6 +403,7 @@
 					<option value="preset">{m.soe_official()}</option>
 					<option value="drawn">{m.soe_draw()}</option>
 					<option value="csv">{m.soe_csv()}</option>
+					<option value="community">{m.curve_social_target()}</option>
 				</select>
 				{#if targetKind === 'autoeq'}
 					<label for="soe-target-search">{m.soe_search()}</label>
@@ -412,6 +427,16 @@
 					{:else if !dataLoading && !dataMissing && !targets.length}
 						<p>{m.soe_no_matches()}</p>
 					{/if}
+				{:else if targetKind === 'community'}
+					<SocialSources
+						{social}
+						path="/soe-como-x"
+						onload={(curve) => {
+							targetSequence++;
+							loadingTarget = false;
+							send({ type: 'target', trace: socialTarget(curve) });
+						}}
+					/>
 				{:else if targetKind === 'preset'}
 					<label for="soe-preset">{m.soe_preset()}</label>
 					<select
@@ -557,6 +582,12 @@
 						{stopLabels[station.result.stopReason]}
 					</p>
 					<Preview {audio} {current} {candidate} {reference} />
+					{#key station.result}<SocialPublish
+							{social}
+							curve={candidate}
+							recipe={solverRecipe(station)}
+							path="/soe-como-x"
+						/>{/key}
 					<button type="button" class="primary use" disabled={!current} onclick={useCurve}>
 						{m.soe_use()}
 					</button>

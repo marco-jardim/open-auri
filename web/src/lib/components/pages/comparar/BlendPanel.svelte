@@ -9,19 +9,23 @@
 	import { blendTarget, type Track, type NamedCurve } from './comparison.ts';
 	import ComparisonPlot from './ComparisonPlot.svelte';
 	import { reasonText, type Copy } from './copy.ts';
+	import SocialPublish from './SocialPublish.svelte';
+	import type { CurveSocial } from './social.svelte.ts';
 
 	let {
 		tracks,
 		t,
 		locale,
 		app,
-		onBounce
+		onBounce,
+		social
 	}: {
 		tracks: readonly Track[];
 		t: Copy;
 		locale: 'pt-BR' | 'en-US';
 		app: ClientApp | null;
 		onBounce: (id: number, curve: NamedCurve) => void;
+		social?: CurveSocial;
 	} = $props();
 	let before = $state(1);
 	let after = $state(2);
@@ -247,6 +251,9 @@
 				</div>
 			</div>
 			{#if accepted}
+				{#if social}
+					{#key accepted}<SocialPublish {social} curve={accepted.curve} path="/comparar" />{/key}
+				{/if}
 				<div class="stat-row">
 					<div class="stat">
 						<small>{t.preamp}</small><output
