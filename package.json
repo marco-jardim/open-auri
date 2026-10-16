@@ -6,6 +6,7 @@
   "description": "Open protocol for the 0xCB firmware of the CB5100 chip family",
   "scripts": {
     "test": "node --test",
+    "check:sensitive": "node tools/check-sensitive.mjs",
     "fixtures:reference": "node tools/extract-kuba-reference.mjs"
   }
 }
