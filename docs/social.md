@@ -1,38 +1,113 @@
-# Camada social — curvas como objetos compartilháveis
+# Camada social: curvas como objetos compartilháveis
 
 Ideias para transformar o preset de "configuração que mora num cabo" em
 **conteúdo que circula**: código curto, proveniência, versionamento, curadoria.
 
 Marca de confiança: ✅ confirmado/medido · 🟡 hipótese · ❌ precisa do cabo.
 
+Contrato das rotas: [`api.md`](api.md). Esquema, regras de visibilidade e
+semântica de exclusão: [`web/src/lib/server/social/README.md`](../web/src/lib/server/social/README.md).
+
 ## Antes: calibração de *prior art*
 
 Isto **não** é território virgem. O `jeromeof/devicePEQ` já tem `sharePEQ/`,
-`visualizePEQ/`, `subjectizePEQ/` e `treblizerPEQ/` — compartilhar e visualizar
+`visualizePEQ/`, `subjectizePEQ/` e `treblizerPEQ/`: compartilhar e visualizar
 preset é padrão naquele ecossistema (`0x4B`).
 
-O que **é** novo aqui: fazer isso para `0xCB` **e** as camadas que eles não têm —
+O que **é** novo aqui: fazer isso para `0xCB` **e** as camadas que eles não têm:
 forma compacta canônica (S1), proveniência (S2), versionamento (S3), envelope com
-receita (S5) e agregação sem servidor (S6).
+receita (S5), agregação anônima (S6) e troca às cegas (S7).
 
 ## Estado das decisões
 
 | ID | Ideia | Decisão |
 |---|---|---|
-| **S1** | Formato compacto canônico | ✅ **adotar** — S1 v1, ver [`s1-format.md`](s1-format.md) |
-| **S2** | Assinatura criptográfica | ❌ **descartada** — proveniência por link basta |
-| **S3** | Curvas versionadas (git) | ✅ **adotar** — 100% estático, sem backend |
-| **S4** | Distância entre curvas | ✅ **adotar** — barato, `magnitudeDb()` já existe |
-| **S5** | Envelope: números **+** receita | ✅ **adotar** — os dois, não um ou outro |
-| **S6** | Preferência crowdsourced | ✅ **adotar** — via GitHub Actions (pseudônimo) ou Worker (anônimo) |
-| **S7** | "Blind trade" | 🟡 opcional |
-| **S8** | Curva como identidade | 🟡 opcional |
-| **S9** | Packs curados e licenciáveis | ✅ **adotar** — resolve licença de curva |
-| **S10** | Antes/depois compartilhável | ✅ **adotar** — barato, é o que faz circular |
+| **S1** | Formato compacto canônico | ✅ **adotado**: S1 v1, ver [`s1-format.md`](s1-format.md) |
+| **S2** | Assinatura criptográfica | ❌ **descartada**: proveniência por link basta |
+| **S3** | Curvas versionadas | ✅ **ativo**: linhagens com versões só por acréscimo, forks e lápide |
+| **S4** | Distância entre curvas | ✅ **adotado**: barato, `magnitudeDb()` já existe |
+| **S5** | Envelope: números **+** receita | ✅ **adotado**: os dois, não um ou outro |
+| **S6** | Preferência crowdsourced | ✅ **ativo**: lote anônimo no Worker, com consentimento e recibo |
+| **S7** | Troca às cegas | ✅ **ativo**: usuários verificados, pareamento assíncrono, 72 h |
+| **S8** | Curva como identidade | 🟡 parcial: link `/c/<id>`, imagem OG e QR |
+| **S9** | Packs curados e licenciáveis | ✅ **ativo**: packs com licença por item (CC0 ou CC-BY 4.0) |
+| **S10** | Antes/depois compartilhável | ✅ **adotado**: barato, é o que faz circular |
 
 ---
 
-## S1 — O formato compacto ✅
+## Identidade: login no lugar da identidade por dispositivo
+
+O desenho inicial previa identidade por dispositivo (uma chave no navegador) e
+nenhum servidor. Isso foi substituído por **conta opcional com e-mail e senha**:
+
+- Sem conta, tudo o que é local continua: editor, presets, biblioteca no
+  navegador, prévias, teste cego e gravação no cabo.
+- Qualquer ação social exige conta com **e-mail verificado**: publicar,
+  favoritar, registrar atividade, compartilhar, montar packs, denunciar e trocar
+  (S7). Retirar uma publicação própria só exige estar logado.
+- O único nome público é o **apelido** (`/u/<apelido>`): 3 a 24 caracteres
+  (letras, dígitos, `.`, `_`, `-`), único depois de NFKC e do esqueleto de
+  confundíveis (UTS #39), com lista de reservados. Troca a cada 30 dias; o antigo
+  fica reservado por 90 dias e redireciona.
+- Ao entrar, a biblioteca local anônima pode ser mesclada na conta sem duplicar.
+- Turnstile protege cadastro, entrada, recuperação, troca de e-mail, denúncia e
+  envio S6. Administradores usam segundo fator.
+- Encerrar a conta oferece dois modos para o conteúdo público CC: **anonimizar**
+  (curvas e packs públicos e ativos ficam como "autor removido"; o apelido fica
+  reservado por 90 dias sem dono) ou **apagar tudo** (o apelido fica livre na
+  hora). Conteúdo privado, não listado ou retirado é sempre apagado. Forks de
+  outras pessoas continuam.
+
+## Regras de privacidade
+
+- **Visibilidade de uma linhagem:** privada (só o dono), não listada (abre por
+  id, nunca listada) ou pública. Só aparece em feed, rankings, perfis, packs de
+  outras pessoas e buscas a linhagem pública, ativa, sem ocultação de moderação,
+  com a curva do head aprovada no gate atual e dono não banido.
+- **Rastreio:** "experimentou" = prévia audível de pelo menos 10 s; "instalou" =
+  gravação real bem-sucedida no cabo (nunca simulada); "favoritou". Os eventos
+  saem do navegador por uma fila offline e são aceitos até 7 dias depois.
+- **Contagens públicas** contam usuários distintos, com e-mail verificado, não
+  banidos, e nunca o dono. Repetir um evento só aumenta um contador privado.
+- **Perfil:** `activity_visibility` e `library_visibility` são privadas por
+  padrão. Com atividade privada, a pessoa entra no público de uma curva só como
+  "N pessoas com perfil privado". Com biblioteca privada, o perfil mostra só o
+  apelido e contagens agregadas; as curvas públicas continuam abrindo por link,
+  creditadas ao apelido.
+- **Histórico:** o usuário vê e apaga a própria atividade (tudo ou por curva e
+  tipo); as contagens públicas caem na hora e os rankings no próximo recálculo.
+- **Compartilhamentos:** aberturas anônimas viram só um contador por dia, sem
+  identidade. Prévia, instalação e favorito de quem está logado entram no funil
+  uma vez por tipo, e só quem compartilhou vê os números.
+- **IP:** o rate limit usa HMAC do IP com sal diário, descartado em até 48 h.
+  Nenhuma tabela social guarda IP.
+
+## Modelo de dados (resumo)
+
+Tabelas D1 das migrações 0004 a 0006; o mapa completo, os gatilhos e os
+predicados de visibilidade estão em
+[`web/src/lib/server/social/README.md`](../web/src/lib/server/social/README.md).
+
+| Tabela | Papel |
+|---|---|
+| `curves` | Curva endereçada pelo conteúdo (`id` = `curveId(s1)`), cache do gate por versão do gate. Sem autor. |
+| `lineages` | Dono, visibilidade, estado (ativa ou retirada), moderação, curadoria, head e origem do fork. |
+| `versions` | Só acréscimo; nome, descrição, licença, receita S5, idioma. Gatilho recusa curva reprovada no gate. |
+| `favorites`, `activity` | Uma linha por usuário e linhagem (e tipo, na atividade), com primeira e última vez. |
+| `shares`, `share_events`, `share_event_users` | Compartilhamento, contador anônimo diário e eventos atribuídos. |
+| `packs`, `pack_items` | Packs com licença copiada da versão head. |
+| `reports` | Denúncias, uma por alvo e denunciante. |
+| `rankings`, `ranking_state` | Rankings materializados por métrica e janela. |
+| `s6_batches`, `s6_pairs` | Lotes anônimos S6: hash do recibo, versão do consentimento, dia. |
+| `trades` | Trocas S7; no máximo uma `waiting` ou `matched` por usuário. |
+
+O perfil fica em colunas de `"user"` (`bio`, `activity_visibility`,
+`library_visibility`, `username_changed_at`) e o histórico de apelidos em
+`username_holds`.
+
+---
+
+## S1: o formato compacto ✅
 
 O blob de gravação tem 220 B (296 chars em base64). Isso não circula num post.
 O preset real, porém, é só `(type, f, g, q)` × 10 + preamp.
@@ -47,11 +122,11 @@ O preset real, porém, é só `(type, f, g, q)` × 10 + preamp.
 | entropia ideal medida | 22,6 | 32 | 29 |
 
 ⚠️ Os 22,6 B são **overfit**: 104 valores distintos de `f` em 110 amostras. Todo
-`f` inédito precisaria de escape, então não é alcançável — é estimativa otimista.
+`f` inédito precisaria de escape, então não é alcançável; é estimativa otimista.
 
 ### O ponto conceitual
 
-**"Lossless" não é propriedade dos bytes — é propriedade do domínio canônico
+**"Lossless" não é propriedade dos bytes; é propriedade do domínio canônico
 escolhido.** Cortar os valores impossíveis **é** a compressão: 220 → 46 B sem
 algoritmo nenhum (4,8×). Comprimir algoritmicamente por cima rende no máximo
 ~1,5×, ao custo de um codec, de fragilidade e de perder a depurabilidade. Aos
@@ -64,12 +139,12 @@ congelado é o **S1 v1**, definido em [`s1-format.md`](s1-format.md): 51 B
 (68 caracteres base64url), grade da UI sem perda (ganho de −25,6 a +12,7 dB, Q
 até 20,47) e CRC-16/CCITT-FALSE.
 
-O range observado é **estreito** — é aí que está o ganho, não em algoritmo.
+O range observado é **estreito**: é aí que está o ganho, não em algoritmo.
 
 **"Lossless" dentro do domínio.** Hz inteiro, 0,1 dB e Q com 2 casas cobrem todos
 os presets de referência e a saída do AutoEQ do hangout.audio (que arredonda
 para esses passos). **Não** cobrem tudo: o `eqloader` arredonda `f` a 0,1 Hz e o
-ganho a 0,01 dB. Uma curva fora do domínio vai para o sabor `raw` — nunca é
+ganho a 0,01 dB. Uma curva fora do domínio vai para o sabor `raw` e nunca é
 arredondada em silêncio.
 
 **Variante de 39 B rejeitada:** `f` numa grade de 1/96 oitava (925 passos) tem erro
@@ -80,7 +155,7 @@ máximo de **0,36%** em `f`. Economiza 7 bytes = 12 caracteres, e cobra o adjeti
 
 | Sabor | Conteúdo | Tamanho | Quando |
 |---|---|---|---|
-| `parametric` | 10 × `(type, f, g, q)` + preamp | 51 B | curvas RBJ dentro do domínio — praticamente tudo |
+| `parametric` | 10 × `(type, f, g, q)` + preamp | 51 B | curvas RBJ dentro do domínio, praticamente tudo |
 | `raw` | 10 × 5 coeficientes int32 + preamp | ~203 B | biquad que não é expressável como RBJ, ou parâmetros fora do domínio |
 
 O cabeçalho de 4 bits (2 de versão + 2 de variante) resolve. Na v1, só a variante
@@ -90,8 +165,8 @@ formato compacto mentiria sobre curvas desenhadas direto em coeficientes.
 ### Forma canônica para compartilhar ≠ ordem de envio ⚠️
 
 Bandas em série **comutam** na resposta ideal. Então qualquer preset pode ser
-**ordenado** para virar forma canônica — por `f`, desempatando por tipo, Q e
-ganho — o que torna diff, hash e comparação determinísticos de graça.
+**ordenado** para virar forma canônica (por `f`, desempatando por tipo, Q e
+ganho), o que torna diff, hash e comparação determinísticos de graça.
 
 **Mas essa ordem nunca vai para o cabo.** O **pico interno** da cadeia depende da
 ordem, e a referência ordena **cortes antes dos reforços** de propósito. Medido
@@ -107,66 +182,48 @@ reconstrói a ordem de envio (cortes primeiro).
 
 ---
 
-## S2 — Proveniência, não assinatura ❌ descartada
+## S2: proveniência, não assinatura ❌ descartada
 
 Assinatura criptográfica foi **descartada**, e o argumento é bom: o pior caso de
-uma curva adulterada é um EQ diferente — sem dano (e o codec recusa curvas que
+uma curva adulterada é um EQ diferente, sem dano (e o codec recusa curvas que
 gravariam silêncio ou instabilidade). E, sem leitura conhecida, não há como
 verificar o que está no cabo de qualquer forma.
 
 Substituto: campo **`source`** apontando para a origem canônica (commit, PR,
-gist). É verificável de graça e é a identidade real.
+gist), e a linhagem publicada com o apelido do autor. É verificável de graça e é
+a identidade real.
 
 Assinatura só voltaria em um cenário: **S9 virar comercial** (packs vendidos). Aí
 o correto é assinar **a receita** (medição + alvo + versão do solver), não o blob.
 
 ---
 
-## S3 — Hospedagem: GitHub Pages dá conta ✅
+## S3: versionamento e hospedagem ✅
 
-**S1, S3, S4, S5, S8, S10 rodam 100% estáticos.** Três mecanismos:
+O plano começou 100% estático (fragmento de URL, repositório como banco, busca
+no cliente). Isso continua valendo para o que é local: o link `#p=<código>` (68
+caracteres) não precisa de servidor, e editor, presets e teste cego funcionam
+offline.
 
-1. **Fragmento de URL** (`#p=<código>`, 68 caracteres): zero armazenamento.
-   Compartilhar é mandar um link.
-2. **Repo-como-banco** — presets como arquivos de texto. A **UI do GitHub é a
-   camada social**: PR = contribuição, issue = discussão, blame = atribuição,
-   fork = remix, stars = curadoria, licença por arquivo = S9. Versionamento,
-   histórico e revisão saem de graça.
-3. **Busca no cliente**: 10.000 presets × 68 caracteres ≈ **680 KB**. Nada.
-   Fuse.js client-side, que é o que o próprio `eq.hangout.audio` usa.
+A camada social, porém, tem backend próprio (Worker + D1 + R2), porque escrita
+por usuário não técnico, conta, S6 anônimo, S7, rankings e antiabuso exigem
+estado no servidor:
 
-### Agregação sem servidor (destrava o S6) ✅
-
-**GitHub Actions como backend.** Resultados opt-in entram como dado no repo; um
-job agendado recalcula o alvo da comunidade e publica o JSON. Sem servidor, sem
-custo — e **o dataset inteiro fica auditável**, o que é vantagem, não remédio.
-
-⚠️ **Isso não é anônimo.** Enviar por PR ou issue expõe o usuário do GitHub junto
-com os dados, num repositório público: é **pseudônimo e público**. Serve para
-quem aceita isso; coleta anônima de verdade exige um servidor (próxima seção).
-
-### Quando o backend é inevitável
-
-| Necessidade | Por quê |
-|---|---|
-| escrita por usuário não-técnico | git é barreira real |
-| identidade / conta | OAuth do GitHub exige troca de token → Worker mínimo |
-| S6 **anônimo** | envio sem conta GitHub; o servidor descarta identidade e IP |
-| S7 (pareamento anônimo) | precisa de estado do servidor |
-| ranking/voto além do GitHub | idem |
-| telemetria e antabuso | idem |
-
-Stack natural: **Cloudflare Workers + KV/D1/R2**, free tier cobre isto
-trivialmente.
-
-**Recomendação: começar 100% estático.** O Worker entra quando a agregação doer.
-
-Requisitos atendidos: Pages é HTTPS ⇒ WebHID funciona ✅. Limites do Pages
-(repo ~1 GB, ~100 GB/mês, ~10 builds/h) são irrelevantes nesta escala ✅.
+- **Linhagem:** cada publicação cria uma linhagem; novas versões só se
+  acrescentam e precisam partir do head atual (`HEAD_MOVED` se outra versão
+  entrou antes). Nada é reescrito.
+- **Fork:** qualquer usuário verificado copia uma versão legível para uma
+  linhagem nova, privada por padrão. Fonte CC-BY 4.0 devolve a atribuição que o
+  fork precisa manter.
+- **Lápide:** o dono retira a linhagem (some das listas, responde 410 a outras
+  pessoas) e pode restaurá-la; a moderação não muda com isso.
+- **Gate:** toda publicação, versão e fork passa pelo gate v2 no servidor, com os
+  mesmos códigos de motivo do navegador; um gatilho no banco recusa versão sobre
+  curva reprovada, e linhagem cujo head reprova some de toda lista.
 
 ---
 
-## S4 — Distância entre curvas ✅
+## S4: distância entre curvas ✅
 
 Comparação exata: amostrar as duas respostas numa grade log e reportar delta RMS,
 delta máximo e **onde** divergem ("+2,3 dB a 150 Hz; acima de 4 kHz idênticas").
@@ -176,13 +233,13 @@ minha com mais grave". A `magnitudeDb()` do codec já faz o trabalho pesado.
 
 ---
 
-## S5 — Envelope: números **e** receita ✅
+## S5: envelope com números **e** receita ✅
 
 O envelope carrega **as duas coisas**, e cada uma resolve um problema distinto:
 
 | Parte | O que garante |
 |---|---|
-| os **10 números** | autossuficiência — aplica offline, sem base, sem rede |
+| os **10 números** | autossuficiência: aplica offline, sem base, sem rede |
 | a **receita** (medição + alvo + versão do solver) | auditabilidade e re-derivação |
 
 Só receita deixa o app refém da base de dados; só números, ninguém audita.
@@ -227,60 +284,83 @@ Esboço conceitual da receita (o esquema normativo é
 
 ---
 
-## S6 — Preferência crowdsourced ✅
+## S6: preferência crowdsourced ✅ ativo
 
-O teste cego (X2 em [`ideas.md`](ideas.md)) gera pares A/B **localmente**. Com
-opt-in, sobe só o resultado dos pares — e a comunidade constrói um **alvo
-derivado de dados reais**, continuamente. É como a curva Harman nasceu, mas
-aberto e sem parar. Transforma usuários em corpus.
+O teste cego no navegador gera pares A/B **localmente**. Com consentimento, sobe
+só o resultado dos pares, e a comunidade constrói uma preferência derivada de
+dados reais, continuamente.
 
-Dois caminhos, com garantias diferentes:
+Preferência auditiva pode revelar perda de audição. Pela LGPD (art. 11), isso
+pede **consentimento explícito** e dados minimizados. Como funciona:
 
-| Caminho | Privacidade | Infra |
-|---|---|---|
-| PR/issue + Actions (S3) | **pseudônimo e público** (usuário do GitHub visível) | nenhuma |
-| Worker | **anônimo** (sem conta; identidade e IP descartados) | Cloudflare Worker |
+- **Anônimo, sem conta:** a sessão, se houver, é ignorada. O lote guarda só um id
+  aleatório, o SHA-256 do recibo, a versão do consentimento (`s6-consent-v1`) e o
+  dia UTC; os pares (curva A, curva B, escolha, nível igualado) entram em ordem
+  embaralhada. Nada de usuário, IP, hash de IP, navegador ou hora.
+- **Antiabuso sem rastro:** Turnstile e contador de rajada pelo hash do IP com sal
+  diário, sem cota gravada em banco.
+- **Retirada:** o navegador gera um recibo de 32 bytes aleatórios e o guarda só
+  localmente. Com ele, o lote e seus pares são apagados; a resposta é a mesma
+  existindo ou não. Sem o recibo, não há como achar o lote.
+- **"Comunidade prefere":** um job diário roda Bradley–Terry (iteração MM de
+  Zermelo, empate = meia vitória, normalização pela média geométrica, parada em
+  1e-9 ou 10 000 iterações) e publica só pontuação e número de comparações por
+  curva. Só a maior componente fortemente conexa do grafo de comparações recebe
+  pontuação (Ford 1957); curvas fora dela ficam sem número publicado.
 
-Preferência auditiva pode revelar perda de audição. Pela LGPD, isso pede
-**consentimento explícito** e dados minimizados (só os pares, sem perfil).
-
-Depende do X2 e do cabo ❌.
+O caminho pseudônimo por PR ou issue no GitHub, previsto no desenho inicial, não
+é usado: ele expõe o usuário do GitHub junto com os dados.
 
 ---
 
-## S7 — "Blind trade" 🟡 opcional
+## S7: troca às cegas ✅ ativo
 
-Dois usuários trocam curvas **anonimamente** e pontuam. Gamifica a coleta e dá ao
-autor feedback **sem viés de marca ou nome**. Precisa de backend.
+Dois usuários trocam curvas **sem saber de quem são** e dão nota. O autor recebe
+retorno sem viés de nome.
 
-## S8 — Curva como identidade 🟡 opcional
+- Um usuário verificado entra na fila com uma curva aprovada no gate: uma
+  linhagem própria ou uma pública e listável. No máximo uma troca ativa por vez.
+- **Pareamento assíncrono:** na entrada, com a troca em espera mais antiga
+  elegível; senão, um job de hora em hora tenta de novo. O pareamento é atômico:
+  duas entradas simultâneas nunca pegam a mesma troca.
+- **Às cegas:** cada lado recebe só a curva do parceiro (id e S1), o bastante
+  para a prévia no navegador. Instalar passa pelo checklist e pelo gesto de
+  sempre.
+- **Nota de 1 a 5,** uma vez. A segunda nota do par revela as duas trocas no
+  mesmo lote: apelido do parceiro (se houver e não estiver banido), a linhagem
+  quando ela abre por link e as duas notas. O id de usuário do parceiro nunca é
+  exposto.
+- **Expiração em 72 h** depois de entrar na fila ou do pareamento; dá para
+  cancelar enquanto espera.
 
-Assinatura sonora como avatar em reviews/fóruns; cartões de preset imprimíveis
-com QR. Une digital e físico. Depende de S1.
+## S8: curva como identidade 🟡 parcial
 
-## S9 — Packs curados e licenciáveis ✅
+Cada linhagem tem o link `/c/<id>` (com `?s=<shareId>` para o funil), imagem OG
+gerada no servidor e QR. Assinatura sonora como avatar e cartões impressos
+continuam como ideia.
 
-"Pack v1", packs de reviewers, cada curva com licença explícita (`CC0`, `CC-BY`)
-para remix legal. Resolve **de propósito** o problema de licença de curva — que é
-o mesmo problema já tratado no [`README.md`](README.md#créditos).
+## S9: packs curados e licenciáveis ✅
 
-## S10 — Antes/depois compartilhável ✅
+Packs com licença explícita por item (`CC0-1.0` ou `CC-BY-4.0`, copiada da versão
+head) para remix legal. Resolve **de propósito** o problema de licença de curva,
+o mesmo tratado no [`README.md`](README.md#créditos). O pack de outra pessoa só
+mostra linhagens públicas e listáveis.
+
+## S10: antes/depois compartilhável ✅
 
 Exportar o gráfico (curva sobre o alvo) como PNG/SVG. Barato, e é o que faz uma
 ideia circular.
 
 ---
 
-## Roteiro
+## Moderação e rankings (resumo)
 
-| Ordem | O que | Depende de |
-|---|---|---|
-| 1 | **S1** (código compacto) + **S5** (envelope) | nada — puro design |
-| 2 | **S10** + **S4** | S1 |
-| 3 | **S3** (repo-como-banco + Pages) | S1, S5 |
-| 4 | **S9** (licença por curva) | S3 |
-| 5 | **S6** | X2 + cabo ❌ |
-| 6 | S7 / S8 | backend / opcional |
+- **Denúncias** de curva, pack ou perfil por usuários verificados, com Turnstile.
+  Três contas distintas, verificadas, não banidas e com 3 dias ou mais ocultam
+  automaticamente uma curva ou pack até a revisão. Administradores ocultam,
+  restauram, removem, dispensam ou banem, sempre com registro de auditoria.
+- **Rankings:** mais favoritadas e mais instaladas, em 7 dias, 30 dias e sempre;
+  só curvas públicas, listáveis e aprovadas no gate; desempate por pontuação,
+  atividade recente e id; recálculo a cada 15 minutos.
 
-**S1 + S5 são o alicerce.** Sem eles, nada mais escala; com eles, S3/S4/S9/S10
-saem quase de graça e continuam 100% estáticos.
+Detalhes e códigos de erro em [`api.md`](api.md).

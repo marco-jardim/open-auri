@@ -79,7 +79,7 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				exactNumber(THRESHOLDS.radiusNumericalTolerance, locale)
 			);
 		});
-		test('legal anchor and full notice exist in both locales; accounts/social remain reserved', () => {
+		test('legal anchor and full notice exist in both locales; social sections are filled', () => {
 			expect(content.sections.find((section) => section.id === 'aviso-legal')?.paragraphs).toEqual(
 				legalNotice[locale]
 			);
@@ -98,12 +98,18 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				'aviso-legal',
 				'creditos',
 				'contas',
-				'social'
+				'privacidade-atividade',
+				'rankings',
+				'moderacao',
+				's6',
+				's7'
 			]);
 			expect(content.safetyCaveat).toMatch(locale === 'pt-BR' ? /não uma prova/ : /not a proof/);
-			expect(content.sections.find((section) => section.id === 'contas')?.paragraphs[0]).toMatch(
-				locale === 'pt-BR' ? /próxima fase/ : /next phase/
-			);
+			for (const id of ['contas', 'privacidade-atividade', 'rankings', 'moderacao', 's6', 's7']) {
+				const section = content.sections.find((entry) => entry.id === id);
+				expect(section?.paragraphs.length).toBeGreaterThan(0);
+				expect(JSON.stringify(section)).not.toMatch(/próxima fase|next phase/);
+			}
 			if (locale === 'pt-BR') expect(JSON.stringify(content)).not.toContain('—');
 		});
 		test('search indexes every section, glossary, credits and exact threshold values locally', () => {

@@ -170,15 +170,75 @@ export const ptBR: DocsContent = {
 			id: 'contas',
 			title: 'Contas',
 			paragraphs: [
-				'Chega na próxima fase. Esta seção será preenchida com os fluxos de conta e seus controles. Usar o editor local não exige conta.'
+				'A conta é opcional. Editor, presets, biblioteca no navegador, prévias, teste cego e gravação no cabo funcionam sem ela. Publicar, favoritar, registrar atividade, compartilhar, montar packs, denunciar e trocar curvas exigem conta com e-mail verificado.',
+				'Cadastro com e-mail e senha de pelo menos 10 caracteres, com verificação de força. Cadastro, entrada, recuperação e troca de e-mail passam pelo Turnstile. O link de verificação chega por e-mail; sem ele a conta só lê.',
+				'O apelido é o único nome público: aparece em rankings, feed, créditos, compartilhamentos, perfil e público das curvas. Tem de 3 a 24 caracteres (letras, dígitos, ponto, sublinhado e hífen) e é único depois da normalização NFKC e do esqueleto de caracteres confundíveis (UTS #39). Alguns nomes são reservados, como admin, open-auri, kuba, auri, os homenageados e termos de sistema. A troca é permitida a cada 30 dias; o apelido antigo fica reservado por 90 dias e redireciona para o novo.',
+				'Contas de administração usam segundo fator (app autenticador ou códigos de reserva). Ações destrutivas, como remover conteúdo ou banir, pedem uma sessão recente: até 10 minutos desde a entrada ou a última verificação do segundo fator.',
+				'Encerrar a conta pede confirmação pelo link enviado ao e-mail. Você escolhe o destino do conteúdo público CC: manter anonimizado (curvas e packs públicos e ativos ficam como “autor removido” e o apelido fica reservado por 90 dias sem dono) ou apagar tudo (todas as curvas, versões e packs; o apelido fica livre na hora). Nos dois modos, o conteúdo privado, não listado ou retirado é apagado, junto com favoritos, atividade, compartilhamentos e trocas. Forks feitos por outras pessoas continuam. Exporte seus dados em JSON antes, se quiser guardá-los.'
+			],
+			links: [
+				{ label: 'Minha conta', href: '/conta' },
+				{ label: 'Política de privacidade', href: '/privacidade' }
 			]
 		},
 		{
-			id: 'social',
-			title: 'Comunidade e social',
+			id: 'privacidade-atividade',
+			title: 'Privacidade da atividade',
 			paragraphs: [
-				'Chega na próxima fase. Esta seção será preenchida com publicação, privacidade da atividade e compartilhamentos.'
+				'“Experimentou” é uma prévia audível de pelo menos 10 s. “Instalou” é uma gravação real e bem-sucedida no cabo, nunca a simulada; quem informa é o seu navegador, depois do checklist e do gesto. “Favoritou” é o favorito. Eventos feitos sem rede ficam numa fila e são aceitos até 7 dias depois.',
+				'Os números públicos contam pessoas distintas, com e-mail verificado e não banidas; o autor nunca conta na própria curva. Repetir uma prévia ou instalação só aumenta um contador privado seu.',
+				'A atividade é privada por padrão. Com ela privada, você entra no público de uma curva só como parte de “N pessoas com perfil privado”. Se torná-la pública, seu apelido aparece na lista de quem experimentou, instalou ou favoritou, e seus favoritos podem aparecer no perfil.',
+				'A biblioteca pública também é opcional e começa desligada: o perfil mostra só o apelido e contagens agregadas. Ligada, mostra suas criações e packs públicos. Em qualquer caso, suas curvas públicas abrem por link, creditadas ao apelido.',
+				'Você vê e apaga o próprio histórico, inteiro ou por curva e tipo. As contagens públicas caem na hora; os rankings, no próximo recálculo. Aberturas de links compartilhados são só um contador anônimo por dia.'
+			],
+			links: [{ label: 'Minha conta', href: '/conta' }]
+		},
+		{
+			id: 'rankings',
+			title: 'Rankings',
+			paragraphs: [
+				'Duas métricas: mais favoritadas e mais instaladas. Três janelas: 7 dias, 30 dias e sempre. A pontuação é o número de pessoas distintas, com e-mail verificado e não banidas, que favoritaram ou instalaram dentro da janela; o autor da curva não conta.',
+				'Entram só curvas públicas e listadas, ativas, sem ocultação de moderação, com a versão atual aprovada no gate e autor não banido. Curvas não listadas ou privadas nunca entram.',
+				'Desempate: pontuação, depois a atividade mais recente, depois o id. Os rankings são recalculados a cada 15 minutos, com até 1000 posições por métrica e janela. A visibilidade é conferida de novo em cada leitura: uma curva ocultada ou retirada sai da lista na hora.'
+			],
+			links: [{ label: 'Comunidade', href: '/comunidade' }]
+		},
+		{
+			id: 'moderacao',
+			title: 'Moderação',
+			paragraphs: [
+				'Qualquer conta com e-mail verificado pode denunciar uma curva, um pack ou um perfil, com um motivo (perigosa, spam, ofensiva, direitos autorais, falsidade de identidade ou outro) e uma nota opcional de até 500 caracteres, lida só pela administração. A denúncia passa pelo Turnstile; cada pessoa denuncia um mesmo alvo uma vez, até 30 denúncias por dia, e não pode denunciar o próprio conteúdo.',
+				'Quando 3 contas distintas, verificadas, não banidas e com 3 dias ou mais de idade denunciam a mesma curva ou pack, o conteúdo é ocultado automaticamente até a revisão. A ocultação automática nunca desfaz uma decisão da administração. Perfis não são ocultados automaticamente.',
+				'A administração revisa a fila e decide: ocultar, restaurar, remover, dispensar as denúncias ou banir o autor. Toda decisão fica no registro de auditoria, com o motivo. Para contestar uma decisão, use o canal de contato indicado na política de privacidade.'
+			],
+			links: [
+				{ label: 'Política de privacidade', href: '/privacidade' },
+				{ label: 'Termos de uso', href: '/termos' }
 			]
+		},
+		{
+			id: 's6',
+			title: 'Preferências anônimas (S6)',
+			paragraphs: [
+				'Ao fim de um teste cego no navegador, você pode enviar o resultado dos pares. O envio é opcional, anônimo e não exige conta. Como preferência auditiva pode revelar condições de saúde, ele só acontece com o seu consentimento explícito (LGPD, art. 11).',
+				'O servidor guarda só um identificador aleatório, o resumo SHA-256 do seu recibo, a versão do consentimento, o dia e os pares (curva A, curva B, escolha e se o nível estava igualado), em ordem embaralhada. Nada de conta, IP, navegador ou horário. O controle de abuso usa o Turnstile e um contador passageiro, sem gravar nada sobre você.',
+				'O recibo fica só neste navegador. Com ele, você retira o envio a qualquer momento e os pares são apagados. Sem o recibo não há como achar o lote: guarde-o se quiser poder retirar depois.',
+				'Uma vez por dia, os pares viram “Comunidade prefere” pelo modelo Bradley–Terry: empate vale meia vitória para cada lado e só as curvas ligadas entre si por comparações nos dois sentidos recebem pontuação. O resultado publicado tem só a pontuação e o número de comparações de cada curva.'
+			],
+			links: [
+				{ label: 'Teste cego no navegador', href: '/teste-cego' },
+				{ label: 'Comunidade', href: '/comunidade' }
+			]
+		},
+		{
+			id: 's7',
+			title: 'Troca às cegas (S7)',
+			paragraphs: [
+				'Com e-mail verificado, você coloca na fila uma curva aprovada no gate: uma sua ou uma pública. Cada pessoa tem uma troca ativa por vez. O pareamento é assíncrono, com quem está esperando há mais tempo; se ninguém estiver na fila, a troca espera.',
+				'Pareada, você ouve a curva do parceiro só pela prévia no navegador, sem nome, autor ou link. Instalar continua pedindo o checklist e o seu gesto. Dê uma nota de 1 a 5, uma única vez.',
+				'Quando os dois dão nota, a troca é revelada: você vê o apelido do parceiro, a curva dele quando ela abre por link e as duas notas. Trocas não reveladas expiram 72 h depois de entrar na fila ou do pareamento; enquanto espera, você pode cancelar.'
+			],
+			links: [{ label: 'Comunidade', href: '/comunidade' }]
 		}
 	],
 	glossary: [

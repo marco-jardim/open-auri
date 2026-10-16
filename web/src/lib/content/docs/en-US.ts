@@ -173,15 +173,75 @@ export const enUS: DocsContent = {
 			id: 'contas',
 			title: 'Accounts',
 			paragraphs: [
-				'Arrives in the next phase. This section will describe account flows and controls. The local editor does not require an account.'
+				'An account is optional. The editor, presets, in-browser library, previews, blind test and cable writes all work without one. Publishing, favoriting, recording activity, sharing, building packs, reporting and trading curves need an account with a verified e-mail.',
+				'Sign up with an e-mail and a password of at least 10 characters, checked for strength. Sign-up, sign-in, recovery and e-mail change go through Turnstile. The verification link arrives by e-mail; until then the account can only read.',
+				'Your nickname is the only public name: it appears in rankings, the feed, credits, shares, your profile and curve audiences. It has 3 to 24 characters (letters, digits, dot, underscore and hyphen) and is unique after NFKC normalization and the confusable-character skeleton (UTS #39). Some names are reserved, such as admin, open-auri, kuba, auri, the honorees and system terms. You can change it every 30 days; the old nickname stays reserved for 90 days and redirects to the new one.',
+				'Administrator accounts use a second factor (authenticator app or backup codes). Destructive actions, such as removing content or banning, need a recent session: at most 10 minutes since sign-in or the last second-factor check.',
+				'Closing your account requires confirmation through a link sent to your e-mail. You choose what happens to your public CC content: keep it anonymized (public, active curves and packs stay as “author removed” and the nickname stays reserved for 90 days with no owner) or delete everything (every curve, version and pack; the nickname is free at once). In both modes, private, unlisted or retracted content is deleted, together with favorites, activity, shares and trades. Forks made by other people remain. Export your data as JSON first if you want to keep it.'
+			],
+			links: [
+				{ label: 'My account', href: '/conta' },
+				{ label: 'Privacy policy', href: '/privacidade' }
 			]
 		},
 		{
-			id: 'social',
-			title: 'Community and social',
+			id: 'privacidade-atividade',
+			title: 'Activity privacy',
 			paragraphs: [
-				'Arrives in the next phase. This section will describe publishing, activity privacy and sharing.'
+				'“Tried” is an audible preview of at least 10 s. “Installed” is a real, successful write to the cable, never a simulated one; your browser reports it after the checklist and your gesture. “Favorited” is a favorite. Events made offline wait in a queue and are accepted up to 7 days later.',
+				'Public numbers count distinct people with a verified e-mail who are not banned; the author never counts on their own curve. Repeating a preview or install only bumps a private counter of yours.',
+				'Activity is private by default. While it is private, you appear in a curve’s audience only as part of “N people with a private profile”. If you make it public, your nickname appears in the list of who tried, installed or favorited, and your favorites can appear on your profile.',
+				'A public library is also optional and starts off: your profile shows only your nickname and aggregate counts. When on, it shows your public creations and packs. Either way, your public curves open by link, credited to your nickname.',
+				'You can see and delete your own history, all of it or per curve and kind. Public counts drop at once; rankings, at the next recalculation. Opens of shared links are only an anonymous daily counter.'
+			],
+			links: [{ label: 'My account', href: '/conta' }]
+		},
+		{
+			id: 'rankings',
+			title: 'Rankings',
+			paragraphs: [
+				'Two metrics: most favorited and most installed. Three windows: 7 days, 30 days and all time. The score is the number of distinct people with a verified e-mail, not banned, who favorited or installed within the window; the curve’s author does not count.',
+				'Only public, listed curves enter: active, not hidden by moderation, with the current version approved by the gate and an author who is not banned. Unlisted or private curves never enter.',
+				'Tie-break: score, then the most recent activity, then the id. Rankings are recalculated every 15 minutes, with up to 1000 positions per metric and window. Visibility is checked again on every read: a curve that is hidden or retracted leaves the list at once.'
+			],
+			links: [{ label: 'Community', href: '/comunidade' }]
+		},
+		{
+			id: 'moderacao',
+			title: 'Moderation',
+			paragraphs: [
+				'Any account with a verified e-mail can report a curve, a pack or a profile, with a reason (dangerous, spam, offensive, copyright, impersonation or other) and an optional note of up to 500 characters, read only by administrators. Reports go through Turnstile; each person reports the same target once, up to 30 reports per day, and cannot report their own content.',
+				'When 3 distinct accounts, verified, not banned and at least 3 days old, report the same curve or pack, it is hidden automatically until review. Automatic hiding never overrides an administrator’s decision. Profiles are not hidden automatically.',
+				'Administrators review the queue and decide: hide, restore, remove, dismiss the reports or ban the author. Every decision is kept in the audit log with its reason. To appeal a decision, use the contact channel given in the privacy policy.'
+			],
+			links: [
+				{ label: 'Privacy policy', href: '/privacidade' },
+				{ label: 'Terms of use', href: '/termos' }
 			]
+		},
+		{
+			id: 's6',
+			title: 'Anonymous preferences (S6)',
+			paragraphs: [
+				'At the end of a blind test in the browser, you can send the result of the pairs. Sending is optional, anonymous and needs no account. Since hearing preferences can reveal health conditions, it only happens with your explicit consent (LGPD, art. 11).',
+				'The server keeps only a random identifier, the SHA-256 digest of your receipt, the consent version, the day and the pairs (curve A, curve B, choice and whether levels were matched), in shuffled order. No account, IP, browser or time of day. Abuse control uses Turnstile and a short-lived counter that stores nothing about you.',
+				'The receipt stays only in this browser. With it, you can withdraw the submission at any time and the pairs are deleted. Without the receipt the batch cannot be found: keep it if you may want to withdraw later.',
+				'Once a day, the pairs become “Community prefers” through the Bradley–Terry model: a tie counts as half a win for each side, and only curves linked to each other by comparisons in both directions get a score. The published result has only each curve’s score and number of comparisons.'
+			],
+			links: [
+				{ label: 'Blind test in the browser', href: '/teste-cego' },
+				{ label: 'Community', href: '/comunidade' }
+			]
+		},
+		{
+			id: 's7',
+			title: 'Blind trade (S7)',
+			paragraphs: [
+				'With a verified e-mail, you put a gate-approved curve in the queue: one of yours or a public one. Each person has one active trade at a time. Pairing is asynchronous, with whoever has waited longest; if nobody is in the queue, your trade waits.',
+				'Once paired, you hear your partner’s curve only through the browser preview, with no name, author or link. Installing still asks for the checklist and your gesture. Give a score from 1 to 5, only once.',
+				'When both have scored, the trade is revealed: you see your partner’s nickname, their curve when it opens by link, and both scores. Unrevealed trades expire 72 h after joining the queue or after pairing; while waiting, you can cancel.'
+			],
+			links: [{ label: 'Community', href: '/comunidade' }]
 		}
 	],
 	glossary: [
