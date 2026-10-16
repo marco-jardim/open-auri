@@ -20,7 +20,8 @@ function fixture(t, env, files) {
   }
   return {
     root,
-    run: (...args) => spawnSync(process.execPath, [scanner, ...args], { cwd: root, encoding: 'utf8' }),
+    run: (...args) =>
+      spawnSync(process.execPath, [scanner, ...args], { cwd: root, encoding: 'utf8' }),
   };
 }
 
@@ -51,9 +52,15 @@ test('safelists public repository, worker names and flags, and ignores short or 
     SHORT_TOKEN: 'abcde',
     EMPTY_TOKEN: '',
   };
-  const repo = fixture(t, Object.entries(entries).map(([key, value]) => `${key}=${value}`).join('\n'), {
-    'safe.txt': Object.values(entries).join('\n'),
-  });
+  const repo = fixture(
+    t,
+    Object.entries(entries)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n'),
+    {
+      'safe.txt': Object.values(entries).join('\n'),
+    },
+  );
   const result = repo.run('--json');
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), []);
@@ -61,19 +68,32 @@ test('safelists public repository, worker names and flags, and ignores short or 
 
 test('derives email domains and workers subdomains and returns label-only JSON', (t) => {
   const email = 'operator@fixture-mail.invalid';
-  const repo = fixture(t, [
-    `ADMIN_EMAIL='${email}'`,
-    'PUBLIC_ORIGIN=https://app.fixture-team.workers.dev',
-    'CLOUDFLARE_WORKERS_SUBDOMAIN=fixture-team',
-  ].join('\n'), {
-    'contact.txt': 'https://FIXTURE-MAIL.INVALID/help\nfixture-team\n',
-  });
+  const repo = fixture(
+    t,
+    [
+      `ADMIN_EMAIL='${email}'`,
+      'PUBLIC_ORIGIN=https://app.fixture-team.workers.dev',
+      'CLOUDFLARE_WORKERS_SUBDOMAIN=fixture-team',
+    ].join('\n'),
+    {
+      'contact.txt': 'https://FIXTURE-MAIL.INVALID/help\nfixture-team\n',
+    },
+  );
   const result = repo.run('--json');
   assert.equal(result.status, 1, result.stderr);
   const findings = JSON.parse(result.stdout);
-  assert.ok(findings.some(({ path, line, label }) => path === 'contact.txt' && line === 1 && label === 'derived:EMAIL_DOMAIN(ADMIN_EMAIL)'));
-  assert.ok(findings.some(({ line, label }) => line === 2 && label === 'derived:WORKERS_SUBDOMAIN'));
-  assert.ok(findings.some(({ line, label }) => line === 2 && label === 'CLOUDFLARE_WORKERS_SUBDOMAIN'));
+  assert.ok(
+    findings.some(
+      ({ path, line, label }) =>
+        path === 'contact.txt' && line === 1 && label === 'derived:EMAIL_DOMAIN(ADMIN_EMAIL)',
+    ),
+  );
+  assert.ok(
+    findings.some(({ line, label }) => line === 2 && label === 'derived:WORKERS_SUBDOMAIN'),
+  );
+  assert.ok(
+    findings.some(({ line, label }) => line === 2 && label === 'CLOUDFLARE_WORKERS_SUBDOMAIN'),
+  );
   assert.ok(findings.every((finding) => Object.keys(finding).join(',') === 'path,line,label'));
   assert.ok(!`${result.stdout}${result.stderr}`.includes(email));
 });
@@ -108,11 +128,15 @@ test('derives both Windows user-profile path spellings without echoing them', (t
 });
 
 test('accepts inline comments and exported or multiline quoted values', (t) => {
-  const repo = fixture(t, 'EMPTY_TOKEN=\nexport PRIVATE_TOKEN=fixture-inline-secret # ignored comment\nMULTILINE_TOKEN="fixture-multiline\nsecret-ending"\n', {
-    'inline.txt': 'fixture-inline-secret',
-    'multiline.txt': 'ordinary text\nfixture-multiline\nsecret-ending\n',
-    'not-a-secret.txt': 'ignored comment',
-  });
+  const repo = fixture(
+    t,
+    'EMPTY_TOKEN=\nexport PRIVATE_TOKEN=fixture-inline-secret # ignored comment\nMULTILINE_TOKEN="fixture-multiline\nsecret-ending"\n',
+    {
+      'inline.txt': 'fixture-inline-secret',
+      'multiline.txt': 'ordinary text\nfixture-multiline\nsecret-ending\n',
+      'not-a-secret.txt': 'ignored comment',
+    },
+  );
   const result = repo.run('--json');
   assert.equal(result.status, 1, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), [

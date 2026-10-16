@@ -34,6 +34,24 @@ está marcado como hipótese ou pendência — não como fato.
 | [`probing.md`](probing.md) | Plano técnico: sondagem do firmware, testes cegos, otimizações de qualidade. |
 | [`open-questions.md`](open-questions.md) | O que está confirmado, o que é hipótese, o que falta — e a errata. |
 
+## Índice do núcleo
+
+| Módulo ou documento | Estado |
+|---|---|
+| [`src/dsp/level.mjs`](../src/dsp/level.mjs) | em construção |
+| [`src/dsp/distance.mjs`](../src/dsp/distance.mjs) | em construção |
+| [`src/dsp/iso226.mjs`](../src/dsp/iso226.mjs) | em construção |
+| [`src/safety/`](../src/safety/) | em construção |
+| [`src/share/`](../src/share/) | em construção |
+| [`src/io/`](../src/io/) | em construção |
+| [`src/solver/`](../src/solver/) | em construção |
+| [`src/catalog/`](../src/catalog/) | em construção |
+| [`src/transport/`](../src/transport/) | em construção |
+| [`src/policy/`](../src/policy/) | em construção |
+| [`src/meter/`](../src/meter/) | em construção |
+| [`schemas/`](../schemas/) | em construção |
+| [`docs/s1-format.md`](s1-format.md) | em construção |
+
 ## Créditos
 
 - **Presets e implementação de referência:** [Kuba](https://equalizador.kuba.audio/)

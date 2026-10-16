@@ -43,8 +43,33 @@ const USAGE = [
 /** An expected failure: printed as a message, without a stack trace. */
 class CliError extends Error {}
 
+/**
+ * @typedef {{type: string, f: number, g: number, q: number}} ReferenceBand
+ * @typedef {{id: string, pre: number, bands: ReferenceBand[]}} ReferencePreset
+ * @typedef {Object} ReferenceCodec
+ * @property {number} VENDOR_ID
+ * @property {number} PRODUCT_ID
+ * @property {number} REPORT_ID
+ * @property {number} FS
+ * @property {number[]} HEADER
+ * @property {number[]} APPLY
+ * @property {(bands: ReferenceBand[], preamp: number) => number[]} blob
+ * @property {(bands: ReferenceBand[], preamp: number) => Iterable<number>[]} packets
+ * @typedef {{codec: ReferenceCodec, presets: {auri: ReferencePreset[]}}} Reference
+ * @typedef {Object} FixturePreset
+ * @property {number} preampDb
+ * @property {{kind: string, freqHz: number, gainDb: number, qFactor: number}[]} eqBands
+ * @property {number[]} payload
+ * @property {number[][]} reports
+ */
+
+/** @param {string} text */
 const sha256 = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
 
+/**
+ * @param {string[]} argv
+ * @param {string} name
+ */
 function option(argv, name) {
   const i = argv.indexOf(name);
   const v = i >= 0 ? argv[i + 1] : undefined;
@@ -53,11 +78,21 @@ function option(argv, name) {
 
 // The page is a bundled artifact: the app lives in a JSON-encoded template tag.
 // Plain (already decoded) HTML passes through unchanged.
+/**
+ * @param {string} html
+ * @returns {string}
+ */
 function decodeTemplate(html) {
   const m = html.match(/<script type="__bundler\/template">([\s\S]*?)<\/script>/);
   return m ? JSON.parse(m[1]) : html;
 }
 
+/**
+ * @param {string} src
+ * @param {string} start
+ * @param {string} end
+ * @param {boolean} inclusiveEnd
+ */
 function between(src, start, end, inclusiveEnd) {
   const a = src.indexOf(start);
   if (a < 0) throw new Error(`start marker not found: ${start}`);
@@ -66,7 +101,10 @@ function between(src, start, end, inclusiveEnd) {
   return src.slice(a, inclusiveEnd ? b + end.length : b);
 }
 
-/** Downloads the page, saves the decoded template and returns its sha256. Runs nothing. */
+/**
+ * Downloads the page, saves the decoded template and returns its sha256. Runs nothing.
+ * @param {string} out
+ */
 async function download(out) {
   const res = await fetch(URL_DEFAULT);
   if (!res.ok) throw new CliError(`GET ${URL_DEFAULT} -> HTTP ${res.status}`);
@@ -75,11 +113,12 @@ async function download(out) {
   return sha256(text);
 }
 
+/** @returns {Promise<string | undefined>} */
 async function pinnedSha() {
   try {
     return JSON.parse(await readFile(OUT, 'utf8'))._provenance?.templateSha256;
   } catch (e) {
-    if (e.code === 'ENOENT') return undefined;
+    if (/** @type {NodeJS.ErrnoException} */ (e).code === 'ENOENT') return undefined;
     throw e;
   }
 }
@@ -87,23 +126,31 @@ async function pinnedSha() {
 async function refresh() {
   const pinned = await pinnedSha();
   if (!pinned) {
-    throw new CliError('No sha256 pinned in the fixture. Bootstrap with --fetch <file>, '
-      + 'review it, then --template <file> --expect-sha256 <hash>.');
+    throw new CliError(
+      'No sha256 pinned in the fixture. Bootstrap with --fetch <file>, ' +
+        'review it, then --template <file> --expect-sha256 <hash>.',
+    );
   }
   const tmp = join(tmpdir(), 'open-auri-kuba-template.html');
   const hash = await download(tmp);
   if (hash !== pinned) {
-    throw new CliError([
-      'The reference page changed; nothing was run.',
-      `  downloaded sha256 ${hash}`,
-      `  pinned     sha256 ${pinned}`,
-      `Review ${tmp}. If it is safe, re-pin with:`,
-      `  node tools/extract-kuba-reference.mjs --template "${tmp}" --expect-sha256 ${hash}`,
-    ].join('\n'));
+    throw new CliError(
+      [
+        'The reference page changed; nothing was run.',
+        `  downloaded sha256 ${hash}`,
+        `  pinned     sha256 ${pinned}`,
+        `Review ${tmp}. If it is safe, re-pin with:`,
+        `  node tools/extract-kuba-reference.mjs --template "${tmp}" --expect-sha256 ${hash}`,
+      ].join('\n'),
+    );
   }
   await buildFixture(tmp, pinned);
 }
 
+/**
+ * @param {string} path
+ * @param {string | undefined} expectedSha
+ */
 async function buildFixture(path, expectedSha) {
   const text = decodeTemplate(await readFile(path, 'utf8'));
   const hash = sha256(text);
@@ -116,22 +163,26 @@ async function buildFixture(path, expectedSha) {
   // project's own vocabulary.
   const dspSrc = between(text, 'const DSP = {', 'module.exports = DSP;', true);
   const presetsSrc = between(text, 'const PK = ', '// Medição', false);
+  /** @type {Reference} */
   const reference = vm.runInContext(
     `${dspSrc}\n${presetsSrc}\n({ codec: DSP, presets: PRESETS })`,
     vm.createContext({}),
     { timeout: 5000 },
   );
+  /** @param {ReferenceBand} ref */
   const toBand = (ref) => ({ kind: ref.type, freqHz: ref.f, gainDb: ref.g, qFactor: ref.q });
 
   const fixture = {
     _provenance: {
       source: URL_DEFAULT,
       templateSha256: hash,
-      credit: 'Presets and reference implementation: Kuba (kuba.audio). '
-        + 'The reference page attributes its default curve to Leonardo '
-        + '("Padrão = filtros do Leonardo").',
-      note: 'Reference bytes produced by the Kuba page DSP implementation, '
-        + 'evaluated from a pinned local copy (not vendored).',
+      credit:
+        'Presets and reference implementation: Kuba (kuba.audio). ' +
+        'The reference page attributes its default curve to Leonardo ' +
+        '("Padrão = filtros do Leonardo").',
+      note:
+        'Reference bytes produced by the Kuba page DSP implementation, ' +
+        'evaluated from a pinned local copy (not vendored).',
     },
     constants: {
       usbVid: reference.codec.VENDOR_ID,
@@ -141,7 +192,7 @@ async function buildFixture(path, expectedSha) {
       preamble: reference.codec.HEADER,
       commitCommand: reference.codec.APPLY,
     },
-    presets: {},
+    presets: /** @type {Record<string, FixturePreset>} */ ({}),
   };
 
   for (const preset of reference.presets.auri) {
@@ -149,7 +200,9 @@ async function buildFixture(path, expectedSha) {
       preampDb: preset.pre,
       eqBands: preset.bands.map(toBand),
       payload: reference.codec.blob(preset.bands, preset.pre),
-      reports: reference.codec.packets(preset.bands, preset.pre).map((report) => Array.from(report)),
+      reports: reference.codec
+        .packets(preset.bands, preset.pre)
+        .map((report) => Array.from(report)),
     };
   }
 

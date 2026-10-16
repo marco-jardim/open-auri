@@ -26,6 +26,13 @@
 // int32, and sections whose *quantized* poles are not strictly inside the unit
 // circle.
 
+/**
+ * @typedef {{kind: 'PK' | 'LS' | 'HS', freqHz: number, gainDb: number, qFactor: number}} GainBand
+ * @typedef {{kind: 'LP' | 'HP', freqHz: number, gainDb?: number, qFactor: number}} PassBand
+ * @typedef {GainBand | PassBand | {kind: 'OFF'}} Band
+ * @typedef {{b0: number, b1: number, b2: number, a1: number, a2: number}} Section
+ */
+
 export const USB_VID = 0x3302;
 export const USB_PID = 0x8902;
 export const HID_REPORT_ID = 0xcb;
@@ -57,6 +64,7 @@ export const REPORT_COUNT = 9;
  */
 export const FILTER_KINDS = Object.freeze(['PK', 'LS', 'HS', 'LP', 'HP', 'OFF']);
 
+/** @type {Readonly<{kind: 'OFF'}>} */
 export const OFF = Object.freeze({ kind: 'OFF' });
 
 /** Ten exact pass-through sections: the known-good neutral preset. */
@@ -77,12 +85,21 @@ const INT32_MAX = 2147483647;
 /**
  * AutoEq returns the feedback coefficients negated (its PEQFilter.fr flips them
  * back before use). Flip them once here; negation is exact in IEEE 754.
+ * @param {Section} section
+ * @returns {Section}
  */
 function fromAutoEqSign({ a1, a2, b0, b1, b2 }) {
   return { b0, b1, b2, a1: -a1, a2: -a2 };
 }
 
-/** Peaking EQ — AutoEq `Peaking.biquad_coefficients`. */
+/**
+ * Peaking EQ — AutoEq `Peaking.biquad_coefficients`.
+ * @param {number} freqHz
+ * @param {number} gainDb
+ * @param {number} qFactor
+ * @param {number} [sampleRate]
+ * @returns {Section}
+ */
 export function designPeaking(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
   // Math.pow, not `**`, so the result matches other JS implementations bit for bit.
   const amp = Math.pow(10, gainDb / 40);
@@ -100,7 +117,14 @@ export function designPeaking(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE)
   });
 }
 
-/** Low shelf — AutoEq `LowShelf.biquad_coefficients`. */
+/**
+ * Low shelf — AutoEq `LowShelf.biquad_coefficients`.
+ * @param {number} freqHz
+ * @param {number} gainDb
+ * @param {number} qFactor
+ * @param {number} [sampleRate]
+ * @returns {Section}
+ */
 export function designLowShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
   const amp = Math.pow(10, gainDb / 40);
   const w0 = (2 * Math.PI * freqHz) / sampleRate;
@@ -108,17 +132,24 @@ export function designLowShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE
   const cosW0 = Math.cos(w0);
   const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
 
-  const a0 = (amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+  const a0 = amp + 1 + (amp - 1) * cosW0 + twoSqrtAmpAlpha;
   return fromAutoEqSign({
-    a1: -(-2 * ((amp - 1) + (amp + 1) * cosW0)) / a0,
-    a2: -((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
-    b0: (amp * ((amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
-    b1: (2 * amp * ((amp - 1) - (amp + 1) * cosW0)) / a0,
-    b2: (amp * ((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+    a1: -(-2 * (amp - 1 + (amp + 1) * cosW0)) / a0,
+    a2: -(amp + 1 + (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+    b0: (amp * (amp + 1 - (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+    b1: (2 * amp * (amp - 1 - (amp + 1) * cosW0)) / a0,
+    b2: (amp * (amp + 1 - (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
   });
 }
 
-/** High shelf — AutoEq `HighShelf.biquad_coefficients`. */
+/**
+ * High shelf — AutoEq `HighShelf.biquad_coefficients`.
+ * @param {number} freqHz
+ * @param {number} gainDb
+ * @param {number} qFactor
+ * @param {number} [sampleRate]
+ * @returns {Section}
+ */
 export function designHighShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
   const amp = Math.pow(10, gainDb / 40);
   const w0 = (2 * Math.PI * freqHz) / sampleRate;
@@ -126,41 +157,53 @@ export function designHighShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RAT
   const cosW0 = Math.cos(w0);
   const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
 
-  const a0 = (amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+  const a0 = amp + 1 - (amp - 1) * cosW0 + twoSqrtAmpAlpha;
   return fromAutoEqSign({
-    a1: -(2 * ((amp - 1) - (amp + 1) * cosW0)) / a0,
-    a2: -((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
-    b0: (amp * ((amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
-    b1: (-2 * amp * ((amp - 1) + (amp + 1) * cosW0)) / a0,
-    b2: (amp * ((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+    a1: -(2 * (amp - 1 - (amp + 1) * cosW0)) / a0,
+    a2: -(amp + 1 - (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+    b0: (amp * (amp + 1 + (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+    b1: (-2 * amp * (amp - 1 + (amp + 1) * cosW0)) / a0,
+    b2: (amp * (amp + 1 + (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
   });
 }
 
-/** 2nd-order low pass — RBJ Audio EQ Cookbook. */
+/**
+ * 2nd-order low pass — RBJ Audio EQ Cookbook.
+ * @param {number} freqHz
+ * @param {number} qFactor
+ * @param {number} [sampleRate]
+ * @returns {Section}
+ */
 export function designLowPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
   const w0 = (2 * Math.PI * freqHz) / sampleRate;
   const cosW0 = Math.cos(w0);
   const alpha = Math.sin(w0) / (2 * qFactor);
   const a0 = 1 + alpha;
   return {
-    b0: ((1 - cosW0) / 2) / a0,
+    b0: (1 - cosW0) / 2 / a0,
     b1: (1 - cosW0) / a0,
-    b2: ((1 - cosW0) / 2) / a0,
+    b2: (1 - cosW0) / 2 / a0,
     a1: (-2 * cosW0) / a0,
     a2: (1 - alpha) / a0,
   };
 }
 
-/** 2nd-order high pass — RBJ Audio EQ Cookbook. */
+/**
+ * 2nd-order high pass — RBJ Audio EQ Cookbook.
+ * @param {number} freqHz
+ * @param {number} qFactor
+ * @param {number} [sampleRate]
+ * @returns {Section}
+ */
 export function designHighPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
   const w0 = (2 * Math.PI * freqHz) / sampleRate;
   const cosW0 = Math.cos(w0);
   const alpha = Math.sin(w0) / (2 * qFactor);
   const a0 = 1 + alpha;
   return {
-    b0: ((1 + cosW0) / 2) / a0,
-    b1: (-(1 + cosW0)) / a0,
-    b2: ((1 + cosW0) / 2) / a0,
+    b0: (1 + cosW0) / 2 / a0,
+    b1: -(1 + cosW0) / a0,
+    b2: (1 + cosW0) / 2 / a0,
     a1: (-2 * cosW0) / a0,
     a2: (1 - alpha) / a0,
   };
@@ -170,28 +213,47 @@ export function designHighPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
  * Section coefficients for a band `{ kind, freqHz, gainDb, qFactor }`. Throws on
  * an unknown kind: codes such as `LSQ`/`HSQ` (EqualizerAPO, hangout.audio) must
  * be mapped explicitly by the caller, never guessed.
+ * @param {Band} band
+ * @param {number} [sampleRate]
+ * @returns {Section}
  */
 export function designSection(band, sampleRate = SAMPLE_RATE) {
   switch (band.kind) {
-    case 'PK': return designPeaking(band.freqHz, band.gainDb, band.qFactor, sampleRate);
-    case 'LS': return designLowShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
-    case 'HS': return designHighShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
-    case 'LP': return designLowPass(band.freqHz, band.qFactor, sampleRate);
-    case 'HP': return designHighPass(band.freqHz, band.qFactor, sampleRate);
-    case 'OFF': return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
-    default: throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+    case 'PK':
+      return designPeaking(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'LS':
+      return designLowShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'HS':
+      return designHighShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'LP':
+      return designLowPass(band.freqHz, band.qFactor, sampleRate);
+    case 'HP':
+      return designHighPass(band.freqHz, band.qFactor, sampleRate);
+    case 'OFF':
+      return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
+    default:
+      throw new TypeError(`unknown filter kind ${JSON.stringify(/** @type {Band} */ (band).kind)}`);
   }
 }
 
 // --- Validation -------------------------------------------------------------
 
+/**
+ * @param {number} index
+ * @param {string} message
+ */
 function bandError(index, message) {
   return new RangeError(`band ${index}: ${message}`);
 }
 
-/** Rejects bands whose parameters cannot describe a valid filter at SAMPLE_RATE. */
+/**
+ * Rejects bands whose parameters cannot describe a valid filter at SAMPLE_RATE.
+ * @param {Band} band
+ * @param {number} [index]
+ */
 export function checkBand(band, index = 0) {
-  if (band === null || typeof band !== 'object') throw new TypeError(`band ${index}: not an object`);
+  if (band === null || typeof band !== 'object')
+    throw new TypeError(`band ${index}: not an object`);
   if (!FILTER_KINDS.includes(band.kind)) {
     throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
   }
@@ -208,7 +270,11 @@ export function checkBand(band, index = 0) {
   }
 }
 
-/** Jury criterion for 1 + a1 z^-1 + a2 z^-2: both poles strictly inside the unit circle. */
+/**
+ * Jury criterion for 1 + a1 z^-1 + a2 z^-2: both poles strictly inside the unit circle.
+ * @param {number} a1
+ * @param {number} a2
+ */
 export function isStable(a1, a2) {
   return Math.abs(a2) < 1 && Math.abs(a1) < 1 + a2;
 }
@@ -217,6 +283,8 @@ export function isStable(a1, a2) {
  * Quantizes one section to its 5 wire words `[b0, b2, -a1, b1, -a2]` (Q27).
  * Stability is checked on the quantized feedback words, which is what the chip
  * will actually run.
+ * @param {Section} section
+ * @param {number} [index]
  */
 export function encodeSection(section, index = 0) {
   const ordered = [section.b0, section.b2, -section.a1, section.b1, -section.a2];
@@ -248,7 +316,10 @@ export function preampWord(preampDb = 0) {
   return Math.round(Math.pow(10, preampDb / 20) * Q23_ONE);
 }
 
-/** CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection, no final XOR). */
+/**
+ * CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection, no final XOR).
+ * @param {Iterable<number>} data
+ */
 export function crc16Ccitt(data) {
   let register = 0xffff;
   for (const byte of data) {
@@ -260,6 +331,10 @@ export function crc16Ccitt(data) {
   return register;
 }
 
+/**
+ * @param {number[]} buffer
+ * @param {number} value
+ */
 function appendInt32LE(buffer, value) {
   if (!Number.isInteger(value) || value > INT32_MAX || value < INT32_MIN) {
     throw new RangeError(`value does not fit int32: ${value}`);
@@ -271,6 +346,8 @@ function appendInt32LE(buffer, value) {
  * Builds the 220-byte payload for 10 bands and a preamp. Bands are written in
  * the order given: keep cuts before boosts (see docs/protocol-0xcb.md), the
  * ordering the reference uses to avoid internal clipping.
+ * @param {readonly Band[]} eqBands
+ * @param {number} [preampDb]
  */
 export function encodePayload(eqBands, preampDb = 0) {
   if (!Array.isArray(eqBands) || eqBands.length !== BAND_COUNT) {
@@ -290,6 +367,8 @@ export function encodePayload(eqBands, preampDb = 0) {
 /**
  * Splits the payload into the 9 HID reports: byte 0 is the report index,
  * bytes 1..30 carry 30 bytes of the payload.
+ * @param {readonly Band[]} eqBands
+ * @param {number} [preampDb]
  */
 export function encodeReports(eqBands, preampDb) {
   const payload = encodePayload(eqBands, preampDb);
@@ -323,6 +402,9 @@ export function commitReport() {
  * measured on ~27 000 cases: 6e-14 dB, against 4e-9 dB for the direct form and
  * 1.5e-7 dB for AutoEq's phi form (PEQFilter.fr), which is why that one is not
  * used here.
+ * @param {readonly Band[]} eqBands
+ * @param {number} freqHz
+ * @param {number} [sampleRate]
  */
 export function magnitudeDb(eqBands, freqHz, sampleRate = SAMPLE_RATE) {
   const omega = (2 * Math.PI * freqHz) / sampleRate;
@@ -331,6 +413,11 @@ export function magnitudeDb(eqBands, freqHz, sampleRate = SAMPLE_RATE) {
   const uIm = Math.sin(omega);
   const uSquaredRe = uRe * uRe - uIm * uIm;
   const uSquaredIm = 2 * uRe * uIm;
+  /**
+   * @param {number} p0
+   * @param {number} p1
+   * @param {number} p2
+   */
   const powerAt = (p0, p1, p2) => {
     const sum = p0 + p1 + p2;
     const slope = p1 + 2 * p2;

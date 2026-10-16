@@ -1,0 +1,982 @@
+<!--
+  TODOs críticos antes de publicar:
+  - revisar o aviso legal com um advogado;
+  - validar a escrita, o firmware, o clock e as condições de falha no cabo real;
+  - revisar o envelope provisório com medições, sem ampliar seus limites por inferência;
+  - traduzir o corpo técnico e as descrições acessíveis (neste mock, permanecem em pt-BR);
+  - integrar a navegação e o chrome compartilhado; este arquivo não conecta nem grava;
+  - testar em Chrome/Edge, com teclado, leitor de tela e diferentes tamanhos de viewport;
+  - revisar as fontes dos homenageados e a atribuição antes da publicação.
+-->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Documentação do open-auri: limites, envelope provisório e formato do protocolo 0xCB. Mock local, sem acesso ao cabo.">
+  <title>Docs · open-auri</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink:#0F0F0E; --ink-2:#171715; --ink-3:#22221F; --rule:rgba(236,231,221,.12);
+      --text:#ECE7DD; --muted:#8F8A80; --paper:#F2EDE4; --paper-ink:#1A1917;
+      --paper-muted:#6B665D; --danger:#E5484D; --accent:#2F5D8A;
+      --accent-light:#A3BED8; --paper-rule:rgba(26,25,23,.18);
+      --serif:"Instrument Serif",Georgia,serif; --sans:"Geist",Arial,sans-serif;
+      --mono:"JetBrains Mono",Consolas,monospace;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; scroll-padding-top:94px; }
+    body { margin:0; color:var(--paper-ink); background:var(--paper); font-family:var(--sans); -webkit-font-smoothing:antialiased; }
+    ::selection { background:var(--accent); color:var(--paper); }
+    button,input { font:inherit; }
+    button,a,input,summary { -webkit-tap-highlight-color:transparent; }
+    a { color:inherit; text-underline-offset:4px; text-decoration-thickness:1px; }
+    a:hover { color:var(--accent); }
+    button { cursor:pointer; }
+    :focus-visible { outline:2px solid var(--accent); outline-offset:5px; }
+    .cable-bar :focus-visible,.site-footer :focus-visible { outline-color:var(--accent-light); }
+    button:disabled,[aria-disabled="true"] { cursor:not-allowed; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    .skip-link { position:fixed; top:8px; left:24px; z-index:20; padding:12px 18px; color:var(--paper); background:var(--accent); transform:translateY(-160%); }
+    .skip-link:focus { transform:translateY(0); color:var(--paper); }
+    .frame { width:100%; max-width:1440px; margin-inline:auto; padding-inline:24px; }
+    .mono,code,kbd,.data { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+    code { font-size:.82em; }
+    .eyebrow { font-size:10px; font-weight:500; line-height:1.6; letter-spacing:.16em; text-transform:uppercase; }
+    .cable-bar { position:sticky; top:0; z-index:10; background:var(--ink-2); color:var(--text); border-bottom:1px solid var(--rule); }
+    .bar-inner { min-height:60px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .wordmark { font:italic 28px/1 var(--serif); text-decoration:none; white-space:nowrap; letter-spacing:-.7px; }
+    .wordmark:hover { color:var(--text); }
+    .main-nav { display:flex; align-items:center; gap:13px; min-height:60px; white-space:nowrap; }
+    .main-nav a { display:flex; align-items:center; position:relative; align-self:stretch; text-decoration:none; font-size:10.5px; }
+    .main-nav a + a::before { content:"·"; position:absolute; left:-8px; color:var(--muted); font-size:10px; }
+    .main-nav a:hover { color:var(--accent-light); }
+    .main-nav a[aria-current="page"] { color:var(--accent-light); }
+    .main-nav a[aria-current="page"]::after { content:""; height:2px; position:absolute; bottom:0; inset-inline:0; background:var(--accent-light); }
+    .main-nav a[aria-disabled] { color:var(--muted); opacity:.65; }
+    .bar-actions { display:flex; align-items:center; gap:6px; }
+    .connection { display:flex; flex-direction:column; gap:4px; align-items:flex-start; margin-right:5px; white-space:nowrap; }
+    .status-pill { font-size:10px; border:1px solid var(--rule); border-radius:20px; padding:4px 7px; }
+    .status-dot { display:inline-block; width:5px; height:5px; margin-right:5px; border-radius:50%; background:var(--muted); vertical-align:1px; }
+    .unsaved { font-size:8px; color:#AAA59B; }
+    .bar-button { padding:8px 9px; border:1px solid var(--rule); border-radius:3px; color:var(--text); background:transparent; font-size:10px; white-space:nowrap; }
+    .bar-button:disabled { opacity:.45; }
+    .bar-button.primary { background:var(--accent); border-color:var(--accent); }
+    .language-toggle { display:flex; align-items:center; gap:4px; margin-left:6px; font:10px var(--mono); }
+    .language-toggle button { border:0; padding:6px 2px; color:var(--muted); background:none; font:inherit; }
+    .language-toggle button[aria-pressed="true"] { color:var(--text); text-decoration:underline; text-underline-offset:4px; }
+    .language-toggle span { color:var(--muted); }
+    .reading-progress { height:1px; width:0; background:var(--accent-light); position:absolute; bottom:-1px; left:0; }
+    .sampling-background { position:absolute; top:150px; left:0; width:100%; height:970px; overflow:hidden; pointer-events:none; opacity:.16; mask-image:linear-gradient(90deg,#000 0%,transparent 27%,transparent 76%,#000 100%); }
+    .sampling-background svg { width:1800px; height:100%; position:absolute; left:50%; transform:translateX(-50%); color:var(--accent); }
+    .sample-drift { animation:sample-drift 36s ease-in-out infinite alternate; }
+    .alias-wave { animation:alias-appear 18s ease-in-out infinite; }
+    @keyframes sample-drift { to { transform:translateX(44px); } }
+    @keyframes alias-appear { 0%,35%,85%,100% { opacity:0; } 50%,70% { opacity:.6; } }
+    .doc-layout { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:24px; position:relative; }
+    .toc { grid-column:1 / span 2; padding-top:51px; }
+    .toc-inner { position:sticky; top:106px; }
+    .toc-label { color:var(--paper-muted); margin:0 0 23px; }
+    .toc ol { padding:0; margin:0; list-style:none; }
+    .toc li { margin:0 0 5px; }
+    .toc a { display:grid; grid-template-columns:23px 1fr; align-items:baseline; gap:8px; padding:7px 0 7px 10px; border-left:1px solid transparent; text-decoration:none; font-size:11px; line-height:1.5; color:var(--paper-muted); }
+    .toc a .mono { font-size:9px; }
+    .toc a:hover,.toc a.active { color:var(--accent); border-left-color:var(--accent); }
+    .toc a.active { font-weight:600; }
+    .toc-bottom { margin:32px 0 0 10px; border-top:1px solid var(--paper-rule); padding-top:17px; color:var(--paper-muted); font-size:10px; line-height:1.7; }
+    .toc-bottom .mono { display:block; font-size:9px; margin-top:7px; }
+    .document { grid-column:3 / -1; min-width:0; }
+    .page-head { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); gap:24px; padding:46px 0 42px; }
+    .head-main { grid-column:1 / span 7; }
+    .document-label { display:flex; justify-content:space-between; gap:20px; color:var(--paper-muted); margin:0 0 25px; }
+    .document-label .mono { font-size:9px; letter-spacing:.04em; }
+    h1,h2,h3,p,figure { margin:0; }
+    h1 { font:normal clamp(72px,7.1vw,108px)/.96 var(--serif); letter-spacing:-3px; margin-bottom:26px; }
+    h1 span { display:block; }
+    h1 em { font-weight:normal; color:var(--accent); }
+    .standfirst { max-width:51ch; font-size:18px; line-height:1.7; color:#4E4A43; }
+    .head-margin { grid-column:8 / span 3; align-self:end; padding-bottom:6px; }
+    .nyquist-card { border-top:1px solid var(--paper-rule); padding-top:12px; }
+    .nyquist-card .eyebrow { color:var(--paper-muted); font-size:9px; }
+    .nyquist-number { font:normal 100px/.94 var(--serif); letter-spacing:-4px; margin:18px 0 6px; }
+    .nyquist-number small { font:12px var(--mono); letter-spacing:0; margin-left:8px; color:var(--accent); }
+    .nyquist-card svg { display:block; width:100%; height:auto; margin-top:16px; }
+    .nyquist-card figcaption { font-size:10px; line-height:1.6; color:var(--paper-muted); margin-top:8px; }
+    .legend-strip { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:16px 0; border-top:1px solid var(--paper-rule); border-bottom:1px solid var(--paper-rule); }
+    .legend-list { display:flex; flex-wrap:wrap; gap:19px; }
+    .status { display:inline-flex; align-items:baseline; gap:5px; font-size:10px; font-weight:500; white-space:nowrap; line-height:1.5; }
+    .status > span:first-child { font-family:var(--mono); font-size:12px; font-weight:400; }
+    .confirmed { color:var(--accent); }
+    .hypothesis,.requires { color:var(--paper-muted); }
+    .local-only { color:var(--paper-muted); font:9px var(--mono); letter-spacing:.03em; }
+    .chapter { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); column-gap:24px; padding:49px 0 45px; border-bottom:1px solid var(--paper-rule); scroll-margin-top:90px; }
+    .copy { grid-column:1 / span 7; min-width:0; max-width:68ch; font-size:17px; line-height:1.78; }
+    .chapter-heading { display:flex; align-items:baseline; gap:13px; margin-bottom:24px; }
+    .chapter-heading .section-number { font:10px var(--mono); color:var(--accent); transform:translateY(-4px); }
+    h2 { font:normal 41px/1.1 var(--serif); letter-spacing:-.65px; }
+    .copy p + p { margin-top:17px; }
+    .copy a { text-decoration-color:rgba(47,93,138,.45); }
+    .copy strong { font-weight:600; }
+    .margin { grid-column:8 / span 3; align-self:start; padding-top:5px; max-width:29ch; font-size:12px; color:var(--paper-muted); line-height:1.75; }
+    .margin .note-label { display:block; font:9px var(--mono); color:var(--accent); letter-spacing:.04em; margin-bottom:11px; }
+    .margin p + p { margin-top:13px; }
+    .margin .status { margin-top:12px; }
+    .margin .footnote-ref { font:italic 24px var(--serif); color:var(--accent); display:block; margin-bottom:6px; }
+    .margin-figure { width:100%; height:auto; display:block; margin-bottom:12px; }
+    .steps { padding:0; margin:0; list-style:none; }
+    .steps li { display:flex; gap:15px; align-items:baseline; padding:13px 0; border-bottom:1px solid var(--paper-rule); font-size:15px; }
+    .steps li:first-child { border-top:1px solid var(--paper-rule); }
+    .step-number { flex-shrink:0; display:inline-grid; width:25px; height:25px; place-items:center; border:1px solid rgba(47,93,138,.35); border-radius:50%; color:var(--accent); font:10px var(--mono); }
+    .fine { font-size:11px!important; line-height:1.8!important; color:var(--paper-muted); }
+    .copy .after-list { margin-top:18px; }
+    .layers { margin-top:3px; border-top:1px solid var(--paper-rule); }
+    .layer { display:grid; grid-template-columns:100px 1fr; gap:18px; border-bottom:1px solid var(--paper-rule); padding:17px 0; }
+    .layer-name { font-size:15px; font-weight:500; }
+    .layer-name small { display:block; font:9px var(--mono); color:var(--paper-muted); margin-top:4px; }
+    .layer p { font-size:14px; line-height:1.7; }
+    .layer-link { margin-top:7px; display:inline-block; font:9px var(--mono); color:var(--accent); }
+    .layer-diagram { width:100%; height:auto; margin-bottom:10px; }
+    .envelope-title { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:24px 0 12px; }
+    .envelope-title h3 { font-size:15px; font-weight:600; }
+    .badge { display:inline-block; border:1px solid var(--paper-rule); border-radius:2px; padding:3px 6px; font:8px/1.4 var(--mono); letter-spacing:.07em; color:var(--paper-muted); vertical-align:middle; }
+    .table-scroll { max-width:100%; overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:12px; text-align:left; }
+    th { color:var(--paper-muted); font-size:9px; font-weight:500; letter-spacing:.05em; text-transform:uppercase; padding:12px 8px 12px 0; border-top:1px solid var(--paper-rule); border-bottom:1px solid var(--paper-rule); }
+    td { border-bottom:1px solid var(--paper-rule); padding:13px 8px 13px 0; vertical-align:top; }
+    .envelope-table { min-width:510px; }
+    .envelope-table td:not(:first-child) { white-space:nowrap; font:11px/1.8 var(--mono); }
+    .envelope-table td:first-child { font-size:12px; }
+    .envelope-table td small { display:block; font-size:10px; color:var(--paper-muted); }
+    .envelope-rules { margin:17px 0; padding:0 0 0 17px; font-size:13px; line-height:1.9; }
+    .soon-box { border:1px solid var(--paper-rule); padding:17px 18px; margin-top:22px; }
+    .soon-box-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .soon-box button { color:var(--paper-ink); padding:8px 11px; border:1px solid var(--paper-rule); background:transparent; opacity:.45; font-size:12px; }
+    .soon-box p { font-size:12px; line-height:1.75; margin-top:13px; }
+    .soon-box .fine { margin-top:12px; }
+    .failure-title { font-size:14px; font-weight:600; margin:29px 0 11px; }
+    .refusal { border-left:2px solid var(--danger); padding-left:14px; }
+    .refusal table { min-width:400px; }
+    .refusal th:first-child { color:var(--paper-ink); }
+    .refusal td { font-size:12px; }
+    .refusal code { font-size:11px; }
+    .wide { grid-column:1 / -1; min-width:0; }
+    .protocol-section .copy { margin-bottom:25px; }
+    .protocol-section .margin { padding-top:9px; }
+    .byte-figure { border:1px solid var(--paper-rule); background:rgba(255,255,255,.22); padding:21px 23px 18px; }
+    .figure-heading { display:flex; justify-content:space-between; align-items:baseline; gap:15px; padding-bottom:8px; }
+    .figure-heading strong { font-size:12px; font-weight:500; }
+    .figure-heading .mono { font-size:9px; color:var(--paper-muted); }
+    .diagram-scroll { overflow-x:auto; }
+    .byte-svg,.framing-svg { display:block; width:100%; min-width:680px; height:auto; }
+    .diagram-scroll:focus-visible { outline-offset:-2px; }
+    svg text { font-family:var(--mono); fill:var(--paper-muted); font-size:11px; }
+    .svg-ink { fill:var(--paper-ink); }
+    .svg-accent { fill:var(--accent); }
+    .svg-paper { fill:var(--paper); }
+    .figure-caption { display:flex; justify-content:space-between; flex-wrap:wrap; gap:9px 22px; margin-top:9px; padding-top:13px; border-top:1px solid var(--paper-rule); font-size:10px; line-height:1.7; color:var(--paper-muted); }
+    .header-bytes { margin-top:17px; padding:15px 0; display:flex; align-items:baseline; flex-wrap:wrap; gap:7px 17px; font-size:10px; border-bottom:1px solid var(--paper-rule); }
+    .header-bytes code { font-size:10px; color:var(--accent); letter-spacing:.02em; overflow-wrap:anywhere; }
+    .header-caption { font-size:11px; line-height:1.8; color:var(--paper-muted); margin-top:10px; }
+    .framing-figure { padding:25px 0 19px; }
+    .widget-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:10px; }
+    .widget { min-width:0; border:1px solid var(--paper-rule); padding:20px; background:rgba(255,255,255,.22); }
+    .widget-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:19px; }
+    .widget h3 { font-size:13px; font-weight:600; }
+    .widget-index { font:9px var(--mono); color:var(--paper-muted); }
+    .widget label { display:block; font-size:10px; color:var(--paper-muted); margin-bottom:8px; }
+    .input-wrap { display:flex; align-items:center; border-bottom:1px solid var(--paper-ink); padding-bottom:7px; gap:10px; }
+    .widget input { width:100%; min-width:0; border:0; background:transparent; color:var(--paper-ink); font:22px/1.5 var(--mono); border-radius:0; }
+    .input-wrap:focus-within { border-bottom-color:var(--accent); }
+    .widget input:focus { outline:none; }
+    .input-wrap:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:5px; }
+    .input-wrap > span { font:11px var(--mono); color:var(--paper-muted); white-space:nowrap; }
+    .widget-output { display:block; margin:18px 0 9px; min-height:31px; font:24px/1.3 var(--mono); letter-spacing:.03em; color:var(--accent); overflow-wrap:anywhere; }
+    .widget-metadata { font:9px/1.9 var(--mono); color:var(--paper-muted); min-height:18px; }
+    .widget-note { margin-top:13px; padding-top:12px; border-top:1px solid var(--paper-rule); font-size:10px; line-height:1.8; color:var(--paper-muted); }
+    .widget-error { min-height:19px; margin-top:7px; font-size:10px; line-height:1.7; color:var(--paper-ink); }
+    .widget[data-invalid="true"] .input-wrap { border-bottom:2px solid var(--danger); }
+    .widget[data-invalid="true"] .widget-output { color:var(--paper-ink); font-size:18px; }
+    .physical { display:grid; grid-template-columns:repeat(3,1fr); border-top:1px solid var(--paper-rule); margin:0 0 23px; }
+    .physical-cell { padding:18px 10px 17px 0; border-bottom:1px solid var(--paper-rule); }
+    .physical-value { font:45px/1.1 var(--serif); letter-spacing:-1px; }
+    .physical-value small { font:10px var(--mono); letter-spacing:0; }
+    .physical-label { font-size:10px; line-height:1.6; color:var(--paper-muted); margin-top:8px; }
+    .physical-cell .status { margin-top:7px; font-size:8px; }
+    .questions { list-style:none; padding:0; margin:0; }
+    .questions li { display:grid; grid-template-columns:14px 1fr; gap:12px; padding:13px 0; border-top:1px solid var(--paper-rule); font-size:14px; line-height:1.75; }
+    .questions li:last-child { border-bottom:1px solid var(--paper-rule); }
+    .questions .pending-glyph { font:12px/2 var(--mono); color:var(--paper-muted); }
+    .questions strong { font-weight:500; }
+    .glossary { display:grid; grid-template-columns:1fr 1fr; gap:0 25px; margin:0; }
+    .glossary div { border-top:1px solid var(--paper-rule); padding:13px 0 16px; }
+    .glossary dt { font:12px var(--mono); margin-bottom:6px; color:var(--accent); }
+    .glossary dd { margin:0; font-size:12px; line-height:1.8; color:#514D46; }
+    .legal-copy p { font-size:17px; line-height:1.9; }
+    .legal-copy .legal-lead { font-size:17px; line-height:1.8; }
+    .legal-copy .license-link { display:inline-block; font-size:11px; margin-top:19px; color:var(--accent); }
+    .credits-list { margin:0; padding:0; list-style:none; }
+    .credits-list li { border-top:1px solid var(--paper-rule); padding:13px 0; font-size:13px; line-height:1.8; }
+    .credits-list li:last-child { border-bottom:1px solid var(--paper-rule); }
+    .credits-list small { display:block; font-size:11px; color:var(--paper-muted); }
+    .honoree-list { margin-top:21px; display:grid; grid-template-columns:1fr 1fr; gap:12px 23px; }
+    .honoree-list div { font-size:11px; line-height:1.8; }
+    .honoree-list small { display:block; color:var(--paper-muted); font:9px/1.6 var(--mono); }
+    .credits-section { padding-bottom:58px; border-bottom:0; }
+    .endmark { display:flex; justify-content:space-between; margin-top:34px; padding-top:16px; border-top:1px solid var(--paper-rule); font-size:9px; color:var(--paper-muted); }
+    .endmark span:last-child { color:var(--accent); }
+    .site-footer { background:var(--ink); color:var(--text); border-top:1px solid var(--rule); position:relative; }
+    .footer-grid { display:grid; grid-template-columns:1fr 1fr; gap:100px; padding-block:42px 38px; }
+    .footer-label { color:#AAA59B; margin-bottom:14px; }
+    .honoree-heading { display:flex; align-items:baseline; gap:17px; margin-bottom:14px; }
+    .honoree-heading h2 { font:normal 39px/1.1 var(--serif); letter-spacing:-.5px; }
+    .honoree-heading .mono { color:#AAA59B; font-size:10px; }
+    .site-footer p { font-size:11px; line-height:1.9; color:#BDB7AC; max-width:65ch; }
+    .site-footer a:hover { color:var(--accent-light); }
+    .source-link { display:inline-block; margin-top:12px; color:#BDB7AC; font-size:10px; }
+    .footer-warning h3 { font-size:12px; font-weight:500; margin-bottom:13px; }
+    .footer-links { display:flex; flex-wrap:wrap; gap:12px 24px; margin-top:17px; font-size:10px; }
+    .footer-baseline { display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--rule); padding-block:16px 20px; color:#AAA59B; font:9px var(--mono); }
+    @media (min-width:1440px) { .main-nav { gap:16px; } .main-nav a { font-size:11px; } .main-nav a + a::before { left:-10px; } .bar-button { padding-inline:10px; } }
+    @media (max-width:1230px) {
+      .bar-inner { flex-wrap:wrap; gap:0 20px; padding-top:12px; }
+      .main-nav { order:3; width:100%; justify-content:center; min-height:39px; gap:26px; }
+      .main-nav a { font-size:11px; }
+      .main-nav a + a::before { left:-15px; }
+      .connection { flex-direction:row; align-items:center; gap:9px; }
+      .bar-actions { margin-left:auto; }
+      html { scroll-padding-top:125px; }
+      .toc-inner { top:136px; }
+      .chapter { scroll-margin-top:120px; }
+      h1 { font-size:84px; }
+      h2 { font-size:36px; }
+      .nyquist-number { font-size:83px; }
+      .margin { font-size:11px; }
+      .footer-grid { gap:60px; }
+    }
+    @media (max-width:1000px) {
+      .unsaved { display:none; }
+      .toc { grid-column:1 / span 2; }
+      .document { grid-column:3 / -1; }
+      .page-head { grid-template-columns:repeat(8,minmax(0,1fr)); }
+      .head-main { grid-column:1 / span 6; }
+      .head-margin { grid-column:7 / span 2; }
+      h1 { font-size:70px; letter-spacing:-2px; }
+      .standfirst { font-size:16px; }
+      .nyquist-number { font-size:68px; }
+      .nyquist-number small { font-size:9px; }
+      .nyquist-card figcaption { font-size:9px; }
+      .chapter { grid-template-columns:1fr; }
+      .copy,.margin { grid-column:1; max-width:none; }
+      .margin { display:block; padding:16px 0 0 18px; margin-top:22px; border-left:1px solid var(--paper-rule); max-width:60ch; font-size:11px; }
+      .margin svg { max-width:210px; }
+      .margin .footnote-ref { display:inline; font-size:19px; margin-right:8px; }
+      .margin .note-label { display:inline; margin-right:9px; }
+      .head-margin .nyquist-card { margin-top:0; }
+      .byte-figure { margin-top:25px; }
+      .copy { font-size:16px; }
+      .toc a { font-size:10px; padding-left:0; grid-template-columns:19px 1fr; gap:4px; }
+      .toc-bottom { margin-left:0; }
+      .widget-grid { gap:15px; }
+      .widget { padding:16px; }
+      .widget-output { font-size:20px; }
+    }
+    @media (max-width:700px) {
+      .frame { padding-inline:24px; }
+      .bar-inner { padding-top:13px; gap:12px; }
+      .wordmark { font-size:27px; }
+      .bar-actions { gap:7px; }
+      .connection { margin:0; }
+      .unsaved,.bar-button { display:none; }
+      .status-pill { font-size:9px; padding:5px 7px; }
+      .language-toggle { margin-left:2px; }
+      .main-nav { justify-content:flex-start; overflow-x:auto; gap:23px; min-height:32px; scrollbar-width:none; }
+      .main-nav::-webkit-scrollbar { display:none; }
+      .main-nav a { min-height:32px; font-size:10px; }
+      .main-nav a + a::before { left:-13px; }
+      .doc-layout { display:block; }
+      .toc { padding-top:23px; }
+      .toc-inner { position:static; }
+      .toc-label,.toc-bottom { display:none; }
+      .toc ol { display:flex; gap:18px; overflow-x:auto; padding-bottom:10px; border-bottom:1px solid var(--paper-rule); scrollbar-width:thin; }
+      .toc li { flex-shrink:0; margin:0; }
+      .toc a { display:flex; gap:7px; padding:4px 0; border-left:0; white-space:nowrap; font-size:10px; }
+      .toc a.active { text-decoration:underline; }
+      .page-head { padding:29px 0 27px; gap:18px; grid-template-columns:repeat(4,minmax(0,1fr)); }
+      .head-main { grid-column:1 / -1; }
+      .head-margin { grid-column:1 / -1; }
+      .document-label { margin-bottom:23px; }
+      h1 { font-size:clamp(62px,15vw,94px); margin-bottom:22px; }
+      .standfirst { font-size:16px; }
+      .nyquist-card { display:grid; grid-template-columns:90px 1fr; gap:3px 18px; padding-top:16px; margin-top:5px; }
+      .nyquist-card .eyebrow { grid-column:1 / -1; }
+      .nyquist-number { font-size:65px; margin-top:13px; }
+      .nyquist-number small { margin-left:4px; }
+      .nyquist-card svg { grid-column:2; grid-row:2; margin-top:10px; max-height:90px; }
+      .nyquist-card figcaption { grid-column:1 / -1; font-size:10px; }
+      .legend-strip { gap:10px; padding-block:12px; }
+      .legend-list { gap:13px; }
+      .status { font-size:9px; }
+      .local-only { font-size:8px; }
+      .chapter { padding:33px 0; }
+      h2 { font-size:35px; }
+      .chapter-heading { gap:10px; margin-bottom:21px; }
+      .copy { font-size:16px; line-height:1.8; }
+      .steps li { font-size:13px; gap:11px; }
+      .step-number { width:23px; height:23px; font-size:9px; }
+      .layer { grid-template-columns:82px 1fr; gap:12px; }
+      .layer p { font-size:12px; }
+      .layer-name { font-size:13px; }
+      .layer-link { font-size:8px; }
+      .margin { margin-top:20px; }
+      .byte-figure { padding:15px 13px; }
+      .figure-heading { gap:8px; }
+      .figure-heading strong { font-size:10px; }
+      .figure-heading .mono { font-size:8px; }
+      .widget-grid { grid-template-columns:1fr; }
+      .widget { padding:18px; }
+      .widget-output { font-size:25px; }
+      .physical-value { font-size:38px; }
+      .physical-value small { font-size:9px; }
+      .glossary { column-gap:18px; }
+      .glossary dd { font-size:11px; }
+      .honoree-list { gap:14px 15px; }
+      .footer-grid { grid-template-columns:1fr; gap:31px; padding-block:31px; }
+      .honoree-heading h2 { font-size:37px; }
+      .footer-warning { padding-top:24px; border-top:1px solid var(--rule); }
+      .footer-baseline { font-size:8px; gap:20px; line-height:1.8; }
+      .sampling-background { opacity:.09; }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      html { scroll-behavior:auto; }
+      *,*::before,*::after { animation:none!important; transition:none!important; }
+      .alias-wave { opacity:0; }
+    }
+  </style>
+</head>
+<body>
+  <a href="#conteudo" class="skip-link" data-i18n="skip">Ir para o conteúdo</a>
+  <header class="cable-bar" aria-label="Barra do cabo">
+    <div class="frame bar-inner">
+      <a class="wordmark" href="curva.html" aria-label="open-auri, início">open-auri</a>
+      <nav class="main-nav" aria-label="Navegação principal">
+        <a href="curva.html" data-i18n="navCurve">Curva</a>
+        <a href="biblioteca.html" data-i18n="navLibrary">Biblioteca</a>
+        <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navCompare">Comparar</a>
+        <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navSound">Soe como X</a>
+        <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navCommunity">Comunidade</a>
+        <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navBlind">Teste cego</a>
+        <a href="cabo.html" data-i18n="navCable">Cabo</a>
+        <a href="docs.html" aria-current="page">Docs</a>
+      </nav>
+      <div class="bar-actions">
+        <div class="connection">
+          <span class="status-pill"><span class="status-dot" aria-hidden="true"></span><span data-i18n="connection">Sem cabo · simulado</span></span>
+          <span class="unsaved" data-i18n="unsaved">0 alterações não gravadas</span>
+        </div>
+        <button class="bar-button" type="button" disabled aria-disabled="true" title="Mock de leitura, sem alteração de preset" data-i18n="neutral">Neutro</button>
+        <button class="bar-button" type="button" disabled aria-disabled="true" title="Mock de leitura, sem alteração de preset" data-i18n="defaultPreset">Padrão Auri</button>
+        <button class="bar-button primary" type="button" disabled aria-disabled="true" title="Mock local: nenhuma gravação é possível" data-i18n="writeCable">Gravar no cabo</button>
+        <div class="language-toggle" role="group" aria-label="Idioma / Language">
+          <button type="button" data-locale="pt-BR" aria-pressed="true" aria-label="Português do Brasil">PT</button><span aria-hidden="true">·</span><button type="button" data-locale="en-US" aria-pressed="false" aria-label="English, United States">EN</button>
+        </div>
+      </div>
+    </div>
+    <div class="reading-progress" aria-hidden="true"></div>
+  </header>
+
+  <div class="sampling-background" aria-hidden="true">
+    <svg viewBox="0 0 1800 900" fill="none">
+      <defs>
+        <pattern id="background-grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" stroke="currentColor" stroke-width=".5" opacity=".25"/></pattern>
+        <path id="background-sine" d="M0 320C60 180 120 180 180 320S300 460 360 320S480 180 540 320S660 460 720 320S840 180 900 320S1020 460 1080 320S1200 180 1260 320S1380 460 1440 320S1560 180 1620 320S1740 460 1800 320"/>
+      </defs>
+      <rect width="1800" height="900" fill="url(#background-grid)"/>
+      <g class="sample-drift">
+        <path d="M0 320H1800" stroke="currentColor" stroke-width="1" stroke-dasharray="4 8"/>
+        <use href="#background-sine" stroke="currentColor" stroke-width="1.5"/>
+        <g fill="currentColor">
+          <circle cx="0" cy="320" r="4"/><circle cx="90" cy="215" r="4"/><circle cx="180" cy="320" r="4"/><circle cx="270" cy="425" r="4"/><circle cx="360" cy="320" r="4"/><circle cx="450" cy="215" r="4"/><circle cx="540" cy="320" r="4"/><circle cx="630" cy="425" r="4"/><circle cx="720" cy="320" r="4"/><circle cx="810" cy="215" r="4"/><circle cx="900" cy="320" r="4"/><circle cx="990" cy="425" r="4"/><circle cx="1080" cy="320" r="4"/><circle cx="1170" cy="215" r="4"/><circle cx="1260" cy="320" r="4"/><circle cx="1350" cy="425" r="4"/><circle cx="1440" cy="320" r="4"/><circle cx="1530" cy="215" r="4"/><circle cx="1620" cy="320" r="4"/><circle cx="1710" cy="425" r="4"/>
+        </g>
+        <path class="alias-wave" d="M0 320Q30 530 60 320T120 320T180 320T240 320T300 320T360 320T420 320T480 320T540 320T600 320T660 320T720 320T780 320T840 320T900 320T960 320T1020 320T1080 320T1140 320T1200 320T1260 320T1320 320T1380 320T1440 320T1500 320T1560 320T1620 320T1680 320T1740 320T1800 320" stroke="currentColor" stroke-width="1"/>
+        <path d="M1080 680H1660M1080 680L1350 520L1620 680" stroke="currentColor" stroke-width="1"/>
+        <path d="M1350 490V710" stroke="currentColor" stroke-width="1" stroke-dasharray="4 8"/>
+        <text x="1363" y="713" fill="currentColor" font-size="12">fₛ / 2 · folding frequency</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="frame doc-layout">
+    <aside class="toc" aria-label="Índice da documentação">
+      <nav class="toc-inner" aria-label="Nesta página">
+        <p class="eyebrow toc-label" data-i18n="onThisPage">Neste caderno</p>
+        <ol>
+          <li><a href="#comeco" class="active" aria-current="location"><span class="mono">01</span><span data-i18n="hQuick">Começo rápido</span></a></li>
+          <li><a href="#camadas"><span class="mono">02</span><span data-i18n="hLayers">As três camadas</span></a></li>
+          <li><a href="#envelope"><span class="mono">03</span><span data-i18n="hSafe">O que é seguro</span></a></li>
+          <li><a href="#protocolo"><span class="mono">04</span><span data-i18n="hProtocol">Protocolo 0xCB</span></a></li>
+          <li><a href="#limites"><span class="mono">05</span><span data-i18n="hLimits">Limites físicos</span></a></li>
+          <li><a href="#perguntas"><span class="mono">06</span><span data-i18n="hUnknown">O que ainda não sabemos</span></a></li>
+          <li><a href="#glossario"><span class="mono">07</span><span data-i18n="hGlossary">Glossário</span></a></li>
+          <li><a href="#aviso-legal"><span class="mono">08</span><span data-i18n="hLegal">Aviso legal</span></a></li>
+          <li><a href="#creditos"><span class="mono">09</span><span data-i18n="hCredits">Créditos</span></a></li>
+        </ol>
+        <div class="toc-bottom"><span data-i18n="tocNote">Formato estudado. Hardware ainda não validado.</span><span class="mono">0xCB / rev. 2026-10-15</span></div>
+      </nav>
+    </aside>
+
+    <main class="document" id="conteudo" tabindex="-1">
+      <div class="page-head">
+        <div class="head-main">
+          <div class="document-label"><span class="eyebrow" data-i18n="docLabel">Documentação / caderno 04</span><span class="mono">15.10.2026</span></div>
+          <h1><span data-i18n="heroLine1">Os limites,</span><em data-i18n="heroLine2">por escrito.</em></h1>
+          <p class="standfirst" data-i18n="intro">Do preset aos 220 bytes: o que foi confirmado no formato, o que é hipótese e o que ainda depende do cabo.</p>
+        </div>
+        <div class="head-margin">
+          <figure class="nyquist-card" aria-label="Limite de Nyquist: metade da taxa de amostragem de 96 kHz é 48 kHz">
+            <div class="eyebrow" data-i18n="folding">O limite de Nyquist</div>
+            <div class="nyquist-number">48<small>kHz</small></div>
+            <svg viewBox="0 0 260 100" role="img" aria-label="Diagrama de frequência com dobra em 48 kHz">
+              <path d="M8 65H250M130 13V77" fill="none" stroke="currentColor" opacity=".25" stroke-width="1"/>
+              <path d="M8 65L130 18L250 65" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+              <path d="M130 13V77" stroke="var(--accent)" stroke-width="1" stroke-dasharray="2 3"/>
+              <path d="M178 42H153L158 38M153 42L158 46" fill="none" stroke="var(--accent)"/>
+              <circle cx="69" cy="41.5" r="3" fill="var(--accent)"/><circle cx="191" cy="41.9" r="3" fill="var(--paper)" stroke="var(--accent)"/>
+              <text x="8" y="94" font-size="9">0</text><text x="130" y="94" text-anchor="middle" class="svg-accent" font-size="9">48</text><text x="250" y="94" text-anchor="end" font-size="9">96 kHz</text>
+            </svg>
+            <figcaption><span class="mono">fₙ = fₛ / 2</span><br><span data-i18n="nyquistCaption">Coeficientes projetados a 96 kHz. Clock real do chip: hipótese.</span></figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="legend-strip" aria-label="Legenda de confiança">
+        <div class="legend-list">
+          <span class="status confirmed"><span aria-hidden="true">✓</span><span data-i18n="confirmed">confirmado</span></span>
+          <span class="status hypothesis"><span aria-hidden="true">◇</span><span data-i18n="hypothesis">hipótese</span></span>
+          <span class="status requires"><span aria-hidden="true">□</span><span data-i18n="requires">requer o cabo</span></span>
+        </div>
+        <span class="local-only" data-i18n="localMock">MOCK LOCAL · SEM ESCRITA</span>
+      </div>
+
+      <!-- TODO i18n: o corpo técnico e as notas de margem permanecem em pt-BR neste mock. -->
+      <article lang="pt-BR" aria-label="Documentação técnica">
+        <section class="chapter" id="comeco" aria-labelledby="title-quick">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">01</span><h2 id="title-quick" data-i18n="hQuick">Começo rápido</h2></div>
+            <ol class="steps">
+              <li><span class="step-number" aria-hidden="true">1</span><span>Abra no Chrome ou Edge desktop, em HTTPS.</span></li>
+              <li><span class="step-number" aria-hidden="true">2</span><span>Conecte o cabo e autorize o WebHID com um clique.</span></li>
+              <li><span class="step-number" aria-hidden="true">3</span><span>Escolha um preset dentro do envelope provisório.</span></li>
+              <li><span class="step-number" aria-hidden="true">4</span><span>Revise a curva e use <strong>Gravar no cabo</strong>.</span></li>
+            </ol>
+            <p class="fine after-list">Esta é a sequência prevista para o app. Este arquivo abre por <code>file://</code>, mas só documenta e calcula exemplos: não pede permissão USB e não grava nada.</p>
+          </div>
+          <aside class="margin">
+            <span class="footnote-ref">a.</span><p>O cabo Auri DSP usa o bridge <span class="mono">CB5100</span>. O preset fica na flash do cabo, não no computador. Cada commit é uma nova gravação.</p>
+            <span class="status confirmed"><span aria-hidden="true">✓</span><span>formato e referência</span></span>
+            <p class="fine">Nenhum byte foi transmitido por nós ao hardware.</p>
+          </aside>
+        </section>
+
+        <section class="chapter" id="camadas" aria-labelledby="title-layers">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">02</span><h2 id="title-layers" data-i18n="hLayers">As três camadas</h2></div>
+            <p>A mesma curva, com quantidades diferentes de informação. Cada camada inclui tudo o que a anterior mostra; mudar a vista não muda o payload.</p>
+            <div class="layers">
+              <div class="layer"><div class="layer-name">Ouvir<small>01 / essencial</small></div><div><p>Presets, curva e preamp. Para escolher e conferir antes de gravar.</p><a class="layer-link" href="curva.html?camada=ouvir">?camada=ouvir ↗</a></div></div>
+              <div class="layer"><div class="layer-name">Ajustar<small>02 / + controles</small></div><div><p>Tudo de Ouvir, mais frequência, ganho e Q das bandas, dentro do envelope.</p><a class="layer-link" href="curva.html?camada=ajustar">?camada=ajustar ↗</a></div></div>
+              <div class="layer"><div class="layer-name">Engenharia<small>03 / + evidência</small></div><div><p>Tudo de Ajustar, mais coeficientes, bytes do payload e estados de validação. Inspecionar não libera uma escrita fora do envelope.</p><a class="layer-link" href="curva.html?camada=engenharia">?camada=engenharia ↗</a></div></div>
+            </div>
+          </div>
+          <aside class="margin">
+            <svg class="layer-diagram" viewBox="0 0 240 162" role="img" aria-label="Três retângulos contidos: Ouvir está dentro de Ajustar, que está dentro de Engenharia">
+              <rect x="1" y="1" width="238" height="160" fill="var(--accent)" fill-opacity=".04" stroke="var(--accent)" stroke-opacity=".35"/>
+              <rect x="1" y="46" width="187" height="115" fill="var(--accent)" fill-opacity=".06" stroke="var(--accent)" stroke-opacity=".45"/>
+              <rect x="1" y="91" width="133" height="70" fill="var(--accent)" fill-opacity=".1" stroke="var(--accent)"/>
+              <text x="14" y="25" font-size="10">03 ENGENHARIA</text><text x="14" y="70" font-size="10">02 AJUSTAR</text><text x="14" y="124" class="svg-accent" font-size="10">01 OUVIR</text>
+            </svg>
+            <span class="note-label">VISTA ≠ PERMISSÃO</span><p>A URL seleciona uma interface, não um modo secreto do firmware. Os links são destinos previstos do mock.</p>
+          </aside>
+        </section>
+
+        <section class="chapter" id="envelope" aria-labelledby="title-safe">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">03</span><h2 id="title-safe" data-i18n="hSafe">O que é seguro</h2></div>
+            <p>Por enquanto, “seguro” significa <strong>não ampliar o que a página original comprovadamente grava</strong>. Não significa garantia de segurança física. Os limites vêm dos seus <span class="mono">11</span> presets, não da capacidade teórica do chip.</p>
+            <div class="envelope-title"><h3>Envelope Kuba</h3><span class="badge" data-i18n="provisional">ENVELOPE PROVISÓRIO</span></div>
+            <div class="table-scroll" role="region" aria-label="Tabela do envelope provisório" tabindex="0">
+              <table class="envelope-table">
+                <thead><tr><th scope="col">Filtro</th><th scope="col">Frequência / Hz</th><th scope="col">Ganho / dB</th><th scope="col">Q</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="mono">PK</span><small>peak</small></td><td>20–15 808</td><td><span data-number="-12">−12</span> a <span data-number="9.2" data-digits="1" data-plus>+9,2</span></td><td><span data-number="0.1" data-digits="1">0,1</span>–4</td></tr>
+                  <tr><td><span class="mono">LS</span><small>low shelf</small></td><td>120–297</td><td><span data-number="-9.3" data-digits="1">−9,3</span> a <span data-number="8.2" data-digits="1" data-plus>+8,2</span></td><td><span data-number="0.44" data-digits="2">0,44</span>–<span data-number="0.94" data-digits="2">0,94</span></td></tr>
+                  <tr><td>Preamp<small>global, antes dos filtros</small></td><td>n/a</td><td><span data-number="-7.8" data-digits="1">−7,8</span> a <span data-number="-0.5" data-digits="1">−0,5</span></td><td>n/a</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <ul class="envelope-rules">
+              <li>Sempre <span class="mono">10</span> bandas; somente <span class="mono">PK</span> e <span class="mono">LS</span>.</li>
+              <li>Cortes escritos antes dos boosts; a ordem livre não está liberada.</li>
+              <li>Pico de saída dos presets de referência ≤ <span class="mono" data-number="-0.47" data-digits="2">−0,47</span> <span class="mono">dB</span>, com senoide de entrada a <span class="mono">0 dBFS</span>, em regime permanente. Isso não garante ausência de overshoot em banda larga.</li>
+            </ul>
+            <p>O caminho conhecido é <em>write-only</em>: não há read-back disponível para conferir ou desfazer. Todo commit persiste na flash, com desgaste desconhecido. A implementação de referência é nossa única base de escrita comprovada; ela não substitui validação própria no cabo.</p>
+            <div class="soon-box">
+              <div class="soon-box-top"><button type="button" disabled aria-disabled="true" data-i18n="extendedEnvelope">Envelope ampliado</button><span class="badge" data-i18n="soon">EM BREVE</span></div>
+              <p data-i18n="soonNote">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p>
+              <p class="fine"><span class="mono">HS, LP, HP, OFF</span>, biquads crus, <span class="mono">Q &gt; 4</span>, boost acima de <span class="mono">16 kHz</span>, preamp <span class="mono">0 dB</span> e ordem livre de seções continuam desabilitados.</p>
+            </div>
+            <h3 class="failure-title">O que o codec recusa antes da flash</h3>
+            <div class="refusal table-scroll" role="region" aria-label="Entradas recusadas por segurança" tabindex="0">
+              <table><thead><tr><th scope="col">Entrada recusada</th><th scope="col">Sem a validação</th></tr></thead><tbody>
+                <tr><td><code>q = 0</code> ou <code>f = NaN</code></td><td>Seção toda zero: cabo mudo.</td></tr>
+                <tr><td><code>q &lt; 0</code> ou <code>f &gt; Nyquist</code></td><td>Seção instável: oscilação em volume máximo.</td></tr>
+                <tr><td><code>preamp &gt; 0 dB</code></td><td>Ganho antes das bandas: clipping em escala cheia.</td></tr>
+              </tbody></table>
+            </div>
+            <p class="fine after-list">O codec também recusa valores não finitos, frequência fora de <span class="mono">0 &lt; f &lt; 48 kHz</span>, tipos desconhecidos, coeficientes fora de <span class="mono">int32</span> e polos instáveis após a quantização. Validade no codec não é permissão na interface.</p>
+          </div>
+          <aside class="margin">
+            <span class="footnote-ref">b.</span><p>A ordem não muda a resposta ideal de uma cadeia linear. Muda o pico <em>dentro</em> da cadeia.</p>
+            <svg class="margin-figure" viewBox="0 0 240 155" role="img" aria-label="Pior pico interno nos onze presets: cortes primeiro, menos 0,20 dB; ordenado por frequência, mais 4,79 dB; invertido, mais 9,13 dB">
+              <path d="M66 13V133M5 133H235" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+              <text x="66" y="11" text-anchor="middle" font-size="9">0 dBFS</text>
+              <rect x="62" y="32" width="4" height="10" fill="var(--accent)"/>
+              <rect x="66" y="68" width="77" height="10" fill="var(--accent)" fill-opacity=".4"/>
+              <rect x="66" y="104" width="147" height="10" fill="var(--accent)" fill-opacity=".65"/>
+              <text x="5" y="56" font-size="9">cortes primeiro</text><text x="224" y="41" text-anchor="end" font-size="10" data-chart-number="-0.2">−0,20</text>
+              <text x="5" y="92" font-size="9">por frequência</text><text x="224" y="77" text-anchor="end" font-size="10" data-chart-number="4.79">+4,79</text>
+              <text x="5" y="128" font-size="9">boosts primeiro</text><text x="224" y="113" text-anchor="end" font-size="10" data-chart-number="9.13">+9,13</text>
+            </svg>
+            <p>Pior pico interno entre os <span class="mono">11</span> presets. Não confundir com o pico de saída da tabela.</p>
+            <span class="status confirmed"><span aria-hidden="true">✓</span><span>medido em software</span></span>
+          </aside>
+        </section>
+
+        <section class="chapter protocol-section" id="protocolo" aria-labelledby="title-protocol">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">04</span><h2 id="title-protocol" data-i18n="hProtocol">Protocolo 0xCB</h2></div>
+            <p>Uma curva vira um bloco de <span class="mono">220 B</span>. O chip recebe coeficientes, não nomes de filtros. O formato abaixo foi reconstruído da implementação pública de referência e reproduzido byte a byte nos <span class="mono">11</span> presets.</p>
+          </div>
+          <aside class="margin"><span class="note-label">TRANSPORTE / CONFIRMADO</span><p><span class="mono">VID 0x3302 · PID 0x8902</span><br>WebHID, report ID <span class="mono">0xCB</span>.<br>O ID do report não está incluído nos <span class="mono">31 B</span> de cada relatório.</p><span class="status requires"><span aria-hidden="true">□</span><span>execução real no chip</span></span></aside>
+
+          <figure class="wide byte-figure" aria-labelledby="byte-caption">
+            <div class="figure-heading"><strong data-i18n="payloadTitle">Fig. 01 / Anatomia de um preset</strong><span class="mono">220 BYTES · LITTLE-ENDIAN</span></div>
+            <div class="diagram-scroll" role="region" aria-label="Diagrama do payload, com rolagem horizontal em telas pequenas" tabindex="0">
+              <svg class="byte-svg" viewBox="0 0 1100 410" role="img" aria-labelledby="payload-svg-title payload-svg-desc">
+                <title id="payload-svg-title">Mapa proporcional dos 220 bytes do payload</title>
+                <desc id="payload-svg-desc">Header de 14 bytes, preamp de 4, dez biquads de 20 bytes cada e CRC de 2. A quinta seção é ampliada em cinco palavras int32 little-endian Q27 na ordem b0, b2, menos a1, b1, menos a2.</desc>
+                <defs><pattern id="lens-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><path d="M0 0V7" stroke="var(--accent)" stroke-opacity=".11" stroke-width="1"/></pattern></defs>
+                <text x="40" y="23" class="svg-ink" font-size="12">HEADER</text><text x="40" y="41">14 B</text>
+                <path d="M70 47V100" fill="none" stroke="var(--accent)" stroke-opacity=".45"/>
+                <text x="135" y="43" class="svg-ink" font-size="12">PREAMP</text><text x="135" y="61">4 B / Q23</text>
+                <path d="M130 57H112V100" fill="none" stroke="var(--accent)" stroke-opacity=".45"/>
+                <text x="560" y="43" text-anchor="middle" class="svg-accent" font-size="12">10 BIQUADS × 20 B = 200 B</text>
+                <text x="1030" y="23" text-anchor="end" class="svg-ink" font-size="12">CRC</text><text x="1030" y="41" text-anchor="end">2 B</text>
+                <path d="M1025 47V100" stroke="var(--accent)" stroke-opacity=".45"/>
+                <rect x="40" y="100" width="63" height="64" fill="var(--accent)" fill-opacity=".32"/>
+                <rect x="103" y="100" width="18" height="64" fill="var(--paper-ink)"/>
+                <rect x="121" y="100" width="900" height="64" fill="var(--accent)" fill-opacity=".1"/>
+                <rect x="481" y="100" width="90" height="64" fill="var(--accent)"/>
+                <rect x="1021" y="100" width="9" height="64" fill="var(--accent)"/>
+                <path d="M40 100H1030V164H40ZM103 100V164M121 100V164M211 100V164M301 100V164M391 100V164M481 100V164M571 100V164M661 100V164M751 100V164M841 100V164M931 100V164M1021 100V164" fill="none" stroke="var(--paper)" stroke-width="1"/>
+                <g text-anchor="middle"><text x="166" y="138">01</text><text x="256" y="138">02</text><text x="346" y="138">03</text><text x="436" y="138">04</text><text x="526" y="138" class="svg-paper">05</text><text x="616" y="138">06</text><text x="706" y="138">07</text><text x="796" y="138">08</text><text x="886" y="138">09</text><text x="976" y="138">10</text></g>
+                <text x="40" y="185" font-size="9">000</text><text x="103" y="185" text-anchor="middle" font-size="9">014</text><text x="133" y="185" font-size="9">018</text><text x="1018" y="185" text-anchor="end" font-size="9">218</text><text x="1030" y="185" font-size="9">220</text>
+                <path d="M481 164L160 261H960L571 164Z" fill="url(#lens-hatch)"/>
+                <path d="M481 164L160 261M571 164L960 261" fill="none" stroke="var(--accent)" stroke-opacity=".4"/>
+                <text x="40" y="238" font-size="10">ZOOM / SEÇÃO 05</text>
+                <rect x="160" y="261" width="800" height="70" fill="var(--accent)" fill-opacity=".07" stroke="var(--accent)" stroke-opacity=".4"/>
+                <path d="M320 261V331M480 261V331M640 261V331M800 261V331" stroke="var(--accent)" stroke-opacity=".35"/>
+                <g text-anchor="middle"><text x="240" y="303" class="svg-accent" style="font-size:22px">b₀</text><text x="400" y="303" class="svg-accent" style="font-size:22px">b₂</text><text x="560" y="303" class="svg-accent" style="font-size:22px">−a₁</text><text x="720" y="303" class="svg-accent" style="font-size:22px">b₁</text><text x="880" y="303" class="svg-accent" style="font-size:22px">−a₂</text>
+                <text x="240" y="354" font-size="10">int32 LE · Q27</text><text x="400" y="354" font-size="10">int32 LE · Q27</text><text x="560" y="354" font-size="10">int32 LE · Q27</text><text x="720" y="354" font-size="10">int32 LE · Q27</text><text x="880" y="354" font-size="10">int32 LE · Q27</text></g>
+                <path d="M160 367V375H960V367" fill="none" stroke="var(--accent)" stroke-opacity=".4"/>
+                <text x="560" y="398" text-anchor="middle">5 palavras × 4 B · a₀ implícito = 1 · round(coef × 2²⁷)</text>
+              </svg>
+            </div>
+            <figcaption class="figure-caption" id="byte-caption"><span>Larguras proporcionais aos bytes. Offsets em decimal; a ampliação mostra a ordem no fio.</span><span class="status confirmed"><span aria-hidden="true">✓</span><span>layout, Q23, Q27 e ordem</span></span></figcaption>
+            <div class="header-bytes"><span class="eyebrow">HEADER / 14 B</span><code>45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00</code><span class="status confirmed"><span aria-hidden="true">✓</span><span>bytes</span></span></div>
+            <p class="header-caption"><span class="status hypothesis"><span aria-hidden="true">◇</span><span>interpretação</span></span> <span class="mono">EQ1#</span> é ASCII confirmado; seu significado é hipótese. <span class="mono">D6 00 = 214 = 220 − 6</span> sugere comprimento. Os bytes de geometria ainda são hipóteses; os offsets <span class="mono">6</span> e <span class="mono">12–13</span> seguem sem significado conhecido.</p>
+          </figure>
+
+          <figure class="wide framing-figure" aria-labelledby="framing-caption">
+            <div class="figure-heading"><strong data-i18n="framingTitle">Fig. 02 / Do bloco aos reports</strong><span class="mono">REPORT ID 0xCB · 31 B / REPORT</span></div>
+            <div class="diagram-scroll" role="region" aria-label="Fatiamento e sequência temporal dos reports" tabindex="0">
+              <svg class="framing-svg" viewBox="0 0 1100 312" role="img" aria-labelledby="framing-svg-title framing-svg-desc">
+                <title id="framing-svg-title">Nove reports de 31 bytes e um commit</title>
+                <desc id="framing-svg-desc">Cada report começa com um índice de um byte. Os reports zero a seis levam trinta bytes de dados cada; o sete leva dez, e o oito nenhum. O restante é padding zero. Nove esperas de dezesseis milissegundos, depois cento e cinquenta milissegundos e o commit de cinco bytes completado com vinte e seis zeros, em cerca de trezentos milissegundos.</desc>
+                <defs><pattern id="zero-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V6" stroke="var(--paper-ink)" stroke-opacity=".15" stroke-width="1"/></pattern><pattern id="report-cells" width="3" height="60" patternUnits="userSpaceOnUse"><path d="M0 0V60" stroke="var(--paper)" stroke-width=".5"/></pattern></defs>
+                <g text-anchor="middle"><text x="86" y="33">00</text><text x="190" y="33">01</text><text x="294" y="33">02</text><text x="398" y="33">03</text><text x="502" y="33">04</text><text x="606" y="33">05</text><text x="710" y="33">06</text><text x="814" y="33">07</text><text x="918" y="33">08</text></g>
+                <g fill="var(--accent)" fill-opacity=".2"><rect x="43" y="48" width="90" height="60"/><rect x="147" y="48" width="90" height="60"/><rect x="251" y="48" width="90" height="60"/><rect x="355" y="48" width="90" height="60"/><rect x="459" y="48" width="90" height="60"/><rect x="563" y="48" width="90" height="60"/><rect x="667" y="48" width="90" height="60"/><rect x="771" y="48" width="30" height="60"/></g>
+                <g fill="url(#zero-hatch)"><rect x="801" y="48" width="60" height="60"/><rect x="875" y="48" width="90" height="60"/></g>
+                <g fill="var(--paper-ink)"><rect x="40" y="48" width="3" height="60"/><rect x="144" y="48" width="3" height="60"/><rect x="248" y="48" width="3" height="60"/><rect x="352" y="48" width="3" height="60"/><rect x="456" y="48" width="3" height="60"/><rect x="560" y="48" width="3" height="60"/><rect x="664" y="48" width="3" height="60"/><rect x="768" y="48" width="3" height="60"/><rect x="872" y="48" width="3" height="60"/></g>
+                <g fill="url(#report-cells)" stroke="var(--paper-ink)" stroke-opacity=".2" stroke-width=".5"><rect x="40" y="48" width="93" height="60"/><rect x="144" y="48" width="93" height="60"/><rect x="248" y="48" width="93" height="60"/><rect x="352" y="48" width="93" height="60"/><rect x="456" y="48" width="93" height="60"/><rect x="560" y="48" width="93" height="60"/><rect x="664" y="48" width="93" height="60"/><rect x="768" y="48" width="93" height="60"/><rect x="872" y="48" width="93" height="60"/></g>
+                <path d="M40 118V124H757V118" stroke="var(--accent)" stroke-opacity=".4" fill="none"/>
+                <text x="398" y="143" text-anchor="middle" font-size="10">0–6 / 30 B de dados em cada</text><text x="814" y="132" text-anchor="middle" font-size="10">10 B</text><text x="918" y="132" text-anchor="middle" font-size="10">0 B</text>
+                <rect x="990" y="49" width="7" height="7" fill="var(--paper-ink)"/><text x="1005" y="56" font-size="9">índice</text><rect x="990" y="69" width="7" height="7" fill="var(--accent)" fill-opacity=".25"/><text x="1005" y="76" font-size="9">dados</text><rect x="990" y="89" width="7" height="7" fill="url(#zero-hatch)"/><text x="1005" y="96" font-size="9">zeros</text>
+                <text x="40" y="185" font-size="9">TEMPO / ms</text>
+                <path d="M40 215H922" stroke="var(--paper-ink)" stroke-opacity=".4"/>
+                <rect x="40" y="206" width="432" height="18" fill="var(--accent)" fill-opacity=".1"/>
+                <g stroke="var(--accent)"><path d="M40 202V228M88 206V224M136 206V224M184 206V224M232 206V224M280 206V224M328 206V224M376 206V224M424 202V228M472 202V228"/></g>
+                <path d="M472 215H922" stroke="var(--accent)" stroke-dasharray="3 4"/>
+                <circle cx="922" cy="215" r="5" fill="var(--accent)"/>
+                <text x="40" y="246">0</text><text x="472" y="246" text-anchor="middle">144</text><text x="922" y="246" text-anchor="middle">294</text>
+                <text x="256" y="194" text-anchor="middle" class="svg-accent" font-size="10">9 × 16 ms</text><text x="697" y="201" text-anchor="middle" font-size="10">espera / 150 ms</text><text x="940" y="219" class="svg-accent" font-size="10">COMMIT</text>
+                <text x="40" y="285" font-size="10">[índice, 30 bytes] · padding em 00</text><text x="1060" y="285" text-anchor="end" font-size="10">commit: 01 65 00 01 FF + 26 × 00</text>
+              </svg>
+            </div>
+            <figcaption class="figure-caption" id="framing-caption"><span><span class="status confirmed"><span aria-hidden="true">✓</span><span>9 reports, pausas e comando de commit</span></span><br>Espera de <span class="mono">16 ms</span> após cada report, inclusive o último; depois <span class="mono">150 ms</span>. Total nominal ≈ <span class="mono" data-number="0.3" data-digits="1">0,3</span> <span class="mono">s</span>, mais overhead.</span><span><span class="status hypothesis"><span aria-hidden="true">◇</span><span>equivalência do padding no firmware</span></span><br>A referência manda o commit com <span class="mono">5 B</span>; o codec completa até <span class="mono">31 B</span>.</span></figcaption>
+          </figure>
+
+          <div class="wide widget-grid">
+            <section class="widget" id="preamp-widget" aria-labelledby="preamp-widget-title">
+              <div class="widget-title"><h3 id="preamp-widget-title" data-i18n="preampTitle">Um preamp, quatro bytes</h3><span class="widget-index">EX. 01 / Q23</span></div>
+              <label for="preamp-input" data-i18n="preampLabel">Preamp em dB, finito e ≤ 0</label>
+              <div class="input-wrap"><input id="preamp-input" type="text" inputmode="decimal" value="−6,0" spellcheck="false" autocomplete="off" aria-describedby="preamp-note preamp-error"><span>dB → LE</span></div>
+              <output class="widget-output" id="preamp-bytes" for="preamp-input" aria-live="polite">·· ·· ·· ··</output>
+              <p class="widget-metadata" id="preamp-word">int32 / Q23</p>
+              <p class="widget-error" id="preamp-error" aria-live="polite"></p>
+              <p class="widget-note" id="preamp-note"><span class="mono">round(10^(dB/20) × 2²³)</span><br><span data-i18n="preampNote">Exemplo de codificação, não de permissão de escrita. 0 dB cabe no codec, mas está fora do envelope provisório.</span></p>
+            </section>
+            <section class="widget" aria-labelledby="crc-widget-title">
+              <div class="widget-title"><h3 id="crc-widget-title" data-i18n="crcTitle">Um CRC que dá para conferir</h3><span class="widget-index">EX. 02 / CRC16</span></div>
+              <label for="crc-input" data-i18n="crcLabel">Texto de entrada, bytes UTF-8</label>
+              <div class="input-wrap"><input id="crc-input" type="text" value="123456789" maxlength="256" spellcheck="false" autocomplete="off" aria-describedby="crc-note"><span>UTF-8</span></div>
+              <output class="widget-output" id="crc-output" for="crc-input" aria-live="polite">0x29B1</output>
+              <p class="widget-metadata" id="crc-bytes">LE / B1 29</p>
+              <p class="widget-error" aria-hidden="true"></p>
+              <p class="widget-note" id="crc-note"><span class="mono">CCITT-FALSE · poly 0x1021 · init 0xFFFF</span><br><span data-i18n="crcNote">Sem reflexão ou XOR final. No payload: cobre os primeiros 218 B, anexado como 2 B LE.</span><br><span class="status confirmed"><span aria-hidden="true">✓</span><span class="mono" id="crc-vector">"123456789" → 0x29B1</span></span></p>
+            </section>
+          </div>
+        </section>
+
+        <section class="chapter" id="limites" aria-labelledby="title-limits">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">05</span><h2 id="title-limits" data-i18n="hLimits">Limites físicos</h2></div>
+            <div class="physical">
+              <div class="physical-cell"><div class="physical-value">10</div><p class="physical-label">bandas no formato conhecido</p><span class="status confirmed"><span aria-hidden="true">✓</span><span>formato</span></span></div>
+              <div class="physical-cell"><div class="physical-value">1</div><p class="physical-label">curva para os dois canais</p><span class="status confirmed"><span aria-hidden="true">✓</span><span>caminho conhecido</span></span></div>
+              <div class="physical-cell"><div class="physical-value">96 <small>kHz</small></div><p class="physical-label">taxa de projeto dos filtros</p><span class="status confirmed"><span aria-hidden="true">✓</span><span>coeficientes</span></span></div>
+              <div class="physical-cell"><div class="physical-value">48 <small>kHz</small></div><p class="physical-label">Nyquist; frequência deve ser menor</p><span class="status confirmed"><span aria-hidden="true">✓</span><span>limite do codec</span></span></div>
+              <div class="physical-cell"><div class="physical-value">≈ <span data-number="0.3" data-digits="1">0,3</span> <small>s</small></div><p class="physical-label">por sequência de escrita</p><span class="status confirmed"><span aria-hidden="true">✓</span><span>timing da referência</span></span></div>
+              <div class="physical-cell"><div class="physical-value">?</div><p class="physical-label">ciclos de vida da flash</p><span class="status requires"><span aria-hidden="true">□</span><span data-i18n="requires">requer o cabo</span></span></div>
+            </div>
+            <p>Não há curva L/R independente no caminho implementado. Também não há leitura de volta, verificação pelo cabo ou undo garantido. Uma cópia local do último envio não é uma leitura do estado atual.</p>
+            <p>O projeto dos coeficientes usa <span class="mono">96 000 Hz</span>, portanto <span class="mono">0 &lt; f &lt; 48 000 Hz</span>. Que o núcleo rode nessa taxa fixa, independentemente do áudio recebido, ainda é uma hipótese. Cada commit grava na flash; sua durabilidade e o efeito de uma interrupção de energia são desconhecidos.</p>
+          </div>
+          <aside class="margin"><span class="footnote-ref">c.</span><p>Nyquist não é um botão de qualidade. É um limite do sistema amostrado: a frequência máxima representável sem ambiguidade fica na metade da taxa de amostragem.</p><p>Três implementações independentes projetam os filtros a <span class="mono">96 kHz</span>. Isso sustenta a hipótese de clock fixo, mas não mede o clock do chip.</p><span class="status hypothesis"><span aria-hidden="true">◇</span><span>96 kHz no núcleo</span></span></aside>
+        </section>
+
+        <section class="chapter" id="perguntas" aria-labelledby="title-unknown">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">06</span><h2 id="title-unknown" data-i18n="hUnknown">O que ainda não sabemos</h2></div>
+            <p style="margin-bottom:22px">Sucesso no byte-stream não prova sucesso no hardware. Estas perguntas continuam abertas; não são funcionalidades escondidas.</p>
+            <ul class="questions">
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>Read-back.</strong> Existe leitura no <span class="mono">0xCB</span> para pull, verify ou rollback? A referência nunca lê.</span></li>
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>CRC no firmware.</strong> O código gera o CRC; ainda não sabemos se o chip o valida.</span></li>
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>Modo só-RAM.</strong> Existe uma forma de aplicar sem persistir? Não foi identificada no <span class="mono">0xCB</span>.</span></li>
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>Flash e energia.</strong> Quantos ciclos ela suporta? O que acontece se o cabo desconectar durante a gravação?</span></li>
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>Troca durante a reprodução.</strong> Há click ou estalo ao mudar de preset?</span></li>
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>Header.</strong> Qual é a função dos bytes <span class="mono">6</span> e <span class="mono">12–13</span>? A geometria poderia permitir outra contagem de seções ou L/R?</span></li>
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>Escrita real.</strong> O firmware do produto aceita estes bytes e produz a resposta esperada? É preciso gravar, ouvir e medir.</span></li>
+              <li><span class="pending-glyph" aria-hidden="true">□</span><span><strong>Enumeração e firmware.</strong> Quais são as strings e a interface HID? O cabo expõe <span class="mono">0xCB</span>, <span class="mono">0x4B</span> ou ambos?</span></li>
+            </ul>
+          </div>
+          <aside class="margin"><span class="note-label">CADERNO ABERTO</span><p>O parentesco entre <span class="mono">0xCB</span> e <span class="mono">0x4B</span> é hipótese, não intercambialidade. Os formatos de coeficientes são diferentes.</p><p>A atribuição do fabricante do chip à Savitech também é hipótese de fonte secundária. O nome <span class="mono">CB5100</span> está confirmado nos briefs do integrador.</p><span class="status requires"><span aria-hidden="true">□</span><span data-i18n="requires">requer o cabo</span></span></aside>
+        </section>
+
+        <section class="chapter" id="glossario" aria-labelledby="title-glossary">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">07</span><h2 id="title-glossary" data-i18n="hGlossary">Glossário</h2></div>
+            <dl class="glossary">
+              <div><dt>biquad</dt><dd>Seção de filtro de segunda ordem. Aqui, cinco coeficientes com <span class="mono">a₀ = 1</span> implícito.</dd></div>
+              <div><dt>Q</dt><dd>Fator de qualidade. Em um peak, valores maiores tornam a faixa afetada mais estreita.</dd></div>
+              <div><dt>peak / PK</dt><dd>Eleva ou atenua uma região em torno de uma frequência central.</dd></div>
+              <div><dt>low shelf / LS</dt><dd>Altera o patamar das baixas frequências, com transição para ganho unitário nos agudos.</dd></div>
+              <div><dt>high shelf / HS</dt><dd>Altera o patamar das altas frequências. Fora do envelope de escrita atual.</dd></div>
+              <div><dt>preamp</dt><dd>Ganho global antes das bandas. No payload, é ganho linear em Q23, não dB.</dd></div>
+              <div><dt>headroom</dt><dd>Margem entre o pico do sinal e o limite antes de clipping.</dd></div>
+              <div><dt>clipping</dt><dd>Recorte de um sinal que ultrapassa a amplitude representável pelo estágio.</dd></div>
+              <div><dt>Q23 / Q27</dt><dd>Escalas de ponto fixo em <span class="mono">int32</span>: multiplicar por <span class="mono">2²³</span> ou <span class="mono">2²⁷</span> e arredondar.</dd></div>
+              <div><dt>CRC</dt><dd>Verificação de integridade dos bytes. Não comprova estabilidade, segurança nem autenticidade.</dd></div>
+              <div><dt>WebHID</dt><dd>API de acesso a dispositivos HID no navegador, com permissão explícita e contexto seguro.</dd></div>
+              <div><dt>flash</dt><dd>Memória não volátil do cabo. Mantém o preset sem energia; tem vida útil de gravação finita, aqui desconhecida.</dd></div>
+              <div><dt>report</dt><dd>Unidade do transporte HID. Neste caminho: <span class="mono">31 B</span>, enviados com report ID <span class="mono">0xCB</span>.</dd></div>
+            </dl>
+          </div>
+          <aside class="margin"><span class="note-label">SOBRE AS UNIDADES</span><p><span class="mono">Hz</span> é frequência; <span class="mono">dB</span> expressa uma razão logarítmica. O <span class="mono">Q</span> do filtro não é o “Q” de Q23 ou Q27.</p><p><span class="mono">LE</span> significa little-endian: o byte menos significativo é transmitido primeiro.</p></aside>
+        </section>
+
+        <section class="chapter" id="aviso-legal" aria-labelledby="title-legal">
+          <div class="copy legal-copy">
+            <div class="chapter-heading"><span class="section-number">08</span><h2 id="title-legal" data-i18n="hLegal">Aviso legal</h2></div>
+            <p class="legal-lead" data-i18n="legal1">open-auri é um projeto independente. Não é oficial, não é afiliado nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante.</p>
+            <p data-i18n="legal2">As informações técnicas foram obtidas por estudo do protocolo para fins de interoperabilidade. A documentação distingue fatos confirmados no código, hipóteses e pontos que exigem testes no hardware. Nenhuma escrita foi validada por este projeto no cabo real até a revisão indicada nesta página. A ausência de falhas nos testes em software não constitui garantia de funcionamento ou segurança do dispositivo.</p>
+            <p data-i18n="legal3">O software e esta documentação são fornecidos “no estado em que se encontram” (“as is”), sem qualquer garantia, expressa ou implícita, incluindo garantias de comercialização, adequação a uma finalidade específica e não violação, na máxima extensão permitida pela legislação aplicável. Consulte a licença AGPL-3.0, especialmente a seção 15 (isenção de garantia) e a seção 16 (limitação de responsabilidade). Este aviso não substitui os termos da licença.</p>
+            <p data-i18n="legal4">O uso é por sua conta e risco. Na máxima extensão permitida pela legislação aplicável, os autores e colaboradores não se responsabilizam por danos ao cabo, aos fones, à audição, a outros equipamentos ou a dados, nem por perdas diretas, indiretas, incidentais ou consequenciais decorrentes do uso ou da impossibilidade de uso. Uma gravação pode persistir na flash e não há read-back, rollback ou recuperação garantidos no caminho conhecido. Não use esta documentação como promessa de segurança auditiva.</p>
+            <p data-i18n="legal5">Marcas e nomes de produtos pertencem aos seus respectivos titulares e são citados apenas para identificação, atribuição e interoperabilidade. As homenagens presentes em cada página são tributos editoriais, sem vínculo, afiliação, aprovação ou endosso pelos homenageados, por seus representantes ou por seus espólios.</p>
+            <a class="license-link" href="https://www.gnu.org/licenses/agpl-3.0.html" data-i18n="licenseRead">Ler a AGPL-3.0, incluindo as seções 15 e 16 ↗</a>
+          </div>
+          <aside class="margin"><span class="note-label" data-i18n="legalMarginTitle">ANTES DE USAR</span><p data-i18n="legalMargin">Este mock é uma leitura do estado do projeto, não uma ferramenta de gravação. O aviso precisa de revisão jurídica antes da publicação.</p></aside>
+        </section>
+
+        <section class="chapter credits-section" id="creditos" aria-labelledby="title-credits">
+          <div class="copy">
+            <div class="chapter-heading"><span class="section-number">09</span><h2 id="title-credits" data-i18n="hCredits">Créditos</h2></div>
+            <ul class="credits-list">
+              <li><a href="https://equalizador.kuba.audio/">Kuba ↗</a><small>Presets e implementação pública de referência em equalizador.kuba.audio. O layout dos bytes foi aprendido dela; seu código não é incluído no codec do projeto.</small></li>
+              <li>Leonardo<small>Crédito da referência: “Padrão = filtros do Leonardo”. Isso não confirma que o preset seja o estado de fábrica.</small></li>
+              <li><a href="https://github.com/jaakkopasanen/AutoEq">AutoEq ↗</a><small>MIT · Copyright (c) 2018-2022 Jaakko Pasanen. O design de PK, LS e HS no codec é um porte de autoeq/peq.py. A magnitude e a validação são próprias. Atribuição conforme THIRD_PARTY_NOTICES.md; nenhum design de filtro do AutoEq é executado neste mock.</small></li>
+              <li><a href="https://www.w3.org/TR/audio-eq-cookbook/">Robert Bristow-Johnson · Audio EQ Cookbook ↗</a><small>Referência das equações de biquads; LP e HP no codec seguem o cookbook diretamente.</small></li>
+            </ul>
+            <h3 class="failure-title" data-i18n="homageSources">Homenagens e suas fontes</h3>
+            <div class="honoree-list">
+              <div><a href="https://en.wikipedia.org/wiki/Robert_Moog">Bob Moog ↗</a><small>curva.html</small></div>
+              <div><a href="https://en.wikipedia.org/wiki/Geoff_Emerick">Geoff Emerick ↗</a><small>biblioteca.html</small></div>
+              <div><a href="https://en.wikipedia.org/wiki/Ray_Dolby">Ray Dolby ↗</a><small>cabo.html</small></div>
+              <div><a href="https://en.wikipedia.org/wiki/Harry_Nyquist">Harry Nyquist ↗</a><small>docs.html / este caderno</small></div>
+              <div><a href="https://en.wikipedia.org/wiki/Les_Paul">Les Paul ↗</a><small>página futura</small></div>
+              <div><a href="https://en.wikipedia.org/wiki/Andy_Hildebrand">Andy Hildebrand ↗</a><small>página futura</small></div>
+              <div><a href="https://en.wikipedia.org/wiki/Bob_Clearmountain">Bob Clearmountain ↗</a><small>página futura</small></div>
+              <div><a href="https://en.wikipedia.org/wiki/Floyd_Toole">Floyd Toole</a> &amp; <a href="https://en.wikipedia.org/wiki/Sean_Olive">Sean Olive ↗</a><small>página futura</small></div>
+            </div>
+            <div class="endmark"><span class="mono">open-auri / docs / 2026-10-15</span><span aria-hidden="true">∿</span></div>
+          </div>
+          <aside class="margin"><span class="note-label">BASE DESTA EDIÇÃO</span><p><span class="mono">docs/protocol-0xcb.md</span><br><span class="mono">docs/open-questions.md</span><br><span class="mono">docs/verification.md</span><br><span class="mono">THIRD_PARTY_NOTICES.md</span></p><p>Os testes documentam equivalência de bytes e validação matemática. Não documentam uma gravação bem-sucedida no hardware.</p><span class="status confirmed"><span aria-hidden="true">✓</span><span>evidência com escopo</span></span></aside>
+        </section>
+      </article>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <div class="frame footer-grid">
+      <div class="footer-homage">
+        <div class="eyebrow footer-label" data-i18n="homageLabel">ESTA PÁGINA HOMENAGEIA</div>
+        <div class="honoree-heading"><h2>Harry Nyquist</h2><span class="mono">1889–1976</span></div>
+        <p data-i18n="trivia">Em 1928, Harry Nyquist mostrou em Certain Topics in Telegraph Transmission Theory que um canal de largura de banda B carrega até 2B elementos independentes por segundo. É por isso que, a 96 kHz, nenhum filtro deste cabo passa de 48 kHz.</p>
+        <a class="source-link" href="https://en.wikipedia.org/wiki/Harry_Nyquist" data-i18n="source">fonte ↗</a>
+      </div>
+      <div class="footer-warning">
+        <h3 data-i18n="notice">Aviso</h3>
+        <p data-i18n="footerNotice">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p>
+        <div class="footer-links"><a href="#aviso-legal" data-i18n="fullNotice">Aviso legal completo</a><a href="https://www.gnu.org/licenses/agpl-3.0.html" data-i18n="license">Licença AGPL-3.0</a></div>
+      </div>
+    </div>
+    <div class="frame"><div class="footer-baseline"><span>open-auri · 0xCB</span><span data-i18n="footerEnd">Uma homenagem, não uma afiliação.</span></div></div>
+  </footer>
+
+  <script type="module">
+    // TODO i18n: translate the technical body and SVG descriptions before publication.
+    // No HID, network requests, storage, imports or device-side effects in this mock.
+    const dictionary = {
+      'pt-BR': {
+        skip:'Ir para o conteúdo', navCurve:'Curva', navLibrary:'Biblioteca', navCompare:'Comparar',
+        navSound:'Soe como X', navCommunity:'Comunidade', navBlind:'Teste cego', navCable:'Cabo',
+        connection:'Sem cabo · simulado', unsaved:'0 alterações não gravadas', neutral:'Neutro',
+        defaultPreset:'Padrão Auri', writeCable:'Gravar no cabo', onThisPage:'Neste caderno',
+        tocNote:'Formato estudado. Hardware ainda não validado.', docLabel:'Documentação / caderno 04',
+        heroLine1:'Os limites,', heroLine2:'por escrito.',
+        intro:'Do preset aos 220 bytes: o que foi confirmado no formato, o que é hipótese e o que ainda depende do cabo.',
+        folding:'O limite de Nyquist', nyquistCaption:'Coeficientes projetados a 96 kHz. Clock real do chip: hipótese.',
+        confirmed:'confirmado', hypothesis:'hipótese', requires:'requer o cabo', localMock:'MOCK LOCAL · SEM ESCRITA',
+        hQuick:'Começo rápido', hLayers:'As três camadas', hSafe:'O que é seguro', hProtocol:'Protocolo 0xCB',
+        hLimits:'Limites físicos', hUnknown:'O que ainda não sabemos', hGlossary:'Glossário', hLegal:'Aviso legal', hCredits:'Créditos',
+        provisional:'ENVELOPE PROVISÓRIO', extendedEnvelope:'Envelope ampliado', soon:'EM BREVE',
+        soonNote:'Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.',
+        payloadTitle:'Fig. 01 / Anatomia de um preset', framingTitle:'Fig. 02 / Do bloco aos reports',
+        preampTitle:'Um preamp, quatro bytes', preampLabel:'Preamp em dB, finito e ≤ 0',
+        preampNote:'Exemplo de codificação, não de permissão de escrita. 0 dB cabe no codec, mas está fora do envelope provisório.',
+        preampInvalid:'RECUSADO', preampInvalidNote:'Use um número finito ≤ 0 dB. Ganho positivo é recusado antes das bandas.',
+        crcTitle:'Um CRC que dá para conferir', crcLabel:'Texto de entrada, bytes UTF-8',
+        crcNote:'Sem reflexão ou XOR final. No payload: cobre os primeiros 218 B, anexado como 2 B LE.',
+        legal1:'open-auri é um projeto independente. Não é oficial, não é afiliado nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante.',
+        legal2:'As informações técnicas foram obtidas por estudo do protocolo para fins de interoperabilidade. A documentação distingue fatos confirmados no código, hipóteses e pontos que exigem testes no hardware. Nenhuma escrita foi validada por este projeto no cabo real até a revisão indicada nesta página. A ausência de falhas nos testes em software não constitui garantia de funcionamento ou segurança do dispositivo.',
+        legal3:'O software e esta documentação são fornecidos “no estado em que se encontram” (“as is”), sem qualquer garantia, expressa ou implícita, incluindo garantias de comercialização, adequação a uma finalidade específica e não violação, na máxima extensão permitida pela legislação aplicável. Consulte a licença AGPL-3.0, especialmente a seção 15 (isenção de garantia) e a seção 16 (limitação de responsabilidade). Este aviso não substitui os termos da licença.',
+        legal4:'O uso é por sua conta e risco. Na máxima extensão permitida pela legislação aplicável, os autores e colaboradores não se responsabilizam por danos ao cabo, aos fones, à audição, a outros equipamentos ou a dados, nem por perdas diretas, indiretas, incidentais ou consequenciais decorrentes do uso ou da impossibilidade de uso. Uma gravação pode persistir na flash e não há read-back, rollback ou recuperação garantidos no caminho conhecido. Não use esta documentação como promessa de segurança auditiva.',
+        legal5:'Marcas e nomes de produtos pertencem aos seus respectivos titulares e são citados apenas para identificação, atribuição e interoperabilidade. As homenagens presentes em cada página são tributos editoriais, sem vínculo, afiliação, aprovação ou endosso pelos homenageados, por seus representantes ou por seus espólios.',
+        licenseRead:'Ler a AGPL-3.0, incluindo as seções 15 e 16 ↗', legalMarginTitle:'ANTES DE USAR',
+        legalMargin:'Este mock é uma leitura do estado do projeto, não uma ferramenta de gravação. O aviso precisa de revisão jurídica antes da publicação.',
+        homageSources:'Homenagens e suas fontes', homageLabel:'ESTA PÁGINA HOMENAGEIA',
+        trivia:'Em 1928, Harry Nyquist mostrou em Certain Topics in Telegraph Transmission Theory que um canal de largura de banda B carrega até 2B elementos independentes por segundo. É por isso que, a 96 kHz, nenhum filtro deste cabo passa de 48 kHz.',
+        source:'fonte ↗', notice:'Aviso',
+        footerNotice:'open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.',
+        fullNotice:'Aviso legal completo', license:'Licença AGPL-3.0', footerEnd:'Uma homenagem, não uma afiliação.'
+      },
+      'en-US': {
+        skip:'Skip to content', navCurve:'Curve', navLibrary:'Library', navCompare:'Compare',
+        navSound:'Sound like X', navCommunity:'Community', navBlind:'Blind test', navCable:'Cable',
+        connection:'No cable · simulated', unsaved:'0 unsaved changes', neutral:'Neutral',
+        defaultPreset:'Auri default', writeCable:'Write to cable', onThisPage:'In this notebook',
+        tocNote:'Format studied. Hardware not yet validated.', docLabel:'Documentation / notebook 04',
+        heroLine1:'The limits,', heroLine2:'in writing.',
+        intro:'From a preset to 220 bytes: what is confirmed in the format, what is a hypothesis, and what still needs the cable.',
+        folding:'The Nyquist limit', nyquistCaption:'Coefficients designed at 96 kHz. The actual chip clock remains a hypothesis.',
+        confirmed:'confirmed', hypothesis:'hypothesis', requires:'needs the cable', localMock:'LOCAL MOCK · NO WRITES',
+        hQuick:'Quick start', hLayers:'The three layers', hSafe:'What is safe', hProtocol:'Protocol 0xCB',
+        hLimits:'Physical limits', hUnknown:'What we still do not know', hGlossary:'Glossary', hLegal:'Legal notice', hCredits:'Credits',
+        provisional:'PROVISIONAL ENVELOPE', extendedEnvelope:'Extended envelope', soon:'COMING SOON',
+        soonNote:'Available once the earphones reach the test bench. Until then, we do not write anything the original Kuba page does not write.',
+        payloadTitle:'Fig. 01 / Anatomy of a preset', framingTitle:'Fig. 02 / From the block to reports',
+        preampTitle:'One preamp, four bytes', preampLabel:'Preamp in dB, finite and ≤ 0',
+        preampNote:'An encoding example, not permission to write. The codec accepts 0 dB, but it is outside the provisional envelope.',
+        preampInvalid:'REFUSED', preampInvalidNote:'Enter a finite number ≤ 0 dB. Positive gain before the bands is refused.',
+        crcTitle:'A CRC you can check', crcLabel:'Input text, UTF-8 bytes',
+        crcNote:'No reflection or final XOR. In the payload: covers the first 218 B, appended as 2 B LE.',
+        legal1:'open-auri is an independent project. It is not official, affiliated with, or endorsed by Kuba, TTGK, Savitech, or any manufacturer.',
+        legal2:'Technical information was obtained by studying the protocol for interoperability purposes. This documentation distinguishes facts confirmed in code, hypotheses, and matters requiring hardware testing. No write has been validated by this project on the actual cable as of the revision shown on this page. Passing software tests does not guarantee device operation or safety.',
+        legal3:'The software and this documentation are provided “as is”, without any express or implied warranty, including warranties of merchantability, fitness for a particular purpose, and non-infringement, to the maximum extent permitted by applicable law. Refer to the AGPL-3.0 license, particularly section 15 (Disclaimer of Warranty) and section 16 (Limitation of Liability). This notice does not replace the license terms.',
+        legal4:'Use is at your own risk. To the maximum extent permitted by applicable law, authors and contributors accept no responsibility for damage to the cable, earphones, hearing, other equipment, or data, or for direct, indirect, incidental, or consequential losses arising from use or inability to use. A write may persist in flash, and the known path provides no guaranteed read-back, rollback, or recovery. Do not treat this documentation as a promise of hearing safety.',
+        legal5:'Trademarks and product names belong to their respective owners and are mentioned only for identification, attribution, and interoperability. The homages on each page are editorial tributes, with no connection, affiliation, approval, or endorsement by the honorees, their representatives, or their estates.',
+        licenseRead:'Read AGPL-3.0, including sections 15 and 16 ↗', legalMarginTitle:'BEFORE USE',
+        legalMargin:'This mock documents the state of the project; it is not a writing tool. The notice needs legal review before publication.',
+        homageSources:'Homages and their sources', homageLabel:'THIS PAGE PAYS TRIBUTE TO',
+        trivia:'In 1928, Harry Nyquist showed in Certain Topics in Telegraph Transmission Theory that a channel of bandwidth B carries up to 2B independent elements per second. That is why, at 96 kHz, no filter on this cable goes beyond 48 kHz.',
+        source:'source ↗', notice:'Notice',
+        footerNotice:'open-auri is not official or endorsed by Kuba, TTGK, Savitech, or any manufacturer. Everything here was obtained by studying the protocol for interoperability purposes. Use at your own risk: we accept no responsibility for damage to the cable, earphones, or your hearing.',
+        fullNotice:'Full legal notice', license:'AGPL-3.0 license', footerEnd:'A tribute, not an affiliation.'
+      }
+    };
+
+    let locale = 'pt-BR';
+    const preampInput = document.querySelector('#preamp-input');
+    const preampBytes = document.querySelector('#preamp-bytes');
+    const preampInteger = document.querySelector('#preamp-word');
+    const preampError = document.querySelector('#preamp-error');
+    const preampWidget = document.querySelector('#preamp-widget');
+    const crcInput = document.querySelector('#crc-input');
+    const crcOutput = document.querySelector('#crc-output');
+    const crcBytes = document.querySelector('#crc-bytes');
+    const encoder = new TextEncoder();
+    const t = key => dictionary[locale][key];
+    const hexByte = value => value.toString(16).toUpperCase().padStart(2, '0');
+    const hexWord = value => '0x' + value.toString(16).toUpperCase().padStart(4, '0');
+
+    // The project's own Q23 and CRC implementations, inlined from src/dsp/eq0xcb.mjs.
+    function preampWord(preampDb = 0) {
+      if (!Number.isFinite(preampDb)) throw new RangeError('preamp must be finite');
+      if (preampDb > 0) throw new RangeError('preamp must be <= 0 dB');
+      return Math.round(Math.pow(10, preampDb / 20) * (2 ** 23));
+    }
+
+    function crc16Ccitt(data) {
+      let register = 0xffff;
+      for (const byte of data) {
+        register ^= byte << 8;
+        for (let bit = 0; bit < 8; bit++) {
+          register = register & 0x8000 ? ((register << 1) ^ 0x1021) & 0xffff : (register << 1) & 0xffff;
+        }
+      }
+      return register;
+    }
+
+    function parsePreamp(text) {
+      const normalized = text.trim().replace(/−/g, '-').replace(',', '.');
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return NaN;
+      return Number(normalized);
+    }
+
+    function formatNumber(number, digits = 0, plus = false) {
+      return new Intl.NumberFormat(locale, {
+        useGrouping:false, minimumFractionDigits:digits, maximumFractionDigits:digits,
+        signDisplay:plus ? 'always' : 'auto'
+      }).format(number).replace(/-/g, '−');
+    }
+
+    function updatePreamp() {
+      try {
+        const word = preampWord(parsePreamp(preampInput.value));
+        const bytes = new Uint8Array(4);
+        new DataView(bytes.buffer).setInt32(0, word, true);
+        preampBytes.textContent = Array.from(bytes, hexByte).join(' ');
+        preampInteger.textContent = 'int32 / ' + new Intl.NumberFormat(locale).format(word) + ' · Q23';
+        preampError.textContent = '';
+        preampInput.setAttribute('aria-invalid', 'false');
+        preampWidget.dataset.invalid = 'false';
+      } catch (error) {
+        // User input refusal is visible, never an uncaught error or a device write.
+        preampBytes.textContent = t('preampInvalid');
+        preampInteger.textContent = 'int32 / ···';
+        preampError.textContent = t('preampInvalidNote');
+        preampInput.setAttribute('aria-invalid', 'true');
+        preampWidget.dataset.invalid = 'true';
+      }
+    }
+
+    function updateCrc() {
+      const bytes = encoder.encode(crcInput.value);
+      const checksum = crc16Ccitt(bytes);
+      crcOutput.textContent = hexWord(checksum);
+      crcBytes.textContent = 'LE / ' + hexByte(checksum & 0xff) + ' ' + hexByte(checksum >>> 8) + ' · ' + bytes.length + ' B';
+    }
+
+    function setLocale(nextLocale) {
+      if (!Object.hasOwn(dictionary, nextLocale)) return;
+      const preampValue = parsePreamp(preampInput.value);
+      locale = nextLocale;
+      document.documentElement.lang = locale;
+      document.querySelectorAll('[data-i18n]').forEach(node => {
+        const value = t(node.dataset.i18n);
+        if (value !== undefined) node.textContent = value;
+        node.lang = locale;
+      });
+      document.querySelectorAll('[data-locale]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.locale === locale));
+      });
+      document.querySelectorAll('[data-number]').forEach(node => {
+        node.textContent = formatNumber(Number(node.dataset.number), Number(node.dataset.digits || 0), node.hasAttribute('data-plus'));
+      });
+      document.querySelectorAll('[data-chart-number]').forEach(node => {
+        const value = Number(node.dataset.chartNumber);
+        node.textContent = formatNumber(value, 2, value > 0);
+      });
+      // Change only the decimal separator; preserve the user's precision and value.
+      if (Number.isFinite(preampValue)) {
+        preampInput.value = preampInput.value.trim().replace(/[.,]/g, locale === 'pt-BR' ? ',' : '.');
+      }
+      updatePreamp();
+      updateCrc();
+    }
+
+    preampInput.addEventListener('input', updatePreamp);
+    crcInput.addEventListener('input', updateCrc);
+    document.querySelectorAll('[data-locale]').forEach(button => {
+      button.addEventListener('click', () => setLocale(button.dataset.locale));
+    });
+    document.querySelectorAll('a[aria-disabled="true"]').forEach(link => {
+      link.addEventListener('click', event => event.preventDefault());
+    });
+    document.querySelector('#crc-vector').textContent = '"123456789" → ' + hexWord(crc16Ccitt(encoder.encode('123456789')));
+    setLocale(locale);
+
+    const tocLinks = [...document.querySelectorAll('.toc a')];
+    const sections = [...document.querySelectorAll('.chapter')];
+    const progress = document.querySelector('.reading-progress');
+    let scrollQueued = false;
+    function updateReadingPosition() {
+      const offset = document.querySelector('.cable-bar').getBoundingClientRect().height + 55;
+      let currentSection = sections[0];
+      for (const section of sections) {
+        if (section.getBoundingClientRect().top <= offset) currentSection = section;
+      }
+      tocLinks.forEach(link => {
+        const active = link.getAttribute('href') === '#' + currentSection.id;
+        link.classList.toggle('active', active);
+        if (active) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      });
+      const range = document.documentElement.scrollHeight - window.innerHeight;
+      const fraction = range > 0 ? Math.max(0, Math.min(1, window.scrollY / range)) : 0;
+      progress.style.width = (fraction * 100) + '%';
+      scrollQueued = false;
+    }
+    function queueReadingPosition() {
+      if (!scrollQueued) {
+        scrollQueued = true;
+        window.requestAnimationFrame(updateReadingPosition);
+      }
+    }
+    window.addEventListener('scroll', queueReadingPosition, { passive:true });
+    window.addEventListener('resize', queueReadingPosition, { passive:true });
+    updateReadingPosition();
+  </script>
+</body>
+</html>

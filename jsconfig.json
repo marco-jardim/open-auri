@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "allowJs": true,
+    "strict": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "maxNodeModuleJsDepth": 0,
+    "noEmit": true
+  },
+  "include": ["src/**/*.mjs", "tools/**/*.mjs"],
+  "exclude": ["design", "node_modules", "types", "coverage", "web", "workers"]
+}

@@ -1,0 +1,2478 @@
+<!DOCTYPE html>
+<!--
+  open-auri · mock v2 · teste-cego.html (homenagem a Floyd Toole e Sean Olive)
+  TODO antes de publicar:
+  - LGPD: revisar consentimento do S6 (texto, base legal art. 7º, I, finalidade, retenção, pedido de remoção, menores de idade).
+  - S6: trocar OWNER pelo repositório real e criar o template de issue "preferencia-cega" com o mesmo schema do JSON.
+  - S6: decidir se o pseudônimo basta, já que a issue fica ligada à conta do GitHub de quem envia.
+  - Rodapé: confirmar com fonte primária os anos de nascimento antes de exibir anos (omitidos aqui por falta de confirmação nas fontes citadas).
+  - Rodapé: revisar a citação das fontes (um dos links contém o nome de uma fabricante na URL; é só referência, não marca).
+  - Áudio: validar IIRFilterNode a 96 kHz em Chrome, Firefox e Safari; medir a resposta real contra magnitudeDb.
+  - Áudio: definir com medição o nível seguro do motor compartilhado (OA.audio: volume da prévia padrão −12 dB).
+  - Gate v2: substituir as constantes copiadas de design/analysis/envelope.json por import quando a página sair do mock.
+  - Blocos OA SHARED (storage v2, audio-loader v1): manter idênticos a curva.html; contrato de armazenamento no topo de curva.html.
+  - HS/LP/HP: a "Curva atual" com essas seções entra só como candidata EXPERIMENTAL (navegador); confirmar o gate sem a restrição de tipos.
+  - Descrições oficiais: confirmar se podemos citar o texto da Kuba com atribuição.
+  - X2 no cabo: medir o clique de troca e o desgaste da flash antes de liberar.
+  - Estatística: revisar com alguém de psicoacústica (IC 95 % por t de Student sobre rodadas; sem modelo de ouvinte).
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teste cego · open-auri</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0F0F0E; --ink-2:#171715; --text:#ECE7DD; --muted:#8F8A80; --rule:rgba(236,231,221,.12); --danger:#E5484D;
+  --accent:#FFD27A; --accent-ink:#1d1606; --accent-glow:rgba(255,210,122,.55);
+  --room:#070605; --fabric:#0c0b0a; --walnut:#3d2716; --walnut-hi:#6a4628; --metal:#24211d; --metal-hi:#3a3631; --glass:#111110;
+  --serif:'Instrument Serif', Georgia, serif; --sans:'Geist', system-ui, sans-serif; --ui:var(--sans); --mono:'JetBrains Mono', ui-monospace, monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ink);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:var(--text)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.mono{font-family:var(--mono)}
+
+/* ---------- CHROME (identical across pages) ---------- */
+.cable-bar{position:sticky;top:0;z-index:60;background:#171715;border-bottom:1px solid var(--rule)}
+.cable-inner{max-width:1480px;margin:auto;min-height:56px;padding:0 24px;display:flex;align-items:center;gap:22px}
+.wordmark{font:italic 27px/1 var(--serif);text-decoration:none;white-space:nowrap;color:var(--text)}
+.main-nav{display:flex;gap:15px;align-self:stretch;align-items:center;margin:auto;font-size:11.5px;white-space:nowrap}
+.main-nav a{text-decoration:none;position:relative;color:#cfc9be}
+.main-nav a:hover{color:var(--text)}
+.main-nav a[aria-current="page"]{color:var(--text)}
+.main-nav a[aria-current="page"]:after{content:"";position:absolute;left:0;right:0;bottom:-19px;height:2px;background:var(--accent)}
+.cable-actions{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.cable-actions button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:7px 10px;font-size:11px;line-height:1.2;cursor:pointer}
+.cable-actions button:hover{border-color:var(--muted)}
+.cable-actions button.primary{background:var(--accent);border-color:var(--accent);color:#120a05;font-weight:650}
+.cable-actions button.primary:hover{filter:brightness(1.06)}
+.cable-state{font-size:10.5px;color:#b5afa4;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
+.status-dot{color:var(--muted);font-size:8px;margin-right:5px}
+.dirty{font:9.5px/1.35 var(--mono);color:var(--muted);max-width:100px;white-space:normal}
+.dirty.has{color:var(--accent)}
+.language{border:0!important;font-family:var(--mono)!important;color:var(--muted)}
+.language .on{color:var(--text)}
+@media (max-width:1100px){.cable-inner{flex-wrap:wrap;padding-top:10px;padding-bottom:8px;gap:0 18px}.main-nav{order:3;width:100%;overflow:auto;margin:10px 0 0;padding-bottom:6px}.main-nav a[aria-current="page"]:after{bottom:-6px}.cable-actions{margin-left:auto}}
+/* === OA SHARED: audio-loader v1 (CSS) === */
+.oa-audio{position:relative}
+.oa-audio-btn{display:inline-flex;align-items:center;gap:6px;max-width:190px}
+.oa-audio-btn .oa-audio-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.oa-audio-btn.has-file{border-color:color-mix(in srgb,var(--accent) 55%,transparent)!important;color:var(--accent)}
+.oa-audio-pop{position:absolute;left:0;top:calc(100% + 10px);z-index:80;width:320px;max-width:calc(100vw - 24px);background:#1b1b19;border:1px solid #34332f;border-radius:6px;padding:14px;box-shadow:0 18px 40px rgba(0,0,0,.65);font:12px/1.45 var(--ui);color:var(--text);white-space:normal}
+.oa-audio-pop h3{margin:0 0 10px;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.oa-audio-load{position:relative;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);color:var(--accent);border-radius:3px;padding:7px 10px;cursor:pointer;font-size:12px}
+.oa-audio-load:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+.oa-audio-file{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.oa-audio-meta{margin:10px 0;font:11px/1.5 var(--mono);color:#cfc9be;word-break:break-word}
+.oa-audio-meta b{color:var(--text);font-weight:500}
+.oa-audio-row{display:flex;gap:8px;flex-wrap:wrap}
+.oa-audio-row button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:6px 10px;font-size:11.5px}
+.oa-audio-row button:disabled{opacity:.45;cursor:not-allowed}
+.oa-audio-vol{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-top:12px;font-size:11.5px;color:#cfc9be}
+.oa-audio-vol input{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.oa-audio-vol output{font:11px var(--mono);color:var(--accent)}
+.oa-audio-note{margin:10px 0 0;font-size:11px;color:var(--muted)}
+.oa-audio-rate{margin:6px 0 0;font:10.5px var(--mono);color:var(--muted)}
+.oa-audio-rate.approx{color:color-mix(in srgb,var(--accent) 40%,white)}
+@media (max-width:720px){.cable-actions{flex-wrap:wrap;row-gap:6px}.oa-audio-btn .oa-audio-name{max-width:70px}.oa-audio-pop{position:fixed;left:12px;right:12px;top:118px;width:auto;max-width:none}}
+/* === END OA SHARED: audio-loader v1 (CSS) === */
+.btn{height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--rule);background:transparent;color:var(--text);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.btn:hover{border-color:rgba(236,231,221,.3)}
+.btn.accent{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.accent:hover{filter:brightness(1.06)}
+.btn[aria-disabled="true"],.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* ---------- ROOM ---------- */
+.room{position:relative;height:clamp(400px,64vh,660px);background:var(--room);overflow:hidden;isolation:isolate}
+#scene{position:absolute;inset:0;width:100%;height:100%;display:block}
+.room-title{position:absolute;left:clamp(16px,4vw,56px);top:clamp(18px,5vh,46px);max-width:440px;pointer-events:none;z-index:2}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.room-title .eyebrow{color:rgba(255,210,122,.72)}
+.room-title h1{font-family:var(--serif);font-style:italic;font-weight:400;font-size:clamp(40px,5.4vw,72px);line-height:.95;margin:.18em 0 .22em;color:#f4ecdc;text-shadow:0 2px 24px rgba(0,0,0,.8)}
+.room-title p{margin:0;color:#bdb5a6;font-size:14.5px;max-width:380px;text-shadow:0 1px 8px rgba(0,0,0,.9)}
+.cue{position:absolute;right:clamp(12px,3vw,40px);top:clamp(18px,5vh,46px);z-index:2;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center;padding:12px 16px;min-width:210px;border-radius:8px;background:linear-gradient(180deg,#1b1916,#100f0d);border:1px solid rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 14px 28px -10px rgba(0,0,0,.9)}
+.cue .lamp{grid-row:span 2}
+.cue-text{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+.cue-sub{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.lamp{width:14px;height:14px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#4a4339,#1c1915 70%);box-shadow:inset 0 1px 2px rgba(0,0,0,.8),0 0 0 2px #0b0a09,0 0 0 3px rgba(255,255,255,.05)}
+.lamp.on{background:radial-gradient(circle at 35% 30%,#fff4d6,var(--accent) 45%,#b07a1e 100%);box-shadow:0 0 10px 2px var(--accent-glow),0 0 0 2px #0b0a09,0 0 0 3px rgba(255,255,255,.05)}
+.lamp.blink{animation:blink .5s steps(2,start) infinite}
+@keyframes blink{to{visibility:hidden}}
+.room-help{position:absolute;right:clamp(12px,3vw,40px);bottom:14px;z-index:2;font-family:var(--mono);font-size:12px;background:rgba(15,15,14,.7);border:1px solid var(--rule);color:var(--muted);border-radius:6px;padding:5px 10px;cursor:pointer}
+.room-help:hover{color:var(--text)}
+@media (max-width:760px){.room{height:auto;aspect-ratio:16/11}.room-title h1{font-size:34px}.room-title p{display:none}.cue{min-width:0;padding:8px 10px}.cue-sub{display:none}}
+
+/* SVG scene classes */
+.mote{fill:#ffe7b5;opacity:0;animation:drift var(--d,14s) linear var(--del,0s) infinite}
+@keyframes drift{0%{opacity:0;transform:translate(0,0)}15%{opacity:var(--o,.5)}85%{opacity:var(--o,.5)}100%{opacity:0;transform:translate(var(--dx,10px),var(--dy,30px))}}
+.cone{mix-blend-mode:screen;animation:flicker 9s ease-in-out infinite}
+@keyframes flicker{0%,100%{opacity:.95}40%{opacity:.86}55%{opacity:1}72%{opacity:.9}}
+#scrimG{transition:transform 1.9s cubic-bezier(.65,0,.2,1)}
+#scrimG.lifted{transform:translateY(-428px)}
+#backlight{transition:opacity 1.2s ease}
+.revealed #backlight{opacity:1}
+.spk-body{fill:#040404;stroke:rgba(255,210,122,0);stroke-width:2;transition:stroke 1s ease .9s}
+.revealed .spk-body{stroke:rgba(255,210,122,.55)}
+.spk-drv{fill:#0d0d0c;stroke:rgba(255,255,255,.04)}
+.reveal-label{font-family:var(--mono);font-size:22px;fill:var(--accent);opacity:0;transition:opacity .8s ease 1.4s;text-anchor:middle;letter-spacing:.04em}
+.revealed .reveal-label{opacity:1}
+.plate{cursor:pointer;outline:none}
+.plate-bg{fill:rgba(236,231,221,.035);stroke:rgba(236,231,221,.28);stroke-width:1.5;stroke-dasharray:10 6;transition:fill .3s,stroke .3s}
+.plate-num{font-family:var(--mono);font-size:36px;font-weight:500;fill:rgba(236,231,221,.55);text-anchor:middle;transition:fill .3s}
+.plate-name{font-family:var(--mono);font-size:14px;fill:var(--accent);text-anchor:middle;opacity:0;transition:opacity .6s ease 1.2s}
+.revealed .plate-name{opacity:1}
+.plate-focus{fill:none;stroke:var(--accent);stroke-width:3;opacity:0}
+.plate:focus-visible .plate-focus{opacity:1}
+.plate:hover .plate-bg{fill:rgba(236,231,221,.07)}
+.plate[aria-pressed="true"] .plate-bg{fill:rgba(255,210,122,.16);stroke:var(--accent);stroke-dasharray:none}
+.plate[aria-pressed="true"] .plate-num{fill:var(--accent)}
+.plate[aria-disabled="true"]{opacity:.35;cursor:not-allowed}
+#lockLamp{fill:#2a2520;transition:fill .2s}
+#lockLamp.on{fill:var(--accent);filter:drop-shadow(0 0 6px var(--accent))}
+.rail{stroke:rgba(236,231,221,.10);stroke-width:2;fill:none}
+.rail.hot{stroke:rgba(255,210,122,.32)}
+
+/* ---------- DESK ---------- */
+.desk{position:relative;padding:34px clamp(12px,3vw,40px) 46px;background-color:var(--walnut);
+  background-image:
+    linear-gradient(115deg,rgba(255,226,180,.10) 0%,rgba(255,226,180,0) 38%),
+    url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='420'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.0035 0.11' numOctaves='4' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.05 0 0 0 0 0.03 0 0 0 0 0.01 1.5 0 0 0 -0.45'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E"),
+    linear-gradient(180deg,#4a301b,#2f1e11);
+  background-size:auto,1200px 420px,auto;
+  box-shadow:inset 0 14px 22px -10px rgba(0,0,0,.85);border-top:4px solid var(--walnut-hi)}
+.desk::before{content:"";position:absolute;left:0;right:0;top:-4px;height:2px;background:linear-gradient(90deg,transparent,rgba(255,230,190,.35) 30%,rgba(255,230,190,.12) 70%,transparent)}
+.desk-grid{display:grid;grid-template-columns:300px minmax(0,1fr);gap:28px;max-width:1360px;margin:0 auto;align-items:start}
+@media (max-width:980px){.desk-grid{grid-template-columns:1fr}}
+
+.rack{position:relative;padding:22px 20px 18px;border-radius:12px;
+  background:repeating-linear-gradient(90deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px),linear-gradient(170deg,var(--metal-hi),var(--metal) 40%,#171512);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -1px 0 rgba(0,0,0,.6),0 22px 34px -14px rgba(0,0,0,.85),0 3px 6px rgba(0,0,0,.55)}
+.rack::before,.rack::after{content:"";position:absolute;width:9px;height:9px;border-radius:50%;top:8px;background:radial-gradient(circle at 35% 30%,#8a8276,#3a352f 60%,#1a1815);box-shadow:inset 0 0 0 1px rgba(0,0,0,.5)}
+.rack::before{left:8px}.rack::after{right:8px}
+.engrave{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:#7d766b;text-transform:uppercase;margin:0 0 8px;text-shadow:0 1px 0 rgba(0,0,0,.7)}
+.seg-row{display:flex;gap:10px;margin-bottom:16px}
+.seg{flex:1;background:#0b0907;border-radius:6px;padding:8px 10px;font-family:var(--mono);font-size:20px;color:var(--accent);text-shadow:0 0 8px rgba(255,210,122,.6);box-shadow:inset 0 2px 6px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);letter-spacing:.06em;white-space:nowrap}
+.seg small{display:block;font-size:9.5px;letter-spacing:.18em;color:#8a7348;text-shadow:none}
+.seg.dim{color:#5c4f37;text-shadow:none}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.key{position:relative;aspect-ratio:1;border-radius:11px;border:0;cursor:pointer;font-family:var(--mono);font-size:30px;color:#cfc6b6;
+  background:linear-gradient(180deg,#34302b,#1d1a17);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 5px 0 #0b0a09,0 10px 16px rgba(0,0,0,.6);transition:transform .08s,box-shadow .08s,color .2s}
+.key::before{content:"";position:absolute;left:22%;right:22%;top:10px;height:4px;border-radius:2px;background:#2b2621;box-shadow:inset 0 1px 1px rgba(0,0,0,.8)}
+.key[aria-pressed="true"]{transform:translateY(3px);color:var(--accent);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 0 #0b0a09,0 4px 8px rgba(0,0,0,.6),0 0 22px -4px var(--accent-glow)}
+.key[aria-pressed="true"]::before{background:var(--accent);box-shadow:0 0 10px var(--accent)}
+.key[aria-disabled="true"]{opacity:.35;cursor:not-allowed}
+.key:active:not([aria-disabled="true"]){transform:translateY(4px)}
+.rack-row{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.transport{flex:0 0 auto;width:64px;height:48px;border-radius:9px;border:0;cursor:pointer;background:linear-gradient(180deg,#34302b,#1d1a17);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 4px 0 #0b0a09,0 8px 12px rgba(0,0,0,.6);display:grid;place-items:center;color:#cfc6b6}
+.transport[aria-pressed="true"]{color:var(--accent);transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 0 #0b0a09,0 0 18px -4px var(--accent-glow)}
+.transport svg{width:20px;height:20px}
+.toggle{display:flex;align-items:center;gap:10px;background:none;border:0;cursor:pointer;padding:4px;text-align:left;color:var(--text)}
+.toggle .track{position:relative;width:46px;height:24px;border-radius:12px;background:#0d0c0a;box-shadow:inset 0 2px 5px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);flex:0 0 auto}
+.toggle .lever{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e6dccb,#8f8577 60%,#4b453d);box-shadow:0 2px 3px rgba(0,0,0,.7);transition:left .18s}
+.toggle[aria-checked="true"] .lever{left:24px}
+.toggle[aria-checked="true"] .track{background:#2b220f}
+.toggle .tl{font-size:12px;line-height:1.25}
+.toggle .tl small{display:block;color:var(--muted);font-size:11px}
+.lamp-row{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.lamp-row .mono{font-size:11.5px;color:var(--muted)}
+
+/* ---------- TABLET ---------- */
+.tablet{border-radius:28px;padding:14px;background:linear-gradient(160deg,#1a1a1b,#0a0a0b 50%);box-shadow:0 38px 60px -26px rgba(0,0,0,.95),0 6px 12px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.07),inset 0 1px 0 rgba(255,255,255,.14)}
+.screen{position:relative;border-radius:16px;overflow:hidden;background:radial-gradient(120% 80% at 20% 0%,#1a1916,#121110 60%);min-height:520px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.8)}
+.screen::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(118deg,rgba(255,255,255,.045) 0%,rgba(255,255,255,0) 32%,rgba(255,255,255,0) 70%,rgba(255,255,255,.02) 100%)}
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border-bottom:1px solid var(--rule);background:rgba(0,0,0,.25)}
+.step{border:0;background:none;padding:12px 10px 11px;text-align:left;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;display:flex;flex-direction:column;gap:2px;min-width:0}
+.step .n{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em}
+.step .l{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.step[aria-selected="true"] .n{color:var(--accent)}
+.step:hover{color:var(--text)}
+@media (max-width:760px){.steps{grid-template-columns:repeat(3,1fr)}}
+.panel{padding:22px 24px 26px}
+.panel[hidden]{display:none}
+.panel h2{font-family:var(--serif);font-weight:400;font-size:30px;margin:0 0 4px;line-height:1.1}
+.panel h2 em{color:var(--accent)}
+.lede{color:#b8b0a1;margin:0 0 18px;max-width:72ch}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media (max-width:1100px){.grid3{grid-template-columns:1fr 1fr}}
+@media (max-width:700px){.grid2,.grid3{grid-template-columns:1fr}}
+.card{border:1px solid var(--rule);border-radius:12px;padding:16px;background:rgba(255,255,255,.018)}
+.card h3{margin:0 0 10px;font-size:13px;font-weight:600;letter-spacing:.02em}
+.card h3 .eyebrow{display:block;margin-bottom:2px}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:8px;border:1px solid transparent;cursor:pointer}
+.opt:hover{background:rgba(255,255,255,.03)}
+.opt input{accent-color:var(--accent);margin-top:3px}
+.opt.checked{border-color:rgba(255,210,122,.35);background:rgba(255,210,122,.05)}
+.opt b{font-weight:600;font-size:13.5px}
+.opt small{display:block;color:var(--muted);font-size:12px}
+.note{font-size:12.5px;color:var(--muted);margin:8px 0 0}
+.warn{font-size:12.5px;color:#e8d3a6;margin:8px 0 0}
+.refuse{color:var(--danger)}
+.msg{min-height:1.4em;font-size:13px;color:#e8d3a6;margin:10px 0 0}
+.msg.err{color:var(--danger)}
+table.lv{width:100%;border-collapse:collapse;font-size:12.5px}
+table.lv th,table.lv td{text-align:left;padding:5px 4px;border-bottom:1px solid var(--rule)}
+table.lv th{font-weight:500;color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+table.lv td.num{font-family:var(--mono);text-align:right}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:18px}
+.chip{display:inline-flex;align-items:center;font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:999px;border:1px solid var(--rule);color:var(--muted);white-space:nowrap}
+.chip.ok{color:var(--accent);border-color:rgba(255,210,122,.35)}
+.chip.bad{color:var(--danger);border-color:rgba(229,72,77,.45)}
+.chip.exp{color:#e8d3a6;border-color:rgba(232,211,166,.4);letter-spacing:.08em}
+.badge-soon{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;padding:3px 8px;border-radius:4px;background:rgba(255,210,122,.12);color:var(--accent);border:1px solid rgba(255,210,122,.35);vertical-align:middle}
+.soon{opacity:.45;cursor:not-allowed}
+
+/* candidates */
+.cand-groups{display:grid;gap:18px}
+.group-h{display:flex;align-items:baseline;gap:10px;margin:0 0 8px}
+.cands{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.cand{position:relative;border:1px solid var(--rule);border-radius:10px;padding:11px 12px 10px;cursor:pointer;background:rgba(255,255,255,.015);transition:border-color .2s,background .2s}
+.cand:hover{border-color:rgba(236,231,221,.28)}
+.cand[aria-checked="true"]{border-color:var(--accent);background:rgba(255,210,122,.06);box-shadow:0 0 0 1px rgba(255,210,122,.25) inset}
+.cand-top{display:flex;align-items:center;gap:8px}
+.cand-name{font-weight:600;font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cand-sel{font-family:var(--mono);font-size:11px;color:var(--accent);min-width:1ch}
+.spark{display:block;width:100%;height:34px;margin:6px 0 4px}
+.cand-desc{font-size:12px;color:#b3ab9c;margin:0 0 4px;line-height:1.35}
+.cand-desc .by{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#7c766c}
+.cand-meta{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.cand-reasons{font-family:var(--mono);font-size:10.5px;color:var(--danger);margin-top:4px;word-break:break-word}
+
+/* sliders */
+.sl{display:grid;grid-template-columns:minmax(90px,auto) 1fr 74px;gap:12px;align-items:center;margin:8px 0}
+.sl label{font-size:13px}
+.sl label small{display:block;color:var(--muted);font-size:11px}
+.readout{font-family:var(--mono);font-size:13px;text-align:right;background:#0c0b09;border:1px solid var(--rule);border-radius:6px;padding:5px 8px;cursor:text;color:var(--text);width:100%}
+.readout.untouched{color:#6d675e;font-style:italic}
+.readout-edit{font-family:var(--mono);font-size:13px;text-align:right;background:#0c0b09;border:1px solid var(--accent);border-radius:6px;padding:5px 8px;color:var(--text);width:100%}
+.tablet input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:28px;background:transparent;--p:50%;cursor:pointer}
+.tablet input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--accent) 0 var(--p),rgba(236,231,221,.14) var(--p) 100%);box-shadow:inset 0 1px 2px rgba(0,0,0,.6)}
+.tablet input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;margin-top:-7px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff6df,#cdb688 55%,#7d6b48);box-shadow:0 2px 4px rgba(0,0,0,.7)}
+.tablet input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:rgba(236,231,221,.14)}
+.tablet input[type=range]::-moz-range-progress{height:6px;border-radius:3px;background:var(--accent)}
+.tablet input[type=range]::-moz-range-thumb{width:20px;height:20px;border:0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff6df,#cdb688 55%,#7d6b48)}
+.tablet input[type=range].untouched::-webkit-slider-runnable-track{background:rgba(236,231,221,.14)}
+select,textarea,input[type=text]{font:inherit;color:var(--text);background:#0c0b09;border:1px solid var(--rule);border-radius:8px;padding:8px 10px}
+textarea{width:100%;min-height:72px;resize:vertical}
+
+/* escuta */
+.esc-top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:14px}
+.bignums{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:6px 0 18px}
+.bignum{position:relative;border-radius:14px;border:1px solid var(--rule);background:linear-gradient(180deg,#1f1d1a,#141311);padding:16px 10px 12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:border-color .2s,background .2s,box-shadow .2s}
+.bignum .d{font-family:var(--serif);font-size:64px;line-height:1}
+.bignum .c{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+.bignum[aria-pressed="true"]{border-color:var(--accent);background:linear-gradient(180deg,#2a2314,#17130b);box-shadow:0 0 28px -8px var(--accent-glow)}
+.bignum[aria-pressed="true"] .d{color:var(--accent)}
+.bignum[hidden]{display:none}
+.empty{border:1px dashed var(--rule);border-radius:12px;padding:26px;text-align:center;color:var(--muted)}
+
+/* results */
+.res-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px}
+@media (max-width:1100px){.res-grid{grid-template-columns:1fr}}
+svg.chart,svg.bracket{display:block;width:100%;height:auto}
+.chart text,.bracket text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+.bracket-wrap{overflow-x:auto}
+
+/* json */
+pre.json{margin:0;max-height:300px;overflow:auto;font-family:var(--mono);font-size:11.5px;line-height:1.5;background:#0b0a09;border:1px solid var(--rule);border-radius:10px;padding:12px;color:#d9d1c2;white-space:pre}
+.cost{font-family:var(--serif);font-size:44px;line-height:1;color:var(--accent)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;font-family:var(--mono)}
+
+/* overlays */
+.overlay{position:fixed;inset:0;z-index:100;background:rgba(5,5,4,.72);display:grid;place-items:center;padding:20px}
+.overlay[hidden]{display:none}
+.dialog{width:min(560px,100%);max-height:90vh;overflow:auto;background:var(--ink-2);border:1px solid var(--rule);border-radius:14px;padding:22px 24px;box-shadow:0 30px 80px rgba(0,0,0,.7)}
+.dialog h2{font-family:var(--serif);font-weight:400;font-size:28px;margin:0 0 10px}
+.shortcuts{width:100%;border-collapse:collapse;font-size:13.5px}
+.shortcuts td{padding:7px 4px;border-bottom:1px solid var(--rule)}
+kbd{font-family:var(--mono);font-size:12px;border:1px solid rgba(236,231,221,.25);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:#0f0f0e}
+.check{list-style:none;margin:0 0 12px;padding:0}
+.check li{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--rule);font-size:13.5px}
+.check .st{font-family:var(--mono);width:1.4em;flex:0 0 auto}
+.check .st.ok{color:var(--accent)}.check .st.no{color:var(--danger)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:120;background:#1f1d19;border:1px solid rgba(255,210,122,.35);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13.5px;box-shadow:0 12px 30px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+
+/* ---------- FOOTER (identical structure) ---------- */
+.site-footer{max-width:1480px;margin:80px auto 0;padding:32px 24px 36px;border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr;gap:90px;color:var(--muted);font-size:11.5px;line-height:1.5;background:rgba(15,15,14,.9)}
+.site-footer p{max-width:600px;margin:0}
+.site-footer h3{color:var(--text);margin:0 0 9px;font-size:12px;font-weight:500}
+.site-footer a{color:inherit;text-underline-offset:4px}
+.f-eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:550}
+.honoree{display:flex;align-items:baseline;gap:14px;margin:9px 0 10px}
+.honoree strong{color:var(--text);font:400 30px/1.1 var(--serif)}
+.honoree span{font:11px var(--mono)}
+.sources{display:flex;flex-wrap:wrap;gap:18px;margin-top:10px}
+.footer-links{display:flex;gap:24px;margin-top:16px}
+@media (max-width:1100px){.site-footer{grid-template-columns:1fr;gap:30px}}
+
+/* reduced motion */
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+.rm *,.rm *::before,.rm *::after{animation:none!important;transition:none!important}
+</style>
+</head>
+<body>
+<a class="sr" href="#tablet">Ir para o painel</a>
+
+<!-- ================= CHROME ================= -->
+<header class="cable-bar">
+ <div class="cable-inner">
+  <a class="wordmark" href="curva.html">open-auri</a>
+  <nav class="main-nav" aria-label="Principal" data-i18n-aria="nav.aria">
+    <a href="curva.html" data-i18n="nav.curva">Curva</a>
+    <a href="biblioteca.html" data-i18n="nav.biblioteca">Biblioteca</a>
+    <a href="comparar.html" data-i18n="nav.comparar">Comparar</a>
+    <a href="soe-como-x.html" data-i18n="nav.soe">Soe como X</a>
+    <a href="comunidade.html" data-i18n="nav.comunidade">Comunidade</a>
+    <a href="teste-cego.html" aria-current="page" data-i18n="nav.teste">Teste cego</a>
+    <a href="cabo.html" data-i18n="nav.cabo">Cabo</a>
+    <a href="docs.html" data-i18n="nav.docs">Docs</a>
+  </nav>
+  <div class="cable-actions">
+    <span class="cable-state"><span class="status-dot" aria-hidden="true">●</span><span data-i18n="chrome.status">Sem cabo · simulado</span></span>
+    <span class="dirty" id="dirtyCounter" aria-live="polite">0 alterações não gravadas</span>
+      <!-- === OA SHARED: audio-loader v1 (HTML) === -->
+      <div class="oa-audio" id="oaAudio">
+        <button type="button" class="oa-audio-btn" id="oaAudioBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="oaAudioPop"><span aria-hidden="true">♪</span><span class="oa-audio-name" id="oaAudioName">Áudio</span></button>
+        <div class="oa-audio-pop" id="oaAudioPop" role="dialog" aria-labelledby="oaAudioTitle" hidden>
+          <h3 id="oaAudioTitle" data-oa-audio="title">Áudio da prévia</h3>
+          <label class="oa-audio-load"><span data-oa-audio="load">Carregar MP3…</span><input type="file" class="oa-audio-file" id="oaAudioFile" accept="audio/mpeg,audio/mp3,audio/*"></label>
+          <div class="oa-audio-meta" id="oaAudioMeta" aria-live="polite"></div>
+          <div class="oa-audio-row"><button type="button" id="oaAudioPlay" data-oa-audio="play">Tocar arquivo</button><button type="button" id="oaAudioRemove" data-oa-audio="remove">Remover</button></div>
+          <label class="oa-audio-vol"><span data-oa-audio="vol">Volume da prévia (só no navegador)</span><output id="oaAudioVolOut" for="oaAudioVol">−12 dB</output><input type="range" id="oaAudioVol" min="-40" max="0" step="1" value="-12"></label>
+          <p class="oa-audio-rate" id="oaAudioRate"></p>
+          <p class="oa-audio-note" data-oa-audio="note">O arquivo fica só neste navegador. Nada é enviado.</p>
+        </div>
+      </div>
+      <!-- === END OA SHARED: audio-loader v1 (HTML) === -->
+    <button type="button" id="btnNeutro" data-i18n="chrome.neutro">Neutro</button>
+    <button type="button" id="btnPadrao" data-i18n="chrome.padrao">Padrão Auri</button>
+    <button type="button" class="primary" id="btnGravar" data-i18n="chrome.gravar">Gravar no cabo</button>
+    <button type="button" class="language" id="langToggle" aria-label="Switch to English"><span class="pt on">PT</span> · <span class="en">EN</span></button>
+  </div>
+ </div>
+</header>
+
+<main>
+<!-- ================= ROOM ================= -->
+<section class="room" id="room" aria-label="Sala de escuta: tela acústica, seletor de três posições" data-i18n-aria="room.aria">
+  <svg id="scene" viewBox="0 0 1600 600" preserveAspectRatio="xMidYMid slice" role="group" aria-label="Sala tratada vista da cadeira do ouvinte. Atrás da tela, três caixas idênticas em trilhos; à frente, três posições no chão." data-i18n-aria="scene.aria">
+    <defs>
+      <linearGradient id="gWall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#15120f"/><stop offset="1" stop-color="#0a0807"/></linearGradient>
+      <pattern id="pSlats" width="34" height="40" patternUnits="userSpaceOnUse"><rect width="34" height="40" fill="#0f0d0b"/><rect x="0" width="26" height="40" fill="#14110e"/><rect x="26" width="1" height="40" fill="#060505"/></pattern>
+      <radialGradient id="gBack" cx="800" cy="300" r="620" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8a6a3a" stop-opacity=".55"/><stop offset=".45" stop-color="#4a3820" stop-opacity=".28"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+      <pattern id="pWeave" width="5" height="5" patternUnits="userSpaceOnUse"><rect width="5" height="2.4" fill="rgba(236,231,221,.035)"/><rect x="0" y="0" width="2.4" height="5" fill="rgba(0,0,0,.28)"/><rect x="2.5" y="2.5" width="2.5" height="2.5" fill="rgba(236,231,221,.02)"/></pattern>
+      <linearGradient id="gPleat" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".42"/><stop offset=".38" stop-color="#fff0d0" stop-opacity=".025"/><stop offset=".52" stop-color="#fff0d0" stop-opacity=".075"/><stop offset=".66" stop-color="#fff0d0" stop-opacity=".02"/><stop offset="1" stop-color="#000" stop-opacity=".42"/></linearGradient>
+      <pattern id="pPleat" width="96" height="600" patternUnits="userSpaceOnUse"><rect width="96" height="600" fill="url(#gPleat)"/><animateTransform attributeName="patternTransform" type="translate" values="0 0;7 0;0 0;-6 0;0 0" dur="11s" repeatCount="indefinite"/></pattern>
+      <pattern id="pPleat2" width="151" height="600" patternUnits="userSpaceOnUse"><rect width="151" height="600" fill="url(#gPleat)"/><animateTransform attributeName="patternTransform" type="translate" values="0 0;-9 0;0 0;8 0;0 0" dur="17s" repeatCount="indefinite"/></pattern>
+      <linearGradient id="gScrimLight" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd27a" stop-opacity=".26"/><stop offset=".28" stop-color="#ffd27a" stop-opacity=".07"/><stop offset=".8" stop-color="#ffd27a" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".35"/></linearGradient>
+      <radialGradient id="gPool" cx="800" cy="70" r="540" gradientTransform="translate(0 70) scale(1 .45) translate(0 -70)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe2a6" stop-opacity=".42"/><stop offset=".5" stop-color="#ffd27a" stop-opacity=".1"/><stop offset="1" stop-color="#ffd27a" stop-opacity="0"/></radialGradient>
+      <linearGradient id="gSheen" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffe2a6" stop-opacity="0"/><stop offset=".5" stop-color="#ffe2a6" stop-opacity=".05"/><stop offset="1" stop-color="#ffe2a6" stop-opacity="0"/></linearGradient>
+      <linearGradient id="gCone" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe2a6" stop-opacity=".30"/><stop offset=".55" stop-color="#ffd27a" stop-opacity=".07"/><stop offset="1" stop-color="#ffd27a" stop-opacity=".02"/></linearGradient>
+      <linearGradient id="gTrack" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a544b"/><stop offset=".4" stop-color="#2c2824"/><stop offset="1" stop-color="#121010"/></linearGradient>
+      <pattern id="pRings" width="40" height="14" patternUnits="userSpaceOnUse"><circle cx="20" cy="6" r="4.5" fill="none" stroke="#5c564c" stroke-width="1.6"/></pattern>
+      <linearGradient id="gFloor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16120e"/><stop offset="1" stop-color="#0b0907"/></linearGradient>
+      <pattern id="pCarpet" width="6" height="4" patternUnits="userSpaceOnUse"><rect width="6" height="4" fill="transparent"/><rect width="3" height="2" fill="rgba(255,255,255,.012)"/><rect x="3" y="2" width="3" height="2" fill="rgba(0,0,0,.18)"/></pattern>
+      <radialGradient id="gFloorPool" cx="800" cy="545" r="470" gradientTransform="translate(0 545) scale(1 .16) translate(0 -545)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffd27a" stop-opacity=".22"/><stop offset="1" stop-color="#ffd27a" stop-opacity="0"/></radialGradient>
+      <radialGradient id="gLens" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fffaf0"/><stop offset=".6" stop-color="#ffe2a6"/><stop offset="1" stop-color="#ffd27a" stop-opacity="0"/></radialGradient>
+      <linearGradient id="gHem" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1714"/><stop offset=".5" stop-color="#090808"/><stop offset="1" stop-color="#040404"/></linearGradient>
+      <linearGradient id="gSideL" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".85"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient>
+      <linearGradient id="gSideR" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".85"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient>
+      <symbol id="speaker" viewBox="-70 -270 140 270" overflow="visible">
+        <rect class="spk-body" x="-62" y="-262" width="124" height="262" rx="9"/>
+        <circle class="spk-drv" cx="0" cy="-215" r="17"/>
+        <circle class="spk-drv" cx="0" cy="-150" r="40"/>
+        <circle class="spk-drv" cx="0" cy="-62" r="40"/>
+      </symbol>
+    </defs>
+
+    <!-- ceiling + back wall (seen only when the scrim lifts) -->
+    <rect x="0" y="0" width="1600" height="600" fill="#050404"/>
+    <rect x="0" y="40" width="1600" height="430" fill="url(#gWall)"/>
+    <rect x="0" y="40" width="1600" height="430" fill="url(#pSlats)" opacity=".9"/>
+    <rect id="backlight" x="0" y="40" width="1600" height="430" fill="url(#gBack)" opacity=".7"/>
+
+    <!-- shuffler: rails, bays, carriage and three identical boxes -->
+    <g id="backstage">
+      <path class="rail" id="rail0" d="M470 362 L800 466"/>
+      <path class="rail" id="rail1" d="M800 362 L800 466"/>
+      <path class="rail" id="rail2" d="M1130 362 L800 466"/>
+      <path class="rail" d="M420 364 H1180"/>
+      <rect id="carriage" x="-26" y="357" width="52" height="10" rx="2" fill="#2b2620" stroke="rgba(255,210,122,.3)"/>
+      <g id="bayMarks" fill="none" stroke="rgba(236,231,221,.10)" stroke-width="1.5">
+        <ellipse cx="470" cy="362" rx="44" ry="7"/><ellipse cx="800" cy="362" rx="44" ry="7"/><ellipse cx="1130" cy="362" rx="44" ry="7"/>
+        <ellipse cx="800" cy="466" rx="78" ry="10" stroke="rgba(255,210,122,.18)"/>
+      </g>
+      <g id="shapes">
+        <use id="spk1" href="#speaker" width="140" height="270" x="-70" y="-270"/>
+        <use id="spk2" href="#speaker" width="140" height="270" x="-70" y="-270"/>
+        <use id="spk3" href="#speaker" width="140" height="270" x="-70" y="-270"/>
+      </g>
+      <g id="revealLabels">
+        <text class="reveal-label" id="rl1" x="470" y="180"></text>
+        <text class="reveal-label" id="rl2" x="800" y="180"></text>
+        <text class="reveal-label" id="rl3" x="1130" y="180"></text>
+      </g>
+    </g>
+
+    <!-- the scrim: acoustically transparent, visually opaque -->
+    <g id="scrimG">
+      <rect x="0" y="40" width="1600" height="428" fill="#0b0a09" opacity=".9"/>
+      <rect x="0" y="40" width="1600" height="428" fill="url(#pWeave)"/>
+      <rect x="0" y="40" width="1600" height="428" fill="url(#pPleat)"/>
+      <rect x="0" y="40" width="1600" height="428" fill="url(#pPleat2)" opacity=".55"/>
+      <rect x="0" y="40" width="1600" height="428" fill="url(#gScrimLight)"/>
+      <rect x="0" y="40" width="1600" height="300" fill="url(#gPool)"/>
+      <rect x="-320" y="40" width="320" height="428" fill="url(#gSheen)"><animate attributeName="x" values="-320;1600" dur="16s" repeatCount="indefinite"/></rect>
+      <rect x="0" y="454" width="1600" height="14" fill="url(#gHem)"/>
+      <rect x="0" y="454" width="1600" height="1" fill="rgba(255,226,170,.10)"/>
+      <rect x="0" y="38" width="1600" height="14" fill="url(#pRings)"/>
+    </g>
+
+    <!-- side shadows -->
+    <rect x="0" y="0" width="240" height="600" fill="url(#gSideL)"/>
+    <rect x="1360" y="0" width="240" height="600" fill="url(#gSideR)"/>
+
+    <!-- track + ceiling fixture -->
+    <rect x="0" y="30" width="1600" height="11" fill="url(#gTrack)"/>
+    <g transform="translate(800 0)">
+      <path d="M-46 -2 L46 -2 L38 22 L-38 22 Z" fill="#1d1a17" stroke="#3a352f"/>
+      <path d="M-38 22 L-62 30 L-30 26 Z M38 22 L62 30 L30 26 Z" fill="#2a2621"/>
+      <ellipse cx="0" cy="24" rx="40" ry="9" fill="url(#gLens)" opacity=".95"/>
+    </g>
+
+    <!-- floor -->
+    <rect x="0" y="468" width="1600" height="132" fill="url(#gFloor)"/>
+    <rect x="0" y="468" width="1600" height="132" fill="url(#pCarpet)"/>
+    <rect x="0" y="468" width="1600" height="132" fill="url(#gFloorPool)"/>
+    <circle id="lockLamp" cx="800" cy="478" r="4"/>
+
+    <!-- spotlight cone -->
+    <polygon class="cone" points="768,26 832,26 1250,600 350,600" fill="url(#gCone)"/>
+    <g id="dust" aria-hidden="true"></g>
+
+    <!-- floor positions 1 · 2 · 3 -->
+    <g class="plate" id="plate1" data-n="1" role="button" tabindex="0" aria-pressed="false" aria-label="Posição 1">
+      <polygon class="plate-bg" points="531.6,500 655.6,500 640,566 480,566"/>
+      <text class="plate-num" x="577" y="546">1</text>
+      <text class="plate-name" id="pn1" x="566" y="588"></text>
+      <polygon class="plate-focus" points="525,495 662,495 648,571 472,571"/>
+    </g>
+    <g class="plate" id="plate2" data-n="2" role="button" tabindex="0" aria-pressed="false" aria-label="Posição 2">
+      <polygon class="plate-bg" points="738,500 862,500 880,566 720,566"/>
+      <text class="plate-num" x="800" y="546">2</text>
+      <text class="plate-name" id="pn2" x="800" y="588"></text>
+      <polygon class="plate-focus" points="731,495 869,495 888,571 712,571"/>
+    </g>
+    <g class="plate" id="plate3" data-n="3" role="button" tabindex="0" aria-pressed="false" aria-label="Posição 3">
+      <polygon class="plate-bg" points="944.4,500 1068.4,500 1120,566 960,566"/>
+      <text class="plate-num" x="1023" y="546">3</text>
+      <text class="plate-name" id="pn3" x="1034" y="588"></text>
+      <polygon class="plate-focus" points="938,495 1075,495 1128,571 952,571"/>
+    </g>
+  </svg>
+
+  <div class="room-title">
+    <div class="eyebrow" data-i18n="room.eyebrow">Teste cego · escuta controlada</div>
+    <h1 data-i18n="room.h1">Ouça sem ver.</h1>
+    <p data-i18n="room.lede">Até três curvas atrás da tela, com nível igualado e ordem sorteada. Você troca quando quiser; os nomes só aparecem no fim.</p>
+  </div>
+  <div class="cue" aria-hidden="true">
+    <span class="lamp" id="cueLamp"></span>
+    <span class="cue-text" id="cueText">Tela fechada</span>
+    <span class="cue-sub" id="cueSub">aguardando candidatos</span>
+  </div>
+  <button class="room-help" type="button" id="helpBtn" aria-label="Atalhos de teclado" data-i18n-aria="help.aria">? <span data-i18n="help.btn">atalhos</span></button>
+  <div class="sr" role="status" aria-live="polite" id="srStatus"></div>
+</section>
+
+<!-- ================= DESK ================= -->
+<section class="desk" aria-label="Mesa do ouvinte" data-i18n-aria="desk.aria">
+  <div class="desk-grid">
+    <!-- hardware console -->
+    <div class="rack" role="group" aria-label="Console do ouvinte" data-i18n-aria="rack.aria">
+      <p class="engrave" data-i18n="rack.title">Console do ouvinte</p>
+      <div class="seg-row">
+        <div class="seg" id="segRound" aria-label="Rodada"><small data-i18n="rack.round">RODADA</small><span id="segRoundV">––/––</span></div>
+        <div class="seg" id="segRate"><small data-i18n="rack.rate">TAXA DSP</small><span id="segRateV">96 kHz</span></div>
+      </div>
+      <p class="engrave" data-i18n="rack.selector">Seletor · 3 posições</p>
+      <div class="keys" role="group" aria-label="Candidatos" data-i18n-aria="keys.aria">
+        <button class="key" type="button" data-n="1" aria-pressed="false" aria-label="Candidato 1">1</button>
+        <button class="key" type="button" data-n="2" aria-pressed="false" aria-label="Candidato 2">2</button>
+        <button class="key" type="button" data-n="3" aria-pressed="false" aria-label="Candidato 3">3</button>
+      </div>
+      <div class="rack-row">
+        <button class="transport" type="button" id="playKey" aria-pressed="false" aria-label="Tocar (Espaço)">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path id="playIcon" d="M5 3 L17 10 L5 17 Z" fill="currentColor"/></svg>
+        </button>
+        <button class="toggle" type="button" role="switch" id="labMode" aria-checked="false">
+          <span class="track"><span class="lever"></span></span>
+          <span class="tl"><span data-i18n="rack.lab">Troca de 3 s</span><small data-i18n="rack.labsub">silêncio durante a troca, como no laboratório</small></span>
+        </button>
+      </div>
+      <div class="lamp-row" style="margin-bottom:8px"><span class="lamp" id="lvlLamp"></span><span><span data-i18n="rack.level">Nível igualado</span><br><span class="mono" id="lvlText">sem candidatos</span></span></div>
+      <div class="lamp-row"><span class="lamp" id="lockLampHw"></span><span><span data-i18n="rack.lock">Em posição</span><br><span class="mono" id="lockText">tela fechada</span></span></div>
+    </div>
+
+    <!-- tablet -->
+    <div class="tablet" id="tablet">
+      <div class="screen">
+        <div class="steps" role="tablist" aria-label="Etapas do teste" data-i18n-aria="steps.aria">
+          <button class="step" role="tab" id="tab-preparo" aria-controls="p-preparo" aria-selected="true" type="button"><span class="n">01</span><span class="l" data-i18n="step.1">Preparo</span></button>
+          <button class="step" role="tab" id="tab-candidatos" aria-controls="p-candidatos" aria-selected="false" tabindex="-1" type="button"><span class="n">02</span><span class="l" data-i18n="step.2">Candidatos</span></button>
+          <button class="step" role="tab" id="tab-escuta" aria-controls="p-escuta" aria-selected="false" tabindex="-1" type="button"><span class="n">03</span><span class="l" data-i18n="step.3">Escuta</span></button>
+          <button class="step" role="tab" id="tab-resultado" aria-controls="p-resultado" aria-selected="false" tabindex="-1" type="button"><span class="n">04</span><span class="l" data-i18n="step.4">Resultado</span></button>
+          <button class="step" role="tab" id="tab-cabo" aria-controls="p-cabo" aria-selected="false" tabindex="-1" type="button"><span class="n">05</span><span class="l" data-i18n="step.5">No cabo</span></button>
+          <button class="step" role="tab" id="tab-compartilhar" aria-controls="p-compartilhar" aria-selected="false" tabindex="-1" type="button"><span class="n">06</span><span class="l" data-i18n="step.6">Compartilhar</span></button>
+        </div>
+
+        <!-- 1 PREPARO -->
+        <section class="panel" role="tabpanel" id="p-preparo" aria-labelledby="tab-preparo">
+          <h2 data-i18n="prep.h">Preparo</h2>
+          <p class="lede" data-i18n="prep.lede">O teste roda só no navegador: nada é gravado no cabo. Escolha a fonte, confirme por onde você vai ouvir e deixe o nível igualado.</p>
+          <div class="grid3">
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="prep.src.e">Fonte</span><span data-i18n="prep.src.h">O que vai tocar</span></h3>
+              <div class="opt checked" style="cursor:default" role="status" aria-live="polite"><span class="lamp on" id="srcLamp" style="margin-top:3px;flex:0 0 auto"></span><span><b id="srcName">Ruído rosa</b><small id="srcDetail">Nenhum arquivo: ruído rosa gerado no navegador.</small></span></div>
+              <div class="actions" style="margin-top:8px">
+                <button class="btn" type="button" id="pickFile" aria-controls="oaAudioPop" data-i18n="prep.pick">Escolher arquivo de áudio</button>
+              </div>
+              <p class="note" data-i18n="prep.file.note">A fonte é a mesma em todas as páginas: o ♪ Áudio da barra do topo. O arquivo fica só neste navegador; nada é enviado.</p>
+            </div>
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="prep.out.e">Saída · obrigatório</span><span data-i18n="prep.out.h">Por onde você ouve</span></h3>
+              <label class="opt" id="optNeutro"><input type="radio" name="out" value="neutro"><span><b data-i18n="prep.out.n">Saída: cabo em Neutro</b><small data-i18n="prep.out.n.s">10 × OFF + preamp −0,5 dB. O cabo não pode ser lido: só você pode confirmar.</small></span></label>
+              <label class="opt" id="optOutra"><input type="radio" name="out" value="outra"><span><b data-i18n="prep.out.o">Outra saída</b><small data-i18n="prep.out.o.s">Placa de som ou fone sem o cabo no caminho.</small></span></label>
+              <p class="warn" id="outWarn"></p>
+            </div>
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="prep.lvl.e">Nível</span><span data-i18n="prep.lvl.h">Igualado por levelDb</span></h3>
+              <div class="lamp-row" style="margin-bottom:10px"><span class="lamp" id="lvlLamp2"></span><span id="lvlStatus">Escolha 2 ou 3 candidatos.</span></div>
+              <table class="lv" aria-label="Nível por candidato" data-i18n-aria="prep.lvl.aria"><thead><tr><th data-i18n="th.cand">Candidato</th><th style="text-align:right" data-i18n="th.level">Nível</th><th style="text-align:right" data-i18n="th.comp">Ajuste</th></tr></thead><tbody id="lvlBody"></tbody></table>
+              <p class="note" data-i18n="prep.lvl.note">Média do ganho de 300 Hz a 3 kHz, preamp incluído. Todos descem até o mais baixo; ninguém sobe.</p>
+            </div>
+          </div>
+          <div class="card" style="margin-top:14px">
+            <h3><span class="eyebrow" data-i18n="prep.eng.e">Motor de áudio</span><span data-i18n="prep.eng.h">Coeficientes exatos do cabo</span></h3>
+            <p class="note" id="rateNote" style="margin-top:0">Pedimos 96 000 Hz ao navegador ao tocar pela primeira vez. Cada seção roda num IIRFilterNode com os coeficientes Q27 que o chip usaria.</p>
+            <p class="note" data-i18n="prep.eng.gain">O som começa só no primeiro play, com subida suave. O nível da prévia fica no ♪ Áudio da barra do topo (só no navegador).</p>
+          </div>
+          <div class="actions"><button class="btn accent" type="button" data-go="candidatos" data-i18n="prep.next">Escolher candidatos</button><span class="msg" id="prepMsg"></span></div>
+        </section>
+
+        <!-- 2 CANDIDATOS -->
+        <section class="panel" role="tabpanel" id="p-candidatos" aria-labelledby="tab-candidatos" hidden>
+          <h2 data-i18n="cand.h">Candidatos</h2>
+          <p class="lede" data-i18n="cand.lede">Escolha 2 ou 3. Todos passam pelo gate v2 antes de entrar: só PK, LS e OFF, limites por coeficiente, polo ≤ 0,99987, pico de seção ≤ +9,2 dB, prefixo ≤ −0,2037 dB, saída ≤ −0,4709 dB, preamp de −25,5 a −0,5 dB.</p>
+          <div class="cand-groups" id="candGroups"></div>
+          <div class="grid2" style="margin-top:18px">
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="var.e">Variações em torno de um alvo</span><span data-i18n="var.h">Gerar vizinhas de uma curva</span></h3>
+              <div class="sl"><label for="varBase" data-i18n="var.base">Alvo</label><select id="varBase" style="grid-column:span 2"></select></div>
+              <div class="sl"><label for="spread"><span data-i18n="var.spread">Amplitude</span><small data-i18n="var.spread.s">± dB por região</small></label><input type="range" id="spread" min="0.5" max="4" step="any" data-step="0.5" value="2" aria-label="Amplitude das variações em dB"><button class="readout" type="button" id="spreadOut" aria-label="Amplitude: clique para digitar"></button></div>
+              <div class="actions" style="margin-top:6px"><button class="btn" type="button" id="genVar" data-i18n="var.gen">Gerar 3 variações</button><span class="note" id="varMsg" style="margin:0"></span></div>
+              <p class="note" data-i18n="var.note">Graves (&lt; 250 Hz), presença (1 a 5 kHz) e agudos (&gt; 5 kHz) mudam por padrão fixo; o preamp desce o necessário para passar no gate. O que não passa é recusado, nunca ajustado em silêncio.</p>
+            </div>
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="plan.e">Plano</span><span data-i18n="plan.h">Rodadas e início</span></h3>
+              <div class="sl"><label for="rounds"><span data-i18n="plan.rounds">Rodadas</span><small data-i18n="plan.rounds.s">ordem sorteada em cada uma</small></label><input type="range" id="rounds" min="2" max="12" step="1" data-step="1" data-int="1" value="6" aria-label="Número de rodadas"><button class="readout" type="button" id="roundsOut" aria-label="Rodadas: clique para digitar"></button></div>
+              <p class="note" id="selCount">0 de 3 escolhidas.</p>
+              <div class="actions"><button class="btn accent" type="button" id="startBtn" data-i18n="plan.start">Começar</button></div>
+              <p class="msg" id="startMsg"></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3 ESCUTA -->
+        <section class="panel" role="tabpanel" id="p-escuta" aria-labelledby="tab-escuta" hidden>
+          <div id="escEmpty" class="empty"><p data-i18n="esc.empty">Nenhum teste em andamento.</p><button class="btn" type="button" data-go="candidatos" data-i18n="esc.empty.go">Escolher candidatos</button></div>
+          <div id="escBody" hidden>
+            <div class="esc-top">
+              <div><h2><span data-i18n="esc.round">Rodada</span> <em id="escRound">1</em> <span data-i18n="esc.of">de</span> <span id="escPlanned">6</span></h2>
+              <p class="lede" style="margin:0" data-i18n="esc.lede">A ordem foi sorteada de novo: o 1 desta rodada não é o 1 da anterior. Troque quantas vezes quiser.</p></div>
+              <button class="btn" type="button" id="playBtn"><span id="playLabel">▶ Tocar</span> <kbd>Espaço</kbd></button>
+            </div>
+            <div class="bignums" role="group" aria-label="Candidatos" data-i18n-aria="keys.aria">
+              <button class="bignum" type="button" data-n="1" aria-pressed="false" aria-label="Candidato 1"><span class="d">1</span><span class="c" data-i18n="esc.cand">candidato</span></button>
+              <button class="bignum" type="button" data-n="2" aria-pressed="false" aria-label="Candidato 2"><span class="d">2</span><span class="c" data-i18n="esc.cand">candidato</span></button>
+              <button class="bignum" type="button" data-n="3" aria-pressed="false" aria-label="Candidato 3"><span class="d">3</span><span class="c" data-i18n="esc.cand">candidato</span></button>
+            </div>
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="esc.rate.e">Preferência</span><span data-i18n="esc.rate.h">Nota de 0 a 10 para cada um</span></h3>
+              <div id="ratings"></div>
+            </div>
+            <label for="notes" class="eyebrow" style="display:block;margin:14px 0 6px" data-i18n="esc.notes">Notas (ficam só neste dispositivo)</label>
+            <textarea id="notes"></textarea>
+            <div class="actions">
+              <button class="btn accent" type="button" id="nextRound"><span data-i18n="esc.next">Próxima rodada</span> <kbd>N</kbd></button>
+              <button class="btn" type="button" id="endTest" data-i18n="esc.end">Encerrar e revelar</button>
+              <span class="note" id="escInfo" style="margin:0"></span>
+            </div>
+            <p class="msg" id="escMsg"></p>
+          </div>
+        </section>
+
+        <!-- 4 RESULTADO -->
+        <section class="panel" role="tabpanel" id="p-resultado" aria-labelledby="tab-resultado" hidden>
+          <div id="resEmpty" class="empty"><p data-i18n="res.empty">Termine um teste para ver o resultado.</p></div>
+          <div id="resBody" hidden>
+            <h2><span data-i18n="res.h">A tela sobe.</span> <em id="resWinner"></em></h2>
+            <p class="lede" id="resLede"></p>
+            <div class="res-grid">
+              <div class="card"><h3><span class="eyebrow" data-i18n="res.chart.e">Preferência média · IC 95 %</span><span data-i18n="res.chart.h">Notas por candidato</span></h3><svg class="chart" id="chart" viewBox="0 0 560 300" role="img" aria-label=""></svg>
+                <table class="lv" style="margin-top:8px"><thead><tr><th data-i18n="th.cand">Candidato</th><th style="text-align:right" data-i18n="th.mean">Média</th><th style="text-align:right" data-i18n="th.ci">IC 95 %</th><th style="text-align:right">n</th></tr></thead><tbody id="resBodyTable"></tbody></table>
+                <p class="note" data-i18n="res.ci.note">IC 95 % pela t de Student com n − 1 graus de liberdade sobre as notas de cada rodada. Com poucas rodadas os intervalos ficam largos: isso é informação, não defeito.</p>
+              </div>
+              <div class="card"><h3><span class="eyebrow" data-i18n="res.br.e">Torneio X2</span><span data-i18n="res.br.h">Convergindo para uma curva pessoal</span></h3>
+                <div class="bracket-wrap"><svg class="bracket" id="bracket" role="img" aria-label=""></svg></div>
+                <p class="note" data-i18n="res.br.note">Cada etapa põe a vencedora contra duas variações dela com metade da amplitude anterior. Pare quando as notas empatarem dentro do intervalo.</p>
+              </div>
+            </div>
+            <div class="actions">
+              <a class="btn accent" id="openWinner" href="curva.html" data-i18n="res.open">Abrir vencedora na Curva</a>
+              <a class="btn" id="compareLink" href="comparar.html" data-i18n="res.compare">Comparar</a>
+              <button class="btn" type="button" id="continueX2" data-i18n="res.x2">Próxima etapa do torneio</button>
+              <button class="btn" type="button" id="newTest" data-i18n="res.new">Novo teste</button>
+            </div>
+            <p class="msg" id="resMsg"></p>
+          </div>
+        </section>
+
+        <!-- 5 TESTE NO CABO -->
+        <section class="panel" role="tabpanel" id="p-cabo" aria-labelledby="tab-cabo" hidden>
+          <h2><span data-i18n="cabo.h">Teste no cabo</span> <span class="badge-soon">EM BREVE</span></h2>
+          <p class="lede" data-i18n="cabo.lede">O mesmo fluxo, mas cada troca A/B grava a candidata no cabo. Cada gravação reescreve a flash do chip, e ainda não sabemos se a troca gera clique.</p>
+          <div class="grid2">
+            <div class="card soon" aria-disabled="true">
+              <h3><span class="eyebrow" data-i18n="cabo.ctl.e">Controles</span><span data-i18n="cabo.ctl.h">Torneio gravando no cabo</span></h3>
+              <div class="actions" style="margin-top:0">
+                <button class="btn" type="button" aria-disabled="true" tabindex="0" id="caboStart" data-i18n="cabo.start">Começar no cabo</button>
+                <span class="badge-soon">EM BREVE</span>
+              </div>
+              <p class="note">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p>
+            </div>
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="cabo.cost.e">Custo estimado</span><span data-i18n="cabo.cost.h">Gravações na flash</span></h3>
+              <div class="cost" id="flashCost">0</div>
+              <p style="margin:6px 0 0" id="flashText">este torneio custaria 0 gravações na flash</p>
+              <p class="note" id="flashHow"></p>
+              <p class="note mono" id="flashCounts"></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6 COMPARTILHAR -->
+        <section class="panel" role="tabpanel" id="p-compartilhar" aria-labelledby="tab-compartilhar" hidden>
+          <h2 data-i18n="share.h">Compartilhar preferências</h2>
+          <p class="lede" data-i18n="share.lede">Opcional. Ajuda a comunidade a saber quais curvas vencem às cegas. Só os pares A/B e as notas saem do dispositivo, e só se você consentir.</p>
+          <div class="grid2">
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="share.c.e">Consentimento · LGPD</span><span data-i18n="share.c.h">Você decide o que sai</span></h3>
+              <dl class="kv" style="margin:0 0 10px">
+                <dt data-i18n="share.purpose">Finalidade</dt><dd style="font-family:var(--sans)" data-i18n="share.purpose.v">estudar quais curvas são preferidas em escuta cega</dd>
+                <dt data-i18n="share.basis">Base legal</dt><dd style="font-family:var(--sans)" data-i18n="share.basis.v">seu consentimento (LGPD, art. 7º, I)</dd>
+                <dt data-i18n="share.where">Onde fica</dt><dd style="font-family:var(--sans)" data-i18n="share.where.v">issue pública no GitHub, ligada à sua conta de lá</dd>
+              </dl>
+              <label class="opt"><input type="checkbox" class="consent"><span data-i18n="share.c1">Entendo que o envio cria uma issue pública no GitHub, visível a qualquer pessoa.</span></label>
+              <label class="opt"><input type="checkbox" class="consent"><span data-i18n="share.c2">Concordo em publicar só os pares A/B e as notas mostrados ao lado, sob um pseudônimo.</span></label>
+              <label class="opt"><input type="checkbox" class="consent"><span data-i18n="share.c3">Sei que posso retirar o consentimento e pedir a remoção a qualquer momento, numa nova issue.</span></label>
+              <div class="sl" style="grid-template-columns:auto 1fr auto"><label for="pseudo" data-i18n="share.pseudo">Pseudônimo</label><input type="text" id="pseudo" maxlength="32" spellcheck="false"><button class="btn" type="button" id="rePseudo" data-i18n="share.re">Sortear</button></div>
+              <p class="note" data-i18n="share.stay">Não sai daqui: o áudio, o nome do arquivo, suas notas de texto, a curva gravada no cabo.</p>
+              <div class="actions"><button class="btn accent" type="button" id="sendIssue" aria-disabled="true" data-i18n="share.send">Enviar via issue no GitHub</button><span class="chip" data-i18n="share.sim">simulado</span></div>
+              <p class="msg" id="shareMsg"></p>
+            </div>
+            <div class="card">
+              <h3><span class="eyebrow" data-i18n="share.p.e">Prévia exata</span><span data-i18n="share.p.h">É isto que seria enviado</span></h3>
+              <pre class="json" id="payload" tabindex="0" aria-label="Prévia do JSON a enviar"></pre>
+            </div>
+          </div>
+          <div class="card soon" style="margin-top:14px" aria-disabled="true">
+            <h3><span class="eyebrow" data-i18n="s7.e">Ranking da comunidade</span><span data-i18n="s7.h">Preferência agregada em tempo real</span> <span class="badge-soon">EM BREVE</span></h3>
+            <p class="note" style="margin-top:0">Precisa de um servidor; o open-auri começa 100% estático.</p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- ================= FOOTER ================= -->
+<footer class="site-footer">
+  <section>
+    <div class="f-eyebrow" data-i18n="foot.e">ESTA PÁGINA HOMENAGEIA</div>
+    <div class="honoree"><strong>Floyd Toole <span data-i18n="foot.and">e</span> Sean Olive</strong></div>
+    <p data-i18n="foot.trivia">No laboratório de escuta de uma fabricante de áudio, Floyd Toole e Sean Olive escondiam as caixas atrás de uma tela que deixa passar o som e esconde a imagem; um mecanismo trocava cada caixa para a mesma posição em três segundos. Sem ver a marca, os ouvintes votavam no som. A curva-alvo de fones nasceu de testes assim.</p>
+    <div class="sources"><a href="https://seanolive.blogspot.com/2009/01/video-on-how-we-measure-loudspeaker.html" target="_blank" rel="noreferrer" data-i18n="foot.src1">fonte: o laboratório ↗</a><a href="https://seanolive.blogspot.com/2010/07/harman-kardons-quest-to-standardise.html" target="_blank" rel="noreferrer" data-i18n="foot.src2">fonte: o seletor de caixas ↗</a><a href="https://seanolive.blogspot.com/2022/03/the-perception-and-measurement-of.html" target="_blank" rel="noreferrer" data-i18n="foot.src3">fonte: a curva-alvo de fones ↗</a></div>
+  </section>
+  <section>
+    <h3 data-i18n="foot.aviso">Aviso</h3>
+    <p data-i18n="foot.aviso.t">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p>
+    <div class="footer-links"><a href="docs.html#aviso-legal" data-i18n="foot.legal">Aviso legal completo</a><span data-i18n="foot.lic">Licença AGPL-3.0</span></div>
+  </section>
+</footer>
+
+<!-- overlays -->
+<div class="overlay" id="helpOv" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <h2 id="helpTitle" data-i18n="help.h">Atalhos</h2>
+    <table class="shortcuts"><tbody>
+      <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td data-i18n="help.1">Selecionar candidato</td></tr>
+      <tr><td><kbd>Espaço</kbd></td><td data-i18n="help.2">Tocar ou pausar</td></tr>
+      <tr><td><kbd>N</kbd></td><td data-i18n="help.3">Próxima rodada</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td data-i18n="help.4">Ajustar o controle focado</td></tr>
+      <tr><td><kbd>Shift</kbd> + <kbd>seta</kbd></td><td data-i18n="help.5">Passo × 10</td></tr>
+      <tr><td><kbd>Alt</kbd> + <kbd>seta</kbd></td><td data-i18n="help.6">Passo × 0,1</td></tr>
+      <tr><td data-i18n="help.7k">clique no número</td><td data-i18n="help.7">Digitar o valor exato</td></tr>
+      <tr><td><kbd>?</kbd></td><td data-i18n="help.8">Abrir ou fechar esta lista</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td data-i18n="help.9">Fechar</td></tr>
+    </tbody></table>
+    <div class="actions"><button class="btn" type="button" id="helpClose" data-i18n="close">Fechar</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="writeOv" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="writeTitle">
+    <h2 id="writeTitle" data-i18n="write.h">Antes de gravar</h2>
+    <p class="note" style="margin:0 0 10px" data-i18n="write.sim">Simulado: esta página não fala com o cabo.</p>
+    <ul class="check" id="writeList"></ul>
+    <label class="opt"><input type="checkbox" id="writeAck"><span data-i18n="write.ack">Entendi: cada gravação reescreve a flash do chip.</span></label>
+    <div class="actions"><button class="btn accent" type="button" id="writeGo" aria-disabled="true" data-i18n="write.go">Gravar (simulado)</button><button class="btn" type="button" id="writeClose" data-i18n="cancel">Cancelar</button></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+/* === OA SHARED: storage v2 === */
+// Canonical implementation of the OA STORAGE CONTRACT v2 (see the HTML comment at the top of curva.html).
+// Self-contained: no page dependencies. Copy verbatim into every v2 page, before "OA SHARED: audio-loader v1".
+const OA = (globalThis.OA = globalThis.OA || {});
+OA.store = (() => {
+  const KEYS = Object.freeze({
+    current: 'oa.v2.current', journal: 'oa.v2.journal', flashDay: 'oa.v2.flashDay', flashTotal: 'oa.v2.flashTotal',
+    flashSession: 'oa.v2.flashSession', lang: 'oa.v2.lang', previewDb: 'oa.v2.previewDb',
+  });
+  const SESSION_KEYS = new Set([KEYS.flashSession]);
+  const KINDS = new Set(['PK', 'LS', 'HS', 'LP', 'HP']);
+  const area = (key) => { try { return SESSION_KEYS.has(key) ? globalThis.sessionStorage : globalThis.localStorage; } catch { return null; } };
+  function get(key, fallback) {
+    try { const a = area(key), raw = a ? a.getItem(key) : null; return raw == null ? fallback : JSON.parse(raw); } catch { return fallback; }
+  }
+  function set(key, value) { try { const a = area(key); if (a) a.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked */ } }
+  function remove(key) { try { const a = area(key); if (a) a.removeItem(key); } catch { /* blocked */ } }
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const bandToString = (b) => (b.kind === 'OFF' ? 'OFF' : `${b.kind}|${b.freqHz}|${b.gainDb}|${b.qFactor}`);
+  function bandFromString(s) {
+    if (s === 'OFF') return { kind: 'OFF' };
+    const [kind, f, g, q] = String(s).split('|');
+    const band = { kind, freqHz: Number(f), gainDb: Number(g), qFactor: Number(q) };
+    return KINDS.has(kind) && [band.freqHz, band.gainDb, band.qFactor].every(Number.isFinite) ? band : null;
+  }
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const store = {
+    KEYS, get, set, remove, today, bandToString, bandFromString,
+    getLang() { return get(KEYS.lang, 'pt-BR') === 'en-US' ? 'en-US' : 'pt-BR'; },
+    setLang(lang) { set(KEYS.lang, lang === 'en-US' ? 'en-US' : 'pt-BR'); },
+    /** bands: array of {kind, freqHz, gainDb, qFactor} in written order. */
+    saveCurrent({ name, source, preampDb, bands }) {
+      set(KEYS.current, { name: String(name), source: String(source), preampDb, bands: bands.map(bandToString), updatedAt: Date.now() });
+    },
+    /** Returns {name, source, preampDb, bands (objects), updatedAt} or null. Callers must re-run the gate. */
+    loadCurrent() {
+      const c = get(KEYS.current, null);
+      if (!c || !Array.isArray(c.bands) || c.bands.length !== 10 || !Number.isFinite(c.preampDb)) return null;
+      const bands = c.bands.map(bandFromString);
+      return bands.every(Boolean) ? { ...c, bands } : null;
+    },
+    journal() { const j = get(KEYS.journal, []); return Array.isArray(j) ? j : []; },
+    appendJournal(entry, max = 30) { const j = store.journal(); j.push(entry); while (j.length > max) j.shift(); set(KEYS.journal, j); return j; },
+    flashCounts() {
+      const day = get(KEYS.flashDay, null);
+      return { session: num(get(KEYS.flashSession, 0)), today: day && day.date === today() ? num(day.count) : 0, total: num(get(KEYS.flashTotal, 0)) };
+    },
+    recordFlash() {
+      const c = store.flashCounts();
+      set(KEYS.flashSession, c.session + 1); set(KEYS.flashDay, { date: today(), count: c.today + 1 }); set(KEYS.flashTotal, c.total + 1);
+      return store.flashCounts();
+    },
+  };
+  return store;
+})();
+/* === END OA SHARED: storage v2 === */
+
+/* === OA SHARED: audio-loader v1 === */
+// Top-bar MP3 loader + shared preview engine (streaming HTMLAudioElement or pink noise; exact Q27 chains).
+// HOW TO COPY
+//   1. CSS: copy the block "OA SHARED: audio-loader v1 (CSS)" into the page <style> (after the shared chrome CSS).
+//   2. HTML: copy the block "OA SHARED: audio-loader v1 (HTML)" into the top bar's .cable-actions, after the
+//      change counter and before the buttons.
+//   3. JS, in one <script type="module">, in this order: first "OA SHARED: storage v2", then this block
+//      ("OA SHARED: audio-loader v1"), both verbatim. Nothing else is needed for a working loader: the UI binds
+//      itself when the DOM is ready (idempotent, silent if the HTML block is absent) and reads "oa.v2.lang".
+//   4. Optional, only for pages with previews/A-B/blind test: OA.audio.useCodec({ designSection, encodeSection,
+//      preampWord }) with the page's inline codec copy. Without it everything works except buildChain(), which
+//      throws a clear Error.
+//   5. Call OA.audioUI.setLang('pt' | 'en') (or 'pt-BR' | 'en-US') from the page's language toggle.
+// PUBLIC API
+//   OA.audio.getSource()                 creates the AudioContext (call inside a user gesture) and returns the
+//                                        shared source bus (GainNode).
+//   OA.audio.buildChain(bands, preampDb, { gainDb = 0, on = true })
+//                                        -> { input, output, setGain(db, on), dispose(fadeMs) }; one IIRFilterNode per
+//                                        non-OFF section with the EXACT Q27 words (feedforward [b0,b1,b2], feedback
+//                                        [1,a1,a2]), then the Q23 preamp. Several chains may hang off the one source
+//                                        (A/B, blind test): switch them with chain.setGain(db, on).
+//   OA.audio.matchGains([levelDb, ...])  -> trims in dB that bring every chain to the quietest level.
+//   OA.audio.start('chains' | 'raw') / stop()   fade-in / fade-out; 'raw' plays the file without any chain.
+//   OA.audio.state()                     -> { mode, ready, rate, exact, volumeDb, error, persisted, file }.
+//   OA.audio.onChange(cb)                -> unsubscribe function; cb(state) on every change.
+//   OA.audio.loadFile(file) / removeFile() / setVolume(db) / toggleRaw() / ready (Promise: stored file restored).
+//   OA.audioUI.init() / setLang(lang)    init() runs automatically; calling it again is a no-op.
+OA.audio = (() => {
+  const DB_NAME = 'oa-v2', STORE = 'audio', KEY = 'current', RATE = 96000;
+  const listeners = new Set();
+  const clampDb = (v) => Math.min(0, Math.max(-40, Math.round(Number.isFinite(Number(v)) ? Number(v) : -12)));
+  const dbToGain = (db) => Math.pow(10, db / 20);
+  const st = {
+    ctx: null, rate: RATE, exact: true, codec: null, file: null, duration: NaN, error: false, persisted: true,
+    url: null, el: null, elSource: null, noise: null, noiseBuf: null, bus: null, rawGain: null, chainsIn: null, master: null,
+    mode: 'off', volumeDb: clampDb(OA.store.get(OA.store.KEYS.previewDb, -12)),
+  };
+  const state = () => ({
+    mode: st.mode, ready: !!st.ctx, rate: st.rate, exact: st.exact, volumeDb: st.volumeDb, error: st.error, persisted: st.persisted,
+    file: st.file ? { ...st.file, duration: st.duration } : null,
+  });
+  const emit = () => { const s = state(); listeners.forEach((cb) => cb(s)); };
+  // --- IndexedDB (db "oa-v2", store "audio", key "current") ---
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      if (!globalThis.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idb(mode, op) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode), req = op(tx.objectStore(STORE));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  }
+  // --- source handling ---
+  function pinkBuffer(ctx) {
+    const n = Math.round(ctx.sampleRate * 3), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    return buf;
+  }
+  function stopNoise() { if (st.noise) { try { st.noise.stop(); } catch { /* not started */ } st.noise.disconnect(); st.noise = null; } }
+  function startNoise() {
+    if (!st.ctx || st.noise) return;
+    if (!st.noiseBuf) st.noiseBuf = pinkBuffer(st.ctx);
+    const n = st.ctx.createBufferSource(); n.buffer = st.noiseBuf; n.loop = true; n.connect(st.bus); n.start(); st.noise = n;
+  }
+  function detachFile() {
+    if (st.el) { st.el.pause(); st.el.oaDead = true; }
+    if (st.elSource) { try { st.elSource.disconnect(); } catch { /* already */ } }
+    if (st.url) URL.revokeObjectURL(st.url);
+    st.el = null; st.elSource = null; st.url = null; st.file = null; st.duration = NaN; st.error = false;
+  }
+  function attach(record) {
+    detachFile();
+    if (record && record.blob) {
+      st.file = { name: String(record.name || 'audio'), type: record.type || '', size: Number(record.size) || record.blob.size, addedAt: record.addedAt || Date.now() };
+      st.url = URL.createObjectURL(record.blob);
+      const el = new Audio();
+      el.preload = 'metadata'; el.loop = true; el.src = st.url;
+      el.addEventListener('loadedmetadata', () => { if (!el.oaDead) { st.duration = el.duration; emit(); } });
+      el.addEventListener('error', () => { if (!el.oaDead) { st.error = true; emit(); } });
+      st.el = el;
+    }
+    routeSource();
+    emit();
+  }
+  /** Connects the current source (file element or pink noise) to the bus; plays it if the engine is running. */
+  function routeSource() {
+    if (!st.ctx) return;
+    stopNoise();
+    if (st.el) {
+      if (!st.elSource) st.elSource = st.ctx.createMediaElementSource(st.el);
+      st.elSource.connect(st.bus);
+      if (st.mode !== 'off') st.el.play().catch(() => {});
+    } else if (st.mode !== 'off') startNoise();
+  }
+  /** Creates the AudioContext. Call from a user gesture (click/key). */
+  function ensure() {
+    if (st.ctx) return st.ctx;
+    const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio unavailable');
+    let ctx;
+    try { ctx = new AC({ sampleRate: RATE }); } catch { ctx = new AC(); }
+    st.ctx = ctx; st.rate = ctx.sampleRate; st.exact = ctx.sampleRate === RATE;
+    st.master = ctx.createGain(); st.master.gain.value = 0; st.master.connect(ctx.destination);
+    st.chainsIn = ctx.createGain(); st.chainsIn.gain.value = 0; st.chainsIn.connect(st.master);
+    st.rawGain = ctx.createGain(); st.rawGain.gain.value = 0; st.rawGain.connect(st.master);
+    st.bus = ctx.createGain(); st.bus.connect(st.rawGain);
+    routeSource();
+    emit();
+    return ctx;
+  }
+  async function start(mode = 'chains') {
+    const ctx = ensure();
+    st.mode = mode === 'raw' ? 'raw' : 'chains';
+    const t = ctx.currentTime;
+    st.rawGain.gain.setValueAtTime(st.mode === 'raw' ? 1 : 0, t);
+    st.chainsIn.gain.setValueAtTime(st.mode === 'chains' ? 1 : 0, t);
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setValueAtTime(0, t);
+    st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), t + 0.02, 0.08); // short fade-in
+    if (st.el) st.el.play().catch(() => {}); else startNoise();
+    emit();
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* blocked until a gesture */ } }
+  }
+  function stop() {
+    if (!st.ctx || st.mode === 'off') return;
+    const t = st.ctx.currentTime;
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setTargetAtTime(0, t, 0.03);
+    st.mode = 'off';
+    setTimeout(() => { if (st.mode !== 'off') return; if (st.el) st.el.pause(); stopNoise(); }, 180);
+    emit();
+  }
+  function setVolume(db) {
+    st.volumeDb = clampDb(db);
+    OA.store.set(OA.store.KEYS.previewDb, st.volumeDb);
+    if (st.ctx && st.mode !== 'off') st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), st.ctx.currentTime, 0.03);
+    emit();
+  }
+  async function loadFile(file) {
+    if (!file || !(/^audio\//.test(file.type) || /\.(mp3|m4a|aac|ogg|wav|flac)$/i.test(file.name))) throw new Error('not audio');
+    const record = { name: file.name, type: file.type || 'audio/mpeg', size: file.size, blob: file, addedAt: Date.now() };
+    attach(record);
+    try { await idb('readwrite', (s) => s.put(record, KEY)); st.persisted = true; } catch { st.persisted = false; }
+    emit();
+  }
+  async function removeFile() {
+    attach(null);
+    try { await idb('readwrite', (s) => s.delete(KEY)); } catch { /* nothing stored */ }
+    emit();
+  }
+  // Optional: only pages that build preview chains need it. Loader-only pages never call it.
+  function useCodec(codec) {
+    if (!codec || typeof codec.designSection !== 'function' || typeof codec.encodeSection !== 'function' || typeof codec.preampWord !== 'function') {
+      throw new Error('OA.audio.useCodec expects { designSection, encodeSection, preampWord } functions');
+    }
+    st.codec = codec;
+  }
+  function coefficients(band) {
+    if (!st.codec) throw new Error('OA.audio.useCodec({ designSection, encodeSection, preampWord }) must be called first');
+    const w = st.codec.encodeSection(st.codec.designSection(band, st.rate)); // Q27 words [b0, b2, -a1, b1, -a2]
+    const q = 2 ** 27;
+    return { b0: w[0] / q, b2: w[1] / q, a1: -w[2] / q, b1: w[3] / q, a2: -w[4] / q };
+  }
+  function buildChain(bands, preampDb, { gainDb = 0, on = true } = {}) {
+    if (!st.codec) throw new Error('OA.audio.buildChain needs a codec: call OA.audio.useCodec({ designSection, encodeSection, preampWord }) first');
+    const ctx = ensure();
+    const input = ctx.createGain(), pre = ctx.createGain(), output = ctx.createGain(), nodes = [input, pre, output];
+    let node = input;
+    for (const band of bands) {
+      if (band.kind === 'OFF') continue;
+      const c = coefficients(band);
+      const f = ctx.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
+      node.connect(f); node = f; nodes.push(f);
+    }
+    node.connect(pre);
+    pre.gain.value = st.codec.preampWord(preampDb) / 2 ** 23;
+    pre.connect(output);
+    output.gain.value = 0;
+    output.connect(st.chainsIn);
+    st.bus.connect(input);
+    const chain = {
+      input, output,
+      setGain(db, isOn = true, tc = 0.02) { const t = ctx.currentTime; output.gain.cancelScheduledValues(t); output.gain.setTargetAtTime(isOn ? dbToGain(db) : 0, t, tc); },
+      dispose(fadeMs = 60) {
+        chain.setGain(0, false, fadeMs / 4000);
+        setTimeout(() => { try { st.bus.disconnect(input); } catch { /* already */ } nodes.forEach((n) => { try { n.disconnect(); } catch { /* already */ } }); }, fadeMs + 20);
+      },
+    };
+    chain.setGain(gainDb, on);
+    return chain;
+  }
+  const matchGains = (levels) => { const lo = Math.min(...levels); return levels.map((l) => lo - l); };
+  const api = {
+    state, start, stop, setVolume, loadFile, removeFile, useCodec, buildChain, matchGains, dbToGain,
+    getSource() { ensure(); return st.bus; },
+    toggleRaw() { if (st.mode === 'raw') stop(); else start('raw').catch(() => {}); },
+    onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); },
+    ready: idb('readonly', (s) => s.get(KEY)).then((rec) => { if (rec && rec.blob) attach(rec); }).catch(() => {}),
+  };
+  return api;
+})();
+OA.audioUI = (() => {
+  const TXT = {
+    pt: { btn: 'Áudio', title: 'Áudio da prévia', load: 'Carregar MP3…', none: 'Nenhum arquivo: ruído rosa gerado no navegador.', play: 'Tocar arquivo', pause: 'Pausar', remove: 'Remover', vol: 'Volume da prévia (só no navegador)', note: 'O arquivo fica só neste navegador. Nada é enviado.', exact: 'Prévia a 96 kHz: coeficientes Q27 exatos.', approx: 'Este navegador abriu áudio a {rate} Hz: coeficientes recalculados, prévia aproximada.', idle: 'O áudio começa no primeiro play (exige um clique).', bad: 'Arquivo não reconhecido como áudio.', notSaved: 'Não foi possível guardar no navegador; vale só nesta página.', btnAria: 'Áudio da prévia: {x}' },
+    en: { btn: 'Audio', title: 'Preview audio', load: 'Load MP3…', none: 'No file: pink noise generated in the browser.', play: 'Play file', pause: 'Pause', remove: 'Remove', vol: 'Preview volume (browser only)', note: 'The file stays in this browser. Nothing is uploaded.', exact: 'Preview at 96 kHz: exact Q27 coefficients.', approx: 'This browser opened audio at {rate} Hz: coefficients recomputed, preview approximate.', idle: 'Audio starts on the first play (needs a click).', bad: 'File not recognised as audio.', notSaved: 'Could not store it in the browser; it lasts for this page only.', btnAria: 'Preview audio: {x}' },
+  };
+  let lang = OA.store.getLang() === 'en-US' ? 'en' : 'pt';
+  const el = (id) => document.getElementById(id);
+  const tx = (k, p) => { let s = TXT[lang][k]; if (p) for (const n in p) s = s.split(`{${n}}`).join(p[n]); return s; };
+  const fmtDb = (v) => `${v < 0 ? '−' + Math.abs(v) : v} dB`;
+  const fmtDur = (d) => (Number.isFinite(d) ? `${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}` : '…');
+  const fmtSize = (b) => `${new Intl.NumberFormat(lang === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: 1 }).format(b / 1048576)} MB`;
+  function render(s) {
+    if (!el('oaAudioBtn')) return;
+    const name = s.file ? s.file.name : tx('btn');
+    el('oaAudioName').textContent = name;
+    el('oaAudioBtn').title = s.file ? s.file.name : '';
+    el('oaAudioBtn').classList.toggle('has-file', !!s.file);
+    el('oaAudioBtn').setAttribute('aria-label', tx('btnAria', { x: s.file ? s.file.name : tx('none') }));
+    document.querySelectorAll('[data-oa-audio]').forEach((n) => { if (TXT[lang][n.dataset.oaAudio]) n.textContent = tx(n.dataset.oaAudio); });
+    const meta = el('oaAudioMeta');
+    meta.textContent = '';
+    if (s.file) {
+      const b = document.createElement('b'); b.textContent = s.file.name;
+      meta.append(b, document.createTextNode(` · ${fmtDur(s.file.duration)} · ${fmtSize(s.file.size)}`));
+      if (s.error) meta.append(document.createTextNode(` · ${tx('bad')}`));
+      if (!s.persisted) meta.append(document.createTextNode(` · ${tx('notSaved')}`));
+    } else meta.textContent = tx('none');
+    el('oaAudioPlay').textContent = s.mode === 'raw' ? tx('pause') : tx('play');
+    el('oaAudioPlay').disabled = !s.file;
+    el('oaAudioPlay').setAttribute('aria-pressed', s.mode === 'raw' ? 'true' : 'false');
+    el('oaAudioRemove').disabled = !s.file;
+    el('oaAudioVol').value = String(s.volumeDb);
+    el('oaAudioVolOut').textContent = fmtDb(s.volumeDb);
+    const rate = el('oaAudioRate');
+    rate.textContent = !s.ready ? tx('idle') : s.exact ? tx('exact') : tx('approx', { rate: s.rate });
+    rate.classList.toggle('approx', s.ready && !s.exact);
+  }
+  function setOpen(open) {
+    el('oaAudioPop').hidden = !open;
+    el('oaAudioBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  let bound = false;
+  function init() {
+    if (bound || !el('oaAudioBtn') || !el('oaAudioPop')) return; // idempotent; silent when the HTML block is absent
+    bound = true;
+    el('oaAudioBtn').addEventListener('click', () => setOpen(el('oaAudioPop').hidden));
+    document.addEventListener('click', (e) => { if (!el('oaAudioPop').hidden && !el('oaAudio').contains(e.target)) setOpen(false); });
+    el('oaAudio').addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('oaAudioPop').hidden) { e.stopPropagation(); setOpen(false); el('oaAudioBtn').focus(); } });
+    el('oaAudioFile').addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) OA.audio.loadFile(f).catch(() => { el('oaAudioMeta').textContent = tx('bad'); });
+    });
+    el('oaAudioPlay').addEventListener('click', () => OA.audio.toggleRaw());
+    el('oaAudioRemove').addEventListener('click', () => { OA.audio.removeFile(); });
+    el('oaAudioVol').addEventListener('input', (e) => OA.audio.setVolume(Number(e.target.value)));
+    OA.audio.onChange(render);
+    render(OA.audio.state());
+  }
+  // Accepts 'pt' | 'en' or the stored form 'pt-BR' | 'en-US'.
+  const setLang = (l) => { lang = l === 'en' || l === 'en-US' ? 'en' : 'pt'; if (bound) render(OA.audio.state()); };
+  // Auto-init: module scripts run after parsing; classic scripts may run earlier, so wait for the DOM if needed.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+  return { init, setLang };
+})();
+/* === END OA SHARED: audio-loader v1 === */
+
+// =====================================================================
+// 1. eq0xcb: inline copy of src/dsp/eq0xcb.mjs (design, encode, magnitude)
+// Peaking/shelf design ported from AutoEq (MIT, Jaakko Pasanen); LP/HP from
+// the RBJ Audio EQ Cookbook. Byte layout learned from the reference page.
+// =====================================================================
+const SAMPLE_RATE = 96000;
+const BAND_COUNT = 10;
+const PREAMBLE = Object.freeze([0x45, 0x51, 0x31, 0x23, 0xd6, 0x00, 0x00, 0x0a, 0x04, 0x05, 0x01, 0x0a, 0x00, 0x00]);
+const FILTER_KINDS = Object.freeze(['PK', 'LS', 'HS', 'LP', 'HP', 'OFF']);
+const OFF = Object.freeze({ kind: 'OFF' });
+const KINDS_WITH_GAIN = new Set(['PK', 'LS', 'HS']);
+const Q23_ONE = 2 ** 23;
+const Q27_ONE = 2 ** 27;
+const INT32_MIN = -2147483648;
+const INT32_MAX = 2147483647;
+
+function fromAutoEqSign({ a1, a2, b0, b1, b2 }) { return { b0, b1, b2, a1: -a1, a2: -a2 }; }
+function designPeaking(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+  const amp = Math.pow(10, gainDb / 40);
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const cosW0 = Math.cos(w0);
+  const a0 = 1 + alpha / amp;
+  return fromAutoEqSign({
+    a1: -(-2 * cosW0) / a0,
+    a2: -(1 - alpha / amp) / a0,
+    b0: (1 + alpha * amp) / a0,
+    b1: (-2 * cosW0) / a0,
+    b2: (1 - alpha * amp) / a0,
+  });
+}
+function designLowShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+  const amp = Math.pow(10, gainDb / 40);
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const cosW0 = Math.cos(w0);
+  const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
+  const a0 = (amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+  return fromAutoEqSign({
+    a1: -(-2 * ((amp - 1) + (amp + 1) * cosW0)) / a0,
+    a2: -((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+    b0: (amp * ((amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+    b1: (2 * amp * ((amp - 1) - (amp + 1) * cosW0)) / a0,
+    b2: (amp * ((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+  });
+}
+function designHighShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+  const amp = Math.pow(10, gainDb / 40);
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const cosW0 = Math.cos(w0);
+  const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
+  const a0 = (amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+  return fromAutoEqSign({
+    a1: -(2 * ((amp - 1) - (amp + 1) * cosW0)) / a0,
+    a2: -((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+    b0: (amp * ((amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+    b1: (-2 * amp * ((amp - 1) + (amp + 1) * cosW0)) / a0,
+    b2: (amp * ((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+  });
+}
+function designLowPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const cosW0 = Math.cos(w0);
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const a0 = 1 + alpha;
+  return { b0: ((1 - cosW0) / 2) / a0, b1: (1 - cosW0) / a0, b2: ((1 - cosW0) / 2) / a0, a1: (-2 * cosW0) / a0, a2: (1 - alpha) / a0 };
+}
+function designHighPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const cosW0 = Math.cos(w0);
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const a0 = 1 + alpha;
+  return { b0: ((1 + cosW0) / 2) / a0, b1: (-(1 + cosW0)) / a0, b2: ((1 + cosW0) / 2) / a0, a1: (-2 * cosW0) / a0, a2: (1 - alpha) / a0 };
+}
+function designSection(band, sampleRate = SAMPLE_RATE) {
+  switch (band.kind) {
+    case 'PK': return designPeaking(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'LS': return designLowShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'HS': return designHighShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'LP': return designLowPass(band.freqHz, band.qFactor, sampleRate);
+    case 'HP': return designHighPass(band.freqHz, band.qFactor, sampleRate);
+    case 'OFF': return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
+    default: throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+  }
+}
+function bandError(index, message) { return new RangeError(`band ${index}: ${message}`); }
+function checkBand(band, index = 0) {
+  if (band === null || typeof band !== 'object') throw new TypeError(`band ${index}: not an object`);
+  if (!FILTER_KINDS.includes(band.kind)) throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
+  if (band.kind === 'OFF') return;
+  const nyquist = SAMPLE_RATE / 2;
+  if (!(Number.isFinite(band.freqHz) && band.freqHz > 0 && band.freqHz < nyquist)) throw bandError(index, `freqHz must be in (0, ${nyquist}), got ${band.freqHz}`);
+  if (!(Number.isFinite(band.qFactor) && band.qFactor > 0)) throw bandError(index, `qFactor must be > 0, got ${band.qFactor}`);
+  if (KINDS_WITH_GAIN.has(band.kind) && !Number.isFinite(band.gainDb)) throw bandError(index, `gainDb must be finite, got ${band.gainDb}`);
+}
+function isStable(a1, a2) { return Math.abs(a2) < 1 && Math.abs(a1) < 1 + a2; }
+function encodeSection(section, index = 0) {
+  const ordered = [section.b0, section.b2, -section.a1, section.b1, -section.a2];
+  const words = ordered.map((coefficient) => {
+    const word = Math.round(coefficient * Q27_ONE) + 0;
+    if (!Number.isInteger(word) || word > INT32_MAX || word < INT32_MIN) throw bandError(index, 'coefficient does not fit Q27 in int32');
+    return word;
+  });
+  if (!isStable(-words[2] / Q27_ONE, -words[4] / Q27_ONE)) throw bandError(index, 'unstable section: poles on or outside the unit circle');
+  return words;
+}
+function preampWord(preampDb = 0) {
+  if (!Number.isFinite(preampDb)) throw new RangeError(`preamp must be a finite dB value, got ${preampDb}`);
+  if (preampDb > 0) throw new RangeError(`preamp must be <= 0 dB, got ${preampDb}`);
+  return Math.round(Math.pow(10, preampDb / 20) * Q23_ONE);
+}
+function crc16Ccitt(data) {
+  let register = 0xffff;
+  for (const byte of data) {
+    register ^= byte << 8;
+    for (let bit = 0; bit < 8; bit++) register = register & 0x8000 ? ((register << 1) ^ 0x1021) & 0xffff : (register << 1) & 0xffff;
+  }
+  return register;
+}
+function appendInt32LE(buffer, value) {
+  if (!Number.isInteger(value) || value > INT32_MAX || value < INT32_MIN) throw new RangeError(`value does not fit int32: ${value}`);
+  buffer.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+}
+// Builds the bytes only, to run the gate. Nothing in this page sends them anywhere.
+function encodePayload(eqBands, preampDb = 0) {
+  if (!Array.isArray(eqBands) || eqBands.length !== BAND_COUNT) throw new RangeError(`expected ${BAND_COUNT} bands`);
+  eqBands.forEach(checkBand);
+  const payload = [...PREAMBLE];
+  appendInt32LE(payload, preampWord(preampDb));
+  eqBands.forEach((band, index) => { for (const word of encodeSection(designSection(band), index)) appendInt32LE(payload, word); });
+  const checksum = crc16Ccitt(payload);
+  payload.push(checksum & 0xff, checksum >>> 8);
+  return payload;
+}
+function magnitudeDb(eqBands, freqHz, sampleRate = SAMPLE_RATE) {
+  const omega = (2 * Math.PI * freqHz) / sampleRate;
+  const halfSin = Math.sin(omega / 2);
+  const uRe = 2 * halfSin * halfSin;
+  const uIm = Math.sin(omega);
+  const uSquaredRe = uRe * uRe - uIm * uIm;
+  const uSquaredIm = 2 * uRe * uIm;
+  const powerAt = (p0, p1, p2) => {
+    const sum = p0 + p1 + p2;
+    const slope = p1 + 2 * p2;
+    const re = sum - slope * uRe + p2 * uSquaredRe;
+    const im = -slope * uIm + p2 * uSquaredIm;
+    return re * re + im * im;
+  };
+  let totalDb = 0;
+  for (const band of eqBands) {
+    const { b0, b1, b2, a1, a2 } = designSection(band, sampleRate);
+    totalDb += 10 * Math.log10(powerAt(b0, b1, b2) / powerAt(1, a1, a2));
+  }
+  return totalDb;
+}
+
+// =====================================================================
+// 2. Official presets (ids; [kind, fHz, gainDb, Q]) from test/fixtures/eq0xcb.reference.json
+// =====================================================================
+const PRESETS = {
+  padrao: { pre: -2.8, b: [['PK',25,-0.8,0.3],['PK',150,-3,0.69],['PK',2237,-10,1.41],['PK',4348,-6.1,3],['PK',4958,-8.3,2.72],['PK',7178,-10,3],['PK',11063,-10,3],['PK',520,3.1,0.81],['PK',3046,5.7,1.51],['PK',5995,3.4,0.59]] },
+  pref6: { pre: -3, b: [['PK',25,-2,0.4],['PK',167,-6.2,0.53],['PK',2560,-8,1.03],['PK',4911,-8,4],['PK',7838,-6.7,4],['PK',11523,-6.5,4],['PK',270,0.1,4],['PK',404,4.1,0.48],['PK',2930,7,2.94],['PK',3537,4.5,4]] },
+  emv: { pre: -7.8, b: [['PK',1084,-1.1,3],['PK',1930,-1.9,2.39],['PK',2334,-8,1.93],['PK',4454,-8,2.63],['PK',5568,-4.2,1.55],['PK',7504,-7.2,3],['PK',107,0.7,0.5],['PK',473,2.4,0.5],['PK',6814,7.7,1.48],['PK',8862,8,3]] },
+  basshead: { pre: -5.7, b: [['PK',4613,-12,2.5],['PK',2246,-12,1.31],['PK',6746,-7.9,2.5],['PK',1122,-2.6,1.73],['PK',10302,-6.1,2.5],['PK',20,-5,0.42],['PK',223,-4.9,0.84],['PK',3184,2.5,2.5],['PK',3116,9.2,0.3],['LS',286,8.2,0.47]] },
+  energico: { pre: -3.3, b: [['PK',25,-3.1,0.5],['PK',97,-1.4,0.68],['PK',2445,-8,0.87],['PK',4725,-8,3],['PK',6920,-8,3],['PK',12439,-8,1.96],['PK',1838,5,0.92],['PK',2904,4.5,2.62],['PK',3665,3.7,3],['PK',8376,8,2.42]] },
+  musical: { pre: -2.3, b: [['PK',24,-3.2,0.1],['PK',2277,-8,1.69],['PK',4588,-9.4,2.8],['PK',5979,-3.8,2],['PK',7184,-3.2,3],['PK',10638,-10.4,3],['PK',840,2.2,1.54],['PK',1393,2,1.85],['PK',3224,1.1,3],['PK',15808,2.2,2.5]] },
+  analitico: { pre: -0.8, b: [['LS',120,-9.3,0.44],['PK',7007,-9.1,2.5],['PK',147,-3.5,0.48],['PK',4561,-12,2.5],['PK',2198,-12,1.42],['PK',255,-0.4,1.78],['PK',11291,-7.8,2.5],['PK',1093,-2.7,1.17],['PK',3226,6.2,0.3],['PK',3028,1.8,2.5]] },
+  referencia: { pre: -4, b: [['LS',297,-3.4,0.81],['PK',11107,-4.8,2.5],['PK',1027,-1.7,1.98],['PK',20,-3.6,0.57],['PK',7055,-3.8,2.5],['PK',4588,-8,2.5],['PK',2208,-8.2,1.83],['PK',595,3.5,0.42],['PK',3144,5.6,1.69],['PK',3031,0.5,2.5]] },
+  harman: { pre: -0.5, b: [['LS',199,-5.6,0.94],['PK',399,-1.4,1.62],['PK',2271,-8,1.32],['PK',256,-4.2,1.17],['PK',7566,-7.6,0.43],['PK',4662,-6.8,2.5],['PK',9138,3.8,2.5],['PK',3318,7.8,1.32],['PK',5767,5.8,2.5],['PK',3209,1.1,1.33]] },
+  vdsf: { pre: -2.2, b: [['PK',25,-8,0.5],['PK',80,-5,0.52],['PK',210,-2,0.79],['PK',1286,-5.9,1.34],['PK',1978,-7.4,1.67],['PK',2375,-5.4,2.4],['PK',4384,-4.7,3],['PK',4833,-6,3],['PK',7252,-7.6,3],['PK',1718,8,0.5]] },
+  etymotic: { pre: -2.2, b: [['PK',25,-8,0.97],['PK',45,-8,0.5],['PK',105,-5.3,0.51],['PK',226,-1.4,0.91],['PK',2190,-8,1.39],['PK',4276,-5,3],['PK',4847,-7.2,3],['PK',7260,-6.8,3],['PK',785,1.8,1.42],['PK',3120,6.5,1.01]] },
+};
+// Official display labels (names only, never branding). Descriptions are Kuba's copy, shown attributed.
+const LABELS = [
+  { id: 'padrao', name: 'Auri', group: 'pref', desc: 'A assinatura do Auri, inspirada pela comunidade.' },
+  { id: 'pref6', name: 'Natural', group: 'pref', desc: 'Subgrave presente, médios limpos e agudos arejados.' },
+  { id: 'emv', name: 'Em V', group: 'pref', desc: 'Alvo com graves e agudos levantados.' },
+  { id: 'basshead', name: 'Basshead', group: 'pref', desc: 'Para os amantes de graves.' },
+  { id: 'energico', name: 'Enérgico', group: 'pref', desc: 'Sonoridade intensa, pensada para rock.' },
+  { id: 'musical', name: 'Musical', group: 'pref', desc: 'Graves fortes, médios comedidos e agudos delicados.' },
+  { id: 'analitico', name: 'Analítico', group: 'pref', desc: 'Para quem prioriza detalhamento e clareza.' },
+  { id: 'referencia', name: 'JM-1', group: 'ref', desc: 'Sonoridade fiel à JM-1.' },
+  { id: 'harman', name: 'Harman IE 2019', group: 'ref', desc: 'A curva de preferência mais estudada do mundo.' },
+  { id: 'vdsf', name: 'VDSF', group: 'ref', desc: 'Meio-termo entre campo difuso e Harman, com graves discretos.' },
+  { id: 'etymotic', name: 'Etymotic', group: 'ref', desc: 'Graves contidos e muita definição nos médios e agudos.' },
+];
+const toBands = (rows) => rows.map(([kind, freqHz, gainDb, qFactor]) => ({ kind, freqHz, gainDb, qFactor }));
+const NEUTRAL_BANDS = Array.from({ length: BAND_COUNT }, () => ({ ...OFF }));
+
+// =====================================================================
+// 3. Gate v2: inline copy of design/analysis/gate.mjs (levelDb + gate).
+// envelope.json values copied below (aggregate.*); the section-peak limit is
+// recomputed from the presets exactly as the envelope derives it.
+// =====================================================================
+const ENVELOPE = {
+  coefficientOrder: ['b0', 'b2', '-a1', 'b1', '-a2'],
+  quantizedCoefficientMaxima: [
+    { word: 176145720, absCoefficient: 1.3123878836631775 },
+    { word: 133967223, absCoefficient: 0.9981335923075676 },
+    { word: 268076748, absCoefficient: 1.9973274171352386 },
+    { word: -268076748, absCoefficient: 1.9973274171352386 },
+    { word: -133859379, absCoefficient: 0.9973300918936729 },
+  ],
+  maxQuantizedPoleRadius: 0.99986846753918,
+  quantizedInternalAudibleDb: -0.20368875272918074,
+  quantizedOutputAudibleDb: -0.47087539615209006,
+  quantizedOutputFullDb: 2.5000638697363913,
+};
+const Q27 = 2 ** 27;
+function envelopeSectionPeakDb() {
+  let max = -Infinity;
+  for (const p of Object.values(PRESETS)) for (const band of toBands(p.b)) {
+    max = Math.max(max, sectionPeaks(fromWords(encodeSection(designSection(band)))).full.db);
+  }
+  return max;
+}
+function fromWords(w) { return { b0: w[0] / Q27, b2: w[1] / Q27, a1: -w[2] / Q27, b1: w[3] / Q27, a2: -w[4] / Q27 }; }
+function poleRadius(s) {
+  const d = s.a1 * s.a1 - 4 * s.a2;
+  return d < 0 ? Math.sqrt(s.a2) : Math.max(Math.abs((-s.a1 + Math.sqrt(d)) / 2), Math.abs((-s.a1 - Math.sqrt(d)) / 2));
+}
+function sectionDb(s, f) {
+  if (s.b0 === 1 && s.b1 === s.a1 && s.b2 === s.a2) return 0;
+  const w = 2 * Math.PI * f / SAMPLE_RATE;
+  const re = 2 * Math.sin(w / 2) ** 2, im = Math.sin(w);
+  const u2re = re * re - im * im, u2im = 2 * re * im;
+  const power = (p0, p1, p2) => {
+    const r = p0 + p1 + p2 - (p1 + 2 * p2) * re + p2 * u2re;
+    const i = -(p1 + 2 * p2) * im + p2 * u2im;
+    return r * r + i * i;
+  };
+  return 10 * Math.log10(power(s.b0, s.b1, s.b2) / power(1, s.a1, s.a2));
+}
+function powerPolynomial(p0, p1, p2) {
+  const sum = p0 + p1 + p2;
+  return [sum * sum, 4 * ((p0 - p2) ** 2 - sum * (p0 + p2)), 16 * p0 * p2];
+}
+function sectionPeaks(s) {
+  const n = powerPolynomial(s.b0, s.b1, s.b2), d = powerPolynomial(1, s.a1, s.a2);
+  const a = n[2] * d[1] - n[1] * d[2];
+  const b = 2 * (n[2] * d[0] - n[0] * d[2]);
+  const c = n[1] * d[0] - n[0] * d[1];
+  const roots = [];
+  if (a === 0) { if (b !== 0) roots.push(-c / b); }
+  else {
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant >= 0) {
+      const q = -0.5 * (b + (b >= 0 ? 1 : -1) * Math.sqrt(discriminant));
+      if (q !== 0) roots.push(q / a, c / q);
+      else roots.push(-b / (2 * a));
+    }
+  }
+  const stationaryHz = roots.filter((t) => t > 0 && t < 1).map((t) => Math.asin(Math.sqrt(t)) * SAMPLE_RATE / Math.PI);
+  const maximum = (frequencies) => frequencies.map((f) => ({ db: sectionDb(s, f), frequencyHz: f })).reduce((best, p) => p.db > best.db ? p : best);
+  return {
+    full: maximum([0, 48000, ...stationaryHz]),
+    audible: maximum([20, 20000, ...stationaryHz.filter((f) => f >= 20 && f <= 20000)]),
+  };
+}
+const THRESHOLDS = Object.freeze({
+  coefficientPositions: Object.freeze([...ENVELOPE.coefficientOrder]),
+  coefficientAbsWords: Object.freeze(ENVELOPE.quantizedCoefficientMaxima.map((m) => Math.abs(m.word))),
+  coefficientAbs: Object.freeze(ENVELOPE.quantizedCoefficientMaxima.map((m) => m.absCoefficient)),
+  poleRadius: ENVELOPE.maxQuantizedPoleRadius,
+  sectionPeakDb: envelopeSectionPeakDb(),
+  internalAudibleDb: ENVELOPE.quantizedInternalAudibleDb,
+  outputAudibleDb: ENVELOPE.quantizedOutputAudibleDb,
+  outputFullDb: ENVELOPE.quantizedOutputFullDb,
+  preampMaxDb: Math.max(...Object.values(PRESETS).map((p) => p.pre)),
+  preampMinDb: -25.5,
+  dbNumericalTolerance: 1e-8,
+  radiusNumericalTolerance: 2e-15,
+});
+const MEAN_FREQUENCIES = Object.freeze(Array.from({ length: 280 }, (_, i) =>
+  Math.round(20 * 1000 ** (i / 279) * 100) / 100).filter((f) => f >= 300 && f <= 3000));
+
+function analyseSection(band) {
+  const words = encodeSection(designSection(band));
+  const section = fromWords(words), radius = poleRadius(section), peaks = sectionPeaks(section);
+  const reasons = [];
+  words.forEach((word, i) => { if (Math.abs(word) > THRESHOLDS.coefficientAbsWords[i]) reasons.push(`a:${THRESHOLDS.coefficientPositions[i]}`); });
+  if (radius > THRESHOLDS.poleRadius + THRESHOLDS.radiusNumericalTolerance) reasons.push('b:pole-radius');
+  if (peaks.full.db > THRESHOLDS.sectionPeakDb + THRESHOLDS.dbNumericalTolerance) reasons.push('c:section-peak');
+  return { words, section, poleRadius: radius, fullPeak: peaks.full, audiblePeak: peaks.audible, reasons };
+}
+const intentionalPreampDb = (db) => 20 * Math.log10(preampWord(db) / 2 ** 23);
+function refine(fn, a, b) {
+  const r = (Math.sqrt(5) - 1) / 2;
+  let c = b - r * (b - a), d = a + r * (b - a), fc = fn(c), fd = fn(d);
+  for (let i = 0; i < 70 && b - a > 1e-8; i++) {
+    if (fc > fd) { b = d; d = c; fd = fc; c = b - r * (b - a); fc = fn(c); }
+    else { a = c; c = d; fc = fd; d = a + r * (b - a); fd = fn(d); }
+  }
+  return fc > fd ? { db: fc, frequencyHz: c } : { db: fd, frequencyHz: d };
+}
+function responsePeak(sections, minHz, maxHz) {
+  if (!sections.length) return { db: 0, frequencyHz: minHz };
+  if (sections.length === 1) {
+    const p = sectionPeaks(sections[0]);
+    return minHz === 0 ? p.full : p.audible;
+  }
+  const fn = (f) => sections.reduce((db, section) => db + sectionDb(section, f), 0);
+  const intervals = 16384, lo = minHz || 0.001;
+  const fs = Array.from({ length: intervals + 1 }, (_, i) => lo * (maxHz / lo) ** (i / intervals));
+  fs[0] = lo; fs[intervals] = maxHz;
+  if (minHz === 0) fs.unshift(0);
+  const values = fs.map(fn);
+  let best = { db: values[0], frequencyHz: fs[0] };
+  for (let i = 1; i < fs.length; i++) {
+    if (values[i] > best.db) best = { db: values[i], frequencyHz: fs[i] };
+    if (i < fs.length - 1 && values[i] > values[i - 1] && values[i] >= values[i + 1]) {
+      const candidate = refine(fn, fs[i - 1], fs[i + 1]);
+      if (candidate.db > best.db) best = candidate;
+    }
+  }
+  return best;
+}
+function levelDb(eqBands, preampDb) {
+  const sections = eqBands.map((b) => fromWords(encodeSection(designSection(b))));
+  return intentionalPreampDb(preampDb) + MEAN_FREQUENCIES.reduce((sum, f) =>
+    sum + sections.reduce((db, s) => db + sectionDb(s, f), 0), 0) / MEAN_FREQUENCIES.length;
+}
+function gate(eqBands, preampDb) {
+  const reasons = [], metrics = { thresholds: THRESHOLDS };
+  let payload;
+  try { payload = encodePayload(eqBands, preampDb); }
+  catch (error) { return { ok: false, reasons: [`f:codec:${error.message}`], metrics }; }
+  metrics.payloadCrc = `0x${payload.at(-1).toString(16).padStart(2, '0')}${payload.at(-2).toString(16).padStart(2, '0')}`;
+  if (preampDb < THRESHOLDS.preampMinDb || preampDb > THRESHOLDS.preampMaxDb) reasons.push('g:preamp-range');
+  metrics.preampDb = preampDb;
+  metrics.quantizedPreampDb = intentionalPreampDb(preampDb);
+  metrics.sections = eqBands.map((b, i) => {
+    const s = analyseSection(b);
+    reasons.push(...s.reasons.map((r) => `${r}:stage-${i + 1}`));
+    return s;
+  });
+  const active = [];
+  metrics.prefixAudible = [{ stage: 0, db: metrics.quantizedPreampDb, frequencyHz: null }];
+  for (const [i, item] of metrics.sections.entries()) {
+    const s = item.section;
+    if (!(s.b0 === 1 && s.b1 === s.a1 && s.b2 === s.a2)) active.push(s);
+    const peak = responsePeak(active, 20, 20000);
+    metrics.prefixAudible.push({ stage: i + 1, db: peak.db + metrics.quantizedPreampDb, frequencyHz: peak.frequencyHz });
+  }
+  metrics.internalAudible = metrics.prefixAudible.reduce((a, b) => b.db > a.db ? b : a);
+  metrics.outputAudible = metrics.prefixAudible.at(-1);
+  const full = responsePeak(active, 0, 48000);
+  metrics.outputFull = { db: full.db + metrics.quantizedPreampDb, frequencyHz: full.frequencyHz };
+  if (metrics.internalAudible.db > THRESHOLDS.internalAudibleDb + THRESHOLDS.dbNumericalTolerance) reasons.push('d:internal-audible');
+  if (metrics.outputAudible.db > THRESHOLDS.outputAudibleDb + THRESHOLDS.dbNumericalTolerance) reasons.push('e:output-audible');
+  if (metrics.outputFull.db > THRESHOLDS.outputFullDb + THRESHOLDS.dbNumericalTolerance) reasons.push('e:output-full');
+  return { ok: reasons.length === 0, reasons, metrics };
+}
+// Gate v2 adds the approved kind restriction (PK, LS, OFF only) on top of gate().
+const GATE_KINDS = new Set(['PK', 'LS', 'OFF']);
+function gateV2(bands, pre) {
+  const kindsOk = Array.isArray(bands) && bands.every((b) => b && GATE_KINDS.has(b.kind));
+  const g = gate(bands, pre);
+  return { ok: g.ok && kindsOk, reasons: kindsOk ? g.reasons : ['h:kind', ...g.reasons], metrics: g.metrics };
+}
+
+// =====================================================================
+// 4. Helpers, i18n
+// =====================================================================
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+let LANG = OA.store.getLang() === 'en-US' ? 'en' : 'pt';   // "oa.v2.lang", shared across pages
+const L = (pt, en) => (LANG === 'en' ? en : pt);
+function fmt(n, d = 1) {
+  if (!Number.isFinite(n)) return '–';
+  let v = Number(n.toFixed(d));
+  if (Object.is(v, -0)) v = 0;
+  return new Intl.NumberFormat(LANG === 'en' ? 'en-US' : 'pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }).format(v).replace('-', '−');
+}
+const fmtS = (n, d = 1) => (Number(n.toFixed(d)) > 0 ? '+' : '') + fmt(n, d);
+const fmtHz = (f) => f >= 1000 ? `${fmt(f / 1000, f % 1000 === 0 ? 0 : 1)} kHz` : `${fmt(f, 0)} Hz`;
+function parseNum(str) {
+  let s = String(str).trim().replace(/−/g, '-').replace(/\s/g, '');
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  return parseFloat(s);
+}
+function randInt(n) { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; }
+function randPerm(k) { const p = Array.from({ length: k }, (_, i) => i); for (let i = k - 1; i > 0; i--) { const j = randInt(i + 1); [p[i], p[j]] = [p[j], p[i]]; } return p; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const EN = {
+  'nav.aria': 'Main', 'nav.curva': 'Curve', 'nav.biblioteca': 'Library', 'nav.comparar': 'Compare', 'nav.soe': 'Sound like X', 'nav.comunidade': 'Community', 'nav.teste': 'Blind test', 'nav.cabo': 'Cable', 'nav.docs': 'Docs',
+  'chrome.status': 'No cable · simulated', 'chrome.neutro': 'Neutral', 'chrome.padrao': 'Auri default', 'chrome.gravar': 'Write to cable',
+  'room.aria': 'Listening room: acoustic scrim, three-position shuffler', 'scene.aria': 'Treated room seen from the listener seat. Behind the scrim, three identical boxes on rails; in front, three positions on the floor.',
+  'room.eyebrow': 'Blind test · controlled listening', 'room.h1': 'Listen without looking.', 'room.lede': 'Up to three curves behind the scrim, level-matched, in random order. Switch whenever you like; names appear only at the end.',
+  'help.aria': 'Keyboard shortcuts', 'help.btn': 'shortcuts', 'desk.aria': 'Listener desk', 'rack.aria': 'Listener console', 'rack.title': 'Listener console', 'rack.round': 'ROUND', 'rack.rate': 'DSP RATE', 'rack.selector': 'Selector · 3 positions', 'keys.aria': 'Candidates',
+  'rack.lab': '3 s switch', 'rack.labsub': 'silence during the switch, as in the lab', 'rack.level': 'Level matched', 'rack.lock': 'In position',
+  'steps.aria': 'Test steps', 'step.1': 'Setup', 'step.2': 'Candidates', 'step.3': 'Listening', 'step.4': 'Result', 'step.5': 'On the cable', 'step.6': 'Share',
+  'prep.h': 'Setup', 'prep.lede': 'The test runs in the browser only: nothing is written to the cable. Pick a source, confirm how you will listen and keep the level matched.',
+  'prep.src.e': 'Source', 'prep.src.h': 'What will play', 'prep.pick': 'Choose audio file', 'prep.file.note': 'The source is the same on every page: the ♪ Audio in the top bar. The file stays in this browser; nothing is uploaded.',
+  'prep.out.e': 'Output · required', 'prep.out.h': 'How you listen', 'prep.out.n': 'Output: cable in Neutral', 'prep.out.n.s': '10 × OFF + preamp −0.5 dB. The cable cannot be read: only you can confirm.', 'prep.out.o': 'Other output', 'prep.out.o.s': 'Sound card or earphone without the cable in the path.',
+  'prep.lvl.e': 'Level', 'prep.lvl.h': 'Matched by levelDb', 'prep.lvl.aria': 'Level per candidate', 'th.cand': 'Candidate', 'th.level': 'Level', 'th.comp': 'Trim', 'th.mean': 'Mean', 'th.ci': '95 % CI',
+  'prep.lvl.note': 'Mean gain from 300 Hz to 3 kHz, preamp included. Everyone goes down to the quietest; nobody goes up.',
+  'prep.eng.e': 'Audio engine', 'prep.eng.h': 'The cable’s exact coefficients', 'prep.eng.gain': 'Sound starts only on the first play, with a gentle fade-in. The preview level lives in the ♪ Audio in the top bar (browser only).', 'prep.next': 'Choose candidates',
+  'cand.h': 'Candidates', 'cand.lede': 'Pick 2 or 3. All pass gate v2 first: PK, LS and OFF only, per-coefficient limits, pole ≤ 0.99987, section peak ≤ +9.2 dB, prefix ≤ −0.2037 dB, output ≤ −0.4709 dB, preamp from −25.5 to −0.5 dB.',
+  'var.e': 'Variations around a target', 'var.h': 'Generate neighbours of a curve', 'var.base': 'Target', 'var.spread': 'Spread', 'var.spread.s': '± dB per region', 'var.gen': 'Generate 3 variations',
+  'var.note': 'Bass (&lt; 250 Hz), presence (1 to 5 kHz) and treble (&gt; 5 kHz) move by a fixed pattern; the preamp drops as needed to pass the gate. Anything that fails is refused, never silently adjusted.',
+  'plan.e': 'Plan', 'plan.h': 'Rounds and start', 'plan.rounds': 'Rounds', 'plan.rounds.s': 'order randomised each time', 'plan.start': 'Start',
+  'esc.empty': 'No test running.', 'esc.empty.go': 'Choose candidates', 'esc.round': 'Round', 'esc.of': 'of', 'esc.lede': 'The order was drawn again: this round’s 1 is not the previous 1. Switch as often as you like.',
+  'esc.cand': 'candidate', 'esc.rate.e': 'Preference', 'esc.rate.h': 'Score each from 0 to 10', 'esc.notes': 'Notes (stay on this device)', 'esc.next': 'Next round', 'esc.end': 'End and reveal',
+  'res.empty': 'Finish a test to see the result.', 'res.h': 'The scrim rises.', 'res.chart.e': 'Mean preference · 95 % CI', 'res.chart.h': 'Scores per candidate',
+  'res.ci.note': '95 % CI from Student’s t with n − 1 degrees of freedom over each round’s scores. With few rounds the intervals are wide: that is information, not a defect.',
+  'res.br.e': 'X2 tournament', 'res.br.h': 'Converging to a personal curve', 'res.br.note': 'Each stage puts the winner against two of its variations at half the previous spread. Stop when scores tie within the interval.',
+  'res.open': 'Open winner in Curve', 'res.compare': 'Compare', 'res.x2': 'Next tournament stage', 'res.new': 'New test',
+  'cabo.h': 'Test on the cable', 'cabo.lede': 'The same flow, but each A/B switch writes the candidate to the cable. Every write rewrites the chip’s flash, and we do not yet know whether the switch clicks.',
+  'cabo.ctl.e': 'Controls', 'cabo.ctl.h': 'Tournament writing to the cable', 'cabo.start': 'Start on the cable', 'cabo.cost.e': 'Estimated cost', 'cabo.cost.h': 'Flash writes',
+  'share.h': 'Share preferences', 'share.lede': 'Optional. Helps the community learn which curves win blind. Only A/B pairs and scores leave the device, and only with your consent.',
+  'share.c.e': 'Consent · LGPD', 'share.c.h': 'You decide what leaves', 'share.purpose': 'Purpose', 'share.purpose.v': 'study which curves are preferred in blind listening', 'share.basis': 'Legal basis', 'share.basis.v': 'your consent (LGPD, art. 7, I)', 'share.where': 'Where it lives', 'share.where.v': 'public GitHub issue, tied to your account there',
+  'share.c1': 'I understand that sending creates a public GitHub issue, visible to anyone.', 'share.c2': 'I agree to publish only the A/B pairs and scores shown alongside, under a pseudonym.', 'share.c3': 'I know I can withdraw consent and ask for removal at any time, in a new issue.',
+  'share.pseudo': 'Pseudonym', 'share.re': 'Draw', 'share.stay': 'Stays here: the audio, the file name, your text notes, the curve stored in the cable.', 'share.send': 'Send via GitHub issue', 'share.sim': 'simulated',
+  'share.p.e': 'Exact preview', 'share.p.h': 'This is what would be sent', 's7.e': 'Community ranking', 's7.h': 'Aggregated preference in real time',
+  'foot.e': 'THIS PAGE PAYS TRIBUTE TO', 'foot.and': 'and',
+  'foot.trivia': 'In the listening lab of an audio manufacturer, Floyd Toole and Sean Olive hid the loudspeakers behind a screen that lets sound through and hides the image; a mechanism moved each speaker into the same position in three seconds. Without seeing the brand, listeners voted on the sound. The headphone target curve was born from tests like these.',
+  'foot.src1': 'source: the lab ↗', 'foot.src2': 'source: the speaker shuffler ↗', 'foot.src3': 'source: the headphone target ↗', 'foot.aviso': 'Notice',
+  'foot.aviso.t': 'open-auri is not official nor endorsed by Kuba, TTGK, Savitech or any manufacturer. Everything here was obtained by studying the protocol for interoperability. Use at your own risk: we are not responsible for damage to the cable, the earphone or your hearing.',
+  'foot.legal': 'Full legal notice', 'foot.lic': 'AGPL-3.0 license',
+  'help.h': 'Shortcuts', 'help.1': 'Select candidate', 'help.2': 'Play or pause', 'help.3': 'Next round', 'help.4': 'Adjust the focused control', 'help.5': 'Step × 10', 'help.6': 'Step × 0.1', 'help.7k': 'click the number', 'help.7': 'Type the exact value', 'help.8': 'Open or close this list', 'help.9': 'Close', 'close': 'Close', 'cancel': 'Cancel',
+  'write.h': 'Before writing', 'write.sim': 'Simulated: this page does not talk to the cable.', 'write.ack': 'Understood: each write rewrites the chip’s flash.', 'write.go': 'Write (simulated)',
+};
+const ORIG = new Map(), ORIG_ARIA = new Map();
+function applyI18n() {
+  $$('[data-i18n]').forEach((el) => {
+    if (!ORIG.has(el)) ORIG.set(el, el.innerHTML);
+    const k = el.dataset.i18n;
+    el.innerHTML = LANG === 'en' && EN[k] != null ? EN[k] : ORIG.get(el);
+  });
+  $$('[data-i18n-aria]').forEach((el) => {
+    if (!ORIG_ARIA.has(el)) ORIG_ARIA.set(el, el.getAttribute('aria-label') || '');
+    const k = el.dataset.i18nAria;
+    el.setAttribute('aria-label', LANG === 'en' && EN[k] != null ? EN[k] : ORIG_ARIA.get(el));
+  });
+  document.documentElement.lang = LANG === 'en' ? 'en' : 'pt-BR';
+  const lb = $('#langToggle');
+  lb.querySelector('.pt').classList.toggle('on', LANG === 'pt');
+  lb.querySelector('.en').classList.toggle('on', LANG === 'en');
+  lb.setAttribute('aria-label', L('Switch to English', 'Mudar para português'));
+  OA.audioUI.setLang(LANG);
+  renderAll();
+}
+
+// =====================================================================
+// 5. State and candidates
+// =====================================================================
+const state = {
+  output: null,
+  selected: [], rounds: 6, spread: 2, labMode: false,
+  test: null, stages: [], lastResult: null, pseudo: '',
+  tab: 'preparo',
+};
+const pool = new Map();
+function addCand(c) {
+  c.gate = null;
+  try { c.level = levelDb(c.bands, c.pre); } catch { c.level = NaN; }
+  pool.set(c.id, c);
+  return c;
+}
+for (const l of LABELS) addCand({ id: l.id, type: 'preset', group: l.group, name: l.name, desc: l.desc, pre: PRESETS[l.id].pre, bands: toBands(PRESETS[l.id].b) });
+addCand({ id: 'neutro', type: 'neutral', group: 'other', name: 'Neutro', nameEn: 'Neutral', pre: -0.5, bands: NEUTRAL_BANDS.map((b) => ({ ...b })) });
+// "Curva atual" = the editor curve from "oa.v2.current" (written by the Curva page). Missing or unreadable: Auri.
+const EXPERIMENTAL_KINDS = new Set(['HS', 'LP', 'HP']);
+function currentCurve() {
+  const c = OA.store.loadCurrent();
+  if (c) return { pre: c.preampDb, bands: c.bands.map((b) => ({ ...b })), from: 'storage', storedName: c.name, source: c.source };
+  return { pre: PRESETS.padrao.pre, bands: toBands(PRESETS.padrao.b), from: 'default', storedName: 'Auri', source: 'preset:padrao' };
+}
+function refreshCurrent() {
+  const cur = currentCurve();
+  addCand({ id: 'atual', type: 'current', group: 'other', name: 'Curva atual', nameEn: 'Current curve', from: cur.from, storedName: cur.storedName, source: cur.source,
+    experimental: cur.bands.some((b) => EXPERIMENTAL_KINDS.has(b.kind)), pre: cur.pre, bands: cur.bands });
+}
+refreshCurrent();
+const candName = (c) => (LANG === 'en' && c.nameEn ? c.nameEn : c.name);
+// HS/LP/HP are experimental (Curva, ENGENHARIA layer). Such a curve may be a candidate here because it only plays
+// in the browser: it runs the same gate minus the PK/LS/OFF restriction, and is tagged EXPERIMENTAL.
+function ensureGate(c) {
+  if (!c.gate) { const g = c.experimental ? gate(c.bands, c.pre) : gateV2(c.bands, c.pre); c.gate = { ok: g.ok, reasons: g.reasons }; }
+  return c.gate;
+}
+const curveKey = (pre, bands) => JSON.stringify([pre, bands.map(OA.store.bandToString)]);
+// The cable is simulated: its content is the last journal entry ("oa.v2.journal"), or Auri if nothing was written.
+function cableCurve() {
+  const last = OA.store.journal().at(-1);
+  if (last && Array.isArray(last.bands) && last.bands.length === BAND_COUNT && Number.isFinite(last.pre)) {
+    const bands = last.bands.map(OA.store.bandFromString);
+    if (bands.every(Boolean)) return { name: String(last.name || ''), pre: last.pre, bands };
+  }
+  return { name: 'Auri', pre: PRESETS.padrao.pre, bands: toBands(PRESETS.padrao.b) };
+}
+// Background verification of every candidate, one per tick, so the UI stays responsive.
+function verifyQueue() {
+  const next = [...pool.values()].find((c) => !c.gate);
+  if (!next) return;
+  ensureGate(next);
+  renderCandidates();
+  setTimeout(verifyQueue, 40);
+}
+
+// Variations around a target: fixed regional patterns, preamp lowered to pass the gate, refusals kept visible.
+const PATTERNS = [
+  { k: 'graves', pt: 'graves', en: 'bass', w: [1, 0, -0.5] },
+  { k: 'agudos', pt: 'agudos', en: 'treble', w: [-0.5, 0, 1] },
+  { k: 'presenca', pt: 'presença', en: 'presence', w: [0, 1, 0] },
+];
+const r1 = (v) => Math.round(v * 10) / 10;
+function region(f) { return f < 250 ? 0 : (f >= 1000 && f <= 5000) ? 1 : f > 5000 ? 2 : -1; }
+function fitPreamp(bands, pre0) {
+  let pre = Math.min(THRESHOLDS.preampMaxDb, r1(pre0));
+  let g = gateV2(bands, pre);
+  if (g.ok) return { pre, g };
+  const soft = (r) => /^(d|e|g):/.test(r);
+  if (!g.reasons.every(soft) || !g.metrics.internalAudible) return { pre, g };
+  const m = g.metrics, T = THRESHOLDS;
+  const over = Math.max(m.internalAudible.db - T.internalAudibleDb, m.outputAudible.db - T.outputAudibleDb, m.outputFull.db - T.outputFullDb, 0);
+  pre = Math.floor((pre - over - 0.05) * 10) / 10;
+  for (let i = 0; i < 3 && pre >= T.preampMinDb; i++) {
+    g = gateV2(bands, pre);
+    if (g.ok) break;
+    pre = r1(pre - 0.1);
+  }
+  if (pre < T.preampMinDb) g = gateV2(bands, pre);
+  return { pre, g };
+}
+function makeVariations(base, spread, patterns = PATTERNS) {
+  return patterns.map((p) => {
+    const bands = base.bands.map((b) => {
+      if (b.kind === 'OFF') return { ...b };
+      const rg = region(b.freqHz);
+      return { ...b, gainDb: r1(b.gainDb + (rg < 0 ? 0 : p.w[rg] * spread)) };
+    });
+    const { pre, g } = fitPreamp(bands, base.pre);
+    const id = `var:${base.id}:${p.k}:${spread}`;
+    const c = addCand({ id, type: 'variation', group: 'var', parent: base.id, spread, pattern: p, baseName: base.name, baseNameEn: base.nameEn,
+      name: `${base.name} · ${p.pt} ±${String(spread).replace('.', ',')}`, nameEn: `${base.nameEn || base.name} · ${p.en} ±${spread}`, pre, bands });
+    c.gate = { ok: g.ok, reasons: g.reasons };
+    return c;
+  });
+}
+
+// =====================================================================
+// 6. Scene: shuffler, curtain, dust
+// =====================================================================
+let RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const BAYS = [{ x: 470, y: 362, s: 0.58 }, { x: 800, y: 362, s: 0.58 }, { x: 1130, y: 362, s: 0.58 }];
+const SPOT = { x: 800, y: 466, s: 1 };
+const shapes = [0, 1, 2].map((i) => ({ el: $(`#spk${i + 1}`), x: BAYS[i].x, y: BAYS[i].y, s: BAYS[i].s }));
+const carriage = { el: $('#carriage'), x: 800 };
+let shuffle = null;
+function placeShape(sh) { sh.el.setAttribute('transform', `translate(${sh.x.toFixed(1)} ${sh.y.toFixed(1)}) scale(${sh.s.toFixed(3)})`); }
+function placeCarriage() { carriage.el.setAttribute('transform', `translate(${carriage.x.toFixed(1)} 0)`); }
+function resetShapes() {
+  if (shuffle) cancelAnimationFrame(shuffle.raf);
+  shuffle = null;
+  shapes.forEach((sh, i) => { Object.assign(sh, BAYS[i]); placeShape(sh); sh.el.style.display = ''; });
+  placeCarriage();
+  $$('.rail').forEach((r) => r.classList.remove('hot'));
+}
+function setCue(kind, extra = '') {
+  const lamp = $('#cueLamp'), text = $('#cueText'), sub = $('#cueSub');
+  lamp.className = 'lamp';
+  if (kind === 'moving') { lamp.classList.add('on', 'blink'); text.textContent = L('Trocando', 'Switching'); }
+  else if (kind === 'locked') { lamp.classList.add('on'); text.textContent = L('Em posição', 'In position'); sub.textContent = extra; }
+  else if (kind === 'revealed') { lamp.classList.add('on'); text.textContent = L('Tela erguida', 'Scrim raised'); sub.textContent = L('identidades reveladas', 'identities revealed'); }
+  else { text.textContent = L('Tela fechada', 'Scrim closed'); sub.textContent = extra || L('aguardando candidatos', 'waiting for candidates'); }
+  const hw = $('#lockLampHw');
+  hw.className = 'lamp' + (kind === 'locked' || kind === 'revealed' ? ' on' : '') + (kind === 'moving' ? ' on blink' : '');
+  $('#lockText').textContent = kind === 'moving' ? L('trocando…', 'switching…') : kind === 'locked' ? L(`posição ${extra.replace(/\D/g, '')} travada`, `position ${extra.replace(/\D/g, '')} locked`) : kind === 'revealed' ? L('tela erguida', 'scrim raised') : L('tela fechada', 'scrim closed');
+}
+function shuffleTo(n) {
+  const target = n - 1;
+  if (shuffle) cancelAnimationFrame(shuffle.raf);
+  const from = shapes.map((s) => ({ x: s.x, y: s.y, s: s.s }));
+  const cFrom = carriage.x;
+  $('#shapes').appendChild(shapes[target].el);
+  $$('.rail').forEach((r) => r.classList.remove('hot'));
+  $(`#rail${target}`).classList.add('hot');
+  $('#lockLamp').classList.remove('on');
+  const dur = RM ? 0 : 3000;
+  const start = performance.now();
+  setCue('moving');
+  const lerp = (sh, a, b, p) => { sh.x = a.x + (b.x - a.x) * p; sh.y = a.y + (b.y - a.y) * p; sh.s = a.s + (b.s - a.s) * p; };
+  const step = (now) => {
+    const t = dur ? clamp((now - start) / dur, 0, 1) : 1;
+    const p1 = ease(clamp(t * 3, 0, 1)), p2 = ease(clamp(t * 3 - 1, 0, 1)), p3 = ease(clamp(t * 3 - 2, 0, 1));
+    shapes.forEach((sh, i) => { if (i === target) lerp(sh, from[i], SPOT, p3); else lerp(sh, from[i], BAYS[i], p1); placeShape(sh); });
+    carriage.x = cFrom + (BAYS[target].x - cFrom) * p2; placeCarriage();
+    $('#cueSub').textContent = `${fmt((1 - t) * 3, 1)} s · ${L('posição', 'position')} ${n}`;
+    if (t < 1) shuffle.raf = requestAnimationFrame(step);
+    else { shuffle = null; setCue('locked', `${L('posição', 'position')} ${n}`); $('#lockLamp').classList.add('on'); }
+  };
+  shuffle = { raf: requestAnimationFrame(step) };
+  $('#srStatus').textContent = L(`Candidato ${n} em posição.`, `Candidate ${n} in position.`);
+}
+// On reveal the boxes line up above their floor positions so each label sits over its own box.
+const LINEUP = [{ x: 560, y: 466, s: 0.8 }, { x: 800, y: 466, s: 0.8 }, { x: 1040, y: 466, s: 0.8 }];
+function tweenShapes(targets, dur, after) {
+  if (shuffle) cancelAnimationFrame(shuffle.raf);
+  const from = shapes.map((s) => ({ x: s.x, y: s.y, s: s.s }));
+  const start = performance.now();
+  const step = (now) => {
+    const t = dur ? clamp((now - start) / dur, 0, 1) : 1, p = ease(t);
+    shapes.forEach((sh, i) => {
+      const b = targets[i];
+      sh.x = from[i].x + (b.x - from[i].x) * p; sh.y = from[i].y + (b.y - from[i].y) * p; sh.s = from[i].s + (b.s - from[i].s) * p;
+      placeShape(sh);
+    });
+    if (t < 1) shuffle.raf = requestAnimationFrame(step);
+    else { shuffle = null; if (after) after(); }
+  };
+  shuffle = { raf: requestAnimationFrame(step) };
+}
+function revealCurtain(map) {
+  $('#scrimG').classList.add('lifted');
+  $('#scene').classList.add('revealed');
+  $('#lockLamp').classList.remove('on');
+  $$('.rail').forEach((r) => r.classList.remove('hot'));
+  const T = state.test;
+  [0, 1, 2].forEach((i) => {
+    const has = T && i < T.k;
+    const name = has ? candName(T.cands[map[i]]) : '';
+    const lab = $(`#rl${i + 1}`);
+    lab.textContent = has ? `${i + 1} · ${name.length > 22 ? name.slice(0, 21) + '…' : name}` : '';
+    lab.setAttribute('x', String(LINEUP[i].x));
+    lab.setAttribute('y', String(LINEUP[i].y - 270 * LINEUP[i].s - 16));
+    $(`#pn${i + 1}`).textContent = name.length > 18 ? name.slice(0, 17) + '…' : name;
+  });
+  tweenShapes(LINEUP, RM ? 0 : 1400);
+  setCue('revealed');
+}
+function lowerCurtain() {
+  $('#scrimG').classList.remove('lifted');
+  $('#scene').classList.remove('revealed');
+  [1, 2, 3].forEach((i) => { $(`#rl${i}`).textContent = ''; $(`#pn${i}`).textContent = ''; });
+}
+function buildDust() {
+  const g = $('#dust');
+  const NS = 'http://www.w3.org/2000/svg';
+  for (let i = 0; i < 34; i++) {
+    const y = 60 + Math.random() * 480;
+    const hw = 32 + (y - 26) / 574 * 418;
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', (800 + (Math.random() * 2 - 1) * hw * 0.85).toFixed(1));
+    c.setAttribute('cy', y.toFixed(1));
+    c.setAttribute('r', (0.6 + Math.random() * 1.5).toFixed(2));
+    c.setAttribute('class', 'mote');
+    c.style.setProperty('--dx', `${(Math.random() * 40 - 20).toFixed(1)}px`);
+    c.style.setProperty('--dy', `${(10 + Math.random() * 40).toFixed(1)}px`);
+    c.style.setProperty('--d', `${(9 + Math.random() * 12).toFixed(1)}s`);
+    c.style.setProperty('--del', `${(-Math.random() * 20).toFixed(1)}s`);
+    c.style.setProperty('--o', (0.25 + Math.random() * 0.5).toFixed(2));
+    g.appendChild(c);
+  }
+}
+function applyMotion() {
+  document.documentElement.classList.toggle('rm', RM);
+  const svg = $('#scene');
+  if (svg.pauseAnimations) { if (RM) svg.pauseAnimations(); else svg.unpauseAnimations(); }
+}
+
+// =====================================================================
+// 7. Audio: the shared engine (OA.audio). One source (top-bar file or the shared pink noise) fans out to one
+// exact-Q27 chain per candidate; switching = chain gains. Starts only on a user gesture.
+// =====================================================================
+OA.audio.useCodec({ designSection, encodeSection, preampWord });
+const audio = { chains: [], graphFor: null, playing: false, swapTimer: null };
+function teardown() {
+  clearTimeout(audio.swapTimer);
+  audio.chains.forEach((ch) => ch.dispose(60));
+  audio.chains = []; audio.graphFor = null;
+}
+function buildGraph() {
+  teardown();
+  const T = state.test;
+  // Each chain starts muted at its loudness trim (OA.audio.matchGains, from levelDb).
+  audio.chains = T.cands.map((c, i) => OA.audio.buildChain(c.bands, c.pre, { gainDb: T.comp[i], on: false }));
+  audio.graphFor = T;
+}
+function activeIdx() { const T = state.test; return T && T.active ? T.maps[T.round][T.active - 1] : -1; }
+function applySwitchGains(immediate) {
+  if (!audio.chains.length) return;
+  const T = state.test, idx = activeIdx();
+  clearTimeout(audio.swapTimer);
+  if (state.labMode && !immediate) {
+    // 3-second silent swap, as in the lab: everyone muted until the box locks.
+    audio.chains.forEach((ch, i) => ch.setGain(T.comp[i], false));
+    audio.swapTimer = setTimeout(() => { if (audio.chains[idx] && activeIdx() === idx) audio.chains[idx].setGain(T.comp[idx], true); }, 3000);
+  } else audio.chains.forEach((ch, i) => ch.setGain(T.comp[i], i === idx));
+}
+async function togglePlay() {
+  const T = state.test;
+  if (!T || T.ended) { toast(L('Comece um teste em Candidatos para tocar.', 'Start a test in Candidates to play.')); return; }
+  try {
+    if (!audio.playing) {
+      if (audio.graphFor !== T || !audio.chains.length) { buildGraph(); applySwitchGains(true); }
+      audio.playing = true;
+      await OA.audio.start('chains');
+    } else {
+      audio.playing = false;
+      OA.audio.stop();
+    }
+  } catch (err) {
+    audio.playing = false;
+    toast(L(`Não foi possível tocar: ${err.message}`, `Could not play: ${err.message}`));
+  }
+  renderTransport(); renderRate();
+}
+function stopAudio() {
+  if (audio.playing) OA.audio.stop();
+  audio.playing = false;
+  teardown();
+  renderTransport();
+}
+// Engine changes (file loaded/removed, rate known, raw play from the top bar) update this page.
+OA.audio.onChange((s) => {
+  if (audio.playing && s.mode !== 'chains') audio.playing = false;
+  renderSource(s); renderRate(); renderTransport();
+});
+
+// =====================================================================
+// 8. Test flow
+// =====================================================================
+function selectionIssues() {
+  const out = [];
+  if (!state.output) out.push(L('Confirme a saída em Preparo.', 'Confirm the output in Setup.'));
+  if (state.selected.length < 2) out.push(L('Escolha pelo menos 2 candidatos.', 'Pick at least 2 candidates.'));
+  return out;
+}
+function startTest() {
+  const issues = selectionIssues();
+  const msg = $('#startMsg');
+  if (issues.length) { msg.textContent = issues.join(' '); msg.className = 'msg err'; return; }
+  const cands = state.selected.map((id) => pool.get(id));
+  cands.forEach(ensureGate);
+  const bad = cands.filter((c) => !c.gate.ok);
+  if (bad.length) { msg.textContent = L(`Recusado pelo gate v2: ${bad.map(candName).join(', ')}.`, `Refused by gate v2: ${bad.map(candName).join(', ')}.`); msg.className = 'msg err'; renderCandidates(); return; }
+  if (cands.some((c) => !Number.isFinite(c.level))) { msg.textContent = L('Nível indefinido para um candidato.', 'Undefined level for a candidate.'); msg.className = 'msg err'; return; }
+  msg.textContent = ''; msg.className = 'msg';
+  stopAudio();
+  state.test = { cands, k: cands.length, comp: OA.audio.matchGains(cands.map((c) => c.level)), round: 0, planned: state.rounds, maps: [randPerm(cands.length)], ratings: [], current: new Array(cands.length).fill(null), active: null, loads: 0, ended: false };
+  lowerCurtain(); resetShapes();
+  // Identical boxes, one per candidate: nothing visible tells the candidates apart.
+  shapes.forEach((sh, i) => { sh.el.style.display = i < state.test.k ? '' : 'none'; });
+  goTab('escuta');
+  setActive(1);
+  renderAll();
+}
+function setActive(n) {
+  const T = state.test;
+  if (!T || T.ended) { toast(L('Nenhum teste em andamento.', 'No test running.')); return; }
+  if (n < 1 || n > T.k) return;
+  if (T.active !== n) { T.active = n; T.loads++; applySwitchGains(false); shuffleTo(n); }
+  renderKeys(); renderCabo();
+}
+function roundComplete() { const T = state.test; return T && T.current.every((v) => v != null); }
+function commitRound() {
+  const T = state.test;
+  const rec = new Array(T.k);
+  T.current.forEach((v, n) => { rec[T.maps[T.round][n]] = v; });
+  T.ratings.push(rec);
+}
+function nextRound() {
+  const T = state.test;
+  if (!T || T.ended) return;
+  if (!roundComplete()) { $('#escMsg').textContent = L('Dê uma nota a cada candidato antes de seguir.', 'Score every candidate before moving on.'); $('#escMsg').className = 'msg err'; return; }
+  commitRound();
+  if (T.ratings.length >= T.planned) { endTest(); return; }
+  T.round++; T.maps.push(randPerm(T.k)); T.current = new Array(T.k).fill(null); T.active = null;
+  $('#escMsg').textContent = ''; $('#escMsg').className = 'msg';
+  setActive(1);
+  renderEscuta(); renderHw();
+  $('#srStatus').textContent = L(`Rodada ${T.round + 1}. Ordem sorteada de novo.`, `Round ${T.round + 1}. Order drawn again.`);
+}
+const T975 = [NaN, 12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042];
+function stats(arr) {
+  const n = arr.length, mean = arr.reduce((a, b) => a + b, 0) / n;
+  const sd = n > 1 ? Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : NaN;
+  const t = T975[n - 1] ?? 1.96;
+  return { n, mean, sd, half: n > 1 ? t * sd / Math.sqrt(n) : NaN };
+}
+function endTest() {
+  const T = state.test;
+  if (!T || T.ended) return;
+  if (roundComplete() && T.ratings.length <= T.round) commitRound();
+  if (!T.ratings.length) { $('#escMsg').textContent = L('Complete pelo menos uma rodada.', 'Complete at least one round.'); $('#escMsg').className = 'msg err'; return; }
+  T.ended = true;
+  const res = T.cands.map((c, i) => ({ c, ...stats(T.ratings.map((r) => r[i])) }));
+  const win = res.reduce((b, r, i) => r.mean > res[b].mean ? i : b, 0);
+  const as = OA.audio.state();
+  state.lastResult = { res, win, test: T, rate: as.ready ? as.rate : null };
+  const spreadUsed = T.cands.find((c) => c.type === 'variation')?.spread ?? null;
+  state.stages.push({ names: T.cands.map(candName), ids: T.cands.map((c) => c.id), means: res.map((r) => r.mean), win, spread: spreadUsed });
+  stopAudio();
+  revealCurtain(T.maps[T.maps.length - 1]);
+  goTab('resultado');
+  renderAll();
+  $('#srStatus').textContent = L(`Tela erguida. Vencedora: ${candName(res[win].c)}.`, `Scrim raised. Winner: ${candName(res[win].c)}.`);
+}
+function continueX2() {
+  const R = state.lastResult;
+  if (!R) return;
+  const winner = R.res[R.win].c;
+  const prev = state.stages.at(-1)?.spread ?? state.spread;
+  const next = Math.max(0.25, Math.round((prev / 2) * 20) / 20);
+  const msg = $('#resMsg');
+  msg.textContent = L('Gerando variações e passando pelo gate…', 'Generating variations and running the gate…');
+  setTimeout(() => {
+    const vars = makeVariations(winner, next, PATTERNS.slice(0, 2)).filter((v) => v.gate.ok);
+    if (!vars.length) { msg.textContent = L('Nenhuma variação passou no gate v2. O torneio para aqui.', 'No variation passed gate v2. The tournament stops here.'); msg.className = 'msg err'; return; }
+    state.selected = [winner.id, ...vars.map((v) => v.id)].slice(0, 3);
+    state.test = null;
+    lowerCurtain(); resetShapes(); setCue('idle', L('próxima etapa pronta', 'next stage ready'));
+    msg.textContent = ''; msg.className = 'msg';
+    goTab('candidatos');
+    $('#startMsg').textContent = L(`Etapa ${state.stages.length + 1}: vencedora contra ${vars.length} variação(ões) com ±${fmt(next, 2)} dB. Confira e comece.`, `Stage ${state.stages.length + 1}: winner against ${vars.length} variation(s) at ±${fmt(next, 2)} dB. Check and start.`);
+    $('#startMsg').className = 'msg';
+    renderAll();
+  }, 30);
+}
+
+// =====================================================================
+// 9. Sliders: exact readout, click-to-type, Shift ×10, Alt ×0,1
+// =====================================================================
+function paintRange(input) {
+  const min = +input.min, max = +input.max;
+  input.style.setProperty('--p', `${((+input.value - min) / (max - min)) * 100}%`);
+}
+function bindSlider(input, readout, { show, onChange, label }) {
+  const min = +input.min, max = +input.max, step = +input.dataset.step || 1, isInt = !!input.dataset.int;
+  const quant = (v, res) => Math.round(v / res) * res;
+  const api = {
+    set(v, res = step) {
+      v = clamp(isInt ? Math.round(v) : quant(v, res), min, max);
+      v = Math.round(v * 1000) / 1000;
+      input.value = String(v); paintRange(input);
+      if (onChange) onChange(v);
+      api.show();
+    },
+    show() { readout.textContent = show(+input.value); readout.setAttribute('aria-label', `${label()}: ${readout.textContent}. ${L('Clique para digitar', 'Click to type')}`); },
+  };
+  input.addEventListener('input', () => api.set(+input.value));
+  input.addEventListener('keydown', (e) => {
+    const dir = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 }[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    const mult = e.shiftKey ? 10 : e.altKey ? 0.1 : 1;
+    api.set(+input.value + dir * step * mult, step * 0.1);
+  });
+  readout.addEventListener('click', () => {
+    const ed = document.createElement('input');
+    ed.type = 'text'; ed.className = 'readout-edit'; ed.inputMode = 'decimal';
+    ed.value = String(+input.value).replace('.', LANG === 'pt' ? ',' : '.');
+    ed.setAttribute('aria-label', label());
+    readout.hidden = true; readout.after(ed); ed.focus(); ed.select();
+    let done = false;
+    const finish = (commit) => {
+      if (done) return; done = true;
+      if (commit) { const v = parseNum(ed.value); if (Number.isFinite(v)) api.set(v, step * 0.1); }
+      ed.remove(); readout.hidden = false; readout.focus();
+    };
+    ed.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } });
+    ed.addEventListener('blur', () => finish(true));
+  });
+  paintRange(input); api.show();
+  return api;
+}
+const digitsFor = (v) => (Math.abs(Math.round(v * 100) - Math.round(v * 10) * 10) > 0 ? 2 : 1);
+const spreadSl = bindSlider($('#spread'), $('#spreadOut'), { show: (v) => `±${fmt(v, digitsFor(v))} dB`, onChange: (v) => { state.spread = v; }, label: () => L('Amplitude', 'Spread') });
+const roundsSl = bindSlider($('#rounds'), $('#roundsOut'), { show: (v) => fmt(v, 0), onChange: (v) => { state.rounds = v; renderCabo(); }, label: () => L('Rodadas', 'Rounds') });
+
+// =====================================================================
+// 10. Rendering
+// =====================================================================
+function spark(c) {
+  const W = 200, H = 34, N = 48, lo = -16, hi = 8;
+  const y = (db) => (H - 2) - (clamp(db, lo, hi) - lo) / (hi - lo) * (H - 4);
+  let d = '';
+  for (let i = 0; i < N; i++) {
+    const f = 20 * Math.pow(1000, i / (N - 1));
+    const v = magnitudeDb(c.bands, f) + c.pre;
+    d += `${i ? 'L' : 'M'}${(i / (N - 1) * W).toFixed(1)} ${y(v).toFixed(1)}`;
+  }
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="rgba(236,231,221,.15)" stroke-dasharray="3 3"/><path d="${d}" fill="none" stroke="${state.selected.includes(c.id) ? '#FFD27A' : '#a59d8f'}" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function gateChip(c) {
+  if (!c.gate) return `<span class="chip">${L('gate v2…', 'gate v2…')}</span>`;
+  return c.gate.ok ? '<span class="chip ok">gate v2 ✓</span>' : `<span class="chip bad">${L('recusada', 'refused')}</span>`;
+}
+function candCard(c, idx) {
+  const sel = state.selected.indexOf(c.id);
+  const desc = c.desc ? `<p class="cand-desc"><span class="by">${L('descrição da Kuba', 'Kuba’s description')}</span>${esc(c.desc)}</p>`
+    : c.type === 'current' ? `<p class="cand-desc">${c.from === 'storage' ? L(`A curva aberta na página Curva: ${esc(c.storedName)}.`, `The curve open on the Curve page: ${esc(c.storedName)}.`) : L('Nenhuma curva salva na página Curva: usamos Auri.', 'No curve saved on the Curve page: using Auri.')}${c.experimental ? L(' Tem seções HS/LP/HP (camada ENGENHARIA): toca só no navegador.', ' Has HS/LP/HP sections (ENGINEERING layer): browser playback only.') : ''}</p>`
+    : c.type === 'neutral' ? `<p class="cand-desc">${L('10 × OFF, preamp −0,5 dB. O controle sem EQ.', '10 × OFF, preamp −0.5 dB. The no-EQ control.')}</p>`
+    : `<p class="cand-desc">${L(`Variação de ${esc(c.baseName)}: ${c.pattern.pt} ${fmtS(c.spread, 2)} dB.`, `Variation of ${esc(c.baseNameEn || c.baseName)}: ${c.pattern.en} ${fmtS(c.spread, 2)} dB.`)}</p>`;
+  const reasons = c.gate && !c.gate.ok ? `<div class="cand-reasons">${esc(c.gate.reasons.slice(0, 4).join(' · '))}</div>` : '';
+  const aria = `${candName(c)}${sel >= 0 ? L(', escolhida', ', selected') : ''}`;
+  return `<div class="cand" role="checkbox" tabindex="0" aria-checked="${sel >= 0}" aria-label="${esc(aria)}" data-id="${esc(c.id)}">
+    <div class="cand-top">${idx != null ? `<span class="cand-sel" style="color:var(--muted)">${idx}</span>` : ''}<span class="cand-name">${esc(candName(c))}</span>${c.experimental ? '<span class="chip exp">EXPERIMENTAL</span>' : ''}${gateChip(c)}<span class="cand-sel">${sel >= 0 ? '✓' : ''}</span></div>
+    ${spark(c)}${desc}
+    <div class="cand-meta">preamp ${fmt(c.pre, 1)} dB · ${L('nível', 'level')} ${fmt(c.level, 2)} dB</div>${reasons}</div>`;
+}
+function renderCandidates() {
+  const all = [...pool.values()];
+  const groups = [
+    { k: 'pref', pt: 'Curvas de preferência', en: 'Preference curves' },
+    { k: 'ref', pt: 'Curvas de referência', en: 'Reference curves' },
+    { k: 'other', pt: 'Controle e curva atual', en: 'Control and current curve' },
+    { k: 'var', pt: 'Variações em torno de um alvo', en: 'Variations around a target' },
+  ];
+  const focusedId = document.activeElement?.closest?.('.cand')?.dataset.id;
+  $('#candGroups').innerHTML = groups.map((g) => {
+    const items = all.filter((c) => c.group === g.k);
+    if (!items.length) return '';
+    return `<div><div class="group-h"><span class="eyebrow">${L(g.pt, g.en)}</span>${g.k !== 'other' && g.k !== 'var' ? `<span class="note" style="margin:0">${L('nomes oficiais dos presets', 'official preset names')}</span>` : ''}</div>
+      <div class="cands">${items.map((c) => candCard(c, c.type === 'preset' ? LABELS.findIndex((l) => l.id === c.id) + 1 : null)).join('')}</div></div>`;
+  }).join('');
+  if (focusedId) $(`.cand[data-id="${CSS.escape(focusedId)}"]`)?.focus();
+  $('#selCount').textContent = L(`${state.selected.length} de 3 escolhidas${state.selected.length ? ': ' + state.selected.map((id) => candName(pool.get(id))).join(', ') : ''}.`,
+    `${state.selected.length} of 3 selected${state.selected.length ? ': ' + state.selected.map((id) => candName(pool.get(id))).join(', ') : ''}.`);
+  const sel = $('#varBase'), keep = sel.value;
+  sel.innerHTML = all.filter((c) => c.type !== 'variation' && c.type !== 'neutral').map((c) => `<option value="${esc(c.id)}">${esc(candName(c))}</option>`).join('');
+  sel.value = keep && pool.has(keep) ? keep : 'padrao';
+  renderLevels();
+}
+function toggleCand(id) {
+  const i = state.selected.indexOf(id);
+  if (i >= 0) state.selected.splice(i, 1);
+  else {
+    if (state.selected.length >= 3) { toast(L('No máximo 3 candidatos.', 'At most 3 candidates.')); return; }
+    const c = pool.get(id);
+    if (c.gate && !c.gate.ok) { toast(L('Esta curva foi recusada pelo gate v2.', 'This curve was refused by gate v2.')); return; }
+    state.selected.push(id);
+  }
+  renderCandidates(); renderCabo();
+}
+function renderLevels() {
+  const cands = state.selected.map((id) => pool.get(id));
+  const body = $('#lvlBody');
+  if (cands.length < 1) {
+    body.innerHTML = `<tr><td colspan="3" class="note">${L('Nenhum candidato.', 'No candidates.')}</td></tr>`;
+  } else {
+    const minL = Math.min(...cands.map((c) => c.level));
+    body.innerHTML = cands.map((c) => `<tr><td>${esc(candName(c))}</td><td class="num">${fmt(c.level, 2)} dB</td><td class="num">${fmtS(minL - c.level, 2)} dB</td></tr>`).join('');
+  }
+  const on = cands.length >= 2;
+  const spread = on ? Math.max(...cands.map((c) => c.level)) - Math.min(...cands.map((c) => c.level)) : 0;
+  $('#lvlLamp2').className = 'lamp' + (on ? ' on' : '');
+  $('#lvlStatus').textContent = on ? L(`Diferença de ${fmt(spread, 2)} dB, compensada. Δ residual 0,00 dB.`, `Difference of ${fmt(spread, 2)} dB, compensated. Residual Δ 0.00 dB.`) : L('Escolha 2 ou 3 candidatos.', 'Pick 2 or 3 candidates.');
+  renderHw();
+}
+function renderPrep() {
+  $$('input[name=out]').forEach((r) => { r.checked = r.value === state.output; r.closest('.opt').classList.toggle('checked', r.checked); });
+  const w = $('#outWarn');
+  const cab = cableCurve(), cabNeutral = curveKey(cab.pre, cab.bands) === curveKey(-0.5, NEUTRAL_BANDS);
+  if (!state.output) w.textContent = L('Escolha uma opção para liberar o início.', 'Pick one to enable the start.');
+  else if (state.output === 'neutro') w.textContent = cabNeutral ? L('No simulado o cabo já está em Neutro.', 'In the simulation the cable is already in Neutral.')
+    : L(`Ouvir pelo cabo soma a curva gravada nele. No simulado ele está com ${cab.name || 'Auri'}: use Neutro e depois Gravar no cabo.`, `Listening through the cable adds the curve stored in it. In the simulation it holds ${cab.name || 'Auri'}: use Neutral, then Write to cable.`);
+  else w.textContent = L('Certo: a curva do cabo fica fora do caminho.', 'Good: the cable’s curve stays out of the path.');
+  renderSource(OA.audio.state());
+  renderRate();
+}
+// Source = the shared engine: the top-bar file if one is loaded, otherwise the shared pink noise.
+function renderSource(s) {
+  const f = s.file;
+  $('#srcName').textContent = f ? f.name : L('Ruído rosa', 'Pink noise');
+  $('#srcDetail').textContent = f
+    ? `${Number.isFinite(f.duration) ? `${Math.floor(f.duration / 60)}:${String(Math.floor(f.duration % 60)).padStart(2, '0')} · ` : ''}${fmt(f.size / 1048576, 1)} MB${s.error ? L(' · não reconhecido como áudio', ' · not recognised as audio') : ''}`
+    : L('Nenhum arquivo: ruído rosa gerado no navegador.', 'No file: pink noise generated in the browser.');
+}
+function renderRate() {
+  const s = OA.audio.state();
+  const sr = s.ready ? s.rate : null;
+  const exact = s.ready && s.exact;
+  $('#segRateV').textContent = sr ? `${fmt(sr / 1000, sr % 1000 ? 1 : 0)} kHz` : '96 kHz';
+  $('#segRate').classList.toggle('dim', !sr);
+  $('#rateNote').textContent = !sr
+    ? L('Pedimos 96 000 Hz ao navegador quando você tocar pela primeira vez. Cada seção roda num IIRFilterNode com os coeficientes Q27 que o chip usaria.', 'We ask the browser for 96,000 Hz the first time you play. Each section runs in an IIRFilterNode with the Q27 coefficients the chip would use.')
+    : exact ? L('O navegador aceitou 96 000 Hz: cada seção roda com os coeficientes Q27 exatos do cabo.', 'The browser accepted 96,000 Hz: each section runs with the cable’s exact Q27 coefficients.')
+    : L(`O navegador só ofereceu ${fmt(sr, 0)} Hz. Recalculamos as seções nessa taxa: o som é próximo, mas não são os coeficientes exatos do cabo.`, `The browser only offered ${fmt(sr, 0)} Hz. Sections are redesigned at that rate: close, but not the cable’s exact coefficients.`);
+}
+function renderKeys() {
+  const T = state.test, k = T ? T.k : 0, live = T && !T.ended;
+  $$('[data-n]').forEach((el) => {
+    const n = +el.dataset.n;
+    const on = !!(live && T.active === n);
+    el.setAttribute('aria-pressed', String(on));
+    const dis = !live || n > k;
+    el.setAttribute('aria-disabled', String(dis));
+    if (el.classList.contains('bignum')) el.hidden = !!T && n > k;
+    if (el.classList.contains('plate') || el.classList.contains('key') || el.classList.contains('bignum')) el.setAttribute('aria-label', `${L('Candidato', 'Candidate')} ${n}${on ? L(', tocando', ', active') : ''}`);
+  });
+}
+function renderTransport() {
+  const on = audio.playing;
+  $('#playKey').setAttribute('aria-pressed', String(on));
+  $('#playKey').setAttribute('aria-label', on ? L('Pausar (Espaço)', 'Pause (Space)') : L('Tocar (Espaço)', 'Play (Space)'));
+  $('#playIcon').setAttribute('d', on ? 'M5 3 H8.5 V17 H5 Z M11.5 3 H15 V17 H11.5 Z' : 'M5 3 L17 10 L5 17 Z');
+  $('#playLabel').textContent = on ? L('❚❚ Pausar', '❚❚ Pause') : L('▶ Tocar', '▶ Play');
+}
+function renderHw() {
+  const T = state.test;
+  $('#segRoundV').textContent = T ? `${String(Math.min(T.round + 1, T.planned)).padStart(2, '0')}/${String(T.planned).padStart(2, '0')}` : '––/––';
+  $('#segRound').classList.toggle('dim', !T);
+  const n = T ? T.k : state.selected.length;
+  const on = n >= 2;
+  $('#lvlLamp').className = 'lamp' + (on ? ' on' : '');
+  $('#lvlText').textContent = T ? L('Δ residual 0,00 dB', 'residual Δ 0.00 dB') : on ? L('pronto para igualar', 'ready to match') : L('sem candidatos', 'no candidates');
+  $('#labMode').setAttribute('aria-checked', String(state.labMode));
+}
+function renderEscuta() {
+  const T = state.test, live = T && !T.ended;
+  $('#escEmpty').hidden = !!live; $('#escBody').hidden = !live;
+  if (!live) return;
+  $('#escRound').textContent = String(T.round + 1); $('#escPlanned').textContent = String(T.planned);
+  const box = $('#ratings');
+  const focusId = document.activeElement?.id;
+  box.innerHTML = Array.from({ length: T.k }, (_, i) => `<div class="sl"><label for="rate${i + 1}">${L('Candidato', 'Candidate')} ${i + 1}<small id="rateHint${i + 1}">${T.current[i] == null ? L('a avaliar', 'not rated') : L('avaliado', 'rated')}</small></label>
+    <input type="range" id="rate${i + 1}" min="0" max="10" step="any" data-step="0.1" value="${T.current[i] ?? 5}" class="${T.current[i] == null ? 'untouched' : ''}" aria-label="${L('Nota do candidato', 'Score for candidate')} ${i + 1}">
+    <button class="readout ${T.current[i] == null ? 'untouched' : ''}" type="button" id="rateOut${i + 1}"></button></div>`).join('');
+  for (let i = 0; i < T.k; i++) {
+    const inp = $(`#rate${i + 1}`), out = $(`#rateOut${i + 1}`);
+    bindSlider(inp, out, {
+      show: (v) => fmt(v, digitsFor(v)),
+      label: () => `${L('Nota do candidato', 'Score for candidate')} ${i + 1}`,
+      onChange: (v) => { T.current[i] = v; inp.classList.remove('untouched'); out.classList.remove('untouched'); $(`#rateHint${i + 1}`).textContent = L('avaliado', 'rated'); renderEscInfo(); },
+    });
+  }
+  if (focusId && $(`#${focusId}`)) $(`#${focusId}`).focus();
+  renderEscInfo();
+}
+function renderEscInfo() {
+  const T = state.test;
+  if (!T) return;
+  const done = T.ratings.length;
+  $('#escInfo').textContent = L(`${done} rodada(s) completas · ${T.loads} troca(s)`, `${done} round(s) complete · ${T.loads} switch(es)`);
+  $('#nextRound').setAttribute('aria-disabled', String(!roundComplete()));
+}
+function renderResult() {
+  const R = state.lastResult;
+  $('#resEmpty').hidden = !!R; $('#resBody').hidden = !R;
+  if (!R) return;
+  const { res, win } = R;
+  $('#resWinner').textContent = L(`Vencedora: ${candName(res[win].c)}`, `Winner: ${candName(res[win].c)}`);
+  const n = res[0].n;
+  $('#resLede').textContent = n < 2 ? L('Uma rodada só: sem intervalo de confiança. Faça pelo menos 2.', 'Only one round: no confidence interval. Do at least 2.')
+    : L(`${n} rodadas, nível igualado, ordem sorteada em cada uma.`, `${n} rounds, level-matched, order randomised each time.`);
+  // chart
+  const W = 560, H = 300, Lp = 40, Rp = 14, Tp = 18, Bp = 54, pw = W - Lp - Rp, ph = H - Tp - Bp;
+  const y = (v) => Tp + (10 - clamp(v, 0, 10)) / 10 * ph;
+  let s = '';
+  for (let v = 0; v <= 10; v += 2) s += `<line x1="${Lp}" x2="${W - Rp}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(236,231,221,${v === 0 ? .25 : .08})"/><text x="${Lp - 8}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
+  res.forEach((r, i) => {
+    const cx = Lp + (i + 0.5) * (pw / res.length), isW = i === win, col = isW ? '#FFD27A' : '#ECE7DD';
+    if (Number.isFinite(r.half)) {
+      const a = y(r.mean + r.half), b = y(r.mean - r.half);
+      s += `<rect x="${cx - 22}" y="${a}" width="44" height="${b - a}" fill="${isW ? 'rgba(255,210,122,.10)' : 'rgba(236,231,221,.05)'}"/><line x1="${cx}" x2="${cx}" y1="${a}" y2="${b}" stroke="${col}" stroke-width="2"/><line x1="${cx - 12}" x2="${cx + 12}" y1="${a}" y2="${a}" stroke="${col}" stroke-width="2"/><line x1="${cx - 12}" x2="${cx + 12}" y1="${b}" y2="${b}" stroke="${col}" stroke-width="2"/>`;
+    }
+    s += `<circle cx="${cx}" cy="${y(r.mean)}" r="7" fill="${isW ? '#FFD27A' : '#171715'}" stroke="${col}" stroke-width="2"/>`;
+    s += `<text x="${cx + 14}" y="${y(r.mean) + 4}" style="fill:${col}">${fmt(r.mean, 1)}</text>`;
+    const nm = candName(r.c);
+    s += `<text x="${cx}" y="${H - Bp + 22}" text-anchor="middle" style="fill:${col};font-size:12px">${esc(nm.length > 24 ? nm.slice(0, 23) + '…' : nm)}</text>`;
+    s += `<text x="${cx}" y="${H - Bp + 38}" text-anchor="middle">${Number.isFinite(r.half) ? `±${fmt(r.half, 2)}` : L('sem IC', 'no CI')}</text>`;
+  });
+  const chart = $('#chart');
+  chart.innerHTML = s;
+  chart.setAttribute('aria-label', L('Gráfico de preferência média com intervalo de confiança de 95 %: ', 'Mean preference chart with 95 % confidence interval: ') +
+    res.map((r) => `${candName(r.c)} ${fmt(r.mean, 1)}${Number.isFinite(r.half) ? ` ± ${fmt(r.half, 2)}` : ''}`).join('; '));
+  $('#resBodyTable').innerHTML = res.map((r, i) => `<tr><td>${i === win ? '★ ' : ''}${esc(candName(r.c))}</td><td class="num">${fmt(r.mean, 2)}</td><td class="num">${Number.isFinite(r.half) ? `${fmt(r.mean - r.half, 2)} a ${fmt(r.mean + r.half, 2)}`.replace(' a ', LANG === 'en' ? ' to ' : ' a ') : '–'}</td><td class="num">${r.n}</td></tr>`).join('');
+  // links
+  const w = res[win].c;
+  $('#openWinner').href = 'curva.html';   // the click handler writes "oa.v2.current" first
+  const order = res.map((r, i) => i).sort((a, b) => res[b].mean - res[a].mean);
+  const ref = (c) => c.type === 'preset' ? c.id : `curve:${encodeURIComponent(JSON.stringify({ preampDb: c.pre, eqBands: c.bands }))}`;
+  $('#compareLink').href = `comparar.html#a=${ref(res[order[0]].c)}&b=${ref(res[order[1]].c)}`;
+  renderBracket();
+}
+function renderBracket() {
+  const st = state.stages;
+  const colW = 176, boxW = 150, boxH = 30, gap = 10, cols = st.length + 3;
+  const W = 16 + cols * colW, H = 16 + 3 * (boxH + gap) + 30;
+  const prevSpread = st.at(-1)?.spread ?? state.spread;
+  let s = '';
+  const box = (x, yy, label, opts = {}) => {
+    const t = label.length > 20 ? label.slice(0, 19) + '…' : label;
+    return `<rect x="${x}" y="${yy}" width="${boxW}" height="${boxH}" rx="6" fill="${opts.win ? 'rgba(255,210,122,.12)' : 'rgba(236,231,221,.03)'}" stroke="${opts.win ? '#FFD27A' : opts.dash ? 'rgba(236,231,221,.25)' : 'rgba(236,231,221,.2)'}" ${opts.dash ? 'stroke-dasharray="4 4"' : ''}/>
+      <text x="${x + 10}" y="${yy + 19}" style="fill:${opts.win ? '#FFD27A' : opts.dash ? '#8F8A80' : '#ECE7DD'}">${esc(t)}</text>${opts.score != null ? `<text x="${x + boxW - 8}" y="${yy + 19}" text-anchor="end">${fmt(opts.score, 1)}</text>` : ''}`;
+  };
+  st.forEach((stage, i) => {
+    const x = 16 + i * colW;
+    s += `<text x="${x}" y="14" style="font-size:10px;letter-spacing:.12em">${L('ETAPA', 'STAGE')} ${i + 1}</text>`;
+    stage.names.forEach((nm, j) => {
+      const yy = 22 + j * (boxH + gap);
+      s += box(x, yy, nm, { win: j === stage.win, score: stage.means[j] });
+    });
+    const wy = 22 + stage.win * (boxH + gap) + boxH / 2;
+    const nx = x + colW, ny = 22 + boxH / 2;
+    s += `<path d="M${x + boxW} ${wy} H${x + boxW + 12} V${ny} H${nx}" fill="none" stroke="#FFD27A" stroke-width="1.5"/>`;
+  });
+  let sp = prevSpread;
+  for (let p = 0; p < 2; p++) {
+    const x = 16 + (st.length + p) * colW;
+    sp = Math.max(0.25, Math.round((sp / 2) * 20) / 20);
+    s += `<text x="${x}" y="14" style="font-size:10px;letter-spacing:.12em">${L('ETAPA', 'STAGE')} ${st.length + p + 1} · ${L('prevista', 'planned')}</text>`;
+    s += box(x, 22, L('vencedora', 'winner'), { dash: true });
+    s += box(x, 22 + boxH + gap, `${L('graves', 'bass')} ±${fmt(sp, 2)} dB`, { dash: true });
+    s += box(x, 22 + 2 * (boxH + gap), `${L('agudos', 'treble')} ±${fmt(sp, 2)} dB`, { dash: true });
+    s += `<path d="M${x + boxW} ${22 + boxH / 2} H${x + colW}" fill="none" stroke="rgba(236,231,221,.25)" stroke-dasharray="3 4"/>`;
+  }
+  const fx = 16 + (st.length + 2) * colW;
+  s += `<text x="${fx}" y="14" style="font-size:10px;letter-spacing:.12em">${L('FIM', 'END')}</text>`;
+  s += `<rect x="${fx}" y="22" width="${boxW}" height="${boxH}" rx="15" fill="none" stroke="#FFD27A" stroke-dasharray="2 4"/><text x="${fx + boxW / 2}" y="41" text-anchor="middle" style="fill:#FFD27A">${L('curva pessoal', 'personal curve')}</text>`;
+  const svg = $('#bracket');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.style.minWidth = `${Math.min(W, 900)}px`;
+  svg.innerHTML = s;
+  svg.setAttribute('aria-label', L('Chave do torneio: ', 'Tournament bracket: ') + st.map((x, i) => `${L('etapa', 'stage')} ${i + 1}, ${L('vencedora', 'winner')} ${x.names[x.win]}`).join('; ') + L('; mais duas etapas previstas até a curva pessoal.', '; two more planned stages up to the personal curve.'));
+}
+function flashEstimate() {
+  const T = state.test || state.lastResult?.test;
+  if (T && T.loads) return { n: T.loads + 1, real: true, loads: T.loads };
+  const k = Math.max(2, state.selected.length);
+  return { n: state.rounds * k * 2 + 1, real: false, k };
+}
+function renderCabo() {
+  const e = flashEstimate();
+  $('#flashCost').textContent = fmt(e.n, 0);
+  $('#flashText').textContent = L(`este torneio custaria ${fmt(e.n, 0)} gravações na flash`, `this tournament would cost ${fmt(e.n, 0)} flash writes`);
+  $('#flashHow').textContent = e.real
+    ? L(`Contado do seu teste: ${e.loads} troca(s) de candidato, cada uma uma gravação completa, mais 1 para voltar à sua curva.`, `Counted from your test: ${e.loads} candidate switch(es), each a full write, plus 1 to restore your curve.`)
+    : L(`Estimativa antes do teste: ${state.rounds} rodadas × ${e.k} candidatos × 2 audições, mais 1 para voltar à sua curva.`, `Estimate before testing: ${state.rounds} rounds × ${e.k} candidates × 2 listens, plus 1 to restore your curve.`);
+  const fc = OA.store.flashCounts();
+  $('#flashCounts').textContent = L(`Gravações simuladas neste navegador: sessão ${fmt(fc.session, 0)} · hoje ${fmt(fc.today, 0)} · total ${fmt(fc.total, 0)}`,
+    `Simulated writes in this browser: session ${fmt(fc.session, 0)} · today ${fmt(fc.today, 0)} · total ${fmt(fc.total, 0)}`);
+}
+function buildPayload() {
+  const R = state.lastResult;
+  if (!R) return null;
+  const T = R.test;
+  const keys = T.cands.map((_, i) => `c${i + 1}`);
+  const candidates = {};
+  T.cands.forEach((c, i) => {
+    candidates[keys[i]] = c.type === 'preset' ? { preset: c.id }
+      : { preampDb: c.pre, bands: c.bands.map((b) => b.kind === 'OFF' ? ['OFF'] : [b.kind, b.freqHz, b.gainDb, b.qFactor]) };
+  });
+  const pairs = [];
+  T.ratings.forEach((r, round) => {
+    for (let i = 0; i < T.k; i++) for (let j = i + 1; j < T.k; j++) pairs.push({ round: round + 1, a: keys[i], b: keys[j], ratingA: r[i], ratingB: r[j] });
+  });
+  return {
+    schema: 'open-auri.blind-ab/1',
+    pseudonym: state.pseudo,
+    levelMatch: 'levelDb 300 Hz-3 kHz, preamp incl.',
+    sampleRateHz: R.rate,
+    candidates,
+    pairs,
+  };
+}
+function consentOk() { return $$('.consent').every((c) => c.checked) && state.pseudo.trim().length >= 3; }
+function renderShare() {
+  const p = buildPayload();
+  $('#payload').textContent = p ? JSON.stringify(p, null, 2) : L('// Nada a enviar ainda: termine um teste para gerar os pares A/B.', '// Nothing to send yet: finish a test to generate the A/B pairs.');
+  const ready = !!p && consentOk();
+  $('#sendIssue').setAttribute('aria-disabled', String(!ready));
+}
+function renderChrome() {
+  const cur = pool.get('atual'), cab = cableCurve();
+  const n = curveKey(cur.pre, cur.bands) !== curveKey(cab.pre, cab.bands) ? 1 : 0;
+  $('#dirtyCounter').classList.toggle('has', n > 0);
+  $('#dirtyCounter').textContent = LANG === 'en' ? `${n} unsaved change${n === 1 ? '' : 's'}` : `${n} ${n === 1 ? 'alteração não gravada' : 'alterações não gravadas'}`;
+}
+function renderAll() {
+  renderChrome(); renderPrep(); renderCandidates(); renderEscuta(); renderKeys(); renderTransport(); renderHw(); renderResult(); renderCabo(); renderShare();
+  spreadSl.show(); roundsSl.show();
+  const T = state.test;
+  if (!T) setCue('idle');
+  else if (T.ended) setCue('revealed');
+  else if (!shuffle && T.active) setCue('locked', `${L('posição', 'position')} ${T.active}`);
+}
+
+// =====================================================================
+// 11. Tabs, overlays, events
+// =====================================================================
+const TABS = ['preparo', 'candidatos', 'escuta', 'resultado', 'cabo', 'compartilhar'];
+function goTab(name) {
+  state.tab = name;
+  TABS.forEach((t) => {
+    const tab = $(`#tab-${t}`), on = t === name;
+    tab.setAttribute('aria-selected', String(on)); tab.tabIndex = on ? 0 : -1;
+    $(`#p-${t}`).hidden = !on;
+  });
+}
+$$('.step').forEach((tab) => {
+  tab.addEventListener('click', () => goTab(tab.id.replace('tab-', '')));
+  tab.addEventListener('keydown', (e) => {
+    const i = TABS.indexOf(tab.id.replace('tab-', ''));
+    let j = null;
+    if (e.key === 'ArrowRight') j = (i + 1) % TABS.length;
+    else if (e.key === 'ArrowLeft') j = (i - 1 + TABS.length) % TABS.length;
+    else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = TABS.length - 1;
+    if (j == null) return;
+    e.preventDefault(); goTab(TABS[j]); $(`#tab-${TABS[j]}`).focus();
+  });
+});
+$$('[data-go]').forEach((b) => b.addEventListener('click', () => goTab(b.dataset.go)));
+
+let lastFocus = null;
+function openOv(id) { lastFocus = document.activeElement; $(id).hidden = false; $(`${id} .btn`)?.focus(); }
+function closeOv(id) { $(id).hidden = true; if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+const toggleHelp = () => ($('#helpOv').hidden ? openOv('#helpOv') : closeOv('#helpOv'));
+$('#helpBtn').addEventListener('click', toggleHelp);
+$('#helpClose').addEventListener('click', () => closeOv('#helpOv'));
+$$('.overlay').forEach((ov) => ov.addEventListener('click', (e) => { if (e.target === ov) closeOv(`#${ov.id}`); }));
+
+let toastT = null;
+function toast(text) { const t = $('#toast'); t.textContent = text; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
+
+// chrome (simulated: never talks to a device)
+// Neutro / Padrão Auri set the shared editor curve ("oa.v2.current"); Gravar appends to "oa.v2.journal" and the flash counters.
+function setEditorCurve(name, source, pre, bands, msgPt, msgEn) {
+  OA.store.saveCurrent({ name, source, preampDb: pre, bands });
+  refreshCurrent(); renderAll(); setTimeout(verifyQueue, 60);
+  toast(L(msgPt, msgEn));
+}
+// Another tab (e.g. the Curva page) changed the shared curve, journal or language.
+window.addEventListener('storage', (e) => {
+  const K = OA.store.KEYS;
+  if (e.key === K.current || e.key === K.journal) { refreshCurrent(); renderAll(); setTimeout(verifyQueue, 60); }
+  else if (e.key === K.lang) { LANG = OA.store.getLang() === 'en-US' ? 'en' : 'pt'; applyI18n(); }
+});
+$('#btnNeutro').addEventListener('click', () => setEditorCurve('Neutro', 'preset:neutro', -0.5, NEUTRAL_BANDS, 'Editor em Neutro (10 × OFF, preamp −0,5 dB). Nada gravado.', 'Editor set to Neutral (10 × OFF, preamp −0.5 dB). Nothing written.'));
+$('#btnPadrao').addEventListener('click', () => setEditorCurve('Auri', 'preset:padrao', PRESETS.padrao.pre, toBands(PRESETS.padrao.b), 'Editor no preset Auri. Nada gravado.', 'Editor set to the Auri preset. Nothing written.'));
+let writeCheck = null;
+function renderWrite() {
+  const cur = pool.get('atual'), cab = cableCurve();
+  const name = cur.storedName || 'Auri';
+  const g = gateV2(cur.bands, cur.pre);
+  const dirty = curveKey(cur.pre, cur.bands) !== curveKey(cab.pre, cab.bands);
+  writeCheck = { g, cur, name };
+  const items = [
+    [false, L('Cabo conectado', 'Cable connected'), L('sem cabo · simulado', 'no cable · simulated')],
+    [g.ok, L(`“${name}” passa no gate v2`, `“${name}” passes gate v2`), g.ok ? 'ok' : (cur.experimental ? L('HS/LP/HP só gravam pela camada ENGENHARIA da Curva. ', 'HS/LP/HP are written only from the Curve ENGINEERING layer. ') : '') + g.reasons.join(' · ')],
+    [cur.pre >= -25.5 && cur.pre <= -0.5, L('Preamp entre −25,5 e −0,5 dB', 'Preamp between −25.5 and −0.5 dB'), `${fmt(cur.pre, 1)} dB`],
+    [dirty, L('Há alteração para gravar', 'There is a change to write'), dirty ? L('1 alteração', '1 change') : L('nada mudou', 'nothing changed')],
+    [true, L('Neutro sempre disponível para voltar', 'Neutral always available to go back'), '10 × OFF'],
+  ];
+  $('#writeList').innerHTML = items.map(([ok, a, b]) => `<li><span class="st ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✕'}</span><span>${esc(a)}<br><span class="note" style="margin:0">${esc(b)}</span></span></li>`).join('');
+  $('#writeGo').setAttribute('aria-disabled', String(!$('#writeAck').checked || !g.ok));
+}
+$('#btnGravar').addEventListener('click', () => { $('#writeAck').checked = false; refreshCurrent(); renderWrite(); openOv('#writeOv'); });
+$('#writeAck').addEventListener('change', renderWrite);
+$('#writeClose').addEventListener('click', () => closeOv('#writeOv'));
+$('#writeGo').addEventListener('click', () => {
+  if ($('#writeGo').getAttribute('aria-disabled') === 'true' || !writeCheck || !writeCheck.g.ok) return;
+  const { cur, name } = writeCheck;
+  const p = encodePayload(cur.bands, cur.pre);   // bytes only to compute the CRC; nothing is sent
+  const crc = `0x${((p.at(-1) << 8) | p.at(-2)).toString(16).toUpperCase().padStart(4, '0')}`;
+  OA.store.appendJournal({ at: Date.now(), name, crc, pre: cur.pre, bands: cur.bands.map(OA.store.bandToString) });
+  OA.store.recordFlash();
+  closeOv('#writeOv'); renderAll();
+  toast(L(`Simulado (CRC ${crc}): nenhum byte foi enviado ao cabo.`, `Simulated (CRC ${crc}): no byte was sent to the cable.`));
+});
+$('#langToggle').addEventListener('click', () => { LANG = LANG === 'pt' ? 'en' : 'pt'; OA.store.setLang(LANG === 'en' ? 'en-US' : 'pt-BR'); applyI18n(); });
+
+// preparo
+$$('input[name=out]').forEach((r) => r.addEventListener('change', () => { state.output = r.value; $('#prepMsg').textContent = ''; renderPrep(); }));
+// "Escolher arquivo de áudio" opens the shared top-bar ♪ Áudio popover (stopPropagation: its outside-click
+// handler would otherwise close it on this same click).
+$('#pickFile').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if ($('#oaAudioPop').hidden) $('#oaAudioBtn').click();
+  $('#oaAudioFile').focus();
+});
+
+// candidatos
+$('#candGroups').addEventListener('click', (e) => { const c = e.target.closest('.cand'); if (c) toggleCand(c.dataset.id); });
+$('#candGroups').addEventListener('keydown', (e) => {
+  const c = e.target.closest('.cand');
+  if (c && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); toggleCand(c.dataset.id); }
+});
+$('#genVar').addEventListener('click', () => {
+  const base = pool.get($('#varBase').value);
+  if (!base) return;
+  $('#varMsg').textContent = L('Gerando e passando pelo gate…', 'Generating and running the gate…');
+  setTimeout(() => {
+    const vars = makeVariations(base, state.spread);
+    const ok = vars.filter((v) => v.gate.ok).length;
+    $('#varMsg').textContent = L(`${ok} de ${vars.length} passaram no gate v2.`, `${ok} of ${vars.length} passed gate v2.`);
+    renderCandidates();
+  }, 30);
+});
+$('#startBtn').addEventListener('click', startTest);
+
+// escuta
+$$('.key, .bignum, .plate').forEach((el) => {
+  el.addEventListener('click', () => { if (el.getAttribute('aria-disabled') === 'true') { if (!state.test || state.test.ended) toast(L('Comece um teste em Candidatos.', 'Start a test in Candidates.')); return; } setActive(+el.dataset.n); });
+});
+$$('.plate').forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); el.dispatchEvent(new MouseEvent('click')); } }));
+$('#playKey').addEventListener('click', togglePlay);
+$('#playBtn').addEventListener('click', togglePlay);
+$('#labMode').addEventListener('click', () => { state.labMode = !state.labMode; renderHw(); toast(state.labMode ? L('Troca de 3 s: silêncio até a caixa travar.', '3 s switch: silence until the box locks.') : L('Troca instantânea no áudio; a tela continua mostrando o seletor.', 'Instant audio switch; the scene still shows the shuffler.')); });
+$('#nextRound').addEventListener('click', nextRound);
+$('#endTest').addEventListener('click', () => {
+  const T = state.test;
+  if (T && !roundComplete() && !T.ratings.length) { $('#escMsg').textContent = L('Complete pelo menos uma rodada.', 'Complete at least one round.'); $('#escMsg').className = 'msg err'; return; }
+  endTest();
+});
+$('#notes').addEventListener('input', (e) => { if (state.test) state.test.notes = e.target.value; });
+
+// resultado
+$('#continueX2').addEventListener('click', continueX2);
+// "Abrir vencedora na Curva": the winner becomes the shared editor curve, then we navigate.
+$('#openWinner').addEventListener('click', (e) => {
+  const R = state.lastResult;
+  if (!R) return;
+  e.preventDefault();
+  const w = R.res[R.win].c;
+  const source = w.type === 'preset' ? `preset:${w.id}` : w.type === 'neutral' ? 'preset:neutro' : w.type === 'current' ? (w.source || 'custom') : 'custom';
+  OA.store.saveCurrent({ name: w.type === 'current' ? (w.storedName || w.name) : w.name, source, preampDb: w.pre, bands: w.bands });
+  location.href = 'curva.html';
+});
+$('#newTest').addEventListener('click', () => { state.test = null; state.lastResult = null; state.stages = []; lowerCurtain(); resetShapes(); goTab('candidatos'); renderAll(); });
+
+// cabo (EM BREVE)
+$('#caboStart').addEventListener('click', () => toast(L('Em breve: nada é gravado no cabo por esta página.', 'Coming soon: this page writes nothing to the cable.')));
+
+// compartilhar (S6 opt-in, simulated)
+function newPseudo() { const a = new Uint8Array(3); crypto.getRandomValues(a); return `${LANG === 'en' ? 'listener' : 'ouvinte'}-${[...a].map((x) => x.toString(16).padStart(2, '0')).join('')}`; }
+state.pseudo = newPseudo();
+$('#pseudo').value = state.pseudo;
+$('#pseudo').addEventListener('input', (e) => { state.pseudo = e.target.value.replace(/[^\w.-]/g, '').slice(0, 32); renderShare(); });
+$('#rePseudo').addEventListener('click', () => { state.pseudo = newPseudo(); $('#pseudo').value = state.pseudo; renderShare(); });
+$$('.consent').forEach((c) => c.addEventListener('change', () => { c.closest('.opt').classList.toggle('checked', c.checked); renderShare(); }));
+$('#sendIssue').addEventListener('click', () => {
+  const m = $('#shareMsg');
+  if ($('#sendIssue').getAttribute('aria-disabled') === 'true') {
+    m.textContent = !state.lastResult ? L('Termine um teste primeiro.', 'Finish a test first.') : L('Marque os três consentimentos e escolha um pseudônimo.', 'Tick all three consents and choose a pseudonym.');
+    m.className = 'msg err'; return;
+  }
+  const body = '```json\n' + JSON.stringify(buildPayload(), null, 2) + '\n```';
+  const url = `https://github.com/OWNER/open-auri/issues/new?labels=preferencia-cega&title=${encodeURIComponent('Preferência cega: ' + state.pseudo)}&body=${encodeURIComponent(body)}`;
+  m.className = 'msg';
+  m.textContent = L(`Simulado: abriríamos ${url.slice(0, 72)}… (${fmt(url.length, 0)} caracteres). Nada foi enviado.`, `Simulated: we would open ${url.slice(0, 72)}… (${fmt(url.length, 0)} characters). Nothing was sent.`);
+});
+
+// global keyboard
+document.addEventListener('keydown', (e) => {
+  const tgt = e.target;
+  const typing = tgt.closest && tgt.closest('textarea, input[type=text], select, .readout-edit');
+  if (e.key === 'Escape') { if (!$('#helpOv').hidden) closeOv('#helpOv'); if (!$('#writeOv').hidden) closeOv('#writeOv'); return; }
+  if (typing || e.ctrlKey || e.metaKey) return;
+  if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+  if (!$('#helpOv').hidden || !$('#writeOv').hidden) return;
+  if (['1', '2', '3'].includes(e.key) && !e.altKey) {
+    if (state.test && !state.test.ended) { e.preventDefault(); setActive(+e.key); }
+    return;
+  }
+  if (e.key === ' ' || e.code === 'Space') {
+    if (tgt.closest && tgt.closest('button, a, [role=button], [role=checkbox], [role=switch], [role=tab], input[type=checkbox], input[type=radio]')) return;
+    e.preventDefault(); togglePlay(); return;
+  }
+  if ((e.key === 'n' || e.key === 'N') && !e.altKey) { if (state.test && !state.test.ended) { e.preventDefault(); nextRound(); } }
+});
+
+// =====================================================================
+// 12. Init
+// =====================================================================
+matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => { RM = e.matches; applyMotion(); });
+buildDust();
+applyMotion();
+resetShapes();
+applyI18n();
+setTimeout(verifyQueue, 400);
+</script>
+</body>
+</html>

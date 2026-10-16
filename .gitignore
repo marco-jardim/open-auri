@@ -147,3 +147,16 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Local web and worker tooling
+.wrangler/
+.dev.vars
+playwright-report/
+test-results/
+/web/wrangler.jsonc
+/workers/jobs/wrangler.jsonc
+/web/static/data/autoeq/
+
+# Design sources, analysis outputs and QA images are versioned.
+!/design/
+!/design/**

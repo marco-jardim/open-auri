@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import * as codec from '../src/dsp/eq0xcb.mjs';
+import * as codec from '../../src/dsp/eq0xcb.mjs';
 
 const fixture = JSON.parse(
-  await readFile(new URL('./fixtures/eq0xcb.reference.json', import.meta.url), 'utf8'),
+  await readFile(new URL('../fixtures/eq0xcb.reference.json', import.meta.url), 'utf8'),
 );
 const presetIds = Object.keys(fixture.presets);
 
@@ -30,7 +30,12 @@ test('preamp 0 dB encodes 1.0 in Q23', () => {
 
 // RBJ cookbook properties, from the filter definitions themselves.
 test('peaking: gain at the centre frequency equals gainDb', () => {
-  for (const [freqHz, gainDb, qFactor] of [[1000, 6, 1], [100, -9, 2], [8000, 3, 0.7], [40, -12, 4]]) {
+  for (const [freqHz, gainDb, qFactor] of [
+    [1000, 6, 1],
+    [100, -9, 2],
+    [8000, 3, 0.7],
+    [40, -12, 4],
+  ]) {
     const measured = codec.magnitudeDb([peaking(freqHz, gainDb, qFactor)], freqHz);
     assert.ok(Math.abs(measured - gainDb) < 1e-9, `PK ${freqHz} ${gainDb} ${qFactor}`);
   }
@@ -89,7 +94,9 @@ for (const id of presetIds) {
   });
 
   test(`reports match reference: ${id}`, () => {
-    const actual = codec.encodeReports(expected.eqBands, expected.preampDb).map((r) => Array.from(r));
+    const actual = codec
+      .encodeReports(expected.eqBands, expected.preampDb)
+      .map((r) => Array.from(r));
     assert.deepEqual(actual, expected.reports);
   });
 }
@@ -115,13 +122,17 @@ test('preamble bytes 4..5 are a u16 LE length of everything after them', () => {
 test('commitReport is the reference commit command zero-padded to 31 bytes', () => {
   const report = codec.commitReport();
   assert.equal(report.length, codec.REPORT_SIZE);
-  assert.deepEqual(Array.from(report.slice(0, codec.COMMIT_COMMAND.length)), [...codec.COMMIT_COMMAND]);
+  assert.deepEqual(Array.from(report.slice(0, codec.COMMIT_COMMAND.length)), [
+    ...codec.COMMIT_COMMAND,
+  ]);
   assert.ok(report.slice(codec.COMMIT_COMMAND.length).every((byte) => byte === 0));
 });
 
 test('exported constants cannot be mutated', () => {
   assert.throws(() => codec.PREAMBLE.push(0), TypeError);
-  assert.throws(() => { codec.COMMIT_COMMAND[0] = 0; }, TypeError);
+  assert.throws(() => {
+    codec.COMMIT_COMMAND[0] = 0;
+  }, TypeError);
   assert.ok(Object.isFrozen(codec.NEUTRAL_BANDS));
 });
 
@@ -183,7 +194,10 @@ test('encodePayload rejects a positive preamp and accepts 0 dB and cuts', () => 
 });
 
 test('encodePayload rejects coefficients outside int32 (Q27)', () => {
-  assert.throws(() => codec.encodePayload(withNeutral(peaking(20000, 40, 0.1)), 0), /does not fit Q27/);
+  assert.throws(
+    () => codec.encodePayload(withNeutral(peaking(20000, 40, 0.1)), 0),
+    /does not fit Q27/,
+  );
 });
 
 test('isStable implements the Jury criterion', () => {

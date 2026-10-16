@@ -1,0 +1,527 @@
+<!--
+TODOs críticos antes da publicação:
+- licença dos presets da Kuba a confirmar antes de publicar.
+- Confirmar os nove nomes provisórios com a fonte e fixar a versão do pack.
+- Definir e validar os formatos S1 e S5; os códigos compartilháveis são exemplos, não payloads.
+- Substituir o QR ilustrativo por um código verificável após definir S1.
+- Validar o envelope, o pico de saída e a gravação em hardware na bancada; este mock nunca usa WebHID.
+- Testar Chrome/Edge, leitores de tela, impressão, exportação e navegação via file:// antes de publicar.
+
+Peaking/low-shelf math copied from src/dsp/eq0xcb.mjs, ported from AutoEq.
+MIT License
+Copyright (c) 2018-2022 Jaakko Pasanen
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="Biblioteca de curvas de referência do open-auri. Mock estático, sem conexão com hardware.">
+  <title>Biblioteca · open-auri</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@300..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+  <style>
+    :root{--ink:#0F0F0E;--ink-2:#171715;--ink-3:#22221F;--rule:rgba(236,231,221,.12);--text:#ECE7DD;--muted:#8F8A80;--paper:#F2EDE4;--paper-ink:#1A1917;--paper-muted:#6B665D;--danger:#E5484D;--accent:#9FC28A;--serif:"Instrument Serif",Georgia,serif;--sans:"Geist",Arial,sans-serif;--mono:"JetBrains Mono",monospace}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:var(--ink);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}body:has(dialog[open]){overflow:hidden}button,input,select{font:inherit}button,a,input,select{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}a{color:inherit;text-underline-offset:4px}button{color:inherit}button:disabled,[aria-disabled="true"]{opacity:.45;cursor:not-allowed}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px}::selection{background:var(--accent);color:var(--ink)}h1,h2,h3,p{margin:0}button,select,input{border-radius:2px}.mono,.data{font-family:var(--mono);font-variant-numeric:tabular-nums}.smallcaps{font-size:10px;font-weight:500;letter-spacing:.16em;text-transform:uppercase}.muted{color:var(--muted)}.paper-muted{color:var(--paper-muted)}.accent{color:var(--accent)}.wrap{width:calc(100% - 96px);max-width:1440px;margin-inline:auto}.grid-12{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:24px}.rule{border-top:1px solid var(--rule)}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip{position:fixed;left:24px;top:-100px;z-index:100;background:var(--accent);color:var(--ink);padding:12px}.skip:focus{top:8px}
+    .cable-bar{position:sticky;top:0;z-index:30;min-height:56px;background:var(--ink-2);border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:24px;padding:0 24px}.wordmark{font-family:var(--serif);font-style:italic;font-size:28px;text-decoration:none;white-space:nowrap;line-height:1}.main-nav{display:flex;align-items:center;justify-content:center;gap:14px;flex:1;white-space:nowrap}.main-nav a{font-size:11px;text-decoration:none;line-height:55px;position:relative}.main-nav a[aria-current="page"]:after{content:"";height:2px;position:absolute;bottom:0;left:0;right:0;background:var(--accent)}.bar-right{display:flex;align-items:center;gap:8px;white-space:nowrap}.status-pill{font-size:10px;color:#B7B2A8;padding:5px 8px;border:1px solid var(--rule);border-radius:20px}.status-dot{color:var(--muted);font-size:9px;margin-right:4px}.unsaved{font-size:9px;color:var(--muted);max-width:105px;white-space:normal;line-height:1.5;margin-inline:2px}.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 13px;background:transparent;border:1px solid var(--rule);font-size:11px;text-decoration:none;transition:background .18s,border-color .18s}.btn:hover:not(:disabled){background:var(--ink-3);border-color:#777367}.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--ink);font-weight:600}.btn.primary:hover{background:#B0CF9E;border-color:#B0CF9E}.bar-right .btn{min-height:29px;padding:5px 9px;font-size:10px}.lang{border:0;background:none;font-size:10px;padding:8px 0 8px 8px;white-space:nowrap}.lang .inactive{color:var(--muted)}
+    .ambient{position:absolute;top:60px;left:0;width:100%;height:570px;overflow:hidden;pointer-events:none;z-index:-1;mask-image:linear-gradient(#000 35%,transparent 100%)}.ambient svg{width:100%;height:100%;color:var(--text);opacity:.043}.reel{transform-box:fill-box;transform-origin:center;animation:spool 190s linear infinite}.reel.second{animation-direction:reverse;animation-duration:230s}@keyframes spool{to{transform:rotate(360deg)}}main{position:relative;isolation:isolate}.hero{padding:54px 0 38px}.hero-top{display:flex;align-items:center;justify-content:space-between;color:var(--muted);margin-bottom:22px}.archive-mark{display:flex;align-items:center;gap:10px}.archive-mark:before{content:"";width:6px;height:6px;background:var(--accent);border-radius:50%}.hero-copy{grid-column:span 7}.hero h1{font-family:var(--serif);font-weight:400;letter-spacing:-.04em;font-size:112px;line-height:1.02}.hero h1 em{font-style:normal;color:var(--accent)}.lede{max-width:580px;font-size:14px;line-height:1.8;color:#B7B2A8;margin-top:20px}.hero-stats{grid-column:span 5;display:grid;grid-template-columns:1.4fr 1fr 1.2fr;gap:24px;align-self:end;padding-bottom:6px}.stat{border-top:1px solid var(--rule);padding-top:18px}.stat-number{display:block;font-family:var(--serif);font-size:72px;line-height:1.1;font-variant-numeric:lining-nums}.stat-label{font-size:11px;color:#B7B2A8;display:block;margin-top:12px;max-width:105px}.hero-caption{font-size:10px;margin-top:32px;display:flex;gap:16px;color:var(--muted)}.hero-caption .line{width:28px;height:1px;background:var(--accent);margin-top:8px;flex-shrink:0}
+    .reference-bar{background:var(--ink-2);border:1px solid var(--rule);padding:16px 20px;display:flex;gap:24px;align-items:center;justify-content:space-between}.reference-control{display:flex;align-items:center;gap:16px}.reference-control label{font-size:10px;letter-spacing:.09em;text-transform:uppercase}.reference-control select{font-family:var(--mono);font-size:12px;background:var(--ink-3);color:var(--text);border:1px solid var(--rule);padding:8px 30px 8px 12px;min-width:180px}.reference-detail{font-size:10px;display:flex;gap:20px;align-items:center}.reference-detail span{color:var(--muted)}.method{position:relative;font-size:11px;color:#B7B2A8}.method summary{cursor:pointer;text-decoration:underline;text-underline-offset:3px;list-style:none}.method[open] p{position:absolute;right:0;top:24px;width:320px;background:var(--ink-3);border:1px solid var(--rule);padding:18px;z-index:8;box-shadow:0 12px 35px #0006}.archive{padding-top:34px}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:21px}.section-heading h2{font-weight:400;font-family:var(--serif);font-size:31px;line-height:1.2}.section-heading .smallcaps{color:var(--muted)}.tools{display:flex;justify-content:space-between;align-items:center;gap:24px}.search-wrap{position:relative;flex:1;max-width:530px}.search-wrap svg{position:absolute;left:14px;top:14px;width:16px;height:16px;stroke:var(--muted)}.search-wrap input{width:100%;height:44px;padding:10px 52px 10px 41px;color:var(--text);background:var(--ink-2);border:1px solid var(--rule);font-size:12px}.search-wrap input::placeholder{color:var(--muted);opacity:1}.search-wrap kbd{position:absolute;right:14px;top:11px;padding:0 6px;color:var(--muted);border:1px solid var(--rule);font-family:var(--mono);font-size:12px;line-height:20px;pointer-events:none}.sort-wrap{display:flex;align-items:center;gap:12px;font-size:11px;color:var(--muted)}.sort-wrap select{color:var(--text);border:1px solid var(--rule);background:var(--ink-2);padding:11px 30px 11px 12px;font-size:11px;max-width:255px}.filter-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:16px 0 24px}.filter-label{font-size:10px;color:var(--muted);margin-right:9px}.chip{font-size:10px;border:1px solid var(--rule);background:transparent;border-radius:20px;padding:5px 11px;min-height:30px;color:#B7B2A8}.chip[aria-pressed="true"]{background:var(--accent);color:var(--ink);border-color:var(--accent)}.chip .count{font-family:var(--mono);font-size:9px;opacity:.75;margin-left:7px}.filter-footnote{margin-left:auto;font-size:9px;color:var(--muted)}.tape-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}.tape{position:relative;min-width:0;background:var(--paper);color:var(--paper-ink);border-radius:3px;box-shadow:0 3px 0 #A9A397,0 5px 0 #514E47;transition:transform .2s,box-shadow .2s}.tape:hover{transform:translateY(-4px);box-shadow:0 3px 0 #A9A397,0 6px 0 #514E47,0 14px 24px #0004}.tape.is-current:before{content:"";position:absolute;top:0;left:0;bottom:0;width:4px;background:var(--accent);z-index:1}.tape-button{width:100%;display:block;text-align:left;color:inherit;background:none;border:0;padding:19px 23px 16px;border-radius:3px}.tape-button:focus-visible{outline-offset:6px}.tape-top{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1A191723;padding-bottom:12px;margin-bottom:15px}.tape-id{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--paper-muted)}.tape-stamp{font-size:8px;letter-spacing:.1em;line-height:1.5;border:1px solid #1A191733;padding:2px 6px;color:var(--paper-muted)}.tape-stamp.current{border-color:#1A1917;color:var(--paper-ink);background:#1A19170B}.tape-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.tape-name{display:block;font-family:var(--mono);font-size:21px;line-height:1.3;font-weight:500;letter-spacing:-.05em}.tape-author{display:block;font-family:var(--mono);color:var(--paper-muted);font-size:9px;margin-top:5px;min-height:15px}.spool-icon{width:30px;height:30px;opacity:.3;flex-shrink:0}.tape-data{display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:10px;margin-top:17px}.tape-data>span>span{display:block;color:var(--paper-muted);font-size:8px;letter-spacing:.08em;margin-bottom:2px}.mini-chart{display:block;width:100%;margin-top:10px;height:auto}.tape-distance{display:flex;justify-content:space-between;gap:6px;font-family:var(--mono);font-size:9px;padding:8px 0 11px;border-bottom:1px solid #1A191723}.tape-distance .rms{font-weight:500}.tape-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--mono);font-size:8px;color:var(--paper-muted);padding-top:11px}.tape-tags{display:flex;gap:5px;flex-wrap:wrap}.tape-tags span{border:1px solid #1A191725;padding:1px 5px;line-height:1.6}.open-arrow{font-size:16px;line-height:1;color:var(--paper-ink);margin-left:auto}.no-results{text-align:center;padding:60px 20px;border:1px solid var(--rule)}.no-results p{color:var(--muted);margin:12px 0 20px}.archive-notes{display:flex;justify-content:space-between;gap:24px;margin:25px 0 0;font-size:10px;color:var(--muted)}
+    .packs{padding:54px 0 0}.pack-reference{grid-column:span 7;padding:25px 27px;border:1px solid var(--rule);background:var(--ink-2);display:flex;gap:24px;align-items:center}.pack-art{width:68px;height:78px;flex-shrink:0;position:relative}.pack-art i{position:absolute;inset:5px 0 0 6px;border:1px solid #8F8A8066;background:var(--ink-3);transform:rotate(7deg)}.pack-art i:nth-child(2){inset:2px 5px 4px 1px;transform:rotate(-5deg)}.pack-art i:nth-child(3){inset:0 8px 8px 0;transform:none;background:var(--paper)}.pack-art i:nth-child(3):before{content:"REF.\A 001–011";white-space:pre;font:9px/2 var(--mono);position:absolute;left:8px;top:12px;color:var(--paper-ink);border-block:1px solid #1A191740}.pack-reference h3{font-family:var(--serif);font-weight:400;font-size:25px;margin-bottom:6px}.pack-reference p{font-size:11px;color:var(--muted)}.pack-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:13px;font-family:var(--mono);font-size:9px;color:#B7B2A8}.community-pack{grid-column:span 5;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:22px 0}.community-pack h3{font-size:13px;font-weight:500;margin-bottom:9px}.community-pack p{font-size:11px;color:var(--muted);line-height:1.8;max-width:420px}.text-link{font-size:11px;display:inline-block;margin-top:15px;text-decoration-color:#8F8A80}.soon-row{display:flex;align-items:center;gap:16px;border-top:1px solid var(--rule);margin-top:32px;padding-top:20px}.badge{display:inline-flex;align-items:center;border:1px solid var(--rule);padding:3px 6px;font-size:8px;letter-spacing:.1em;white-space:nowrap}.soon-note{font-size:10px;color:var(--muted);max-width:680px;line-height:1.8}.envelope{margin-top:28px;padding:16px 0;color:var(--muted);font-size:10px}.envelope summary{cursor:pointer;display:flex;justify-content:space-between;gap:16px;align-items:center;list-style:none}.envelope summary:after{content:"+";font-family:var(--mono);font-size:16px}.envelope[open] summary:after{content:"−"}.envelope-details{padding:18px 0 5px;display:grid;grid-template-columns:1fr 1fr;gap:24px}.envelope-details p{line-height:1.9}.envelope-details .mono{font-size:10px;color:#B7B2A8}.hardware-strip{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;font-family:var(--mono);font-size:9px;color:var(--muted);border-top:1px solid var(--rule);margin-top:22px;padding:16px 0}
+    .site-footer{border-top:1px solid var(--rule);margin-top:38px;padding:38px 0 27px}.footer-homage{grid-column:span 6;padding-right:60px}.footer-legal{grid-column:span 6;padding-left:20px}.footer-homage .smallcaps{color:var(--muted);font-size:9px}.honoree{font-family:var(--serif);font-size:36px;font-weight:400;display:flex;gap:16px;align-items:baseline;margin:10px 0}.honoree .years{font-family:var(--mono);font-size:10px;color:var(--muted)}.footer-homage p,.footer-legal p{font-size:11px;line-height:1.85;color:var(--muted)}.footer-homage a{font-size:10px;color:#B7B2A8;display:inline-block;margin-top:8px}.footer-legal h3{font-size:11px;font-weight:500;margin-bottom:11px}.legal-links{display:flex;gap:24px;margin-top:16px;font-size:10px}.footer-bottom{display:flex;justify-content:space-between;border-top:1px solid var(--rule);margin-top:30px;padding-top:17px;font-size:9px;color:var(--muted)}
+    dialog{color:var(--text);background:var(--ink-2);border:1px solid var(--rule);padding:0;box-shadow:0 20px 100px #0008}dialog::backdrop{background:#0009;backdrop-filter:blur(3px)}.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(750px,100%);max-width:100%;height:100dvh;max-height:100dvh;border-block:0;border-right:0;overflow-y:auto;overscroll-behavior:contain}.drawer-head{display:flex;justify-content:space-between;align-items:center;background:var(--ink-2);border-bottom:1px solid var(--rule);padding:16px 28px;position:sticky;top:0;z-index:3}.drawer-head .smallcaps{color:var(--muted)}.close-btn{display:flex;align-items:center;gap:10px;border:0;background:none;font-size:11px;padding:8px}.close-btn span:last-child{font-size:22px;line-height:1}.drawer-content{padding:26px 28px 32px}.sheet-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:15px}.sheet-title-row h2{font-family:var(--serif);font-weight:400;font-size:54px;line-height:1.1}.sheet-title-row p{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:9px}.sheet-pre{font-family:var(--serif);font-size:35px;line-height:1.3;white-space:nowrap}.sheet-pre span{display:block;font-family:var(--mono);font-size:9px;color:var(--muted);text-align:right}.sheet-distance{font-size:11px;color:var(--muted);margin:22px 0 16px}.sheet-distance strong{font-family:var(--mono);color:var(--text);font-weight:400}.s-label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:10px;margin-bottom:14px}.s-label .mono{font-size:9px;color:var(--muted)}.chart-section{border:1px solid var(--rule);padding:16px 16px 12px;margin-bottom:22px;background:var(--ink)}.chart-large svg{display:block;width:100%;height:auto}.chart-exports{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:11px}.chart-exports .btn{font-size:9px;padding:6px 8px;min-height:29px}.chart-note{font-size:8px;color:var(--muted);max-width:285px}.spec-sheet{color:var(--paper-ink);background:var(--paper);padding:22px 24px;position:relative}.spec-sheet:before{content:"";position:absolute;top:0;left:24px;right:24px;height:3px;background:var(--paper-ink)}.spec-sheet .s-label{border-bottom:1px solid #1A191733;padding-bottom:11px}.spec-sheet .s-label .mono{color:var(--paper-muted)}.spec-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px 20px;font-family:var(--mono);font-size:10px;margin-bottom:18px}.spec-fields div{min-width:0}.spec-fields dt{display:block;color:var(--paper-muted);font-size:8px;text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px}.spec-fields dd{margin:0;overflow-wrap:anywhere}.band-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;font-variant-numeric:tabular-nums}.band-table th{font-weight:400;font-size:8px;color:var(--paper-muted);padding:7px 5px;text-align:right;border-block:1px solid #1A191733}.band-table td{padding:5px;text-align:right;border-bottom:1px solid #1A191712}.band-table th:first-child,.band-table td:first-child{text-align:left;color:var(--paper-muted)}.band-table th:nth-child(2),.band-table td:nth-child(2){text-align:left}.spec-note{font-family:var(--mono);font-size:8px;color:var(--paper-muted);margin-top:13px;line-height:1.8}.share-section,.print-section,.history-section{border-top:1px solid var(--rule);padding-top:21px;margin-top:24px}.share-code{display:block;width:100%;background:var(--ink);color:var(--text);border:1px solid var(--rule);padding:12px;font-family:var(--mono);font-size:10px;overflow-wrap:anywhere;word-break:break-all;line-height:1.8}.share-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}.share-controls p{font-size:9px;color:var(--muted)}.copy-fallback{width:100%;margin-top:10px;padding:9px;font-family:var(--mono);font-size:10px;background:var(--ink);color:var(--text);border:1px solid var(--rule)}.print-layout{display:flex;align-items:center;gap:18px}.print-card{background:var(--paper);color:var(--paper-ink);padding:16px;width:330px;max-width:100%;display:grid;grid-template-columns:1fr 62px;gap:6px 15px;border-radius:2px}.print-card .smallcaps{font-family:var(--mono);font-size:7px;grid-column:1/-1;color:var(--paper-muted)}.print-card-name{font-family:var(--mono);font-size:15px;align-self:center}.print-card .mini-chart{margin:0;grid-column:1;grid-row:3}.qr-placeholder{grid-column:2;grid-row:2/4;align-self:end}.qr-placeholder svg{display:block;width:58px;height:58px}.qr-placeholder span{font-family:var(--mono);font-size:6px;display:block;text-align:center;margin-top:3px;white-space:nowrap}.print-card-data{grid-column:1/-1;font-family:var(--mono);font-size:7px;border-top:1px solid #1A191733;padding-top:7px}.print-help p{font-size:9px;color:var(--muted);max-width:230px;margin-bottom:12px}.timeline{border-left:1px solid var(--rule);padding:0 0 0 17px;margin-left:4px;position:relative;font-size:11px}.timeline:before{content:"";position:absolute;left:-4px;top:6px;width:7px;height:7px;border-radius:50%;background:var(--accent)}.timeline span{font-family:var(--mono);color:var(--muted);font-size:9px;display:block;margin-top:4px}.sheet-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:27px}.sheet-actions .primary{margin-left:auto}.use-current{font-size:10px;border:0;background:none;color:var(--accent);text-decoration:underline;text-underline-offset:4px;padding:0;margin-top:18px}.sim-dialog{width:450px;max-width:calc(100% - 32px);padding:27px;border-radius:3px}.sim-dialog .smallcaps{color:var(--accent)}.sim-dialog h2{font:36px/1.15 var(--serif);margin:15px 0}.sim-dialog p{font-size:12px;color:#B7B2A8;line-height:1.8}.sim-data{font-family:var(--mono);font-size:12px;padding:13px 0;margin:15px 0;border-block:1px solid var(--rule)}.sim-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:25px}.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100;max-width:calc(100% - 32px);padding:13px 20px;background:var(--paper);color:var(--paper-ink);border-left:3px solid var(--accent);box-shadow:0 7px 35px #0006;font-size:12px;pointer-events:none}.toast:empty{display:none}[hidden]{display:none!important}
+    .toast{inset:auto auto 24px 50%;margin:0;border:0;border-left:3px solid var(--accent)}
+    .main-nav a+a:before{content:"·";position:absolute;left:-9px;color:var(--muted);opacity:.5}
+    @media(min-width:1650px){.cable-bar{padding-inline:36px;gap:32px}.main-nav{gap:20px}.main-nav a{font-size:12px}.main-nav a+a:before{left:-12px}.bar-right .btn{font-size:11px}.unsaved{max-width:115px;font-size:10px}}
+    @media(max-width:1350px){.cable-bar{flex-wrap:wrap;gap:0 24px;padding-top:10px}.wordmark{margin-right:auto}.main-nav{order:3;flex-basis:100%;justify-content:flex-start;gap:24px;overflow:auto}.main-nav a{line-height:39px}.bar-right{margin-left:auto}.wrap{width:calc(100% - 64px)}.hero h1{font-size:100px}.tape-button{padding-inline:19px}.filter-footnote{display:none}}
+    @media(max-width:1000px){.hero-copy{grid-column:span 6}.hero-stats{grid-column:span 6;gap:18px}.stat-number{font-size:62px}.hero h1{font-size:86px}.tape-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.reference-bar{align-items:flex-start;gap:15px}.reference-detail{flex-direction:column;align-items:flex-end;gap:8px}.pack-reference{grid-column:span 6;padding:22px 20px;gap:15px}.community-pack{grid-column:span 6}.pack-reference h3{font-size:23px}.footer-homage{padding-right:15px}.footer-legal{padding-left:0}}
+    @media(max-width:700px){.wrap{width:calc(100% - 40px)}.cable-bar{padding:10px 16px 0;gap:8px 15px}.wordmark{font-size:26px}.bar-right{gap:8px}.unsaved,.bar-right>.btn:not(.primary){display:none}.status-pill{font-size:8px;padding:4px 6px}.bar-right .primary{font-size:9px;padding:5px 7px;min-height:28px}.lang{font-size:9px;padding-left:3px}.main-nav{gap:20px}.main-nav a{font-size:10px;line-height:33px}.hero{padding:32px 0 25px}.hero-top{font-size:8px;margin-bottom:20px}.hero-top>span{max-width:110px;text-align:right;font-size:8px}.hero-copy{grid-column:1/-1}.hero h1{font-size:86px}.lede{font-size:12px;line-height:1.8;margin-top:14px;max-width:420px}.hero-stats{grid-column:1/-1;gap:24px;margin-top:5px;grid-template-columns:repeat(3,1fr)}.stat{padding-top:12px}.stat-number{font-size:56px}.stat-label{font-size:10px;margin-top:5px}.hero-caption{margin-top:20px;font-size:9px}.reference-bar{flex-direction:column;padding:14px;gap:12px}.reference-control{width:100%;justify-content:space-between;gap:10px}.reference-control label{font-size:8px}.reference-control select{font-size:10px;min-width:150px}.reference-detail{width:100%;flex-direction:row;align-items:center;justify-content:space-between;font-size:8px}.method{font-size:9px}.method[open] p{width:280px}.archive{padding-top:28px}.section-heading h2{font-size:28px}.section-heading .smallcaps{font-size:8px}.tools{flex-direction:column;align-items:stretch;gap:12px}.search-wrap{max-width:none}.sort-wrap{justify-content:space-between;font-size:10px}.sort-wrap select{flex:1;max-width:240px;font-size:10px;padding-block:8px}.filter-row{gap:6px;padding-top:14px}.filter-label{width:100%;margin:0 0 3px;font-size:9px}.chip{font-size:9px;padding-inline:10px}.tape-grid{gap:20px}.tape-button{padding:15px}.tape-name{font-size:18px}.tape-author{font-size:8px}.spool-icon{width:24px;height:24px}.tape-top{padding-bottom:9px;margin-bottom:12px}.tape-data{font-size:9px;gap:5px}.tape-data>span>span{font-size:7px}.tape-distance{font-size:8px;flex-wrap:wrap}.tape-foot{flex-wrap:wrap;font-size:7px}.tape-tags{gap:4px}.tape-tags span{font-size:7px}.tape-stamp{font-size:7px}.archive-notes{font-size:9px;flex-direction:column;gap:7px}.packs{padding-top:35px}.pack-reference,.community-pack{grid-column:1/-1}.community-pack{padding-bottom:20px}.soon-row{flex-wrap:wrap;gap:12px}.soon-note{flex-basis:100%;font-size:9px}.envelope-details{grid-template-columns:1fr;gap:12px}.hardware-strip{font-size:8px;gap:8px 16px}.site-footer{margin-top:24px;padding-top:26px}.footer-homage,.footer-legal{grid-column:1/-1;padding:0}.footer-legal{border-top:1px solid var(--rule);padding-top:24px}.honoree{font-size:32px}.footer-homage p,.footer-legal p{font-size:10px}.footer-bottom{font-size:8px;gap:20px}.drawer-head{padding:12px 18px}.drawer-content{padding:22px 18px}.sheet-title-row h2{font-size:46px}.sheet-pre{font-size:30px}.spec-sheet{padding:20px 16px}.spec-fields{gap:10px;font-size:9px}.chart-section{padding:12px 8px}.chart-exports{align-items:flex-start}.chart-note{font-size:7px;max-width:150px}.chart-exports .btn{font-size:8px;padding:5px}.share-controls{align-items:flex-start;flex-direction:column}.print-layout{align-items:flex-start;flex-direction:column}.print-help{display:flex;align-items:center;gap:15px}.sheet-actions .primary{margin-left:0}.sheet-actions{gap:7px}.sheet-actions .btn{font-size:10px;padding:8px 10px}}
+    @media(max-width:440px){.tape-grid{grid-template-columns:1fr}.tape-button{padding:19px 23px 16px}.tape-name{font-size:22px}.tape-author{font-size:9px}.tape-data{font-size:10px}.tape-distance{font-size:9px}.tape-foot{font-size:8px}.tape-tags span{font-size:8px}.mini-chart{max-height:115px}.status-pill{max-width:86px;line-height:1.4;white-space:normal}.bar-right{gap:6px}.hero h1{font-size:78px}.hero-stats{gap:15px}.stat-number{font-size:52px}.chart-note{max-width:130px}.chart-exports .btn{font-size:7px}}
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+    @media print{@page{margin:18mm}body{background:white;color:black}body>*{display:none!important}body>#preset-sheet[open]{display:block!important;position:static;width:100%;height:auto;max-height:none;margin:0;border:0;box-shadow:none;overflow:visible;background:white}.sheet::backdrop{display:none}.drawer-head{display:none!important}.drawer-content{padding:0}.drawer-content>*{display:none!important}.drawer-content>.print-section{display:block!important;border:0;margin:0;padding:0}.print-section>.s-label,.print-help{display:none!important}.print-card{width:105mm;max-width:none;border:1px solid #1A1917;print-color-adjust:exact;-webkit-print-color-adjust:exact}.print-card-name{font-size:18px}.print-card .mini-chart{max-height:none}.print-card-data{font-size:8px}.qr-placeholder svg{width:62px;height:62px}}
+  </style>
+</head>
+<body>
+  <a href="#main" class="skip" data-i18n="skip">Ir ao conteúdo</a>
+  <header class="cable-bar" aria-label="Barra do cabo" data-i18n-aria="cableBar">
+    <a class="wordmark" href="curva.html" aria-label="open-auri">open-auri</a>
+    <nav class="main-nav" aria-label="Navegação principal" data-i18n-aria="navigation">
+      <a href="curva.html" data-i18n="navCurve">Curva</a>
+      <a href="biblioteca.html" aria-current="page" data-i18n="navLibrary">Biblioteca</a>
+      <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navCompare">Comparar</a>
+      <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navSound">Soe como X</a>
+      <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navCommunity">Comunidade</a>
+      <a href="#" title="mock pendente" aria-disabled="true" data-i18n="navBlind">Teste cego</a>
+      <a href="cabo.html" data-i18n="navCable">Cabo</a>
+      <a href="docs.html">Docs</a>
+    </nav>
+    <div class="bar-right">
+      <span class="status-pill"><span class="status-dot" aria-hidden="true">●</span><span data-i18n="status">Sem cabo · simulado</span></span>
+      <span class="unsaved" data-i18n="unsaved">0 alterações não gravadas</span>
+      <button class="btn" id="neutral-button" data-i18n="neutral">Neutro</button>
+      <button class="btn" id="default-button" data-i18n="auriDefault">Padrão Auri</button>
+      <button class="btn primary" id="write-current" data-i18n="write">Gravar no cabo</button>
+      <button class="lang" id="language" aria-label="Switch to English"><span>PT</span> · <span class="inactive">EN</span></button>
+    </div>
+  </header>
+  <main id="main" class="wrap">
+    <div class="ambient" aria-hidden="true">
+      <svg viewBox="0 0 1440 570" fill="none">
+        <defs><g id="reel-drawing"><circle r="218" stroke="currentColor" stroke-width="1"/><circle r="207" stroke="currentColor" stroke-width="1"/><circle r="106" stroke="currentColor" stroke-width="30"/><circle r="28" stroke="currentColor" stroke-width="1"/><circle r="8" stroke="currentColor" stroke-width="1"/><path d="M-24-51L-68-157Q0-192 68-157L24-51ZM56 5L170 20Q173 95 106 137L32 46ZM-32 46L-106 137Q-173 95-170 20L-56 5Z" fill="currentColor"/></g></defs>
+        <path d="M410 110L1060 110M300 332L300 438Q300 470 332 470H1150Q1182 470 1182 438V332" stroke="currentColor"/>
+        <g transform="translate(390 240)"><g class="reel"><use href="#reel-drawing"/></g></g>
+        <g transform="translate(1110 240)"><g class="reel second"><use href="#reel-drawing"/></g></g>
+      </svg>
+    </div>
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-top smallcaps"><div class="archive-mark" data-i18n="archiveMark">Arquivo de curvas · vol. 01</div><span class="mono" data-i18n="heroNote">96 kHz / uma curva, dois canais</span></div>
+      <div class="grid-12">
+        <div class="hero-copy"><h1 id="page-title" data-i18n="title">Biblioteca</h1><p class="lede" data-i18n="lede">Onze curvas de referência, com filtros e preamp preservados. As distâncias usam a curva atual como referência, sem normalização de nível.</p></div>
+        <div class="hero-stats">
+          <div class="stat"><span class="stat-number">11</span><span class="stat-label" data-i18n="referenceCurves">curvas de referência</span></div>
+          <div class="stat"><span class="stat-number">1</span><span class="stat-label" data-i18n="pack">pack</span></div>
+          <div class="stat"><span class="stat-number muted">0</span><span class="stat-label" data-i18n="fromCommunity">da comunidade</span></div>
+        </div>
+      </div>
+      <p class="hero-caption"><span class="line" aria-hidden="true"></span><span data-i18n="heroCaption">Dados da página de referência, arquivados na ordem de escrita. Cada linha inclui os dez filtros e o preamp.</span></p>
+    </section>
+    <section class="reference-bar" aria-label="Referência de comparação" data-i18n-aria="referenceLabel">
+      <div class="reference-control"><label for="current-curve" data-i18n="currentCurve">Curva atual</label><select id="current-curve"></select></div>
+      <div class="reference-detail"><span class="mono" id="current-data"></span><span data-i18n="localOnly">Referência local, não estado do cabo.</span><details class="method"><summary data-i18n="method">Como medimos a distância ↗</summary><p data-i18n="methodText">S4: RMS e maior diferença absoluta em dB, em 601 pontos igualmente espaçados em log de 20 Hz a 20 kHz. Inclui preamp, sem normalização de nível. Não é uma medida de preferência nem uma resposta acústica.</p></details></div>
+    </section>
+    <section class="archive" aria-labelledby="archive-title">
+      <div class="section-heading"><h2 id="archive-title" data-i18n="collection">As fitas de referência</h2><span class="smallcaps" id="result-count" aria-live="polite"></span></div>
+      <div class="tools">
+        <div class="search-wrap"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><label class="sr-only" for="search" data-i18n="searchLabel">Buscar presets por nome ou tag</label><input id="search" type="search" autocomplete="off" placeholder="Buscar por nome ou tag…" data-i18n-placeholder="searchPlaceholder"><kbd aria-hidden="true">/</kbd></div>
+        <div class="sort-wrap"><label for="sort" data-i18n="sort">Ordenar por</label><select id="sort"><option value="name" data-i18n="sortName">nome</option><option value="pre" data-i18n="sortPre">preamp</option><option value="distance" data-i18n="sortDistance">distância para a curva atual</option></select></div>
+      </div>
+      <div class="filter-row"><span class="filter-label" data-i18n="automaticTags">tags automáticas</span><div id="filters" style="display:contents"></div><span class="filter-footnote mono" data-i18n="filterNote">forma elétrica · sem preamp</span></div>
+      <div class="tape-grid" id="tapes"></div>
+      <div class="no-results" id="empty" hidden><h3 data-i18n="emptyTitle">Nenhuma fita nesta seleção.</h3><p data-i18n="emptyText">Tente outro nome ou remova a tag.</p><button class="btn" id="clear-search" data-i18n="clearFilters">Limpar busca e filtros</button></div>
+      <div class="archive-notes"><p data-i18n="labelsNote">Padrão e Natural são nomes documentados. Os demais rótulos são provisórios.</p><p class="mono" data-i18n="distanceNote">S4 · RMS / máx. em dB · inclui preamp</p></div>
+    </section>
+    <section class="packs" aria-labelledby="packs-title">
+      <div class="section-heading"><h2 id="packs-title" data-i18n="packs">Packs</h2><span class="smallcaps" data-i18n="packsSubtitle">S9 · arquivos versionados</span></div>
+      <div class="grid-12">
+        <div class="pack-reference"><div class="pack-art" aria-hidden="true"><i></i><i></i><i></i></div><div><h3 data-i18n="referencePack">Pack de referência Auri</h3><p data-i18n="packByline">11 curvas · Kuba</p><div class="pack-meta"><span>v1 · open-auri/preset@1</span><span data-i18n="packLicense">licença: a confirmar</span></div></div></div>
+        <div class="community-pack"><h3 data-i18n="communityPacks">Packs da comunidade</h3><p data-i18n="communityText">Ainda não há packs aqui. As contribuições chegam por pull request no GitHub: dados versionados, revisão pública e uma biblioteca 100% estática.</p><a class="text-link" href="docs.html" data-i18n="contribute">Como contribuir ↗</a></div>
+      </div>
+      <div class="soon-row"><button class="btn" disabled aria-disabled="true" data-i18n="experimental">Importar pack fora do envelope</button><span class="badge" data-i18n="soon">EM BREVE</span><p class="soon-note" data-i18n="soonNote">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p></div>
+      <details class="envelope rule"><summary><span data-i18n="envelopeTitle">Envelope Kuba · envelope provisório</span><span class="mono" data-i18n="envelopeSummary">PK + LS / 10 bandas</span></summary><div class="envelope-details"><p class="mono" data-i18n="envelopeNumbers">PK: 20–15 808 Hz · −12 a +9,2 dB · Q 0,1–4<br>LS: 120–297 Hz · −9,3 a +8,2 dB · Q 0,44–0,94<br>Preamp: −7,8 a −0,5 dB · pico de saída ≤ −0,47 dB</p><p data-i18n="envelopeText">Somente PK e LS neste envelope, com cortes antes dos boosts. Uma curva para ambos os canais. Neutro é a referência de passagem direta conhecida. Este mock não envia payloads e não grava em flash.</p></div></details>
+      <div class="hardware-strip"><span>AURI DSP / CB5100 / 96 kHz</span><span>VID 0x3302 · PID 0x8902 · report 0xCB</span><span data-i18n="hardwareTransport">WebHID · Chrome/Edge desktop · HTTPS</span><span data-i18n="writeOnly">write-only · sem leitura de volta</span></div>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="wrap"><div class="grid-12">
+    <div class="footer-homage"><span class="smallcaps" data-i18n="homage">ESTA PÁGINA HOMENAGEIA</span><h2 class="honoree">Geoff Emerick <span class="years">1945–2018</span></h2><p data-i18n="trivia">Geoff Emerick entrou na EMI aos 16 anos e, aos 20, assumiu a engenharia dos Beatles em Revolver (1966). Foi ele quem pôs o microfone colado na bateria de Ringo, coisa que a EMI até então proibia.</p><a href="https://en.wikipedia.org/wiki/Geoff_Emerick" target="_blank" rel="noreferrer" data-i18n="source">fonte ↗</a></div>
+    <div class="footer-legal"><h3 data-i18n="notice">Aviso</h3><p data-i18n="disclaimer">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p><div class="legal-links"><a href="docs.html#aviso-legal" data-i18n="fullNotice">Aviso legal completo</a><span data-i18n="license">Licença AGPL-3.0</span></div></div>
+  </div><div class="footer-bottom"><span class="mono">open-auri / biblioteca / 001</span><span data-i18n="mockFooter">Mock de interface · sem comunicação com o cabo</span></div></div></footer>
+  <dialog class="sheet" id="preset-sheet" aria-labelledby="sheet-title">
+    <div class="drawer-head"><span class="smallcaps" data-i18n="sheetLabel">Ficha de arquivo</span><button class="close-btn" id="close-sheet" data-i18n-aria="close"><span data-i18n="close">Fechar</span><span aria-hidden="true">×</span></button></div>
+    <div class="drawer-content" id="sheet-content"></div>
+  </dialog>
+  <dialog class="sim-dialog" id="write-dialog" aria-labelledby="write-title" aria-describedby="write-explanation"><span class="smallcaps" data-i18n="simulation">Simulação · nenhum cabo conectado</span><h2 id="write-title" data-i18n="writeTitle">Simular a gravação?</h2><p id="write-explanation" data-i18n="writeExplanation">No hardware, toda gravação persiste em flash, com desgaste ainda desconhecido. O cabo é write-only: não há leitura de volta. Aqui, nenhuma escrita será enviada.</p><div class="sim-data" id="write-data"></div><p data-i18n="writeSafe">Esta confirmação demonstra o fluxo da interface, não valida o cabo nem o áudio.</p><div class="sim-actions"><button class="btn" id="cancel-write" data-i18n="cancel">Cancelar</button><button class="btn primary" id="confirm-write" data-i18n="confirmSimulation">Confirmar simulação</button></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" popover="manual"></div>
+  <script type="module">
+    // Self-contained mock: no imports, network calls, storage or hardware access.
+    const I18N = {
+      'pt-BR': {
+        skip:'Ir ao conteúdo',cableBar:'Barra do cabo',navigation:'Navegação principal',navCurve:'Curva',navLibrary:'Biblioteca',navCompare:'Comparar',navSound:'Soe como X',navCommunity:'Comunidade',navBlind:'Teste cego',navCable:'Cabo',status:'Sem cabo · simulado',unsaved:'0 alterações não gravadas',neutral:'Neutro',auriDefault:'Padrão Auri',write:'Gravar no cabo',
+        archiveMark:'Arquivo de curvas · vol. 01',heroNote:'96 kHz / uma curva, dois canais',title:'Biblioteca',lede:'Onze curvas de referência, com filtros e preamp preservados. As distâncias usam a curva atual como referência, sem normalização de nível.',referenceCurves:'curvas de referência',pack:'pack',fromCommunity:'da comunidade',heroCaption:'Dados da página de referência, arquivados na ordem de escrita. Cada linha inclui os dez filtros e o preamp.',
+        referenceLabel:'Referência de comparação',currentCurve:'Curva atual',localOnly:'Referência local, não estado do cabo.',method:'Como medimos a distância ↗',methodText:'S4: RMS e maior diferença absoluta em dB, em 601 pontos igualmente espaçados em log de 20 Hz a 20 kHz. Inclui preamp, sem normalização de nível. Não é uma medida de preferência nem uma resposta acústica.',collection:'As fitas de referência',searchLabel:'Buscar presets por nome ou tag',searchPlaceholder:'Buscar por nome ou tag…',sort:'Ordenar por',sortName:'nome',sortPre:'preamp',sortDistance:'distância para a curva atual',automaticTags:'tags automáticas',filterNote:'forma elétrica · sem preamp',all:'todas',bassUp:'graves +',bassDown:'graves −',trebleDown:'agudos −',presence:'presença',flat:'neutro',emptyTitle:'Nenhuma fita nesta seleção.',emptyText:'Tente outro nome ou remova a tag.',clearFilters:'Limpar busca e filtros',labelsNote:'Padrão e Natural são nomes documentados. Os demais rótulos são provisórios.',distanceNote:'S4 · RMS / máx. em dB · inclui preamp',showing:'{n} de 11 fitas',documented:'DOCUMENTADO',provisional:'PROVISÓRIO',currentStamp:'CURVA ATUAL',preamp:'preamp',bands:'bandas',max:'máx.',licensePending:'licença: a confirmar',openSheet:'Abrir ficha de {name}',response:'Resposta elétrica de {name}, incluindo preamp, de 20 Hz a 20 kHz, janela de −15 a +15 dB',
+        packs:'Packs',packsSubtitle:'S9 · arquivos versionados',referencePack:'Pack de referência Auri',packByline:'11 curvas · Kuba',packLicense:'licença: a confirmar',communityPacks:'Packs da comunidade',communityText:'Ainda não há packs aqui. As contribuições chegam por pull request no GitHub: dados versionados, revisão pública e uma biblioteca 100% estática.',contribute:'Como contribuir ↗',experimental:'Importar pack fora do envelope',soon:'EM BREVE',soonNote:'Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.',envelopeTitle:'Envelope Kuba · envelope provisório',envelopeSummary:'PK + LS / 10 bandas',envelopeNumbers:'PK: 20–15 808 Hz · −12 a +9,2 dB · Q 0,1–4<br>LS: 120–297 Hz · −9,3 a +8,2 dB · Q 0,44–0,94<br>Preamp: −7,8 a −0,5 dB · pico de saída ≤ −0,47 dB',envelopeText:'Somente PK e LS neste envelope, com cortes antes dos boosts. Uma curva para ambos os canais. Neutro é a referência de passagem direta conhecida. Este mock não envia payloads e não grava em flash.',hardwareTransport:'WebHID · Chrome/Edge desktop · HTTPS',writeOnly:'write-only · sem leitura de volta',
+        homage:'ESTA PÁGINA HOMENAGEIA',trivia:'Geoff Emerick entrou na EMI aos 16 anos e, aos 20, assumiu a engenharia dos Beatles em Revolver (1966). Foi ele quem pôs o microfone colado na bateria de Ringo, coisa que a EMI até então proibia.',source:'fonte ↗',notice:'Aviso',disclaimer:'open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.',fullNotice:'Aviso legal completo',license:'Licença AGPL-3.0',mockFooter:'Mock de interface · sem comunicação com o cabo',
+        sheetLabel:'Ficha de arquivo',close:'Fechar',sheetCompared:'Distância para {name}',beforeAfter:'Antes / depois',selected:'selecionada',current:'atual',
+        chartWindow:'Inclui preamp. Janela ±15 dB; trechos fora dela são recortados. Eixo de frequência logarítmico.',
+        exportPNG:'Exportar PNG',exportSVG:'Exportar SVG',specTitle:'Envelope do preset',format:'formato',name:'nome',author:'autor',sourceField:'fonte',licenseField:'licença',pending:'a confirmar',code:'código',recipe:'receita',unknownRecipe:'não informada',kind:'tipo',gain:'ganho',
+        orderNote:'Ordem de escrita preservada: cortes antes dos boosts. Cálculo dos biquads a 96 kHz. Envelope provisório.',labelNote:'Nome provisório; não documentado pela fonte.',
+        shareTitle:'Código compartilhável',shareExample:'exemplo, formato S1 em definição',copyLink:'Copiar link #p=…',shareNote:'Não é um payload. Sem decodificação de presets externos.',
+        printTitle:'Ficha para guardar',printNote:'O desenho ao lado não é um QR funcional. A impressão contém somente este cartão.',illustrativeQR:'QR ilustrativo',print:'Imprimir cartão',printReference:'OPEN-AURI / FICHA DE REFERÊNCIA',
+        historyTitle:'Histórico de versões',illustrative:'ilustrativo',history:'v1 · referência importada',historyNote:'Sem histórico editorial validado neste mock.',openCurve:'Abrir na Curva',compare:'Comparar',useCurrent:'Usar como curva atual (simulado)',currentChanged:'Referência local: {name}. Nenhum dado enviado ao cabo.',
+        linkCopied:'Link ilustrativo copiado.',copyFallback:'A cópia automática não está disponível. Selecione e copie o link abaixo.',downloaded:'Arquivo preparado para download.',exportError:'Não foi possível exportar a imagem. Tente Exportar SVG.',
+        simulation:'Simulação · nenhum cabo conectado',writeTitle:'Simular a gravação?',writeExplanation:'No hardware, toda gravação persiste em flash, com desgaste ainda desconhecido. O cabo é write-only: não há leitura de volta. Aqui, nenhuma escrita será enviada.',
+        writeSafe:'Esta confirmação demonstra o fluxo da interface, não valida o cabo nem o áudio.',cancel:'Cancelar',confirmSimulation:'Confirmar simulação',simulated:'Simulação concluída. Nenhum payload enviado; nenhuma gravação em flash.',neutralInfo:'10 seções OFF · preamp 0 dB',peak:'pico calculado',
+        filterSafety:'Tags por médias logarítmicas: graves (20–200 Hz) e agudos (6–12 kHz) contra médios (300–1 000 Hz), limiar de 2 dB. Presença: 1–4 kHz acima dos médios em mais de 1 dB. Neutro: amplitude da resposta ≤ 4 dB. Sem preamp; não descrevem a resposta do fone.'
+      },
+      'en-US': {
+        skip:'Skip to content',cableBar:'Cable bar',navigation:'Main navigation',navCurve:'Curve',navLibrary:'Library',navCompare:'Compare',navSound:'Sound like X',navCommunity:'Community',navBlind:'Blind test',navCable:'Cable',status:'No cable · simulated',unsaved:'0 unsaved changes',neutral:'Neutral',auriDefault:'Auri default',write:'Write to cable',
+        archiveMark:'Curve archive · vol. 01',heroNote:'96 kHz / one curve, both channels',title:'Library',lede:'Eleven reference curves, with filters and preamp preserved. Distances use the current curve as a reference, without level normalization.',referenceCurves:'reference curves',pack:'pack',fromCommunity:'from the community',heroCaption:'Data from the reference page, archived in write order. Each line includes the ten filters and preamp.',
+        referenceLabel:'Comparison reference',currentCurve:'Current curve',localOnly:'Local reference, not the state of the cable.',method:'How we measure distance ↗',methodText:'S4: RMS and maximum absolute difference in dB, over 601 equally log-spaced points from 20 Hz to 20 kHz. Includes preamp, without level normalization. Not a preference score or an acoustic response.',collection:'The reference tapes',searchLabel:'Search presets by name or tag',searchPlaceholder:'Search by name or tag…',sort:'Sort by',sortName:'name',sortPre:'preamp',sortDistance:'distance to current curve',automaticTags:'automatic tags',filterNote:'electrical shape · no preamp',all:'all',bassUp:'bass +',bassDown:'bass −',trebleDown:'treble −',presence:'presence',flat:'neutral',emptyTitle:'No tapes in this selection.',emptyText:'Try another name or remove the tag.',clearFilters:'Clear search and filters',labelsNote:'Padrão and Natural are documented names. All other labels are provisional.',distanceNote:'S4 · RMS / max. in dB · includes preamp',showing:'{n} of 11 tapes',documented:'DOCUMENTED',provisional:'PROVISIONAL',currentStamp:'CURRENT CURVE',preamp:'preamp',bands:'bands',max:'max.',licensePending:'license: pending',openSheet:'Open the sheet for {name}',response:'Electrical response of {name}, including preamp, from 20 Hz to 20 kHz, −15 to +15 dB window',
+        packs:'Packs',packsSubtitle:'S9 · versioned files',referencePack:'Auri reference pack',packByline:'11 curves · Kuba',packLicense:'license: pending',communityPacks:'Community packs',communityText:'No packs here yet. Contributions arrive via pull request on GitHub: versioned data, public review, and a 100% static library.',contribute:'How to contribute ↗',experimental:'Import an out-of-envelope pack',soon:'COMING SOON',soonNote:'Available once the headphones reach the test bench. Until then, we write nothing that the original Kuba page does not write.',envelopeTitle:'Kuba envelope · provisional envelope',envelopeSummary:'PK + LS / 10 bands',envelopeNumbers:'PK: 20–15,808 Hz · −12 to +9.2 dB · Q 0.1–4<br>LS: 120–297 Hz · −9.3 to +8.2 dB · Q 0.44–0.94<br>Preamp: −7.8 to −0.5 dB · output peak ≤ −0.47 dB',envelopeText:'Only PK and LS in this envelope, with cuts before boosts. One curve for both channels. Neutral is the known direct-pass reference. This mock sends no payloads and never writes to flash.',hardwareTransport:'WebHID · Chrome/Edge desktop · HTTPS',writeOnly:'write-only · no read-back',
+        homage:'THIS PAGE PAYS TRIBUTE TO',trivia:'Geoff Emerick joined EMI at 16 and, at 20, took over engineering for the Beatles on Revolver (1966). He placed microphones right up against Ringo’s drums, something EMI had forbidden until then.',source:'source ↗',notice:'Notice',disclaimer:'open-auri is not official or endorsed by Kuba, TTGK, Savitech, or any manufacturer. Everything here was obtained by studying the protocol for interoperability. Use at your own risk: we are not responsible for damage to your cable, headphones, or hearing.',fullNotice:'Full legal notice',license:'AGPL-3.0 license',mockFooter:'Interface mock · no communication with the cable',
+        sheetLabel:'Archive sheet',close:'Close',sheetCompared:'Distance to {name}',beforeAfter:'Before / after',selected:'selected',current:'current',
+        chartWindow:'Includes preamp. ±15 dB window; values outside it are clipped. Logarithmic frequency axis.',
+        exportPNG:'Export PNG',exportSVG:'Export SVG',specTitle:'Preset envelope',format:'format',name:'name',author:'author',sourceField:'source',licenseField:'license',pending:'pending',code:'code',recipe:'recipe',unknownRecipe:'not supplied',kind:'kind',gain:'gain',
+        orderNote:'Write order preserved: cuts before boosts. Biquads calculated at 96 kHz. Provisional envelope.',labelNote:'Provisional name; not documented by the source.',
+        shareTitle:'Share code',shareExample:'example, S1 format under definition',copyLink:'Copy link #p=…',shareNote:'Not a payload. No decoding of external presets.',
+        printTitle:'A sheet to keep',printNote:'The pattern is not a functional QR code. Only this card will be printed.',illustrativeQR:'Illustrative QR',print:'Print card',printReference:'OPEN-AURI / REFERENCE SHEET',
+        historyTitle:'Version history',illustrative:'illustrative',history:'v1 · reference imported',historyNote:'No validated editorial history in this mock.',openCurve:'Open in Curve',compare:'Compare',useCurrent:'Use as current curve (simulated)',currentChanged:'Local reference: {name}. No data sent to the cable.',
+        linkCopied:'Illustrative link copied.',copyFallback:'Automatic copying is unavailable. Select and copy the link below.',downloaded:'File prepared for download.',exportError:'Could not export the image. Try Export SVG.',
+        simulation:'Simulation · no cable connected',writeTitle:'Simulate writing?',writeExplanation:'On hardware, every write commits to flash, with unknown wear. The cable is write-only: there is no read-back. Here, no write will be sent.',
+        writeSafe:'This confirmation demonstrates the interface flow; it does not validate the cable or audio.',cancel:'Cancel',confirmSimulation:'Confirm simulation',simulated:'Simulation complete. No payload sent; no write to flash.',neutralInfo:'10 OFF sections · preamp 0 dB',peak:'calculated peak',
+        filterSafety:'Tags use log-frequency averages: bass (20–200 Hz) and treble (6–12 kHz) versus mids (300–1,000 Hz), with a 2 dB threshold. Presence: 1–4 kHz more than 1 dB above mids. Neutral: response range ≤ 4 dB. Excludes preamp; these do not describe the headphones’ response.'
+      }
+    };
+    let locale = 'pt-BR';
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const t = (key, params = {}) => Object.entries(params).reduce((s,[k,v]) => s.replaceAll(`{${k}}`,String(v)), I18N[locale][key] ?? key);
+    const esc = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const number = (value, digits = 1) => new Intl.NumberFormat(locale,{minimumFractionDigits:digits,maximumFractionDigits:digits,useGrouping:false}).format(Math.abs(value));
+    const signed = (value, digits = 1, plus = false) => `${value < -0.000001 ? '−' : plus && value > 0.000001 ? '+' : ''}${number(value,digits)}`;
+    const db = value => `${signed(value)} dB`;
+
+    // Reference data, in written order; see test/fixtures/eq0xcb.reference.json.
+    const PRESETS = {
+      padrao:{label:'Padrão',pre:-2.8,b:[['PK',25,-0.8,0.3],['PK',150,-3,0.69],['PK',2237,-10,1.41],['PK',4348,-6.1,3],['PK',4958,-8.3,2.72],['PK',7178,-10,3],['PK',11063,-10,3],['PK',520,3.1,0.81],['PK',3046,5.7,1.51],['PK',5995,3.4,0.59]]},
+      pref6:{label:'Natural',pre:-3,b:[['PK',25,-2,0.4],['PK',167,-6.2,0.53],['PK',2560,-8,1.03],['PK',4911,-8,4],['PK',7838,-6.7,4],['PK',11523,-6.5,4],['PK',270,0.1,4],['PK',404,4.1,0.48],['PK',2930,7,2.94],['PK',3537,4.5,4]]},
+      emv:{label:'EMV',pre:-7.8,b:[['PK',1084,-1.1,3],['PK',1930,-1.9,2.39],['PK',2334,-8,1.93],['PK',4454,-8,2.63],['PK',5568,-4.2,1.55],['PK',7504,-7.2,3],['PK',107,0.7,0.5],['PK',473,2.4,0.5],['PK',6814,7.7,1.48],['PK',8862,8,3]]},
+      basshead:{label:'Basshead',pre:-5.7,b:[['PK',4613,-12,2.5],['PK',2246,-12,1.31],['PK',6746,-7.9,2.5],['PK',1122,-2.6,1.73],['PK',10302,-6.1,2.5],['PK',20,-5,0.42],['PK',223,-4.9,0.84],['PK',3184,2.5,2.5],['PK',3116,9.2,0.3],['LS',286,8.2,0.47]]},
+      energico:{label:'Enérgico',pre:-3.3,b:[['PK',25,-3.1,0.5],['PK',97,-1.4,0.68],['PK',2445,-8,0.87],['PK',4725,-8,3],['PK',6920,-8,3],['PK',12439,-8,1.96],['PK',1838,5,0.92],['PK',2904,4.5,2.62],['PK',3665,3.7,3],['PK',8376,8,2.42]]},
+      musical:{label:'Musical',pre:-2.3,b:[['PK',24,-3.2,0.1],['PK',2277,-8,1.69],['PK',4588,-9.4,2.8],['PK',5979,-3.8,2],['PK',7184,-3.2,3],['PK',10638,-10.4,3],['PK',840,2.2,1.54],['PK',1393,2,1.85],['PK',3224,1.1,3],['PK',15808,2.2,2.5]]},
+      analitico:{label:'Analítico',pre:-0.8,b:[['LS',120,-9.3,0.44],['PK',7007,-9.1,2.5],['PK',147,-3.5,0.48],['PK',4561,-12,2.5],['PK',2198,-12,1.42],['PK',255,-0.4,1.78],['PK',11291,-7.8,2.5],['PK',1093,-2.7,1.17],['PK',3226,6.2,0.3],['PK',3028,1.8,2.5]]},
+      referencia:{label:'Referência',pre:-4,b:[['LS',297,-3.4,0.81],['PK',11107,-4.8,2.5],['PK',1027,-1.7,1.98],['PK',20,-3.6,0.57],['PK',7055,-3.8,2.5],['PK',4588,-8,2.5],['PK',2208,-8.2,1.83],['PK',595,3.5,0.42],['PK',3144,5.6,1.69],['PK',3031,0.5,2.5]]},
+      harman:{label:'Harman',pre:-0.5,b:[['LS',199,-5.6,0.94],['PK',399,-1.4,1.62],['PK',2271,-8,1.32],['PK',256,-4.2,1.17],['PK',7566,-7.6,0.43],['PK',4662,-6.8,2.5],['PK',9138,3.8,2.5],['PK',3318,7.8,1.32],['PK',5767,5.8,2.5],['PK',3209,1.1,1.33]]},
+      vdsf:{label:'VDSF',pre:-2.2,b:[['PK',25,-8,0.5],['PK',80,-5,0.52],['PK',210,-2,0.79],['PK',1286,-5.9,1.34],['PK',1978,-7.4,1.67],['PK',2375,-5.4,2.4],['PK',4384,-4.7,3],['PK',4833,-6,3],['PK',7252,-7.6,3],['PK',1718,8,0.5]]},
+      etymotic:{label:'Etymotic',pre:-2.2,b:[['PK',25,-8,0.97],['PK',45,-8,0.5],['PK',105,-5.3,0.51],['PK',226,-1.4,0.91],['PK',2190,-8,1.39],['PK',4276,-5,3],['PK',4847,-7.2,3],['PK',7260,-6.8,3],['PK',785,1.8,1.42],['PK',3120,6.5,1.01]]}
+    };
+
+    // Inline math from src/dsp/eq0xcb.mjs. designSection is deliberately
+    // restricted to PK, LS and the known neutral OFF; no unproven filter UI.
+    const SAMPLE_RATE = 96000;
+    function fromAutoEqSign({ a1, a2, b0, b1, b2 }) {
+      return { b0, b1, b2, a1: -a1, a2: -a2 };
+    }
+    function designPeaking(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+      const amp = Math.pow(10, gainDb / 40);
+      const w0 = (2 * Math.PI * freqHz) / sampleRate;
+      const alpha = Math.sin(w0) / (2 * qFactor);
+      const cosW0 = Math.cos(w0);
+      const a0 = 1 + alpha / amp;
+      return fromAutoEqSign({
+        a1: -(-2 * cosW0) / a0,
+        a2: -(1 - alpha / amp) / a0,
+        b0: (1 + alpha * amp) / a0,
+        b1: (-2 * cosW0) / a0,
+        b2: (1 - alpha * amp) / a0,
+      });
+    }
+    function designLowShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+      const amp = Math.pow(10, gainDb / 40);
+      const w0 = (2 * Math.PI * freqHz) / sampleRate;
+      const alpha = Math.sin(w0) / (2 * qFactor);
+      const cosW0 = Math.cos(w0);
+      const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
+      const a0 = (amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+      return fromAutoEqSign({
+        a1: -(-2 * ((amp - 1) + (amp + 1) * cosW0)) / a0,
+        a2: -((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+        b0: (amp * ((amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+        b1: (2 * amp * ((amp - 1) - (amp + 1) * cosW0)) / a0,
+        b2: (amp * ((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+      });
+    }
+    function designSection(band, sampleRate = SAMPLE_RATE) {
+      switch (band.kind) {
+        case 'PK': return designPeaking(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+        case 'LS': return designLowShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+        case 'OFF': return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
+        default: throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+      }
+    }
+    function magnitudeDb(eqBands, freqHz, sampleRate = SAMPLE_RATE) {
+      const omega = (2 * Math.PI * freqHz) / sampleRate;
+      const halfSin = Math.sin(omega / 2);
+      const uRe = 2 * halfSin * halfSin;
+      const uIm = Math.sin(omega);
+      const uSquaredRe = uRe * uRe - uIm * uIm;
+      const uSquaredIm = 2 * uRe * uIm;
+      const powerAt = (p0, p1, p2) => {
+        const sum = p0 + p1 + p2;
+        const slope = p1 + 2 * p2;
+        const re = sum - slope * uRe + p2 * uSquaredRe;
+        const im = -slope * uIm + p2 * uSquaredIm;
+        return re * re + im * im;
+      };
+      let totalDb = 0;
+      for (const band of eqBands) {
+        const { b0, b1, b2, a1, a2 } = designSection(band, sampleRate);
+        totalDb += 10 * Math.log10(powerAt(b0, b1, b2) / powerAt(1, a1, a2));
+      }
+      return totalDb;
+    }
+
+    const frequencies = Array.from({length:601}, (_,i) => 20 * Math.pow(1000,i / 600));
+    const meanBand = (bands, low, high) => {
+      const values = frequencies.filter(f => f >= low && f <= high).map(f => magnitudeDb(bands,f));
+      return values.reduce((sum,v) => sum + v,0) / values.length;
+    };
+    function automaticTags(preset) {
+      const mid = meanBand(preset.bands,300,1000);
+      const bass = meanBand(preset.bands,20,200) - mid;
+      const treble = meanBand(preset.bands,6000,12000) - mid;
+      const presence = meanBand(preset.bands,1000,4000) - mid;
+      const range = Math.max(...preset.response) - Math.min(...preset.response);
+      return [bass > 2 && 'bassUp',bass < -2 && 'bassDown',treble < -2 && 'trebleDown',presence > 1 && 'presence',range <= 4 && 'flat'].filter(Boolean);
+    }
+    const codeAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const presets = Object.entries(PRESETS).map(([id,p],index) => {
+      const bands = p.b.map(([kind,freqHz,gainDb,qFactor]) => ({kind,freqHz,gainDb,qFactor}));
+      const response = frequencies.map(f => magnitudeDb(bands,f) + p.pre);
+      const preset = {...p,id,index,bands,response,documented:['padrao','pref6'].includes(id),author:id === 'padrao' ? 'Kuba · filtros do Leonardo' : 'Kuba',shareCode:codeAlphabet.slice(index) + codeAlphabet.slice(0,index)};
+      preset.tags = automaticTags(preset);
+      return preset;
+    });
+    const neutral = {id:'neutral',label:'Neutro',pre:0,bands:Array.from({length:10},() => ({kind:'OFF'})),response:frequencies.map(() => 0)};
+    let current = presets[0];
+    let selected = null;
+    let activeTag = 'all';
+    let pendingWrite = null;
+    let toastTimer;
+    let lastCardId = null;
+    const sheet = $('#preset-sheet');
+    const writeDialog = $('#write-dialog');
+    const currentName = () => current.id === 'neutral' ? t('neutral') : current.label;
+    function distance(preset) {
+      let sum = 0, max = 0;
+      preset.response.forEach((value,i) => {
+        const delta = value - current.response[i];
+        sum += delta * delta;
+        max = Math.max(max,Math.abs(delta));
+      });
+      return {rms:Math.sqrt(sum / frequencies.length),max};
+    }
+    const spoolIcon = '<svg class="spool-icon" viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="14" stroke="currentColor"/><circle cx="16" cy="16" r="3" stroke="currentColor"/><circle cx="16" cy="8" r="3" fill="currentColor"/><circle cx="9" cy="20" r="3" fill="currentColor"/><circle cx="23" cy="20" r="3" fill="currentColor"/></svg>';
+    let chartSerial = 0;
+    function chartSVG(preset, full = false) {
+      const width = full ? 640 : 350, height = full ? 282 : 112;
+      const left = full ? 37 : 21, right = full ? 20 : 12, top = full ? 32 : 10, bottom = full ? 29 : 20;
+      const plotW = width - left - right, plotH = height - top - bottom;
+      const x = f => left + Math.log10(f / 20) / 3 * plotW;
+      const y = value => top + (15 - value) / 30 * plotH;
+      const color = full ? '#ECE7DD' : '#1A1917', muted = full ? '#A39D91' : '#6B665D';
+      const clipId = `response-window-${++chartSerial}`;
+      const path = response => response.map((value,i) => `${i ? 'L' : 'M'}${x(frequencies[i]).toFixed(3)},${y(value).toFixed(3)}`).join(' ');
+      const tick = (px,py,label,anchor = 'middle',size = full ? 9 : 7) => `<text x="${px}" y="${py}" fill="${muted}" font-family="JetBrains Mono,monospace" font-size="${size}" text-anchor="${anchor}">${esc(label)}</text>`;
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(t('response',{name:preset.label}))}"><title>${esc(t('response',{name:preset.label}))}</title><rect width="${width}" height="${height}" fill="${full ? '#0F0F0E' : '#F2EDE4'}"/><defs><clipPath id="${clipId}"><rect x="${left}" y="${top}" width="${plotW}" height="${plotH}"/></clipPath></defs>`;
+      const freqTicks = full ? [20,50,100,200,500,1000,2000,5000,10000,20000] : [20,100,1000,10000,20000];
+      for (const f of freqTicks) {
+        svg += `<line x1="${x(f)}" y1="${top}" x2="${x(f)}" y2="${height-bottom}" stroke="${color}" stroke-opacity=".09" stroke-width=".6"/>`;
+        svg += tick(x(f),height-8,f >= 1000 ? `${number(f/1000,0)}k` : number(f,0));
+      }
+      for (const value of full ? [-15,-10,-5,0,5,10,15] : [-15,0,15]) {
+        svg += `<line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="${color}" stroke-opacity="${value === 0 ? '.28' : '.10'}" stroke-width=".6" ${value === 0 ? 'stroke-dasharray="2 3"' : ''}/>`;
+        svg += tick(left-6,y(value)+2.5,signed(value,0,value>0),'end',full ? 8 : 6);
+      }
+      svg += `<g clip-path="url(#${clipId})">`;
+      if (full) {
+        svg += `<path d="${path(neutral.response)}" fill="none" stroke="#A39D91" stroke-width="1" stroke-dasharray="2 4"/><path d="${path(current.response)}" fill="none" stroke="#ECE7DD" stroke-opacity=".65" stroke-width="1.2" stroke-dasharray="5 4"/>`;
+      }
+      svg += `<path d="${path(preset.response)}" fill="none" stroke="${full ? '#9FC28A' : '#1A1917'}" stroke-width="${full ? 1.8 : 1.4}" stroke-linejoin="round" stroke-linecap="round"/></g>`;
+      if (full) {
+        const legend = (px,label,stroke,dash = '') => `<line x1="${px}" y1="10" x2="${px+17}" y2="10" stroke="${stroke}" stroke-width="1.5" stroke-dasharray="${dash}"/><text x="${px+24}" y="13" fill="${muted}" font-family="JetBrains Mono,monospace" font-size="8">${esc(label)}</text>`;
+        svg += legend(38,t('neutral'),'#A39D91','2 4') + legend(190,`${t('current')}: ${currentName()}`,'#ECE7DD','5 4') + legend(425,`${t('selected')}: ${preset.label}`,'#9FC28A');
+      }
+      return svg + '</svg>';
+    }
+    function applyTranslations(root = document) {
+      root.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        if (key === 'envelopeNumbers') el.innerHTML = t(key);
+        else el.textContent = t(key);
+      });
+      root.querySelectorAll('[data-i18n-placeholder]').forEach(el => el.placeholder = t(el.dataset.i18nPlaceholder));
+      root.querySelectorAll('[data-i18n-aria]').forEach(el => el.setAttribute('aria-label',t(el.dataset.i18nAria)));
+    }
+    const tagKeys = ['all','bassUp','bassDown','trebleDown','presence','flat'];
+    function renderFilters() {
+      $('#filters').innerHTML = tagKeys.map(key => {
+        const count = key === 'all' ? presets.length : presets.filter(p => p.tags.includes(key)).length;
+        return `<button class="chip" data-tag="${key}" aria-pressed="${activeTag === key}">${esc(t(key))}<span class="count">${count}</span></button>`;
+      }).join('');
+      $('.filter-label').title = t('filterSafety');
+    }
+    function renderCurrent() {
+      $('#current-curve').innerHTML = presets.map(p => `<option value="${p.id}">${esc(p.label)}</option>`).join('') + `<option value="neutral">${esc(t('neutral'))}</option>`;
+      $('#current-curve').value = current.id;
+      $('#current-data').textContent = current.id === 'neutral' ? t('neutralInfo') : `${db(current.pre)} · 10 ${t('bands')}`;
+    }
+    function renderCards() {
+      const normalize = s => s.toLocaleLowerCase(locale).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      const query = normalize($('#search').value.trim());
+      const filtered = presets.filter(p => (activeTag === 'all' || p.tags.includes(activeTag)) && normalize([p.label,p.id,p.author,...p.tags.map(tag => t(tag))].join(' ')).includes(query));
+      const sorting = $('#sort').value;
+      filtered.sort((a,b) => sorting === 'pre' ? a.pre - b.pre : sorting === 'distance' ? distance(a).rms - distance(b).rms : a.label.localeCompare(b.label,locale));
+      $('#tapes').innerHTML = filtered.map(p => {
+        const delta = distance(p), pk = p.b.filter(b => b[0] === 'PK').length, ls = p.b.length - pk;
+        const stamp = p.id === current.id ? 'currentStamp' : p.documented ? 'documented' : 'provisional';
+        return `<article class="tape ${p.id === current.id ? 'is-current' : ''}"><button class="tape-button" id="tape-${p.id}" data-preset="${p.id}" aria-label="${esc(t('openSheet',{name:p.label}))}" aria-haspopup="dialog" aria-controls="preset-sheet">
+          <span class="tape-top"><span class="tape-id">OA / REF. ${String(p.index+1).padStart(3,'0')}</span><span class="tape-stamp ${p.id === current.id ? 'current' : ''}">${esc(t(stamp))}</span></span>
+          <span class="tape-title-row"><span><span class="tape-name">${esc(p.label)}</span><span class="tape-author">${esc(p.author)}</span></span>${spoolIcon}</span>
+          <span class="tape-data"><span><span>${esc(t('preamp'))}</span>${db(p.pre)}</span><span><span>${esc(t('bands'))}</span>${pk} PK / ${ls} LS</span><span><span>${esc(t('code'))}</span>${p.id.toUpperCase()}</span></span>
+          <span class="mini-chart">${chartSVG(p)}</span>
+          <span class="tape-distance"><span class="rms">${number(delta.rms)} dB RMS</span><span>${number(delta.max)} dB ${esc(t('max'))}</span></span>
+          <span class="tape-foot"><span class="tape-tags">${p.tags.map(tag => `<span>${esc(t(tag))}</span>`).join('')}</span><span>${esc(t('licensePending'))}</span><span class="open-arrow" aria-hidden="true">↗</span></span>
+        </button></article>`;
+      }).join('');
+      $('#empty').hidden = filtered.length > 0;
+      $('#result-count').textContent = t('showing',{n:filtered.length});
+    }
+    function qrPattern() {
+      // Intentionally NOT a QR encoder: no finder squares, explicit DEMO bar.
+      let blocks = '';
+      for (let row=0;row<9;row++) for (let col=0;col<9;col++) {
+        if ((row * 7 + col * 3 + row * col) % 5 < 2) blocks += `<rect x="${3+col*6}" y="${3+row*6}" width="4" height="4"/>`;
+      }
+      return `<svg viewBox="0 0 60 60" aria-hidden="true"><rect width="60" height="60" fill="#F2EDE4"/><g fill="#1A1917">${blocks}</g><rect x="0" y="23" width="60" height="15" fill="#F2EDE4"/><text x="30" y="34" text-anchor="middle" fill="#1A1917" font-family="monospace" font-size="10" letter-spacing="2">DEMO</text></svg>`;
+    }
+    function renderSheet() {
+      if (!selected) return;
+      const p = selected, delta = distance(p);
+      const field = (key,value) => `<div><dt>${esc(t(key))}</dt><dd>${value}</dd></div>`;
+      $('#sheet-content').innerHTML = `
+        <div class="sheet-title-row"><div><h2 id="sheet-title">${esc(p.label)}</h2><p>REF. ${String(p.index+1).padStart(3,'0')} / ${esc(p.author)}</p></div><div class="sheet-pre">${db(p.pre)}<span>preamp</span></div></div>
+        <p class="sheet-distance">${esc(t('sheetCompared',{name:currentName()}))} <strong>${number(delta.rms)} dB RMS · ${number(delta.max)} dB ${esc(t('max'))}</strong></p>
+        <section class="chart-section"><div class="s-label"><span>${esc(t('beforeAfter'))}</span><span class="mono">S10 / 20 Hz–20 kHz</span></div><div class="chart-large">${chartSVG(p,true)}</div><div class="chart-exports"><p class="chart-note">${esc(t('chartWindow'))}</p><span style="display:flex;gap:6px"><button class="btn" data-action="png">${esc(t('exportPNG'))}</button><button class="btn" data-action="svg">${esc(t('exportSVG'))}</button></span></div></section>
+        <section class="spec-sheet"><div class="s-label"><span>${esc(t('specTitle'))}</span><span class="mono">S5 / SPEC SHEET</span></div><dl class="spec-fields">
+          ${field('format','open-auri/preset@1')}${field('name',esc(p.label))}${field('author',esc(p.author))}${field('sourceField','equalizador.kuba.audio')}${field('licenseField',esc(t('pending')))}${field('code',esc(p.id))}${field('preamp',db(p.pre))}${field('recipe',esc(t('unknownRecipe')))}
+        </dl><table class="band-table"><caption class="sr-only">${esc(p.label)} · 10 ${esc(t('bands'))} · 96 kHz</caption><thead><tr><th scope="col">#</th><th scope="col">${esc(t('kind'))}</th><th scope="col">Hz</th><th scope="col">${esc(t('gain'))} / dB</th><th scope="col">Q</th></tr></thead><tbody>${p.b.map(([kind,f,g,q],index) => `<tr><td>${String(index+1).padStart(2,'0')}</td><td>${kind}</td><td>${number(f,0)}</td><td>${signed(g,1,true)}</td><td>${number(q,2)}</td></tr>`).join('')}</tbody></table><p class="spec-note">${esc(t('orderNote'))}${!p.documented ? `<br>${esc(t('labelNote'))}` : ''}<br>${esc(t('peak'))}: ${signed(Math.max(...p.response),2)} dB / 601 ${locale === 'pt-BR' ? 'pontos' : 'points'}.</p></section>
+        <section class="share-section"><div class="s-label"><span>${esc(t('shareTitle'))}</span><span class="mono">S1 / 64 base64url</span></div><p style="font-size:10px;color:var(--muted);margin-bottom:10px">${esc(t('shareExample'))}</p><code class="share-code">${p.shareCode}</code><div class="share-controls"><button class="btn" data-action="copy">${esc(t('copyLink'))}</button><p>${esc(t('shareNote'))}</p></div><input id="copy-fallback" class="copy-fallback" aria-label="${esc(t('copyLink'))}" readonly hidden></section>
+        <section class="print-section"><div class="s-label"><span>${esc(t('printTitle'))}</span><span class="mono">S8 / PRINT</span></div><div class="print-layout"><div class="print-card"><span class="smallcaps">${esc(t('printReference'))}</span><span class="print-card-name">${esc(p.label)}</span><span class="mini-chart">${chartSVG(p)}</span><span class="qr-placeholder">${qrPattern()}<span>${esc(t('illustrativeQR'))}</span></span><span class="print-card-data">${db(p.pre)} · 10 ${esc(t('bands'))} · 96 kHz · ${esc(t('licensePending'))}</span></div><div class="print-help"><p>${esc(t('printNote'))}</p><button class="btn" data-action="print">${esc(t('print'))}</button></div></div></section>
+        <section class="history-section"><div class="s-label"><span>${esc(t('historyTitle'))}</span><span class="mono">S3 / ${esc(t('illustrative'))}</span></div><div class="timeline">${esc(t('history'))}<span>${esc(t('historyNote'))}</span></div></section>
+        <div class="sheet-actions"><a class="btn" href="curva.html">${esc(t('openCurve'))} ↗</a><button class="btn" disabled aria-disabled="true" title="mock pendente">${esc(t('compare'))}</button><button class="btn primary" data-action="write">${esc(t('write'))}</button></div><button class="use-current" data-action="current">${esc(t('useCurrent'))}</button>
+      `;
+    }
+    function showPreset(id) {
+      const preset = presets.find(p => p.id === id);
+      if (!preset) return;
+      selected = preset;
+      lastCardId = `tape-${id}`;
+      renderSheet();
+      if (!sheet.open) sheet.showModal();
+      sheet.scrollTop = 0;
+      $('#close-sheet').focus({preventScroll:true});
+    }
+    function toast(message) {
+      clearTimeout(toastTimer);
+      const element = $('#toast');
+      element.textContent = message;
+      if (element.showPopover && !element.matches(':popover-open')) element.showPopover();
+      toastTimer = setTimeout(() => {
+        if (element.hidePopover && element.matches(':popover-open')) element.hidePopover();
+        element.textContent = '';
+      },4500);
+    }
+    function setCurrent(id) {
+      current = id === 'neutral' ? neutral : presets.find(p => p.id === id) ?? presets[0];
+      renderCurrent();renderCards();
+      if (sheet.open) renderSheet();
+      toast(t('currentChanged',{name:currentName()}));
+    }
+    function writeData() {
+      if (!pendingWrite) return;
+      const name = pendingWrite.id === 'neutral' ? t('neutral') : pendingWrite.label;
+      $('#write-data').textContent = `${name} · ${db(pendingWrite.pre)} · 10 ${t('bands')} · 96 kHz`;
+    }
+    function simulateWrite(preset) {
+      pendingWrite = preset;
+      writeData();
+      if (!writeDialog.open) writeDialog.showModal();
+      $('#cancel-write').focus();
+    }
+    async function copyLink() {
+      const link = `${location.href.split('#')[0]}#p=${selected.shareCode}`;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(link);
+        toast(t('linkCopied'));
+      } catch {
+        const input = $('#copy-fallback');
+        input.hidden = false;input.value = link;input.focus();input.select();
+        toast(t('copyFallback'));
+      }
+    }
+    function downloadBlob(blob,filename) {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;anchor.download = filename;document.body.append(anchor);anchor.click();anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url),10000);
+      toast(t('downloaded'));
+    }
+    function exportChart(kind) {
+      const svg = chartSVG(selected,true), filename = `open-auri-${selected.id}`;
+      const blob = new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+      if (kind === 'svg') {downloadBlob(blob,`${filename}.svg`);return;}
+      const url = URL.createObjectURL(blob), image = new Image();
+      image.onerror = () => {URL.revokeObjectURL(url);toast(t('exportError'));};
+      image.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');canvas.width = 1920;canvas.height = 846;
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Canvas unavailable');
+          context.drawImage(image,0,0,canvas.width,canvas.height);
+          canvas.toBlob(png => {if (png) downloadBlob(png,`${filename}.png`);else toast(t('exportError'));},'image/png');
+        } catch {toast(t('exportError'));}
+        finally {URL.revokeObjectURL(url);}
+      };
+      image.src = url;
+    }
+    function updateLanguage() {
+      document.documentElement.lang = locale;
+      document.title = `${t('title')} · open-auri`;
+      applyTranslations();renderCurrent();renderFilters();renderCards();
+      if (selected) renderSheet();
+      writeData();
+      $('#language').innerHTML = `<span class="${locale === 'pt-BR' ? '' : 'inactive'}">PT</span> · <span class="${locale === 'en-US' ? '' : 'inactive'}">EN</span>`;
+      $('#language').setAttribute('aria-label',locale === 'pt-BR' ? 'Switch to English' : 'Mudar para português');
+      $('#toast').textContent = '';
+    }
+    $('#search').addEventListener('input',renderCards);
+    $('#sort').addEventListener('change',renderCards);
+    $('#current-curve').addEventListener('change',event => setCurrent(event.target.value));
+    $('#filters').addEventListener('click',event => {const button = event.target.closest('[data-tag]');if (!button) return;activeTag = button.dataset.tag;renderFilters();renderCards();$(`[data-tag="${activeTag}"]`).focus();});
+    $('#tapes').addEventListener('click',event => {const button = event.target.closest('[data-preset]');if (button) showPreset(button.dataset.preset);});
+    $('#clear-search').addEventListener('click',() => {$('#search').value = '';activeTag = 'all';renderFilters();renderCards();$('#search').focus();});
+    $('#neutral-button').addEventListener('click',() => setCurrent('neutral'));
+    $('#default-button').addEventListener('click',() => setCurrent('padrao'));
+    $('#write-current').addEventListener('click',() => simulateWrite(current));
+    $('#close-sheet').addEventListener('click',() => sheet.close());
+    sheet.addEventListener('close',() => {const card = lastCardId ? document.getElementById(lastCardId) : null;(card ?? $('#search')).focus({preventScroll:true});});
+    $('#sheet-content').addEventListener('click',event => {
+      const button = event.target.closest('[data-action]');if (!button) return;
+      switch (button.dataset.action) {
+        case 'copy': void copyLink();break;
+        case 'print': window.print();break;
+        case 'svg': exportChart('svg');break;
+        case 'png': exportChart('png');break;
+        case 'write': simulateWrite(selected);break;
+        case 'current': setCurrent(selected.id);$('.use-current',sheet).focus();break;
+      }
+    });
+    $('#cancel-write').addEventListener('click',() => writeDialog.close());
+    $('#confirm-write').addEventListener('click',() => {writeDialog.close();toast(t('simulated'));});
+    $('#language').addEventListener('click',() => {locale = locale === 'pt-BR' ? 'en-US' : 'pt-BR';updateLanguage();});
+    document.querySelectorAll('a[aria-disabled="true"]').forEach(link => link.addEventListener('click',event => event.preventDefault()));
+    document.addEventListener('keydown',event => {
+      const isEditing = event.target instanceof HTMLElement && (['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName) || event.target.isContentEditable);
+      if (event.key === '/' && !isEditing && !sheet.open && !writeDialog.open && !event.ctrlKey && !event.metaKey && !event.altKey) {event.preventDefault();$('#search').focus();}
+    });
+    updateLanguage();
+    const initialCode = new URLSearchParams(location.hash.slice(1)).get('p');
+    const sharedExample = presets.find(p => p.shareCode === initialCode);
+    if (sharedExample) showPreset(sharedExample.id);
+  </script>
+</body>
+</html>

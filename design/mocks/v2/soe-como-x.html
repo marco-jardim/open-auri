@@ -1,0 +1,1224 @@
+<!--
+Pre-publication TODOs:
+- fonte e licença das medições reais: AutoEq e afins
+- portar o otimizador do AutoEq (MIT); this constrained greedy fitter is not that optimizer.
+- Bench-test the observed envelope, Q27/Q23 codec, WebHID, flash wear and loudness.
+- Official preset labels supplied by the follow-up specification; numeric data from the reference fixture.
+- Verify the honoree's birth year with the cited sources; years deliberately omitted here.
+- Review ISO 226 weighting approximation, translations, keyboard/touch and contrast.
+- Connect audio preview and cross-page persistence to the application, not to hardware here.
+- Shared blocks (audio-loader v1 CSS/HTML/JS, storage v2) are verbatim copies from curva.html; keep them in sync.
+- Storage contract v2 has no library key: "Salvar na Biblioteca" stores the curve as "oa.v2.current". Confirm with Biblioteca.
+- HS/LP/HP imports are experimental (gated), opened in the Curva ENGENHARIA layer; bench-test before any real write.
+- A/B preview: listening check of loudness matching (levelDb) and of the approximate mode at device rates.
+-->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Soe como X · open-auri</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{--ink:#0F0F0E;--ink-2:#171715;--text:#ECE7DD;--muted:#8F8A80;--rule:rgba(236,231,221,.12);--danger:#E5484D;--accent:#FF3D8B;--paper:#dedbce;--mono:"JetBrains Mono",monospace;--serif:"Instrument Serif",Georgia,serif;--ui:"Geist",Arial,sans-serif}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:80px}body{margin:0;background:#121312;color:var(--text);font:12px/1.5 var(--ui);-webkit-font-smoothing:antialiased;isolation:isolate}button,input,select,textarea{font:inherit;color:inherit}button,a{touch-action:manipulation}button{cursor:pointer;border:1px solid var(--rule);background:#222421;border-radius:3px;padding:8px 12px;line-height:1.2}button:hover:not(:disabled){border-color:var(--accent)}button:active:not(:disabled){transform:translateY(1px)}button.primary{background:var(--accent);border-color:var(--accent);color:#190b12;font-weight:650}a{color:inherit;text-underline-offset:4px}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:4px}button:disabled,[aria-disabled="true"]{opacity:.45;cursor:not-allowed}h1,h2,h3,p,figure{margin:0}h2,h3{font-weight:500}input,select,textarea{min-width:0}select{background:#101411;border:1px solid #4a4c44;border-radius:2px;padding:9px 7px;width:100%;font-size:11px}input[type="text"],textarea{background:#101411;border:1px solid #4a4c44;border-radius:2px;padding:8px}input[type="checkbox"]{accent-color:var(--accent)}[hidden]{display:none!important}.mono,code,kbd{font-family:var(--mono);font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.accent{color:var(--accent)}.eyebrow{font-size:9px;font-weight:550;letter-spacing:.14em;text-transform:uppercase}.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.skip{position:fixed;top:-100px;left:20px;z-index:100;background:var(--paper);color:var(--ink);padding:12px}.skip:focus{top:10px}
+    /* Shared v2 chrome. */
+    .cable-bar{position:sticky;top:0;z-index:60;background:#171715;border-bottom:1px solid var(--rule)}
+    .cable-inner{max-width:1480px;margin:auto;min-height:56px;padding:0 24px;display:flex;align-items:center;gap:22px}
+    .wordmark{font:italic 27px/1 var(--serif);text-decoration:none;white-space:nowrap}
+    .main-nav{display:flex;gap:15px;align-self:stretch;align-items:center;margin:auto;font-size:11.5px;white-space:nowrap}
+    .main-nav a{text-decoration:none;position:relative;color:#cfc9be}.main-nav a:hover,.main-nav a[aria-current="page"]{color:var(--text)}
+    .main-nav a[aria-current="page"]:after{content:"";position:absolute;left:0;right:0;bottom:-19px;height:2px;background:var(--accent)}
+    .cable-actions{display:flex;align-items:center;gap:8px;white-space:nowrap}
+    .cable-actions button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:7px 10px;font-size:11px;line-height:1.2}
+    .cable-actions button:hover{border-color:var(--muted)}.cable-actions button.primary{background:var(--accent);border-color:var(--accent);color:#120a05;font-weight:650}.cable-actions button.primary:hover{background:#ff78af}
+    .cable-state{font-size:10.5px;color:#b5afa4;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
+    .status-dot{color:var(--muted);font-size:8px;margin-right:5px}.dirty{font:9.5px/1.35 var(--mono);color:var(--muted);max-width:100px;white-space:normal}
+    .language{border:0!important;font-family:var(--mono)!important;color:var(--muted)}.language .on{color:var(--text)}
+/* === OA SHARED: audio-loader v1 (CSS) === */
+.oa-audio{position:relative}
+.oa-audio-btn{display:inline-flex;align-items:center;gap:6px;max-width:190px}
+.oa-audio-btn .oa-audio-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.oa-audio-btn.has-file{border-color:color-mix(in srgb,var(--accent) 55%,transparent)!important;color:var(--accent)}
+.oa-audio-pop{position:absolute;left:0;top:calc(100% + 10px);z-index:80;width:320px;max-width:calc(100vw - 24px);background:#1b1b19;border:1px solid #34332f;border-radius:6px;padding:14px;box-shadow:0 18px 40px rgba(0,0,0,.65);font:12px/1.45 var(--ui);color:var(--text);white-space:normal}
+.oa-audio-pop h3{margin:0 0 10px;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.oa-audio-load{position:relative;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);color:var(--accent);border-radius:3px;padding:7px 10px;cursor:pointer;font-size:12px}
+.oa-audio-load:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+.oa-audio-file{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.oa-audio-meta{margin:10px 0;font:11px/1.5 var(--mono);color:#cfc9be;word-break:break-word}
+.oa-audio-meta b{color:var(--text);font-weight:500}
+.oa-audio-row{display:flex;gap:8px;flex-wrap:wrap}
+.oa-audio-row button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:6px 10px;font-size:11.5px}
+.oa-audio-row button:disabled{opacity:.45;cursor:not-allowed}
+.oa-audio-vol{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-top:12px;font-size:11.5px;color:#cfc9be}
+.oa-audio-vol input{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.oa-audio-vol output{font:11px var(--mono);color:var(--accent)}
+.oa-audio-note{margin:10px 0 0;font-size:11px;color:var(--muted)}
+.oa-audio-rate{margin:6px 0 0;font:10.5px var(--mono);color:var(--muted)}
+.oa-audio-rate.approx{color:color-mix(in srgb,var(--accent) 40%,white)}
+@media (max-width:720px){.cable-actions{flex-wrap:wrap;row-gap:6px}.oa-audio-btn .oa-audio-name{max-width:70px}.oa-audio-pop{position:fixed;left:12px;right:12px;top:118px;width:auto;max-width:none}}
+/* === END OA SHARED: audio-loader v1 (CSS) === */
+    .site-footer{max-width:1480px;margin:80px auto 0;padding:32px 24px 36px;border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr;gap:90px;color:var(--muted);font-size:11.5px;position:relative;background:rgba(15,15,14,.9)}
+    .f-eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:550}
+    .honoree{display:flex;align-items:baseline;gap:14px;margin:9px 0 10px}.honoree strong{color:var(--text);font:400 30px/1.1 var(--serif)}
+    .site-footer p{max-width:600px}.site-footer h3{color:var(--text);margin-bottom:9px;font-size:12px;font-weight:500}
+    .sources{display:flex;gap:18px;margin-top:10px}.footer-links{display:flex;gap:24px;margin-top:16px}
+    .soon-badge{display:inline-block;border:1px solid currentColor;padding:2px 5px;font:8px/1.4 var(--mono);letter-spacing:.07em;vertical-align:middle;color:var(--muted)}.soon-note{font-size:10px;color:var(--muted);line-height:1.65}
+    .ambient{position:fixed;inset:56px 0 0;z-index:-1;overflow:hidden;pointer-events:none;background:radial-gradient(ellipse at 20% 0,#45473a55,transparent 65%),#131512}.ambient svg{position:absolute;top:0;right:-20%;width:145%;height:100%;opacity:.11;animation:drift 85s linear infinite alternate;filter:sepia(.5)}.ambient:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 119px,#c6c8af0a 120px),repeating-linear-gradient(0deg,transparent 0 59px,#c6c8af08 60px)}@keyframes drift{to{transform:translate(-12%,7%)}}
+    main{max-width:1600px;padding:35px 24px 0;margin:auto}.hero{display:grid;grid-template-columns:1.3fr 1fr .8fr;align-items:end;gap:32px;margin-bottom:28px}.hero-kicker{display:flex;align-items:center;gap:14px;margin-bottom:10px;color:#aaa99c}.hero-kicker span:first-child{color:var(--accent)}h1{font:clamp(72px,7.8vw,124px)/.85 var(--serif);letter-spacing:-.045em;white-space:nowrap}h1 em{font-style:italic;color:var(--accent);display:inline-block;position:relative;text-shadow:2px 3px 0 #ff3d8b15}.hero-copy{border-left:1px solid #737668;padding-left:22px;max-width:350px;padding-bottom:3px}.hero-copy h2{font-size:15px;line-height:1.35;font-weight:450;margin-bottom:10px}.hero-copy p{color:#9d9f91;font-size:11px}.hero-stamp{justify-self:end;text-align:right;font:9px/1.9 var(--mono);color:#999d8c}.hero-stamp strong{display:block;color:var(--text);font-size:12px;font-weight:400}.hero-stamp i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px #ff3d8b66;margin-right:7px;animation:pulse 3s ease-in-out infinite}@keyframes pulse{50%{opacity:.5}}
+    .paper-ribbon{height:55px;overflow:hidden;position:relative;background:var(--paper);color:#34372e;box-shadow:inset 0 2px 5px #0005;border:1px solid #9a9b89;display:flex;align-items:center;gap:25px;padding:0 25px;margin:0 9px -1px;transform:rotate(-.25deg)}.paper-ribbon svg{height:100%;flex:1;min-width:0;opacity:.7}.paper-ribbon .mono{font-size:8px;letter-spacing:.12em;white-space:nowrap}.paper-ribbon:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,#00000004 0 1px,transparent 1px 3px);pointer-events:none}
+    .chassis{position:relative;padding:23px 20px 18px;background:linear-gradient(135deg,#64665a 0,#41443d 2%,#343731 36%,#292c27 100%);border:1px solid #777b69;border-bottom:5px solid #161914;border-radius:9px 9px 14px 14px;box-shadow:0 2px 0 #000,0 25px 45px #0008,inset 0 1px 0 #adb19744,inset 1px 0 0 #afb59b33}.chassis:before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;opacity:.15;background:repeating-linear-gradient(0deg,transparent 0 2px,#bcc8ab15 2px 3px)}.screw{position:absolute;width:9px;height:9px;border-radius:50%;background:linear-gradient(125deg,#a4a78e,#34382c 55%,#0c100a);box-shadow:0 1px 2px #000,inset 0 1px 0 #bfc5ab55;z-index:1}.screw:after{content:"";position:absolute;left:2px;right:2px;top:4px;height:1px;background:#10140d;transform:rotate(-35deg)}.screw.tl{top:8px;left:8px}.screw.tr{top:8px;right:8px}.screw.bl{bottom:8px;left:8px}.screw.br{bottom:8px;right:8px}
+    .console-top{display:flex;justify-content:space-between;align-items:center;padding:0 3px 14px;font:8px var(--mono);color:#c3c6b4;letter-spacing:.1em}.console-top .bus{display:flex;gap:15px;align-items:center}.console-top .bus:before{content:"";width:36px;height:4px;background:repeating-linear-gradient(90deg,#b5bba0 0 3px,transparent 3px 6px)}.workstation{display:grid;grid-template-columns:.94fr .94fr 1.05fr 1.35fr;gap:14px;align-items:stretch}.station{position:relative;min-width:0;padding:13px 13px 15px;border:1px solid #151a11;border-radius:3px;background:linear-gradient(120deg,#45483e,#363a30);box-shadow:inset 0 1px 0 #a6b38a22,1px 2px 3px #0005}.station-head{display:flex;gap:9px;align-items:center;margin-bottom:12px}.station-number{display:grid;place-items:center;width:27px;height:27px;border:1px solid #b5b8a1;background:#c6c7b3;color:#2d3227;box-shadow:0 2px 2px #0004;font:16px var(--mono);border-radius:2px}.station-head h2{font:10px var(--mono);letter-spacing:.09em}.station-head .small{font:8px var(--mono);color:#afb39e;margin-top:2px;letter-spacing:.03em}.station-head .lamp{margin-left:auto}.lamp{display:inline-block;width:6px;height:6px;border-radius:50%;background:#666d58;box-shadow:inset 0 1px 2px #0008}.lamp.on{background:var(--accent);box-shadow:0 0 8px #ff3d8b77,inset 0 1px 1px #ffc0d9}.station label.field{display:block;margin:11px 0 5px;font-size:9px;color:#c6c9b7}.screen{position:relative;background:radial-gradient(ellipse at 35% 15%,#1c2a22,#0b120e 80%);border:5px solid #1b1f19;border-radius:8px;box-shadow:inset 0 0 18px #000,0 1px 1px #8c927455,0 -1px 3px #000;overflow:hidden}.screen:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:2;border-radius:4px;background:linear-gradient(135deg,#d9f5db08,transparent 45%),repeating-linear-gradient(0deg,#0002 0 1px,transparent 1px 3px);box-shadow:inset 0 0 17px #0005}.screen svg{display:block;width:100%;height:auto}.screen-label{position:absolute;z-index:3;top:6px;left:8px;font:7px var(--mono);color:#b6c1a3;letter-spacing:.07em}.screen-meta{font:8px var(--mono);color:#adb79d;display:flex;justify-content:space-between;padding:7px 1px 0;gap:6px}.micro{font-size:9px;color:#b1b6a1;line-height:1.6}.measurement-search{display:flex;gap:5px;margin-bottom:6px}.measurement-search input{width:100%;font-size:10px;padding:7px}.measurement-search button{padding:6px 8px}.measurement-note{margin:9px 0 11px;color:#d1d4c2;font-size:9px}.measurement-note b{font-weight:500;border-bottom:1px dotted #aeb399}.dropzone{padding:10px 7px;border:1px dashed #7e866d;border-radius:3px;text-align:center;background:#252b2244;cursor:pointer}.dropzone:hover,.dropzone.drag{border-color:var(--accent);background:#ff3d8b0d}.dropzone strong{display:block;font-size:10px;font-weight:450;margin-bottom:4px}.dropzone small{font:8px var(--mono);color:#b4b8a6}.dropzone button{margin-top:7px;font-size:8px;padding:4px 7px;background:transparent}.target-tools{display:flex;gap:6px;margin:10px 0}.target-tools button{padding:6px 7px;font-size:9px;flex:1}.target-tools button[aria-pressed="true"]{color:var(--accent);border-color:#ff3d8b88}.target-note{font:8px/1.7 var(--mono);color:#bcc1ac;margin-top:10px;padding-top:9px;border-top:1px solid #60664f}.draw-mode svg{cursor:crosshair;touch-action:none}.draw-mode{outline:1px solid var(--accent);outline-offset:2px}
+    .knob-unit{position:relative;text-align:center;padding:0 0 8px}.knob-title{font:9px var(--mono);letter-spacing:.05em;text-align:center;margin-bottom:4px}.knob-scale{width:166px;height:148px;margin:0 auto;position:relative;background:conic-gradient(from 225deg at 50% 57%,var(--accent) 0deg,var(--accent) var(--arc,176deg),transparent var(--arc,176deg) 270deg,transparent 270deg);clip-path:polygon(0 0,100% 0,100% 100%,80% 100%,50% 74%,20% 100%,0 100%);border-radius:50%}.knob-scale:before{content:"";position:absolute;inset:5px;border-radius:50%;background:repeating-conic-gradient(from 225deg at 50% 58%,#b2b69f 0 1deg,transparent 1deg 9deg),#383d31;mask:radial-gradient(circle at 50% 58%,transparent 0 60px,#000 61px)}.knob-scale:after{content:"";position:absolute;width:120px;height:120px;left:23px;top:22px;background:#373c31;border-radius:50%;box-shadow:0 4px 7px #0009}.knob{position:absolute;z-index:2;left:36px;top:35px;width:94px;height:94px;border-radius:50%;background:radial-gradient(circle at 30% 22%,#696c5f,#33372e 44%,#1a2017 80%);border:2px solid #777e65;box-shadow:inset 1px 2px 2px #c7cdb344,inset -2px -3px 5px #000b,3px 7px 8px #0008;cursor:ns-resize;touch-action:none}.knob:before{content:"";position:absolute;inset:5px;border:1px solid #a2aa8122;border-radius:50%}.knob-pointer{position:absolute;inset:9px;transform:rotate(var(--rotation,40deg))}.knob-pointer:before{content:"";position:absolute;top:0;left:calc(50% - 2px);width:4px;height:21px;border-radius:1px;background:var(--accent);box-shadow:0 0 6px #ff3d8b66}.scale-ends{display:flex;justify-content:space-between;max-width:136px;margin:-1px auto 0;font:8px var(--mono);color:#c4c9b4}.knob-value{display:flex;align-items:baseline;justify-content:center;margin:-3px auto 3px;gap:4px}.knob-value input{width:62px;text-align:center;font:24px var(--mono);padding:0;border:0;background:none;color:var(--accent)}.knob-value span{font:9px var(--mono);color:#b2b99f}.switches{border-top:1px solid #676e58;padding-top:6px}.switch{display:flex;align-items:center;gap:8px;margin:8px 0;cursor:pointer;font-size:9px;line-height:1.4}.switch input{appearance:none;width:25px;height:13px;flex-shrink:0;border-radius:2px;background:#151b12;border:1px solid #0d110b;box-shadow:0 1px 1px #88947744;position:relative;margin:0}.switch input:before{content:"";position:absolute;top:1px;left:2px;width:8px;height:9px;background:linear-gradient(90deg,#9ea38c,#646c54);box-shadow:1px 1px 3px #000}.switch input:checked:before{left:13px;background:var(--accent)}.solve{width:100%;padding:12px 8px;margin-top:7px;letter-spacing:.13em;font:600 12px var(--mono);box-shadow:0 3px 0 #8c234f,0 4px 8px #0005,inset 0 1px 0 #ffb7d455}.solve:active{box-shadow:0 1px 0 #8c234f}.solve[aria-busy="true"]{animation:pulse 1s infinite}.fit-readouts{display:flex;gap:12px;margin-top:15px;border-top:1px solid #676e58;padding-top:10px}.fit-readouts>div{flex:1}.fit-readouts strong{font:38px/.95 var(--mono);letter-spacing:-.09em;font-weight:400;color:var(--text)}.fit-readouts span{display:block;font:7px var(--mono);color:#bfc6af;margin-top:5px;letter-spacing:.06em}.fit-readouts .accent{color:var(--accent)}
+    .result{grid-column:4;grid-row:1/3;background:linear-gradient(110deg,#3a3f33,#2c3227);display:flex;flex-direction:column}.result .station-head{margin-bottom:9px}.gate-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;font:8px var(--mono);color:#bac5aa}.gate-header b{color:var(--accent);font-weight:400}.table-well{padding:6px 7px 8px;background:#11190f;border:4px solid #1c2119;border-radius:5px;box-shadow:inset 0 1px 8px #000,0 1px 0 #6a7556}.band-table{width:100%;border-collapse:collapse;font:9px var(--mono);color:#ccd5bf;table-layout:fixed}.band-table th{font-size:7px;font-weight:400;color:#8d9b7e;padding:3px 1px 8px;text-align:right;border-bottom:1px solid #3f4b34}.band-table th:first-child{width:18px;text-align:left}.band-table th:nth-child(2){width:49px;text-align:left}.band-table td{padding:4px 1px;border-bottom:1px solid #35422a66;text-align:right}.band-table td:first-child{text-align:left;color:#738667}.band-table input{width:100%;padding:4px 2px;text-align:right;border:1px solid transparent;background:transparent;color:#d5dec6;font:10px var(--mono);border-radius:1px}.band-table input:hover{border-color:#687b54}.band-table input:disabled{opacity:.3}.band-table select{padding:4px 1px;border:0;background:#182110;color:#c9d4b6;font:9px var(--mono)}.band-table tr:last-child td{border:0}.gate-lamps{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin:14px 0 9px}.gate-lamps button{background:none;padding:5px 0;border-color:#717b6055;font:7px var(--mono);color:#acb99b;display:flex;align-items:center;flex-direction:column;gap:6px}.gate-lamps .lamp{width:7px;height:7px}.gate-lamps .pass .lamp{background:#c0c9a5;box-shadow:0 0 5px #c0c9a533,inset 0 1px 1px #fff8}.gate-lamps .fail .lamp{background:var(--danger);box-shadow:0 0 7px #e5484d77}.gate-readout{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid #606e4f}.gate-readout label{font:8px var(--mono);color:#a6b598}.gate-readout strong{display:block;font:23px var(--mono);letter-spacing:-.06em;margin-top:3px}.gate-readout strong small{font:9px var(--mono);color:#a6b598}.level{text-align:right}.level strong{font-size:18px}.gate-summary{font:8px/1.8 var(--mono);color:#adb99d;min-height:30px;margin:4px 0 11px;overflow-wrap:anywhere}.preview-ab{display:flex;align-items:center;gap:5px;margin:2px 0 5px}.preview-ab .caption{font-size:10px;margin-right:auto}.preview-ab button{font:10px var(--mono);padding:6px 13px}.preview-ab button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:#ff3d8b11}.result-actions{display:grid;grid-template-columns:1fr;gap:7px;margin-top:12px}.result-actions a{display:block;text-align:center;border:1px solid #77826888;border-radius:3px;padding:8px 9px;text-decoration:none;font-size:10px;background:linear-gradient(#5c665044,#293022)}.result-actions button{font-size:10px}.result-actions .primary{padding:12px}.result .micro{margin-top:5px}.result-spacer{flex:1;min-height:10px}.hardware-mini{margin-top:15px;padding-top:12px;border-top:1px solid #606e4f;font:8px/1.9 var(--mono);color:#a3b191;display:flex;justify-content:space-between}.vent{height:24px;margin-top:13px;opacity:.7;background:repeating-linear-gradient(90deg,#11160d 0 3px,transparent 3px 8px);border-top:1px solid #5f705044;border-bottom:1px solid #5f705022}
+    .panorama{grid-column:1/4;grid-row:2;background:linear-gradient(120deg,#343b2c,#2a3024);border:1px solid #151d10;border-radius:5px;padding:12px 13px 10px;min-width:0;box-shadow:inset 0 1px 0 #9dab7c22}.monitor-head{display:flex;align-items:center;justify-content:space-between;margin:0 3px 9px;gap:8px;font:8px var(--mono);color:#c4cbb4;letter-spacing:.08em}.monitor-head .lamp{margin-right:6px}.monitor-head button{font:9px var(--mono);padding:3px 7px;background:#20281a}.monitor-screen{border-width:8px;border-radius:14px 14px 9px 9px}.plot-info{position:absolute;top:12px;left:15px;right:15px;display:flex;align-items:center;justify-content:space-between;gap:10px;font:8px var(--mono);color:#9baa8f;z-index:3}.plot-info strong{font-weight:400;color:#e2ead8}.plot-svg{aspect-ratio:900/320;min-height:200px}.plot-legend{display:flex;gap:18px;flex-wrap:wrap;padding:2px 17px 11px;font:8px var(--mono);color:#a9b69c}.plot-legend span{display:flex;align-items:center;gap:6px}.plot-legend i{width:16px;height:2px;background:#819273}.plot-legend i.target{background:#eee8d9}.plot-legend i.prediction{background:var(--accent);box-shadow:0 0 4px #ff3d8b55}.heatmap-frame{position:relative;border-top:1px solid #536d3f55;padding:12px 16px 9px}.heatmap-head{display:flex;justify-content:space-between;align-items:center;gap:12px;font:7px var(--mono);letter-spacing:.08em;color:#a7b89a;margin-bottom:6px}.heatmap-head .ramp{display:inline-block;vertical-align:middle;margin:0 4px;width:64px;height:5px;background:linear-gradient(90deg,#365d9a,#e5e8dc,#cc5d48)}#heatmap{aspect-ratio:900/105;min-height:70px}.monitor-bottom{display:flex;align-items:center;justify-content:space-between;padding:10px 3px 0;gap:15px;font:8px var(--mono);color:#b2bea1}.progress-track{width:80px;height:4px;background:#151e10;display:inline-block;margin-right:8px}.progress-track i{display:block;width:0;height:100%;background:var(--accent);transition:width .15s}.monitor-bottom .status{display:flex;align-items:center}.chassis-bottom{display:flex;justify-content:space-between;gap:15px;margin:16px 5px 0;align-items:center;font:8px var(--mono);letter-spacing:.1em;color:#a9b397}.chassis-bottom .slots{width:120px;height:10px;background:repeating-linear-gradient(90deg,#151c11 0 2px,transparent 2px 6px)}
+    .under-console{display:grid;grid-template-columns:1fr 1.1fr;gap:30px;margin:24px 7px 0}.method-note{display:flex;gap:14px;align-items:start;font-size:10px;color:#9dA58f}.method-note .mark{font:24px/1 var(--serif);color:var(--accent);min-width:20px}.method-note strong{display:block;color:#c9d0bd;font-weight:450;margin-bottom:4px}.method-note p{max-width:620px}.future-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.future-row button{font:9px var(--mono);padding:5px 8px}.future-block .soon-note{font-size:9px}.refusal{color:var(--danger)!important}.toast{position:fixed;bottom:25px;left:50%;transform:translateX(-50%);z-index:80;max-width:min(620px,90vw);background:#e6e5d6;color:#1b2116;padding:13px 18px;border-left:3px solid var(--accent);box-shadow:0 5px 20px #0008;font-size:12px}.toast.refusal{background:#281e1c;color:#f0d9d5!important;border-color:var(--danger)}
+    dialog{background:#282e24;color:var(--text);border:1px solid #7b8669;border-radius:6px;width:min(600px,calc(100vw - 36px));padding:27px;box-shadow:0 30px 100px #000c;max-height:90vh;overflow:auto}dialog::backdrop{background:#070b07c9;backdrop-filter:blur(5px)}dialog h2{font:38px/1.1 var(--serif);margin:8px 0 16px}dialog p{color:#b5bea7;font-size:12px;margin:12px 0}dialog .dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}dialog textarea{width:100%;height:165px;font:10px/1.8 var(--mono);resize:vertical;margin-top:8px}dialog .checklist{display:grid;gap:10px;margin:17px 0;font-size:11px}dialog .checklist label{display:flex;gap:9px;align-items:flex-start}dialog .summary{background:#131b0f;padding:12px 14px;font:10px/1.9 var(--mono);white-space:pre-wrap;margin:12px 0;border:1px solid #586d4355}.shortcut-grid{display:grid;grid-template-columns:130px 1fr;gap:13px 20px;font-size:12px}.shortcut-grid kbd{color:var(--accent);font-size:10px}.import-report{font:10px/1.7 var(--mono);white-space:pre-wrap;max-height:170px;overflow:auto}.draw-help{font-size:10px;border:1px solid #59694a;padding:10px;margin-top:12px;color:#b3c2a0}
+    @media(min-width:1550px){.main-nav{gap:18px}.cable-actions{gap:9px}.cable-actions button{font-size:11px}.workstation{gap:18px}.station{padding:15px}.band-table td{padding-block:5px}}
+    @media(max-width:1260px){.cable-inner{gap:13px}.main-nav{font-size:10px;gap:10px}.cable-state{display:none}.dirty{font-size:8px;max-width:80px}.hero{grid-template-columns:1.3fr 1fr .6fr;gap:25px}.hero-stamp{font-size:8px}.workstation{grid-template-columns:1fr 1fr 1fr 1.25fr;gap:10px}.station{padding:10px}.band-table input{font-size:9px}.band-table th:nth-child(2){width:43px}.fit-readouts strong{font-size:33px}.station-head h2{font-size:9px}.screen-meta{font-size:7px}.gate-readout strong{font-size:20px}.hero-copy{padding-left:17px}.knob-scale{transform:scale(.9);margin-block:-7px}}
+    @media(max-width:1080px){.cable-inner{flex-wrap:wrap;gap:0 20px;padding-top:11px;padding-bottom:9px}.main-nav{order:3;overflow:auto;width:100%;margin-top:13px;gap:22px;padding-bottom:5px}.main-nav a[aria-current="page"]:after{bottom:-5px}.cable-actions{margin-left:auto}.cable-state{display:block}.dirty{max-width:105px}.hero{grid-template-columns:1.3fr 1fr}.hero-stamp{display:none}.workstation{grid-template-columns:repeat(3,1fr)}.result{grid-column:1/4;grid-row:3;display:grid;grid-template-columns:1.1fr 1fr;column-gap:25px}.result>.station-head,.result>.gate-header{grid-column:1/3}.result .table-well{grid-column:1;grid-row:3/12}.result .result-spacer,.result .hardware-mini,.result .vent{display:none}.panorama{grid-row:2}.band-table input{font-size:11px}.band-table td{padding-block:6px}.gate-lamps{margin-top:3px}.site-footer{gap:50px}}
+    @media(max-width:720px){main{padding:27px 16px 0}.cable-inner{padding-inline:16px}.cable-actions{gap:5px}.cable-state,.dirty{display:none}.cable-actions button{font-size:9px;padding:7px}.wordmark{font-size:25px}.main-nav{font-size:10px;gap:20px}.hero{display:block;margin-bottom:22px}.hero h1{font-size:88px}.hero-copy{margin-top:22px;max-width:100%;padding-left:15px}.hero-copy h2{font-size:13px}.hero-copy p{font-size:10px}.hero-kicker{font-size:8px}.paper-ribbon{padding-inline:12px;margin-inline:5px;height:43px;gap:10px}.paper-ribbon .mono{font-size:6px}.paper-ribbon .paper-right{display:none}.chassis{padding:18px 10px 13px}.console-top{font-size:6px;letter-spacing:0}.console-top .bus{gap:4px}.console-top .bus:before{width:19px}.workstation{grid-template-columns:1fr 1fr;gap:10px}.station{padding:10px;min-width:0}.station-head{gap:6px}.station-number{width:23px;height:25px;font-size:13px}.station-head h2{font-size:8px}.station-head .small{font-size:6px}.station-head .lamp{display:none}.station select{font-size:9px}.screen-meta{font-size:6px}.dropzone strong{font-size:9px}.dropzone small{font-size:6px}.measurement-note,.micro{font-size:8px}.target-tools button{font-size:8px;padding:6px 3px}.target-note{font-size:7px}.correction{grid-column:1/3;display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.correction .station-head{grid-column:1/3}.correction .knob-unit{grid-row:2/5}.correction .switches{padding-top:0;border-top:0;align-self:start}.correction .fit-readouts{margin-top:12px}.correction .solve{align-self:center}.switch{font-size:8px}.fit-readouts strong{font-size:30px}.panorama{grid-column:1/3;grid-row:3;padding:9px 7px}.plot-svg{min-height:190px}.plot-info{font-size:6px;top:9px;left:11px;right:11px}.plot-legend{font-size:6px;gap:11px;padding-left:12px}.heatmap-head{font-size:6px}.heatmap-frame{padding:9px 10px}.monitor-bottom{font-size:6px;gap:5px}.monitor-head{font-size:6px}.monitor-screen{border-width:5px;border-radius:9px}.result{grid-column:1/3;grid-row:4;display:block}.result .table-well{margin-bottom:15px}.band-table input{font-size:12px}.band-table th{font-size:8px}.band-table td{padding-block:6px}.result .result-actions{grid-template-columns:1fr 1fr}.result-actions .primary{grid-column:1/3}.gate-readout strong{font-size:26px}.gate-readout{padding-top:12px}.result .hardware-mini{display:flex}.result .vent{display:block}.result .micro{font-size:9px}.under-console{grid-template-columns:1fr;gap:20px}.chassis-bottom{font-size:6px;gap:9px}.chassis-bottom .slots{width:50px}.site-footer{grid-template-columns:1fr;gap:30px;padding-inline:24px;margin-top:35px}.hero h1{font-size:clamp(70px,14vw,95px)}dialog{padding:22px}.shortcut-grid{grid-template-columns:100px 1fr;font-size:11px}}
+    .preset-start{margin-bottom:12px}.preset-start label.field{margin-top:0}.preset-start button{display:block;width:100%;font-size:9px;padding:6px 8px;margin-top:6px}
+    @media(min-width:721px) and (max-width:1080px){.result>.preset-start{grid-column:1/3}.result .table-well{grid-row:4/13}}
+    /* Legible instrument legends, without changing the CRT or signal flow.
+       #D4DEC8 on the lightest result face (#3A3F33) exceeds 7:1 before overlays. */
+    .result .station-head h2,.result .station-head .small,.result label.field,.gate-header,.gate-readout label,.gate-readout strong small,.hardware-mini{font-size:11px;color:#d4dec8}
+    .band-table,.band-table th,.band-table td:first-child,.band-table input,.band-table select{font-size:11px;color:#d4dec8}
+    .band-table th{padding-block:6px 9px}.band-table th:first-child{width:21px}.band-table th:nth-child(2){width:49px}
+    .gate-lamps button{font-size:11px;font-weight:500;letter-spacing:-.045em;padding:7px 0;color:#d4dec8}
+    .gate-header b,.result .preview-ab button[aria-pressed="true"]{color:#ff99c4}
+    .gate-summary{font-size:11px;line-height:1.65;color:#d4dec8;white-space:pre-line;min-height:38px}
+    .result .micro,.result .preview-ab .caption,.result .preset-start button,.result .result-actions a,.result .result-actions button{font-size:11px;color:#d4dec8}
+    .result select,.result .preview-ab button{font-size:11px}
+    .result .result-actions button.primary{color:#190b12}.result .refusal{color:#ffabae!important}
+    .monitor-head,.monitor-head button,.plot-info,.plot-legend,.heatmap-head,.monitor-bottom{font-size:11px;color:#d4dec8;line-height:1.5}
+    .plot-info,.heatmap-head{flex-wrap:wrap;gap:5px 12px}.plot-info strong{color:#ecefe2}
+    .monitor-bottom{flex-wrap:wrap;gap:8px 14px}.monitor-bottom .status{min-width:0}
+    #plot text,#heatmap text{font-size:16px;fill:#d4dec8;font-weight:400}
+    #heatmap text[text-anchor="end"]{transform:translateY(2px)}
+    #heatmap{min-height:88px}
+    .console-top,.chassis-bottom{font-size:11px;line-height:1.5;color:#d4dec8;flex-wrap:wrap;gap:8px 14px}
+    /* Canonical chrome spacing and breakpoints, after page-specific media rules. */
+    .cable-inner{gap:22px}.main-nav{gap:15px;font-size:11.5px}.cable-actions{gap:8px}
+    .cable-actions button{font-size:11px;padding:7px 10px}.wordmark{font-size:27px}
+    .dirty{font:9.5px/1.35 var(--mono);max-width:100px}.site-footer{margin:80px auto 0;gap:90px}
+    @media(max-width:1400px){.main-nav{gap:11px;font-size:10.5px}.cable-state{display:none}}
+    @media(max-width:1100px){.cable-inner{flex-wrap:wrap;padding-top:10px;padding-bottom:8px;gap:0 18px}.main-nav{order:3;width:100%;overflow:auto;margin:10px 0 0;padding-bottom:6px}.main-nav a[aria-current="page"]:after{bottom:-6px}.cable-actions{margin-left:auto}.site-footer{grid-template-columns:1fr;gap:30px}}
+    @media(max-width:720px){.cable-inner{padding-inline:14px}.dirty{display:none}}
+    /* Round 3: experimental-kind warning (not a refusal) and the A/B listen control. */
+    dialog p.warn-exp{border-left:3px solid var(--accent);padding:8px 11px;background:#ff3d8b14;color:#ffd9e8}
+    .result .preview-ab #abPlay{padding:6px 10px}.result .preview-ab #abPlay[aria-pressed="true"]{border-color:var(--accent);color:#ff99c4;background:#ff3d8b11}
+    .band-table option.exp{color:#ff99c4}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main" data-i18n="skip">Ir ao conteúdo</a>
+  <div class="ambient" aria-hidden="true"><svg id="ambientTrace" viewBox="0 0 1600 1000" preserveAspectRatio="none"></svg></div>
+  <header class="cable-bar"><div class="cable-inner">
+    <a class="wordmark" href="curva.html" aria-label="open-auri, Curva">open-auri</a>
+    <nav class="main-nav" aria-label="Principal"><a href="curva.html" data-i18n="navCurve">Curva</a><a href="biblioteca.html" data-i18n="navLibrary">Biblioteca</a><a href="comparar.html" data-i18n="navCompare">Comparar</a><a href="soe-como-x.html" aria-current="page" data-i18n="navSound">Soe como X</a><a href="comunidade.html" data-i18n="navCommunity">Comunidade</a><a href="teste-cego.html" data-i18n="navBlind">Teste cego</a><a href="cabo.html" data-i18n="navCable">Cabo</a><a href="docs.html">Docs</a></nav>
+    <div class="cable-actions"><span class="cable-state"><span class="status-dot" aria-hidden="true">●</span><span data-i18n="disconnected">Sem cabo · simulado</span></span><span class="dirty" id="dirty" aria-live="polite">0 alterações não gravadas</span>
+      <!-- === OA SHARED: audio-loader v1 (HTML) === -->
+      <div class="oa-audio" id="oaAudio">
+        <button type="button" class="oa-audio-btn" id="oaAudioBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="oaAudioPop"><span aria-hidden="true">♪</span><span class="oa-audio-name" id="oaAudioName">Áudio</span></button>
+        <div class="oa-audio-pop" id="oaAudioPop" role="dialog" aria-labelledby="oaAudioTitle" hidden>
+          <h3 id="oaAudioTitle" data-oa-audio="title">Áudio da prévia</h3>
+          <label class="oa-audio-load"><span data-oa-audio="load">Carregar MP3…</span><input type="file" class="oa-audio-file" id="oaAudioFile" accept="audio/mpeg,audio/mp3,audio/*"></label>
+          <div class="oa-audio-meta" id="oaAudioMeta" aria-live="polite"></div>
+          <div class="oa-audio-row"><button type="button" id="oaAudioPlay" data-oa-audio="play">Tocar arquivo</button><button type="button" id="oaAudioRemove" data-oa-audio="remove">Remover</button></div>
+          <label class="oa-audio-vol"><span data-oa-audio="vol">Volume da prévia (só no navegador)</span><output id="oaAudioVolOut" for="oaAudioVol">−12 dB</output><input type="range" id="oaAudioVol" min="-40" max="0" step="1" value="-12"></label>
+          <p class="oa-audio-rate" id="oaAudioRate"></p>
+          <p class="oa-audio-note" data-oa-audio="note">O arquivo fica só neste navegador. Nada é enviado.</p>
+        </div>
+      </div>
+      <!-- === END OA SHARED: audio-loader v1 (HTML) === -->
+      <button type="button" id="neutral" data-i18n="neutral">Neutro</button><button type="button" id="default" data-i18n="defaultAuri">Padrão Auri</button><button type="button" class="primary" data-write data-i18n="write">Gravar no cabo</button><button type="button" class="language" id="language" aria-label="Switch to English"><span class="pt on">PT</span> · <span class="en">EN</span></button></div>
+  </div></header>
+  <main id="main">
+    <section class="hero" aria-labelledby="pageTitle"><div><div class="hero-kicker eyebrow"><span>04 / C1 · C2 · C4</span><span data-i18n="interpretation">ESTAÇÃO DE INTERPRETAÇÃO</span></div><h1 id="pageTitle"><span data-i18n="soundLike">Soe como</span> <em>X</em></h1></div><div class="hero-copy"><h2 data-i18n="lede">Uma resposta bruta.<br>Um alvo. Dez seções para chegar lá.</h2><p data-i18n="heroNote">Da interpretação sísmica à correção de afinação: encontre o desvio, desenhe o destino e deixe o solver aproximar os dois.</p></div><div class="hero-stamp"><strong><i></i><span data-i18n="localEngine">MOTOR LOCAL · 96 kHz</span></strong>Q27 / Q23 · 10 × BIQUAD<br><span data-i18n="simulation">SIMULAÇÃO · SEM CONEXÃO HID</span><br>FIELD 04 / INTERPRETATION</div></section>
+    <div class="paper-ribbon" aria-hidden="true"><span class="mono">SEISMIC SECTION<br>LINE 04 / RAW DATA</span><svg id="paperTrace" viewBox="0 0 1100 55" preserveAspectRatio="none"></svg><span class="mono paper-right">FREQUENCY DOMAIN<br>20 Hz → 20 kHz</span></div>
+    <div class="chassis"><i class="screw tl" aria-hidden="true"></i><i class="screw tr" aria-hidden="true"></i><i class="screw bl" aria-hidden="true"></i><i class="screw br" aria-hidden="true"></i>
+      <div class="console-top"><span>RESPONSE INTERPRETER / 10-SECTION WORKSTATION</span><span class="bus">96 000 SAMPLES / SECOND <span class="accent">●</span></span></div>
+      <div class="workstation">
+        <section class="station measurement" aria-labelledby="measurementHeading"><div class="station-head"><span class="station-number">1</span><div><h2 id="measurementHeading" data-i18n="measurement">MEDIÇÃO</h2><div class="small">INPUT / RAW TRACE</div></div><i class="lamp on" aria-hidden="true"></i></div>
+          <div class="measurement-search"><label class="sr-only" for="search" data-i18n="search">Buscar medição</label><input id="search" type="search" placeholder="Buscar fone…" aria-label="Buscar medição ilustrativa"><button id="clearSearch" type="button" aria-label="Limpar busca">×</button></div>
+          <label class="sr-only" for="measurement" data-i18n="measurement">Medição</label><select id="measurement" aria-label="Selecionar medição ilustrativa"></select>
+          <p class="measurement-note"><b data-i18n="illustrative">medição ilustrativa</b> <span data-i18n="procedural">· IEM procedural, não é dado de bancada.</span></p>
+          <div class="screen"><span class="screen-label">RAW / VARIABLE AREA</span><svg id="wiggle" viewBox="0 0 260 155" role="img" aria-label="Medição ilustrativa como sismograma, traço e preenchimento de área positiva"></svg></div><div class="screen-meta"><span id="measurementId">IEM / 001</span><span>20 Hz → 20 kHz</span></div>
+          <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Importar arquivo .txt EqualizerAPO ou medição CSV"><strong data-i18n="importLabel">Importar .txt / medição CSV</strong><small data-i18n="dropLabel">SOLTE UM ARQUIVO OU CLIQUE</small><br><button type="button" id="pasteImport" data-i18n="paste">Colar texto</button></div><input id="file" type="file" accept=".txt,.csv,text/plain,text/csv" hidden>
+        </section>
+        <section class="station target" aria-labelledby="targetHeading"><div class="station-head"><span class="station-number">2</span><div><h2 id="targetHeading" data-i18n="target">ALVO</h2><div class="small">DESTINATION / NOTE GRID</div></div><i class="lamp on" aria-hidden="true"></i></div>
+          <label class="field" for="target" data-i18n="targetCurve">Curva de destino</label><select id="target"><option value="preference" data-i18n="preference">Alvo de preferência para IEM (ilustrativo)</option><option value="diffuse" data-i18n="diffuse">Campo difuso (ilustrativo)</option><option value="auri" data-i18n="auriTarget">Auri (preset oficial) como alvo</option><option value="draw" data-i18n="draw">Desenhar (C2)</option></select>
+          <div class="target-tools"><button type="button" id="drawToggle" aria-pressed="false" data-i18n="freehand">↗ Desenhar</button><button type="button" id="resetDraw" data-i18n="reset">Redefinir</button></div>
+          <div class="screen" id="targetScreen"><span class="screen-label">TARGET / NOTE GRID</span><svg id="targetGraph" viewBox="0 0 260 175" tabindex="0" role="application" aria-label="Curva-alvo; no modo Desenhar, arraste para desenhar e use setas para ajustar um ponto"></svg></div>
+          <p class="target-note" id="targetNote" data-i18n="targetHint">Curvas ilustrativas alinhadas em 1 kHz. O alvo define a forma, não o nível de reprodução.</p><p class="micro" data-i18n="drawHint">Desenho livre vira spline suave. No teclado: ← → escolhem o ponto; ↑ ↓ ajustam o alvo.</p>
+        </section>
+        <section class="station correction" aria-labelledby="correctionHeading"><div class="station-head"><span class="station-number">3</span><div><h2 id="correctionHeading" data-i18n="correction">CORREÇÃO</h2><div class="small">CONSTRAINED / PK + LS</div></div><i class="lamp on" aria-hidden="true"></i></div>
+          <div class="knob-unit"><div class="knob-title" data-i18n="speed">VELOCIDADE DE CORREÇÃO</div><div class="knob-scale" id="knobScale"><div class="knob" id="speedKnob" tabindex="0" role="slider" aria-label="Velocidade de correção" aria-valuemin="0" aria-valuemax="100" aria-valuenow="65"><span class="knob-pointer" id="knobPointer"></span></div></div><div class="scale-ends"><span>0 / SOFT</span><span>100 / TIGHT</span></div><div class="knob-value"><label class="sr-only" for="speed" data-i18n="speed">Velocidade de correção</label><input id="speed" type="text" inputmode="decimal" value="65" aria-label="Velocidade de correção, de 0 a 100"><span>/ 100</span></div></div>
+          <div class="switches"><label class="switch"><input type="checkbox" id="iso" checked><span data-i18n="iso">Peso perceptual ISO 226</span></label><label class="switch"><input type="checkbox" id="opposing" checked><span data-i18n="opposing">Evitar bandas opostas vizinhas</span></label><label class="switch"><input type="checkbox" id="order" checked><span data-i18n="order">Ordem padrão: cortes antes de reforços</span></label></div>
+          <button class="primary solve" type="button" id="solve" data-i18n="solve">RESOLVER ↗</button>
+          <div class="fit-readouts" aria-live="polite"><div><strong id="rms" class="accent">3,42</strong><span>RMS / dB</span></div><div><strong id="maxError">7,18</strong><span data-i18n="maxError">ERRO MÁX. / dB</span></div></div>
+        </section>
+        <section class="station result" aria-labelledby="resultHeading"><div class="station-head"><span class="station-number">4</span><div><h2 id="resultHeading" data-i18n="result">RESULTADO</h2><div class="small">OUTPUT / QUANTIZED Q27</div></div><i class="lamp on" aria-hidden="true"></i></div>
+          <div class="preset-start"><label class="field" for="startingPreset" data-i18n="officialStartingPoint">Preset oficial de partida</label><select id="startingPreset" aria-label="Preset oficial de partida"></select><button type="button" id="loadPreset" data-i18n="useStartingPoint">Usar como ponto de partida</button></div>
+          <div class="gate-header"><span data-i18n="tenSections">10 SEÇÕES EDITÁVEIS</span><b id="activeSections">00 / 10</b></div>
+          <div class="table-well"><table class="band-table" aria-label="Dez seções EQ editáveis"><thead><tr><th>#</th><th data-i18n="kind">TIPO</th><th>f / Hz</th><th>dB</th><th>Q</th></tr></thead><tbody id="bands"></tbody></table></div>
+          <div class="gate-lamps" id="gateLamps" aria-label="Gate v2, envelope observado"></div>
+          <div class="gate-readout"><div><label data-i18n="autoPreamp">PREAMP AUTO / Q23</label><strong><span id="preamp">−0,5</span> <small>dB</small></strong></div><div class="level"><label data-i18n="levelCurrent">NÍVEL VS. ATUAL</label><strong id="levelDelta">? dB</strong></div></div>
+          <p class="gate-summary" id="gateSummary" aria-live="polite"></p>
+          <div class="preview-ab"><span class="caption" data-i18n="preview">Prévia A/B</span><button type="button" id="abPlay" aria-pressed="false" data-i18n="listen">▶ Ouvir</button><button type="button" id="abA" aria-pressed="false" aria-label="A: curva de partida">A</button><button type="button" id="abB" aria-pressed="true" aria-label="B: resultado">B</button></div><p class="micro" id="abLevels" aria-live="polite"></p><p class="micro" data-i18n="previewNote">A = curva de partida, B = resultado, com nível igualado por levelDb. Toca o MP3 da barra superior ou ruído rosa. Não altera o payload.</p>
+          <div class="result-actions"><a id="openCurve" href="curva.html?camada=ajustar" data-i18n="openCurve">Abrir na Curva ↗</a><button type="button" id="save" data-i18n="save">Salvar na Biblioteca</button><button type="button" class="primary" data-write data-i18n="write">Gravar no cabo</button></div>
+          <p class="micro" id="writeCount">0 simulações hoje · 0 nesta sessão</p><div class="result-spacer"></div><div class="hardware-mini"><span>Auri DSP / CB5100<br>96 kHz · 10 biquads</span><span>write-only / WebHID<br>Q27 · Q23 · 0xCB</span></div><div class="vent" aria-hidden="true"></div>
+        </section>
+        <section class="panorama" aria-labelledby="monitorHeading"><div class="monitor-head"><span id="monitorHeading"><i class="lamp on" aria-hidden="true"></i><span data-i18n="monitor">MONITOR DE INTERPRETAÇÃO</span></span><span id="iterationLabel">ITER 00 / 20</span><button type="button" id="help" aria-label="Ajuda e atalhos">?</button></div>
+          <div class="screen monitor-screen"><div class="plot-info"><strong data-i18n="response">RESPOSTA PREVISTA × ALVO</strong><span data-i18n="shapeOnly">FORMA ALINHADA EM 1 kHz · ±18 dB</span></div><svg class="plot-svg" id="plot" viewBox="0 0 900 320" role="img" aria-label="Resposta em frequência, medição ilustrativa, alvo e resposta prevista, frequência logarítmica de 20 Hz a 20 kHz"></svg><div class="plot-legend"><span><i></i><span data-i18n="measurementLegend">medição ilustrativa</span></span><span><i class="target"></i><span data-i18n="targetLegend">alvo</span></span><span><i class="prediction"></i><span data-i18n="predictedLegend">medição + EQ</span></span></div>
+            <div class="heatmap-frame"><div class="heatmap-head"><span data-i18n="heatmap">MAPA DO DESVIO / FREQUÊNCIA × ITERAÇÃO</span><span>−9 <i class="ramp"></i> +9 dB</span></div><svg id="heatmap" viewBox="0 0 900 105" role="img" aria-label="Mapa sísmico do erro residual por frequência e por iteração, azul negativo, branco zero, vermelho positivo"></svg></div>
+          </div><div class="monitor-bottom"><span class="status"><span class="progress-track"><i id="progress"></i></span><span id="solverStatus" role="status" data-i18n="ready">PRONTO PARA INTERPRETAR</span></span><span id="cursorReadout">1 000 Hz / 0,00 dB</span><span>LOG f / 20–20k</span></div>
+        </section>
+      </div><div class="chassis-bottom"><span>FIELD 04 / RESPONSE ALIGNMENT</span><span data-i18n="observed">GATE v2 · ENVELOPE OBSERVADO</span><span class="slots" aria-hidden="true"></span><span>DSP / 96 kHz</span></div>
+    </div>
+    <div class="under-console"><div class="method-note"><span class="mark">↳</span><div><strong data-i18n="methodTitle">O solver aproxima. O gate decide.</strong><p data-i18n="method">Ajuste greedy PK + LS em dez seções, regularização por velocidade, peso ISO 226 aproximado a 60 phon e penalidade para vizinhas opostas. Cada candidato passa pelo codec e pelo gate em Q27/Q23. Não é certificação de segurança em hardware.</p></div></div><div class="future-block"><p class="soon-note" data-i18n="experimentalNote">HS, LP e HP: experimentais, só na camada Engenharia da Curva e sempre pelo gate. O solver daqui usa apenas PK, LS e OFF.</p><div class="future-row"><button disabled aria-disabled="true">raw biquads</button><span class="soon-badge" data-i18n="soon">EM BREVE</span></div><p class="soon-note" data-i18n="soonNote">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p></div></div>
+  </main>
+  <footer class="site-footer">
+    <section>
+      <div class="f-eyebrow" data-i18n="homage">ESTA PÁGINA HOMENAGEIA</div>
+      <div class="honoree"><strong>Andy Hildebrand</strong></div>
+      <p data-i18n="trivia">Antes da música, Andy Hildebrand interpretava dados sísmicos para uma petroleira, procurando onde perfurar. Em 1997 lançou um corretor de afinação que detecta a nota por autocorrelação e puxa a voz em direção ao alvo. Aqui a mesma ideia puxa a resposta do seu fone em direção a uma curva-alvo.</p>
+      <div class="sources"><a href="https://priceonomics.com/the-inventor-of-auto-tune/" target="_blank" rel="noreferrer" data-i18n="source">fonte ↗</a><a href="https://en.wikipedia.org/wiki/AutoTune" target="_blank" rel="noreferrer" data-i18n="source">fonte ↗</a></div>
+    </section>
+    <section>
+      <h3 data-i18n="notice">Aviso</h3>
+      <p data-i18n="disclaimer">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p>
+      <div class="footer-links"><a href="docs.html#aviso-legal" data-i18n="fullNotice">Aviso legal completo</a><span data-i18n="license">Licença AGPL-3.0</span></div>
+    </section>
+  </footer>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <dialog id="writeDialog" aria-labelledby="writeTitle"><div class="eyebrow accent" data-i18n="simulationOnly">SOMENTE SIMULAÇÃO</div><h2 id="writeTitle" data-i18n="beforeWrite">Antes de gravar</h2><p data-i18n="flashNote">No cabo real, cada gravação usa flash. Não há leitura de volta. Uma curva vale para os dois canais. Este mock não conecta nem envia dados.</p><div class="summary" id="writeSummary"></div><p id="loudnessWarning" data-i18n="loudness">A nova curva pode soar mais alta. Abaixe o volume antes de gravar.</p><p id="wearWarning" hidden data-i18n="wear">A memória do cabo tem vida útil desconhecida; memórias desse tipo costumam aguentar de 10 mil a 1 milhão de gravações.</p><p id="experimentalWarning" class="warn-exp" hidden data-i18n="experimentalWrite">Esta curva usa tipos que a página oficial nunca gravou. Os coeficientes estão dentro do envelope observado, mas o firmware nunca recebeu esses formatos.</p><div class="checklist"><label id="experimentalCheckLabel" hidden><input type="checkbox" id="checkExperimental"><span data-i18n="experimentalAck">Entendi o risco dos tipos experimentais e quero gravar mesmo assim.</span></label><label><input type="checkbox" id="checkLower"><span data-i18n="lowered">Abaixei o volume e entendi o aviso de nível.</span></label><label><input type="checkbox" id="checkFlash"><span data-i18n="flashAck">Entendi que cada gravação real persiste na flash e não pode ser lida de volta.</span></label></div><div class="dialog-actions"><button type="button" data-close="writeDialog" data-i18n="cancel">Cancelar</button><button type="button" class="primary" id="confirmWrite" disabled data-i18n="simulateWrite">Simular gravação</button></div><p class="micro" id="cooldownNote"></p></dialog>
+  <dialog id="importDialog" aria-labelledby="importTitle"><div class="eyebrow accent">C4 / EQUALIZER APO · CSV</div><h2 id="importTitle" data-i18n="importTitle">Interpretar arquivo</h2><p data-i18n="importHint">PK, LS e OFF passam pelo gate. LSC → LS e HSC → HS são mapeamentos explícitos. HS, LP e HP entram como EXPERIMENTAL · abrir na Engenharia, também pelo gate. LSQ e HSQ são recusados. CSV: frequência em Hz, resposta em dB.</p><label class="sr-only" for="importText" data-i18n="importText">Texto a importar</label><textarea id="importText" spellcheck="false" placeholder="Preamp: -3 dB&#10;Filter 1: ON PK Fc 1000 Hz Gain -2.5 dB Q 1.4&#10;Filter 2: ON LSC Fc 180 Hz Gain 2 dB Q 0.7"></textarea><div class="import-report" id="importReport" aria-live="polite"></div><div class="dialog-actions"><button type="button" data-close="importDialog" data-i18n="cancel">Cancelar</button><button type="button" class="primary" id="applyImport" data-i18n="interpretFile">Interpretar</button></div></dialog>
+  <dialog id="gateDialog" aria-labelledby="gateTitle"><div class="eyebrow accent">Q27 / Q23 · 96 kHz</div><h2 id="gateTitle" data-i18n="gateTitle">Envelope observado</h2><p data-i18n="gateNote">Limites derivados dos presets oficiais, não comprovados em hardware. Picos senoidais de cada prefixo com preamp; não são limites dos estados internos no tempo.</p><div class="summary" id="gateDetails"></div><div class="dialog-actions"><button type="button" data-close="gateDialog" data-i18n="close">Fechar</button></div></dialog>
+  <dialog id="helpDialog" aria-labelledby="helpTitle"><div class="eyebrow accent">WORKSTATION / SHORTCUTS</div><h2 id="helpTitle" data-i18n="helpTitle">Mãos no instrumento</h2><div class="shortcut-grid"><kbd>↑ ↓ / wheel</kbd><span data-i18n="shortcutNudge">Ajustar o valor em foco.</span><kbd>Shift / Alt</kbd><span data-i18n="shortcutModifiers">Passo ×10 / ×0,1.</span><kbd>↵ / click</kbd><span data-i18n="shortcutType">Digite no valor numérico; Enter aplica.</span><kbd>double-click</kbd><span data-i18n="shortcutReset">Redefinir valor ou knob.</span><kbd>drag</kbd><span data-i18n="shortcutDrag">Arraste o knob verticalmente; desenhe no alvo.</span><kbd>← → / ↑ ↓</kbd><span data-i18n="shortcutDraw">No alvo: escolher ponto / ajustar dB.</span><kbd>R / A / B</kbd><span data-i18n="shortcutSolve">Resolver / prévia A / prévia B.</span><kbd>? / Esc</kbd><span data-i18n="shortcutHelp">Abrir ajuda / fechar diálogo.</span></div><div class="dialog-actions"><button type="button" data-close="helpDialog" data-i18n="close">Fechar</button></div></dialog>
+  <script type="module">
+/* === OA SHARED: storage v2 === */
+// Canonical implementation of the OA STORAGE CONTRACT v2 (see the HTML comment at the top of curva.html).
+// Self-contained: no page dependencies. Copy verbatim into every v2 page, before "OA SHARED: audio-loader v1".
+const OA = (globalThis.OA = globalThis.OA || {});
+OA.store = (() => {
+  const KEYS = Object.freeze({
+    current: 'oa.v2.current', journal: 'oa.v2.journal', flashDay: 'oa.v2.flashDay', flashTotal: 'oa.v2.flashTotal',
+    flashSession: 'oa.v2.flashSession', lang: 'oa.v2.lang', previewDb: 'oa.v2.previewDb',
+  });
+  const SESSION_KEYS = new Set([KEYS.flashSession]);
+  const KINDS = new Set(['PK', 'LS', 'HS', 'LP', 'HP']);
+  const area = (key) => { try { return SESSION_KEYS.has(key) ? globalThis.sessionStorage : globalThis.localStorage; } catch { return null; } };
+  function get(key, fallback) {
+    try { const a = area(key), raw = a ? a.getItem(key) : null; return raw == null ? fallback : JSON.parse(raw); } catch { return fallback; }
+  }
+  function set(key, value) { try { const a = area(key); if (a) a.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked */ } }
+  function remove(key) { try { const a = area(key); if (a) a.removeItem(key); } catch { /* blocked */ } }
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const bandToString = (b) => (b.kind === 'OFF' ? 'OFF' : `${b.kind}|${b.freqHz}|${b.gainDb}|${b.qFactor}`);
+  function bandFromString(s) {
+    if (s === 'OFF') return { kind: 'OFF' };
+    const [kind, f, g, q] = String(s).split('|');
+    const band = { kind, freqHz: Number(f), gainDb: Number(g), qFactor: Number(q) };
+    return KINDS.has(kind) && [band.freqHz, band.gainDb, band.qFactor].every(Number.isFinite) ? band : null;
+  }
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const store = {
+    KEYS, get, set, remove, today, bandToString, bandFromString,
+    getLang() { return get(KEYS.lang, 'pt-BR') === 'en-US' ? 'en-US' : 'pt-BR'; },
+    setLang(lang) { set(KEYS.lang, lang === 'en-US' ? 'en-US' : 'pt-BR'); },
+    /** bands: array of {kind, freqHz, gainDb, qFactor} in written order. */
+    saveCurrent({ name, source, preampDb, bands }) {
+      set(KEYS.current, { name: String(name), source: String(source), preampDb, bands: bands.map(bandToString), updatedAt: Date.now() });
+    },
+    /** Returns {name, source, preampDb, bands (objects), updatedAt} or null. Callers must re-run the gate. */
+    loadCurrent() {
+      const c = get(KEYS.current, null);
+      if (!c || !Array.isArray(c.bands) || c.bands.length !== 10 || !Number.isFinite(c.preampDb)) return null;
+      const bands = c.bands.map(bandFromString);
+      return bands.every(Boolean) ? { ...c, bands } : null;
+    },
+    journal() { const j = get(KEYS.journal, []); return Array.isArray(j) ? j : []; },
+    appendJournal(entry, max = 30) { const j = store.journal(); j.push(entry); while (j.length > max) j.shift(); set(KEYS.journal, j); return j; },
+    flashCounts() {
+      const day = get(KEYS.flashDay, null);
+      return { session: num(get(KEYS.flashSession, 0)), today: day && day.date === today() ? num(day.count) : 0, total: num(get(KEYS.flashTotal, 0)) };
+    },
+    recordFlash() {
+      const c = store.flashCounts();
+      set(KEYS.flashSession, c.session + 1); set(KEYS.flashDay, { date: today(), count: c.today + 1 }); set(KEYS.flashTotal, c.total + 1);
+      return store.flashCounts();
+    },
+  };
+  return store;
+})();
+/* === END OA SHARED: storage v2 === */
+
+/* === OA SHARED: audio-loader v1 === */
+// Top-bar MP3 loader + shared preview engine (streaming HTMLAudioElement or pink noise; exact Q27 chains).
+// HOW TO COPY
+//   1. CSS: copy the block "OA SHARED: audio-loader v1 (CSS)" into the page <style> (after the shared chrome CSS).
+//   2. HTML: copy the block "OA SHARED: audio-loader v1 (HTML)" into the top bar's .cable-actions, after the
+//      change counter and before the buttons.
+//   3. JS, in one <script type="module">, in this order: first "OA SHARED: storage v2", then this block
+//      ("OA SHARED: audio-loader v1"), both verbatim. Nothing else is needed for a working loader: the UI binds
+//      itself when the DOM is ready (idempotent, silent if the HTML block is absent) and reads "oa.v2.lang".
+//   4. Optional, only for pages with previews/A-B/blind test: OA.audio.useCodec({ designSection, encodeSection,
+//      preampWord }) with the page's inline codec copy. Without it everything works except buildChain(), which
+//      throws a clear Error.
+//   5. Call OA.audioUI.setLang('pt' | 'en') (or 'pt-BR' | 'en-US') from the page's language toggle.
+// PUBLIC API
+//   OA.audio.getSource()                 creates the AudioContext (call inside a user gesture) and returns the
+//                                        shared source bus (GainNode).
+//   OA.audio.buildChain(bands, preampDb, { gainDb = 0, on = true })
+//                                        -> { input, output, setGain(db, on), dispose(fadeMs) }; one IIRFilterNode per
+//                                        non-OFF section with the EXACT Q27 words (feedforward [b0,b1,b2], feedback
+//                                        [1,a1,a2]), then the Q23 preamp. Several chains may hang off the one source
+//                                        (A/B, blind test): switch them with chain.setGain(db, on).
+//   OA.audio.matchGains([levelDb, ...])  -> trims in dB that bring every chain to the quietest level.
+//   OA.audio.start('chains' | 'raw') / stop()   fade-in / fade-out; 'raw' plays the file without any chain.
+//   OA.audio.state()                     -> { mode, ready, rate, exact, volumeDb, error, persisted, file }.
+//   OA.audio.onChange(cb)                -> unsubscribe function; cb(state) on every change.
+//   OA.audio.loadFile(file) / removeFile() / setVolume(db) / toggleRaw() / ready (Promise: stored file restored).
+//   OA.audioUI.init() / setLang(lang)    init() runs automatically; calling it again is a no-op.
+OA.audio = (() => {
+  const DB_NAME = 'oa-v2', STORE = 'audio', KEY = 'current', RATE = 96000;
+  const listeners = new Set();
+  const clampDb = (v) => Math.min(0, Math.max(-40, Math.round(Number.isFinite(Number(v)) ? Number(v) : -12)));
+  const dbToGain = (db) => Math.pow(10, db / 20);
+  const st = {
+    ctx: null, rate: RATE, exact: true, codec: null, file: null, duration: NaN, error: false, persisted: true,
+    url: null, el: null, elSource: null, noise: null, noiseBuf: null, bus: null, rawGain: null, chainsIn: null, master: null,
+    mode: 'off', volumeDb: clampDb(OA.store.get(OA.store.KEYS.previewDb, -12)),
+  };
+  const state = () => ({
+    mode: st.mode, ready: !!st.ctx, rate: st.rate, exact: st.exact, volumeDb: st.volumeDb, error: st.error, persisted: st.persisted,
+    file: st.file ? { ...st.file, duration: st.duration } : null,
+  });
+  const emit = () => { const s = state(); listeners.forEach((cb) => cb(s)); };
+  // --- IndexedDB (db "oa-v2", store "audio", key "current") ---
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      if (!globalThis.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idb(mode, op) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode), req = op(tx.objectStore(STORE));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  }
+  // --- source handling ---
+  function pinkBuffer(ctx) {
+    const n = Math.round(ctx.sampleRate * 3), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    return buf;
+  }
+  function stopNoise() { if (st.noise) { try { st.noise.stop(); } catch { /* not started */ } st.noise.disconnect(); st.noise = null; } }
+  function startNoise() {
+    if (!st.ctx || st.noise) return;
+    if (!st.noiseBuf) st.noiseBuf = pinkBuffer(st.ctx);
+    const n = st.ctx.createBufferSource(); n.buffer = st.noiseBuf; n.loop = true; n.connect(st.bus); n.start(); st.noise = n;
+  }
+  function detachFile() {
+    if (st.el) { st.el.pause(); st.el.oaDead = true; }
+    if (st.elSource) { try { st.elSource.disconnect(); } catch { /* already */ } }
+    if (st.url) URL.revokeObjectURL(st.url);
+    st.el = null; st.elSource = null; st.url = null; st.file = null; st.duration = NaN; st.error = false;
+  }
+  function attach(record) {
+    detachFile();
+    if (record && record.blob) {
+      st.file = { name: String(record.name || 'audio'), type: record.type || '', size: Number(record.size) || record.blob.size, addedAt: record.addedAt || Date.now() };
+      st.url = URL.createObjectURL(record.blob);
+      const el = new Audio();
+      el.preload = 'metadata'; el.loop = true; el.src = st.url;
+      el.addEventListener('loadedmetadata', () => { if (!el.oaDead) { st.duration = el.duration; emit(); } });
+      el.addEventListener('error', () => { if (!el.oaDead) { st.error = true; emit(); } });
+      st.el = el;
+    }
+    routeSource();
+    emit();
+  }
+  /** Connects the current source (file element or pink noise) to the bus; plays it if the engine is running. */
+  function routeSource() {
+    if (!st.ctx) return;
+    stopNoise();
+    if (st.el) {
+      if (!st.elSource) st.elSource = st.ctx.createMediaElementSource(st.el);
+      st.elSource.connect(st.bus);
+      if (st.mode !== 'off') st.el.play().catch(() => {});
+    } else if (st.mode !== 'off') startNoise();
+  }
+  /** Creates the AudioContext. Call from a user gesture (click/key). */
+  function ensure() {
+    if (st.ctx) return st.ctx;
+    const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio unavailable');
+    let ctx;
+    try { ctx = new AC({ sampleRate: RATE }); } catch { ctx = new AC(); }
+    st.ctx = ctx; st.rate = ctx.sampleRate; st.exact = ctx.sampleRate === RATE;
+    st.master = ctx.createGain(); st.master.gain.value = 0; st.master.connect(ctx.destination);
+    st.chainsIn = ctx.createGain(); st.chainsIn.gain.value = 0; st.chainsIn.connect(st.master);
+    st.rawGain = ctx.createGain(); st.rawGain.gain.value = 0; st.rawGain.connect(st.master);
+    st.bus = ctx.createGain(); st.bus.connect(st.rawGain);
+    routeSource();
+    emit();
+    return ctx;
+  }
+  async function start(mode = 'chains') {
+    const ctx = ensure();
+    st.mode = mode === 'raw' ? 'raw' : 'chains';
+    const t = ctx.currentTime;
+    st.rawGain.gain.setValueAtTime(st.mode === 'raw' ? 1 : 0, t);
+    st.chainsIn.gain.setValueAtTime(st.mode === 'chains' ? 1 : 0, t);
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setValueAtTime(0, t);
+    st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), t + 0.02, 0.08); // short fade-in
+    if (st.el) st.el.play().catch(() => {}); else startNoise();
+    emit();
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* blocked until a gesture */ } }
+  }
+  function stop() {
+    if (!st.ctx || st.mode === 'off') return;
+    const t = st.ctx.currentTime;
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setTargetAtTime(0, t, 0.03);
+    st.mode = 'off';
+    setTimeout(() => { if (st.mode !== 'off') return; if (st.el) st.el.pause(); stopNoise(); }, 180);
+    emit();
+  }
+  function setVolume(db) {
+    st.volumeDb = clampDb(db);
+    OA.store.set(OA.store.KEYS.previewDb, st.volumeDb);
+    if (st.ctx && st.mode !== 'off') st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), st.ctx.currentTime, 0.03);
+    emit();
+  }
+  async function loadFile(file) {
+    if (!file || !(/^audio\//.test(file.type) || /\.(mp3|m4a|aac|ogg|wav|flac)$/i.test(file.name))) throw new Error('not audio');
+    const record = { name: file.name, type: file.type || 'audio/mpeg', size: file.size, blob: file, addedAt: Date.now() };
+    attach(record);
+    try { await idb('readwrite', (s) => s.put(record, KEY)); st.persisted = true; } catch { st.persisted = false; }
+    emit();
+  }
+  async function removeFile() {
+    attach(null);
+    try { await idb('readwrite', (s) => s.delete(KEY)); } catch { /* nothing stored */ }
+    emit();
+  }
+  // Optional: only pages that build preview chains need it. Loader-only pages never call it.
+  function useCodec(codec) {
+    if (!codec || typeof codec.designSection !== 'function' || typeof codec.encodeSection !== 'function' || typeof codec.preampWord !== 'function') {
+      throw new Error('OA.audio.useCodec expects { designSection, encodeSection, preampWord } functions');
+    }
+    st.codec = codec;
+  }
+  function coefficients(band) {
+    if (!st.codec) throw new Error('OA.audio.useCodec({ designSection, encodeSection, preampWord }) must be called first');
+    const w = st.codec.encodeSection(st.codec.designSection(band, st.rate)); // Q27 words [b0, b2, -a1, b1, -a2]
+    const q = 2 ** 27;
+    return { b0: w[0] / q, b2: w[1] / q, a1: -w[2] / q, b1: w[3] / q, a2: -w[4] / q };
+  }
+  function buildChain(bands, preampDb, { gainDb = 0, on = true } = {}) {
+    if (!st.codec) throw new Error('OA.audio.buildChain needs a codec: call OA.audio.useCodec({ designSection, encodeSection, preampWord }) first');
+    const ctx = ensure();
+    const input = ctx.createGain(), pre = ctx.createGain(), output = ctx.createGain(), nodes = [input, pre, output];
+    let node = input;
+    for (const band of bands) {
+      if (band.kind === 'OFF') continue;
+      const c = coefficients(band);
+      const f = ctx.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
+      node.connect(f); node = f; nodes.push(f);
+    }
+    node.connect(pre);
+    pre.gain.value = st.codec.preampWord(preampDb) / 2 ** 23;
+    pre.connect(output);
+    output.gain.value = 0;
+    output.connect(st.chainsIn);
+    st.bus.connect(input);
+    const chain = {
+      input, output,
+      setGain(db, isOn = true, tc = 0.02) { const t = ctx.currentTime; output.gain.cancelScheduledValues(t); output.gain.setTargetAtTime(isOn ? dbToGain(db) : 0, t, tc); },
+      dispose(fadeMs = 60) {
+        chain.setGain(0, false, fadeMs / 4000);
+        setTimeout(() => { try { st.bus.disconnect(input); } catch { /* already */ } nodes.forEach((n) => { try { n.disconnect(); } catch { /* already */ } }); }, fadeMs + 20);
+      },
+    };
+    chain.setGain(gainDb, on);
+    return chain;
+  }
+  const matchGains = (levels) => { const lo = Math.min(...levels); return levels.map((l) => lo - l); };
+  const api = {
+    state, start, stop, setVolume, loadFile, removeFile, useCodec, buildChain, matchGains, dbToGain,
+    getSource() { ensure(); return st.bus; },
+    toggleRaw() { if (st.mode === 'raw') stop(); else start('raw').catch(() => {}); },
+    onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); },
+    ready: idb('readonly', (s) => s.get(KEY)).then((rec) => { if (rec && rec.blob) attach(rec); }).catch(() => {}),
+  };
+  return api;
+})();
+OA.audioUI = (() => {
+  const TXT = {
+    pt: { btn: 'Áudio', title: 'Áudio da prévia', load: 'Carregar MP3…', none: 'Nenhum arquivo: ruído rosa gerado no navegador.', play: 'Tocar arquivo', pause: 'Pausar', remove: 'Remover', vol: 'Volume da prévia (só no navegador)', note: 'O arquivo fica só neste navegador. Nada é enviado.', exact: 'Prévia a 96 kHz: coeficientes Q27 exatos.', approx: 'Este navegador abriu áudio a {rate} Hz: coeficientes recalculados, prévia aproximada.', idle: 'O áudio começa no primeiro play (exige um clique).', bad: 'Arquivo não reconhecido como áudio.', notSaved: 'Não foi possível guardar no navegador; vale só nesta página.', btnAria: 'Áudio da prévia: {x}' },
+    en: { btn: 'Audio', title: 'Preview audio', load: 'Load MP3…', none: 'No file: pink noise generated in the browser.', play: 'Play file', pause: 'Pause', remove: 'Remove', vol: 'Preview volume (browser only)', note: 'The file stays in this browser. Nothing is uploaded.', exact: 'Preview at 96 kHz: exact Q27 coefficients.', approx: 'This browser opened audio at {rate} Hz: coefficients recomputed, preview approximate.', idle: 'Audio starts on the first play (needs a click).', bad: 'File not recognised as audio.', notSaved: 'Could not store it in the browser; it lasts for this page only.', btnAria: 'Preview audio: {x}' },
+  };
+  let lang = OA.store.getLang() === 'en-US' ? 'en' : 'pt';
+  const el = (id) => document.getElementById(id);
+  const tx = (k, p) => { let s = TXT[lang][k]; if (p) for (const n in p) s = s.split(`{${n}}`).join(p[n]); return s; };
+  const fmtDb = (v) => `${v < 0 ? '−' + Math.abs(v) : v} dB`;
+  const fmtDur = (d) => (Number.isFinite(d) ? `${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}` : '…');
+  const fmtSize = (b) => `${new Intl.NumberFormat(lang === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: 1 }).format(b / 1048576)} MB`;
+  function render(s) {
+    if (!el('oaAudioBtn')) return;
+    const name = s.file ? s.file.name : tx('btn');
+    el('oaAudioName').textContent = name;
+    el('oaAudioBtn').title = s.file ? s.file.name : '';
+    el('oaAudioBtn').classList.toggle('has-file', !!s.file);
+    el('oaAudioBtn').setAttribute('aria-label', tx('btnAria', { x: s.file ? s.file.name : tx('none') }));
+    document.querySelectorAll('[data-oa-audio]').forEach((n) => { if (TXT[lang][n.dataset.oaAudio]) n.textContent = tx(n.dataset.oaAudio); });
+    const meta = el('oaAudioMeta');
+    meta.textContent = '';
+    if (s.file) {
+      const b = document.createElement('b'); b.textContent = s.file.name;
+      meta.append(b, document.createTextNode(` · ${fmtDur(s.file.duration)} · ${fmtSize(s.file.size)}`));
+      if (s.error) meta.append(document.createTextNode(` · ${tx('bad')}`));
+      if (!s.persisted) meta.append(document.createTextNode(` · ${tx('notSaved')}`));
+    } else meta.textContent = tx('none');
+    el('oaAudioPlay').textContent = s.mode === 'raw' ? tx('pause') : tx('play');
+    el('oaAudioPlay').disabled = !s.file;
+    el('oaAudioPlay').setAttribute('aria-pressed', s.mode === 'raw' ? 'true' : 'false');
+    el('oaAudioRemove').disabled = !s.file;
+    el('oaAudioVol').value = String(s.volumeDb);
+    el('oaAudioVolOut').textContent = fmtDb(s.volumeDb);
+    const rate = el('oaAudioRate');
+    rate.textContent = !s.ready ? tx('idle') : s.exact ? tx('exact') : tx('approx', { rate: s.rate });
+    rate.classList.toggle('approx', s.ready && !s.exact);
+  }
+  function setOpen(open) {
+    el('oaAudioPop').hidden = !open;
+    el('oaAudioBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  let bound = false;
+  function init() {
+    if (bound || !el('oaAudioBtn') || !el('oaAudioPop')) return; // idempotent; silent when the HTML block is absent
+    bound = true;
+    el('oaAudioBtn').addEventListener('click', () => setOpen(el('oaAudioPop').hidden));
+    document.addEventListener('click', (e) => { if (!el('oaAudioPop').hidden && !el('oaAudio').contains(e.target)) setOpen(false); });
+    el('oaAudio').addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('oaAudioPop').hidden) { e.stopPropagation(); setOpen(false); el('oaAudioBtn').focus(); } });
+    el('oaAudioFile').addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) OA.audio.loadFile(f).catch(() => { el('oaAudioMeta').textContent = tx('bad'); });
+    });
+    el('oaAudioPlay').addEventListener('click', () => OA.audio.toggleRaw());
+    el('oaAudioRemove').addEventListener('click', () => { OA.audio.removeFile(); });
+    el('oaAudioVol').addEventListener('input', (e) => OA.audio.setVolume(Number(e.target.value)));
+    OA.audio.onChange(render);
+    render(OA.audio.state());
+  }
+  // Accepts 'pt' | 'en' or the stored form 'pt-BR' | 'en-US'.
+  const setLang = (l) => { lang = l === 'en' || l === 'en-US' ? 'en' : 'pt'; if (bound) render(OA.audio.state()); };
+  // Auto-init: module scripts run after parsing; classic scripts may run earlier, so wait for the DOM if needed.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+  return { init, setLang };
+})();
+/* === END OA SHARED: audio-loader v1 === */
+
+    /* Inline copy of src/dsp/eq0xcb.mjs (design, validation, codec, response).
+     * Peaking and shelf arithmetic: AutoEq, Copyright (c) 2018-2022 Jaakko Pasanen.
+     * MIT License
+     * Permission is hereby granted, free of charge, to any person obtaining a copy
+     * of this software and associated documentation files (the "Software"), to deal
+     * in the Software without restriction, including without limitation the rights
+     * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+     * copies of the Software, and to permit persons to whom the Software is
+     * furnished to do so, subject to the following conditions:
+     * The above copyright notice and this permission notice shall be included in
+     * all copies or substantial portions of the Software.
+     * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+     * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+     * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+     * THE SOFTWARE.
+     * Byte layout: interoperability study of the reference, not copied firmware.
+     */
+    const SAMPLE_RATE=96000, BAND_COUNT=10, Q23_ONE=2**23, Q27_ONE=2**27;
+    const INT32_MIN=-2147483648, INT32_MAX=2147483647;
+    const FILTER_KINDS=['PK','LS','HS','LP','HP','OFF'], KINDS_WITH_GAIN=new Set(['PK','LS','HS']);
+    const PREAMBLE=[0x45,0x51,0x31,0x23,0xd6,0,0,0x0a,4,5,1,0x0a,0,0];
+    const COMMIT_COMMAND=[1,0x65,0,1,0xff];
+    function fromAutoEqSign({a1,a2,b0,b1,b2}){return {b0,b1,b2,a1:-a1,a2:-a2};}
+    function designPeaking(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+      const amp=Math.pow(10,gainDb/40),w0=(2*Math.PI*freqHz)/sampleRate;
+      const alpha=Math.sin(w0)/(2*qFactor),cosW0=Math.cos(w0),a0=1+alpha/amp;
+      return fromAutoEqSign({a1:-(-2*cosW0)/a0,a2:-(1-alpha/amp)/a0,b0:(1+alpha*amp)/a0,b1:(-2*cosW0)/a0,b2:(1-alpha*amp)/a0});
+    }
+    function designLowShelf(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+      const amp=Math.pow(10,gainDb/40),w0=(2*Math.PI*freqHz)/sampleRate;
+      const alpha=Math.sin(w0)/(2*qFactor),cosW0=Math.cos(w0),twoSqrtAmpAlpha=2*Math.sqrt(amp)*alpha;
+      const a0=(amp+1)+(amp-1)*cosW0+twoSqrtAmpAlpha;
+      return fromAutoEqSign({a1:-(-2*((amp-1)+(amp+1)*cosW0))/a0,a2:-((amp+1)+(amp-1)*cosW0-twoSqrtAmpAlpha)/a0,b0:(amp*((amp+1)-(amp-1)*cosW0+twoSqrtAmpAlpha))/a0,b1:(2*amp*((amp-1)-(amp+1)*cosW0))/a0,b2:(amp*((amp+1)-(amp-1)*cosW0-twoSqrtAmpAlpha))/a0});
+    }
+    function designHighShelf(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+      const amp=Math.pow(10,gainDb/40),w0=(2*Math.PI*freqHz)/sampleRate;
+      const alpha=Math.sin(w0)/(2*qFactor),cosW0=Math.cos(w0),twoSqrtAmpAlpha=2*Math.sqrt(amp)*alpha;
+      const a0=(amp+1)-(amp-1)*cosW0+twoSqrtAmpAlpha;
+      return fromAutoEqSign({a1:-(2*((amp-1)-(amp+1)*cosW0))/a0,a2:-((amp+1)-(amp-1)*cosW0-twoSqrtAmpAlpha)/a0,b0:(amp*((amp+1)+(amp-1)*cosW0+twoSqrtAmpAlpha))/a0,b1:(-2*amp*((amp-1)+(amp+1)*cosW0))/a0,b2:(amp*((amp+1)+(amp-1)*cosW0-twoSqrtAmpAlpha))/a0});
+    }
+    function designLowPass(freqHz,qFactor,sampleRate=SAMPLE_RATE){
+      const w0=(2*Math.PI*freqHz)/sampleRate,cosW0=Math.cos(w0),alpha=Math.sin(w0)/(2*qFactor),a0=1+alpha;
+      return {b0:((1-cosW0)/2)/a0,b1:(1-cosW0)/a0,b2:((1-cosW0)/2)/a0,a1:(-2*cosW0)/a0,a2:(1-alpha)/a0};
+    }
+    function designHighPass(freqHz,qFactor,sampleRate=SAMPLE_RATE){
+      const w0=(2*Math.PI*freqHz)/sampleRate,cosW0=Math.cos(w0),alpha=Math.sin(w0)/(2*qFactor),a0=1+alpha;
+      return {b0:((1+cosW0)/2)/a0,b1:-(1+cosW0)/a0,b2:((1+cosW0)/2)/a0,a1:(-2*cosW0)/a0,a2:(1-alpha)/a0};
+    }
+    function designSection(band,sampleRate=SAMPLE_RATE){
+      switch(band.kind){
+        case 'PK':return designPeaking(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+        case 'LS':return designLowShelf(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+        case 'HS':return designHighShelf(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+        case 'LP':return designLowPass(band.freqHz,band.qFactor,sampleRate);
+        case 'HP':return designHighPass(band.freqHz,band.qFactor,sampleRate);
+        case 'OFF':return {b0:1,b1:0,b2:0,a1:0,a2:0};
+        default:throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+      }
+    }
+    function bandError(index,message){return new RangeError(`band ${index}: ${message}`);}
+    function checkBand(band,index=0){
+      if(band===null||typeof band!=='object')throw new TypeError(`band ${index}: not an object`);
+      if(!FILTER_KINDS.includes(band.kind))throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
+      if(band.kind==='OFF')return;
+      const nyquist=SAMPLE_RATE/2;
+      if(!(Number.isFinite(band.freqHz)&&band.freqHz>0&&band.freqHz<nyquist))throw bandError(index,`freqHz must be in (0, ${nyquist}), got ${band.freqHz}`);
+      if(!(Number.isFinite(band.qFactor)&&band.qFactor>0))throw bandError(index,`qFactor must be > 0, got ${band.qFactor}`);
+      if(KINDS_WITH_GAIN.has(band.kind)&&!Number.isFinite(band.gainDb))throw bandError(index,`gainDb must be finite, got ${band.gainDb}`);
+    }
+    function isStable(a1,a2){return Math.abs(a2)<1&&Math.abs(a1)<1+a2;}
+    function encodeSection(section,index=0){
+      const ordered=[section.b0,section.b2,-section.a1,section.b1,-section.a2];
+      const words=ordered.map(coefficient=>{const word=Math.round(coefficient*Q27_ONE)+0;if(!Number.isInteger(word)||word>INT32_MAX||word<INT32_MIN)throw bandError(index,'coefficient does not fit Q27 in int32');return word;});
+      if(!isStable(-words[2]/Q27_ONE,-words[4]/Q27_ONE))throw bandError(index,'unstable section: poles on or outside the unit circle');
+      return words;
+    }
+    function preampWord(preampDb=0){
+      if(!Number.isFinite(preampDb))throw new RangeError(`preamp must be a finite dB value, got ${preampDb}`);
+      if(preampDb>0)throw new RangeError(`preamp must be <= 0 dB, got ${preampDb}`);
+      return Math.round(Math.pow(10,preampDb/20)*Q23_ONE);
+    }
+    function crc16Ccitt(data){let register=0xffff;for(const byte of data){register^=byte<<8;for(let bit=0;bit<8;bit++)register=register&0x8000?((register<<1)^0x1021)&0xffff:(register<<1)&0xffff;}return register;}
+    function appendInt32LE(buffer,value){if(!Number.isInteger(value)||value>INT32_MAX||value<INT32_MIN)throw new RangeError(`value does not fit int32: ${value}`);buffer.push(value&0xff,(value>>>8)&0xff,(value>>>16)&0xff,(value>>>24)&0xff);}
+    function encodePayload(eqBands,preampDb=0){
+      if(!Array.isArray(eqBands)||eqBands.length!==BAND_COUNT)throw new RangeError(`expected ${BAND_COUNT} bands`);
+      eqBands.forEach(checkBand);const payload=[...PREAMBLE];appendInt32LE(payload,preampWord(preampDb));
+      eqBands.forEach((band,index)=>{for(const word of encodeSection(designSection(band),index))appendInt32LE(payload,word);});
+      const checksum=crc16Ccitt(payload);payload.push(checksum&0xff,checksum>>>8);return payload;
+    }
+    function encodeReports(eqBands,preampDb){const payload=encodePayload(eqBands,preampDb);return Array.from({length:9},(_,index)=>{const report=new Uint8Array(31);report[0]=index;report.set(payload.slice(index*30,(index+1)*30),1);return report;});}
+    function commitReport(){const report=new Uint8Array(31);report.set(COMMIT_COMMAND);return report;}
+    function magnitudeDb(eqBands,freqHz,sampleRate=SAMPLE_RATE){
+      const omega=(2*Math.PI*freqHz)/sampleRate,halfSin=Math.sin(omega/2),uRe=2*halfSin*halfSin,uIm=Math.sin(omega),uSquaredRe=uRe*uRe-uIm*uIm,uSquaredIm=2*uRe*uIm;
+      const powerAt=(p0,p1,p2)=>{const sum=p0+p1+p2,slope=p1+2*p2,re=sum-slope*uRe+p2*uSquaredRe,im=-slope*uIm+p2*uSquaredIm;return re*re+im*im;};
+      let totalDb=0;for(const band of eqBands){const {b0,b1,b2,a1,a2}=designSection(band,sampleRate);totalDb+=10*Math.log10(powerAt(b0,b1,b2)/powerAt(1,a1,a2));}return totalDb;
+    }
+
+    /* Inline gate + levelDb from design/analysis/gate.mjs.
+     * Thresholds are the exact Q27/Q23 values in design/analysis/envelope.json.
+     * responsePeak keeps the original 16384-point grid + golden-section refinement.
+     * Only memoization of section grids and complete peaks is added for interactivity.
+     * This is an observed envelope, not a hardware safety certification.
+     */
+    const Q27=2**27;
+    const THRESHOLDS=Object.freeze({coefficientPositions:['b0','b2','-a1','b1','-a2'],coefficientAbsWords:[176145720,133967223,268076748,268076748,133859379],coefficientAbs:[1.3123878836631775,.9981335923075676,1.9973274171352386,1.9973274171352386,.9973300918936729],poleRadius:.99986846753918,sectionPeakDb:9.200000050722664,internalAudibleDb:-.20368875272918074,outputAudibleDb:-.47087539615209006,outputFullDb:2.5000638697363913,preampMaxDb:-.5,preampMinDb:-25.5,dbNumericalTolerance:1e-8,radiusNumericalTolerance:2e-15});
+    const MEAN_FREQUENCIES=Object.freeze(Array.from({length:280},(_,i)=>Math.round(20*1000**(i/279)*100)/100).filter(f=>f>=300&&f<=3000));
+    function fromWords(w){return {b0:w[0]/Q27,b2:w[1]/Q27,a1:-w[2]/Q27,b1:w[3]/Q27,a2:-w[4]/Q27};}
+    function poleRadius(s){const d=s.a1*s.a1-4*s.a2;return d<0?Math.sqrt(s.a2):Math.max(Math.abs((-s.a1+Math.sqrt(d))/2),Math.abs((-s.a1-Math.sqrt(d))/2));}
+    function sectionDb(s,f){
+      if(s.b0===1&&s.b1===s.a1&&s.b2===s.a2)return 0;
+      const w=2*Math.PI*f/SAMPLE_RATE,re=2*Math.sin(w/2)**2,im=Math.sin(w),u2re=re*re-im*im,u2im=2*re*im;
+      const power=(p0,p1,p2)=>{const r=p0+p1+p2-(p1+2*p2)*re+p2*u2re,i=-(p1+2*p2)*im+p2*u2im;return r*r+i*i;};
+      return 10*Math.log10(power(s.b0,s.b1,s.b2)/power(1,s.a1,s.a2));
+    }
+    function powerPolynomial(p0,p1,p2){const sum=p0+p1+p2;return [sum*sum,4*((p0-p2)**2-sum*(p0+p2)),16*p0*p2];}
+    function sectionPeaks(s){
+      const n=powerPolynomial(s.b0,s.b1,s.b2),d=powerPolynomial(1,s.a1,s.a2),a=n[2]*d[1]-n[1]*d[2],b=2*(n[2]*d[0]-n[0]*d[2]),c=n[1]*d[0]-n[0]*d[1],roots=[];
+      if(a===0){if(b!==0)roots.push(-c/b);}else{const discriminant=b*b-4*a*c;if(discriminant>=0){const q=-.5*(b+(b>=0?1:-1)*Math.sqrt(discriminant));if(q!==0)roots.push(q/a,c/q);else roots.push(-b/(2*a));}}
+      const stationaryHz=roots.filter(t=>t>0&&t<1).map(t=>Math.asin(Math.sqrt(t))*SAMPLE_RATE/Math.PI);
+      const maximum=frequencies=>frequencies.map(f=>({db:sectionDb(s,f),frequencyHz:f})).reduce((best,p)=>p.db>best.db?p:best);
+      return {full:maximum([0,48000,...stationaryHz]),audible:maximum([20,20000,...stationaryHz.filter(f=>f>=20&&f<=20000)])};
+    }
+    function analyseSection(band){
+      const words=encodeSection(designSection(band)),section=fromWords(words),radius=poleRadius(section),peaks=sectionPeaks(section),reasons=[];
+      words.forEach((word,i)=>{if(Math.abs(word)>THRESHOLDS.coefficientAbsWords[i])reasons.push(`a:${THRESHOLDS.coefficientPositions[i]}`);});
+      if(radius>THRESHOLDS.poleRadius+THRESHOLDS.radiusNumericalTolerance)reasons.push('b:pole-radius');
+      if(peaks.full.db>THRESHOLDS.sectionPeakDb+THRESHOLDS.dbNumericalTolerance)reasons.push('c:section-peak');
+      return {words,section,poleRadius:radius,fullPeak:peaks.full,audiblePeak:peaks.audible,reasons};
+    }
+    const intentionalPreampDb=db=>20*Math.log10(preampWord(db)/2**23);
+    function autoPreampForSection(metrics){
+      const cap=Math.min(THRESHOLDS.internalAudibleDb-Math.max(0,metrics.audiblePeak.db),THRESHOLDS.outputAudibleDb-metrics.audiblePeak.db,THRESHOLDS.outputFullDb-metrics.fullPeak.db),maximumWord=preampWord(THRESHOLDS.preampMaxDb),word=Math.min(maximumWord,Math.floor(10**(cap/20)*2**23));
+      if(word<preampWord(THRESHOLDS.preampMinDb))return null;if(word===maximumWord)return THRESHOLDS.preampMaxDb;return Math.max(THRESHOLDS.preampMinDb,20*Math.log10(word/2**23));
+    }
+    function refine(fn,a,b){
+      const r=(Math.sqrt(5)-1)/2;let c=b-r*(b-a),d=a+r*(b-a),fc=fn(c),fd=fn(d);
+      for(let i=0;i<70&&b-a>1e-8;i++){if(fc>fd){b=d;d=c;fd=fc;c=b-r*(b-a);fc=fn(c);}else{a=c;c=d;fc=fd;d=a+r*(b-a);fd=fn(d);}}
+      return fc>fd?{db:fc,frequencyHz:c}:{db:fd,frequencyHz:d};
+    }
+    const peakCache=new Map(),sectionGridCache=new Map(),frequencyGrids=new Map();
+    const sectionKey=s=>[s.b0,s.b2,s.a1,s.b1,s.a2].join(',');
+    function memoPut(map,key,value,max){if(map.size>=max)map.delete(map.keys().next().value);map.set(key,value);return value;}
+    function responsePeak(sections,minHz,maxHz){
+      if(!sections.length)return {db:0,frequencyHz:minHz};
+      if(sections.length===1){const p=sectionPeaks(sections[0]);return minHz===0?p.full:p.audible;}
+      const key=`${minHz}/${maxHz}:`+sections.map(sectionKey).join(';');if(peakCache.has(key))return peakCache.get(key);
+      const fn=f=>sections.reduce((db,section)=>db+sectionDb(section,f),0),intervals=16384,lo=minHz||.001,gridKey=`${minHz}/${maxHz}`;
+      let fs=frequencyGrids.get(gridKey);
+      if(!fs){fs=Array.from({length:intervals+1},(_,i)=>lo*(maxHz/lo)**(i/intervals));fs[0]=lo;fs[intervals]=maxHz;if(minHz===0)fs.unshift(0);frequencyGrids.set(gridKey,fs);}
+      const values=new Float64Array(fs.length);
+      for(const s of sections){const sk=gridKey+':'+sectionKey(s);let grid=sectionGridCache.get(sk);if(!grid)grid=memoPut(sectionGridCache,sk,Float64Array.from(fs,f=>sectionDb(s,f)),100);for(let i=0;i<fs.length;i++)values[i]+=grid[i];}
+      let best={db:values[0],frequencyHz:fs[0]};
+      for(let i=1;i<fs.length;i++){if(values[i]>best.db)best={db:values[i],frequencyHz:fs[i]};if(i<fs.length-1&&values[i]>values[i-1]&&values[i]>=values[i+1]){const candidate=refine(fn,fs[i-1],fs[i+1]);if(candidate.db>best.db)best=candidate;}}
+      return memoPut(peakCache,key,best,512);
+    }
+    function levelDb(eqBands,preampDb){const sections=eqBands.map(b=>fromWords(encodeSection(designSection(b))));return intentionalPreampDb(preampDb)+MEAN_FREQUENCIES.reduce((sum,f)=>sum+sections.reduce((db,s)=>db+sectionDb(s,f),0),0)/MEAN_FREQUENCIES.length;}
+    function gate(eqBands,preampDb){
+      const reasons=[],metrics={thresholds:THRESHOLDS};let payload;
+      try{payload=encodePayload(eqBands,preampDb);}catch(error){return {ok:false,reasons:[`f:codec:${error.message}`],metrics};}
+      metrics.payloadCrc=`0x${payload.at(-1).toString(16).padStart(2,'0')}${payload.at(-2).toString(16).padStart(2,'0')}`;
+      if(preampDb<THRESHOLDS.preampMinDb||preampDb>THRESHOLDS.preampMaxDb)reasons.push('g:preamp-range');
+      metrics.preampDb=preampDb;metrics.quantizedPreampDb=intentionalPreampDb(preampDb);
+      metrics.sections=eqBands.map((b,i)=>{const s=analyseSection(b);reasons.push(...s.reasons.map(r=>`${r}:stage-${i+1}`));return s;});
+      const active=[];metrics.prefixAudible=[{stage:0,db:metrics.quantizedPreampDb,frequencyHz:null}];
+      for(const [i,item] of metrics.sections.entries()){const s=item.section;if(!(s.b0===1&&s.b1===s.a1&&s.b2===s.a2))active.push(s);const peak=responsePeak(active,20,20000);metrics.prefixAudible.push({stage:i+1,db:peak.db+metrics.quantizedPreampDb,frequencyHz:peak.frequencyHz});}
+      metrics.internalAudible=metrics.prefixAudible.reduce((a,b)=>b.db>a.db?b:a);metrics.outputAudible=metrics.prefixAudible.at(-1);
+      const full=responsePeak(active,0,48000);metrics.outputFull={db:full.db+metrics.quantizedPreampDb,frequencyHz:full.frequencyHz};
+      if(metrics.internalAudible.db>THRESHOLDS.internalAudibleDb+THRESHOLDS.dbNumericalTolerance)reasons.push('d:internal-audible');
+      if(metrics.outputAudible.db>THRESHOLDS.outputAudibleDb+THRESHOLDS.dbNumericalTolerance)reasons.push('e:output-audible');
+      if(metrics.outputFull.db>THRESHOLDS.outputFullDb+THRESHOLDS.dbNumericalTolerance)reasons.push('e:output-full');
+      return {ok:reasons.length===0,reasons,metrics};
+    }
+
+    // WORKSTATION CONTROLLER
+    const $=id=>document.getElementById(id), $$=selector=>[...document.querySelectorAll(selector)];
+    const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v)),clone=v=>JSON.parse(JSON.stringify(v));
+    const off=()=>({kind:'OFF',freqHz:1000,gainDb:0,qFactor:1});
+    const neutralBands=()=>Array.from({length:10},off);
+    const toBands=p=>p.b.map(([kind,freqHz,gainDb,qFactor])=>({kind,freqHz,gainDb,qFactor}));
+    // Numeric data copied from test/fixtures/eq0xcb.reference.json:
+    // pre = presets.<id>.preampDb; b = eqBands as [kind, freqHz, gainDb, qFactor].
+    // Official labels and display order supplied by the follow-up specification.
+    // Starting points retain original bytes: no auto-preamp and no reordering.
+    const PRESETS={
+      padrao:{label:'Auri',pre:-2.8,b:[['PK',25,-.8,.3],['PK',150,-3,.69],['PK',2237,-10,1.41],['PK',4348,-6.1,3],['PK',4958,-8.3,2.72],['PK',7178,-10,3],['PK',11063,-10,3],['PK',520,3.1,.81],['PK',3046,5.7,1.51],['PK',5995,3.4,.59]]},
+      pref6:{label:'Natural',pre:-3,b:[['PK',25,-2,.4],['PK',167,-6.2,.53],['PK',2560,-8,1.03],['PK',4911,-8,4],['PK',7838,-6.7,4],['PK',11523,-6.5,4],['PK',270,.1,4],['PK',404,4.1,.48],['PK',2930,7,2.94],['PK',3537,4.5,4]]},
+      emv:{label:'Em V',pre:-7.8,b:[['PK',1084,-1.1,3],['PK',1930,-1.9,2.39],['PK',2334,-8,1.93],['PK',4454,-8,2.63],['PK',5568,-4.2,1.55],['PK',7504,-7.2,3],['PK',107,.7,.5],['PK',473,2.4,.5],['PK',6814,7.7,1.48],['PK',8862,8,3]]},
+      basshead:{label:'Basshead',pre:-5.7,b:[['PK',4613,-12,2.5],['PK',2246,-12,1.31],['PK',6746,-7.9,2.5],['PK',1122,-2.6,1.73],['PK',10302,-6.1,2.5],['PK',20,-5,.42],['PK',223,-4.9,.84],['PK',3184,2.5,2.5],['PK',3116,9.2,.3],['LS',286,8.2,.47]]},
+      energico:{label:'Enérgico',pre:-3.3,b:[['PK',25,-3.1,.5],['PK',97,-1.4,.68],['PK',2445,-8,.87],['PK',4725,-8,3],['PK',6920,-8,3],['PK',12439,-8,1.96],['PK',1838,5,.92],['PK',2904,4.5,2.62],['PK',3665,3.7,3],['PK',8376,8,2.42]]},
+      musical:{label:'Musical',pre:-2.3,b:[['PK',24,-3.2,.1],['PK',2277,-8,1.69],['PK',4588,-9.4,2.8],['PK',5979,-3.8,2],['PK',7184,-3.2,3],['PK',10638,-10.4,3],['PK',840,2.2,1.54],['PK',1393,2,1.85],['PK',3224,1.1,3],['PK',15808,2.2,2.5]]},
+      analitico:{label:'Analítico',pre:-.8,b:[['LS',120,-9.3,.44],['PK',7007,-9.1,2.5],['PK',147,-3.5,.48],['PK',4561,-12,2.5],['PK',2198,-12,1.42],['PK',255,-.4,1.78],['PK',11291,-7.8,2.5],['PK',1093,-2.7,1.17],['PK',3226,6.2,.3],['PK',3028,1.8,2.5]]},
+      referencia:{label:'JM-1',pre:-4,b:[['LS',297,-3.4,.81],['PK',11107,-4.8,2.5],['PK',1027,-1.7,1.98],['PK',20,-3.6,.57],['PK',7055,-3.8,2.5],['PK',4588,-8,2.5],['PK',2208,-8.2,1.83],['PK',595,3.5,.42],['PK',3144,5.6,1.69],['PK',3031,.5,2.5]]},
+      harman:{label:'Harman IE 2019',pre:-.5,b:[['LS',199,-5.6,.94],['PK',399,-1.4,1.62],['PK',2271,-8,1.32],['PK',256,-4.2,1.17],['PK',7566,-7.6,.43],['PK',4662,-6.8,2.5],['PK',9138,3.8,2.5],['PK',3318,7.8,1.32],['PK',5767,5.8,2.5],['PK',3209,1.1,1.33]]},
+      vdsf:{label:'VDSF',pre:-2.2,b:[['PK',25,-8,.5],['PK',80,-5,.52],['PK',210,-2,.79],['PK',1286,-5.9,1.34],['PK',1978,-7.4,1.67],['PK',2375,-5.4,2.4],['PK',4384,-4.7,3],['PK',4833,-6,3],['PK',7252,-7.6,3],['PK',1718,8,.5]]},
+      etymotic:{label:'Etymotic',pre:-2.2,b:[['PK',25,-8,.97],['PK',45,-8,.5],['PK',105,-5.3,.51],['PK',226,-1.4,.91],['PK',2190,-8,1.39],['PK',4276,-5,3],['PK',4847,-7.2,3],['PK',7260,-6.8,3],['PK',785,1.8,1.42],['PK',3120,6.5,1.01]]}
+    };
+    const PRESET_GROUPS=[{key:'preferenceCurves',ids:['padrao','pref6','emv','basshead','energico','musical','analitico']},{key:'referenceCurves',ids:['referencia','harman','vdsf','etymotic']}];
+    const FREQS=Array.from({length:180},(_,i)=>20*1000**(i/179));
+    const DRAW_COUNT=33,ITERATIONS=20;
+    // Storage contract v2: language is shared across pages through "oa.v2.lang".
+    let lang=OA.store.getLang()==='en-US'?'en':'pt',speed=65,bands=neutralBands(),preamp=-.5,verdict=gate(bands,preamp);
+    let dirty=0,raw=[],target=[],drawKnots=[],selectedMeasurement=0,customMeasurement=null;
+    let heatRows=[],iteration=0,busy=false,solveToken=0,ab='B',previewOnly=null,currentCurve=null;
+    let toastTimer,drawIndex=16,drawPointer=null,knobDrag=null,lastWrite=0;
+    // A of the A/B preview: the starting curve (oa.v2.current when the gate accepts it, else Neutro).
+    let startCurve={name:'Neutro',source:'preset:neutro',bands:neutralBands(),preamp:-.5};
+    let curveSource='custom',curveLabel=null,abAudio=null;
+    // HS/LP/HP: experimental, gated, opened in the Curva ENGENHARIA layer. The solver never creates them.
+    const EXPERIMENTAL=new Set(['HS','LP','HP']);
+    const hasExperimental=eq=>eq.some(b=>EXPERIMENTAL.has(b.kind));
+    OA.audio.useCodec({designSection,encodeSection,preampWord});
+    const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
+    const pt={};$$('[data-i18n]').forEach(el=>{pt[el.dataset.i18n]=el.innerHTML;});
+    Object.assign(pt,{ready:'PRONTO PARA INTERPRETAR',solving:'INTERPRETANDO',solved:'CONVERGIU · ENVELOPE RESPEITADO',boundary:'LIMITE DO GATE · ÚLTIMO ESTADO VÁLIDO',converged:'SEM MELHORA · ÚLTIMO ESTADO VÁLIDO',changed:'ALVO ALTERADO · RESOLVA NOVAMENTE',edited:'EDIÇÃO MANUAL · GATE APROVADO',accepted:'Dentro do envelope observado',rejected:'Recusado pelo gate',saved:'Preset salvo na Biblioteca local deste mock.',storageError:'O navegador bloqueou o armazenamento local. Use a exportação do report.',onlyPreview:'APENAS PRÉVIA',noMeasurement:'Nenhuma medição encontrada',unknown:'desconhecido',imported:'Importação',importedCSV:'Medição CSV importada',csvNote:'Dado do usuário, origem não verificada.',fileError:'Arquivo inválido',noFilters:'Nenhum filtro ou par frequência/dB reconhecido.',tooMany:'Mais de 10 seções: importação recusada, sem truncamento.',rangeError:'Fora dos limites: 20–20 000 Hz, −24…+9,2 dB, Q 0,1–20; boost Q ≤ 4 e sem boost acima de 16 kHz.',cooldown:'Aguarde 2 s entre simulações de gravação.',writeDone:'Gravação simulada. Nenhum dado foi enviado ao cabo.',gateBlocked:'Gravação bloqueada pelo gate ou pela prévia de tipo não habilitado.',drawSelected:'DESENHO / SPLINE SUAVE',preferenceNote:'Curvas ilustrativas alinhadas em 1 kHz. O alvo define a forma, não o nível de reprodução.',auriNote:'Resposta EQ real do preset padrao, alinhada em 1 kHz; não é uma medição acústica. Preamp original −2,8 dB não muda a forma.',drawNote:'Arraste a curva ou ajuste pontos com as setas. Spline suave, nós em passos de 0,25 dB.',seed:'PRÉVIA INICIAL · RESOLVA PARA REFINAR',currentUnknown:'curva no cabo desconhecida',simulations:'simulações hoje',session:'nesta sessão',dirty:'alterações não gravadas',previewCleared:'Prévia descartada. Solver novamente dentro do gate.',unsupportedNote:'Tipos não habilitados: apenas prévia, nunca payload.',importApplied:'Importação aplicada dentro do envelope observado.',sourceUnknown:'origem não verificada',gateProof:'envelope observado, não comprovado em hardware',cooldownReady:'Limite: 1 gravação / 2 s. Nenhum acesso HID neste mock.',reportSaved:'Report JSON exportado.',downloadReport:'Exportar report',presetLabel:'Padrão Auri',thresholds:'Limites',prefix:'pico de prefixo',output:'pico de saída',full:'pico DC–48 kHz',level:'nível médio 300–3 000 Hz',csvCoverage:'CSV exige ao menos 3 pares, frequências positivas únicas e cobertura de 20 Hz a 20 kHz.',invalidNumber:'Digite um número finito.'});
+    const en={skip:'Skip to content',navCurve:'Curve',navLibrary:'Library',navCompare:'Compare',navSound:'Sound like X',navCommunity:'Community',navBlind:'Blind test',navCable:'Cable',disconnected:'No cable · simulated',neutral:'Neutral',defaultAuri:'Auri default',write:'Write to cable',interpretation:'INTERPRETATION WORKSTATION',soundLike:'Sound like',lede:'One raw response.<br>One target. Ten sections to get there.',heroNote:'From seismic interpretation to pitch correction: find the deviation, draw the destination and let the solver bring them together.',localEngine:'LOCAL ENGINE · 96 kHz',simulation:'SIMULATION · NO HID CONNECTION',measurement:'MEASUREMENT',search:'Search measurements',illustrative:'illustrative measurement',procedural:'· procedural IEM, not bench data.',importLabel:'Import .txt / measurement CSV',dropLabel:'DROP A FILE OR CLICK',paste:'Paste text',target:'TARGET',targetCurve:'Destination curve',preference:'IEM preference target (illustrative)',diffuse:'Diffuse field (illustrative)',auriTarget:'Auri default as target',draw:'Draw (C2)',freehand:'↗ Draw',reset:'Reset',targetHint:'Illustrative curves aligned at 1 kHz. The target sets the shape, not the playback level.',drawHint:'Freehand becomes a smooth spline. Keyboard: ← → select a point; ↑ ↓ adjust the target.',correction:'CORRECTION',speed:'CORRECTION SPEED',iso:'ISO 226 perceptual weighting',opposing:'Avoid adjacent opposing bands',order:'Default order: cuts before boosts',solve:'SOLVE ↗',maxError:'MAX. ERROR / dB',result:'RESULT',tenSections:'10 EDITABLE SECTIONS',kind:'KIND',autoPreamp:'AUTO PREAMP / Q23',levelCurrent:'LEVEL VS. CURRENT',preview:'A/B preview',previewNote:'Simulated, no audio. A/B switches the monitor prediction; it does not change the payload.',openCurve:'Open in Curve ↗',save:'Save to Library',monitor:'INTERPRETATION MONITOR',response:'PREDICTED RESPONSE × TARGET',shapeOnly:'SHAPE ALIGNED AT 1 kHz · ±18 dB',measurementLegend:'illustrative measurement',targetLegend:'target',predictedLegend:'measurement + EQ',heatmap:'DEVIATION MAP / FREQUENCY × ITERATION',ready:'READY TO INTERPRET',observed:'GATE v2 · OBSERVED ENVELOPE',methodTitle:'The solver approximates. The gate decides.',method:'Greedy PK + LS fitting in ten sections, speed-dependent regularization, approximate ISO 226 weighting at 60 phon and an adjacent-opposition penalty. Every candidate goes through the codec and the Q27/Q23 gate. Not a hardware safety certification.',soon:'COMING SOON',soonNote:'Available once the earphone reaches the test bench. Until then we write nothing the original Kuba page does not write.',homage:'THIS PAGE PAYS HOMAGE TO',trivia:'Before music, Andy Hildebrand interpreted seismic data for an oil company, looking for drilling sites. In 1997 he released a pitch corrector that detects the note through autocorrelation and pulls the voice toward a target. Here the same idea pulls your earphone response toward a target curve.',source:'source ↗',notice:'Notice',disclaimer:'open-auri is not official or endorsed by Kuba, TTGK, Savitech or any manufacturer. Everything here was obtained by studying the protocol for interoperability. Use at your own risk: we are not responsible for damage to the cable, earphone or your hearing.',fullNotice:'Full legal notice',license:'AGPL-3.0 license',simulationOnly:'SIMULATION ONLY',beforeWrite:'Before writing',flashNote:'On the real cable, every write uses flash. There is no readback. One curve applies to both channels. This mock neither connects nor sends data.',loudness:'The new curve may sound louder. Lower the volume before writing.',wear:'The cable memory has an unknown lifespan; memories of this kind typically withstand 10 thousand to 1 million writes.',lowered:'I lowered the volume and understood the level warning.',flashAck:'I understand that every real write persists to flash and cannot be read back.',cancel:'Cancel',simulateWrite:'Simulate write',importTitle:'Interpret a file',importHint:'PK, LS and OFF go through the gate. LSC → LS is an explicit mapping. HSC, HS, LP, HP, LSQ and HSQ remain preview-only. CSV: frequency in Hz, response in dB.',importText:'Text to import',interpretFile:'Interpret',gateTitle:'Observed envelope',gateNote:'Limits derived from official presets, not verified in hardware. Sinusoidal peaks of every prefix including preamp; not time-domain internal-state bounds.',close:'Close',helpTitle:'Hands on the instrument',shortcutNudge:'Nudge the focused value.',shortcutModifiers:'Step ×10 / ×0.1.',shortcutType:'Type in the numerical value; Enter applies.',shortcutReset:'Reset the value or knob.',shortcutDrag:'Drag the knob vertically; draw on the target.',shortcutDraw:'On the target: select a point / adjust dB.',shortcutSolve:'Solve / preview A / preview B.',shortcutHelp:'Open help / close dialog.',solving:'INTERPRETING',solved:'CONVERGED · ENVELOPE RESPECTED',boundary:'GATE BOUNDARY · LAST VALID STATE',converged:'NO IMPROVEMENT · LAST VALID STATE',changed:'TARGET CHANGED · SOLVE AGAIN',edited:'MANUAL EDIT · GATE PASSED',accepted:'Inside the observed envelope',rejected:'Refused by the gate',saved:'Preset saved to this mock’s local Library.',storageError:'The browser blocked local storage. Export a report instead.',onlyPreview:'PREVIEW ONLY',noMeasurement:'No matching measurement',unknown:'unknown',imported:'Import',importedCSV:'Imported CSV measurement',csvNote:'User data, unverified origin.',fileError:'Invalid file',noFilters:'No filters or frequency/dB pairs recognized.',tooMany:'More than 10 sections: import refused, not truncated.',rangeError:'Outside limits: 20–20,000 Hz, −24…+9.2 dB, Q 0.1–20; boost Q ≤ 4, no boost above 16 kHz.',cooldown:'Wait 2 seconds between simulated writes.',writeDone:'Write simulated. No data was sent to a cable.',gateBlocked:'Writing blocked by the gate or by preview-only filter types.',drawSelected:'DRAWING / SMOOTH SPLINE',preferenceNote:'Illustrative curves aligned at 1 kHz. The target sets the shape, not the playback level.',auriNote:'Real EQ response of the padrao preset, aligned at 1 kHz; not an acoustic measurement. The original −2.8 dB preamp does not change its shape.',drawNote:'Drag the curve or adjust points with arrow keys. Smooth spline, nodes quantized to 0.25 dB.',seed:'INITIAL PREVIEW · SOLVE TO REFINE',currentUnknown:'cable curve unknown',simulations:'simulations today',session:'this session',dirty:'unsaved changes',previewCleared:'Preview discarded. Solver is back inside the gate.',unsupportedNote:'Disabled filter types: preview only, never a payload.',importApplied:'Import applied inside the observed envelope.',sourceUnknown:'unverified origin',gateProof:'observed envelope, not verified in hardware',cooldownReady:'Limit: 1 write / 2 s. No HID access in this mock.',reportSaved:'JSON report exported.',downloadReport:'Export report',presetLabel:'Auri default',thresholds:'Thresholds',prefix:'prefix peak',output:'output peak',full:'DC–48 kHz peak',level:'mean level 300–3,000 Hz',csvCoverage:'CSV requires at least 3 pairs, unique positive frequencies, and coverage from 20 Hz to 20 kHz.',invalidNumber:'Enter a finite number.'};
+    Object.assign(pt,{preferenceCurves:'Curvas de preferência',referenceCurves:'Curvas de referência',officialPreset:'preset oficial',asTarget:'como alvo',officialResponse:'Resposta EQ real do preset oficial',officialAlignment:'alinhada em 1 kHz; não é uma medição acústica.',originalPreamp:'Preamp original',preampShape:'não muda a forma.'});
+    Object.assign(en,{auriTarget:'Auri (official preset) as target',officialStartingPoint:'Official starting preset',useStartingPoint:'Use as starting point',preferenceCurves:'Preference curves',referenceCurves:'Reference curves',officialPreset:'official preset',asTarget:'as target',officialResponse:'Real EQ response of the official preset',officialAlignment:'aligned at 1 kHz; not an acoustic measurement.',originalPreamp:'Original preamp',preampShape:'does not change the shape.'});
+    Object.assign(pt,{stopListen:'■ Parar',experimentalOpen:'EXPERIMENTAL · abrir na Engenharia',editorGroup:'Editor',editorCurve:'Curva atual do editor',abLevels:'Nível igualado (levelDb): A {a} dB · B {b} dB · correção A {ga} dB, B {gb} dB',audioError:'Não foi possível iniciar o áudio neste navegador',total:'no total',saved:'Curva guardada como curva atual do editor (oa.v2.current). A Curva e a Biblioteca a encontram ali.',kindRefused:'LSQ e HSQ são recusados: não há conversão exata para PK/LS/HS.',importExperimental:'Importação com tipos experimentais (HS, LP, HP). Passou pelo gate; abra na camada Engenharia da Curva.',startLoaded:'Ponto de partida carregado. A da prévia A/B agora é esta curva.',resultName:'Soe como X',listenBlocked:'Prévia bloqueada: o resultado não passou pelo gate.'});
+    Object.assign(en,{listen:'▶ Listen',stopListen:'■ Stop',previewNote:'A = starting curve, B = result, loudness-matched with levelDb. Plays the top-bar MP3 or pink noise. Does not change the payload.',importHint:'PK, LS and OFF go through the gate. LSC → LS and HSC → HS are explicit mappings. HS, LP and HP come in as EXPERIMENTAL · open in Engineering, also gated. LSQ and HSQ are refused. CSV: frequency in Hz, response in dB.',experimentalNote:'HS, LP and HP: experimental, only in the Curve Engineering layer and always through the gate. This solver uses only PK, LS and OFF.',experimentalWrite:'This curve uses kinds the official page never wrote. The coefficients are inside the observed envelope, but the firmware has never received these formats.',experimentalAck:'I understand the risk of experimental kinds and want to write anyway.',experimentalOpen:'EXPERIMENTAL · open in Engineering',editorGroup:'Editor',editorCurve:'Current editor curve',abLevels:'Loudness-matched (levelDb): A {a} dB · B {b} dB · trim A {ga} dB, B {gb} dB',audioError:'Could not start audio in this browser',total:'total',saved:'Curve stored as the current editor curve (oa.v2.current). Curve and Library pick it up there.',kindRefused:'LSQ and HSQ are refused: there is no exact conversion to PK/LS/HS.',importExperimental:'Import with experimental kinds (HS, LP, HP). It passed the gate; open it in the Curve Engineering layer.',startLoaded:'Starting point loaded. A of the A/B preview is now this curve.',resultName:'Sound like X',listenBlocked:'Preview blocked: the result did not pass the gate.'});
+    const t=key=>(lang==='en'?en[key]:pt[key])||pt[key]||key;
+    const fmt=(v,d=1)=>new Intl.NumberFormat(lang==='pt'?'pt-BR':'en-US',{minimumFractionDigits:d,maximumFractionDigits:d,useGrouping:false}).format(Math.abs(v)<10**(-d)/2?0:v).replace(/-/g,'−');
+    const signed=(v,d=1)=>(v>0?'+':'')+fmt(v,d);
+    const num=v=>Number(String(v).trim().replace(/−/g,'-').replace(',','.'));
+    function toast(message,bad=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('refusal',bad);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,5000);}
+    function status(key,details=''){$('solverStatus').dataset.state=key;$('solverStatus').textContent=t(key)+(details?' / '+details:'');}
+    function changed(){dirty++;$('dirty').textContent=`${dirty} ${t('dirty')}`;}
+    function locale(){
+      document.documentElement.lang=lang==='pt'?'pt-BR':'en';document.title=`${lang==='pt'?'Soe como X':'Sound like X'} · open-auri`;
+      $$('[data-i18n]').forEach(el=>{el.innerHTML=t(el.dataset.i18n);});
+      $('language').innerHTML=`<span class="pt ${lang==='pt'?'on':''}">PT</span> · <span class="en ${lang==='en'?'on':''}">EN</span>`;
+      $('language').setAttribute('aria-label',lang==='pt'?'Switch to English':'Mudar para português');
+      $('search').placeholder=lang==='pt'?'Buscar fone…':'Search earphones…';$('search').setAttribute('aria-label',t('search'));
+      $('speedKnob').setAttribute('aria-label',t('speed'));$('speed').setAttribute('aria-label',t('speed'));
+      $('plot').setAttribute('aria-label',lang==='pt'?'Medição ilustrativa, alvo e previsão; frequência logarítmica de 20 Hz a 20 kHz':'Illustrative measurement, target and prediction; logarithmic frequency from 20 Hz to 20 kHz');
+      $('heatmap').setAttribute('aria-label',lang==='pt'?'Erro por frequência e iteração; azul negativo, branco zero, vermelho positivo':'Error by frequency and iteration; blue negative, white zero, red positive');
+      $('abA').setAttribute('aria-label',lang==='pt'?'A: curva de partida':'A: starting curve');$('abB').setAttribute('aria-label',lang==='pt'?'B: resultado':'B: result');
+      OA.audioUI.setLang(lang);
+      populatePresets();populateMeasurements();renderKnob();renderAll();$('dirty').textContent=`${dirty} ${t('dirty')}`;
+      status($('solverStatus').dataset.state||'ready');updateWriteCount();renderAbButton();
+    }
+    // Six explicitly synthetic IEMs. No product names or external measurements.
+    const MEASUREMENTS=[
+      {pt:'IEM 01 · Duplo dinâmico',en:'IEM 01 · Dual dynamic',bass:7,mid:10,air:5,dip:4,phase:.2},
+      {pt:'IEM 02 · Armadura equilibrada',en:'IEM 02 · Balanced armature',bass:2.5,mid:11,air:7,dip:3,phase:1.4},
+      {pt:'IEM 03 · Planar amplo',en:'IEM 03 · Broad planar',bass:5,mid:7,air:8,dip:2.5,phase:2.1},
+      {pt:'IEM 04 · Dinâmico quente',en:'IEM 04 · Warm dynamic',bass:9,mid:7.5,air:3,dip:4.5,phase:3.2},
+      {pt:'IEM 05 · Híbrido incisivo',en:'IEM 05 · Vivid hybrid',bass:6,mid:12,air:9,dip:5,phase:4.2},
+      {pt:'IEM 06 · Inserção profunda',en:'IEM 06 · Deep insertion',bass:2,mid:9,air:4,dip:2,phase:5.1}
+    ];
+    const gaussian=(f,center,width)=>Math.exp(-.5*(Math.log2(f/center)/width)**2);
+    function generated(m,f){const x=Math.log2(f);return m.bass/(1+(f/170)**1.65)+m.mid*gaussian(f,2750,.8)+m.air*gaussian(f,9200,.33)-m.dip*gaussian(f,6100,.24)-7*gaussian(f,20000,.48)+.55*Math.sin(x*3.4+m.phase)*gaussian(f,3800,2.8);}
+    function preference(f){return 4.5/(1+(f/140)**1.8)+7*gaussian(f,2800,.85)+3*gaussian(f,8500,.5)-6*gaussian(f,20000,.45);}
+    function diffuse(f){return 1/(1+(f/150)**1.8)+9*gaussian(f,2800,.8)+4*gaussian(f,8500,.5)-5*gaussian(f,20000,.45);}
+    function align(values,reference){return values.map(v=>v-reference);}
+    function atLog(values,f){const x=clamp(Math.log(f/20)/Math.log(1000)*(values.length-1),0,values.length-1),i=Math.min(values.length-2,Math.floor(x)),u=x-i;return values[i]*(1-u)+values[i+1]*u;}
+    function measurementCurve(){if(customMeasurement)return customMeasurement.values;const m=MEASUREMENTS[selectedMeasurement];return align(FREQS.map(f=>generated(m,f)),generated(m,1000));}
+    function populateMeasurements(){
+      const search=$('search').value.toLocaleLowerCase(),select=$('measurement');select.innerHTML='';
+      MEASUREMENTS.forEach((m,i)=>{const name=m[lang];if(!search||name.toLocaleLowerCase().includes(search)){const o=new Option(name,String(i));select.add(o);}});
+      if(customMeasurement)select.add(new Option(customMeasurement.name,'custom'));
+      if(!select.options.length){const o=new Option(t('noMeasurement'),'none');o.disabled=true;select.add(o);}
+      select.value=customMeasurement?'custom':String(selectedMeasurement);
+      if(select.selectedIndex<0)select.selectedIndex=0;
+    }
+    const targetPresetId=value=>value==='auri'?'padrao':value.startsWith('preset:')?value.slice(7):null;
+    function populatePresets(){
+      const editorCurve=OA.store.loadCurrent();
+      const targetSelect=$('target'),startingSelect=$('startingPreset'),targetValue=targetSelect.value||'preference',startingValue=startingSelect.value||(editorCurve?'current':'padrao');
+      targetSelect.replaceChildren(new Option(t('preference'),'preference'),new Option(t('diffuse'),'diffuse'));
+      startingSelect.replaceChildren();
+      if(editorCurve){const editorGroup=document.createElement('optgroup');editorGroup.label=t('editorGroup');editorGroup.append(new Option(`${t('editorCurve')} · ${editorCurve.name}${hasExperimental(editorCurve.bands)?' · EXP':''}`,'current'));startingSelect.append(editorGroup);}
+      for(const group of PRESET_GROUPS){
+        const targetGroup=document.createElement('optgroup'),startingGroup=document.createElement('optgroup');
+        targetGroup.label=t(group.key);startingGroup.label=t(group.key);
+        for(const id of group.ids){
+          const label=`${PRESETS[id].label} (${t('officialPreset')})`;
+          targetGroup.append(new Option(`${label} ${t('asTarget')}`,id==='padrao'?'auri':`preset:${id}`));
+          startingGroup.append(new Option(label,id));
+        }
+        targetSelect.append(targetGroup);startingSelect.append(startingGroup);
+      }
+      targetSelect.append(new Option(t('draw'),'draw'));targetSelect.value=targetValue;startingSelect.value=startingValue;
+      if(targetSelect.selectedIndex<0)targetSelect.value='preference';if(startingSelect.selectedIndex<0)startingSelect.selectedIndex=0;
+      startingSelect.setAttribute('aria-label',t('officialStartingPoint'));targetSelect.setAttribute('aria-label',t('targetCurve'));
+    }
+    function spline(knots,x){const i=Math.min(knots.length-2,Math.floor(clamp(x,0,knots.length-1))),u=clamp(x-i,0,1),a=knots[Math.max(0,i-1)],b=knots[i],c=knots[i+1],d=knots[Math.min(knots.length-1,i+2)];return clamp(.5*((2*b)+(-a+c)*u+(2*a-5*b+4*c-d)*u*u+(-a+3*b-3*c+d)*u*u*u),-18,18);}
+    function targetCurve(){
+      const mode=$('target').value;
+      if(mode==='draw')return FREQS.map((_,i)=>spline(drawKnots,i/(FREQS.length-1)*(DRAW_COUNT-1)));
+      const preset=PRESETS[targetPresetId(mode)];
+      if(preset){const p=toBands(preset),center=magnitudeDb(p,1000);return FREQS.map(f=>magnitudeDb(p,f)-center);}
+      const fn=mode==='diffuse'?diffuse:preference;return FREQS.map(f=>fn(f)-fn(1000));
+    }
+    function shapeResponse(eq){const sections=eq.map(b=>fromWords(encodeSection(designSection(b)))),center=sections.reduce((a,s)=>a+sectionDb(s,1000),0);return FREQS.map(f=>sections.reduce((a,s)=>a+sectionDb(s,f),0)-center);}
+    function prediction(eq=bands){const correction=shapeResponse(eq);return raw.map((v,i)=>v+correction[i]);}
+    // ISO 226:2003 60-phon contour table; log-frequency interpolation.
+    // Relative inverse-pressure weighting, bounded to 0.15…2.5, is an explicit
+    // fitting heuristic, not a loudness or safe-listening-level calculation.
+    const ISO_F=[20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500];
+    const ISO_AF=[.532,.506,.480,.455,.432,.409,.387,.367,.349,.330,.315,.301,.288,.276,.267,.259,.253,.250,.246,.244,.243,.243,.243,.242,.242,.245,.254,.271,.301];
+    const ISO_LU=[-31.6,-27.2,-23,-19.1,-15.9,-13,-10.3,-8.1,-6.2,-4.5,-3.1,-2,-1.1,-.4,0,.3,.5,0,-2.7,-4.1,-1,1.7,2.5,1.2,-2.1,-7.1,-11.2,-10.7,-3.1];
+    const ISO_TF=[78.5,68.7,59.5,51.1,44,37.5,31.5,26.5,22.1,17.9,14.4,11.4,8.6,6.2,4.4,3,2.2,2.4,3.5,1.7,-1.3,-4.2,-6,-5.4,-1.5,6,12.6,13.9,12.3];
+    const ISO_60=ISO_AF.map((a,i)=>10/a*Math.log10(4.47e-3*(10**(.025*60)-1.15)+(.4*10**((ISO_TF[i]+ISO_LU[i])/10-9))**a)-ISO_LU[i]+94);
+    function perceptualWeight(f){if(!$('iso').checked)return 1;let i=0;while(i<ISO_F.length-2&&f>ISO_F[i+1])i++;const u=clamp(Math.log(f/ISO_F[i])/Math.log(ISO_F[i+1]/ISO_F[i]),0,1),spl=ISO_60[i]*(1-u)+ISO_60[i+1]*u;return clamp(10**((60-spl)/30),.15,2.5);}
+    function opposingPenalty(eq){if(!$('opposing').checked)return 0;const active=eq.filter(b=>b.kind!=='OFF').sort((a,b)=>a.freqHz-b.freqHz);let penalty=0;for(let i=1;i<active.length;i++){const a=active[i-1],b=active[i],distance=Math.abs(Math.log2(b.freqHz/a.freqHz));if(a.gainDb*b.gainDb<0&&distance<1.5)penalty+=Math.abs(a.gainDb*b.gainDb)*(1-distance/1.5);}return penalty;}
+    function objective(eq){const predicted=prediction(eq);let sum=0,weights=0;predicted.forEach((v,i)=>{const w=perceptualWeight(FREQS[i]);sum+=w*(v-target[i])**2;weights+=w;});const lambda=.0005+(100-speed)/100*.009;return sum/weights+lambda*eq.reduce((s,b)=>s+(b.gainDb||0)**2*(1+(b.qFactor||1)*.15),0)+.018*opposingPenalty(eq);}
+    function policyReasons(eq){const reasons=[];eq.forEach((b,i)=>{if(!['PK','LS','OFF','HS','LP','HP'].includes(b.kind))reasons.push(`f:kind-refused:${b.kind}`);if(b.kind==='OFF')return;if(!(b.freqHz>=20&&b.freqHz<=20000&&b.gainDb>=-24&&b.gainDb<=9.2&&b.qFactor>=.1&&b.qFactor<=20)||b.gainDb>0&&(b.qFactor>4||b.freqHz>16000))reasons.push(`f:parameter-range:${i+1}`);});return reasons;}
+    function autoCandidate(eq){
+      // Every trial, including backtracking trials, is evaluated by the real gate.
+      const low=gate(eq,-25.5),policy=policyReasons(eq);if(!low.ok||policy.length)return {bands:eq,pre:-25.5,gate:{...low,ok:false,reasons:[...low.reasons,...policy]}};
+      const m=low.metrics,base=m.quantizedPreampDb;
+      const cap=Math.min(THRESHOLDS.internalAudibleDb-(m.internalAudible.db-base),THRESHOLDS.outputAudibleDb-(m.outputAudible.db-base),THRESHOLDS.outputFullDb-(m.outputFull.db-base));
+      const maxWord=preampWord(-.5),word=Math.min(maxWord,Math.floor(10**((cap-1e-9)/20)*Q23_ONE));
+      if(word<preampWord(-25.5))return {bands:eq,pre:-25.5,gate:{...low,ok:false,reasons:[...low.reasons,'g:preamp-budget']}};
+      const pre=word===maxWord?-.5:Math.max(-25.5,20*Math.log10(word/Q23_ONE));return {bands:eq,pre,gate:gate(eq,pre)};
+    }
+    function writtenOrder(eq){if(!$('order').checked)return eq;return eq.map((b,i)=>({b,i})).sort((a,b)=>{const category=x=>x.kind==='OFF'?1:x.gainDb<=0?0:2;return category(a.b)-category(b.b)||a.i-b.i;}).map(x=>x.b);}
+    function accept(candidate,mark=true,source='custom',name=null){bands=clone(candidate.bands);preamp=candidate.pre;verdict=candidate.gate;previewOnly=null;curveSource=source;curveLabel=name;if(mark)changed();renderAll();}
+    function stopSolver(){const wasBusy=busy;solveToken++;busy=false;$('solve').disabled=false;$('solve').setAttribute('aria-busy','false');if(wasBusy)renderTable();}
+    const nextFrame=()=>new Promise(resolve=>setTimeout(resolve,reducedMotion.matches?0:55));
+    async function solve(){
+      if(busy)return;busy=true;const token=++solveToken;$('solve').disabled=true;$('solve').setAttribute('aria-busy','true');previewOnly=null;iteration=0;heatRows=[];
+      curveSource='custom';curveLabel=null;bands=neutralBands();preamp=-.5;verdict=gate(bands,preamp);raw=measurementCurve();target=targetCurve();let best=objective(bands),stalls=0,reason='solved';
+      changed();pushHeat();renderAll();
+      try{
+        for(let k=0;k<ITERATIONS;k++){
+          await nextFrame();if(token!==solveToken)return;
+          status('solving',`${k+1}/${ITERATIONS}`);
+          const slot=k<10?bands.findIndex(b=>b.kind==='OFF'):(k-10)%10;
+          const index=slot<0?k%10:slot,base=clone(bands);base[index]=off();const predicted=prediction(base),error=target.map((v,i)=>v-predicted[i]);
+          let location=0,value=-Infinity;
+          error.forEach((v,i)=>{if(FREQS[i]>16000&&v>0)return;const score=v*v*perceptualWeight(FREQS[i]);if(score>value){value=score;location=i;}});
+          const low=FREQS[location]<150,kind=low?'LS':'PK',f=low?160:clamp(FREQS[location],150,20000),q=low ? .65 : 1+speed/100*1.35;
+          const unit={kind,freqHz:Math.round(f),gainDb:1,qFactor:Math.round(q*100)/100},basis=shapeResponse([unit]);let dot=0,energy=0;
+          basis.forEach((v,i)=>{const w=perceptualWeight(FREQS[i]);dot+=w*v*error[i];energy+=w*v*v;});
+          const lambda=(100-speed)/100*8+.3,gain=clamp(dot/(energy+lambda),-24,2+speed*.04);
+          let accepted=false,hitGate=false;
+          for(let backtrack=0;backtrack<4;backtrack++){
+            const trial=clone(base);trial[index]={...unit,gainDb:Math.round(gain*2**(-backtrack)*100)/100};
+            if(Math.abs(trial[index].gainDb)<.08)trial[index]=off();
+            const candidate=autoCandidate(writtenOrder(trial));
+            if(!candidate.gate.ok){hitGate=true;continue;}
+            const score=objective(candidate.bands);
+            if(score<best-1e-5){bands=candidate.bands;preamp=candidate.pre;verdict=candidate.gate;best=score;accepted=true;break;}
+          }
+          iteration=k+1;pushHeat();renderAll();
+          if(!accepted){stalls++;if(hitGate){reason='boundary';break;}if(stalls>=4){reason='converged';break;}}else stalls=0;
+        }
+        if(token===solveToken){status(reason);$('progress').style.width='100%';}
+      }catch(error){status('boundary');toast(`${t('rejected')}: ${error.message}`,true);}
+      finally{if(token===solveToken){busy=false;$('solve').disabled=false;$('solve').setAttribute('aria-busy','false');renderTable();}}
+    }
+
+    // SVG instruments. Only generated numeric data is injected into SVG markup.
+    const svgText=(x,y,text,extra='')=>`<text x="${x}" y="${y}" fill="#91a382" font-family="JetBrains Mono,monospace" font-size="8" ${extra}>${text}</text>`;
+    const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    function curvePath(values,w,h,left=48,right=20,top=35,bottom=28){return values.map((v,i)=>`${i?'L':'M'}${(left+i/(values.length-1)*(w-left-right)).toFixed(2)},${(top+(18-v)/36*(h-top-bottom)).toFixed(2)}`).join(' ');}
+    function grid(w,h,left=48,right=20,top=35,bottom=28){
+      let html='';const width=w-left-right,height=h-top-bottom;
+      [20,50,100,200,500,1000,2000,5000,10000,20000].forEach(f=>{const x=left+Math.log(f/20)/Math.log(1000)*width;html+=`<path d="M${x} ${top}V${h-bottom}" stroke="#a4c286" stroke-opacity="${f===1000 ? .22 : .09}"/>`+svgText(x,h-10,f>=1000?`${f/1000}k`:f,'text-anchor="middle"');});
+      [-18,-12,-6,0,6,12,18].forEach(db=>{const y=top+(18-db)/36*height;html+=`<path d="M${left} ${y}H${w-right}" stroke="#b2c99e" stroke-opacity="${db===0 ? .23 : .07}" ${db===0?'':'stroke-dasharray="2 5"'}/>`+svgText(left-9,y+3,signed(db,0),'text-anchor="end"');});
+      return html;
+    }
+    function seismic(w,h,cols,points,paper=false,measurement=false){
+      let html=paper?`<rect width="${w}" height="${h}" fill="#dedbce"/>`:'';
+      for(let j=0;j<cols;j++){
+        const center=(j+.5)/cols*w,spread=w/cols*.6;let path='',fill=`M${center} 0`;
+        for(let k=0;k<=points;k++){
+          const u=k/points,y=u*h;
+          const horizon=Math.exp(-(((u-.28-.035*Math.sin(j*.15))/.08)**2))+.8*Math.exp(-(((u-.7-.05*Math.sin(j*.25))/.09)**2));
+          const amplitude=measurement?(.18+Math.abs(atLog(raw,20*1000**u))*.07):(.15+horizon*.8);
+          const wiggle=(Math.sin(u*70+j*.13)+.35*Math.sin(u*130+j*.3))*amplitude*spread;
+          path+=`${k?'L':'M'}${(center+wiggle).toFixed(2)},${y.toFixed(2)} `;fill+=`L${(center+Math.max(0,wiggle)).toFixed(2)},${y.toFixed(2)} `;
+        }
+        fill+=`L${center} ${h}Z`;
+        html+=`<path d="${fill}" fill="${paper?'#292e24':'#c5cbb4'}" opacity=".8"/><path d="${path}" fill="none" stroke="${paper?'#20281c':'#c8d0b5'}" stroke-width="${paper ? .6 : .7}"/>`;
+      }
+      return html;
+    }
+    function renderWiggle(){
+      $('wiggle').innerHTML=`<rect width="260" height="155" fill="#dedbce"/><g transform="translate(0 23)">${seismic(260,121,14,100,true,true)}</g><path d="M0 53H260M0 83H260M0 113H260" stroke="#68765c" stroke-opacity=".25" stroke-width=".5"/>`;
+      $('measurementId').textContent=customMeasurement?'CSV / USER':`IEM / ${String(selectedMeasurement+1).padStart(3,'0')}`;
+      const note=document.querySelector('.measurement-note');
+      note.innerHTML=customMeasurement?`<b>${escapeHTML(t('sourceUnknown'))}</b> · CSV`:`<b>${t('illustrative')}</b> ${t('procedural')}`;
+    }
+    function renderTarget(){
+      const mode=$('target').value,isDraw=mode==='draw';$('targetScreen').classList.toggle('draw-mode',isDraw);$('drawToggle').setAttribute('aria-pressed',String(isDraw));
+      let html=grid(260,175,26,12,28,23);
+      for(let i=0;i<target.length;i+=12){const x=26+i/(target.length-1)*222,y=28+(18-target[i])/36*124;html+=`<rect x="${x}" y="${y-2}" width="11" height="4" fill="#f0e9da" opacity=".25"/>`;}
+      html+=`<path d="${curvePath(target,260,175,26,12,28,23)}" fill="none" stroke="${isDraw?'#FF3D8B':'#eee8d9'}" stroke-width="1.6"/>`;
+      if(isDraw){drawKnots.forEach((v,i)=>{if(i%4===0||i===drawIndex){const x=26+i/32*222,y=28+(18-v)/36*124;html+=`<circle cx="${x}" cy="${y}" r="${i===drawIndex?3:1.5}" fill="${i===drawIndex?'#FF3D8B':'#eee8d9'}"/>`;}});}
+      const preset=PRESETS[targetPresetId(mode)];
+      $('targetGraph').innerHTML=html;$('targetNote').textContent=preset?`${t('officialResponse')} ${preset.label}, ${t('officialAlignment')} ${t('originalPreamp')} ${fmt(preset.pre,1)} dB; ${t('preampShape')}`:t(isDraw?'drawNote':'preferenceNote');
+    }
+    function renderPlot(){
+      let predicted;
+      // A = measurement through the starting curve; B = measurement through the result.
+      try{predicted=prediction(ab==='A'?startCurve.bands:(previewOnly?previewOnly.bands:bands));}catch{predicted=raw;}
+      const pathPredicted=curvePath(predicted,900,320),pathTarget=curvePath(target,900,320),pathRaw=curvePath(raw,900,320);
+      const area=pathPredicted+' '+target.map((v,j)=>{const i=target.length-1-j;return `L${(48+i/(target.length-1)*832).toFixed(2)},${(35+(18-target[i])/36*257).toFixed(2)}`;}).join(' ')+'Z';
+      $('plot').innerHTML=`<defs><clipPath id="plotClip"><rect x="48" y="35" width="832" height="257"/></clipPath><linearGradient id="errorFill" x2="0" y2="1"><stop stop-color="#ff3d8b" stop-opacity=".17"/><stop offset="1" stop-color="#ff3d8b" stop-opacity=".025"/></linearGradient></defs>${grid(900,320)}<g clip-path="url(#plotClip)"><path d="${area}" fill="url(#errorFill)"/><path d="${pathRaw}" fill="none" stroke="#7d9270" stroke-width="1.4"/><path d="${pathTarget}" fill="none" stroke="#eae6d6" stroke-width="1.2" stroke-dasharray="9 5"/><path d="${pathPredicted}" fill="none" stroke="#ff3d8b" stroke-width="2.1"/><path d="${pathPredicted}" fill="none" stroke="#ff3d8b" stroke-width="7" opacity=".08"/></g>`;
+      const residual=predicted.map((v,i)=>v-target[i]);let squares=0,weight=0;residual.forEach((v,i)=>{const w=perceptualWeight(FREQS[i]);squares+=w*v*v;weight+=w;});
+      $('rms').textContent=fmt(Math.sqrt(squares/weight),2);$('maxError').textContent=fmt(Math.max(...residual.map(Math.abs)),2);
+      $('abA').setAttribute('aria-pressed',String(ab==='A'));$('abB').setAttribute('aria-pressed',String(ab==='B'));
+    }
+    function pushHeat(){const predicted=prediction();heatRows.push(Array.from({length:60},(_,i)=>atLog(predicted,20*1000**(i/59))-atLog(target,20*1000**(i/59))));if(heatRows.length>ITERATIONS+1)heatRows.shift();}
+    function heatColor(value){const u=clamp(Math.abs(value)/9,0,1),zero=[225,231,215],end=value<0?[49,91,151]:[202,83,65];return `rgb(${zero.map((v,i)=>Math.round(v+(end[i]-v)*u)).join(',')})`;}
+    function renderHeat(){
+      const left=29,top=3,width=851,height=79,rh=height/(ITERATIONS+1),cw=width/60;let html='';
+      for(let r=0;r<ITERATIONS+1;r++){const values=heatRows[r];for(let c=0;c<60;c++){html+=`<rect x="${left+c*cw}" y="${top+r*rh}" width="${cw+.3}" height="${rh+.25}" fill="${values?heatColor(values[c]):'#1a291b'}" opacity="${values ? .93 : .7}"/>`;}}
+      // Marching-square contours at −3, 0 and +3 dB on the live residual field.
+      [-3,0,3].forEach(level=>{for(let r=0;r<heatRows.length-1;r++){for(let c=0;c<59;c++){
+        const v=[heatRows[r][c],heatRows[r][c+1],heatRows[r+1][c+1],heatRows[r+1][c]],p=[[c,r],[c+1,r],[c+1,r+1],[c,r+1]],cross=[];
+        for(let e=0;e<4;e++){const next=(e+1)%4;if((v[e]<level)!==(v[next]<level)){const u=(level-v[e])/(v[next]-v[e]);cross.push([left+(p[e][0]+u*(p[next][0]-p[e][0])+.5)*cw,top+(p[e][1]+u*(p[next][1]-p[e][1])+.5)*rh]);}}
+        for(let i=0;i+1<cross.length;i+=2)html+=`<path d="M${cross[i][0]},${cross[i][1]}L${cross[i+1][0]},${cross[i+1][1]}" fill="none" stroke="#fffbed" stroke-opacity=".6" stroke-width=".6"/>`;
+      }}});
+      html+=svgText(19,10,'01','text-anchor="end"')+svgText(19,82,'21','text-anchor="end"');
+      [20,100,1000,10000,20000].forEach(f=>{const x=left+Math.log(f/20)/Math.log(1000)*width;html+=svgText(x,99,f>=1000?`${f/1000}k`:f,'text-anchor="middle"');});
+      $('heatmap').innerHTML=html;$('iterationLabel').textContent=`ITER ${String(iteration).padStart(2,'0')} / ${ITERATIONS}`;
+      $('progress').style.width=`${iteration/ITERATIONS*100}%`;
+    }
+    function renderKnob(){$('knobPointer').style.setProperty('--rotation',`${-135+speed*2.7}deg`);$('knobScale').style.setProperty('--arc',`${speed*2.7}deg`);$('speedKnob').setAttribute('aria-valuenow',String(speed));$('speedKnob').setAttribute('aria-valuetext',fmt(speed,1)+' / 100');if(document.activeElement!==$('speed'))$('speed').value=fmt(speed,speed%1?1:0);}
+    function renderTable(){
+      const focused=document.activeElement,restore=focused&&focused.closest('#bands')?{index:focused.dataset.index,key:focused.dataset.key,select:focused.tagName==='SELECT'}:null;
+      $('bands').innerHTML=bands.map((b,i)=>`<tr><td>${String(i+1).padStart(2,'0')}</td><td><select data-index="${i}" aria-label="${lang==='pt'?'Tipo, seção':'Kind, section'} ${i+1}" ${busy?'disabled':''}>${['PK','LS','OFF'].map(kind=>`<option ${kind===b.kind?'selected':''}>${kind}</option>`).join('')}${EXPERIMENTAL.has(b.kind)?`<option class="exp" value="${b.kind}" selected>${b.kind} · EXP</option>`:''}</select></td>${['freqHz','gainDb','qFactor'].map((key,j)=>`<td><input type="text" inputmode="decimal" data-index="${i}" data-key="${key}" aria-label="${['Hz','dB','Q'][j]}, ${lang==='pt'?'seção':'section'} ${i+1}" value="${fmt(b[key]??[1000,0,1][j],j===0?0:2)}" ${b.kind==='OFF'||busy||(key==='gainDb'&&(b.kind==='LP'||b.kind==='HP'))?'disabled':''} title="${t('shortcutNudge')} Shift ×10 · Alt ×0,1 · double-click reset"></td>`).join('')}</tr>`).join('');
+      $('activeSections').textContent=`${String(bands.filter(b=>b.kind!=='OFF').length).padStart(2,'0')} / 10`;
+      if(restore&&!busy){const next=$('bands').querySelector(`${restore.select?'select':'input'}[data-index="${restore.index}"]${restore.key?`[data-key="${restore.key}"]`:''}`);if(next&&!next.disabled)next.focus({preventScroll:true});}
+    }
+    function effectiveVerdict(){return previewOnly?{...verdict,ok:false,reasons:[...verdict.reasons,...previewOnly.types.map(kind=>`f:preview-only:${kind}`)]}:verdict;}
+    function renderGate(){
+      const v=effectiveVerdict(),labels=['COEF','POLE','PEAK','PREFIX','OUT','CODEC','PRE'];
+      $('gateLamps').innerHTML='abcdefg'.split('').map((key,i)=>{const passed=!v.reasons.some(r=>r.startsWith(key+':'));return `<button type="button" class="${passed?'pass':'fail'}" data-gate="${key}" aria-label="${labels[i]}: ${passed?'OK':t('rejected')}"><i class="lamp" aria-hidden="true"></i>${labels[i]}</button>`;}).join('');
+      $('preamp').textContent=fmt(preamp,2);$('preamp').title=fmt(preamp,9)+' dB / Q23 '+preampWord(preamp);
+      const level=levelDb(bands,preamp),delta=currentCurve?level-levelDb(currentCurve.bands,currentCurve.preamp):null;
+      $('levelDelta').textContent=delta===null?'? dB':signed(delta,2)+' dB';$('levelDelta').title=delta===null?t('currentUnknown'):t('level');
+      $('gateSummary').classList.toggle('refusal',!v.ok);
+      $('gateSummary').textContent=previewOnly?`${t('onlyPreview')}: ${previewOnly.types.join(' / ')}. ${t('unsupportedNote')}`:v.ok?`${t('accepted')} · ${v.metrics.payloadCrc}\n${t('output')}: ${fmt(v.metrics.outputAudible.db,4)} dB${hasExperimental(bands)?`\n${t('experimentalOpen')}`:''}`:v.reasons.join(' · ');
+      // The buttons remain actionable so a refusal is explained in the checklist.
+      $$('[data-write]').forEach(button=>button.setAttribute('aria-label',t('write')+(v.ok?'':': '+t('gateBlocked'))));
+      // HS/LP/HP are enabled only in the Curva ENGENHARIA layer.
+      $('openCurve').href=hasExperimental(bands)?'curva.html?camada=engenharia':'curva.html?camada=ajustar';
+      $('openCurve').textContent=hasExperimental(bands)?`${t('experimentalOpen')} ↗`:t('openCurve');
+      syncAudio();
+    }
+    function renderAll(){raw=measurementCurve();target=targetCurve();renderWiggle();renderTarget();renderPlot();renderHeat();renderTable();renderGate();}
+    function resetHeat(){iteration=0;heatRows=[];pushHeat();renderAll();}
+    function targetChanged(){stopSolver();target=targetCurve();status('changed');changed();resetHeat();}
+    function setSpeed(value){if(!Number.isFinite(value)){toast(t('invalidNumber'),true);$('speed').value=fmt(speed,1);return;}speed=Math.round(clamp(value,0,100)*10)/10;$('speed').value=fmt(speed,speed%1?1:0);renderKnob();stopSolver();status('changed');}
+    function editBand(index,key,value){
+      if(busy)return;const eq=clone(bands);
+      if(key==='kind'){eq[index].kind=value;if(value!=='OFF'&&bands[index].kind==='OFF')Object.assign(eq[index],{freqHz:1000,gainDb:0,qFactor:1});}
+      else{if(!Number.isFinite(value)){toast(t('invalidNumber'),true);renderTable();return;}eq[index][key]=value;}
+      const candidate=autoCandidate(writtenOrder(eq));
+      if(!candidate.gate.ok){toast(t('rejected')+': '+candidate.gate.reasons.join(' · '),true);renderTable();status('boundary');return;}
+      accept(candidate);status('edited');resetHeat();
+    }
+    const nudgeStep={freqHz:1,gainDb:.1,qFactor:.01,speed:1};
+    function stepFor(event,key){return nudgeStep[key]*(event.shiftKey?10:1)*(event.altKey ? .1 : 1);}
+    function numericNudge(event,direction){const el=event.target,key=el.id==='speed'?'speed':el.dataset.key;if(!key)return;event.preventDefault();const value=num(el.value)+direction*stepFor(event,key);if(key==='speed')setSpeed(value);else editBand(Number(el.dataset.index),key,Math.round(value*10000)/10000);}
+    $('bands').addEventListener('change',event=>{const el=event.target;if(el.matches('select'))editBand(Number(el.dataset.index),'kind',el.value);else if(el.dataset.key)editBand(Number(el.dataset.index),el.dataset.key,num(el.value));});
+    $('bands').addEventListener('focusin',event=>{const el=event.target;if(el.dataset.key){const value=bands[Number(el.dataset.index)][el.dataset.key];el.value=String(value).replace('-', '−').replace('.',lang==='pt'?',':'.');}});
+    $('bands').addEventListener('keydown',event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown')numericNudge(event,event.key==='ArrowUp'?1:-1);if(event.key==='Enter'&&event.target.dataset.key){event.preventDefault();event.target.blur();}});
+    $('bands').addEventListener('wheel',event=>{if(event.target.dataset.key&&document.activeElement===event.target)numericNudge(event,event.deltaY<0?1:-1);},{passive:false});
+    $('bands').addEventListener('dblclick',event=>{const el=event.target;if(el.dataset.key)editBand(Number(el.dataset.index),el.dataset.key,{freqHz:1000,gainDb:0,qFactor:1}[el.dataset.key]);});
+    $('speed').addEventListener('change',event=>setSpeed(num(event.target.value)));
+    $('speed').addEventListener('keydown',event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown')numericNudge(event,event.key==='ArrowUp'?1:-1);if(event.key==='Enter')event.target.blur();});
+    $('speed').addEventListener('wheel',event=>numericNudge(event,event.deltaY<0?1:-1),{passive:false});
+    $('speed').addEventListener('dblclick',()=>setSpeed(65));
+    $('speedKnob').addEventListener('keydown',event=>{if(['ArrowUp','ArrowRight','ArrowDown','ArrowLeft','Home','End','Enter'].includes(event.key)){event.preventDefault();if(event.key==='Enter'){$('speed').focus();$('speed').select();}else setSpeed(event.key==='Home'?0:event.key==='End'?100:speed+(['ArrowUp','ArrowRight'].includes(event.key)?1:-1)*stepFor(event,'speed'));}});
+    $('speedKnob').addEventListener('wheel',event=>{event.preventDefault();setSpeed(speed+(event.deltaY<0?1:-1)*stepFor(event,'speed'));},{passive:false});
+    $('speedKnob').addEventListener('dblclick',()=>setSpeed(65));
+    $('speedKnob').addEventListener('pointerdown',event=>{knobDrag={id:event.pointerId,y:event.clientY,value:speed};event.currentTarget.setPointerCapture(event.pointerId);event.currentTarget.focus();});
+    $('speedKnob').addEventListener('pointermove',event=>{if(knobDrag&&event.pointerId===knobDrag.id)setSpeed(knobDrag.value+(knobDrag.y-event.clientY)*.65*(event.shiftKey?10:1)*(event.altKey ? .1 : 1));});
+    $('speedKnob').addEventListener('pointerup',()=>{knobDrag=null;});$('speedKnob').addEventListener('pointercancel',()=>{knobDrag=null;});
+    function selectDraw(){if($('target').value!=='draw'){$('target').value='draw';targetChanged();}}
+    function pointFromEvent(event){const rect=$('targetGraph').getBoundingClientRect(),x=(event.clientX-rect.left)/rect.width*260,y=(event.clientY-rect.top)/rect.height*175;return {i:Math.round(clamp((x-26)/222,0,1)*32),v:Math.round(clamp(18-(y-28)/124*36,-18,18)*4)/4};}
+    function paintPoint(event){const p=pointFromEvent(event),previous=drawPointer?.last;if(previous){const lo=Math.min(p.i,previous.i),hi=Math.max(p.i,previous.i);for(let i=lo;i<=hi;i++){const u=p.i===previous.i?1:(i-previous.i)/(p.i-previous.i);drawKnots[i]=previous.v+(p.v-previous.v)*u;}}drawKnots[p.i]=p.v;drawIndex=p.i;if(drawPointer)drawPointer.last=p;target=targetCurve();renderTarget();renderPlot();$('cursorReadout').textContent=`${fmt(20*1000**(p.i/32),0)} Hz / ${signed(p.v,2)} dB`;}
+    $('targetGraph').addEventListener('pointerdown',event=>{if($('target').value!=='draw')return;stopSolver();drawPointer={id:event.pointerId,last:null};event.currentTarget.setPointerCapture(event.pointerId);paintPoint(event);});
+    $('targetGraph').addEventListener('pointermove',event=>{if(drawPointer&&drawPointer.id===event.pointerId)paintPoint(event);});
+    function finishDrawing(){if(!drawPointer)return;drawPointer=null;const original=[...drawKnots];drawKnots=original.map((v,i)=>Math.round(((original[Math.max(0,i-1)]+2*v+original[Math.min(32,i+1)])/4)*4)/4);targetChanged();}
+    $('targetGraph').addEventListener('pointerup',finishDrawing);$('targetGraph').addEventListener('pointercancel',finishDrawing);
+    $('targetGraph').addEventListener('keydown',event=>{if(!event.key.startsWith('Arrow'))return;event.preventDefault();selectDraw();if(event.key==='ArrowLeft'||event.key==='ArrowRight'){drawIndex=clamp(drawIndex+(event.key==='ArrowRight'?1:-1),0,32);renderTarget();}else{drawKnots[drawIndex]=clamp(drawKnots[drawIndex]+(event.key==='ArrowUp'?1:-1)*.25*(event.shiftKey?10:1)*(event.altKey ? .1 : 1),-18,18);targetChanged();}$('cursorReadout').textContent=`${fmt(20*1000**(drawIndex/32),0)} Hz / ${signed(drawKnots[drawIndex],2)} dB`;});
+    $('plot').addEventListener('pointermove',event=>{const rect=$('plot').getBoundingClientRect(),x=clamp(((event.clientX-rect.left)/rect.width*900-48)/832,0,1),f=20*1000**x;$('cursorReadout').textContent=`${fmt(f,0)} Hz / ${signed(atLog(target,f),2)} dB` ;});
+
+    // C4: strict EqualizerAPO parser and measurement CSV, never execute file text.
+    const APO_NUMBER='([-+]?(?:[0-9]+(?:[.,][0-9]*)?|[.,][0-9]+))';
+    function field(line,name){const match=line.match(new RegExp('\\b'+name+'\\s+'+APO_NUMBER,'i'));return match?num(match[1]):null;}
+    function parseImport(text){
+      if(text.length>1024*1024)throw new Error('1 MiB max.');
+      const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).map(s=>s.replace(/#.*/,'').trim()).filter(Boolean);
+      const hasFilters=lines.some(line=>/^Filter\s+\d+\s*:/i.test(line));
+      if(!hasFilters){
+        const points=[];
+        for(const line of lines){const cells=line.includes(';')?line.split(';'):line.includes('\t')?line.split('\t'):line.split(',');if(cells.length<2)continue;const f=num(cells[0]),db=num(cells[1]);if(!Number.isFinite(f)||!Number.isFinite(db))continue;if(f<=0||f>48000||Math.abs(db)>200)throw new Error(t('csvCoverage'));points.push([f,db]);}
+        points.sort((a,b)=>a[0]-b[0]);
+        if(points.length<3||points[0][0]>20||points.at(-1)[0]<20000||points.some((p,i)=>i&&p[0]===points[i-1][0]))throw new Error(points.length?t('csvCoverage'):t('noFilters'));
+        const interp=f=>{let i=0;while(i<points.length-2&&points[i+1][0]<f)i++;const u=clamp(Math.log(f/points[i][0])/Math.log(points[i+1][0]/points[i][0]),0,1);return points[i][1]*(1-u)+points[i+1][1]*u;};
+        return {type:'measurement',values:align(FREQS.map(interp),interp(1000)),count:points.length};
+      }
+      const parsed=[],unsupported=[],mapped=[];let pre=null;
+      for(const line of lines){
+        if(/^Preamp\s*:/i.test(line)){const m=line.match(new RegExp('^Preamp\\s*:\\s*'+APO_NUMBER,'i'));if(!m)throw new Error('Preamp inválido / invalid preamp');pre=num(m[1]);continue;}
+        if(!/^Filter\s+\d+\s*:/i.test(line))throw new Error(`${t('fileError')}: ${line.slice(0,65)}`);
+        const content=line.replace(/^Filter\s+\d+\s*:\s*/i,''),match=content.match(/^(ON|OFF)(?:\s+([A-Z]+))?\b/i);
+        if(!match)throw new Error(`${t('fileError')}: ${line.slice(0,65)}`);
+        if(match[1].toUpperCase()==='OFF'||match[2]?.toUpperCase()==='OFF'){parsed.push(off());continue;}
+        const source=(match[2]||'').toUpperCase();let kind=source;
+        if(source==='LSC'){kind='LS';mapped.push('LSC → LS');}
+        if(source==='HSC'){kind='HS';mapped.push('HSC → HS');}
+        if(source==='LSQ'||source==='HSQ')throw new Error(`${source}: ${t('kindRefused')}`);
+        if(EXPERIMENTAL.has(kind))unsupported.push(kind); // experimental, still gated below
+        if(!FILTER_KINDS.includes(kind))throw new Error(`${t('fileError')}: ${source||'?'}`);
+        const freqHz=field(content,'Fc'),gainDb=['LP','HP'].includes(kind)?0:(field(content,'Gain')??NaN),qFactor=field(content,'Q')??Math.SQRT1_2;
+        const band={kind,freqHz,gainDb,qFactor};checkBand(band,parsed.length);
+        if(!(freqHz>=20&&freqHz<=20000&&gainDb>=-24&&gainDb<=9.2&&qFactor>=.1&&qFactor<=20))throw new Error(t('rangeError'));
+        parsed.push(band);
+      }
+      if(parsed.length>10)throw new Error(t('tooMany'));if(!parsed.length)throw new Error(t('noFilters'));
+      while(parsed.length<10)parsed.push(off());
+      return {type:'eq',bands:parsed,pre,experimental:[...new Set(unsupported)],mapped:[...new Set(mapped)]};
+    }
+    function showImportReport(message){$('importReport').textContent=message;}
+    function applyImport(){
+      try{
+        const imported=parseImport($('importText').value);stopSolver();
+        if(imported.type==='measurement'){
+          customMeasurement={name:t('importedCSV'),values:imported.values};populateMeasurements();raw=measurementCurve();resetHeat();changed();status('changed');$('importDialog').close();toast(`${t('importedCSV')}: ${imported.count} ${lang==='pt'?'pontos':'points'}. ${t('csvNote')}`);return;
+        }
+        // PK/LS/OFF and the experimental HS/LP/HP all go through the same gate; LSQ/HSQ were refused by the parser.
+        const ordered=writtenOrder(imported.bands),candidate=imported.pre===null?autoCandidate(ordered):{bands:ordered,pre:imported.pre,gate:gate(ordered,imported.pre)};
+        const policy=policyReasons(ordered);if(policy.length){candidate.gate={...candidate.gate,ok:false,reasons:[...candidate.gate.reasons,...policy]};}
+        if(!candidate.gate.ok)throw new Error(t('rejected')+': '+candidate.gate.reasons.join(' · '));
+        accept(candidate,true,'import');resetHeat();status('edited');$('importDialog').close();
+        toast(imported.experimental.length?`${t('experimentalOpen')} · ${imported.experimental.join(', ')}. ${t('importExperimental')} ${imported.mapped.join(' · ')}`:`${t('importApplied')} ${imported.mapped.join(' · ')}`);
+      }catch(error){showImportReport(`${t('fileError')}: ${error.message}`);toast(error.message,true);}
+    }
+    function openImport(){showImportReport('');$('importDialog').showModal();}
+    async function readImportFile(file){if(!file)return;if(file.size>1024*1024){toast('1 MiB max.',true);return;}try{$('importText').value=await file.text();openImport();}catch(error){toast(`${t('fileError')}: ${error.message}`,true);}finally{$('file').value='';}}
+    $('dropzone').addEventListener('click',event=>{if(event.target.closest('#pasteImport'))return;$('file').click();});
+    $('dropzone').addEventListener('keydown',event=>{if(event.target!==event.currentTarget)return;if(event.key==='Enter'||event.key===' '){event.preventDefault();$('file').click();}});
+    $('pasteImport').addEventListener('click',event=>{event.stopPropagation();openImport();});
+    $('file').addEventListener('change',event=>readImportFile(event.target.files[0]));
+    $('dropzone').addEventListener('dragover',event=>{event.preventDefault();$('dropzone').classList.add('drag');});
+    $('dropzone').addEventListener('dragleave',()=>$('dropzone').classList.remove('drag'));
+    $('dropzone').addEventListener('drop',event=>{event.preventDefault();$('dropzone').classList.remove('drag');readImportFile(event.dataTransfer.files[0]);});
+    $('applyImport').addEventListener('click',applyImport);
+
+    // N2/N3 on the storage contract v2, always through OA.store: journal "oa.v2.journal", counters
+    // "oa.v2.flashDay" / "oa.v2.flashTotal" / sessionStorage "oa.v2.flashSession". The last journal entry stands
+    // in for the curve already on the cable (simulated writes only; the cable cannot be read back).
+    const lastEntry=OA.store.journal().at(-1);
+    if(lastEntry){
+      lastWrite=Number(lastEntry.at)||0;
+      const entryBands=Array.isArray(lastEntry.bands)?lastEntry.bands.map(OA.store.bandFromString):[];
+      if(entryBands.length===10&&entryBands.every(Boolean)&&Number.isFinite(lastEntry.pre)){try{levelDb(entryBands,lastEntry.pre);currentCurve={bands:entryBands,preamp:lastEntry.pre};}catch{currentCurve=null;}}
+    }
+    function updateWriteCount(){const c=OA.store.flashCounts();$('writeCount').textContent=`${c.today} ${t('simulations')} · ${c.session} ${t('session')} · ${c.total} ${t('total')}`;}
+    function curveName(){if(curveLabel)return curveLabel;if(curveSource==='import')return `${t('resultName')} · ${t('imported')}`;const option=$('target').selectedOptions[0];return `${t('resultName')} · ${option?option.textContent:''}`;}
+    function saveAsCurrent(){OA.store.saveCurrent({name:curveName(),source:curveSource,preampDb:preamp,bands});}
+    function showGate(){
+      const v=effectiveVerdict(),m=v.metrics;
+      $('gateDetails').textContent=`${v.ok?'OK':t('rejected')} / ${t('gateProof')}\n${v.reasons.join('\n')}\n\n${t('thresholds')}\na: |b0| ≤ 1.3123878837; |b2| ≤ 0.9981335923\n   |−a1|, |b1| ≤ 1.9973274171; |−a2| ≤ 0.9973300919\nb: pole radius ≤ 0.99986846753918\nc: section peak ≤ +9.2 dB\nd: ${t('prefix')} ≤ −0.2037 dB\ne: 20–20k ≤ −0.4709 dB; DC–48k ≤ +2.5 dB\nf: codec / Q27 / Q23 / CRC\ng: preamp −25.5…−0.5 dB\n\n${t('prefix')}: ${fmt(m.internalAudible.db,7)} dB / S${m.internalAudible.stage}\n${t('output')}: ${fmt(m.outputAudible.db,7)} dB\n${t('full')}: ${fmt(m.outputFull.db,7)} dB\n${t('level')}: ${fmt(levelDb(bands,preamp),4)} dB\nCRC ${m.payloadCrc} / 220 bytes / 9 reports`;
+      $('gateDialog').showModal();
+    }
+    function refreshConfirm(){const wait=Math.max(0,2000-(Date.now()-lastWrite)),v=effectiveVerdict(),experimental=hasExperimental(bands);$('confirmWrite').disabled=!v.ok||busy||!$('checkLower').checked||!$('checkFlash').checked||(experimental&&!$('checkExperimental').checked)||wait>0;$('cooldownNote').textContent=wait>0?`${t('cooldown')} ${fmt(wait/1000,1)} s`:t('cooldownReady');}
+    function openWrite(){
+      const v=effectiveVerdict(),counts=OA.store.flashCounts(),experimental=hasExperimental(bands);$('checkLower').checked=false;$('checkFlash').checked=false;$('checkExperimental').checked=false;
+      const delta=currentCurve?levelDb(bands,preamp)-levelDb(currentCurve.bands,currentCurve.preamp):null;
+      $('loudnessWarning').hidden=delta!==null&&delta<3;$('wearWarning').hidden=counts.today<50;
+      // Extra confirmation for HS/LP/HP: the official page never wrote these kinds.
+      $('experimentalWarning').hidden=!experimental;$('experimentalCheckLabel').hidden=!experimental;
+      $('writeSummary').textContent=`${v.ok?'✓ '+t('accepted'):'× '+t('gateBlocked')}\n${v.ok?'':v.reasons.join('\n')+'\n'}preamp ${fmt(preamp,7)} dB · Q23 ${preampWord(preamp)}\n${t('output')}: ${fmt(v.metrics.outputAudible.db,4)} dB\n${delta===null?t('currentUnknown'):'Δ '+signed(delta,2)+' dB'}\n${counts.today} ${t('simulations')} · ${counts.session} ${t('session')} · ${counts.total} ${t('total')}\n220 bytes / 9 reports / CRC ${v.metrics.payloadCrc}\nwrite-only · flash · 96 kHz · 10 biquads`;
+      refreshConfirm();$('writeDialog').showModal();
+    }
+    function confirmWrite(){
+      const live=gate(bands,preamp),policy=policyReasons(bands);
+      if(!live.ok||previewOnly||policy.length){toast(t('gateBlocked'),true);return;}
+      if(busy||!$('checkLower').checked||!$('checkFlash').checked)return;
+      if(hasExperimental(bands)&&!$('checkExperimental').checked)return;
+      if(Date.now()-lastWrite<2000){toast(t('cooldown'),true);refreshConfirm();return;}
+      // Deliberately no navigator.hid, sendReport or real commit. Encoding is real.
+      const reports=encodeReports(bands,preamp),commit=commitReport();
+      if(reports.length!==9||commit.length!==31)return;
+      lastWrite=Date.now();OA.store.recordFlash();
+      OA.store.appendJournal({at:lastWrite,name:curveName(),crc:`0x${live.metrics.payloadCrc.slice(2).toUpperCase()}`,pre:preamp,bands:bands.map(OA.store.bandToString)});
+      currentCurve={bands:clone(bands),preamp};dirty=0;$('dirty').textContent=`0 ${t('dirty')}`;updateWriteCount();renderGate();$('writeDialog').close();toast(t('writeDone'));
+    }
+    $$('[data-write]').forEach(button=>button.addEventListener('click',openWrite));
+    $('checkLower').addEventListener('change',refreshConfirm);$('checkFlash').addEventListener('change',refreshConfirm);$('checkExperimental').addEventListener('change',refreshConfirm);$('confirmWrite').addEventListener('click',confirmWrite);
+    setInterval(()=>{if($('writeDialog').open)refreshConfirm();},200);
+    $('gateLamps').addEventListener('click',event=>{if(event.target.closest('[data-gate]'))showGate();});
+    function stateReport(){return {schema:'open-auri/mock-target@2',name:lang==='pt'?'Soe como X':'Sound like X',simulated:true,measurement:customMeasurement?{name:customMeasurement.name,origin:'user, unverified'}:{name:MEASUREMENTS[selectedMeasurement][lang],illustrative:true},target:$('target').value,drawKnots:$('target').value==='draw'?[...drawKnots]:null,speed,iso226:$('iso').checked,opposing:$('opposing').checked,cutsFirst:$('order').checked,bands:clone(bands),preampDb:preamp,gate:effectiveVerdict(),levelDb:levelDb(bands,preamp),payload:effectiveVerdict().ok?encodePayload(bands,preamp):null};}
+    // The storage contract v2 has no library key: the curve is stored as "oa.v2.current".
+    function saveLibrary(){if(!effectiveVerdict().ok){toast(t('gateBlocked'),true);return;}saveAsCurrent();populatePresets();toast(t('saved'));}
+    const exportButton=document.createElement('button');exportButton.type='button';exportButton.id='exportReport';exportButton.textContent=t('downloadReport');$('gateDialog').querySelector('.dialog-actions').prepend(exportButton);
+    exportButton.addEventListener('click',()=>{const blob=new Blob([JSON.stringify(stateReport(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download='open-auri-response-report.json';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast(t('reportSaved'));});
+    $('save').addEventListener('click',saveLibrary);
+    // "Abrir na Curva": the solved curve becomes "oa.v2.current"; Curva re-runs the gate when it reads it.
+    $('openCurve').addEventListener('click',event=>{event.preventDefault();if(!effectiveVerdict().ok){toast(t('gateBlocked'),true);return;}saveAsCurrent();location.href=$('openCurve').getAttribute('href');});
+
+    // X3: real A/B through the shared preview engine. A = starting curve, B = result. Both chains hang off the
+    // one source (top-bar MP3 or pink noise) and are loudness-matched with levelDb via OA.audio.matchGains.
+    function abSignature(){return JSON.stringify([startCurve.bands,startCurve.preamp,bands,preamp]);}
+    function abLevels(){const la=levelDb(startCurve.bands,startCurve.preamp),lb=levelDb(bands,preamp),[ga,gb]=OA.audio.matchGains([la,lb]);return {la,lb,ga,gb};}
+    function renderAbButton(){
+      const on=!!abAudio;$('abPlay').setAttribute('aria-pressed',String(on));$('abPlay').textContent=on?t('stopListen'):t('listen');
+      let levels=null;try{levels=abLevels();}catch{levels=null;}
+      $('abLevels').textContent=levels?t('abLevels').replace('{a}',signed(levels.la,1)).replace('{b}',signed(levels.lb,1)).replace('{ga}',signed(levels.ga,1)).replace('{gb}',signed(levels.gb,1)):'';
+    }
+    function disposeAb(){if(!abAudio)return;abAudio.a.dispose();abAudio.b.dispose();abAudio=null;}
+    function buildAb(){const {ga,gb}=abLevels();const a=OA.audio.buildChain(startCurve.bands,startCurve.preamp,{gainDb:ga,on:ab==='A'});const b=OA.audio.buildChain(bands,preamp,{gainDb:gb,on:ab==='B'});abAudio={a,b,ga,gb,sig:abSignature()};}
+    async function toggleAbAudio(){
+      if(abAudio){disposeAb();OA.audio.stop();renderAbButton();return;}
+      if(!effectiveVerdict().ok){toast(t('listenBlocked'),true);return;}
+      try{buildAb();await OA.audio.start('chains');}catch(error){disposeAb();toast(`${t('audioError')}: ${error.message}`,true);}
+      renderAbButton();
+    }
+    function syncAudio(){
+      if(abAudio){
+        if(!effectiveVerdict().ok){disposeAb();OA.audio.stop();}
+        else if(abAudio.sig!==abSignature()){try{disposeAb();buildAb();}catch{disposeAb();OA.audio.stop();}}
+        else{abAudio.a.setGain(abAudio.ga,ab==='A');abAudio.b.setGain(abAudio.gb,ab==='B');}
+      }
+      renderAbButton();
+    }
+    // Another source of playback (the loader's "Tocar arquivo" plays raw) ends the A/B chains.
+    OA.audio.onChange(state=>{if(abAudio&&state.mode!=='chains'){disposeAb();renderAbButton();}});
+    $('abPlay').addEventListener('click',()=>{toggleAbAudio();});
+
+    // Starting points: the editor curve ("oa.v2.current"), Neutro or an official preset. Each becomes A.
+    function useStartingPoint(id){
+      let candidate,name,source;
+      if(id==='current'){
+        const c=OA.store.loadCurrent();if(!c){populatePresets();toast(t('rejected'),true);return;}
+        candidate={bands:c.bands,pre:c.preampDb,gate:gate(c.bands,c.preampDb)};name=c.name;source=c.source;
+        const policy=policyReasons(c.bands);if(policy.length)candidate.gate={...candidate.gate,ok:false,reasons:[...candidate.gate.reasons,...policy]};
+      }else if(id==='neutro'){const eq=neutralBands();candidate={bands:eq,pre:-.5,gate:gate(eq,-.5)};name='Neutro';source='preset:neutro';}
+      else{const preset=PRESETS[id];if(!preset)return;const eq=toBands(preset);candidate={bands:eq,pre:preset.pre,gate:gate(eq,preset.pre)};name=preset.label;source=`preset:${id}`;}
+      stopSolver();
+      if(!candidate.gate.ok){toast(`${t('rejected')}: ${candidate.gate.reasons.join(' · ')}`,true);return;}
+      if($('startingPreset').querySelector(`option[value="${id}"]`))$('startingPreset').value=id;
+      startCurve={name,source,bands:clone(candidate.bands),preamp:candidate.pre};
+      accept(candidate,true,source,name);status('edited');resetHeat();toast(t('startLoaded'));
+    }
+    $('neutral').addEventListener('click',()=>useStartingPoint('neutro'));
+    $('loadPreset').addEventListener('click',()=>useStartingPoint($('startingPreset').value));
+    $('default').addEventListener('click',()=>useStartingPoint('padrao'));
+    $('search').addEventListener('input',populateMeasurements);$('clearSearch').addEventListener('click',()=>{$('search').value='';populateMeasurements();$('search').focus();});
+    $('measurement').addEventListener('change',event=>{if(event.target.value==='none')return;stopSolver();if(event.target.value!=='custom'){selectedMeasurement=Number(event.target.value);customMeasurement=null;}raw=measurementCurve();status('changed');changed();resetHeat();});
+    $('target').addEventListener('change',targetChanged);$('drawToggle').addEventListener('click',()=>{selectDraw();$('targetGraph').focus();});
+    $('resetDraw').addEventListener('click',()=>{drawKnots=Array.from({length:DRAW_COUNT},(_,i)=>preference(20*1000**(i/32))-preference(1000));targetChanged();});
+    ['iso','opposing','order'].forEach(id=>$(id).addEventListener('change',()=>{stopSolver();status('changed');if(id==='order'){const candidate=autoCandidate(writtenOrder(clone(bands)));if(candidate.gate.ok)accept(candidate);}renderPlot();}));
+    $('solve').addEventListener('click',solve);
+    function setAB(value){ab=value;renderPlot();syncAudio();}
+    $('abA').addEventListener('click',()=>setAB('A'));$('abB').addEventListener('click',()=>setAB('B'));
+    // Language is shared: persist to "oa.v2.lang"; locale() also forwards it to OA.audioUI.setLang.
+    $('language').addEventListener('click',()=>{lang=lang==='pt'?'en':'pt';OA.store.setLang(lang==='en'?'en-US':'pt-BR');locale();exportButton.textContent=t('downloadReport');});
+    $('help').addEventListener('click',()=>$('helpDialog').showModal());
+    $$('[data-close]').forEach(button=>button.addEventListener('click',()=>$(button.dataset.close).close()));
+    document.addEventListener('keydown',event=>{if(event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,select,textarea,[role="slider"],[role="application"]'))return;if(document.querySelector('dialog[open]'))return;if(event.key==='?'){event.preventDefault();$('helpDialog').showModal();}else if(event.key.toLowerCase()==='r'){event.preventDefault();solve();}else if(event.key.toLowerCase()==='a')setAB('A');else if(event.key.toLowerCase()==='b')setAB('B');});
+    // Procedural background remains a static SVG with CSS-only slow motion.
+    $('ambientTrace').innerHTML=seismic(1600,1000,74,180);
+    $('paperTrace').innerHTML=seismic(1100,55,95,45,true);
+    raw=measurementCurve();drawKnots=Array.from({length:DRAW_COUNT},(_,i)=>preference(20*1000**(i/32))-preference(1000));target=targetCurve();
+    // Initial, gate-tested interpretation. Each heatmap row is an actual prefix,
+    // not fabricated solver history. Press SOLVE to run the iterative fitter.
+    const seed=[['LS',160,-2,.65],['PK',2700,-3.4,1.6],['PK',6200,-1.6,2],['PK',9200,-2.2,2.2],['PK',14500,-1,1.8],['PK',700,.6,1.1],['PK',1550,.8,1.4],['PK',3700,.9,1.7],['PK',4800,.5,1.8],['PK',11500,.7,2]];
+    pushHeat();for(const [kind,freqHz,gainDb,qFactor] of seed){const trial=clone(bands),index=trial.findIndex(b=>b.kind==='OFF');if(index<0)break;trial[index]={kind,freqHz,gainDb,qFactor};const candidate=autoCandidate(writtenOrder(trial));if(candidate.gate.ok){bands=candidate.bands;preamp=candidate.pre;verdict=candidate.gate;pushHeat();}}
+    // A of the A/B: resume "oa.v2.current" when the gate (and this page's kind policy) accepts it; else Neutro.
+    const resumed=OA.store.loadCurrent();
+    if(resumed&&!policyReasons(resumed.bands).length&&gate(resumed.bands,resumed.preampDb).ok)startCurve={name:resumed.name,source:resumed.source,bands:resumed.bands,preamp:resumed.preampDb};
+    locale();status('seed');updateWriteCount();
+    // Tiny read-only inspection surface for browser/codec acceptance checks.
+    Object.defineProperty(window,'auriMock',{value:Object.freeze({gate,levelDb,encodePayload,encodeReports,designSection,magnitudeDb,parseImport,autoCandidate,getState:stateReport,solve}),writable:false});
+  </script>
+</body>
+</html>

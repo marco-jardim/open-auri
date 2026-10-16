@@ -1,0 +1,1402 @@
+<!--
+  TODOs antes de publicar:
+  - revisar o aviso legal com um advogado;
+  - validar firmware, clock, escrita, flash e falhas de energia no cabo real;
+  - integrar o gate v2 de produção: este mock só calcula e nunca acessa HID;
+  - traduzir o corpo técnico e as descrições SVG para en-US;
+  - testar Chrome/Edge, leitores de tela e os oito destinos da navegação;
+  - rever fontes históricas, atribuição dos presets e atualização do envelope observado;
+  - decidir como D7 (sem boost acima de 16 kHz) convive com o HS-boost experimental (8–20 kHz, até +2 dB);
+  - revisar com jurídico o texto LGPD de "Dados neste navegador" e testar "Apagar dados locais" em file:// e HTTPS;
+  - chrome, storage v2 e audio-loader v1 são cópias de curva.html: manter em sincronia.
+-->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="O protocolo 0xCB e seus limites. Documentação do open-auri em homenagem a Harry Nyquist. Mock local, sem escrita no cabo.">
+  <title>O protocolo 0xCB e seus limites · open-auri</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap">
+  <style>
+    :root{--ink:#0F0F0E;--ink-2:#171715;--text:#ECE7DD;--muted:#8F8A80;--rule:rgba(236,231,221,.12);--danger:#E5484D;--accent:#8C2F2F;--accent-light:#DEA6A0;--paper:#EFE6D2;--paper-ink:#29251F;--paper-muted:#6B5E4C;--paper-rule:rgba(66,47,28,.29);--serif:"Instrument Serif",Georgia,serif;--journal:"EB Garamond",Georgia,serif;--sans:"Geist",Arial,sans-serif;--ui:"Geist",system-ui,sans-serif;--mono:"JetBrains Mono",Consolas,monospace}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:94px}body{margin:0;background:var(--paper);color:var(--paper-ink);font:19px/1.55 var(--journal);-webkit-font-smoothing:antialiased}body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse at 50% 35%,transparent 30%,#a8884930 100%),repeating-linear-gradient(3deg,#78552804 0 1px,transparent 1px 4px),url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%236d5424' opacity='.085' filter='url(%23n)' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}::selection{background:var(--accent);color:var(--paper)}a{color:inherit;text-underline-offset:4px}a:hover{color:var(--accent)}button,input,select{font:inherit}button,select{cursor:pointer}button{color:inherit}button:disabled{cursor:not-allowed}button,a,input,select,summary{ -webkit-tap-highlight-color:transparent}:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.cable-bar :focus-visible,.site-footer :focus-visible{outline-color:var(--accent-light)}h1,h2,h3,p,figure{margin:0}p+p{margin-top:13px}.mono,code,kbd{font-family:var(--mono);font-variant-numeric:tabular-nums}code{font-size:.72em}small{font-size:.78em}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.skip-link{position:fixed;top:8px;left:20px;z-index:50;transform:translateY(-160%);background:var(--accent);color:var(--paper);padding:9px 18px;font:13px var(--sans)}.skip-link:focus{transform:none}.frame{max-width:1560px;margin:auto;padding-inline:24px}
+    /* ===== chrome (shared; canonical copy of curva.html). Docs-only: chrome sits on a light page, so the
+       chrome text/font are reset here and --accent is scoped to the light tint for underline, loader and focus;
+       the primary button keeps the oxblood fill with light text for contrast. ===== */
+    [hidden]{display:none!important}
+    .cable-bar,.site-footer{font:13px/1.5 var(--ui);color:var(--text);--accent:#DEA6A0;--accent-hi:#EBC0BB}
+    .cable-bar{position:sticky;top:0;z-index:60;background:#171715;border-bottom:1px solid var(--rule)}
+    .cable-inner{max-width:1480px;margin:auto;min-height:56px;padding:0 24px;display:flex;align-items:center;gap:22px}
+    .wordmark{font:italic 27px/1 var(--serif);text-decoration:none;white-space:nowrap}
+    .main-nav{display:flex;gap:15px;align-self:stretch;align-items:center;margin:auto;font-size:11.5px;white-space:nowrap}
+    .main-nav a{text-decoration:none;position:relative;color:#cfc9be}
+    .main-nav a:hover{color:var(--text)}
+    .main-nav a[aria-current="page"]{color:var(--text)}
+    .main-nav a[aria-current="page"]:after{content:"";position:absolute;left:0;right:0;bottom:-19px;height:2px;background:var(--accent)}
+    .cable-actions{display:flex;align-items:center;gap:8px;white-space:nowrap}
+    .cable-actions button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:7px 10px;font-size:11px;line-height:1.2}
+    .cable-actions button:hover{border-color:var(--muted)}
+    .cable-actions button.primary{background:#8C2F2F;border-color:#8C2F2F;color:#FFF4EF;font-weight:650}
+    .cable-actions button.primary:hover{background:#A33A3A}
+    .cable-state{font-size:10.5px;color:#b5afa4;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
+    .status-dot{color:var(--muted);font-size:8px;margin-right:5px}
+    .dirty{font:9.5px/1.35 var(--mono);color:var(--muted);max-width:100px;white-space:normal}
+    .dirty.has{color:var(--accent)}
+    .language{border:0!important;font-family:var(--mono)!important;color:var(--muted)}
+    .language .on{color:var(--text)}
+/* === OA SHARED: audio-loader v1 (CSS) === */
+.oa-audio{position:relative}
+.oa-audio-btn{display:inline-flex;align-items:center;gap:6px;max-width:190px}
+.oa-audio-btn .oa-audio-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.oa-audio-btn.has-file{border-color:color-mix(in srgb,var(--accent) 55%,transparent)!important;color:var(--accent)}
+.oa-audio-pop{position:absolute;left:0;top:calc(100% + 10px);z-index:80;width:320px;max-width:calc(100vw - 24px);background:#1b1b19;border:1px solid #34332f;border-radius:6px;padding:14px;box-shadow:0 18px 40px rgba(0,0,0,.65);font:12px/1.45 var(--ui);color:var(--text);white-space:normal}
+.oa-audio-pop h3{margin:0 0 10px;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.oa-audio-load{position:relative;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);color:var(--accent);border-radius:3px;padding:7px 10px;cursor:pointer;font-size:12px}
+.oa-audio-load:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+.oa-audio-file{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.oa-audio-meta{margin:10px 0;font:11px/1.5 var(--mono);color:#cfc9be;word-break:break-word}
+.oa-audio-meta b{color:var(--text);font-weight:500}
+.oa-audio-row{display:flex;gap:8px;flex-wrap:wrap}
+.oa-audio-row button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:6px 10px;font-size:11.5px}
+.oa-audio-row button:disabled{opacity:.45;cursor:not-allowed}
+.oa-audio-vol{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-top:12px;font-size:11.5px;color:#cfc9be}
+.oa-audio-vol input{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.oa-audio-vol output{font:11px var(--mono);color:var(--accent)}
+.oa-audio-note{margin:10px 0 0;font-size:11px;color:var(--muted)}
+.oa-audio-rate{margin:6px 0 0;font:10.5px var(--mono);color:var(--muted)}
+.oa-audio-rate.approx{color:color-mix(in srgb,var(--accent) 40%,white)}
+@media (max-width:720px){.cable-actions{flex-wrap:wrap;row-gap:6px}.oa-audio-btn .oa-audio-name{max-width:70px}.oa-audio-pop{position:fixed;left:12px;right:12px;top:118px;width:auto;max-width:none}}
+/* === END OA SHARED: audio-loader v1 (CSS) === */
+    @media (max-width:1100px){.cable-inner{flex-wrap:wrap;padding-top:10px;padding-bottom:8px;gap:0 18px}.main-nav{order:3;width:100%;overflow:auto;margin:10px 0 0;padding-bottom:6px}.main-nav a[aria-current="page"]:after{bottom:-6px}.cable-actions{margin-left:auto}}
+    @media (max-width:720px){.cable-inner{padding-inline:14px}.dirty{display:none}}
+    .paper-environment{position:relative;overflow:clip}.margin-field{position:absolute;inset:0;pointer-events:none;overflow:hidden;opacity:.09;z-index:-1}.margin-field svg{position:absolute;width:620px;height:1800px;right:-430px;top:450px;animation:field-drift 28s ease-in-out infinite alternate}.margin-field svg:last-child{left:-480px;right:auto;top:1500px;animation-delay:-14s}@keyframes field-drift{to{transform:translateY(90px) rotate(3deg)}}
+    .tape-wrap{padding:22px 0 16px;position:relative;border-bottom:1px solid var(--paper-rule);background:linear-gradient(#aa8a4b0a,transparent)}.tape-label{position:absolute;left:27px;top:5px;z-index:1;font:8px var(--mono);letter-spacing:.12em;color:var(--paper-muted)}.tape-window{overflow:hidden;position:relative;transform:rotate(-.3deg);background:#DCC894;border-block:1px solid #8f77485c;box-shadow:0 3px 5px #74532d22,inset 0 0 17px #b48d4344;padding:16px 0}.tape-window::before,.tape-window::after{content:"";position:absolute;inset-inline:0;height:5px;z-index:1;background:radial-gradient(circle at 5px 2px,var(--paper) 2px,transparent 2.5px) 0 0/13px 5px;pointer-events:none}.tape-window::before{top:3px}.tape-window::after{bottom:3px}.tape-track{display:flex;width:max-content;animation:tape-feed 180s linear infinite}.tape-window:hover .tape-track,.tape-window:focus-within .tape-track,.tape-wrap.paused .tape-track{animation-play-state:paused}.tape-copy{font:10px/1.4 var(--mono);letter-spacing:.07em;white-space:nowrap;padding-right:45px;color:#51452e}.tape-copy b{color:var(--accent);font-weight:500}.tape-toggle{position:absolute;right:26px;top:2px;border:0;background:var(--paper);font:8px var(--mono);padding:1px 5px}.tape-toggle:hover{color:var(--accent)}@keyframes tape-feed{to{transform:translateX(-50%)}}
+    .doc-layout{display:grid;grid-template-columns:202px minmax(0,1fr);gap:40px;max-width:1440px;margin:auto;padding:0 36px}.toc{padding-top:34px;font-family:var(--sans)}.toc-inner{position:sticky;top:88px}.search-button{display:flex;align-items:center;justify-content:space-between;width:100%;border:1px solid var(--paper-rule);background:#fff3;padding:10px 9px;font-size:11px;color:var(--paper-muted);margin-bottom:26px}.search-button:hover{border-color:var(--accent);color:var(--accent)}kbd{font-size:9px;white-space:nowrap}.eyebrow{font:9px/1.6 var(--sans);letter-spacing:.14em;text-transform:uppercase}.toc-label{padding-bottom:10px;border-bottom:2px solid var(--paper-ink);margin-bottom:10px}.toc ol{list-style:none;margin:0;padding:0}.toc a{display:grid;grid-template-columns:20px 1fr;gap:7px;text-decoration:none;font:11px/1.45 var(--sans);color:var(--paper-muted);padding:7px 8px;border-left:1px solid var(--paper-rule)}.toc a .mono{font-size:9px}.toc a.active{color:var(--accent);border-left:2px solid var(--accent);background:#8c2f2f08}.toc-bottom{margin:22px 8px 0;padding-top:14px;border-top:1px solid var(--paper-rule);font:9px/1.8 var(--mono);color:var(--paper-muted)}.shortcuts-button{border:1px solid var(--paper-rule);border-radius:50%;width:23px;height:23px;background:transparent;margin-top:13px;font:12px var(--journal)}.document{min-width:0}.running-head{display:flex;justify-content:space-between;gap:15px;font:10px/1.5 var(--journal);letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid var(--paper-ink);padding:29px 0 10px}.title-block{text-align:center;padding:23px 7% 25px;border-bottom:3px double var(--paper-ink)}.reprint{font:10px var(--mono);letter-spacing:.16em;color:var(--accent);margin-bottom:17px}h1{font:500 clamp(38px,4.6vw,66px)/1.01 var(--journal);letter-spacing:-1.5px;text-wrap:balance}h1 a{text-decoration:none}h1 em{font-weight:400;color:var(--accent)}.subtitle{font:italic 23px/1.3 var(--journal);margin-top:16px}.byline{margin-top:13px;font:10px/1.6 var(--sans);color:var(--paper-muted)}.hero-plate{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:23px;padding:26px 0 24px;border-bottom:1px solid var(--paper-ink)}.polar-svg{width:100%;display:block;aspect-ratio:680/400;overflow:visible}.plate-note{border-left:1px solid var(--paper-rule);padding:8px 0 0 19px;font-size:16px;line-height:1.5}.plate-note .equation{font:italic 34px/1.1 var(--journal);margin:15px 0 9px}.plate-note .folio{font:italic 63px/1 var(--journal);color:var(--accent);margin-top:26px}.fine{font:11px/1.7 var(--sans);color:var(--paper-muted)}.figcaption{font:15px/1.45 var(--journal);margin-top:9px}.figcaption strong{font-variant:small-caps;letter-spacing:.04em}.preset-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;border-top:1px solid var(--paper-rule);padding-top:12px;font:10px var(--sans)}select{max-width:205px;padding:7px 26px 7px 9px;border:1px solid var(--paper-rule);background:transparent;color:var(--paper-ink);font:11px var(--mono)}.polar-readout{font:9px var(--mono);text-align:right;line-height:1.8;color:var(--accent)}.confidence-legend{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:3px double var(--paper-ink);padding:12px 0;font:9px var(--mono);color:var(--paper-muted)}.confidence-legend span span{color:var(--accent)}
+    .chapter{position:relative;padding:31px 0 33px;border-bottom:1px solid var(--paper-ink);scroll-margin-top:95px}.chapter::before{content:attr(data-folio);position:absolute;right:-28px;top:34px;font:italic 12px var(--journal);color:var(--paper-muted);writing-mode:vertical-rl}.chapter h2{font:500 28px/1.15 var(--journal);font-variant:small-caps;letter-spacing:.055em;margin:0 0 20px}.section-number{font:11px var(--mono);color:var(--accent);margin-right:14px;vertical-align:middle}.heading-link{text-decoration:none}.heading-link::after{content:" ¶";color:var(--accent);opacity:0;font-size:.6em}.heading-link:hover::after,.heading-link:focus-visible::after{opacity:1}.columns{columns:2;column-gap:30px;column-rule:1px solid #59442524;text-align:justify;hyphens:auto;orphans:3;widows:3}.columns p{margin:0 0 13px}.columns p:first-child::first-letter{font-size:1.12em}.columns ul,.columns ol{padding-left:20px;margin:0 0 15px}.columns li{padding-left:3px;margin-bottom:8px}.columns h3{break-after:avoid}.chapter h3,.widget h3{font:600 19px/1.3 var(--journal);font-variant:small-caps;letter-spacing:.025em;margin:21px 0 11px}.chapter h3:first-child{margin-top:0}.inset{padding:14px 17px;border:1px solid var(--paper-rule);box-shadow:inset 0 0 0 3px #efe6d2,inset 0 0 0 4px #59442520;background:#dbc99e22;margin:18px 0}.inset p{font-size:17px}.inset strong{color:var(--accent)}.steps{counter-reset:step;list-style:none;padding:0!important}.steps li{counter-increment:step;position:relative;padding:0 0 12px 39px;border-bottom:1px solid var(--paper-rule);break-inside:avoid}.steps li::before{content:counter(step,decimal-leading-zero);position:absolute;left:0;top:3px;font:11px var(--mono);color:var(--accent)}.layer{break-inside:avoid;padding:12px 0;border-top:1px solid var(--paper-rule)}.layer strong{font-variant:small-caps;font-size:23px}.layer small{display:block;font:9px var(--mono);color:var(--accent);margin-top:5px}.layer p{font-size:17px;margin-top:6px}.equation{font-style:italic;text-align:center;font-size:25px;padding:15px 0}.table-scroll{overflow-x:auto;max-width:100%;margin:16px 0}.table-scroll:focus-visible{outline-offset:-2px}table{border-collapse:collapse;width:100%;font:12px/1.6 var(--sans);text-align:left}caption{text-align:left;font:italic 16px var(--journal);margin-bottom:9px}th{font:9px var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:10px 9px;border-block:1px solid var(--paper-ink);background:#79552a09}td{padding:9px;border-bottom:1px solid var(--paper-rule);vertical-align:top}td.numeric{font:11px/1.65 var(--mono);white-space:nowrap}tr:last-child td{border-bottom:1px solid var(--paper-ink)}.thresholds{min-width:660px}.local-data{min-width:600px}.soft-ranges{min-width:580px}.note-line{font:11px/1.7 var(--sans);border-left:2px solid var(--accent);padding-left:14px;margin:14px 0}.badge{display:inline-block;font:8px var(--mono);letter-spacing:.1em;border:1px solid currentColor;padding:3px 6px;color:var(--accent);margin-right:9px}.soon-box{border:1px dashed var(--paper-muted);padding:17px;margin:18px 0}.soon-box p{font-size:17px;margin-top:9px}.refusal{border-left:2px solid var(--danger);padding-left:14px}.refusal th{color:var(--danger)}.plate{border:1px solid var(--paper-rule);padding:18px;margin:21px 0;background:linear-gradient(115deg,#fff2,transparent);box-shadow:inset 0 0 0 4px #efe6d2,inset 0 0 0 5px #59442518}.plate-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:9px;font:9px var(--mono);letter-spacing:.04em;color:var(--paper-muted)}.plate-header strong{font:600 18px var(--journal);color:var(--paper-ink);font-variant:small-caps}.diagram-scroll{overflow-x:auto}.diagram{display:block;width:100%;height:auto;min-width:620px}svg text{font-family:var(--mono);fill:var(--paper-muted);font-size:10px}svg .engraved{stroke:var(--paper-ink);fill:none;stroke-width:.65}svg .accent-stroke{stroke:var(--accent);fill:none}svg .accent-fill{fill:var(--accent)}.polar-svg text{font-size:9px}.polar-curve{stroke:var(--accent);stroke-width:1.65;fill:none;stroke-linejoin:round}.polar-negative{stroke:var(--paper-muted);stroke-width:.7;stroke-dasharray:2 4;opacity:.55;fill:none}.polar-tracer{fill:var(--accent);r:3;filter:drop-shadow(0 0 3px #8c2f2f33)}.code-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-block:1px solid var(--paper-rule);margin-top:16px}.code-row code{overflow-wrap:anywhere;font-size:10px;color:var(--accent)}.copy-button{flex-shrink:0;border:1px solid var(--paper-rule);padding:5px 8px;background:transparent;font:9px var(--sans)}.copy-button:hover{background:#8c2f2f0a;border-color:var(--accent)}.reports-details{font:11px/1.7 var(--sans);margin:17px 0}.reports-details summary{cursor:pointer;color:var(--accent)}.reports-details pre{font:9px/1.9 var(--mono);overflow:auto;padding:14px;background:#8b69290c;border:1px solid var(--paper-rule)}.sampling-controls{display:flex;align-items:center;gap:13px;font:10px var(--mono);margin-top:14px;flex-wrap:wrap}.sampling-controls input{flex:1;min-width:100px;accent-color:var(--accent)}.sample-higher{stroke-dasharray:4 3}.widget-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.widget{padding:19px;border:1px solid var(--paper-rule);background:#fff2;min-width:0}.widget h3{margin:0 0 13px}.widget label{display:block;font:10px var(--sans);color:var(--paper-muted);margin-bottom:8px}.widget input{width:100%;padding:8px 0;border:0;border-bottom:1px solid var(--paper-ink);border-radius:0;color:var(--paper-ink);background:none;font:20px var(--mono)}.widget output{display:block;font:24px var(--mono);color:var(--accent);padding:18px 0 9px;overflow-wrap:anywhere}.widget .mono{font-size:10px}.widget-error{min-height:20px;font:10px/1.5 var(--sans);margin-top:8px}.widget[data-invalid="true"] input{border-color:var(--danger)}.widget[data-invalid="true"] .widget-error{color:var(--danger)}.physical{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--paper-ink);margin-bottom:21px}.physical div{padding:16px 12px 14px 0;border-bottom:1px solid var(--paper-rule)}.physical strong{display:block;font:500 46px/1 var(--journal);letter-spacing:-1px}.physical small{font:10px var(--mono);letter-spacing:0}.physical p{font:11px/1.6 var(--sans);margin-top:8px;color:var(--paper-muted)}.official-list{columns:2;list-style:none;padding:0;margin:16px 0;border-block:1px solid var(--paper-ink)}.official-list li{break-inside:avoid;padding:8px 10px;border-bottom:1px solid var(--paper-rule);display:flex;justify-content:space-between;font:17px var(--journal)}.official-list code{font-size:9px;color:var(--paper-muted)}.questions{list-style:none;padding:0;margin:0}.questions li{padding:9px 0 10px 22px;border-top:1px solid var(--paper-rule);position:relative;break-inside:avoid}.questions li::before{content:"□";position:absolute;left:0;top:14px;color:var(--accent);font:11px var(--mono)}.glossary{columns:2;column-gap:30px;margin:0}.glossary div{break-inside:avoid;border-top:1px solid var(--paper-rule);padding:11px 0}.glossary dt{font:500 18px var(--journal);font-variant:small-caps;letter-spacing:.04em;color:var(--accent)}.glossary dd{font:17px/1.5 var(--journal);margin:5px 0 0}.legal-copy p{font-size:18px}.legal-language{display:flex;gap:10px;margin-bottom:15px;align-items:center}.legal-language span{font:9px var(--mono);color:var(--accent)}.legal-alternate{margin-top:20px;border-top:1px solid var(--paper-rule);padding-top:15px}.legal-alternate summary{font:11px var(--sans);cursor:pointer;color:var(--accent)}.legal-alternate .columns{margin-top:15px}.credits-list{list-style:none;padding:0;margin:0}.credits-list li{break-inside:avoid;border-top:1px solid var(--paper-rule);padding:12px 0;font-size:17px}.credits-list small{display:block;font:11px/1.7 var(--sans);color:var(--paper-muted);margin-top:5px}.honorees{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;margin-top:17px}.honorees div{font:16px/1.5 var(--journal);padding-top:8px;border-top:1px solid var(--paper-rule)}.honorees small{display:block;font:9px/1.8 var(--mono);color:var(--paper-muted)}.license-notice{font:10px/1.7 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}.endmark{display:flex;justify-content:space-between;font:9px var(--mono);color:var(--paper-muted);padding:19px 0 35px}.endmark span:last-child{color:var(--accent)}
+    /* ===== footer (shared; canonical copy of curva.html) ===== */
+    .site-footer{max-width:1480px;margin:80px auto 0;padding:32px 24px 36px;border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr;gap:90px;color:var(--muted);font-size:11.5px;background:rgba(15,15,14,.9)}
+    .f-eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:550}
+    .honoree{display:flex;align-items:baseline;gap:14px;margin:9px 0 10px}
+    .honoree strong{color:var(--text);font:400 30px/1.1 var(--serif)}
+    .honoree span{font:11px var(--mono)}
+    .site-footer p{max-width:600px}
+    .site-footer h3{color:var(--text);margin-bottom:9px;font-size:12px;font-weight:500}
+    .sources{display:flex;gap:18px;margin-top:10px}
+    .footer-links{display:flex;gap:24px;margin-top:16px}
+    @media (max-width:1100px){.site-footer{grid-template-columns:1fr;gap:30px}.toc-inner{top:136px}.chapter{scroll-margin-top:140px}html{scroll-padding-top:140px}}
+    dialog{color:var(--paper-ink);background:var(--paper);border:1px solid var(--paper-ink);padding:0;width:min(630px,calc(100% - 32px));max-height:80vh;box-shadow:0 20px 90px #0006}dialog::backdrop{background:#171715b8;backdrop-filter:blur(3px)}.dialog-head{display:flex;align-items:center;justify-content:space-between;padding:18px 21px;border-bottom:1px solid var(--paper-rule)}.dialog-head h2{font:26px var(--journal);font-variant:small-caps}.dialog-close{border:0;background:none;font:20px var(--journal);padding:4px 8px}#search-input{width:calc(100% - 42px);margin:17px 21px;padding:10px 0;font:17px var(--sans);background:none;border:0;border-bottom:1px solid var(--paper-ink);color:var(--paper-ink)}.search-meta{padding:0 21px 11px;font:10px var(--mono);color:var(--paper-muted)}#search-results{list-style:none;margin:0;padding:0 21px 17px;max-height:49vh;overflow:auto}#search-results a{display:block;padding:11px 8px;border-top:1px solid var(--paper-rule);text-decoration:none;font:15px var(--sans)}#search-results a:hover,#search-results a:focus{background:#8c2f2f0c}#search-results small{display:block;font:11px/1.7 var(--sans);margin-top:5px;color:var(--paper-muted)}mark{background:#8c2f2f1f;color:inherit}.shortcuts-list{padding:10px 23px 22px}.shortcuts-list p{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--paper-rule);font:12px var(--sans)}.shortcuts-list kbd{font-size:11px}.toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,20px);background:var(--ink-2);color:var(--text);border:1px solid var(--rule);padding:12px 19px;z-index:60;font:11px/1.6 var(--sans);opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;max-width:calc(100vw - 30px);text-align:center}.toast.visible{opacity:1;transform:translate(-50%,0)}
+    @media(max-width:1280px){.doc-layout{grid-template-columns:177px minmax(0,1fr);gap:27px;padding-inline:27px}.hero-plate{grid-template-columns:minmax(0,1fr) 155px}.plate-note{font-size:15px;padding-left:14px}.plate-note .equation{font-size:29px}.columns{column-gap:24px}.running-head{font-size:9px}}
+    @media(max-width:950px){.hero-plate{grid-template-columns:1fr}.plate-note{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;border-left:0;border-top:1px solid var(--paper-rule);padding:15px 0 0}.plate-note .folio{display:none}.plate-note .equation{margin:3px 0}.columns{columns:1}.doc-layout{grid-template-columns:155px minmax(0,1fr);gap:25px}.toc a{font-size:10px;padding-left:4px;gap:4px}.chapter h2{font-size:25px}.title-block{padding-inline:0}.widget-grid{grid-template-columns:1fr}.physical strong{font-size:37px}.glossary{columns:1}}
+    @media(max-width:650px){.doc-layout{display:block;padding-inline:21px}.toc{padding-top:20px}.toc-inner{position:static;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.search-button{margin:0;width:100%;padding:10px}.toc-label,.toc-bottom,.toc-inner>.shortcuts-button{display:none}.toc ol{display:flex;width:100%;overflow:auto;gap:13px;padding:0 0 9px;border-bottom:1px solid var(--paper-rule);scrollbar-width:thin}.toc li{flex-shrink:0}.toc a{display:flex;white-space:nowrap;border-left:0;padding:4px 0;gap:5px}.toc a.active{border-left:0;border-bottom:1px solid var(--accent);background:none}.running-head{padding-top:18px;font-size:8px;gap:8px;letter-spacing:.05em}.title-block{padding:22px 0}.reprint{font-size:8px;margin-bottom:14px}h1{font-size:44px;letter-spacing:-1px}.subtitle{font-size:21px}.byline{font-size:9px}.hero-plate{padding-top:18px;gap:15px}.polar-svg{aspect-ratio:680/430}.plate-note{gap:8px 18px;font-size:14px}.plate-note .fine{font-size:10px}.figcaption{font-size:14px}.preset-row{flex-wrap:wrap}.preset-row label{font-size:9px}.polar-readout{font-size:8px}.confidence-legend{font-size:8px}.chapter{padding:27px 0}.chapter::before{right:-14px;font-size:10px}.chapter h2{font-size:26px;letter-spacing:.025em}.section-number{margin-right:9px}.columns{font-size:18px}.plate{padding:12px}.plate-header{font-size:7px}.plate-header strong{font-size:16px}.physical{grid-template-columns:1fr 1fr}.physical strong{font-size:40px}.official-list{columns:1}.honorees{gap:10px 16px}.tape-wrap{padding-top:20px}.tape-label{font-size:7px;left:21px}.tape-toggle{right:20px;font-size:7px}.tape-copy{font-size:9px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}.polar-tracer{display:none}}
+    @media print{.cable-bar,.toc,.tape-wrap,.margin-field,.site-footer,.copy-button,.sampling-controls,.preset-row,.toast,dialog{display:none!important}.doc-layout{display:block;max-width:none;padding:0}.document{width:100%}.columns{columns:2}.chapter{break-inside:auto}.plate{break-inside:avoid}body{background:#fff}body::before{display:none}}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#conteudo" data-en="Skip to content">Ir para o conteúdo</a>
+<header class="cable-bar">
+  <div class="cable-inner">
+    <a class="wordmark" href="curva.html">open-auri</a>
+    <nav class="main-nav" aria-label="Principal">
+      <a href="curva.html" data-en="Curve">Curva</a>
+      <a href="biblioteca.html" data-en="Library">Biblioteca</a>
+      <a href="comparar.html" data-en="Compare">Comparar</a>
+      <a href="soe-como-x.html" data-en="Sound like X">Soe como X</a>
+      <a href="comunidade.html" data-en="Community">Comunidade</a>
+      <a href="teste-cego.html" data-en="Blind test">Teste cego</a>
+      <a href="cabo.html" data-en="Cable">Cabo</a>
+      <a href="docs.html" aria-current="page">Docs</a>
+    </nav>
+    <div class="cable-actions">
+      <span class="cable-state"><span class="status-dot" aria-hidden="true">●</span><span data-en="No cable · simulated">Sem cabo · simulado</span></span>
+      <span class="dirty" id="dirty" aria-live="polite" data-en="0 unsaved changes">0 alterações não gravadas</span>
+      <!-- === OA SHARED: audio-loader v1 (HTML) === -->
+      <div class="oa-audio" id="oaAudio">
+        <button type="button" class="oa-audio-btn" id="oaAudioBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="oaAudioPop"><span aria-hidden="true">♪</span><span class="oa-audio-name" id="oaAudioName">Áudio</span></button>
+        <div class="oa-audio-pop" id="oaAudioPop" role="dialog" aria-labelledby="oaAudioTitle" hidden>
+          <h3 id="oaAudioTitle" data-oa-audio="title">Áudio da prévia</h3>
+          <label class="oa-audio-load"><span data-oa-audio="load">Carregar MP3…</span><input type="file" class="oa-audio-file" id="oaAudioFile" accept="audio/mpeg,audio/mp3,audio/*"></label>
+          <div class="oa-audio-meta" id="oaAudioMeta" aria-live="polite"></div>
+          <div class="oa-audio-row"><button type="button" id="oaAudioPlay" data-oa-audio="play">Tocar arquivo</button><button type="button" id="oaAudioRemove" data-oa-audio="remove">Remover</button></div>
+          <label class="oa-audio-vol"><span data-oa-audio="vol">Volume da prévia (só no navegador)</span><output id="oaAudioVolOut" for="oaAudioVol">−12 dB</output><input type="range" id="oaAudioVol" min="-40" max="0" step="1" value="-12"></label>
+          <p class="oa-audio-rate" id="oaAudioRate"></p>
+          <p class="oa-audio-note" data-oa-audio="note">O arquivo fica só neste navegador. Nada é enviado.</p>
+        </div>
+      </div>
+      <!-- === END OA SHARED: audio-loader v1 (HTML) === -->
+      <button type="button" data-action="neutral" data-en="Neutral">Neutro</button>
+      <button type="button" data-action="default" data-en="Auri default">Padrão Auri</button>
+      <button type="button" class="primary" data-action="write" data-en="Write to cable">Gravar no cabo</button>
+      <button type="button" class="language" id="lang" aria-label="Switch to English"><span class="pt on">PT</span> · <span class="en">EN</span></button>
+    </div>
+  </div>
+</header>
+  <div class="paper-environment">
+    <div class="margin-field" aria-hidden="true"><svg viewBox="0 0 620 1800"><defs><pattern id="field-grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#8C2F2F" stroke-width=".4"/></pattern></defs><rect width="620" height="1800" fill="url(#field-grid)"/><g fill="none" stroke="#8C2F2F" stroke-width=".8"><circle cx="310" cy="400" r="280"/><circle cx="310" cy="400" r="210"/><circle cx="310" cy="400" r="140"/><path d="M0 400H620M310 0V850M0 1000Q155 500 310 1000T620 1000M0 1400Q155 900 310 1400T620 1400"/></g></svg><svg viewBox="0 0 620 1800"><rect width="620" height="1800" fill="url(#field-grid)"/><path d="M0 200L600 600L0 1000L600 1400M310 0V1800" fill="none" stroke="#8C2F2F"/></svg></div>
+    <div class="tape-wrap" id="tape-wrap"><span class="tape-label">FITA DE TRANSMISSÃO · PADRÃO / 9 REPORTS REAIS · 0xCB</span><button class="tape-toggle" id="tape-toggle" type="button" aria-pressed="false" data-en="Pause tape">Pausar fita</button><div class="tape-window" aria-label="Fita telegráfica com os bytes reais dos nove reports do preset Padrão; versão estática na seção de protocolo"><div class="tape-track" id="tape-track" aria-hidden="true"></div></div></div>
+    <div class="doc-layout">
+      <aside class="toc" aria-label="Índice da documentação"><nav class="toc-inner" aria-label="Neste caderno">
+        <button type="button" class="search-button" id="search-open"><span data-en="Search this journal">Buscar no caderno</span><kbd>Ctrl K /</kbd></button>
+        <p class="eyebrow toc-label" data-en="Contents / 13 sections">Índice / 13 seções</p>
+        <ol>
+          <li><a href="#comeco" class="active" aria-current="location"><span class="mono">01</span><span data-en="Quick start">Começo rápido</span></a></li>
+          <li><a href="#camadas"><span class="mono">02</span><span data-en="The three layers">As três camadas</span></a></li>
+          <li><a href="#envelope"><span class="mono">03</span><span data-en="What is safe">O que é seguro</span></a></li>
+          <li><a href="#protocolo"><span class="mono">04</span><span data-en="Protocol 0xCB">Protocolo 0xCB</span></a></li>
+          <li><a href="#limites"><span class="mono">05</span><span data-en="Physical limits">Limites físicos</span></a></li>
+          <li><a href="#memoria"><span class="mono">06</span><span data-en="Memory & endurance">Memória e vida útil</span></a></li>
+          <li><a href="#previa"><span class="mono">07</span><span data-en="Preview with your MP3">Prévia com o seu MP3</span></a></li>
+          <li><a href="#dados-locais"><span class="mono">08</span><span data-en="Data in this browser">Dados neste navegador</span></a></li>
+          <li><a href="#pagina-oficial"><span class="mono">09</span><span data-en="The official page">A página oficial</span></a></li>
+          <li><a href="#perguntas"><span class="mono">10</span><span data-en="Open questions">O que não sabemos</span></a></li>
+          <li><a href="#glossario"><span class="mono">11</span><span data-en="Glossary">Glossário</span></a></li>
+          <li><a href="#aviso-legal"><span class="mono">12</span><span data-en="Legal notice">Aviso legal</span></a></li>
+          <li><a href="#creditos"><span class="mono">13</span><span data-en="Credits">Créditos</span></a></li>
+        </ol>
+        <div class="toc-bottom"><span data-en="Studied format. Hardware not yet validated.">Formato estudado.<br>Hardware ainda não validado.</span><br><br>0xCB / REV. 15.X.2026<br>220 B · 96 kHz<br><button class="shortcuts-button" id="shortcuts-open" type="button" aria-label="Atalhos do teclado">?</button></div>
+      </nav></aside>
+      <main class="document" id="conteudo" tabindex="-1">
+        <div class="running-head"><span data-en="Transmission studies · technical notebook">Estudos de transmissão · caderno técnico</span><span>VOL. II · N.º 08 · 2026</span></div>
+        <header class="title-block"><p class="reprint" data-en="A REPRINT IN TRIBUTE TO HARRY NYQUIST">REIMPRESSÃO EM HOMENAGEM A HARRY NYQUIST</p><h1 id="titulo"><a href="#titulo"><span data-en="Protocol 0xCB">O protocolo 0xCB</span><br><em data-en="and its limits">e seus limites</em></a></h1><p class="subtitle" data-en="open-auri documentation">Documentação do open-auri</p><p class="byline" data-en="An independent study of bytes, sampling and stability. Revised October 15, 2026.">Estudo independente sobre bytes, amostragem e estabilidade. Revisão de 15 de outubro de 2026.</p></header>
+        <div class="hero-plate">
+          <figure aria-label="Figura 1: diagrama polar calculado da resposta complexa do preset selecionado">
+            <svg id="polar-plot" class="polar-svg" viewBox="0 0 680 400" role="img" aria-label="Resposta H de frequência, eixos real e imaginário; ponto histórico menos um, zero"></svg>
+            <figcaption class="figcaption"><strong>Fig. 1.</strong> Resposta <em>H(e<sup>jω</sup>)</em> do preset, com preamp Q23 e seções Q27. Traço contínuo: 0–48 kHz; pontilhado: frequências negativas. O ponto <span class="mono">(−1, 0)</span> é uma referência histórica: <strong>isto não é uma malha de realimentação nem uma aplicação do critério de estabilidade de Nyquist</strong>.</figcaption>
+            <div class="preset-row"><label for="polar-preset" data-en="Response under study">Resposta em estudo</label><select id="polar-preset" aria-label="Preset da figura polar"></select><output id="polar-readout" class="polar-readout" aria-live="polite"></output></div>
+          </figure>
+          <aside class="plate-note"><div><p class="eyebrow">I. TELEGRAFIA / 1928</p><p class="equation">ν ≤ 2B</p><p>Um canal de largura de banda <em>B</em> admite até <em>2B</em> elementos independentes por segundo.</p></div><div><p class="eyebrow">II. ESTABILIDADE / 1932</p><p class="equation">|p| &lt; 1</p><p>Aqui, o codec verifica os polos do filtro digital <em>depois</em> de quantizar os coeficientes.</p></div><p class="fine">Nyquist publicou “Certain Topics in Telegraph Transmission Theory” em 1928 e “Regeneration Theory” em janeiro de 1932. Esta edição aproxima as ideias, sem confundir seus critérios.</p><div class="folio" aria-hidden="true">001</div></aside>
+        </div>
+        <div class="confidence-legend" aria-label="Legenda de confiança"><span><span>✓</span> <span data-en="confirmed">confirmado</span> &nbsp; <span>◇</span> <span data-en="hypothesis">hipótese</span> &nbsp; <span>□</span> <span data-en="needs the cable">requer o cabo</span></span><span data-en="LOCAL MOCK · NO HID · NO WRITES">MOCK LOCAL · SEM HID · SEM ESCRITA</span></div>
+        <article lang="pt-BR" aria-label="Documentação técnica">
+          <section class="chapter" id="comeco" data-folio="002" aria-labelledby="h-comeco">
+            <h2 id="h-comeco"><span class="section-number">01</span><a class="heading-link" href="#comeco" data-en="Quick start">Começo rápido</a></h2>
+            <div class="columns"><ol class="steps"><li>Abra o app em <strong>Chrome ou Edge desktop, em HTTPS</strong>. Conecte o cabo Auri DSP.</li><li>Autorize o <strong>WebHID</strong> com um clique. O caminho conhecido usa o bridge <span class="mono">CB5100</span>, VID <code>0x3302</code>, PID <code>0x8902</code>.</li><li>Escolha um dos 11 presets oficiais ou ajuste PK, LS e OFF. HS, LP e HP existem só como experimentais na camada Engenharia da Curva. Revise o preamp e a aprovação do <strong>gate v2</strong>.</li><li>Abaixe o volume, confira o checklist e pressione <strong>Gravar no cabo</strong>. Só esse gesto deve persistir a curva.</li></ol><p>Este é o fluxo previsto do app. O arquivo que você está lendo funciona por <code>file://</code>, mas <strong>não conecta, não pede permissão e não grava</strong>. Os botões do topo apenas selecionam figuras ou explicam a simulação.</p><p><strong>Neutro</strong> significa 10 × OFF, identidade exata, com preamp <span data-num="-0.5" data-digits="1">−0,5</span> dB; CRC <code>0x4FFF</code>, bytes finais <code>FF 4F</code>. <strong>Padrão Auri</strong> é o preset oficial <code>padrao</code>, não uma restauração de fábrica comprovada.</p><p class="fine">Nenhum byte foi transmitido por nós ao hardware. Uma cópia local não é leitura do cabo; não há undo garantido.</p></div>
+          </section>
+          <section class="chapter" id="camadas" data-folio="003" aria-labelledby="h-camadas">
+            <h2 id="h-camadas"><span class="section-number">02</span><a class="heading-link" href="#camadas" data-en="The three layers">As três camadas</a></h2>
+            <div class="columns"><p>A mesma curva, com diferentes quantidades de informação. Cada camada inclui a anterior. Mudar a vista não muda o payload nem concede permissão de escrita.</p><div class="layer"><strong>Ouvir</strong><small>01 / ESSENCIAL</small><p>Presets, curva, macros de timbre e preamp. Escolher, comparar e conferir antes de gravar.</p><a class="fine" href="curva.html?camada=ouvir">?camada=ouvir ↗</a></div><div class="layer"><strong>Ajustar</strong><small>02 / + CONTROLES</small><p>Frequência, ganho e Q; PK, LS e OFF. Arraste e solver conservam a última curva aprovada. O gate testa novamente após o snapping.</p><a class="fine" href="curva.html?camada=ajustar">?camada=ajustar ↗</a></div><div class="layer"><strong>Engenharia</strong><small>03 / + EVIDÊNCIA</small><p>Coeficientes Q27, palavras Q23, payload, picos de prefixos e motivos de recusa. Aqui ficam HS, LP e HP experimentais, decididos pelo gate v2 e com confirmação extra antes de gravar. Ver os bytes não libera biquads crus para o cabo.</p><a class="fine" href="curva.html?camada=engenharia">?camada=engenharia ↗</a></div></div>
+          </section>
+          <section class="chapter" id="envelope" data-folio="004–006" aria-labelledby="h-envelope">
+            <h2 id="h-envelope"><span class="section-number">03</span><a class="heading-link" href="#envelope" data-en="What is safe">O que é seguro</a></h2>
+            <div class="columns"><p>O <strong>gate v2, “envelope observado”</strong>, compara cada curva nova com a aritmética exercitada pelos 11 payloads oficiais. É uma <strong>política conservadora de similaridade</strong>, não uma prova de segurança do firmware. Nem “passa no gate” significa “já foi gravado pela Kuba”.</p><p>A página oficial só escolhe presets. O firmware não recebe um byte de tipo por banda: recebe cinco números Q27. As quatro seções LS oficiais quebram as simetrias de PK por milhares de LSB, não por erro de arredondamento. Isso é forte evidência de biquads gerais, mas não demonstra que o chip aceite qualquer coeficiente.</p><p>Cada escrita passa por coeficientes, polos, pico isolado, todos os prefixos, saída e codec. O preamp automático busca a maior palavra Q23 admissível entre <span data-num="-25.5" data-digits="1">−25,5</span> e <span data-num="-0.5" data-digits="1">−0,5</span> dB. Atenuar mais não corrige uma seção reprovada em coeficientes, polos ou pico próprio.</p><p><strong>Cortes antes dos boosts</strong> é a ordem inicial, não um certificado. O gate avalia a <em>ordem real do fio</em>. A resposta ideal comuta; o nível interno não. Ordenação canônica por frequência serve para compartilhar e comparar, nunca deve substituir silenciosamente a ordem validada.</p></div>
+            <h3 id="limiares"><a class="heading-link" href="#limiares" data-en="Gate v2: exact thresholds">Gate v2: limiares exatos</a></h3>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Limites exatos do gate v2"><table class="thresholds"><caption>Máximos quantizados do corpus oficial. Coeficientes em valor absoluto por posição no fio.</caption><thead><tr><th scope="col">Teste</th><th scope="col">Grandeza</th><th scope="col">Limite exato</th></tr></thead><tbody>
+              <tr><td>a</td><td><code>|b₀|</code></td><td class="numeric">1.3123878836631775 · 176145720 LSB</td></tr><tr><td>a</td><td><code>|b₂|</code></td><td class="numeric">0.9981335923075676 · 133967223 LSB</td></tr><tr><td>a</td><td><code>|−a₁|</code></td><td class="numeric">1.9973274171352386 · 268076748 LSB</td></tr><tr><td>a</td><td><code>|b₁|</code></td><td class="numeric">1.9973274171352386 · 268076748 LSB</td></tr><tr><td>a</td><td><code>|−a₂|</code></td><td class="numeric">0.9973300918936729 · 133859379 LSB</td></tr>
+              <tr><td>b</td><td>Raio dos polos Q27</td><td class="numeric">≤ 0.99986846753918</td></tr><tr><td>c</td><td>Pico próprio de cada seção, DC–48 kHz</td><td class="numeric">≤ +9.200000050722664 dB</td></tr><tr><td>d</td><td>Todo prefixo, preamp incluído, 20 Hz–20 kHz</td><td class="numeric">≤ −0.20368875272918074 dB</td></tr><tr><td>e</td><td>Saída, 20 Hz–20 kHz</td><td class="numeric">≤ −0.47087539615209006 dB</td></tr><tr><td>e</td><td>Saída, DC–48 kHz</td><td class="numeric">≤ +2.5000638697363913 dB</td></tr><tr><td>f</td><td>Validação do codec</td><td>10 seções, finitude, tipos, int32 e estabilidade Q27</td></tr><tr><td>g</td><td>Preamp nominal</td><td><span data-num="-25.5" data-digits="1">−25,5</span>…<span data-num="-0.5" data-digits="1">−0,5</span> dB</td></tr>
+            </tbody></table></div>
+            <p class="note-line">Leitura arredondada: seção ≤ +9,2 dB; prefixos ≤ −0,2037 dB; saída audível ≤ −0,4709 dB; saída total ≤ +2,5 dB. A implementação usa os valores exatos acima, não esses arredondamentos. Tolerâncias só de cálculo: <code>1e−8 dB</code> e <code>2e−15</code> no raio; coeficientes comparados como inteiros, sem folga. Pontos decimais na tabela preservam a notação da especificação computacional.</p>
+            <h3 id="faixas"><a class="heading-link" href="#faixas" data-en="Soft ranges are not write permission">Soft ranges não são permissão de escrita</a></h3>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Soft ranges do editor"><table class="soft-ranges"><thead><tr><th scope="col">Perfil</th><th scope="col">Frequência</th><th scope="col">Ganho</th><th scope="col">Q</th></tr></thead><tbody><tr><td>PK-main</td><td>150–20 000 Hz</td><td>−24…+6 dB</td><td>1–2</td></tr><tr><td>PK-narrow</td><td>300–20 000 Hz</td><td>−24…+9 dB</td><td>2–4</td></tr><tr><td>LS</td><td>80–1 000 Hz</td><td>−24…+6 dB</td><td><span data-num="0.5" data-digits="1">0,5</span>–<span data-num="0.7" data-digits="1">0,7</span></td></tr><tr><td>HS-cut <small>experimental · Engenharia</small></td><td>80–20 000 Hz</td><td>−24…0 dB</td><td><span data-num="0.5" data-digits="1">0,5</span>–<span data-num="0.7" data-digits="1">0,7</span></td></tr><tr><td>HS-boost <small>experimental · Engenharia</small></td><td>8 000–20 000 Hz</td><td>−24…+2 dB</td><td><span data-num="0.5" data-digits="1">0,5</span>–<span data-num="0.7" data-digits="1">0,7</span></td></tr><tr><td>LP <small>experimental · Engenharia</small></td><td>30–20 000 Hz</td><td>sem ganho</td><td><span data-num="0.5" data-digits="1">0,5</span>–<span data-num="0.7" data-digits="1">0,7</span></td></tr><tr><td>HP <small>experimental · Engenharia</small></td><td>50–20 000 Hz</td><td>sem ganho</td><td><span data-num="0.5" data-digits="1">0,5</span>–<span data-num="0.7" data-digits="1">0,7</span></td></tr><tr><td>OFF</td><td colspan="3">Identidade exata [1, 0, 0, 0, 0], sem polos</td></tr></tbody></table></div>
+            <div class="columns"><p><strong>HS, LP e HP experimentais.</strong> Liberados apenas na camada Engenharia da Curva. A página oficial nunca gravou esses formatos: o gate v2 continua decidindo cada escrita, e o diálogo de gravação pede uma confirmação extra de que a curva usa tipos que o firmware nunca recebeu da página oficial. LP e HP não têm ganho editável; a ressonância é medida pelo gate. Um HP subsônico só passa a partir de ≈<span data-num="28.6" data-digits="1">28,6</span> Hz com Q <span data-num="0.5" data-digits="1">0,5</span> (≈<span data-num="40.4" data-digits="1">40,4</span> Hz com Q <span data-num="0.707" data-digits="3">0,707</span>); o limite final é b₂.</p><p>Essas caixas foram amostradas com preamp automático, não provadas por aritmética intervalar para todo real. Dez seções aprovadas isoladamente podem falhar juntas. O gate segue obrigatório após arredondamento e em cada write.</p><p>A política D7 acrescenta: <strong>sem boost acima de 16 kHz; Q de boost ≤ 4</strong>. Frequências até 20 kHz nas caixas de PK não suspendem essa regra. O HS-boost experimental (até +2 dB a partir de 8 kHz) também eleva a faixa acima de 16 kHz; a convivência entre ele e D7 ainda está em revisão. O piso de preamp é usabilidade e compatibilidade, não um limite físico medido.</p><p><strong>Ressalvas.</strong> Máximos marginais não limitam estados internos, resposta ao impulso, limit cycles, transientes, sinais de banda larga ou aritmética desconhecida. Prefixos só são limitados em 20 Hz–20 kHz: prefixos subsônicos ou ultrassônicos podem escapar. O clock fixo e a realização interna ainda não foram medidos.</p></div>
+            <div class="soon-box"><span class="badge" data-en="COMING SOON">EM BREVE</span><strong>biquads crus · X2 no cabo · S7 · read-back · RAM-only</strong><p data-en="Available once the earphones reach the test bench. Until then, we do not write anything the original Kuba page does not write.">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p><p class="fine">A nota se refere aos recursos com o selo. A edição PK/LS/OFF e os tipos experimentais HS/LP/HP da camada Engenharia seguem a política de similaridade v2; não alegamos que cada curva editada exista no corpus oficial. Teste cego no cabo (X2) e pareamento com servidor (S7) aguardam; o teste cego no navegador já está liberado.</p></div>
+            <h3 id="recusas"><a class="heading-link" href="#recusas" data-en="What the codec refuses before flash">O que o codec recusa antes da flash</a></h3>
+            <div class="refusal table-scroll" tabindex="0" role="region" aria-label="Falhas documentadas recusadas pelo codec"><table><thead><tr><th scope="col">Entrada recusada</th><th scope="col">Sem validação</th></tr></thead><tbody><tr><td><code>q = 0</code> ou <code>f = NaN</code></td><td>Seção toda zero: cabo mudo.</td></tr><tr><td><code>q &lt; 0</code> ou <code>f &gt; Nyquist</code></td><td>Seção instável: oscilação em volume máximo.</td></tr><tr><td><code>preamp &gt; 0</code></td><td>Ganho antes das bandas: clipping em escala cheia.</td></tr></tbody></table></div>
+            <p class="fine">Também são recusados tipos desconhecidos, coeficientes fora de int32, valores não finitos e polos fora do círculo unitário após quantização. Passar pelo codec não basta: validade de bytes não equivale a autorização de gravação, que depende do gate v2.</p>
+          </section>
+          <section class="chapter" id="protocolo" data-folio="007–010" aria-labelledby="h-protocolo">
+            <h2 id="h-protocolo"><span class="section-number">04</span><a class="heading-link" href="#protocolo" data-en="Protocol 0xCB">Protocolo 0xCB</a></h2>
+            <div class="columns"><p>Uma curva vira <strong>220 bytes</strong>. O byte-stream foi reconstruído da implementação pública e reproduzido byte a byte nos 11 presets. O transporte usa WebHID, <code>VID 0x3302</code>, <code>PID 0x8902</code>, report ID <code>0xCB</code> e reports de 31 B. O ID não faz parte dos 31 bytes de dados.</p><p>O caminho conhecido é <em>write-only</em>. O preamp vem primeiro, em Q23; depois, dez seções Q27 na ordem recebida. Não existe comando conhecido de atualizar só uma banda. Todo commit conhecido persiste na flash.</p></div>
+            <figure class="plate" aria-label="Figura 2: mapa proporcional dos 220 bytes e ampliação de uma seção biquad">
+              <div class="plate-header"><strong data-en="Fig. 2 · Anatomy of a preset">Fig. 2 · Anatomia de um preset</strong><span>220 B · INT32 LE</span></div>
+              <div class="diagram-scroll" tabindex="0" role="region" aria-label="Mapa de bytes com rolagem horizontal"><svg class="diagram" viewBox="0 0 1000 305" role="img" aria-label="14 bytes de header, 4 de preamp, 200 de biquads e 2 de CRC, em escala proporcional">
+                <defs><pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><path d="M0 0V5" stroke="#8C2F2F" stroke-width=".5" opacity=".35"/></pattern></defs>
+                <g><text x="25" y="24">HEADER / 14 B</text><path class="engraved" d="M53 31V72"/><text x="125" y="39">PRE / 4 B</text><path class="engraved" d="M130 45H94V72"/><text x="520" y="35" text-anchor="middle">10 BIQUADS × 20 B = 200 B</text><text x="960" y="24" text-anchor="end">CRC / 2 B</text><path class="engraved" d="M969 31V72"/></g>
+                <rect x="25" y="72" width="60.2" height="56" fill="#8C2F2F" opacity=".24"/><rect x="85.2" y="72" width="17.2" height="56" fill="#29251F"/><rect x="102.4" y="72" width="860" height="56" fill="url(#hatch)"/><rect x="446.4" y="72" width="86" height="56" fill="#8C2F2F" opacity=".8"/><rect x="962.4" y="72" width="8.6" height="56" fill="#8C2F2F"/><path class="engraved" d="M25 72H971V128H25ZM85.2 72V128M102.4 72V128M188.4 72V128M274.4 72V128M360.4 72V128M446.4 72V128M532.4 72V128M618.4 72V128M704.4 72V128M790.4 72V128M876.4 72V128M962.4 72V128"/>
+                <g text-anchor="middle"><text x="145" y="105">01</text><text x="231" y="105">02</text><text x="317" y="105">03</text><text x="403" y="105">04</text><text x="489" y="105" style="fill:#EFE6D2">05</text><text x="575" y="105">06</text><text x="661" y="105">07</text><text x="747" y="105">08</text><text x="833" y="105">09</text><text x="919" y="105">10</text></g>
+                <text x="25" y="146">000</text><text x="83" y="146">014</text><text x="112" y="146">018</text><text x="946" y="146" text-anchor="end">218</text><text x="971" y="146">220</text>
+                <path d="M446.4 128L130 202M532.4 128L930 202" class="engraved"/><path d="M446.4 128L130 202H930L532.4 128Z" fill="url(#hatch)" opacity=".35"/><text x="25" y="184">ZOOM / 05</text><rect x="130" y="202" width="800" height="58" class="engraved"/><path d="M290 202V260M450 202V260M610 202V260M770 202V260" class="engraved"/><g text-anchor="middle" style="font-size:23px"><text x="210" y="238" style="font-size:23px" class="accent-fill">b₀</text><text x="370" y="238" style="font-size:23px" class="accent-fill">b₂</text><text x="530" y="238" style="font-size:23px" class="accent-fill">−a₁</text><text x="690" y="238" style="font-size:23px" class="accent-fill">b₁</text><text x="850" y="238" style="font-size:23px" class="accent-fill">−a₂</text></g><text x="530" y="288" text-anchor="middle">5 × int32 LE Q27 · a₀ = 1 · round(coef × 2²⁷)</text>
+              </svg></div><figcaption class="figcaption">Larguras proporcionais. Offsets em decimal; a ampliação mostra a ordem exata no fio. <span class="mono">✓</span> Layout confirmado.</figcaption>
+              <div class="code-row"><code id="header-bytes">45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00</code><button class="copy-button" type="button" data-copy="header-bytes" data-en="Copy">Copiar</button></div>
+              <p class="fine" style="margin-top:10px">◇ Interpretação: “EQ1#” é ASCII confirmado, mas seu significado é hipótese. D6 00 = 214 = 220 − 6 sugere comprimento. Geometria do header é hipótese; bytes 6 e 12–13 seguem desconhecidos.</p>
+            </figure>
+            <figure class="plate" aria-label="Figura 3: enquadramento dos nove reports de 31 bytes e sequência de escrita">
+              <div class="plate-header"><strong data-en="Fig. 3 · From the block to reports">Fig. 3 · Do bloco aos reports</strong><span>9 × 31 B · 0xCB</span></div>
+              <div class="diagram-scroll" tabindex="0" role="region" aria-label="Framing e timing com rolagem horizontal"><svg class="diagram" viewBox="0 0 1000 270" role="img" aria-label="Reports 0 a 6 levam 30 bytes, report 7 leva 10 e report 8 vai vazio. Espera de 16 ms após cada um, 150 ms e commit."><defs><pattern id="zeros" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V4" stroke="#29251F" stroke-width=".5" opacity=".35"/></pattern></defs><g id="report-frames"></g><path class="engraved" d="M25 171H942"/><rect x="25" y="163" width="420" height="16" fill="url(#hatch)"/><path class="accent-stroke" d="M25 158V184M72 163V179M118 163V179M165 163V179M212 163V179M258 163V179M305 163V179M352 163V179M398 158V184M445 158V184"/><path d="M445 171H882" class="accent-stroke" stroke-dasharray="3 4"/><circle cx="882" cy="171" r="4" class="accent-fill"/><text x="25" y="205">0 ms</text><text x="445" y="205" text-anchor="middle">144 ms</text><text x="882" y="205" text-anchor="middle">294 ms</text><text x="235" y="149" text-anchor="middle">9 × 16 ms</text><text x="665" y="152" text-anchor="middle">150 ms</text><text x="898" y="175" class="accent-fill">COMMIT</text><text x="25" y="245">[índice, 30 B de dados] · padding em 00</text><text x="975" y="245" text-anchor="end">01 65 00 01 FF + 26 × 00</text></svg></div>
+              <figcaption class="figcaption">Há uma espera de 16 ms <em>após cada report</em>, inclusive o último, e depois 150 ms. Nominal: 294 ms mais overhead, cerca de <span data-num="0.3" data-digits="1">0,3</span> s. ✓ Sequência confirmada; □ execução no chip. A referência envia commit de 5 B; o codec completa até 31 B. ◇ A equivalência do padding no firmware ainda requer teste.</figcaption>
+              <details class="reports-details"><summary data-en="Inspect the nine real Default reports">Inspecionar os nove reports reais do Padrão</summary><pre id="report-hex" tabindex="0" aria-label="Bytes dos nove reports"></pre><button class="copy-button" type="button" data-copy="report-hex" data-en="Copy all reports">Copiar todos os reports</button></details>
+            </figure>
+            <figure class="plate" aria-label="Figura 4: senoide amostrada em 96 kHz e aliasing acima de 48 kHz">
+              <div class="plate-header"><strong data-en="Fig. 4 · Sampling and folding">Fig. 4 · Amostragem e dobra</strong><span>fₛ = 96 kHz · fₙ = 48 kHz</span></div>
+              <svg id="sampling-plot" viewBox="0 0 920 240" style="display:block;width:100%" role="img" aria-label="Senoide de frequência superior a 48 kHz e seu alias, com amostras coincidentes em pontos a 96 kHz"><path class="engraved" d="M35 105H885M35 28V175"/><g id="sample-stems"></g><path id="sample-high" class="accent-stroke sample-higher" stroke-width=".8"/><path id="sample-alias" class="engraved" style="stroke-width:1.4"/><g id="sample-dots" fill="#8C2F2F"></g><text x="35" y="200">0</text><text x="885" y="200" text-anchor="end">t / 0,125 ms</text><path class="engraved" d="M35 222H885M460 210V233"/><path class="accent-stroke" d="M35 221L460 211L885 221"/><text x="460" y="239" text-anchor="middle">48 kHz / DOBRA</text></svg>
+              <div class="sampling-controls"><label for="alias-frequency">Senoide alta</label><input type="range" id="alias-frequency" min="49" max="90" value="72" step="1" aria-label="Frequência da senoide alta em quilohertz"><output id="alias-readout" for="alias-frequency">72 kHz → alias 24 kHz</output><button type="button" id="sampling-pause" class="copy-button" aria-pressed="false" data-en="Pause">Pausar</button></div>
+              <figcaption class="figcaption">Os pontos são amostras a 96 kHz. Acima de 48 kHz, uma senoide se confunde com outra abaixo da dobra; aqui, <em>f<sub>alias</sub> = 96 − f</em>, para 48 &lt; f &lt; 96 kHz. Esta ilustração não mede o clock real do chip nem simula sua entrada analógica.</figcaption>
+            </figure>
+            <div class="widget-grid">
+              <section class="widget" id="preamp-widget" aria-labelledby="preamp-title"><h3 id="preamp-title"><a class="heading-link" href="#preamp-widget" data-en="One preamp, four bytes">Um preamp, quatro bytes</a></h3><label for="preamp-input" data-en="Preamp in dB, finite and ≤ 0">Preamp em dB, finito e ≤ 0</label><input id="preamp-input" type="text" inputmode="decimal" value="−6,0" autocomplete="off" spellcheck="false" aria-describedby="preamp-note preamp-error"><output id="preamp-bytes" for="preamp-input" aria-live="polite">·· ·· ·· ··</output><div class="code-row"><span id="preamp-word" class="mono">int32 / Q23</span><button class="copy-button" type="button" data-copy="preamp-bytes" data-en="Copy bytes">Copiar bytes</button></div><p id="preamp-error" class="widget-error" aria-live="polite"></p><p id="preamp-note" class="fine"><code>round(10^(dB/20) × 2²³)</code><br>Exemplo do codec, não uma autorização: 0 dB cabe no codec, mas não passa no gate v2. Faixa nominal de escrita: −25,5…−0,5 dB.</p></section>
+              <section class="widget" id="crc-widget" aria-labelledby="crc-title"><h3 id="crc-title"><a class="heading-link" href="#crc-widget" data-en="A CRC you can check">Um CRC que dá para conferir</a></h3><label for="crc-input" data-en="Input text, UTF-8 bytes">Texto de entrada, bytes UTF-8</label><input id="crc-input" type="text" value="123456789" maxlength="256" autocomplete="off" spellcheck="false" aria-describedby="crc-note"><output id="crc-output" for="crc-input" aria-live="polite">0x29B1</output><div class="code-row"><span id="crc-bytes" class="mono">LE / B1 29</span><button class="copy-button" type="button" data-copy="crc-output" data-en="Copy CRC">Copiar CRC</button></div><p class="widget-error" id="crc-check">✓ “123456789” → 0x29B1</p><p class="fine" id="crc-note">CCITT-FALSE · poly 0x1021 · init 0xFFFF.<br>Sem reflexão, sem XOR final. No payload: calculado sobre 218 B, anexado em 2 B little-endian.</p></section>
+            </div>
+          </section>
+          <section class="chapter" id="limites" data-folio="011" aria-labelledby="h-limites"><h2 id="h-limites"><span class="section-number">05</span><a class="heading-link" href="#limites" data-en="Physical limits">Limites físicos</a></h2>
+            <div class="physical"><div><strong>10</strong><p>seções no formato conhecido</p></div><div><strong>1</strong><p>curva para os dois canais</p></div><div><strong>96 <small>kHz</small></strong><p>taxa de projeto do DSP</p></div><div><strong>48 <small>kHz</small></strong><p>Nyquist; codec exige f menor</p></div><div><strong>≈ <span data-num="0.3" data-digits="1">0,3</span> <small>s</small></strong><p>por sequência de escrita</p></div><div><strong>0</strong><p>read-back disponível no app</p></div></div>
+            <div class="columns"><p>Uma curva estática vale para ambos os canais. O formato conhecido não oferece mistura de canais, crossfeed, reverb, compressor ou geração de harmônicos. Não há EQ L/R independente implementado.</p><p>✓ Coeficientes projetados em 96 000 Hz em três implementações independentes. ◇ Que o núcleo rode sempre a essa taxa, independentemente do stream, ainda é inferência, não medição.</p><p>O caminho implementado é write-only. Não há verify, pull ou rollback confirmado. <strong>localStorage, snapshot e journal não são leitura do estado do cabo.</strong> Só registram a intenção e o resultado do envio no host.</p><p>Pré-escuta X3 usa os coeficientes exatos, não promete aritmética bit-exata do chip. Ouvir pela saída do próprio cabo soma a EQ já persistida: use outra saída ou grave Neutro de forma explícita antes.</p></div>
+          </section>
+          <section class="chapter" id="memoria" data-folio="012" aria-labelledby="h-memoria"><h2 id="h-memoria"><span class="section-number">06</span><a class="heading-link" href="#memoria" data-en="Cable memory and endurance">Memória do cabo e vida útil</a></h2>
+            <div class="columns"><p><strong>Rápida não significa gratuita.</strong> Cada commit conhecido grava na flash. A política N2 separa cálculo e persistência: nada de gravar ao arrastar, ao carregar um preset ou durante uma macro.</p><p>Somente <strong>Gravar</strong> explícito, no máximo <strong>1 escrita a cada 2 s</strong>, com contadores da sessão e do dia. A partir de <strong>50 gravações por dia</strong>, mostrar aviso. Não é um orçamento garantido de vida útil.</p><p>O tipo de memória do CB5100 é <strong>desconhecido</strong>. Também não sabemos se cada commit apaga um setor; o firmware pode anexar registros. Não se pode calcular “anos restantes” a partir destes números típicos.</p></div>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Valores típicos de durabilidade por tipo de memória"><table><caption>Ordens de grandeza típicas de datasheets, não especificações do CB5100.</caption><thead><tr><th scope="col">Tipo de memória</th><th scope="col">Endurance típica</th><th scope="col">Neste cabo</th></tr></thead><tbody><tr><td>Flash embutida em MCU</td><td>~10 mil ciclos</td><td>□ Tipo desconhecido</td></tr><tr><td>SPI NOR</td><td>~100 mil ciclos</td><td>□ Tipo desconhecido</td></tr><tr><td>EEPROM</td><td>~1 milhão de ciclos</td><td>□ Tipo desconhecido</td></tr></tbody></table></div>
+            <div class="inset"><h3 id="volume"><a class="heading-link" href="#volume" data-en="Before writing: volume and checklist">Antes de gravar: volume e checklist</a></h3><p>N3: avisar se o aumento previsto for <strong>≥ +3 dB</strong> ou se a curva atual do cabo for desconhecida. “A nova curva pode soar mais alta. Abaixe o volume antes de gravar.” O maior salto de Em V para Neutro é <strong>+<span data-num="8.55" data-digits="2">8,55</span> dB</strong>.</p><p class="fine">A estimativa é a média em dB entre 300 Hz e 3 kHz, não LUFS nem um limiar médico. Exibir aviso geral antes do primeiro write, mesmo abaixo de +3 dB. Checklist: cabo correto, volume baixo, gate aprovado, alimentação estável e confirmação explícita. Não desconecte durante a escrita.</p></div>
+          </section>
+          <section class="chapter" id="previa" data-folio="013" aria-labelledby="h-previa"><h2 id="h-previa"><span class="section-number">07</span><a class="heading-link" href="#previa" data-en="Preview and blind test with your MP3">Prévia e teste cego com o seu MP3</a></h2>
+            <div class="columns"><p>O botão <strong>♪ Áudio</strong> da barra superior carrega um MP3 (ou outro formato de áudio que o navegador toque). Ele aparece em todas as páginas; esta documentação só mostra o carregador e não monta prévias de curva.</p><p><strong>O arquivo fica só neste navegador.</strong> É guardado no IndexedDB (<code>oa-v2</code> / <code>audio</code>) e nunca é enviado a servidor algum. Remover no próprio carregador ou em “Apagar dados locais” o elimina.</p><p>A reprodução é por streaming, sem decodificar o arquivo inteiro na memória. Quando o navegador permite, o áudio abre a <strong>96 kHz</strong>, a mesma taxa de projeto do DSP, e a prévia usa os <strong>coeficientes Q27 exatos</strong>: um filtro IIR por seção ativa, seguido do preamp Q23. Se o navegador impõe outra taxa, os coeficientes são recalculados para ela e a prévia é marcada como <em>aproximada</em>.</p><p>Sem arquivo, a prévia usa ruído rosa gerado no navegador. Nas páginas com prévia A/B e no teste cego, as cadeias são <strong>igualadas em nível</strong>: cada uma recebe o ajuste que a leva ao nível da mais baixa, para que a comparação não premie quem toca mais alto. O teste cego (X2-web) acontece todo no navegador e não grava nada no cabo.</p><p class="fine">A prévia não reproduz a aritmética interna do chip, que é desconhecida. Ouvir a prévia pela saída do próprio cabo soma a curva já gravada nele; use outra saída ou grave Neutro antes. O volume da prévia (−40…0 dB) vale só no navegador.</p></div>
+          </section>
+          <section class="chapter" id="dados-locais" data-folio="014" aria-labelledby="h-dados"><h2 id="h-dados"><span class="section-number">08</span><a class="heading-link" href="#dados-locais" data-en="Data in this browser">Dados neste navegador</a></h2>
+            <div class="columns"><p>O open-auri não tem conta, servidor de dados nem telemetria. O que fica guardado está neste navegador, neste aparelho, e <strong>nada é enviado</strong>. A tabela lista cada chave, o que ela guarda e se existe agora. O envio opt-in de resultados à comunidade (S6) é uma ação separada, explícita, e não usa estas chaves.</p></div>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Dados guardados neste navegador"><table class="local-data"><caption>Armazenamento local do open-auri v2 (LGPD: transparência e eliminação).</caption><thead><tr><th scope="col">Onde / chave</th><th scope="col">O que guarda</th><th scope="col">Agora</th></tr></thead><tbody>
+              <tr><td><code>localStorage</code><br><code>oa.v2.lang</code></td><td>Idioma escolhido no PT · EN.</td><td class="numeric" data-store-state="lang">…</td></tr>
+              <tr><td><code>localStorage</code><br><code>oa.v2.current</code></td><td>A curva do editor, na ordem de escrita: nome, origem, preamp e 10 seções. Toda página roda o gate de novo antes de usá-la.</td><td class="numeric" data-store-state="current">…</td></tr>
+              <tr><td><code>localStorage</code><br><code>oa.v2.journal</code></td><td>Diário das últimas 30 gravações (simuladas neste mock): data, nome, CRC, preamp e seções. Não é leitura do cabo.</td><td class="numeric" data-store-state="journal">…</td></tr>
+              <tr><td><code>localStorage</code><br><code>oa.v2.flashDay</code></td><td>Gravações de hoje neste navegador (data local e contagem).</td><td class="numeric" data-store-state="flashDay">…</td></tr>
+              <tr><td><code>localStorage</code><br><code>oa.v2.flashTotal</code></td><td>Total de gravações já feitas neste navegador.</td><td class="numeric" data-store-state="flashTotal">…</td></tr>
+              <tr><td><code>localStorage</code><br><code>oa.v2.previewDb</code></td><td>Volume da prévia do carregador de áudio.</td><td class="numeric" data-store-state="previewDb">…</td></tr>
+              <tr><td><code>sessionStorage</code><br><code>oa.v2.flashSession</code></td><td>Gravações nesta sessão; some ao fechar a aba.</td><td class="numeric" data-store-state="flashSession">…</td></tr>
+              <tr><td><code>IndexedDB</code><br><code>oa-v2 / audio</code></td><td>O arquivo de áudio escolhido no ♪ Áudio: nome, tipo, tamanho e o próprio arquivo.</td><td class="numeric" data-store-state="audio">…</td></tr>
+            </tbody></table></div>
+            <div class="code-row"><span class="fine">Apaga todas as chaves acima e o arquivo de áudio. Não afeta o cabo: o preset gravado nele continua lá.</span><button type="button" class="copy-button" id="clear-local" data-en="Erase local data">Apagar dados locais</button></div>
+          </section>
+          <section class="chapter" id="pagina-oficial" data-folio="015–016" aria-labelledby="h-oficial"><h2 id="h-oficial"><span class="section-number">09</span><a class="heading-link" href="#pagina-oficial" data-en="What the official page does">O que a página oficial faz</a></h2>
+            <div class="columns"><p>A implementação pública em <a href="https://equalizador.kuba.audio/">equalizador.kuba.audio</a> tem uma interface <strong>preset-only</strong>, com 11 opções em dois grupos. Não permite editar frequência, ganho, Q ou preamp; não há seletor de tipo de filtro nem exportação de presets.</p><p>A página identifica o fone como <strong>Auri</strong> e descreve o cabo como <strong>“Cabo USB-C com DSP”</strong>. Informa que a gravação exige Chrome ou Edge em computador desktop e que, depois dela, o preset permanece no cabo para uso em qualquer aparelho.</p><p>A escrita envia <strong>9 reports de dados e um commit</strong>. Não há feature reports, leituras, tratamento de input reports ou seletor de slots no dispositivo. Antes de enviar, a confirmação avisa que a curva atual do cabo será substituída.</p><p><strong>Natural não desenha o que grava.</strong> O gráfico usa <code>p.show || p.bands</code>; em Natural (<code>pref6</code>), desenha <code>show</code>, mas a escrita usa <code>bands</code>. Os dois conjuntos diferem: até <span data-num="3.87" data-digits="2">3,87</span> dB entre 3 e 8 kHz e <span data-num="7.29" data-digits="2">7,29</span> dB em 11,5 kHz, após o alinhamento que a página faz. Aqui, a figura parte do que é <em>gravado</em>.</p></div>
+            <h3 id="presets-oficiais"><a class="heading-link" href="#presets-oficiais" data-en="The eleven official labels">Os onze rótulos oficiais</a></h3>
+            <h3 id="curvas-preferencia"><a class="heading-link" href="#curvas-preferencia" data-en="Preference curves · 1–7">Curvas de preferência · 1–7</a></h3><ul class="official-list" id="official-list"></ul>
+            <h3 id="curvas-referencia"><a class="heading-link" href="#curvas-referencia" data-en="Reference curves · 8–11">Curvas de referência · 8–11</a></h3><ul class="official-list" id="official-reference-list"></ul>
+            <p class="fine">Dados derivados do fixture de referência. Os 11 presets conservam os bytes oficiais, inclusive ordem e preamp. Padrão Auri aponta a <code>padrao</code>: filtros do Leonardo (segundo comentário no código da página oficial). Essa atribuição está em um comentário da fonte, não na interface, e não confirma o estado de fábrica.</p>
+            <h3 id="acrescimos"><a class="heading-link" href="#acrescimos" data-en="What open-auri adds">O que o open-auri acrescenta</a></h3>
+            <div class="columns"><p><strong>Criação.</strong> C1 Soe como X; C2 desenhar a curva final; C3 editar por delta; C4 importar .txt; C5 loudness; C8 desenhar os mesmos coeficientes que serão enviados. Na importação, <code>LSC → LS</code> exige mapeamento explícito; demais tipos fora de PK/LS/OFF ficam em preview-only.</p><p><strong>Ouvir e guardar.</strong> X1 preset portátil; X2-web teste cego só no navegador; X3 pré-escuta com coeficientes exatos; X4 Neutro, Padrão Auri e journal; X5 headroom; X8 curadoria; X9 vários cabos, <strong>um por vez</strong>, cada um com confirmação.</p><p><strong>Decisões de DSP.</strong> D1 cortes antes dos boosts como padrão, com gate na ordem real; D2 margem de headroom sem promessa para banda larga; D4 ajuste com peso perceptual ISO 226; D5 penalizar bandas adjacentes opostas; D6 igualar volume por ISO 226, sem promessa de sonoridade exata; D7 sem boost acima de 16 kHz e boost Q ≤ 4; D8 gêmeo digital com coeficientes quantizados, picos internos e hipóteses explícitas de aritmética. N1 macros calcula a curva sem auto-write; N2 cuida da flash; N3 exige checklist e aviso de nível.</p><p><strong>Compartilhar.</strong> S1 formato compacto; S3 versionamento; S4 distância entre curvas; S5 números e receita; S8 identidade de curva; S9 packs com licença; S10 antes/depois exportável. S6 é opt-in via GitHub: dados <strong>pseudônimos e públicos</strong>, não anônimos. Consentimento explícito e minimização de dados pela LGPD; preferências podem revelar informação de saúde.</p><p>HS, LP e HP: experimentais, só na camada Engenharia, com gate v2 e confirmação extra. <a href="#envelope">Ainda indisponíveis</a>: raw biquads, X2 no cabo, S7 com servidor, read-back e modo só-RAM. Não há controles de sondagem ou experiências de espacialização na UI. “Liberado” descreve a decisão de produto, não significa que todos os recursos estejam integrados neste mock documental.</p></div>
+          </section>
+          <section class="chapter" id="perguntas" data-folio="017" aria-labelledby="h-perguntas"><h2 id="h-perguntas"><span class="section-number">10</span><a class="heading-link" href="#perguntas" data-en="What we still do not know">O que ainda não sabemos</a></h2>
+            <div class="columns"><ul class="questions"><li><strong>Read-back.</strong> Existe leitura no 0xCB para pull, verify ou rollback? A referência nunca lê.</li><li><strong>CRC no firmware.</strong> O host calcula o checksum; o chip de fato o valida?</li><li><strong>RAM-only.</strong> Há forma de aplicar sem persistir? Não foi identificada no 0xCB.</li><li><strong>Flash e energia.</strong> Tipo, endurance, estratégia de apagamento e efeito de uma desconexão no meio do commit.</li><li><strong>Troca durante áudio.</strong> Há click, estalo, mute ou transiente? Isso também pode denunciar uma troca em teste cego.</li><li><strong>Header.</strong> O que fazem os bytes 6 e 12–13? A geometria poderia permitir outra contagem ou EQ por canal?</li><li><strong>Firmware e enumeração.</strong> O produto expõe 0xCB, 0x4B ou ambos? Quais strings e interfaces HID? O parentesco não torna os formatos intercambiáveis.</li><li><strong>Clock e aritmética.</strong> 96 kHz fixos? Quantos bits internos, guard bits e qual realização do filtro? Há limit cycles?</li><li><strong>Escrita real.</strong> Os bytes aceitos produzem a resposta esperada? Precisamos gravar, ouvir e medir; nenhum teste de software substitui isso.</li><li><strong>Fabricante.</strong> CB5100 está documentado nos briefs TTGK. A atribuição à Savitech vem de fonte secundária única e permanece hipótese.</li></ul></div>
+          </section>
+          <section class="chapter" id="glossario" data-folio="018" aria-labelledby="h-glossario"><h2 id="h-glossario"><span class="section-number">11</span><a class="heading-link" href="#glossario" data-en="Glossary">Glossário</a></h2>
+            <dl class="glossary"><div><dt>biquad</dt><dd>Filtro de segunda ordem. Aqui, cinco coeficientes com a₀ = 1 implícito.</dd></div><div><dt>Q</dt><dd>Fator de qualidade; num peak, Q maior torna a faixa afetada mais estreita. Não é o Q de Q23/Q27.</dd></div><div><dt>peak / PK</dt><dd>Eleva ou atenua uma região em torno da frequência central.</dd></div><div><dt>low shelf / LS</dt><dd>Altera o patamar dos graves, com transição para ganho unitário nos agudos.</dd></div><div><dt>high shelf / HS</dt><dd>Altera o patamar dos agudos. Experimental, só na camada Engenharia, com gate v2 e confirmação extra.</dd></div><div><dt>low pass / LP</dt><dd>Passa os graves e atenua acima da frequência de corte. Sem ganho editável; experimental, só na camada Engenharia.</dd></div><div><dt>high pass / HP</dt><dd>Atenua abaixo da frequência de corte, por exemplo um corte subsônico. Sem ganho editável; experimental, só na camada Engenharia.</dd></div><div><dt>preamp</dt><dd>Ganho global antes das bandas; o payload guarda ganho linear Q23, não dB.</dd></div><div><dt>headroom</dt><dd>Margem entre o pico e o limite de amplitude de um estágio.</dd></div><div><dt>clipping</dt><dd>Recorte do sinal que ultrapassa a amplitude representável.</dd></div><div><dt>Q23 / Q27</dt><dd>Escalas de ponto fixo em int32: multiplicar por 2²³ ou 2²⁷ e arredondar.</dd></div><div><dt>CRC</dt><dd>Verificação de integridade dos bytes. Não prova estabilidade, autenticidade ou segurança.</dd></div><div><dt>WebHID</dt><dd>API do navegador para dispositivos HID, com permissão explícita, gesto do usuário e contexto seguro.</dd></div><div><dt>flash</dt><dd>Memória não volátil. Mantém o preset sem energia; sua vida útil de gravação é finita e desconhecida aqui.</dd></div><div><dt>report</dt><dd>Unidade HID. No caminho 0xCB, 31 B; byte inicial é o índice do pacote de dados.</dd></div><div><dt>envelope observado</dt><dd>Política de similaridade com a aritmética dos 11 payloads oficiais, aplicada aos coeficientes quantizados. Não é prova de segurança física.</dd></div></dl>
+          </section>
+          <section class="chapter" id="aviso-legal" data-folio="019–020" aria-labelledby="h-legal"><h2 id="h-legal"><span class="section-number">12</span><a class="heading-link" href="#aviso-legal" data-en="Legal notice">Aviso legal</a></h2>
+            <div class="legal-language"><span id="legal-language-label">PT-BR / TEXTO INTEGRAL</span><span class="fine" data-en="Legal review pending">Revisão jurídica pendente</span></div>
+            <div class="columns legal-copy" id="legal-primary" lang="pt-BR">
+              <p>open-auri é um projeto independente. Não é oficial, não é afiliado nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante.</p>
+              <p>As informações técnicas foram obtidas por estudo do protocolo para fins de interoperabilidade. A documentação distingue fatos confirmados no código, hipóteses e pontos que exigem testes no hardware. Nenhuma escrita foi validada por este projeto no cabo real até a revisão indicada nesta página. A ausência de falhas nos testes em software não constitui garantia de funcionamento ou segurança do dispositivo.</p>
+              <p>O software e esta documentação são fornecidos “no estado em que se encontram” (“as is”), sem qualquer garantia, expressa ou implícita, incluindo garantias de comercialização, adequação a uma finalidade específica e não violação, na máxima extensão permitida pela legislação aplicável. Consulte a licença AGPL-3.0, especialmente a seção 15 (isenção de garantia) e a seção 16 (limitação de responsabilidade). Este aviso não substitui os termos da licença.</p>
+              <p>O uso é por sua conta e risco. Na máxima extensão permitida pela legislação aplicável, os autores e colaboradores não se responsabilizam por danos ao cabo, aos fones, à audição, a outros equipamentos ou a dados, nem por perdas diretas, indiretas, incidentais ou consequenciais decorrentes do uso ou da impossibilidade de uso. Uma gravação pode persistir na flash e não há read-back, rollback ou recuperação garantidos no caminho conhecido. Não use esta documentação como promessa de segurança auditiva.</p>
+              <p>Marcas e nomes de produtos pertencem aos seus respectivos titulares e são citados apenas para identificação, atribuição e interoperabilidade. As homenagens presentes em cada página são tributos editoriais, sem vínculo, afiliação, aprovação ou endosso pelos homenageados, por seus representantes ou por seus espólios.</p>
+            </div>
+            <details class="legal-alternate"><summary id="legal-alternate-label">Read the full notice in English (en-US)</summary><div class="columns legal-copy" id="legal-secondary" lang="en-US">
+              <p>open-auri is an independent project. It is not official, affiliated with, or endorsed by Kuba, TTGK, Savitech, or any manufacturer.</p>
+              <p>Technical information was obtained by studying the protocol for interoperability purposes. This documentation distinguishes facts confirmed in code, hypotheses, and matters requiring hardware testing. No write has been validated by this project on the actual cable as of the revision shown on this page. Passing software tests does not guarantee device operation or safety.</p>
+              <p>The software and this documentation are provided “as is”, without any express or implied warranty, including warranties of merchantability, fitness for a particular purpose, and non-infringement, to the maximum extent permitted by applicable law. Refer to the AGPL-3.0 license, particularly section 15 (Disclaimer of Warranty) and section 16 (Limitation of Liability). This notice does not replace the license terms.</p>
+              <p>Use is at your own risk. To the maximum extent permitted by applicable law, authors and contributors accept no responsibility for damage to the cable, earphones, hearing, other equipment, or data, or for direct, indirect, incidental, or consequential losses arising from use or inability to use. A write may persist in flash, and the known path provides no guaranteed read-back, rollback, or recovery. Do not treat this documentation as a promise of hearing safety.</p>
+              <p>Trademarks and product names belong to their respective owners and are mentioned only for identification, attribution, and interoperability. The homages on each page are editorial tributes, with no connection, affiliation, approval, or endorsement by the honorees, their representatives, or their estates.</p>
+            </div></details>
+            <p class="fine" style="margin-top:17px"><a href="https://www.gnu.org/licenses/agpl-3.0.html" data-en="Read AGPL-3.0, including sections 15 and 16 ↗">Ler a AGPL-3.0, incluindo as seções 15 e 16 ↗</a></p>
+          </section>
+          <section class="chapter" id="creditos" data-folio="021" aria-labelledby="h-creditos"><h2 id="h-creditos"><span class="section-number">13</span><a class="heading-link" href="#creditos" data-en="Credits">Créditos</a></h2>
+            <div class="columns"><ul class="credits-list"><li><a href="https://equalizador.kuba.audio/">Kuba ↗</a><small>Presets e implementação de referência em equalizador.kuba.audio. O layout e os dados foram estudados para interoperabilidade; nenhum código da página é incluído aqui.</small></li><li>Leonardo<small>Padrão Auri: filtros do Leonardo (segundo comentário no código da página oficial). O crédito aparece somente em um comentário da fonte, não na UI. Isso não confirma o preset de fábrica.</small></li><li><a href="https://github.com/jaakkopasanen/AutoEq">AutoEq ↗</a><small>MIT · Copyright (c) 2018-2022 Jaakko Pasanen. Design PK/LS/HS portado de autoeq/peq.py; magnitude e validação são do projeto. As figuras usam cópias inline de src/dsp/eq0xcb.mjs.</small></li><li><a href="https://www.w3.org/TR/audio-eq-cookbook/">Robert Bristow-Johnson · Audio EQ Cookbook ↗</a><small>Equações dos biquads; LP e HP seguem o cookbook diretamente e só podem ser gravados como experimentais na camada Engenharia.</small></li></ul><p class="fine">Base desta edição: docs/protocol-0xcb.md, docs/open-questions.md, design/analysis/limites-v2.md, THIRD_PARTY_NOTICES.md e fixture de referência. A reprodução em software não comprova a execução no hardware.</p></div>
+            <h3 id="homenagens"><a class="heading-link" href="#homenagens" data-en="Homages and their sources">Homenagens e suas fontes</a></h3>
+            <div class="honorees"><div><a href="https://en.wikipedia.org/wiki/Robert_Moog">Bob Moog ↗</a><small>Curva · curva.html</small></div><div><a href="https://en.wikipedia.org/wiki/Geoff_Emerick">Geoff Emerick ↗</a><small>Biblioteca · biblioteca.html</small></div><div><a href="https://en.wikipedia.org/wiki/Les_Paul">Les Paul ↗</a><small>Comparar · comparar.html</small></div><div><a href="https://en.wikipedia.org/wiki/Andy_Hildebrand">Andy Hildebrand ↗</a><small>Soe como X · soe-como-x.html</small></div><div><a href="https://en.wikipedia.org/wiki/Bob_Clearmountain">Bob Clearmountain ↗</a><small>Comunidade · comunidade.html</small></div><div><a href="https://en.wikipedia.org/wiki/Floyd_Toole">Floyd Toole</a> &amp; <a href="https://en.wikipedia.org/wiki/Sean_Olive">Sean Olive ↗</a><small>Teste cego · teste-cego.html</small></div><div><a href="https://en.wikipedia.org/wiki/Ray_Dolby">Ray Dolby ↗</a><small>Cabo · cabo.html</small></div><div><a href="https://en.wikipedia.org/wiki/Harry_Nyquist">Harry Nyquist</a> · <a href="https://en.wikipedia.org/wiki/Nyquist_stability_criterion">critério ↗</a><small>Docs · docs.html</small></div></div>
+            <details class="reports-details"><summary data-en="AutoEq MIT license notice">Aviso da licença MIT do AutoEq</summary><pre class="license-notice">MIT License
+
+Copyright (c) 2018-2022 Jaakko Pasanen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.</pre></details>
+          </section>
+        </article>
+        <div class="endmark"><span>open-auri / DOCUMENTAÇÃO / 15.X.2026</span><span>FINIS · 021</span></div>
+      </main>
+    </div>
+  </div>
+<footer class="site-footer">
+  <section>
+    <div class="f-eyebrow" data-en="THIS PAGE PAYS TRIBUTE TO">ESTA PÁGINA HOMENAGEIA</div>
+    <div class="honoree"><strong>Harry Nyquist</strong><span>1889–1976</span></div>
+    <p data-en="In 1928, Harry Nyquist showed that a channel of bandwidth B carries up to 2B elements per second; in 1932 he published the stability criterion that bears his name. Both ideas watch over this cable: nothing goes beyond 48 kHz, and no unstable filter is written.">Em 1928, Harry Nyquist mostrou que um canal de largura de banda B carrega até 2B elementos por segundo; em 1932 publicou o critério de estabilidade que leva seu nome. As duas ideias guardam este cabo: nada passa de 48 kHz, e nenhum filtro instável é gravado.</p>
+    <div class="sources"><a href="https://en.wikipedia.org/wiki/Harry_Nyquist" target="_blank" rel="noreferrer"><span data-en="source">fonte</span>: Wikipedia ↗</a><a href="https://en.wikipedia.org/wiki/Nyquist_stability_criterion" target="_blank" rel="noreferrer"><span data-en="source">fonte</span>: <span data-en="stability criterion">critério de estabilidade</span> ↗</a></div>
+  </section>
+  <section>
+    <h3 data-en="Notice">Aviso</h3>
+    <p data-en="open-auri is not official or endorsed by Kuba, TTGK, Savitech, or any manufacturer. Everything here was obtained by studying the protocol for interoperability purposes. Use at your own risk: we accept no responsibility for damage to the cable, earphones, or your hearing.">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p>
+    <div class="footer-links"><a href="docs.html#aviso-legal" data-en="Full legal notice">Aviso legal completo</a><span data-en="AGPL-3.0 license">Licença AGPL-3.0</span></div>
+  </section>
+</footer>
+  <dialog id="search-dialog" aria-labelledby="search-title"><div class="dialog-head"><h2 id="search-title" data-en="Search this journal">Buscar no caderno</h2><button class="dialog-close" type="button" data-close aria-label="Fechar busca">×</button></div><label class="sr-only" for="search-input">Buscar seções, termos ou bytes</label><input id="search-input" type="search" placeholder="Polos, CRC, flash, Natural…" autocomplete="off" spellcheck="false"><p class="search-meta" id="search-count" aria-live="polite"></p><ul id="search-results"></ul><p class="search-meta" data-en="↑ ↓ select · Enter open · Esc close · search stays on this device">↑ ↓ selecionar · Enter abrir · Esc fechar · busca local</p></dialog>
+  <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title"><div class="dialog-head"><h2 id="shortcuts-title" data-en="Keyboard shortcuts">Atalhos do teclado</h2><button class="dialog-close" type="button" data-close aria-label="Fechar atalhos">×</button></div><div class="shortcuts-list"><p><span data-en="Search documentation">Buscar na documentação</span><kbd>Ctrl K / ⌘ K / /</kbd></p><p><span data-en="Show shortcuts">Mostrar atalhos</span><kbd>?</kbd></p><p><span data-en="Close overlay">Fechar sobreposição</span><kbd>Esc</kbd></p><p><span data-en="Navigate controls">Navegar pelos controles</span><kbd>Tab / Shift Tab</kbd></p><p><span data-en="Navigate search results">Navegar resultados de busca</span><kbd>↑ / ↓ / Enter</kbd></p></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module">
+/* === OA SHARED: storage v2 === */
+// Canonical implementation of the OA STORAGE CONTRACT v2 (see the HTML comment at the top of curva.html).
+// Self-contained: no page dependencies. Copy verbatim into every v2 page, before "OA SHARED: audio-loader v1".
+const OA = (globalThis.OA = globalThis.OA || {});
+OA.store = (() => {
+  const KEYS = Object.freeze({
+    current: 'oa.v2.current', journal: 'oa.v2.journal', flashDay: 'oa.v2.flashDay', flashTotal: 'oa.v2.flashTotal',
+    flashSession: 'oa.v2.flashSession', lang: 'oa.v2.lang', previewDb: 'oa.v2.previewDb',
+  });
+  const SESSION_KEYS = new Set([KEYS.flashSession]);
+  const KINDS = new Set(['PK', 'LS', 'HS', 'LP', 'HP']);
+  const area = (key) => { try { return SESSION_KEYS.has(key) ? globalThis.sessionStorage : globalThis.localStorage; } catch { return null; } };
+  function get(key, fallback) {
+    try { const a = area(key), raw = a ? a.getItem(key) : null; return raw == null ? fallback : JSON.parse(raw); } catch { return fallback; }
+  }
+  function set(key, value) { try { const a = area(key); if (a) a.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked */ } }
+  function remove(key) { try { const a = area(key); if (a) a.removeItem(key); } catch { /* blocked */ } }
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const bandToString = (b) => (b.kind === 'OFF' ? 'OFF' : `${b.kind}|${b.freqHz}|${b.gainDb}|${b.qFactor}`);
+  function bandFromString(s) {
+    if (s === 'OFF') return { kind: 'OFF' };
+    const [kind, f, g, q] = String(s).split('|');
+    const band = { kind, freqHz: Number(f), gainDb: Number(g), qFactor: Number(q) };
+    return KINDS.has(kind) && [band.freqHz, band.gainDb, band.qFactor].every(Number.isFinite) ? band : null;
+  }
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const store = {
+    KEYS, get, set, remove, today, bandToString, bandFromString,
+    getLang() { return get(KEYS.lang, 'pt-BR') === 'en-US' ? 'en-US' : 'pt-BR'; },
+    setLang(lang) { set(KEYS.lang, lang === 'en-US' ? 'en-US' : 'pt-BR'); },
+    /** bands: array of {kind, freqHz, gainDb, qFactor} in written order. */
+    saveCurrent({ name, source, preampDb, bands }) {
+      set(KEYS.current, { name: String(name), source: String(source), preampDb, bands: bands.map(bandToString), updatedAt: Date.now() });
+    },
+    /** Returns {name, source, preampDb, bands (objects), updatedAt} or null. Callers must re-run the gate. */
+    loadCurrent() {
+      const c = get(KEYS.current, null);
+      if (!c || !Array.isArray(c.bands) || c.bands.length !== 10 || !Number.isFinite(c.preampDb)) return null;
+      const bands = c.bands.map(bandFromString);
+      return bands.every(Boolean) ? { ...c, bands } : null;
+    },
+    journal() { const j = get(KEYS.journal, []); return Array.isArray(j) ? j : []; },
+    appendJournal(entry, max = 30) { const j = store.journal(); j.push(entry); while (j.length > max) j.shift(); set(KEYS.journal, j); return j; },
+    flashCounts() {
+      const day = get(KEYS.flashDay, null);
+      return { session: num(get(KEYS.flashSession, 0)), today: day && day.date === today() ? num(day.count) : 0, total: num(get(KEYS.flashTotal, 0)) };
+    },
+    recordFlash() {
+      const c = store.flashCounts();
+      set(KEYS.flashSession, c.session + 1); set(KEYS.flashDay, { date: today(), count: c.today + 1 }); set(KEYS.flashTotal, c.total + 1);
+      return store.flashCounts();
+    },
+  };
+  return store;
+})();
+/* === END OA SHARED: storage v2 === */
+
+/* === OA SHARED: audio-loader v1 === */
+// Top-bar MP3 loader + shared preview engine (streaming HTMLAudioElement or pink noise; exact Q27 chains).
+// HOW TO COPY
+//   1. CSS: copy the block "OA SHARED: audio-loader v1 (CSS)" into the page <style> (after the shared chrome CSS).
+//   2. HTML: copy the block "OA SHARED: audio-loader v1 (HTML)" into the top bar's .cable-actions, after the
+//      change counter and before the buttons.
+//   3. JS, in one <script type="module">, in this order: first "OA SHARED: storage v2", then this block
+//      ("OA SHARED: audio-loader v1"), both verbatim. Nothing else is needed for a working loader: the UI binds
+//      itself when the DOM is ready (idempotent, silent if the HTML block is absent) and reads "oa.v2.lang".
+//   4. Optional, only for pages with previews/A-B/blind test: OA.audio.useCodec({ designSection, encodeSection,
+//      preampWord }) with the page's inline codec copy. Without it everything works except buildChain(), which
+//      throws a clear Error.
+//   5. Call OA.audioUI.setLang('pt' | 'en') (or 'pt-BR' | 'en-US') from the page's language toggle.
+// PUBLIC API
+//   OA.audio.getSource()                 creates the AudioContext (call inside a user gesture) and returns the
+//                                        shared source bus (GainNode).
+//   OA.audio.buildChain(bands, preampDb, { gainDb = 0, on = true })
+//                                        -> { input, output, setGain(db, on), dispose(fadeMs) }; one IIRFilterNode per
+//                                        non-OFF section with the EXACT Q27 words (feedforward [b0,b1,b2], feedback
+//                                        [1,a1,a2]), then the Q23 preamp. Several chains may hang off the one source
+//                                        (A/B, blind test): switch them with chain.setGain(db, on).
+//   OA.audio.matchGains([levelDb, ...])  -> trims in dB that bring every chain to the quietest level.
+//   OA.audio.start('chains' | 'raw') / stop()   fade-in / fade-out; 'raw' plays the file without any chain.
+//   OA.audio.state()                     -> { mode, ready, rate, exact, volumeDb, error, persisted, file }.
+//   OA.audio.onChange(cb)                -> unsubscribe function; cb(state) on every change.
+//   OA.audio.loadFile(file) / removeFile() / setVolume(db) / toggleRaw() / ready (Promise: stored file restored).
+//   OA.audioUI.init() / setLang(lang)    init() runs automatically; calling it again is a no-op.
+OA.audio = (() => {
+  const DB_NAME = 'oa-v2', STORE = 'audio', KEY = 'current', RATE = 96000;
+  const listeners = new Set();
+  const clampDb = (v) => Math.min(0, Math.max(-40, Math.round(Number.isFinite(Number(v)) ? Number(v) : -12)));
+  const dbToGain = (db) => Math.pow(10, db / 20);
+  const st = {
+    ctx: null, rate: RATE, exact: true, codec: null, file: null, duration: NaN, error: false, persisted: true,
+    url: null, el: null, elSource: null, noise: null, noiseBuf: null, bus: null, rawGain: null, chainsIn: null, master: null,
+    mode: 'off', volumeDb: clampDb(OA.store.get(OA.store.KEYS.previewDb, -12)),
+  };
+  const state = () => ({
+    mode: st.mode, ready: !!st.ctx, rate: st.rate, exact: st.exact, volumeDb: st.volumeDb, error: st.error, persisted: st.persisted,
+    file: st.file ? { ...st.file, duration: st.duration } : null,
+  });
+  const emit = () => { const s = state(); listeners.forEach((cb) => cb(s)); };
+  // --- IndexedDB (db "oa-v2", store "audio", key "current") ---
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      if (!globalThis.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idb(mode, op) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode), req = op(tx.objectStore(STORE));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  }
+  // --- source handling ---
+  function pinkBuffer(ctx) {
+    const n = Math.round(ctx.sampleRate * 3), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    return buf;
+  }
+  function stopNoise() { if (st.noise) { try { st.noise.stop(); } catch { /* not started */ } st.noise.disconnect(); st.noise = null; } }
+  function startNoise() {
+    if (!st.ctx || st.noise) return;
+    if (!st.noiseBuf) st.noiseBuf = pinkBuffer(st.ctx);
+    const n = st.ctx.createBufferSource(); n.buffer = st.noiseBuf; n.loop = true; n.connect(st.bus); n.start(); st.noise = n;
+  }
+  function detachFile() {
+    if (st.el) { st.el.pause(); st.el.oaDead = true; }
+    if (st.elSource) { try { st.elSource.disconnect(); } catch { /* already */ } }
+    if (st.url) URL.revokeObjectURL(st.url);
+    st.el = null; st.elSource = null; st.url = null; st.file = null; st.duration = NaN; st.error = false;
+  }
+  function attach(record) {
+    detachFile();
+    if (record && record.blob) {
+      st.file = { name: String(record.name || 'audio'), type: record.type || '', size: Number(record.size) || record.blob.size, addedAt: record.addedAt || Date.now() };
+      st.url = URL.createObjectURL(record.blob);
+      const el = new Audio();
+      el.preload = 'metadata'; el.loop = true; el.src = st.url;
+      el.addEventListener('loadedmetadata', () => { if (!el.oaDead) { st.duration = el.duration; emit(); } });
+      el.addEventListener('error', () => { if (!el.oaDead) { st.error = true; emit(); } });
+      st.el = el;
+    }
+    routeSource();
+    emit();
+  }
+  /** Connects the current source (file element or pink noise) to the bus; plays it if the engine is running. */
+  function routeSource() {
+    if (!st.ctx) return;
+    stopNoise();
+    if (st.el) {
+      if (!st.elSource) st.elSource = st.ctx.createMediaElementSource(st.el);
+      st.elSource.connect(st.bus);
+      if (st.mode !== 'off') st.el.play().catch(() => {});
+    } else if (st.mode !== 'off') startNoise();
+  }
+  /** Creates the AudioContext. Call from a user gesture (click/key). */
+  function ensure() {
+    if (st.ctx) return st.ctx;
+    const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio unavailable');
+    let ctx;
+    try { ctx = new AC({ sampleRate: RATE }); } catch { ctx = new AC(); }
+    st.ctx = ctx; st.rate = ctx.sampleRate; st.exact = ctx.sampleRate === RATE;
+    st.master = ctx.createGain(); st.master.gain.value = 0; st.master.connect(ctx.destination);
+    st.chainsIn = ctx.createGain(); st.chainsIn.gain.value = 0; st.chainsIn.connect(st.master);
+    st.rawGain = ctx.createGain(); st.rawGain.gain.value = 0; st.rawGain.connect(st.master);
+    st.bus = ctx.createGain(); st.bus.connect(st.rawGain);
+    routeSource();
+    emit();
+    return ctx;
+  }
+  async function start(mode = 'chains') {
+    const ctx = ensure();
+    st.mode = mode === 'raw' ? 'raw' : 'chains';
+    const t = ctx.currentTime;
+    st.rawGain.gain.setValueAtTime(st.mode === 'raw' ? 1 : 0, t);
+    st.chainsIn.gain.setValueAtTime(st.mode === 'chains' ? 1 : 0, t);
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setValueAtTime(0, t);
+    st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), t + 0.02, 0.08); // short fade-in
+    if (st.el) st.el.play().catch(() => {}); else startNoise();
+    emit();
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* blocked until a gesture */ } }
+  }
+  function stop() {
+    if (!st.ctx || st.mode === 'off') return;
+    const t = st.ctx.currentTime;
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setTargetAtTime(0, t, 0.03);
+    st.mode = 'off';
+    setTimeout(() => { if (st.mode !== 'off') return; if (st.el) st.el.pause(); stopNoise(); }, 180);
+    emit();
+  }
+  function setVolume(db) {
+    st.volumeDb = clampDb(db);
+    OA.store.set(OA.store.KEYS.previewDb, st.volumeDb);
+    if (st.ctx && st.mode !== 'off') st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), st.ctx.currentTime, 0.03);
+    emit();
+  }
+  async function loadFile(file) {
+    if (!file || !(/^audio\//.test(file.type) || /\.(mp3|m4a|aac|ogg|wav|flac)$/i.test(file.name))) throw new Error('not audio');
+    const record = { name: file.name, type: file.type || 'audio/mpeg', size: file.size, blob: file, addedAt: Date.now() };
+    attach(record);
+    try { await idb('readwrite', (s) => s.put(record, KEY)); st.persisted = true; } catch { st.persisted = false; }
+    emit();
+  }
+  async function removeFile() {
+    attach(null);
+    try { await idb('readwrite', (s) => s.delete(KEY)); } catch { /* nothing stored */ }
+    emit();
+  }
+  // Optional: only pages that build preview chains need it. Loader-only pages never call it.
+  function useCodec(codec) {
+    if (!codec || typeof codec.designSection !== 'function' || typeof codec.encodeSection !== 'function' || typeof codec.preampWord !== 'function') {
+      throw new Error('OA.audio.useCodec expects { designSection, encodeSection, preampWord } functions');
+    }
+    st.codec = codec;
+  }
+  function coefficients(band) {
+    if (!st.codec) throw new Error('OA.audio.useCodec({ designSection, encodeSection, preampWord }) must be called first');
+    const w = st.codec.encodeSection(st.codec.designSection(band, st.rate)); // Q27 words [b0, b2, -a1, b1, -a2]
+    const q = 2 ** 27;
+    return { b0: w[0] / q, b2: w[1] / q, a1: -w[2] / q, b1: w[3] / q, a2: -w[4] / q };
+  }
+  function buildChain(bands, preampDb, { gainDb = 0, on = true } = {}) {
+    if (!st.codec) throw new Error('OA.audio.buildChain needs a codec: call OA.audio.useCodec({ designSection, encodeSection, preampWord }) first');
+    const ctx = ensure();
+    const input = ctx.createGain(), pre = ctx.createGain(), output = ctx.createGain(), nodes = [input, pre, output];
+    let node = input;
+    for (const band of bands) {
+      if (band.kind === 'OFF') continue;
+      const c = coefficients(band);
+      const f = ctx.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
+      node.connect(f); node = f; nodes.push(f);
+    }
+    node.connect(pre);
+    pre.gain.value = st.codec.preampWord(preampDb) / 2 ** 23;
+    pre.connect(output);
+    output.gain.value = 0;
+    output.connect(st.chainsIn);
+    st.bus.connect(input);
+    const chain = {
+      input, output,
+      setGain(db, isOn = true, tc = 0.02) { const t = ctx.currentTime; output.gain.cancelScheduledValues(t); output.gain.setTargetAtTime(isOn ? dbToGain(db) : 0, t, tc); },
+      dispose(fadeMs = 60) {
+        chain.setGain(0, false, fadeMs / 4000);
+        setTimeout(() => { try { st.bus.disconnect(input); } catch { /* already */ } nodes.forEach((n) => { try { n.disconnect(); } catch { /* already */ } }); }, fadeMs + 20);
+      },
+    };
+    chain.setGain(gainDb, on);
+    return chain;
+  }
+  const matchGains = (levels) => { const lo = Math.min(...levels); return levels.map((l) => lo - l); };
+  const api = {
+    state, start, stop, setVolume, loadFile, removeFile, useCodec, buildChain, matchGains, dbToGain,
+    getSource() { ensure(); return st.bus; },
+    toggleRaw() { if (st.mode === 'raw') stop(); else start('raw').catch(() => {}); },
+    onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); },
+    ready: idb('readonly', (s) => s.get(KEY)).then((rec) => { if (rec && rec.blob) attach(rec); }).catch(() => {}),
+  };
+  return api;
+})();
+OA.audioUI = (() => {
+  const TXT = {
+    pt: { btn: 'Áudio', title: 'Áudio da prévia', load: 'Carregar MP3…', none: 'Nenhum arquivo: ruído rosa gerado no navegador.', play: 'Tocar arquivo', pause: 'Pausar', remove: 'Remover', vol: 'Volume da prévia (só no navegador)', note: 'O arquivo fica só neste navegador. Nada é enviado.', exact: 'Prévia a 96 kHz: coeficientes Q27 exatos.', approx: 'Este navegador abriu áudio a {rate} Hz: coeficientes recalculados, prévia aproximada.', idle: 'O áudio começa no primeiro play (exige um clique).', bad: 'Arquivo não reconhecido como áudio.', notSaved: 'Não foi possível guardar no navegador; vale só nesta página.', btnAria: 'Áudio da prévia: {x}' },
+    en: { btn: 'Audio', title: 'Preview audio', load: 'Load MP3…', none: 'No file: pink noise generated in the browser.', play: 'Play file', pause: 'Pause', remove: 'Remove', vol: 'Preview volume (browser only)', note: 'The file stays in this browser. Nothing is uploaded.', exact: 'Preview at 96 kHz: exact Q27 coefficients.', approx: 'This browser opened audio at {rate} Hz: coefficients recomputed, preview approximate.', idle: 'Audio starts on the first play (needs a click).', bad: 'File not recognised as audio.', notSaved: 'Could not store it in the browser; it lasts for this page only.', btnAria: 'Preview audio: {x}' },
+  };
+  let lang = OA.store.getLang() === 'en-US' ? 'en' : 'pt';
+  const el = (id) => document.getElementById(id);
+  const tx = (k, p) => { let s = TXT[lang][k]; if (p) for (const n in p) s = s.split(`{${n}}`).join(p[n]); return s; };
+  const fmtDb = (v) => `${v < 0 ? '−' + Math.abs(v) : v} dB`;
+  const fmtDur = (d) => (Number.isFinite(d) ? `${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}` : '…');
+  const fmtSize = (b) => `${new Intl.NumberFormat(lang === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: 1 }).format(b / 1048576)} MB`;
+  function render(s) {
+    if (!el('oaAudioBtn')) return;
+    const name = s.file ? s.file.name : tx('btn');
+    el('oaAudioName').textContent = name;
+    el('oaAudioBtn').title = s.file ? s.file.name : '';
+    el('oaAudioBtn').classList.toggle('has-file', !!s.file);
+    el('oaAudioBtn').setAttribute('aria-label', tx('btnAria', { x: s.file ? s.file.name : tx('none') }));
+    document.querySelectorAll('[data-oa-audio]').forEach((n) => { if (TXT[lang][n.dataset.oaAudio]) n.textContent = tx(n.dataset.oaAudio); });
+    const meta = el('oaAudioMeta');
+    meta.textContent = '';
+    if (s.file) {
+      const b = document.createElement('b'); b.textContent = s.file.name;
+      meta.append(b, document.createTextNode(` · ${fmtDur(s.file.duration)} · ${fmtSize(s.file.size)}`));
+      if (s.error) meta.append(document.createTextNode(` · ${tx('bad')}`));
+      if (!s.persisted) meta.append(document.createTextNode(` · ${tx('notSaved')}`));
+    } else meta.textContent = tx('none');
+    el('oaAudioPlay').textContent = s.mode === 'raw' ? tx('pause') : tx('play');
+    el('oaAudioPlay').disabled = !s.file;
+    el('oaAudioPlay').setAttribute('aria-pressed', s.mode === 'raw' ? 'true' : 'false');
+    el('oaAudioRemove').disabled = !s.file;
+    el('oaAudioVol').value = String(s.volumeDb);
+    el('oaAudioVolOut').textContent = fmtDb(s.volumeDb);
+    const rate = el('oaAudioRate');
+    rate.textContent = !s.ready ? tx('idle') : s.exact ? tx('exact') : tx('approx', { rate: s.rate });
+    rate.classList.toggle('approx', s.ready && !s.exact);
+  }
+  function setOpen(open) {
+    el('oaAudioPop').hidden = !open;
+    el('oaAudioBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  let bound = false;
+  function init() {
+    if (bound || !el('oaAudioBtn') || !el('oaAudioPop')) return; // idempotent; silent when the HTML block is absent
+    bound = true;
+    el('oaAudioBtn').addEventListener('click', () => setOpen(el('oaAudioPop').hidden));
+    document.addEventListener('click', (e) => { if (!el('oaAudioPop').hidden && !el('oaAudio').contains(e.target)) setOpen(false); });
+    el('oaAudio').addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('oaAudioPop').hidden) { e.stopPropagation(); setOpen(false); el('oaAudioBtn').focus(); } });
+    el('oaAudioFile').addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) OA.audio.loadFile(f).catch(() => { el('oaAudioMeta').textContent = tx('bad'); });
+    });
+    el('oaAudioPlay').addEventListener('click', () => OA.audio.toggleRaw());
+    el('oaAudioRemove').addEventListener('click', () => { OA.audio.removeFile(); });
+    el('oaAudioVol').addEventListener('input', (e) => OA.audio.setVolume(Number(e.target.value)));
+    OA.audio.onChange(render);
+    render(OA.audio.state());
+  }
+  // Accepts 'pt' | 'en' or the stored form 'pt-BR' | 'en-US'.
+  const setLang = (l) => { lang = l === 'en' || l === 'en-US' ? 'en' : 'pt'; if (bound) render(OA.audio.state()); };
+  // Auto-init: module scripts run after parsing; classic scripts may run earlier, so wait for the DOM if needed.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+  return { init, setLang };
+})();
+/* === END OA SHARED: audio-loader v1 === */
+
+    // Page code. No imports, HID or external requests. Storage only through OA.store / OA.audio (contract v2).
+    // The codec below is inline-copied from src/dsp/eq0xcb.mjs (exports removed).
+    // PK/LS/HS: AutoEq, Copyright (c) 2018-2022 Jaakko Pasanen, MIT (notice above).
+    // LP/HP: RBJ Audio EQ Cookbook. Magnitude: this project's own stable expansion.
+    const SAMPLE_RATE = 96000;
+    const BAND_COUNT = 10;
+    const Q23_ONE = 2 ** 23;
+    const Q27_ONE = 2 ** 27;
+    const INT32_MIN = -2147483648;
+    const INT32_MAX = 2147483647;
+    const FILTER_KINDS = ['PK', 'LS', 'HS', 'LP', 'HP', 'OFF'];
+    const KINDS_WITH_GAIN = new Set(['PK', 'LS', 'HS']);
+    const PREAMBLE = [0x45, 0x51, 0x31, 0x23, 0xd6, 0x00, 0x00, 0x0a, 0x04, 0x05, 0x01, 0x0a, 0x00, 0x00];
+    function fromAutoEqSign({ a1, a2, b0, b1, b2 }) {
+      return { b0, b1, b2, a1: -a1, a2: -a2 };
+    }
+    function designPeaking(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+      const amp = Math.pow(10, gainDb / 40);
+      const w0 = (2 * Math.PI * freqHz) / sampleRate;
+      const alpha = Math.sin(w0) / (2 * qFactor);
+      const cosW0 = Math.cos(w0);
+      const a0 = 1 + alpha / amp;
+      return fromAutoEqSign({
+        a1: -(-2 * cosW0) / a0,
+        a2: -(1 - alpha / amp) / a0,
+        b0: (1 + alpha * amp) / a0,
+        b1: (-2 * cosW0) / a0,
+        b2: (1 - alpha * amp) / a0,
+      });
+    }
+    function designLowShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+      const amp = Math.pow(10, gainDb / 40);
+      const w0 = (2 * Math.PI * freqHz) / sampleRate;
+      const alpha = Math.sin(w0) / (2 * qFactor);
+      const cosW0 = Math.cos(w0);
+      const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
+      const a0 = (amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+      return fromAutoEqSign({
+        a1: -(-2 * ((amp - 1) + (amp + 1) * cosW0)) / a0,
+        a2: -((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+        b0: (amp * ((amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+        b1: (2 * amp * ((amp - 1) - (amp + 1) * cosW0)) / a0,
+        b2: (amp * ((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+      });
+    }
+    function designHighShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+      const amp = Math.pow(10, gainDb / 40);
+      const w0 = (2 * Math.PI * freqHz) / sampleRate;
+      const alpha = Math.sin(w0) / (2 * qFactor);
+      const cosW0 = Math.cos(w0);
+      const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
+      const a0 = (amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+      return fromAutoEqSign({
+        a1: -(2 * ((amp - 1) - (amp + 1) * cosW0)) / a0,
+        a2: -((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+        b0: (amp * ((amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+        b1: (-2 * amp * ((amp - 1) + (amp + 1) * cosW0)) / a0,
+        b2: (amp * ((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+      });
+    }
+    function designLowPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
+      const w0 = (2 * Math.PI * freqHz) / sampleRate;
+      const cosW0 = Math.cos(w0);
+      const alpha = Math.sin(w0) / (2 * qFactor);
+      const a0 = 1 + alpha;
+      return {
+        b0: ((1 - cosW0) / 2) / a0,
+        b1: (1 - cosW0) / a0,
+        b2: ((1 - cosW0) / 2) / a0,
+        a1: (-2 * cosW0) / a0,
+        a2: (1 - alpha) / a0,
+      };
+    }
+    function designHighPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
+      const w0 = (2 * Math.PI * freqHz) / sampleRate;
+      const cosW0 = Math.cos(w0);
+      const alpha = Math.sin(w0) / (2 * qFactor);
+      const a0 = 1 + alpha;
+      return {
+        b0: ((1 + cosW0) / 2) / a0,
+        b1: (-(1 + cosW0)) / a0,
+        b2: ((1 + cosW0) / 2) / a0,
+        a1: (-2 * cosW0) / a0,
+        a2: (1 - alpha) / a0,
+      };
+    }
+    function designSection(band, sampleRate = SAMPLE_RATE) {
+      switch (band.kind) {
+        case 'PK': return designPeaking(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+        case 'LS': return designLowShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+        case 'HS': return designHighShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+        case 'LP': return designLowPass(band.freqHz, band.qFactor, sampleRate);
+        case 'HP': return designHighPass(band.freqHz, band.qFactor, sampleRate);
+        case 'OFF': return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
+        default: throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+      }
+    }
+    function bandError(index, message) {
+      return new RangeError(`band ${index}: ${message}`);
+    }
+    function checkBand(band, index = 0) {
+      if (band === null || typeof band !== 'object') throw new TypeError(`band ${index}: not an object`);
+      if (!FILTER_KINDS.includes(band.kind)) {
+        throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
+      }
+      if (band.kind === 'OFF') return;
+      const nyquist = SAMPLE_RATE / 2;
+      if (!(Number.isFinite(band.freqHz) && band.freqHz > 0 && band.freqHz < nyquist)) {
+        throw bandError(index, `freqHz must be in (0, ${nyquist}), got ${band.freqHz}`);
+      }
+      if (!(Number.isFinite(band.qFactor) && band.qFactor > 0)) {
+        throw bandError(index, `qFactor must be > 0, got ${band.qFactor}`);
+      }
+      if (KINDS_WITH_GAIN.has(band.kind) && !Number.isFinite(band.gainDb)) {
+        throw bandError(index, `gainDb must be finite, got ${band.gainDb}`);
+      }
+    }
+    function isStable(a1, a2) {
+      return Math.abs(a2) < 1 && Math.abs(a1) < 1 + a2;
+    }
+    function encodeSection(section, index = 0) {
+      const ordered = [section.b0, section.b2, -section.a1, section.b1, -section.a2];
+      const words = ordered.map((coefficient) => {
+        const word = Math.round(coefficient * Q27_ONE) + 0;
+        if (!Number.isInteger(word) || word > INT32_MAX || word < INT32_MIN) {
+          throw bandError(index, 'coefficient does not fit Q27 in int32');
+        }
+        return word;
+      });
+      if (!isStable(-words[2] / Q27_ONE, -words[4] / Q27_ONE)) {
+        throw bandError(index, 'unstable section: poles on or outside the unit circle');
+      }
+      return words;
+    }
+    function preampWord(preampDb = 0) {
+      if (!Number.isFinite(preampDb)) {
+        throw new RangeError(`preamp must be a finite dB value, got ${preampDb}`);
+      }
+      if (preampDb > 0) throw new RangeError(`preamp must be <= 0 dB, got ${preampDb}`);
+      return Math.round(Math.pow(10, preampDb / 20) * Q23_ONE);
+    }
+    function crc16Ccitt(data) {
+      let register = 0xffff;
+      for (const byte of data) {
+        register ^= byte << 8;
+        for (let bit = 0; bit < 8; bit++) {
+          register = register & 0x8000 ? ((register << 1) ^ 0x1021) & 0xffff : (register << 1) & 0xffff;
+        }
+      }
+      return register;
+    }
+    function appendInt32LE(buffer, value) {
+      if (!Number.isInteger(value) || value > INT32_MAX || value < INT32_MIN) {
+        throw new RangeError(`value does not fit int32: ${value}`);
+      }
+      buffer.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+    }
+    function encodePayload(eqBands, preampDb = 0) {
+      if (!Array.isArray(eqBands) || eqBands.length !== BAND_COUNT) {
+        throw new RangeError(`expected ${BAND_COUNT} bands`);
+      }
+      eqBands.forEach(checkBand);
+      const payload = [...PREAMBLE];
+      appendInt32LE(payload, preampWord(preampDb));
+      eqBands.forEach((band, index) => {
+        for (const word of encodeSection(designSection(band), index)) appendInt32LE(payload, word);
+      });
+      const checksum = crc16Ccitt(payload);
+      payload.push(checksum & 0xff, checksum >>> 8);
+      return payload;
+    }
+    function magnitudeDb(eqBands, freqHz, sampleRate = SAMPLE_RATE) {
+      const omega = (2 * Math.PI * freqHz) / sampleRate;
+      const halfSin = Math.sin(omega / 2);
+      const uRe = 2 * halfSin * halfSin;
+      const uIm = Math.sin(omega);
+      const uSquaredRe = uRe * uRe - uIm * uIm;
+      const uSquaredIm = 2 * uRe * uIm;
+      const powerAt = (p0, p1, p2) => {
+        const sum = p0 + p1 + p2;
+        const slope = p1 + 2 * p2;
+        const re = sum - slope * uRe + p2 * uSquaredRe;
+        const im = -slope * uIm + p2 * uSquaredIm;
+        return re * re + im * im;
+      };
+      let totalDb = 0;
+      for (const band of eqBands) {
+        const { b0, b1, b2, a1, a2 } = designSection(band, sampleRate);
+        totalDb += 10 * Math.log10(powerAt(b0, b1, b2) / powerAt(1, a1, a2));
+      }
+      return totalDb;
+    }
+
+    // Sent tuples derived from test/fixtures/eq0xcb.reference.json, never `show`.
+    // Labels are text only. Padrão Auri is the UI action, Auri is the official label.
+    const PRESETS = {
+      padrao:{label:'Auri',pre:-2.8,b:[['PK',25,-.8,.3],['PK',150,-3,.69],['PK',2237,-10,1.41],['PK',4348,-6.1,3],['PK',4958,-8.3,2.72],['PK',7178,-10,3],['PK',11063,-10,3],['PK',520,3.1,.81],['PK',3046,5.7,1.51],['PK',5995,3.4,.59]]},
+      pref6:{label:'Natural',pre:-3,b:[['PK',25,-2,.4],['PK',167,-6.2,.53],['PK',2560,-8,1.03],['PK',4911,-8,4],['PK',7838,-6.7,4],['PK',11523,-6.5,4],['PK',270,.1,4],['PK',404,4.1,.48],['PK',2930,7,2.94],['PK',3537,4.5,4]]},
+      emv:{label:'Em V',pre:-7.8,b:[['PK',1084,-1.1,3],['PK',1930,-1.9,2.39],['PK',2334,-8,1.93],['PK',4454,-8,2.63],['PK',5568,-4.2,1.55],['PK',7504,-7.2,3],['PK',107,.7,.5],['PK',473,2.4,.5],['PK',6814,7.7,1.48],['PK',8862,8,3]]},
+      basshead:{label:'Basshead',pre:-5.7,b:[['PK',4613,-12,2.5],['PK',2246,-12,1.31],['PK',6746,-7.9,2.5],['PK',1122,-2.6,1.73],['PK',10302,-6.1,2.5],['PK',20,-5,.42],['PK',223,-4.9,.84],['PK',3184,2.5,2.5],['PK',3116,9.2,.3],['LS',286,8.2,.47]]},
+      energico:{label:'Enérgico',pre:-3.3,b:[['PK',25,-3.1,.5],['PK',97,-1.4,.68],['PK',2445,-8,.87],['PK',4725,-8,3],['PK',6920,-8,3],['PK',12439,-8,1.96],['PK',1838,5,.92],['PK',2904,4.5,2.62],['PK',3665,3.7,3],['PK',8376,8,2.42]]},
+      musical:{label:'Musical',pre:-2.3,b:[['PK',24,-3.2,.1],['PK',2277,-8,1.69],['PK',4588,-9.4,2.8],['PK',5979,-3.8,2],['PK',7184,-3.2,3],['PK',10638,-10.4,3],['PK',840,2.2,1.54],['PK',1393,2,1.85],['PK',3224,1.1,3],['PK',15808,2.2,2.5]]},
+      analitico:{label:'Analítico',pre:-.8,b:[['LS',120,-9.3,.44],['PK',7007,-9.1,2.5],['PK',147,-3.5,.48],['PK',4561,-12,2.5],['PK',2198,-12,1.42],['PK',255,-.4,1.78],['PK',11291,-7.8,2.5],['PK',1093,-2.7,1.17],['PK',3226,6.2,.3],['PK',3028,1.8,2.5]]},
+      referencia:{label:'JM-1',pre:-4,b:[['LS',297,-3.4,.81],['PK',11107,-4.8,2.5],['PK',1027,-1.7,1.98],['PK',20,-3.6,.57],['PK',7055,-3.8,2.5],['PK',4588,-8,2.5],['PK',2208,-8.2,1.83],['PK',595,3.5,.42],['PK',3144,5.6,1.69],['PK',3031,.5,2.5]]},
+      harman:{label:'Harman IE 2019',pre:-.5,b:[['LS',199,-5.6,.94],['PK',399,-1.4,1.62],['PK',2271,-8,1.32],['PK',256,-4.2,1.17],['PK',7566,-7.6,.43],['PK',4662,-6.8,2.5],['PK',9138,3.8,2.5],['PK',3318,7.8,1.32],['PK',5767,5.8,2.5],['PK',3209,1.1,1.33]]},
+      vdsf:{label:'VDSF',pre:-2.2,b:[['PK',25,-8,.5],['PK',80,-5,.52],['PK',210,-2,.79],['PK',1286,-5.9,1.34],['PK',1978,-7.4,1.67],['PK',2375,-5.4,2.4],['PK',4384,-4.7,3],['PK',4833,-6,3],['PK',7252,-7.6,3],['PK',1718,8,.5]]},
+      etymotic:{label:'Etymotic',pre:-2.2,b:[['PK',25,-8,.97],['PK',45,-8,.5],['PK',105,-5.3,.51],['PK',226,-1.4,.91],['PK',2190,-8,1.39],['PK',4276,-5,3],['PK',4847,-7.2,3],['PK',7260,-6.8,3],['PK',785,1.8,1.42],['PK',3120,6.5,1.01]]}
+    };
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+    const officialEntries = Object.entries(PRESETS);
+    for (const preset of Object.values(PRESETS)) {
+      preset.bands = preset.b.map(([kind, freqHz, gainDb, qFactor]) => ({kind, freqHz, gainDb, qFactor}));
+    }
+    PRESETS.neutro = {label:'Neutro',pre:-.5,bands:Array.from({length:10}, () => ({kind:'OFF'}))};
+    let locale = 'pt-BR';
+    const tr = (pt, en) => locale === 'pt-BR' ? pt : en;
+    const number = (value, digits = 0, plus = false) => new Intl.NumberFormat(locale, {
+      useGrouping:false,minimumFractionDigits:digits,maximumFractionDigits:digits,signDisplay:plus ? 'always' : 'auto'
+    }).format(value).replace(/-/g, '−');
+    const hexByte = value => value.toString(16).toUpperCase().padStart(2, '0');
+    const hexWord = value => '0x' + value.toString(16).toUpperCase().padStart(4, '0');
+    const hex = bytes => Array.from(bytes, hexByte).join(' ');
+    const encoder = new TextEncoder();
+    const select = $('#polar-preset');
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svgNode = (tag, attrs = {}, text) => {
+      const node = document.createElementNS(svgNS, tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    for (const [key, preset] of Object.entries(PRESETS)) {
+      const option = document.createElement('option');
+      option.value = key;
+      option.textContent = key === 'padrao' ? 'Auri · Padrão' : preset.label;
+      select.append(option);
+    }
+    for (const [index, [key, preset]] of officialEntries.entries()) {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = preset.label;
+      const code = document.createElement('code');
+      code.textContent = key;
+      li.append(label, code);
+      $(index < 7 ? '#official-list' : '#official-reference-list').append(li);
+    }
+
+    // Build all nine reports, including the empty report 8, from the real payload.
+    const defaultPayload = encodePayload(PRESETS.padrao.bands, PRESETS.padrao.pre);
+    const defaultReports = Array.from({length:9}, (_, index) => {
+      const report = new Uint8Array(31);
+      report[0] = index;
+      report.set(defaultPayload.slice(30 * index, 30 * (index + 1)), 1);
+      return report;
+    });
+    $('#report-hex').textContent = defaultReports.map((report, index) => 'R' + index + ' / ' + hex(report)).join('\n');
+    for (let copy = 0; copy < 2; copy++) {
+      const strip = document.createElement('span');
+      strip.className = 'tape-copy';
+      for (const [index, report] of defaultReports.entries()) {
+        const mark = document.createElement('b');
+        mark.textContent = 'R' + index + ' / ';
+        strip.append(mark, document.createTextNode(hex(report) + '   ·   '));
+      }
+      $('#tape-track').append(strip);
+    }
+    $('#tape-track').dataset.payloadCrc = hexWord(defaultPayload[218] | (defaultPayload[219] << 8));
+    for (let index = 0; index < 9; index++) {
+      const x = 25 + index * 106;
+      const dataWidth = index < 7 ? 90 : index === 7 ? 30 : 0;
+      const group = svgNode('g');
+      group.append(svgNode('text', {x:x + 46.5,y:23,'text-anchor':'middle'}, String(index).padStart(2,'0')));
+      group.append(svgNode('rect', {x,y:37,width:3,height:57,fill:'#29251F'}));
+      if (dataWidth) group.append(svgNode('rect', {x:x + 3,y:37,width:dataWidth,height:57,fill:'#8C2F2F',opacity:'.19'}));
+      if (dataWidth < 90) group.append(svgNode('rect', {x:x + 3 + dataWidth,y:37,width:90 - dataWidth,height:57,fill:'url(#zeros)'}));
+      group.append(svgNode('rect', {x,y:37,width:93,height:57,class:'engraved'}));
+      for (let byte = 1; byte < 31; byte++) {
+        group.append(svgNode('path', {d:`M${x + byte * 3} 37V94`,stroke:'#EFE6D2','stroke-width':'.55'}));
+      }
+      group.append(svgNode('text', {x:x + 46.5,y:115,'text-anchor':'middle'}, (index < 7 ? 30 : index === 7 ? 10 : 0) + ' B'));
+      $('#report-frames').append(group);
+    }
+
+    // Complex transfer of the quantized words, evaluated in the same stable u basis.
+    let polarSections = [];
+    let polarPre = 1;
+    let tracer;
+    function complexResponse(freqHz) {
+      const omega = 2 * Math.PI * freqHz / SAMPLE_RATE;
+      const uRe = 2 * Math.sin(omega / 2) ** 2;
+      const uIm = Math.sin(omega);
+      const u2Re = uRe * uRe - uIm * uIm;
+      const u2Im = 2 * uRe * uIm;
+      const polynomial = (p0, p1, p2) => [p0 + p1 + p2 - (p1 + 2 * p2) * uRe + p2 * u2Re, -(p1 + 2 * p2) * uIm + p2 * u2Im];
+      let real = polarPre, imaginary = 0;
+      for (const {b0,b1,b2,a1,a2} of polarSections) {
+        const [nr, ni] = polynomial(b0,b1,b2);
+        const [dr, di] = polynomial(1,a1,a2);
+        const divisor = dr * dr + di * di;
+        const re = (nr * dr + ni * di) / divisor;
+        const im = (ni * dr - nr * di) / divisor;
+        [real, imaginary] = [real * re - imaginary * im, real * im + imaginary * re];
+      }
+      return {real,imaginary};
+    }
+    const polarPoint = (response, conjugate = false) => ({x:322 + response.real * 145,y:200 - response.imaginary * 145 * (conjugate ? -1 : 1)});
+    const polarFrequencies = [0, ...Array.from({length:1450}, (_, i) => Math.pow(48000, i / 1449))];
+    function drawPolar() {
+      const preset = PRESETS[select.value];
+      polarSections = preset.bands.map((band, index) => {
+        const [b0,b2,minusA1,b1,minusA2] = encodeSection(designSection(band),index).map(word => word / Q27_ONE);
+        return {b0,b1,b2,a1:-minusA1,a2:-minusA2};
+      });
+      polarPre = preampWord(preset.pre) / Q23_ONE;
+      const plot = $('#polar-plot');
+      plot.replaceChildren();
+      plot.append(svgNode('title', {}, tr('Resposta polar de ' + preset.label, 'Polar response of ' + preset.label)));
+      for (const radius of [.25,.5,.75,1,1.25]) {
+        plot.append(svgNode('circle', {cx:322,cy:200,r:radius * 145,fill:'none',stroke:'#6B5E4C','stroke-width':radius === 1 ? '.7' : '.4',opacity:radius === 1 ? '.5' : '.26','stroke-dasharray':radius === 1 ? 'none' : '2 4'}));
+      }
+      for (let degree = 0; degree < 180; degree += 30) {
+        const radians = degree * Math.PI / 180;
+        const dx = Math.cos(radians) * 183, dy = Math.sin(radians) * 183;
+        plot.append(svgNode('path', {d:`M${322 - dx} ${200 - dy}L${322 + dx} ${200 + dy}`,class:'engraved',opacity:'.22'}));
+      }
+      plot.append(svgNode('path', {d:'M53 200H628M322 14V384',class:'engraved'}));
+      plot.append(svgNode('path', {d:'M622 197L628 200L622 203M319 20L322 14L325 20',class:'engraved'}));
+      plot.append(svgNode('text', {x:631,y:192}, 'Re H'));
+      plot.append(svgNode('text', {x:334,y:22}, 'Im H'));
+      plot.append(svgNode('text', {x:311,y:216}, '0'));
+      plot.append(svgNode('text', {x:471,y:215}, '+1'));
+      plot.append(svgNode('text', {x:333,y:58}, '+j'));
+      plot.append(svgNode('text', {x:333,y:348}, '−j'));
+      plot.append(svgNode('text', {x:62,y:30,'letter-spacing':'.08em'}, tr('PLANO COMPLEXO', 'COMPLEX PLANE')));
+      plot.append(svgNode('text', {x:62,y:46}, 'H(eʲω) · Q27 / Q23'));
+      const points = polarFrequencies.map(complexResponse);
+      const pathData = conjugate => points.map((response, i) => {
+        const p = polarPoint(response, conjugate);
+        return (i ? 'L' : 'M') + p.x.toFixed(3) + ',' + p.y.toFixed(3);
+      }).join('');
+      plot.append(svgNode('path', {d:pathData(true),class:'polar-negative'}));
+      const responsePath = svgNode('path', {d:pathData(false),class:'polar-curve'});
+      plot.append(responsePath);
+      plot.append(svgNode('path', {d:'M173 196L181 204M173 204L181 196',class:'accent-stroke','stroke-width':'1.2'}));
+      plot.append(svgNode('text', {x:163,y:226,'text-anchor':'end',class:'accent-fill'}, '(−1, 0)'));
+      plot.append(svgNode('text', {x:163,y:240,'text-anchor':'end'}, tr('marco histórico', 'historical marker')));
+      const tickFrequencies = [20,150,1000,5000,10000,20000,48000];
+      const offsets = [[13,-32],[29,24],[-68,-27],[-69,25],[24,-30],[29,38],[46,-10]];
+      if (select.value !== 'neutro') tickFrequencies.forEach((freq, index) => {
+        const p = polarPoint(complexResponse(freq));
+        const [dx,dy] = offsets[index];
+        const tx = Math.max(35,Math.min(610,p.x + dx));
+        const ty = Math.max(35,Math.min(370,p.y + dy));
+        plot.append(svgNode('circle', {cx:p.x,cy:p.y,r:2.2,fill:'#EFE6D2',stroke:'#8C2F2F','stroke-width':'.9'}));
+        plot.append(svgNode('path', {d:`M${p.x} ${p.y}L${tx} ${ty - 4}`,class:'engraved',opacity:'.45'}));
+        plot.append(svgNode('text', {x:tx,y:ty,'text-anchor':dx < 0 ? 'end' : 'start',class:'accent-fill'}, freq >= 1000 ? number(freq / 1000) + ' kHz' : number(freq) + ' Hz'));
+      });
+      if (select.value === 'neutro') {
+        const p = polarPoint(complexResponse(1000));
+        plot.append(svgNode('circle', {cx:p.x,cy:p.y,r:3,fill:'#8C2F2F'}));
+        plot.append(svgNode('text', {x:p.x + 10,y:p.y - 13}, '0–48 kHz · 10 × OFF'));
+      }
+      tracer = svgNode('circle', {class:'polar-tracer',cx:0,cy:0});
+      plot.append(tracer);
+      moveTracer(0);
+      const unquantizedAt1k = magnitudeDb(preset.bands,1000) + preset.pre;
+      $('#polar-readout').textContent = 'pre ' + number(preset.pre,1) + ' dB · CRC ' + hexWord(crc16Ccitt(encodePayload(preset.bands,preset.pre).slice(0,218))) + '\n|H(1 kHz)| ≈ ' + number(unquantizedAt1k,2) + ' dB';
+      $('#polar-readout').style.whiteSpace = 'pre-line';
+      plot.dataset.preset = select.value;
+    }
+    function moveTracer(seconds) {
+      if (!tracer) return;
+      const f = 20 * Math.pow(2400,(seconds % 22) / 22);
+      const p = polarPoint(complexResponse(f));
+      tracer.setAttribute('cx',p.x);
+      tracer.setAttribute('cy',p.y);
+    }
+
+    // A 72 kHz sinusoid and its negative-frequency 24 kHz alias coincide at n/fs.
+    const aliasInput = $('#alias-frequency');
+    const sampleDotNodes = [], sampleStemNodes = [];
+    for (let n = 0; n <= 12; n++) {
+      const x = 35 + n * 850 / 12;
+      const stem = svgNode('path', {stroke:'#8C2F2F','stroke-width':'.6',opacity:'.28'});
+      const dot = svgNode('circle', {cx:x,cy:105,r:3});
+      $('#sample-stems').append(stem); $('#sample-dots').append(dot);
+      sampleDotNodes.push(dot); sampleStemNodes.push(stem);
+    }
+    let samplePhase = .32;
+    let samplePaused = false;
+    function drawSampling(phase = samplePhase) {
+      const high = Number(aliasInput.value) * 1000;
+      const alias = SAMPLE_RATE - high;
+      const yAt = (f,time) => 105 - 64 * Math.sin(2 * Math.PI * f * time + phase);
+      const path = f => Array.from({length:801}, (_,i) => {
+        const time = i / 800 * .000125;
+        return (i ? 'L' : 'M') + (35 + i / 800 * 850).toFixed(2) + ',' + yAt(f,time).toFixed(2);
+      }).join('');
+      $('#sample-high').setAttribute('d',path(high));
+      $('#sample-alias').setAttribute('d',path(-alias));
+      for (let n = 0; n <= 12; n++) {
+        const x = 35 + n * 850 / 12, y = yAt(high,n / SAMPLE_RATE);
+        sampleDotNodes[n].setAttribute('cy',y);
+        sampleStemNodes[n].setAttribute('d',`M${x} 105V${y}`);
+      }
+      $('#alias-readout').textContent = number(high / 1000) + ' kHz → alias ' + number(alias / 1000) + ' kHz';
+    }
+    aliasInput.addEventListener('input', () => drawSampling());
+    $('#sampling-pause').addEventListener('click', () => {
+      samplePaused = !samplePaused;
+      $('#sampling-pause').setAttribute('aria-pressed',String(samplePaused));
+      updateMotionLabels();
+    });
+    let tapePaused = false;
+    $('#tape-toggle').addEventListener('click', () => {
+      tapePaused = !tapePaused;
+      $('#tape-wrap').classList.toggle('paused',tapePaused);
+      $('#tape-toggle').setAttribute('aria-pressed',String(tapePaused));
+      updateMotionLabels();
+    });
+    function updateMotionLabels() {
+      $('#tape-toggle').textContent = tapePaused ? tr('Retomar fita','Resume tape') : tr('Pausar fita','Pause tape');
+      $('#sampling-pause').textContent = samplePaused ? tr('Retomar','Resume') : tr('Pausar','Pause');
+    }
+
+    const preampInput = $('#preamp-input');
+    const parsePreamp = text => {
+      const normalized = text.trim().replace(/−/g,'-').replace(',','.');
+      return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized) ? Number(normalized) : NaN;
+    };
+    function updatePreamp() {
+      try {
+        const value = parsePreamp(preampInput.value);
+        const word = preampWord(value);
+        const bytes = [];
+        appendInt32LE(bytes,word);
+        $('#preamp-bytes').textContent = hex(bytes);
+        $('#preamp-word').textContent = 'Q23 / ' + new Intl.NumberFormat(locale).format(word);
+        $('#preamp-error').textContent = value < -25.5 || value > -.5 ? tr('Codificável, mas fora da faixa nominal do gate.','Encodable, but outside the nominal gate range.') : tr('Exemplo de bytes, não aprovação de uma curva.','Byte example, not approval of a curve.');
+        $('#preamp-widget').dataset.invalid = 'false';
+        preampInput.setAttribute('aria-invalid','false');
+      } catch {
+        $('#preamp-bytes').textContent = tr('RECUSADO','REFUSED');
+        $('#preamp-word').textContent = 'Q23 / ···';
+        $('#preamp-error').textContent = tr('Use um número finito ≤ 0 dB. Ganho positivo antes das bandas é recusado.','Enter a finite number ≤ 0 dB. Positive gain before the bands is refused.');
+        $('#preamp-widget').dataset.invalid = 'true';
+        preampInput.setAttribute('aria-invalid','true');
+      }
+    }
+    function updateCrc() {
+      const bytes = encoder.encode($('#crc-input').value);
+      const crc = crc16Ccitt(bytes);
+      $('#crc-output').textContent = hexWord(crc);
+      $('#crc-bytes').textContent = 'LE / ' + hex([crc & 255,crc >>> 8]) + ' · ' + number(bytes.length) + ' B';
+    }
+    preampInput.addEventListener('input',updatePreamp);
+    $('#crc-input').addEventListener('input',updateCrc);
+    select.addEventListener('change',drawPolar);
+    let toastTimer;
+    function toast(text) {
+      clearTimeout(toastTimer);
+      $('#toast').textContent = text;
+      $('#toast').classList.add('visible');
+      toastTimer = setTimeout(() => $('#toast').classList.remove('visible'),3800);
+    }
+    $('[data-action="neutral"]').addEventListener('click', () => {
+      select.value = 'neutro'; drawPolar();
+      toast(tr('Figura: Neutro, 10 × OFF, preamp −0,5 dB. Nenhuma escrita.','Figure: Neutral, 10 × OFF, −0.5 dB preamp. Nothing written.'));
+    });
+    $('[data-action="default"]').addEventListener('click', () => {
+      select.value = 'padrao'; drawPolar();
+      toast(tr('Figura: Padrão Auri, preset padrao oficial. Nenhuma escrita.','Figure: Auri default, official padrao preset. Nothing written.'));
+    });
+    $('[data-action="write"]').addEventListener('click', () => toast(tr('Mock de documentação: nenhuma conexão HID ou gravação. No app, o gate e a confirmação vêm antes de cada write.','Documentation mock: no HID connection or writes. In the app, the gate and explicit confirmation precede every write.')));
+
+    // Copy fallback deliberately handles file:// and denied clipboard permissions.
+    async function copyText(text) {
+      if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(text); return true; } catch { /* fallback */ }
+      }
+      const oldFocus = document.activeElement;
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('aria-label',tr('Texto para copiar','Text to copy'));
+      area.style.cssText = 'position:fixed;left:-9999px;top:0;';
+      document.body.append(area);
+      area.select();
+      let copied = false;
+      try { copied = document.execCommand('copy'); } catch { copied = false; }
+      area.remove();
+      oldFocus?.focus({preventScroll:true});
+      return copied;
+    }
+    $$('[data-copy]').forEach(button => button.addEventListener('click',async () => {
+      const target = document.getElementById(button.dataset.copy);
+      if (!target || (button.dataset.copy === 'preamp-bytes' && preampInput.getAttribute('aria-invalid') === 'true')) {
+        toast(tr('Nada válido para copiar.','No valid bytes to copy.')); return;
+      }
+      const copied = await copyText(target.textContent);
+      toast(copied ? tr('Copiado para a área de transferência.','Copied to clipboard.') : tr('Cópia bloqueada pelo navegador. Selecione o texto para copiar.','Clipboard blocked by the browser. Select the text to copy.'));
+    }));
+
+    const searchDialog = $('#search-dialog');
+    const shortcutsDialog = $('#shortcuts-dialog');
+    const searchInput = $('#search-input');
+    const chapters = $$('.chapter');
+    const fold = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    let searchIndex = [];
+    function buildIndex() {
+      searchIndex = chapters.map(section => {
+        const title = $('h2 .heading-link',section).textContent;
+        const text = section.textContent.replace(/\s+/g,' ').trim();
+        return {id:section.id,title,text,folded:fold(text)};
+      });
+    }
+    function renderSearch() {
+      const query = fold(searchInput.value.trim());
+      const terms = query.split(/\s+/).filter(Boolean);
+      const matches = searchIndex.filter(entry => terms.every(term => entry.folded.includes(term)));
+      const results = $('#search-results');
+      results.replaceChildren();
+      for (const entry of matches) {
+        const li = document.createElement('li');
+        const link = document.createElement('a');
+        link.href = '#' + entry.id;
+        const strong = document.createElement('strong');
+        strong.textContent = entry.title;
+        const snippet = document.createElement('small');
+        const hit = terms.length ? entry.folded.indexOf(terms[0]) : 0;
+        const start = Math.max(0,hit - 42);
+        const excerpt = entry.text.slice(start,start + 155);
+        snippet.textContent = (start ? '…' : '') + excerpt + '…';
+        link.append(strong,snippet);
+        link.addEventListener('click', () => {
+          searchDialog.close();
+          const heading = $('h2',document.getElementById(entry.id));
+          heading.setAttribute('tabindex','-1');
+          requestAnimationFrame(() => heading.focus({preventScroll:true}));
+        });
+        li.append(link); results.append(li);
+      }
+      $('#search-count').textContent = number(matches.length) + tr(' seções · pesquisa sem rede',' sections · no network requests');
+      if (!matches.length) {
+        const li = document.createElement('li');
+        li.className = 'fine';
+        li.textContent = tr('Nenhum resultado. Tente “flash”, “Q27” ou “polos”.','No results. Try “flash”, “Q27” or “poles”.');
+        results.append(li);
+      }
+    }
+    function openSearch() {
+      if (shortcutsDialog.open) shortcutsDialog.close();
+      if (!searchDialog.open) searchDialog.showModal();
+      renderSearch(); searchInput.focus(); searchInput.select();
+    }
+    function openShortcuts() {
+      if (searchDialog.open) searchDialog.close();
+      if (!shortcutsDialog.open) shortcutsDialog.showModal();
+    }
+    $('#search-open').addEventListener('click',openSearch);
+    $('#shortcuts-open').addEventListener('click',openShortcuts);
+    searchInput.addEventListener('input',renderSearch);
+    searchDialog.addEventListener('keydown',event => {
+      if (!['ArrowDown','ArrowUp','Enter'].includes(event.key)) return;
+      const links = $$('#search-results a');
+      if (!links.length) return;
+      if (event.key === 'Enter' && document.activeElement === searchInput) {
+        event.preventDefault(); links[0].click(); return;
+      }
+      if (event.key === 'Enter') return;
+      event.preventDefault();
+      const current = links.indexOf(document.activeElement);
+      const next = current < 0 ? (event.key === 'ArrowDown' ? 0 : links.length - 1) : (current + (event.key === 'ArrowDown' ? 1 : -1) + links.length) % links.length;
+      links[next].focus();
+    });
+    $$('[data-close]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
+    $$('dialog').forEach(dialog => dialog.addEventListener('click',event => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+    }));
+    document.addEventListener('keydown',event => {
+      const editing = event.target instanceof Element && event.target.matches('input,textarea,select,[contenteditable="true"]');
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault(); openSearch(); return;
+      }
+      if (editing || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === '/' && !searchDialog.open && !shortcutsDialog.open) {
+        event.preventDefault(); openSearch();
+      } else if (event.key === '?' && !searchDialog.open && !shortcutsDialog.open) {
+        event.preventDefault(); openShortcuts();
+      }
+    });
+
+    // Save both legal versions once; switching swaps complete notices, not fragments.
+    const legalCopy = {'pt-BR':$('#legal-primary').innerHTML,'en-US':$('#legal-secondary').innerHTML};
+    const translatable = $$('[data-en]');
+    translatable.forEach(node => { node.dataset.pt = node.textContent; });
+    function setLocale(nextLocale) {
+      if (!['pt-BR','en-US'].includes(nextLocale)) return;
+      const oldPreamp = parsePreamp(preampInput.value);
+      locale = nextLocale;
+      document.documentElement.lang = locale;
+      document.title = tr('O protocolo 0xCB e seus limites · open-auri','Protocol 0xCB and its limits · open-auri');
+      translatable.forEach(node => {
+        node.textContent = locale === 'pt-BR' ? node.dataset.pt : node.dataset.en;
+        node.lang = locale;
+      });
+      const langButton = $('#lang');
+      langButton.querySelector('.pt').classList.toggle('on',locale === 'pt-BR');
+      langButton.querySelector('.en').classList.toggle('on',locale === 'en-US');
+      langButton.setAttribute('aria-label',tr('Switch to English','Mudar para português'));
+      OA.audioUI.setLang(locale);
+      $$('[data-num]').forEach(node => { node.textContent = number(Number(node.dataset.num),Number(node.dataset.digits || 0)); });
+      if (Number.isFinite(oldPreamp)) preampInput.value = preampInput.value.trim().replace(/[.,]/g,locale === 'pt-BR' ? ',' : '.');
+      const alternate = locale === 'pt-BR' ? 'en-US' : 'pt-BR';
+      $('#legal-primary').innerHTML = legalCopy[locale];
+      $('#legal-primary').lang = locale;
+      $('#legal-secondary').innerHTML = legalCopy[alternate];
+      $('#legal-secondary').lang = alternate;
+      $('#legal-language-label').textContent = tr('PT-BR / TEXTO INTEGRAL','EN-US / FULL NOTICE');
+      $('#legal-alternate-label').textContent = tr('Read the full notice in English (en-US)','Ler o aviso completo em português (pt-BR)');
+      select.options[0].textContent = tr('Auri · Padrão','Auri · Default');
+      select.options[select.options.length - 1].textContent = tr('Neutro','Neutral');
+      $('#search-input').placeholder = tr('Polos, CRC, flash, Natural…','Poles, CRC, flash, Natural…');
+      $('.main-nav').setAttribute('aria-label',tr('Principal','Main'));
+      renderLocalData();
+      $$('.dialog-close').forEach(button => button.setAttribute('aria-label',tr('Fechar sobreposição','Close overlay')));
+      $('#shortcuts-open').setAttribute('aria-label',tr('Atalhos do teclado','Keyboard shortcuts'));
+      $('#polar-preset').setAttribute('aria-label',tr('Preset da figura polar','Polar figure preset'));
+      buildIndex(); renderSearch(); updatePreamp(); updateCrc(); drawPolar(); drawSampling(); updateMotionLabels();
+    }
+    $('#lang').addEventListener('click', () => {
+      const next = locale === 'pt-BR' ? 'en-US' : 'pt-BR';
+      OA.store.setLang(next);
+      setLocale(next);
+    });
+
+    // "Dados neste navegador": show what exists now, and erase everything on explicit confirmation.
+    let audioStored = false;
+    function renderLocalData() {
+      const K = OA.store.KEYS;
+      const has = key => OA.store.get(key, null) !== null;
+      const present = tr('presente','present'), absent = tr('ausente','absent');
+      const values = {
+        lang: has(K.lang) ? OA.store.get(K.lang,'') : absent,
+        current: has(K.current) ? present : absent,
+        journal: has(K.journal) ? number(OA.store.journal().length) + tr(' registros',' entries') : absent,
+        flashDay: has(K.flashDay) ? number(OA.store.flashCounts().today) + tr(' hoje',' today') : absent,
+        flashTotal: has(K.flashTotal) ? number(OA.store.flashCounts().total) : absent,
+        previewDb: has(K.previewDb) ? number(Number(OA.store.get(K.previewDb,0))) + ' dB' : absent,
+        flashSession: has(K.flashSession) ? number(OA.store.flashCounts().session) : absent,
+        audio: audioStored ? present : absent,
+      };
+      $$('[data-store-state]').forEach(cell => { cell.textContent = values[cell.dataset.storeState] ?? absent; });
+    }
+    OA.audio.onChange(state => { audioStored = !!state.file; renderLocalData(); });
+    OA.audio.ready.then(() => { audioStored = !!OA.audio.state().file; renderLocalData(); });
+    $('#clear-local').addEventListener('click', async () => {
+      const ok = confirm(tr('Apagar todos os dados do open-auri neste navegador (idioma, curva, diário, contadores, volume da prévia e arquivo de áudio)? O cabo não é afetado.','Erase all open-auri data in this browser (language, curve, journal, counters, preview volume and audio file)? The cable is not affected.'));
+      if (!ok) return;
+      OA.audio.stop();
+      Object.values(OA.store.KEYS).forEach(key => OA.store.remove(key));
+      await OA.audio.removeFile();
+      try { if (globalThis.indexedDB) indexedDB.deleteDatabase('oa-v2'); } catch { /* blocked: the record is already removed */ }
+      audioStored = false;
+      renderLocalData();
+      toast(tr('Dados locais apagados. Nada foi enviado.','Local data erased. Nothing was sent.'));
+    });
+
+    const tocLinks = $$('.toc ol a');
+    let scrollQueued = false;
+    function updateReadingPosition() {
+      const barHeight = $('.cable-bar').getBoundingClientRect().height;
+      let current = chapters[0];
+      for (const chapter of chapters) if (chapter.getBoundingClientRect().top <= barHeight + 90) current = chapter;
+      tocLinks.forEach(link => {
+        const active = link.getAttribute('href') === '#' + current.id;
+        link.classList.toggle('active',active);
+        if (active) link.setAttribute('aria-current','location');
+        else link.removeAttribute('aria-current');
+      });
+      scrollQueued = false;
+    }
+    function queueReadingPosition() {
+      if (!scrollQueued) { scrollQueued = true; requestAnimationFrame(updateReadingPosition); }
+    }
+    addEventListener('scroll',queueReadingPosition,{passive:true});
+    addEventListener('resize',queueReadingPosition,{passive:true});
+
+    // One throttled animation loop; offscreen figures stop calculating.
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    let polarVisible = true, samplingVisible = false;
+    const visibility = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target.id === 'polar-plot') polarVisible = entry.isIntersecting;
+        if (entry.target.id === 'sampling-plot') samplingVisible = entry.isIntersecting;
+      }
+    },{rootMargin:'100px'});
+    visibility.observe($('#polar-plot')); visibility.observe($('#sampling-plot'));
+    let animationFrame = 0, lastFrame = 0;
+    function animate(time) {
+      if (reducedMotion.matches) { animationFrame = 0; return; }
+      if (time - lastFrame >= 40) {
+        if (polarVisible) moveTracer(time / 1000);
+        if (samplingVisible && !samplePaused) { samplePhase += .028; drawSampling(); }
+        lastFrame = time;
+      }
+      animationFrame = requestAnimationFrame(animate);
+    }
+    function syncMotion() {
+      cancelAnimationFrame(animationFrame); animationFrame = 0;
+      if (!reducedMotion.matches) animationFrame = requestAnimationFrame(animate);
+      else drawSampling();
+    }
+    reducedMotion.addEventListener('change',syncMotion);
+    setLocale(OA.store.getLang());
+    updateReadingPosition();
+    syncMotion();
+    if (document.fonts) document.fonts.ready.then(queueReadingPosition);
+  </script>
+</body>
+</html>

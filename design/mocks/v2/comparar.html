@@ -1,0 +1,2405 @@
+<!doctype html>
+<!--
+  open-auri · design mock v2 · comparar.html (Comparar · som sobre som · homenagem a Les Paul)
+
+  TODO antes de publicar:
+  - Trocar as cópias inline de src/dsp/eq0xcb.mjs e design/analysis/gate.mjs por imports do módulo real
+    (aqui são cópias porque o mock precisa abrir via file:// sem imports).
+  - THRESHOLDS: os valores vêm de design/analysis/envelope.json (aggregate.*). sectionPeakDb é recalculado
+    a partir das 11 curvas oficiais; o QA deve confirmar que bate com o máximo de quantizedSinglePeak do envelope.
+  - Confirmar paridade de bytes: encodePayload() das 11 curvas contra test/fixtures/eq0xcb.reference.json
+    e CRC 0x4FFF do Neutro (10 × OFF, preamp −0,5 dB).
+  - Armazenamento: segue o OA STORAGE CONTRACT v2 (ver curva.html) via os blocos "OA SHARED: storage v2" e
+    "OA SHARED: audio-loader v1" copiados sem alteração. "Salvar na Biblioteca" ainda usa open-auri:biblioteca,
+    que não está no contrato: definir a chave da Biblioteca no contrato. O aviso de volume (N3) deriva o nível da
+    última gravação da última entrada de oa.v2.journal (sem chave própria).
+  - HS / LP / HP: EXPERIMENTAL (a página oficial nunca gravou). Importação só entra na pista se passar no gate v2;
+    edição só na camada Engenharia da Curva; gravação pede confirmação extra. Validar o firmware na bancada.
+  - OUVIR A/B: escuta só no navegador (OA.audio, cadeias Q27 exatas a 96 kHz, nível igualado por levelDb);
+    checar a escuta em Windows/macOS e em taxa aproximada.
+  - O ajuste (solver) de som sobre som é heurístico (gulosa + descida por coordenadas em 10 seções PK/LS/OFF);
+    revisar desempenho e qualidade antes de publicar; considerar Web Worker.
+  - Gravar no cabo aqui é só simulação: ligar ao transporte WebHID real (relatório 0xCB, VID 0x3302 PID 0x8902)
+    só depois da bancada de testes.
+  - Revisar traduções EN com falante nativo; revisar a cópia pt-BR.
+  - Revisar contraste AA dos rótulos gravados sobre o esmalte martelado.
+  - Fontes: Oswald e Special Elite (Google Fonts) além das fontes do chrome; considerar self-host.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparar · open-auri</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Special+Elite&display=swap">
+<style>
+:root{
+  --ink:#0F0F0E; --ink-2:#171715; --text:#ECE7DD; --muted:#8F8A80; --rule:rgba(236,231,221,.12); --danger:#E5484D;
+  --accent:#F2B33D; --accent-soft:rgba(242,179,61,.16);
+  --enamel:#5f6462; --enamel-d:#3f4342; --cream:#EFE4C8; --paper:#EFE6CF; --bakelite:#121110; --engrave:#E9E4D6;
+  --ui:'Geist',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace; --plate:'Oswald','Geist',sans-serif; --tape:'Special Elite','Courier New',monospace;
+  --hammer:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='260'><filter id='h' x='0' y='0' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='.045' numOctaves='3' seed='11' stitchTiles='stitch'/><feDiffuseLighting lighting-color='%23a4a8a6' surfaceScale='2.4' diffuseConstant='1.04'><feDistantLight azimuth='225' elevation='56'/></feDiffuseLighting></filter><rect width='260' height='260' filter='url(%23h)'/></svg>");
+}
+*{box-sizing:border-box}
+html{color-scheme:dark}
+body{margin:0;background:var(--ink);color:var(--text);font-family:Geist,system-ui,sans-serif;font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.mono{font-family:var(--mono)}
+.skip{position:absolute;left:12px;top:-60px;z-index:100;background:var(--accent);color:#1a1408;padding:8px 12px;border-radius:4px;text-decoration:none}
+.skip:focus{top:8px}
+
+/* ================= CHROME (identical across pages) ================= */
+.cable-bar{position:sticky;top:0;z-index:60;background:#171715;border-bottom:1px solid var(--rule);font-family:Geist,sans-serif}
+.cable-inner{max-width:1480px;margin:auto;min-height:56px;padding:0 24px;display:flex;align-items:center;gap:22px}
+.wordmark{font:italic 27px/1 'Instrument Serif',serif;text-decoration:none;white-space:nowrap;color:var(--text)}
+.main-nav{display:flex;gap:15px;align-self:stretch;align-items:center;margin:auto;font-size:11.5px;white-space:nowrap}
+.main-nav a{text-decoration:none;position:relative;color:#cfc9be}
+.main-nav a:hover{color:var(--text)}
+.main-nav a[aria-current="page"]{color:var(--text)}
+.main-nav a[aria-current="page"]:after{content:"";position:absolute;left:0;right:0;bottom:-19px;height:2px;background:var(--accent)}
+.cable-actions{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.cable-actions button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:7px 10px;font-size:11px;line-height:1.2;cursor:pointer;color:var(--text)}
+.cable-actions button:hover{border-color:var(--muted)}
+.cable-actions button.primary{background:var(--accent);border-color:var(--accent);color:#120a05;font-weight:650}
+.cable-actions button.primary:hover{background:#F7C462}
+.cable-state{font-size:10.5px;color:#b5afa4;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
+.status-dot{color:var(--muted);font-size:8px;margin-right:5px}
+.dirty{font:9.5px/1.35 var(--mono);color:var(--muted);max-width:100px;white-space:normal}
+.dirty.has{color:var(--accent)}
+.language{border:0!important;font-family:var(--mono)!important;color:var(--muted)}
+.language .on{color:var(--text)}
+@media (max-width:1100px){.cable-inner{flex-wrap:wrap;padding-top:10px;padding-bottom:8px;gap:0 18px}.main-nav{order:3;width:100%;overflow:auto;margin:10px 0 0;padding-bottom:6px}.main-nav a[aria-current="page"]:after{bottom:-6px}.cable-actions{margin-left:auto}}
+/* === OA SHARED: audio-loader v1 (CSS) === */
+.oa-audio{position:relative}
+.oa-audio-btn{display:inline-flex;align-items:center;gap:6px;max-width:190px}
+.oa-audio-btn .oa-audio-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.oa-audio-btn.has-file{border-color:color-mix(in srgb,var(--accent) 55%,transparent)!important;color:var(--accent)}
+.oa-audio-pop{position:absolute;left:0;top:calc(100% + 10px);z-index:80;width:320px;max-width:calc(100vw - 24px);background:#1b1b19;border:1px solid #34332f;border-radius:6px;padding:14px;box-shadow:0 18px 40px rgba(0,0,0,.65);font:12px/1.45 var(--ui);color:var(--text);white-space:normal}
+.oa-audio-pop h3{margin:0 0 10px;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.oa-audio-load{position:relative;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);color:var(--accent);border-radius:3px;padding:7px 10px;cursor:pointer;font-size:12px}
+.oa-audio-load:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+.oa-audio-file{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.oa-audio-meta{margin:10px 0;font:11px/1.5 var(--mono);color:#cfc9be;word-break:break-word}
+.oa-audio-meta b{color:var(--text);font-weight:500}
+.oa-audio-row{display:flex;gap:8px;flex-wrap:wrap}
+.oa-audio-row button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:6px 10px;font-size:11.5px}
+.oa-audio-row button:disabled{opacity:.45;cursor:not-allowed}
+.oa-audio-vol{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-top:12px;font-size:11.5px;color:#cfc9be}
+.oa-audio-vol input{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.oa-audio-vol output{font:11px var(--mono);color:var(--accent)}
+.oa-audio-note{margin:10px 0 0;font-size:11px;color:var(--muted)}
+.oa-audio-rate{margin:6px 0 0;font:10.5px var(--mono);color:var(--muted)}
+.oa-audio-rate.approx{color:color-mix(in srgb,var(--accent) 40%,white)}
+@media (max-width:720px){.cable-actions{flex-wrap:wrap;row-gap:6px}.oa-audio-btn .oa-audio-name{max-width:70px}.oa-audio-pop{position:fixed;left:12px;right:12px;top:118px;width:auto;max-width:none}}
+/* === END OA SHARED: audio-loader v1 (CSS) === */
+/* Page: experimental tag, A/B preview controls, write confirmation. */
+.exp-tag{display:inline-block;font:600 9.5px/1 var(--mono);letter-spacing:.1em;color:#1b1404;background:var(--accent);border-radius:2px;padding:3px 5px;margin:3px 4px 0 0}
+.exp-link{font-size:10.5px;color:#5a3d08;text-decoration:underline;text-underline-offset:2px;cursor:pointer;background:none;border:0;padding:0}
+.ab-box{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-radius:6px;background:#0e0d0c;border:1px solid #000;box-shadow:inset 0 1px 4px #000}
+.ab-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.ab-seg{display:inline-flex;border:1px solid #000;border-radius:4px;overflow:hidden}
+.ab-seg button{border:0;background:linear-gradient(180deg,#2f2d2b,#161514);color:var(--engrave);padding:6px 12px;font:500 12px var(--mono);cursor:pointer}
+.ab-seg button[aria-pressed="true"]{background:var(--accent);color:#1b1404}
+.ab-seg button:disabled{opacity:.45;cursor:not-allowed}
+.ab-note{margin:0;font-size:11px;color:var(--muted)}
+.ck-exp{display:flex;gap:8px;align-items:flex-start;margin-top:6px;color:#f1dfb8}
+
+/* ================= BACKGROUND ================= */
+.room{position:fixed;inset:0;z-index:-1;pointer-events:none;background:#141412}
+.room::before{content:"";position:absolute;inset:-20%;background:radial-gradient(38% 30% at 22% 18%,rgba(242,179,61,.16),transparent 70%),radial-gradient(30% 26% at 82% 70%,rgba(255,200,120,.08),transparent 70%);animation:lamp 34s ease-in-out infinite alternate}
+.room::after{content:"";position:absolute;left:0;right:0;top:38%;height:7px;background:repeating-linear-gradient(90deg,rgba(80,52,32,.55) 0 40px,rgba(98,64,40,.55) 40px 41px);opacity:.35;animation:tapebg 24s linear infinite}
+@keyframes lamp{0%{transform:translate(0,0)}100%{transform:translate(6%,4%)}}
+@keyframes tapebg{to{background-position:410px 0}}
+
+/* ================= CABINET ================= */
+main{max-width:1380px;margin:0 auto;padding:18px 22px 24px}
+.cabinet{position:relative;border-radius:14px;padding:18px 20px 20px;background-color:var(--enamel);background-image:radial-gradient(90% 60% at 12% 0%,rgba(255,226,170,.14),transparent 60%),linear-gradient(180deg,rgba(255,255,255,.05),rgba(0,0,0,.28)),var(--hammer);background-size:auto,auto,260px 260px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -3px 0 rgba(0,0,0,.4),0 30px 60px rgba(0,0,0,.6),0 0 0 1px #0a0a09}
+.screw{position:absolute;width:14px;height:14px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#f2f2ef,#9a9d9a 50%,#4d504e 80%);box-shadow:1px 2px 2px rgba(0,0,0,.6)}
+.screw::after{content:"";position:absolute;left:2px;right:2px;top:6px;height:2px;background:#3a3c3b;transform:rotate(-28deg);border-radius:1px}
+.screw.tl{left:9px;top:9px}.screw.tr{right:9px;top:9px}.screw.bl{left:9px;bottom:9px}.screw.br{right:9px;bottom:9px}
+/* Intro on a dark engraved plate: #D9D0BE lede / #E3D6B8 kicker on #161717–#232524 are well above 4.5:1 (about 10:1). */
+.intro{position:relative;margin:0 0 14px;padding:14px 20px 15px;border-radius:6px;background:linear-gradient(180deg,#232524,#161717);border:1px solid #050505;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),inset 0 -1px 0 rgba(0,0,0,.6),0 1px 0 rgba(255,255,255,.16),0 4px 10px rgba(0,0,0,.4)}
+.intro::before,.intro::after{content:"";position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e6e7e4,#8a8d8b 55%,#3e403f)}
+.intro::before{left:6px}.intro::after{right:6px}
+.kicker{font-family:var(--plate);letter-spacing:.2em;text-transform:uppercase;font-size:12px;color:#E3D6B8;margin:0 0 4px;text-shadow:0 -1px 0 #000}
+h1{font-family:'Instrument Serif',serif;font-weight:400;font-size:40px;line-height:1.02;margin:0;color:#F6EFDF;text-shadow:0 -1px 0 #000}
+h1 em{color:var(--accent)}
+.lede{margin:6px 0 0;max-width:96ch;color:#D9D0BE;font-size:14px;text-shadow:0 -1px 0 #000}
+.panel{position:relative;margin-top:16px;padding:14px 16px 16px;border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(0,0,0,.18)),rgba(40,43,42,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 -2px 0 rgba(0,0,0,.35),0 8px 20px rgba(0,0,0,.35);border:1px solid rgba(0,0,0,.55)}
+.plate{display:inline-flex;align-items:center;gap:10px;font-family:var(--plate);font-weight:500;text-transform:uppercase;letter-spacing:.16em;font-size:15px;color:var(--engrave);background:linear-gradient(180deg,#2c2e2d,#1a1b1b);border:1px solid #070707;border-radius:3px;padding:5px 12px 4px;margin:0 0 10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 1px 0 rgba(255,255,255,.14);text-shadow:0 -1px 0 #000}
+.plate.metal{color:#2a2b2a;text-shadow:0 1px 0 rgba(255,255,255,.55);background:linear-gradient(180deg,#e4e5e2,#b2b5b2),repeating-linear-gradient(90deg,rgba(255,255,255,.1) 0 1px,rgba(0,0,0,.05) 1px 2px);background-blend-mode:multiply;border-color:#6c6f6d}
+.note{font-size:13px;color:#d4ccba;margin:0 0 10px;max-width:110ch}
+.muted{color:var(--muted)}
+
+/* ================= DECK ================= */
+.deck{position:relative;border-radius:10px;background:linear-gradient(180deg,#2a2c2b,#1c1d1c);box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.16);padding:8px 10px 0;overflow:hidden}
+.deck svg{display:block;width:100%;height:auto}
+.reel{animation:spin 14s linear infinite}
+.reel.right{animation-duration:9.3s}
+.roller{animation:spin 1.4s linear infinite}
+.flow{animation:flow 2.6s linear infinite}
+.pilot{animation:pilot 5s ease-in-out infinite alternate}
+@keyframes spin{to{transform:rotate(-360deg)}}
+@keyframes flow{to{stroke-dashoffset:-235}}
+@keyframes pilot{from{opacity:.75}to{opacity:1}}
+body.paused .reel,body.paused .roller,body.paused .flow,body.paused .room::after{animation-play-state:paused}
+.transport{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 6px 12px}
+.tkey{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:8px 14px;border-radius:4px 4px 7px 7px;border:1px solid #000;cursor:pointer;font-family:var(--plate);letter-spacing:.14em;text-transform:uppercase;font-size:13px;color:var(--engrave);background:linear-gradient(180deg,#3a3836,#141312 70%);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 4px 0 #050505,0 6px 10px rgba(0,0,0,.5);transition:transform .08s,box-shadow .08s}
+.tkey:active,.tkey[aria-pressed="true"]{transform:translateY(3px);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 1px 0 #050505,0 2px 4px rgba(0,0,0,.5)}
+.tkey .ic{font-size:14px;color:var(--accent)}
+.tkey.rec .ic{color:#e5654a}
+.counter{display:inline-flex;align-items:center;gap:8px;margin-left:auto;font-size:12px;color:#cfc6b2}
+.drums{display:inline-flex;gap:2px;padding:3px;background:#0a0a09;border-radius:3px;box-shadow:inset 0 1px 3px #000,0 1px 0 rgba(255,255,255,.15)}
+.drum{width:17px;height:24px;display:grid;place-items:center;font-family:var(--mono);font-size:15px;color:#f3efe6;background:linear-gradient(180deg,#000 0,#2b2a28 30%,#2b2a28 70%,#000)}
+.soon-wrap{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.is-soon{opacity:.45;cursor:not-allowed!important}
+.badge-soon{font-family:Geist,sans-serif;font-weight:600;font-size:10px;letter-spacing:.1em;color:var(--accent);border:1px solid rgba(242,179,61,.55);background:rgba(20,18,15,.85);border-radius:3px;padding:3px 6px;white-space:nowrap}
+.soon-note{font-size:11.5px;color:#cfc6b2;max-width:46ch;margin:0}
+
+/* ================= LANES ================= */
+.lanes{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px}
+@media (max-width:1180px){.lanes{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:640px){.lanes{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lane{position:relative;display:flex;flex-direction:column;gap:8px;padding:8px 8px 10px;border-radius:7px;background:linear-gradient(180deg,rgba(0,0,0,.12),rgba(0,0,0,.28));box-shadow:inset 0 1px 0 rgba(255,255,255,.1),inset 0 0 0 1px rgba(0,0,0,.45);transition:box-shadow .2s}
+.lane.is-selected{box-shadow:inset 0 1px 0 rgba(255,255,255,.1),inset 0 0 0 2px var(--accent),0 0 22px rgba(242,179,61,.2)}
+.lane.is-off{filter:saturate(.4) brightness(.82)}
+.lane-head{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;cursor:pointer;font-family:var(--plate);letter-spacing:.16em;font-size:12.5px;color:var(--engrave);background:linear-gradient(180deg,#2c2e2d,#191a1a);border:1px solid #060606;border-radius:3px;padding:4px 8px;text-shadow:0 -1px 0 #000;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.lane-led{width:9px;height:9px;border-radius:50%;background:var(--lane);box-shadow:0 0 0 1px rgba(0,0,0,.6),inset 0 -1px 2px rgba(0,0,0,.4);opacity:.85}
+.lane.is-selected .lane-led{background:var(--accent);box-shadow:0 0 8px var(--accent),0 0 0 1px rgba(0,0,0,.6)}
+.tape-label{position:relative;background:linear-gradient(180deg,rgba(255,255,255,.35),rgba(0,0,0,.03)),repeating-linear-gradient(180deg,transparent 0 13px,rgba(70,100,140,.18) 13px 14px),var(--paper);color:#2b2620;border-radius:2px;padding:6px 7px 6px;transform:rotate(-.5deg);box-shadow:2px 3px 5px rgba(0,0,0,.45);border-top:4px solid var(--lane)}
+.lane:nth-child(even) .tape-label{transform:rotate(.45deg)}
+.lane-src{appearance:none;-webkit-appearance:none;width:100%;border:0;background:transparent;font-family:var(--tape);font-size:15px;color:#221d17;padding:0 14px 0 0;cursor:pointer;text-overflow:ellipsis}
+.lane-src option,.lane-src optgroup{font-family:Geist,sans-serif;color:#111;background:#f3ecdd}
+.tape-label::after{content:"▾";position:absolute;right:7px;top:7px;font-size:12px;color:#5a5046;pointer-events:none}
+.spark{display:block;width:100%;height:30px;margin-top:2px}
+.lane-desc{margin:2px 0 0;font-size:10.5px;line-height:1.3;color:#4b4238;min-height:2.6em}
+.lane-desc q{font-style:italic}
+.lane-desc .attr{display:block;font-size:9.5px;color:#7b6f60}
+.vu{position:relative;border-radius:6px;padding:5px;background:linear-gradient(180deg,#2a2826,#0e0d0c);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 3px 6px rgba(0,0,0,.55)}
+.vu svg{display:block;width:100%;height:auto;border-radius:3px}
+.lane-read{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:10.5px;color:#d6cdb9}
+.lane-read output{font-family:var(--mono);font-size:13px;color:#F7D58C}
+.levers{display:flex;justify-content:space-between;gap:2px}
+.lever{appearance:none;background:none;border:0;padding:2px 0;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;min-width:36px}
+.lv-led{width:7px;height:7px;border-radius:50%;background:#3b2a12;box-shadow:inset 0 1px 1px rgba(0,0,0,.6)}
+.lever[aria-checked="true"] .lv-led{background:var(--accent);box-shadow:0 0 7px var(--accent)}
+.lv-base{position:relative;width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#f5f5f2,#a3a6a3 42%,#555856 72%,#2f3130);box-shadow:2px 3px 4px rgba(0,0,0,.6)}
+.lv-base::before{content:"";position:absolute;inset:7px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#cfd1ce,#6c6f6d)}
+.lv-bat{position:absolute;left:50%;width:9px;height:19px;margin-left:-4.5px;border-radius:5px 5px 3px 3px;background:linear-gradient(90deg,#000,#45413d 40%,#141312);box-shadow:2px 2px 3px rgba(0,0,0,.6);top:50%;transform:translateY(-100%);transition:transform .14s cubic-bezier(.3,1.6,.6,1)}
+.lever[aria-checked="false"] .lv-bat{transform:translateY(0);border-radius:3px 3px 5px 5px}
+.lv-txt{font-family:var(--plate);font-size:10.5px;letter-spacing:.14em;color:var(--engrave)}
+
+/* ================= CHART VISOR ================= */
+.visor{position:relative;margin:0;border-radius:9px;padding:8px;background:radial-gradient(110% 80% at 25% 0%,rgba(242,179,61,.09),transparent 60%),#100f0e;border:1px solid #000;box-shadow:inset 0 2px 12px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.16)}
+.visor::after{content:"";position:absolute;inset:0;border-radius:9px;pointer-events:none;background:linear-gradient(160deg,rgba(255,255,255,.07),transparent 35%)}
+.visor svg{display:block;width:100%;height:auto;touch-action:none}
+.visor figcaption{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);padding:4px 4px 0}
+.chart-wrap{position:relative;margin-top:12px}
+.chart-read{position:absolute;right:20px;top:18px;min-width:170px;font-family:var(--mono);font-size:11.5px;line-height:1.5;background:rgba(14,13,12,.92);border:1px solid rgba(242,179,61,.35);border-radius:4px;padding:6px 8px;pointer-events:none;display:none}
+.chart-read.on{display:block}
+.chart-read b{color:var(--accent);font-weight:500}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 2px 0;font-size:12px;color:#ddd4c2}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:18px;height:3px;border-radius:2px;background:var(--c)}
+.legend .is-sel{color:var(--accent)}
+
+/* ================= KNOBS ================= */
+.knob{display:flex;flex-direction:column;align-items:center;gap:6px}
+.knob-dial{position:relative;width:var(--ks,90px);height:var(--ks,90px);border-radius:50%;cursor:ns-resize;touch-action:none}
+.knob-lg .knob-dial{--ks:150px}.knob-md .knob-dial{--ks:96px}.knob-sm .knob-dial{--ks:72px}
+.knob-scale{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.knob-skirt{position:absolute;inset:21%;border-radius:50%;background:conic-gradient(from 0deg,#ecece9,#8b8e8c 12%,#f5f5f2 25%,#7d807e 38%,#e2e3e0 50%,#8a8d8b 62%,#f1f1ee 75%,#7b7e7c 88%,#ecece9);box-shadow:4px 6px 10px rgba(0,0,0,.55),inset 0 0 0 1px rgba(0,0,0,.45)}
+.knob-cap{position:absolute;inset:33%;border-radius:50%;background:radial-gradient(circle at 36% 30%,#5a5753 0,#24221f 38%,#0b0a09 74%);box-shadow:0 2px 4px rgba(0,0,0,.7),inset 0 1px 1px rgba(255,255,255,.2)}
+.knob-cap::before{content:"";position:absolute;inset:0;border-radius:50%;background:repeating-conic-gradient(#000 0 3deg,#3d3a36 3deg 6deg);-webkit-mask:radial-gradient(circle,transparent 76%,#000 79%);mask:radial-gradient(circle,transparent 76%,#000 79%)}
+.knob-cap::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 32% 26%,rgba(255,255,255,.3),transparent 42%)}
+.knob-ptr{position:absolute;inset:21%;border-radius:50%;transform:rotate(var(--a,0deg));pointer-events:none}
+.knob-ptr::before{content:"";position:absolute;left:calc(50% - 1.5px);top:2%;width:3px;height:36%;border-radius:2px;background:#F6EDD5;box-shadow:0 0 0 .6px rgba(0,0,0,.6)}
+.knob-dial:focus-visible{outline-offset:6px;border-radius:50%}
+.knob[aria-disabled="true"] .knob-dial{opacity:.45;cursor:not-allowed}
+.readout{font-family:var(--mono);font-size:13px;background:#0d0c0b;color:#F7D58C;border:1px solid #000;border-radius:3px;padding:3px 8px;min-width:84px;text-align:center;cursor:text;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.12)}
+.readout-in{font-family:var(--mono);font-size:13px;width:96px;text-align:center;background:#000;color:#F7D58C;border:1px solid var(--accent);border-radius:3px;padding:3px 6px}
+.knob-label{font-family:var(--plate);letter-spacing:.18em;font-size:12px;color:var(--engrave);text-shadow:0 -1px 0 rgba(0,0,0,.7)}
+
+/* ================= S4 ================= */
+.grid-s4{display:grid;grid-template-columns:280px minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:980px){.grid-s4{grid-template-columns:1fr}}
+.ctrl-stack{display:flex;flex-direction:column;gap:12px}
+.field{display:flex;flex-direction:column;gap:4px;font-family:var(--plate);letter-spacing:.14em;font-size:11.5px;color:var(--engrave);text-transform:uppercase}
+.sel{appearance:none;-webkit-appearance:none;font-family:Geist,sans-serif;letter-spacing:0;text-transform:none;font-size:13.5px;background:linear-gradient(180deg,#1d1c1b,#0f0e0d);color:var(--text);border:1px solid #000;border-radius:4px;padding:7px 28px 7px 10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08);background-image:linear-gradient(45deg,transparent 50%,#c9bfa8 50%),linear-gradient(135deg,#c9bfa8 50%,transparent 50%),linear-gradient(180deg,#1d1c1b,#0f0e0d);background-position:calc(100% - 15px) 52%,calc(100% - 10px) 52%,0 0;background-size:5px 5px,5px 5px,100% 100%;background-repeat:no-repeat}
+.sel option{background:#1a1918;color:var(--text)}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.chip-btn{background:linear-gradient(180deg,#3a3836,#161514);border:1px solid #000;border-radius:4px;color:var(--engrave);padding:6px 10px;cursor:pointer;font-size:12.5px;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 2px 0 #000}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:#0e0d0c;border:1px solid #000;border-radius:4px;padding:6px 8px;box-shadow:inset 0 1px 3px #000,0 1px 0 rgba(255,255,255,.1)}
+.stat small{display:block;font-family:var(--plate);letter-spacing:.14em;font-size:10px;color:#bdb4a0}
+.stat output{font-family:var(--mono);font-size:15px;color:#F7D58C}
+.stat .sub{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.regions{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}
+.regions li{font-size:12.5px;background:rgba(0,0,0,.28);border-left:3px solid var(--accent);padding:5px 8px;border-radius:0 3px 3px 0}
+.regions li .mono{color:#F7D58C}
+
+/* ================= PATCH BAY ================= */
+.bay{position:relative;overflow-x:auto;padding:4px 4px 40px;border-radius:8px;background:linear-gradient(180deg,#1e1f1e,#121312);box-shadow:inset 0 2px 8px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.14)}
+.bay table{border-collapse:separate;border-spacing:5px 4px;margin:0 auto}
+.bay th{font-weight:400;padding:2px 4px;vertical-align:middle}
+.bay thead th{text-align:center}
+.bay tbody th{text-align:left;white-space:nowrap}
+.bay-lbl{display:inline-block;font-family:var(--plate);letter-spacing:.14em;font-size:11.5px;color:var(--engrave);margin:0 4px}
+.bay-name{display:block;font-size:10.5px;color:var(--muted);max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 auto}
+.bay tbody th .bay-name{display:inline-block;vertical-align:middle;max-width:110px}
+.jack{display:inline-block;width:22px;height:22px;border-radius:50%;vertical-align:middle;background:radial-gradient(circle,#030303 0 30%,#5d605e 33%,#eceeeb 43%,#8d908e 58%,#3e403f 70%,#1a1b1a 74%);box-shadow:2px 3px 3px rgba(0,0,0,.6)}
+.jack.hdr{width:18px;height:18px}
+.jack.blank{opacity:.35}
+.bay-cell{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:6px;min-width:84px;padding:4px 6px;border-radius:4px;border:1px solid #000;cursor:pointer;background:linear-gradient(180deg,rgba(255,236,190,calc(var(--heat,0)*.2)),rgba(0,0,0,.2)),#232423;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.bay-cell .mono{font-size:12px;color:#e8dcc0}
+.bay-cell:hover{background-color:#2c2d2c}
+.bay-cell.on{box-shadow:inset 0 0 0 2px var(--accent)}
+.bay-cell.on .jack{background:radial-gradient(circle,#F2B33D 0 38%,#7a5a1c 44%,#1a1408 52%,#d7d9d6 60%,#6b6e6c 72%,#1a1b1a 76%)}
+.bay td.diag{text-align:center;color:var(--muted)}
+.cord{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+
+/* ================= SOUND ON SOUND ================= */
+.grid-sos{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:18px}
+@media (max-width:1060px){.grid-sos{grid-template-columns:1fr}}
+.headblock{border-radius:9px;background:linear-gradient(180deg,#232524,#151615);padding:8px;box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.14)}
+.headblock svg{display:block;width:100%;height:auto}
+.formula{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.formula .plate{margin:0;font-family:var(--mono);letter-spacing:.04em;text-transform:none;font-size:14px}
+.sos-ctrls{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.sos-knobs{display:flex;gap:18px;align-items:flex-start;justify-content:space-around;flex-wrap:wrap;grid-column:1/-1;padding:4px 0 0}
+.pre-col{display:flex;flex-direction:column;align-items:center;gap:8px}
+.verdict{display:flex;align-items:center;gap:12px;margin-top:12px;padding:10px 12px;border-radius:6px;background:#0e0d0c;border:1px solid #000;box-shadow:inset 0 1px 4px #000}
+.lamp{flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#6a6560,#2a2724);box-shadow:inset 0 -2px 3px rgba(0,0,0,.6),0 0 0 3px #1a1918,0 0 0 4px #4b4d4c}
+.verdict.ok .lamp{background:radial-gradient(circle at 35% 30%,#fff2c8,#F2B33D 45%,#8a5a10);box-shadow:0 0 14px rgba(242,179,61,.75),0 0 0 3px #1a1918,0 0 0 4px #4b4d4c}
+.verdict.bad .lamp{background:radial-gradient(circle at 35% 30%,#ffd0d0,#E5484D 45%,#6a1316);box-shadow:0 0 14px rgba(229,72,77,.7),0 0 0 3px #1a1918,0 0 0 4px #4b4d4c}
+.verdict.busy .lamp{animation:pilot .5s ease-in-out infinite alternate;background:radial-gradient(circle at 35% 30%,#fff2c8,#a77a2a 50%,#3a2a10)}
+.verdict b{font-family:var(--plate);letter-spacing:.14em;font-weight:500;font-size:14px}
+.verdict.bad b{color:var(--danger)}
+.verdict.ok b{color:var(--accent)}
+.verdict small{display:block;font-size:11.5px;color:var(--muted)}
+.reasons{margin:8px 0 0;padding-left:18px;color:#f1c9ca;font-size:12.5px}
+.sect-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-top:10px}
+.sect-table th,.sect-table td{padding:2px 6px;text-align:right;border-bottom:1px solid rgba(236,231,221,.07)}
+.sect-table th{font-family:var(--plate);letter-spacing:.12em;font-weight:400;color:#bdb4a0;font-size:10.5px}
+.sect-table td:nth-child(2),.sect-table th:nth-child(2){text-align:left}
+.sect-table tr.off td{color:var(--muted)}
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;align-items:center}
+.abtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;font-size:13px;padding:8px 12px;border-radius:5px;border:1px solid #000;cursor:pointer;color:var(--engrave);background:linear-gradient(180deg,#3a3836,#161514);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 2px 0 #000}
+.abtn.primary{background:var(--accent);color:#1b1404;font-weight:600;border-color:#7a5510}
+.abtn[aria-disabled="true"]{opacity:.45;cursor:not-allowed}
+.bounce{display:inline-flex;gap:6px;align-items:center}
+
+/* ================= EXPORT ================= */
+.grid-ex{display:grid;grid-template-columns:300px minmax(0,680px);gap:18px;align-items:start}
+@media (max-width:900px){.grid-ex{grid-template-columns:1fr}}
+.preview{background:#e9e1cf;border-radius:4px;padding:8px;box-shadow:3px 5px 12px rgba(0,0,0,.55);transform:rotate(-.3deg)}
+.preview svg{display:block;width:100%;height:auto}
+
+/* ================= FOOTER (identical structure) ================= */
+.site-footer{max-width:1480px;margin:48px auto 0;padding:32px 24px 36px;border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr;gap:90px;color:var(--muted);font-size:11.5px;background:rgba(15,15,14,.9)}
+.site-footer p{max-width:600px;margin:0}
+.site-footer h3{color:var(--text);margin:0 0 9px;font-size:12px;font-weight:500}
+.f-eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:550}
+.honoree{display:flex;align-items:baseline;gap:14px;margin:9px 0 10px}
+.honoree strong{color:var(--text);font:400 30px/1.1 'Instrument Serif',serif}
+.honoree span{font:11px var(--mono)}
+.sources{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}
+.footer-links{display:flex;gap:24px;margin-top:16px}
+@media (max-width:1100px){.site-footer{grid-template-columns:1fr;gap:30px}}
+
+/* ================= DIALOGS / TOASTS ================= */
+dialog{border:1px solid #000;border-radius:10px;padding:0;color:var(--text);background:#1c1d1c;box-shadow:0 30px 80px rgba(0,0,0,.7);max-width:min(640px,92vw);width:100%}
+dialog::backdrop{background:rgba(5,5,4,.66)}
+.dlg-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--rule);background:linear-gradient(180deg,#2a2c2b,#1c1d1c)}
+.dlg-head h2{margin:0;font-family:'Instrument Serif',serif;font-weight:400;font-size:26px}
+.dlg-body{padding:14px 18px;max-height:64vh;overflow:auto;font-size:14px}
+.dlg-foot{display:flex;justify-content:flex-end;gap:10px;padding:12px 18px;border-top:1px solid var(--rule)}
+.ck-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:9px}
+.ck-list li.bad{color:#f6c7c8}
+.ck-list li.bad b{color:var(--danger)}
+.ck-list li.warn b,.ck-list .warnmsg{color:var(--accent)}
+.ck-list ul{margin:4px 0 0;padding-left:16px}
+.notice{margin:4px 0 0;font-size:12.5px;color:#e6d8b8;border-left:2px solid var(--accent);padding-left:8px}
+.journal{margin:10px 0 0;padding:0;list-style:none;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.help-list{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+.help-list dt{font-family:var(--mono);color:var(--accent);white-space:nowrap}
+.help-list dd{margin:0}
+kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--rule);border-bottom-width:2px;border-radius:3px;padding:0 5px}
+.help-fab{position:fixed;right:18px;bottom:18px;z-index:40;width:42px;height:42px;border-radius:50%;border:1px solid #000;cursor:pointer;font-family:var(--plate);font-size:18px;color:var(--engrave);background:radial-gradient(circle at 36% 30%,#55524e,#1c1a18 60%,#0b0a09);box-shadow:3px 5px 10px rgba(0,0,0,.6)}
+.toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{background:#1b1a18;border:1px solid rgba(242,179,61,.45);color:var(--text);padding:8px 14px;border-radius:6px;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.6);max-width:min(560px,92vw)}
+.toast.err{border-color:var(--danger)}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main" data-i18n="skip">Pular para o conteúdo</a>
+<div class="room" aria-hidden="true"></div>
+
+<!-- Shared SVG defs (gradients) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <radialGradient id="gVuFace" cx="50%" cy="20%" r="85%"><stop offset="0" stop-color="#FFF4D6"/><stop offset=".55" stop-color="#F3E2B6"/><stop offset="1" stop-color="#D8C08A"/></radialGradient>
+    <radialGradient id="gVuGlow" cx="50%" cy="70%" r="60%"><stop offset="0" stop-color="#F2B33D" stop-opacity=".38"/><stop offset="1" stop-color="#F2B33D" stop-opacity="0"/></radialGradient>
+    <linearGradient id="gGlare" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".34"/><stop offset=".45" stop-color="#fff" stop-opacity=".04"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="gFlange" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#d9dbd8"/><stop offset=".7" stop-color="#b4b7b4"/><stop offset=".96" stop-color="#8a8d8b"/><stop offset="1" stop-color="#5d605e"/></radialGradient>
+    <radialGradient id="gTapePack" cx="50%" cy="50%" r="50%"><stop offset=".3" stop-color="#2a1a10"/><stop offset=".62" stop-color="#5a3a24"/><stop offset=".9" stop-color="#4a2f1d"/><stop offset="1" stop-color="#3a2416"/></radialGradient>
+    <radialGradient id="gHub" cx="38%" cy="32%" r="70%"><stop offset="0" stop-color="#ffffff"/><stop offset=".35" stop-color="#c9ccc9"/><stop offset=".75" stop-color="#6d706e"/><stop offset="1" stop-color="#2f3130"/></radialGradient>
+    <radialGradient id="gGloss" cx="32%" cy="25%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".32"/><stop offset=".5" stop-color="#fff" stop-opacity=".04"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></radialGradient>
+    <linearGradient id="gHead" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6f7270"/><stop offset=".3" stop-color="#eef0ed"/><stop offset=".55" stop-color="#a7aaa7"/><stop offset="1" stop-color="#4d504e"/></linearGradient>
+    <linearGradient id="gGlass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".16"/><stop offset=".3" stop-color="#ffffff" stop-opacity=".04"/><stop offset="1" stop-color="#ffffff" stop-opacity=".09"/></linearGradient>
+    <radialGradient id="gLamp" cx="45%" cy="40%" r="60%"><stop offset="0" stop-color="#fff3cf"/><stop offset=".45" stop-color="#F2B33D"/><stop offset="1" stop-color="#7a4a08"/></radialGradient>
+    <radialGradient id="gLampGlow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#F2B33D" stop-opacity=".55"/><stop offset="1" stop-color="#F2B33D" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gRubber" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#4a4745"/><stop offset="1" stop-color="#0d0c0b"/></radialGradient>
+  </defs>
+</svg>
+
+<header class="cable-bar">
+  <div class="cable-inner">
+    <a class="wordmark" href="curva.html">open-auri</a>
+    <nav class="main-nav" aria-label="Principal" data-i18n-aria="nav.aria">
+      <a href="curva.html" data-i18n="nav.curva">Curva</a>
+      <a href="biblioteca.html" data-i18n="nav.biblioteca">Biblioteca</a>
+      <a href="comparar.html" aria-current="page" data-i18n="nav.comparar">Comparar</a>
+      <a href="soe-como-x.html" data-i18n="nav.soe">Soe como X</a>
+      <a href="comunidade.html" data-i18n="nav.comunidade">Comunidade</a>
+      <a href="teste-cego.html" data-i18n="nav.teste">Teste cego</a>
+      <a href="cabo.html" data-i18n="nav.cabo">Cabo</a>
+      <a href="docs.html" data-i18n="nav.docs">Docs</a>
+    </nav>
+    <div class="cable-actions">
+      <span class="cable-state"><span class="status-dot" aria-hidden="true">●</span><span data-i18n="chrome.status">Sem cabo · simulado</span></span>
+      <span class="dirty" id="unsaved" aria-live="polite">0 alterações não gravadas</span>
+      <!-- === OA SHARED: audio-loader v1 (HTML) === -->
+      <div class="oa-audio" id="oaAudio">
+        <button type="button" class="oa-audio-btn" id="oaAudioBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="oaAudioPop"><span aria-hidden="true">♪</span><span class="oa-audio-name" id="oaAudioName">Áudio</span></button>
+        <div class="oa-audio-pop" id="oaAudioPop" role="dialog" aria-labelledby="oaAudioTitle" hidden>
+          <h3 id="oaAudioTitle" data-oa-audio="title">Áudio da prévia</h3>
+          <label class="oa-audio-load"><span data-oa-audio="load">Carregar MP3…</span><input type="file" class="oa-audio-file" id="oaAudioFile" accept="audio/mpeg,audio/mp3,audio/*"></label>
+          <div class="oa-audio-meta" id="oaAudioMeta" aria-live="polite"></div>
+          <div class="oa-audio-row"><button type="button" id="oaAudioPlay" data-oa-audio="play">Tocar arquivo</button><button type="button" id="oaAudioRemove" data-oa-audio="remove">Remover</button></div>
+          <label class="oa-audio-vol"><span data-oa-audio="vol">Volume da prévia (só no navegador)</span><output id="oaAudioVolOut" for="oaAudioVol">−12 dB</output><input type="range" id="oaAudioVol" min="-40" max="0" step="1" value="-12"></label>
+          <p class="oa-audio-rate" id="oaAudioRate"></p>
+          <p class="oa-audio-note" data-oa-audio="note">O arquivo fica só neste navegador. Nada é enviado.</p>
+        </div>
+      </div>
+      <!-- === END OA SHARED: audio-loader v1 (HTML) === -->
+      <button type="button" id="neutral" data-i18n="chrome.neutro">Neutro</button>
+      <button type="button" id="default" data-i18n="chrome.padrao">Padrão Auri</button>
+      <button type="button" class="primary" id="write" data-i18n="chrome.gravar">Gravar no cabo</button>
+      <button type="button" class="language" id="language" aria-label="Switch to English"><span class="pt on" id="langPt">PT</span> · <span class="en" id="langEn">EN</span></button>
+    </div>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+<div class="cabinet">
+  <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
+
+  <div class="intro">
+    <div>
+      <p class="kicker" data-i18n="page.kicker">Comparar · som sobre som · gravador de 8 pistas</p>
+      <h1><span data-i18n="page.title1">Oito pistas.</span> <em data-i18n="page.title2">Uma camada sobre a outra.</em></h1>
+      <p class="lede" data-i18n="page.lede">Carregue uma curva em cada pista, veja onde duas delas diferem e grave por cima: a curva nova é a base mais uma fração da diferença entre A e B. Tudo é calculado com a matemática real do relatório 0xCB e passa pelo gate v2 antes de qualquer gravação.</p>
+    </div>
+  </div>
+
+  <!-- DECK: reels + head block -->
+  <div class="deck">
+    <svg id="deckSvg" viewBox="0 0 1200 250" role="img" aria-label="Transporte de fita: dois carretéis e o bloco de cabeças sob tampa transparente" data-i18n-aria="deck.aria"></svg>
+    <div class="transport" role="group" aria-label="Transporte" data-i18n-aria="tr.aria">
+      <button type="button" class="tkey" id="trRewind"><span class="ic" aria-hidden="true">⏮</span><span data-i18n="tr.rewind">Rebobinar</span></button>
+      <button type="button" class="tkey" id="trPlay" aria-pressed="true"><span class="ic" aria-hidden="true" id="trPlayIc">❚❚</span><span id="trPlayTx">Pausar</span></button>
+      <button type="button" class="tkey rec" id="trRec"><span class="ic" aria-hidden="true">●</span><span data-i18n="tr.rec">Rec · gravar por cima</span></button>
+      <span class="soon-wrap">
+        <button type="button" class="tkey is-soon" id="trRead" aria-disabled="true" aria-describedby="soonRead"><span class="ic" aria-hidden="true">⇤</span><span data-i18n="tr.read">Ler do cabo</span></button>
+        <span class="badge-soon" data-i18n="soon.badge">EM BREVE</span>
+        <span class="soon-note" id="soonRead" data-i18n="soon.note">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</span>
+      </span>
+      <span class="counter"><span class="drums" id="drums" aria-hidden="true"></span><span id="counterTx" data-i18n="tr.counter">gravações neste navegador</span></span>
+    </div>
+  </div>
+
+  <!-- 1 · LANES -->
+  <section class="panel" aria-labelledby="s1h">
+    <h2 class="plate" id="s1h" data-i18n="s1.title">1 · Transporte e 8 pistas</h2>
+    <p class="note" data-i18n="s1.note">Cada pista recebe uma curva: preset oficial, a curva do editor, Neutro ou um .txt importado (PK, LS e OFF; HS, LP e HP entram como EXPERIMENTAL, só se passarem no gate v2). ARM inclui a pista no gráfico e na patch bay; SOLO isola; MUTE esconde do gráfico. O VU mostra o nível previsto: ganho médio de 300 Hz a 3 kHz, preamp incluído.</p>
+    <div class="lanes" id="lanes"></div>
+    <div class="chart-wrap">
+      <figure class="visor">
+        <svg id="mainChart" viewBox="0 0 1000 300" role="img" tabindex="0" aria-label="Gráfico"></svg>
+        <figcaption><span data-i18n="chart.main">Sobreposição das pistas armadas</span><span class="mono" data-i18n="chart.note">resposta com preamp · 20 Hz–20 kHz · ±15 dB · ← → movem o cursor</span></figcaption>
+      </figure>
+      <div class="chart-read" id="mainRead" aria-hidden="true"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </section>
+
+  <!-- 2 · WHERE THEY DIFFER -->
+  <section class="panel" id="s4" aria-labelledby="s2h">
+    <h2 class="plate" id="s2h" data-i18n="s2.title">2 · Onde diferem</h2>
+    <div class="grid-s4">
+      <div class="ctrl-stack">
+        <label class="field"><span data-i18n="s2.a">A · antes</span><select class="sel" id="pairA"></select></label>
+        <button type="button" class="chip-btn" id="swapAB"><span aria-hidden="true">⇅</span> <span data-i18n="s2.swap">Trocar A e B</span> <kbd>X</kbd></button>
+        <label class="field"><span data-i18n="s2.b">B · depois</span><select class="sel" id="pairB"></select></label>
+        <div class="row" id="matchRow"></div>
+        <p class="note" id="matchNote" style="margin:0"></p>
+        <div class="row" style="justify-content:center"><div id="thrKnob"></div></div>
+        <div class="stats">
+          <div class="stat"><small>RMS</small><output id="stRms">0</output><span class="sub">dB</span></div>
+          <div class="stat"><small data-i18n="s2.max">MÁX</small><output id="stMax">0</output><span class="sub" id="stMaxF"></span></div>
+          <div class="stat"><small data-i18n="s2.bands">FAIXAS</small><output id="stN">0</output><span class="sub" id="stThr"></span></div>
+        </div>
+        <div class="ab-box" id="abS4" role="group" aria-labelledby="abS4Play">
+          <div class="ab-row">
+            <button type="button" class="chip-btn" id="abS4Play" aria-pressed="false">OUVIR A/B</button>
+            <span class="ab-seg"><button type="button" id="abS4A" aria-pressed="true" disabled>A</button><button type="button" id="abS4B" aria-pressed="false" disabled>B</button></span>
+          </div>
+          <p class="ab-note" id="abS4Note" aria-live="polite"></p>
+        </div>
+      </div>
+      <div>
+        <figure class="visor">
+          <svg id="diffChart" viewBox="0 0 1000 300" role="img" aria-label="Diferença"></svg>
+          <figcaption><span id="diffCap"></span><span class="mono" data-i18n="s2.cap">Δ = B − A · faixas sombreadas passam do limiar</span></figcaption>
+        </figure>
+        <ul class="regions" id="regions"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · PATCH BAY -->
+  <section class="panel" aria-labelledby="s3h">
+    <h2 class="plate" id="s3h" data-i18n="s3.title">3 · Patch bay de distâncias</h2>
+    <p class="note" data-i18n="s3.note">RMS da diferença entre cada par de pistas armadas, 20 Hz–20 kHz, com o mesmo ajuste de nível de Onde diferem. Clique num jaque para ligar o par em A e B.</p>
+    <div class="bay" id="bay"></div>
+  </section>
+
+  <!-- 4 · SOUND ON SOUND -->
+  <section class="panel" aria-labelledby="s4h">
+    <h2 class="plate" id="s4h" data-i18n="s4.title">4 · Som sobre som</h2>
+    <p class="note" data-i18n="s4.lede">Com uma cabeça de reprodução antes das outras, dá para tocar junto do que já está na fita e gravar tudo de novo. Aqui a camada nova é a diferença entre duas pistas: Δ = B − A. A curva nova é base + k × Δ, ajustada em 10 seções PK/LS/OFF e conferida pelo gate v2.</p>
+    <div class="grid-sos">
+      <div>
+        <div class="headblock">
+          <svg viewBox="0 0 600 230" role="img" aria-label="Bloco de cabeças: cabeça extra, apagar, gravar, reproduzir" data-i18n-aria="head.aria">
+            <rect x="0" y="0" width="600" height="230" fill="none"/>
+            <path d="M118 62 C 118 18, 372 18, 372 62" fill="none" stroke="#F2B33D" stroke-width="2" stroke-dasharray="5 5" class="flow"/>
+            <path d="M366 54 l6 9 l6 -9" fill="none" stroke="#F2B33D" stroke-width="2"/>
+            <text x="245" y="24" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" fill="#F2B33D">+ k × Δ</text>
+            <line x1="0" y1="152" x2="600" y2="152" stroke="#4a2f1d" stroke-width="8"/>
+            <line x1="0" y1="152" x2="600" y2="152" stroke="rgba(255,230,190,.2)" stroke-width="8" stroke-dasharray="1.5 22" class="flow"/>
+            <g font-family="Oswald, sans-serif" font-size="13" letter-spacing="2" fill="#E9E4D6" text-anchor="middle">
+              <g><path d="M90 80 h56 v52 q0 16 -28 16 q-28 0 -28 -16z" fill="url(#gHead)" stroke="#F2B33D" stroke-width="2"/><line x1="118" y1="138" x2="118" y2="148" stroke="#111" stroke-width="1.5"/><text x="118" y="74" data-i18n="head.extra">CABEÇA EXTRA</text><text x="118" y="182" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="0" fill="#cfc6b2" data-i18n="head.extraCap">lê a base</text></g>
+              <g><path d="M216 80 h56 v52 q0 16 -28 16 q-28 0 -28 -16z" fill="url(#gHead)" stroke="#111"/><line x1="244" y1="138" x2="244" y2="148" stroke="#111" stroke-width="1.5"/><text x="244" y="74" data-i18n="head.erase">APAGAR</text><text x="244" y="182" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="0" fill="#cfc6b2" data-i18n="head.eraseCap">limpa a passada</text></g>
+              <g><path d="M344 80 h56 v52 q0 16 -28 16 q-28 0 -28 -16z" fill="url(#gHead)" stroke="#111"/><line x1="372" y1="138" x2="372" y2="148" stroke="#111" stroke-width="1.5"/><text x="372" y="74" data-i18n="head.rec">GRAVAR</text><text x="372" y="182" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="0" fill="#cfc6b2" data-i18n="head.recCap">base + k × Δ</text></g>
+              <g><path d="M470 80 h56 v52 q0 16 -28 16 q-28 0 -28 -16z" fill="url(#gHead)" stroke="#111"/><line x1="498" y1="138" x2="498" y2="148" stroke="#111" stroke-width="1.5"/><text x="498" y="74" data-i18n="head.play">REPRODUZIR</text><text x="498" y="182" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="0" fill="#cfc6b2" data-i18n="head.playCap">confere no gate</text></g>
+            </g>
+            <rect x="70" y="44" width="476" height="120" rx="12" fill="url(#gGlass)" stroke="rgba(255,255,255,.28)"/>
+            <path d="M84 52 h200" stroke="rgba(255,255,255,.35)" stroke-width="2" stroke-linecap="round"/>
+            <text x="300" y="214" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#8F8A80" data-i18n="head.dir">fita → sentido de leitura</text>
+          </svg>
+        </div>
+        <div class="formula">
+          <span class="plate metal">Δ = B − A</span>
+          <span class="plate metal" data-i18n="s4.formula2">nova = base + k × Δ</span>
+        </div>
+        <div class="sos-ctrls" style="margin-top:14px">
+          <label class="field"><span data-i18n="s4.a">A · antes</span><select class="sel" id="sosA"></select></label>
+          <label class="field"><span data-i18n="s4.b">B · depois</span><select class="sel" id="sosB"></select></label>
+          <label class="field"><span data-i18n="s4.base">Base · o que já está na fita</span><select class="sel" id="sosBase"></select></label>
+          <div class="field"><span data-i18n="s4.exactNote">Base = A e mistura 100 %: B exato.</span></div>
+          <div class="sos-knobs">
+            <div id="mixKnob"></div>
+            <div class="pre-col"><div id="preKnob"></div><div id="preAutoRow"></div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <figure class="visor">
+          <svg id="sosChart" viewBox="0 0 1000 420" role="img" aria-label="Som sobre som"></svg>
+          <figcaption><span id="sosCap"></span><span class="mono" data-i18n="s4.cap">tracejado: alvo · âmbar: ajuste gravável</span></figcaption>
+        </figure>
+        <div class="verdict" id="verdict" role="status" aria-live="polite"><span class="lamp" aria-hidden="true"></span><div><b id="verdictTx">…</b><small data-i18n="s4.gateNote">Gate v2 · envelope observado nas 11 curvas oficiais. Não é prova em hardware.</small><ul class="reasons" id="reasons"></ul></div></div>
+        <div class="ab-box" id="abSos" role="group" aria-labelledby="abSosPlay" style="margin-top:10px">
+          <div class="ab-row">
+            <button type="button" class="chip-btn" id="abSosPlay" aria-pressed="false">OUVIR A/B · base × resultado</button>
+            <span class="ab-seg"><button type="button" id="abSosA" aria-pressed="true" disabled data-i18n="ab.base">BASE</button><button type="button" id="abSosB" aria-pressed="false" disabled data-i18n="ab.result">RESULTADO</button></span>
+          </div>
+          <p class="ab-note" id="abSosNote" aria-live="polite"></p>
+        </div>
+        <div class="stat-row">
+          <div class="stat"><small>PREAMP</small><output id="sPre">0</output><span class="sub">dB</span></div>
+          <div class="stat"><small data-i18n="st.level">NÍVEL</small><output id="sLvl">0</output><span class="sub">300 Hz–3 kHz</span></div>
+          <div class="stat"><small data-i18n="st.fit">AJUSTE</small><output id="sFit">0</output><span class="sub" id="sFitSub">dB RMS</span></div>
+          <div class="stat"><small>CRC</small><output id="sCrc">0</output><span class="sub">payload 220 B</span></div>
+        </div>
+        <table class="sect-table" id="sectTable" aria-label="Seções do ajuste"></table>
+        <div class="actions">
+          <a class="abtn" id="sosOpen" href="curva.html" data-i18n="s4.open">Abrir na Curva</a>
+          <button type="button" class="abtn" id="sosSave" data-i18n="s4.save">Salvar na Biblioteca</button>
+          <button type="button" class="abtn primary" id="sosWrite" data-i18n="s4.write">Gravar no cabo</button>
+          <span class="bounce"><label for="bounceTo" class="sr-only" data-i18n="s4.bounce">Mandar para a pista</label><select class="sel" id="bounceTo"></select><button type="button" class="abtn" id="bounceBtn" data-i18n="s4.bounceBtn">Mandar para a pista</button></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · EXPORT -->
+  <section class="panel" aria-labelledby="s5h">
+    <h2 class="plate" id="s5h" data-i18n="s5.title">5 · Exportar antes/depois</h2>
+    <div class="grid-ex">
+      <div class="ctrl-stack">
+        <p class="note" data-i18n="s5.note">Exporta o par de Onde diferem (A antes, B depois) com nomes, faixas rotuladas, RMS e máximo.</p>
+        <div class="row" id="exDeltaRow"></div>
+        <div class="row">
+          <button type="button" class="abtn" id="exSvg" data-i18n="s5.svg">Exportar SVG</button>
+          <button type="button" class="abtn" id="exPng" data-i18n="s5.png">Exportar PNG</button>
+        </div>
+      </div>
+      <div class="preview" id="exPreview" role="img" aria-label="Prévia da exportação"></div>
+    </div>
+  </section>
+</div>
+</main>
+
+<footer class="site-footer">
+  <section>
+    <div class="f-eyebrow" data-i18n="foot.k">ESTA PÁGINA HOMENAGEIA</div>
+    <div class="honoree"><strong>Les Paul</strong><span>1915–2009</span></div>
+    <p data-i18n="foot.trivia">No fim dos anos 1940, Les Paul acrescentou uma cabeça de reprodução extra a um gravador que ganhou de Bing Crosby: tocava junto do que já estava na fita e gravava tudo de novo, camada sobre camada. Anos depois, o gravador de oito pistas dele ganhou o apelido de Octopus.</p>
+    <div class="sources"><a href="https://en.wikipedia.org/wiki/Les_Paul#Multitrack_recording" target="_blank" rel="noreferrer"><span data-i18n="foot.src1">fonte</span>: Wikipedia, Les Paul ↗</a><a href="https://en.wikipedia.org/wiki/Ampex#Professional_8-track_recorders" target="_blank" rel="noreferrer"><span data-i18n="foot.src1">fonte</span>: Wikipedia, 8 pistas ↗</a></div>
+  </section>
+  <section>
+    <h3 data-i18n="foot.aviso">Aviso</h3>
+    <p data-i18n="foot.text">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p>
+    <div class="footer-links"><a href="docs.html#aviso-legal" data-i18n="foot.full">Aviso legal completo</a><span data-i18n="foot.lic">Licença AGPL-3.0</span></div>
+  </section>
+</footer>
+
+<button type="button" class="help-fab" id="helpBtn" aria-label="Atalhos de teclado" data-i18n-aria="help.btn">?</button>
+<div class="toasts" id="toasts" aria-live="polite" role="status"></div>
+<input type="file" id="fileInput" accept=".txt,text/plain" hidden>
+
+<dialog id="ckDlg" aria-labelledby="ckTitle">
+  <div class="dlg-head"><h2 id="ckTitle" data-i18n="ck.title">Antes de gravar</h2><span class="badge-soon" data-i18n="ck.sim">SIMULADO</span></div>
+  <div class="dlg-body" id="ckBody"></div>
+  <div class="dlg-foot"><button type="button" class="abtn" id="ckCancel" data-i18n="ck.cancel">Cancelar</button><button type="button" class="abtn primary" id="ckGo" data-i18n="ck.go">Gravar no cabo</button></div>
+</dialog>
+
+<dialog id="helpDlg" aria-labelledby="helpTitle">
+  <div class="dlg-head"><h2 id="helpTitle" data-i18n="help.title">Atalhos</h2><button type="button" class="abtn" id="helpClose" data-i18n="help.close">Fechar</button></div>
+  <div class="dlg-body"><dl class="help-list" id="helpList"></dl></div>
+</dialog>
+
+<script type="module">
+/* === OA SHARED: storage v2 === */
+// Canonical implementation of the OA STORAGE CONTRACT v2 (see the HTML comment at the top of curva.html).
+// Self-contained: no page dependencies. Copy verbatim into every v2 page, before "OA SHARED: audio-loader v1".
+const OA = (globalThis.OA = globalThis.OA || {});
+OA.store = (() => {
+  const KEYS = Object.freeze({
+    current: 'oa.v2.current', journal: 'oa.v2.journal', flashDay: 'oa.v2.flashDay', flashTotal: 'oa.v2.flashTotal',
+    flashSession: 'oa.v2.flashSession', lang: 'oa.v2.lang', previewDb: 'oa.v2.previewDb',
+  });
+  const SESSION_KEYS = new Set([KEYS.flashSession]);
+  const KINDS = new Set(['PK', 'LS', 'HS', 'LP', 'HP']);
+  const area = (key) => { try { return SESSION_KEYS.has(key) ? globalThis.sessionStorage : globalThis.localStorage; } catch { return null; } };
+  function get(key, fallback) {
+    try { const a = area(key), raw = a ? a.getItem(key) : null; return raw == null ? fallback : JSON.parse(raw); } catch { return fallback; }
+  }
+  function set(key, value) { try { const a = area(key); if (a) a.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked */ } }
+  function remove(key) { try { const a = area(key); if (a) a.removeItem(key); } catch { /* blocked */ } }
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const bandToString = (b) => (b.kind === 'OFF' ? 'OFF' : `${b.kind}|${b.freqHz}|${b.gainDb}|${b.qFactor}`);
+  function bandFromString(s) {
+    if (s === 'OFF') return { kind: 'OFF' };
+    const [kind, f, g, q] = String(s).split('|');
+    const band = { kind, freqHz: Number(f), gainDb: Number(g), qFactor: Number(q) };
+    return KINDS.has(kind) && [band.freqHz, band.gainDb, band.qFactor].every(Number.isFinite) ? band : null;
+  }
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const store = {
+    KEYS, get, set, remove, today, bandToString, bandFromString,
+    getLang() { return get(KEYS.lang, 'pt-BR') === 'en-US' ? 'en-US' : 'pt-BR'; },
+    setLang(lang) { set(KEYS.lang, lang === 'en-US' ? 'en-US' : 'pt-BR'); },
+    /** bands: array of {kind, freqHz, gainDb, qFactor} in written order. */
+    saveCurrent({ name, source, preampDb, bands }) {
+      set(KEYS.current, { name: String(name), source: String(source), preampDb, bands: bands.map(bandToString), updatedAt: Date.now() });
+    },
+    /** Returns {name, source, preampDb, bands (objects), updatedAt} or null. Callers must re-run the gate. */
+    loadCurrent() {
+      const c = get(KEYS.current, null);
+      if (!c || !Array.isArray(c.bands) || c.bands.length !== 10 || !Number.isFinite(c.preampDb)) return null;
+      const bands = c.bands.map(bandFromString);
+      return bands.every(Boolean) ? { ...c, bands } : null;
+    },
+    journal() { const j = get(KEYS.journal, []); return Array.isArray(j) ? j : []; },
+    appendJournal(entry, max = 30) { const j = store.journal(); j.push(entry); while (j.length > max) j.shift(); set(KEYS.journal, j); return j; },
+    flashCounts() {
+      const day = get(KEYS.flashDay, null);
+      return { session: num(get(KEYS.flashSession, 0)), today: day && day.date === today() ? num(day.count) : 0, total: num(get(KEYS.flashTotal, 0)) };
+    },
+    recordFlash() {
+      const c = store.flashCounts();
+      set(KEYS.flashSession, c.session + 1); set(KEYS.flashDay, { date: today(), count: c.today + 1 }); set(KEYS.flashTotal, c.total + 1);
+      return store.flashCounts();
+    },
+  };
+  return store;
+})();
+/* === END OA SHARED: storage v2 === */
+
+/* === OA SHARED: audio-loader v1 === */
+// Top-bar MP3 loader + shared preview engine (streaming HTMLAudioElement or pink noise; exact Q27 chains).
+// HOW TO COPY
+//   1. CSS: copy the block "OA SHARED: audio-loader v1 (CSS)" into the page <style> (after the shared chrome CSS).
+//   2. HTML: copy the block "OA SHARED: audio-loader v1 (HTML)" into the top bar's .cable-actions, after the
+//      change counter and before the buttons.
+//   3. JS, in one <script type="module">, in this order: first "OA SHARED: storage v2", then this block
+//      ("OA SHARED: audio-loader v1"), both verbatim. Nothing else is needed for a working loader: the UI binds
+//      itself when the DOM is ready (idempotent, silent if the HTML block is absent) and reads "oa.v2.lang".
+//   4. Optional, only for pages with previews/A-B/blind test: OA.audio.useCodec({ designSection, encodeSection,
+//      preampWord }) with the page's inline codec copy. Without it everything works except buildChain(), which
+//      throws a clear Error.
+//   5. Call OA.audioUI.setLang('pt' | 'en') (or 'pt-BR' | 'en-US') from the page's language toggle.
+// PUBLIC API
+//   OA.audio.getSource()                 creates the AudioContext (call inside a user gesture) and returns the
+//                                        shared source bus (GainNode).
+//   OA.audio.buildChain(bands, preampDb, { gainDb = 0, on = true })
+//                                        -> { input, output, setGain(db, on), dispose(fadeMs) }; one IIRFilterNode per
+//                                        non-OFF section with the EXACT Q27 words (feedforward [b0,b1,b2], feedback
+//                                        [1,a1,a2]), then the Q23 preamp. Several chains may hang off the one source
+//                                        (A/B, blind test): switch them with chain.setGain(db, on).
+//   OA.audio.matchGains([levelDb, ...])  -> trims in dB that bring every chain to the quietest level.
+//   OA.audio.start('chains' | 'raw') / stop()   fade-in / fade-out; 'raw' plays the file without any chain.
+//   OA.audio.state()                     -> { mode, ready, rate, exact, volumeDb, error, persisted, file }.
+//   OA.audio.onChange(cb)                -> unsubscribe function; cb(state) on every change.
+//   OA.audio.loadFile(file) / removeFile() / setVolume(db) / toggleRaw() / ready (Promise: stored file restored).
+//   OA.audioUI.init() / setLang(lang)    init() runs automatically; calling it again is a no-op.
+OA.audio = (() => {
+  const DB_NAME = 'oa-v2', STORE = 'audio', KEY = 'current', RATE = 96000;
+  const listeners = new Set();
+  const clampDb = (v) => Math.min(0, Math.max(-40, Math.round(Number.isFinite(Number(v)) ? Number(v) : -12)));
+  const dbToGain = (db) => Math.pow(10, db / 20);
+  const st = {
+    ctx: null, rate: RATE, exact: true, codec: null, file: null, duration: NaN, error: false, persisted: true,
+    url: null, el: null, elSource: null, noise: null, noiseBuf: null, bus: null, rawGain: null, chainsIn: null, master: null,
+    mode: 'off', volumeDb: clampDb(OA.store.get(OA.store.KEYS.previewDb, -12)),
+  };
+  const state = () => ({
+    mode: st.mode, ready: !!st.ctx, rate: st.rate, exact: st.exact, volumeDb: st.volumeDb, error: st.error, persisted: st.persisted,
+    file: st.file ? { ...st.file, duration: st.duration } : null,
+  });
+  const emit = () => { const s = state(); listeners.forEach((cb) => cb(s)); };
+  // --- IndexedDB (db "oa-v2", store "audio", key "current") ---
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      if (!globalThis.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idb(mode, op) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode), req = op(tx.objectStore(STORE));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  }
+  // --- source handling ---
+  function pinkBuffer(ctx) {
+    const n = Math.round(ctx.sampleRate * 3), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    return buf;
+  }
+  function stopNoise() { if (st.noise) { try { st.noise.stop(); } catch { /* not started */ } st.noise.disconnect(); st.noise = null; } }
+  function startNoise() {
+    if (!st.ctx || st.noise) return;
+    if (!st.noiseBuf) st.noiseBuf = pinkBuffer(st.ctx);
+    const n = st.ctx.createBufferSource(); n.buffer = st.noiseBuf; n.loop = true; n.connect(st.bus); n.start(); st.noise = n;
+  }
+  function detachFile() {
+    if (st.el) { st.el.pause(); st.el.oaDead = true; }
+    if (st.elSource) { try { st.elSource.disconnect(); } catch { /* already */ } }
+    if (st.url) URL.revokeObjectURL(st.url);
+    st.el = null; st.elSource = null; st.url = null; st.file = null; st.duration = NaN; st.error = false;
+  }
+  function attach(record) {
+    detachFile();
+    if (record && record.blob) {
+      st.file = { name: String(record.name || 'audio'), type: record.type || '', size: Number(record.size) || record.blob.size, addedAt: record.addedAt || Date.now() };
+      st.url = URL.createObjectURL(record.blob);
+      const el = new Audio();
+      el.preload = 'metadata'; el.loop = true; el.src = st.url;
+      el.addEventListener('loadedmetadata', () => { if (!el.oaDead) { st.duration = el.duration; emit(); } });
+      el.addEventListener('error', () => { if (!el.oaDead) { st.error = true; emit(); } });
+      st.el = el;
+    }
+    routeSource();
+    emit();
+  }
+  /** Connects the current source (file element or pink noise) to the bus; plays it if the engine is running. */
+  function routeSource() {
+    if (!st.ctx) return;
+    stopNoise();
+    if (st.el) {
+      if (!st.elSource) st.elSource = st.ctx.createMediaElementSource(st.el);
+      st.elSource.connect(st.bus);
+      if (st.mode !== 'off') st.el.play().catch(() => {});
+    } else if (st.mode !== 'off') startNoise();
+  }
+  /** Creates the AudioContext. Call from a user gesture (click/key). */
+  function ensure() {
+    if (st.ctx) return st.ctx;
+    const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio unavailable');
+    let ctx;
+    try { ctx = new AC({ sampleRate: RATE }); } catch { ctx = new AC(); }
+    st.ctx = ctx; st.rate = ctx.sampleRate; st.exact = ctx.sampleRate === RATE;
+    st.master = ctx.createGain(); st.master.gain.value = 0; st.master.connect(ctx.destination);
+    st.chainsIn = ctx.createGain(); st.chainsIn.gain.value = 0; st.chainsIn.connect(st.master);
+    st.rawGain = ctx.createGain(); st.rawGain.gain.value = 0; st.rawGain.connect(st.master);
+    st.bus = ctx.createGain(); st.bus.connect(st.rawGain);
+    routeSource();
+    emit();
+    return ctx;
+  }
+  async function start(mode = 'chains') {
+    const ctx = ensure();
+    st.mode = mode === 'raw' ? 'raw' : 'chains';
+    const t = ctx.currentTime;
+    st.rawGain.gain.setValueAtTime(st.mode === 'raw' ? 1 : 0, t);
+    st.chainsIn.gain.setValueAtTime(st.mode === 'chains' ? 1 : 0, t);
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setValueAtTime(0, t);
+    st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), t + 0.02, 0.08); // short fade-in
+    if (st.el) st.el.play().catch(() => {}); else startNoise();
+    emit();
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* blocked until a gesture */ } }
+  }
+  function stop() {
+    if (!st.ctx || st.mode === 'off') return;
+    const t = st.ctx.currentTime;
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setTargetAtTime(0, t, 0.03);
+    st.mode = 'off';
+    setTimeout(() => { if (st.mode !== 'off') return; if (st.el) st.el.pause(); stopNoise(); }, 180);
+    emit();
+  }
+  function setVolume(db) {
+    st.volumeDb = clampDb(db);
+    OA.store.set(OA.store.KEYS.previewDb, st.volumeDb);
+    if (st.ctx && st.mode !== 'off') st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), st.ctx.currentTime, 0.03);
+    emit();
+  }
+  async function loadFile(file) {
+    if (!file || !(/^audio\//.test(file.type) || /\.(mp3|m4a|aac|ogg|wav|flac)$/i.test(file.name))) throw new Error('not audio');
+    const record = { name: file.name, type: file.type || 'audio/mpeg', size: file.size, blob: file, addedAt: Date.now() };
+    attach(record);
+    try { await idb('readwrite', (s) => s.put(record, KEY)); st.persisted = true; } catch { st.persisted = false; }
+    emit();
+  }
+  async function removeFile() {
+    attach(null);
+    try { await idb('readwrite', (s) => s.delete(KEY)); } catch { /* nothing stored */ }
+    emit();
+  }
+  // Optional: only pages that build preview chains need it. Loader-only pages never call it.
+  function useCodec(codec) {
+    if (!codec || typeof codec.designSection !== 'function' || typeof codec.encodeSection !== 'function' || typeof codec.preampWord !== 'function') {
+      throw new Error('OA.audio.useCodec expects { designSection, encodeSection, preampWord } functions');
+    }
+    st.codec = codec;
+  }
+  function coefficients(band) {
+    if (!st.codec) throw new Error('OA.audio.useCodec({ designSection, encodeSection, preampWord }) must be called first');
+    const w = st.codec.encodeSection(st.codec.designSection(band, st.rate)); // Q27 words [b0, b2, -a1, b1, -a2]
+    const q = 2 ** 27;
+    return { b0: w[0] / q, b2: w[1] / q, a1: -w[2] / q, b1: w[3] / q, a2: -w[4] / q };
+  }
+  function buildChain(bands, preampDb, { gainDb = 0, on = true } = {}) {
+    if (!st.codec) throw new Error('OA.audio.buildChain needs a codec: call OA.audio.useCodec({ designSection, encodeSection, preampWord }) first');
+    const ctx = ensure();
+    const input = ctx.createGain(), pre = ctx.createGain(), output = ctx.createGain(), nodes = [input, pre, output];
+    let node = input;
+    for (const band of bands) {
+      if (band.kind === 'OFF') continue;
+      const c = coefficients(band);
+      const f = ctx.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
+      node.connect(f); node = f; nodes.push(f);
+    }
+    node.connect(pre);
+    pre.gain.value = st.codec.preampWord(preampDb) / 2 ** 23;
+    pre.connect(output);
+    output.gain.value = 0;
+    output.connect(st.chainsIn);
+    st.bus.connect(input);
+    const chain = {
+      input, output,
+      setGain(db, isOn = true, tc = 0.02) { const t = ctx.currentTime; output.gain.cancelScheduledValues(t); output.gain.setTargetAtTime(isOn ? dbToGain(db) : 0, t, tc); },
+      dispose(fadeMs = 60) {
+        chain.setGain(0, false, fadeMs / 4000);
+        setTimeout(() => { try { st.bus.disconnect(input); } catch { /* already */ } nodes.forEach((n) => { try { n.disconnect(); } catch { /* already */ } }); }, fadeMs + 20);
+      },
+    };
+    chain.setGain(gainDb, on);
+    return chain;
+  }
+  const matchGains = (levels) => { const lo = Math.min(...levels); return levels.map((l) => lo - l); };
+  const api = {
+    state, start, stop, setVolume, loadFile, removeFile, useCodec, buildChain, matchGains, dbToGain,
+    getSource() { ensure(); return st.bus; },
+    toggleRaw() { if (st.mode === 'raw') stop(); else start('raw').catch(() => {}); },
+    onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); },
+    ready: idb('readonly', (s) => s.get(KEY)).then((rec) => { if (rec && rec.blob) attach(rec); }).catch(() => {}),
+  };
+  return api;
+})();
+OA.audioUI = (() => {
+  const TXT = {
+    pt: { btn: 'Áudio', title: 'Áudio da prévia', load: 'Carregar MP3…', none: 'Nenhum arquivo: ruído rosa gerado no navegador.', play: 'Tocar arquivo', pause: 'Pausar', remove: 'Remover', vol: 'Volume da prévia (só no navegador)', note: 'O arquivo fica só neste navegador. Nada é enviado.', exact: 'Prévia a 96 kHz: coeficientes Q27 exatos.', approx: 'Este navegador abriu áudio a {rate} Hz: coeficientes recalculados, prévia aproximada.', idle: 'O áudio começa no primeiro play (exige um clique).', bad: 'Arquivo não reconhecido como áudio.', notSaved: 'Não foi possível guardar no navegador; vale só nesta página.', btnAria: 'Áudio da prévia: {x}' },
+    en: { btn: 'Audio', title: 'Preview audio', load: 'Load MP3…', none: 'No file: pink noise generated in the browser.', play: 'Play file', pause: 'Pause', remove: 'Remove', vol: 'Preview volume (browser only)', note: 'The file stays in this browser. Nothing is uploaded.', exact: 'Preview at 96 kHz: exact Q27 coefficients.', approx: 'This browser opened audio at {rate} Hz: coefficients recomputed, preview approximate.', idle: 'Audio starts on the first play (needs a click).', bad: 'File not recognised as audio.', notSaved: 'Could not store it in the browser; it lasts for this page only.', btnAria: 'Preview audio: {x}' },
+  };
+  let lang = OA.store.getLang() === 'en-US' ? 'en' : 'pt';
+  const el = (id) => document.getElementById(id);
+  const tx = (k, p) => { let s = TXT[lang][k]; if (p) for (const n in p) s = s.split(`{${n}}`).join(p[n]); return s; };
+  const fmtDb = (v) => `${v < 0 ? '−' + Math.abs(v) : v} dB`;
+  const fmtDur = (d) => (Number.isFinite(d) ? `${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}` : '…');
+  const fmtSize = (b) => `${new Intl.NumberFormat(lang === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: 1 }).format(b / 1048576)} MB`;
+  function render(s) {
+    if (!el('oaAudioBtn')) return;
+    const name = s.file ? s.file.name : tx('btn');
+    el('oaAudioName').textContent = name;
+    el('oaAudioBtn').title = s.file ? s.file.name : '';
+    el('oaAudioBtn').classList.toggle('has-file', !!s.file);
+    el('oaAudioBtn').setAttribute('aria-label', tx('btnAria', { x: s.file ? s.file.name : tx('none') }));
+    document.querySelectorAll('[data-oa-audio]').forEach((n) => { if (TXT[lang][n.dataset.oaAudio]) n.textContent = tx(n.dataset.oaAudio); });
+    const meta = el('oaAudioMeta');
+    meta.textContent = '';
+    if (s.file) {
+      const b = document.createElement('b'); b.textContent = s.file.name;
+      meta.append(b, document.createTextNode(` · ${fmtDur(s.file.duration)} · ${fmtSize(s.file.size)}`));
+      if (s.error) meta.append(document.createTextNode(` · ${tx('bad')}`));
+      if (!s.persisted) meta.append(document.createTextNode(` · ${tx('notSaved')}`));
+    } else meta.textContent = tx('none');
+    el('oaAudioPlay').textContent = s.mode === 'raw' ? tx('pause') : tx('play');
+    el('oaAudioPlay').disabled = !s.file;
+    el('oaAudioPlay').setAttribute('aria-pressed', s.mode === 'raw' ? 'true' : 'false');
+    el('oaAudioRemove').disabled = !s.file;
+    el('oaAudioVol').value = String(s.volumeDb);
+    el('oaAudioVolOut').textContent = fmtDb(s.volumeDb);
+    const rate = el('oaAudioRate');
+    rate.textContent = !s.ready ? tx('idle') : s.exact ? tx('exact') : tx('approx', { rate: s.rate });
+    rate.classList.toggle('approx', s.ready && !s.exact);
+  }
+  function setOpen(open) {
+    el('oaAudioPop').hidden = !open;
+    el('oaAudioBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  let bound = false;
+  function init() {
+    if (bound || !el('oaAudioBtn') || !el('oaAudioPop')) return; // idempotent; silent when the HTML block is absent
+    bound = true;
+    el('oaAudioBtn').addEventListener('click', () => setOpen(el('oaAudioPop').hidden));
+    document.addEventListener('click', (e) => { if (!el('oaAudioPop').hidden && !el('oaAudio').contains(e.target)) setOpen(false); });
+    el('oaAudio').addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('oaAudioPop').hidden) { e.stopPropagation(); setOpen(false); el('oaAudioBtn').focus(); } });
+    el('oaAudioFile').addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) OA.audio.loadFile(f).catch(() => { el('oaAudioMeta').textContent = tx('bad'); });
+    });
+    el('oaAudioPlay').addEventListener('click', () => OA.audio.toggleRaw());
+    el('oaAudioRemove').addEventListener('click', () => { OA.audio.removeFile(); });
+    el('oaAudioVol').addEventListener('input', (e) => OA.audio.setVolume(Number(e.target.value)));
+    OA.audio.onChange(render);
+    render(OA.audio.state());
+  }
+  // Accepts 'pt' | 'en' or the stored form 'pt-BR' | 'en-US'.
+  const setLang = (l) => { lang = l === 'en' || l === 'en-US' ? 'en' : 'pt'; if (bound) render(OA.audio.state()); };
+  // Auto-init: module scripts run after parsing; classic scripts may run earlier, so wait for the DOM if needed.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+  return { init, setLang };
+})();
+/* === END OA SHARED: audio-loader v1 === */
+
+// =====================================================================
+// 1. Official presets (bytes identical to the official page) and labels
+// =====================================================================
+const PRESETS={padrao:{pre:-2.8,b:[["PK",25,-0.8,0.3],["PK",150,-3,0.69],["PK",2237,-10,1.41],["PK",4348,-6.1,3],["PK",4958,-8.3,2.72],["PK",7178,-10,3],["PK",11063,-10,3],["PK",520,3.1,0.81],["PK",3046,5.7,1.51],["PK",5995,3.4,0.59]]},pref6:{pre:-3,b:[["PK",25,-2,0.4],["PK",167,-6.2,0.53],["PK",2560,-8,1.03],["PK",4911,-8,4],["PK",7838,-6.7,4],["PK",11523,-6.5,4],["PK",270,0.1,4],["PK",404,4.1,0.48],["PK",2930,7,2.94],["PK",3537,4.5,4]]},emv:{pre:-7.8,b:[["PK",1084,-1.1,3],["PK",1930,-1.9,2.39],["PK",2334,-8,1.93],["PK",4454,-8,2.63],["PK",5568,-4.2,1.55],["PK",7504,-7.2,3],["PK",107,0.7,0.5],["PK",473,2.4,0.5],["PK",6814,7.7,1.48],["PK",8862,8,3]]},basshead:{pre:-5.7,b:[["PK",4613,-12,2.5],["PK",2246,-12,1.31],["PK",6746,-7.9,2.5],["PK",1122,-2.6,1.73],["PK",10302,-6.1,2.5],["PK",20,-5,0.42],["PK",223,-4.9,0.84],["PK",3184,2.5,2.5],["PK",3116,9.2,0.3],["LS",286,8.2,0.47]]},energico:{pre:-3.3,b:[["PK",25,-3.1,0.5],["PK",97,-1.4,0.68],["PK",2445,-8,0.87],["PK",4725,-8,3],["PK",6920,-8,3],["PK",12439,-8,1.96],["PK",1838,5,0.92],["PK",2904,4.5,2.62],["PK",3665,3.7,3],["PK",8376,8,2.42]]},musical:{pre:-2.3,b:[["PK",24,-3.2,0.1],["PK",2277,-8,1.69],["PK",4588,-9.4,2.8],["PK",5979,-3.8,2],["PK",7184,-3.2,3],["PK",10638,-10.4,3],["PK",840,2.2,1.54],["PK",1393,2,1.85],["PK",3224,1.1,3],["PK",15808,2.2,2.5]]},analitico:{pre:-0.8,b:[["LS",120,-9.3,0.44],["PK",7007,-9.1,2.5],["PK",147,-3.5,0.48],["PK",4561,-12,2.5],["PK",2198,-12,1.42],["PK",255,-0.4,1.78],["PK",11291,-7.8,2.5],["PK",1093,-2.7,1.17],["PK",3226,6.2,0.3],["PK",3028,1.8,2.5]]},referencia:{pre:-4,b:[["LS",297,-3.4,0.81],["PK",11107,-4.8,2.5],["PK",1027,-1.7,1.98],["PK",20,-3.6,0.57],["PK",7055,-3.8,2.5],["PK",4588,-8,2.5],["PK",2208,-8.2,1.83],["PK",595,3.5,0.42],["PK",3144,5.6,1.69],["PK",3031,0.5,2.5]]},harman:{pre:-0.5,b:[["LS",199,-5.6,0.94],["PK",399,-1.4,1.62],["PK",2271,-8,1.32],["PK",256,-4.2,1.17],["PK",7566,-7.6,0.43],["PK",4662,-6.8,2.5],["PK",9138,3.8,2.5],["PK",3318,7.8,1.32],["PK",5767,5.8,2.5],["PK",3209,1.1,1.33]]},vdsf:{pre:-2.2,b:[["PK",25,-8,0.5],["PK",80,-5,0.52],["PK",210,-2,0.79],["PK",1286,-5.9,1.34],["PK",1978,-7.4,1.67],["PK",2375,-5.4,2.4],["PK",4384,-4.7,3],["PK",4833,-6,3],["PK",7252,-7.6,3],["PK",1718,8,0.5]]},etymotic:{pre:-2.2,b:[["PK",25,-8,0.97],["PK",45,-8,0.5],["PK",105,-5.3,0.51],["PK",226,-1.4,0.91],["PK",2190,-8,1.39],["PK",4276,-5,3],["PK",4847,-7.2,3],["PK",7260,-6.8,3],["PK",785,1.8,1.42],["PK",3120,6.5,1.01]]}};
+const PRESET_ORDER=['padrao','pref6','emv','basshead','energico','musical','analitico','referencia','harman','vdsf','etymotic'];
+const PRESET_LABEL={padrao:'Auri',pref6:'Natural',emv:'Em V',basshead:'Basshead',energico:'Enérgico',musical:'Musical',analitico:'Analítico',referencia:'JM-1',harman:'Harman IE 2019',vdsf:'VDSF',etymotic:'Etymotic'};
+const PRESET_DESC={padrao:'A assinatura do Auri, inspirada pela comunidade.',pref6:'Subgrave presente, médios limpos e agudos arejados.',emv:'Alvo com graves e agudos levantados.',basshead:'Para os amantes de graves.',energico:'Sonoridade intensa, pensada para rock.',musical:'Graves fortes, médios comedidos e agudos delicados.',analitico:'Para quem prioriza detalhamento e clareza.',referencia:'Sonoridade fiel à JM-1.',harman:'A curva de preferência mais estudada do mundo.',vdsf:'Meio-termo entre campo difuso e Harman, com graves discretos.',etymotic:'Graves contidos e muita definição nos médios e agudos.'};
+function toBands(arr){ return arr.map(([kind,freqHz,gainDb,qFactor])=>kind==='OFF'?{kind:'OFF'}:{kind,freqHz,gainDb,qFactor}); }
+
+// =====================================================================
+// 2. Inline copy of src/dsp/eq0xcb.mjs (pure math + wire format)
+//    Peaking/shelf design ported from AutoEq (MIT, Jaakko Pasanen).
+// =====================================================================
+const SAMPLE_RATE = 96000;
+const BAND_COUNT = 10;
+const PREAMBLE = Object.freeze([0x45,0x51,0x31,0x23,0xd6,0x00,0x00,0x0a,0x04,0x05,0x01,0x0a,0x00,0x00]);
+const FILTER_KINDS = Object.freeze(['PK','LS','HS','LP','HP','OFF']);
+const OFF = Object.freeze({ kind: 'OFF' });
+const KINDS_WITH_GAIN = new Set(['PK','LS','HS']);
+const Q23_ONE = 2 ** 23;
+const Q27_ONE = 2 ** 27;
+const INT32_MIN = -2147483648;
+const INT32_MAX = 2147483647;
+
+function fromAutoEqSign({ a1, a2, b0, b1, b2 }) { return { b0, b1, b2, a1: -a1, a2: -a2 }; }
+function designPeaking(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+  const amp = Math.pow(10, gainDb / 40);
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const cosW0 = Math.cos(w0);
+  const a0 = 1 + alpha / amp;
+  return fromAutoEqSign({
+    a1: -(-2 * cosW0) / a0,
+    a2: -(1 - alpha / amp) / a0,
+    b0: (1 + alpha * amp) / a0,
+    b1: (-2 * cosW0) / a0,
+    b2: (1 - alpha * amp) / a0,
+  });
+}
+function designLowShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+  const amp = Math.pow(10, gainDb / 40);
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const cosW0 = Math.cos(w0);
+  const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
+  const a0 = (amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+  return fromAutoEqSign({
+    a1: -(-2 * ((amp - 1) + (amp + 1) * cosW0)) / a0,
+    a2: -((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+    b0: (amp * ((amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+    b1: (2 * amp * ((amp - 1) - (amp + 1) * cosW0)) / a0,
+    b2: (amp * ((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+  });
+}
+function designHighShelf(freqHz, gainDb, qFactor, sampleRate = SAMPLE_RATE) {
+  const amp = Math.pow(10, gainDb / 40);
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const cosW0 = Math.cos(w0);
+  const twoSqrtAmpAlpha = 2 * Math.sqrt(amp) * alpha;
+  const a0 = (amp + 1) - (amp - 1) * cosW0 + twoSqrtAmpAlpha;
+  return fromAutoEqSign({
+    a1: -(2 * ((amp - 1) - (amp + 1) * cosW0)) / a0,
+    a2: -((amp + 1) - (amp - 1) * cosW0 - twoSqrtAmpAlpha) / a0,
+    b0: (amp * ((amp + 1) + (amp - 1) * cosW0 + twoSqrtAmpAlpha)) / a0,
+    b1: (-2 * amp * ((amp - 1) + (amp + 1) * cosW0)) / a0,
+    b2: (amp * ((amp + 1) + (amp - 1) * cosW0 - twoSqrtAmpAlpha)) / a0,
+  });
+}
+function designLowPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const cosW0 = Math.cos(w0);
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const a0 = 1 + alpha;
+  return { b0: ((1 - cosW0) / 2) / a0, b1: (1 - cosW0) / a0, b2: ((1 - cosW0) / 2) / a0, a1: (-2 * cosW0) / a0, a2: (1 - alpha) / a0 };
+}
+function designHighPass(freqHz, qFactor, sampleRate = SAMPLE_RATE) {
+  const w0 = (2 * Math.PI * freqHz) / sampleRate;
+  const cosW0 = Math.cos(w0);
+  const alpha = Math.sin(w0) / (2 * qFactor);
+  const a0 = 1 + alpha;
+  return { b0: ((1 + cosW0) / 2) / a0, b1: (-(1 + cosW0)) / a0, b2: ((1 + cosW0) / 2) / a0, a1: (-2 * cosW0) / a0, a2: (1 - alpha) / a0 };
+}
+function designSection(band, sampleRate = SAMPLE_RATE) {
+  switch (band.kind) {
+    case 'PK': return designPeaking(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'LS': return designLowShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'HS': return designHighShelf(band.freqHz, band.gainDb, band.qFactor, sampleRate);
+    case 'LP': return designLowPass(band.freqHz, band.qFactor, sampleRate);
+    case 'HP': return designHighPass(band.freqHz, band.qFactor, sampleRate);
+    case 'OFF': return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
+    default: throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+  }
+}
+function bandError(index, message) { return new RangeError(`band ${index}: ${message}`); }
+function checkBand(band, index = 0) {
+  if (band === null || typeof band !== 'object') throw new TypeError(`band ${index}: not an object`);
+  if (!FILTER_KINDS.includes(band.kind)) throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
+  if (band.kind === 'OFF') return;
+  const nyquist = SAMPLE_RATE / 2;
+  if (!(Number.isFinite(band.freqHz) && band.freqHz > 0 && band.freqHz < nyquist)) throw bandError(index, `freqHz must be in (0, ${nyquist}), got ${band.freqHz}`);
+  if (!(Number.isFinite(band.qFactor) && band.qFactor > 0)) throw bandError(index, `qFactor must be > 0, got ${band.qFactor}`);
+  if (KINDS_WITH_GAIN.has(band.kind) && !Number.isFinite(band.gainDb)) throw bandError(index, `gainDb must be finite, got ${band.gainDb}`);
+}
+function isStable(a1, a2) { return Math.abs(a2) < 1 && Math.abs(a1) < 1 + a2; }
+function encodeSection(section, index = 0) {
+  const ordered = [section.b0, section.b2, -section.a1, section.b1, -section.a2];
+  const words = ordered.map((coefficient) => {
+    const word = Math.round(coefficient * Q27_ONE) + 0;
+    if (!Number.isInteger(word) || word > INT32_MAX || word < INT32_MIN) throw bandError(index, 'coefficient does not fit Q27 in int32');
+    return word;
+  });
+  if (!isStable(-words[2] / Q27_ONE, -words[4] / Q27_ONE)) throw bandError(index, 'unstable section: poles on or outside the unit circle');
+  return words;
+}
+function preampWord(preampDb = 0) {
+  if (!Number.isFinite(preampDb)) throw new RangeError(`preamp must be a finite dB value, got ${preampDb}`);
+  if (preampDb > 0) throw new RangeError(`preamp must be <= 0 dB, got ${preampDb}`);
+  return Math.round(Math.pow(10, preampDb / 20) * Q23_ONE);
+}
+function crc16Ccitt(data) {
+  let register = 0xffff;
+  for (const byte of data) {
+    register ^= byte << 8;
+    for (let bit = 0; bit < 8; bit++) register = register & 0x8000 ? ((register << 1) ^ 0x1021) & 0xffff : (register << 1) & 0xffff;
+  }
+  return register;
+}
+function appendInt32LE(buffer, value) {
+  if (!Number.isInteger(value) || value > INT32_MAX || value < INT32_MIN) throw new RangeError(`value does not fit int32: ${value}`);
+  buffer.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+}
+function encodePayload(eqBands, preampDb = 0) {
+  if (!Array.isArray(eqBands) || eqBands.length !== BAND_COUNT) throw new RangeError(`expected ${BAND_COUNT} bands`);
+  eqBands.forEach(checkBand);
+  const payload = [...PREAMBLE];
+  appendInt32LE(payload, preampWord(preampDb));
+  eqBands.forEach((band, index) => { for (const word of encodeSection(designSection(band), index)) appendInt32LE(payload, word); });
+  const checksum = crc16Ccitt(payload);
+  payload.push(checksum & 0xff, checksum >>> 8);
+  return payload;
+}
+function magnitudeDb(eqBands, freqHz, sampleRate = SAMPLE_RATE) {
+  const omega = (2 * Math.PI * freqHz) / sampleRate;
+  const halfSin = Math.sin(omega / 2);
+  const uRe = 2 * halfSin * halfSin;
+  const uIm = Math.sin(omega);
+  const uSquaredRe = uRe * uRe - uIm * uIm;
+  const uSquaredIm = 2 * uRe * uIm;
+  const powerAt = (p0, p1, p2) => {
+    const sum = p0 + p1 + p2;
+    const slope = p1 + 2 * p2;
+    const re = sum - slope * uRe + p2 * uSquaredRe;
+    const im = -slope * uIm + p2 * uSquaredIm;
+    return re * re + im * im;
+  };
+  let totalDb = 0;
+  for (const band of eqBands) {
+    const { b0, b1, b2, a1, a2 } = designSection(band, sampleRate);
+    totalDb += 10 * Math.log10(powerAt(b0, b1, b2) / powerAt(1, a1, a2));
+  }
+  return totalDb;
+}
+// Preview chains (OA.audio) use this page's codec copy: exact Q27 words at 96 kHz.
+OA.audio.useCodec({ designSection, encodeSection, preampWord });
+
+// =====================================================================
+// 3. Inline copy of design/analysis/gate.mjs (gate v2, envelope observado)
+//    Thresholds from design/analysis/envelope.json (aggregate).
+// =====================================================================
+const Q27 = 2 ** 27;
+function fromWords(w) { return { b0: w[0] / Q27, b2: w[1] / Q27, a1: -w[2] / Q27, b1: w[3] / Q27, a2: -w[4] / Q27 }; }
+function poleRadius(s) {
+  const d = s.a1 * s.a1 - 4 * s.a2;
+  return d < 0 ? Math.sqrt(s.a2) : Math.max(Math.abs((-s.a1 + Math.sqrt(d)) / 2), Math.abs((-s.a1 - Math.sqrt(d)) / 2));
+}
+function sectionDb(s, f) {
+  if (s.b0 === 1 && s.b1 === s.a1 && s.b2 === s.a2) return 0;
+  const w = 2 * Math.PI * f / SAMPLE_RATE;
+  const re = 2 * Math.sin(w / 2) ** 2, im = Math.sin(w);
+  const u2re = re * re - im * im, u2im = 2 * re * im;
+  const power = (p0, p1, p2) => {
+    const r = p0 + p1 + p2 - (p1 + 2 * p2) * re + p2 * u2re;
+    const i = -(p1 + 2 * p2) * im + p2 * u2im;
+    return r * r + i * i;
+  };
+  return 10 * Math.log10(power(s.b0, s.b1, s.b2) / power(1, s.a1, s.a2));
+}
+function powerPolynomial(p0, p1, p2) {
+  const sum = p0 + p1 + p2;
+  return [sum * sum, 4 * ((p0 - p2) ** 2 - sum * (p0 + p2)), 16 * p0 * p2];
+}
+function sectionPeaks(s) {
+  const n = powerPolynomial(s.b0, s.b1, s.b2), d = powerPolynomial(1, s.a1, s.a2);
+  const a = n[2] * d[1] - n[1] * d[2];
+  const b = 2 * (n[2] * d[0] - n[0] * d[2]);
+  const c = n[1] * d[0] - n[0] * d[1];
+  const roots = [];
+  if (a === 0) { if (b !== 0) roots.push(-c / b); }
+  else {
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant >= 0) {
+      const q = -0.5 * (b + (b >= 0 ? 1 : -1) * Math.sqrt(discriminant));
+      if (q !== 0) roots.push(q / a, c / q);
+      else roots.push(-b / (2 * a));
+    }
+  }
+  const stationaryHz = roots.filter((t) => t > 0 && t < 1).map((t) => Math.asin(Math.sqrt(t)) * SAMPLE_RATE / Math.PI);
+  const maximum = (frequencies) => frequencies.map((f) => ({ db: sectionDb(s, f), frequencyHz: f })).reduce((best, p) => p.db > best.db ? p : best);
+  return {
+    full: maximum([0, 48000, ...stationaryHz]),
+    audible: maximum([20, 20000, ...stationaryHz.filter((f) => f >= 20 && f <= 20000)]),
+  };
+}
+const THRESHOLDS = {
+  coefficientPositions: ['b0', 'b2', '-a1', 'b1', '-a2'],
+  coefficientAbsWords: [176145720, 133967223, 268076748, 268076748, 133859379],
+  coefficientAbs: [1.3123878836631775, 0.9981335923075676, 1.9973274171352386, 1.9973274171352386, 0.9973300918936729],
+  poleRadius: 0.99986846753918,
+  sectionPeakDb: Math.max(...PRESET_ORDER.flatMap((id) => toBands(PRESETS[id].b).map((b) => sectionPeaks(fromWords(encodeSection(designSection(b)))).full.db))),
+  internalAudibleDb: -0.20368875272918074,
+  outputAudibleDb: -0.47087539615209006,
+  outputFullDb: 2.5000638697363913,
+  preampMaxDb: Math.max(...PRESET_ORDER.map((id) => PRESETS[id].pre)),
+  preampMinDb: -25.5,
+  dbNumericalTolerance: 1e-8,
+  radiusNumericalTolerance: 2e-15,
+};
+const MEAN_FREQUENCIES = Object.freeze(Array.from({ length: 280 }, (_, i) => Math.round(20 * 1000 ** (i / 279) * 100) / 100).filter((f) => f >= 300 && f <= 3000));
+function analyseSection(band) {
+  const words = encodeSection(designSection(band));
+  const section = fromWords(words), radius = poleRadius(section), peaks = sectionPeaks(section);
+  const reasons = [];
+  words.forEach((word, i) => { if (Math.abs(word) > THRESHOLDS.coefficientAbsWords[i]) reasons.push(`a:${THRESHOLDS.coefficientPositions[i]}`); });
+  if (radius > THRESHOLDS.poleRadius + THRESHOLDS.radiusNumericalTolerance) reasons.push('b:pole-radius');
+  if (peaks.full.db > THRESHOLDS.sectionPeakDb + THRESHOLDS.dbNumericalTolerance) reasons.push('c:section-peak');
+  return { words, section, poleRadius: radius, fullPeak: peaks.full, audiblePeak: peaks.audible, reasons };
+}
+const intentionalPreampDb = (db) => 20 * Math.log10(preampWord(db) / 2 ** 23);
+function refine(fn, a, b) {
+  const r = (Math.sqrt(5) - 1) / 2;
+  let c = b - r * (b - a), d = a + r * (b - a), fc = fn(c), fd = fn(d);
+  for (let i = 0; i < 70 && b - a > 1e-8; i++) {
+    if (fc > fd) { b = d; d = c; fd = fc; c = b - r * (b - a); fc = fn(c); }
+    else { a = c; c = d; fc = fd; d = a + r * (b - a); fd = fn(d); }
+  }
+  return fc > fd ? { db: fc, frequencyHz: c } : { db: fd, frequencyHz: d };
+}
+function responsePeak(sections, minHz, maxHz) {
+  if (!sections.length) return { db: 0, frequencyHz: minHz };
+  if (sections.length === 1) { const p = sectionPeaks(sections[0]); return minHz === 0 ? p.full : p.audible; }
+  const fn = (f) => sections.reduce((db, section) => db + sectionDb(section, f), 0);
+  const intervals = 16384, lo = minHz || 0.001;
+  const fs = Array.from({ length: intervals + 1 }, (_, i) => lo * (maxHz / lo) ** (i / intervals));
+  fs[0] = lo; fs[intervals] = maxHz;
+  if (minHz === 0) fs.unshift(0);
+  const values = fs.map(fn);
+  let best = { db: values[0], frequencyHz: fs[0] };
+  for (let i = 1; i < fs.length; i++) {
+    if (values[i] > best.db) best = { db: values[i], frequencyHz: fs[i] };
+    if (i < fs.length - 1 && values[i] > values[i - 1] && values[i] >= values[i + 1]) {
+      const candidate = refine(fn, fs[i - 1], fs[i + 1]);
+      if (candidate.db > best.db) best = candidate;
+    }
+  }
+  return best;
+}
+function levelDb(eqBands, preampDb) {
+  const sections = eqBands.map((b) => fromWords(encodeSection(designSection(b))));
+  return intentionalPreampDb(preampDb) + MEAN_FREQUENCIES.reduce((sum, f) => sum + sections.reduce((db, s) => db + sectionDb(s, f), 0), 0) / MEAN_FREQUENCIES.length;
+}
+function gate(eqBands, preampDb) {
+  const reasons = [], metrics = { thresholds: THRESHOLDS };
+  let payload;
+  try { payload = encodePayload(eqBands, preampDb); }
+  catch (error) { return { ok: false, reasons: [`f:codec:${error.message}`], metrics }; }
+  metrics.payloadCrc = `0x${payload.at(-1).toString(16).padStart(2, '0')}${payload.at(-2).toString(16).padStart(2, '0')}`;
+  if (preampDb < THRESHOLDS.preampMinDb || preampDb > THRESHOLDS.preampMaxDb) reasons.push('g:preamp-range');
+  metrics.preampDb = preampDb;
+  metrics.quantizedPreampDb = intentionalPreampDb(preampDb);
+  metrics.sections = eqBands.map((b, i) => { const s = analyseSection(b); reasons.push(...s.reasons.map((r) => `${r}:stage-${i + 1}`)); return s; });
+  const active = [];
+  metrics.prefixAudible = [{ stage: 0, db: metrics.quantizedPreampDb, frequencyHz: null }];
+  for (const [i, item] of metrics.sections.entries()) {
+    const s = item.section;
+    if (!(s.b0 === 1 && s.b1 === s.a1 && s.b2 === s.a2)) active.push(s);
+    const peak = responsePeak(active, 20, 20000);
+    metrics.prefixAudible.push({ stage: i + 1, db: peak.db + metrics.quantizedPreampDb, frequencyHz: peak.frequencyHz });
+  }
+  metrics.internalAudible = metrics.prefixAudible.reduce((a, b) => b.db > a.db ? b : a);
+  metrics.outputAudible = metrics.prefixAudible.at(-1);
+  const full = responsePeak(active, 0, 48000);
+  metrics.outputFull = { db: full.db + metrics.quantizedPreampDb, frequencyHz: full.frequencyHz };
+  if (metrics.internalAudible.db > THRESHOLDS.internalAudibleDb + THRESHOLDS.dbNumericalTolerance) reasons.push('d:internal-audible');
+  if (metrics.outputAudible.db > THRESHOLDS.outputAudibleDb + THRESHOLDS.dbNumericalTolerance) reasons.push('e:output-audible');
+  if (metrics.outputFull.db > THRESHOLDS.outputFullDb + THRESHOLDS.dbNumericalTolerance) reasons.push('e:output-full');
+  return { ok: reasons.length === 0, reasons, metrics };
+}
+// Auto preamp for a whole curve: same Q23 rule as gate.mjs autoPreampForSection,
+// applied to the measured prefix/output peaks of the full chain.
+function autoPreamp(bands) {
+  const probe = gate(bands, THRESHOLDS.preampMaxDb);
+  if (!probe.metrics.prefixAudible) return { pre: null, probe };
+  const q = probe.metrics.quantizedPreampDb;
+  const internal = Math.max(0, ...probe.metrics.prefixAudible.slice(1).map((p) => p.db - q));
+  const outAud = probe.metrics.outputAudible.db - q;
+  const outFull = probe.metrics.outputFull.db - q;
+  const cap = Math.min(THRESHOLDS.internalAudibleDb - internal, THRESHOLDS.outputAudibleDb - outAud, THRESHOLDS.outputFullDb - outFull);
+  const maximumWord = preampWord(THRESHOLDS.preampMaxDb);
+  const word = Math.min(maximumWord, Math.floor(10 ** (cap / 20) * 2 ** 23));
+  if (word < preampWord(THRESHOLDS.preampMinDb)) return { pre: null, probe };
+  if (word === maximumWord) return { pre: THRESHOLDS.preampMaxDb, probe };
+  return { pre: Math.max(THRESHOLDS.preampMinDb, 20 * Math.log10(word / 2 ** 23)), probe };
+}
+
+// =====================================================================
+// 4. i18n and number formatting
+// =====================================================================
+// Contract keys go through OA.store (storage v2). The Library has no contract key yet: this local helper is only
+// used by "Salvar na Biblioteca" (TODO in the header comment).
+const store = {
+  get(k, d = null) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
+};
+let LANG = OA.store.getLang() === 'en-US' ? 'en' : 'pt';
+const SOON_PT = 'Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.';
+const I18N = {
+  pt: {
+    'skip':'Pular para o conteúdo','bar.aria':'Barra do cabo','nav.aria':'Principal','nav.curva':'Curva','nav.biblioteca':'Biblioteca','nav.comparar':'Comparar','nav.soe':'Soe como X','nav.comunidade':'Comunidade','nav.teste':'Teste cego','nav.cabo':'Cabo','nav.docs':'Docs',
+    'chrome.status':'Sem cabo · simulado','chrome.neutro':'Neutro','chrome.padrao':'Padrão Auri','chrome.gravar':'Gravar no cabo','unsaved.n':'{n} alterações não gravadas','unsaved.1':'1 alteração não gravada','lang.aria':'Switch to English',
+    'page.kicker':'Comparar · som sobre som · gravador de 8 pistas','page.title1':'Oito pistas.','page.title2':'Uma camada sobre a outra.',
+    'page.lede':'Carregue uma curva em cada pista, veja onde duas delas diferem e grave por cima: a curva nova é a base mais uma fração da diferença entre A e B. Tudo é calculado com a matemática real do relatório 0xCB e passa pelo gate v2 antes de qualquer gravação.',
+    'deck.aria':'Transporte de fita: dois carretéis e o bloco de cabeças sob tampa transparente','deck.extra':'EXTRA','deck.erase':'APAGAR','deck.rec':'GRAVAR','deck.play':'REPROD.','deck.plate':'8 PISTAS · SOM SOBRE SOM',
+    'tr.aria':'Transporte','tr.rewind':'Rebobinar','tr.play':'Tocar','tr.pause':'Pausar','tr.rec':'Rec · gravar por cima','tr.read':'Ler do cabo','tr.counter':'gravações neste navegador',
+    'soon.badge':'EM BREVE','soon.note':SOON_PT,
+    's1.title':'1 · Transporte e 8 pistas','s1.note':'Cada pista recebe uma curva: preset oficial, a curva do editor, Neutro ou um .txt importado (PK, LS e OFF; HS, LP e HP entram como EXPERIMENTAL, só se passarem no gate v2). ARM inclui a pista no gráfico e na patch bay; SOLO isola; MUTE esconde do gráfico. O VU mostra o nível previsto: ganho médio de 300 Hz a 3 kHz, preamp incluído.',
+    'lane.n':'PISTA {n}','lane.short':'P{n}','lane.select':'Selecionar pista {n}: {name}','lane.src':'Curva da pista {n}','lane.level':'nível','lane.vu':'VU da pista {n}: nível previsto {db} dB','lv.arm':'ARM','lv.solo':'SOLO','lv.mute':'MUTE','lv.aria':'{lv} da pista {n}',
+    'grp.pref':'Curvas de preferência','grp.ref':'Curvas de referência','grp.other':'Outras','src.neutro':'Neutro','src.editor':'Curva do editor','src.import':'Importar .txt…',
+    'desc.kuba':'descrição da Kuba','desc.neutro':'10 seções OFF e preamp −0,5 dB.','desc.editor':'A curva aberta na página Curva: {name}.','desc.editorCopy':'Sem curva no editor: cópia de Auri.','desc.import':'Importada de {file}.{auto}','desc.importAuto':' Preamp automático.','desc.sos':'Som sobre som: base {base}, mistura {k} %.',
+    'chart.main':'Sobreposição das pistas armadas','chart.note':'resposta com preamp · 20 Hz–20 kHz · ±15 dB · ← → movem o cursor','chart.aria':'Resposta em frequência com preamp, 20 Hz a 20 kHz, das pistas visíveis: {list}.','chart.none':'nenhuma',
+    's2.title':'2 · Onde diferem','s2.a':'A · antes','s2.b':'B · depois','s2.swap':'Trocar A e B','s2.match':'IGUALAR NÍVEL','s2.matchNote':'B deslocada {db} dB para igualar o nível de 300 Hz a 3 kHz.','s2.matchOff':'Sem ajuste de nível: inclui a diferença de preamp.','s2.thr':'LIMIAR','s2.max':'MÁX','s2.bands':'FAIXAS','s2.cap':'Δ = B − A · faixas sombreadas passam do limiar',
+    's2.region':'{db} dB em {f}','s2.range':'{f0} a {f1}','s2.none':'Nenhuma faixa passa do limiar de {thr} dB.','s2.same':'A e B são a mesma pista.','s2.capA':'A: {a} · B: {b}','s2.aria':'Diferença entre {a} e {b}: RMS {rms} dB, máximo {max} dB em {f}.','s2.at':'em {f}','s2.thrSub':'≥ {thr} dB',
+    's3.title':'3 · Patch bay de distâncias','s3.note':'RMS da diferença entre cada par de pistas armadas, 20 Hz–20 kHz, com o mesmo ajuste de nível de Onde diferem. Clique num jaque para ligar o par em A e B.','s3.cell':'Comparar {a} com {b}: RMS {rms} dB','s3.few':'Arme pelo menos duas pistas para medir distâncias.','s3.caption':'Matriz de distâncias RMS entre pistas armadas','s3.corner':'Pista',
+    's4.title':'4 · Som sobre som','s4.lede':'Com uma cabeça de reprodução antes das outras, dá para tocar junto do que já está na fita e gravar tudo de novo. Aqui a camada nova é a diferença entre duas pistas: Δ = B − A. A curva nova é base + k × Δ, ajustada em 10 seções PK/LS/OFF e conferida pelo gate v2.',
+    'head.aria':'Bloco de cabeças: cabeça extra, apagar, gravar, reproduzir','head.extra':'CABEÇA EXTRA','head.extraCap':'lê a base','head.erase':'APAGAR','head.eraseCap':'limpa a passada','head.rec':'GRAVAR','head.recCap':'base + k × Δ','head.play':'REPRODUZIR','head.playCap':'confere no gate','head.dir':'fita → sentido de leitura',
+    's4.formula2':'nova = base + k × Δ','s4.a':'A · antes','s4.b':'B · depois','s4.base':'Base · o que já está na fita','s4.exactNote':'Base = A e mistura 100 %: B exato.','s4.mix':'MISTURA','s4.pre':'PREAMP','s4.auto':'AUTO',
+    's4.cap':'tracejado: alvo · âmbar: ajuste gravável','s4.capAB':'A: {a} · B: {b} · base: {base}','s4.busy':'AVALIANDO…','s4.ok':'DENTRO DO ENVELOPE OBSERVADO','s4.bad':'RECUSADO PELO GATE','s4.gateNote':'Gate v2 · envelope observado nas 11 curvas oficiais. Não é prova em hardware.',
+    's4.open':'Abrir na Curva','s4.save':'Salvar na Biblioteca','s4.write':'Gravar no cabo','s4.bounce':'Mandar para a pista','s4.bounceBtn':'Mandar para a pista','s4.exact':'exato','s4.fitSub':'dB RMS de forma','s4.name':'Som sobre som {k} %','s4.saved':'Salvo na Biblioteca deste navegador.','s4.saveFail':'O navegador bloqueou o armazenamento local.','s4.bounced':'Pista {n} recebeu a camada nova.','s4.refusedWrite':'O gate recusou esta curva. Nada é gravado.','s4.aria':'Som sobre som: A, B, alvo e ajuste gravável.','s4.tableAria':'Seções do ajuste, na ordem de gravação',
+    'st.level':'NÍVEL','st.fit':'AJUSTE','tbl.n':'#','tbl.kind':'TIPO','tbl.f':'f (Hz)','tbl.g':'GANHO (dB)','tbl.q':'Q',
+    's5.title':'5 · Exportar antes/depois','s5.note':'Exporta o par de Onde diferem (A antes, B depois) com nomes, faixas rotuladas, RMS e máximo.','s5.svg':'Exportar SVG','s5.png':'Exportar PNG','s5.delta':'INCLUIR Δ','s5.aria':'Prévia da exportação antes/depois','ex.title':'Antes e depois','ex.before':'antes','ex.after':'depois','ex.foot':'open-auri · comparar · resposta com preamp, 20 Hz–20 kHz · {date}','ex.pngFail':'O navegador não deixou gerar o PNG. Use o SVG.','ex.done':'Arquivo exportado: {file}',
+    'r.a':'a: coeficiente {pos} fora do envelope na seção {n}','r.b':'b: raio de polo acima de 0,99986846753918 na seção {n}','r.c':'c: pico da seção {n} acima de +9,2 dB','r.d':'d: pico interno com preamp acima de −0,2037 dB','r.e1':'e: saída 20 Hz–20 kHz acima de −0,4709 dB','r.e2':'e: saída DC–48 kHz acima de +2,5 dB','r.f':'f: o codec recusou ({m})','r.g':'g: preamp fora de −25,5…−0,5 dB','r.gauto':'g: o preamp automático precisaria ficar abaixo de −25,5 dB',
+    'ck.title':'Antes de gravar','ck.sim':'SIMULADO','ck.cancel':'Cancelar','ck.go':'Gravar no cabo','ck.goWait':'Aguarde {s} s','ck.gate':'Gate v2 · envelope observado:','ck.gateOk':'dentro do envelope.','ck.gateBad':'recusado.','ck.payload':'Payload:','ck.pre':'Preamp:','ck.loud':'Volume:','ck.loudOk':'nível previsto {d} dB em relação à última gravação.','ck.level':'nível previsto {l} dB','ck.flash':'Memória flash:','ck.counts':'{s} nesta sessão · {d} hoje · {b} neste navegador.','ck.rate':'No máximo 1 gravação a cada 2 s. Nunca gravamos sozinhos.','ck.ram':'Gravar só na RAM, sem flash','ck.journal':'Diário de gravações','ck.none':'nenhuma ainda','ck.done':'Gravação simulada: CRC {crc}. Nada foi enviado ao cabo.','ck.what':'Curva:',
+    'n3.msg':'A nova curva pode soar mais alta. Abaixe o volume antes de gravar.','n2.msg':'A memória do cabo tem vida útil desconhecida; memórias desse tipo costumam aguentar de 10 mil a 1 milhão de gravações.',
+    'help.title':'Atalhos','help.close':'Fechar','help.btn':'Atalhos de teclado',
+    'imp.unknown':'Tipo de filtro desconhecido: {k}.','imp.qsq':'LSQ e HSQ: recusados. Converta para LS ou HS de forma explícita antes de importar.','imp.expGate':'HS, LP ou HP (experimental) recusado pelo gate v2: {r}','imp.okExp':'Pista {n}: {name} importada como EXPERIMENTAL.',
+    'exp.open':'Abrir na Engenharia','exp.confirm':'Esta curva usa tipos que a página oficial nunca gravou. Os coeficientes estão dentro do envelope observado, mas o firmware nunca recebeu esses formatos.',
+    'ab.listen':'OUVIR A/B','ab.listenSos':'OUVIR A/B · base × resultado','ab.stop':'PARAR A PRÉVIA','ab.base':'BASE','ab.result':'RESULTADO','ab.pink':'ruído rosa','ab.fail':'Não foi possível montar a prévia de áudio neste navegador.',
+    'ab.idle':'Nível igualado pelo levelDb (300 Hz–3 kHz). Fonte: o MP3 da barra superior ou ruído rosa. Só no navegador: nada vai para o cabo.',
+    'ab.note':'Tocando {x}. Nível igualado: {a} {la} dB, {b} {lb} dB (ajuste {ta} e {tb} dB). Fonte: {src}.','imp.empty':'Nenhum filtro reconhecido no arquivo.','imp.many':'{n} filtros: o cabo tem 10 seções. Importação recusada, sem cortar nada.','imp.bad':'Filtro inválido: {m}','imp.prepos':'Preamp positivo recusado: o preamp vem antes das seções.','imp.nopre':'Nem o preamp de −25,5 dB deixa esta curva dentro do envelope.','imp.ok':'Pista {n}: {name} importada.',
+    'toast.lane':'Pista {n}: {name}','toast.rewind':'Pistas de volta ao início.',
+    'foot.k':'ESTA PÁGINA HOMENAGEIA','foot.trivia':'No fim dos anos 1940, Les Paul acrescentou uma cabeça de reprodução extra a um gravador que ganhou de Bing Crosby: tocava junto do que já estava na fita e gravava tudo de novo, camada sobre camada. Anos depois, o gravador de oito pistas dele ganhou o apelido de Octopus.','foot.src1':'fonte','foot.src2':'fonte (8 pistas)','foot.aviso':'Aviso',
+    'foot.text':'open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.','foot.full':'Aviso legal completo','foot.lic':'Licença AGPL-3.0',
+  },
+  en: {
+    'skip':'Skip to content','bar.aria':'Cable bar','nav.aria':'Main','nav.curva':'Curve','nav.biblioteca':'Library','nav.comparar':'Compare','nav.soe':'Sound like X','nav.comunidade':'Community','nav.teste':'Blind test','nav.cabo':'Cable','nav.docs':'Docs',
+    'chrome.status':'No cable · simulated','chrome.neutro':'Neutral','chrome.padrao':'Auri default','chrome.gravar':'Write to cable','unsaved.n':'{n} unsaved changes','unsaved.1':'1 unsaved change','lang.aria':'Mudar para português',
+    'page.kicker':'Compare · sound-on-sound · 8-track recorder','page.title1':'Eight tracks.','page.title2':'One layer over another.',
+    'page.lede':'Load a curve on each track, see where two of them differ and record over: the new curve is the base plus a fraction of the difference between A and B. Everything is computed with the real 0xCB report math and goes through gate v2 before any write.',
+    'deck.aria':'Tape transport: two reels and the head block under a clear cover','deck.extra':'EXTRA','deck.erase':'ERASE','deck.rec':'RECORD','deck.play':'PLAY','deck.plate':'8 TRACKS · SOUND-ON-SOUND',
+    'tr.aria':'Transport','tr.rewind':'Rewind','tr.play':'Play','tr.pause':'Pause','tr.rec':'Rec · record over','tr.read':'Read from cable','tr.counter':'writes in this browser',
+    'soon.badge':'SOON','soon.note':'Released once the earphone reaches the test bench. Until then we write nothing the original Kuba page does not write.',
+    's1.title':'1 · Transport and 8 tracks','s1.note':'Each track holds a curve: an official preset, the editor curve, Neutral or an imported .txt (PK, LS and OFF; HS, LP and HP load as EXPERIMENTAL, only if they pass gate v2). ARM includes the track in the chart and patch bay; SOLO isolates; MUTE hides it from the chart. The VU shows the predicted level: mean gain from 300 Hz to 3 kHz, preamp included.',
+    'lane.n':'TRACK {n}','lane.short':'T{n}','lane.select':'Select track {n}: {name}','lane.src':'Curve on track {n}','lane.level':'level','lane.vu':'Track {n} VU: predicted level {db} dB','lv.arm':'ARM','lv.solo':'SOLO','lv.mute':'MUTE','lv.aria':'{lv} on track {n}',
+    'grp.pref':'Preference curves','grp.ref':'Reference curves','grp.other':'Other','src.neutro':'Neutral','src.editor':'Editor curve','src.import':'Import .txt…',
+    'desc.kuba':'Kuba’s description (pt-BR)','desc.neutro':'10 OFF sections and −0.5 dB preamp.','desc.editor':'The curve open on the Curve page: {name}.','desc.editorCopy':'No editor curve: copy of Auri.','desc.import':'Imported from {file}.{auto}','desc.importAuto':' Automatic preamp.','desc.sos':'Sound-on-sound: base {base}, mix {k} %.',
+    'chart.main':'Armed tracks overlaid','chart.note':'response incl. preamp · 20 Hz–20 kHz · ±15 dB · ← → move the cursor','chart.aria':'Frequency response incl. preamp, 20 Hz to 20 kHz, of visible tracks: {list}.','chart.none':'none',
+    's2.title':'2 · Where they differ','s2.a':'A · before','s2.b':'B · after','s2.swap':'Swap A and B','s2.match':'MATCH LEVEL','s2.matchNote':'B shifted {db} dB to match the 300 Hz to 3 kHz level.','s2.matchOff':'No level match: includes the preamp difference.','s2.thr':'THRESHOLD','s2.max':'MAX','s2.bands':'BANDS','s2.cap':'Δ = B − A · shaded bands exceed the threshold',
+    's2.region':'{db} dB at {f}','s2.range':'{f0} to {f1}','s2.none':'No band exceeds the {thr} dB threshold.','s2.same':'A and B are the same track.','s2.capA':'A: {a} · B: {b}','s2.aria':'Difference between {a} and {b}: RMS {rms} dB, maximum {max} dB at {f}.','s2.at':'at {f}','s2.thrSub':'≥ {thr} dB',
+    's3.title':'3 · Distance patch bay','s3.note':'RMS of the difference between each pair of armed tracks, 20 Hz–20 kHz, with the same level match as Where they differ. Click a jack to patch the pair into A and B.','s3.cell':'Compare {a} with {b}: RMS {rms} dB','s3.few':'Arm at least two tracks to measure distances.','s3.caption':'RMS distance matrix between armed tracks','s3.corner':'Track',
+    's4.title':'4 · Sound-on-sound','s4.lede':'With a playback head ahead of the others you can play along with what is already on tape and record it all again. Here the new layer is the difference between two tracks: Δ = B − A. The new curve is base + k × Δ, fitted into 10 PK/LS/OFF sections and checked by gate v2.',
+    'head.aria':'Head block: extra head, erase, record, playback','head.extra':'EXTRA HEAD','head.extraCap':'reads the base','head.erase':'ERASE','head.eraseCap':'clears the pass','head.rec':'RECORD','head.recCap':'base + k × Δ','head.play':'PLAYBACK','head.playCap':'checks the gate','head.dir':'tape → reading direction',
+    's4.formula2':'new = base + k × Δ','s4.a':'A · before','s4.b':'B · after','s4.base':'Base · what is already on tape','s4.exactNote':'Base = A and mix 100 %: exactly B.','s4.mix':'MIX','s4.pre':'PREAMP','s4.auto':'AUTO',
+    's4.cap':'dashed: target · amber: writable fit','s4.capAB':'A: {a} · B: {b} · base: {base}','s4.busy':'EVALUATING…','s4.ok':'INSIDE THE OBSERVED ENVELOPE','s4.bad':'REFUSED BY THE GATE','s4.gateNote':'Gate v2 · envelope observed on the 11 official curves. Not a hardware proof.',
+    's4.open':'Open in Curve','s4.save':'Save to Library','s4.write':'Write to cable','s4.bounce':'Bounce to track','s4.bounceBtn':'Bounce to track','s4.exact':'exact','s4.fitSub':'dB RMS shape','s4.name':'Sound-on-sound {k} %','s4.saved':'Saved to this browser’s Library.','s4.saveFail':'The browser blocked local storage.','s4.bounced':'Track {n} received the new layer.','s4.refusedWrite':'The gate refused this curve. Nothing is written.','s4.aria':'Sound-on-sound: A, B, target and writable fit.','s4.tableAria':'Fitted sections, in write order',
+    'st.level':'LEVEL','st.fit':'FIT','tbl.n':'#','tbl.kind':'KIND','tbl.f':'f (Hz)','tbl.g':'GAIN (dB)','tbl.q':'Q',
+    's5.title':'5 · Export before/after','s5.note':'Exports the Where they differ pair (A before, B after) with names, labelled bands, RMS and maximum.','s5.svg':'Export SVG','s5.png':'Export PNG','s5.delta':'INCLUDE Δ','s5.aria':'Before/after export preview','ex.title':'Before and after','ex.before':'before','ex.after':'after','ex.foot':'open-auri · compare · response incl. preamp, 20 Hz–20 kHz · {date}','ex.pngFail':'The browser did not allow the PNG. Use the SVG.','ex.done':'Exported: {file}',
+    'r.a':'a: coefficient {pos} outside the envelope in section {n}','r.b':'b: pole radius above 0.99986846753918 in section {n}','r.c':'c: section {n} peak above +9.2 dB','r.d':'d: internal peak with preamp above −0.2037 dB','r.e1':'e: output 20 Hz–20 kHz above −0.4709 dB','r.e2':'e: output DC–48 kHz above +2.5 dB','r.f':'f: codec refused ({m})','r.g':'g: preamp outside −25.5…−0.5 dB','r.gauto':'g: automatic preamp would need to go below −25.5 dB',
+    'ck.title':'Before writing','ck.sim':'SIMULATED','ck.cancel':'Cancel','ck.go':'Write to cable','ck.goWait':'Wait {s} s','ck.gate':'Gate v2 · observed envelope:','ck.gateOk':'inside the envelope.','ck.gateBad':'refused.','ck.payload':'Payload:','ck.pre':'Preamp:','ck.loud':'Volume:','ck.loudOk':'predicted level {d} dB relative to the last write.','ck.level':'predicted level {l} dB','ck.flash':'Flash memory:','ck.counts':'{s} this session · {d} today · {b} in this browser.','ck.rate':'At most 1 write every 2 s. We never write on our own.','ck.ram':'Write to RAM only, no flash','ck.journal':'Write journal','ck.none':'none yet','ck.done':'Simulated write: CRC {crc}. Nothing was sent to the cable.','ck.what':'Curve:',
+    'n3.msg':'The new curve may sound louder. Turn the volume down before writing.','n2.msg':'The cable memory has an unknown lifespan; memories of this kind usually endure 10 thousand to 1 million writes.',
+    'help.title':'Shortcuts','help.close':'Close','help.btn':'Keyboard shortcuts',
+    'imp.unknown':'Unknown filter kind: {k}.','imp.qsq':'LSQ and HSQ: refused. Convert them to LS or HS explicitly before importing.','imp.expGate':'HS, LP or HP (experimental) refused by gate v2: {r}','imp.okExp':'Track {n}: {name} imported as EXPERIMENTAL.',
+    'exp.open':'Open in Engineering','exp.confirm':'This curve uses kinds the official page never wrote. The coefficients are inside the observed envelope, but the firmware has never received these shapes.',
+    'ab.listen':'LISTEN A/B','ab.listenSos':'LISTEN A/B · base × result','ab.stop':'STOP PREVIEW','ab.base':'BASE','ab.result':'RESULT','ab.pink':'pink noise','ab.fail':'Could not build the audio preview in this browser.',
+    'ab.idle':'Level matched with levelDb (300 Hz–3 kHz). Source: the top-bar MP3 or pink noise. Browser only: nothing goes to the cable.',
+    'ab.note':'Playing {x}. Level matched: {a} {la} dB, {b} {lb} dB (trim {ta} and {tb} dB). Source: {src}.','imp.empty':'No filter recognised in the file.','imp.many':'{n} filters: the cable has 10 sections. Import refused, nothing truncated.','imp.bad':'Invalid filter: {m}','imp.prepos':'Positive preamp refused: the preamp runs before the sections.','imp.nopre':'Not even a −25.5 dB preamp keeps this curve inside the envelope.','imp.ok':'Track {n}: {name} imported.',
+    'toast.lane':'Track {n}: {name}','toast.rewind':'Tracks back to the start.',
+    'foot.k':'THIS PAGE HONOURS','foot.trivia':'In the late 1940s, Les Paul added an extra playback head to a recorder Bing Crosby had given him: he played along with what was already on the tape and recorded everything again, layer upon layer. Years later, his eight-track recorder earned the nickname Octopus.','foot.src1':'source','foot.src2':'source (8 tracks)','foot.aviso':'Notice',
+    'foot.text':'open-auri is not official nor endorsed by Kuba, TTGK, Savitech or any manufacturer. Everything here was obtained by studying the protocol for interoperability purposes. Use at your own risk: we are not responsible for damage to the cable, the earphone or your hearing.','foot.full':'Full legal notice','foot.lic':'AGPL-3.0 licence',
+  },
+};
+function t(key, vars) {
+  let s = I18N[LANG][key] ?? I18N.pt[key] ?? key;
+  if (vars) s = s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? ''));
+  return s;
+}
+const NF = new Map();
+function fmt(n, d = 1, sign = false) {
+  if (!Number.isFinite(n)) return '?';
+  const loc = LANG === 'pt' ? 'pt-BR' : 'en-US';
+  const key = loc + d;
+  if (!NF.has(key)) NF.set(key, new Intl.NumberFormat(loc, { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const r = Number(n.toFixed(d));
+  let s = NF.get(key).format(Math.abs(r));
+  if (r < 0) s = '−' + s; else if (sign && r > 0) s = '+' + s;
+  return s;
+}
+function fmtHz(f) {
+  if (f < 1000) return `${fmt(f, 0)} Hz`;
+  const k = f / 1000;
+  return `${fmt(k, k < 10 ? 1 : 0).replace(/[.,]0$/, '')} kHz`;
+}
+function parseNum(s) {
+  const v = parseFloat(String(s).trim().replace(/−/g, '-').replace(/\s/g, '').replace(/%|db/gi, '').replace(',', '.'));
+  return Number.isFinite(v) ? v : NaN;
+}
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+// =====================================================================
+// 5. Curves, responses and distances
+// =====================================================================
+const ACCENT = '#F2B33D';
+const LANE_COLORS = ['#8FA9B8', '#B9A276', '#97B488', '#C48E7B', '#A996BD', '#79AFA4', '#CDB99C', '#9BA2AE'];
+const FREQS = Float64Array.from({ length: 256 }, (_, i) => 20 * Math.pow(1000, i / 255));
+const FIT_IDX = []; for (let i = 0; i < 256; i += 3) FIT_IDX.push(i); if (FIT_IDX[FIT_IDX.length - 1] !== 255) FIT_IDX.push(255);
+const FIT_F = FIT_IDX.map((i) => FREQS[i]);
+
+const padBands = (bands) => { const out = bands.slice(0, BAND_COUNT).map((b) => ({ ...b })); while (out.length < BAND_COUNT) out.push({ kind: 'OFF' }); return out; };
+const cloneBands = (bands) => bands.map((b) => ({ ...b }));
+function presetCurve(id) { return { kind: 'preset', id, pre: PRESETS[id].pre, bands: toBands(PRESETS[id].b) }; }
+function neutroCurve() { return { kind: 'neutro', pre: -0.5, bands: Array.from({ length: BAND_COUNT }, () => ({ kind: 'OFF' })) }; }
+// HS / LP / HP: EXPERIMENTAL (never written by the official page). Allowed in lanes only when gate v2 passes;
+// editable only in the Curva ENGENHARIA layer; writes need an extra confirmation.
+const EXP_KINDS = new Set(['HS', 'LP', 'HP']);
+const hasExp = (bands) => bands.some((b) => EXP_KINDS.has(b.kind));
+function editorCurve() {
+  const saved = OA.store.loadCurrent(); // storage v2 "oa.v2.current"; re-validated here, gate re-run on write
+  if (saved && saved.preampDb <= 0) {
+    try {
+      const bands = padBands(saved.bands);
+      bands.forEach((b, i) => { checkBand(b, i); encodeSection(designSection(b), i); });
+      return { kind: 'editor', pre: saved.preampDb, bands, fromStore: true, savedName: saved.name };
+    } catch { /* fall through */ }
+  }
+  return { kind: 'editor', pre: PRESETS.padrao.pre, bands: toBands(PRESETS.padrao.b), fromStore: false };
+}
+function curveSource(c) {
+  if (c.kind === 'preset') return 'preset:' + c.id;
+  if (c.kind === 'neutro') return 'preset:neutro';
+  if (c.kind === 'editor') return 'custom';
+  return c.noteKey === 'desc.import' ? 'import' : 'custom';
+}
+/** Writes "oa.v2.current" and opens the Curva page (Engenharia layer for experimental kinds). */
+function openInCurva(name, source, pre, bands, eng) {
+  OA.store.saveCurrent({ name, source, preampDb: pre, bands });
+  location.href = eng ? 'curva.html?camada=engenharia' : 'curva.html';
+}
+function curveName(c) {
+  if (c.kind === 'preset') return PRESET_LABEL[c.id];
+  if (c.kind === 'neutro') return t('src.neutro');
+  if (c.kind === 'editor') return t('src.editor');
+  return c.name;
+}
+function curveDesc(c) {
+  let s = '';
+  if (c.kind === 'preset') s = `<q>${esc(PRESET_DESC[c.id])}</q><span class="attr">${esc(t('desc.kuba'))}</span>`;
+  else if (c.kind === 'neutro') s = esc(t('desc.neutro'));
+  else if (c.kind === 'editor') s = esc(c.fromStore ? t('desc.editor', { name: c.savedName || '' }) : t('desc.editorCopy'));
+  else if (c.noteKey) s = esc(t(c.noteKey, { ...c.noteVars, auto: c.noteVars?.auto ? t('desc.importAuto') : '' }));
+  if (hasExp(c.bands)) s += `<br><span class="exp-tag">EXPERIMENTAL</span><button type="button" class="exp-link" data-eng>${esc(t('exp.open'))}</button>`;
+  return s;
+}
+const sameCurve = (x, y) => x === y || (x.pre === y.pre && JSON.stringify(x.bands) === JSON.stringify(y.bands));
+const respCache = new WeakMap();
+function resp(c) {
+  let r = respCache.get(c);
+  if (!r) { r = Float64Array.from(FREQS, (f) => c.pre + magnitudeDb(c.bands, f)); respCache.set(c, r); }
+  return r;
+}
+const lvlCache = new WeakMap();
+function safeLevel(bands, pre) { try { return levelDb(bands, pre); } catch { return NaN; } }
+function lvl(c) { if (!lvlCache.has(c)) lvlCache.set(c, safeLevel(c.bands, c.pre)); return lvlCache.get(c); }
+function diffStats(ca, cb, match) {
+  const A = resp(ca), B = resp(cb);
+  let shift = match ? lvl(cb) - lvl(ca) : 0;
+  if (!Number.isFinite(shift)) shift = 0;
+  const N = FREQS.length, d = new Float64Array(N);
+  let s2 = 0, mi = 0;
+  for (let i = 0; i < N; i++) { d[i] = B[i] - A[i] - shift; s2 += d[i] * d[i]; if (Math.abs(d[i]) > Math.abs(d[mi])) mi = i; }
+  return { d, rms: Math.sqrt(s2 / N), max: d[mi], maxF: FREQS[mi], shift };
+}
+function regions(d, thr) {
+  const out = []; const N = d.length; let i = 0;
+  while (i < N) {
+    if (Math.abs(d[i]) >= thr) {
+      const s = Math.sign(d[i]); let j = i, pk = i;
+      while (j < N && Math.abs(d[j]) >= thr && Math.sign(d[j]) === s) { if (Math.abs(d[j]) > Math.abs(d[pk])) pk = j; j++; }
+      out.push({ f0: FREQS[i], f1: FREQS[j - 1], f: FREQS[pk], db: d[pk] });
+      i = j;
+    } else i++;
+  }
+  return out;
+}
+
+// =====================================================================
+// 6. Sound-on-sound solver: target shape into 10 PK/LS/OFF sections
+// =====================================================================
+function bandRespFit(b) {
+  if (b.kind === 'OFF') return new Float64Array(FIT_F.length);
+  const s = designSection(b);
+  return Float64Array.from(FIT_F, (f) => sectionDb(s, f));
+}
+function residStd(target, base, add) {
+  const N = target.length; let m = 0;
+  for (let i = 0; i < N; i++) m += target[i] - base[i] - add[i];
+  m /= N; let e = 0;
+  for (let i = 0; i < N; i++) { const r = target[i] - base[i] - add[i] - m; e += r * r; }
+  return Math.sqrt(e / N);
+}
+function clampBand(b) {
+  b.freqHz = Math.min(20000, Math.max(20, b.freqHz));
+  b.gainDb = Math.min(9, Math.max(-12, b.gainDb));
+  const qr = b.kind === 'LS' ? [0.3, 1.0] : [0.3, 6];
+  b.qFactor = Math.min(qr[1], Math.max(qr[0], b.qFactor));
+  return b;
+}
+const roundBand = (b) => ({ kind: b.kind, freqHz: Math.round(b.freqHz * 10) / 10, gainDb: Math.round(b.gainDb * 100) / 100, qFactor: Math.round(b.qFactor * 1000) / 1000 });
+function optimiseBand(b0, target, base, iters) {
+  let cur = clampBand({ ...b0 }), curR = bandRespFit(cur), curE = residStd(target, base, curR);
+  let sf = 0.12, sg = 0.8, sq = 0.2;
+  for (let it = 0; it < iters; it++) {
+    let improved = false;
+    for (const p of ['g', 'f', 'q']) {
+      for (const dir of [1, -1]) {
+        const c = { ...cur };
+        if (p === 'g') c.gainDb += dir * sg; else if (p === 'f') c.freqHz *= Math.exp(dir * sf); else c.qFactor *= Math.exp(dir * sq);
+        clampBand(c);
+        const r = bandRespFit(c), e = residStd(target, base, r);
+        if (e < curE - 1e-7) { cur = c; curR = r; curE = e; improved = true; break; }
+      }
+    }
+    if (!improved) { sf /= 2; sg /= 2; sq /= 2; if (sg < 0.01) break; }
+  }
+  return { band: cur, resp: curR, err: curE };
+}
+function fitShape(target) {
+  const N = target.length, zero = new Float64Array(N), sum = new Float64Array(N);
+  let bands = [], resps = [];
+  let err = residStd(target, sum, zero);
+  for (let n = 0; n < BAND_COUNT; n++) {
+    let m = 0; for (let i = 0; i < N; i++) m += target[i] - sum[i]; m /= N;
+    const r = (i) => target[i] - sum[i] - m;
+    let bi = 0; for (let i = 0; i < N; i++) if (Math.abs(r(i)) > Math.abs(r(bi))) bi = i;
+    const bv = r(bi);
+    if (Math.abs(bv) < 0.15) break;
+    let lo = bi, hi = bi;
+    while (lo > 0 && Math.sign(r(lo - 1)) === Math.sign(bv) && Math.abs(r(lo - 1)) > Math.abs(bv) / 2) lo--;
+    while (hi < N - 1 && Math.sign(r(hi + 1)) === Math.sign(bv) && Math.abs(r(hi + 1)) > Math.abs(bv) / 2) hi++;
+    const bw = Math.max(0.2, Math.log2(FIT_F[hi] / FIT_F[lo]));
+    const q0 = Math.sqrt(2 ** bw) / (2 ** bw - 1);
+    const cands = [{ kind: 'PK', freqHz: FIT_F[bi], gainDb: bv, qFactor: q0 }];
+    if (bi < N * 0.2) cands.push({ kind: 'LS', freqHz: Math.max(25, FIT_F[hi]), gainDb: bv, qFactor: 0.7 });
+    let best = null;
+    for (const c of cands) { const o = optimiseBand(c, target, sum, 40); if (!best || o.err < best.err) best = o; }
+    if (best.err > err - 0.005) break;
+    bands.push(best.band); resps.push(best.resp);
+    for (let i = 0; i < N; i++) sum[i] += best.resp[i];
+    err = best.err;
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    for (let j = 0; j < bands.length; j++) {
+      const base = new Float64Array(N); for (let i = 0; i < N; i++) base[i] = sum[i] - resps[j][i];
+      const o = optimiseBand(bands[j], target, base, 14);
+      if (o.err < err) { for (let i = 0; i < N; i++) sum[i] = base[i] + o.resp[i]; bands[j] = o.band; resps[j] = o.resp; err = o.err; }
+    }
+  }
+  // Envelope repair, per section (a, b, c of gate v2), on rounded values.
+  bands = bands.map((b0) => {
+    let b = roundBand(b0);
+    for (let it = 0; it < 40; it++) {
+      let rs; try { rs = analyseSection(b).reasons; } catch { rs = ['b:pole-radius']; }
+      if (!rs.length) break;
+      if (rs.some((x) => x.startsWith('c:'))) b.gainDb = Math.min(b.gainDb, Math.floor((THRESHOLDS.sectionPeakDb - 0.1) * 100) / 100);
+      if (rs.includes('a:b0')) { b.qFactor = Math.min(6, b.qFactor * 1.08); b.gainDb -= 0.1; }
+      if (rs.some((x) => x.startsWith('b:') || (x.startsWith('a:') && x !== 'a:b0'))) { b.freqHz = Math.min(20000, b.freqHz * 1.06); b.qFactor = Math.max(0.3, b.qFactor * 0.94); }
+      b = roundBand(b);
+    }
+    return b;
+  }).filter((b) => Math.abs(b.gainDb) >= 0.05);
+  bands.sort((x, y) => (x.gainDb >= 0) - (y.gainDb >= 0)); // cuts before boosts, as the reference does
+  const fsum = new Float64Array(N);
+  for (const b of bands) { const rr = bandRespFit(b); for (let i = 0; i < N; i++) fsum[i] += rr[i]; }
+  return { bands: padBands(bands), err: residStd(target, fsum, zero) };
+}
+
+// =====================================================================
+// 7. State
+// =====================================================================
+const RM = matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = RM.matches;
+const DEFAULT_LANES = () => [presetCurve('padrao'), presetCurve('pref6'), presetCurve('emv'), presetCurve('basshead'), presetCurve('harman'), presetCurve('referencia'), editorCurve(), neutroCurve()];
+const lanes = DEFAULT_LANES().map((curve) => ({ curve, armed: true, solo: false, mute: false }));
+const state = {
+  selected: 0, pair: [0, 4], levelMatch: true, threshold: 1, cursorF: null, playing: !reduced, unsaved: 0, exportDelta: true,
+  sos: { a: 0, b: 4, base: 6, k: 100, preAuto: true, pre: -3, result: null, busy: false, bounceTo: 7 },
+};
+let lastWriteTs = 0;
+const K = { lib: 'open-auri:biblioteca' }; // not in the storage contract yet (see TODO)
+const counts = () => OA.store.flashCounts(); // "oa.v2.flashSession" / "oa.v2.flashDay" / "oa.v2.flashTotal"
+/** Level of the last (simulated) write, derived from the last "oa.v2.journal" entry; null if unknown. */
+function lastWrittenLevel() {
+  const last = OA.store.journal().at(-1);
+  if (!last || !Array.isArray(last.bands) || last.bands.length !== BAND_COUNT || !Number.isFinite(last.pre)) return null;
+  const bands = last.bands.map(OA.store.bandFromString);
+  if (!bands.every(Boolean)) return null;
+  const L = safeLevel(bands, last.pre);
+  return Number.isFinite(L) ? L : null;
+}
+
+// =====================================================================
+// 8. Controls: knobs, levers, VU meters
+// =====================================================================
+function makeKnob(host, o) {
+  host.classList.add('knob', 'knob-' + (o.size || 'md'));
+  host.innerHTML = `<div class="knob-dial" role="slider" tabindex="0"><svg class="knob-scale" viewBox="0 0 100 100" aria-hidden="true"></svg><div class="knob-skirt"></div><div class="knob-cap"></div><div class="knob-ptr"></div></div><button type="button" class="readout"></button><span class="knob-label"></span>`;
+  const dial = $('.knob-dial', host), ro = $('.readout', host), lab = $('.knob-label', host), scale = $('.knob-scale', host);
+  let v = o.value, disabled = false;
+  const span = o.max - o.min;
+  const res = o.step / 10;
+  const ang = (x) => -135 + 270 * (x - o.min) / span;
+  const pt = (a, r) => [50 + r * Math.sin(a * Math.PI / 180), 50 - r * Math.cos(a * Math.PI / 180)];
+  function drawScale() {
+    let s = '';
+    const nT = o.ticks || 10;
+    for (let i = 0; i <= nT; i++) { const a = -135 + 270 * i / nT; const [x1, y1] = pt(a, 31.5), [x2, y2] = pt(a, i % (o.majorEvery || 5) === 0 ? 37.5 : 35); s += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="#E9E4D6" stroke-width="${i % (o.majorEvery || 5) === 0 ? 1.1 : .6}" stroke-linecap="round"/>`; }
+    for (const lb of (o.labels || [])) { const [x, y] = pt(ang(lb), 44.5); s += `<text x="${x.toFixed(2)}" y="${(y + 2.4).toFixed(2)}" text-anchor="middle" font-family="Oswald, sans-serif" font-size="6.8" fill="#E9E4D6">${esc(o.labelFmt ? o.labelFmt(lb) : lb)}</text>`; }
+    const a0 = -135, a1 = ang(v); const [sx, sy] = pt(a0, 40.5), [ex, ey] = pt(a1, 40.5);
+    if (a1 > a0 + 0.5) s += `<path d="M${sx.toFixed(2)} ${sy.toFixed(2)}A40.5 40.5 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}" fill="none" stroke="${disabled ? '#8F8A80' : ACCENT}" stroke-width="1.6" stroke-linecap="round" opacity=".9"/>`;
+    scale.innerHTML = s;
+  }
+  function paint() {
+    dial.style.setProperty('--a', ang(v) + 'deg');
+    $('.knob-ptr', host).style.setProperty('--a', ang(v) + 'deg');
+    const txt = o.format(v);
+    ro.textContent = txt;
+    dial.setAttribute('aria-valuemin', o.min); dial.setAttribute('aria-valuemax', o.max); dial.setAttribute('aria-valuenow', String(v)); dial.setAttribute('aria-valuetext', txt);
+    drawScale();
+  }
+  function set(x, fire = true) {
+    if (!Number.isFinite(x)) return;
+    x = Math.min(o.max, Math.max(o.min, x));
+    x = Math.round((x - o.min) / res) * res + o.min;
+    x = Number(x.toFixed(4));
+    if (x === v) { paint(); return; }
+    v = x; paint(); if (fire) o.onInput(v);
+  }
+  const mult = (e) => (e.shiftKey ? 10 : e.altKey ? 0.1 : 1);
+  dial.addEventListener('keydown', (e) => {
+    if (disabled) return;
+    const k = e.key; let d = 0;
+    if (k === 'ArrowUp' || k === 'ArrowRight') d = o.step * mult(e);
+    else if (k === 'ArrowDown' || k === 'ArrowLeft') d = -o.step * mult(e);
+    else if (k === 'PageUp') d = o.step * 10; else if (k === 'PageDown') d = -o.step * 10;
+    else if (k === 'Home') { set(o.min); e.preventDefault(); return; }
+    else if (k === 'End') { set(o.max); e.preventDefault(); return; }
+    else if (k === 'Enter') { startEdit(); e.preventDefault(); return; }
+    else return;
+    e.preventDefault(); set(v + d);
+  });
+  dial.addEventListener('wheel', (e) => { if (disabled) return; e.preventDefault(); set(v + (e.deltaY < 0 ? 1 : -1) * o.step * mult(e)); }, { passive: false });
+  let drag = null;
+  dial.addEventListener('pointerdown', (e) => { if (disabled) return; dial.focus(); dial.setPointerCapture(e.pointerId); drag = { y: e.clientY, v }; });
+  dial.addEventListener('pointermove', (e) => { if (!drag) return; const dv = (drag.y - e.clientY) / 220 * span * (e.shiftKey ? 0.1 : 1); set(drag.v + dv); });
+  const end = () => { drag = null; };
+  dial.addEventListener('pointerup', end); dial.addEventListener('pointercancel', end);
+  dial.addEventListener('dblclick', () => { if (!disabled) set(o.def); });
+  function startEdit() {
+    if (disabled) return;
+    const inp = document.createElement('input');
+    inp.className = 'readout-in'; inp.type = 'text'; inp.inputMode = 'decimal';
+    inp.value = fmt(v, o.editDigits ?? 1);
+    inp.setAttribute('aria-label', o.aria());
+    ro.replaceWith(inp); inp.focus(); inp.select();
+    let done = false;
+    const finish = (commit) => { if (done) return; done = true; if (commit) set(parseNum(inp.value)); inp.replaceWith(ro); paint(); ro.focus(); };
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } });
+    inp.addEventListener('blur', () => finish(true));
+  }
+  ro.addEventListener('click', startEdit);
+  function relabel() { lab.textContent = o.label(); dial.setAttribute('aria-label', o.aria()); ro.setAttribute('aria-label', o.aria() + ': ' + o.format(v) + '. ' + (LANG === 'pt' ? 'Clique para digitar' : 'Click to type')); paint(); }
+  relabel();
+  return {
+    get value() { return v; }, set, relabel,
+    setDisabled(x) { disabled = x; host.setAttribute('aria-disabled', String(x)); dial.setAttribute('aria-disabled', String(x)); ro.disabled = x; paint(); },
+  };
+}
+function makeLever(labelKey, checked, onChange, ariaFn) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'lever'; b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', String(!!checked));
+  b.innerHTML = `<span class="lv-led" aria-hidden="true"></span><span class="lv-base" aria-hidden="true"><span class="lv-bat"></span></span><span class="lv-txt"></span>`;
+  b.relabel = () => { $('.lv-txt', b).textContent = t(labelKey); b.setAttribute('aria-label', ariaFn ? ariaFn() : t(labelKey)); };
+  b.setChecked = (x) => b.setAttribute('aria-checked', String(!!x));
+  b.addEventListener('click', () => { const x = b.getAttribute('aria-checked') !== 'true'; b.setChecked(x); onChange(x); });
+  b.relabel();
+  return b;
+}
+const VU_MARKS = [-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3];
+const vuPos = (db) => { const v = (x) => Math.pow(10, x / 20); const c = Math.max(-20, Math.min(3, db)); return (v(c) - v(-20)) / (v(3) - v(-20)); };
+const vuAng = (db) => -48 + 96 * vuPos(db);
+function vuMarkup() {
+  const cx = 70, cy = 104, r = 76;
+  const pt = (a, rr) => [cx + rr * Math.sin(a * Math.PI / 180), cy - rr * Math.cos(a * Math.PI / 180)];
+  let s = `<rect x="0" y="0" width="140" height="92" fill="url(#gVuFace)"/><rect x="0" y="0" width="140" height="92" fill="url(#gVuGlow)"/>`;
+  const [ax, ay] = pt(-48, r), [bx, by] = pt(48, r);
+  s += `<path d="M${ax.toFixed(2)} ${ay.toFixed(2)}A${r} ${r} 0 0 1 ${bx.toFixed(2)} ${by.toFixed(2)}" fill="none" stroke="#2b2620" stroke-width=".8"/>`;
+  const [rx, ry] = pt(vuAng(0), r - 2), [qx, qy] = pt(48, r - 2);
+  s += `<path d="M${rx.toFixed(2)} ${ry.toFixed(2)}A${r - 2} ${r - 2} 0 0 1 ${qx.toFixed(2)} ${qy.toFixed(2)}" fill="none" stroke="#B5402F" stroke-width="3.2"/>`;
+  for (const m of VU_MARKS) {
+    const a = vuAng(m); const [x1, y1] = pt(a, r), [x2, y2] = pt(a, r + 6), [tx, ty] = pt(a, r + 12);
+    s += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="${m > 0 ? '#B5402F' : '#2b2620'}" stroke-width="1"/>`;
+    s += `<text x="${tx.toFixed(2)}" y="${(ty + 2.6).toFixed(2)}" text-anchor="middle" font-family="Oswald, sans-serif" font-size="7.2" fill="${m > 0 ? '#B5402F' : '#2b2620'}">${m > 0 ? '+' + m : Math.abs(m)}</text>`;
+  }
+  s += `<text x="70" y="58" text-anchor="middle" font-family="Oswald, sans-serif" font-size="10" letter-spacing="1.5" fill="#3b3328">dB</text>`;
+  s += `<g class="vu-needle" transform="rotate(-48 70 104)"><line x1="70" y1="104" x2="70" y2="22" stroke="#1b1a18" stroke-width="1.1"/><line x1="70" y1="104" x2="70" y2="22" stroke="rgba(0,0,0,.2)" stroke-width="1.1" transform="translate(1.5 1.5)"/></g>`;
+  s += `<path d="M0 80 Q70 66 140 80 V92 H0Z" fill="#171615"/><path d="M0 80 Q70 66 140 80" fill="none" stroke="rgba(255,255,255,.18)" stroke-width=".8"/>`;
+  s += `<rect x="0" y="0" width="140" height="92" fill="url(#gGlare)"/>`;
+  return s;
+}
+const needles = new Set(); let needleRaf = 0;
+function needleTick() {
+  let moving = false;
+  for (const n of needles) {
+    if (reduced) { n.pos = n.target; n.vel = 0; }
+    else {
+      n.vel += (n.target - n.pos) * 0.09 - n.vel * 0.22; n.pos += n.vel;
+      if (Math.abs(n.vel) > 0.002 || Math.abs(n.target - n.pos) > 0.002) moving = true; else { n.pos = n.target; n.vel = 0; }
+    }
+    n.el.setAttribute('transform', `rotate(${n.pos.toFixed(3)} 70 104)`);
+  }
+  needleRaf = moving ? requestAnimationFrame(needleTick) : 0;
+}
+const kickNeedles = () => { if (!needleRaf) needleRaf = requestAnimationFrame(needleTick); };
+
+// =====================================================================
+// 9. Charts
+// =====================================================================
+const CH = { L: 42, R: 14, T: 14, B: 26 };
+function chartMarkup({ W, H, series, shades = [], range = 15, theme = 'dark' }) {
+  const { L, R, T, B } = CH; const pw = W - L - R, ph = H - T - B;
+  const X = (f) => L + Math.log10(f / 20) / 3 * pw;
+  const Y = (db) => T + (range - Math.max(-range - 3, Math.min(range + 3, db))) / (2 * range) * ph;
+  const ink = theme === 'dark' ? '236,231,221' : '42,36,28';
+  const lblCol = theme === 'dark' ? ACCENT : '#8a4f1a', bg = theme === 'dark' ? '#100f0e' : '#F3ECDD';
+  let s = `<defs><clipPath id="clip-${theme}-${W}-${H}"><rect x="${L}" y="${T}" width="${pw}" height="${ph}"/></clipPath></defs>`;
+  for (const sh of shades) { const x0 = X(sh.f0), x1 = X(sh.f1); s += `<rect x="${(x0 - 1).toFixed(1)}" y="${T}" width="${Math.max(2, x1 - x0 + 2).toFixed(1)}" height="${ph}" fill="${sh.fill}"/>`; }
+  for (let dec = 10; dec <= 10000; dec *= 10) for (let m = 2; m <= 9; m++) { const f = dec * m; if (f < 20 || f > 20000) continue; const x = X(f).toFixed(1); s += `<line x1="${x}" y1="${T}" x2="${x}" y2="${T + ph}" stroke="rgba(${ink},.06)"/>`; }
+  const majors = [[20, '20'], [50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k'], [20000, '20k']];
+  for (const [f, lb] of majors) { const x = X(f).toFixed(1); s += `<line x1="${x}" y1="${T}" x2="${x}" y2="${T + ph}" stroke="rgba(${ink},.13)"/><text x="${x}" y="${H - 8}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="rgba(${ink},.6)">${lb}</text>`; }
+  for (let db = -range; db <= range; db += 5) { const y = Y(db).toFixed(1); s += `<line x1="${L}" y1="${y}" x2="${L + pw}" y2="${y}" stroke="rgba(${ink},${db === 0 ? .32 : .1})"/><text x="${L - 6}" y="${(+y + 4).toFixed(1)}" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="rgba(${ink},.6)">${db > 0 ? '+' + db : db < 0 ? '−' + Math.abs(db) : '0'}</text>`; }
+  s += `<rect x="${L}" y="${T}" width="${pw}" height="${ph}" fill="none" stroke="rgba(${ink},.25)"/>`;
+  s += `<g clip-path="url(#clip-${theme}-${W}-${H})">`;
+  for (const se of series) {
+    const fr = se.freqs || FREQS;
+    let d = ''; for (let i = 0; i < se.d.length; i++) d += (i ? 'L' : 'M') + X(fr[i]).toFixed(1) + ' ' + Y(se.d[i]).toFixed(1);
+    if (se.glow) s += `<path d="${d}" fill="none" stroke="${se.color}" stroke-opacity=".2" stroke-width="${se.width + 6}" stroke-linejoin="round"/>`;
+    s += `<path d="${d}" fill="none" stroke="${se.color}" stroke-width="${se.width}" stroke-linejoin="round" stroke-linecap="round"${se.dash ? ` stroke-dasharray="${se.dash}"` : ''}${se.opacity ? ` stroke-opacity="${se.opacity}"` : ''}/>`;
+  }
+  s += '</g>';
+  const rows = [-1e9, -1e9, -1e9];
+  for (const sh of shades) {
+    if (!sh.label) continue;
+    const x = Math.min(L + pw - 50, Math.max(L + 50, X(sh.fpk)));
+    let row = 0; while (row < 3 && x - rows[row] < 104) row++;
+    if (row === 3) continue;
+    rows[row] = x;
+    s += `<text x="${x.toFixed(1)}" y="${T + 14 + row * 14}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" fill="${lblCol}" stroke="${bg}" stroke-width="3" paint-order="stroke">${esc(sh.label)}</text>`;
+  }
+  return s;
+}
+const xToF = (xv, W) => Math.min(20000, Math.max(20, 20 * Math.pow(10, 3 * (xv - CH.L) / (W - CH.L - CH.R))));
+
+// =====================================================================
+// 10. Lanes UI
+// =====================================================================
+const laneEls = [];
+function srcValueOf(c) { return c.kind === 'preset' ? 'p:' + c.id : c.kind; }
+function fillSrcSelect(sel, c) {
+  const opt = (v, l) => `<option value="${v}">${esc(l)}</option>`;
+  sel.innerHTML = `<optgroup label="${esc(t('grp.pref'))}">${PRESET_ORDER.slice(0, 7).map((id) => opt('p:' + id, PRESET_LABEL[id])).join('')}</optgroup>`
+    + `<optgroup label="${esc(t('grp.ref'))}">${PRESET_ORDER.slice(7).map((id) => opt('p:' + id, PRESET_LABEL[id])).join('')}</optgroup>`
+    + `<optgroup label="${esc(t('grp.other'))}">${opt('neutro', t('src.neutro'))}${opt('editor', t('src.editor'))}${c.kind === 'custom' ? opt('custom', c.name) : ''}${opt('import', t('src.import'))}</optgroup>`;
+  sel.value = srcValueOf(c);
+}
+function curveFromValue(v) { if (v.startsWith('p:')) return presetCurve(v.slice(2)); if (v === 'neutro') return neutroCurve(); return editorCurve(); }
+function buildLanes() {
+  const host = $('#lanes');
+  lanes.forEach((ln, i) => {
+    const el = document.createElement('article');
+    el.className = 'lane'; el.style.setProperty('--lane', LANE_COLORS[i]);
+    el.innerHTML = `<button type="button" class="lane-head"><span class="lane-no"></span><span class="lane-led" aria-hidden="true"></span></button>
+      <div class="tape-label"><label class="sr-only" for="src${i}"></label><select class="lane-src" id="src${i}"></select><svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg><p class="lane-desc"></p></div>
+      <div class="vu" role="img"><svg viewBox="0 0 140 92">${vuMarkup()}</svg></div>
+      <div class="lane-read"><span class="lv-l"></span><output></output></div>
+      <div class="levers"></div>`;
+    const refs = { root: el, head: $('.lane-head', el), no: $('.lane-no', el), sel: $('.lane-src', el), lab: $('label', el), spark: $('.spark', el), desc: $('.lane-desc', el), vu: $('.vu', el), out: $('output', el), lvl: $('.lv-l', el) };
+    refs.needle = { el: $('.vu-needle', el), pos: -48, vel: 0, target: -48 };
+    needles.add(refs.needle);
+    refs.levers = {};
+    for (const key of ['armed', 'solo', 'mute']) {
+      const lk = key === 'armed' ? 'lv.arm' : key === 'solo' ? 'lv.solo' : 'lv.mute';
+      const lv = makeLever(lk, ln[key], (x) => { lanes[i][key] = x; renderLaneState(i); renderAllCharts(); }, () => t('lv.aria', { lv: t(lk), n: i + 1 }));
+      refs.levers[key] = lv; $('.levers', el).appendChild(lv);
+    }
+    refs.head.addEventListener('click', () => selectLane(i));
+    refs.sel.addEventListener('change', () => {
+      const v = refs.sel.value;
+      if (v === 'import') { refs.sel.value = srcValueOf(lanes[i].curve); importInto(i); return; }
+      if (v === 'custom') return;
+      setLaneCurve(i, curveFromValue(v));
+    });
+    host.appendChild(el); laneEls.push(refs);
+  });
+}
+function renderLane(i) {
+  const ln = lanes[i], r = laneEls[i], c = ln.curve;
+  r.no.textContent = t('lane.n', { n: i + 1 });
+  r.head.setAttribute('aria-label', t('lane.select', { n: i + 1, name: curveName(c) }));
+  r.head.setAttribute('aria-pressed', String(state.selected === i));
+  r.lab.textContent = t('lane.src', { n: i + 1 });
+  fillSrcSelect(r.sel, c);
+  const d = resp(c);
+  let p = ''; for (let k = 0; k < d.length; k += 2) p += (k ? 'L' : 'M') + (k / 255 * 100).toFixed(2) + ' ' + (15 - Math.max(-14.5, Math.min(14.5, d[k]))).toFixed(2);
+  r.spark.innerHTML = `<line x1="0" y1="15" x2="100" y2="15" stroke="rgba(60,50,40,.25)" stroke-width=".5" vector-effect="non-scaling-stroke"/><path d="${p}" fill="none" stroke="#3b3328" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`;
+  r.desc.innerHTML = curveDesc(c);
+  const L = lvl(c);
+  r.out.textContent = Number.isFinite(L) ? `${fmt(L, 1)} dB` : '?';
+  r.lvl.textContent = t('lane.level');
+  r.vu.setAttribute('aria-label', t('lane.vu', { n: i + 1, db: fmt(L, 1) }));
+  r.needle.target = Number.isFinite(L) ? vuAng(L) : -48;
+  kickNeedles();
+  for (const k of Object.keys(r.levers)) r.levers[k].relabel();
+  renderLaneState(i);
+}
+function renderLaneState(i) {
+  const ln = lanes[i], r = laneEls[i];
+  r.root.classList.toggle('is-selected', state.selected === i);
+  r.root.classList.toggle('is-off', !ln.armed);
+  r.head.setAttribute('aria-pressed', String(state.selected === i));
+  for (const k of ['armed', 'solo', 'mute']) r.levers[k].setChecked(ln[k]);
+}
+function selectLane(i) { state.selected = i; lanes.forEach((_, j) => renderLaneState(j)); renderMain(); }
+function setLaneCurve(i, c, silent) {
+  lanes[i].curve = c; markChanged(); renderLane(i); renderAllCharts(); fillPairSelects(); scheduleSos();
+  if (!silent) toast(t('toast.lane', { n: i + 1, name: curveName(c) }));
+}
+function markChanged() { state.unsaved++; renderUnsaved(); }
+function renderUnsaved() { const u = $('#unsaved'); u.textContent = state.unsaved === 1 ? t('unsaved.1') : t('unsaved.n', { n: state.unsaved }); u.classList.toggle('has', state.unsaved > 0); }
+
+// ---- .txt import (PK / LS / OFF; HS / LP / HP experimental, gated) ----
+let importLane = 0;
+const fileInput = $('#fileInput');
+function importInto(i) { importLane = i; fileInput.value = ''; fileInput.click(); }
+fileInput.addEventListener('change', async () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) return;
+  const text = await f.text();
+  const res = parseTxt(text);
+  if (res.error) { toast(res.error, true); return; }
+  const name = f.name.replace(/\.txt$/i, '').slice(0, 40);
+  setLaneCurve(importLane, { kind: 'custom', name, pre: res.pre, bands: res.bands, noteKey: 'desc.import', noteVars: { file: f.name, auto: res.autoPre } }, true);
+  toast(t(hasExp(res.bands) ? 'imp.okExp' : 'imp.ok', { n: importLane + 1, name }));
+});
+// PK / LS: loaded as is (gate v2 decides on write). HS / HSC / LP / HP: EXPERIMENTAL, loaded only if gate v2
+// passes. LSQ / HSQ: refused (never guessed).
+function parseTxt(text) {
+  let pre = null; const bands = []; let qsq = false, unknown = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.trim(); if (!l || l.startsWith('#') || l.startsWith('//')) continue;
+    let m = l.match(/^preamp\s*:\s*([−+-]?[\d.,]+)\s*db/i);
+    if (m) { pre = parseNum(m[1]); continue; }
+    m = l.match(/^filter\s*\d*\s*:\s*(on|off)\s+([a-z]+)\b(.*)$/i);
+    if (!m) continue;
+    if (m[1].toLowerCase() === 'off') continue;
+    const code = m[2].toUpperCase(), rest = m[3];
+    if (code === 'LSQ' || code === 'HSQ') { qsq = true; break; }
+    const kind = ({ PK: 'PK', PEQ: 'PK', LS: 'LS', LSC: 'LS', HS: 'HS', HSC: 'HS', LP: 'LP', LPQ: 'LP', HP: 'HP', HPQ: 'HP' })[code];
+    if (!kind) { unknown = code; break; }
+    const fc = rest.match(/fc\s*([\d.,]+)\s*hz/i), g = rest.match(/gain\s*([−+-]?[\d.,]+)\s*db/i), q = rest.match(/\bq\s*([\d.,]+)/i);
+    const pass = kind === 'LP' || kind === 'HP';
+    bands.push({ kind, freqHz: fc ? parseNum(fc[1]) : NaN, gainDb: pass ? 0 : (g ? parseNum(g[1]) : NaN), qFactor: q ? parseNum(q[1]) : (kind === 'PK' ? NaN : 0.7071) });
+  }
+  if (qsq) return { error: t('imp.qsq') };
+  if (unknown) return { error: t('imp.unknown', { k: unknown }) };
+  if (!bands.length) return { error: t('imp.empty') };
+  if (bands.length > BAND_COUNT) return { error: t('imp.many', { n: bands.length }) };
+  const padded = padBands(bands);
+  try { padded.forEach(checkBand); padded.forEach((b, i) => encodeSection(designSection(b), i)); } catch (e) { return { error: t('imp.bad', { m: e.message }) }; }
+  if (pre !== null && !Number.isFinite(pre)) pre = null;
+  if (pre !== null && pre > 0) return { error: t('imp.prepos') };
+  let autoPre = false;
+  if (pre === null) { const ap = autoPreamp(padded); if (ap.pre === null) return { error: t('imp.nopre') }; pre = ap.pre; autoPre = true; }
+  if (hasExp(padded)) { const v = gate(padded, pre); if (!v.ok) return { error: t('imp.expGate', { r: reasonText(v.reasons[0]) }) }; }
+  return { pre, bands: padded, autoPre };
+}
+
+// =====================================================================
+// 11. Main overlay chart
+// =====================================================================
+function visibleLanes() {
+  const anySolo = lanes.some((l) => l.armed && l.solo);
+  return lanes.map((_, i) => i).filter((i) => { const l = lanes[i]; return l.armed && !l.mute && (!anySolo || l.solo); });
+}
+const mainSvg = $('#mainChart');
+function renderMain() {
+  const vis = visibleLanes(), sel = state.selected;
+  const order = [...vis.filter((i) => i !== sel), ...vis.filter((i) => i === sel)];
+  const series = order.map((i) => ({ d: resp(lanes[i].curve), color: i === sel ? ACCENT : LANE_COLORS[i], width: i === sel ? 2.6 : 1.6, glow: i === sel }));
+  mainSvg.innerHTML = chartMarkup({ W: 1000, H: 300, series }) + '<g id="mainCur"></g>';
+  mainSvg.setAttribute('aria-label', t('chart.aria', { list: vis.map((i) => `${t('lane.short', { n: i + 1 })} ${curveName(lanes[i].curve)}`).join(', ') || t('chart.none') }));
+  $('#legend').innerHTML = lanes.map((l, i) => `<span class="${i === sel ? 'is-sel' : ''}" style="--c:${i === sel ? ACCENT : LANE_COLORS[i]};opacity:${vis.includes(i) ? 1 : .4}"><i></i>${esc(t('lane.short', { n: i + 1 }))} · ${esc(curveName(l.curve))}</span>`).join('');
+  renderCursor();
+}
+function renderCursor() {
+  const g = $('#mainCur', mainSvg), box = $('#mainRead');
+  if (!g) return;
+  const f = state.cursorF;
+  if (f === null) { g.innerHTML = ''; box.classList.remove('on'); return; }
+  const W = 1000, H = 300, pw = W - CH.L - CH.R, ph = H - CH.T - CH.B;
+  const x = CH.L + Math.log10(f / 20) / 3 * pw;
+  const Y = (db) => CH.T + (15 - Math.max(-15, Math.min(15, db))) / 30 * ph;
+  const vis = visibleLanes();
+  let s = `<line x1="${x.toFixed(1)}" y1="${CH.T}" x2="${x.toFixed(1)}" y2="${CH.T + ph}" stroke="${ACCENT}" stroke-opacity=".6" stroke-dasharray="3 3"/>`;
+  let rows = `<div><b>${esc(fmtHz(f))}</b></div>`;
+  for (const i of vis) {
+    const c = lanes[i].curve, v = c.pre + magnitudeDb(c.bands, f);
+    s += `<circle cx="${x.toFixed(1)}" cy="${Y(v).toFixed(1)}" r="3.4" fill="${i === state.selected ? ACCENT : LANE_COLORS[i]}" stroke="#100f0e"/>`;
+    rows += `<div><span style="color:${i === state.selected ? ACCENT : LANE_COLORS[i]}">${esc(t('lane.short', { n: i + 1 }))}</span> ${esc(fmt(v, 1, true))} dB</div>`;
+  }
+  g.innerHTML = s; box.innerHTML = rows; box.classList.add('on');
+}
+mainSvg.addEventListener('pointermove', (e) => { const r = mainSvg.getBoundingClientRect(); state.cursorF = xToF((e.clientX - r.left) / r.width * 1000, 1000); renderCursor(); });
+mainSvg.addEventListener('pointerleave', () => { if (document.activeElement !== mainSvg) { state.cursorF = null; renderCursor(); } });
+mainSvg.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    const step = (e.shiftKey ? 10 : e.altKey ? 0.1 : 1) / 24 * (e.key === 'ArrowLeft' ? -1 : 1);
+    state.cursorF = Math.min(20000, Math.max(20, (state.cursorF ?? 1000) * Math.pow(2, step))); renderCursor();
+  } else if (e.key === 'Escape') { state.cursorF = null; renderCursor(); }
+});
+mainSvg.addEventListener('focus', () => { if (state.cursorF === null) { state.cursorF = 1000; renderCursor(); } });
+mainSvg.addEventListener('blur', () => { state.cursorF = null; renderCursor(); });
+
+// =====================================================================
+// 12. Onde diferem (S4)
+// =====================================================================
+let thrKnob, matchLever, exDeltaLever, mixKnob, preKnob, preAutoLever;
+function laneOptions(sel, cur) { sel.innerHTML = lanes.map((l, i) => `<option value="${i}">${esc(t('lane.short', { n: i + 1 }))} · ${esc(curveName(l.curve))}</option>`).join(''); sel.value = String(cur); }
+function fillPairSelects() {
+  laneOptions($('#pairA'), state.pair[0]); laneOptions($('#pairB'), state.pair[1]);
+  laneOptions($('#sosA'), state.sos.a); laneOptions($('#sosB'), state.sos.b); laneOptions($('#sosBase'), state.sos.base); laneOptions($('#bounceTo'), state.sos.bounceTo);
+}
+function renderS4() {
+  const [a, b] = state.pair, ca = lanes[a].curve, cb = lanes[b].curve;
+  const st = diffStats(ca, cb, state.levelMatch);
+  const regs = a === b ? [] : regions(st.d, state.threshold);
+  const Bs = Float64Array.from(resp(cb), (v) => v - st.shift);
+  const shades = regs.map((r) => ({ f0: r.f0, f1: r.f1, fpk: r.f, fill: 'rgba(242,179,61,.13)', label: t('s2.region', { db: fmt(r.db, 1, true), f: fmtHz(r.f) }) }));
+  const series = [{ d: resp(ca), color: LANE_COLORS[a], width: 2 }, { d: Bs, color: LANE_COLORS[b], width: 2 }, { d: st.d, color: ACCENT, width: 2.2, dash: '7 5' }];
+  const svg = $('#diffChart');
+  svg.innerHTML = chartMarkup({ W: 1000, H: 300, series, shades });
+  svg.setAttribute('aria-label', t('s2.aria', { a: curveName(ca), b: curveName(cb), rms: fmt(st.rms, 2), max: fmt(st.max, 1, true), f: fmtHz(st.maxF) }));
+  $('#diffCap').innerHTML = `<span style="color:${LANE_COLORS[a]}">A</span> ${esc(curveName(ca))} · <span style="color:${LANE_COLORS[b]}">B</span> ${esc(curveName(cb))} · <span style="color:${ACCENT}">Δ</span>`;
+  $('#stRms').textContent = fmt(st.rms, 2);
+  $('#stMax').textContent = fmt(st.max, 1, true);
+  $('#stMaxF').textContent = t('s2.at', { f: fmtHz(st.maxF) });
+  $('#stN').textContent = String(regs.length);
+  $('#stThr').textContent = t('s2.thrSub', { thr: fmt(state.threshold, 1) });
+  $('#matchNote').textContent = state.levelMatch ? t('s2.matchNote', { db: fmt(-st.shift, 1, true) }) : t('s2.matchOff');
+  $('#regions').innerHTML = a === b ? `<li>${esc(t('s2.same'))}</li>` : regs.length
+    ? regs.map((r) => `<li><span class="mono">${esc(fmt(r.db, 1, true))} dB</span> ${esc(t('s2.at', { f: fmtHz(r.f) }))} <span class="muted">(${esc(t('s2.range', { f0: fmtHz(r.f0), f1: fmtHz(r.f1) }))})</span></li>`).join('')
+    : `<li>${esc(t('s2.none', { thr: fmt(state.threshold, 1) }))}</li>`;
+  refreshPreview('s4');
+}
+function setPair(a, b) { state.pair = [a, b]; $('#pairA').value = String(a); $('#pairB').value = String(b); renderS4(); renderMatrix(); renderExport(); }
+function swapPair() { setPair(state.pair[1], state.pair[0]); }
+
+// =====================================================================
+// 13. Patch bay (distance matrix)
+// =====================================================================
+const bay = $('#bay');
+function renderMatrix() {
+  const armed = lanes.map((_, i) => i).filter((i) => lanes[i].armed);
+  if (armed.length < 2) { bay.innerHTML = `<p class="note" style="padding:12px">${esc(t('s3.few'))}</p>`; return; }
+  let h = `<table><caption class="sr-only">${esc(t('s3.caption'))}</caption><thead><tr><th scope="col"><span class="sr-only">${esc(t('s3.corner'))}</span></th>`;
+  for (const j of armed) h += `<th scope="col"><span class="jack hdr" data-col="${j}" aria-hidden="true"></span><br><span class="bay-lbl">${esc(t('lane.short', { n: j + 1 }))}</span><span class="bay-name">${esc(curveName(lanes[j].curve))}</span></th>`;
+  h += '</tr></thead><tbody>';
+  for (const i of armed) {
+    h += `<tr><th scope="row"><span class="jack hdr" data-row="${i}" aria-hidden="true"></span><span class="bay-lbl">${esc(t('lane.short', { n: i + 1 }))}</span><span class="bay-name">${esc(curveName(lanes[i].curve))}</span></th>`;
+    for (const j of armed) {
+      if (i === j) { h += `<td class="diag"><span class="jack blank" aria-hidden="true"></span><br><span class="mono">·</span></td>`; continue; }
+      const st = diffStats(lanes[i].curve, lanes[j].curve, state.levelMatch);
+      const on = state.pair[0] === i && state.pair[1] === j;
+      h += `<td><button type="button" class="bay-cell${on ? ' on' : ''}" data-a="${i}" data-b="${j}" style="--heat:${Math.min(1, st.rms / 5).toFixed(3)}" aria-pressed="${on}" aria-label="${esc(t('s3.cell', { a: curveName(lanes[i].curve), b: curveName(lanes[j].curve), rms: fmt(st.rms, 2) }))}"><span class="jack" aria-hidden="true"></span><span class="mono">${fmt(st.rms, 2)}</span></button></td>`;
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table><svg class="cord" aria-hidden="true"></svg>';
+  bay.innerHTML = h;
+  drawCord();
+}
+bay.addEventListener('click', (e) => { const b = e.target.closest('.bay-cell'); if (!b) return; setPair(+b.dataset.a, +b.dataset.b); const nb = $(`.bay-cell[data-a="${b.dataset.a}"][data-b="${b.dataset.b}"]`, bay); if (nb) nb.focus(); });
+function drawCord() {
+  const svg = $('.cord', bay); if (!svg) return;
+  const [a, b] = state.pair;
+  const ja = $(`[data-row="${a}"]`, bay), jb = $(`[data-col="${b}"]`, bay);
+  svg.setAttribute('width', bay.scrollWidth); svg.setAttribute('height', bay.scrollHeight);
+  if (!ja || !jb || a === b) { svg.innerHTML = ''; return; }
+  const br = bay.getBoundingClientRect();
+  const c = (el) => { const r = el.getBoundingClientRect(); return [r.left - br.left + r.width / 2 + bay.scrollLeft, r.top - br.top + r.height / 2 + bay.scrollTop]; };
+  const [x1, y1] = c(ja), [x2, y2] = c(jb);
+  const sag = Math.max(60, Math.abs(x2 - x1) * 0.3 + Math.abs(y2 - y1) * 0.5);
+  const d = `M${x1.toFixed(1)} ${y1.toFixed(1)}C${(x1 + 30).toFixed(1)} ${(y1 + sag).toFixed(1)} ${x2.toFixed(1)} ${(Math.max(y1, y2) + sag).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+  const plug = (x, y) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="#1a1918" stroke="#000"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="${ACCENT}"/><circle cx="${(x - 1.5).toFixed(1)}" cy="${(y - 1.5).toFixed(1)}" r="1.6" fill="#fff6dc"/>`;
+  svg.innerHTML = `<path d="${d}" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="9" transform="translate(3 6)"/><path d="${d}" fill="none" stroke="#2a2826" stroke-width="7" stroke-linecap="round"/><path d="${d}" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="1.6" transform="translate(-1 -1.5)"/>${plug(x1, y1)}${plug(x2, y2)}`;
+}
+
+// =====================================================================
+// 14. Som sobre som (C3)
+// =====================================================================
+let sosTimer = 0;
+function sosCurves() { const s = state.sos; return { cA: lanes[s.a].curve, cB: lanes[s.b].curve, cBase: lanes[s.base].curve, k: s.k / 100 }; }
+function sosTargetFull() {
+  const { cA, cB, cBase, k } = sosCurves(); const A = resp(cA), B = resp(cB), Bs = resp(cBase);
+  return Float64Array.from(Bs, (v, i) => v + k * (B[i] - A[i]));
+}
+function scheduleSos() {
+  state.sos.busy = true; renderSos();
+  clearTimeout(sosTimer);
+  sosTimer = setTimeout(() => { state.sos.result = computeSos(); state.sos.busy = false; renderSos(); }, 170);
+}
+function computeSos() {
+  const s = state.sos; const { cA, cB, cBase, k } = sosCurves();
+  let bands, exact = false, fitErr = 0;
+  if (k === 0 || sameCurve(cA, cB)) { bands = cloneBands(cBase.bands); exact = true; }
+  else if (k === 1 && sameCurve(cBase, cA)) { bands = cloneBands(cB.bands); exact = true; }
+  else {
+    const target = Float64Array.from(FIT_F, (f) => magnitudeDb(cBase.bands, f) + k * ((magnitudeDb(cB.bands, f) + cB.pre) - (magnitudeDb(cA.bands, f) + cA.pre)));
+    const fit = fitShape(target); bands = fit.bands; fitErr = fit.err;
+  }
+  let pre, verdict;
+  if (s.preAuto) {
+    const ap = autoPreamp(bands);
+    if (ap.pre === null) { pre = THRESHOLDS.preampMinDb; const g = gate(bands, pre); verdict = { ...g, ok: false, reasons: [...g.reasons, 'g:auto'] }; }
+    else { pre = ap.pre; verdict = gate(bands, pre); }
+  } else { pre = s.pre; verdict = gate(bands, pre); }
+  return { bands, pre, verdict, exact, fitErr, level: safeLevel(bands, pre), k: s.k, name: t('s4.name', { k: fmt(s.k, s.k % 1 ? 1 : 0) }), baseName: curveName(cBase) };
+}
+function reasonText(r) {
+  let m;
+  if ((m = r.match(/^a:(.+):stage-(\d+)$/))) return t('r.a', { pos: m[1], n: m[2] });
+  if ((m = r.match(/^b:pole-radius:stage-(\d+)$/))) return t('r.b', { n: m[1] });
+  if ((m = r.match(/^c:section-peak:stage-(\d+)$/))) return t('r.c', { n: m[1] });
+  if (r === 'd:internal-audible') return t('r.d');
+  if (r === 'e:output-audible') return t('r.e1');
+  if (r === 'e:output-full') return t('r.e2');
+  if (r.startsWith('f:codec:')) return t('r.f', { m: r.slice(8) });
+  if (r === 'g:preamp-range') return t('r.g');
+  if (r === 'g:auto') return t('r.gauto');
+  return r;
+}
+const crcText = (v) => (v && v.metrics && v.metrics.payloadCrc ? '0x' + v.metrics.payloadCrc.slice(2).toUpperCase() : 'n/d');
+function renderSos() {
+  const s = state.sos, res = s.result; const { cA, cB, cBase } = sosCurves();
+  const series = [
+    { d: resp(cA), color: LANE_COLORS[s.a], width: 1.4, opacity: .8 },
+    { d: resp(cB), color: LANE_COLORS[s.b], width: 1.4, opacity: .8 },
+    { d: sosTargetFull(), color: ACCENT, width: 1.6, dash: '6 5', opacity: .85 },
+  ];
+  if (res) series.push({ d: Float64Array.from(FREQS, (f) => res.pre + magnitudeDb(res.bands, f)), color: ACCENT, width: 2.8, glow: true, opacity: s.busy ? .35 : 1 });
+  const svg = $('#sosChart');
+  svg.innerHTML = chartMarkup({ W: 1000, H: 420, series });
+  svg.setAttribute('aria-label', t('s4.aria'));
+  $('#sosCap').textContent = t('s4.capAB', { a: curveName(cA), b: curveName(cB), base: curveName(cBase) });
+  const vd = $('#verdict'), vt = $('#verdictTx'), rs = $('#reasons');
+  vd.classList.toggle('busy', !!s.busy);
+  if (s.busy || !res) { vd.classList.remove('ok', 'bad'); vt.textContent = t('s4.busy'); rs.innerHTML = ''; }
+  else {
+    vd.classList.toggle('ok', res.verdict.ok); vd.classList.toggle('bad', !res.verdict.ok);
+    vt.textContent = res.verdict.ok ? t('s4.ok') : t('s4.bad');
+    rs.innerHTML = res.verdict.ok ? '' : res.verdict.reasons.map((r) => `<li>${esc(reasonText(r))}</li>`).join('');
+  }
+  if (!res) return;
+  $('#sPre').textContent = fmt(res.pre, 2);
+  $('#sLvl').textContent = fmt(res.level, 1);
+  $('#sFit').textContent = res.exact ? t('s4.exact') : fmt(res.fitErr, 2);
+  $('#sFitSub').textContent = res.exact ? '0 dB' : t('s4.fitSub');
+  $('#sCrc').textContent = crcText(res.verdict);
+  const tbl = $('#sectTable');
+  tbl.setAttribute('aria-label', t('s4.tableAria'));
+  tbl.innerHTML = `<thead><tr><th>${t('tbl.n')}</th><th>${t('tbl.kind')}</th><th>${t('tbl.f')}</th><th>${t('tbl.g')}</th><th>${t('tbl.q')}</th></tr></thead><tbody>`
+    + res.bands.map((b, i) => b.kind === 'OFF' ? `<tr class="off"><td>${i + 1}</td><td>OFF</td><td>·</td><td>·</td><td>·</td></tr>` : `<tr><td>${i + 1}</td><td>${b.kind}</td><td>${fmt(b.freqHz, b.freqHz % 1 ? 1 : 0)}</td><td>${fmt(b.gainDb, 2, true)}</td><td>${fmt(b.qFactor, 3)}</td></tr>`).join('') + '</tbody>';
+  if (s.preAuto && preKnob) preKnob.set(Math.round(res.pre * 10) / 10, false);
+  const w = $('#sosWrite'); w.setAttribute('aria-disabled', String(!res.verdict.ok || s.busy));
+  $('#sosOpen').href = hasExp(res.bands) ? 'curva.html?camada=engenharia' : 'curva.html';
+  refreshPreview('sos');
+}
+function sosCandidate() { const r = state.sos.result; if (!r) return null; return { name: r.name, bands: r.bands, pre: r.pre, verdict: r.verdict }; }
+
+// =====================================================================
+// 15. Export (S10)
+// =====================================================================
+function exportMarkup() {
+  const [a, b] = state.pair, ca = lanes[a].curve, cb = lanes[b].curve;
+  const st = diffStats(ca, cb, state.levelMatch);
+  const regs = a === b ? [] : regions(st.d, state.threshold);
+  const W = 1200, H = 780;
+  const Bs = Float64Array.from(resp(cb), (v) => v - st.shift);
+  const series = [{ d: resp(ca), color: '#4f6f86', width: 2.4 }, { d: Bs, color: '#b06a2a', width: 2.8 }];
+  if (state.exportDelta) series.push({ d: st.d, color: '#6b5f50', width: 1.6, dash: '6 5' });
+  const shades = regs.map((r) => ({ f0: r.f0, f1: r.f1, fpk: r.f, fill: 'rgba(176,106,42,.12)', label: t('s2.region', { db: fmt(r.db, 1, true), f: fmtHz(r.f) }) }));
+  const chart = chartMarkup({ W: 1120, H: 520, series, shades, theme: 'paper' });
+  const mono = 'font-family="JetBrains Mono, monospace"';
+  const date = new Date().toLocaleDateString(LANG === 'pt' ? 'pt-BR' : 'en-US');
+  const shiftTxt = state.levelMatch ? t('s2.matchNote', { db: fmt(-st.shift, 1, true) }) : t('s2.matchOff');
+  let leg = `<line x1="40" y1="676" x2="76" y2="676" stroke="#4f6f86" stroke-width="3"/><text x="84" y="681" ${mono} font-size="14" fill="#2a241c">A · ${esc(t('ex.before'))}: ${esc(curveName(ca))}</text>`
+    + `<line x1="460" y1="676" x2="496" y2="676" stroke="#b06a2a" stroke-width="3"/><text x="504" y="681" ${mono} font-size="14" fill="#2a241c">B · ${esc(t('ex.after'))}: ${esc(curveName(cb))}</text>`;
+  if (state.exportDelta) leg += `<line x1="880" y1="676" x2="916" y2="676" stroke="#6b5f50" stroke-width="2" stroke-dasharray="6 5"/><text x="924" y="681" ${mono} font-size="14" fill="#2a241c">Δ = B − A</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#F3ECDD"/>`
+    + `<text x="40" y="58" font-family="Georgia, 'Instrument Serif', serif" font-style="italic" font-size="34" fill="#2a241c">${esc(t('ex.title'))}</text>`
+    + `<text x="40" y="88" ${mono} font-size="14" fill="#5a5046">${esc(curveName(ca))} → ${esc(curveName(cb))} · RMS ${esc(fmt(st.rms, 2))} dB · ${esc(t('s2.max'))} ${esc(fmt(st.max, 1, true))} dB ${esc(t('s2.at', { f: fmtHz(st.maxF) }))}</text>`
+    + `<text x="40" y="108" ${mono} font-size="12" fill="#7b6f60">${esc(shiftTxt)}</text>`
+    + `<g transform="translate(40 128)">${chart}</g>${leg}`
+    + `<text x="40" y="720" ${mono} font-size="12" fill="#5a5046">${esc(regs.length ? regs.map((r) => t('s2.region', { db: fmt(r.db, 1, true), f: fmtHz(r.f) })).join(' · ') : t('s2.none', { thr: fmt(state.threshold, 1) }))}</text>`
+    + `<text x="40" y="752" ${mono} font-size="11" fill="#8a7d6c">${esc(t('ex.foot', { date }))}</text></svg>`;
+}
+function renderExport() { const p = $('#exPreview'); p.innerHTML = exportMarkup(); p.setAttribute('aria-label', t('s5.aria')); }
+function download(blob, name) { const a = document.createElement('a'); const url = URL.createObjectURL(blob); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); toast(t('ex.done', { file: name })); }
+const exName = (ext) => `open-auri-antes-depois-P${state.pair[0] + 1}-P${state.pair[1] + 1}.${ext}`;
+function exportSVG() { download(new Blob([exportMarkup()], { type: 'image/svg+xml' }), exName('svg')); }
+function exportPNG() {
+  const svgStr = exportMarkup();
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = 2400; c.height = 1560;
+      const g = c.getContext('2d'); g.scale(2, 2); g.drawImage(img, 0, 0);
+      c.toBlob((b) => { if (b) download(b, exName('png')); else toast(t('ex.pngFail'), true); }, 'image/png');
+    } catch { toast(t('ex.pngFail'), true); }
+  };
+  img.onerror = () => toast(t('ex.pngFail'), true);
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
+}
+
+// =====================================================================
+// 16. Pre-write checklist (N2 / N3), journal, help, toasts
+// =====================================================================
+const ckDlg = $('#ckDlg'); let ckCand = null, ckTimer = 0;
+function laneCandidate() { const i = state.selected, c = lanes[i].curve; return { name: `${t('lane.short', { n: i + 1 })} · ${curveName(c)}`, bands: c.bands, pre: c.pre }; }
+function openChecklist(cand) {
+  if (!cand) return;
+  const v = cand.verdict || gate(cand.bands, cand.pre);
+  ckCand = { ...cand, verdict: v };
+  const L = safeLevel(cand.bands, cand.pre);
+  const last = lastWrittenLevel();
+  const known = last !== null;
+  const loud = !known || (Number.isFinite(L) && L - last >= 3);
+  const c = counts();
+  const journal = OA.store.journal();
+  ckCand.exp = hasExp(cand.bands);
+  $('#ckBody').innerHTML = `<p style="margin:0 0 10px"><b>${esc(t('ck.what'))}</b> ${esc(cand.name)}</p><ol class="ck-list">
+    <li class="${v.ok ? '' : 'bad'}"><b>${esc(t('ck.gate'))}</b> ${esc(v.ok ? t('ck.gateOk') : t('ck.gateBad'))}${v.ok ? '' : '<ul>' + v.reasons.map((r) => `<li>${esc(reasonText(r))}</li>`).join('') + '</ul>'}</li>
+    <li><b>${esc(t('ck.payload'))}</b> <span class="mono">220 bytes · CRC ${esc(crcText(v))} · 9 × report 0xCB</span></li>
+    <li><b>${esc(t('ck.pre'))}</b> <span class="mono">${esc(fmt(cand.pre, 2))} dB</span> <span class="muted">(${esc(fmt(-25.5, 1))}…${esc(fmt(-0.5, 1))})</span></li>
+    <li class="${loud ? 'warn' : ''}"><b>${esc(t('ck.loud'))}</b> ${loud ? `<span class="warnmsg">${esc(t('n3.msg'))}</span>` : esc(t('ck.loudOk', { d: fmt(L - last, 1, true) }))} <span class="mono muted">${esc(t('ck.level', { l: fmt(L, 1) }))}</span></li>
+    <li><b>${esc(t('ck.flash'))}</b> ${esc(t('ck.counts', { s: c.session, d: c.today, b: c.total }))} ${esc(t('ck.rate'))}${c.today + 1 >= 50 ? `<p class="notice">${esc(t('n2.msg'))}</p>` : ''}</li>
+    ${ckCand.exp ? `<li class="warn"><b>EXPERIMENTAL</b> <label class="ck-exp"><input type="checkbox" id="ckExp"> <span>${esc(t('exp.confirm'))}</span></label></li>` : ''}
+    <li><span class="soon-wrap"><label class="is-soon"><input type="checkbox" disabled aria-disabled="true"> ${esc(t('ck.ram'))}</label><span class="badge-soon">${esc(t('soon.badge'))}</span></span><p class="soon-note">${esc(t('soon.note'))}</p></li>
+  </ol><p style="margin:14px 0 4px"><b>${esc(t('ck.journal'))}</b></p><ul class="journal">${journal.length ? journal.slice(-5).reverse().map((j) => `<li>${esc(new Date(j.at).toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-US'))} · ${esc(j.name)} · ${esc(j.crc)} · ${esc(fmt(j.pre, 2))} dB</li>`).join('') : `<li>${esc(t('ck.none'))}</li>`}</ul>`;
+  const ex = $('#ckExp'); if (ex) ex.addEventListener('change', updateGo);
+  updateGo();
+  if (!ckDlg.open) ckDlg.showModal();
+}
+function updateGo() {
+  const go = $('#ckGo'); clearTimeout(ckTimer);
+  if (!ckCand || !ckCand.verdict.ok || (ckCand.exp && !($('#ckExp') && $('#ckExp').checked))) { go.disabled = true; go.textContent = t('ck.go'); return; }
+  const wait = 2000 - (Date.now() - lastWriteTs);
+  if (wait > 0) { go.disabled = true; go.textContent = t('ck.goWait', { s: fmt(wait / 1000, 1) }); ckTimer = setTimeout(updateGo, 100); return; }
+  go.disabled = false; go.textContent = t('ck.go');
+}
+$('#ckGo').addEventListener('click', () => {
+  if (!ckCand || !ckCand.verdict.ok || Date.now() - lastWriteTs < 2000) return;
+  if (ckCand.exp && !($('#ckExp') && $('#ckExp').checked)) return;
+  let crc;
+  try { const p = encodePayload(ckCand.bands, ckCand.pre); crc = '0x' + ((p[219] << 8) | p[218]).toString(16).toUpperCase().padStart(4, '0'); } catch { return; }
+  lastWriteTs = Date.now();
+  OA.store.recordFlash();
+  OA.store.appendJournal({ at: lastWriteTs, name: String(ckCand.name), crc, pre: ckCand.pre, bands: ckCand.bands.map(OA.store.bandToString) });
+  state.unsaved = 0; renderUnsaved(); renderDrums();
+  ckDlg.close(); toast(t('ck.done', { crc }));
+});
+$('#ckCancel').addEventListener('click', () => ckDlg.close());
+ckDlg.addEventListener('close', () => clearTimeout(ckTimer));
+function renderDrums() { const n = String(Math.min(9999, counts().total)).padStart(4, '0'); $('#drums').innerHTML = [...n].map((d) => `<span class="drum">${d}</span>`).join(''); }
+
+const helpDlg = $('#helpDlg');
+function renderHelp() {
+  const rows = LANG === 'pt' ? [
+    ['1 … 8', 'selecionar pista'], ['A · S · M', 'ARM, SOLO e MUTE da pista selecionada'], ['X', 'trocar A e B em Onde diferem'], ['← →', 'no gráfico: mover o cursor (Shift ×10, Alt ×0,1)'],
+    ['↑ ↓ ← →', 'nos botões giratórios: ajustar (Shift ×10, Alt ×0,1)'], ['roda do mouse', 'ajustar o botão sob o ponteiro'], ['duplo clique', 'voltar o botão ao padrão'], ['clique no número', 'digitar o valor (Enter confirma, Esc cancela)'],
+    ['Espaço', 'tocar ou pausar a fita'], ['G', 'Gravar no cabo (checklist)'], ['E', 'exportar SVG do par'], ['?', 'esta ajuda'], ['Esc', 'fechar'],
+  ] : [
+    ['1 … 8', 'select track'], ['A · S · M', 'ARM, SOLO and MUTE on the selected track'], ['X', 'swap A and B in Where they differ'], ['← →', 'on the chart: move the cursor (Shift ×10, Alt ×0.1)'],
+    ['↑ ↓ ← →', 'on knobs: adjust (Shift ×10, Alt ×0.1)'], ['mouse wheel', 'adjust the knob under the pointer'], ['double-click', 'reset the knob'], ['click the number', 'type the value (Enter confirms, Esc cancels)'],
+    ['Space', 'play or pause the tape'], ['G', 'Write to cable (checklist)'], ['E', 'export SVG of the pair'], ['?', 'this help'], ['Esc', 'close'],
+  ];
+  $('#helpList').innerHTML = rows.map(([k, d]) => `<dt>${esc(k)}</dt><dd>${esc(d)}</dd>`).join('');
+}
+function openHelp() { renderHelp(); if (!helpDlg.open) helpDlg.showModal(); }
+$('#helpBtn').addEventListener('click', openHelp);
+$('#helpClose').addEventListener('click', () => helpDlg.close());
+
+function toast(msg, err) {
+  const el = document.createElement('div'); el.className = 'toast' + (err ? ' err' : ''); el.textContent = msg;
+  $('#toasts').appendChild(el); setTimeout(() => el.remove(), err ? 6500 : 3200);
+}
+
+// =====================================================================
+// 16b. OUVIR A/B: previews through OA.audio (top-bar MP3 or pink noise),
+//      exact Q27 chains, loudness-matched with levelDb. Browser only.
+// =====================================================================
+const AB = { owner: null, chains: [], trims: [0, 0], levels: [NaN, NaN], names: ['', ''], which: 0, sig: '' };
+const AB_IDS = { s4: ['abS4Play', 'abS4A', 'abS4B', 'abS4Note'], sos: ['abSosPlay', 'abSosA', 'abSosB', 'abSosNote'] };
+function abCurves(owner) {
+  if (owner === 's4') { const [a, b] = state.pair; return [lanes[a].curve, lanes[b].curve].map((c, i) => ({ bands: c.bands, pre: c.pre, name: `${i ? 'B' : 'A'} · ${curveName(c)}` })); }
+  const r = state.sos.result; if (!r) return null;
+  const base = lanes[state.sos.base].curve;
+  return [{ bands: base.bands, pre: base.pre, name: `${t('ab.base')} · ${curveName(base)}` }, { bands: r.bands, pre: r.pre, name: `${t('ab.result')} · ${r.name}` }];
+}
+const abSig = (cs) => JSON.stringify(cs.map((c) => [c.pre, c.bands]));
+function abDispose() { AB.chains.forEach((ch) => ch.dispose()); AB.chains = []; }
+function abBuild(cs) {
+  const levels = cs.map((c) => safeLevel(c.bands, c.pre));
+  const trims = OA.audio.matchGains(levels.map((l) => (Number.isFinite(l) ? l : 0)));
+  abDispose();
+  AB.chains = cs.map((c, i) => OA.audio.buildChain(c.bands, c.pre, { gainDb: trims[i], on: i === AB.which }));
+  AB.trims = trims; AB.levels = levels; AB.names = cs.map((c) => c.name); AB.sig = abSig(cs);
+}
+function abStop() { const was = AB.owner; AB.owner = null; abDispose(); if (was) OA.audio.stop(); abRender(); }
+function abStart(owner) {
+  abStop();
+  const cs = abCurves(owner); if (!cs) return;
+  try { AB.which = 0; abBuild(cs); AB.owner = owner; OA.audio.start('chains').catch(() => {}); }
+  catch { abDispose(); AB.owner = null; toast(t('ab.fail'), true); }
+  abRender();
+}
+function abSelect(i) { if (!AB.owner) return; AB.which = i; AB.chains.forEach((ch, j) => ch.setGain(AB.trims[j], j === i)); abRender(); }
+/** Rebuilds the chains when the compared curves change while a preview is playing. */
+function refreshPreview(owner) {
+  if (AB.owner !== owner) return;
+  const cs = abCurves(owner);
+  if (!cs) return;
+  if (abSig(cs) !== AB.sig) { try { abBuild(cs); } catch { abStop(); toast(t('ab.fail'), true); return; } }
+  abRender();
+}
+function abRender() {
+  const src = OA.audio.state().file ? OA.audio.state().file.name : t('ab.pink');
+  for (const owner of ['s4', 'sos']) {
+    const [p, a, b, n] = AB_IDS[owner].map((id) => document.getElementById(id));
+    if (!p) continue;
+    const on = AB.owner === owner;
+    p.setAttribute('aria-pressed', String(on));
+    p.textContent = on ? t('ab.stop') : t(owner === 's4' ? 'ab.listen' : 'ab.listenSos');
+    a.disabled = !on; b.disabled = !on;
+    a.setAttribute('aria-pressed', String(!on || AB.which === 0)); b.setAttribute('aria-pressed', String(on && AB.which === 1));
+    n.textContent = on
+      ? t('ab.note', { x: AB.names[AB.which], a: AB.names[0], la: fmt(AB.levels[0], 1), b: AB.names[1], lb: fmt(AB.levels[1], 1), ta: fmt(AB.trims[0], 1, true), tb: fmt(AB.trims[1], 1, true), src })
+      : t('ab.idle');
+  }
+}
+OA.audio.onChange((s) => {
+  // The loader's "Tocar arquivo" (raw) or any stop ends our A/B preview.
+  if (AB.owner && s.mode !== 'chains') { AB.owner = null; abDispose(); }
+  abRender();
+});
+$('#abS4Play').addEventListener('click', () => (AB.owner === 's4' ? abStop() : abStart('s4')));
+$('#abSosPlay').addEventListener('click', () => (AB.owner === 'sos' ? abStop() : abStart('sos')));
+$('#abS4A').addEventListener('click', () => abSelect(0));
+$('#abS4B').addEventListener('click', () => abSelect(1));
+$('#abSosA').addEventListener('click', () => abSelect(0));
+$('#abSosB').addEventListener('click', () => abSelect(1));
+
+// =====================================================================
+// 17. Deck (reels, heads) and transport
+// =====================================================================
+function sector(cx, cy, r1, r2, a0, a1) {
+  const p = (r, a) => [(cx + r * Math.cos(a)).toFixed(2), (cy + r * Math.sin(a)).toFixed(2)];
+  const [x0, y0] = p(r2, a0), [x1, y1] = p(r2, a1), [x2, y2] = p(r1, a1), [x3, y3] = p(r1, a0);
+  return `M${x0} ${y0}A${r2} ${r2} 0 0 1 ${x1} ${y1}L${x2} ${y2}A${r1} ${r1} 0 0 0 ${x3} ${y3}Z`;
+}
+function buildDeck() {
+  const reel = (cx, cy, pack, cls) => {
+    const R = 112;
+    let fl = `M${cx - R} ${cy}A${R} ${R} 0 1 0 ${cx + R} ${cy}A${R} ${R} 0 1 0 ${cx - R} ${cy}Z`;
+    for (let k = 0; k < 3; k++) { const a0 = (k * 120 - 90 + 25) * Math.PI / 180; fl += sector(cx, cy, 34, 100, a0, a0 + 70 * Math.PI / 180); }
+    let rings = ''; for (let r = 30; r < pack; r += 7) rings += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(0,0,0,.18)" stroke-width=".6"/>`;
+    let keys = ''; for (let k = 0; k < 3; k++) keys += `<rect x="${cx - 3}" y="${cy - 26}" width="6" height="9" rx="1" fill="#2a2c2b" transform="rotate(${k * 120} ${cx} ${cy})"/>`;
+    return `<circle cx="${cx}" cy="${cy}" r="${R + 2}" fill="rgba(0,0,0,.5)" transform="translate(5 7)"/>`
+      + `<g class="reel ${cls}" style="transform-origin:${cx}px ${cy}px"><circle cx="${cx}" cy="${cy}" r="${R}" fill="#1b1a19"/><circle cx="${cx}" cy="${cy}" r="${pack}" fill="url(#gTapePack)"/>${rings}`
+      + `<path d="${fl}" fill="url(#gFlange)" fill-rule="evenodd" stroke="rgba(0,0,0,.55)"/><circle cx="${cx}" cy="${cy}" r="27" fill="url(#gHub)" stroke="#2a2c2b"/>${keys}<circle cx="${cx}" cy="${cy}" r="6" fill="#1b1a19"/></g>`
+      + `<circle cx="${cx}" cy="${cy}" r="${R}" fill="url(#gGloss)" pointer-events="none"/>`;
+  };
+  const heads = [[492, 'deck.extra', true], [567, 'deck.erase'], [642, 'deck.rec'], [717, 'deck.play']];
+  let hs = '';
+  for (const [x, key, extra] of heads) {
+    hs += `<path d="M${x - 21} 146 h42 v52 q0 15 -21 15 q-21 0 -21 -15z" fill="url(#gHead)" stroke="${extra ? ACCENT : '#111'}" stroke-width="${extra ? 2 : 1}"/><line x1="${x}" y1="205" x2="${x}" y2="213" stroke="#111" stroke-width="1.4"/><circle cx="${x - 12}" cy="156" r="2.4" fill="#3a3c3b"/><circle cx="${x + 12}" cy="156" r="2.4" fill="#3a3c3b"/>`;
+    hs += `<text x="${x}" y="136" text-anchor="middle" font-family="Oswald, sans-serif" font-size="11" letter-spacing="1.5" fill="${extra ? ACCENT : '#E9E4D6'}" data-i18n="${key}">${esc(t(key))}</text>`;
+  }
+  const tape = 'M180 221 L395 217 L805 217 L1020 189';
+  $('#deckSvg').innerHTML =
+    `<circle cx="600" cy="44" r="40" fill="url(#gLampGlow)" class="pilot"/><circle cx="600" cy="44" r="9" fill="url(#gLamp)" stroke="#1a1408" class="pilot"/><circle cx="600" cy="44" r="12" fill="none" stroke="#9a9d9a" stroke-width="2.5"/>`
+    + `<text x="600" y="84" text-anchor="middle" font-family="Oswald, sans-serif" font-size="13" letter-spacing="3" fill="#E9E4D6" data-i18n="deck.plate">${esc(t('deck.plate'))}</text>`
+    + reel(180, 125, 96, 'left') + reel(1020, 125, 64, 'right')
+    + `<path d="${tape}" fill="none" stroke="#4a2f1d" stroke-width="6" stroke-linejoin="round"/><path d="${tape}" fill="none" stroke="rgba(255,230,190,.2)" stroke-width="6" stroke-dasharray="1.5 22" class="flow"/>`
+    + `<g><circle cx="395" cy="206" r="11" fill="url(#gHub)" stroke="#222"/><circle cx="805" cy="206" r="11" fill="url(#gHub)" stroke="#222"/></g>`
+    + hs
+    + `<circle cx="845" cy="212" r="4.5" fill="url(#gHub)"/><g class="roller" style="transform-origin:845px 230px"><circle cx="845" cy="230" r="13" fill="url(#gRubber)" stroke="#000"/><circle cx="845" cy="221" r="1.8" fill="#6b6865"/></g>`
+    + `<rect x="430" y="112" width="340" height="114" rx="12" fill="url(#gGlass)" stroke="rgba(255,255,255,.3)"/><path d="M444 120 h150" stroke="rgba(255,255,255,.4)" stroke-width="2" stroke-linecap="round"/>`;
+}
+function applyMotion() {
+  document.body.classList.toggle('paused', !state.playing || reduced);
+  const p = $('#trPlay'); p.setAttribute('aria-pressed', String(state.playing && !reduced));
+  $('#trPlayIc').textContent = state.playing && !reduced ? '❚❚' : '▶';
+  $('#trPlayTx').textContent = state.playing && !reduced ? t('tr.pause') : t('tr.play');
+}
+function togglePlay() { if (reduced) { state.playing = false; applyMotion(); return; } state.playing = !state.playing; applyMotion(); }
+$('#trPlay').addEventListener('click', togglePlay);
+$('#trRewind').addEventListener('click', () => {
+  DEFAULT_LANES().forEach((c, i) => { lanes[i].curve = c; lanes[i].armed = true; lanes[i].solo = false; lanes[i].mute = false; });
+  state.selected = 0; state.pair = [0, 4]; Object.assign(state.sos, { a: 0, b: 4, base: 6, k: 100 }); mixKnob.set(100, false);
+  lanes.forEach((_, i) => renderLane(i)); fillPairSelects(); renderAllCharts(); scheduleSos(); toast(t('toast.rewind'));
+});
+$('#trRec').addEventListener('click', () => openChecklist(sosCandidate()));
+$('#trRead').addEventListener('click', (e) => { e.preventDefault(); toast(t('soon.note')); });
+RM.addEventListener('change', (e) => { reduced = e.matches; if (reduced) state.playing = false; applyMotion(); kickNeedles(); });
+
+// =====================================================================
+// 18. Wiring and i18n application
+// =====================================================================
+function renderAllCharts() { renderMain(); renderS4(); renderMatrix(); renderExport(); }
+function applyI18n() {
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  $$('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  $$('[data-i18n-aria]').forEach((el) => el.setAttribute('aria-label', t(el.dataset.i18nAria)));
+  $('#language').setAttribute('aria-label', t('lang.aria'));
+  $('#langPt').classList.toggle('on', LANG === 'pt'); $('#langEn').classList.toggle('on', LANG === 'en');
+  document.title = (LANG === 'pt' ? 'Comparar' : 'Compare') + ' · open-auri';
+  renderUnsaved(); applyMotion();
+  [thrKnob, mixKnob, preKnob].forEach((k) => k && k.relabel());
+  [matchLever, exDeltaLever, preAutoLever].forEach((l) => l && l.relabel());
+  lanes.forEach((_, i) => renderLane(i));
+  fillPairSelects(); renderAllCharts(); renderSos(); renderHelp(); abRender();
+}
+$('#language').addEventListener('click', () => { LANG = LANG === 'pt' ? 'en' : 'pt'; OA.store.setLang(LANG === 'en' ? 'en-US' : 'pt-BR'); OA.audioUI.setLang(LANG); applyI18n(); });
+$('#neutral').addEventListener('click', () => setLaneCurve(state.selected, neutroCurve()));
+$('#default').addEventListener('click', () => setLaneCurve(state.selected, presetCurve('padrao')));
+$('#write').addEventListener('click', () => openChecklist(laneCandidate()));
+// "Abrir na Curva": writes "oa.v2.current" (storage v2) and navigates; Engenharia layer if HS/LP/HP are present.
+$('#sosOpen').addEventListener('click', (e) => {
+  const r = state.sos.result; e.preventDefault();
+  if (!r || state.sos.busy) return;
+  openInCurva(r.name, 'custom', r.pre, r.bands, hasExp(r.bands));
+});
+// "Abrir na Engenharia" on lanes holding experimental kinds.
+$('#lanes').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-eng]'); if (!b) return;
+  const i = laneEls.findIndex((r) => r.root.contains(b)); if (i < 0) return;
+  const c = lanes[i].curve;
+  openInCurva(curveName(c), curveSource(c), c.pre, c.bands, true);
+});
+$('#pairA').addEventListener('change', (e) => setPair(+e.target.value, state.pair[1]));
+$('#pairB').addEventListener('change', (e) => setPair(state.pair[0], +e.target.value));
+$('#swapAB').addEventListener('click', swapPair);
+$('#sosA').addEventListener('change', (e) => { state.sos.a = +e.target.value; markChanged(); scheduleSos(); });
+$('#sosB').addEventListener('change', (e) => { state.sos.b = +e.target.value; markChanged(); scheduleSos(); });
+$('#sosBase').addEventListener('change', (e) => { state.sos.base = +e.target.value; markChanged(); scheduleSos(); });
+$('#bounceTo').addEventListener('change', (e) => { state.sos.bounceTo = +e.target.value; });
+$('#sosWrite').addEventListener('click', () => { const r = state.sos.result; if (!r || state.sos.busy) return; if (!r.verdict.ok) { toast(t('s4.refusedWrite'), true); return; } openChecklist(sosCandidate()); });
+$('#sosSave').addEventListener('click', () => {
+  const r = state.sos.result; if (!r) return;
+  const lib = store.get(K.lib, []) || [];
+  lib.push({ name: r.name, pre: r.pre, b: r.bands.map((b) => b.kind === 'OFF' ? ['OFF'] : [b.kind, b.freqHz, b.gainDb, b.qFactor]), origin: 'comparar', gate: r.verdict.ok, created: new Date().toISOString() });
+  toast(store.set(K.lib, lib) ? t('s4.saved') : t('s4.saveFail'), !store.get(K.lib));
+});
+$('#bounceBtn').addEventListener('click', () => {
+  const r = state.sos.result; if (!r || state.sos.busy) return;
+  const n = state.sos.bounceTo;
+  setLaneCurve(n, { kind: 'custom', name: r.name, pre: r.pre, bands: cloneBands(r.bands), noteKey: 'desc.sos', noteVars: { base: r.baseName, k: fmt(r.k, r.k % 1 ? 1 : 0) } }, true);
+  toast(t('s4.bounced', { n: n + 1 }));
+});
+$('#exSvg').addEventListener('click', exportSVG);
+$('#exPng').addEventListener('click', exportPNG);
+
+document.addEventListener('keydown', (e) => {
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+  if ($('dialog[open]')) return;
+  const tg = e.target;
+  if (tg && (['INPUT', 'SELECT', 'TEXTAREA'].includes(tg.tagName) || tg.isContentEditable)) return;
+  const k = e.key;
+  if (k >= '1' && k <= '8') { selectLane(+k - 1); laneEls[+k - 1].head.focus(); e.preventDefault(); }
+  else if (k === 'a' || k === 'A' || k === 's' || k === 'S' || k === 'm' || k === 'M') {
+    const key = { a: 'armed', s: 'solo', m: 'mute' }[k.toLowerCase()]; const i = state.selected;
+    lanes[i][key] = !lanes[i][key]; renderLaneState(i); renderAllCharts(); e.preventDefault();
+  }
+  else if (k === 'x' || k === 'X') { swapPair(); e.preventDefault(); }
+  else if (k === '?') { openHelp(); e.preventDefault(); }
+  else if (k === 'g' || k === 'G') { openChecklist(laneCandidate()); e.preventDefault(); }
+  else if (k === 'e' || k === 'E') { exportSVG(); e.preventDefault(); }
+  else if (k === ' ' && (tg === document.body || tg === $('#main'))) { togglePlay(); e.preventDefault(); }
+});
+let rzT = 0; addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(drawCord, 120); });
+bay.addEventListener('scroll', drawCord, { passive: true });
+
+// ---- init ----
+buildDeck();
+buildLanes();
+thrKnob = makeKnob($('#thrKnob'), { size: 'sm', min: 0.5, max: 6, step: 0.1, value: 1, def: 1, ticks: 11, majorEvery: 2, labels: [0.5, 2, 4, 6], labelFmt: (x) => fmt(x, x % 1 ? 1 : 0), editDigits: 1,
+  format: (v) => `${fmt(v, Math.round(v * 100) % 10 ? 2 : 1)} dB`, label: () => t('s2.thr'), aria: () => t('s2.thr') + ' (dB)', onInput: (v) => { state.threshold = v; renderS4(); renderExport(); } });
+matchLever = makeLever('s2.match', state.levelMatch, (x) => { state.levelMatch = x; markChanged(); renderS4(); renderMatrix(); renderExport(); });
+$('#matchRow').appendChild(matchLever);
+exDeltaLever = makeLever('s5.delta', state.exportDelta, (x) => { state.exportDelta = x; renderExport(); });
+$('#exDeltaRow').appendChild(exDeltaLever);
+mixKnob = makeKnob($('#mixKnob'), { size: 'lg', min: 0, max: 150, step: 1, value: 100, def: 100, ticks: 15, majorEvery: 5, labels: [0, 50, 100, 150], editDigits: 1,
+  format: (v) => `${fmt(v, v % 1 ? 1 : 0)} %`, label: () => t('s4.mix'), aria: () => t('s4.mix') + ' k (%)', onInput: (v) => { state.sos.k = v; markChanged(); scheduleSos(); } });
+preKnob = makeKnob($('#preKnob'), { size: 'md', min: -25.5, max: -0.5, step: 0.1, value: -3, def: -3, ticks: 10, majorEvery: 5, labels: [-25.5, -13, -0.5], labelFmt: (x) => fmt(x, x % 1 ? 1 : 0), editDigits: 2,
+  format: (v) => `${fmt(v, 1)} dB`, label: () => t('s4.pre'), aria: () => 'Preamp (dB)', onInput: (v) => { state.sos.pre = v; markChanged(); scheduleSos(); } });
+preAutoLever = makeLever('s4.auto', true, (x) => { state.sos.preAuto = x; if (!x) state.sos.pre = preKnob.value; preKnob.setDisabled(x); markChanged(); scheduleSos(); });
+$('#preAutoRow').appendChild(preAutoLever);
+preKnob.setDisabled(true);
+state.unsaved = 0;
+renderDrums();
+OA.audioUI.setLang(LANG); // language from "oa.v2.lang"
+applyI18n();
+state.unsaved = 0; renderUnsaved();
+scheduleSos();
+</script>
+</body>
+</html>

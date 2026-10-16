@@ -1,0 +1,1932 @@
+<!--
+TODOs antes da publicação (comunidade.html):
+- LGPD: revisar termo de consentimento do S6 (base legal, finalidade, idade mínima, retirada do consentimento, cópias que ficam no histórico do git).
+- Estrutura do repositório de curvas e CI de validação com o gate (pastas curves/<curator>/<slug>.json, schema open-auri/preset@1, workflow que roda o gate v2 em cada pull request e gera o índice estático).
+- Definir o endereço público do repositório de curvas e o domínio do site; os passos de fork/pull request/issue aqui são simulados.
+- Congelar e versionar os formatos S1 (código de 64 caracteres, #p=) e S5 (open-auri/preset@1); neste mock eles são propostas.
+- Licença das 11 curvas oficiais (Pack de referência Auri): a confirmar.
+- Trocar o QR ilustrativo (S8) por um QR real e conferir a exportação PNG/SVG (S10) com fontes embutidas.
+- Todos os curators, packs, versões, relevâncias e pares A/B desta página são exemplos gerados dentro do gate.
+- Gate v2 é o envelope observado das 11 curvas oficiais, não certificação de segurança do hardware; validar em bancada.
+- Revisar acessibilidade (leitor de tela na mesa), impressão do cartão e tradução EN completa.
+- S1 v1 (2 bits de tipo) não codifica HS/LP/HP: curvas experimentais ficam sem código/link até o S1 v2.
+Storage: OA STORAGE CONTRACT v2 (canônico em curva.html): oa.v2.lang, oa.v2.current, oa.v2.journal, oa.v2.flashDay,
+oa.v2.flashTotal, sessionStorage oa.v2.flashSession; áudio da prévia via blocos OA SHARED (storage v2 + audio-loader v1).
+Math: inline from src/dsp/eq0xcb.mjs + design/analysis/gate.mjs (thresholds copied from design/analysis/envelope.json).
+Peaking/low-shelf design ported from AutoEq, Copyright (c) 2018-2022 Jaakko Pasanen.
+MIT License: Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions: The above copyright notice and this permission
+notice shall be included in all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Comunidade · open-auri</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@300..700&amp;family=JetBrains+Mono:wght@400;500&amp;family=Permanent+Marker&amp;family=VT323&amp;display=swap">
+<style>
+:root{--ink:#0F0F0E;--ink-2:#171715;--text:#ECE7DD;--muted:#8F8A80;--rule:rgba(236,231,221,.12);--danger:#E5484D;--accent:#3DDC97;--accent-hi:#6BE8B2;--ui:"Geist",Arial,sans-serif;--serif:"Instrument Serif",Georgia,serif;--sans:"Geist",Arial,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;--marker:"Permanent Marker","Comic Sans MS",cursive;--crt:"VT323",ui-monospace,monospace;--face:#2e3134;--engrave:#c9c5bb;--tape:#f3f0e6;--marker-ink:#1c1f55;--amber:#ffb547;--ice:#cfe6ff}
+*{box-sizing:border-box}html{scroll-padding-top:90px}body{margin:0;color:var(--text);font:14px/1.5 var(--sans);background:#0a0b0c;-webkit-font-smoothing:antialiased}button,input,select,textarea{font:inherit}button{cursor:pointer;color:inherit}a{color:inherit;text-underline-offset:4px}button:disabled,[aria-disabled=true]{opacity:.45;cursor:not-allowed}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[role=slider]:focus-visible,pre:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);outline-offset:3px}::selection{background:var(--accent);color:var(--ink)}h1,h2,h3,p{margin:0}.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}.caps{font-size:10px;letter-spacing:.15em;text-transform:uppercase}.muted{color:var(--muted)}.sr-only{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap}.skip{position:fixed;top:-100px;left:12px;z-index:100;background:var(--accent);color:var(--ink);padding:12px}.skip:focus{top:8px}
+.btn{display:inline-flex;justify-content:center;align-items:center;gap:7px;min-height:34px;padding:7px 13px;border:1px solid var(--rule);border-radius:2px;background:#22221f;color:var(--text);font-size:11px;text-decoration:none;white-space:nowrap}.btn:hover{border-color:var(--accent)}.btn.primary{background:var(--accent);color:var(--ink);border-color:var(--accent);font-weight:600}
+/* chrome (identical across pages) */
+.cable-bar{position:sticky;top:0;z-index:60;background:#171715;border-bottom:1px solid var(--rule)}
+.cable-inner{max-width:1480px;margin:auto;min-height:56px;padding:0 24px;display:flex;align-items:center;gap:22px}
+.wordmark{font:italic 27px/1 var(--serif);text-decoration:none;white-space:nowrap}
+.main-nav{display:flex;gap:15px;align-self:stretch;align-items:center;margin:auto;font-size:11.5px;white-space:nowrap}
+.main-nav a{text-decoration:none;position:relative;color:#cfc9be}
+.main-nav a:hover{color:var(--text)}
+.main-nav a[aria-current="page"]{color:var(--text)}
+.main-nav a[aria-current="page"]:after{content:"";position:absolute;left:0;right:0;bottom:-19px;height:2px;background:var(--accent)}
+.cable-actions{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.cable-actions button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:7px 10px;font-size:11px;line-height:1.2}
+.cable-actions button:hover{border-color:var(--muted)}
+.cable-actions button.primary{background:var(--accent);border-color:var(--accent);color:#06140d;font-weight:650}
+.cable-actions button.primary:hover{background:var(--accent-hi)}
+.cable-state{font-size:10.5px;color:#b5afa4;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
+.status-dot{color:var(--muted);font-size:8px;margin-right:5px}
+.dirty{font:9.5px/1.35 var(--mono);color:var(--muted);max-width:100px;white-space:normal}
+.language{border:0!important;font-family:var(--mono)!important;color:var(--text)}
+.language .inactive{color:var(--muted)}
+.site-footer{max-width:1480px;margin:80px auto 0;padding:32px 24px 36px;border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr;gap:90px;color:var(--muted);font-size:11.5px;background:rgba(15,15,14,.9)}
+.f-eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:550}
+.honoree{display:flex;align-items:baseline;gap:14px;margin:9px 0 10px}
+.honoree strong{color:var(--text);font:400 30px/1.1 var(--serif)}
+.honoree span{font:11px var(--mono)}
+.site-footer p{max-width:600px}
+.site-footer h3{color:var(--text);margin-bottom:9px;font-size:12px;font-weight:500}
+.sources{display:flex;gap:18px;margin-top:10px}
+.footer-links{display:flex;gap:24px;margin-top:16px}
+/* === OA SHARED: audio-loader v1 (CSS) === */
+.oa-audio{position:relative}
+.oa-audio-btn{display:inline-flex;align-items:center;gap:6px;max-width:190px}
+.oa-audio-btn .oa-audio-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.oa-audio-btn.has-file{border-color:color-mix(in srgb,var(--accent) 55%,transparent)!important;color:var(--accent)}
+.oa-audio-pop{position:absolute;left:0;top:calc(100% + 10px);z-index:80;width:320px;max-width:calc(100vw - 24px);background:#1b1b19;border:1px solid #34332f;border-radius:6px;padding:14px;box-shadow:0 18px 40px rgba(0,0,0,.65);font:12px/1.45 var(--ui);color:var(--text);white-space:normal}
+.oa-audio-pop h3{margin:0 0 10px;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.oa-audio-load{position:relative;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);color:var(--accent);border-radius:3px;padding:7px 10px;cursor:pointer;font-size:12px}
+.oa-audio-load:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+.oa-audio-file{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.oa-audio-meta{margin:10px 0;font:11px/1.5 var(--mono);color:#cfc9be;word-break:break-word}
+.oa-audio-meta b{color:var(--text);font-weight:500}
+.oa-audio-row{display:flex;gap:8px;flex-wrap:wrap}
+.oa-audio-row button{border:1px solid var(--rule);background:transparent;border-radius:3px;padding:6px 10px;font-size:11.5px}
+.oa-audio-row button:disabled{opacity:.45;cursor:not-allowed}
+.oa-audio-vol{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-top:12px;font-size:11.5px;color:#cfc9be}
+.oa-audio-vol input{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.oa-audio-vol output{font:11px var(--mono);color:var(--accent)}
+.oa-audio-note{margin:10px 0 0;font-size:11px;color:var(--muted)}
+.oa-audio-rate{margin:6px 0 0;font:10.5px var(--mono);color:var(--muted)}
+.oa-audio-rate.approx{color:color-mix(in srgb,var(--accent) 40%,white)}
+@media (max-width:720px){.cable-actions{flex-wrap:wrap;row-gap:6px}.oa-audio-btn .oa-audio-name{max-width:70px}.oa-audio-pop{position:fixed;left:12px;right:12px;top:118px;width:auto;max-width:none}}
+/* === END OA SHARED: audio-loader v1 (CSS) === */
+/* A/B preview on the master scope */
+.ab-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 14px;padding:10px 12px;background:#17181a;border:1px solid #000;border-radius:4px;box-shadow:inset 0 1px 0 #ffffff0d}.ab-title{font:600 11px var(--mono);letter-spacing:.08em;color:#e4e0d6}.ab-play{min-width:120px}.ab-play[aria-pressed=true]{background:var(--accent);color:var(--ink);border-color:var(--accent);font-weight:600}.ab-read{font:12px/1.5 var(--mono);color:#ece7dd;flex:1;min-width:220px}.ab-read .muted{color:#c9c4b9}.checklist label[hidden]{display:none}
+/* stadium far behind */
+.stadium{position:fixed;inset:0;z-index:-1;overflow:hidden;background:radial-gradient(120% 60% at 50% -8%,#1d2433 0,#10131a 42%,#0a0b0c 72%)}.stadium i{position:absolute;border-radius:50%;filter:blur(14px);opacity:var(--o1);animation:bokeh var(--d) ease-in-out var(--dl) infinite alternate}@keyframes bokeh{to{opacity:var(--o2);transform:translate(var(--dx),var(--dy)) scale(1.18)}}.beam{position:absolute;top:-10%;width:46vw;height:90vh;opacity:.12;background:conic-gradient(from 168deg at 50% 0,transparent 0 8deg,#fff3d6 10deg,transparent 14deg);filter:blur(6px);transform-origin:50% 0;animation:sweep 26s ease-in-out infinite alternate}.beam.b1{left:6%}.beam.b2{right:4%;animation-duration:33s;animation-direction:alternate-reverse}@keyframes sweep{from{transform:rotate(-14deg)}to{transform:rotate(16deg)}}.stadium .rig{position:absolute;left:0;right:0;top:46%;height:1px;background:linear-gradient(90deg,transparent,#ffffff22 20% 80%,transparent);box-shadow:0 0 30px 6px #ffb54711}
+/* hero */
+.hero{max-width:1520px;margin:0 auto;padding:40px 36px 24px;display:grid;grid-template-columns:1.25fr 1fr;gap:40px;align-items:end}.kicker{color:#b9b4a8}.hero h1{font:italic 104px/.88 var(--serif);letter-spacing:-.035em;margin-top:10px;text-shadow:0 8px 40px #000}.hero p{max-width:600px;color:#d4cec2;font-size:14px;line-height:1.75;margin-top:16px}.facts{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px}.facts li{font:11px/1.5 var(--mono);color:#e4e0d6;padding:9px 11px;background:linear-gradient(160deg,#2c2f33,#1f2124);border:1px solid #000;box-shadow:inset 0 1px 0 #ffffff1a,0 4px 10px #0008;letter-spacing:.04em}.facts b{display:block;font:500 11px var(--mono);color:#b9b4a8;letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}.stamp{display:inline-block;font:15px var(--marker);color:#efe9d8;border:2px solid #efe9d8aa;padding:1px 9px;transform:rotate(-4deg);border-radius:3px;opacity:.85}
+.desk{max-width:1540px;margin:0 auto;padding:0 18px 50px}
+/* console */
+.console{position:relative;border-radius:16px 16px 8px 8px;padding:12px 16px 0;background:radial-gradient(90% 50% at 10% 0,#ffffff10,transparent 60%),linear-gradient(180deg,#3a3d41,#2a2c2f 6%,#25272a);border:1px solid #000;box-shadow:0 40px 80px #000d,inset 0 1px 0 #ffffff26,inset 0 -2px 0 #000a}.console:before{content:"";position:absolute;left:24px;right:24px;top:-7px;height:7px;border-radius:6px 6px 0 0;background:linear-gradient(#4a4d52,#2b2d30);box-shadow:0 -1px 0 #ffffff1a}
+.console-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 6px 12px;border-bottom:1px solid #0008;box-shadow:0 1px 0 #ffffff10;margin-bottom:10px}.plate-title{font:600 12px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:#e4e0d6;text-shadow:0 -1px 0 #000,0 1px 0 #ffffff12}.plate{font:500 11px var(--mono);letter-spacing:.1em;color:#d6d2c8;padding:4px 9px;border:1px solid #000;background:#1c1e20;box-shadow:inset 0 1px 2px #000,0 1px 0 #ffffff14}.search-tape{display:flex;flex-direction:column;background:linear-gradient(180deg,#f7f4ea,#e7e2d3);padding:4px 10px 3px;transform:rotate(-.6deg);box-shadow:0 2px 4px #000a;min-width:240px}.search-tape label{font:600 11px var(--mono);letter-spacing:.08em;color:#45443f}.search-tape input{border:0;background:transparent;font:16px var(--marker);color:var(--marker-ink);padding:1px 0;outline-offset:2px}.search-tape input::placeholder{color:#8a887f}.push-group{display:flex;gap:5px;align-items:center}.push{min-height:30px;border:1px solid #000;border-radius:3px;padding:5px 10px;font:600 11px var(--mono);letter-spacing:.06em;background:linear-gradient(#4a4d51,#2b2d31);box-shadow:0 3px 0 #111,inset 0 1px 0 #ffffff26;color:#e2ded4}.push[aria-pressed=true]{background:radial-gradient(circle at 50% 40%,#d8fff0,var(--accent) 60%,#1f9a68);color:#062016;box-shadow:0 0 12px #3ddc9766,0 1px 0 #111;transform:translateY(2px)}.head-spacer{flex:1}.mini-tally{font:700 11px var(--sans);letter-spacing:.24em;padding:5px 10px;border-radius:3px;background:#251c14;color:#5b4632;border:1px solid #000;box-shadow:inset 0 1px 3px #000}.mini-tally.lit{background:radial-gradient(circle,#ffe2a0,#ff9b2e 70%);color:#3a1d05;box-shadow:0 0 18px #ff9b2e88}.help-key{width:30px;height:30px;border-radius:50%;border:1px solid #000;background:linear-gradient(#45484c,#25272a);box-shadow:0 3px 0 #111,inset 0 1px 0 #ffffff26;color:#e8e3d8;font:600 13px var(--mono)}
+.bank-wrap{display:flex;gap:0;overflow-x:auto;scrollbar-color:#555 #1a1b1c;position:relative}.bank{display:flex;flex:0 0 auto}.vca-bank{display:flex;flex:0 0 auto;margin-left:12px;padding-left:12px;border-left:4px groove #0c0d0e;position:relative}.vca-bank:before{content:"VCA · PACKS (S9)";position:absolute;top:3px;left:18px;font:600 11px var(--mono);letter-spacing:.08em;color:#d6d2c8;z-index:2}
+.strip{width:94px;flex:0 0 94px;display:flex;flex-direction:column;border-right:1px solid #0b0c0d;box-shadow:inset 1px 0 0 #ffffff12;transition:opacity .25s,filter .25s}.strip.dim{opacity:.32;filter:saturate(.3)}.bridge-seg{position:relative;height:132px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:8px 0 8px;background:linear-gradient(#111213,#1b1c1e);border-bottom:7px solid #0d0e0f;box-shadow:inset 0 -1px 0 #ffffff12,0 6px 10px #0009}.chno{font:500 12px var(--mono);color:#e4e0d6;margin-top:6px;letter-spacing:.06em}.strip.selected .chno{color:var(--accent);text-shadow:0 0 8px #3ddc9788}.meter{position:relative;width:16px;height:96px;border-radius:2px;overflow:hidden;background:repeating-linear-gradient(to top,transparent 0 3px,#050505 3px 4px),linear-gradient(to top,#2ed47e 0 62%,#e8d34b 62% 82%,#ff6b3d 82% 100%);box-shadow:0 0 0 1px #000,0 0 10px #2ed47e22}.meter .cover{position:absolute;left:0;right:0;top:0;height:calc((1 - var(--lv,.35))*100%);background:repeating-linear-gradient(to top,transparent 0 3px,#050505 3px 4px),linear-gradient(to top,#0f2619 0 62%,#29260f 62% 82%,#2d130b 82% 100%);background-size:100% 96px;background-position:0 0}.meter .peak{position:absolute;left:0;right:0;height:2px;top:calc((1 - var(--pk,.4))*100%);background:#fff;opacity:.7}.meter:after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,#ffffff26,transparent 38%)}.strip.s7 .meter .cover{height:100%}
+.face{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 4px 12px;background:radial-gradient(140% 50% at 0 0,#ffffff12,transparent 60%),repeating-linear-gradient(90deg,#ffffff04 0 1px,transparent 1px 3px),linear-gradient(180deg,#35383c,#2c2f32 50%,#27292c);box-shadow:inset 1px 0 0 #ffffff14,inset -1px 0 0 #00000080}.face:before,.face:after{content:"";position:absolute;left:calc(50% - 3px);width:6px;height:6px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#d4d1c9,#55575a);box-shadow:0 1px 1px #000}.face:before{top:3px}.face:after{bottom:3px}.ex-tag{font:600 11px var(--mono);letter-spacing:.06em;color:#d6d2c8;text-transform:uppercase;margin-top:2px}.glyph{display:block;filter:drop-shadow(1px 2px 2px #000a)}.glyph .g-bg{fill:#111214;stroke:#000;stroke-width:1}.glyph .g-zero{fill:none;stroke:#ffffff22;stroke-dasharray:1.5 2}.glyph .g-tick{stroke:#ffffff55}.knobs{display:grid;grid-template-columns:1fr 1fr;gap:6px 2px;width:100%}.ro-knob{display:flex;flex-direction:column;align-items:center;gap:4px}.k-lbl{font:600 11px var(--mono);letter-spacing:0;color:#e4e0d6}.k-val{font:12px var(--mono);font-variant-numeric:tabular-nums;color:#ffd79a}
+.knob{--sz:28px;position:relative;width:var(--sz);height:var(--sz);border-radius:50%;flex:0 0 auto;margin:5px}.knob.big{--sz:46px;margin:8px}.knob .sk{position:absolute;inset:-6px;border-radius:50%;background:repeating-conic-gradient(from -135.7deg,#d6d2c8 0 1.4deg,transparent 1.4deg 27deg);-webkit-mask:radial-gradient(circle,transparent 61%,#000 62% 75%,transparent 76%),conic-gradient(from 135deg,transparent 0 90deg,#000 90deg);-webkit-mask-composite:source-in;mask:radial-gradient(circle,transparent 61%,#000 62% 75%,transparent 76%),conic-gradient(from 135deg,transparent 0 90deg,#000 90deg);mask-composite:intersect;opacity:.6}.knob .kb{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 32% 28%,#ffffff33,transparent 46%),repeating-conic-gradient(#141516 0 5deg,#3c3e41 5deg 10deg);box-shadow:2px 4px 5px #000c,inset 0 0 0 1px #000,inset 1px 1px 1px #ffffff33}.knob .cp{position:absolute;inset:21%;border-radius:50%;background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--cap) 50%,white),var(--cap) 55%,color-mix(in srgb,var(--cap) 60%,black));box-shadow:0 1px 2px #000b;transform:rotate(calc(-135deg + var(--n,.5)*270deg));transition:transform .18s ease-out}.knob .cp:after{content:"";position:absolute;left:calc(50% - 1px);top:-30%;width:2px;height:62%;border-radius:1px;background:#f6f3ec;box-shadow:0 0 2px #000}.knob[role=slider]{cursor:ns-resize;touch-action:none}
+.leds{display:flex;align-items:center;gap:10px}.led{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--mono);background:#191a1c;color:#5d5f62;box-shadow:inset 0 1px 2px #000,0 1px 0 #ffffff14}.led.on{background:radial-gradient(circle at 40% 35%,#eafff5,var(--accent) 55%,#167a52);color:#05301f;box-shadow:0 0 9px #3ddc97aa}.led.near.on{background:radial-gradient(circle at 40% 35%,#f0fbff,#7fd6ff 55%,#2b7ea6);color:#062436;box-shadow:0 0 9px #7fd6ffaa}.led{color:#9a9c9f}.led.bad{background:radial-gradient(circle at 40% 35%,#ffd9da,var(--danger) 55%,#8a1c20);color:#2a0506}
+.btns{display:flex;gap:4px}.sq{width:41px;height:28px;border-radius:3px;border:1px solid #000;background:linear-gradient(#4a4d51,#2d2f33);color:#f0ece3;font:700 11px var(--mono);letter-spacing:0;box-shadow:0 3px 0 #111,inset 0 1px 0 #ffffff26;padding:0}.sq.solo[aria-pressed=true]{background:radial-gradient(circle at 50% 40%,#fff3c4,#ffc248 60%,#c98a1c);color:#2a1d05;box-shadow:0 0 12px #ffc24888,0 1px 0 #111;transform:translateY(2px)}.sq.sel[aria-pressed=true]{background:radial-gradient(circle at 50% 40%,#d8fff0,var(--accent) 60%,#1f9a68);color:#062016;box-shadow:0 0 12px #3ddc9788,0 1px 0 #111;transform:translateY(2px)}
+.fctl{display:flex;flex-direction:column;align-items:center;gap:5px}.f-lbl{font:600 11px var(--mono);letter-spacing:.04em;color:#e4e0d6;text-align:center;line-height:1.3}.fader{position:relative;width:42px;height:150px;cursor:ns-resize;touch-action:none;border-radius:3px}.fader:before{content:"";position:absolute;inset:8px 3px;background:repeating-linear-gradient(to bottom,#cfcbc155 0 1px,transparent 1px 13.4px);-webkit-mask:linear-gradient(90deg,#000 0 8px,transparent 8px calc(100% - 8px),#000 calc(100% - 8px));mask:linear-gradient(90deg,#000 0 8px,transparent 8px calc(100% - 8px),#000 calc(100% - 8px))}.fader .slot{position:absolute;left:calc(50% - 3px);top:6px;bottom:6px;width:6px;border-radius:3px;background:#040404;box-shadow:inset 0 1px 3px #000,0 1px 0 #ffffff1c}.fader .cap{position:absolute;left:4px;right:4px;height:30px;top:calc((1 - var(--n,.5))*(100% - 30px));border-radius:3px;background:repeating-linear-gradient(0deg,transparent 0 3px,#00000018 3px 4px),linear-gradient(#ebe8e0,#bcb8ae 45%,#8e8a81 50%,#cbc7bd 55%,#a09c93);box-shadow:0 7px 9px #000c,inset 0 1px 0 #fff,inset 0 -1px 0 #0006;transition:top .12s ease-out}.fader .cap:after{content:"";position:absolute;left:3px;right:3px;top:calc(50% - 1px);height:2px;background:#1b1b1b}
+.readout{font:12px var(--mono);font-variant-numeric:tabular-nums;background:#0a0a0b;color:#ffdca6;border:1px solid #000;box-shadow:inset 0 1px 3px #000,0 1px 0 #ffffff14;padding:3px 6px;min-width:56px;border-radius:2px;cursor:text;text-shadow:0 0 6px #ffb54755}.readout:hover{border-color:var(--accent)}.ro-input{font:12px var(--mono);width:72px;background:#000;color:#fff;border:1px solid var(--accent);padding:2px 4px;border-radius:2px}
+.scribble{width:100%;min-height:52px;margin-top:auto;padding:6px 4px 5px;background:linear-gradient(180deg,#f8f5ec,#e9e4d6);color:var(--marker-ink);box-shadow:0 2px 3px #000a,inset 0 0 0 1px #0000000d;transform:rotate(var(--tilt,-.7deg));font-family:var(--marker);line-height:1.08;text-align:center;clip-path:polygon(0 3%,8% 0,22% 4%,40% 1%,61% 4%,80% 0,100% 3%,99% 97%,84% 100%,63% 96%,41% 100%,19% 97%,0 100%)}.scribble .m1{display:block;font-size:11px;overflow-wrap:anywhere;color:#23255f}.scribble .m2{display:block;font-size:14px;color:#141414;margin-top:3px;overflow-wrap:anywhere}
+.strip.vca{width:108px;flex-basis:108px}.strip.vca .face{background:radial-gradient(140% 50% at 0 0,#ffffff12,transparent 60%),repeating-linear-gradient(90deg,#ffffff04 0 1px,transparent 1px 3px),linear-gradient(180deg,#3d3833,#33302c 50%,#2c2926)}.strip.vca .bridge-seg{background:linear-gradient(#141210,#1d1a17)}.vca-plate{font:700 11px var(--mono);letter-spacing:.06em;color:#1b1206;background:linear-gradient(#e9d9b4,#c8b48a);padding:2px 6px;border-radius:2px;box-shadow:0 1px 2px #000}.lic-badge{font:700 11px var(--mono);padding:3px 6px;border-radius:2px;letter-spacing:.04em;border:1px solid #000;box-shadow:0 1px 0 #ffffff1a}.lic-badge.cc0{background:#e9e6dc;color:#151515}.lic-badge.ccby{background:#2f3a52;color:#e7eefc}.lic-badge.tbc{background:#2b2724;color:#d9c6a5;border-style:dashed}.stat{font:11px/1.4 var(--mono);color:#e4e0d6;text-align:center}.stat b{display:block;font:14px var(--mono);color:#ffd79a;font-weight:400}.fixed-plate{height:150px;display:grid;place-items:center;text-align:center;font:11px/1.5 var(--mono);color:#d6d2c8;padding:6px;border:1px dashed #ffffff22;border-radius:3px}
+.strip.s7{width:140px;flex-basis:140px}.strip.s7 .face{background:repeating-linear-gradient(135deg,#ffffff05 0 8px,transparent 8px 16px),linear-gradient(180deg,#303236,#26282b)}.s7-off{opacity:.45;cursor:not-allowed;display:flex;flex-direction:column;align-items:center;gap:8px}.badge{font:700 11px var(--mono);letter-spacing:.08em;padding:3px 7px;border:1px solid #efe9d8;color:#efe9d8;border-radius:2px}.s7-note{font:12px/1.5 var(--sans);color:#ece7dd;text-align:center;padding:0 4px}.s7 .scribble .m2{font-size:15px}
+.armrest{height:48px;margin:0 -16px;border-radius:0 0 8px 8px;background:radial-gradient(120% 160% at 50% -50%,#3d3029,#1b1512 62%);box-shadow:inset 0 2px 0 #ffffff14,inset 0 -8px 14px #000;position:relative}.armrest:before{content:"";position:absolute;left:16px;right:16px;top:10px;border-top:1px dashed #6e5a4a}.armrest span{position:absolute;right:22px;bottom:9px;font:11px var(--mono);color:#b39c88;letter-spacing:.08em}
+.boot{position:absolute;inset:60px 16px 48px;display:grid;place-items:center;background:#0b0c0dee;z-index:5;font:22px var(--crt);color:var(--amber);text-shadow:0 0 10px #ffb54788;border-radius:6px}.boot[hidden]{display:none}.bank-count{font:12px var(--mono);color:#d6d2c8;margin:10px 4px 0;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+/* centre section */
+.centre{margin-top:26px;padding:20px;border-radius:12px;background:radial-gradient(80% 60% at 10% 0,#ffffff0e,transparent 60%),linear-gradient(180deg,#303337,#232528);border:1px solid #000;box-shadow:0 30px 60px #000c,inset 0 1px 0 #ffffff22}.centre-grid{display:grid;grid-template-columns:1.25fr 1fr;gap:22px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.panel-head h2{font:italic 30px/1 var(--serif)}.solo-lamp{font:700 11px var(--mono);letter-spacing:.12em;padding:4px 9px;border-radius:3px;background:#2b2516;color:#a8925a;border:1px solid #000}.solo-lamp.on{background:radial-gradient(circle,#fff3c4,#ffc248 70%);color:#2a1d05;box-shadow:0 0 14px #ffc24888}
+.crt{position:relative;border-radius:20px;padding:13px;background:linear-gradient(145deg,#55585c,#26282b 60%,#1d1e20);box-shadow:inset 0 2px 0 #ffffff26,inset 0 -2px 0 #000,0 12px 26px #000b}.crt svg{display:block;width:100%;height:auto;border-radius:12px;background:radial-gradient(120% 110% at 50% 45%,#0f1913,#050806 80%);box-shadow:inset 0 0 50px #000}.crt-glass{position:absolute;inset:13px;border-radius:12px;pointer-events:none;background:linear-gradient(128deg,#ffffff16,transparent 32%),repeating-linear-gradient(0deg,#0000002e 0 1px,transparent 1px 3px)}.gr{stroke:#5f9a7c3d;stroke-width:1}.gr0{stroke:#7fbf9e99}.gt{fill:#b5d8c6;font:12px var(--mono)}.tr-cur{fill:none;stroke:var(--ice);stroke-width:2;stroke-dasharray:6 4}.tr-sel{fill:none;stroke:var(--amber);stroke-width:2.4;filter:drop-shadow(0 0 4px #ffb547aa)}.tr-area{fill:#ffb54714}.tr-ghost{fill:none;stroke:var(--amber);stroke-width:2;opacity:0;animation:afterglow 1.3s ease-out}@keyframes afterglow{from{opacity:.55}to{opacity:0}}.tr-member{fill:none;stroke-width:1.2;opacity:.75}.cursor-line{stroke:#ffffff55;stroke-dasharray:2 3}.cursor-dot{fill:var(--amber)}
+.scope-legend{display:flex;flex-wrap:wrap;gap:6px 20px;font:12px var(--mono);color:#ece7dd;margin:12px 2px}.scope-legend .muted{color:#c9c4b9}.sw{display:inline-block;width:20px;height:3px;vertical-align:3px;margin-right:6px}.sw.sel{background:var(--amber)}.sw.cur{background:repeating-linear-gradient(90deg,var(--ice) 0 5px,transparent 5px 8px)}.scope-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin:6px 0 12px}.seg-box{display:flex;flex-direction:column;gap:3px}.seg-box span{font:600 11px var(--mono);letter-spacing:.06em;color:#e4e0d6}.seg{font:500 24px var(--mono);font-variant-numeric:tabular-nums;color:var(--amber);text-shadow:0 0 10px #ffb54788;background:#110b04;padding:3px 10px;border-radius:3px;box-shadow:inset 0 2px 6px #000,0 1px 0 #ffffff14;min-width:128px;text-align:right}.kctl{display:flex;flex-direction:column;align-items:center;gap:2px}.kctl .k-lbl{font-size:11px}.cursor-read{font:12px/1.6 var(--mono);color:#ece7dd;min-width:220px}.gate-row{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 14px}.gl{display:inline-flex;align-items:center;gap:6px;font:11px var(--mono);color:#e4e0d6;padding:4px 8px 4px 6px;background:#18191b;border:1px solid #000;border-radius:2px;box-shadow:inset 0 1px 0 #ffffff0d}.gl i{width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#eafff5,var(--accent) 55%,#167a52);box-shadow:0 0 7px #3ddc97aa}.gl.bad{color:#ffd0d2;border-color:#5a1a1d}.gl.bad i{background:radial-gradient(circle at 40% 35%,#ffd9da,var(--danger) 55%,#8a1c20);box-shadow:0 0 7px #e5484d99}.gl.na i{background:#333;box-shadow:none}.scope-actions{display:flex;flex-wrap:wrap;gap:8px}
+/* total recall monitor */
+.monitor{background:linear-gradient(160deg,#d6ccb5,#b3a88f 60%,#9c917a);border-radius:14px 14px 10px 10px;padding:16px 16px 10px;box-shadow:inset 0 2px 0 #fffbe9aa,inset 0 -3px 0 #6d6553,0 18px 30px #000c}.screen{position:relative;border-radius:10px;padding:14px 14px 12px;min-height:560px;background:radial-gradient(130% 100% at 50% 40%,#16120a,#070604 85%);box-shadow:inset 0 0 40px #000,inset 0 0 0 3px #2a2418;font-family:var(--crt);color:var(--amber);text-shadow:0 0 6px #ffb54788;overflow:hidden}.screen:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,#00000040 0 1px,transparent 1px 3px),radial-gradient(120% 90% at 30% 10%,#ffffff0d,transparent 50%);animation:flicker 5s steps(40) infinite}@keyframes flicker{0%,100%{opacity:1}47%{opacity:.92}48%{opacity:1}}.scr-head{font-size:20px;line-height:1.1;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:1px dashed #ffb54755;padding-bottom:6px;margin-bottom:8px}.scr-head small{font-size:16px;color:#d39a46}.commits{list-style:none;margin:0;padding:0;max-height:176px;overflow:auto;scrollbar-color:#6b4d1f #0a0805}.commit{display:grid;grid-template-columns:6px 70px 88px 1fr auto;gap:8px;align-items:center;width:100%;text-align:left;border:0;background:transparent;color:inherit;font:17px/1.15 var(--crt);padding:3px 4px;border-radius:2px;text-shadow:inherit}.commit:hover{background:#ffb5471a}.commit[aria-pressed=true]{background:#ffb5472b;box-shadow:inset 0 0 0 1px #ffb54777}.cbar{width:6px;height:18px;background:var(--c);box-shadow:0 0 6px var(--c)}.commit .m{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.commit .st{font-size:15px;color:#d39a46}.commit.refused{color:#ff9fa2}.commit.refused .st{color:#ff8a8e}.legend-row{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:15px;color:#c08a3e;margin:6px 0 8px}.legend-row i{display:inline-block;width:9px;height:9px;margin-right:4px;background:var(--c)}
+.rc-title{font-size:17px;margin:8px 0 4px;color:#ffd08a}.rc{display:grid;grid-template-columns:34px 30px 72px 1fr 56px 56px 72px;gap:6px;align-items:center;font-size:16px;line-height:1.1;padding:1px 0}.rc-bar{position:relative;height:10px;background:linear-gradient(90deg,transparent calc(50% - .5px),#ffb54755 calc(50% - .5px) calc(50% + .5px),transparent 0),#ffb5470d;border-radius:1px}.mk{position:absolute;top:-2px;width:8px;height:14px;margin-left:-4px}.mk.head{background:#7fd6ff;box-shadow:0 0 6px #7fd6ff;border-radius:50%;width:10px;height:10px;top:0;margin-left:-5px}.mk.ver{background:var(--amber);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}.rc.ok .rc-s{color:#7fe6b0}.rc.diff .rc-s{color:#ffd08a}.rc.bad .rc-s{color:#ff8a8e}.delta{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:center;margin-top:10px;border-top:1px dashed #ffb54755;padding-top:8px}.delta svg{width:100%;height:auto;display:block}.delta-read{font-size:16px;line-height:1.2}.monitor-foot{display:flex;justify-content:space-between;align-items:center;margin-top:9px;font:600 11px var(--mono);letter-spacing:.08em;color:#3a3427}.monitor-foot .vent{width:90px;height:8px;background:repeating-linear-gradient(90deg,#6d6553 0 3px,transparent 3px 6px);border-radius:2px}
+/* on air */
+.onair{margin-top:26px;padding:22px;border-radius:12px;background:linear-gradient(180deg,#2a2622,#1b1916);border:1px solid #000;box-shadow:0 30px 60px #000c,inset 0 1px 0 #ffffff1c}.onair-head{display:flex;gap:22px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.onair-head h2{font:italic 40px/1 var(--serif)}.onair-head p{color:#cfc9bd;font-size:13px;line-height:1.7;max-width:760px;margin-top:6px}.tally{flex:0 0 auto;width:190px;height:72px;padding:7px;border-radius:7px;background:linear-gradient(#2b241d,#15110d);border:1px solid #000;box-shadow:0 8px 18px #000b,inset 0 1px 0 #ffffff1a}.tally-glass{display:grid;place-items:center;height:100%;border-radius:4px;font:700 25px var(--sans);letter-spacing:.24em;color:#4a3826;background:linear-gradient(#2a2017,#1b140e);box-shadow:inset 0 2px 6px #000;transition:all .35s}.tally.lit .tally-glass{color:#fff6e0;background:radial-gradient(circle at 50% 45%,#ffe3a6,#ff9b2e 62%,#c25d12);box-shadow:0 0 50px #ff9b2e99,inset 0 0 12px #fff6;text-shadow:0 0 12px #fff8;animation:hum 3.2s ease-in-out infinite}@keyframes hum{50%{filter:brightness(1.07)}}.tally-cap{font:11px var(--mono);color:#cfc5b5;margin-top:6px;text-align:center;letter-spacing:.06em}
+.onair-grid{display:grid;grid-template-columns:330px 1fr;gap:20px}.producer{display:flex;flex-direction:column;gap:12px;padding:14px;background:linear-gradient(160deg,#34302b,#24211d);border:1px solid #000;box-shadow:inset 0 1px 0 #ffffff1a;border-radius:4px}.producer label,.fld-lbl{font:600 11px var(--mono);letter-spacing:.06em;color:#d4cabb;text-transform:uppercase;display:block;margin-bottom:4px}.source-plate{font:11px var(--mono);color:#ffdca6;background:#0c0a08;padding:6px 8px;border-radius:2px;box-shadow:inset 0 1px 3px #000}.tape-input{width:100%;border:0;padding:6px 8px;background:linear-gradient(180deg,#f8f5ec,#e9e4d6);color:var(--marker-ink);font:17px var(--marker);box-shadow:0 2px 3px #000a}.plain-input,textarea{width:100%;background:#0f0e0c;color:#ece7dd;border:1px solid #000;box-shadow:inset 0 1px 3px #000;padding:7px 8px;font:12px var(--mono);border-radius:2px}textarea{min-height:96px;resize:vertical;line-height:1.5}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.step{display:flex;flex-direction:column;gap:8px;padding:12px;background:linear-gradient(180deg,#2f2b27,#211e1b);border:1px solid #000;border-radius:4px;box-shadow:inset 0 1px 0 #ffffff14}.step-n{display:flex;align-items:center;justify-content:space-between;font:600 11px var(--mono);letter-spacing:.08em;color:#d4cabb}.step h3{font:500 14px/1.3 var(--sans)}.step p{font-size:11.5px;line-height:1.6;color:#cbc4b7;flex:1}.step .lamp{width:11px;height:11px;border-radius:50%;background:#2a2622;box-shadow:inset 0 1px 2px #000}.step.done .lamp{background:radial-gradient(circle at 40% 35%,#eafff5,var(--accent) 55%,#167a52);box-shadow:0 0 9px #3ddc97aa}.step.fail .lamp{background:radial-gradient(circle at 40% 35%,#ffd9da,var(--danger) 55%,#8a1c20);box-shadow:0 0 9px #e5484d99}.big-push{min-height:38px;border:1px solid #000;border-radius:4px;background:linear-gradient(#4b4640,#2e2a26);box-shadow:0 4px 0 #0e0c0a,inset 0 1px 0 #ffffff26;color:#efe9dd;font:600 11px var(--sans)}.step.done .big-push{background:radial-gradient(circle at 50% 40%,#d8fff0,var(--accent) 60%,#1f9a68);color:#062016;transform:translateY(2px);box-shadow:0 2px 0 #0e0c0a}
+.outputs{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;margin-top:16px}.out{background:#0c0b0a;border:1px solid #000;border-radius:4px;box-shadow:inset 0 2px 8px #000}.out-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #ffffff12;font:600 11px var(--mono);letter-spacing:.06em;color:#d4cabb;text-transform:uppercase}.out pre{margin:0;padding:10px 12px;max-height:340px;overflow:auto;font:11px/1.55 var(--mono);color:#d9f2e6;white-space:pre}.code-box{padding:12px}.code{font:500 15px/1.6 var(--mono);color:#ffdca6;word-break:break-all;letter-spacing:.06em;text-shadow:0 0 8px #ffb54744}.code-link{font:11px var(--mono);color:#cfcbc1;word-break:break-all;margin-top:8px}.note{font-size:11px;line-height:1.6;color:#a99f90;margin-top:8px}.ci-log{min-height:150px;color:#cfe6d8}.ci-log .ok{color:#7fe6b0}.ci-log .bad{color:#ff8a8e}.refusal{color:#ffb3b5;border-left:3px solid var(--danger);padding:6px 10px;background:#e5484d14;font-size:12px;margin-top:8px}
+/* share desk */
+.share{margin-top:26px;padding:22px;border-radius:12px;background:linear-gradient(180deg,#2c2f33,#1e2023);border:1px solid #000;box-shadow:0 30px 60px #000c,inset 0 1px 0 #ffffff1c}.sec-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:16px;flex-wrap:wrap}.sec-head h2{font:italic 36px/1 var(--serif)}.sec-head p{color:#bdb7ab;font-size:12.5px;line-height:1.6;max-width:640px;margin-top:6px}.share-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:20px;align-items:start}.s10-frame{border:10px solid #15161a;border-radius:6px;box-shadow:0 10px 20px #000a,inset 0 0 0 1px #ffffff14;background:#0d0e10}.s10-frame svg{display:block;width:100%;height:auto}.row-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.print-card{width:100%;max-width:470px;aspect-ratio:86/54;display:grid;grid-template-columns:118px 1fr 96px;gap:12px;align-items:center;padding:14px;background:linear-gradient(135deg,#fbf9f3,#ebe6d9);color:#1b1b1b;border-radius:10px;box-shadow:0 14px 26px #000b,inset 0 0 0 1px #0000001a;font-family:var(--sans)}.print-card .pc-name{font:italic 26px/1 var(--serif)}.print-card .pc-h{font:12px var(--marker);color:var(--marker-ink);margin-top:4px}.print-card .pc-code{font:8.5px/1.45 var(--mono);letter-spacing:.03em;margin-top:8px;color:#333;word-break:break-all}.print-card .pc-meta{font:8px var(--mono);color:#555;margin-top:6px}.print-card .qr-wrap{text-align:center;font:7px var(--mono);color:#555}.print-card .qr-wrap svg{width:92px;height:92px;display:block;margin-bottom:3px}.print-card .pc-glyph svg{width:118px;height:118px}.print-card .pc-glyph .g-bg{fill:#14161a}
+/* talkback S6 */
+.talkback{margin-top:26px;padding:22px;border-radius:12px;background:linear-gradient(180deg,#262a2e,#1a1c1f);border:1px solid #000;box-shadow:0 30px 60px #000c,inset 0 1px 0 #ffffff1c}.tb-grid{display:grid;grid-template-columns:1fr 1.1fr;gap:20px}.grille{height:60px;border-radius:6px;margin-bottom:12px;background:radial-gradient(circle,#050505 1.6px,transparent 2px) 0 0/9px 9px,linear-gradient(#3a3d41,#2a2c2f);box-shadow:inset 0 2px 5px #000}fieldset{border:1px solid #ffffff1c;border-radius:4px;padding:14px;margin:0}legend{font:600 11px var(--mono);letter-spacing:.06em;color:#d6d2c8;text-transform:uppercase;padding:0 6px}.consent label{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.55;color:#e1dcd1;margin-bottom:10px}.consent input[type=checkbox]{accent-color:var(--accent);margin-top:4px;width:15px;height:15px;flex:0 0 auto}.pairs-table{width:100%;border-collapse:collapse;font:11px var(--mono);margin-bottom:10px}.pairs-table th,.pairs-table td{padding:6px 8px;border-bottom:1px solid #ffffff12;text-align:left}.pairs-table th{font-size:11px;letter-spacing:.06em;color:#d6d2c8;text-transform:uppercase;font-weight:600}.hardware{display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:center;margin-top:22px;font:11px var(--mono);color:#b9b4a8;letter-spacing:.04em}
+/* dialogs */
+dialog{color:var(--text);background:#202225;border:1px solid #000;padding:0;box-shadow:0 20px 90px #000c,inset 0 1px 0 #ffffff1c;max-height:92dvh;max-width:calc(100% - 30px);border-radius:8px}dialog::backdrop{background:#050506cc;backdrop-filter:blur(4px)}body:has(dialog[open]){overflow:hidden}.dlg{width:640px;padding:22px 24px}.dlg.wide{width:900px}.dlg-top{display:flex;justify-content:space-between;align-items:center;gap:14px}.dlg h2{font:italic 34px/1.05 var(--serif);margin:10px 0}.dlg p{font-size:12.5px;line-height:1.7;color:#d1cbc0}.close{background:transparent;border:0;color:#e4d9bc;font:24px/1 var(--mono);padding:4px 9px}.checklist{display:grid;gap:10px;margin-top:14px}.checklist label{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:#e3ddd2}.checklist input{accent-color:var(--accent);margin-top:4px}.warning{padding:10px 12px;border-left:3px solid var(--amber);background:#ffb54714;color:#f6dcae!important;margin-top:12px!important}.dlg-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;flex-wrap:wrap}.card-top{display:grid;grid-template-columns:150px 1fr;gap:20px;align-items:center}.card-top .glyph{width:150px;height:150px}.band-table{width:100%;border-collapse:collapse;font:11px var(--mono);margin-top:12px}.band-table th,.band-table td{padding:4px 6px;border-bottom:1px solid #ffffff10;text-align:right}.band-table th{font-size:11px;letter-spacing:.06em;color:#d6d2c8;font-weight:600}.band-table td:first-child,.band-table th:first-child{text-align:left}.member-list{list-style:none;margin:12px 0 0;padding:0;max-height:48vh;overflow:auto}.member-list li{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid #ffffff10;font-size:12.5px}.member-list small{display:block;color:#a7a399;font-size:11px}.shortcut-list{display:grid;grid-template-columns:150px 1fr;gap:9px;font-size:12.5px;margin:16px 0}.shortcut-list dt{font:11px var(--mono);color:var(--accent)}.shortcut-list dd{margin:0;color:#d2ccc0}.toast{position:fixed;z-index:100;bottom:22px;left:50%;transform:translateX(-50%);max-width:calc(100% - 30px);padding:12px 18px;background:#1f2326;border:1px solid #000;border-left:3px solid var(--accent);box-shadow:0 5px 25px #000a;font-size:12.5px}.toast.bad{border-left-color:var(--danger)}.toast[hidden]{display:none}
+@media (max-width:1400px){.main-nav{gap:11px;font-size:10.5px}.cable-state{display:none}}
+@media (max-width:1350px){.centre-grid{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}}
+@media (max-width:1100px){.cable-inner{flex-wrap:wrap;padding-top:10px;padding-bottom:8px;gap:0 18px}.main-nav{order:3;width:100%;overflow:auto;margin:10px 0 0;padding-bottom:6px}.main-nav a[aria-current="page"]:after{bottom:-6px}.cable-actions{margin-left:auto}.site-footer{grid-template-columns:1fr;gap:30px}}
+@media(max-width:1000px){.hero{grid-template-columns:1fr}.hero h1{font-size:80px}.onair-grid,.outputs,.share-grid,.tb-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.hero{padding:28px 18px 18px}.hero h1{font-size:62px}.facts{grid-template-columns:1fr}.steps{grid-template-columns:1fr}.rc{grid-template-columns:30px 26px 62px 1fr 50px;font-size:14px}.rc .rc-q,.rc .rc-k{display:none}.card-top{grid-template-columns:1fr}.print-card{grid-template-columns:90px 1fr 76px}.print-card .pc-glyph svg{width:90px;height:90px}.print-card .qr-wrap svg{width:72px;height:72px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.tr-ghost{display:none}}
+@media print{@page{margin:12mm}body *{visibility:hidden!important}.stadium{display:none}#print-card,#print-card *{visibility:visible!important}#print-card{position:fixed;left:0;top:0;width:86mm;max-width:none;box-shadow:none;print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main" data-pt="Ir ao conteúdo" data-en="Skip to content">Ir ao conteúdo</a>
+<div class="stadium" id="stadium" aria-hidden="true"><span class="beam b1"></span><span class="beam b2"></span><span class="rig"></span></div>
+<header class="cable-bar">
+ <div class="cable-inner">
+  <a class="wordmark" href="curva.html">open-auri</a>
+  <nav class="main-nav" aria-label="Principal" data-en-label="Main">
+   <a href="curva.html" data-pt="Curva" data-en="Curve">Curva</a>
+   <a href="biblioteca.html" data-pt="Biblioteca" data-en="Library">Biblioteca</a>
+   <a href="comparar.html" data-pt="Comparar" data-en="Compare">Comparar</a>
+   <a href="soe-como-x.html" data-pt="Soe como X" data-en="Sound like X">Soe como X</a>
+   <a href="comunidade.html" aria-current="page" data-pt="Comunidade" data-en="Community">Comunidade</a>
+   <a href="teste-cego.html" data-pt="Teste cego" data-en="Blind test">Teste cego</a>
+   <a href="cabo.html" data-pt="Cabo" data-en="Cable">Cabo</a>
+   <a href="docs.html">Docs</a>
+  </nav>
+  <div class="cable-actions">
+   <span class="cable-state"><span class="status-dot" aria-hidden="true">●</span><span data-pt="Sem cabo · simulado" data-en="No cable · simulated">Sem cabo · simulado</span></span>
+   <span class="dirty" id="unsaved" aria-live="polite">0 alterações não gravadas</span>
+      <!-- === OA SHARED: audio-loader v1 (HTML) === -->
+      <div class="oa-audio" id="oaAudio">
+        <button type="button" class="oa-audio-btn" id="oaAudioBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="oaAudioPop"><span aria-hidden="true">♪</span><span class="oa-audio-name" id="oaAudioName">Áudio</span></button>
+        <div class="oa-audio-pop" id="oaAudioPop" role="dialog" aria-labelledby="oaAudioTitle" hidden>
+          <h3 id="oaAudioTitle" data-oa-audio="title">Áudio da prévia</h3>
+          <label class="oa-audio-load"><span data-oa-audio="load">Carregar MP3…</span><input type="file" class="oa-audio-file" id="oaAudioFile" accept="audio/mpeg,audio/mp3,audio/*"></label>
+          <div class="oa-audio-meta" id="oaAudioMeta" aria-live="polite"></div>
+          <div class="oa-audio-row"><button type="button" id="oaAudioPlay" data-oa-audio="play">Tocar arquivo</button><button type="button" id="oaAudioRemove" data-oa-audio="remove">Remover</button></div>
+          <label class="oa-audio-vol"><span data-oa-audio="vol">Volume da prévia (só no navegador)</span><output id="oaAudioVolOut" for="oaAudioVol">−12 dB</output><input type="range" id="oaAudioVol" min="-40" max="0" step="1" value="-12"></label>
+          <p class="oa-audio-rate" id="oaAudioRate"></p>
+          <p class="oa-audio-note" data-oa-audio="note">O arquivo fica só neste navegador. Nada é enviado.</p>
+        </div>
+      </div>
+      <!-- === END OA SHARED: audio-loader v1 (HTML) === -->
+   <button type="button" id="neutral" data-pt="Neutro" data-en="Neutral">Neutro</button>
+   <button type="button" id="default" data-pt="Padrão Auri" data-en="Auri default">Padrão Auri</button>
+   <button type="button" class="primary" id="write" data-pt="Gravar no cabo" data-en="Write to cable">Gravar no cabo</button>
+   <button type="button" class="language" id="language" aria-label="Switch to English"><span>PT</span> · <span class="inactive">EN</span></button>
+  </div>
+ </div>
+</header>
+<main id="main">
+ <section class="hero" aria-labelledby="page-title">
+  <div>
+   <span class="caps kicker" data-pt="Mesa grande · 12 canais · S7 · 3 VCAs" data-en="Large-format desk · 12 channels · S7 · 3 VCAs">Mesa grande · 12 canais · S7 · 3 VCAs</span> <span class="stamp" data-pt="dados de exemplo" data-en="example data">dados de exemplo</span>
+   <h1 id="page-title" data-pt="Comunidade" data-en="Community">Comunidade</h1>
+   <p data-pt="Cada canal é um curator; cada VCA é um pack. As curvas moram num repositório público no GitHub, e é ele o banco de dados: a busca roda no seu navegador. Não há contas, curtidas nem servidor. Para entrar na mesa, uma curva passa pelo gate v2 e chega por pull request." data-en="Each channel is a curator; each VCA is a pack. Curves live in a public GitHub repository, which is the database: search runs in your browser. No accounts, no likes, no server. To reach the desk, a curve passes gate v2 and arrives through a pull request.">Cada canal é um curator; cada VCA é um pack. As curvas moram num repositório público no GitHub, e é ele o banco de dados: a busca roda no seu navegador. Não há contas, curtidas nem servidor. Para entrar na mesa, uma curva passa pelo gate v2 e chega por pull request.</p>
+  </div>
+  <ul class="facts">
+   <li><b data-pt="Canal" data-en="Channel">Canal</b><span data-pt="curator · avatar da curva · resumo em knobs" data-en="curator · curve avatar · knob summary">curator · avatar da curva · resumo em knobs</span></li>
+   <li><b>SOLO / SEL</b><span data-pt="pré-escuta no scope · abre o cartão" data-en="scope preview · opens the card">pré-escuta no scope · abre o cartão</span></li>
+   <li><b>Total Recall</b><span data-pt="histórico de versões do repositório" data-en="version history from the repository">histórico de versões do repositório</span></li>
+   <li><b data-pt="No ar" data-en="On air">No ar</b><span data-pt="envelope S5 · fork · pull request · CI com o gate" data-en="S5 envelope · fork · pull request · CI with the gate">envelope S5 · fork · pull request · CI com o gate</span></li>
+  </ul>
+ </section>
+ <div class="desk">
+  <section class="console" aria-labelledby="console-title">
+   <div class="console-head">
+    <h2 id="console-title" class="plate-title" data-pt="Canais da comunidade" data-en="Community channels">Canais da comunidade</h2>
+    <span class="plate" data-pt="EXEMPLO · NÃO SÃO CURATORS REAIS" data-en="EXAMPLE · NOT REAL CURATORS">EXEMPLO · NÃO SÃO CURATORS REAIS</span>
+    <div class="search-tape"><label for="search" data-pt="BUSCA NO REPOSITÓRIO [ / ]" data-en="REPOSITORY SEARCH [ / ]">BUSCA NO REPOSITÓRIO [ / ]</label><input id="search" type="search" autocomplete="off" placeholder="curator, nome, base, licença…" data-en-ph="curator, name, base, licence…"></div>
+    <div class="push-group" role="group" aria-label="Ordenar canais" data-en-label="Sort channels"><button class="push" type="button" data-sort="ch" aria-pressed="true" data-pt="ORDEM" data-en="ORDER">ORDEM</button><button class="push" type="button" data-sort="rel" aria-pressed="false" data-pt="RELEVÂNCIA (LOCAL)" data-en="RELEVANCE (LOCAL)">RELEVÂNCIA (LOCAL)</button></div>
+    <div class="kctl" id="ctl-thresh"><span class="k-lbl" data-pt="DESTAQUE ≈ (S4 RMS)" data-en="HIGHLIGHT ≈ (S4 RMS)">DESTAQUE ≈ (S4 RMS)</span><div class="knob" role="slider" tabindex="0" style="--cap:#6b4fa0"><i class="sk"></i><i class="kb"></i><i class="cp"></i></div><button class="readout" type="button"></button></div>
+    <span class="head-spacer"></span>
+    <span class="mini-tally" id="mini-tally" aria-hidden="true" data-pt="NO AR" data-en="ON AIR">NO AR</span>
+    <button class="help-key" id="help" type="button" aria-label="Atalhos de teclado" data-en-label="Keyboard shortcuts">?</button>
+   </div>
+   <div class="bank-wrap"><div class="bank" id="bank"></div><div class="vca-bank" id="vca-bank"></div></div>
+   <div class="boot" id="boot" role="status"><span id="boot-line">RECALL…</span></div>
+   <div class="armrest" aria-hidden="true"><span>MESA A · 16 POSIÇÕES · 1985</span></div>
+  </section>
+  <div class="bank-count"><span id="bank-count" aria-live="polite"></span><span data-pt="Faders = relevância (exemplo): só ordenam a mesa neste navegador. Não há votos em servidor." data-en="Faders = relevance (example): they only sort the desk in this browser. There are no server votes.">Faders = relevância (exemplo): só ordenam a mesa neste navegador. Não há votos em servidor.</span></div>
+
+  <section class="centre" aria-labelledby="centre-title">
+   <div class="centre-grid">
+    <div class="scope-panel">
+     <div class="panel-head"><h2 id="centre-title" data-pt="Scope master" data-en="Master scope">Scope master</h2><span class="solo-lamp" id="solo-lamp">SOLO</span></div>
+     <div class="crt"><svg id="scope" viewBox="0 0 760 300" role="img" aria-label="Scope"></svg><div class="crt-glass"></div></div>
+     <div class="scope-legend" id="scope-legend"></div>
+     <div class="scope-row">
+      <div class="seg-box"><span data-pt="S4 · RMS 20 Hz–20 kHz" data-en="S4 · RMS 20 Hz–20 kHz">S4 · RMS 20 Hz–20 kHz</span><output class="seg" id="d-rms">–</output></div>
+      <div class="seg-box"><span data-pt="S4 · MÁX |Δ|" data-en="S4 · MAX |Δ|">S4 · MÁX |Δ|</span><output class="seg" id="d-max">–</output></div>
+      <div class="kctl" id="ctl-range"><span class="k-lbl" data-pt="ESCALA" data-en="SCALE">ESCALA</span><div class="knob big" role="slider" tabindex="0" style="--cap:#d8d4ca"><i class="sk"></i><i class="kb"></i><i class="cp"></i></div><button class="readout" type="button"></button></div>
+      <div class="kctl" id="ctl-cursor"><span class="k-lbl" data-pt="CURSOR" data-en="CURSOR">CURSOR</span><div class="knob big" role="slider" tabindex="0" style="--cap:#2f63a0"><i class="sk"></i><i class="kb"></i><i class="cp"></i></div><button class="readout" type="button"></button></div>
+      <div class="cursor-read" id="cursor-read" aria-live="polite"></div>
+     </div>
+     <div class="ab-row" role="group" aria-labelledby="ab-title"><span class="ab-title" id="ab-title" data-pt="OUVIR A/B" data-en="LISTEN A/B">OUVIR A/B</span><button class="btn ab-play" id="ab-play" type="button" aria-pressed="false" data-pt="▶ Ouvir" data-en="▶ Listen">▶ Ouvir</button><span class="push-group"><button class="push" id="ab-a" type="button" aria-pressed="true" data-pt="A · SELEÇÃO" data-en="A · SELECTION">A · SELEÇÃO</button><button class="push" id="ab-b" type="button" aria-pressed="false" data-pt="B · SUA CURVA" data-en="B · YOUR CURVE">B · SUA CURVA</button></span><span class="ab-read" id="ab-read" aria-live="polite"></span></div>
+     <div class="gate-row" id="scope-gate" aria-label="Lâmpadas do gate v2" data-en-label="Gate v2 lamps"></div>
+     <div class="scope-actions"><a class="btn" id="open-curve" href="curva.html" data-pt="Abrir na Curva" data-en="Open in Curve">Abrir na Curva</a><a class="btn" id="open-compare" href="comparar.html" data-pt="Comparar" data-en="Compare">Comparar</a><button class="btn" id="load-current" type="button" data-pt="Usar como minha curva" data-en="Use as my curve">Usar como minha curva</button><button class="btn primary" id="scope-write" type="button" data-pt="Gravar no cabo" data-en="Write to cable">Gravar no cabo</button></div>
+    </div>
+    <div class="recall-panel" id="recall">
+     <div class="panel-head"><h2 data-pt="Total Recall" data-en="Total Recall">Total Recall</h2><span class="plate">S3 · git log</span></div>
+     <div class="monitor"><div class="screen" id="recall-screen">
+      <div class="scr-head" id="recall-head"></div>
+      <div class="legend-row" id="recall-legend"></div>
+      <ol class="commits" id="commits" aria-label="Histórico de versões (exemplo)"></ol>
+      <div id="recall-grid" aria-live="polite"></div>
+      <div class="delta"><svg id="delta" viewBox="0 0 420 110" role="img" aria-label="Diferença para a versão anterior"></svg><div class="delta-read" id="delta-read"></div></div>
+     </div>
+     <div class="monitor-foot"><span>RECALL DISPLAY · 80×25</span><span class="vent"></span></div></div>
+    </div>
+   </div>
+  </section>
+
+  <section class="onair" id="publicar" aria-labelledby="onair-title">
+   <div class="onair-head">
+    <div><div class="tally" id="tally"><div class="tally-glass" data-pt="NO AR" data-en="ON AIR">NO AR</div></div><div class="tally-cap" id="tally-cap" role="status" aria-live="polite"></div></div>
+    <div><h2 id="onair-title" data-pt="Publicar é ir ao ar" data-en="Publishing is going on air">Publicar é ir ao ar</h2><p data-pt="Quatro passos, todos pelo GitHub. O open-auri não guarda nada: você gera o envelope aqui, abre um pull request no repositório público de curvas e a CI repete o gate v2 antes do merge. A lâmpada acende quando o envelope passa no gate." data-en="Four steps, all through GitHub. open-auri stores nothing: you generate the envelope here, open a pull request on the public curves repository and CI repeats gate v2 before merging. The lamp lights when the envelope passes the gate.">Quatro passos, todos pelo GitHub. O open-auri não guarda nada: você gera o envelope aqui, abre um pull request no repositório público de curvas e a CI repete o gate v2 antes do merge. A lâmpada acende quando o envelope passa no gate.</p></div>
+   </div>
+   <div class="onair-grid">
+    <div class="producer">
+     <div><span class="fld-lbl" data-pt="Fonte: curva no scope" data-en="Source: curve on the scope">Fonte: curva no scope</span><div class="source-plate" id="pub-source"></div></div>
+     <div><label for="pub-name" data-pt="Nome da curva" data-en="Curve name">Nome da curva</label><input class="tape-input" id="pub-name" maxlength="48" autocomplete="off"></div>
+     <div><label for="pub-handle" data-pt="Pseudônimo de curator (público)" data-en="Curator pseudonym (public)">Pseudônimo de curator (público)</label><input class="plain-input" id="pub-handle" maxlength="39" value="@seu.pseudonimo" autocomplete="off"></div>
+     <div><span class="fld-lbl" id="lic-lbl" data-pt="Licença desta curva" data-en="Licence for this curve">Licença desta curva</span><div class="push-group" role="group" aria-labelledby="lic-lbl"><button class="push" type="button" data-lic="CC0-1.0" aria-pressed="false">CC0</button><button class="push" type="button" data-lic="CC-BY-4.0" aria-pressed="true">CC-BY 4.0</button></div></div>
+     <div><label for="pub-recipe" data-pt="Receita (S5)" data-en="Recipe (S5)">Receita (S5)</label><textarea id="pub-recipe"></textarea></div>
+    </div>
+    <ol class="steps" id="steps">
+     <li class="step" data-step="0"><div class="step-n"><span>01</span><i class="lamp"></i></div><h3 data-pt="Gerar o envelope S5" data-en="Generate the S5 envelope">Gerar o envelope S5</h3><p data-pt="JSON open-auri/preset@1 com números, receita, licença e o código S1. Roda o gate v2 aqui no navegador." data-en="open-auri/preset@1 JSON with numbers, recipe, licence and the S1 code. Runs gate v2 here in the browser.">JSON open-auri/preset@1 com números, receita, licença e o código S1. Roda o gate v2 aqui no navegador.</p><button class="big-push" type="button" data-pt="Gerar e testar" data-en="Generate and test">Gerar e testar</button></li>
+     <li class="step" data-step="1"><div class="step-n"><span>02</span><i class="lamp"></i></div><h3 data-pt="Fork do repositório de curvas" data-en="Fork the curves repository">Fork do repositório de curvas</h3><p data-pt="No GitHub, com a sua conta de lá. Endereço do repositório a definir; nenhum login acontece nesta página." data-en="On GitHub, with your account there. Repository address to be defined; no login happens on this page.">No GitHub, com a sua conta de lá. Endereço do repositório a definir; nenhum login acontece nesta página.</p><button class="big-push" type="button" data-pt="Simular fork" data-en="Simulate fork">Simular fork</button></li>
+     <li class="step" data-step="2"><div class="step-n"><span>03</span><i class="lamp"></i></div><h3 data-pt="Abrir pull request" data-en="Open a pull request">Abrir pull request</h3><p data-pt="Um arquivo por curva em curves/&lt;curator&gt;/&lt;nome&gt;.json. O texto do pull request sai pronto no monitor abaixo." data-en="One file per curve in curves/&lt;curator&gt;/&lt;name&gt;.json. The pull request text appears ready in the monitor below.">Um arquivo por curva em curves/&lt;curator&gt;/&lt;nome&gt;.json. O texto do pull request sai pronto no monitor abaixo.</p><button class="big-push" type="button" data-pt="Preparar pull request" data-en="Prepare pull request">Preparar pull request</button></li>
+     <li class="step" data-step="3"><div class="step-n"><span>04</span><i class="lamp"></i></div><h3 data-pt="A CI valida com o gate e publica" data-en="CI validates with the gate and publishes">A CI valida com o gate e publica</h3><p data-pt="A CI repete o gate v2. Se passar, o merge atualiza o índice estático e a curva entra na mesa. Se recusar, nada entra." data-en="CI repeats gate v2. If it passes, the merge updates the static index and the curve joins the desk. If it refuses, nothing gets in.">A CI repete o gate v2. Se passar, o merge atualiza o índice estático e a curva entra na mesa. Se recusar, nada entra.</p><button class="big-push" type="button" data-pt="Simular CI" data-en="Simulate CI">Simular CI</button></li>
+    </ol>
+   </div>
+   <div class="outputs">
+    <div class="out"><div class="out-head"><span data-pt="Envelope S5 · open-auri/preset@1" data-en="S5 envelope · open-auri/preset@1">Envelope S5 · open-auri/preset@1</span><button class="btn" type="button" id="copy-json" data-pt="Copiar" data-en="Copy">Copiar</button></div><pre id="json-out" tabindex="0" aria-label="Envelope JSON"></pre></div>
+    <div>
+     <div class="out"><div class="out-head"><span data-pt="Código S1 · 64 caracteres" data-en="S1 code · 64 characters">Código S1 · 64 caracteres</span><span class="push-group"><button class="btn" type="button" id="copy-code" data-pt="Copiar código" data-en="Copy code">Copiar código</button><button class="btn" type="button" id="copy-link" data-pt="Copiar link" data-en="Copy link">Copiar link</button></span></div><div class="code-box"><div class="code" id="s1-code"></div><div class="code-link" id="s1-link"></div><p class="note" data-pt="X8: a curadoria viaja no link (&amp;by=). É proveniência por link, não assinatura criptográfica." data-en="X8: curation travels in the link (&amp;by=). It is provenance by link, not a cryptographic signature.">X8: a curadoria viaja no link (&amp;by=). É proveniência por link, não assinatura criptográfica.</p></div></div>
+     <div class="out" style="margin-top:12px"><div class="out-head"><span data-pt="Monitor do pull request e da CI (simulado)" data-en="Pull request and CI monitor (simulated)">Monitor do pull request e da CI (simulado)</span></div><pre class="ci-log" id="ci-log" tabindex="0" aria-live="polite"></pre></div>
+    </div>
+   </div>
+  </section>
+
+  <section class="share" aria-labelledby="share-title">
+   <div class="sec-head"><div><h2 id="share-title" data-pt="Mesa de compartilhamento" data-en="Sharing desk">Mesa de compartilhamento</h2><p data-pt="S10: imagem antes/depois da curva no scope contra a sua. S8: a curva como identidade, num cartão para imprimir." data-en="S10: before/after image of the scope curve against yours. S8: the curve as identity, on a printable card.">S10: imagem antes/depois da curva no scope contra a sua. S8: a curva como identidade, num cartão para imprimir.</p></div></div>
+   <div class="share-grid">
+    <div><div class="s10-frame" id="s10-preview"></div><div class="row-btns"><button class="btn" type="button" id="dl-png" data-pt="Baixar PNG" data-en="Download PNG">Baixar PNG</button><button class="btn" type="button" id="dl-svg" data-pt="Baixar SVG" data-en="Download SVG">Baixar SVG</button></div></div>
+    <div><div class="print-card" id="print-card"></div><div class="row-btns"><button class="btn" type="button" id="print" data-pt="Imprimir cartão" data-en="Print card">Imprimir cartão</button></div><p class="note" data-pt="O QR é ilustrativo e não abre nada. O código S1 impresso é real e reabre a curva." data-en="The QR is illustrative and opens nothing. The printed S1 code is real and reopens the curve.">O QR é ilustrativo e não abre nada. O código S1 impresso é real e reabre a curva.</p></div>
+   </div>
+  </section>
+
+  <section class="talkback" aria-labelledby="tb-title">
+   <div class="sec-head"><div><h2 id="tb-title" data-pt="S6 · Preferência (opt-in)" data-en="S6 · Preference (opt-in)">S6 · Preferência (opt-in)</h2><p data-pt="Resultados do teste cego no navegador (teste-cego.html) podem ajudar a estudar preferência. Só sai daqui o que você marcar, só os pares A/B, em público e com pseudônimo, por uma issue no GitHub." data-en="Results from the in-browser blind test (teste-cego.html) can help study preference. Only what you tick leaves this page, only the A/B pairs, publicly and under a pseudonym, through a GitHub issue.">Resultados do teste cego no navegador (teste-cego.html) podem ajudar a estudar preferência. Só sai daqui o que você marcar, só os pares A/B, em público e com pseudônimo, por uma issue no GitHub.</p></div></div>
+   <div class="tb-grid">
+    <fieldset class="consent"><legend data-pt="Consentimento explícito (LGPD)" data-en="Explicit consent (LGPD)">Consentimento explícito (LGPD)</legend>
+     <div class="grille" aria-hidden="true"></div>
+     <label><input type="checkbox" id="c1"><span data-pt="Entendo que só os pares A/B (qual curva, qual escolha) saem do meu navegador. Nada sobre volume, aparelho ou audição." data-en="I understand only the A/B pairs (which curve, which choice) leave my browser. Nothing about volume, device or hearing.">Entendo que só os pares A/B (qual curva, qual escolha) saem do meu navegador. Nada sobre volume, aparelho ou audição.</span></label>
+     <label><input type="checkbox" id="c2"><span data-pt="Entendo que a issue é pública no GitHub e fica ligada ao pseudônimo abaixo e à minha conta de lá." data-en="I understand the issue is public on GitHub and tied to the pseudonym below and to my account there.">Entendo que a issue é pública no GitHub e fica ligada ao pseudônimo abaixo e à minha conta de lá.</span></label>
+     <label><input type="checkbox" id="c3"><span data-pt="Concordo com o uso para pesquisa aberta de preferência e sei que posso retirar o consentimento quando quiser." data-en="I agree to use for open preference research and know I can withdraw consent at any time.">Concordo com o uso para pesquisa aberta de preferência e sei que posso retirar o consentimento quando quiser.</span></label>
+     <label for="tb-handle" class="fld-lbl" style="margin-top:6px" data-pt="Pseudônimo" data-en="Pseudonym">Pseudônimo</label><input class="plain-input" id="tb-handle" value="@ouvinte.anonimo" maxlength="39" autocomplete="off">
+     <div class="dlg-actions" style="justify-content:flex-start"><button class="btn primary" type="button" id="tb-send" disabled data-pt="Enviar resultados via issue" data-en="Send results via issue">Enviar resultados via issue</button><button class="btn" type="button" id="tb-withdraw" data-pt="Retirar consentimento" data-en="Withdraw consent">Retirar consentimento</button></div>
+     <p class="note" id="tb-withdraw-note" data-pt="Para retirar depois do envio: abra uma issue pedindo a remoção; um pull request apaga o arquivo. Cópias antigas podem continuar no histórico do git (ver TODO LGPD)." data-en="To withdraw after sending: open an issue asking for removal; a pull request deletes the file. Old copies may remain in the git history (see LGPD TODO).">Para retirar depois do envio: abra uma issue pedindo a remoção; um pull request apaga o arquivo. Cópias antigas podem continuar no histórico do git (ver TODO LGPD).</p>
+    </fieldset>
+    <div>
+     <span class="fld-lbl" data-pt="Pares do teste cego (exemplo)" data-en="Blind test pairs (example)">Pares do teste cego (exemplo)</span>
+     <table class="pairs-table" id="pairs"></table>
+     <div class="out"><div class="out-head"><span data-pt="Exatamente o que sairia (prévia da issue)" data-en="Exactly what would leave (issue preview)">Exatamente o que sairia (prévia da issue)</span></div><pre id="tb-json" tabindex="0"></pre></div>
+    </div>
+   </div>
+   <div class="hardware"><span>CB5100 · WebHID · write-only</span><span data-pt="cada escrita grava em flash" data-en="every write commits to flash">cada escrita grava em flash</span><span data-pt="uma curva para os dois canais" data-en="one curve for both channels">uma curva para os dois canais</span><span>DSP 96 kHz · 10 biquads</span></div>
+  </section>
+ </div>
+</main>
+<footer class="site-footer">
+ <section>
+  <div class="f-eyebrow" data-pt="ESTA PÁGINA HOMENAGEIA" data-en="THIS PAGE PAYS TRIBUTE TO">ESTA PÁGINA HOMENAGEIA</div>
+  <div class="honoree"><strong>Bob Clearmountain</strong><span>1953–</span></div>
+  <p data-pt="Bob Clearmountain foi engenheiro-chefe do Power Station, em Nova York, e é creditado por firmar o papel do engenheiro de mixagem. Em 13 de julho de 1985 mixou o Live Aid no JFK Stadium, na Filadélfia: uma mix para o mundo inteiro ouvir ao mesmo tempo." data-en="Bob Clearmountain was chief engineer at the Power Station in New York and is credited with establishing the role of the mixing engineer. On 13 July 1985 he mixed Live Aid at JFK Stadium in Philadelphia: one mix for the whole world to hear at the same time.">Bob Clearmountain foi engenheiro-chefe do Power Station, em Nova York, e é creditado por firmar o papel do engenheiro de mixagem. Em 13 de julho de 1985 mixou o Live Aid no JFK Stadium, na Filadélfia: uma mix para o mundo inteiro ouvir ao mesmo tempo.</p>
+  <div class="sources"><a href="https://en.wikipedia.org/wiki/Bob_Clearmountain" target="_blank" rel="noreferrer" data-pt="fonte: Wikipedia ↗" data-en="source: Wikipedia ↗">fonte: Wikipedia ↗</a></div>
+ </section>
+ <section>
+  <h3 data-pt="Aviso" data-en="Notice">Aviso</h3>
+  <p data-pt="open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição." data-en="open-auri is not official or endorsed by Kuba, TTGK, Savitech, or any manufacturer. Everything here was obtained by studying the protocol for interoperability. Use at your own risk: we are not responsible for damage to your cable, headphones, or hearing.">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p>
+  <div class="footer-links"><a href="docs.html#aviso-legal" data-pt="Aviso legal completo" data-en="Full legal notice">Aviso legal completo</a><span data-pt="Licença AGPL-3.0" data-en="AGPL-3.0 licence">Licença AGPL-3.0</span></div>
+ </section>
+</footer>
+
+<dialog id="card-dialog" aria-labelledby="card-title"><div class="dlg wide" id="card-body"></div></dialog>
+<dialog id="write-dialog" aria-labelledby="write-title"><div class="dlg">
+ <div class="dlg-top"><span class="caps" data-pt="Checklist de pré-gravação" data-en="Pre-write checklist">Checklist de pré-gravação</span><button class="close" type="button" data-close="write-dialog" aria-label="Fechar" data-en-label="Close">×</button></div>
+ <h2 id="write-title" data-pt="Antes de gravar" data-en="Before writing">Antes de gravar</h2>
+ <p data-pt="Simulação local: nenhum cabo conectado, nenhum report enviado. No hardware, toda escrita grava em flash e não pode ser lida de volta. Uma curva vale para os dois canais." data-en="Local simulation: no cable connected, no report sent. On hardware, every write commits to flash and cannot be read back. One curve applies to both channels.">Simulação local: nenhum cabo conectado, nenhum report enviado. No hardware, toda escrita grava em flash e não pode ser lida de volta. Uma curva vale para os dois canais.</p>
+ <p class="mono" id="write-curve" style="margin-top:10px;color:#ffdca6"></p>
+ <div class="gate-row" id="write-lamps"></div>
+ <div id="write-msg"></div>
+ <div class="checklist"><label><input type="checkbox" id="chk-vol"><span data-pt="Abaixei o volume antes de gravar." data-en="I lowered the volume before writing.">Abaixei o volume antes de gravar.</span></label><label><input type="checkbox" id="chk-flash"><span data-pt="Entendo que cada escrita grava em flash e não pode ser lida de volta." data-en="I understand every write commits to flash and cannot be read back.">Entendo que cada escrita grava em flash e não pode ser lida de volta.</span></label><label id="chk-exp-row" hidden><input type="checkbox" id="chk-exp"><span data-pt="Esta curva usa tipos que a página oficial nunca gravou. Os coeficientes estão dentro do envelope observado, mas o firmware nunca recebeu esses formatos." data-en="This curve uses filter types the official page never wrote. The coefficients are within the observed envelope, but the firmware has never received these formats.">Esta curva usa tipos que a página oficial nunca gravou. Os coeficientes estão dentro do envelope observado, mas o firmware nunca recebeu esses formatos.</span></label></div>
+ <p class="note" id="write-count"></p>
+ <div class="dlg-actions"><button class="btn" type="button" data-close="write-dialog" data-pt="Cancelar" data-en="Cancel">Cancelar</button><button class="btn primary" type="button" id="write-confirm" disabled data-pt="Confirmar simulação" data-en="Confirm simulation">Confirmar simulação</button></div>
+</div></dialog>
+<dialog id="help-dialog" aria-labelledby="help-title"><div class="dlg">
+ <div class="dlg-top"><span class="caps" data-pt="Referência rápida" data-en="Quick reference">Referência rápida</span><button class="close" type="button" data-close="help-dialog" aria-label="Fechar" data-en-label="Close">×</button></div>
+ <h2 id="help-title" data-pt="Atalhos da mesa" data-en="Desk shortcuts">Atalhos da mesa</h2>
+ <dl class="shortcut-list">
+  <dt>?</dt><dd data-pt="Esta lista" data-en="This list">Esta lista</dd>
+  <dt>/</dt><dd data-pt="Buscar no repositório (no navegador)" data-en="Search the repository (in the browser)">Buscar no repositório (no navegador)</dd>
+  <dt>↑ ↓ ← →</dt><dd data-pt="Ajustar knob ou fader em foco" data-en="Adjust the focused knob or fader">Ajustar knob ou fader em foco</dd>
+  <dt>Shift / Alt</dt><dd data-pt="Passo ×10 / ×0,1" data-en="Step ×10 / ×0.1">Passo ×10 / ×0,1</dd>
+  <dt>PgUp PgDn · Home End</dt><dd data-pt="Passo ×10 · mínimo e máximo" data-en="Step ×10 · minimum and maximum">Passo ×10 · mínimo e máximo</dd>
+  <dt data-pt="Roda" data-en="Wheel">Roda</dt><dd data-pt="Ajustar o controle sob o ponteiro" data-en="Adjust the control under the pointer">Ajustar o controle sob o ponteiro</dd>
+  <dt data-pt="Duplo clique · Delete" data-en="Double-click · Delete">Duplo clique · Delete</dt><dd data-pt="Voltar ao valor inicial" data-en="Back to the initial value">Voltar ao valor inicial</dd>
+  <dt data-pt="Enter · clique no número" data-en="Enter · click the number">Enter · clique no número</dt><dd data-pt="Digitar o valor exato" data-en="Type the exact value">Digitar o valor exato</dd>
+  <dt>S</dt><dd data-pt="Solo do canal em foco" data-en="Solo the focused channel">Solo do canal em foco</dd>
+  <dt>[ ]</dt><dd data-pt="Versão anterior / seguinte no Total Recall" data-en="Previous / next version in Total Recall">Versão anterior / seguinte no Total Recall</dd>
+  <dt>Esc</dt><dd data-pt="Fechar janela ou cancelar a digitação" data-en="Close the dialog or cancel typing">Fechar janela ou cancelar a digitação</dd>
+ </dl>
+</div></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module">
+/* === OA SHARED: storage v2 === */
+// Canonical implementation of the OA STORAGE CONTRACT v2 (see the HTML comment at the top of curva.html).
+// Self-contained: no page dependencies. Copy verbatim into every v2 page, before "OA SHARED: audio-loader v1".
+const OA = (globalThis.OA = globalThis.OA || {});
+OA.store = (() => {
+  const KEYS = Object.freeze({
+    current: 'oa.v2.current', journal: 'oa.v2.journal', flashDay: 'oa.v2.flashDay', flashTotal: 'oa.v2.flashTotal',
+    flashSession: 'oa.v2.flashSession', lang: 'oa.v2.lang', previewDb: 'oa.v2.previewDb',
+  });
+  const SESSION_KEYS = new Set([KEYS.flashSession]);
+  const KINDS = new Set(['PK', 'LS', 'HS', 'LP', 'HP']);
+  const area = (key) => { try { return SESSION_KEYS.has(key) ? globalThis.sessionStorage : globalThis.localStorage; } catch { return null; } };
+  function get(key, fallback) {
+    try { const a = area(key), raw = a ? a.getItem(key) : null; return raw == null ? fallback : JSON.parse(raw); } catch { return fallback; }
+  }
+  function set(key, value) { try { const a = area(key); if (a) a.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked */ } }
+  function remove(key) { try { const a = area(key); if (a) a.removeItem(key); } catch { /* blocked */ } }
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const bandToString = (b) => (b.kind === 'OFF' ? 'OFF' : `${b.kind}|${b.freqHz}|${b.gainDb}|${b.qFactor}`);
+  function bandFromString(s) {
+    if (s === 'OFF') return { kind: 'OFF' };
+    const [kind, f, g, q] = String(s).split('|');
+    const band = { kind, freqHz: Number(f), gainDb: Number(g), qFactor: Number(q) };
+    return KINDS.has(kind) && [band.freqHz, band.gainDb, band.qFactor].every(Number.isFinite) ? band : null;
+  }
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const store = {
+    KEYS, get, set, remove, today, bandToString, bandFromString,
+    getLang() { return get(KEYS.lang, 'pt-BR') === 'en-US' ? 'en-US' : 'pt-BR'; },
+    setLang(lang) { set(KEYS.lang, lang === 'en-US' ? 'en-US' : 'pt-BR'); },
+    /** bands: array of {kind, freqHz, gainDb, qFactor} in written order. */
+    saveCurrent({ name, source, preampDb, bands }) {
+      set(KEYS.current, { name: String(name), source: String(source), preampDb, bands: bands.map(bandToString), updatedAt: Date.now() });
+    },
+    /** Returns {name, source, preampDb, bands (objects), updatedAt} or null. Callers must re-run the gate. */
+    loadCurrent() {
+      const c = get(KEYS.current, null);
+      if (!c || !Array.isArray(c.bands) || c.bands.length !== 10 || !Number.isFinite(c.preampDb)) return null;
+      const bands = c.bands.map(bandFromString);
+      return bands.every(Boolean) ? { ...c, bands } : null;
+    },
+    journal() { const j = get(KEYS.journal, []); return Array.isArray(j) ? j : []; },
+    appendJournal(entry, max = 30) { const j = store.journal(); j.push(entry); while (j.length > max) j.shift(); set(KEYS.journal, j); return j; },
+    flashCounts() {
+      const day = get(KEYS.flashDay, null);
+      return { session: num(get(KEYS.flashSession, 0)), today: day && day.date === today() ? num(day.count) : 0, total: num(get(KEYS.flashTotal, 0)) };
+    },
+    recordFlash() {
+      const c = store.flashCounts();
+      set(KEYS.flashSession, c.session + 1); set(KEYS.flashDay, { date: today(), count: c.today + 1 }); set(KEYS.flashTotal, c.total + 1);
+      return store.flashCounts();
+    },
+  };
+  return store;
+})();
+/* === END OA SHARED: storage v2 === */
+
+/* === OA SHARED: audio-loader v1 === */
+// Top-bar MP3 loader + shared preview engine (streaming HTMLAudioElement or pink noise; exact Q27 chains).
+// HOW TO COPY
+//   1. CSS: copy the block "OA SHARED: audio-loader v1 (CSS)" into the page <style> (after the shared chrome CSS).
+//   2. HTML: copy the block "OA SHARED: audio-loader v1 (HTML)" into the top bar's .cable-actions, after the
+//      change counter and before the buttons.
+//   3. JS, in one <script type="module">, in this order: first "OA SHARED: storage v2", then this block
+//      ("OA SHARED: audio-loader v1"), both verbatim. Nothing else is needed for a working loader: the UI binds
+//      itself when the DOM is ready (idempotent, silent if the HTML block is absent) and reads "oa.v2.lang".
+//   4. Optional, only for pages with previews/A-B/blind test: OA.audio.useCodec({ designSection, encodeSection,
+//      preampWord }) with the page's inline codec copy. Without it everything works except buildChain(), which
+//      throws a clear Error.
+//   5. Call OA.audioUI.setLang('pt' | 'en') (or 'pt-BR' | 'en-US') from the page's language toggle.
+// PUBLIC API
+//   OA.audio.getSource()                 creates the AudioContext (call inside a user gesture) and returns the
+//                                        shared source bus (GainNode).
+//   OA.audio.buildChain(bands, preampDb, { gainDb = 0, on = true })
+//                                        -> { input, output, setGain(db, on), dispose(fadeMs) }; one IIRFilterNode per
+//                                        non-OFF section with the EXACT Q27 words (feedforward [b0,b1,b2], feedback
+//                                        [1,a1,a2]), then the Q23 preamp. Several chains may hang off the one source
+//                                        (A/B, blind test): switch them with chain.setGain(db, on).
+//   OA.audio.matchGains([levelDb, ...])  -> trims in dB that bring every chain to the quietest level.
+//   OA.audio.start('chains' | 'raw') / stop()   fade-in / fade-out; 'raw' plays the file without any chain.
+//   OA.audio.state()                     -> { mode, ready, rate, exact, volumeDb, error, persisted, file }.
+//   OA.audio.onChange(cb)                -> unsubscribe function; cb(state) on every change.
+//   OA.audio.loadFile(file) / removeFile() / setVolume(db) / toggleRaw() / ready (Promise: stored file restored).
+//   OA.audioUI.init() / setLang(lang)    init() runs automatically; calling it again is a no-op.
+OA.audio = (() => {
+  const DB_NAME = 'oa-v2', STORE = 'audio', KEY = 'current', RATE = 96000;
+  const listeners = new Set();
+  const clampDb = (v) => Math.min(0, Math.max(-40, Math.round(Number.isFinite(Number(v)) ? Number(v) : -12)));
+  const dbToGain = (db) => Math.pow(10, db / 20);
+  const st = {
+    ctx: null, rate: RATE, exact: true, codec: null, file: null, duration: NaN, error: false, persisted: true,
+    url: null, el: null, elSource: null, noise: null, noiseBuf: null, bus: null, rawGain: null, chainsIn: null, master: null,
+    mode: 'off', volumeDb: clampDb(OA.store.get(OA.store.KEYS.previewDb, -12)),
+  };
+  const state = () => ({
+    mode: st.mode, ready: !!st.ctx, rate: st.rate, exact: st.exact, volumeDb: st.volumeDb, error: st.error, persisted: st.persisted,
+    file: st.file ? { ...st.file, duration: st.duration } : null,
+  });
+  const emit = () => { const s = state(); listeners.forEach((cb) => cb(s)); };
+  // --- IndexedDB (db "oa-v2", store "audio", key "current") ---
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      if (!globalThis.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idb(mode, op) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode), req = op(tx.objectStore(STORE));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  }
+  // --- source handling ---
+  function pinkBuffer(ctx) {
+    const n = Math.round(ctx.sampleRate * 3), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    return buf;
+  }
+  function stopNoise() { if (st.noise) { try { st.noise.stop(); } catch { /* not started */ } st.noise.disconnect(); st.noise = null; } }
+  function startNoise() {
+    if (!st.ctx || st.noise) return;
+    if (!st.noiseBuf) st.noiseBuf = pinkBuffer(st.ctx);
+    const n = st.ctx.createBufferSource(); n.buffer = st.noiseBuf; n.loop = true; n.connect(st.bus); n.start(); st.noise = n;
+  }
+  function detachFile() {
+    if (st.el) { st.el.pause(); st.el.oaDead = true; }
+    if (st.elSource) { try { st.elSource.disconnect(); } catch { /* already */ } }
+    if (st.url) URL.revokeObjectURL(st.url);
+    st.el = null; st.elSource = null; st.url = null; st.file = null; st.duration = NaN; st.error = false;
+  }
+  function attach(record) {
+    detachFile();
+    if (record && record.blob) {
+      st.file = { name: String(record.name || 'audio'), type: record.type || '', size: Number(record.size) || record.blob.size, addedAt: record.addedAt || Date.now() };
+      st.url = URL.createObjectURL(record.blob);
+      const el = new Audio();
+      el.preload = 'metadata'; el.loop = true; el.src = st.url;
+      el.addEventListener('loadedmetadata', () => { if (!el.oaDead) { st.duration = el.duration; emit(); } });
+      el.addEventListener('error', () => { if (!el.oaDead) { st.error = true; emit(); } });
+      st.el = el;
+    }
+    routeSource();
+    emit();
+  }
+  /** Connects the current source (file element or pink noise) to the bus; plays it if the engine is running. */
+  function routeSource() {
+    if (!st.ctx) return;
+    stopNoise();
+    if (st.el) {
+      if (!st.elSource) st.elSource = st.ctx.createMediaElementSource(st.el);
+      st.elSource.connect(st.bus);
+      if (st.mode !== 'off') st.el.play().catch(() => {});
+    } else if (st.mode !== 'off') startNoise();
+  }
+  /** Creates the AudioContext. Call from a user gesture (click/key). */
+  function ensure() {
+    if (st.ctx) return st.ctx;
+    const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio unavailable');
+    let ctx;
+    try { ctx = new AC({ sampleRate: RATE }); } catch { ctx = new AC(); }
+    st.ctx = ctx; st.rate = ctx.sampleRate; st.exact = ctx.sampleRate === RATE;
+    st.master = ctx.createGain(); st.master.gain.value = 0; st.master.connect(ctx.destination);
+    st.chainsIn = ctx.createGain(); st.chainsIn.gain.value = 0; st.chainsIn.connect(st.master);
+    st.rawGain = ctx.createGain(); st.rawGain.gain.value = 0; st.rawGain.connect(st.master);
+    st.bus = ctx.createGain(); st.bus.connect(st.rawGain);
+    routeSource();
+    emit();
+    return ctx;
+  }
+  async function start(mode = 'chains') {
+    const ctx = ensure();
+    st.mode = mode === 'raw' ? 'raw' : 'chains';
+    const t = ctx.currentTime;
+    st.rawGain.gain.setValueAtTime(st.mode === 'raw' ? 1 : 0, t);
+    st.chainsIn.gain.setValueAtTime(st.mode === 'chains' ? 1 : 0, t);
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setValueAtTime(0, t);
+    st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), t + 0.02, 0.08); // short fade-in
+    if (st.el) st.el.play().catch(() => {}); else startNoise();
+    emit();
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* blocked until a gesture */ } }
+  }
+  function stop() {
+    if (!st.ctx || st.mode === 'off') return;
+    const t = st.ctx.currentTime;
+    st.master.gain.cancelScheduledValues(t);
+    st.master.gain.setTargetAtTime(0, t, 0.03);
+    st.mode = 'off';
+    setTimeout(() => { if (st.mode !== 'off') return; if (st.el) st.el.pause(); stopNoise(); }, 180);
+    emit();
+  }
+  function setVolume(db) {
+    st.volumeDb = clampDb(db);
+    OA.store.set(OA.store.KEYS.previewDb, st.volumeDb);
+    if (st.ctx && st.mode !== 'off') st.master.gain.setTargetAtTime(dbToGain(st.volumeDb), st.ctx.currentTime, 0.03);
+    emit();
+  }
+  async function loadFile(file) {
+    if (!file || !(/^audio\//.test(file.type) || /\.(mp3|m4a|aac|ogg|wav|flac)$/i.test(file.name))) throw new Error('not audio');
+    const record = { name: file.name, type: file.type || 'audio/mpeg', size: file.size, blob: file, addedAt: Date.now() };
+    attach(record);
+    try { await idb('readwrite', (s) => s.put(record, KEY)); st.persisted = true; } catch { st.persisted = false; }
+    emit();
+  }
+  async function removeFile() {
+    attach(null);
+    try { await idb('readwrite', (s) => s.delete(KEY)); } catch { /* nothing stored */ }
+    emit();
+  }
+  // Optional: only pages that build preview chains need it. Loader-only pages never call it.
+  function useCodec(codec) {
+    if (!codec || typeof codec.designSection !== 'function' || typeof codec.encodeSection !== 'function' || typeof codec.preampWord !== 'function') {
+      throw new Error('OA.audio.useCodec expects { designSection, encodeSection, preampWord } functions');
+    }
+    st.codec = codec;
+  }
+  function coefficients(band) {
+    if (!st.codec) throw new Error('OA.audio.useCodec({ designSection, encodeSection, preampWord }) must be called first');
+    const w = st.codec.encodeSection(st.codec.designSection(band, st.rate)); // Q27 words [b0, b2, -a1, b1, -a2]
+    const q = 2 ** 27;
+    return { b0: w[0] / q, b2: w[1] / q, a1: -w[2] / q, b1: w[3] / q, a2: -w[4] / q };
+  }
+  function buildChain(bands, preampDb, { gainDb = 0, on = true } = {}) {
+    if (!st.codec) throw new Error('OA.audio.buildChain needs a codec: call OA.audio.useCodec({ designSection, encodeSection, preampWord }) first');
+    const ctx = ensure();
+    const input = ctx.createGain(), pre = ctx.createGain(), output = ctx.createGain(), nodes = [input, pre, output];
+    let node = input;
+    for (const band of bands) {
+      if (band.kind === 'OFF') continue;
+      const c = coefficients(band);
+      const f = ctx.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
+      node.connect(f); node = f; nodes.push(f);
+    }
+    node.connect(pre);
+    pre.gain.value = st.codec.preampWord(preampDb) / 2 ** 23;
+    pre.connect(output);
+    output.gain.value = 0;
+    output.connect(st.chainsIn);
+    st.bus.connect(input);
+    const chain = {
+      input, output,
+      setGain(db, isOn = true, tc = 0.02) { const t = ctx.currentTime; output.gain.cancelScheduledValues(t); output.gain.setTargetAtTime(isOn ? dbToGain(db) : 0, t, tc); },
+      dispose(fadeMs = 60) {
+        chain.setGain(0, false, fadeMs / 4000);
+        setTimeout(() => { try { st.bus.disconnect(input); } catch { /* already */ } nodes.forEach((n) => { try { n.disconnect(); } catch { /* already */ } }); }, fadeMs + 20);
+      },
+    };
+    chain.setGain(gainDb, on);
+    return chain;
+  }
+  const matchGains = (levels) => { const lo = Math.min(...levels); return levels.map((l) => lo - l); };
+  const api = {
+    state, start, stop, setVolume, loadFile, removeFile, useCodec, buildChain, matchGains, dbToGain,
+    getSource() { ensure(); return st.bus; },
+    toggleRaw() { if (st.mode === 'raw') stop(); else start('raw').catch(() => {}); },
+    onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); },
+    ready: idb('readonly', (s) => s.get(KEY)).then((rec) => { if (rec && rec.blob) attach(rec); }).catch(() => {}),
+  };
+  return api;
+})();
+OA.audioUI = (() => {
+  const TXT = {
+    pt: { btn: 'Áudio', title: 'Áudio da prévia', load: 'Carregar MP3…', none: 'Nenhum arquivo: ruído rosa gerado no navegador.', play: 'Tocar arquivo', pause: 'Pausar', remove: 'Remover', vol: 'Volume da prévia (só no navegador)', note: 'O arquivo fica só neste navegador. Nada é enviado.', exact: 'Prévia a 96 kHz: coeficientes Q27 exatos.', approx: 'Este navegador abriu áudio a {rate} Hz: coeficientes recalculados, prévia aproximada.', idle: 'O áudio começa no primeiro play (exige um clique).', bad: 'Arquivo não reconhecido como áudio.', notSaved: 'Não foi possível guardar no navegador; vale só nesta página.', btnAria: 'Áudio da prévia: {x}' },
+    en: { btn: 'Audio', title: 'Preview audio', load: 'Load MP3…', none: 'No file: pink noise generated in the browser.', play: 'Play file', pause: 'Pause', remove: 'Remove', vol: 'Preview volume (browser only)', note: 'The file stays in this browser. Nothing is uploaded.', exact: 'Preview at 96 kHz: exact Q27 coefficients.', approx: 'This browser opened audio at {rate} Hz: coefficients recomputed, preview approximate.', idle: 'Audio starts on the first play (needs a click).', bad: 'File not recognised as audio.', notSaved: 'Could not store it in the browser; it lasts for this page only.', btnAria: 'Preview audio: {x}' },
+  };
+  let lang = OA.store.getLang() === 'en-US' ? 'en' : 'pt';
+  const el = (id) => document.getElementById(id);
+  const tx = (k, p) => { let s = TXT[lang][k]; if (p) for (const n in p) s = s.split(`{${n}}`).join(p[n]); return s; };
+  const fmtDb = (v) => `${v < 0 ? '−' + Math.abs(v) : v} dB`;
+  const fmtDur = (d) => (Number.isFinite(d) ? `${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}` : '…');
+  const fmtSize = (b) => `${new Intl.NumberFormat(lang === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: 1 }).format(b / 1048576)} MB`;
+  function render(s) {
+    if (!el('oaAudioBtn')) return;
+    const name = s.file ? s.file.name : tx('btn');
+    el('oaAudioName').textContent = name;
+    el('oaAudioBtn').title = s.file ? s.file.name : '';
+    el('oaAudioBtn').classList.toggle('has-file', !!s.file);
+    el('oaAudioBtn').setAttribute('aria-label', tx('btnAria', { x: s.file ? s.file.name : tx('none') }));
+    document.querySelectorAll('[data-oa-audio]').forEach((n) => { if (TXT[lang][n.dataset.oaAudio]) n.textContent = tx(n.dataset.oaAudio); });
+    const meta = el('oaAudioMeta');
+    meta.textContent = '';
+    if (s.file) {
+      const b = document.createElement('b'); b.textContent = s.file.name;
+      meta.append(b, document.createTextNode(` · ${fmtDur(s.file.duration)} · ${fmtSize(s.file.size)}`));
+      if (s.error) meta.append(document.createTextNode(` · ${tx('bad')}`));
+      if (!s.persisted) meta.append(document.createTextNode(` · ${tx('notSaved')}`));
+    } else meta.textContent = tx('none');
+    el('oaAudioPlay').textContent = s.mode === 'raw' ? tx('pause') : tx('play');
+    el('oaAudioPlay').disabled = !s.file;
+    el('oaAudioPlay').setAttribute('aria-pressed', s.mode === 'raw' ? 'true' : 'false');
+    el('oaAudioRemove').disabled = !s.file;
+    el('oaAudioVol').value = String(s.volumeDb);
+    el('oaAudioVolOut').textContent = fmtDb(s.volumeDb);
+    const rate = el('oaAudioRate');
+    rate.textContent = !s.ready ? tx('idle') : s.exact ? tx('exact') : tx('approx', { rate: s.rate });
+    rate.classList.toggle('approx', s.ready && !s.exact);
+  }
+  function setOpen(open) {
+    el('oaAudioPop').hidden = !open;
+    el('oaAudioBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  let bound = false;
+  function init() {
+    if (bound || !el('oaAudioBtn') || !el('oaAudioPop')) return; // idempotent; silent when the HTML block is absent
+    bound = true;
+    el('oaAudioBtn').addEventListener('click', () => setOpen(el('oaAudioPop').hidden));
+    document.addEventListener('click', (e) => { if (!el('oaAudioPop').hidden && !el('oaAudio').contains(e.target)) setOpen(false); });
+    el('oaAudio').addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('oaAudioPop').hidden) { e.stopPropagation(); setOpen(false); el('oaAudioBtn').focus(); } });
+    el('oaAudioFile').addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) OA.audio.loadFile(f).catch(() => { el('oaAudioMeta').textContent = tx('bad'); });
+    });
+    el('oaAudioPlay').addEventListener('click', () => OA.audio.toggleRaw());
+    el('oaAudioRemove').addEventListener('click', () => { OA.audio.removeFile(); });
+    el('oaAudioVol').addEventListener('input', (e) => OA.audio.setVolume(Number(e.target.value)));
+    OA.audio.onChange(render);
+    render(OA.audio.state());
+  }
+  // Accepts 'pt' | 'en' or the stored form 'pt-BR' | 'en-US'.
+  const setLang = (l) => { lang = l === 'en' || l === 'en-US' ? 'en' : 'pt'; if (bound) render(OA.audio.state()); };
+  // Auto-init: module scripts run after parsing; classic scripts may run earlier, so wait for the DOM if needed.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+  return { init, setLang };
+})();
+/* === END OA SHARED: audio-loader v1 === */
+
+// ===================== helpers =====================
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let lang='pt';
+const T=(pt,en)=>(lang==='pt'?pt:en);
+const loc=()=>(lang==='pt'?'pt-BR':'en-US');
+const esc=(s)=>String(s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+const r1=(x)=>Math.round(x*10)/10, r2=(x)=>Math.round(x*100)/100, r4=(x)=>Math.round(x*1e4)/1e4;
+const pad2=(n)=>String(n).padStart(2,'0');
+function num(x,d=1,signed=false){
+ if(!Number.isFinite(x)) return '–';
+ let v=Math.round(x*10**d)/10**d; if(v===0) v=0;
+ const s=new Intl.NumberFormat(loc(),{minimumFractionDigits:d,maximumFractionDigits:d}).format(Math.abs(v));
+ return v<0?'−'+s:(signed&&v>0?'+'+s:s);
+}
+const hz=(f)=>(f>=1000?`${num(f/1000,f>=10000?1:2)} kHz`:`${num(f,Number.isInteger(f)?0:1)} Hz`);
+const fmtDate=(ms)=>new Intl.DateTimeFormat(loc(),{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'UTC'}).format(new Date(ms));
+function parseNum(str){
+ let s=String(str).trim().replace(/[−–]/g,'-').replace(/\s+/g,'').replace(/^±/,'');
+ let mult=1; const m=s.match(/^(.*?)(khz|k|hz|db)?$/i);
+ if(m){ s=m[1]; if(m[2]&&/^k/i.test(m[2])) mult=1000; }
+ if(!s) return NaN;
+ if(s.includes(',')&&s.includes('.')){ s=s.lastIndexOf(',')>s.lastIndexOf('.')?s.replace(/\./g,'').replace(',','.'):s.replace(/,/g,''); }
+ else if(s.includes(',')) s=s.replace(',','.');
+ const v=Number(s); return Number.isFinite(v)?v*mult:NaN;
+}
+function hash32(str){ let h=2166136261>>>0; for(const ch of String(str)){ h^=ch.codePointAt(0); h=Math.imul(h,16777619)>>>0; } return h>>>0; }
+function mulberry32(a){ return function(){ a|=0; a=(a+0x6D2B79F5)|0; let t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; }
+
+// ===================== inline subset of src/dsp/eq0xcb.mjs =====================
+// Arithmetic and wire order preserved. All six kinds are designed; HS/LP/HP are experimental
+// (enabled only in the Curva ENGENHARIA layer) and still have to pass gate v2 like everything else.
+const SAMPLE_RATE=96000, BAND_COUNT=10, Q27=2**27, Q27_ONE=Q27, Q23_ONE=2**23;
+const INT32_MIN=-2147483648, INT32_MAX=2147483647;
+const PREAMBLE=[0x45,0x51,0x31,0x23,0xd6,0x00,0x00,0x0a,0x04,0x05,0x01,0x0a,0x00,0x00];
+const FILTER_KINDS=['PK','LS','HS','LP','HP','OFF'], KINDS_WITH_GAIN=new Set(['PK','LS','HS']);
+const EXPERIMENTAL_KINDS=new Set(['HS','LP','HP']);
+function fromAutoEqSign({a1,a2,b0,b1,b2}){ return {b0,b1,b2,a1:-a1,a2:-a2}; }
+function designPeaking(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+ const amp=Math.pow(10,gainDb/40);
+ const w0=(2*Math.PI*freqHz)/sampleRate;
+ const alpha=Math.sin(w0)/(2*qFactor);
+ const cosW0=Math.cos(w0);
+ const a0=1+alpha/amp;
+ return fromAutoEqSign({a1:-(-2*cosW0)/a0,a2:-(1-alpha/amp)/a0,b0:(1+alpha*amp)/a0,b1:(-2*cosW0)/a0,b2:(1-alpha*amp)/a0});
+}
+function designLowShelf(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+ const amp=Math.pow(10,gainDb/40);
+ const w0=(2*Math.PI*freqHz)/sampleRate;
+ const alpha=Math.sin(w0)/(2*qFactor);
+ const cosW0=Math.cos(w0);
+ const twoSqrtAmpAlpha=2*Math.sqrt(amp)*alpha;
+ const a0=(amp+1)+(amp-1)*cosW0+twoSqrtAmpAlpha;
+ return fromAutoEqSign({
+  a1:-(-2*((amp-1)+(amp+1)*cosW0))/a0,
+  a2:-((amp+1)+(amp-1)*cosW0-twoSqrtAmpAlpha)/a0,
+  b0:(amp*((amp+1)-(amp-1)*cosW0+twoSqrtAmpAlpha))/a0,
+  b1:(2*amp*((amp-1)-(amp+1)*cosW0))/a0,
+  b2:(amp*((amp+1)-(amp-1)*cosW0-twoSqrtAmpAlpha))/a0,
+ });
+}
+function designHighShelf(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+ const amp=Math.pow(10,gainDb/40);
+ const w0=(2*Math.PI*freqHz)/sampleRate;
+ const alpha=Math.sin(w0)/(2*qFactor);
+ const cosW0=Math.cos(w0);
+ const twoSqrtAmpAlpha=2*Math.sqrt(amp)*alpha;
+ const a0=(amp+1)-(amp-1)*cosW0+twoSqrtAmpAlpha;
+ return fromAutoEqSign({
+  a1:-(2*((amp-1)-(amp+1)*cosW0))/a0,
+  a2:-((amp+1)-(amp-1)*cosW0-twoSqrtAmpAlpha)/a0,
+  b0:(amp*((amp+1)+(amp-1)*cosW0+twoSqrtAmpAlpha))/a0,
+  b1:(-2*amp*((amp-1)+(amp+1)*cosW0))/a0,
+  b2:(amp*((amp+1)+(amp-1)*cosW0-twoSqrtAmpAlpha))/a0,
+ });
+}
+function designLowPass(freqHz,qFactor,sampleRate=SAMPLE_RATE){
+ const w0=(2*Math.PI*freqHz)/sampleRate;
+ const cosW0=Math.cos(w0);
+ const alpha=Math.sin(w0)/(2*qFactor);
+ const a0=1+alpha;
+ return {b0:((1-cosW0)/2)/a0,b1:(1-cosW0)/a0,b2:((1-cosW0)/2)/a0,a1:(-2*cosW0)/a0,a2:(1-alpha)/a0};
+}
+function designHighPass(freqHz,qFactor,sampleRate=SAMPLE_RATE){
+ const w0=(2*Math.PI*freqHz)/sampleRate;
+ const cosW0=Math.cos(w0);
+ const alpha=Math.sin(w0)/(2*qFactor);
+ const a0=1+alpha;
+ return {b0:((1+cosW0)/2)/a0,b1:(-(1+cosW0))/a0,b2:((1+cosW0)/2)/a0,a1:(-2*cosW0)/a0,a2:(1-alpha)/a0};
+}
+function designSection(band,sampleRate=SAMPLE_RATE){
+ switch(band.kind){
+  case 'PK': return designPeaking(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+  case 'LS': return designLowShelf(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+  case 'HS': return designHighShelf(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+  case 'LP': return designLowPass(band.freqHz,band.qFactor,sampleRate);
+  case 'HP': return designHighPass(band.freqHz,band.qFactor,sampleRate);
+  case 'OFF': return {b0:1,b1:0,b2:0,a1:0,a2:0};
+  default: throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+ }
+}
+function bandError(index,message){ return new RangeError(`band ${index}: ${message}`); }
+function checkBand(band,index=0){
+ if(band===null||typeof band!=='object') throw new TypeError(`band ${index}: not an object`);
+ if(!FILTER_KINDS.includes(band.kind)) throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
+ if(band.kind==='OFF') return;
+ const nyquist=SAMPLE_RATE/2;
+ if(!(Number.isFinite(band.freqHz)&&band.freqHz>0&&band.freqHz<nyquist)) throw bandError(index,`freqHz must be in (0, ${nyquist}), got ${band.freqHz}`);
+ if(!(Number.isFinite(band.qFactor)&&band.qFactor>0)) throw bandError(index,`qFactor must be > 0, got ${band.qFactor}`);
+ if(KINDS_WITH_GAIN.has(band.kind)&&!Number.isFinite(band.gainDb)) throw bandError(index,`gainDb must be finite, got ${band.gainDb}`);
+}
+function isStable(a1,a2){ return Math.abs(a2)<1&&Math.abs(a1)<1+a2; }
+function encodeSection(section,index=0){
+ const ordered=[section.b0,section.b2,-section.a1,section.b1,-section.a2];
+ const words=ordered.map((coefficient)=>{
+  const word=Math.round(coefficient*Q27_ONE)+0;
+  if(!Number.isInteger(word)||word>INT32_MAX||word<INT32_MIN) throw bandError(index,'coefficient does not fit Q27 in int32');
+  return word;
+ });
+ if(!isStable(-words[2]/Q27_ONE,-words[4]/Q27_ONE)) throw bandError(index,'unstable section: poles on or outside the unit circle');
+ return words;
+}
+function preampWord(preampDb=0){
+ if(!Number.isFinite(preampDb)) throw new RangeError(`preamp must be a finite dB value, got ${preampDb}`);
+ if(preampDb>0) throw new RangeError(`preamp must be <= 0 dB, got ${preampDb}`);
+ return Math.round(Math.pow(10,preampDb/20)*Q23_ONE);
+}
+function crc16Ccitt(data){
+ let register=0xffff;
+ for(const byte of data){
+  register^=byte<<8;
+  for(let bit=0;bit<8;bit++) register=register&0x8000?((register<<1)^0x1021)&0xffff:(register<<1)&0xffff;
+ }
+ return register;
+}
+function appendInt32LE(buffer,value){
+ if(!Number.isInteger(value)||value>INT32_MAX||value<INT32_MIN) throw new RangeError(`value does not fit int32: ${value}`);
+ buffer.push(value&0xff,(value>>>8)&0xff,(value>>>16)&0xff,(value>>>24)&0xff);
+}
+function encodePayload(eqBands,preampDb=0){
+ if(!Array.isArray(eqBands)||eqBands.length!==BAND_COUNT) throw new RangeError(`expected ${BAND_COUNT} bands`);
+ eqBands.forEach(checkBand);
+ const payload=[...PREAMBLE];
+ appendInt32LE(payload,preampWord(preampDb));
+ eqBands.forEach((band,index)=>{ for(const word of encodeSection(designSection(band),index)) appendInt32LE(payload,word); });
+ const checksum=crc16Ccitt(payload);
+ payload.push(checksum&0xff,checksum>>>8);
+ return payload;
+}
+function magnitudeDb(eqBands,freqHz,sampleRate=SAMPLE_RATE){
+ const omega=(2*Math.PI*freqHz)/sampleRate;
+ const halfSin=Math.sin(omega/2);
+ const uRe=2*halfSin*halfSin;
+ const uIm=Math.sin(omega);
+ const uSquaredRe=uRe*uRe-uIm*uIm;
+ const uSquaredIm=2*uRe*uIm;
+ const powerAt=(p0,p1,p2)=>{
+  const sum=p0+p1+p2;
+  const slope=p1+2*p2;
+  const re=sum-slope*uRe+p2*uSquaredRe;
+  const im=-slope*uIm+p2*uSquaredIm;
+  return re*re+im*im;
+ };
+ let totalDb=0;
+ for(const band of eqBands){
+  const {b0,b1,b2,a1,a2}=designSection(band,sampleRate);
+  totalDb+=10*Math.log10(powerAt(b0,b1,b2)/powerAt(1,a1,a2));
+ }
+ return totalDb;
+}
+
+// ===================== inline design/analysis/gate.mjs (gate v2, observed envelope) =====================
+// Thresholds copied from design/analysis/envelope.json (aggregate). Not a firmware safety certification.
+const THRESHOLDS=Object.freeze({
+ coefficientPositions:Object.freeze(['b0','b2','-a1','b1','-a2']),
+ coefficientAbsWords:Object.freeze([176145720,133967223,268076748,268076748,133859379]),
+ poleRadius:0.99986846753918,
+ sectionPeakDb:9.200000050722664,
+ internalAudibleDb:-0.20368875272918074,
+ outputAudibleDb:-0.47087539615209006,
+ outputFullDb:2.5000638697363913,
+ preampMaxDb:-0.5,
+ preampMinDb:-25.5,
+ dbNumericalTolerance:1e-8,
+ radiusNumericalTolerance:2e-15,
+});
+const MEAN_FREQUENCIES=Object.freeze(Array.from({length:280},(_,i)=>Math.round(20*1000**(i/279)*100)/100).filter((f)=>f>=300&&f<=3000));
+function fromWords(w){ return {b0:w[0]/Q27,b2:w[1]/Q27,a1:-w[2]/Q27,b1:w[3]/Q27,a2:-w[4]/Q27}; }
+function poleRadius(s){
+ const d=s.a1*s.a1-4*s.a2;
+ return d<0?Math.sqrt(s.a2):Math.max(Math.abs((-s.a1+Math.sqrt(d))/2),Math.abs((-s.a1-Math.sqrt(d))/2));
+}
+function sectionDb(s,f){
+ if(s.b0===1&&s.b1===s.a1&&s.b2===s.a2) return 0;
+ const w=2*Math.PI*f/SAMPLE_RATE;
+ const re=2*Math.sin(w/2)**2, im=Math.sin(w);
+ const u2re=re*re-im*im, u2im=2*re*im;
+ const power=(p0,p1,p2)=>{
+  const r=p0+p1+p2-(p1+2*p2)*re+p2*u2re;
+  const i=-(p1+2*p2)*im+p2*u2im;
+  return r*r+i*i;
+ };
+ return 10*Math.log10(power(s.b0,s.b1,s.b2)/power(1,s.a1,s.a2));
+}
+function powerPolynomial(p0,p1,p2){ const sum=p0+p1+p2; return [sum*sum,4*((p0-p2)**2-sum*(p0+p2)),16*p0*p2]; }
+function sectionPeaks(s){
+ const n=powerPolynomial(s.b0,s.b1,s.b2), d=powerPolynomial(1,s.a1,s.a2);
+ const a=n[2]*d[1]-n[1]*d[2];
+ const b=2*(n[2]*d[0]-n[0]*d[2]);
+ const c=n[1]*d[0]-n[0]*d[1];
+ const roots=[];
+ if(a===0){ if(b!==0) roots.push(-c/b); }
+ else{
+  const discriminant=b*b-4*a*c;
+  if(discriminant>=0){
+   const q=-0.5*(b+(b>=0?1:-1)*Math.sqrt(discriminant));
+   if(q!==0) roots.push(q/a,c/q);
+   else roots.push(-b/(2*a));
+  }
+ }
+ const stationaryHz=roots.filter((t)=>t>0&&t<1).map((t)=>Math.asin(Math.sqrt(t))*SAMPLE_RATE/Math.PI);
+ const maximum=(frequencies)=>frequencies.map((f)=>({db:sectionDb(s,f),frequencyHz:f})).reduce((best,p)=>(p.db>best.db?p:best));
+ return {full:maximum([0,48000,...stationaryHz]),audible:maximum([20,20000,...stationaryHz.filter((f)=>f>=20&&f<=20000)])};
+}
+function analyseSection(band){
+ const words=encodeSection(designSection(band));
+ const section=fromWords(words), radius=poleRadius(section), peaks=sectionPeaks(section);
+ const reasons=[];
+ words.forEach((word,i)=>{ if(Math.abs(word)>THRESHOLDS.coefficientAbsWords[i]) reasons.push(`a:${THRESHOLDS.coefficientPositions[i]}`); });
+ if(radius>THRESHOLDS.poleRadius+THRESHOLDS.radiusNumericalTolerance) reasons.push('b:pole-radius');
+ if(peaks.full.db>THRESHOLDS.sectionPeakDb+THRESHOLDS.dbNumericalTolerance) reasons.push('c:section-peak');
+ return {words,section,poleRadius:radius,fullPeak:peaks.full,audiblePeak:peaks.audible,reasons};
+}
+const intentionalPreampDb=(db)=>20*Math.log10(preampWord(db)/2**23);
+function refine(fn,a,b){
+ const r=(Math.sqrt(5)-1)/2;
+ let c=b-r*(b-a), d=a+r*(b-a), fc=fn(c), fd=fn(d);
+ for(let i=0;i<70&&b-a>1e-8;i++){
+  if(fc>fd){ b=d; d=c; fd=fc; c=b-r*(b-a); fc=fn(c); }
+  else{ a=c; c=d; fc=fd; d=a+r*(b-a); fd=fn(d); }
+ }
+ return fc>fd?{db:fc,frequencyHz:c}:{db:fd,frequencyHz:d};
+}
+// Same grid and arithmetic as gate.mjs responsePeak; per-section columns are cached
+// so the prefix sums add the very same doubles in the very same order.
+const GRID_INTERVALS=16384, GRIDS=new Map();
+function gridFor(minHz,maxHz){
+ const key=`${minHz}:${maxHz}`; let fs=GRIDS.get(key);
+ if(!fs){
+  const lo=minHz||0.001;
+  fs=Array.from({length:GRID_INTERVALS+1},(_,i)=>lo*(maxHz/lo)**(i/GRID_INTERVALS));
+  fs[0]=lo; fs[GRID_INTERVALS]=maxHz;
+  if(minHz===0) fs.unshift(0);
+  GRIDS.set(key,fs);
+ }
+ return fs;
+}
+function responsePeak(sections,minHz,maxHz,cache){
+ if(!sections.length) return {db:0,frequencyHz:minHz};
+ if(sections.length===1){ const p=sectionPeaks(sections[0]); return minHz===0?p.full:p.audible; }
+ const fn=(f)=>sections.reduce((db,section)=>db+sectionDb(section,f),0);
+ const fs=gridFor(minHz,maxHz);
+ const cols=sections.map((s)=>{
+  let col=cache.get(s);
+  if(!col){ col=new Float64Array(fs.length); for(let i=0;i<fs.length;i++) col[i]=sectionDb(s,fs[i]); cache.set(s,col); }
+  return col;
+ });
+ const values=new Float64Array(fs.length);
+ for(let i=0;i<fs.length;i++){ let v=0; for(const col of cols) v+=col[i]; values[i]=v; }
+ let best={db:values[0],frequencyHz:fs[0]};
+ for(let i=1;i<fs.length;i++){
+  if(values[i]>best.db) best={db:values[i],frequencyHz:fs[i]};
+  if(i<fs.length-1&&values[i]>values[i-1]&&values[i]>=values[i+1]){
+   const candidate=refine(fn,fs[i-1],fs[i+1]);
+   if(candidate.db>best.db) best=candidate;
+  }
+ }
+ return best;
+}
+function levelDb(eqBands,preampDb){
+ const sections=eqBands.map((b)=>fromWords(encodeSection(designSection(b))));
+ return intentionalPreampDb(preampDb)+MEAN_FREQUENCIES.reduce((sum,f)=>sum+sections.reduce((db,s)=>db+sectionDb(s,f),0),0)/MEAN_FREQUENCIES.length;
+}
+function gate(eqBands,preampDb){
+ const reasons=[], metrics={thresholds:THRESHOLDS};
+ let payload;
+ try{ payload=encodePayload(eqBands,preampDb); }
+ catch(error){ return {ok:false,reasons:[`f:codec:${error.message}`],metrics}; }
+ metrics.payloadCrc=`0x${payload.at(-1).toString(16).padStart(2,'0')}${payload.at(-2).toString(16).padStart(2,'0')}`;
+ if(preampDb<THRESHOLDS.preampMinDb||preampDb>THRESHOLDS.preampMaxDb) reasons.push('g:preamp-range');
+ metrics.preampDb=preampDb;
+ metrics.quantizedPreampDb=intentionalPreampDb(preampDb);
+ metrics.sections=eqBands.map((b,i)=>{ const s=analyseSection(b); reasons.push(...s.reasons.map((r)=>`${r}:stage-${i+1}`)); return s; });
+ const active=[], cacheAudible=new Map(), cacheFull=new Map();
+ metrics.prefixAudible=[{stage:0,db:metrics.quantizedPreampDb,frequencyHz:null}];
+ for(const [i,item] of metrics.sections.entries()){
+  const s=item.section;
+  if(!(s.b0===1&&s.b1===s.a1&&s.b2===s.a2)) active.push(s);
+  const peak=responsePeak(active,20,20000,cacheAudible);
+  metrics.prefixAudible.push({stage:i+1,db:peak.db+metrics.quantizedPreampDb,frequencyHz:peak.frequencyHz});
+ }
+ metrics.internalAudible=metrics.prefixAudible.reduce((a,b)=>(b.db>a.db?b:a));
+ metrics.outputAudible=metrics.prefixAudible.at(-1);
+ const full=responsePeak(active,0,48000,cacheFull);
+ metrics.outputFull={db:full.db+metrics.quantizedPreampDb,frequencyHz:full.frequencyHz};
+ if(metrics.internalAudible.db>THRESHOLDS.internalAudibleDb+THRESHOLDS.dbNumericalTolerance) reasons.push('d:internal-audible');
+ if(metrics.outputAudible.db>THRESHOLDS.outputAudibleDb+THRESHOLDS.dbNumericalTolerance) reasons.push('e:output-audible');
+ if(metrics.outputFull.db>THRESHOLDS.outputFullDb+THRESHOLDS.dbNumericalTolerance) reasons.push('e:output-full');
+ return {ok:reasons.length===0,reasons,metrics};
+}
+
+// ===================== official presets (labels from the official page) =====================
+const PRESETS={
+ padrao:{pre:-2.8,b:[['PK',25,-0.8,0.3],['PK',150,-3,0.69],['PK',2237,-10,1.41],['PK',4348,-6.1,3],['PK',4958,-8.3,2.72],['PK',7178,-10,3],['PK',11063,-10,3],['PK',520,3.1,0.81],['PK',3046,5.7,1.51],['PK',5995,3.4,0.59]]},
+ pref6:{pre:-3,b:[['PK',25,-2,0.4],['PK',167,-6.2,0.53],['PK',2560,-8,1.03],['PK',4911,-8,4],['PK',7838,-6.7,4],['PK',11523,-6.5,4],['PK',270,0.1,4],['PK',404,4.1,0.48],['PK',2930,7,2.94],['PK',3537,4.5,4]]},
+ emv:{pre:-7.8,b:[['PK',1084,-1.1,3],['PK',1930,-1.9,2.39],['PK',2334,-8,1.93],['PK',4454,-8,2.63],['PK',5568,-4.2,1.55],['PK',7504,-7.2,3],['PK',107,0.7,0.5],['PK',473,2.4,0.5],['PK',6814,7.7,1.48],['PK',8862,8,3]]},
+ basshead:{pre:-5.7,b:[['PK',4613,-12,2.5],['PK',2246,-12,1.31],['PK',6746,-7.9,2.5],['PK',1122,-2.6,1.73],['PK',10302,-6.1,2.5],['PK',20,-5,0.42],['PK',223,-4.9,0.84],['PK',3184,2.5,2.5],['PK',3116,9.2,0.3],['LS',286,8.2,0.47]]},
+ energico:{pre:-3.3,b:[['PK',25,-3.1,0.5],['PK',97,-1.4,0.68],['PK',2445,-8,0.87],['PK',4725,-8,3],['PK',6920,-8,3],['PK',12439,-8,1.96],['PK',1838,5,0.92],['PK',2904,4.5,2.62],['PK',3665,3.7,3],['PK',8376,8,2.42]]},
+ musical:{pre:-2.3,b:[['PK',24,-3.2,0.1],['PK',2277,-8,1.69],['PK',4588,-9.4,2.8],['PK',5979,-3.8,2],['PK',7184,-3.2,3],['PK',10638,-10.4,3],['PK',840,2.2,1.54],['PK',1393,2,1.85],['PK',3224,1.1,3],['PK',15808,2.2,2.5]]},
+ analitico:{pre:-0.8,b:[['LS',120,-9.3,0.44],['PK',7007,-9.1,2.5],['PK',147,-3.5,0.48],['PK',4561,-12,2.5],['PK',2198,-12,1.42],['PK',255,-0.4,1.78],['PK',11291,-7.8,2.5],['PK',1093,-2.7,1.17],['PK',3226,6.2,0.3],['PK',3028,1.8,2.5]]},
+ referencia:{pre:-4,b:[['LS',297,-3.4,0.81],['PK',11107,-4.8,2.5],['PK',1027,-1.7,1.98],['PK',20,-3.6,0.57],['PK',7055,-3.8,2.5],['PK',4588,-8,2.5],['PK',2208,-8.2,1.83],['PK',595,3.5,0.42],['PK',3144,5.6,1.69],['PK',3031,0.5,2.5]]},
+ harman:{pre:-0.5,b:[['LS',199,-5.6,0.94],['PK',399,-1.4,1.62],['PK',2271,-8,1.32],['PK',256,-4.2,1.17],['PK',7566,-7.6,0.43],['PK',4662,-6.8,2.5],['PK',9138,3.8,2.5],['PK',3318,7.8,1.32],['PK',5767,5.8,2.5],['PK',3209,1.1,1.33]]},
+ vdsf:{pre:-2.2,b:[['PK',25,-8,0.5],['PK',80,-5,0.52],['PK',210,-2,0.79],['PK',1286,-5.9,1.34],['PK',1978,-7.4,1.67],['PK',2375,-5.4,2.4],['PK',4384,-4.7,3],['PK',4833,-6,3],['PK',7252,-7.6,3],['PK',1718,8,0.5]]},
+ etymotic:{pre:-2.2,b:[['PK',25,-8,0.97],['PK',45,-8,0.5],['PK',105,-5.3,0.51],['PK',226,-1.4,0.91],['PK',2190,-8,1.39],['PK',4276,-5,3],['PK',4847,-7.2,3],['PK',7260,-6.8,3],['PK',785,1.8,1.42],['PK',3120,6.5,1.01]]},
+};
+const OFFICIAL=[
+ ['padrao','Auri','A assinatura do Auri, inspirada pela comunidade.','The Auri signature, inspired by the community.'],
+ ['pref6','Natural','Subgrave presente, médios limpos e agudos arejados.','Present sub-bass, clean mids and airy treble.'],
+ ['emv','Em V','Alvo com graves e agudos levantados.','A target with raised bass and treble.'],
+ ['basshead','Basshead','Para os amantes de graves.','For bass lovers.'],
+ ['energico','Enérgico','Sonoridade intensa, pensada para rock.','An intense sound, designed for rock.'],
+ ['musical','Musical','Graves fortes, médios comedidos e agudos delicados.','Strong bass, restrained mids and delicate treble.'],
+ ['analitico','Analítico','Para quem prioriza detalhamento e clareza.','For those who prioritise detail and clarity.'],
+ ['referencia','JM-1','Sonoridade fiel à JM-1.','A sound faithful to the JM-1.'],
+ ['harman','Harman IE 2019','A curva de preferência mais estudada do mundo.','The most studied preference curve in the world.'],
+ ['vdsf','VDSF','Meio-termo entre campo difuso e Harman, com graves discretos.','Midway between diffuse field and Harman, with discreet bass.'],
+ ['etymotic','Etymotic','Graves contidos e muita definição nos médios e agudos.','Restrained bass and plenty of definition in the mids and treble.'],
+];
+const LABEL=Object.fromEntries(OFFICIAL.map(([id,l])=>[id,l]));
+const toCurve=(p)=>({pre:p.pre,bands:p.b.map(([kind,freqHz,gainDb,qFactor])=>({kind,freqHz,gainDb,qFactor}))});
+const cloneCurve=(c)=>({pre:c.pre,bands:c.bands.map((b)=>({...b}))});
+const NEUTRAL={pre:-0.5,bands:Array.from({length:10},()=>({kind:'OFF'}))};
+
+// ===================== community data (ILLUSTRATIVE: exemplo) =====================
+// Fake curators. Every head curve is derived from an official preset and must pass gate v2 at load.
+const CHANNELS=[
+ {id:'c01',handle:'@madrugada.fm',name:'Rádio de madrugada',base:'pref6',s:1,lic:'CC-BY-4.0',pack:'m',rel:7.4,tags:'voz noite podcast',drop:6},
+ {id:'c02',handle:'@bancada.sul',name:'Bancada fria',base:'referencia',s:0.8,lic:'CC0-1.0',pack:'b',rel:6.1,tags:'monitoração neutra',drop:9},
+ {id:'c03',handle:'@ouvido.de.coruja',name:'Coruja',base:'analitico',s:1,lic:'CC0-1.0',pack:'b',rel:5.2,tags:'detalhe clássica'},
+ {id:'c04',handle:'@fone.no.onibus',name:'Ônibus 07h12',base:'energico',s:1.2,lic:'CC-BY-4.0',pack:'m',rel:8.3,tags:'rock rua',refused:{after:1,idx:9,gain:10.4}},
+ {id:'c05',handle:'@salinha.b',name:'Salinha B',base:'padrao',s:0.7,lic:'CC0-1.0',pack:'b',rel:4.6,tags:'mix referência'},
+ {id:'c06',handle:'@grave.contido',name:'Grave contido',base:'etymotic',s:1,lic:'CC-BY-4.0',pack:null,rel:3.9,tags:'jazz acústico'},
+ {id:'c07',handle:'@luz.de.palco',name:'Luz de palco',base:'emv',s:1,lic:'CC-BY-4.0',pack:'m',rel:6.8,tags:'ao vivo show'},
+ {id:'c08',handle:'@lado.b.cassete',name:'Lado B',base:'musical',s:1,lic:'CC0-1.0',pack:null,rel:5.5,tags:'retrô mpb'},
+ {id:'c09',handle:'@eco.de.garagem',name:'Garagem',base:'basshead',s:0.9,lic:'CC-BY-4.0',pack:'m',rel:7.9,tags:'grave eletrônica'},
+ {id:'c10',handle:'@agudo.manso',name:'Agudo manso',base:'harman',s:1,lic:'CC0-1.0',pack:'b',rel:6.4,tags:'sibilância voz'},
+ {id:'c11',handle:'@mesa.de.cozinha',name:'Mesa de cozinha',base:'vdsf',s:1,lic:'CC-BY-4.0',pack:null,rel:2.8,tags:'casa dia a dia'},
+ {id:'c12',handle:'@trem.das.sete',name:'Trem das sete',base:'pref6',s:1.4,lic:'CC0-1.0',pack:null,rel:4.1,tags:'viagem natural'},
+];
+const PACKS=[
+ {id:'ref',no:1,name:'Pack de referência Auri',nameEn:'Auri reference pack',lic:'tbc',members:OFFICIAL.map(([id])=>'o:'+id),official:true},
+ {id:'m',no:2,name:'Pack Madrugada',nameEn:'Pack Madrugada',lic:'CC-BY-4.0',members:['c01','c04','c07','c09'],curator:'@madrugada.fm'},
+ {id:'b',no:3,name:'Pack Bancada aberta',nameEn:'Pack Bancada aberta',lic:'CC0-1.0',members:['c02','c03','c05','c10'],curator:'@bancada.sul'},
+];
+const AB_PAIRS=[['padrao','pref6',10,7],['harman','vdsf',10,4],['emv','analitico',12,9]]; // exemplo: [a, b, trials, b chosen]
+
+// ===================== curve math for display =====================
+const F601=Array.from({length:601},(_,i)=>20*1000**(i/600));
+const curveKey=(c)=>c.pre+'|'+c.bands.map((b)=>(b.kind==='OFF'?'OFF':`${b.kind},${b.freqHz},${b.gainDb},${b.qFactor}`)).join(';');
+const respCache=new Map(), gateCache=new Map();
+function response(c){ const k=curveKey(c); let r=respCache.get(k); if(!r){ r=Float64Array.from(F601,(f)=>magnitudeDb(c.bands,f)); respCache.set(k,r); } return r; }
+function gateCurve(c){ const k=curveKey(c); let g=gateCache.get(k); if(!g){ g=gate(c.bands,c.pre); gateCache.set(k,g); } return g; }
+const safeLevel=(c)=>{ try{ return levelDb(c.bands,c.pre); }catch{ return NaN; } };
+let ready=false;
+function distance(a,b){ const ra=response(a), rb=response(b); let s=0,m=0; for(let i=0;i<ra.length;i++){ const d=(ra[i]+a.pre)-(rb[i]+b.pre); s+=d*d; m=Math.max(m,Math.abs(d)); } return {rms:Math.sqrt(s/ra.length),max:m}; }
+function bandMean(c,lo,hi){ const r=response(c); let s=0,n=0; for(let i=0;i<F601.length;i++){ if(F601[i]>=lo&&F601[i]<=hi){ s+=r[i]; n++; } } return s/n; }
+function summary(c){ const mid=bandMean(c,300,1000); return {bass:bandMean(c,20,200)-mid,pres:bandMean(c,2000,5000)-mid,treble:bandMean(c,6000,12000)-mid}; }
+function valueAt(c,f){ const r=response(c); const i=clamp(Math.round(Math.log10(f/20)/3*600),0,600); return r[i]+c.pre; }
+
+// derivation inside the gate: cuts deeper, boosts smaller, small shifts above 300 Hz, lower preamp
+function derive(baseId,seed,strength,drop){
+ const base=toCurve(PRESETS[baseId]); const rand=mulberry32(hash32(seed));
+ const stats={cut:0,boost:0,shift:0};
+ const bands=base.bands.map((b)=>{
+  const u1=rand(), u2=rand(), u3=rand();
+  if(b.kind!=='PK'||b.freqHz<300) return {...b};
+  const shift=(u1*2-1)*0.06*strength;
+  const freqHz=Math.max(300,Math.round(b.freqHz*(1+shift)));
+  let gainDb;
+  if(b.gainDb<0){ const k=u2*0.15*strength; gainDb=Math.max(-25.5,r1(b.gainDb*(1+k))); stats.cut=Math.max(stats.cut,k); }
+  else{ const k=u2*0.2*strength; gainDb=r1(b.gainDb*(1-k)); stats.boost=Math.max(stats.boost,k); }
+  const qFactor=clamp(r2(b.qFactor*(1+(u3*2-1)*0.08*strength)),0.1,10);
+  stats.shift=Math.max(stats.shift,Math.abs(shift));
+  return {kind:'PK',freqHz,gainDb,qFactor};
+ });
+ if(Number.isInteger(drop)&&strength>0) bands[drop]={kind:'OFF'};
+ const trim=0.8+rand()*1.0;
+ const pre=Math.max(-25.5,r1(base.pre-trim));
+ return {curve:{pre,bands},stats,trim:r1(base.pre-pre),dropped:Number.isInteger(drop)&&strength>0?drop:null};
+}
+function buildHead(ch){
+ for(const k of [1,0.6,0.3,0]){
+  const d=derive(ch.base,ch.handle,ch.s*k,ch.drop);
+  if(gateCurve(d.curve).ok) return {...d,strength:ch.s*k};
+ }
+ return {curve:toCurve(PRESETS[ch.base]),stats:{cut:0,boost:0,shift:0},trim:0,dropped:null,strength:0};
+}
+function recipeOf(e){
+ if(e.type==='off') return T(`Curva oficial sem alterações. Descrição da Kuba: "${e.descPt}"`,`Official curve, unchanged. Kuba's description (translated): "${e.descEn}"`);
+ if(e.type==='link') return T('Curva recebida por link (X8). Receita não informada.','Curve received by link (X8). No recipe given.');
+ const st=e.derived.stats, pct=(x)=>num(x*100,0)+'%';
+ let s=T(`Base: ${LABEL[e.base]} (oficial). Cortes acima de 300 Hz até ${pct(st.cut)} mais fundos; reforços até ${pct(st.boost)} menores; frequências deslocadas até ±${pct(st.shift)}; preamp ${num(-e.derived.trim,1)} dB.`,
+  `Base: ${LABEL[e.base]} (official). Cuts above 300 Hz up to ${pct(st.cut)} deeper; boosts up to ${pct(st.boost)} smaller; frequencies shifted up to ±${pct(st.shift)}; preamp ${num(-e.derived.trim,1)} dB.`);
+ if(e.derived.dropped!==null) s+=T(` Seção ${e.derived.dropped+1} desligada (OFF).`,` Section ${e.derived.dropped+1} switched OFF.`);
+ return s;
+}
+
+// ===================== S1 compact share code (64 chars, proposal) =====================
+// bits: version 4 · preamp 8 (−0,1 dB) · 10 × [kind 2 · Hz 15 · gain 9 (0,1 dB, +256) · Q 10 (0,01, −1)] · CRC-16/CCITT 12 high bits
+const B64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function crc12(contentBits){
+ const padded=contentBits.concat([0,0,0,0]); const bytes=[];
+ for(let i=0;i<padded.length;i+=8){ let b=0; for(let j=0;j<8;j++) b=b*2+padded[i+j]; bytes.push(b); }
+ return crc16Ccitt(bytes)>>>4;
+}
+function encodeShare(c){
+ const bits=[]; const put=(v,n)=>{ for(let i=n-1;i>=0;i--) bits.push(Math.floor(v/2**i)%2); };
+ const pre=Math.round(-c.pre*10); if(!(pre>=0&&pre<=255)) throw new RangeError('S1: preamp');
+ put(1,4); put(pre,8);
+ for(const b of c.bands){
+  if(b.kind==='OFF'){ put(0,36); continue; }
+  const k={PK:1,LS:2}[b.kind]; if(!k) throw new RangeError('S1: kind');
+  const f=Math.round(b.freqHz), g=Math.round(b.gainDb*10)+256, q=Math.round(b.qFactor*100)-1;
+  if(f<1||f>32767||g<0||g>511||q<0||q>1023) throw new RangeError('S1: fora da grade');
+  put(k,2); put(f,15); put(g,9); put(q,10);
+ }
+ put(crc12(bits.slice()),12);
+ let out=''; for(let i=0;i<bits.length;i+=6){ let v=0; for(let j=0;j<6;j++) v=v*2+bits[i+j]; out+=B64[v]; }
+ return out;
+}
+function decodeShare(code){
+ if(!/^[A-Za-z0-9_-]{64}$/.test(code)) throw new RangeError('S1: 64 caracteres base64url');
+ const bits=[]; for(const ch of code){ const v=B64.indexOf(ch); for(let i=5;i>=0;i--) bits.push((v>>i)&1); }
+ let p=0; const get=(n)=>{ let v=0; for(let i=0;i<n;i++) v=v*2+bits[p++]; return v; };
+ if(get(4)!==1) throw new RangeError('S1: versão');
+ const pre=-get(8)/10; const bands=[];
+ for(let i=0;i<10;i++){
+  const k=get(2), f=get(15), g=get(9), q=get(10);
+  if(k===0) bands.push({kind:'OFF'});
+  else if(k===1||k===2) bands.push({kind:k===1?'PK':'LS',freqHz:f,gainDb:(g-256)/10,qFactor:(q+1)/100});
+  else throw new RangeError('S1: kind');
+ }
+ if(get(12)!==crc12(bits.slice(0,372))) throw new RangeError('S1: CRC');
+ return {pre:pre===0?0:pre,bands};
+}
+const codeOf=(c)=>{ try{ return encodeShare(c); }catch{ return null; } };
+
+// ===================== entities and state =====================
+const ENT=new Map();
+OFFICIAL.forEach(([id,label,dpt,den],i)=>ENT.set('o:'+id,{id:'o:'+id,type:'off',key:id,name:label,handle:'',descPt:dpt,descEn:den,curve:toCurve(PRESETS[id]),lic:'tbc',group:i<7?'pref':'ref'}));
+CHANNELS.forEach((c)=>ENT.set(c.id,{...c,type:'ch'}));
+// OA STORAGE CONTRACT v2: "sua curva" is the editor curve in "oa.v2.current" (re-gated by every reader).
+function storedCurrent(){
+ const c=OA.store.loadCurrent();
+ if(!c) return {pt:'Auri',en:'Auri',curve:toCurve(PRESETS.padrao),source:'preset:padrao'};
+ const curve={pre:c.preampDb,bands:c.bands.map((b)=>(b.kind==='OFF'?{kind:'OFF'}:{kind:b.kind,freqHz:b.freqHz,gainDb:b.gainDb,qFactor:b.qFactor}))};
+ return {pt:c.name,en:c.name,curve,source:c.source};
+}
+function persistCurrent(cur){ OA.store.saveCurrent({name:cur.pt,source:cur.source||'custom',preampDb:cur.curve.pre,bands:cur.curve.bands}); }
+const sourceOf=(e)=>(e.type==='ch'?'community:'+e.id:e.type==='off'?'preset:'+e.key:'import');
+const hasExperimental=(c)=>c.bands.some((b)=>EXPERIMENTAL_KINDS.has(b.kind));
+const state={
+ current:storedCurrent(),
+ sel:'c01',ver:null,solo:null,sort:'ch',search:'',unsaved:0,
+ rel:Object.fromEntries(CHANNELS.map((c)=>[c.id,c.rel])),vca:{m:10,b:10},
+};
+const pub={source:'',nameDirty:false,recipeDirty:false,lic:'CC-BY-4.0',steps:[0,0,0,0],env:null,gate:null,code:null};
+const ctl={};
+const hue=(s)=>hash32(s)%360;
+const licShort=(l)=>(l==='CC0-1.0'?'CC0':l==='CC-BY-4.0'?'CC-BY 4.0':T('a confirmar','TBC'));
+const licClass=(l)=>(l==='CC0-1.0'?'cc0':l==='CC-BY-4.0'?'ccby':'tbc');
+const entName=(e)=>(e.type==='off'?e.name:e.type==='link'?T('Curva do link','Curve from link'):e.name);
+const entBy=(e)=>(e.type==='off'?T('oficial','official'):e.handle||T('anônimo','anonymous'));
+
+// ===================== versions (S3, illustrative git history) =====================
+function describeDelta(a,b){
+ const parts=[];
+ b.bands.forEach((bb,j)=>{
+  const ab=a.bands[j];
+  if(ab.kind!==bb.kind){ parts.push({score:99,txt:`S${j+1}: ${ab.kind} → ${bb.kind}`}); return; }
+  if(bb.kind==='OFF') return;
+  const dg=Math.abs(bb.gainDb-ab.gainDb), df=Math.abs(Math.log2(bb.freqHz/ab.freqHz))*12;
+  if(dg>0.04) parts.push({score:dg+df*0.3,txt:`S${j+1} ${hz(bb.freqHz)}: ${num(ab.gainDb,1,true)} → ${num(bb.gainDb,1,true)} dB`});
+  else if(df>0.01) parts.push({score:df*0.3,txt:`S${j+1}: ${hz(ab.freqHz)} → ${hz(bb.freqHz)}`});
+ });
+ parts.sort((x,y)=>y.score-x.score);
+ let s=parts.length?parts[0].txt:'';
+ if(parts.length>1) s+=T(` (+${parts.length-1} seções)`,` (+${parts.length-1} sections)`);
+ if(Math.abs(a.pre-b.pre)>0.04) s+=`${s?'; ':''}preamp ${num(a.pre,1)} → ${num(b.pre,1)} dB`;
+ return s||T('sem mudança elétrica','no electrical change');
+}
+function versionsOf(e){
+ if(e.versions) return e.versions;
+ let vs=[];
+ if(e.type==='ch'){
+  const n=3+hash32(e.handle+'v')%3;
+  for(let k=1;k<=n;k++){
+   const curve=k===n?e.curve:derive(e.base,e.handle,e.derived.strength*k/n,k>=2?e.drop:undefined).curve;
+   vs.push({curve,merged:k===n?true:gateCurve(curve).ok});
+  }
+  if(e.refused&&vs[e.refused.after]){
+   const bad=cloneCurve(vs[e.refused.after].curve); const b=bad.bands[e.refused.idx];
+   if(b.kind!=='OFF') b.gainDb=e.refused.gain;
+   vs.splice(e.refused.after+1,0,{curve:bad,merged:false});
+  }
+  let day=Date.UTC(2026,0,6)+(hash32(e.handle+'d')%30)*864e5; const pr0=12+hash32(e.handle+'p')%160;
+  vs.forEach((v,i)=>{ day+=(19+hash32(e.handle+i)%26)*864e5; v.date=day; v.hash=hash32(e.handle+'#'+i).toString(16).padStart(8,'0').slice(0,7); v.pr=pr0+i*4+hash32(e.handle+'r'+i)%3; });
+ }else if(e.type==='off'){
+  vs=[{curve:e.curve,merged:true,date:Date.UTC(2026,9,1),hash:hash32(e.id).toString(16).padStart(8,'0').slice(0,7),pr:1}];
+ }
+ let last=-1; vs.forEach((v,i)=>{ v.prev=last; if(v.merged) last=i; });
+ e.head=last; e.versions=vs; return vs;
+}
+function curVer(vs){ return state.ver===null?vs.length-1:clamp(state.ver,0,vs.length-1); }
+function versionMsg(e,vs,i){
+ const v=vs[i];
+ if(e.type==='off') return T('importa as 11 curvas oficiais','imports the 11 official curves');
+ if(v.prev<0) return T(`primeira versão, a partir de ${LABEL[e.base]}`,`first version, from ${LABEL[e.base]}`);
+ return describeDelta(vs[v.prev].curve,v.curve);
+}
+function deltaColor(v,vs){
+ if(!v.merged) return 'var(--danger)';
+ if(v.prev<0) return '#cfe6ff';
+ const d=distance(vs[v.prev].curve,v.curve).rms;
+ return d<0.3?'#7fd6ff':d<1?'#ffb547':'#ff7ad9';
+}
+
+// ===================== scoped / target =====================
+function selEnt(){ return ENT.get(state.sel)||ENT.get('c01'); }
+function selection(){
+ const e=selEnt(); const vs=versionsOf(e);
+ if(!vs.length) return {ent:e,curve:e.curve,version:null,vi:-1};
+ const vi=curVer(vs); return {ent:e,curve:vs[vi].curve,version:vs[vi],vi};
+}
+function scoped(){
+ if(state.solo&&state.solo.startsWith('pack:')) return {pack:PACKS.find((p)=>'pack:'+p.id===state.solo)};
+ if(state.solo){ const e=ENT.get(state.solo); return {ent:e,curve:e.curve,solo:true}; }
+ return selection();
+}
+function target(){ const s=scoped(); return s.pack?selection():s; }
+function targetLabel(t){
+ const e=t.ent; let s=`${entName(e)} · ${entBy(e)}`;
+ if(t.version&&e.type==='ch'){ const vs=versionsOf(e); s+=` · ${t.version.hash}${t.vi===vs.length-1?' (HEAD)':''}`; }
+ return s;
+}
+
+// ===================== glyph (S8: the curve as identity) =====================
+function glyphPath(c,R0=17,k=0.95){
+ const r=response(c); const N=96; let d='';
+ for(let j=0;j<=N;j++){
+  const i=Math.round(j/N*600), a=-Math.PI/2+j/N*2*Math.PI, rad=R0+clamp(r[i],-15,10)*k;
+  d+=(j?'L':'M')+(Math.cos(a)*rad).toFixed(2)+' '+(Math.sin(a)*rad).toFixed(2);
+ }
+ return d+'Z';
+}
+function glyphSvg(c,h,size,label){
+ return `<svg class="glyph" viewBox="-30 -30 60 60" width="${size}" height="${size}" role="img" aria-label="${esc(label)}"><circle r="28.5" class="g-bg"/><circle r="17" class="g-zero"/><path d="${glyphPath(c)}" fill="hsl(${h} 70% 60% / .22)" stroke="hsl(${h} 80% 72%)" stroke-width="1.3" stroke-linejoin="round"/><line x1="0" y1="-29" x2="0" y2="-24" class="g-tick"/></svg>`;
+}
+
+// ===================== generic control: knob / fader with exact readout =====================
+class Ctl{
+ constructor(o){
+  Object.assign(this,{log:false,step:0.01,kind:'knob',round:null,parse:null,onChange:null},o);
+  this.v=o.value; this.editing=false;
+  this.hit=this.el.querySelector('[role="slider"]'); this.ro=this.el.querySelector('.readout');
+  this.hit.setAttribute('aria-valuemin',String(this.min)); this.hit.setAttribute('aria-valuemax',String(this.max));
+  if(this.kind==='fader') this.hit.setAttribute('aria-orientation','vertical');
+  this.bind(); this.paint();
+ }
+ toN(v){ return this.log?Math.log(v/this.min)/Math.log(this.max/this.min):(v-this.min)/(this.max-this.min); }
+ fromN(n){ n=clamp(n,0,1); return this.log?this.min*(this.max/this.min)**n:this.min+n*(this.max-this.min); }
+ set(v,emit=true){ if(!Number.isFinite(v)) return; v=clamp(v,this.min,this.max); if(this.round) v=this.round(v); if(v===this.v){ this.paint(); return; } this.v=v; this.paint(); if(emit&&this.onChange) this.onChange(v); }
+ nudge(mult){ this.set(this.fromN(this.toN(this.v)+this.step*mult)); }
+ paint(){
+  this.el.style.setProperty('--n',this.toN(this.v).toFixed(4));
+  this.hit.setAttribute('aria-valuenow',String(this.v));
+  this.hit.setAttribute('aria-valuetext',this.fmt(this.v));
+  this.hit.setAttribute('aria-label',this.label());
+  this.ro.setAttribute('aria-label',T(`${this.label()}: ${this.fmt(this.v)}. Clique para digitar`,`${this.label()}: ${this.fmt(this.v)}. Click to type`));
+  if(!this.editing) this.ro.textContent=this.fmt(this.v);
+ }
+ bind(){
+  const h=this.hit;
+  h.addEventListener('keydown',(e)=>{
+   const m=e.shiftKey?10:e.altKey?0.1:1; let d=0;
+   if(e.key==='ArrowUp'||e.key==='ArrowRight') d=1; else if(e.key==='ArrowDown'||e.key==='ArrowLeft') d=-1;
+   else if(e.key==='PageUp') d=10; else if(e.key==='PageDown') d=-10;
+   else if(e.key==='Home'){ e.preventDefault(); this.set(this.min); return; }
+   else if(e.key==='End'){ e.preventDefault(); this.set(this.max); return; }
+   else if(e.key==='Enter'){ e.preventDefault(); this.edit(); return; }
+   else if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); this.set(this.def); return; }
+   if(d){ e.preventDefault(); this.nudge(d*m); }
+  });
+  h.addEventListener('wheel',(e)=>{ e.preventDefault(); const dy=e.deltaY||e.deltaX; if(!dy) return; this.nudge((dy<0?1:-1)*(e.shiftKey?10:e.altKey?0.1:1)); },{passive:false});
+  h.addEventListener('dblclick',()=>this.set(this.def));
+  h.addEventListener('pointerdown',(e)=>{
+   if(e.button!==0) return; e.preventDefault(); h.focus(); h.setPointerCapture(e.pointerId);
+   const startN=this.toN(this.v), startY=e.clientY, rect=h.getBoundingClientRect();
+   const move=(ev)=>{
+    let n;
+    if(this.kind==='fader') n=1-(ev.clientY-rect.top-15)/(rect.height-30);
+    else n=startN+(startY-ev.clientY)/180*(ev.altKey?0.1:1);
+    this.set(this.fromN(n));
+   };
+   if(this.kind==='fader') move(e);
+   const up=()=>{ h.removeEventListener('pointermove',move); h.removeEventListener('pointerup',up); h.removeEventListener('pointercancel',up); };
+   h.addEventListener('pointermove',move); h.addEventListener('pointerup',up); h.addEventListener('pointercancel',up);
+  });
+  this.ro.addEventListener('click',()=>this.edit());
+ }
+ edit(){
+  if(this.editing) return; this.editing=true;
+  const inp=document.createElement('input'); inp.className='ro-input'; inp.type='text'; inp.inputMode='decimal';
+  inp.value=this.fmt(this.v).replace(/^±/,''); inp.setAttribute('aria-label',T(`Digite: ${this.label()}`,`Type: ${this.label()}`));
+  this.ro.hidden=true; this.ro.after(inp); inp.focus(); inp.select();
+  const done=(commit)=>{
+   if(!this.editing) return; this.editing=false;
+   if(commit){ const v=(this.parse||parseNum)(inp.value); if(Number.isFinite(v)) this.set(v); else toast(T('Valor não reconhecido.','Value not recognised.'),'bad'); }
+   inp.remove(); this.ro.hidden=false; this.paint(); this.hit.focus();
+  };
+  inp.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); done(true); } else if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); done(false); } });
+  inp.addEventListener('blur',()=>done(true));
+ }
+}
+
+// ===================== console: strips =====================
+const KCAPS={bass:'#9b2f2a',pres:'#c48a2c',treble:'#2f63a0',pre:'#8a8a84'};
+function roKnob(lbl,v,cap,n,valTxt,aria){
+ return `<div class="ro-knob"><span class="k-lbl">${lbl}</span><div class="knob" role="img" aria-label="${esc(aria)}" style="--cap:${cap};--n:${n.toFixed(3)}"><i class="sk"></i><i class="kb"></i><i class="cp"></i></div><span class="k-val">${valTxt}</span></div>`;
+}
+function stripHTML(c,i){
+ const e=ENT.get(c.id), s=summary(e.curve), g=gateCurve(e.curve), h=hue(c.handle), no=pad2(i+1);
+ const kn=(lbl,lblL,v,cap)=>roKnob(lbl,v,cap,clamp((v+12)/24,0,1),num(v,1,true),T(`${lblL} ${num(v,1,true)} dB, resumo da curva (média contra os médios)`,`${lblL} ${num(v,1,true)} dB, curve summary (mean against the mids)`));
+ return `<article class="strip" data-id="${c.id}" tabindex="-1" aria-label="${esc(T(`Canal ${no}: ${c.name}, ${c.handle} (exemplo)`,`Channel ${no}: ${c.name}, ${c.handle} (example)`))}">
+<div class="bridge-seg" aria-hidden="true"><div class="meter"><i class="cover"></i><i class="peak"></i></div><span class="chno">${no}</span></div>
+<div class="face"><span class="ex-tag">${T('exemplo','example')}</span>
+${glyphSvg(e.curve,h,58,T(`Avatar da curva ${c.name}: resposta de 20 Hz a 20 kHz em volta do círculo`,`Avatar of ${c.name}: response from 20 Hz to 20 kHz around the circle`))}
+<div class="knobs">${kn(T('GRAVE','BASS'),T('Grave','Bass'),s.bass,KCAPS.bass)}${kn(T('AGUDO','TREBLE'),T('Agudo','Treble'),s.treble,KCAPS.treble)}</div>
+<div class="leds"><span class="led ${g.ok?'on':'bad'}" role="img" aria-label="${g.ok?T('Passa no gate v2','Passes gate v2'):T('Recusada pelo gate v2','Refused by gate v2')}" title="gate v2">G</span><span class="led near" role="img" aria-label="${T('Perto da sua curva','Close to your curve')}">≈</span></div>
+<div class="btns"><button class="sq solo" type="button" aria-pressed="false" aria-label="${esc(T(`Solo: ${c.name} no scope`,`Solo: ${c.name} on the scope`))}">SOLO</button><button class="sq sel" type="button" aria-pressed="false" aria-label="${esc(T(`Selecionar e abrir o cartão de ${c.name}`,`Select and open the card of ${c.name}`))}">SEL</button></div>
+<div class="fctl"><span class="f-lbl" aria-hidden="true">REL.</span><div class="fader" role="slider" tabindex="0"><i class="slot"></i><i class="cap"></i></div><button class="readout" type="button"></button></div>
+<div class="scribble" style="--tilt:${((hash32(c.id)%15)-7)/10}deg"><span class="m1">${esc(c.handle)}</span><span class="m2">${esc(c.name)}</span></div>
+</div></article>`;
+}
+function s7HTML(){
+ return `<article class="strip s7" aria-label="${esc(T('S7 Troca às cegas: em breve','S7 Blind trade: coming soon'))}">
+<div class="bridge-seg" aria-hidden="true"><div class="meter"><i class="cover"></i></div><span class="chno">S7</span></div>
+<div class="face"><span class="badge">${T('EM BREVE','COMING SOON')}</span>
+<div class="s7-off" aria-disabled="true">
+<svg class="glyph" viewBox="-30 -30 60 60" width="58" height="58" aria-hidden="true"><circle r="28.5" class="g-bg"/><circle r="17" class="g-zero"/><text x="0" y="7" text-anchor="middle" fill="#8f8a80" font-size="20" font-family="Georgia">?</text></svg>
+<div class="btns"><button class="sq" type="button" disabled aria-disabled="true">SOLO</button><button class="sq" type="button" disabled aria-disabled="true">SEL</button></div>
+</div>
+<p class="s7-note">${T('Precisa de um servidor; o open-auri começa 100% estático.','Needs a server; open-auri starts 100% static.')}</p>
+<div class="scribble" style="--tilt:.8deg"><span class="m1">${T('troca às cegas','blind trade')}</span><span class="m2">${T('EM BREVE','COMING SOON')}</span></div>
+</div></article>`;
+}
+function packMembers(p){ return p.members.map((id)=>ENT.get(id)); }
+function packDispersion(p){
+ const ms=packMembers(p); const mean=new Float64Array(601);
+ ms.forEach((m)=>{ const r=response(m.curve); for(let i=0;i<601;i++) mean[i]+=(r[i]+m.curve.pre)/ms.length; });
+ let tot=0; ms.forEach((m)=>{ const r=response(m.curve); let s=0; for(let i=0;i<601;i++){ const d=r[i]+m.curve.pre-mean[i]; s+=d*d; } tot+=Math.sqrt(s/601); });
+ return tot/ms.length;
+}
+function vcaHTML(p){
+ const ms=packMembers(p);
+ const paths=ms.map((m)=>`<path d="${glyphPath(m.curve)}" fill="none" stroke="hsl(${hue(m.handle||m.id)} 75% 70% / .7)" stroke-width=".8"/>`).join('');
+ const name=T(p.name,p.nameEn);
+ const fader=p.official?`<div class="fixed-plate">${T('não ordena','no sorting')}</div>`:`<div class="fctl"><span class="f-lbl" aria-hidden="true">${T('PESO','WEIGHT')}</span><div class="fader" role="slider" tabindex="0"><i class="slot"></i><i class="cap"></i></div><button class="readout" type="button"></button></div>`;
+ return `<article class="strip vca" data-pack="${p.id}" aria-label="${esc(`VCA ${p.no}: ${name}`)}">
+<div class="bridge-seg" aria-hidden="true"><div class="meter"><i class="cover"></i><i class="peak"></i></div><span class="chno">VCA ${p.no}</span></div>
+<div class="face"><span class="vca-plate">VCA ${p.no}</span><span class="ex-tag">${p.official?T('oficial','official'):T('exemplo','example')}</span>
+<svg class="glyph" viewBox="-30 -30 60 60" width="62" height="62" role="img" aria-label="${esc(T(`Sobreposição das ${ms.length} curvas do pack`,`Overlay of the pack's ${ms.length} curves`))}"><circle r="28.5" class="g-bg"/><circle r="17" class="g-zero"/>${paths}</svg>
+<span class="lic-badge ${licClass(p.lic)}">${licShort(p.lic)}</span>
+<div class="stat">${T('CURVAS','CURVES')}<b>${ms.length}</b></div>
+<div class="btns"><button class="sq solo" type="button" aria-pressed="false" aria-label="${esc(T(`Solo do pack ${name}: todas as curvas no scope`,`Solo pack ${name}: all curves on the scope`))}">SOLO</button><button class="sq sel" type="button" aria-label="${esc(T(`Abrir o pack ${name}`,`Open pack ${name}`))}">SEL</button></div>
+${fader}
+<div class="scribble" style="--tilt:${((hash32(p.id)%11)-5)/10}deg"><span class="m1">${p.official?T('11 curvas oficiais','11 official curves'):esc(p.curator)}</span><span class="m2">${esc(name)}</span></div>
+</div></article>`;
+}
+let meters=[];
+function buildBank(){
+ const bank=$('#bank');
+ bank.innerHTML=CHANNELS.map(stripHTML).join('')+s7HTML();
+ $('#vca-bank').innerHTML=PACKS.map(vcaHTML).join('');
+ CHANNELS.forEach((c)=>{
+  const root=bank.querySelector(`[data-id="${c.id}"] .fctl`);
+  ctl['f-'+c.id]=new Ctl({el:root,kind:'fader',min:0,max:10,value:state.rel[c.id],def:c.rel,step:0.01,round:(v)=>Math.round(v*100)/100,fmt:(v)=>num(v,2),
+   label:()=>T(`Relevância (exemplo, só ordena neste navegador): ${c.name}`,`Relevance (example, sorts in this browser only): ${c.name}`),
+   onChange:(v)=>{ state.rel[c.id]=v; scheduleSort(); }});
+ });
+ PACKS.filter((p)=>!p.official).forEach((p)=>{
+  const root=$(`#vca-bank [data-pack="${p.id}"] .fctl`);
+  ctl['v-'+p.id]=new Ctl({el:root,kind:'fader',min:0,max:10,value:state.vca[p.id],def:10,step:0.01,round:(v)=>Math.round(v*100)/100,fmt:(v)=>num(v,2),
+   label:()=>T(`Peso do pack (exemplo, multiplica a relevância dos membros): ${p.name}`,`Pack weight (example, multiplies member relevance): ${p.nameEn}`),
+   onChange:(v)=>{ state.vca[p.id]=v; scheduleSort(); }});
+ });
+ meters=$$('.strip .meter').map((el,i)=>{ const strip=el.closest('.strip'); return {el,id:strip.dataset.id||(strip.dataset.pack?'pack:'+strip.dataset.pack:'s7'),v:.3,pk:.4,ph:i*1.7}; });
+ updateBank();
+}
+let sortTimer=0;
+function scheduleSort(){ clearTimeout(sortTimer); sortTimer=setTimeout(()=>{ if(state.sort==='rel') updateBank(); },650); }
+const effRel=(c)=>state.rel[c.id]*(c.pack?state.vca[c.pack]/10:1);
+const norm=(s)=>String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+function updateBank(){
+ if(!ready) return;
+ const cur=state.current.curve, th=ctl.thresh?ctl.thresh.v:1.5, q=norm(state.search.trim());
+ const order=[...CHANNELS]; if(state.sort==='rel') order.sort((a,b)=>effRel(b)-effRel(a));
+ let shown=0, near=0;
+ order.forEach((c,i)=>{
+  const el=$(`#bank [data-id="${c.id}"]`); if(!el) return; const e=ENT.get(c.id);
+  el.style.order=String(i);
+  const d=distance(e.curve,cur).rms, isNear=d<=th; if(isNear) near++;
+  const led=el.querySelector('.led.near'); led.classList.toggle('on',isNear);
+  led.setAttribute('aria-label',T(`S4 RMS contra a sua curva: ${num(d,2)} dB${isNear?' (dentro do destaque)':''}`,`S4 RMS against your curve: ${num(d,2)} dB${isNear?' (within highlight)':''}`));
+  const hay=norm([c.handle,c.name,LABEL[c.base],c.tags,licShort(c.lic),c.lic].join(' '));
+  const match=!q||hay.includes(q); el.classList.toggle('dim',!match); if(match) shown++;
+  el.querySelector('.solo').setAttribute('aria-pressed',String(state.solo===c.id));
+  el.querySelector('.sel').setAttribute('aria-pressed',String(state.sel===c.id));
+  el.classList.toggle('selected',state.sel===c.id);
+ });
+ const s7=$('#bank .s7'); if(s7) s7.style.order='99';
+ $$('#vca-bank .strip').forEach((el)=>{ el.querySelector('.solo').setAttribute('aria-pressed',String(state.solo==='pack:'+el.dataset.pack)); });
+ $('#bank-count').textContent=T(`${shown} de ${CHANNELS.length} canais na busca · ${near} perto da sua curva (≈ até ${num(th,2)} dB RMS)`,`${shown} of ${CHANNELS.length} channels match · ${near} close to your curve (≈ up to ${num(th,2)} dB RMS)`);
+}
+
+// ===================== gate lamps =====================
+function lampData(g){
+ const has=(p)=>g.reasons.some((r)=>r.startsWith(p)); const m=g.metrics; const codec=has('f:'); const secs=m.sections||[];
+ const maxPole=secs.length?Math.max(...secs.map((s)=>s.poleRadius)):NaN;
+ const maxPeak=secs.length?Math.max(...secs.map((s)=>s.fullPeak.db)):NaN;
+ const na=codec;
+ return [
+  {k:'a',ok:!codec&&!has('a:'),na,t:T('coeficientes por posição','per-position coefficients'),v:codec?'–':T('10 seções','10 sections')},
+  {k:'b',ok:!codec&&!has('b:'),na,t:`${T('raio de polo','pole radius')} ≤ ${num(THRESHOLDS.poleRadius,5)}`,v:num(maxPole,5)},
+  {k:'c',ok:!codec&&!has('c:'),na,t:`${T('pico por seção','section peak')} ≤ ${num(THRESHOLDS.sectionPeakDb,1,true)} dB`,v:`${num(maxPeak,2,true)} dB`},
+  {k:'d',ok:!codec&&!has('d:'),na,t:`${T('prefixos','prefixes')} ≤ ${num(THRESHOLDS.internalAudibleDb,4)} dB`,v:m.internalAudible?`${num(m.internalAudible.db,3,true)} dB`:'–'},
+  {k:'e',ok:!codec&&!has('e:output-audible'),na,t:`${T('saída 20 Hz–20 kHz','output 20 Hz–20 kHz')} ≤ ${num(THRESHOLDS.outputAudibleDb,4)} dB`,v:m.outputAudible?`${num(m.outputAudible.db,3,true)} dB`:'–'},
+  {k:'e',ok:!codec&&!has('e:output-full'),na,t:`${T('saída 0–48 kHz','output 0–48 kHz')} ≤ ${num(THRESHOLDS.outputFullDb,4,true)} dB`,v:m.outputFull?`${num(m.outputFull.db,3,true)} dB`:'–'},
+  {k:'g',ok:!codec&&!has('g:'),na,t:`preamp ${num(THRESHOLDS.preampMinDb,1)}…${num(THRESHOLDS.preampMaxDb,1)} dB`,v:Number.isFinite(m.preampDb)?`${num(m.preampDb,1)} dB`:'–'},
+  {k:'f',ok:!codec,na:false,t:'codec Q27/Q23',v:codec?g.reasons[0].replace(/^f:codec:/,''):(m.payloadCrc||'')},
+ ];
+}
+function lampsHTML(g){
+ return lampData(g).map((l)=>`<span class="gl ${l.ok?'':(l.na?'na':'bad')}" role="img" aria-label="${esc(`${l.k} · ${l.t}: ${l.v}, ${l.ok?T('ok','ok'):l.na?T('não avaliado','not evaluated'):T('recusado','refused')}`)}"><i></i>${l.k} · ${esc(l.t)} · <b>${esc(l.v)}</b></span>`).join('');
+}
+
+// ===================== master scope =====================
+let lastSelD='';
+function renderScope(){
+ if(!ready) return;
+ const sc=scoped(), cur=state.current.curve, svg=$('#scope');
+ const W=760,H=300,L=44,R=12,Tp=12,B=26, pw=W-L-R, ph=H-Tp-B, rg=ctl.range?ctl.range.v:12;
+ const X=(f)=>L+Math.log10(f/20)/3*pw, Y=(db)=>Tp+(rg-clamp(db,-rg,rg))/(2*rg)*ph;
+ const pathD=(c)=>{ const r=response(c); let d=''; for(let i=0;i<601;i++) d+=(i?'L':'M')+X(F601[i]).toFixed(1)+' '+Y(r[i]+c.pre).toFixed(1); return d; };
+ let g='';
+ [20,50,100,200,500,1000,2000,5000,10000,20000].forEach((f)=>{ g+=`<line class="gr" x1="${X(f).toFixed(1)}" x2="${X(f).toFixed(1)}" y1="${Tp}" y2="${Tp+ph}"/><text class="gt" x="${X(f).toFixed(1)}" y="${H-8}" text-anchor="middle">${f>=1000?f/1000+'k':f}</text>`; });
+ const stepDb=rg<=6?1:rg<=12?3:6;
+ for(let d=-Math.floor(rg/stepDb)*stepDb;d<=rg+1e-9;d+=stepDb){ g+=`<line class="${d===0?'gr gr0':'gr'}" x1="${L}" x2="${L+pw}" y1="${Y(d).toFixed(1)}" y2="${Y(d).toFixed(1)}"/><text class="gt" x="${L-6}" y="${(Y(d)+3).toFixed(1)}" text-anchor="end">${num(d,0,true)}</text>`; }
+ const curD=pathD(cur); const cx=X(ctl.cursor?ctl.cursor.v:1000);
+ let aria='', legend='';
+ if(sc.pack){
+  const ms=packMembers(sc.pack);
+  ms.forEach((m)=>{ g+=`<path class="tr-member" d="${pathD(m.curve)}" style="stroke:hsl(${hue(m.handle||m.id)} 75% 68%)"/>`; });
+  g+=`<path class="tr-cur" d="${curD}"/>`;
+  lastSelD='';
+  aria=T(`Scope: as ${ms.length} curvas do ${sc.pack.name} sobre a sua curva`,`Scope: the ${ms.length} curves of ${sc.pack.nameEn} over your curve`);
+  legend=`<span><i class="sw sel"></i>SOLO · ${esc(T(sc.pack.name,sc.pack.nameEn))} (${ms.length})</span><span><i class="sw cur"></i>${T('sua curva','your curve')}: ${esc(T(state.current.pt,state.current.en))}</span>`;
+  $('#d-rms').textContent='–'; $('#d-max').textContent='–';
+  $('#cursor-read').textContent=`${hz(ctl.cursor.v)} · ${T('sua','yours')} ${num(valueAt(cur,ctl.cursor.v),2,true)} dB`;
+ }else{
+  const selD=pathD(sc.curve);
+  const back=curD.replace(/^M/,'L').split('L').filter(Boolean).reverse().map((p)=>'L'+p).join('');
+  g+=`<path class="tr-area" d="${selD}${back}Z"/>`;
+  if(lastSelD&&lastSelD!==selD&&!REDUCED) g+=`<path class="tr-ghost" d="${lastSelD}"/>`;
+  g+=`<path class="tr-cur" d="${curD}"/><path class="tr-sel" d="${selD}"/>`;
+  lastSelD=selD;
+  const dist=distance(sc.curve,cur), f=ctl.cursor.v, a=valueAt(sc.curve,f), b=valueAt(cur,f);
+  g+=`<circle class="cursor-dot" cx="${cx.toFixed(1)}" cy="${Y(a).toFixed(1)}" r="3.5"/>`;
+  $('#d-rms').textContent=`${num(dist.rms,2)} dB`; $('#d-max').textContent=`${num(dist.max,2)} dB`;
+  $('#cursor-read').innerHTML=`${hz(f)}<br>${T('seleção','selection')} ${num(a,2,true)} dB<br>${T('sua','yours')} ${num(b,2,true)} dB · Δ ${num(a-b,2,true)} dB`;
+  aria=T(`Scope: ${targetLabel(sc)} contra a sua curva. S4 RMS ${num(dist.rms,2)} dB, máximo ${num(dist.max,2)} dB, 20 Hz a 20 kHz com preamp.`,`Scope: ${targetLabel(sc)} against your curve. S4 RMS ${num(dist.rms,2)} dB, max ${num(dist.max,2)} dB, 20 Hz to 20 kHz with preamp.`);
+  legend=`<span><i class="sw sel"></i>${sc.solo?'SOLO · ':''}${esc(targetLabel(sc))}</span><span><i class="sw cur"></i>${T('sua curva','your curve')}: ${esc(T(state.current.pt,state.current.en))}</span><span class="muted">${T('resposta elétrica calculada, com preamp; não é áudio ao vivo','calculated electrical response, with preamp; not live audio')}</span>`;
+ }
+ g+=`<line class="cursor-line" x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${Tp}" y2="${Tp+ph}"/>`;
+ svg.innerHTML=g; svg.setAttribute('aria-label',aria);
+ $('#scope-legend').innerHTML=legend;
+ $('#solo-lamp').classList.toggle('on',!!state.solo);
+ const t=target(), code=codeOf(t.curve), codeCur=codeOf(cur);
+ $('#scope-gate').innerHTML=lampsHTML(gateCurve(t.curve));
+ const oc=$('#open-curve'), cp=$('#open-compare');
+ oc.href='curva.html';
+ cp.href=code&&codeCur?`comparar.html#a=${codeCur}&b=${code}`:'comparar.html';
+ syncAb();
+}
+
+// ===================== OUVIR A/B (OA.audio, loudness-matched with levelDb) =====================
+const ab={on:false,which:'A',chains:null,key:'',ga:0,gb:0};
+function disposeAb(){ if(ab.chains){ ab.chains.A.dispose(); ab.chains.B.dispose(); ab.chains=null; } }
+function abCurves(){ return {a:target().curve,b:state.current.curve}; }
+function buildAb(){
+ const {a,b}=abCurves();
+ const la=safeLevel(a), lb=safeLevel(b);
+ [ab.ga,ab.gb]=Number.isFinite(la)&&Number.isFinite(lb)?OA.audio.matchGains([la,lb]):[0,0];
+ const A=OA.audio.buildChain(a.bands,a.pre,{gainDb:ab.ga,on:ab.which==='A'});
+ let B;
+ try{ B=OA.audio.buildChain(b.bands,b.pre,{gainDb:ab.gb,on:ab.which==='B'}); }catch(err){ A.dispose(); throw err; }
+ disposeAb(); ab.chains={A,B}; ab.key=curveKey(a)+'#'+curveKey(b);
+}
+async function abStart(){
+ try{ buildAb(); ab.on=true; await OA.audio.start('chains'); }
+ catch(err){ ab.on=false; disposeAb(); toast(T(`Prévia indisponível: ${err.message}`,`Preview unavailable: ${err.message}`),'bad'); }
+ renderAb();
+}
+function abStop(){ ab.on=false; disposeAb(); OA.audio.stop(); renderAb(); }
+function abSwitch(w){ ab.which=w; if(ab.chains){ ab.chains.A.setGain(ab.ga,w==='A'); ab.chains.B.setGain(ab.gb,w==='B'); } renderAb(); }
+function syncAb(){
+ if(ab.on){ const {a,b}=abCurves(); if(curveKey(a)+'#'+curveKey(b)!==ab.key){ try{ buildAb(); }catch(err){ abStop(); toast(T(`Prévia indisponível: ${err.message}`,`Preview unavailable: ${err.message}`),'bad'); return; } } }
+ renderAb();
+}
+function renderAb(){
+ const play=$('#ab-play'); if(!play) return;
+ play.setAttribute('aria-pressed',String(ab.on)); play.textContent=ab.on?T('■ Parar','■ Stop'):T('▶ Ouvir','▶ Listen');
+ $('#ab-a').setAttribute('aria-pressed',String(ab.which==='A')); $('#ab-b').setAttribute('aria-pressed',String(ab.which==='B'));
+ const {a,b}=abCurves(), la=safeLevel(a), lb=safeLevel(b);
+ const [ga,gb]=Number.isFinite(la)&&Number.isFinite(lb)?OA.audio.matchGains([la,lb]):[0,0];
+ const s=OA.audio.state(), src=s.file?s.file.name:T('ruído rosa','pink noise');
+ $('#ab-read').innerHTML=`${T('nível casado (300 Hz–3 kHz)','level-matched (300 Hz–3 kHz)')}: A ${num(ga,1,true)} dB · B ${num(gb,1,true)} dB<br><span class="muted">${T('fonte','source')}: ${esc(src)} · ${T('prévia no navegador, não é o cabo','browser preview, not the cable')}${s.ready&&!s.exact?' · '+T('aproximada','approximate'):''}</span>`;
+}
+
+// ===================== total recall =====================
+function renderRecall(){
+ const e=selEnt(), vs=versionsOf(e);
+ const head=$('#recall-head'), list=$('#commits'), grid=$('#recall-grid'), dsvg=$('#delta'), dread=$('#delta-read');
+ const chNo=e.type==='ch'?T('CANAL ','CHANNEL ')+pad2(CHANNELS.findIndex((c)=>c.id===e.id)+1):e.type==='off'?T('REFERÊNCIA','REFERENCE'):'LINK';
+ head.innerHTML=`<span>${chNo} · ${esc(entName(e))}</span><small>${esc(entBy(e))} · ${T('repositório de curvas (exemplo)','curves repository (example)')}</small>`;
+ $('#recall-legend').innerHTML=[['#cfe6ff',T('primeira','first')],['#7fd6ff',T('Δ < 0,3 dB','Δ < 0.3 dB')],['#ffb547',T('Δ < 1 dB','Δ < 1 dB')],['#ff7ad9',T('Δ ≥ 1 dB','Δ ≥ 1 dB')],['var(--danger)',T('recusada pela CI','refused by CI')]].map(([c,l])=>`<span><i style="--c:${c}"></i>${l}</span>`).join('');
+ if(!vs.length){
+  list.innerHTML=`<li style="font-size:17px">${T('Curva vinda de link (X8): sem histórico no repositório.','Curve from a link (X8): no history in the repository.')}</li>`;
+  grid.innerHTML=''; dsvg.innerHTML=''; dread.textContent=''; return;
+ }
+ const vi=curVer(vs);
+ list.innerHTML=vs.map((v,i)=>{
+  const g=v.merged?null:gateCurve(v.curve);
+  const st=v.merged?(i===vs.length-1?'HEAD · gate ok':'merge · gate ok'):`PR #${v.pr} ${T('fechado','closed')} · CI: ${g.reasons[0]||''}`;
+  const dl=v.prev>=0?`ΔRMS ${num(distance(vs[v.prev].curve,v.curve).rms,2)}`:'';
+  return `<li><button class="commit${v.merged?'':' refused'}" type="button" data-v="${i}" aria-pressed="${i===vi}"><span class="cbar" style="--c:${deltaColor(v,vs)}"></span><span>${v.hash}</span><span>${fmtDate(v.date)}</span><span class="m">${esc(versionMsg(e,vs,i))}${dl?' · '+dl:''}</span><span class="st">${esc(st)}</span></button></li>`;
+ }).join('');
+ // recall grid: stored positions of this version against HEAD
+ const v=vs[vi], hd=vs[e.head], gv=v.merged?null:gateCurve(v.curve);
+ const pos=(g)=>clamp((g+12)/24*100,0,100);
+ let same=0;
+ const rows=v.curve.bands.map((b,j)=>{
+  const hb=hd.curve.bands[j];
+  const eq=b.kind===hb.kind&&(b.kind==='OFF'||(b.freqHz===hb.freqHz&&b.gainDb===hb.gainDb&&b.qFactor===hb.qFactor));
+  const bad=gv&&gv.reasons.some((r)=>r.endsWith(`stage-${j+1}`));
+  if(eq) same++;
+  let st='OK';
+  if(bad) st=T('RECUSA','REFUSED');
+  else if(!eq){ const dg=(b.gainDb||0)-(hb.gainDb||0); st=Math.abs(dg)>0.04?`${dg>0?'↑':'↓'} ${num(Math.abs(dg),1)} dB`:(b.freqHz!==hb.freqHz?'f':'Q'); }
+  const gb=b.kind==='OFF'?0:b.gainDb, gh=hb.kind==='OFF'?0:hb.gainDb;
+  return `<div class="rc ${bad?'bad':eq?'ok':'diff'}"><span>S${j+1}</span><span class="rc-k">${b.kind}</span><span>${b.kind==='OFF'?'–':hz(b.freqHz)}</span><span class="rc-bar" aria-hidden="true"><i class="mk head" style="left:${pos(gh)}%"></i><i class="mk ver" style="left:${pos(gb)}%"></i></span><span>${b.kind==='OFF'?'–':num(gb,1,true)}</span><span class="rc-q">${b.kind==='OFF'?'':'Q '+num(b.qFactor,2)}</span><span class="rc-s">${st}</span></div>`;
+ }).join('');
+ const title=vi===e.head?T('RECALL · esta é a versão atual (HEAD): nada a reajustar','RECALL · this is the current version (HEAD): nothing to reset'):T(`RECALL ${v.hash} · ${10-same} de 10 seções a reajustar a partir da HEAD · ◆ guardado ● HEAD`,`RECALL ${v.hash} · ${10-same} of 10 sections to reset from HEAD · ◆ stored ● HEAD`);
+ grid.innerHTML=`<div class="rc-title">${esc(title)}${v.curve.pre!==hd.curve.pre?` · preamp ${num(v.curve.pre,1)} / ${num(hd.curve.pre,1)} dB`:''}</div>${rows}`;
+ // delta chart vs previous merged version (S4)
+ if(v.prev<0){ dsvg.innerHTML=`<text x="210" y="60" text-anchor="middle" fill="#c08a3e" font-family="VT323,monospace" font-size="18">${T('primeira versão: sem anterior','first version: no previous one')}</text>`; dsvg.setAttribute('aria-label',T('Primeira versão, sem diferença a mostrar','First version, no difference to show')); dread.textContent=''; return; }
+ const p=vs[v.prev], ra=response(v.curve), rb=response(p.curve);
+ const d=Array.from(ra,(x,i)=>x+v.curve.pre-(rb[i]+p.curve.pre)); const mx=Math.max(...d.map(Math.abs)); const rg=Math.max(1,Math.ceil(mx*1.2));
+ const W=420,H=110,L=26,Tp=6,ph=H-Tp-16,pw=W-L-6; const X=(i)=>L+i/600*pw, Y=(x)=>Tp+(rg-clamp(x,-rg,rg))/(2*rg)*ph;
+ let path=''; d.forEach((x,i)=>{ path+=(i?'L':'M')+X(i).toFixed(1)+' '+Y(x).toFixed(1); });
+ const dist=distance(v.curve,p.curve);
+ dsvg.innerHTML=`<line x1="${L}" x2="${L+pw}" y1="${Y(0)}" y2="${Y(0)}" stroke="#ffb54755"/><text x="${L-4}" y="${Tp+8}" text-anchor="end" fill="#c08a3e" font-size="11" font-family="VT323,monospace">+${rg}</text><text x="${L-4}" y="${Tp+ph}" text-anchor="end" fill="#c08a3e" font-size="11" font-family="VT323,monospace">−${rg}</text><path d="${path}L${(L+pw).toFixed(1)} ${Y(0).toFixed(1)}L${L} ${Y(0).toFixed(1)}Z" fill="#ffb54722"/><path d="${path}" fill="none" stroke="${v.merged?'#ffb547':'#ff8a8e'}" stroke-width="1.6"/><text x="${L}" y="${H-2}" fill="#c08a3e" font-size="11" font-family="VT323,monospace">20 Hz</text><text x="${L+pw}" y="${H-2}" text-anchor="end" fill="#c08a3e" font-size="11" font-family="VT323,monospace">20 kHz</text>`;
+ dsvg.setAttribute('aria-label',T(`Diferença de ${v.hash} para ${p.hash}: RMS ${num(dist.rms,2)} dB, máximo ${num(dist.max,2)} dB`,`Difference from ${p.hash} to ${v.hash}: RMS ${num(dist.rms,2)} dB, max ${num(dist.max,2)} dB`));
+ dread.innerHTML=`Δ ${esc(v.hash)} − ${esc(p.hash)}<br>RMS ${num(dist.rms,2)} dB<br>${T('máx','max')} ${num(dist.max,2)} dB`;
+}
+
+// ===================== publish (on air) =====================
+const slug=(s)=>norm(s).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'curva';
+function syncPublish(){
+ const t=target(), key=curveKey(t.curve)+'|'+t.ent.id;
+ $('#pub-source').textContent=targetLabel(t);
+ if(key!==pub.source){
+  pub.source=key; resetSteps();
+  if(!pub.nameDirty) $('#pub-name').value=t.ent.type==='ch'?`${t.ent.name} (fork)`:`${entName(t.ent)} (fork)`;
+  if(!pub.recipeDirty) $('#pub-recipe').value=recipeOf(t.ent);
+ }
+ renderPublish();
+}
+function resetSteps(){ pub.steps=[0,0,0,0]; pub.env=null; pub.gate=null; pub.code=null; $('#ci-log').textContent=''; }
+function buildEnvelope(){
+ const t=target(), c=t.curve, g=gateCurve(c), code=codeOf(c), handle=$('#pub-handle').value.trim()||'@anonimo';
+ const env={
+  format:'open-auri/preset@1',
+  example:true,
+  name:$('#pub-name').value.trim()||'sem nome',
+  curator:handle,
+  license:pub.lic,
+  hardware:{chip:'CB5100',sampleRateHz:SAMPLE_RATE,sections:BAND_COUNT,channels:'one curve for both channels'},
+  preampDb:c.pre,
+  bands:c.bands.map((b)=>(b.kind==='OFF'?{kind:'OFF'}:{kind:b.kind,freqHz:b.freqHz,gainDb:b.gainDb,qFactor:b.qFactor})),
+  share:{s1:code,link:code?`curva.html#p=${code}&by=${encodeURIComponent(handle)}`:null},
+  recipe:{from:t.ent.type==='off'?t.ent.key:t.ent.type==='ch'?{curator:t.ent.handle,commit:t.version?t.version.hash:null,base:t.ent.base}:'link',text:$('#pub-recipe').value.trim()},
+  measures:{levelDb300to3k:Number.isFinite(safeLevel(c))?r4(safeLevel(c)):null,s4VsAuri:(()=>{ const d=distance(c,ENT.get('o:padrao').curve); return {rmsDb:r4(d.rms),maxDb:r4(d.max)}; })()},
+  gate:{version:'v2-envelope-observado',ok:g.ok,reasons:g.reasons,internalPeakDb:g.metrics.internalAudible?r4(g.metrics.internalAudible.db):null,outputPeakDb:g.metrics.outputAudible?r4(g.metrics.outputAudible.db):null,outputFullDb:g.metrics.outputFull?r4(g.metrics.outputFull.db):null,payloadCrc:g.metrics.payloadCrc||null},
+ };
+ return {env,g,code};
+}
+function renderPublish(){
+ $$('#steps .step').forEach((li,i)=>{
+  const s=pub.steps[i]; li.classList.toggle('done',s===2); li.classList.toggle('fail',s===3);
+  const btn=li.querySelector('button'); const enabled=i===0||pub.steps[i-1]===2;
+  btn.disabled=!enabled; btn.setAttribute('aria-disabled',String(!enabled));
+ });
+ const lit=!!(pub.env&&pub.gate&&pub.gate.ok);
+ $('#tally').classList.toggle('lit',lit); $('#mini-tally').classList.toggle('lit',lit);
+ $('#tally-cap').textContent=!pub.env?T('apagada: gere o envelope','off: generate the envelope'):lit?T('acesa: envelope passa no gate v2','lit: envelope passes gate v2'):T('apagada: o gate v2 recusou','off: gate v2 refused');
+ $('#json-out').textContent=pub.env?JSON.stringify(pub.env,null,2):T('// gere o envelope (passo 01)','// generate the envelope (step 01)');
+ const code=pub.code||codeOf(target().curve);
+ $('#s1-code').textContent=code?code.match(/.{1,16}/g).join(' '):'–';
+ $('#s1-link').textContent=code?`curva.html#p=${code}&by=${encodeURIComponent($('#pub-handle').value.trim()||'@anonimo')}`:'';
+}
+let ciTimer=0;
+function runStep(i){
+ const log=$('#ci-log');
+ if(i===0){
+  const {env,g,code}=buildEnvelope(); pub.env=env; pub.gate=g; pub.code=code; pub.steps=[g.ok?2:3,0,0,0];
+  log.innerHTML=g.ok?`<span class="ok">${esc(T('gate v2 local: ok. Envelope pronto para o pull request.','local gate v2: ok. Envelope ready for the pull request.'))}</span>`:`<span class="bad">${esc(T('gate v2 local recusou: ','local gate v2 refused: ')+g.reasons.join(', '))}</span>\n${esc(T('Nada segue para o GitHub. Ajuste a curva na página Curva.','Nothing goes to GitHub. Adjust the curve on the Curve page.'))}`;
+ }else if(i===1){
+  pub.steps[1]=2;
+  const who=($('#pub-handle').value.trim()||'@anonimo').replace(/^@/,'');
+  log.textContent=T(`[simulado] fork criado em github.com/${who}/<repositório-de-curvas>\nendereço oficial do repositório: a definir\nnenhum login aconteceu nesta página.`,`[simulated] fork created at github.com/${who}/<curves-repository>\nofficial repository address: to be defined\nno login happened on this page.`);
+ }else if(i===2){
+  pub.steps[2]=2;
+  const who=($('#pub-handle').value.trim()||'@anonimo').replace(/^@/,''), name=pub.env.name;
+  log.textContent=`${T('Título','Title')}: ${T('curva','curve')}: ${name} (@${who})\n${T('Arquivo','File')}: curves/${slug(who)}/${slug(name)}.json\n${T('Licença','Licence')}: ${pub.lic}\nS1: ${pub.code||'–'}\n\n- [x] ${T('envelope gerado no open-auri, gate v2 local ok','envelope generated in open-auri, local gate v2 ok')}\n- [x] ${T('licença escolhida para esta curva','licence chosen for this curve')}\n- [ ] ${T('a CI repete o gate; se recusar, o pull request não entra','CI repeats the gate; if it refuses, the pull request does not get in')}`;
+ }else if(i===3){
+  const g=pub.gate, m=g.metrics, l=lampData(g);
+  const lines=[`$ ci/validate curves/…/${slug(pub.env.name)}.json`,`schema open-auri/preset@1 ........ ok`,`S1 ${T('64 caracteres, CRC','64 characters, CRC')} ........ ${pub.code?(decodeOk(pub.code)?'ok':'FALHOU'):T('n/d: S1 v1 não codifica HS/LP/HP','n/a: S1 v1 cannot encode HS/LP/HP')}`,...l.map((x)=>`${x.k} ${x.t} ... ${x.v} ${x.ok?'ok':'FALHOU'}`),`${T('nível 300 Hz–3 kHz','level 300 Hz–3 kHz')} ${num(safeLevel(target().curve),2,true)} dB`,g.ok?T('merge → índice estático atualizado (simulado). No ar.','merge → static index updated (simulated). On air.'):T('recusado: o pull request não entra.','refused: the pull request does not get in.')];
+  log.textContent=''; clearTimeout(ciTimer);
+  let k=0; const step=()=>{ const ln=lines[k]; const span=document.createElement('span'); span.className=/FALHOU|recusado|refused/.test(ln)?'bad':/ok$|No ar|On air/.test(ln)?'ok':''; span.textContent=ln+'\n'; log.append(span); k++; if(k<lines.length) ciTimer=setTimeout(step,REDUCED?0:140); else { pub.steps[3]=g.ok?2:3; renderPublish(); toast(g.ok?T('Simulação: CI aprovou e publicou. Nada foi enviado a lugar nenhum.','Simulation: CI approved and published. Nothing was sent anywhere.'):T('Simulação: CI recusou.','Simulation: CI refused.'),g.ok?'':'bad'); } };
+  step(); return;
+ }
+ renderPublish();
+}
+function decodeOk(code){ try{ decodeShare(code); return true; }catch{ return false; } }
+
+// ===================== share desk (S10 / S8) =====================
+const xmlEsc=esc;
+function shareSvgString(){
+ const t=target(), a=state.current.curve, b=t.curve; const W=1200,H=630,L=90,R=60,Tp=170,B=110,pw=W-L-R,ph=H-Tp-B,rg=15;
+ const X=(f)=>L+Math.log10(f/20)/3*pw, Y=(db)=>Tp+(rg-clamp(db,-rg,rg))/(2*rg)*ph;
+ const path=(c)=>{ const r=response(c); let d=''; for(let i=0;i<601;i+=2) d+=(i?'L':'M')+X(F601[i]).toFixed(1)+' '+Y(r[i]+c.pre).toFixed(1); return d; };
+ const dist=distance(b,a), code=codeOf(b)||'';
+ let grid='';
+ [20,100,1000,10000,20000].forEach((f)=>{ grid+=`<line x1="${X(f)}" x2="${X(f)}" y1="${Tp}" y2="${Tp+ph}" stroke="#ffffff1a"/><text x="${X(f)}" y="${Tp+ph+24}" fill="#8f8a80" font-size="16" font-family="Arial" text-anchor="middle">${f>=1000?f/1000+' kHz':f+' Hz'}</text>`; });
+ [-12,-6,0,6,12].forEach((d)=>{ grid+=`<line x1="${L}" x2="${L+pw}" y1="${Y(d)}" y2="${Y(d)}" stroke="${d===0?'#ffffff40':'#ffffff14'}"/><text x="${L-10}" y="${Y(d)+5}" fill="#8f8a80" font-size="14" font-family="Arial" text-anchor="end">${d>0?'+':d<0?'−':''}${Math.abs(d)}</text>`; });
+ return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#121315"/><rect x="20" y="20" width="${W-40}" height="${H-40}" rx="18" fill="#1b1d20" stroke="#000"/>
+<text x="${L}" y="78" fill="#ece7dd" font-size="44" font-family="Georgia,serif" font-style="italic">${xmlEsc(entName(t.ent))}</text>
+<text x="${L}" y="112" fill="#c9c5bb" font-size="18" font-family="Arial">${xmlEsc(entBy(t.ent))} · ${xmlEsc(T('antes','before'))}: ${xmlEsc(T(state.current.pt,state.current.en))} · ${xmlEsc(T('depois','after'))}: ${xmlEsc(entName(t.ent))}</text>
+<text x="${W-R}" y="78" fill="#ffb547" font-size="26" font-family="Courier New,monospace" text-anchor="end">S4 RMS ${xmlEsc(num(dist.rms,2))} dB</text>
+<text x="${W-R}" y="112" fill="#c9c5bb" font-size="18" font-family="Courier New,monospace" text-anchor="end">${xmlEsc(T('máx','max'))} ${xmlEsc(num(dist.max,2))} dB</text>
+${grid}<path d="${path(a)}" fill="none" stroke="#cfe6ff" stroke-width="3" stroke-dasharray="10 8"/><path d="${path(b)}" fill="none" stroke="#ffb547" stroke-width="4.5"/>
+<text x="${L}" y="${H-46}" fill="#8f8a80" font-size="15" font-family="Courier New,monospace">${xmlEsc(T('tracejado: antes · contínuo: depois · resposta elétrica com preamp · exemplo','dashed: before · solid: after · electrical response with preamp · example'))}</text>
+<text x="${W-R}" y="${H-46}" fill="#8f8a80" font-size="13" font-family="Courier New,monospace" text-anchor="end">open-auri · #p=${xmlEsc(code)}</text></svg>`;
+}
+function qrSvg(seed){
+ const n=25, r=mulberry32(hash32(seed)); let rects='';
+ const inFinder=(x,y)=>(x<8&&y<8)||(x>=n-8&&y<8)||(x<8&&y>=n-8);
+ for(let y=0;y<n;y++) for(let x=0;x<n;x++){ if(!inFinder(x,y)&&r()<0.48) rects+=`<rect x="${x}" y="${y}" width="1" height="1"/>`; }
+ const finder=(x,y)=>`<rect x="${x}" y="${y}" width="7" height="7"/><rect x="${x+1}" y="${y+1}" width="5" height="5" fill="#fff"/><rect x="${x+2}" y="${y+2}" width="3" height="3"/>`;
+ return `<svg viewBox="-2 -2 ${n+4} ${n+4}" role="img" aria-label="${esc(T('QR ilustrativo, não escaneável','Illustrative QR, not scannable'))}"><rect x="-2" y="-2" width="${n+4}" height="${n+4}" fill="#fff"/><g fill="#111">${finder(0,0)}${finder(n-7,0)}${finder(0,n-7)}${rects}</g></svg>`;
+}
+function renderShare(){
+ $('#s10-preview').innerHTML=shareSvgString();
+ const sv=$('#s10-preview svg'); sv.setAttribute('role','img'); sv.setAttribute('aria-label',T('Prévia da imagem antes/depois (S10)','Before/after image preview (S10)'));
+ const t=target(), e=t.ent, code=codeOf(t.curve)||'';
+ const lic=e.type==='off'?T('licença a confirmar','licence TBC'):e.type==='ch'?licShort(e.lic):'–';
+ $('#print-card').innerHTML=`<div class="pc-glyph">${glyphSvg(t.curve,hue(e.handle||e.id),118,T(`Avatar de ${entName(e)}`,`Avatar of ${entName(e)}`))}</div><div><div class="pc-name">${esc(entName(e))}</div><div class="pc-h">${esc(entBy(e))}</div><div class="pc-code">${code.match(/.{1,16}/g)?.join('<br>')||''}</div><div class="pc-meta">S1 · ${esc(lic)} · ${e.type==='ch'?T('exemplo','example'):''} · open-auri</div></div><div class="qr-wrap">${qrSvg(code)}${T('QR ilustrativo','illustrative QR')}</div>`;
+}
+function download(name,blob){ const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),3000); }
+async function downloadPng(){
+ try{
+  const svg=shareSvgString(); const img=new Image();
+  await new Promise((res,rej)=>{ img.onload=res; img.onerror=()=>rej(new Error('svg')); img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg); });
+  const c=document.createElement('canvas'); c.width=1200; c.height=630; c.getContext('2d').drawImage(img,0,0);
+  const blob=await new Promise((res)=>c.toBlob(res,'image/png'));
+  if(!blob) throw new Error('png'); download(`open-auri-${slug(entName(target().ent))}.png`,blob);
+ }catch{ toast(T('Não deu para gerar o PNG neste navegador; baixe o SVG.','Could not render the PNG in this browser; download the SVG.'),'bad'); }
+}
+
+// ===================== talkback (S6) =====================
+function renderTalkback(){
+ $('#pairs').innerHTML=`<thead><tr><th>A</th><th>B</th><th>${T('rodadas','trials')}</th><th>${T('escolheu B','chose B')}</th></tr></thead><tbody>${AB_PAIRS.map(([a,b,n,k])=>`<tr><td>${esc(LABEL[a])}</td><td>${esc(LABEL[b])}</td><td>${n}</td><td>${k}/${n}</td></tr>`).join('')}</tbody>`;
+ const payload={format:'open-auri/ab-pairs@1',example:true,pseudonym:$('#tb-handle').value.trim(),consent:{terms:'rascunho-1',onlyAbPairs:$('#c1').checked,publicOnGithub:$('#c2').checked,researchAndWithdrawable:$('#c3').checked},source:'teste-cego.html (X2-web)',pairs:AB_PAIRS.map(([a,b,n,k])=>({a,b,trials:n,chosenB:k}))};
+ $('#tb-json').textContent=JSON.stringify(payload,null,2);
+ const ok=$('#c1').checked&&$('#c2').checked&&$('#c3').checked&&$('#tb-handle').value.trim().length>1;
+ const btn=$('#tb-send'); btn.disabled=!ok; btn.setAttribute('aria-disabled',String(!ok));
+}
+
+// ===================== dialogs =====================
+let pendingWrite=null;
+function openWrite(curve,label,cur){
+ pendingWrite={curve,label,cur:cur||{pt:label,en:label,curve,source:'custom'}}; const g=gateCurve(curve);
+ $('#write-curve').textContent=label;
+ $('#write-lamps').innerHTML=lampsHTML(g);
+ const dl=safeLevel(curve)-safeLevel(state.current.curve);
+ let msg='';
+ if(!g.ok) msg=`<p class="refusal">${esc(T('Recusado pelo gate v2: ','Refused by gate v2: ')+g.reasons.join(', ')+T('. Nada seria enviado ao cabo.','. Nothing would be sent to the cable.'))}</p>`;
+ else if(dl>0.5) msg=`<p class="warning">${esc(T(`Atenção ao volume: esta curva soa ${num(dl,1,true)} dB mais alto que a sua curva atual nos médios (300 Hz–3 kHz).`,`Mind the volume: this curve is ${num(dl,1,true)} dB louder than your current curve in the mids (300 Hz–3 kHz).`))}</p>`;
+ else msg=`<p class="warning">${esc(T(`Nível médio 300 Hz–3 kHz: ${num(dl,1,true)} dB contra a sua curva atual. Mesmo assim, abaixe o volume antes de gravar.`,`Mean level 300 Hz–3 kHz: ${num(dl,1,true)} dB against your current curve. Still, lower the volume before writing.`))}</p>`;
+ $('#write-msg').innerHTML=msg;
+ const exp=hasExperimental(curve);
+ $('#chk-vol').checked=false; $('#chk-flash').checked=false; $('#chk-exp').checked=false; $('#chk-vol').disabled=!g.ok; $('#chk-flash').disabled=!g.ok; $('#chk-exp').disabled=!g.ok;
+ $('#chk-exp-row').hidden=!exp;
+ const fc=OA.store.flashCounts();
+ $('#write-count').textContent=T(`Escritas simuladas neste navegador: sessão ${fc.session} · hoje ${fc.today} · total ${fc.total}.`,`Simulated writes in this browser: session ${fc.session} · today ${fc.today} · total ${fc.total}.`);
+ updateWriteBtn(); $('#write-dialog').showModal();
+}
+function updateWriteBtn(){ const ok=pendingWrite&&gateCurve(pendingWrite.curve).ok&&$('#chk-vol').checked&&$('#chk-flash').checked&&(!hasExperimental(pendingWrite.curve)||$('#chk-exp').checked); $('#write-confirm').disabled=!ok; }
+function openInCurva(cur){ persistCurrent(cur); location.href='curva.html'; }
+const curFromEnt=(e,curve)=>({pt:entName(e),en:entName(e),curve,source:sourceOf(e)});
+function openCard(id){
+ const e=ENT.get(id); const c=e.curve, g=gateCurve(c), code=codeOf(c)||'', d=distance(c,state.current.curve), h=hue(e.handle||e.id);
+ const rows=c.bands.map((b,j)=>`<tr><td>S${j+1}</td><td>${b.kind}</td><td>${b.kind==='OFF'?'–':hz(b.freqHz)}</td><td>${b.kind==='OFF'?'–':num(b.gainDb,1,true)+' dB'}</td><td>${b.kind==='OFF'?'–':num(b.qFactor,2)}</td></tr>`).join('');
+ const sm=summary(c), pk=e.type==='ch'?PACKS.find((p)=>p.id===e.pack):null;
+ const sumLine=`<p class="mono" style="margin-top:8px">${T('Resumo (média contra os médios 300 Hz–1 kHz)','Summary (mean against the 300 Hz–1 kHz mids)')}: ${T('grave','bass')} ${num(sm.bass,1,true)} · ${T('presença','presence')} ${num(sm.pres,1,true)} · ${T('agudo','treble')} ${num(sm.treble,1,true)} dB${e.type==='ch'?` · ${pk?`VCA ${pk.no} · ${esc(T(pk.name,pk.nameEn))}`:T('sem VCA','no VCA')} · ${T('relevância (exemplo)','relevance (example)')} ${num(state.rel[e.id],2)}`:''}</p>`;
+ const desc=e.type==='off'?`<p style="margin-top:8px">${T('Descrição da Kuba','Kuba\'s description')}: "${esc(T(e.descPt,e.descEn))}"</p>`:'';
+ $('#card-body').innerHTML=`<div class="dlg-top"><span class="caps">${e.type==='ch'?T('Cartão do canal · exemplo','Channel card · example'):T('Cartão da curva','Curve card')}</span><button class="close" type="button" data-close="card-dialog" aria-label="${T('Fechar','Close')}">×</button></div>
+<div class="card-top">${glyphSvg(c,h,150,T(`Avatar de ${entName(e)}`,`Avatar of ${entName(e)}`))}<div><h2 id="card-title">${esc(entName(e))}</h2><p class="mono">${esc(entBy(e))} · ${e.type==='ch'?licShort(e.lic):T('licença a confirmar','licence TBC')} · preamp ${num(c.pre,1)} dB · S4 ${T('contra a sua','vs yours')} ${num(d.rms,2)} / ${num(d.max,2)} dB</p>${sumLine}${desc}<p style="margin-top:8px">${esc(recipeOf(e))}</p><p class="mono" style="margin-top:8px;color:#ffdca6;word-break:break-all">S1 ${esc(code)}</p></div></div>
+<div class="gate-row" style="margin-top:12px">${lampsHTML(g)}</div>
+<table class="band-table"><thead><tr><th>${T('Seção','Section')}</th><th>${T('Tipo','Kind')}</th><th>Hz</th><th>${T('Ganho','Gain')}</th><th>Q</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="dlg-actions"><button class="btn" type="button" data-act="solo" data-id="${e.id}">SOLO</button><button class="btn" type="button" data-act="recall" data-id="${e.id}">${T('Ver no Total Recall','View in Total Recall')}</button><a class="btn" href="curva.html" data-act="open-curve" data-id="${e.id}">${T('Abrir na Curva','Open in Curve')}</a><a class="btn" href="comparar.html#a=${codeOf(state.current.curve)||''}&amp;b=${code}">${T('Comparar','Compare')}</a><button class="btn primary" type="button" data-act="publish" data-id="${e.id}">${T('Fazer fork e publicar','Fork and publish')}</button></div>`;
+ const dlg=$('#card-dialog'); if(!dlg.open) dlg.showModal();
+}
+function openPack(pid){
+ const p=PACKS.find((x)=>x.id===pid); const ms=packMembers(p);
+ $('#card-body').innerHTML=`<div class="dlg-top"><span class="caps">S9 · VCA ${p.no} · ${p.official?T('oficial','official'):T('exemplo','example')}</span><button class="close" type="button" data-close="card-dialog" aria-label="${T('Fechar','Close')}">×</button></div>
+<h2 id="card-title">${esc(T(p.name,p.nameEn))} <span class="lic-badge ${licClass(p.lic)}">${licShort(p.lic)}</span></h2>
+<p>${p.official?T('As 11 curvas da página oficial, na ordem de lá: 1 a 7 em "Curvas de preferência", 8 a 11 em "Curvas de referência". Licença a confirmar. Nomes são só nomes, não marcas.','The 11 curves from the official page, in their order: 1 to 7 under "Preference curves", 8 to 11 under "Reference curves". Licence to be confirmed. Names are names only, not brands.'):T(`Pack curado por ${p.curator}. A licença vale por curva e aparece em cada linha. Dispersão RMS média: ${num(packDispersion(p),2)} dB.`,`Pack curated by ${p.curator}. Licence applies per curve and is shown on each row. Mean RMS spread: ${num(packDispersion(p),2)} dB.`)}</p>
+<ul class="member-list">${ms.map((m,i)=>`<li><span>${p.official&&i===7?`<small>${T('Curvas de referência','Reference curves')}</small>`:''}${p.official&&i===0?`<small>${T('Curvas de preferência','Preference curves')}</small>`:''}${esc(entName(m))} <small>${esc(entBy(m))}${m.type==='off'?' · '+T('descrição da Kuba','Kuba\'s description')+': '+esc(T(m.descPt,m.descEn)):''}</small></span><span class="lic-badge ${licClass(m.lic)}">${licShort(m.lic)}</span><button class="btn" type="button" data-act="select" data-id="${m.id}">${T('Selecionar','Select')}</button></li>`).join('')}</ul>
+<div class="dlg-actions"><button class="btn" type="button" data-act="pack-json" data-id="${p.id}">${T('Exportar pack (JSON)','Export pack (JSON)')}</button></div>`;
+ const dlg=$('#card-dialog'); if(!dlg.open) dlg.showModal();
+}
+
+// ===================== actions =====================
+function select(id,ver=null){ state.sel=id; state.ver=ver; renderSelection(); }
+function toggleSolo(id){ state.solo=state.solo===id?null:id; updateBank(); renderScope(); syncPublish(); renderShare(); }
+function renderSelection(){ updateBank(); renderScope(); renderRecall(); syncPublish(); renderShare(); }
+function setCurrent(c){
+ if(curveKey(c.curve)!==curveKey(state.current.curve)) state.unsaved++;
+ state.current=c; persistCurrent(c); updateChrome(); updateBank(); renderScope(); renderShare();
+ toast(T(`Sua curva agora: ${c.pt}. Nada foi gravado.`,`Your curve is now: ${c.en}. Nothing was written.`));
+}
+function updateChrome(){ const n=state.unsaved; $('#unsaved').textContent=lang==='pt'?(n===1?'1 alteração não gravada':`${n} alterações não gravadas`):(n===1?'1 unsaved change':`${n} unsaved changes`); }
+let toastTimer=0;
+function toast(msg,kind=''){ const el=$('#toast'); el.textContent=msg; el.className='toast'+(kind?' '+kind:''); el.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>{ el.hidden=true; },4200); }
+async function copy(text,what){
+ try{ await navigator.clipboard.writeText(text); toast(T(`Copiado: ${what}`,`Copied: ${what}`)); }
+ catch{
+  const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.opacity='0'; document.body.append(ta); ta.select();
+  let ok=false; try{ ok=document.execCommand('copy'); }catch{ ok=false; } ta.remove();
+  toast(ok?T(`Copiado: ${what}`,`Copied: ${what}`):T('Não deu para copiar; selecione o texto à mão.','Could not copy; select the text manually.'),ok?'':'bad');
+ }
+}
+function absLink(rel){ try{ return new URL(rel,location.href).href; }catch{ return rel; } }
+
+// ===================== i18n =====================
+function applyLang(){
+ document.documentElement.lang=lang==='pt'?'pt-BR':'en';
+ $$('[data-en]').forEach((el)=>{ if(el.dataset.pt===undefined) el.dataset.pt=el.textContent; el.textContent=lang==='pt'?el.dataset.pt:el.dataset.en; });
+ $$('[data-en-label]').forEach((el)=>{ if(el.dataset.ptLabel===undefined) el.dataset.ptLabel=el.getAttribute('aria-label')||''; el.setAttribute('aria-label',lang==='pt'?el.dataset.ptLabel:el.dataset.enLabel); });
+ $$('[data-en-ph]').forEach((el)=>{ if(el.dataset.ptPh===undefined) el.dataset.ptPh=el.placeholder; el.placeholder=lang==='pt'?el.dataset.ptPh:el.dataset.enPh; });
+ const lb=$('#language'); lb.children[0].classList.toggle('inactive',lang!=='pt'); lb.children[1].classList.toggle('inactive',lang==='pt'); lb.setAttribute('aria-label',lang==='pt'?'Switch to English':'Mudar para português');
+ $('#commits').setAttribute('aria-label',T('Histórico de versões (exemplo)','Version history (example)'));
+ document.title=T('Comunidade · open-auri','Community · open-auri');
+ OA.audioUI.setLang(lang);
+ Object.values(ctl).forEach((c)=>c.paint());
+ buildBank(); renderScope(); renderRecall(); renderPublish(); $('#pub-source').textContent=targetLabel(target()); renderShare(); renderTalkback(); updateChrome();
+}
+
+// ===================== background =====================
+function buildStadium(){
+ const st=$('#stadium'), r=mulberry32(19850713), cols=['255,236,200','255,190,120','190,210,255','255,140,200','160,255,220'];
+ let h='';
+ for(let i=0;i<34;i++){
+  const x=r()*100, y=3+r()*42, s=10+r()*72, c=cols[Math.floor(r()*cols.length)];
+  h+=`<i style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;width:${s.toFixed(0)}px;height:${s.toFixed(0)}px;background:radial-gradient(circle,rgba(${c},.9),rgba(${c},0) 70%);--o1:${(0.05+r()*0.16).toFixed(2)};--o2:${(0.16+r()*0.34).toFixed(2)};--d:${(9+r()*16).toFixed(1)}s;--dl:${(-r()*20).toFixed(1)}s;--dx:${((r()-.5)*30).toFixed(0)}px;--dy:${((r()-.5)*14).toFixed(0)}px"></i>`;
+ }
+ st.insertAdjacentHTML('beforeend',h);
+}
+let lastTick=0;
+function tick(ts){
+ if(ts-lastTick>85){
+  lastTick=ts;
+  for(const m of meters){
+   if(m.id==='s7'){ m.el.style.setProperty('--lv','0'); continue; }
+   let tgt=0.3+0.42*Math.abs(Math.sin(ts/1400*(0.55+(m.ph%1)*0.5)+m.ph))*(0.7+0.3*Math.random());
+   if(state.solo) tgt*=m.id===state.solo?1.3:0.22;
+   m.v+=(tgt-m.v)*0.35; m.pk=Math.max(m.v,m.pk-0.012);
+   m.el.style.setProperty('--lv',clamp(m.v,0,1).toFixed(3)); m.el.style.setProperty('--pk',clamp(m.pk,0,1).toFixed(3));
+  }
+ }
+ requestAnimationFrame(tick);
+}
+function staticMeters(){ meters.forEach((m,i)=>{ const v=m.id==='s7'?0:0.35+((i*37)%30)/100; m.el.style.setProperty('--lv',v.toFixed(2)); m.el.style.setProperty('--pk',Math.min(1,v+0.06).toFixed(2)); }); }
+
+// ===================== wiring =====================
+function wire(){
+ $('#language').addEventListener('click',()=>{ lang=lang==='pt'?'en':'pt'; OA.store.setLang(lang==='en'?'en-US':'pt-BR'); applyLang(); if(REDUCED) staticMeters(); });
+ $('#neutral').addEventListener('click',()=>setCurrent({pt:'Neutro',en:'Neutral',curve:NEUTRAL,source:'preset:neutro'}));
+ $('#default').addEventListener('click',()=>setCurrent({pt:'Auri',en:'Auri',curve:ENT.get('o:padrao').curve,source:'preset:padrao'}));
+ $('#write').addEventListener('click',()=>openWrite(state.current.curve,T(`Sua curva: ${state.current.pt}`,`Your curve: ${state.current.en}`),{...state.current}));
+ $('#scope-write').addEventListener('click',()=>{ const t=target(); openWrite(t.curve,targetLabel(t),curFromEnt(t.ent,t.curve)); });
+ $('#load-current').addEventListener('click',()=>{ const t=target(); openInCurva(curFromEnt(t.ent,t.curve)); });
+ $('#open-curve').addEventListener('click',(e)=>{ e.preventDefault(); const t=target(); openInCurva(curFromEnt(t.ent,t.curve)); });
+ $('#ab-play').addEventListener('click',()=>{ if(ab.on) abStop(); else abStart(); });
+ $('#ab-a').addEventListener('click',()=>abSwitch('A'));
+ $('#ab-b').addEventListener('click',()=>abSwitch('B'));
+ OA.audio.onChange((s)=>{ if(ab.on&&s.mode!=='chains'){ ab.on=false; disposeAb(); } renderAb(); });
+ window.addEventListener('storage',(e)=>{ if(e.key===OA.store.KEYS.current){ state.current=storedCurrent(); updateBank(); renderScope(); renderShare(); } });
+ window.addEventListener('pagehide',()=>{ if(ab.on) abStop(); });
+ $('#help').addEventListener('click',()=>$('#help-dialog').showModal());
+ $('#search').addEventListener('input',(e)=>{ state.search=e.target.value; updateBank(); });
+ $$('[data-sort]').forEach((b)=>b.addEventListener('click',()=>{ state.sort=b.dataset.sort; $$('[data-sort]').forEach((x)=>x.setAttribute('aria-pressed',String(x===b))); updateBank(); }));
+ $('#bank').addEventListener('click',(e)=>{
+  const strip=e.target.closest('.strip[data-id]'); if(!strip) return; const id=strip.dataset.id;
+  if(e.target.closest('.solo')) toggleSolo(id);
+  else if(e.target.closest('.sel')){ select(id); openCard(id); }
+ });
+ $('#vca-bank').addEventListener('click',(e)=>{
+  const strip=e.target.closest('.strip[data-pack]'); if(!strip) return; const pid=strip.dataset.pack;
+  if(e.target.closest('.solo')) toggleSolo('pack:'+pid);
+  else if(e.target.closest('.sel')) openPack(pid);
+ });
+ $('#commits').addEventListener('click',(e)=>{ const b=e.target.closest('[data-v]'); if(!b) return; state.ver=Number(b.dataset.v); state.solo=null; renderSelection(); const nb=$(`#commits [data-v="${b.dataset.v}"]`); if(nb) nb.focus(); });
+ document.addEventListener('click',(e)=>{
+  const c=e.target.closest('[data-close]'); if(c){ $('#'+c.dataset.close).close(); return; }
+  const a=e.target.closest('[data-act]'); if(!a) return; const id=a.dataset.id;
+  if(a.dataset.act==='solo'){ $('#card-dialog').close(); if(ENT.get(id)) toggleSolo(id); }
+  else if(a.dataset.act==='recall'){ $('#card-dialog').close(); select(id); $('#recall').scrollIntoView({behavior:REDUCED?'auto':'smooth'}); }
+  else if(a.dataset.act==='publish'){ $('#card-dialog').close(); state.solo=null; select(id); $('#publicar').scrollIntoView({behavior:REDUCED?'auto':'smooth'}); }
+  else if(a.dataset.act==='open-curve'){ e.preventDefault(); const en=ENT.get(id); if(en) openInCurva(curFromEnt(en,en.curve)); }
+  else if(a.dataset.act==='select'){ $('#card-dialog').close(); state.solo=null; select(id); toast(T(`Selecionada: ${entName(ENT.get(id))}`,`Selected: ${entName(ENT.get(id))}`)); }
+  else if(a.dataset.act==='pack-json'){
+   const p=PACKS.find((x)=>x.id===id);
+   const json={format:'open-auri/pack@1',example:!p.official,name:p.name,curator:p.official?'oficial':p.curator,curves:packMembers(p).map((m)=>({name:entName(m),curator:entBy(m),license:m.type==='off'?'a confirmar':m.lic,s1:codeOf(m.curve)}))};
+   download(`open-auri-pack-${p.id}.json`,new Blob([JSON.stringify(json,null,2)],{type:'application/json'}));
+  }
+ });
+ $('#chk-vol').addEventListener('change',updateWriteBtn); $('#chk-flash').addEventListener('change',updateWriteBtn); $('#chk-exp').addEventListener('change',updateWriteBtn);
+ $('#write-confirm').addEventListener('click',()=>{
+  if(!pendingWrite) return; const w=pendingWrite, g=gateCurve(w.curve);
+  if(!g.ok) return;
+  const crc=g.metrics.payloadCrc?'0x'+g.metrics.payloadCrc.slice(2).toUpperCase():'0x0000';
+  OA.store.appendJournal({at:Date.now(),name:w.cur.pt,crc,pre:w.curve.pre,bands:w.curve.bands.map(OA.store.bandToString)});
+  OA.store.recordFlash();
+  state.current={...w.cur,curve:w.curve}; persistCurrent(state.current); state.unsaved=0;
+  $('#write-dialog').close(); updateChrome(); updateBank(); renderScope(); renderShare();
+  toast(T('Simulação concluída: nenhum report enviado. No hardware, isto gravaria em flash.','Simulation complete: no report sent. On hardware, this would commit to flash.'));
+ });
+ $$('#steps .big-push').forEach((b,i)=>b.addEventListener('click',()=>runStep(i)));
+ $('#pub-name').addEventListener('input',()=>{ pub.nameDirty=true; resetSteps(); renderPublish(); });
+ $('#pub-recipe').addEventListener('input',()=>{ pub.recipeDirty=true; resetSteps(); renderPublish(); });
+ $('#pub-handle').addEventListener('input',()=>{ resetSteps(); renderPublish(); });
+ $$('[data-lic]').forEach((b)=>b.addEventListener('click',()=>{ pub.lic=b.dataset.lic; $$('[data-lic]').forEach((x)=>x.setAttribute('aria-pressed',String(x===b))); resetSteps(); renderPublish(); }));
+ $('#copy-json').addEventListener('click',()=>{ if(!pub.env){ toast(T('Gere o envelope primeiro (passo 01).','Generate the envelope first (step 01).'),'bad'); return; } copy(JSON.stringify(pub.env,null,2),'JSON'); });
+ $('#copy-code').addEventListener('click',()=>{ const c=pub.code||codeOf(target().curve); if(c) copy(c,'S1'); });
+ $('#copy-link').addEventListener('click',()=>{ const t=$('#s1-link').textContent; if(t) copy(absLink(t),'link'); });
+ $('#dl-svg').addEventListener('click',()=>download(`open-auri-${slug(entName(target().ent))}.svg`,new Blob([shareSvgString()],{type:'image/svg+xml'})));
+ $('#dl-png').addEventListener('click',()=>{ downloadPng(); });
+ $('#print').addEventListener('click',()=>window.print());
+ ['c1','c2','c3'].forEach((id)=>$('#'+id).addEventListener('change',renderTalkback));
+ $('#tb-handle').addEventListener('input',renderTalkback);
+ $('#tb-send').addEventListener('click',()=>toast(T('Simulação: abriria uma issue pré-preenchida no GitHub com o JSON mostrado. Nada foi enviado.','Simulation: this would open a pre-filled GitHub issue with the JSON shown. Nothing was sent.')));
+ $('#tb-withdraw').addEventListener('click',()=>{ ['c1','c2','c3'].forEach((id)=>{ $('#'+id).checked=false; }); renderTalkback(); toast(T('Consentimento retirado neste navegador. Se já enviou, peça a remoção por issue.','Consent withdrawn in this browser. If you already sent, request removal by issue.')); });
+ document.addEventListener('keydown',(e)=>{
+  const tg=e.target, typing=tg.tagName==='INPUT'||tg.tagName==='TEXTAREA'||tg.isContentEditable;
+  if(typing||e.ctrlKey||e.metaKey) return;
+  if(document.querySelector('dialog[open]')) return;
+  if(e.key==='?'){ e.preventDefault(); $('#help-dialog').showModal(); }
+  else if(e.key==='/'){ e.preventDefault(); $('#search').focus(); }
+  else if(e.key==='['||e.key===']'){
+   const vs=versionsOf(selEnt()); if(!vs.length) return; e.preventDefault();
+   state.ver=clamp(curVer(vs)+(e.key===']'?1:-1),0,vs.length-1); renderSelection();
+  }
+  else if((e.key==='s'||e.key==='S')&&!e.altKey){ const strip=tg.closest&&tg.closest('.strip[data-id]'); if(strip){ e.preventDefault(); toggleSolo(strip.dataset.id); } }
+ });
+}
+function setupControls(){
+ ctl.thresh=new Ctl({el:$('#ctl-thresh'),min:0,max:6,value:1.5,def:1.5,step:1/60,round:(v)=>Math.round(v*100)/100,fmt:(v)=>`${num(v,2)} dB`,label:()=>T('Destaque ≈: canais a até este RMS (S4) da sua curva','Highlight ≈: channels within this RMS (S4) of your curve'),onChange:()=>updateBank()});
+ ctl.range=new Ctl({el:$('#ctl-range'),min:3,max:24,value:12,def:12,step:1/21,round:(v)=>Math.round(v*10)/10,fmt:(v)=>`±${num(v,1)} dB`,label:()=>T('Escala vertical do scope','Scope vertical scale'),onChange:()=>renderScope()});
+ ctl.cursor=new Ctl({el:$('#ctl-cursor'),min:20,max:20000,value:1000,def:1000,log:true,step:1/120,round:(v)=>(v<100?Math.round(v*10)/10:Math.round(v)),fmt:(v)=>hz(v),label:()=>T('Frequência do cursor do scope','Scope cursor frequency'),onChange:()=>renderScope()});
+}
+function parseHash(){
+ const h=location.hash.slice(1); if(!h) return;
+ const ps=new URLSearchParams(h); const code=ps.get('p'); if(!code) return;
+ try{
+  const curve=decodeShare(code); const by=ps.get('by')||'';
+  ENT.set('link',{id:'link',type:'link',name:'',handle:by,curve,lic:'–'});
+  state.sel='link'; state.ver=null;
+  const g=gateCurve(curve);
+  toast(g.ok?T(`Curva do link carregada${by?' (curadoria '+by+')':''}. Passa no gate v2.`,`Curve from link loaded${by?' (curated by '+by+')':''}. Passes gate v2.`):T('Curva do link carregada, mas o gate v2 recusa: não dá para gravar.','Curve from link loaded, but gate v2 refuses it: it cannot be written.'),g.ok?'':'bad');
+ }catch(err){ toast(T(`Link inválido: ${err.message}`,`Invalid link: ${err.message}`),'bad'); }
+}
+
+// ===================== boot =====================
+async function init(){
+ lang=OA.store.getLang()==='en-US'?'en':'pt'; // OA STORAGE CONTRACT v2: "oa.v2.lang"
+ OA.audioUI.setLang(lang);
+ OA.audio.useCodec({designSection,encodeSection,preampWord});
+ buildStadium(); setupControls();
+ for(const [i,c] of CHANNELS.entries()){
+  $('#boot-line').textContent=`RECALL · ${T('CANAL','CHANNEL')} ${pad2(i+1)} · GATE V2`;
+  const e=ENT.get(c.id); e.derived=buildHead(c); e.curve=e.derived.curve;
+  await new Promise((r)=>setTimeout(r,0));
+ }
+ ready=true; wire();
+ parseHash();
+ buildBank(); renderScope(); renderRecall(); syncPublish(); renderShare(); renderTalkback(); updateChrome();
+ if(lang==='en') applyLang();
+ $('#boot').hidden=true;
+ if(REDUCED) staticMeters(); else requestAnimationFrame(tick);
+}
+init();
+</script>
+</body>
+</html>

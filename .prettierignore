@@ -1,0 +1,10 @@
+design/
+docs/
+*.md
+test/fixtures/
+types/
+coverage/
+package-lock.json
+node_modules/
+.svelte-kit/
+.wrangler/

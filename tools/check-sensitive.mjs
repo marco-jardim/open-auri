@@ -13,9 +13,12 @@ const safelist = new Set([
 ]);
 const maxFileSize = 5 * 1024 * 1024;
 
+/** @param {string} text */
 function parseEnv(text) {
+  /** @type {Map<string, string>} */
   const values = new Map();
-  const assignment = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?:"((?:\\[\s\S]|[^"\\])*)"|'([^']*)'|([^\r\n]*))/gm;
+  const assignment =
+    /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?:"((?:\\[\s\S]|[^"\\])*)"|'([^']*)'|([^\r\n]*))/gm;
   for (const match of text.matchAll(assignment)) {
     let value;
     if (match[2] !== undefined) {
@@ -28,15 +31,23 @@ function parseEnv(text) {
   return values;
 }
 
+/** @param {Map<string, string>} values */
 function sensitiveNeedles(values) {
+  /** @type {{value: string, label: string}[]} */
   const needles = [];
+  /**
+   * @param {string | undefined} value
+   * @param {string} label
+   */
   const add = (value, label) => {
     if (value) needles.push({ value: value.toLowerCase(), label });
   };
 
   for (const [key, value] of values) {
     if (!safelist.has(key) && value.length >= 6) add(value, key);
-    for (const email of value.matchAll(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,})/g)) {
+    for (const email of value.matchAll(
+      /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,})/g,
+    )) {
       add(email[1], `derived:EMAIL_DOMAIN(${key})`);
     }
     if (key === 'CLOUDFLARE_WORKERS_SUBDOMAIN') {
@@ -63,6 +74,7 @@ function sensitiveNeedles(values) {
   return needles;
 }
 
+/** @param {string} root */
 function scan(root) {
   const values = parseEnv(readFileSync(resolve(root, '.env'), 'utf8'));
   const needles = sensitiveNeedles(values);
@@ -71,7 +83,9 @@ function scan(root) {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
-  }).split('\0').filter(Boolean);
+  })
+    .split('\0')
+    .filter(Boolean);
   const findings = [];
   for (const path of new Set(files)) {
     const absolute = resolve(root, path);
@@ -79,7 +93,7 @@ function scan(root) {
     try {
       stat = lstatSync(absolute);
     } catch (error) {
-      if (error.code === 'ENOENT') continue;
+      if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') continue;
       throw error;
     }
     if (!stat.isFile() || stat.size > maxFileSize) continue;

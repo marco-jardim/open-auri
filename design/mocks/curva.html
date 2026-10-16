@@ -1,0 +1,684 @@
+<!--
+CRITICAL TODOs before publication:
+- Browser-test file://, keyboard/touch, both locales, contrast and all three layers.
+- Bench-validate the provisional envelope, quantized peak search and internal headroom;
+  sampled frequency analysis is not a hardware safety certification.
+- No hardware writes or audio preview here. Add reviewed WebHID/AudioWorklet paths only
+  after hardware testing; confirm flash wear, timing and the padded commit command.
+- Approve proposal N1, the conservative neutral (10 zero-gain PK, -0.5 dB preamp),
+  provisional preset labels, legal copy and open-auri/preset@1 interchange schema.
+- Reconcile shared chrome with sibling mocks, replace pending links, check translations.
+-->
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Curva · open-auri</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{--ink:#0F0F0E;--ink-2:#171715;--ink-3:#22221F;--rule:rgba(236,231,221,.12);--text:#ECE7DD;--muted:#8F8A80;--paper:#F2EDE4;--paper-ink:#1A1917;--paper-muted:#6B665D;--danger:#E5484D;--accent:#E8743B;--mono:"JetBrains Mono",monospace;--serif:"Instrument Serif",Georgia,serif;--ui:"Geist",Arial,sans-serif}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:var(--ink);color:var(--text);font:13px/1.55 var(--ui);-webkit-font-smoothing:antialiased}button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button,a{touch-action:manipulation}a{color:inherit;text-underline-offset:4px}button{color:inherit}button:disabled,[aria-disabled="true"]{opacity:.45;cursor:not-allowed}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:4px}button{border:1px solid var(--rule);border-radius:3px;background:transparent;padding:8px 13px;line-height:1.2}button:hover:not(:disabled){border-color:var(--muted)}button.primary{background:var(--accent);border-color:var(--accent);color:var(--ink);font-weight:650}button.primary:hover{background:#f18b57}h1,h2,h3,p,figure{margin:0}h2,h3{font-weight:500}h2{font:36px/1.1 var(--serif)}small{font-size:11px}.mono,code,pre{font-family:var(--mono);font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:550}.accent{color:var(--accent)}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}[hidden]{display:none!important}.skip{position:fixed;top:-80px;left:16px;z-index:100;background:var(--paper);color:var(--paper-ink);padding:12px}.skip:focus{top:8px}
+    /* Shared cable bar and footer. */
+    .cable-bar{position:sticky;top:0;z-index:40;background:var(--ink-2);border-bottom:1px solid var(--rule)}.cable-inner{max-width:1440px;min-height:56px;padding:0 24px;margin:auto;display:flex;align-items:center;gap:22px}.wordmark{font:italic 27px/1 var(--serif);text-decoration:none;white-space:nowrap}.main-nav{display:flex;gap:14px;align-self:stretch;align-items:center;margin:auto;font-size:11px;white-space:nowrap}.main-nav a{text-decoration:none;position:relative}.main-nav a[aria-current="page"]:after{content:"";position:absolute;bottom:-18px;left:0;right:0;height:2px;background:var(--accent)}.main-nav a.pending{color:var(--muted);opacity:.65}.cable-actions{display:flex;align-items:center;gap:7px;white-space:nowrap}.cable-actions button{font-size:10px;padding:7px 9px}.cable-state{font-size:10px;color:#aaa59c}.status-dot{color:var(--muted);font-size:8px;margin-right:5px}.dirty{font:9px/1.5 var(--mono);color:var(--muted);max-width:93px;white-space:normal}.language{border:0!important;padding:7px 0 7px 5px!important;font-family:var(--mono);color:var(--muted)}.language .active{color:var(--text)}
+    .site-footer{max-width:1440px;margin:72px auto 0;padding:32px 24px 34px;border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr;gap:100px;color:var(--muted);font-size:11px;position:relative;background:var(--ink)}.honoree{display:flex;align-items:baseline;gap:14px;margin:9px 0 10px}.honoree strong{color:var(--text);font:30px/1.1 var(--serif)}.honoree span{font:11px var(--mono)}.site-footer p{max-width:590px}.site-footer h3{color:var(--text);margin-bottom:9px;font-size:12px}.footer-links{display:flex;gap:24px;margin-top:16px}.source{display:inline-block;margin-top:9px}.soon-badge{display:inline-block;border:1px solid currentColor;padding:2px 5px;font:8px/1.4 var(--mono);letter-spacing:.07em;vertical-align:middle;color:var(--muted)}.soon-note{font-size:10px;color:var(--muted);line-height:1.65;max-width:660px}
+    .ambient{position:fixed;inset:56px 0 0;pointer-events:none;z-index:-1;overflow:hidden}.ambient svg{width:150%;height:100%;opacity:.11;transform-origin:center;animation:phase 42s ease-in-out infinite alternate}.ambient path{fill:none;stroke:#827b6f;stroke-width:1}.ambient .cable{stroke:var(--accent);opacity:.5;animation:sway 31s ease-in-out infinite alternate;transform-origin:center}.ambient .other{animation-delay:-15s}@keyframes phase{to{transform:translateX(-14%) translateY(14px)}}@keyframes sway{to{transform:rotate(3deg) translateY(24px)}}
+    main{max-width:1440px;margin:auto;padding:34px 24px 0}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:24px}.hero{padding:0 0 29px;align-items:end}.hero-title{grid-column:span 5}.page-index{display:flex;align-items:center;gap:14px;color:var(--muted);margin-bottom:10px}.page-index .index{color:var(--accent);font:11px var(--mono)}h1{font:clamp(72px,7.1vw,110px)/.91 var(--serif);font-weight:400;letter-spacing:-.025em}h1 .edited-dot{font:12px var(--mono);color:var(--accent);letter-spacing:0;vertical-align:top;display:inline-block;margin:15px 0 0 8px}.lede{color:var(--muted);font-size:12px;margin-top:16px;max-width:440px}.hero-number{grid-column:span 2;padding-bottom:3px}.hero-number .value{font:clamp(36px,3.5vw,54px)/1 var(--serif);letter-spacing:-.025em;white-space:nowrap}.hero-number .unit{font:11px var(--mono);letter-spacing:0;margin-left:6px}.hero-number .label{color:var(--muted);font-size:10px;margin-top:9px}.hero-layer{grid-column:span 3;align-self:end;text-align:right;padding-bottom:3px}.segmented{display:inline-flex;border:1px solid var(--rule);padding:3px;border-radius:4px;background:var(--ink-2)}.segmented button{border:0;border-radius:2px;padding:8px 11px;font-size:11px;color:var(--muted)}.segmented button[aria-pressed="true"]{background:var(--text);color:var(--ink)}.key-hint{font:9px var(--mono);color:var(--muted);margin-top:10px}.key-hint kbd{font:inherit;border:1px solid var(--rule);padding:1px 4px;margin:0 2px}.workspace{border-top:1px solid var(--rule);padding-top:24px;align-items:stretch}.chart-panel{grid-column:span 8;background:var(--ink-2);border:1px solid var(--rule);min-width:0}.panel-top{padding:17px 20px;display:flex;justify-content:space-between;align-items:center;gap:14px;border-bottom:1px solid var(--rule)}.panel-top .eyebrow{font-size:9px}.panel-top .mono{font-size:9px;color:var(--muted)}.chart-wrap{position:relative;padding:9px 8px 0}.response-chart{display:block;width:100%;height:auto;touch-action:pan-y;overflow:visible}.response-chart.editable{touch-action:none}.response-chart text{font-family:var(--mono);font-size:9px;fill:var(--muted)}.response-chart .axis{stroke:var(--rule);stroke-width:1;shape-rendering:crispEdges}.response-chart .zero{stroke:rgba(236,231,221,.27)}.response-chart .handle{fill:var(--ink-2);stroke:var(--accent);stroke-width:1.4;cursor:grab}.response-chart .handle.selected{fill:var(--accent)}.response-chart .handle-group text{fill:var(--text);font-size:8px;pointer-events:none}.chart-bottom{padding:10px 20px 14px;display:flex;justify-content:space-between;gap:16px;border-top:1px solid var(--rule);font-size:10px;align-items:center}.legend{display:flex;align-items:center;gap:17px;flex-wrap:wrap}.legend-item{display:flex;align-items:center;gap:6px}.swatch{width:18px;border-top:1px solid var(--text)}.swatch.output{border-color:var(--accent);border-width:2px}.ghost-toggle{display:flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer}.ghost-toggle input{accent-color:var(--accent);width:11px;height:11px;margin:0}.ghost-toggle .swatch{border-top:1px dashed var(--muted)}.figure-caption{padding:10px 20px;border-top:1px solid var(--rule);font:9px/1.7 var(--mono);color:var(--muted);display:flex;justify-content:space-between;gap:16px}.limit-note{position:absolute;bottom:51px;left:62px;max-width:85%;padding:5px 9px;background:var(--ink);border-left:2px solid var(--accent);font:10px var(--mono);color:var(--text);pointer-events:none}.sidenotes{grid-column:span 4;display:flex;flex-direction:column;padding:0 4px 0 7px}.notes-head{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid var(--rule);padding:2px 0 14px}.notes-head .mono{color:var(--muted);font-size:9px}.note{display:grid;grid-template-columns:24px 1fr;gap:14px;padding:17px 0;border-bottom:1px solid var(--rule)}.note-index{color:var(--accent);font:9px var(--mono);padding-top:4px}.note-title{font-size:10px;color:var(--muted);margin-bottom:4px}.note-value{font:25px/1.2 var(--serif)}.note-value .mono{font-size:11px}.note p{font-size:11px;color:var(--muted);margin-top:5px}.protocol-note{display:flex;align-items:start;gap:11px;margin-top:auto;padding-top:20px;font-size:10px;color:var(--muted)}.protocol-note .mono{border:1px solid var(--rule);padding:4px 6px;color:var(--text);font-size:9px}.section{margin-top:30px}.section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:20px;margin-bottom:17px}.section-heading .section-id{font:10px var(--mono);color:var(--accent);margin-right:13px}.section-heading .heading-wrap{display:flex;align-items:baseline}.section-heading h2{font-size:31px}.section-heading p{color:var(--muted);font-size:10px;max-width:550px;text-align:right}.presets{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.preset-card{position:relative;text-align:left;padding:11px 13px 9px;background:var(--ink-2);border:1px solid var(--rule);border-radius:2px;min-width:0}.preset-card:hover{background:var(--ink-3)}.preset-card[aria-pressed="true"]{border-color:var(--accent)}.preset-card[aria-pressed="true"]:before{content:"";width:4px;height:4px;background:var(--accent);position:absolute;right:12px;top:14px;border-radius:50%}.preset-card .name{font-size:11px;font-weight:500}.preset-card .preset-meta{display:flex;justify-content:space-between;font:8px var(--mono);color:var(--muted);margin-top:3px}.preset-card svg{display:block;width:100%;height:50px;margin:6px 0}.preset-card svg path{fill:none;stroke:var(--muted);stroke-width:1.2;vector-effect:non-scaling-stroke}.preset-card[aria-pressed="true"] svg path{stroke:var(--accent)}.preset-card svg line{stroke:var(--rule);stroke-width:1}.rescue-card{background:var(--paper);color:var(--paper-ink);padding:14px;display:flex;flex-direction:column;justify-content:space-between;border-radius:2px}.rescue-card .eyebrow{font-size:8px;color:var(--paper-muted)}.rescue-card p{font:23px/1.05 var(--serif);margin:5px 0 10px}.rescue-card .buttons{display:flex;gap:5px}.rescue-card button{border-color:rgba(26,25,23,.23);font-size:9px;padding:7px 8px}.rescue-card button:hover{background:rgba(26,25,23,.06)}.rescue-detail{font-size:9px;color:var(--muted);margin-top:11px;display:flex;justify-content:space-between;gap:24px}.listen-tools{margin-top:27px}.preview-panel{grid-column:span 7;border:1px solid var(--rule);background:var(--ink-2);padding:23px;display:grid;grid-template-columns:1fr auto;gap:18px 28px}.preview-heading{display:flex;align-items:center;gap:13px}.play{width:41px;height:41px;display:grid;place-items:center;border-radius:50%;padding:0}.play svg{width:13px;height:13px;fill:var(--text)}.preview-heading h3{font:27px var(--serif)}.preview-heading .sub{font-size:9px;color:var(--muted);margin-top:1px}.ab{align-self:center;display:flex;gap:0}.ab button{font:11px var(--mono);border-radius:0;width:33px}.ab button:first-child{border-radius:3px 0 0 3px}.ab button:last-child{border-radius:0 3px 3px 0;border-left:0}.ab button[aria-pressed="true"]{background:var(--text);color:var(--ink)}.preview-panel p{grid-column:1/-1;font-size:10px;color:var(--muted);max-width:670px}.share-row{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--rule);padding-top:15px}.share-row .mono{font-size:9px;color:var(--muted)}.share-row button{font-size:10px}.macro-panel{grid-column:span 5;border:1px solid var(--rule);padding:20px 22px;background:var(--ink-2)}.macro-heading{display:flex;justify-content:space-between;gap:10px;align-items:center}.macro-heading h3{font:27px var(--serif)}.proposal{font-size:9px;color:var(--muted);margin:4px 0 16px}.macro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 23px;margin-bottom:15px}.macro-grid label{font-size:10px;display:block;color:var(--muted)}.macro-grid input{width:100%;accent-color:var(--accent);height:12px;opacity:.45;cursor:not-allowed}.macro-panel .soon-note{font-size:9px}
+    .adjust-panel{background:var(--ink-2);border:1px solid var(--rule)}.adjust-top{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:17px 19px;border-bottom:1px solid var(--rule)}.adjust-top p{font-size:10px;color:var(--muted)}.order-badge{font:9px var(--mono);color:var(--muted)}.order-badge .check{color:var(--accent)}.modules-scroll{overflow-x:auto;padding:12px;scrollbar-color:var(--ink-3) var(--ink-2)}.modules{display:grid;grid-template-columns:repeat(10,minmax(110px,1fr));gap:8px}.band-module{background:var(--ink);border:1px solid var(--rule);border-radius:2px;min-width:0;padding:10px 9px 8px;position:relative}.band-module.selected{border-color:var(--accent)}.band-module:before,.band-module:after{content:"";position:absolute;top:6px;width:2px;height:2px;background:var(--muted);opacity:.5;border-radius:50%}.band-module:before{left:4px}.band-module:after{right:4px}.module-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}.module-header button{font:10px var(--mono);border:0;padding:0;color:var(--accent)}.module-header select{background:var(--ink-3);color:var(--text);border:1px solid var(--rule);border-radius:2px;font:10px var(--mono);padding:3px;max-width:62px}.module-field{display:block;border-top:1px solid var(--rule);padding:8px 0 5px}.field-row{display:flex;align-items:center;justify-content:space-between;gap:3px}.field-row label{font:8px var(--mono);color:var(--muted);cursor:ew-resize;touch-action:none;user-select:none}.field-row input{background:none;border:0;color:var(--text);text-align:right;font:12px var(--mono);width:75px;min-width:0;padding:2px 0;border-radius:0}.field-limits{font:7px/1.5 var(--mono);color:var(--muted);margin-top:2px;text-align:right}.headroom{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;padding:17px 20px;border-top:1px solid var(--rule)}.headroom-title{font-size:11px}.headroom-title p{font-size:9px;color:var(--muted);margin-top:4px}.headroom-controls{display:flex;align-items:center;gap:8px}.headroom-controls label{font:10px var(--mono);color:var(--muted)}.headroom-controls input{width:73px;background:var(--ink);color:var(--text);border:1px solid var(--rule);border-radius:2px;padding:7px;font:11px var(--mono)}.headroom-controls button{font-size:10px}.envelope-note{display:flex;gap:15px;align-items:start;margin-top:12px}.envelope-note .soon-note{font-size:9px}.envelope-note button{font-size:9px;white-space:nowrap}.safety-refusal{color:var(--danger)!important}
+    .engineering{margin-top:35px}.cabinet{background:var(--ink-2);border:1px solid var(--rule);overflow:hidden}.chain-scroll{overflow-x:auto;padding:12px 12px 0}.chain-svg{display:block;width:100%;min-width:1040px;height:auto}.chain-svg text{font-family:var(--mono);fill:var(--text);font-size:9px}.chain-svg .tiny{font-size:7px;fill:var(--muted)}.chain-svg .chain-module{cursor:pointer;outline-offset:-2px}.chain-module rect.module-box{fill:var(--ink);stroke:var(--rule)}.chain-module.selected rect.module-box{stroke:var(--accent)}.cabinet-bottom{display:flex;justify-content:space-between;gap:18px;padding:11px 20px 16px;font-size:9px;color:var(--muted)}.cabinet-bottom .mono{color:var(--text)}.inspection{margin-top:18px}.coeff-panel{grid-column:span 8;background:var(--paper);color:var(--paper-ink);padding:22px 24px}.coeff-header{display:flex;align-items:baseline;justify-content:space-between;gap:16px}.coeff-header h3{font:31px var(--serif)}.coeff-header .mono{font-size:10px;color:var(--paper-muted)}.coeffs{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-top:20px}.coefficient{min-width:0}.coefficient .key{font:9px var(--mono);color:var(--paper-muted)}.coefficient .float{font:11px var(--mono);margin-top:5px;overflow-wrap:anywhere}.wire-order{font:9px var(--mono);margin:19px 0 8px;color:var(--paper-muted)}.wire-words{display:flex;justify-content:space-between;gap:8px;font:11px var(--mono);flex-wrap:wrap}.coeff-panel .fine{font-size:9px;color:var(--paper-muted);margin-top:14px}.pole-panel{grid-column:span 4;border:1px solid var(--rule);background:var(--ink-2);padding:18px 20px;display:grid;grid-template-columns:1fr 150px;align-items:center;gap:14px}.pole-panel h3{font-size:12px}.pole-panel p{font-size:10px;color:var(--muted);margin-top:8px}.pole-panel .radius{font:14px var(--mono);color:var(--text);margin-top:9px}.pole-panel svg{width:150px;height:150px}.payload-section{margin-top:25px}.payload-panel{grid-column:span 8;min-width:0;border:1px solid var(--rule);background:var(--ink-2)}.payload-toolbar{padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:15px;border-bottom:1px solid var(--rule)}.payload-toolbar .segmented button{font:9px var(--mono);padding:6px 9px}.crc-label{font:10px var(--mono);color:var(--muted)}.crc-label strong{color:var(--text);font-weight:400}.dump-scroll{overflow-x:auto;padding:15px 17px 9px}.dump-row{display:flex;align-items:baseline;gap:10px;margin-bottom:5px;white-space:nowrap;min-width:590px}.dump-offset{font:8px var(--mono);color:var(--muted);width:28px}.dump-label{font:8px var(--mono);color:var(--muted);width:65px;flex-shrink:0}.dump-bytes{display:flex;gap:5px}.byte{font:9px var(--mono);padding:2px 0;color:var(--text);cursor:help}.byte:hover,.byte:focus{background:var(--accent);color:var(--ink);outline-offset:0}.dump-row.header .byte,.dump-row.crc .byte{color:var(--accent)}.dump-row .byte:hover,.dump-row .byte:focus{color:var(--ink)}.byte.word-start:not(:first-child){margin-left:5px}.byte-detail{min-height:36px;border-top:1px solid var(--rule);padding:10px 17px;color:var(--muted);font:9px var(--mono)}.report-row{font:9px/1.8 var(--mono);white-space:pre;min-width:750px;color:var(--text);padding:2px 0}.report-row .report-id{color:var(--accent)}.tx-panel{grid-column:span 4;border:1px solid var(--rule);background:var(--ink-2);padding:18px 20px;min-width:0}.tx-heading{display:flex;align-items:center;justify-content:space-between}.tx-heading h3{font-size:12px}.tx-heading button{font:9px var(--mono);padding:6px 8px}.tx-log{font:9px/1.95 var(--mono);color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;margin:17px 0 13px}.tx-panel p{font-size:9px;color:var(--muted)}.tx-panel .tx-commit{color:var(--accent)}.export-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px;align-items:center}.export-row .eyebrow{font-size:9px;color:var(--muted);margin-right:6px}.export-row button{font:10px var(--mono);padding:9px 12px}.hardware-strip{margin-top:35px;padding:15px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);display:flex;gap:24px;flex-wrap:wrap;font:9px var(--mono);color:var(--muted)}.hardware-strip .accent{margin-left:auto}.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:80;max-width:min(650px,90vw);background:var(--paper);color:var(--paper-ink);border-left:3px solid var(--accent);box-shadow:0 8px 35px #0005;padding:12px 19px;font-size:12px}.toast.safety-refusal{background:var(--ink-2);border-color:var(--danger)}dialog{background:var(--ink-2);color:var(--text);border:1px solid var(--rule);border-radius:4px;max-width:470px;width:calc(100% - 40px);padding:28px;box-shadow:0 25px 100px #0009}dialog::backdrop{background:#0009;backdrop-filter:blur(4px)}dialog h2{font-size:35px;margin:10px 0 13px}dialog p{font-size:12px;color:var(--muted);margin:12px 0}dialog .summary{border-block:1px solid var(--rule);padding:14px 0;font:11px/1.9 var(--mono);margin:18px 0}.dialog-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:23px}.dialog-actions button{font-size:11px}dialog textarea{width:100%;height:105px;resize:vertical;border:1px solid var(--rule);color:var(--text);background:var(--ink);padding:11px;font:10px/1.7 var(--mono)}
+    /* Put the faint background above the canvas, below every opaque data panel. */
+    body{isolation:isolate}.ambient{z-index:-1}.handle-group:focus-visible{outline:0}.handle-group:focus-visible .handle{stroke-width:3;stroke:var(--accent)}
+    @media(min-width:1440px){.cable-inner{gap:24px}.main-nav{gap:17px}.cable-actions{gap:9px}.cable-actions button{font-size:11px}}
+    @media(max-width:1270px){.cable-inner{gap:18px}.main-nav{gap:11px;font-size:10px}.cable-state{display:none}.dirty{font-size:8px;max-width:85px}.hero-title{grid-column:span 4}.hero-layer{grid-column:span 4}.hero-number .value{font-size:42px}.segmented button{padding:8px}.pole-panel{grid-template-columns:1fr 120px;padding:16px}.pole-panel svg{width:120px;height:120px}.dump-bytes{gap:4px}.byte{font-size:8px}}
+    @media(max-width:1050px){.cable-inner{flex-wrap:wrap;gap:0 20px;padding-top:11px;padding-bottom:9px}.main-nav{order:3;overflow:auto;width:100%;margin-top:13px;gap:22px;padding-bottom:5px}.main-nav a[aria-current="page"]:after{bottom:-5px}.cable-actions{margin-left:auto}.cable-state{display:block}.dirty{max-width:115px}.hero{row-gap:23px}.hero-title{grid-column:span 6}.hero-layer{grid-column:span 6;text-align:left}.hero-number{grid-column:span 3}.hero-number .value{font-size:48px}.chart-panel{grid-column:span 8}.sidenotes{grid-column:span 4}.note{padding:13px 0;gap:7px;grid-template-columns:18px 1fr}.note-value{font-size:21px}.protocol-note{font-size:9px}.presets{grid-template-columns:repeat(4,minmax(0,1fr))}.preview-panel,.macro-panel{grid-column:span 6}.coeff-panel,.payload-panel{grid-column:span 8}.pole-panel,.tx-panel{grid-column:span 4}.pole-panel{display:flex;flex-direction:column;align-items:start;gap:2px}.pole-panel svg{align-self:center}.coeffs{gap:7px}.coefficient .float{font-size:9px}.wire-words{font-size:9px}.site-footer{gap:50px}.headroom-controls{flex-wrap:wrap}.headroom{align-items:start}.figure-caption{font-size:8px}}
+    @media(max-width:760px){main{padding:27px 18px 0}.cable-inner{padding-inline:18px}.cable-actions{gap:5px}.cable-state,.dirty{display:none}.cable-actions button{font-size:9px;padding:7px}.wordmark{font-size:25px}.main-nav{font-size:10px;gap:20px}.hero{gap:22px 16px;padding-bottom:24px}.hero-title{grid-column:span 12}h1{font-size:83px}.lede{margin-top:14px}.hero-number{grid-column:span 6}.hero-number .value{font-size:45px}.hero-layer{grid-column:span 12;display:flex;justify-content:space-between;align-items:center;gap:10px}.hero-layer .key-hint{margin:0;font-size:8px}.grid{gap:18px}.workspace{padding-top:18px}.chart-panel{grid-column:span 12}.panel-top{padding:13px 14px;gap:7px}.panel-top .mono{font-size:8px}.chart-wrap{padding:6px 0 0}.chart-bottom{padding:11px 13px;font-size:9px}.legend{gap:10px}.chart-bottom>.mono{display:none}.figure-caption{padding:9px 13px}.sidenotes{grid-column:span 12;display:grid;grid-template-columns:1fr 1fr;gap:0 22px;padding:0}.notes-head{grid-column:1/-1}.note:last-of-type{border-bottom:0}.protocol-note{margin-top:0;padding-top:12px;border-top:1px solid var(--rule)}.section{margin-top:26px}.section-heading{align-items:start;gap:12px}.section-heading h2{font-size:29px}.section-heading p{font-size:9px;max-width:160px}.section-heading .section-id{margin-right:9px}.presets{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.preset-card{padding:10px 10px 7px}.preset-card svg{height:42px}.preset-card .name{font-size:10px}.preset-card .preset-meta{font-size:7px}.rescue-card{padding:11px}.rescue-card p{font-size:20px}.rescue-card .buttons{flex-direction:column;gap:4px}.rescue-card button{font-size:9px;padding:5px}.rescue-detail{font-size:8px;display:block}.rescue-detail span{display:block;margin-bottom:4px}.preview-panel,.macro-panel{grid-column:span 12}.preview-panel{padding:19px}.adjust-top{padding:14px;flex-direction:column;align-items:start;gap:7px}.adjust-top p{font-size:9px}.headroom{padding:14px}.headroom-controls{gap:7px}.headroom-controls button{font-size:9px}.envelope-note{flex-direction:column;gap:7px}.cabinet-bottom{flex-direction:column;gap:5px;padding:10px 14px 14px}.coeff-panel,.pole-panel,.payload-panel,.tx-panel{grid-column:span 12}.coeff-panel{padding:19px 17px}.coeff-header h3{font-size:28px}.coeff-header .mono{font-size:8px}.coeffs{gap:9px}.coefficient .float{font-size:9px}.wire-words{font-size:10px}.pole-panel{display:grid;grid-template-columns:1fr 140px}.pole-panel svg{width:140px;height:140px}.payload-toolbar{padding:12px}.export-row button{font-size:9px}.hardware-strip{gap:10px 20px;font-size:8px}.hardware-strip .accent{margin-left:0}.site-footer{grid-template-columns:1fr;gap:30px;margin-top:40px;padding:27px 18px;font-size:10px}.honoree strong{font-size:29px}.source{margin-top:8px}.footer-links{gap:19px}.ambient{opacity:.5}}
+    @media(max-width:390px){.cable-actions button[data-action="neutral"]{display:none}.presets{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-layer{display:block}.hero-layer .key-hint{margin-top:8px}.coeffs{grid-template-columns:repeat(3,1fr);row-gap:13px}.chart-bottom{font-size:8px}.legend{gap:7px}.panel-top .eyebrow{font-size:8px}}
+    .cable-state{border:1px solid var(--rule);border-radius:999px;padding:4px 7px;line-height:1.1}
+    @media(max-width:760px){main,.cable-inner,.site-footer{padding-inline:24px}.grid{gap:24px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main" data-i18n="skip">Ir para a curva</a>
+  <div class="ambient" aria-hidden="true"><svg viewBox="0 0 1600 1100" preserveAspectRatio="none"><path d="M-200 220 Q-100 100 0 220 T200 220 T400 220 T600 220 T800 220 T1000 220 T1200 220 T1400 220 T1600 220 T1800 220"/><path d="M-100 650 L80 490 80 650 260 490 260 650 440 490 440 650 620 490 620 650 800 490 800 650 980 490 980 650 1160 490 1160 650 1340 490 1340 650 1520 490 1520 650"/><path d="M-100 950 Q0 860 100 950 T300 950 T500 950 T700 950 T900 950 T1100 950 T1300 950 T1500 950"/><path class="cable" d="M30 50 C590 20 40 1000 650 850 S1250 50 1550 530"/><path class="cable other" d="M200 1000 C-70 310 900 1150 1010 380 S1400 370 1680 80"/></svg></div>
+  <header class="cable-bar">
+    <div class="cable-inner">
+      <a class="wordmark" href="curva.html" aria-label="open-auri, Curva">open-auri</a>
+      <nav class="main-nav" aria-label="Principal">
+        <a href="curva.html" aria-current="page" data-i18n="navCurve">Curva</a><a href="biblioteca.html" data-i18n="navLibrary">Biblioteca</a><a href="#" class="pending" title="mock pendente" data-i18n="navCompare">Comparar</a><a href="#" class="pending" title="mock pendente" data-i18n="navSound">Soe como X</a><a href="#" class="pending" title="mock pendente" data-i18n="navCommunity">Comunidade</a><a href="#" class="pending" title="mock pendente" data-i18n="navBlind">Teste cego</a><a href="cabo.html" data-i18n="navCable">Cabo</a><a href="docs.html">Docs</a>
+      </nav>
+      <div class="cable-actions">
+        <span class="cable-state"><span class="status-dot" aria-hidden="true">●</span><span data-i18n="disconnected">Sem cabo · simulado</span></span>
+        <span class="dirty" id="dirty" aria-live="polite">0 alterações não gravadas</span>
+        <button type="button" data-action="neutral" data-i18n="neutral">Neutro</button><button type="button" data-action="default" data-i18n="defaultAuri">Padrão Auri</button><button type="button" class="primary" data-action="write" data-i18n="write">Gravar no cabo</button>
+        <button type="button" class="language" id="language" aria-label="Switch to English"><span class="active">PT</span> · <span>EN</span></button>
+      </div>
+    </div>
+  </header>
+  <main id="main">
+    <section class="hero grid" aria-labelledby="presetTitle">
+      <div class="hero-title"><div class="page-index eyebrow"><span class="index">01 /</span><span data-i18n="pageTitle">Curva · equalizador paramétrico</span></div><h1 id="presetTitle">Padrão</h1><p class="lede" data-i18n="lede">Dez seções em série, a mesma curva nos dois canais.</p></div>
+      <div class="hero-number"><div class="value"><span id="heroPre">−2,8</span><span class="unit">dB</span></div><div class="label">preamp <span class="mono muted">/ Q23</span></div></div>
+      <div class="hero-number"><div class="value accent"><span id="heroPeak">…</span><span class="unit">dB</span></div><div class="label" data-i18n="outputPeak">pico de saída</div></div>
+      <div class="hero-layer"><div class="segmented" role="group" aria-label="Camada" id="layers"><button type="button" data-layer="ouvir" aria-pressed="true" data-i18n="listen">Ouvir</button><button type="button" data-layer="ajustar" aria-pressed="false" data-i18n="adjust">Ajustar</button><button type="button" data-layer="engenharia" aria-pressed="false" data-i18n="engineering">Engenharia</button></div><div class="key-hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> <span data-i18n="switchLayer">trocar camada</span></div></div>
+    </section>
+    <section class="workspace grid" aria-label="Resposta e notas">
+      <figure class="chart-panel">
+        <div class="panel-top"><span class="eyebrow" data-i18n="responseTitle">Resposta em frequência</span><span class="mono">20 Hz – 20 kHz <span class="muted">/</span> 96 kHz DSP</span></div>
+        <div class="chart-wrap"><svg id="response" class="response-chart" viewBox="0 0 840 364" role="group" aria-label="Resposta em frequência da soma EQ e da saída com preamp"></svg><div class="limit-note" id="limitNote" hidden role="status"></div></div>
+        <figcaption class="chart-bottom"><div class="legend"><span class="legend-item"><i class="swatch" aria-hidden="true"></i><span data-i18n="eqSum">soma EQ</span></span><span class="legend-item"><i class="swatch output" aria-hidden="true"></i><span data-i18n="output">saída</span></span><label class="ghost-toggle"><input type="checkbox" id="ghost" checked><i class="swatch" aria-hidden="true"></i><span data-i18n="defaultRef">Padrão, referência</span></label></div><span class="mono muted">±15 dB</span></figcaption>
+        <div class="figure-caption"><span id="chartHint" data-i18n="chartListenHint">A curva inclui os dez biquads quantizados em Q27.</span><span data-i18n="provisionalEnvelope">envelope provisório</span></div>
+      </figure>
+      <aside class="sidenotes" aria-label="Notas da curva"><div class="notes-head"><span class="eyebrow" data-i18n="reading">Leitura da curva</span><span class="mono" data-i18n="calculated">CALCULADA, NÃO MEDIDA</span></div><div class="note"><span class="note-index">01</span><div><div class="note-title" data-i18n="largestCut">Maior corte · soma EQ</div><div class="note-value" id="cutNote"></div><p data-i18n="cutDescription">O vale da resposta resultante, não o ganho de uma banda isolada.</p></div></div><div class="note"><span class="note-index">02</span><div><div class="note-title" data-i18n="largestBoost">Maior reforço · soma EQ</div><div class="note-value" id="boostNote"></div><p id="boostDescription"></p></div></div><div class="note"><span class="note-index">03</span><div><div class="note-title" data-i18n="headroomLabel">Headroom na saída</div><div class="note-value" id="peakNote"></div><p id="preNote"></p></div></div><div class="protocol-note"><span class="mono">0xCB</span><p data-i18n="truthNote">O cabo não permite leitura de volta. Esta é a curva do editor, não uma medição do que está no cabo.</p></div></aside>
+    </section>
+    <section class="section" aria-labelledby="presetsHeading"><div class="section-heading"><div class="heading-wrap"><span class="section-id">02 /</span><h2 id="presetsHeading" data-i18n="startingPoint">O ponto de partida</h2></div><p data-i18n="presetCredit">11 presets da Kuba. Padrão = filtros do Leonardo. Os demais nomes, exceto Natural, são provisórios.</p></div><div class="presets" id="presets"></div><div class="rescue-detail"><span data-i18n="rescueExplanation">Neutro: dez PK a 0 dB, preamp −0,5 dB. Padrão Auri: restaura os filtros do Leonardo no editor.</span><span data-i18n="miniLegend">Miniaturas: saída, com preamp · mesma escala</span></div></section>
+    <section class="listen-tools grid" aria-label="Prévia e ajuste fino"><div class="preview-panel"><div class="preview-heading"><button type="button" class="play" id="preview" aria-label="Ouvir prévia simulada"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1 L14 8 3 15 Z"/></svg></button><div><h3 data-i18n="preview">Ouvir prévia</h3><div class="sub" id="previewState" data-i18n="previewMock">Interface simulada · nenhum áudio é reproduzido</div></div></div><div class="ab" role="group" aria-label="A/B da prévia"><button type="button" data-ab="A" aria-pressed="false" aria-label="A: Padrão de referência">A</button><button type="button" data-ab="B" aria-pressed="true" aria-label="B: curva do editor">B</button></div><p data-i18n="previewNote">A prévia, quando implementada, roda no navegador com os mesmos coeficientes. Se você ouvir pelo cabo, a curva já gravada nele se soma à prévia. A/B não altera o payload.</p><div class="share-row"><span class="mono" id="abState">A: Padrão · B: curva do editor</span><button type="button" data-action="share"><span data-i18n="share">Compartilhar</span> ↗</button></div></div><div class="macro-panel"><div class="macro-heading"><h3 data-i18n="fineTune">Ajuste fino</h3><span class="soon-badge" data-i18n="soon">EM BREVE</span></div><p class="proposal" data-i18n="proposal">proposta N1, aguardando aprovação · não altera curva nem payload</p><div class="macro-grid"><label><span data-i18n="bass">Grave</span><input type="range" min="-3" max="3" value="0" disabled aria-disabled="true"></label><label><span data-i18n="body">Corpo</span><input type="range" min="-3" max="3" value="0" disabled aria-disabled="true"></label><label><span data-i18n="presence">Presença</span><input type="range" min="-3" max="3" value="0" disabled aria-disabled="true"></label><label><span data-i18n="air">Brilho</span><input type="range" min="-3" max="3" value="0" disabled aria-disabled="true"></label></div><p class="soon-note" data-i18n="soonNote">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p></div></section>
+    <section class="section" id="adjustSection" hidden aria-labelledby="adjustHeading"><div class="section-heading"><div class="heading-wrap"><span class="section-id">03 /</span><h2 id="adjustHeading" data-i18n="tenSections">Dez seções, em série</h2></div><p data-i18n="adjustHint">Arraste os pontos: frequência e ganho. Roda do mouse: Q. Nos valores, use ↑ ↓ ou arraste o rótulo; Shift multiplica por 10.</p></div><div class="adjust-panel"><div class="adjust-top"><p data-i18n="envelopeSummary">PK: 20–15 808 Hz · −12 a +9,2 dB · Q 0,1–4. LS: 120–297 Hz · −9,3 a +8,2 dB · Q 0,44–0,94.</p><span class="order-badge"><span data-i18n="automaticOrder">Cortes antes de reforços: ordem automática</span> <span class="check">✓</span></span></div><div class="modules-scroll" id="modulesScroll"><div class="modules" id="modules"></div></div><div class="headroom"><div class="headroom-title" data-i18n="headroomManager">Gerenciar headroom<p>preamp −7,8…−0,5 dB · saída ≤ −0,47 dB</p></div><div class="headroom-controls"><label for="preInput">preamp</label><input id="preInput" type="text" inputmode="decimal" aria-label="Preamp em dB, de menos 7,8 a menos 0,5"><button type="button" id="matchVolume" data-i18n="matchVolume">Igualar volume</button><button type="button" id="maxVolume" data-i18n="maxVolume">Máximo sem clipping</button></div></div></div><div class="envelope-note"><button type="button" disabled aria-disabled="true">HS · LP · HP · OFF · raw</button><span class="soon-badge" data-i18n="soon">EM BREVE</span><p class="soon-note" data-i18n="soonNote">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p></div><p class="soon-note" style="margin-top:7px" data-i18n="moreEnvelope">Q acima de 4, boost acima de 16 kHz, preamp a 0 dB e ordem livre também ficam fora do envelope provisório.</p></section>
+    <section class="engineering" id="engineeringSection" hidden aria-labelledby="engineeringHeading"><div class="section-heading"><div class="heading-wrap"><span class="section-id">04 /</span><h2 id="engineeringHeading" data-i18n="insideCabinet">Dentro do gabinete</h2></div><p data-i18n="cabinetHint">Cada módulo recebe a saída do anterior. Selecione uma seção para inspecionar os números que vão para o cabo.</p></div><div class="cabinet"><div class="panel-top"><span class="eyebrow" data-i18n="signalChain">Cadeia de sinal</span><span class="mono">preamp → S1…S10 → <span data-i18n="output">saída</span></span></div><div class="chain-scroll"><svg id="chain" class="chain-svg" viewBox="0 0 1360 175" role="group" aria-label="Cadeia de sinal com dez módulos selecionáveis"></svg></div><div class="cabinet-bottom"><span data-i18n="stageNote">Barras: pico acumulado após cada estágio, incluindo preamp. Busca numérica em 0–48 kHz.</span><span class="mono" id="alternatePeak"></span></div></div><div class="inspection grid"><div class="coeff-panel" id="coefficients"></div><div class="pole-panel"><div><h3 data-i18n="polesZeros">Polos e zeros</h3><p data-i18n="poleLegend">× polos · ○ zeros<br>Círculo unitário, coeficientes Q27.</p><div class="radius" id="poleRadius"></div><p id="poleStatus"></p></div><svg id="polePlot" viewBox="0 0 160 160" role="img" aria-label="Diagrama de polos e zeros"></svg></div></div><div class="envelope-note"><button type="button" disabled aria-disabled="true" data-i18n="reorder">Reordenar módulos</button><span class="soon-badge" data-i18n="soon">EM BREVE</span><p class="soon-note" data-i18n="soonNote">Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.</p></div><div class="payload-section grid"><section class="payload-panel" aria-label="Payload e reports"><div class="payload-toolbar"><div class="segmented" role="group" aria-label="Vista dos bytes"><button type="button" data-wire="payload" aria-pressed="true">Payload · 220 B</button><button type="button" data-wire="reports" aria-pressed="false">9 reports</button></div><span class="crc-label">CRC16 <strong id="crcValue"></strong> <span class="accent">✓</span></span></div><div class="dump-scroll"><div id="payloadDump"></div><div id="reportsDump" hidden></div></div><div class="byte-detail" id="byteDetail" data-i18n="byteHint">Passe o mouse ou foque um byte para identificar o campo.</div></section><section class="tx-panel" aria-labelledby="txTitle"><div class="tx-heading"><h3 id="txTitle" data-i18n="simulatedTx">TX · simulado</h3><button type="button" id="runTx" data-i18n="simulate">Simular</button></div><pre class="tx-log" id="txLog"></pre><p data-i18n="txTiming">Report 0xCB, 31 bytes. Intervalos de 16 ms; espera de 150 ms após o último report. Commit em t = 278 ms. Nenhum acesso ao dispositivo.</p></section></div><div class="export-row"><span class="eyebrow" data-i18n="export">Exportar</span><button type="button" data-export="apo">.txt (EqualizerAPO)</button><button type="button" data-export="json">JSON open-auri/preset@1</button><button type="button" data-export="bin">bytes .bin</button></div></section>
+    <div class="hardware-strip"><span>Auri DSP / CB5100</span><span>VID 0x3302 · PID 0x8902</span><span>96 kHz · 10 biquads · Q27</span><span data-i18n="writeOnly">write-only · cada gravação usa flash</span><span data-i18n="webhid">WebHID: Chrome/Edge desktop · HTTPS</span><span class="accent" id="codecStatus">codec local…</span></div>
+  </main>
+  <footer class="site-footer"><section><div class="eyebrow" data-i18n="homage">ESTA PÁGINA HOMENAGEIA</div><div class="honoree"><strong>Robert Moog</strong><span>1934–2005</span></div><p data-i18n="trivia">Em 1966, Robert Moog pediu a patente de um filtro passa-baixas e passa-altas feito com uma escada de transistores (US 3.475.623, concedida em 1969). O ladder filter virou a voz dos sintetizadores Moog; aqui, dez filtros em série fazem o papel dele.</p><a class="source" href="https://patents.google.com/patent/US3475623A/en" target="_blank" rel="noreferrer" data-i18n="source">fonte ↗</a></section><section><h3 data-i18n="notice">Aviso</h3><p data-i18n="disclaimer">open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.</p><div class="footer-links"><a href="docs.html#aviso-legal" data-i18n="fullNotice">Aviso legal completo</a><span data-i18n="license">Licença AGPL-3.0</span></div></section></footer>
+  <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+  <dialog id="writeDialog" aria-labelledby="writeTitle"><div class="eyebrow accent" data-i18n="simulationOnly">SOMENTE SIMULAÇÃO</div><h2 id="writeTitle" data-i18n="writeTitle">Antes de gravar</h2><p data-i18n="writeWarning">No cabo real, cada gravação persiste na flash. O desgaste é desconhecido e não há leitura de volta nem confirmação do conteúdo gravado.</p><div class="summary" id="writeSummary"></div><p data-i18n="mockWarning">Este mock não conecta ao cabo. Confirmar apenas simula o envio e zera o contador local; não comprova uma gravação real.</p><div class="dialog-actions"><button type="button" data-close="writeDialog" data-i18n="cancel">Cancelar</button><button type="button" class="primary" id="confirmWrite" data-i18n="simulateWrite">Simular gravação</button></div></dialog>
+  <dialog id="shareDialog" aria-labelledby="shareTitle"><div class="eyebrow accent" data-i18n="editorState">ESTADO DO EDITOR</div><h2 id="shareTitle" data-i18n="shareTitle">Uma curva, um link</h2><p data-i18n="shareNote">O link guarda as dez bandas, o preamp e a camada. Em file://, a outra pessoa precisa ter este mesmo HTML no caminho indicado.</p><textarea id="shareText" readonly aria-label="Link da curva"></textarea><div class="dialog-actions"><button type="button" data-close="shareDialog" data-i18n="close">Fechar</button><button type="button" class="primary" id="copyLink" data-i18n="copyLink">Copiar link</button></div></dialog>
+  <script type="module">
+    /* Codec math copied inline from src/dsp/eq0xcb.mjs.
+     * Peaking and shelf design: AutoEq, Copyright (c) 2018-2022 Jaakko Pasanen.
+     * MIT License
+     * Permission is hereby granted, free of charge, to any person obtaining a copy
+     * of this software and associated documentation files (the "Software"), to deal
+     * in the Software without restriction, including without limitation the rights
+     * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+     * copies of the Software, and to permit persons to whom the Software is
+     * furnished to do so, subject to the following conditions:
+     * The above copyright notice and this permission notice shall be included in
+     * all copies or substantial portions of the Software.
+     * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+     * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+     * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+     * THE SOFTWARE.
+     * Byte layout and preset data: interoperability study of Kuba's reference.
+     */
+    const SAMPLE_RATE=96000, BAND_COUNT=10, Q23_ONE=2**23, Q27_ONE=2**27;
+    const INT32_MIN=-2147483648, INT32_MAX=2147483647;
+    const FILTER_KINDS=['PK','LS','HS','LP','HP','OFF'], KINDS_WITH_GAIN=new Set(['PK','LS','HS']);
+    const PREAMBLE=[0x45,0x51,0x31,0x23,0xd6,0x00,0x00,0x0a,0x04,0x05,0x01,0x0a,0x00,0x00];
+    const COMMIT_COMMAND=[0x01,0x65,0x00,0x01,0xff];
+    function fromAutoEqSign({a1,a2,b0,b1,b2}){return {b0,b1,b2,a1:-a1,a2:-a2};}
+    function designPeaking(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+      const amp=Math.pow(10,gainDb/40), w0=(2*Math.PI*freqHz)/sampleRate;
+      const alpha=Math.sin(w0)/(2*qFactor),cosW0=Math.cos(w0),a0=1+alpha/amp;
+      return fromAutoEqSign({a1:-(-2*cosW0)/a0,a2:-(1-alpha/amp)/a0,b0:(1+alpha*amp)/a0,b1:(-2*cosW0)/a0,b2:(1-alpha*amp)/a0});
+    }
+    function designLowShelf(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+      const amp=Math.pow(10,gainDb/40),w0=(2*Math.PI*freqHz)/sampleRate;
+      const alpha=Math.sin(w0)/(2*qFactor),cosW0=Math.cos(w0),twoSqrtAmpAlpha=2*Math.sqrt(amp)*alpha;
+      const a0=(amp+1)+(amp-1)*cosW0+twoSqrtAmpAlpha;
+      return fromAutoEqSign({a1:-(-2*((amp-1)+(amp+1)*cosW0))/a0,a2:-((amp+1)+(amp-1)*cosW0-twoSqrtAmpAlpha)/a0,b0:(amp*((amp+1)-(amp-1)*cosW0+twoSqrtAmpAlpha))/a0,b1:(2*amp*((amp-1)-(amp+1)*cosW0))/a0,b2:(amp*((amp+1)-(amp-1)*cosW0-twoSqrtAmpAlpha))/a0});
+    }
+    function designHighShelf(freqHz,gainDb,qFactor,sampleRate=SAMPLE_RATE){
+      const amp=Math.pow(10,gainDb/40),w0=(2*Math.PI*freqHz)/sampleRate;
+      const alpha=Math.sin(w0)/(2*qFactor),cosW0=Math.cos(w0),twoSqrtAmpAlpha=2*Math.sqrt(amp)*alpha;
+      const a0=(amp+1)-(amp-1)*cosW0+twoSqrtAmpAlpha;
+      return fromAutoEqSign({a1:-(2*((amp-1)-(amp+1)*cosW0))/a0,a2:-((amp+1)-(amp-1)*cosW0-twoSqrtAmpAlpha)/a0,b0:(amp*((amp+1)+(amp-1)*cosW0+twoSqrtAmpAlpha))/a0,b1:(-2*amp*((amp-1)+(amp+1)*cosW0))/a0,b2:(amp*((amp+1)+(amp-1)*cosW0-twoSqrtAmpAlpha))/a0});
+    }
+    function designLowPass(freqHz,qFactor,sampleRate=SAMPLE_RATE){
+      const w0=(2*Math.PI*freqHz)/sampleRate,cosW0=Math.cos(w0),alpha=Math.sin(w0)/(2*qFactor),a0=1+alpha;
+      return {b0:((1-cosW0)/2)/a0,b1:(1-cosW0)/a0,b2:((1-cosW0)/2)/a0,a1:(-2*cosW0)/a0,a2:(1-alpha)/a0};
+    }
+    function designHighPass(freqHz,qFactor,sampleRate=SAMPLE_RATE){
+      const w0=(2*Math.PI*freqHz)/sampleRate,cosW0=Math.cos(w0),alpha=Math.sin(w0)/(2*qFactor),a0=1+alpha;
+      return {b0:((1+cosW0)/2)/a0,b1:-(1+cosW0)/a0,b2:((1+cosW0)/2)/a0,a1:(-2*cosW0)/a0,a2:(1-alpha)/a0};
+    }
+    function designSection(band,sampleRate=SAMPLE_RATE){
+      switch(band.kind){
+        case 'PK':return designPeaking(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+        case 'LS':return designLowShelf(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+        case 'HS':return designHighShelf(band.freqHz,band.gainDb,band.qFactor,sampleRate);
+        case 'LP':return designLowPass(band.freqHz,band.qFactor,sampleRate);
+        case 'HP':return designHighPass(band.freqHz,band.qFactor,sampleRate);
+        case 'OFF':return {b0:1,b1:0,b2:0,a1:0,a2:0};
+        default:throw new TypeError(`unknown filter kind ${JSON.stringify(band.kind)}`);
+      }
+    }
+    function bandError(index,message){return new RangeError(`band ${index}: ${message}`);}
+    function checkBand(band,index=0){
+      if(band===null||typeof band!=='object')throw new TypeError(`band ${index}: not an object`);
+      if(!FILTER_KINDS.includes(band.kind))throw new TypeError(`band ${index}: unknown filter kind ${JSON.stringify(band.kind)}`);
+      if(band.kind==='OFF')return;
+      if(!(Number.isFinite(band.freqHz)&&band.freqHz>0&&band.freqHz<SAMPLE_RATE/2))throw bandError(index,'freqHz must be in (0, 48000)');
+      if(!(Number.isFinite(band.qFactor)&&band.qFactor>0))throw bandError(index,'qFactor must be > 0');
+      if(KINDS_WITH_GAIN.has(band.kind)&&!Number.isFinite(band.gainDb))throw bandError(index,'gainDb must be finite');
+    }
+    function isStable(a1,a2){return Math.abs(a2)<1&&Math.abs(a1)<1+a2;}
+    function encodeSection(section,index=0){
+      const ordered=[section.b0,section.b2,-section.a1,section.b1,-section.a2];
+      const words=ordered.map(coefficient=>{
+        const word=Math.round(coefficient*Q27_ONE)+0;
+        if(!Number.isInteger(word)||word>INT32_MAX||word<INT32_MIN)throw bandError(index,'coefficient does not fit Q27 in int32');
+        return word;
+      });
+      if(!isStable(-words[2]/Q27_ONE,-words[4]/Q27_ONE))throw bandError(index,'unstable section: poles on or outside the unit circle');
+      return words;
+    }
+    function preampWord(preampDb=0){
+      if(!Number.isFinite(preampDb))throw new RangeError(`preamp must be a finite dB value, got ${preampDb}`);
+      if(preampDb>0)throw new RangeError(`preamp must be <= 0 dB, got ${preampDb}`);
+      return Math.round(Math.pow(10,preampDb/20)*Q23_ONE);
+    }
+    function crc16Ccitt(data){
+      let register=0xffff;
+      for(const byte of data){register^=byte<<8;for(let bit=0;bit<8;bit++)register=register&0x8000?((register<<1)^0x1021)&0xffff:(register<<1)&0xffff;}
+      return register;
+    }
+    function appendInt32LE(buffer,value){
+      if(!Number.isInteger(value)||value>INT32_MAX||value<INT32_MIN)throw new RangeError(`value does not fit int32: ${value}`);
+      buffer.push(value&0xff,(value>>>8)&0xff,(value>>>16)&0xff,(value>>>24)&0xff);
+    }
+    function encodePayload(eqBands,preampDb=0){
+      if(!Array.isArray(eqBands)||eqBands.length!==BAND_COUNT)throw new RangeError(`expected ${BAND_COUNT} bands`);
+      eqBands.forEach(checkBand);
+      const payload=[...PREAMBLE];appendInt32LE(payload,preampWord(preampDb));
+      eqBands.forEach((band,index)=>{for(const word of encodeSection(designSection(band),index))appendInt32LE(payload,word);});
+      const checksum=crc16Ccitt(payload);payload.push(checksum&0xff,checksum>>>8);return payload;
+    }
+    function magnitudeDb(eqBands,freqHz,sampleRate=SAMPLE_RATE){
+      const omega=(2*Math.PI*freqHz)/sampleRate,halfSin=Math.sin(omega/2),uRe=2*halfSin*halfSin,uIm=Math.sin(omega);
+      const uSquaredRe=uRe*uRe-uIm*uIm,uSquaredIm=2*uRe*uIm;
+      const powerAt=(p0,p1,p2)=>{const sum=p0+p1+p2,slope=p1+2*p2,re=sum-slope*uRe+p2*uSquaredRe,im=-slope*uIm+p2*uSquaredIm;return re*re+im*im;};
+      let totalDb=0;for(const band of eqBands){const {b0,b1,b2,a1,a2}=designSection(band,sampleRate);totalDb+=10*Math.log10(powerAt(b0,b1,b2)/powerAt(1,a1,a2));}return totalDb;
+    }
+
+    // Reference parameters, in written order. Labels other than Padrão/Natural are provisional.
+    const PRESETS={
+      padrao:{label:'Padrão',pre:-2.8,b:[['PK',25,-0.8,0.3],['PK',150,-3,0.69],['PK',2237,-10,1.41],['PK',4348,-6.1,3],['PK',4958,-8.3,2.72],['PK',7178,-10,3],['PK',11063,-10,3],['PK',520,3.1,0.81],['PK',3046,5.7,1.51],['PK',5995,3.4,0.59]]},
+      pref6:{label:'Natural',pre:-3,b:[['PK',25,-2,0.4],['PK',167,-6.2,0.53],['PK',2560,-8,1.03],['PK',4911,-8,4],['PK',7838,-6.7,4],['PK',11523,-6.5,4],['PK',270,0.1,4],['PK',404,4.1,0.48],['PK',2930,7,2.94],['PK',3537,4.5,4]]},
+      emv:{label:'EMV',pre:-7.8,b:[['PK',1084,-1.1,3],['PK',1930,-1.9,2.39],['PK',2334,-8,1.93],['PK',4454,-8,2.63],['PK',5568,-4.2,1.55],['PK',7504,-7.2,3],['PK',107,0.7,0.5],['PK',473,2.4,0.5],['PK',6814,7.7,1.48],['PK',8862,8,3]]},
+      basshead:{label:'Basshead',pre:-5.7,b:[['PK',4613,-12,2.5],['PK',2246,-12,1.31],['PK',6746,-7.9,2.5],['PK',1122,-2.6,1.73],['PK',10302,-6.1,2.5],['PK',20,-5,0.42],['PK',223,-4.9,0.84],['PK',3184,2.5,2.5],['PK',3116,9.2,0.3],['LS',286,8.2,0.47]]},
+      energico:{label:'Enérgico',pre:-3.3,b:[['PK',25,-3.1,0.5],['PK',97,-1.4,0.68],['PK',2445,-8,0.87],['PK',4725,-8,3],['PK',6920,-8,3],['PK',12439,-8,1.96],['PK',1838,5,0.92],['PK',2904,4.5,2.62],['PK',3665,3.7,3],['PK',8376,8,2.42]]},
+      musical:{label:'Musical',pre:-2.3,b:[['PK',24,-3.2,0.1],['PK',2277,-8,1.69],['PK',4588,-9.4,2.8],['PK',5979,-3.8,2],['PK',7184,-3.2,3],['PK',10638,-10.4,3],['PK',840,2.2,1.54],['PK',1393,2,1.85],['PK',3224,1.1,3],['PK',15808,2.2,2.5]]},
+      analitico:{label:'Analítico',pre:-0.8,b:[['LS',120,-9.3,0.44],['PK',7007,-9.1,2.5],['PK',147,-3.5,0.48],['PK',4561,-12,2.5],['PK',2198,-12,1.42],['PK',255,-0.4,1.78],['PK',11291,-7.8,2.5],['PK',1093,-2.7,1.17],['PK',3226,6.2,0.3],['PK',3028,1.8,2.5]]},
+      referencia:{label:'Referência',pre:-4,b:[['LS',297,-3.4,0.81],['PK',11107,-4.8,2.5],['PK',1027,-1.7,1.98],['PK',20,-3.6,0.57],['PK',7055,-3.8,2.5],['PK',4588,-8,2.5],['PK',2208,-8.2,1.83],['PK',595,3.5,0.42],['PK',3144,5.6,1.69],['PK',3031,0.5,2.5]]},
+      harman:{label:'Harman',pre:-0.5,b:[['LS',199,-5.6,0.94],['PK',399,-1.4,1.62],['PK',2271,-8,1.32],['PK',256,-4.2,1.17],['PK',7566,-7.6,0.43],['PK',4662,-6.8,2.5],['PK',9138,3.8,2.5],['PK',3318,7.8,1.32],['PK',5767,5.8,2.5],['PK',3209,1.1,1.33]]},
+      vdsf:{label:'VDSF',pre:-2.2,b:[['PK',25,-8,0.5],['PK',80,-5,0.52],['PK',210,-2,0.79],['PK',1286,-5.9,1.34],['PK',1978,-7.4,1.67],['PK',2375,-5.4,2.4],['PK',4384,-4.7,3],['PK',4833,-6,3],['PK',7252,-7.6,3],['PK',1718,8,0.5]]},
+      etymotic:{label:'Etymotic',pre:-2.2,b:[['PK',25,-8,0.97],['PK',45,-8,0.5],['PK',105,-5.3,0.51],['PK',226,-1.4,0.91],['PK',2190,-8,1.39],['PK',4276,-5,3],['PK',4847,-7.2,3],['PK',7260,-6.8,3],['PK',785,1.8,1.42],['PK',3120,6.5,1.01]]}
+    };
+    const hasPreset=key=>Object.hasOwn(PRESETS,key);
+    const I18N={
+      'pt-BR':{
+        skip:'Ir para a curva',navCurve:'Curva',navLibrary:'Biblioteca',navCompare:'Comparar',
+        navSound:'Soe como X',navCommunity:'Comunidade',navBlind:'Teste cego',navCable:'Cabo',
+        disconnected:'Sem cabo · simulado',neutral:'Neutro',defaultAuri:'Padrão Auri',write:'Gravar no cabo',
+        pageTitle:'Curva · equalizador paramétrico',lede:'Dez seções em série, a mesma curva nos dois canais.',
+        outputPeak:'pico de saída',listen:'Ouvir',adjust:'Ajustar',engineering:'Engenharia',switchLayer:'trocar camada',
+        responseTitle:'Resposta em frequência',eqSum:'soma EQ',output:'saída',defaultRef:'Padrão, referência',
+        chartListenHint:'A curva inclui os dez biquads quantizados em Q27.',
+        chartAdjustHint:'Arraste f/ganho · roda: Q · setas: ajuste preciso',provisionalEnvelope:'envelope provisório',
+        reading:'Leitura da curva',calculated:'CALCULADA, NÃO MEDIDA',largestCut:'Maior corte · soma EQ',
+        cutDescription:'O vale da resposta resultante, não o ganho de uma banda isolada.',
+        largestBoost:'Maior reforço · soma EQ',headroomLabel:'Headroom na saída',
+        truthNote:'O cabo não permite leitura de volta. Esta é a curva do editor, não uma medição do que está no cabo.',
+        startingPoint:'O ponto de partida',
+        presetCredit:'11 presets da Kuba. Padrão = filtros do Leonardo. Os demais nomes, exceto Natural, são provisórios.',
+        rescueExplanation:'Neutro: dez PK a 0 dB, preamp −0,5 dB. Padrão Auri: restaura os filtros do Leonardo no editor.',
+        miniLegend:'Miniaturas: saída, com preamp · mesma escala',preview:'Ouvir prévia',
+        previewMock:'Interface simulada · nenhum áudio é reproduzido',
+        previewNote:'A prévia, quando implementada, roda no navegador com os mesmos coeficientes. Se você ouvir pelo cabo, a curva já gravada nele se soma à prévia. A/B não altera o payload.',
+        share:'Compartilhar',fineTune:'Ajuste fino',soon:'EM BREVE',
+        proposal:'proposta N1, aguardando aprovação · não altera curva nem payload',
+        bass:'Grave',body:'Corpo',presence:'Presença',air:'Brilho',
+        soonNote:'Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.',
+        tenSections:'Dez seções, em série',
+        adjustHint:'Arraste os pontos: frequência e ganho. Roda do mouse: Q. Nos valores, use ↑ ↓ ou arraste o rótulo; Shift multiplica por 10.',
+        envelopeSummary:'PK: 20–15 808 Hz · −12 a +9,2 dB · Q 0,1–4. LS: 120–297 Hz · −9,3 a +8,2 dB · Q 0,44–0,94.',
+        automaticOrder:'Cortes antes de reforços: ordem automática',headroomManager:'Gerenciar headroom',
+        matchVolume:'Igualar volume',maxVolume:'Máximo sem clipping',
+        moreEnvelope:'Q acima de 4, boost acima de 16 kHz, preamp a 0 dB e ordem livre também ficam fora do envelope provisório.',
+        insideCabinet:'Dentro do gabinete',
+        cabinetHint:'Cada módulo recebe a saída do anterior. Selecione uma seção para inspecionar os números que vão para o cabo.',
+        signalChain:'Cadeia de sinal',
+        stageNote:'Barras: pico acumulado após cada estágio, incluindo preamp. Busca numérica em 0–48 kHz.',
+        polesZeros:'Polos e zeros',poleLegend:'× polos · ○ zeros\nCírculo unitário, coeficientes Q27.',reorder:'Reordenar módulos',
+        byteHint:'Passe o mouse ou foque um byte para identificar o campo.',simulatedTx:'TX · simulado',simulate:'Simular',
+        txTiming:'Report 0xCB, 31 bytes. Intervalos de 16 ms; espera de 150 ms após o último report. Commit em t = 278 ms. Nenhum acesso ao dispositivo.',
+        export:'Exportar',writeOnly:'write-only · cada gravação usa flash',webhid:'WebHID: Chrome/Edge desktop · HTTPS',
+        homage:'ESTA PÁGINA HOMENAGEIA',
+        trivia:'Em 1966, Robert Moog pediu a patente de um filtro passa-baixas e passa-altas feito com uma escada de transistores (US 3.475.623, concedida em 1969). O ladder filter virou a voz dos sintetizadores Moog; aqui, dez filtros em série fazem o papel dele.',
+        source:'fonte ↗',notice:'Aviso',
+        disclaimer:'open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.',
+        fullNotice:'Aviso legal completo',license:'Licença AGPL-3.0',simulationOnly:'SOMENTE SIMULAÇÃO',writeTitle:'Antes de gravar',
+        writeWarning:'No cabo real, cada gravação persiste na flash. O desgaste é desconhecido e não há leitura de volta nem confirmação do conteúdo gravado.',
+        mockWarning:'Este mock não conecta ao cabo. Confirmar apenas simula o envio e zera o contador local; não comprova uma gravação real.',
+        cancel:'Cancelar',simulateWrite:'Simular gravação',editorState:'ESTADO DO EDITOR',shareTitle:'Uma curva, um link',
+        shareNote:'O link guarda as dez bandas, o preamp e a camada. Em file://, a outra pessoa precisa ter este mesmo HTML no caminho indicado.',
+        close:'Fechar',copyLink:'Copiar link',dirty:'alterações não gravadas',edited:'editado',custom:'Curva compartilhada',at:'em',
+        boostDescription:'Acima de 16 kHz, nenhum novo boost é habilitado.',
+        preNote:'Preamp de {pre} dB antes dos filtros. Teto de saída: −0,47 dB.',noCut:'Sem corte',noBoost:'Sem reforço',
+        rescueTitle:'Voltar a um lugar conhecido.',rescueEyebrow:'PONTO DE RETORNO',
+        chartAria:'Resposta calculada da soma EQ e da saída com preamp; frequência logarítmica de 20 Hz a 20 kHz, de menos 15 a mais 15 dB.',
+        limit:'limite comprovado: ',refusal:'Ajuste recusado: a saída ultrapassa −0,47 dB mesmo com preamp a −7,8 dB.',
+        invalid:'Valor inválido. Use um número finito; a curva anterior foi mantida.',
+        autoPre:'Preamp reduzido automaticamente para preservar o headroom.',loaded:'carregado no editor. Nenhuma gravação.',
+        neutralName:'Neutro',previewToast:'Prévia apenas visual neste mock. Nenhum áudio foi iniciado.',
+        abState:'A: Padrão · B: curva do editor',abPreview:'Prévia {ab} selecionada · simulação sem áudio',
+        stable:'Polos estritamente dentro do círculo.',wireOrder:'Q27 int32 · ordem no fio [b0, b2, −a1, b1, −a2]',
+        floatNote:'Acima: float de projeto. Gráfico, polos e picos usam os coeficientes quantizados do payload.',
+        section:'Seção',alternative:'Se reforços viessem antes: pico interno ',payload:'payload',header:'header',
+        preampField:'preamp Q23',crc:'CRC16 LE',byte:'byte',padding:'padding',reportData:'dados',
+        codecOk:'codec local ✓',codecFailed:'codec recusado',txDone:'TX simulado concluído. Nenhum byte foi enviado ao cabo.',
+        writeDone:'Simulação concluída. Contador local zerado; o cabo não foi acessado.',
+        copied:'Link copiado.',copyFallback:'Selecione o link e use Ctrl+C ou ⌘C.',exported:'Arquivo calculado a partir da curva atual.',
+        sharedInvalid:'Link fora do envelope provisório; Padrão foi mantido.',
+        equalized:'Nível médio energético igualado ao Padrão, limitado pelo headroom.',maximum:'Preamp ajustado ao máximo permitido sem clipping.',
+        meanNote:'Igualar volume usa a média energética em frequências logarítmicas, não uma medição de loudness.',
+        fLabel:'Frequência em Hz',gLabel:'Ganho em dB',qLabel:'Q',preAria:'Preamp em dB, entre menos 7,8 e menos 0,5',
+        chainAria:'Cadeia de sinal: preamp, dez biquads e saída. Selecione uma seção para inspecionar.',
+        poleAria:'Polos e zeros dos coeficientes Q27 selecionados, com círculo unitário',
+        layerAria:'Camada de detalhe',navAria:'Principal',shared:'Compartilhada',
+        exportSchema:'Esquema de intercâmbio proposto; validar antes de importar.'
+      },
+      'en-US':{
+        skip:'Skip to the curve',navCurve:'Curve',navLibrary:'Library',navCompare:'Compare',
+        navSound:'Sound like X',navCommunity:'Community',navBlind:'Blind test',navCable:'Cable',
+        disconnected:'No cable · simulated',neutral:'Neutral',defaultAuri:'Auri default',write:'Write to cable',
+        pageTitle:'Curve · parametric equalizer',lede:'Ten sections in series, the same curve for both channels.',
+        outputPeak:'output peak',listen:'Listen',adjust:'Adjust',engineering:'Engineering',switchLayer:'switch layer',
+        responseTitle:'Frequency response',eqSum:'EQ sum',output:'output',defaultRef:'Padrão reference',
+        chartListenHint:'The curve includes all ten Q27-quantized biquads.',
+        chartAdjustHint:'Drag f/gain · wheel: Q · arrows: precise adjustment',provisionalEnvelope:'provisional envelope',
+        reading:'Reading the curve',calculated:'CALCULATED, NOT MEASURED',largestCut:'Largest cut · EQ sum',
+        cutDescription:'The valley of the combined response, not the gain of an individual band.',
+        largestBoost:'Largest boost · EQ sum',headroomLabel:'Output headroom',
+        truthNote:'The cable offers no read-back. This is the editor curve, not a measurement of what is stored in the cable.',
+        startingPoint:'The starting point',
+        presetCredit:'11 presets by Kuba. Padrão = Leonardo’s filters. Labels other than Padrão and Natural are provisional.',
+        rescueExplanation:'Neutral: ten PK at 0 dB, −0.5 dB preamp. Auri default: restores Leonardo’s filters in the editor.',
+        miniLegend:'Thumbnails: output, including preamp · same scale',preview:'Listen to preview',
+        previewMock:'Simulated interface · no audio is played',
+        previewNote:'When implemented, preview runs in the browser using the same coefficients. If you listen through the cable, its stored curve adds to the preview. A/B does not alter the payload.',
+        share:'Share',fineTune:'Fine tuning',soon:'COMING SOON',
+        proposal:'proposal N1, awaiting approval · does not change curve or payload',
+        bass:'Bass',body:'Body',presence:'Presence',air:'Treble',
+        soonNote:'Enabled once the headphones reach the test bench. Until then, we write nothing the original Kuba page does not write.',
+        tenSections:'Ten sections, in series',
+        adjustHint:'Drag points: frequency and gain. Mouse wheel: Q. For values, use ↑ ↓ or scrub the label; Shift multiplies by 10.',
+        envelopeSummary:'PK: 20–15,808 Hz · −12 to +9.2 dB · Q 0.1–4. LS: 120–297 Hz · −9.3 to +8.2 dB · Q 0.44–0.94.',
+        automaticOrder:'Cuts before boosts: automatic order',headroomManager:'Manage headroom',
+        matchVolume:'Match level',maxVolume:'Maximum without clipping',
+        moreEnvelope:'Q above 4, boosts above 16 kHz, 0 dB preamp and free section order also remain outside the provisional envelope.',
+        insideCabinet:'Inside the cabinet',
+        cabinetHint:'Each module receives the output of the previous one. Select a section to inspect the numbers destined for the cable.',
+        signalChain:'Signal chain',
+        stageNote:'Bars: cumulative peak after each stage, including preamp. Numerical search across 0–48 kHz.',
+        polesZeros:'Poles and zeros',poleLegend:'× poles · ○ zeros\nUnit circle, Q27 coefficients.',reorder:'Reorder modules',
+        byteHint:'Hover or focus a byte to identify its field.',simulatedTx:'TX · simulated',simulate:'Simulate',
+        txTiming:'Report 0xCB, 31 bytes. 16 ms intervals; a 150 ms wait after the last report. Commit at t = 278 ms. No device access.',
+        export:'Export',writeOnly:'write-only · every write uses flash',webhid:'WebHID: Chrome/Edge desktop · HTTPS',
+        homage:'THIS PAGE PAYS HOMAGE TO',
+        trivia:'In 1966, Robert Moog filed a patent for a low-pass and high-pass filter built with a ladder of transistors (US 3,475,623, granted in 1969). The ladder filter became the voice of Moog synthesizers; here, ten filters in series take its place.',
+        source:'source ↗',notice:'Notice',
+        disclaimer:'open-auri is not official or endorsed by Kuba, TTGK, Savitech or any manufacturer. Everything here was obtained by studying the protocol for interoperability. Use at your own risk: we accept no responsibility for damage to the cable, headphones or your hearing.',
+        fullNotice:'Full legal notice',license:'AGPL-3.0 license',simulationOnly:'SIMULATION ONLY',writeTitle:'Before writing',
+        writeWarning:'On the real cable, every write persists to flash. Wear is unknown; there is no read-back or confirmation of the stored contents.',
+        mockWarning:'This mock does not connect to the cable. Confirmation only simulates transmission and resets the local counter; it does not verify a real write.',
+        cancel:'Cancel',simulateWrite:'Simulate write',editorState:'EDITOR STATE',shareTitle:'One curve, one link',
+        shareNote:'The link stores all ten bands, preamp and layer. With file://, the recipient needs this same HTML at the indicated path.',
+        close:'Close',copyLink:'Copy link',dirty:'unsaved changes',edited:'edited',custom:'Shared curve',at:'at',
+        boostDescription:'Above 16 kHz, no new boost is enabled.',
+        preNote:'{pre} dB preamp before the filters. Output ceiling: −0.47 dB.',noCut:'No cut',noBoost:'No boost',
+        rescueTitle:'Back to familiar ground.',rescueEyebrow:'RETURN POINT',
+        chartAria:'Calculated EQ sum and output with preamp; logarithmic frequency from 20 Hz to 20 kHz, minus 15 to plus 15 dB.',
+        limit:'proven limit: ',refusal:'Change refused: output exceeds −0.47 dB even with −7.8 dB preamp.',
+        invalid:'Invalid value. Enter a finite number; the previous curve was kept.',
+        autoPre:'Preamp automatically reduced to preserve headroom.',loaded:'loaded in the editor. No hardware write.',
+        neutralName:'Neutral',previewToast:'Preview is visual only in this mock. No audio was started.',
+        abState:'A: Padrão · B: editor curve',abPreview:'Preview {ab} selected · silent simulation',
+        stable:'Poles strictly inside the unit circle.',wireOrder:'Q27 int32 · wire order [b0, b2, −a1, b1, −a2]',
+        floatNote:'Above: design floats. Chart, poles and peaks use the quantized payload coefficients.',
+        section:'Section',alternative:'With boosts first: internal peak ',payload:'payload',header:'header',
+        preampField:'preamp Q23',crc:'CRC16 LE',byte:'byte',padding:'padding',reportData:'data',
+        codecOk:'local codec ✓',codecFailed:'codec refused',txDone:'Simulated TX complete. No byte was sent to the cable.',
+        writeDone:'Simulation complete. Local counter reset; no cable was accessed.',
+        copied:'Link copied.',copyFallback:'Select the link and press Ctrl+C or ⌘C.',exported:'File calculated from the current curve.',
+        sharedInvalid:'Link outside the provisional envelope; Padrão was kept.',
+        equalized:'Average energy level matched to Padrão, constrained by headroom.',maximum:'Preamp set to the maximum allowed without clipping.',
+        meanNote:'Match level uses an energy average over logarithmic frequencies, not a loudness measurement.',
+        fLabel:'Frequency in Hz',gLabel:'Gain in dB',qLabel:'Q',preAria:'Preamp in dB, between minus 7.8 and minus 0.5',
+        chainAria:'Signal chain: preamp, ten biquads and output. Select a section to inspect.',
+        poleAria:'Poles and zeros of the selected Q27 coefficients, with unit circle',
+        layerAria:'Detail layer',navAria:'Main',shared:'Shared',
+        exportSchema:'Proposed interchange schema; validate before importing.'
+      }
+    };
+    const $=id=>document.getElementById(id), clone=value=>JSON.parse(JSON.stringify(value));
+    let locale='pt-BR',layer='ouvir',selectedUid=3,wireView='payload',ab='B',previewTouched=false,codecOkay=true;
+    const t=key=>I18N[locale][key]??key;
+    const formatters=new Map();
+    function num(value,digits=1,sign=false){
+      const clean=Math.abs(value)<0.5*10**(-digits)?0:value;
+      const key=`${locale}/${digits}/${sign}`;
+      if(!formatters.has(key))formatters.set(key,new Intl.NumberFormat(locale,{maximumFractionDigits:digits,useGrouping:false,signDisplay:sign?'exceptZero':'auto'}));
+      return formatters.get(key).format(clean).replaceAll('-','−');
+    }
+    function freq(value){return value>=1000?`${num(value/1000,1)} kHz`:`${num(value,0)} Hz`;}
+    const hex=(value,width=2)=>(value>>>0).toString(16).toUpperCase().padStart(width,'0');
+    const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    function presetState(key){const p=PRESETS[key];return {key,pre:p.pre,bands:p.b.map(([kind,freqHz,gainDb,qFactor],i)=>({uid:i+1,kind,freqHz,gainDb,qFactor}))};}
+    let state=presetState('padrao'),baseline=clone(state),model;
+    const ENVELOPE={PK:{freqHz:[20,15808],gainDb:[-12,9.2],qFactor:[.1,4]},LS:{freqHz:[120,297],gainDb:[-9.3,8.2],qFactor:[.44,.94]}};
+    const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+    function validateEnvelope(next){
+      if(!Number.isFinite(next.pre)||next.pre< -7.8||next.pre> -.5||next.bands.length!==10)throw new RangeError('envelope');
+      for(const b of next.bands){const limits=ENVELOPE[b.kind];if(!limits)throw new RangeError('kind');for(const field of ['freqHz','gainDb','qFactor'])if(!Number.isFinite(b[field])||b[field]<limits[field][0]||b[field]>limits[field][1])throw new RangeError('envelope');}
+    }
+    const sorted=bands=>bands.filter(b=>b.gainDb<=0).concat(bands.filter(b=>b.gainDb>0));
+    function decodeSections(payload){
+      const view=new DataView(Uint8Array.from(payload).buffer);
+      return Array.from({length:10},(_,i)=>{const w=Array.from({length:5},(_,j)=>view.getInt32(18+i*20+j*4,true)/Q27_ONE);return {b0:w[0],b2:w[1],a1:-w[2],b1:w[3],a2:-w[4]};});
+    }
+    // Same stable polynomial evaluation as magnitudeDb, using the actual Q27 words.
+    function response(sections,freqHz,withStages=false){
+      const omega=2*Math.PI*freqHz/SAMPLE_RATE,halfSin=Math.sin(omega/2),uRe=2*halfSin*halfSin,uIm=Math.sin(omega),uSquaredRe=uRe*uRe-uIm*uIm,uSquaredIm=2*uRe*uIm;
+      const powerAt=(p0,p1,p2)=>{const sum=p0+p1+p2,slope=p1+2*p2,re=sum-slope*uRe+p2*uSquaredRe,im=-slope*uIm+p2*uSquaredIm;return re*re+im*im;};
+      let db=0;const stages=[];for(const {b0,b1,b2,a1,a2} of sections){db+=10*Math.log10(powerAt(b0,b1,b2)/powerAt(1,a1,a2));if(withStages)stages.push(db);}return withStages?stages:db;
+    }
+    const SEARCH_FREQS=Array.from({length:3073},(_,i)=>.05*Math.pow(47999.999/.05,i/3072));
+    const CHART_FREQS=Array.from({length:641},(_,i)=>20*Math.pow(1000,i/640));
+    function refinePeak(sections,left,right){
+      for(let i=0;i<25;i++){const a=left+(right-left)/3,b=right-(right-left)/3;if(response(sections,a)<response(sections,b))left=a;else right=b;}
+      const f=(left+right)/2;return {f,db:response(sections,f)};
+    }
+    function analyze(next){
+      validateEnvelope(next);
+      const payload=encodePayload(next.bands,next.pre),sections=decodeSections(payload),preActual=20*Math.log10(preampWord(next.pre)/Q23_ONE);
+      const values=SEARCH_FREQS.map(f=>response(sections,f,true));
+      const stagePeaks=Array(10).fill(-Infinity);let peak={db:-Infinity,f:20};
+      values.forEach((v,i)=>{v.forEach((db,j)=>{stagePeaks[j]=Math.max(stagePeaks[j],db+preActual);});if(v[9]>peak.db)peak={db:v[9],f:SEARCH_FREQS[i]};});
+      for(let i=1;i<values.length-1;i++)if(values[i][9]>=values[i-1][9]&&values[i][9]>values[i+1][9]){const p=refinePeak(sections,SEARCH_FREQS[i-1],SEARCH_FREQS[i+1]);if(p.db>peak.db)peak=p;}
+      stagePeaks[9]=peak.db+preActual;
+      const points=CHART_FREQS.map(f=>({f,db:response(sections,f)}));
+      const cut=points.reduce((a,b)=>b.db<a.db?b:a),boost=points.reduce((a,b)=>b.db>a.db?b:a);
+      return {payload,sections,preActual,peakEq:peak.db,peak:peak.db+preActual,peakF:peak.f,stagePeaks,points,cut,boost};
+    }
+    // All plotted presets and the ghost go through the same encoder/decoder.
+    const REFERENCE_MODELS=Object.fromEntries(Object.keys(PRESETS).map(key=>[key,analyze(presetState(key))]));
+    const reference=REFERENCE_MODELS.padrao;
+    let toastTimer,limitTimer,limitUntil=0;
+    function toast(message,safety=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('safety-refusal',safety);$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},4200);}
+    function showLimit(message){limitUntil=Date.now()+1800;$('limitNote').textContent=message;$('limitNote').hidden=false;clearTimeout(limitTimer);limitTimer=setTimeout(()=>{$('limitNote').hidden=true;},1800);}
+    function accept(next,{notify=false}={}){
+      try{
+        next.bands=sorted(next.bands);validateEnvelope(next);
+        let candidate=analyze(next);
+        if(candidate.peak>-.47){
+          const safeMax=Math.floor((-.471-candidate.peakEq)*100)/100;
+          if(safeMax< -7.8){toast(t('refusal'),true);render();return false;}
+          next.pre=clamp(Math.min(next.pre,safeMax),-7.8,-.5);candidate=analyze(next);if(notify)toast(t('autoPre'));
+        }
+        if(!Number.isFinite(candidate.peak)||candidate.peak>-.47)throw new RangeError('peak');
+        state=next;model=candidate;if(location.hash.startsWith('#curva='))setUrl(true);render();return true;
+      }catch{toast(t('invalid'),true);render();return false;}
+    }
+    function dirtyCount(){
+      let count=Math.abs(state.pre-baseline.pre)>1e-8?1:0;
+      state.bands.forEach((b,i)=>{const before=baseline.bands[i];for(const field of ['kind','freqHz','gainDb','qFactor'])if(b[field]!==before[field])count++;});return count;
+    }
+    function isEdited(){const p=PRESETS[state.key];return p?JSON.stringify(state.bands.map(b=>[b.kind,b.freqHz,b.gainDb,b.qFactor]))!==JSON.stringify(p.b)||state.pre!==p.pre:state.key==='neutral'?state.bands.some(b=>b.gainDb!==0)||state.pre!==-.5:true;}
+    function currentName(){return PRESETS[state.key]?.label??(state.key==='neutral'?t('neutralName'):t('custom'));}
+    function setUrl(includeCurve=false){
+      const url=new URL(location.href);url.searchParams.set('camada',layer);url.searchParams.set('preset',state.key);
+      if(includeCurve||url.hash.startsWith('#curva='))url.hash='curva='+encodeURIComponent(JSON.stringify({pre:state.pre,b:state.bands.map(b=>[b.kind,b.freqHz,b.gainDb,b.qFactor])}));
+      try{history.replaceState(null,'',url);}catch{/* Some file:// policies disallow replaceState. Sharing still works. */}
+      return url.href;
+    }
+    function setLayer(value,updateUrl=true){
+      layer=['ouvir','ajustar','engenharia'].includes(value)?value:'ouvir';
+      $('adjustSection').hidden=layer==='ouvir';$('engineeringSection').hidden=layer!=='engenharia';
+      document.querySelectorAll('[data-layer]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.layer===layer)));
+      let chapter=2;document.querySelectorAll('.section-id').forEach(el=>{if(!el.closest('section').hidden)el.textContent=String(chapter++).padStart(2,'0')+' /';});
+      if(updateUrl)setUrl();render();
+    }
+    function localize(){
+      document.documentElement.lang=locale;document.title=`${t('navCurve')} · open-auri`;
+      document.querySelectorAll('[data-i18n]').forEach(el=>{
+        if(el.dataset.i18n==='headroomManager'){
+          el.replaceChildren(document.createTextNode(t('headroomManager')));const p=document.createElement('p');p.textContent=`preamp ${num(-7.8)}…${num(-.5)} dB · ${t('output')} ≤ ${num(-.47,2)} dB`;el.append(p);
+        }else{el.textContent=t(el.dataset.i18n);if(el.dataset.i18n==='poleLegend')el.style.whiteSpace='pre-line';}
+      });
+      $('language').innerHTML=`<span class="${locale==='pt-BR'?'active':''}">PT</span> · <span class="${locale==='en-US'?'active':''}">EN</span>`;
+      $('language').setAttribute('aria-label',locale==='pt-BR'?'Switch to English':'Mudar para português');
+      $('response').setAttribute('aria-label',t('chartAria'));$('preInput').setAttribute('aria-label',t('preAria'));$('chain').setAttribute('aria-label',t('chainAria'));$('polePlot').setAttribute('aria-label',t('poleAria'));$('layers').setAttribute('aria-label',t('layerAria'));document.querySelector('.main-nav').setAttribute('aria-label',t('navAria'));
+      $('preview').setAttribute('aria-label',t('preview')+' · '+t('simulationOnly').toLowerCase());
+      document.querySelectorAll('a.pending').forEach(a=>a.setAttribute('aria-disabled','true'));
+      $('matchVolume').title=t('meanNote');document.querySelector('[data-export="json"]').title=t('exportSchema');
+      render();
+    }
+    const PLOT={left:48,right:813,top:29,bottom:319};
+    const x=f=>PLOT.left+Math.log10(f/20)/3*(PLOT.right-PLOT.left),y=db=>PLOT.top+(15-db)/30*(PLOT.bottom-PLOT.top);
+    function path(points,offset=0){return points.map((p,i)=>`${i?'L':'M'}${x(p.f).toFixed(2)},${y(p.db+offset).toFixed(2)}`).join(' ');}
+    function renderChart(){
+      const gridY=[-15,-10,-5,0,5,10,15].map(db=>`<line class="axis ${db===0?'zero':''}" x1="48" x2="813" y1="${y(db)}" y2="${y(db)}"/><text x="36" y="${y(db)+3}" text-anchor="end">${num(db,0,true)}</text>`).join('');
+      const gridX=[20,50,100,200,500,1000,2000,5000,10000,20000].map(f=>`<line class="axis" x1="${x(f)}" x2="${x(f)}" y1="29" y2="319"/><text x="${x(f)}" y="339" text-anchor="middle">${f>=1000?num(f/1000,0)+'k':f}</text>`).join('');
+      const handles=layer==='ouvir'?'':state.bands.map((b,i)=>`<g class="handle-group" data-uid="${b.uid}" role="button" tabindex="0" aria-label="S${i+1}, ${b.kind}, ${esc(freq(b.freqHz))}, ${num(b.gainDb,2,true)} dB, Q ${num(b.qFactor,2)}"><line x1="${x(b.freqHz)}" x2="${x(b.freqHz)}" y1="${y(response(model.sections,b.freqHz))}" y2="${PLOT.bottom}" stroke="var(--accent)" opacity=".09"/><circle class="handle ${b.uid===selectedUid?'selected':''}" cx="${x(b.freqHz)}" cy="${y(response(model.sections,b.freqHz))}" r="${b.uid===selectedUid?7:5}"/><circle cx="${x(b.freqHz)}" cy="${y(response(model.sections,b.freqHz))}" r="13" fill="transparent"/><text x="${x(b.freqHz)}" y="${y(response(model.sections,b.freqHz))-12}" text-anchor="middle">${i+1}</text><title>${freq(b.freqHz)} · ${num(b.gainDb,2,true)} dB · Q ${num(b.qFactor,2)}</title></g>`).join('');
+      const ghost=$('ghost').checked?`<path d="${path(reference.points)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 5" fill="none" opacity=".55"/>`:'';
+      $('response').innerHTML=`<title>${esc(t('responseTitle'))}</title><defs><clipPath id="plotClip"><rect x="48" y="29" width="765" height="290"/></clipPath><linearGradient id="outputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".085"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient><pattern id="forbidden" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M-1 1 L1 -1 M0 6 L6 0 M5 7 L7 5" stroke="var(--text)" stroke-width=".5" opacity=".16"/></pattern></defs>${gridY}${gridX}<text x="25" y="15">dB</text><text x="813" y="355" text-anchor="end">Hz</text><g clip-path="url(#plotClip)"><rect x="${x(16000)}" y="29" width="${813-x(16000)}" height="${y(0)-29}" fill="url(#forbidden)"/><path d="${path(model.points,model.preActual)} L813,319 L48,319 Z" fill="url(#outputFill)"/>${ghost}<path d="${path(model.points)}" fill="none" stroke="var(--text)" stroke-width="1.25" opacity=".8"/><path d="${path(model.points,model.preActual)}" fill="none" stroke="var(--accent)" stroke-width="2.1"/>${handles}</g><text x="${x(16000)-6}" y="18" text-anchor="end">&gt;16k · ${esc(t('soon').toLowerCase())}</text>`;
+      if(layer!=='ouvir'&&Date.now()<limitUntil){
+        const band=state.bands.find(b=>b.uid===selectedUid),px=x(band.freqHz),py=clamp(y(response(model.sections,band.freqHz))-13,PLOT.top+3,PLOT.bottom-3);
+        $('response').insertAdjacentHTML('beforeend',`<path d="M${px-6} ${py} h12" stroke="var(--accent)" stroke-width="2"><title>${esc($('limitNote').textContent)}</title></path>`);
+      }
+      $('response').classList.toggle('editable',layer!=='ouvir');$('chartHint').textContent=t(layer==='ouvir'?'chartListenHint':'chartAdjustHint');
+    }
+    let presetsLocale=null;
+    function renderPresets(){
+      if(presetsLocale===locale){$('presets').querySelectorAll('[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(state.key===b.dataset.preset&&!isEdited())));return;}
+      presetsLocale=locale;
+      $('presets').innerHTML=Object.entries(PRESETS).map(([key,p],i)=>{
+        const m=REFERENCE_MODELS[key];const mini=m.points.filter((_,j)=>j%8===0).map((point,j)=>`${j?'L':'M'}${(Math.log10(point.f/20)/3*150).toFixed(2)},${(25-(point.db+m.preActual)/30*50).toFixed(2)}`).join(' ');
+        return `<button type="button" class="preset-card" data-preset="${key}" aria-pressed="${state.key===key&&!isEdited()}" aria-label="${esc(p.label)}, preamp ${num(p.pre)} dB"><div class="name">${esc(p.label)}</div><svg viewBox="0 0 150 50" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="150" y1="25" y2="25"/><path d="${mini}"/></svg><div class="preset-meta"><span>${String(i+1).padStart(2,'0')} / 10 biquads</span><span>${num(p.pre)} dB</span></div></button>`;
+      }).join('')+`<div class="rescue-card"><div><div class="eyebrow">${esc(t('rescueEyebrow'))}</div><p>${esc(t('rescueTitle'))}</p></div><div class="buttons"><button type="button" id="rescueNeutral" data-action="neutral">${esc(t('neutral'))}</button><button type="button" id="rescueDefault" data-action="default">${esc(t('defaultAuri'))}</button></div></div>`;
+    }
+    const FIELD_INFO={freqHz:{short:'Hz',label:'fLabel',step:1,digits:0},gainDb:{short:'dB',label:'gLabel',step:.1,digits:2},qFactor:{short:'Q',label:'qLabel',step:.01,digits:2}};
+    function renderModules(){
+      $('modules').innerHTML=state.bands.map((b,i)=>`<article class="band-module ${selectedUid===b.uid?'selected':''}"><div class="module-header"><button type="button" data-select="${b.uid}" aria-label="${t('section')} ${i+1}">S${i+1}</button><select data-kind="${b.uid}" aria-label="S${i+1}, ${locale==='pt-BR'?'tipo':'kind'}">${['PK','LS'].map(k=>`<option value="${k}" ${k===b.kind?'selected':''}>${k}</option>`).join('')}${['HS','LP','HP','OFF'].map(k=>`<option disabled value="${k}">${k} · ${t('soon')}</option>`).join('')}</select></div>${Object.entries(FIELD_INFO).map(([field,info])=>{const [min,max]=ENVELOPE[b.kind][field];return `<div class="module-field"><div class="field-row"><label for="s${b.uid}-${field}" data-scrub="${b.uid}" data-field="${field}" title="${esc(t('adjustHint'))}">${info.short}</label><input id="s${b.uid}-${field}" data-uid="${b.uid}" data-field="${field}" type="text" inputmode="decimal" value="${num(b[field],info.digits)}" aria-label="S${i+1}: ${esc(t(info.label))}" aria-describedby="limits-${b.uid}-${field}"></div><div class="field-limits" id="limits-${b.uid}-${field}">${num(min,2)}…${num(max,2)}</div></div>`;}).join('')}</article>`).join('');
+      $('preInput').value=num(state.pre,2);
+    }
+    function roots(a,b,c){const d=b*b-4*a*c;if(d<0){const re=-b/(2*a),im=Math.sqrt(-d)/(2*a);return [{re,im},{re,im:-im}];}return [{re:(-b+Math.sqrt(d))/(2*a),im:0},{re:(-b-Math.sqrt(d))/(2*a),im:0}];}
+    function renderEngineering(){
+      const selectedIndex=Math.max(0,state.bands.findIndex(b=>b.uid===selectedUid)),b=state.bands[selectedIndex],c=designSection(b),q=model.sections[selectedIndex],words=encodeSection(c);
+      const start=99,step=113,width=95;
+      const chainModules=state.bands.map((band,i)=>{const left=start+i*step,peak=model.stagePeaks[i],bar=clamp((peak+18)/24,0,1)*67;return `<g class="chain-module ${band.uid===selectedUid?'selected':''}" data-select="${band.uid}" role="button" tabindex="0" aria-label="S${i+1} ${band.kind}, ${esc(freq(band.freqHz))}, ${num(band.gainDb,2)} dB, Q ${num(band.qFactor,2)}, ${t('outputPeak')} ${num(peak,2)} dB"><rect class="module-box" x="${left}" y="16" width="${width}" height="136" rx="2"/><circle cx="${left+7}" cy="23" r="1" fill="var(--muted)"/><circle cx="${left+width-7}" cy="23" r="1" fill="var(--muted)"/><text x="${left+12}" y="39" style="fill:var(--accent)">S${i+1}</text><text x="${left+width-12}" y="39" text-anchor="end">${band.kind}</text><text x="${left+12}" y="61">${esc(freq(band.freqHz))}</text><text x="${left+12}" y="79">${num(band.gainDb,2,true)} dB</text><text x="${left+12}" y="95" class="tiny">Q ${num(band.qFactor,2)}</text><rect x="${left+12}" y="111" width="67" height="3" fill="var(--ink-3)"/><rect x="${left+12}" y="111" width="${bar}" height="3" fill="var(--accent)" opacity=".7"/><text x="${left+12}" y="131" class="tiny">${num(peak,2)} dB</text><circle cx="${left}" cy="99" r="3" fill="var(--ink)" stroke="var(--muted)"/><circle cx="${left+width}" cy="99" r="3" fill="var(--ink)" stroke="var(--muted)"/></g>`;}).join('');
+      const cables=Array.from({length:11},(_,i)=>{const x1=i===0?74:start+(i-1)*step+width,x2=i===10?1261:start+i*step;return `<path d="M${x1} 99 C${x1+7} ${168-(i%3)*5},${x2-7} ${168-(i%3)*5},${x2} 99" fill="none" stroke="var(--accent)" stroke-width="1" opacity=".5"/>`;}).join('');
+      $('chain').innerHTML=`<title>${esc(t('signalChain'))}</title>${cables}<rect x="5" y="56" width="69" height="76" rx="2" fill="var(--ink)" stroke="var(--rule)"/><text x="39" y="78" text-anchor="middle" class="tiny">preamp</text><text x="39" y="100" text-anchor="middle">${num(state.pre,2)} dB</text>${chainModules}<rect x="1261" y="56" width="92" height="76" rx="2" fill="var(--ink)" stroke="var(--rule)"/><text x="1307" y="78" text-anchor="middle" class="tiny">${esc(t('output'))}</text><text x="1307" y="100" text-anchor="middle" style="fill:var(--accent)">${num(model.peak,2)} dB</text>`;
+      // An informational alternative, never passed to encodePayload or enabled for writing.
+      const reverse=model.sections.filter((_,i)=>state.bands[i].gainDb>0).concat(model.sections.filter((_,i)=>state.bands[i].gainDb<=0));let alternative=-Infinity;
+      for(let i=0;i<SEARCH_FREQS.length;i+=3)for(const db of response(reverse,SEARCH_FREQS[i],true))alternative=Math.max(alternative,db+model.preActual);
+      $('alternatePeak').textContent=t('alternative')+'≈ '+num(alternative,2)+' dB';
+      $('coefficients').innerHTML=`<div class="coeff-header"><h3>${esc(t('section'))} ${String(selectedIndex+1).padStart(2,'0')} <span style="color:var(--paper-muted)">/ ${b.kind}</span></h3><span class="mono">${esc(freq(b.freqHz))} · ${num(b.gainDb,2,true)} dB · Q ${num(b.qFactor,2)}</span></div><div class="coeffs">${['b0','b1','b2','a1','a2'].map(key=>`<div class="coefficient"><div class="key">${key}</div><div class="float">${num(c[key],9)}</div></div>`).join('')}</div><div class="wire-order">${esc(t('wireOrder'))}</div><div class="wire-words">${words.map(w=>`<span title="${w}">0x${hex(w,8)}</span>`).join('')}</div><p class="fine">${esc(t('floatNote'))}</p>`;
+      const poles=roots(1,q.a1,q.a2),zeros=roots(q.b0,q.b1,q.b2),radius=Math.max(...poles.map(p=>Math.hypot(p.re,p.im)));
+      const poleMarks=poles.map(p=>{const px=80+p.re*61,py=80-p.im*61;return `<path d="M${px-3} ${py-3} l6 6 M${px-3} ${py+3} l6 -6" stroke="var(--accent)" stroke-width="1.4"/>`;}).join('');
+      const zeroMarks=zeros.map(p=>`<circle cx="${80+p.re*61}" cy="${80-p.im*61}" r="3.2" fill="none" stroke="var(--text)" stroke-width="1"/>`).join('');
+      $('polePlot').innerHTML=`<title>${esc(t('poleAria'))}</title><path d="M8 80 H152 M80 8 V152" stroke="var(--rule)"/><circle cx="80" cy="80" r="61" fill="none" stroke="var(--muted)" stroke-width=".7"/><circle cx="80" cy="80" r="30.5" fill="none" stroke="var(--rule)" stroke-dasharray="2 4"/>${zeroMarks}${poleMarks}<text x="145" y="94" fill="var(--muted)" font-family="var(--mono)" font-size="8">1</text><text x="86" y="15" fill="var(--muted)" font-family="var(--mono)" font-size="8">j</text>`;
+      $('poleRadius').textContent='r = '+num(radius,7);$('poleStatus').textContent=t('stable');renderBytes();
+    }
+    function byteField(offset){
+      if(offset<14)return t('header')+' · '+t('byte')+' '+offset;
+      if(offset<18)return t('preampField')+' · int32 LE · '+t('byte')+' '+(offset-14);
+      if(offset>=218)return t('crc')+' · '+t('byte')+' '+(offset-218);
+      const rel=offset-18,section=Math.floor(rel/20)+1,coefficient=['b0','b2','−a1','b1','−a2'][Math.floor(rel%20/4)];
+      return `S${section} · ${coefficient} · Q27 int32 LE · ${t('byte')} ${rel%4}`;
+    }
+    function reports(payload=model.payload){return Array.from({length:9},(_,index)=>{const report=new Uint8Array(31);report[0]=index;report.set(payload.slice(index*30,(index+1)*30),1);return report;});}
+    function commitReport(){const report=new Uint8Array(31);report.set(COMMIT_COMMAND);return report;}
+    function renderBytes(){
+      const rows=[{offset:0,length:14,label:'header · 14',kind:'header'},{offset:14,length:4,label:'preamp · 4',kind:'preamp'},...state.bands.map((_,i)=>({offset:18+i*20,length:20,label:`S${String(i+1).padStart(2,'0')} · 20`,kind:'band'})),{offset:218,length:2,label:'CRC · 2',kind:'crc'}];
+      $('payloadDump').innerHTML=`<div class="mono muted" style="font-size:8px;margin-bottom:13px">14 B header | 4 B preamp | ${state.bands.length*20} B biquads | 2 B CRC</div>`+rows.map(r=>`<div class="dump-row ${r.kind}"><span class="dump-offset">${hex(r.offset,3)}</span><span class="dump-label">${r.label}</span><div class="dump-bytes">${model.payload.slice(r.offset,r.offset+r.length).map((byte,i)=>`<span class="byte ${i%4===0?'word-start':''}" tabindex="0" data-offset="${r.offset+i}" title="0x${hex(r.offset+i,3)} · ${esc(byteField(r.offset+i))}" aria-label="${hex(byte)}, ${esc(byteField(r.offset+i))}">${hex(byte)}</span>`).join('')}</div></div>`).join('');
+      $('crcValue').textContent='0x'+hex(model.payload[218]|model.payload[219]<<8,4);
+      $('reportsDump').innerHTML=reports().map((report,i)=>`<div class="report-row" title="${i===7?'10':i===8?'0':'30'} ${t('reportData')} + ${i===7?'20':i===8?'30':'0'} ${t('padding')}"><span class="report-id">${String(i).padStart(2,'0')} / CB</span>  ${Array.from(report).map(v=>hex(v)).join(' ')}</div>`).join('');
+      $('payloadDump').hidden=wireView!=='payload';$('reportsDump').hidden=wireView!=='reports';
+      document.querySelectorAll('[data-wire]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.wire===wireView)));
+      $('byteDetail').textContent=t('byteHint');renderTx();
+    }
+    function renderTx(){
+      const log=reports().map((r,i)=>{const count=clamp(model.payload.length-i*30,0,30);return `+${String(i*16).padStart(3,' ')} ms  report ${i}  [${hex(r[0])}] ${String(count).padStart(2,' ')} B + ${30-count} pad`;});
+      log.push('         ↓ 150 ms',`+278 ms  commit [${COMMIT_COMMAND.map(v=>hex(v)).join(' ')}]`,`         + ${31-COMMIT_COMMAND.length} B padding · 31 B`);
+      $('txLog').textContent=log.join('\n');
+    }
+    function render(){
+      if(!model)model=analyze(state);
+      const active=document.activeElement,focusId=active?.id,focusUid=active?.dataset?.uid,focusField=active?.dataset?.field,handleUid=active?.classList?.contains('handle-group')?active.dataset.uid:null;
+      const focusPreset=active?.dataset?.preset,focusKind=active?.dataset?.kind,focusSelect=active?.dataset?.select;
+      const inChain=Boolean(active?.closest?.('#chain'));
+      $('presetTitle').innerHTML=esc(currentName())+(isEdited()?`<span class="edited-dot" title="${esc(t('edited'))}" aria-label="${esc(t('edited'))}">●</span>`:'');
+      $('heroPre').textContent=num(state.pre,2);$('heroPeak').textContent=num(model.peak,2);$('dirty').textContent=`${dirtyCount()} ${t('dirty')}`;
+      const noteValue=p=>`${num(p.db,1,true)} dB <span class="mono muted">${t('at')} ${freq(p.f)}</span>`;
+      $('cutNote').innerHTML=model.cut.db<-.005?noteValue(model.cut):t('noCut');$('boostNote').innerHTML=model.boost.db>.005?noteValue(model.boost):t('noBoost');
+      $('boostDescription').textContent=t('boostDescription');$('peakNote').textContent=num(-model.peak,2)+' dB';$('preNote').textContent=t('preNote').replace('{pre}',num(state.pre,2));
+      $('abState').textContent=t('abState');$('previewState').textContent=previewTouched?t('abPreview').replace('{ab}',ab):t('previewMock');
+      $('codecStatus').textContent=t(codecOkay?'codecOk':'codecFailed');$('codecStatus').classList.toggle('safety-refusal',!codecOkay);
+      renderChart();renderPresets();renderModules();if(layer==='engenharia')renderEngineering();
+      if(focusUid&&focusField)document.querySelector(`input[data-uid="${focusUid}"][data-field="${focusField}"]`)?.focus({preventScroll:true});
+      else if(handleUid)$('response').querySelector(`[data-uid="${handleUid}"]`)?.focus({preventScroll:true});
+      else if(focusPreset)$('presets').querySelector(`[data-preset="${focusPreset}"]`)?.focus({preventScroll:true});
+      else if(focusKind)$('modules').querySelector(`[data-kind="${focusKind}"]`)?.focus({preventScroll:true});
+      else if(focusSelect)$(inChain?'chain':'modules').querySelector(`[data-select="${focusSelect}"]`)?.focus({preventScroll:true});
+      else if(focusId&&$(focusId)&&document.activeElement!==$(focusId))$(focusId).focus({preventScroll:true});
+    }
+    function loadPreset(key){if(!hasPreset(key))return;if(accept(presetState(key))){selectedUid=3;setUrl();render();toast(`${PRESETS[key].label} ${t('loaded')}`);}}
+    function loadNeutral(){const next={key:'neutral',pre:-.5,bands:[25,80,150,300,600,1200,2400,4800,9600,15000].map((freqHz,i)=>({uid:i+1,kind:'PK',freqHz,gainDb:0,qFactor:1}))};if(accept(next)){setUrl();toast(`${t('neutralName')} ${t('loaded')}`);}}
+    function editBand(uid,patch,notify=true){
+      const next=clone(state),b=next.bands.find(b=>b.uid===Number(uid));if(!b)return false;selectedUid=b.uid;
+      if(patch.kind&&!ENVELOPE[patch.kind])return false;
+      Object.assign(b,patch);const limits=ENVELOPE[b.kind];
+      for(const field of ['freqHz','gainDb','qFactor']){
+        if(!Number.isFinite(b[field])){toast(t('invalid'));render();return false;}
+        const value=clamp(b[field],...limits[field]);
+        if(value!==b[field])showLimit(t('limit')+(field==='freqHz'?freq(value):field==='gainDb'?num(value,2,true)+' dB':'Q '+num(value,2)));
+        const scale=10**FIELD_INFO[field].digits;b[field]=Math.round(value*scale)/scale;
+      }
+      return accept(next,{notify});
+    }
+    function parseNumber(text){const clean=String(text).trim().replaceAll('−','-').replace(',','.');return clean===''?NaN:Number(clean);}
+    function changePre(value){if(!Number.isFinite(value)){toast(t('invalid'));render();return;}const next=clone(state);next.pre=Math.round(clamp(value,-7.8,-.5)*100)/100;if(value< -7.8||value> -.5)showLimit(t('limit')+num(next.pre,2)+' dB preamp');accept(next,{notify:true});}
+    function energyLevel(m){const mean=m.points.reduce((sum,p)=>sum+Math.pow(10,p.db/10),0)/m.points.length;return 10*Math.log10(mean);}
+    function autoHeadroom(match){
+      const next=clone(state),ceiling=Math.floor((-.471-model.peakEq)*100)/100;
+      const target=match?energyLevel(reference)+reference.preActual-energyLevel(model):ceiling;
+      next.pre=clamp(Math.min(target,ceiling),-7.8,-.5);next.pre=Math.floor(next.pre*100)/100;
+      if(accept(next))toast(t(match?'equalized':'maximum'));
+    }
+    // All event handlers are local. No HID request and no AudioContext is created.
+    document.addEventListener('click',event=>{
+      const pending=event.target.closest('a.pending');if(pending){event.preventDefault();return;}
+      const close=event.target.closest('[data-close]');if(close){$(close.dataset.close).close();return;}
+      const preset=event.target.closest('[data-preset]');if(preset){loadPreset(preset.dataset.preset);return;}
+      const layerButton=event.target.closest('[data-layer]');if(layerButton){setLayer(layerButton.dataset.layer);return;}
+      const select=event.target.closest('[data-select]');if(select){selectedUid=Number(select.dataset.select);render();return;}
+      const wire=event.target.closest('[data-wire]');if(wire){wireView=wire.dataset.wire;renderBytes();return;}
+      const abButton=event.target.closest('[data-ab]');if(abButton){ab=abButton.dataset.ab;previewTouched=true;document.querySelectorAll('[data-ab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ab===ab)));render();return;}
+      const action=event.target.closest('[data-action]')?.dataset.action;
+      if(action==='neutral')loadNeutral();if(action==='default')loadPreset('padrao');
+      if(action==='write'){
+        if(!codecOkay||model.peak>-.47){toast(t('refusal'),true);return;}
+        $('writeSummary').textContent=`${currentName()} · ${num(state.pre,2)} dB preamp\n${t('outputPeak')}: ${num(model.peak,2)} dB\n220 B · CRC 0x${hex(model.payload[218]|model.payload[219]<<8,4)}\n9 reports + commit · 278 ms`;$('writeSummary').style.whiteSpace='pre-line';$('writeDialog').showModal();
+      }
+      if(action==='share'){$('shareText').value=setUrl(true);$('shareDialog').showModal();$('shareText').select();}
+      const format=event.target.closest('[data-export]')?.dataset.export;if(format)exportFile(format);
+    });
+    $('language').addEventListener('click',()=>{locale=locale==='pt-BR'?'en-US':'pt-BR';localize();});
+    $('ghost').addEventListener('change',renderChart);
+    $('preview').addEventListener('click',()=>{previewTouched=true;render();toast(t('previewToast'));});
+    $('matchVolume').addEventListener('click',()=>autoHeadroom(true));$('maxVolume').addEventListener('click',()=>autoHeadroom(false));
+    $('preInput').addEventListener('change',event=>changePre(parseNumber(event.target.value)));
+    $('preInput').addEventListener('keydown',event=>{
+      if(event.key==='Enter'){event.preventDefault();changePre(parseNumber(event.target.value));}
+      else if(event.key==='Escape'){event.preventDefault();event.target.value=num(state.pre,2);}
+      else if(['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();changePre(state.pre+(event.key==='ArrowUp'?1:-1)*.1*(event.shiftKey?10:1));}
+    });
+    $('modules').addEventListener('change',event=>{
+      const input=event.target;if(input.dataset.kind)editBand(input.dataset.kind,{kind:input.value});
+      else if(input.dataset.field)editBand(input.dataset.uid,{[input.dataset.field]:parseNumber(input.value)});
+    });
+    $('modules').addEventListener('keydown',event=>{
+      const input=event.target;if(!input.matches('input[data-field]'))return;
+      if(event.key==='Escape'){event.preventDefault();render();return;}
+      if(event.key==='Enter'){event.preventDefault();editBand(input.dataset.uid,{[input.dataset.field]:parseNumber(input.value)});return;}
+      if(!['ArrowUp','ArrowDown'].includes(event.key))return;
+      event.preventDefault();const b=state.bands.find(b=>b.uid===Number(input.dataset.uid)),step=FIELD_INFO[input.dataset.field].step*(event.shiftKey?10:1);
+      editBand(b.uid,{[input.dataset.field]:b[input.dataset.field]+(event.key==='ArrowUp'?step:-step)});
+    });
+    let scrub=null;
+    $('modulesScroll').addEventListener('pointerdown',event=>{
+      const label=event.target.closest('[data-scrub]');if(!label||event.button!==0)return;
+      event.preventDefault();const b=state.bands.find(b=>b.uid===Number(label.dataset.scrub));scrub={uid:b.uid,field:label.dataset.field,value:b[label.dataset.field],x:event.clientX};$('modulesScroll').setPointerCapture(event.pointerId);
+    });
+    $('modulesScroll').addEventListener('pointermove',event=>{if(!scrub)return;const step=FIELD_INFO[scrub.field].step*(event.shiftKey?10:1);editBand(scrub.uid,{[scrub.field]:scrub.value+(event.clientX-scrub.x)*step},false);});
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])$('modulesScroll').addEventListener(type,()=>{scrub=null;});
+    function chartPosition(event){const rect=$('response').getBoundingClientRect();return {x:(event.clientX-rect.left)/rect.width*840,y:(event.clientY-rect.top)/rect.height*364};}
+    let drag=null;
+    $('response').addEventListener('pointerdown',event=>{
+      const handle=event.target.closest('[data-uid]');if(!handle||layer==='ouvir'||event.button!==0)return;event.preventDefault();const b=state.bands.find(b=>b.uid===Number(handle.dataset.uid)),pos=chartPosition(event);selectedUid=b.uid;drag={uid:b.uid,gain:b.gainDb,y:pos.y};$('response').setPointerCapture(event.pointerId);render();
+    });
+    $('response').addEventListener('pointermove',event=>{if(!drag)return;const pos=chartPosition(event),f=20*Math.pow(1000,(pos.x-PLOT.left)/(PLOT.right-PLOT.left)),g=drag.gain+(drag.y-pos.y)*30/(PLOT.bottom-PLOT.top);editBand(drag.uid,{freqHz:Math.round(f),gainDb:Math.round(g*10)/10},false);});
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])$('response').addEventListener(type,()=>{drag=null;});
+    $('response').addEventListener('wheel',event=>{const handle=event.target.closest('[data-uid]');if(!handle||layer==='ouvir')return;event.preventDefault();const b=state.bands.find(b=>b.uid===Number(handle.dataset.uid));editBand(b.uid,{qFactor:b.qFactor+(event.deltaY<0 ? .05 : -.05)*(event.shiftKey?10:1)},false);},{passive:false});
+    $('response').addEventListener('keydown',event=>{
+      const handle=event.target.closest('[data-uid]');if(!handle)return;const b=state.bands.find(b=>b.uid===Number(handle.dataset.uid)),multi=event.shiftKey?10:1;
+      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)){
+        event.preventDefault();const fStep=Math.max(1,Math.round(b.freqHz*.01*multi));
+        const patch=['ArrowLeft','ArrowRight'].includes(event.key)?{freqHz:b.freqHz+(event.key==='ArrowRight'?fStep:-fStep)}:{gainDb:b.gainDb+(event.key==='ArrowUp' ? .1 : -.1)*multi};editBand(b.uid,patch);
+      }
+      else if(event.key==='Enter'||event.key===' '){event.preventDefault();selectedUid=b.uid;render();}
+    });
+    $('chain').addEventListener('keydown',event=>{const module=event.target.closest('[data-select]');if(module&&(event.key==='Enter'||event.key===' ')){event.preventDefault();selectedUid=Number(module.dataset.select);render();$('chain').querySelector(`[data-select="${selectedUid}"]`)?.focus();}});
+    document.addEventListener('keydown',event=>{if(event.altKey||event.ctrlKey||event.metaKey||event.repeat||document.querySelector('dialog[open]')||event.target.closest('input,textarea,select,[contenteditable]'))return;if(['1','2','3'].includes(event.key)){event.preventDefault();setLayer(['ouvir','ajustar','engenharia'][Number(event.key)-1]);}});
+    for(const type of ['pointerover','focusin'])$('payloadDump').addEventListener(type,event=>{const byte=event.target.closest('[data-offset]');if(byte){const offset=Number(byte.dataset.offset);$('byteDetail').textContent=`0x${hex(offset,3)} · ${byteField(offset)} · 0x${hex(model.payload[offset])}`;}});
+    $('runTx').addEventListener('click',()=>{renderTx();toast(t('txDone'));});
+    $('confirmWrite').addEventListener('click',()=>{baseline=clone(state);$('writeDialog').close();render();toast(t('writeDone'));});
+    $('copyLink').addEventListener('click',async()=>{try{if(!navigator.clipboard?.writeText)throw new Error('clipboard unavailable');await navigator.clipboard.writeText($('shareText').value);toast(t('copied'));}catch{$('shareText').focus();$('shareText').select();toast(t('copyFallback'));}});
+    function exportFile(format){
+      let data,type,name;
+      if(format==='bin'){data=Uint8Array.from(model.payload);type='application/octet-stream';name='curva-0xcb.bin';}
+      else if(format==='json'){data=JSON.stringify({format:'open-auri/preset@1',name:currentName(),sampleRate:SAMPLE_RATE,preampDb:state.pre,eqBands:state.bands.map(({uid,...band})=>band)},null,2);type='application/json';name='curva.json';}
+      else{data=[`# open-auri | 96000 Hz | ${currentName()}`,`Preamp: ${state.pre} dB`,...state.bands.map((b,i)=>`Filter ${i+1}: ON ${b.kind==='LS'?'LSC':'PK'} Fc ${b.freqHz} Hz Gain ${b.gainDb} dB Q ${b.qFactor}`)].join('\r\n');type='text/plain';name='curva.txt';}
+      const url=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);toast(t('exported'));
+    }
+    // Small deterministic, in-browser checks, including the fixture's Padrão CRC.
+    function selfCheck(){
+      const bands=presetState('padrao').bands,bytes=encodePayload(bands,-2.8);
+      const framed=reports(bytes),natural=REFERENCE_MODELS.pref6.payload,emv=REFERENCE_MODELS.emv.payload;
+      return crc16Ccitt(new TextEncoder().encode('123456789'))===0x29b1&&bytes.length===220
+        &&bytes[218]===0x70&&bytes[219]===0x19&&bytes.slice(14,18).join(',')==='81,186,92,0'
+        &&natural[218]===0xb8&&natural[219]===0x85&&emv[218]===0xa9&&emv[219]===0x14
+        &&Math.abs(magnitudeDb(bands,1000)-response(reference.sections,1000))<.001
+        &&framed.length===9&&framed.every(r=>r.length===31)&&framed[7].slice(11).every(v=>v===0)
+        &&framed[8][0]===8&&framed[8].slice(1).every(v=>v===0)&&commitReport().length===31;
+    }
+    codecOkay=selfCheck();
+    let badShare=false;
+    const initialUrl=new URL(location.href),initialPreset=initialUrl.searchParams.get('preset');
+    if(hasPreset(initialPreset))state=presetState(initialPreset);
+    if(initialUrl.hash.startsWith('#curva=')){
+      try{
+        if(initialUrl.hash.length>12000)throw new RangeError('link too large');
+        const data=JSON.parse(decodeURIComponent(initialUrl.hash.slice(7)));
+        if(!Array.isArray(data.b)||data.b.length!==10)throw new RangeError('bands');
+        const next={key:hasPreset(initialPreset)?initialPreset:'shared',pre:data.pre,bands:data.b.map((row,i)=>{if(!Array.isArray(row)||row.length!==4)throw new RangeError('band');const [kind,freqHz,gainDb,qFactor]=row;return {uid:i+1,kind,freqHz,gainDb,qFactor};})};
+        validateEnvelope(next);next.bands=sorted(next.bands);const proposed=analyze(next);if(proposed.peak>-.47)throw new RangeError('headroom');state=next;
+      }catch{state=presetState('padrao');badShare=true;}
+    }else if(initialPreset==='neutral'){
+      state={key:'neutral',pre:-.5,bands:[25,80,150,300,600,1200,2400,4800,9600,15000].map((freqHz,i)=>({uid:i+1,kind:'PK',freqHz,gainDb:0,qFactor:1}))};
+    }
+    model=analyze(state);
+    // Loading a reference is not a hardware write; baseline remains the initial Padrão.
+    // Keep precision tools directly below the main figure in the superset layers.
+    document.querySelector('.workspace').after($('adjustSection'));
+    $('adjustSection').after($('engineeringSection'));
+    setLayer(initialUrl.searchParams.get('camada')||'ouvir',false);localize();
+    if(badShare)toast(t('sharedInvalid'));if(!codecOkay)toast(t('codecFailed'),true);
+  </script>
+</body>
+</html>
