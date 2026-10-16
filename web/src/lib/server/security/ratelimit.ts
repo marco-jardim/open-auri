@@ -79,6 +79,12 @@ export interface WindowRule {
 	key: RateLimitKey;
 	limit: number;
 	windowSeconds: number;
+	/**
+	 * Check without counting: the rule passes while one more event would still fit. Used for
+	 * failure budgets, which are counted separately once a failure happened (`slidingWindowLimit`
+	 * with the same rule minus `peek`).
+	 */
+	peek?: boolean;
 }
 
 export type WindowOutcome =
@@ -89,8 +95,9 @@ export type WindowOutcome =
 /**
  * Sliding-window approximation (two fixed windows, the previous one weighted by how much of it
  * still overlaps the sliding window). Every call counts as an attempt, including rejected ones, so
- * a client that keeps hammering stays limited. All rules run in one D1 batch (one round trip,
- * atomic). Returns the first violated rule's outcome; `retryAfter` is the end of the current window.
+ * a client that keeps hammering stays limited. Rules with `peek` are only read: they fail when one
+ * more event would exceed the limit. All rules run in one D1 batch (one round trip, atomic).
+ * Returns the first violated rule's outcome; `retryAfter` is the end of the current window.
  */
 export async function slidingWindowLimit(
 	db: D1Database,
@@ -106,16 +113,23 @@ export async function slidingWindowLimit(
 		}
 		const start = Math.floor(nowSeconds / rule.windowSeconds) * rule.windowSeconds;
 		statements.push(
-			sql(
-				db,
-				`INSERT INTO rate_limit_counters (key, window_start, count, expires_at)
+			rule.peek
+				? sql(
+						db,
+						'SELECT count FROM rate_limit_counters WHERE key = ? AND window_start = ?',
+						`${rule.key}:${rule.windowSeconds}`,
+						start
+					)
+				: sql(
+						db,
+						`INSERT INTO rate_limit_counters (key, window_start, count, expires_at)
 				 VALUES (?, ?, 1, ?)
 				 ON CONFLICT (key, window_start) DO UPDATE SET count = count + 1
 				 RETURNING count`,
-				`${rule.key}:${rule.windowSeconds}`,
-				start,
-				start + 2 * rule.windowSeconds
-			),
+						`${rule.key}:${rule.windowSeconds}`,
+						start,
+						start + 2 * rule.windowSeconds
+					),
 			sql(
 				db,
 				'SELECT count FROM rate_limit_counters WHERE key = ? AND window_start = ?',
@@ -137,7 +151,7 @@ export async function slidingWindowLimit(
 		const current = results[index * 2]?.results[0]?.count ?? 0;
 		const previous = results[index * 2 + 1]?.results[0]?.count ?? 0;
 		const elapsed = (nowSeconds - start) / rule.windowSeconds;
-		const estimate = previous * (1 - elapsed) + current;
+		const estimate = previous * (1 - elapsed) + current + (rule.peek ? 1 : 0);
 		if (estimate > rule.limit) {
 			const retryAfter = Math.max(1, Math.ceil(start + rule.windowSeconds - nowSeconds));
 			return { ok: false, reason: 'limited', retryAfter };
@@ -223,7 +237,10 @@ export const AUTH_POLICIES: Readonly<Record<AuthGuardedPath, AuthRoutePolicy>> =
 		limits: [
 			{ scope: 'ip+id', limit: 3, windowSeconds: 300 },
 			{ scope: 'id', limit: 3, windowSeconds: 300 },
-			{ scope: 'ip', limit: 10, windowSeconds: 300 }
+			{ scope: 'ip', limit: 10, windowSeconds: 300 },
+			// Daily cap per address: no Turnstile here, so this is what bounds the mail a third party
+			// can make one mailbox receive (IP rotation included).
+			{ scope: 'id', limit: 10, windowSeconds: 86_400 }
 		]
 	},
 	'/change-email': {
@@ -258,15 +275,30 @@ export interface AuthRateSubject {
 	userId?: string | null;
 }
 
+/** A window rule of an authentication route, with the scope it was built from. */
+export interface AuthWindowRule extends WindowRule {
+	scope: AuthScope;
+}
+
+/**
+ * Whether a rule's key belongs to the requester (their IP, their IP combined with the identifier,
+ * their own session) rather than to a third party (`id`: someone's e-mail or username). The guard
+ * counts requester-owned rules before Turnstile and third-party rules only after Turnstile passed,
+ * so token-less requests can never spend a victim's per-account budget (auth-guard.ts).
+ */
+export function isRequesterScope(scope: AuthScope): boolean {
+	return scope !== 'id';
+}
+
 /**
  * The window rules that apply to an authentication request, or `null` when `path` is not guarded.
  * Pure: hashing happens before (see auth-guard.ts). Rules whose subject is absent are skipped,
  * except `ip+id`, which falls back to the IP hash alone.
  */
-export function authRateLimit(subject: AuthRateSubject): WindowRule[] | null {
+export function authRateLimit(subject: AuthRateSubject): AuthWindowRule[] | null {
 	if (!isAuthGuardedPath(subject.path)) return null;
 	const policy = AUTH_POLICIES[subject.path];
-	const rules: WindowRule[] = [];
+	const rules: AuthWindowRule[] = [];
 	for (const [index, { scope, limit, windowSeconds }] of policy.limits.entries()) {
 		const group = `${policy.group}.${index}`;
 		let key: RateLimitKey | null = null;
@@ -274,7 +306,53 @@ export function authRateLimit(subject: AuthRateSubject): WindowRule[] | null {
 		else if (scope === 'ip+id') key = rateLimitKey.ip(group, subject.ipIdHash ?? subject.ipHash);
 		else if (scope === 'id' && subject.idHash) key = rateLimitKey.id(group, subject.idHash);
 		else if (scope === 'user' && subject.userId) key = rateLimitKey.user(group, subject.userId);
-		if (key) rules.push({ key, limit, windowSeconds });
+		if (key) rules.push({ key, limit, windowSeconds, scope });
 	}
 	return rules;
+}
+
+// --- Secret checks by a signed-in user (password, second factor) -------------------------------
+
+/**
+ * Endpoints that check a secret for an existing session (change password, delete account, 2FA
+ * management, second-factor verification of a signed-in session) have no Turnstile and no
+ * identifier from the body, so they are limited per user:
+ * - `attempts`: counted on every attempt (bounds bursts and concurrent guessing);
+ * - `failures`: the lockout budget, checked before each attempt (`peek`) and counted only when the
+ *   secret was wrong, so legitimate use (an admin re-verifying TOTP many times a day) never locks.
+ */
+export type SecretKind = 'password' | 'second-factor';
+
+export interface SecretPolicy {
+	group: string;
+	attempts: { limit: number; windowSeconds: number };
+	failures: { limit: number; windowSeconds: number };
+}
+
+export const SECRET_POLICIES: Readonly<Record<SecretKind, SecretPolicy>> = {
+	password: {
+		group: 'auth.secret.password',
+		attempts: { limit: 5, windowSeconds: 300 },
+		failures: { limit: 20, windowSeconds: 86_400 }
+	},
+	'second-factor': {
+		group: 'auth.secret.2fa',
+		attempts: { limit: 5, windowSeconds: 300 },
+		failures: { limit: 20, windowSeconds: 86_400 }
+	}
+};
+
+/** Rules checked before a secret is verified: count the attempt, read the failure budget. */
+export function secretAttemptRules(kind: SecretKind, userId: string): WindowRule[] {
+	const policy = SECRET_POLICIES[kind];
+	return [
+		{ key: rateLimitKey.user(`${policy.group}.attempts`, userId), ...policy.attempts },
+		{ ...secretFailureRule(kind, userId), peek: true }
+	];
+}
+
+/** Rule counted once a secret turned out wrong (the lockout budget). */
+export function secretFailureRule(kind: SecretKind, userId: string): WindowRule {
+	const policy = SECRET_POLICIES[kind];
+	return { key: rateLimitKey.user(`${policy.group}.failures`, userId), ...policy.failures };
 }

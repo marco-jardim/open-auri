@@ -8,16 +8,19 @@
 //   schema is hand-written in migrations/0001_auth.sql; runtime schema introspection is off
 //   (it would run on every request with per-request instances) and a test checks it instead.
 // - Passwords: scrypt in auth/password.ts (PF3). Rate limiting: Better Auth's is off; the T3.3
-//   guard runs in `hooks.before` (auth/hooks.ts) together with Turnstile and the sign-up switch.
+//   guard runs in `hooks.before` (auth/hooks.ts) together with Turnstile and the sign-up switch,
+//   and so do the per-user limits on password / second-factor checks (auth/secret-guard.ts) and
+//   the freshness rule of the sensitive endpoints (Better Auth's freshAge does not cover them).
 // - No IP stored (`disableIpTracking`), session user agent reduced to browser + OS.
 // - Cookies: HttpOnly, SameSite=Lax, Secure (and `__Secure-` names) when the origin is https.
-// - Session freshness 10 min for sensitive endpoints; no cookie cache (every request reads D1,
-//   so revocation and bans apply immediately).
+// - Session freshness 10 min (`freshAge`, plus the hook rule above); no cookie cache (every
+//   request reads D1, so revocation and bans apply immediately).
 import { betterAuth, type BetterAuthPlugin } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { admin } from 'better-auth/plugins/admin';
 import { twoFactor } from 'better-auth/plugins/two-factor';
 import { username } from 'better-auth/plugins/username';
+import { emailChangeRequestedAt } from './account/email-change.ts';
 import { batch } from './db.ts';
 import { createEmailProvider, type EmailProvider } from './email/index.ts';
 import type { ServerEnv } from './env.ts';
@@ -25,9 +28,14 @@ import { deleteAcceptancesStatement } from './legal/acceptance.ts';
 import { createAuthGuard, type AuthGuard } from './security/auth-guard.ts';
 import type { AuthSession, AuthUser } from './types.ts';
 import { createAuthMailer, LINK_TTL_SECONDS } from './auth/emails.ts';
-import { createAfterHook, createBeforeHook, USERNAME_CHANGE_NOT_ALLOWED } from './auth/hooks.ts';
+import {
+	CLOSED_AUTH_PATHS,
+	createAfterHook,
+	createBeforeHook,
+	USERNAME_CHANGE_NOT_ALLOWED
+} from './auth/hooks.ts';
 import { createAuthLogger, type AuthLogEntry } from './auth/logger.ts';
-import { passwordHasher } from './auth/password.ts';
+import { MAX_PASSWORD_LENGTH, passwordHasher } from './auth/password.ts';
 import { FRESH_SESSION_MS } from './auth/session-policy.ts';
 import { reduceUserAgent } from './auth/user-agent.ts';
 import {
@@ -46,11 +54,16 @@ export {
 	requireFreshSession,
 	StaleSessionError
 } from './auth/session-policy.ts';
-export { isAdminPluginPath, TURNSTILE_HEADER, USERNAME_CHANGE_NOT_ALLOWED } from './auth/hooks.ts';
+export {
+	CLOSED_AUTH_PATHS,
+	isAdminPluginPath,
+	TURNSTILE_HEADER,
+	USERNAME_CHANGE_NOT_ALLOWED
+} from './auth/hooks.ts';
 
 export const AUTH_BASE_PATH = '/api/auth';
 export const MIN_PASSWORD_LENGTH = 10;
-export const MAX_PASSWORD_LENGTH = 128;
+export { MAX_PASSWORD_LENGTH };
 
 /** The user being deleted, as Better Auth hands it to `beforeDelete`. */
 export interface DeletedUser {
@@ -113,7 +126,9 @@ export function createAuth(env: ServerEnv, options: CreateAuthOptions) {
 	const mailer = createAuthMailer({
 		provider: options.emailProvider ?? createEmailProvider(env),
 		origin: env.publicOrigin,
-		waitUntil: options.waitUntil
+		waitUntil: options.waitUntil,
+		emailChangeRequestedAt: (userId, newEmail) =>
+			emailChangeRequestedAt(env.db, userId, newEmail, options.now?.().getTime())
 	});
 	const guard = options.guard ?? createAuthGuard({ env });
 	const beforeDeleteUser = options.beforeDeleteUser ?? defaultBeforeDeleteUser(env.db);
@@ -128,9 +143,13 @@ export function createAuth(env: ServerEnv, options: CreateAuthOptions) {
 		trustedOrigins: [env.publicOrigin],
 		telemetry: { enabled: false },
 		logger: createAuthLogger(options.log),
+		// Better Auth's limiter is off: the T3.3 guard and the per-user secret limits
+		// (auth/secret-guard.ts) in hooks.before replace it, including its `/two-factor/*` throttle.
 		rateLimit: { enabled: false },
-		// The 2FA marker is a session field; nothing else needs client-side session updates.
-		disabledPaths: ['/update-session'],
+		// Endpoints the app does not use answer 404 over HTTP (Q3-7; list and reasons in
+		// auth/hooks.ts CLOSED_AUTH_PATHS). The router matches literal paths only, so the hook also
+		// closes the parameterized ones.
+		disabledPaths: CLOSED_AUTH_PATHS.filter((path) => !path.includes(':')),
 
 		emailAndPassword: {
 			enabled: true,
@@ -152,7 +171,10 @@ export function createAuth(env: ServerEnv, options: CreateAuthOptions) {
 		emailVerification: {
 			sendOnSignUp: true,
 			sendOnSignIn: false,
-			// The link opened in the mailbox signs nobody in: the user signs in with the password.
+			// Opening the sign-up verification link does not sign anyone in: the user signs in with the
+			// password. Exception (Better Auth behaviour, documented in auth/README.md): the final
+			// change-email link, opened without a session, signs its opener in to the account, since
+			// the change was already approved from the current mailbox. That link is single-use.
 			autoSignInAfterVerification: false,
 			expiresIn: LINK_TTL_SECONDS.verification,
 			sendVerificationEmail: async ({ user, url, token }, request) => {

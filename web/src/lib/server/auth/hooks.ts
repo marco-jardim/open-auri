@@ -2,32 +2,93 @@
 // `auth.handler` and for server-side `auth.api.*` calls alike.
 //
 // before, in order:
-//   0. the admin plugin's endpoints (`/admin/*`, impersonation included) answer 404 over HTTP;
-//      server-side `auth.api.*` calls (no request) keep working for the guarded /admin area (T3.8);
+//   0. over HTTP, the admin plugin's endpoints (`/admin/*`, impersonation included) and the
+//      endpoints the app does not use (CLOSED_AUTH_PATHS) answer 404; server-side `auth.api.*`
+//      calls (no request) keep working for the guarded /admin area (T3.8);
 //   1. strict origin: state-changing HTTP requests must come from PUBLIC_ORIGIN (Origin, or
 //      Referer when Origin is absent), on top of Better Auth's own CSRF/origin checks;
 //   2. SIGNUP_ENABLED=false → `/sign-up/email` answers 403 `SIGNUP_DISABLED`;
-//   3. nickname rules: `/update-user` never changes the nickname (400
+//   3. nickname and name rules: `/update-user` never changes the nickname (400
 //      `USERNAME_CHANGE_NOT_ALLOWED`; /conta changes it through account/nickname.ts, which writes
 //      D1 directly with the 30-day and hold rules); `/sign-up/email` checks format, reserved
-//      names, skeleton uniqueness and active holds (held looks taken);
+//      names, skeleton uniqueness and active holds (held looks taken); `name` is bounded (64
+//      characters, no control or bidi characters: it is the greeting of some e-mails);
 //   4. `/delete-user` without the confirmation token requires the password;
-//   5. the T3.3 guard (RL_AUTH → D1 windows → Turnstile) on the guarded paths. The Turnstile
-//      token travels in the `x-turnstile-token` request header.
+//   5. the T3.3 guard (RL_AUTH → requester windows → Turnstile → per-account windows) on the
+//      guarded paths. The Turnstile token travels in the `x-turnstile-token` request header;
+//   6. signed-in secret checks (auth/secret-guard.ts): admins with 2FA need the session's 2FA
+//      marker for 2FA management; every password / second-factor check of a session counts
+//      against the per-user limits; `/change-email` needs a fresh session (10 min) or the correct
+//      current password (`password` in the body, verified here);
+//   7. `/verify-email` with an e-mail-change token: single use (auth/link-uses.ts).
 // after:
+//   - wrong password / second factor of a session → counted toward the lockout budget;
 //   - 2FA session marker after a successful TOTP / backup-code verification;
 //   - "password changed" notice after `/change-password`.
 import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from 'better-auth/api';
+import { verifyJWT } from 'better-auth/crypto';
 import { isNicknameHeld } from '../account/nickname.ts';
 import { first, sql } from '../db.ts';
 import type { ServerEnv } from '../env.ts';
 import type { AuthGuard } from '../security/auth-guard.ts';
 import { isAuthGuardedPath } from '../security/ratelimit.ts';
 import type { AuthMailer } from './emails.ts';
+import { claimLinkUse } from './link-uses.ts';
+import {
+	beginSecretAttempt,
+	checkUserPassword,
+	recordSecretFailure,
+	type SecretKind
+} from './secret-guard.ts';
+import {
+	FRESH_SESSION_MS,
+	hasTwoFactorMarker,
+	isFreshSession,
+	type PolicySession
+} from './session-policy.ts';
 import { checkUsername, normalizeUsername, usernameSkeleton } from './username.ts';
 
 /** Request header carrying the Turnstile token to the auth endpoints (T3.6 sets it). */
 export const TURNSTILE_HEADER = 'x-turnstile-token';
+
+/**
+ * Better Auth endpoints closed over HTTP because the app does not use them (Q3-7). Server-side
+ * `auth.api.*` calls still reach them (tests, future server code). Kept open on purpose:
+ * sign-in/up/out, get-session, verification and reset, change-email/password, delete-user (+
+ * callback), the 2FA verification and enable/disable endpoints, and `/revoke-session(s)` /
+ * `/revoke-other-sessions` (they only remove the caller's own sessions, like /conta does).
+ */
+export const CLOSED_AUTH_PATHS = [
+	// The 2FA marker is a session field: no client-side session updates.
+	'/update-session',
+	// /conta edits the profile through its own actions; `name`/`image` would be unbounded here.
+	'/update-user',
+	// Exact-match probe (no confusables, no holds, no throttle); sign-up answers taken/held itself.
+	'/is-username-available',
+	// /conta lists and revokes sessions from D1.
+	'/list-sessions',
+	// A password oracle with no use in the app.
+	'/verify-password',
+	// The reset e-mail links to /redefinir-senha, which POSTs /reset-password.
+	'/reset-password/:token',
+	// Secrets of an enabled 2FA: shown once at enable time; nothing re-reads or regenerates them.
+	'/two-factor/get-totp-uri',
+	'/two-factor/generate-backup-codes',
+	// No OTP delivery is configured.
+	'/two-factor/send-otp',
+	'/two-factor/verify-otp',
+	// No social providers / linked accounts.
+	'/sign-in/social',
+	'/callback/:id',
+	'/link-social',
+	'/unlink-account',
+	'/list-accounts',
+	'/account-info',
+	'/get-access-token',
+	'/refresh-token'
+] as const;
+
+const CLOSED_PATHS: ReadonlySet<string> = new Set(CLOSED_AUTH_PATHS);
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const STATUS_NAME = {
@@ -37,10 +98,56 @@ const STATUS_NAME = {
 	429: 'TOO_MANY_REQUESTS',
 	503: 'SERVICE_UNAVAILABLE'
 } as const;
+
+/** Paths whose success sets the session's 2FA marker. */
 const TWO_FACTOR_VERIFY_PATHS = new Set([
 	'/two-factor/verify-totp',
 	'/two-factor/verify-backup-code'
 ]);
+/** Second-factor checks: limited per user when they verify an existing session. */
+const SECOND_FACTOR_PATHS = new Set([...TWO_FACTOR_VERIFY_PATHS, '/two-factor/verify-otp']);
+/** Endpoints where Better Auth checks the current password of the session's user. */
+const PASSWORD_PATHS = new Set([
+	'/change-password',
+	'/two-factor/enable',
+	'/two-factor/disable',
+	'/two-factor/get-totp-uri',
+	'/two-factor/generate-backup-codes',
+	'/verify-password'
+]);
+/** 2FA management: an admin with 2FA enabled needs the 2FA marker in this session. */
+const TWO_FACTOR_MANAGEMENT_PATHS = new Set([
+	'/two-factor/enable',
+	'/two-factor/disable',
+	'/two-factor/get-totp-uri',
+	'/two-factor/generate-backup-codes'
+]);
+/** Better Auth error codes meaning "the secret was wrong". */
+const WRONG_SECRET_CODES: Readonly<Record<SecretKind, ReadonlySet<string>>> = {
+	password: new Set(['INVALID_PASSWORD']),
+	'second-factor': new Set(['INVALID_CODE', 'INVALID_BACKUP_CODE'])
+};
+
+export const NAME_MAX = 64;
+
+/** C0/C1 controls and bidirectional marks/overrides/isolates (they reorder e-mail greetings). */
+function hasForbiddenNameChar(value: string): boolean {
+	for (const char of value) {
+		const code = char.codePointAt(0) ?? 0;
+		if (
+			code <= 0x1f ||
+			(code >= 0x7f && code <= 0x9f) ||
+			code === 0x061c ||
+			code === 0x200e ||
+			code === 0x200f ||
+			(code >= 0x202a && code <= 0x202e) ||
+			(code >= 0x2066 && code <= 0x2069)
+		) {
+			return true;
+		}
+	}
+	return false;
+}
 
 export interface AuthHookDeps {
 	env: Pick<ServerEnv, 'db' | 'publicOrigin' | 'flags'>;
@@ -77,6 +184,14 @@ function fail(status: keyof typeof STATUS_NAME, code: string, message: string): 
 	return APIError.from(STATUS_NAME[status], { code, message });
 }
 
+function limitedError(retryAfter: number): APIError {
+	return new APIError(
+		STATUS_NAME[429],
+		{ code: 'RATE_LIMITED', message: 'RATE_LIMITED' },
+		{ 'Retry-After': String(retryAfter) }
+	);
+}
+
 /** Identifier the guard keys its per-account limits on, per path. */
 function guardIdentifier(path: string, body: Body): string | null {
 	if (path === '/sign-in/username') return text(body.username) ?? null;
@@ -84,8 +199,53 @@ function guardIdentifier(path: string, body: Body): string | null {
 	return text(body.email) ?? null;
 }
 
+/** Which secret a request checks for its session's user, if any. */
+function secretKind(path: string, body: Body): SecretKind | null {
+	if (SECOND_FACTOR_PATHS.has(path)) return 'second-factor';
+	if (PASSWORD_PATHS.has(path)) return 'password';
+	// Deletion by mailed token checks no password; `/change-email` checks one only when sent.
+	if ((path === '/delete-user' || path === '/change-email') && text(body.password)) {
+		return 'password';
+	}
+	return null;
+}
+
+/** `{ user, session }` of the request's session, loosely typed (plugin fields included). */
+interface SessionView {
+	user: Record<string, unknown> & { id: string; email: string };
+	session: PolicySession;
+}
+
+function sessionView(value: unknown): SessionView | null {
+	if (typeof value !== 'object' || value === null) return null;
+	const { user, session } = value as { user?: unknown; session?: unknown };
+	if (typeof user !== 'object' || user === null || typeof session !== 'object' || !session) {
+		return null;
+	}
+	const record = user as Record<string, unknown>;
+	if (typeof record.id !== 'string' || typeof record.email !== 'string') return null;
+	return {
+		user: record as SessionView['user'],
+		session: session as PolicySession
+	};
+}
+
+/** Code of a Better Auth APIError (`body.code`). */
+function apiErrorCode(error: unknown): string | null {
+	const body: unknown = Reflect.get(error as object, 'body');
+	const code = typeof body === 'object' && body !== null ? Reflect.get(body, 'code') : undefined;
+	return typeof code === 'string' ? code : null;
+}
+
+/** A same-origin relative path (`/x?y`), never `//host` or `/\host`. */
+function safeRelativePath(value: unknown): string | null {
+	if (typeof value !== 'string' || !/^\/(?![/\\])/.test(value)) return null;
+	return value;
+}
+
 const USERNAME_TAKEN = 'USERNAME_IS_ALREADY_TAKEN';
 export const USERNAME_CHANGE_NOT_ALLOWED = 'USERNAME_CHANGE_NOT_ALLOWED';
+export const LINK_ALREADY_USED = 'LINK_ALREADY_USED';
 
 /** Endpoints of Better Auth's admin plugin (all live under `/admin/`). */
 export function isAdminPluginPath(path: string | undefined): boolean {
@@ -93,12 +253,14 @@ export function isAdminPluginPath(path: string | undefined): boolean {
 }
 
 export function createBeforeHook(deps: AuthHookDeps) {
+	const now = deps.now ?? (() => new Date());
 	return createAuthMiddleware(async (ctx) => {
 		const request = ctx.request;
 		const path = ctx.path;
 		const body = asBody(ctx.body);
+		const db = deps.env.db;
 
-		if (request && isAdminPluginPath(path)) {
+		if (request && (isAdminPluginPath(path) || CLOSED_PATHS.has(path))) {
 			throw fail(404, 'NOT_FOUND', 'Not found');
 		}
 
@@ -114,6 +276,13 @@ export function createBeforeHook(deps: AuthHookDeps) {
 
 		if (path === '/update-user' && ('username' in body || 'displayUsername' in body)) {
 			throw fail(400, USERNAME_CHANGE_NOT_ALLOWED, 'The nickname changes only in the account area');
+		}
+
+		if ((path === '/sign-up/email' || path === '/update-user') && 'name' in body) {
+			const name = body.name;
+			if (typeof name !== 'string' || name.length > NAME_MAX || hasForbiddenNameChar(name)) {
+				throw fail(400, 'INVALID_NAME', 'Invalid name');
+			}
 		}
 
 		if (path === '/sign-up/email') {
@@ -132,14 +301,13 @@ export function createBeforeHook(deps: AuthHookDeps) {
 				if (problem === 'reserved') throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
 				const row = await first<{ id: string }>(
 					sql(
-						deps.env.db,
+						db,
 						'SELECT id FROM "user" WHERE usernameSkeleton = ? LIMIT 1',
 						usernameSkeleton(username)
 					)
 				);
-				const now = (deps.now?.() ?? new Date()).getTime();
 				// A nickname on its 90-day hold answers exactly like a taken one.
-				if (row || (await isNicknameHeld(deps.env.db, username, now))) {
+				if (row || (await isNicknameHeld(db, username, now().getTime()))) {
 					throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
 				}
 			}
@@ -149,10 +317,16 @@ export function createBeforeHook(deps: AuthHookDeps) {
 			throw fail(400, 'PASSWORD_REQUIRED', 'Password is required');
 		}
 
+		// The session is read at most once, and only by the steps that need it.
+		let cached: Promise<SessionView | null> | undefined;
+		const currentSession = (): Promise<SessionView | null> => {
+			cached ??= getSessionFromCtx(ctx).then(sessionView);
+			return cached;
+		};
+
 		if (isAuthGuardedPath(path)) {
 			const headers = request?.headers ?? ctx.headers ?? new Headers();
-			let userId: string | null = null;
-			if (path === '/change-email') userId = (await getSessionFromCtx(ctx))?.user.id ?? null;
+			const userId = path === '/change-email' ? ((await currentSession())?.user.id ?? null) : null;
 			const result = await deps.guard({
 				path,
 				ip: headers.get('cf-connecting-ip'),
@@ -166,6 +340,78 @@ export function createBeforeHook(deps: AuthHookDeps) {
 					{ code: result.code, message: result.code },
 					result.retryAfter === undefined ? undefined : { 'Retry-After': String(result.retryAfter) }
 				);
+			}
+		}
+
+		const kind = secretKind(path, body);
+		if (kind || path === '/change-email' || TWO_FACTOR_MANAGEMENT_PATHS.has(path)) {
+			// Without a session Better Auth answers 401 itself, or (second factor) runs the sign-in
+			// challenge, which has its own per-challenge and per-account lockout.
+			const current = await currentSession();
+			if (current) {
+				const at = now();
+				const { user, session } = current;
+				if (
+					TWO_FACTOR_MANAGEMENT_PATHS.has(path) &&
+					user.role === 'admin' &&
+					user.twoFactorEnabled === true &&
+					!hasTwoFactorMarker(session)
+				) {
+					throw fail(403, 'TWO_FACTOR_REQUIRED', 'Verify the second factor first');
+				}
+				if (path === '/change-email') {
+					const password = text(body.password);
+					if (password) {
+						const check = await checkUserPassword(db, user.id, password, at);
+						if (check.result === 'limited') throw limitedError(check.retryAfter ?? 60);
+						if (check.result === 'unavailable') {
+							throw fail(503, 'RATE_LIMIT_UNAVAILABLE', 'RATE_LIMIT_UNAVAILABLE');
+						}
+						if (check.result === 'wrong') throw fail(400, 'INVALID_PASSWORD', 'Invalid password');
+					} else if (!isFreshSession(session, FRESH_SESSION_MS, at.getTime())) {
+						throw fail(403, 'SESSION_NOT_FRESH', 'Session is not fresh enough for this action');
+					}
+				} else if (kind) {
+					const attempt = await beginSecretAttempt(db, kind, user.id, at);
+					if (!attempt.ok) {
+						if (attempt.status === 429) throw limitedError(attempt.retryAfter);
+						throw fail(503, 'RATE_LIMIT_UNAVAILABLE', 'RATE_LIMIT_UNAVAILABLE');
+					}
+				}
+			}
+		}
+
+		if (path === '/verify-email') {
+			const query = asBody(ctx.query);
+			const token = text(query.token);
+			const payload = token ? await verifyJWT(token, ctx.context.secret) : null;
+			const owner = text(payload?.email);
+			if (token && payload && owner && text(payload.updateTo)) {
+				// Claim only a link Better Auth is about to act on, so a link opened in the wrong
+				// browser (signed in as someone else) still works afterwards in the right one.
+				const found = await ctx.context.internalAdapter.findUserByEmail(owner);
+				const current = await currentSession();
+				if (found && (!current || current.user.email === owner)) {
+					const expiresAt = typeof payload.exp === 'number' ? payload.exp * 1000 : 0;
+					let firstUse: boolean;
+					try {
+						firstUse = await claimLinkUse(db, token, expiresAt, now().getTime());
+					} catch {
+						throw fail(503, 'SERVICE_UNAVAILABLE', 'Try again later');
+					}
+					if (!firstUse) {
+						// Same answer shape as Better Auth's own link errors: back to the page with
+						// `?error=`, when the page is a same-origin path; JSON otherwise.
+						const callback = safeRelativePath(query.callbackURL);
+						if (callback) {
+							const target = new URL(callback, deps.env.publicOrigin);
+							target.searchParams.set('error', LINK_ALREADY_USED);
+							const location = `${target.pathname}${target.search}${target.hash}`;
+							throw new APIError('FOUND', undefined, new Headers({ location }));
+						}
+						throw fail(400, LINK_ALREADY_USED, 'This link was already used');
+					}
+				}
 			}
 		}
 	});
@@ -202,7 +448,19 @@ export function createAfterHook(deps: AuthHookDeps) {
 	const now = deps.now ?? (() => new Date());
 	return createAuthMiddleware(async (ctx) => {
 		const returned: unknown = ctx.context.returned;
-		if (returned === undefined || returned === null || isAPIError(returned)) return;
+
+		if (isAPIError(returned)) {
+			// Wrong secret checked for a session (a sign-in 2FA challenge has no session here and is
+			// counted by Better Auth's own lockout). `/change-email` is counted in the before hook.
+			const kind = secretKind(ctx.path, asBody(ctx.body));
+			const code = apiErrorCode(returned);
+			if (kind && ctx.path !== '/change-email' && code && WRONG_SECRET_CODES[kind].has(code)) {
+				const userId = sessionView(ctx.context.session)?.user.id;
+				if (userId) await recordSecretFailure(deps.env.db, kind, userId, now());
+			}
+			return;
+		}
+		if (returned === undefined || returned === null) return;
 		if (returned instanceof Response && !returned.ok) return;
 
 		if (TWO_FACTOR_VERIFY_PATHS.has(ctx.path)) {

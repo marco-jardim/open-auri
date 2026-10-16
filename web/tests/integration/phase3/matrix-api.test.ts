@@ -30,8 +30,9 @@ afterAll(async () => {
 const SIGNED_IN: readonly PersonaName[] = PERSONAS.filter((name) => name !== 'anonymous');
 
 /** Session-bound endpoints: method, path and a body that would otherwise be valid. */
+// FX3.1 (Q3-7): `/list-sessions` and `/update-user` left this list: the app does not use them and
+// they now answer 404 over HTTP for everyone (covered in auth/hardening.test.ts).
 const SESSION_ENDPOINTS: readonly { method: 'GET' | 'POST'; path: string; body?: unknown }[] = [
-	{ method: 'GET', path: '/list-sessions' },
 	{
 		method: 'POST',
 		path: '/change-password',
@@ -39,7 +40,6 @@ const SESSION_ENDPOINTS: readonly { method: 'GET' | 'POST'; path: string; body?:
 	},
 	{ method: 'POST', path: '/change-email', body: { newEmail: 'nobody-new@example.com' } },
 	{ method: 'POST', path: '/delete-user', body: { password: PASSWORD } },
-	{ method: 'POST', path: '/update-user', body: { name: 'x' } },
 	{ method: 'POST', path: '/revoke-session', body: { token: 'not-a-token' } },
 	{ method: 'POST', path: '/revoke-sessions' },
 	{ method: 'POST', path: '/revoke-other-sessions' },
@@ -62,21 +62,18 @@ describe('/api/auth/* × personas', () => {
 		expect(await anonymous.client.session()).toBeNull();
 	});
 
-	it('signed-in personas reach their own session list; cross-origin writes are refused', async () => {
+	it('signed-in personas reach their own session; cross-origin writes are refused', async () => {
 		const h = harness(network);
 		const all = await personas(h);
 		// `banned` here is a flipped row with a live session (an artificial state: a real ban revokes
 		// every session, covered below), so only its cross-origin refusal is asserted.
+		// FX3.1: `/list-sessions` is closed over HTTP; the own-session check uses `/get-session`.
 		for (const name of SIGNED_IN) {
 			const { client } = all[name];
 			if (name !== 'banned') {
-				const list = await client.get('/list-sessions');
-				expect(list.status, name).toBe(200);
-				const sessions = (await list.json()) as { userId: string }[];
-				expect(
-					sessions.every((session) => session.userId === all[name].id),
-					name
-				).toBe(true);
+				const current = await client.session();
+				expect(current?.user.id, name).toBe(all[name].id);
+				expect((await client.get('/list-sessions')).status, name).toBe(404);
 			}
 
 			const crossSite = await client.post(
@@ -132,7 +129,15 @@ describe('/api/auth/* × personas', () => {
 		const again = await h.client().signIn(email);
 		expect(again.status).toBe(403);
 		// The banned user's former cookie cannot reach session endpoints either.
-		expect((await victim.get('/list-sessions')).status).toBe(401);
+		// (FX3.1: `/list-sessions` is closed over HTTP; `/change-password` is session-bound.)
+		expect(
+			(
+				await victim.post('/change-password', {
+					currentPassword: PASSWORD,
+					newPassword: NEW_PASSWORD
+				})
+			).status
+		).toBe(401);
 	});
 });
 

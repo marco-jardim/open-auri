@@ -11,6 +11,8 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 export const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 5 } as const;
+/** Longest password accepted anywhere (Better Auth option and our own checks). */
+export const MAX_PASSWORD_LENGTH = 128;
 export const KEY_LENGTH = 64;
 export const SALT_LENGTH = 16;
 /** 128 · N · r = 16 MiB for the current parameters; leave room for the accepted maximum. */

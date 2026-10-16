@@ -49,6 +49,30 @@ export async function recordEmailChangeRequest(
 	return { newEmail: email, requestedAt: now, expiresAt };
 }
 
+/**
+ * `requested_at` of the pending (unexpired) change of `userId` to `newEmail`, or null. The auth
+ * mailer keys the final change-email messages on it, so every opening of a confirmation link for
+ * the same request maps to the same Resend idempotency key (Q3-4).
+ */
+export async function emailChangeRequestedAt(
+	db: D1Database,
+	userId: string,
+	newEmail: string,
+	now: number = Date.now()
+): Promise<number | null> {
+	const row = await first<{ requested_at: number }>(
+		sql(
+			db,
+			'SELECT requested_at FROM email_change_requests ' +
+				'WHERE user_id = ? AND new_email = ? AND expires_at > ?',
+			userId,
+			normalizeEmail(newEmail),
+			now
+		)
+	);
+	return typeof row?.requested_at === 'number' ? row.requested_at : null;
+}
+
 export async function clearEmailChangeRequest(db: D1Database, userId: string): Promise<void> {
 	await run(sql(db, 'DELETE FROM email_change_requests WHERE user_id = ?', userId));
 }

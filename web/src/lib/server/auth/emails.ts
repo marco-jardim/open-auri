@@ -4,6 +4,7 @@
 // One message has no T3.2 template: the change-email confirmation that goes to the CURRENT
 // address (Better Auth's `sendChangeEmailConfirmation`). Its copy lives here and reuses the T3.2
 // layout and escaping. The other messages use the T3.2 templates.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
 	accountDeleted,
 	buildIdempotencyKey,
@@ -50,6 +51,11 @@ export interface AuthMailerOptions {
 	provider: EmailProvider;
 	origin: string;
 	waitUntil: (promise: Promise<unknown>) => void;
+	/**
+	 * `requested_at` of the pending e-mail change of `userId` to `newEmail`
+	 * (email_change_requests), or null. Keys the final change-email messages (Q3-4).
+	 */
+	emailChangeRequestedAt?: (userId: string, newEmail: string) => Promise<number | null>;
 }
 
 interface Recipient {
@@ -59,14 +65,38 @@ interface Recipient {
 	emailVerified?: boolean | null;
 }
 
-/** Locale of the e-mail: the `oa_lang` cookie, then Accept-Language, then pt-BR. */
-export function emailLocaleFromRequest(request: Request | undefined | null): EmailLocale {
-	const headers = request?.headers;
+/** Locale from request headers: the `oa_lang` cookie, then Accept-Language, then pt-BR. */
+export function emailLocaleFromHeaders(headers: Headers | undefined | null): EmailLocale {
 	if (!headers) return 'pt-BR';
 	const cookie = headers.get('cookie') ?? '';
 	const match = /(?:^|;\s*)oa_lang=([^;]+)/.exec(cookie);
-	if (match?.[1]) return resolveEmailLocale(decodeURIComponent(match[1]));
+	if (match?.[1]) {
+		let value: string | null = null;
+		try {
+			value = decodeURIComponent(match[1]);
+		} catch {
+			// Malformed escape (`oa_lang=%`): ignore the cookie; the mail must still go out.
+		}
+		if (value !== null) return resolveEmailLocale(value);
+	}
 	return resolveEmailLocale(headers.get('accept-language'));
+}
+
+/**
+ * Server-side `auth.api.*` calls (the /conta actions) carry no `Request`, so Better Auth hands the
+ * e-mail callbacks `undefined`. The caller states the locale with {@link withEmailLocale} around the
+ * call instead; the scope follows every await inside it.
+ */
+const localeScope = new AsyncLocalStorage<EmailLocale>();
+
+export function withEmailLocale<T>(locale: EmailLocale, run: () => Promise<T>): Promise<T> {
+	return localeScope.run(locale, run);
+}
+
+/** Locale of the e-mail: the request's headers, else the {@link withEmailLocale} scope, else pt-BR. */
+export function emailLocaleFromRequest(request: Request | undefined | null): EmailLocale {
+	if (request?.headers) return emailLocaleFromHeaders(request.headers);
+	return localeScope.getStore() ?? 'pt-BR';
 }
 
 const CONFIRM_CHANGE_COPY: Record<
@@ -185,7 +215,7 @@ export function createAuthMailer(options: AuthMailerOptions) {
 	const nameFor = (user: Recipient) => (user.emailVerified ? (user.name ?? null) : null);
 
 	return {
-		verification(user: Recipient, url: string, token: string, request?: Request) {
+		async verification(user: Recipient, url: string, token: string, request?: Request) {
 			const locale = emailLocaleFromRequest(request);
 			const { email: currentEmail, updateTo } = readEmailTokenPayload(token);
 			const ttl = minutes(LINK_TTL_SECONDS.verification);
@@ -198,14 +228,23 @@ export function createAuthMailer(options: AuthMailerOptions) {
 					token
 				);
 			}
-			// E-mail change, final step: the new address confirms; the old one is told.
+			// E-mail change, final step: the new address confirms; the old one is told. Both are keyed
+			// on the pending request (user, new address, requested_at), not on this link's token: Better
+			// Auth mints a new token on every opening of the first link, so a token key would let one
+			// link mail the new address (and the account's own) again and again. With the request key,
+			// Resend sends each message once per request (repeats are deduplicated for 24 h). Without a
+			// recorded request (an API call outside /conta), the token keys it; the single-use claim of
+			// the first link (auth/link-uses.ts) still limits that to one message per link.
+			const lookup = options.emailChangeRequestedAt;
+			const requestedAt = lookup ? await lookup(user.id, updateTo).catch(() => null) : null;
+			const keyParts =
+				requestedAt === null ? [user.id, token] : [user.id, updateTo, String(requestedAt)];
 			const tasks = [
 				send(
 					'confirm-new-email',
 					updateTo,
 					confirmNewEmail(locale, { origin, url, expiresInMinutes: ttl }),
-					user.id,
-					token
+					...keyParts
 				)
 			];
 			if (currentEmail && currentEmail !== updateTo && user.emailVerified) {
@@ -218,8 +257,7 @@ export function createAuthMailer(options: AuthMailerOptions) {
 							url: page(AUTH_PAGES.secureAccount),
 							name: user.name ?? null
 						}),
-						user.id,
-						token
+						...keyParts
 					)
 				);
 			}

@@ -96,7 +96,9 @@ describe('admin plugin endpoints', () => {
 });
 
 describe('nickname changes outside /conta', () => {
-	it('/update-user refuses username and displayUsername, accepts other fields', async () => {
+	// FX3.1 (Q3-7): `/update-user` is closed over HTTP (404 for every body); server-side calls still
+	// refuse nickname fields with USERNAME_CHANGE_NOT_ALLOWED and accept the other fields.
+	it('/update-user: 404 over HTTP; server-side it refuses nickname fields, accepts others', async () => {
 		const h = harness();
 		const email = uniqueEmail('upd');
 		const original = uniqueUsername('orig');
@@ -106,13 +108,24 @@ describe('nickname changes outside /conta', () => {
 		for (const body of [
 			{ username: uniqueUsername('new') },
 			{ displayUsername: original.toUpperCase() },
-			{ username: original, displayUsername: original.toUpperCase() }
+			{ username: original, displayUsername: original.toUpperCase() },
+			{ name: 'Renamed' }
 		]) {
-			const response = await client.post('/update-user', body);
-			expect(response.status).toBe(400);
-			expect(await errorCode(response)).toBe('USERNAME_CHANGE_NOT_ALLOWED');
+			expect((await client.post('/update-user', body)).status).toBe(404);
 		}
-		expect((await client.post('/update-user', { name: 'Renamed' })).status).toBe(200);
+		for (const body of [
+			{ username: uniqueUsername('new') },
+			{ displayUsername: original.toUpperCase() }
+		]) {
+			const error = await h.auth.api
+				.updateUser({ body, headers: client.headers() })
+				.then(() => null)
+				.catch((caught: unknown) => caught);
+			expect(JSON.stringify((error as { body?: unknown } | null)?.body ?? null)).toContain(
+				'USERNAME_CHANGE_NOT_ALLOWED'
+			);
+		}
+		await h.auth.api.updateUser({ body: { name: 'Renamed' }, headers: client.headers() });
 		expect(await nickname(id)).toEqual({ username: original, displayUsername: original });
 	});
 

@@ -6,17 +6,19 @@ Better Auth 1.7.10 on Cloudflare Workers with D1. Server-only modules; nothing h
 
 ## Modules
 
-| File                         | What it does                                                                                                                                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `../auth.ts`                 | `createAuth(env, { waitUntil, plugins?, baseURL?, beforeDeleteUser? })`: one instance per request. `toAuthLocals()` maps `getSession()` to `App.Locals`. Re-exports the session-policy helpers.  |
-| `password.ts`                | scrypt `N=2^14 r=8 p=5`, 16-byte salt, 64-byte key, NFKC, constant-time compare. Format `scrypt$16384$8$5$<saltHex>$<hashHex>`; malformed or out-of-bounds hashes never verify; `needsRehash`.   |
-| `username.ts`, `reserved.ts` | Nickname rules (§3.7): NFKC + lowercase, 3 to 24 chars of `[a-z0-9._-]`, confusable skeleton, reserved names.                                                                                    |
-| `compose.ts`                 | Order of the server hooks (`HOOK_ORDER`, read-only first) and `createReadOnlyHandle`.                                                                                                            |
-| `hooks.ts`                   | `hooks.before` (admin plugin closed over HTTP, origin, sign-up switch, nickname rules, delete needs password, T3.3 guard + Turnstile) and `hooks.after` (2FA marker, "password changed" notice). |
-| `emails.ts`                  | Auth e-mails through the T3.2 provider under `waitUntil`; the change-email confirmation to the current address has its own copy here.                                                            |
-| `session-policy.ts`          | `isAdminEffective`, `isFreshSession` / `requireFreshSession`, `hasTwoFactorMarker`.                                                                                                              |
-| `guards.ts`, `kit.ts`        | `checkUser` / `checkVerified` (typed results) and the SvelteKit `requireUser` / `requireVerified` (`error(401 \| 403)`).                                                                         |
-| `logger.ts`, `user-agent.ts` | Better Auth logger without personal data (warn level, redacted messages, error names only); session user agent reduced to "browser on OS".                                                       |
+| File                         | What it does                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `../auth.ts`                 | `createAuth(env, { waitUntil, plugins?, baseURL?, beforeDeleteUser? })`: one instance per request. `toAuthLocals()` maps `getSession()` to `App.Locals`. Re-exports the session-policy helpers.                                                                                                                                   |
+| `password.ts`                | scrypt `N=2^14 r=8 p=5`, 16-byte salt, 64-byte key, NFKC, constant-time compare. Format `scrypt$16384$8$5$<saltHex>$<hashHex>`; malformed or out-of-bounds hashes never verify; `needsRehash`.                                                                                                                                    |
+| `username.ts`, `reserved.ts` | Nickname rules (§3.7): NFKC + lowercase, 3 to 24 chars of `[a-z0-9._-]`, confusable skeleton, reserved names.                                                                                                                                                                                                                     |
+| `compose.ts`                 | Order of the server hooks (`HOOK_ORDER`, read-only first) and `createReadOnlyHandle`.                                                                                                                                                                                                                                             |
+| `hooks.ts`                   | `hooks.before` (admin plugin and unused endpoints closed over HTTP, origin, sign-up switch, nickname and name rules, delete needs password, T3.3 guard + Turnstile, per-user secret limits, change-email freshness, single-use change-email links) and `hooks.after` (wrong-secret count, 2FA marker, "password changed" notice). |
+| `secret-guard.ts`            | Per-user limits on password and second-factor checks of a session (`beginSecretAttempt`, `recordSecretFailure`, `checkUserPassword`, raw `verifyUserPassword`).                                                                                                                                                                   |
+| `link-uses.ts`               | `claimLinkUse`: first-use claim of a change-email link (table `auth_link_uses`, migration 0010).                                                                                                                                                                                                                                  |
+| `emails.ts`                  | Auth e-mails through the T3.2 provider under `waitUntil`; the change-email confirmation to the current address has its own copy here. `withEmailLocale` sets the locale of server-side calls.                                                                                                                                     |
+| `session-policy.ts`          | `isAdminEffective`, `isFreshSession` / `requireFreshSession`, `hasTwoFactorMarker`.                                                                                                                                                                                                                                               |
+| `guards.ts`, `kit.ts`        | `checkUser` / `checkVerified` (typed results) and the SvelteKit `requireUser` / `requireVerified` (`error(401 \| 403)`).                                                                                                                                                                                                          |
+| `logger.ts`, `user-agent.ts` | Better Auth logger without personal data (warn level, redacted messages, error names only); session user agent reduced to "browser on OS".                                                                                                                                                                                        |
 
 ## Wiring
 
@@ -43,7 +45,9 @@ accountDeletionHook(env)` from T3.7), puts it in `locals.auth` and fills `locals
   `TURNSTILE_REQUIRED` (400), `TURNSTILE_FAILED` (403), `TURNSTILE_UNAVAILABLE` /
   `RATE_LIMIT_UNAVAILABLE` (503), `RATE_LIMITED` (429 + `Retry-After`), `INVALID_USERNAME`,
   `USERNAME_IS_ALREADY_TAKEN` (also for reserved names), `DISPLAY_USERNAME_MISMATCH`,
-  `PASSWORD_REQUIRED` (delete without password), plus Better Auth's own codes
+  `PASSWORD_REQUIRED` (delete without password), `INVALID_NAME`, `SESSION_NOT_FRESH` (403),
+  `INVALID_PASSWORD` (400, change-email of a stale session), `TWO_FACTOR_REQUIRED` (403),
+  `LINK_ALREADY_USED`, plus Better Auth's own codes
   (`EMAIL_NOT_VERIFIED`, `INVALID_EMAIL_OR_PASSWORD`, `INVALID_TOKEN`, `BANNED_USER`, ...).
 - **Links in e-mails:** reset → `/redefinir-senha?token=…` (the page POSTs `/reset-password`);
   verification, change-email steps and account deletion → Better Auth GET endpoints under
@@ -68,14 +72,45 @@ accountDeletionHook(env)` from T3.7), puts it in `locals.auth` and fills `locals
   transactions). Runtime schema validation is off: with per-request instances it would introspect
   D1 on every request. `tests/integration/auth/schema.test.ts` runs Better Auth's explicit schema
   check against `migrations/0001_auth.sql` instead.
-- **Rate limiting** is the T3.3 guard only (`rateLimit.enabled: false`). IP: `disableIpTracking`;
-  the client IP (`cf-connecting-ip`) is only hashed by the guard.
+- **Rate limiting** (`rateLimit.enabled: false`, which also drops Better Auth's `/two-factor/*`
+  throttle) is ours: the T3.3 guard on the anonymous endpoints, and per-user D1 limits on every
+  secret checked for a session (`secret-guard.ts`): `/two-factor/verify-totp` and
+  `/verify-backup-code` of a signed-in session (admin re-authentication included, it calls
+  `verifyTOTP`), `/change-password`, `/delete-user` with a password, `/two-factor/enable` and
+  `/disable`, and the password `/change-email` takes from a stale session. 5 attempts per 5 min
+  (counted before the check) and 20 wrong secrets per day (checked before, counted on failure:
+  the lockout) per user and kind; 429 `RATE_LIMITED` + `Retry-After`. The sign-in 2FA challenge
+  (no session yet) keeps Better Auth's own lockout (5 tries per challenge, 10 consecutive failures
+  lock the account 15 min). IP: `disableIpTracking`; the client IP (`cf-connecting-ip`) is only
+  hashed by the guard.
+- **Closed endpoints** (`CLOSED_AUTH_PATHS`, 404 over HTTP, still callable server-side): everything
+  the app does not use: `/update-session`, `/update-user`, `/is-username-available`,
+  `/list-sessions`, `/verify-password`, `/reset-password/:token`, `/two-factor/get-totp-uri`,
+  `/generate-backup-codes`, `/send-otp`, `/verify-otp`, and the social/linked-account endpoints.
+  `/revoke-session(s)` and `/revoke-other-sessions` stay open (they only remove the caller's own
+  sessions, as /conta does). `name` (sign-up, server-side `/update-user`) is at most 64 characters
+  without control or bidi characters (400 `INVALID_NAME`): it greets the user in e-mails.
 - **Cookies:** `open-auri.*` names (`__Secure-` prefixed on https), HttpOnly, SameSite=Lax, Secure
   on https, Path=/. No cookie cache: every request reads the session row, so sign-out, revocation,
   password reset and bans apply at once.
-- **Freshness:** `session.freshAge` = 10 min for Better Auth's sensitive endpoints (change e-mail,
-  delete, 2FA disable). `requireFreshSession` (T3.8 destructive actions) also accepts a 2FA
-  verification within the last 10 minutes.
+- **Freshness / re-authentication.** Better Auth's `session.freshAge` (10 min) only applies to
+  endpoints using its `freshSessionMiddleware`; `/change-email`, `/delete-user` and
+  `/two-factor/disable` use `sensitiveSessionMiddleware`, which only requires a session. So the
+  before-hook enforces it (every caller, HTTP and /conta alike):
+
+  | Endpoint                                                        | Requirement                                                                                                                                 |
+  | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `/change-email`                                                 | `isFreshSession` (created or 2FA-verified < 10 min), or a correct `password` in the body (403 `SESSION_NOT_FRESH` / 400 `INVALID_PASSWORD`) |
+  | `/delete-user`                                                  | the password (400 `PASSWORD_REQUIRED`), or the mailed confirmation token                                                                    |
+  | `/change-password`, `/two-factor/enable`, `/two-factor/disable` | the current password (checked by Better Auth)                                                                                               |
+  | `/two-factor/enable`, `/two-factor/disable` (admin with 2FA on) | also the session's 2FA marker (403 `TWO_FACTOR_REQUIRED`)                                                                                   |
+
+  Every password checked there is under the per-user limits above. `requireFreshSession` (T3.8
+  destructive actions) also accepts a 2FA verification within the last 10 minutes.
+
+- **E-mail locale:** the request's `oa_lang` cookie (a malformed value is ignored), then
+  Accept-Language, then pt-BR. Server-side calls carry no Request: the /conta actions wrap their
+  `auth.api.*` calls in `withEmailLocale(<locale of the page request>)`.
 - **Admin 2FA marker:** `session.twoFactorVerifiedAt` (additional field, `input: false`;
   `/update-session` is disabled). Set in `hooks.after` when `/two-factor/verify-totp` or
   `/two-factor/verify-backup-code` succeed, on the session created by that request (challenged
@@ -92,6 +127,14 @@ accountDeletionHook(env)` from T3.7), puts it in `locals.auth` and fills `locals
   address's link switches the e-mail. That last link signs its opener in when no session is
   present (Better Auth behaviour; the change was already approved from the old mailbox). If the new
   address got registered in between, the unique index rejects the update (500, nothing changes).
+  Both links are single-use (Q3-4): the hook claims a link (SHA-256 of the token in
+  `auth_link_uses`) right before Better Auth acts on it, only when it would act (valid token,
+  account found, no session of another account); a reused link redirects to its same-origin
+  `callbackURL` with `?error=LINK_ALREADY_USED` (400 JSON otherwise). A claimed link whose step
+  then fails (e.g. the new address was taken meanwhile) needs a new request. The final messages
+  (`confirm-new-email`, `email-change-notice`) are keyed for Resend on (user, new address,
+  `email_change_requests.requested_at`), so they go out once per request; requests made outside
+  /conta (no row) fall back to the token key.
 - **Account deletion:** password required, then a confirmation link (1 h) that only works in a
   browser signed in as that user. `beforeDelete` runs the injected content-deletion policy (default:
   delete `policy_acceptances`); `afterDelete` sends "account deleted". Child auth rows cascade.

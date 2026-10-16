@@ -106,7 +106,9 @@ describe('profile', () => {
 	it('falls back for missing display nickname and unknown visibility values', async () => {
 		const username = nick('prof');
 		const user = await seedUser({ username });
-		await env.DB.prepare('UPDATE "user" SET "displayUsername" = NULL WHERE id = ?').bind(user.id).run();
+		await env.DB.prepare('UPDATE "user" SET "displayUsername" = NULL WHERE id = ?')
+			.bind(user.id)
+			.run();
 		const profile = await getAccountProfile(env.DB, user.id, NOW);
 		expect(profile).toMatchObject({
 			displayUsername: username,
@@ -196,7 +198,14 @@ describe('sessions', () => {
 			'INSERT INTO "session" ("id", "expiresAt", "token", "createdAt", "updatedAt", "userId") ' +
 				'VALUES (?, ?, ?, ?, ?, ?)'
 		)
-			.bind(`expired-${crypto.randomUUID()}`, 'garbage', `tok-${crypto.randomUUID()}`, NOW, NOW, user.id)
+			.bind(
+				`expired-${crypto.randomUUID()}`,
+				'garbage',
+				`tok-${crypto.randomUUID()}`,
+				NOW,
+				NOW,
+				user.id
+			)
 			.run();
 		const sessions = await listAccountSessions(env.DB, user.id, null, NOW);
 		expect(sessions).toHaveLength(1);

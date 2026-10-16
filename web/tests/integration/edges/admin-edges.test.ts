@@ -4,12 +4,7 @@
 import { setupNetwork } from '@msw/cloudflare';
 import { env } from 'cloudflare:workers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import {
-	banAction,
-	readOnlyAction,
-	reauthAction,
-	unbanAction
-} from '#lib/server/admin/actions.ts';
+import { banAction, readOnlyAction, reauthAction, unbanAction } from '#lib/server/admin/actions.ts';
 import {
 	checkAccess,
 	clearAccessKeyCache,
@@ -109,14 +104,39 @@ describe('admin actions', () => {
 		const otherAdmin = await account(h, 'adm-other', true);
 		const cases: [Action, Record<string, string>, number, string][] = [
 			[banAction as Action, { userId: acct.id, reason: 'self ban', duration: '1' }, 409, 'SELF'],
-			[banAction as Action, { userId: 'no-such-user-42', reason: 'missing', duration: '1' }, 404, 'NOT_FOUND'],
-			[banAction as Action, { userId: otherAdmin.id, reason: 'admin', duration: '7' }, 409, 'TARGET_IS_ADMIN'],
+			[
+				banAction as Action,
+				{ userId: 'no-such-user-42', reason: 'missing', duration: '1' },
+				404,
+				'NOT_FOUND'
+			],
+			[
+				banAction as Action,
+				{ userId: otherAdmin.id, reason: 'admin', duration: '7' },
+				409,
+				'TARGET_IS_ADMIN'
+			],
 			[banAction as Action, { userId: target, reason: 'x', duration: '1' }, 400, 'INVALID_INPUT'],
-			[banAction as Action, { userId: target, reason: 'valid reason', duration: '2' }, 400, 'INVALID_INPUT'],
-			[banAction as Action, { userId: 'bad id!', reason: 'valid reason', duration: '1' }, 400, 'INVALID_INPUT'],
+			[
+				banAction as Action,
+				{ userId: target, reason: 'valid reason', duration: '2' },
+				400,
+				'INVALID_INPUT'
+			],
+			[
+				banAction as Action,
+				{ userId: 'bad id!', reason: 'valid reason', duration: '1' },
+				400,
+				'INVALID_INPUT'
+			],
 			[unbanAction as Action, { userId: target, reason: 'not banned' }, 409, 'NOT_BANNED'],
 			[unbanAction as Action, { userId: 'no-such-user-43', reason: 'missing' }, 404, 'NOT_FOUND'],
-			[unbanAction as Action, { userId: target, reason: '\u0001\u0002\u0003' }, 400, 'INVALID_INPUT']
+			[
+				unbanAction as Action,
+				{ userId: target, reason: '\u0001\u0002\u0003' },
+				400,
+				'INVALID_INPUT'
+			]
 		];
 		for (const [action, form, status, code] of cases) {
 			const result = await run(action, locals, acct.client, form);
@@ -175,8 +195,13 @@ describe('audit trail edges', () => {
 			targetId: target
 		};
 		const apiError = Object.assign(new Error('x'), { body: { code: 'USER_NOT_FOUND' } });
-		await expect(audited(env.DB, entry, async () => Promise.reject(apiError))).rejects.toBe(apiError);
-		const oddBody = Object.assign(new Error('y'), { name: 'OddError', body: { code: 'lower case' } });
+		await expect(audited(env.DB, entry, async () => Promise.reject(apiError))).rejects.toBe(
+			apiError
+		);
+		const oddBody = Object.assign(new Error('y'), {
+			name: 'OddError',
+			body: { code: 'lower case' }
+		});
 		await expect(audited(env.DB, entry, async () => Promise.reject(oddBody))).rejects.toBe(oddBody);
 		await expect(audited(env.DB, entry, async () => Promise.reject('plain string'))).rejects.toBe(
 			'plain string'
@@ -200,7 +225,16 @@ describe('audit trail edges', () => {
 				'INSERT INTO audit_log (id, actor_id, actor_kind, action, target_kind, target_id, detail, created_at) ' +
 					'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
 			)
-				.bind(crypto.randomUUID(), null, 'system', AUDIT_ACTIONS.reauth, 'user', target, detail, Date.now())
+				.bind(
+					crypto.randomUUID(),
+					null,
+					'system',
+					AUDIT_ACTIONS.reauth,
+					'user',
+					target,
+					detail,
+					Date.now()
+				)
 				.run();
 		}
 		const { rows } = await listAudit(env.DB, { page: 1, targetId: target });
@@ -259,9 +293,14 @@ describe('Cloudflare Access configuration', () => {
 		expect(readAccessConfig({ ACCESS_AUD: '  ', ACCESS_TEAM_DOMAIN: '' })).toBeNull();
 		expect(readAccessConfig({ ACCESS_AUD: 'aud' })).toBe('invalid');
 		expect(readAccessConfig({ ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com' })).toBe('invalid');
-		expect(readAccessConfig({ ACCESS_AUD: 'aud', ACCESS_TEAM_DOMAIN: 'not a host' })).toBe('invalid');
+		expect(readAccessConfig({ ACCESS_AUD: 'aud', ACCESS_TEAM_DOMAIN: 'not a host' })).toBe(
+			'invalid'
+		);
 		expect(
-			readAccessConfig({ ACCESS_AUD: 'aud', ACCESS_TEAM_DOMAIN: 'HTTPS://Team.CloudflareAccess.com//' })
+			readAccessConfig({
+				ACCESS_AUD: 'aud',
+				ACCESS_TEAM_DOMAIN: 'HTTPS://Team.CloudflareAccess.com//'
+			})
 		).toEqual({
 			aud: 'aud',
 			issuer: 'https://team.cloudflareaccess.com',
@@ -354,7 +393,13 @@ describe('Cloudflare Access JWT', () => {
 			now: () => now
 		};
 		const nowS = Math.floor(now / 1000);
-		const good = { aud: ['other', 'aud-1'], iss: config.issuer, exp: nowS + 600, iat: nowS, sub: 'u' };
+		const good = {
+			aud: ['other', 'aud-1'],
+			iss: config.issuer,
+			exp: nowS + 600,
+			iat: nowS,
+			sub: 'u'
+		};
 		const header = { alg: 'RS256', kid: 'k1' };
 
 		expect(await verifyAccessJwt(await sign(pair.privateKey, header, good), config, deps)).toEqual({
@@ -372,14 +417,20 @@ describe('Cloudflare Access JWT', () => {
 			[header, { ...good, iat: nowS + 3600 }, 'not_yet_valid']
 		];
 		for (const [h, p, reason] of cases) {
-			expect(await verifyAccessJwt(await sign(pair.privateKey, h, p), config, deps), reason).toEqual({
+			expect(
+				await verifyAccessJwt(await sign(pair.privateKey, h, p), config, deps),
+				reason
+			).toEqual({
 				ok: false,
 				reason
 			});
 		}
 		const valid = await sign(pair.privateKey, header, good);
 		const tampered = `${valid.slice(0, valid.lastIndexOf('.'))}.${b64url(new Uint8Array(256))}`;
-		expect(await verifyAccessJwt(tampered, config, deps)).toEqual({ ok: false, reason: 'signature' });
+		expect(await verifyAccessJwt(tampered, config, deps)).toEqual({
+			ok: false,
+			reason: 'signature'
+		});
 		expect(
 			await verifyAccessJwt(await sign(pair.privateKey, header, { ...good, sub: '' }), config, deps)
 		).toEqual({ ok: true, configured: true, subject: null });
@@ -388,7 +439,11 @@ describe('Cloudflare Access JWT', () => {
 		// An unknown kid after the minimum refetch interval triggers one refetch; after the TTL
 		// the cached set is replaced.
 		now += 60_000;
-		await verifyAccessJwt(await sign(pair.privateKey, { ...header, kid: 'k9' }, good), config, deps);
+		await verifyAccessJwt(
+			await sign(pair.privateKey, { ...header, kid: 'k9' }, good),
+			config,
+			deps
+		);
 		expect(fetches).toBe(2);
 		now += 10 * 60_000;
 		const later = Math.floor(now / 1000);

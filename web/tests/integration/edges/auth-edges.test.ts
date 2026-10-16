@@ -17,7 +17,12 @@ import {
 	emailLocaleFromRequest,
 	readEmailTokenPayload
 } from '#lib/server/auth/emails.ts';
-import { AccessError, assertUser, assertVerified, type AuthLocals } from '#lib/server/auth/guards.ts';
+import {
+	AccessError,
+	assertUser,
+	assertVerified,
+	type AuthLocals
+} from '#lib/server/auth/guards.ts';
 import { requireUser, requireVerified } from '#lib/server/auth/kit.ts';
 import { createAuthLogger, redactLogMessage } from '#lib/server/auth/logger.ts';
 import { reduceUserAgent } from '#lib/server/auth/user-agent.ts';
@@ -85,9 +90,19 @@ describe('access helpers (guards.ts, kit.ts)', () => {
 		expect(assertVerified(SIGNED_IN)).toEqual(SIGNED_IN);
 		const cases: [AuthLocals, (locals: AuthLocals) => unknown, number, string][] = [
 			[ANONYMOUS, assertUser, 401, 'UNAUTHENTICATED'],
-			[{ user: user(), session: session({ userId: 'someone-else' }) }, assertUser, 401, 'UNAUTHENTICATED'],
+			[
+				{ user: user(), session: session({ userId: 'someone-else' }) },
+				assertUser,
+				401,
+				'UNAUTHENTICATED'
+			],
 			[{ user: user({ banned: true }), session: session() }, assertUser, 403, 'BANNED'],
-			[{ user: user({ emailVerified: false }), session: session() }, assertVerified, 403, 'EMAIL_NOT_VERIFIED'],
+			[
+				{ user: user({ emailVerified: false }), session: session() },
+				assertVerified,
+				403,
+				'EMAIL_NOT_VERIFIED'
+			],
 			[ANONYMOUS, assertVerified, 401, 'UNAUTHENTICATED']
 		];
 		for (const [locals, check, status, code] of cases) {
@@ -177,15 +192,25 @@ describe('reduceUserAgent', () => {
 			[null, ''],
 			[undefined, ''],
 			['', ''],
-			['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36 Edg/120.0', 'Edge on Windows'],
+			[
+				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36 Edg/120.0',
+				'Edge on Windows'
+			],
 			['Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/128.0', 'Firefox on Linux'],
-			['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile Safari/604.1', 'Safari on iOS'],
-			['Mozilla/5.0 (Linux; Android 14) SamsungBrowser/24.0 Chrome/117.0 Mobile Safari/537.36', 'Samsung Internet on Android'],
+			[
+				'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile Safari/604.1',
+				'Safari on iOS'
+			],
+			[
+				'Mozilla/5.0 (Linux; Android 14) SamsungBrowser/24.0 Chrome/117.0 Mobile Safari/537.36',
+				'Samsung Internet on Android'
+			],
 			['Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) Chrome/120.0 Safari/537.36', 'Chrome on ChromeOS'],
 			['Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) OPR/105.0', 'Opera on macOS'],
 			['curl/8.0', 'Other on Other']
 		];
-		for (const [agent, expected] of cases) expect(reduceUserAgent(agent), String(agent)).toBe(expected);
+		for (const [agent, expected] of cases)
+			expect(reduceUserAgent(agent), String(agent)).toBe(expected);
 		expect(reduceUserAgent(`${'x'.repeat(600)} Firefox/1.0 Linux`)).toBe('Other on Other');
 	});
 });
@@ -196,9 +221,18 @@ describe('auth logger', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 		const logger = createAuthLogger();
 		expect(logger.level).toBe('warn');
-		logger.log('error', 'failed for person@example.com from 203.0.113.9', new TypeError('x'), 'extra');
+		logger.log(
+			'error',
+			'failed for person@example.com from 203.0.113.9',
+			new TypeError('x'),
+			'extra'
+		);
 		logger.log('warn', 'plain message');
-		logger.log('info', 'token abcdefghijklmnopqrstuvwxyz0123456789', Object.assign(new Error('y'), { name: '' }));
+		logger.log(
+			'info',
+			'token abcdefghijklmnopqrstuvwxyz0123456789',
+			Object.assign(new Error('y'), { name: '' })
+		);
 		expect(error).toHaveBeenCalledOnce();
 		expect(warn).toHaveBeenCalledTimes(2);
 		const first = JSON.parse(String(error.mock.calls[0]?.[0])) as Record<string, unknown>;
@@ -220,7 +254,10 @@ describe('auth logger', () => {
 
 describe('e-mail helpers of the auth flows', () => {
 	function jwtWith(payload: unknown): string {
-		const encoded = btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+		const encoded = btoa(JSON.stringify(payload))
+			.replace(/\+/g, '-')
+			.replace(/\//g, '_')
+			.replace(/=+$/, '');
 		return `header.${encoded}.signature`;
 	}
 
@@ -285,7 +322,11 @@ describe('account auth actions: error mapping', () => {
 		expect(readAuthError('string')).toBeNull();
 		expect(
 			readAuthError(
-				new APIError('TOO_MANY_REQUESTS', { code: 'RATE_LIMITED', message: 'x' }, { 'Retry-After': '30' })
+				new APIError(
+					'TOO_MANY_REQUESTS',
+					{ code: 'RATE_LIMITED', message: 'x' },
+					{ 'Retry-After': '30' }
+				)
 			)
 		).toEqual({ code: 'RATE_LIMITED', status: 429, retryAfter: 30 });
 		expect(
@@ -328,7 +369,9 @@ describe('account auth actions: error mapping', () => {
 		expect(
 			await requestAccountClosure(api, new Headers(), { ...base, mode: 'bogus' as never })
 		).toEqual({ ok: false, code: 'invalid-mode', status: 400 });
-		expect(await requestAccountClosure(api, new Headers(), { ...base, acknowledged: false })).toEqual({
+		expect(
+			await requestAccountClosure(api, new Headers(), { ...base, acknowledged: false })
+		).toEqual({
 			ok: false,
 			code: 'not-acknowledged',
 			status: 400
@@ -355,10 +398,14 @@ describe('auth hooks: origin from Referer', () => {
 		// Past the origin check: refused only for having no session.
 		expect(sameSite.status).toBe(401);
 		for (const referer of ['not a url', 'https://evil.example/conta']) {
-			const response = await client.post('/revoke-other-sessions', {}, {
-				origin: null,
-				headers: { referer }
-			});
+			const response = await client.post(
+				'/revoke-other-sessions',
+				{},
+				{
+					origin: null,
+					headers: { referer }
+				}
+			);
 			expect(response.status, referer).toBe(403);
 		}
 		const nullOrigin = await client.post('/revoke-other-sessions', {}, { origin: 'null' });

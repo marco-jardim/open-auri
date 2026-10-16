@@ -2,9 +2,15 @@
 // the request: T3.5 calls it from a `hooks.before` middleware with the path, the client IP, the
 // identifier from the body and the Turnstile token, and maps a failure to an APIError.
 //
-// Order: coarse per-IP binding (RL_AUTH) → exact D1 window rules → Turnstile. Rate limits run
-// first so floods are rejected before any outbound Siteverify call. Every dependency failure
-// (KV salt, binding, D1, Siteverify) fails closed with 503.
+// Order: coarse per-IP binding (RL_AUTH) → D1 window rules keyed on the requester (`ip`, `ip+id`,
+// `user`) → Turnstile → D1 window rules keyed on a third party's identifier (`id`). Requester rules
+// run first so floods are rejected before any outbound Siteverify call; the per-account `id` rules
+// (e.g. 10 sign-ins per 5 min per e-mail) are counted only for requests that passed Turnstile, so
+// token-less or invalid-token requests can never lock someone else's account. A requester rule
+// cannot be spent by a third party: its key contains the requester's own IP or session. Routes
+// without Turnstile (resend verification) count their `id` rules right after the requester rules:
+// there, the `id` rules are the mailbox's flood budget. Every dependency failure (KV salt,
+// binding, D1, Siteverify) fails closed with 503.
 import type { RateLimit } from '@cloudflare/workers-types';
 import type { ServerEnv } from '../env.ts';
 import { createKeyedHasher, getDailySalt, InvalidIpError, type KeyedHasher } from './iphash.ts';
@@ -12,10 +18,12 @@ import {
 	AUTH_POLICIES,
 	authRateLimit,
 	isAuthGuardedPath,
+	isRequesterScope,
 	normalizeIdentifier,
 	rateLimit as defaultRateLimit,
 	rateLimitKey,
 	slidingWindowLimit as defaultWindowLimit,
+	type AuthWindowRule,
 	type WindowRule
 } from './ratelimit.ts';
 import { localTestTurnstile, verifyTurnstile as defaultVerifyTurnstile } from './turnstile.ts';
@@ -132,7 +140,7 @@ export function createAuthGuard(deps: AuthGuardDeps) {
 				: deny(503, 'RATE_LIMIT_UNAVAILABLE');
 		}
 
-		let rules: WindowRule[];
+		let rules: AuthWindowRule[];
 		try {
 			rules =
 				authRateLimit({ path: input.path, ipHash, idHash, ipIdHash, userId: input.userId }) ?? [];
@@ -140,12 +148,19 @@ export function createAuthGuard(deps: AuthGuardDeps) {
 			// RateLimitKeyError (e.g. an unexpected user id shape): fail closed.
 			return deny(503, 'RATE_LIMIT_UNAVAILABLE');
 		}
-		const windows = await limitWindows(deps.env.db, rules, at);
-		if (!windows.ok) {
+		const requesterRules: WindowRule[] = rules.filter((rule) => isRequesterScope(rule.scope));
+		const accountRules: WindowRule[] = rules.filter((rule) => !isRequesterScope(rule.scope));
+		const checkWindows = async (batch: WindowRule[]): Promise<AuthGuardResult | null> => {
+			if (batch.length === 0) return null;
+			const windows = await limitWindows(deps.env.db, batch, at);
+			if (windows.ok) return null;
 			return windows.reason === 'limited'
 				? deny(429, 'RATE_LIMITED', windows.retryAfter)
 				: deny(503, 'RATE_LIMIT_UNAVAILABLE');
-		}
+		};
+
+		const requesterDenied = await checkWindows(requesterRules);
+		if (requesterDenied) return requesterDenied;
 
 		if (policy.turnstileAction) {
 			if (!input.turnstileToken) return deny(400, 'TURNSTILE_REQUIRED');
@@ -161,6 +176,9 @@ export function createAuthGuard(deps: AuthGuardDeps) {
 				return deny(403, 'TURNSTILE_FAILED');
 			}
 		}
+
+		const accountDenied = await checkWindows(accountRules);
+		if (accountDenied) return accountDenied;
 		return { ok: true };
 	};
 }

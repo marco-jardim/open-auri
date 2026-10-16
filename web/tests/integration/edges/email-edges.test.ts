@@ -12,7 +12,12 @@ import {
 	type EmailMessage
 } from '#lib/server/email/index.ts';
 import { deriveSuppressionKey } from '#lib/server/email/suppression.ts';
-import { cleanText, escapeHtml, MAX_NAME_LENGTH, safeUrl } from '#lib/server/email/templates/escape.ts';
+import {
+	cleanText,
+	escapeHtml,
+	MAX_NAME_LENGTH,
+	safeUrl
+} from '#lib/server/email/templates/escape.ts';
 import {
 	renderTemplate,
 	TEMPLATE_IDS,
@@ -62,8 +67,11 @@ describe('templates', () => {
 
 	it('formats link lifetimes in days, hours or minutes and rejects impossible ones', () => {
 		const render = (minutes: number) =>
-			renderTemplate('verify-email', 'en-US', { origin: ORIGIN, url: URL_OK, expiresInMinutes: minutes })
-				.text;
+			renderTemplate('verify-email', 'en-US', {
+				origin: ORIGIN,
+				url: URL_OK,
+				expiresInMinutes: minutes
+			}).text;
 		const day = render(24 * 60);
 		const hours = render(120);
 		const minutes = render(45);
@@ -77,7 +85,9 @@ describe('templates', () => {
 
 	it('refuses missing or unsafe links and escapes the name', () => {
 		expect(
-			isEmailError(caught(() => renderTemplate('reset-password', 'pt-BR', { origin: ORIGIN } as never)))
+			isEmailError(
+				caught(() => renderTemplate('reset-password', 'pt-BR', { origin: ORIGIN } as never))
+			)
 		).toBe(true);
 		const named = renderTemplate('password-changed', 'en-US', {
 			origin: ORIGIN,
@@ -95,7 +105,9 @@ describe('templates', () => {
 describe('escape helpers', () => {
 	it('safeUrl: absolute https, or http only on a local configured origin', () => {
 		expect(safeUrl('https://example.org/a b', ORIGIN)).toBe('https://example.org/a%20b');
-		expect(safeUrl('http://localhost:4173/x', 'http://localhost:4173')).toBe('http://localhost:4173/x');
+		expect(safeUrl('http://localhost:4173/x', 'http://localhost:4173')).toBe(
+			'http://localhost:4173/x'
+		);
 		for (const [value, origin] of [
 			['/relative', ORIGIN],
 			['not a url', ORIGIN],
@@ -121,7 +133,9 @@ describe('escape helpers', () => {
 		expect(long).toHaveLength(MAX_NAME_LENGTH);
 		expect(long?.endsWith('…')).toBe(true);
 		expect(cleanText('abc', 2)).toBe('a…');
-		expect(escapeHtml(`<a href="x">'&'</a>`)).toBe('&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;');
+		expect(escapeHtml(`<a href="x">'&'</a>`)).toBe(
+			'&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;'
+		);
 	});
 });
 
@@ -163,7 +177,10 @@ describe('message metadata and idempotency keys', () => {
 	});
 
 	it('EmailError keeps only safe vendor codes and a status', () => {
-		const error = new EmailError('rejected', 'fixed reason', { status: 403, code: 'invalid_api_key' });
+		const error = new EmailError('rejected', 'fixed reason', {
+			status: 403,
+			code: 'invalid_api_key'
+		});
 		expect(error.message).toBe('email rejected: fixed reason (403 invalid_api_key)');
 		const unsafe = new EmailError('rejected', 'fixed reason', { code: 'Has Spaces <x@y.z>' });
 		expect(unsafe.code).toBeNull();
@@ -174,7 +191,9 @@ describe('message metadata and idempotency keys', () => {
 
 	it('queueEmail never rejects and logs only the template label and the error kind', async () => {
 		const logged: Record<string, string | number>[] = [];
-		const logger = { warn: (_: string, details: Record<string, string | number>) => logged.push(details) };
+		const logger = {
+			warn: (_: string, details: Record<string, string | number>) => logged.push(details)
+		};
 		const pending: Promise<unknown>[] = [];
 		const ctx = { waitUntil: (promise: Promise<unknown>) => void pending.push(promise) };
 		await queueEmail(
@@ -189,7 +208,12 @@ describe('message metadata and idempotency keys', () => {
 			{ templateId: 'Not A Label a@example.test', message },
 			logger
 		);
-		await queueEmail(ctx, { send: async () => ({ id: 'ok' }) }, { templateId: 'verify-email', message }, logger);
+		await queueEmail(
+			ctx,
+			{ send: async () => ({ id: 'ok' }) },
+			{ templateId: 'verify-email', message },
+			logger
+		);
 		expect(pending).toHaveLength(3);
 		expect(logged).toEqual([
 			{ template: 'verify-email', kind: 'unavailable', status: 503 },

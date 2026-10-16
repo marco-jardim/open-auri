@@ -1,12 +1,15 @@
 // The /conta actions that go through Better Auth (`locals.auth.api.*` with the request headers, so
-// the session cookie, the T3.3 guard and Turnstile all apply): change password, change e-mail and
-// request account closure. Results are typed codes; the page maps them to messages.
+// the session cookie, the T3.3 guard, Turnstile and the per-user password limits of the auth hooks
+// all apply): change password, change e-mail and request account closure. Results are typed codes;
+// the page maps them to messages. Every call runs inside `withEmailLocale` with the locale of the
+// request (`oa_lang` cookie, then Accept-Language): server-side calls carry no Request, so the
+// e-mails they trigger would otherwise always be pt-BR.
 import type { D1Database } from '@cloudflare/workers-types';
 import { isAPIError } from 'better-auth/api';
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, type Auth } from '../auth.ts';
-import { first, sql } from '../db.ts';
+import { emailLocaleFromHeaders, withEmailLocale } from '../auth/emails.ts';
 import { TURNSTILE_HEADER } from '../auth/hooks.ts';
-import { verifyPassword } from '../auth/password.ts';
+import { verifyUserPassword } from '../auth/secret-guard.ts';
 import { isFreshSession } from '../auth/session-policy.ts';
 import type { AuthSession } from '../types.ts';
 import { recordDeletionRequest, type DeletionMode, isDeletionMode } from './deletion.ts';
@@ -59,28 +62,28 @@ function failure(error: unknown): AuthFailure {
 	const read = readAuthError(error);
 	if (!read) throw error;
 	if (read.code === 'INVALID_PASSWORD') return { ok: false, code: 'wrong-password', status: 400 };
+	if (read.code === 'SESSION_NOT_FRESH') {
+		return { ok: false, code: 'reauth-required', status: 403 };
+	}
 	return { ok: false, ...read };
 }
 
-/** Checks `password` against the credential account of `userId` (scrypt, constant time). */
-export async function verifyCurrentPassword(
+/** Runs a Better Auth call in the e-mail locale of the request behind `headers`. */
+function inRequestLocale<T>(headers: Headers, call: () => Promise<T>): Promise<T> {
+	return withEmailLocale(emailLocaleFromHeaders(headers), call);
+}
+
+/**
+ * Raw check of `password` against the credential account of `userId` (scrypt, constant time),
+ * WITHOUT the per-user attempt limits. The /conta actions never call it: they pass the password to
+ * Better Auth, whose hooks apply the limits (auth/secret-guard.ts). Kept for tests and tooling.
+ */
+export function verifyCurrentPassword(
 	db: D1Database,
 	userId: string,
 	password: string
 ): Promise<boolean> {
-	if (typeof password !== 'string' || password === '' || password.length > PASSWORD_MAX) {
-		return false;
-	}
-	const row = await first<{ password: string | null }>(
-		sql(
-			db,
-			'SELECT "password" FROM "account" WHERE "userId" = ? AND "providerId" = ? LIMIT 1',
-			userId,
-			'credential'
-		)
-	);
-	if (!row?.password) return false;
-	return verifyPassword({ hash: row.password, password });
+	return verifyUserPassword(db, userId, password);
 }
 
 export interface ChangePasswordInput {
@@ -102,10 +105,12 @@ export async function changeAccountPassword(
 	if (newPassword !== confirmPassword) return { ok: false, code: 'mismatch', status: 400 };
 	if (newPassword === currentPassword) return { ok: false, code: 'same-password', status: 400 };
 	try {
-		await api.changePassword({
-			headers,
-			body: { currentPassword, newPassword, revokeOtherSessions: input.revokeOtherSessions }
-		});
+		await inRequestLocale(headers, () =>
+			api.changePassword({
+				headers,
+				body: { currentPassword, newPassword, revokeOtherSessions: input.revokeOtherSessions }
+			})
+		);
 		return { ok: true };
 	} catch (error) {
 		return failure(error);
@@ -126,8 +131,10 @@ export interface EmailChangeInput {
 
 /**
  * Starts an e-mail change. Sensitive: needs a fresh session (T3.5 `isFreshSession`) or the current
- * password. Better Auth then mails the CURRENT address first; the request is recorded so /conta
- * shows it as pending.
+ * password. The password is not checked here: it goes to Better Auth in the body, and the auth
+ * before-hook verifies it after the guard and Turnstile, under the per-user attempt limits (it also
+ * enforces freshness for every caller, HTTP included). Better Auth then mails the CURRENT address
+ * first; the request is recorded so /conta shows it as pending.
  */
 export async function requestEmailChange(
 	api: AccountAuthApi,
@@ -139,19 +146,22 @@ export async function requestEmailChange(
 	if (newEmail === normalizeEmail(input.currentEmail)) {
 		return { ok: false, code: 'same-email', status: 400 };
 	}
-	if (!isFreshSession(input.session, undefined, input.now)) {
-		if (!input.password) return { ok: false, code: 'reauth-required', status: 403 };
-		if (!(await verifyCurrentPassword(input.db, input.userId, input.password))) {
-			return { ok: false, code: 'wrong-password', status: 400 };
-		}
-	}
+	const stale = !isFreshSession(input.session, undefined, input.now);
+	if (stale && !input.password) return { ok: false, code: 'reauth-required', status: 403 };
 	const guarded = new Headers(headers);
 	guarded.set(TURNSTILE_HEADER, input.turnstileToken);
 	try {
-		await api.changeEmail({
-			headers: guarded,
-			body: { newEmail, callbackURL: EMAIL_CHANGE_CALLBACK }
-		});
+		await inRequestLocale(headers, () =>
+			api.changeEmail({
+				headers: guarded,
+				body: {
+					newEmail,
+					callbackURL: EMAIL_CHANGE_CALLBACK,
+					// Read by the auth hook (not by Better Auth's schema): checked when sent.
+					...(stale ? { password: input.password } : {})
+				} as { newEmail: string; callbackURL: string }
+			})
+		);
 	} catch (error) {
 		return failure(error);
 	}
@@ -183,10 +193,12 @@ export async function requestAccountClosure(
 	if (!input.acknowledged) return { ok: false, code: 'not-acknowledged', status: 400 };
 	if (!input.password) return { ok: false, code: 'wrong-password', status: 400 };
 	try {
-		await api.deleteUser({
-			headers,
-			body: { password: input.password, callbackURL: CLOSURE_CALLBACK }
-		});
+		await inRequestLocale(headers, () =>
+			api.deleteUser({
+				headers,
+				body: { password: input.password, callbackURL: CLOSURE_CALLBACK }
+			})
+		);
 	} catch (error) {
 		return failure(error);
 	}

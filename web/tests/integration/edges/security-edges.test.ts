@@ -87,7 +87,9 @@ describe('normalizeIp', () => {
 		expect(ipHashMaterial(a)).toBe(ipHashMaterial(b));
 		expect(ipHashMaterial(a, 128)).not.toBe(ipHashMaterial(b, 128));
 		const options = { pepper: 'pepper', salt: SALT };
-		expect(await ipHash('2001:db8:1:2::1', options)).toBe(await ipHash('2001:db8:1:2::ffff', options));
+		expect(await ipHash('2001:db8:1:2::1', options)).toBe(
+			await ipHash('2001:db8:1:2::ffff', options)
+		);
 		expect(await ipHash('2001:db8:1:2::1', { ...options, ipv6Prefix: 128 })).not.toBe(
 			await ipHash('2001:db8:1:2::ffff', { ...options, ipv6Prefix: 128 })
 		);
@@ -159,15 +161,19 @@ describe('encoding helpers', () => {
 		expect(base64UrlToBytes('a+b/')).toBeNull();
 		expect(base64UrlToBytes('abcde')).toBeNull();
 		expect(base64UrlToBytes('')).toEqual(new Uint8Array());
-		expect(concatBytes(new Uint8Array([1]), new Uint8Array([2, 3]))).toEqual(new Uint8Array([1, 2, 3]));
+		expect(concatBytes(new Uint8Array([1]), new Uint8Array([2, 3]))).toEqual(
+			new Uint8Array([1, 2, 3])
+		);
 		expect(utcDay(new Date(Date.UTC(2026, 0, 2, 23, 59)))).toBe('2026-01-02');
 	});
 });
 
 describe('verifyTurnstile (Siteverify answers)', () => {
 	const base = { action: 'sign-in', hostname: 'example.org', secret: 'secret' };
-	const answering = (body: unknown, status = 200) => async () =>
-		new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
+	const answering =
+		(body: unknown, status = 200) =>
+		async () =>
+			new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
 
 	it('maps every answer to a fail-closed result', async () => {
 		const cases: [Parameters<typeof verifyTurnstile>[0], string | true][] = [
@@ -188,16 +194,45 @@ describe('verifyTurnstile (Siteverify answers)', () => {
 			],
 			[{ ...base, token: 't', fetch: answering({ success: false }) }, 'unavailable'],
 			[
-				{ ...base, token: 't', fetch: answering({ success: false, 'error-codes': [1, 'missing-input-response'] }) },
+				{
+					...base,
+					token: 't',
+					fetch: answering({ success: false, 'error-codes': [1, 'missing-input-response'] })
+				},
 				'missing'
 			],
 			[
-				{ ...base, token: 't', fetch: answering({ success: false, 'error-codes': ['timeout-or-duplicate'] }) },
+				{
+					...base,
+					token: 't',
+					fetch: answering({ success: false, 'error-codes': ['timeout-or-duplicate'] })
+				},
 				'expired-or-duplicate'
 			],
-			[{ ...base, token: 't', fetch: answering({ success: true, action: 'other', hostname: 'example.org' }) }, 'action'],
-			[{ ...base, token: 't', fetch: answering({ success: true, action: 'sign-in', hostname: 'evil.example' }) }, 'hostname'],
-			[{ ...base, token: 't', fetch: answering({ success: true, action: 'sign-in', hostname: 'example.org' }) }, true]
+			[
+				{
+					...base,
+					token: 't',
+					fetch: answering({ success: true, action: 'other', hostname: 'example.org' })
+				},
+				'action'
+			],
+			[
+				{
+					...base,
+					token: 't',
+					fetch: answering({ success: true, action: 'sign-in', hostname: 'evil.example' })
+				},
+				'hostname'
+			],
+			[
+				{
+					...base,
+					token: 't',
+					fetch: answering({ success: true, action: 'sign-in', hostname: 'example.org' })
+				},
+				true
+			]
 		];
 		for (const [options, expected] of cases) {
 			const result = await verifyTurnstile(options);
@@ -252,7 +287,9 @@ describe('rate limit primitives', () => {
 			}
 		};
 		expect(
-			await slidingWindowLimit(brokenDb as never, [{ key: 'k' as never, limit: 1, windowSeconds: 10 }])
+			await slidingWindowLimit(brokenDb as never, [
+				{ key: 'k' as never, limit: 1, windowSeconds: 10 }
+			])
 		).toEqual({ ok: false, reason: 'unavailable' });
 	});
 });
@@ -285,15 +322,47 @@ describe('auth guard: every dependency failure fails closed', () => {
 
 	it('maps limits, outages and Turnstile failures', async () => {
 		const cases: [Partial<AuthGuardDeps>, Record<string, unknown>, Record<string, unknown>][] = [
-			[{ rateLimit: async () => ({ ok: false, reason: 'limited' }) }, {}, { status: 429, code: 'RATE_LIMITED', retryAfter: 60 }],
-			[{ rateLimit: async () => ({ ok: false, reason: 'unavailable' }) }, {}, { status: 503, code: 'RATE_LIMIT_UNAVAILABLE' }],
-			[{ windowLimit: async () => ({ ok: false, reason: 'limited', retryAfter: 7 }) }, {}, { status: 429, code: 'RATE_LIMITED', retryAfter: 7 }],
-			[{ windowLimit: async () => ({ ok: false, reason: 'unavailable' }) }, {}, { status: 503, code: 'RATE_LIMIT_UNAVAILABLE' }],
-			[{}, { path: '/change-email', userId: 'not a valid id!' }, { status: 503, code: 'RATE_LIMIT_UNAVAILABLE' }],
+			[
+				{ rateLimit: async () => ({ ok: false, reason: 'limited' }) },
+				{},
+				{ status: 429, code: 'RATE_LIMITED', retryAfter: 60 }
+			],
+			[
+				{ rateLimit: async () => ({ ok: false, reason: 'unavailable' }) },
+				{},
+				{ status: 503, code: 'RATE_LIMIT_UNAVAILABLE' }
+			],
+			[
+				{ windowLimit: async () => ({ ok: false, reason: 'limited', retryAfter: 7 }) },
+				{},
+				{ status: 429, code: 'RATE_LIMITED', retryAfter: 7 }
+			],
+			[
+				{ windowLimit: async () => ({ ok: false, reason: 'unavailable' }) },
+				{},
+				{ status: 503, code: 'RATE_LIMIT_UNAVAILABLE' }
+			],
+			[
+				{},
+				{ path: '/change-email', userId: 'not a valid id!' },
+				{ status: 503, code: 'RATE_LIMIT_UNAVAILABLE' }
+			],
 			[{}, { turnstileToken: null }, { status: 400, code: 'TURNSTILE_REQUIRED' }],
-			[{ verifyTurnstile: async () => ({ ok: false, reason: 'unavailable' }) }, {}, { status: 503, code: 'TURNSTILE_UNAVAILABLE' }],
-			[{ verifyTurnstile: async () => ({ ok: false, reason: 'missing' }) }, {}, { status: 400, code: 'TURNSTILE_REQUIRED' }],
-			[{ verifyTurnstile: async () => ({ ok: false, reason: 'hostname' }) }, {}, { status: 403, code: 'TURNSTILE_FAILED' }]
+			[
+				{ verifyTurnstile: async () => ({ ok: false, reason: 'unavailable' }) },
+				{},
+				{ status: 503, code: 'TURNSTILE_UNAVAILABLE' }
+			],
+			[
+				{ verifyTurnstile: async () => ({ ok: false, reason: 'missing' }) },
+				{},
+				{ status: 400, code: 'TURNSTILE_REQUIRED' }
+			],
+			[
+				{ verifyTurnstile: async () => ({ ok: false, reason: 'hostname' }) },
+				{},
+				{ status: 403, code: 'TURNSTILE_FAILED' }
+			]
 		];
 		for (const [deps, overrides, expected] of cases) {
 			expect(await guard(deps)(input(overrides)), JSON.stringify(expected)).toEqual({
@@ -381,7 +450,11 @@ describe('access log capture: skips and failures never throw or leak', () => {
 			key: KEY,
 			queue: { send: async () => Promise.reject('not an error') }
 		});
-		await captureAccess(withIp, { ...base, key: 'k1:short', queue: { send: async () => undefined } });
+		await captureAccess(withIp, {
+			...base,
+			key: 'k1:short',
+			queue: { send: async () => undefined }
+		});
 		expect(failures).toEqual([
 			{ event: 'access_log.enqueue_failed', reason: 'unknown' },
 			{ event: 'access_log.enqueue_failed', reason: 'Error' }
@@ -390,15 +463,21 @@ describe('access log capture: skips and failures never throw or leak', () => {
 	});
 
 	it('records unmatched routes, a valid port only, and the keyring id', async () => {
-		const record = buildAccessRecord(event({ route: { id: null }, getClientAddress: () => ' 198.51.100.2 ' }), {
-			status: 404,
-			userId: 'u1',
-			port: 70_000,
-			ts: 1
-		});
+		const record = buildAccessRecord(
+			event({ route: { id: null }, getClientAddress: () => ' 198.51.100.2 ' }),
+			{
+				status: 404,
+				userId: 'u1',
+				port: 70_000,
+				ts: 1
+			}
+		);
 		expect(record).toMatchObject({ route_group: 'unmatched', port: null, user_id: 'u1' });
 		const withPort = buildAccessRecord(
-			{ request: { headers: new Headers({ 'cf-connecting-ip': ' 198.51.100.2 ' }) }, route: { id: '/x' } },
+			{
+				request: { headers: new Headers({ 'cf-connecting-ip': ' 198.51.100.2 ' }) },
+				route: { id: '/x' }
+			},
 			{ status: 200, port: 443, ts: 1 }
 		);
 		expect(withPort).toMatchObject({ ip: '198.51.100.2', port: 443, user_id: null });
@@ -410,10 +489,22 @@ describe('access log capture: skips and failures never throw or leak', () => {
 
 describe('security headers', () => {
 	it('HSTS only for https origins (and never for an unparsable one)', () => {
-		expect(securityHeaders({ origin: 'https://example.org', isHtml: true })['strict-transport-security']).toBe(HSTS);
-		expect(securityHeaders({ origin: 'http://localhost:4173', isHtml: true })).not.toHaveProperty('strict-transport-security');
-		expect(securityHeaders({ origin: 'not a url', isHtml: false })).not.toHaveProperty('strict-transport-security');
-		expect(securityHeaders({ origin: 'https://example.org', isHtml: false, crossOriginResourcePolicy: 'cross-origin' })['cross-origin-resource-policy']).toBe('cross-origin');
+		expect(
+			securityHeaders({ origin: 'https://example.org', isHtml: true })['strict-transport-security']
+		).toBe(HSTS);
+		expect(securityHeaders({ origin: 'http://localhost:4173', isHtml: true })).not.toHaveProperty(
+			'strict-transport-security'
+		);
+		expect(securityHeaders({ origin: 'not a url', isHtml: false })).not.toHaveProperty(
+			'strict-transport-security'
+		);
+		expect(
+			securityHeaders({
+				origin: 'https://example.org',
+				isHtml: false,
+				crossOriginResourcePolicy: 'cross-origin'
+			})['cross-origin-resource-policy']
+		).toBe('cross-origin');
 	});
 
 	it('the static _headers file carries the same set plus frame-ancestors', () => {

@@ -121,6 +121,18 @@ describe('slidingWindowLimit (D1)', () => {
 		expect((await attempts([loose], 1, T0))[0]).toEqual({ ok: true });
 	});
 
+	it('peek rules (failure budgets) are read, never counted', async () => {
+		const counted = rule(2, 60, 'peek');
+		const peek: WindowRule = { ...counted, peek: true };
+		const peeks = await attempts([peek], 5, T0);
+		expect(peeks.every((o) => o.ok)).toBe(true);
+		await attempts([counted], 1, T0);
+		expect((await attempts([peek], 1, T0))[0]).toEqual({ ok: true });
+		await attempts([counted], 1, T0);
+		// Two failures counted: one more would exceed the limit of 2.
+		expect((await attempts([peek], 1, T0))[0]).toMatchObject({ ok: false, reason: 'limited' });
+	});
+
 	it('reports D1 failures as unavailable', async () => {
 		const broken: Pick<D1Database, 'prepare' | 'batch'> = {
 			prepare: (query: string) => env.DB.prepare(query),
@@ -147,6 +159,8 @@ describe('authRateLimit rules', () => {
 		expect(limits('/sign-up/email')?.[0]).toBe('3/60');
 		expect(limits('/request-password-reset')?.[0]).toBe('3/60');
 		expect(limits('/send-verification-email')?.[0]).toBe('3/300');
+		// FX3.1 (Q3-4): daily cap per address.
+		expect(limits('/send-verification-email')).toContain('10/86400');
 		expect(limits('/change-email')).toContain('3/300');
 		expect(authRateLimit({ path: '/get-session', ipHash: HASH })).toBeNull();
 		for (const path of AUTH_GUARDED_PATHS) expect(limits(path)?.length).toBeGreaterThan(0);
@@ -241,6 +255,19 @@ describe('createAuthGuard', () => {
 		}
 		expect(results.slice(0, 10).every((r) => r.ok)).toBe(true);
 		expect(results[10]).toMatchObject({ ok: false, status: 429 });
+	});
+
+	it('counts the per-e-mail rule only after Turnstile passed (no lockout by third parties)', async () => {
+		const failing = guardWith({ verify: async () => ({ ok: false, reason: 'hostname' }) });
+		for (let index = 1; index <= 15; index += 1) {
+			const ip = `198.51.100.${index}`;
+			expect(await failing.guard({ ...signIn, ip })).toMatchObject({ status: 403 });
+			expect(await failing.guard({ ...signIn, ip, turnstileToken: null })).toMatchObject({
+				status: 400
+			});
+		}
+		const { guard } = guardWith();
+		expect(await guard({ ...signIn, ip: '198.51.100.99' })).toEqual({ ok: true });
 	});
 
 	it('limits resend verification to 3 per 300 s without Turnstile', async () => {
