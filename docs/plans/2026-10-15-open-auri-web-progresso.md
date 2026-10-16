@@ -105,6 +105,18 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | FX2.6 | commitada | 008315f | R2-04, R2-09, R2-10, R2-11, R2-13 |
 | Q2.3 | PASS | — | verificação pós-rodada 2: nenhum major ou pior; minors N-1…N-5 e T-1 → issues #14–#19 (`qa-minor`) |
 
+## Tarefas F3
+
+| ID | Status | Commit | Notas |
+|---|---|---|---|
+| PF3 | verificada | 455a611, 90008ca | ver Pre-flights; brief `docs/plans/f3-delegate-brief.md` |
+| T3.1 | commitada | f25f5e8, 5e361d2 | testes de integração numa config própria (`vitest.integration.config.ts`); `Env` escrito à mão (os tipos de runtime do `wrangler types` conflitam com o DOM e puxam `.svelte-kit/output`); orquestrador assumiu a separação da config após 2 tentativas |
+| T3.2 | commitada | e76c59a | campo de bounce confirmado na documentação (`data.bounce.type: "Permanent"`); falhas de rede também são repetidas (a chave de idempotência evita duplicatas); a supressão guarda HMAC do endereço com chave derivada do `BETTER_AUTH_SECRET` (girar o segredo esvazia a lista: runbook) |
+| T3.3 | commitada | 904b750 | heavy; limites da auth contados em D1 (o binding só tem 10/60 s); IPv6 por /64; mensagens da fila já cifradas; `ACCESS_LOG_KEY` como chaveiro `kid:segredo`; S6 só com o dia; `web/_headers` gerado de `renderStaticHeadersFile()`; CSP do Kit com `challenges.cloudflare.com` e `frame-ancestors 'none'` |
+| T3.4 | commitada | 16d9b62 | data de vigência aceita `AAAA/MM/DD` e é normalizada; `PUBLIC_ORIGIN` obrigatório; primeira visita anônima conta como vista |
+
+Verificação central da W3.2: raiz 652/652; `check:web` 0 erros; `check:int` ok; unidade web 1 229/1 229 (14 snapshots de e-mail gravados); integração 87/87; jobs 16/16; build ok; orçamentos ok; e2e smoke + a11y + i18n + offline 96/96.
+
 Verificação central da W2.4: `check:web` 0 erros; `test:web:unit` 61 arquivos, 586 testes; lint do web limpo; build ok; e2e smoke 2/2; raiz 613/613.
 
 Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos, 284 testes; lint do web limpo; build ok; raiz 613/613.
