@@ -17,16 +17,18 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 
 ## Primeira ação
 
-**Estado (2026-10-16, antes de reiniciar a máquina):**
+**Estado (2026-10-16, ao reiniciar a máquina):**
 - **F1 (núcleo):** concluída. QA heavy PASS, push `25b2ee1`, issue #1 fechada; minors adiados nas issues #8 a #13 (`qa-minor`).
-- **F2 (web local-first):** implementada e testada (PF2, T2.1–T2.19, T2.T). Último commit `71ef64a`. São **38 commits locais sem push**: o push acontece só quando o Q2 aprovar. Falta o **Q2**, que estava rodando e se perdeu no reinício.
+- **F2 (web local-first):** implementada e testada (PF2, T2.1–T2.19, T2.T). Último commit `5d811b3`. Os commits da F2 estão **locais, sem push**: o push acontece só quando o Q2 aprovar.
+- **Q2 (QA heavy da F2):** a rodada 1 estava rodando no reinício. Se os achados não estiverem registrados no progresso (seção "QA"), **rode a rodada 1 do zero** com o despacho da seção 0 do handover.
+- **Dados AutoEq:** o download parcial (24 packs, ~24 MB) foi **preservado** em `D:\git\open-auri\.cache\autoeq\<sha>` (ignorado pelo git). O script retoma de lá.
 - **Decisões importantes já tomadas:** SvelteKit **3.1** (configuração no `web/vite.config.ts`, `#lib`, `$app/env/public`); TypeScript **6** no núcleo e no web; testes de componente em Chromium real (`vitest-browser-svelte`). Estão todas registradas no progresso.
 
 **Ordem:**
-1. Leia `D:\git\open-auri\docs\plans\2026-10-16-handover.md`, **começando pela seção 0** (retomada após reinício, pendências e despacho do Q2) e depois a §5b. Em seguida leia o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (seção "Decisões durante a execução") e o brief dos delegados `D:\git\open-auri\docs\plans\f2-delegate-brief.md`.
-2. Termine os dados AutoEq a partir do download parcial preservado em `.cache\autoeq` (`/.cache/` já está no `.gitignore`): rode `node tools/import-autoeq.mjs --cache D:\git\open-auri\.cache\autoeq`. Depois rode o smoke e2e da `/soe-como-x`.
-3. Estabilize os testes de componente instáveis sob carga, depois rode a verificação central completa (ver "Troubleshooting").
-4. Rode o **Q2** heavy (rodada 1) e siga o ciclo da §0.5. Com PASS: push para `origin/main`, marque e feche a issue #2, comente na #7.
+1. Leia `D:\git\open-auri\docs\plans\2026-10-16-handover.md`, **começando pela seção 0** (retomada após reinício, pendências e despacho do Q2) e depois a §5b. Em seguida leia o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (seções "Decisões durante a execução" e "QA") e o brief dos delegados `D:\git\open-auri\docs\plans\f2-delegate-brief.md`.
+2. Termine os dados AutoEq: `node tools/import-autoeq.mjs --cache D:\git\open-auri\.cache\autoeq` (retoma do cache; quedas de rede só exigem rodar de novo). Depois rode o smoke e2e da `/soe-como-x` (`cd web; npx playwright test smoke --workers=6`).
+3. Estabilize os testes de componente instáveis sob carga (rode `npm run test:web:unit` duas ou três vezes, junte as falhas em `_qa\` e despache a correção). Depois rode a verificação central completa (ver "Troubleshooting").
+4. Rode o **Q2** heavy (ou continue do que estiver registrado) e siga o ciclo da §0.5. Com PASS: push para `origin/main`, marque e feche a issue #2, comente na #7.
 5. Siga para a **F3** (PF3 primeiro) e depois F4 e F5, **sem pausar entre waves ou fases**. Plano: F3 a partir da linha ~1615, F4 ~1976, F5 ~2269.
 ## Regras inegociáveis
 
