@@ -22,7 +22,8 @@
 		"test:e2e": "playwright test",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
-		"gen": "node ../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc && wrangler types"
+		"gen": "node ../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc && wrangler types",
+		"budgets": "node scripts/check-budgets.mjs"
 	},
 	"devDependencies": {
 		"@axe-core/playwright": "^4.14.0",

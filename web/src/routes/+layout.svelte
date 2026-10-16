@@ -6,6 +6,8 @@
 	import { getLocale, getTextDirection } from '#lib/paraglide/runtime.js';
 	import { PUBLIC_GITHUB_URL } from '#lib/config/public.ts';
 	import { setAppContext } from '#lib/app/index.ts';
+	import { dev } from '$app/env';
+	import UpdatePrompt from '#lib/pwa/UpdatePrompt.svelte';
 	import { getFooterHonoree, getPageMeta } from '#lib/page-meta.ts';
 	import {
 		CableBar,
@@ -185,6 +187,8 @@
 		<Footer {honoree} githubUrl={PUBLIC_GITHUB_URL} />
 	</div>
 </div>
+
+<UpdatePrompt enabled={!dev} workerUrl="/service-worker.js" scope="/" />
 
 <style>
 	.app-root {

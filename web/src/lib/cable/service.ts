@@ -58,6 +58,22 @@ import type {
 } from './types.ts';
 
 /** Event dispatched on `service.events` after each real, successful write (F4 outbox). */
+let activeWrites = 0;
+/**
+ * Marks a write in progress on `window.__oaWriteInProgress` for the PWA update flow, which must
+ * never reload the page mid-write (see web/src/lib/pwa/README.md). Counts overlapping writes.
+ */
+async function withWriteFlag<T>(run: () => Promise<T>): Promise<T> {
+	const scope = globalThis as typeof globalThis & { __oaWriteInProgress?: boolean };
+	activeWrites += 1;
+	scope.__oaWriteInProgress = true;
+	try {
+		return await run();
+	} finally {
+		activeWrites -= 1;
+		scope.__oaWriteInProgress = activeWrites > 0;
+	}
+}
 export const CABLE_WRITTEN_EVENT = 'cable:written';
 /** Event dispatched on `service.events` whenever the state changes (detail: CableState). */
 export const CABLE_STATUS_EVENT = 'cable:status';
@@ -524,12 +540,15 @@ export function createCableService(deps: CableServiceDeps) {
 			emit();
 			let result: WriteResult;
 			try {
-				result = await writeCurve(device, snapshot, preampDb, {
-					experimental,
-					signal: controller.signal,
-					clock,
-					hid
-				});
+				const writeSignal = controller.signal;
+				result = await withWriteFlag(() =>
+					writeCurve(device, snapshot, preampDb, {
+						experimental,
+						signal: writeSignal,
+						clock,
+						hid
+					})
+				);
 			} catch (cause) {
 				// writeCurve only throws before any I/O: nothing reached the cable.
 				writing = false;
@@ -599,12 +618,15 @@ export function createCableService(deps: CableServiceDeps) {
 			);
 			let results: ManyResult[];
 			try {
-				results = await writeMany(list, snapshot, preampDb, {
-					experimental,
-					signal: controller.signal,
-					clock,
-					hid: progressHid
-				});
+				const queueSignal = controller.signal;
+				results = await withWriteFlag(() =>
+					writeMany(list, snapshot, preampDb, {
+						experimental,
+						signal: queueSignal,
+						clock,
+						hid: progressHid
+					})
+				);
 			} catch (cause) {
 				// writeMany only throws before the first device is touched.
 				writing = false;

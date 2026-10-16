@@ -20,6 +20,7 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 			adapter: adapter(),
+			serviceWorker: { register: false },
 			prerender: {
 				// Routes linked from the shared chrome whose pages land in a later task or phase. A 404
 				// on any other path fails the build. Shrinks as pages are implemented.
