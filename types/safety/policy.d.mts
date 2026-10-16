@@ -1,72 +1,16 @@
-export type Band = import('../dsp/eq0xcb.mjs').Band;
-export type Range = {
-    readonly min: number;
-    readonly max: number;
-};
-export type Layer = 'ouvir' | 'ajustar' | 'engenharia';
-export type SoftRangeId = 'PK-main' | 'PK-narrow' | 'LS' | 'HS-cut' | 'HS-boost' | 'LP' | 'HP';
-export type SoftRange = {
-    kind: 'PK' | 'LS' | 'HS' | 'LP' | 'HP';
-    freqHz: Range;
-    /**
-     * absent for LP/HP (no gain)
-     */
-    gainDb?: Range;
-    qFactor: Range;
-};
-export type AbsRanges = {
-    freqHz: Range;
-    gainDb: Range;
-    qFactor: Range;
-    /**
-     * highest Q of a PK/LS/HS boost (D7)
-     */
-    boostQMax: number;
-    /**
-     * highest frequency of a PK boost (D7)
-     */
-    pkBoostMaxHz: number;
-};
-/**
- * Conservative single-section boxes (design/analysis/limites-v2.md §4), sampled
- * with automatic preamp and zero violations. Sampling is not an interval proof:
- * the gate stays mandatory.
- * @type {Readonly<Record<SoftRangeId, Readonly<SoftRange>>>}
- */
-export declare const SOFT_RANGES: Readonly<Record<SoftRangeId, Readonly<SoftRange>>>;
-/**
- * Absolute control ranges (any layer) and the D7 boost rules: a boost (gain > 0)
- * on PK/LS/HS needs Q <= `boostQMax`, and no PK may boost above `pkBoostMaxHz`.
- * @type {Readonly<AbsRanges>}
- */
-export declare const ABS_RANGES: Readonly<AbsRanges>;
-/** Kinds that exist only behind the `experimental` flag (engineering layer). */
-export declare const EXPERIMENTAL_KINDS: readonly string[];
-/**
- * Filter kinds offered by each UI layer. The engineering layer adds the
- * experimental kinds (see `isExperimentalKind`).
- * @type {Readonly<Record<Layer, readonly string[]>>}
- */
-export declare const LAYER_KINDS: Readonly<Record<Layer, readonly string[]>>;
-/** Rounding grid: gain 0.1 dB, frequency 1 Hz, Q 0.01. */
-export declare const GRID_STEPS: Readonly<{
-    gainDb: 0.1;
-    freqHz: 1;
-    qFactor: 0.01;
-}>;
 /**
  * Whether `kind` may be used in `layer`. Unknown layers allow nothing.
  * @param {unknown} kind
  * @param {string} layer
  * @returns {boolean}
  */
-export declare function isKindAllowed(kind: unknown, layer: string): boolean;
+export function isKindAllowed(kind: unknown, layer: string): boolean;
 /**
  * Whether `kind` is experimental (HS, LP, HP).
  * @param {unknown} kind
  * @returns {boolean}
  */
-export declare function isExperimentalKind(kind: unknown): boolean;
+export function isExperimentalKind(kind: unknown): boolean;
 /**
  * Band rounded to the UI grid (gain 0.1 dB, frequency 1 Hz, Q 0.01). OFF and
  * non-object values are returned unchanged; missing keys stay missing.
@@ -74,7 +18,7 @@ export declare function isExperimentalKind(kind: unknown): boolean;
  * @param {T} band
  * @returns {T}
  */
-export declare function roundToGrid<T extends Band>(band: T): T;
+export function roundToGrid<T extends Band>(band: T): T;
 /**
  * Band clamped to ABS_RANGES, D7 included: a PK/LS/HS boost has its Q clamped to
  * `boostQMax`, and a PK boost above `pkBoostMaxHz` has its frequency clamped to
@@ -84,7 +28,7 @@ export declare function roundToGrid<T extends Band>(band: T): T;
  * @param {T} band
  * @returns {T}
  */
-export declare function clampToAbs<T extends Band>(band: T): T;
+export function clampToAbs<T extends Band>(band: T): T;
 /**
  * Default interpolation for `boundarySearch`: numbers are interpolated linearly;
  * arrays and plain objects recursively, key by key; anything else (e.g. `kind`)
@@ -96,7 +40,7 @@ export declare function clampToAbs<T extends Band>(band: T): T;
  * @param {number} t
  * @returns {T}
  */
-export declare function interpolateLinear<T>(from: T, to: T, t: number): T;
+export function interpolateLinear<T>(from: T, to: T, t: number): T;
 /**
  * Band interpolation recommended for dragging: gain linear, frequency and Q on a
  * log scale; other keys keep the value of `from`. Falls back to linear for
@@ -106,7 +50,7 @@ export declare function interpolateLinear<T>(from: T, to: T, t: number): T;
  * @param {number} t
  * @returns {Band}
  */
-export declare function interpolateBand(from: Band, to: Band, t: number): Band;
+export function interpolateBand(from: Band, to: Band, t: number): Band;
 /**
  * Bisection between an accepted state `from` and a target `to`: returns the last
  * accepted point found (`to` itself when it is accepted). Pure; the result
@@ -122,7 +66,7 @@ export declare function interpolateBand(from: Band, to: Band, t: number): Band;
  * @param {{iterations?: number, interpolate?: (from: T, to: T, t: number) => T}} [options]
  * @returns {T}
  */
-export declare function boundarySearch<T>(from: T, to: T, predicate: (state: T) => boolean, { iterations, interpolate }?: {
+export function boundarySearch<T>(from: T, to: T, predicate: (state: T) => boolean, { iterations, interpolate }?: {
     iterations?: number;
     interpolate?: (from: T, to: T, t: number) => T;
 }): T;
@@ -138,6 +82,62 @@ export declare function boundarySearch<T>(from: T, to: T, predicate: (state: T) 
  * @param {{maxSteps?: number}} [options]
  * @returns {T}
  */
-export declare function snapToGridAccepted<T extends Band>(value: T, from: T, predicate: (state: T) => boolean, { maxSteps }?: {
+export function snapToGridAccepted<T extends Band>(value: T, from: T, predicate: (state: T) => boolean, { maxSteps }?: {
     maxSteps?: number;
 }): T;
+/**
+ * Conservative single-section boxes (design/analysis/limites-v2.md §4), sampled
+ * with automatic preamp and zero violations. Sampling is not an interval proof:
+ * the gate stays mandatory.
+ * @type {Readonly<Record<SoftRangeId, Readonly<SoftRange>>>}
+ */
+export const SOFT_RANGES: Readonly<Record<SoftRangeId, Readonly<SoftRange>>>;
+/**
+ * Absolute control ranges (any layer) and the D7 boost rules: a boost (gain > 0)
+ * on PK/LS/HS needs Q <= `boostQMax`, and no PK may boost above `pkBoostMaxHz`.
+ * @type {Readonly<AbsRanges>}
+ */
+export const ABS_RANGES: Readonly<AbsRanges>;
+/** Kinds that exist only behind the `experimental` flag (engineering layer). */
+export const EXPERIMENTAL_KINDS: readonly string[];
+/**
+ * Filter kinds offered by each UI layer. The engineering layer adds the
+ * experimental kinds (see `isExperimentalKind`).
+ * @type {Readonly<Record<Layer, readonly string[]>>}
+ */
+export const LAYER_KINDS: Readonly<Record<Layer, readonly string[]>>;
+/** Rounding grid: gain 0.1 dB, frequency 1 Hz, Q 0.01. */
+export const GRID_STEPS: Readonly<{
+    gainDb: 0.1;
+    freqHz: 1;
+    qFactor: 0.01;
+}>;
+export type Band = import("../dsp/eq0xcb.mjs").Band;
+export type Range = {
+    readonly min: number;
+    readonly max: number;
+};
+export type Layer = "ouvir" | "ajustar" | "engenharia";
+export type SoftRangeId = "PK-main" | "PK-narrow" | "LS" | "HS-cut" | "HS-boost" | "LP" | "HP";
+export type SoftRange = {
+    kind: "PK" | "LS" | "HS" | "LP" | "HP";
+    freqHz: Range;
+    /**
+     * absent for LP/HP (no gain)
+     */
+    gainDb?: Range | undefined;
+    qFactor: Range;
+};
+export type AbsRanges = {
+    freqHz: Range;
+    gainDb: Range;
+    qFactor: Range;
+    /**
+     * highest Q of a PK/LS/HS boost (D7)
+     */
+    boostQMax: number;
+    /**
+     * highest frequency of a PK boost (D7)
+     */
+    pkBoostMaxHz: number;
+};

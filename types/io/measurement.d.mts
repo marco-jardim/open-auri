@@ -1,29 +1,3 @@
-export type MeasurementErrorCode = 'meas:empty' | 'meas:format' | 'meas:number' | 'meas:nonfinite' | * 'meas:order' | 'meas:duplicate' | 'meas:coverage' | 'meas:column';
-export type MeasurementFormat = 'autoeq-csv' | 'rew-txt';
-export type Series = {
-    frequencies: number[];
-    values: number[];
-};
-export type Measurement = Series & {
-    format: MeasurementFormat;
-    columns: string[];
-};
-/**
- * @typedef {'meas:empty' | 'meas:format' | 'meas:number' | 'meas:nonfinite' |
- * 'meas:order' | 'meas:duplicate' | 'meas:coverage' | 'meas:column'} MeasurementErrorCode
- * @typedef {'autoeq-csv' | 'rew-txt'} MeasurementFormat
- * @typedef {{frequencies: number[], values: number[]}} Series
- * @typedef {Series & {format: MeasurementFormat, columns: string[]}} Measurement
- */
-/** A measurement import/processing failure with a stable, machine-readable code. */
-export declare class MeasurementError extends Error {
-    code: MeasurementErrorCode;
-    /**
-     * @param {MeasurementErrorCode} code
-     * @param {string} message
-     */
-    constructor(code: MeasurementErrorCode, message: string);
-}
 /**
  * Parse AutoEq CSV or REW text, including BOM/CRLF, decimal commas, and scientific notation.
  * AutoEq needs a frequency-first header; raw is the default value column. REW skips blank,
@@ -34,8 +8,8 @@ export declare class MeasurementError extends Error {
  * @param {{format?: 'auto' | MeasurementFormat, column?: string}} [options]
  * @returns {Measurement}
  */
-export declare function parseMeasurement(text: string, { format, column }?: {
-    format?: 'auto' | MeasurementFormat;
+export function parseMeasurement(text: string, { format, column }?: {
+    format?: "auto" | MeasurementFormat;
     column?: string;
 }): Measurement;
 /**
@@ -48,7 +22,7 @@ export declare function parseMeasurement(text: string, { format, column }?: {
  * @param {{grid?: readonly number[]}} [options]
  * @returns {number[]}
  */
-export declare function toGrid(frequencies: readonly number[], values: readonly number[], { grid }?: {
+export function toGrid(frequencies: readonly number[], values: readonly number[], { grid }?: {
     grid?: readonly number[];
 }): number[];
 /**
@@ -59,8 +33,8 @@ export declare function toGrid(frequencies: readonly number[], values: readonly 
  * @param {{mode?: '1k' | 'mean-300-3k'}} [options]
  * @returns {number[]}
  */
-export declare function normalize(values: readonly number[], grid: readonly number[], { mode }?: {
-    mode?: '1k' | 'mean-300-3k';
+export function normalize(values: readonly number[], grid: readonly number[], { mode }?: {
+    mode?: "1k" | "mean-300-3k";
 }): number[];
 /**
  * Boxcar smoothing over a symmetric log-frequency window of total width 1/fraction octave.
@@ -72,4 +46,30 @@ export declare function normalize(values: readonly number[], grid: readonly numb
  * @param {3 | 6 | 12} fraction
  * @returns {number[]}
  */
-export declare function smooth(values: readonly number[], grid: readonly number[], fraction: 3 | 6 | 12): number[];
+export function smooth(values: readonly number[], grid: readonly number[], fraction: 3 | 6 | 12): number[];
+/**
+ * @typedef {'meas:empty' | 'meas:format' | 'meas:number' | 'meas:nonfinite' |
+ * 'meas:order' | 'meas:duplicate' | 'meas:coverage' | 'meas:column'} MeasurementErrorCode
+ * @typedef {'autoeq-csv' | 'rew-txt'} MeasurementFormat
+ * @typedef {{frequencies: number[], values: number[]}} Series
+ * @typedef {Series & {format: MeasurementFormat, columns: string[]}} Measurement
+ */
+/** A measurement import/processing failure with a stable, machine-readable code. */
+export class MeasurementError extends Error {
+    /**
+     * @param {MeasurementErrorCode} code
+     * @param {string} message
+     */
+    constructor(code: MeasurementErrorCode, message: string);
+    code: MeasurementErrorCode;
+}
+export type MeasurementErrorCode = "meas:empty" | "meas:format" | "meas:number" | "meas:nonfinite" | "meas:order" | "meas:duplicate" | "meas:coverage" | "meas:column";
+export type MeasurementFormat = "autoeq-csv" | "rew-txt";
+export type Series = {
+    frequencies: number[];
+    values: number[];
+};
+export type Measurement = Series & {
+    format: MeasurementFormat;
+    columns: string[];
+};

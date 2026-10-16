@@ -1,68 +1,3 @@
-export declare const FAKE_PRODUCT_NAME = "USB DSP Audio";
-export type SentReport = {
-    reportId: number;
-    bytes: Uint8Array;
-    at: number;
-};
-export type FakeClock = {
-    /**
-     * Current virtual time in ms.
-     */
-    now: () => number;
-    /**
-     * Resolves once virtual
-     * time reaches now + ms; rejects with `signal.reason` on abort.
-     */
-    sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
-    /**
-     * Moves virtual time forward, waking due
-     * sleepers in order and letting each one's continuation run before the next.
-     */
-    advance: (ms: number) => Promise<void>;
-    /**
-     * Number of sleepers waiting.
-     */
-    pending: () => number;
-};
-export type FakeDeviceOptions = {
-    /**
-     * Timestamps and delays; defaults to an auto-advancing fake clock.
-     */
-    clock?: FakeClock;
-    vendorId?: number;
-    productId?: number;
-    productName?: string;
-    /**
-     * 0-based sendReport attempt at which the cable is
-     * unplugged (that report is not delivered).
-     */
-    disconnectAtReport?: number;
-    /**
-     * 0-based sendReport attempt that fails (not delivered).
-     */
-    throwAtReport?: number;
-    /**
-     * What that attempt rejects with (default: NotAllowedError).
-     */
-    throwError?: unknown;
-    /**
-     * 0-based sendReport attempt that never settles (not
-     * delivered), like a cable that stops responding.
-     */
-    hangAtReport?: number;
-    /**
-     * If set, open() rejects with it.
-     */
-    openError?: unknown;
-    /**
-     * Virtual time each delivered report takes to complete.
-     */
-    delayMs?: number;
-};
-export type FakeFilter = {
-    vendorId?: number;
-    productId?: number;
-};
 /**
  * @typedef {{reportId: number, bytes: Uint8Array, at: number}} SentReport
  *
@@ -99,12 +34,14 @@ export type FakeFilter = {
  * @param {{autoAdvance?: boolean}} [options]
  * @returns {FakeClock}
  */
-export declare function createFakeClock(start?: number, { autoAdvance }?: {
+export function createFakeClock(start?: number, { autoAdvance }?: {
     autoAdvance?: boolean;
 }): FakeClock;
+export const FAKE_PRODUCT_NAME: "USB DSP Audio";
 /** A simulated cable: records every report it accepts, with its virtual timestamp. */
-export declare class FakeHIDDevice extends EventTarget {
-    #private;
+export class FakeHIDDevice extends EventTarget {
+    /** @param {FakeDeviceOptions} [options] */
+    constructor({ clock, vendorId, productId, productName, disconnectAtReport, throwAtReport, throwError, hangAtReport, openError, delayMs, }?: FakeDeviceOptions);
     clock: FakeClock;
     vendorId: number;
     productId: number;
@@ -131,8 +68,6 @@ export declare class FakeHIDDevice extends EventTarget {
         openError: unknown;
         delayMs: number;
     };
-    /** @param {FakeDeviceOptions} [options] */
-    constructor({ clock, vendorId, productId, productName, disconnectAtReport, throwAtReport, throwError, hangAtReport, openError, delayMs, }?: FakeDeviceOptions);
     get opened(): boolean;
     get connected(): boolean;
     /** sendReport calls made while open, delivered or not. */
@@ -148,17 +83,18 @@ export declare class FakeHIDDevice extends EventTarget {
     sendReport(reportId: number, data: ArrayBuffer | ArrayBufferView): Promise<void>;
     /** Simulates unplugging the cable. Idempotent. */
     disconnect(): void;
+    #private;
 }
 /** Event carrying the device, like WebHID's HIDConnectionEvent. */
-export declare class FakeHIDConnectionEvent extends Event {
-    device: FakeHIDDevice;
+export class FakeHIDConnectionEvent extends Event {
     /**
      * @param {'connect' | 'disconnect'} type
      * @param {{device: FakeHIDDevice}} init
      */
-    constructor(type: 'connect' | 'disconnect', { device }: {
+    constructor(type: "connect" | "disconnect", { device }: {
         device: FakeHIDDevice;
     });
+    device: FakeHIDDevice;
 }
 /**
  * A simulated `navigator.hid`. `choose` stands in for the browser's picker: it
@@ -166,13 +102,7 @@ export declare class FakeHIDConnectionEvent extends Event {
  * "user" picked (default: the first). Only vendorId/productId filters are
  * modelled. 'disconnect' fires for every attached device that is unplugged.
  */
-export declare class FakeHID extends EventTarget {
-    #private;
-    choose: (matching: FakeHIDDevice[]) => FakeHIDDevice[] | Promise<FakeHIDDevice[]>;
-    /** Options passed to each requestDevice call. @type {{filters: FakeFilter[]}[]} */
-    requests: {
-        filters: FakeFilter[];
-    }[];
+export class FakeHID extends EventTarget {
     /**
      * @param {{
      *   devices?: FakeHIDDevice[],
@@ -183,6 +113,11 @@ export declare class FakeHID extends EventTarget {
         devices?: FakeHIDDevice[];
         choose?: (matching: FakeHIDDevice[]) => FakeHIDDevice[] | Promise<FakeHIDDevice[]>;
     });
+    /** Options passed to each requestDevice call. @type {{filters: FakeFilter[]}[]} */
+    requests: {
+        filters: FakeFilter[];
+    }[];
+    choose: (matching: FakeHIDDevice[]) => FakeHIDDevice[] | Promise<FakeHIDDevice[]>;
     /** Plugs in a device and fires 'connect'. @param {FakeHIDDevice} device */
     addDevice(device: FakeHIDDevice): void;
     /**
@@ -196,4 +131,69 @@ export declare class FakeHID extends EventTarget {
     getDevices(): Promise<FakeHIDDevice[]>;
     /** Unplugs `device` (fires 'disconnect'). @param {FakeHIDDevice} device */
     disconnect(device: FakeHIDDevice): void;
+    #private;
 }
+export type SentReport = {
+    reportId: number;
+    bytes: Uint8Array;
+    at: number;
+};
+export type FakeClock = {
+    /**
+     * Current virtual time in ms.
+     */
+    now: () => number;
+    /**
+     * Resolves once virtual
+     * time reaches now + ms; rejects with `signal.reason` on abort.
+     */
+    sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
+    /**
+     * Moves virtual time forward, waking due
+     * sleepers in order and letting each one's continuation run before the next.
+     */
+    advance: (ms: number) => Promise<void>;
+    /**
+     * Number of sleepers waiting.
+     */
+    pending: () => number;
+};
+export type FakeDeviceOptions = {
+    /**
+     * Timestamps and delays; defaults to an auto-advancing fake clock.
+     */
+    clock?: FakeClock | undefined;
+    vendorId?: number | undefined;
+    productId?: number | undefined;
+    productName?: string | undefined;
+    /**
+     * 0-based sendReport attempt at which the cable is
+     * unplugged (that report is not delivered).
+     */
+    disconnectAtReport?: number | undefined;
+    /**
+     * 0-based sendReport attempt that fails (not delivered).
+     */
+    throwAtReport?: number | undefined;
+    /**
+     * What that attempt rejects with (default: NotAllowedError).
+     */
+    throwError?: unknown;
+    /**
+     * 0-based sendReport attempt that never settles (not
+     * delivered), like a cable that stops responding.
+     */
+    hangAtReport?: number | undefined;
+    /**
+     * If set, open() rejects with it.
+     */
+    openError?: unknown;
+    /**
+     * Virtual time each delivered report takes to complete.
+     */
+    delayMs?: number | undefined;
+};
+export type FakeFilter = {
+    vendorId?: number;
+    productId?: number;
+};

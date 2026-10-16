@@ -1,60 +1,3 @@
-export type GainBand = {
-    kind: 'PK' | 'LS' | 'HS';
-    freqHz: number;
-    gainDb: number;
-    qFactor: number;
-};
-export type PassBand = {
-    kind: 'LP' | 'HP';
-    freqHz: number;
-    gainDb?: number;
-    qFactor: number;
-};
-export type Band = GainBand | PassBand | {
-    kind: 'OFF';
-};
-export type Section = {
-    b0: number;
-    b1: number;
-    b2: number;
-    a1: number;
-    a2: number;
-};
-/**
- * @typedef {{kind: 'PK' | 'LS' | 'HS', freqHz: number, gainDb: number, qFactor: number}} GainBand
- * @typedef {{kind: 'LP' | 'HP', freqHz: number, gainDb?: number, qFactor: number}} PassBand
- * @typedef {GainBand | PassBand | {kind: 'OFF'}} Band
- * @typedef {{b0: number, b1: number, b2: number, a1: number, a2: number}} Section
- */
-export declare const USB_VID = 13058;
-export declare const USB_PID = 35074;
-export declare const HID_REPORT_ID = 203;
-/** Sample rate the coefficients are designed for. */
-export declare const SAMPLE_RATE = 96000;
-/** Number of biquad sections the firmware stores. */
-export declare const BAND_COUNT = 10;
-/** Fixed 14-byte prologue: ASCII "EQ1#", then (hypothesis) a u16 LE length and layout bytes. */
-export declare const PREAMBLE: readonly number[];
-/** Commit command as the reference sends it (5 bytes): persists the preset to flash. */
-export declare const COMMIT_COMMAND: readonly number[];
-/** Payload size in bytes: 14 preamble + 4 preamp + 10*5*4 coefficients + 2 CRC. */
-export declare const PAYLOAD_SIZE = 220;
-export declare const REPORT_SIZE = 31;
-export declare const REPORT_COUNT = 9;
-/**
- * Supported filter kinds. `OFF` is an exact pass-through section
- * (wire words [1, 0, 0, 0, 0]); prefer it to a 0 dB peaking band, which still
- * runs poles close to the unit circle.
- */
-export declare const FILTER_KINDS: readonly string[];
-/** @type {Readonly<{kind: 'OFF'}>} */
-export declare const OFF: Readonly<{
-    kind: 'OFF';
-}>;
-/** Ten exact pass-through sections: the known-good neutral preset. */
-export declare const NEUTRAL_BANDS: readonly Readonly<{
-    kind: 'OFF';
-}>[];
 /**
  * Peaking EQ — AutoEq `Peaking.biquad_coefficients`.
  * @param {number} freqHz
@@ -63,7 +6,7 @@ export declare const NEUTRAL_BANDS: readonly Readonly<{
  * @param {number} [sampleRate]
  * @returns {Section}
  */
-export declare function designPeaking(freqHz: number, gainDb: number, qFactor: number, sampleRate?: number): Section;
+export function designPeaking(freqHz: number, gainDb: number, qFactor: number, sampleRate?: number): Section;
 /**
  * Low shelf — AutoEq `LowShelf.biquad_coefficients`.
  * @param {number} freqHz
@@ -72,7 +15,7 @@ export declare function designPeaking(freqHz: number, gainDb: number, qFactor: n
  * @param {number} [sampleRate]
  * @returns {Section}
  */
-export declare function designLowShelf(freqHz: number, gainDb: number, qFactor: number, sampleRate?: number): Section;
+export function designLowShelf(freqHz: number, gainDb: number, qFactor: number, sampleRate?: number): Section;
 /**
  * High shelf — AutoEq `HighShelf.biquad_coefficients`.
  * @param {number} freqHz
@@ -81,7 +24,7 @@ export declare function designLowShelf(freqHz: number, gainDb: number, qFactor: 
  * @param {number} [sampleRate]
  * @returns {Section}
  */
-export declare function designHighShelf(freqHz: number, gainDb: number, qFactor: number, sampleRate?: number): Section;
+export function designHighShelf(freqHz: number, gainDb: number, qFactor: number, sampleRate?: number): Section;
 /**
  * 2nd-order low pass — RBJ Audio EQ Cookbook.
  * @param {number} freqHz
@@ -89,7 +32,7 @@ export declare function designHighShelf(freqHz: number, gainDb: number, qFactor:
  * @param {number} [sampleRate]
  * @returns {Section}
  */
-export declare function designLowPass(freqHz: number, qFactor: number, sampleRate?: number): Section;
+export function designLowPass(freqHz: number, qFactor: number, sampleRate?: number): Section;
 /**
  * 2nd-order high pass — RBJ Audio EQ Cookbook.
  * @param {number} freqHz
@@ -97,7 +40,7 @@ export declare function designLowPass(freqHz: number, qFactor: number, sampleRat
  * @param {number} [sampleRate]
  * @returns {Section}
  */
-export declare function designHighPass(freqHz: number, qFactor: number, sampleRate?: number): Section;
+export function designHighPass(freqHz: number, qFactor: number, sampleRate?: number): Section;
 /**
  * Section coefficients for a band `{ kind, freqHz, gainDb, qFactor }`. Throws on
  * an unknown kind: codes such as `LSQ`/`HSQ` (EqualizerAPO, hangout.audio) must
@@ -106,7 +49,7 @@ export declare function designHighPass(freqHz: number, qFactor: number, sampleRa
  * @param {number} [sampleRate]
  * @returns {Section}
  */
-export declare function designSection(band: Band, sampleRate?: number): Section;
+export function designSection(band: Band, sampleRate?: number): Section;
 /**
  * One-read copy of a band list, taken before any check, so every later check and
  * the encoded bytes see the same values whatever the caller passes (getters,
@@ -133,7 +76,7 @@ export declare function designSection(band: Band, sampleRate?: number): Section;
  * @param {number} [expectedLength]
  * @returns {readonly Readonly<Band>[]} A frozen array of frozen bands.
  */
-export declare function snapshotBands(bands: unknown, expectedLength?: number): readonly Readonly<Band>[];
+export function snapshotBands(bands: unknown, expectedLength?: number): readonly Readonly<Band>[];
 /**
  * Rejects bands whose parameters cannot describe a valid filter at SAMPLE_RATE.
  *
@@ -145,13 +88,13 @@ export declare function snapshotBands(bands: unknown, expectedLength?: number): 
  * @param {Band} band
  * @param {number} [index]
  */
-export declare function checkBand(band: Band, index?: number): void;
+export function checkBand(band: Band, index?: number): void;
 /**
  * Jury criterion for 1 + a1 z^-1 + a2 z^-2: both poles strictly inside the unit circle.
  * @param {number} a1
  * @param {number} a2
  */
-export declare function isStable(a1: number, a2: number): boolean;
+export function isStable(a1: number, a2: number): boolean;
 /**
  * Quantizes one section to its 5 wire words `[b0, b2, -a1, b1, -a2]` (Q27).
  * Stability is checked on the quantized feedback words, which is what the chip
@@ -159,17 +102,17 @@ export declare function isStable(a1: number, a2: number): boolean;
  * @param {Section} section
  * @param {number} [index]
  */
-export declare function encodeSection(section: Section, index?: number): number[];
+export function encodeSection(section: Section, index?: number): number[];
 /**
  * Q23 linear-gain word for a preamp in dB. The preamp runs before the bands,
  * so a positive value clips full-scale content: it is refused.
  */
-export declare function preampWord(preampDb?: number): number;
+export function preampWord(preampDb?: number): number;
 /**
  * CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection, no final XOR).
  * @param {Iterable<number>} data
  */
-export declare function crc16Ccitt(data: Iterable<number>): number;
+export function crc16Ccitt(data: Iterable<number>): number;
 /**
  * Builds the 220-byte payload for 10 bands and a preamp. Bands are written in
  * the order given: keep cuts before boosts (see docs/protocol-0xcb.md), the
@@ -184,7 +127,7 @@ export declare function crc16Ccitt(data: Iterable<number>): number;
  * @param {number} [preampDb] Must be a finite number <= 0 (nothing is coerced).
  * @returns {number[]}
  */
-export declare function encodePayload(eqBands: readonly Band[], preampDb?: number): number[];
+export function encodePayload(eqBands: readonly Band[], preampDb?: number): number[];
 /**
  * Splits an already encoded payload into the 9 HID reports: byte 0 is the report
  * index, bytes 1..30 carry 30 bytes of the payload (the last report is
@@ -194,20 +137,20 @@ export declare function encodePayload(eqBands: readonly Band[], preampDb?: numbe
  * @param {ArrayLike<number>} payload
  * @returns {Uint8Array[]}
  */
-export declare function reportsFromPayload(payload: ArrayLike<number>): Uint8Array[];
+export function reportsFromPayload(payload: ArrayLike<number>): Uint8Array[];
 /**
  * The 9 HID reports for 10 bands and a preamp:
  * `reportsFromPayload(encodePayload(eqBands, preampDb))`.
  * @param {readonly Band[]} eqBands
  * @param {number} [preampDb]
  */
-export declare function encodeReports(eqBands: readonly Band[], preampDb?: number): Uint8Array<ArrayBufferLike>[];
+export function encodeReports(eqBands: readonly Band[], preampDb?: number): Uint8Array<ArrayBufferLike>[];
 /**
  * The commit command zero-padded to the 31-byte report size, so every transport
  * sends the same bytes. The reference sends the bare 5 bytes; whether the
  * firmware distinguishes the two is unverified.
  */
-export declare function commitReport(): Uint8Array<ArrayBuffer>;
+export function commitReport(): Uint8Array<ArrayBuffer>;
 /**
  * Magnitude response (dB) of `eqBands` at `freqHz`, summed across sections.
  *
@@ -223,4 +166,61 @@ export declare function commitReport(): Uint8Array<ArrayBuffer>;
  * @param {number} freqHz
  * @param {number} [sampleRate]
  */
-export declare function magnitudeDb(eqBands: readonly Band[], freqHz: number, sampleRate?: number): number;
+export function magnitudeDb(eqBands: readonly Band[], freqHz: number, sampleRate?: number): number;
+/**
+ * @typedef {{kind: 'PK' | 'LS' | 'HS', freqHz: number, gainDb: number, qFactor: number}} GainBand
+ * @typedef {{kind: 'LP' | 'HP', freqHz: number, gainDb?: number, qFactor: number}} PassBand
+ * @typedef {GainBand | PassBand | {kind: 'OFF'}} Band
+ * @typedef {{b0: number, b1: number, b2: number, a1: number, a2: number}} Section
+ */
+export const USB_VID: 13058;
+export const USB_PID: 35074;
+export const HID_REPORT_ID: 203;
+/** Sample rate the coefficients are designed for. */
+export const SAMPLE_RATE: 96000;
+/** Number of biquad sections the firmware stores. */
+export const BAND_COUNT: 10;
+/** Fixed 14-byte prologue: ASCII "EQ1#", then (hypothesis) a u16 LE length and layout bytes. */
+export const PREAMBLE: readonly number[];
+/** Commit command as the reference sends it (5 bytes): persists the preset to flash. */
+export const COMMIT_COMMAND: readonly number[];
+/** Payload size in bytes: 14 preamble + 4 preamp + 10*5*4 coefficients + 2 CRC. */
+export const PAYLOAD_SIZE: 220;
+export const REPORT_SIZE: 31;
+export const REPORT_COUNT: 9;
+/**
+ * Supported filter kinds. `OFF` is an exact pass-through section
+ * (wire words [1, 0, 0, 0, 0]); prefer it to a 0 dB peaking band, which still
+ * runs poles close to the unit circle.
+ */
+export const FILTER_KINDS: readonly string[];
+/** @type {Readonly<{kind: 'OFF'}>} */
+export const OFF: Readonly<{
+    kind: "OFF";
+}>;
+/** Ten exact pass-through sections: the known-good neutral preset. */
+export const NEUTRAL_BANDS: readonly Readonly<{
+    kind: "OFF";
+}>[];
+export type GainBand = {
+    kind: "PK" | "LS" | "HS";
+    freqHz: number;
+    gainDb: number;
+    qFactor: number;
+};
+export type PassBand = {
+    kind: "LP" | "HP";
+    freqHz: number;
+    gainDb?: number;
+    qFactor: number;
+};
+export type Band = GainBand | PassBand | {
+    kind: "OFF";
+};
+export type Section = {
+    b0: number;
+    b1: number;
+    b2: number;
+    a1: number;
+    a2: number;
+};
