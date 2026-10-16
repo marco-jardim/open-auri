@@ -10,6 +10,8 @@
 // limit namespaces; its origin is derived from the workers.dev subdomain. Wrangler does not
 // inherit bindings or vars into named environments (only main, assets, compatibility settings and
 // account_id are inherited), so every binding and var is repeated per environment.
+// EMAIL_TRANSPORT defaults to "resend" when unset (tools/render-wrangler.mjs DEFAULTS); "capture"
+// is the local e2e mailbox and the Worker refuses it unless PUBLIC_ORIGIN is localhost.
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "${WORKER_NAME_WEB}",
@@ -48,7 +50,8 @@
 		"ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
 		"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
 		"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
-		"RESEND_FROM": "${RESEND_FROM}"
+		"RESEND_FROM": "${RESEND_FROM}",
+		"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}"
 	},
 	"env": {
 		"production": {
@@ -80,7 +83,8 @@
 				"ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
 				"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
 				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
-				"RESEND_FROM": "${RESEND_FROM}"
+				"RESEND_FROM": "${RESEND_FROM}",
+				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}"
 			}
 		},
 		"staging": {
@@ -112,7 +116,8 @@
 				"ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
 				"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
 				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
-				"RESEND_FROM": "${RESEND_FROM}"
+				"RESEND_FROM": "${RESEND_FROM}",
+				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}"
 			}
 		}
 	}

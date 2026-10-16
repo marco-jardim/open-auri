@@ -31,6 +31,13 @@ export const SECRETS = [
   },
 ];
 
+/**
+ * Placeholder values used when the key is missing or empty in .env / process.env. Only for
+ * non-secret switches whose default is the production behaviour.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const DEFAULTS = Object.freeze({ EMAIL_TRANSPORT: 'resend' });
+
 /** @param {string} source */
 export function parseEnv(source) {
   /** @type {Map<string, string>} */
@@ -99,7 +106,11 @@ export function renderTemplate(template, output, values) {
   const rendered = source.replace(
     /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
     (/** @type {string} */ _, /** @type {string} */ key) => {
-      const value = values.get(key);
+      const given = values.get(key);
+      const value =
+        (given === undefined || given === '') && Object.hasOwn(DEFAULTS, key)
+          ? DEFAULTS[key]
+          : given;
       if (value === undefined || value === '') missing.add(key);
       return JSON.stringify(value ?? '').slice(1, -1);
     },

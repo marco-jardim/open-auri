@@ -18,7 +18,7 @@ import {
 	slidingWindowLimit as defaultWindowLimit,
 	type WindowRule
 } from './ratelimit.ts';
-import { verifyTurnstile as defaultVerifyTurnstile } from './turnstile.ts';
+import { localTestTurnstile, verifyTurnstile as defaultVerifyTurnstile } from './turnstile.ts';
 
 export type AuthGuardCode =
 	| 'RATE_LIMITED'
@@ -58,6 +58,8 @@ export interface AuthGuardDeps {
 		rateLimit: { auth: Pick<RateLimit, 'limit'> };
 		publicOrigin: string;
 		secrets: Pick<ServerEnv['secrets'], 'iphashPepper' | 'turnstileSecret'>;
+		/** With `capture` on a localhost origin the local Turnstile stub replaces Siteverify. */
+		emailTransport?: ServerEnv['emailTransport'];
 	};
 	verifyTurnstile?: typeof defaultVerifyTurnstile;
 	rateLimit?: typeof defaultRateLimit;
@@ -83,7 +85,8 @@ async function hashIp(hasher: KeyedHasher, ip: string | null): Promise<string> {
 }
 
 export function createAuthGuard(deps: AuthGuardDeps) {
-	const verify = deps.verifyTurnstile ?? defaultVerifyTurnstile;
+	// Local e2e only (EMAIL_TRANSPORT=capture on localhost): see turnstile.ts localTestTurnstile.
+	const verify = deps.verifyTurnstile ?? localTestTurnstile(deps.env) ?? defaultVerifyTurnstile;
 	const limitBinding = deps.rateLimit ?? defaultRateLimit;
 	const limitWindows = deps.windowLimit ?? defaultWindowLimit;
 	const now = deps.now ?? (() => new Date());

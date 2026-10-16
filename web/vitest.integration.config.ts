@@ -21,6 +21,24 @@ const INTEGRATION_TEST_SECRETS = {
 	RESEND_WEBHOOK_SECRET: 'whsec_aW50ZWdyYXRpb24tdGVzdC1vbmx5LXdlYmhvb2s='
 };
 
+// Unit tests of pure server modules that also run here, inside workerd (the production runtime),
+// so the integration coverage of src/lib/server/** counts them. Not ported: headers.test.ts
+// (reads web/_headers through node:fs), templates.test.ts (file snapshots; its contract is
+// re-asserted in tests/integration/edges/email-edges.test.ts) and turnstile.svelte.test.ts
+// (browser component test).
+const PORTED_UNIT_TESTS = [
+	'tests/unit/server/auth/compose.test.ts',
+	'tests/unit/server/auth/password.test.ts',
+	'tests/unit/server/auth/session-policy.test.ts',
+	'tests/unit/server/auth/user-agent-logger.test.ts',
+	'tests/unit/server/auth/username.test.ts',
+	'tests/unit/server/email/capture.test.ts',
+	'tests/unit/server/email/queue.test.ts',
+	'tests/unit/server/email/resend.test.ts',
+	'tests/unit/server/email/suppression.test.ts',
+	'tests/unit/server/email/webhook.test.ts'
+];
+
 export default defineConfig({
 	resolve: {
 		// Same mapping as the "imports" field of web/package.json, made explicit so it does not
@@ -53,7 +71,18 @@ export default defineConfig({
 	test: {
 		name: 'integration',
 		expect: { requireAssertions: true },
-		include: ['tests/integration/**/*.test.ts'],
-		setupFiles: ['./tests/integration/setup/apply-migrations.ts']
+		include: ['tests/integration/**/*.test.ts', ...PORTED_UNIT_TESTS],
+		setupFiles: ['./tests/integration/setup/apply-migrations.ts'],
+		// Only with --coverage (`npm run test:int:coverage`). Istanbul instruments the source at
+		// transform time, so it works inside workerd (V8 coverage does not). Target of T3.T: 90 %
+		// of the server code. README.md files and type-only modules carry no statements.
+		coverage: {
+			provider: 'istanbul',
+			include: ['src/lib/server/**/*.ts'],
+			exclude: ['src/lib/server/types.ts', 'src/lib/server/**/*.d.ts'],
+			reporter: ['text-summary', 'text', 'json-summary', 'html'],
+			reportsDirectory: './coverage/integration',
+			thresholds: { lines: 90, branches: 90, functions: 90, statements: 90 }
+		}
 	}
 });

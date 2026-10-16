@@ -15,6 +15,12 @@ export interface ServerEnv {
 	publicOrigin: string;
 	githubUrl: string;
 	resendFrom: string;
+	/**
+	 * How transactional e-mail leaves the Worker: `resend` (default, production) or `capture`
+	 * (local e2e only: messages go to the D1 table `dev_mail_outbox`, see email/capture.ts).
+	 * `capture` is refused unless PUBLIC_ORIGIN is http(s)://localhost or 127.0.0.1.
+	 */
+	emailTransport: EmailTransport;
 	flags: { accessLogEnabled: boolean; signupEnabled: boolean; admin2faRequired: boolean };
 	secrets: {
 		betterAuthSecret: string;
@@ -25,6 +31,19 @@ export interface ServerEnv {
 		/** Optional until F5 (Resend webhooks). */
 		resendWebhookSecret: string | null;
 	};
+}
+
+export const EMAIL_TRANSPORTS = ['resend', 'capture'] as const;
+export type EmailTransport = (typeof EMAIL_TRANSPORTS)[number];
+
+/** True when `origin` is a loopback origin (the only place the capture transport may run). */
+export function isLocalOrigin(origin: string): boolean {
+	try {
+		const { hostname } = new URL(origin);
+		return hostname === 'localhost' || hostname === '127.0.0.1';
+	} catch {
+		return false;
+	}
 }
 
 export class ServerEnvError extends Error {
@@ -87,6 +106,8 @@ const schema = z.object({
 		.refine(isOrigin, 'not a bare https origin (scheme://host[:port])'),
 	GITHUB_URL: z.string('expected a string').refine(isHttpsUrl, 'not an https URL'),
 	RESEND_FROM: z.string('expected a string').min(3, 'empty'),
+	// Missing (configs rendered before the variable existed) means the production transport.
+	EMAIL_TRANSPORT: z.enum(EMAIL_TRANSPORTS, 'expected "resend" or "capture"').default('resend'),
 	ACCESS_LOG_ENABLED: flag,
 	SIGNUP_ENABLED: flag,
 	ADMIN_2FA_REQUIRED: flag,
@@ -121,6 +142,10 @@ export function getServerEnv(platform: { readonly env?: unknown } | undefined): 
 		);
 	}
 	const data = parsed.data;
+	// Hard guard: the dev mailbox must never run where real people sign up.
+	if (data.EMAIL_TRANSPORT === 'capture' && !isLocalOrigin(data.PUBLIC_ORIGIN)) {
+		throw new ServerEnvError(['EMAIL_TRANSPORT: capture is only allowed on a localhost origin']);
+	}
 	const serverEnv: ServerEnv = {
 		db: data.DB,
 		config: data.CONFIG,
@@ -130,6 +155,7 @@ export function getServerEnv(platform: { readonly env?: unknown } | undefined): 
 		publicOrigin: data.PUBLIC_ORIGIN,
 		githubUrl: data.GITHUB_URL,
 		resendFrom: data.RESEND_FROM,
+		emailTransport: data.EMAIL_TRANSPORT,
 		flags: {
 			accessLogEnabled: data.ACCESS_LOG_ENABLED,
 			signupEnabled: data.SIGNUP_ENABLED,

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { SECRETS, renderTemplate } from '../../tools/render-wrangler.mjs';
+import { DEFAULTS, SECRETS, renderTemplate } from '../../tools/render-wrangler.mjs';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -108,6 +108,36 @@ test('lists only missing names, deduplicated, without partial writes or value le
   assert.match(result.stderr, /Missing environment variables: OA_TEST_LABEL, OA_TEST_MISSING/);
   assert.ok(!existsSync(repo.output));
   silent(result, ['fixture-private-value-123']);
+});
+
+test('EMAIL_TRANSPORT defaults to resend when missing or empty; an explicit value wins', (t) => {
+  assert.deepEqual(DEFAULTS, { EMAIL_TRANSPORT: 'resend' });
+  for (const [env, expected] of [
+    [{}, 'resend'],
+    [{ EMAIL_TRANSPORT: '' }, 'resend'],
+    [{ EMAIL_TRANSPORT: 'capture' }, 'capture'],
+  ]) {
+    const repo = fixture(t);
+    writeFileSync(
+      join(repo.root, 'web', 'template.jsonc'),
+      '{"name":"${OA_TEST_WORKER}","transport":"${EMAIL_TRANSPORT}"}\n',
+    );
+    const childEnv = { ...process.env, OA_TEST_WORKER: 'w', ...env };
+    if (!('EMAIL_TRANSPORT' in env)) delete childEnv.EMAIL_TRANSPORT;
+    const result = spawnSync(
+      process.execPath,
+      [join(repo.root, 'tools', 'render-wrangler.mjs'), 'template.jsonc', 'output.jsonc'],
+      { cwd: join(repo.root, 'web'), env: childEnv, encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const output = readFileSync(repo.output, 'utf8');
+    assert.equal(JSON.parse(output.split('\n').slice(1).join('\n')).transport, expected);
+  }
+  // Keys without a default still fail when missing.
+  const repo = fixture(t);
+  const missing = repo.run({ OA_TEST_WORKER: 'w' });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /Missing environment variables: OA_TEST_LABEL/);
 });
 
 test('invalid dotenv syntax never echoes its contents', (t) => {
@@ -312,12 +342,14 @@ test('web template declares every binding at the top level and in each environme
     assert.deepEqual(Object.keys(target.vars).sort(), [
       'ACCESS_LOG_ENABLED',
       'ADMIN_2FA_REQUIRED',
+      'EMAIL_TRANSPORT',
       'GITHUB_URL',
       'PUBLIC_ORIGIN',
       'RESEND_FROM',
       'SIGNUP_ENABLED',
     ]);
     assert.equal(target.vars.GITHUB_URL, 'fixture:PUBLIC_GITHUB_URL');
+    assert.equal(target.vars.EMAIL_TRANSPORT, 'fixture:EMAIL_TRANSPORT');
   }
   assert.equal(config.vars.PUBLIC_ORIGIN, 'fixture:PUBLIC_ORIGIN');
   assert.equal(

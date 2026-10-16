@@ -212,13 +212,16 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 	const volume = popover.getByRole('slider');
 	await volume.fill('-40');
 	await expect(volume).toHaveAttribute('aria-valuetext', '−40 dB');
-	// Measured window: the VU ballistics (300 ms) and the throttled readout settle well within it.
-	await page.waitForTimeout(1200);
+	// Pre-volume: −40 dB of preview volume would move a post-volume VU by ~40; here the reading only
+	// has to settle back within 0.5 (VU ballistics and the throttled readout, slower under load).
 	await expect(bridge.locator('.mode')).toHaveText('AO VIVO');
-	expect(Math.abs((await reading()) - before)).toBeLessThanOrEqual(0.5);
+	await expect
+		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })
+		.toBeLessThanOrEqual(0.5);
 	await volume.fill('0');
-	await page.waitForTimeout(1200);
-	expect(Math.abs((await reading()) - before)).toBeLessThanOrEqual(0.5);
+	await expect
+		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })
+		.toBeLessThanOrEqual(0.5);
 
 	// 0 VU at −20 dBFS: the same −18 dBFS tone reads about +2 VU on every tap.
 	await popover.getByRole('radio', { name: '−20 dBFS' }).check();

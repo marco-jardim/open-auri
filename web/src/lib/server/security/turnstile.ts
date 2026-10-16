@@ -56,6 +56,39 @@ export function reasonFromErrorCodes(codes: readonly string[]): TurnstileFailure
 	return 'unavailable';
 }
 
+/** Token the Cloudflare test sitekeys (e.g. `1x00000000000000000000AA`) hand out. */
+export const DUMMY_TURNSTILE_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
+
+/** The env fields that decide whether the local stub may run. */
+export interface LocalTurnstileEnv {
+	publicOrigin: string;
+	emailTransport?: string;
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+	try {
+		const { hostname } = new URL(origin);
+		return hostname === 'localhost' || hostname === '127.0.0.1';
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Local Siteverify stand-in for the e2e suite, or `null`. Active ONLY with EMAIL_TRANSPORT=capture
+ * on a localhost / 127.0.0.1 PUBLIC_ORIGIN (getServerEnv already refuses capture anywhere else;
+ * this re-checks both). It makes no network call, still requires a token, and accepts exactly
+ * {@link DUMMY_TURNSTILE_TOKEN} (what the widget with a Cloudflare test sitekey returns), so the
+ * whole flow runs against `wrangler dev` without reaching challenges.cloudflare.com.
+ */
+export function localTestTurnstile(env: LocalTurnstileEnv): typeof verifyTurnstile | null {
+	if (env.emailTransport !== 'capture' || !isLoopbackOrigin(env.publicOrigin)) return null;
+	return async (options) => {
+		if (typeof options.token !== 'string' || options.token.length === 0) return failure('missing');
+		return options.token === DUMMY_TURNSTILE_TOKEN ? { ok: true } : failure('invalid');
+	};
+}
+
 export async function verifyTurnstile(options: VerifyTurnstileOptions): Promise<TurnstileResult> {
 	const { token, action, hostname, secret } = options;
 	if (typeof token !== 'string' || token.length === 0) return failure('missing');

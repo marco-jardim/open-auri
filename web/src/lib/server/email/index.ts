@@ -10,6 +10,7 @@
 //       tags: [{ name: 'template', value: 'verify-email' }] }
 //   });
 import type { ServerEnv } from '../env.ts';
+import { createCaptureProvider } from './capture.ts';
 import type { EmailProvider } from './provider.ts';
 import { ResendProvider, type ResendProviderOptions } from './resend.ts';
 import { SuppressionList, withSuppression } from './suppression.ts';
@@ -28,16 +29,24 @@ export type EmailProviderOverrides = Pick<
 	'fetch' | 'sleep' | 'random' | 'maxAttempts' | 'baseDelayMs' | 'maxDelayMs' | 'timeoutMs'
 >;
 
-/** Resend adapter behind the D1 suppression list, configured from the validated env. */
+/**
+ * Resend adapter behind the D1 suppression list, configured from the validated env. With
+ * EMAIL_TRANSPORT=capture (local e2e only; getServerEnv refuses it on a non-local origin) the
+ * messages go to the dev mailbox instead (capture.ts), still behind the suppression list.
+ */
 export function createEmailProvider(
 	env: ServerEnv,
 	overrides: EmailProviderOverrides = {}
 ): EmailProvider {
+	const suppression = new SuppressionList(env.db, env.secrets.betterAuthSecret);
+	if (env.emailTransport === 'capture') {
+		return withSuppression(createCaptureProvider(env), suppression);
+	}
 	const resend = new ResendProvider({
 		...overrides,
 		apiKey: env.secrets.resendApiKey,
 		from: env.resendFrom,
 		userAgent: EMAIL_USER_AGENT
 	});
-	return withSuppression(resend, new SuppressionList(env.db, env.secrets.betterAuthSecret));
+	return withSuppression(resend, suppression);
 }

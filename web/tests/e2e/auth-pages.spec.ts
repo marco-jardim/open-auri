@@ -8,6 +8,7 @@
 // the same for every address; the exact credentials mapping is covered by the unit tests.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { randomIp } from './helpers/auth-flow';
 
 const AUTH_ROUTES = [
 	'/entrar',
@@ -50,6 +51,11 @@ async function open(page: Page, path: string): Promise<void> {
 
 test.describe('auth pages', () => {
 	test.describe.configure({ mode: 'parallel' });
+	// Rate limits key on CF-Connecting-IP (kept by Miniflare): one address per test, so runs and
+	// projects never share a limiter window.
+	test.beforeEach(async ({ context }) => {
+		await context.setExtraHTTPHeaders({ 'cf-connecting-ip': randomIp() });
+	});
 
 	for (const path of AUTH_ROUTES) {
 		test(`${path} renders server-side, noindex, with no serious or critical axe violations`, async ({
@@ -176,14 +182,20 @@ test.describe('auth pages', () => {
 	});
 
 	test('works without JavaScript: the form posts and the page answers', async ({ browser }) => {
-		const context = await browser.newContext({ javaScriptEnabled: false, locale: 'pt-BR' });
+		const context = await browser.newContext({
+			javaScriptEnabled: false,
+			locale: 'pt-BR',
+			extraHTTPHeaders: { 'cf-connecting-ip': randomIp() }
+		});
 		const page = await context.newPage();
 		await page.goto('/esqueci-senha');
-		await page.getByLabel('E-mail', { exact: true }).fill('ninguem@example.com');
+		// Unique address: the per-address limiter (D1, survives between runs) must start empty.
+		const address = `ninguem+${crypto.randomUUID()}@example.com`;
+		await page.getByLabel('E-mail', { exact: true }).fill(address);
 		await page.getByRole('button', { name: 'Enviar link' }).click();
 		// Without JS there is no Turnstile token: the server answers with the uniform check message.
 		await expect(page.getByRole('alert')).toContainText('A verificação de segurança não passou.');
-		await expect(page.getByLabel('E-mail', { exact: true })).toHaveValue('ninguem@example.com');
+		await expect(page.getByLabel('E-mail', { exact: true })).toHaveValue(address);
 		await context.close();
 	});
 });
