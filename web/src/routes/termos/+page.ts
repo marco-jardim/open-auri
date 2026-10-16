@@ -1,7 +1,2 @@
-import * as publicConfig from '#lib/config/public.ts';
-import { publicLegalValues } from '#lib/content/docs/legal.ts';
-
+// Operator data is rendered once, at build time, by +page.server.ts.
 export const prerender = true;
-export function load() {
-	return { legalValues: publicLegalValues(publicConfig) };
-}
