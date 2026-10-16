@@ -38,6 +38,7 @@ import type {
 	Lang,
 	License,
 	LineageVisibility,
+	PackRecord,
 	PackVisibility,
 	Page,
 	RankingMetric,
@@ -245,8 +246,7 @@ export interface FavoriteOff {
 }
 
 export type ActivityPostResult =
-	| { status: 'recorded'; activity: ActivityRecord }
-	| { status: 'duplicate' };
+	{ status: 'recorded'; activity: ActivityRecord } | { status: 'duplicate' };
 
 export interface LibraryQuery extends PageQuery {
 	shelf: LibraryShelf;
@@ -331,6 +331,18 @@ export interface TradePage {
 export interface MyActivityDeleteFilter {
 	lineageId?: string;
 	kind?: ActivityKind;
+}
+
+/** One pack of `GET /me/packs` (any visibility; the owner is the caller). */
+export type MyPackItem = Omit<PackRecord, 'ownerUserId'>;
+
+/** One share link of `GET /me/shares`; `lineage.name` is null when the caller cannot read it. */
+export interface MyShareItem {
+	id: string;
+	lineage: { id: string; name: string | null };
+	versionId: string | null;
+	channel: string | null;
+	createdAt: number;
 }
 
 // ---- Client -------------------------------------------------------------------------------------
@@ -475,6 +487,10 @@ export function createSocialApi(options: SocialApiOptions = {}) {
 			call<LibraryPage>('GET', `/me/library${queryString({ ...query })}`, opts),
 		mergeLibrary: (items: LibraryMergeItem[], opts: RequestOptions = {}) =>
 			call<MergeReport>('POST', '/me/library/merge', { ...opts, body: { items } }),
+		myPacks: (query: PageQuery = {}, opts: RequestOptions = {}) =>
+			call<Page<MyPackItem>>('GET', `/me/packs${queryString({ ...query })}`, opts),
+		myShares: (query: PageQuery = {}, opts: RequestOptions = {}) =>
+			call<Page<MyShareItem>>('GET', `/me/shares${queryString({ ...query })}`, opts),
 
 		// Shares.
 		createShare: (body: CreateShareInput, opts: RequestOptions = {}) =>

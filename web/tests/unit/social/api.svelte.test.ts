@@ -197,6 +197,61 @@ describe('createSocialApi: request shapes', () => {
 		await api.getUser('ana', { signal: controller.signal });
 		expect(calls[0]?.init.signal).toBe(controller.signal);
 	});
+
+	it('lists the caller own packs and shares with GET /me/packs and /me/shares', async () => {
+		const packPage = {
+			items: [
+				{
+					id: 'P1',
+					name: 'Mine',
+					description: '',
+					visibility: 'private',
+					moderation: 'visible',
+					createdAt: 2,
+					updatedAt: 3
+				}
+			],
+			nextCursor: 'n1'
+		};
+		const sharePage = {
+			items: [
+				{
+					id: 'S1',
+					lineage: { id: 'L1', name: 'Warm vocal' },
+					versionId: null,
+					channel: 'whatsapp',
+					createdAt: 4
+				}
+			],
+			nextCursor: null
+		};
+		const { calls, fetch } = fakeFetch((call) =>
+			jsonResponse(call.url.includes('/me/packs') ? packPage : sharePage)
+		);
+		const api = createSocialApi({ fetch });
+		await expect(api.myPacks({ limit: 5 })).resolves.toEqual(packPage);
+		await expect(api.myShares({ cursor: 'c1' })).resolves.toEqual(sharePage);
+		await api.myPacks();
+		await api.myShares();
+		expect(calls.map((call) => call.url)).toEqual([
+			'/api/v1/me/packs?limit=5',
+			'/api/v1/me/shares?cursor=c1',
+			'/api/v1/me/packs',
+			'/api/v1/me/shares'
+		]);
+		expect(calls.every((call) => call.init.method === 'GET')).toBe(true);
+		expect(calls.every((call) => call.init.credentials === 'same-origin')).toBe(true);
+		expect(calls.every((call) => call.init.body === undefined)).toBe(true);
+	});
+
+	it('maps an owner-list error to SocialApiError', async () => {
+		const body = { error: { code: 'INVALID_CURSOR' } };
+		const { fetch } = fakeFetch(() => jsonResponse(body, 400));
+		const api = createSocialApi({ fetch });
+		const error = await caught(api.myShares({ cursor: 'bad' }));
+		expect(error).toBeInstanceOf(SocialApiError);
+		expect(error).toMatchObject({ status: 400, code: 'INVALID_CURSOR' });
+	});
 });
 
 describe('createSocialApi: errors', () => {

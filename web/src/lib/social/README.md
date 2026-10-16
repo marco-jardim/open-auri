@@ -36,6 +36,8 @@ Methods (paths under `/api/v1`):
 - `postActivityOutbox(events)`: `POST /me/activity/outbox` (used by the outbox).
 - `myLibrary({ shelf, visibility?, cursor?, limit? })`: `GET /me/library`.
 - `mergeLibrary(items)`: `POST /me/library/merge` (at most 100 items).
+- `myPacks({ cursor?, limit? })`, `myShares({ cursor?, limit? })`: `GET /me/packs`, `GET /me/shares`
+  (the caller's own packs in any visibility and own share links; `MyPackItem`, `MyShareItem`).
 - `createShare({ lineageId, versionId?, channel? })`: `POST /shares`.
 - `shareStats(shareId)`, `openShare(shareId)`: `GET /shares/[id]/stats`, `POST /shares/[id]/open`.
 - `getUser(nickname)`, `getUserList(nickname, list, { cursor?, limit? })`: `GET /users/[apelido]`

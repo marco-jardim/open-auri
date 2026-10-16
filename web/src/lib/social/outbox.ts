@@ -48,17 +48,10 @@ export interface QueuedActivity {
 }
 
 export type EnqueueResult =
-	| { ok: true; event: QueuedActivity }
-	| { ok: false; reason: 'too-short' | 'invalid' | 'storage' };
+	{ ok: true; event: QueuedActivity } | { ok: false; reason: 'too-short' | 'invalid' | 'storage' };
 
 export type FlushStatus =
-	| 'done'
-	| 'signed-out'
-	| 'unverified'
-	| 'offline'
-	| 'busy'
-	| 'aborted'
-	| 'error';
+	'done' | 'signed-out' | 'unverified' | 'offline' | 'busy' | 'aborted' | 'error';
 
 export interface FlushReport {
 	status: FlushStatus;
@@ -202,7 +195,11 @@ function toWire(item: QueuedActivity): OutboxItemInput {
 }
 
 /** Codes after which retrying cannot help until the session changes (no backoff increment). */
-const SESSION_CODES: ReadonlySet<string> = new Set(['AUTH_REQUIRED', 'EMAIL_NOT_VERIFIED', 'BANNED']);
+const SESSION_CODES: ReadonlySet<string> = new Set([
+	'AUTH_REQUIRED',
+	'EMAIL_NOT_VERIFIED',
+	'BANNED'
+]);
 
 export function createSocialOutbox(options: SocialOutboxOptions) {
 	const { store, session } = options;
@@ -211,8 +208,7 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 	const online = options.online ?? browserOnline;
 	const randomId = options.randomId ?? (() => globalThis.crypto.randomUUID());
 	const random = options.random ?? Math.random;
-	const log =
-		options.log ?? ((message: string, detail: string) => console.warn(message, detail));
+	const log = options.log ?? ((message: string, detail: string) => console.warn(message, detail));
 	let running: Promise<FlushReport> | null = null;
 
 	function backoffDelay(attempts: number, retryAfterMs: number | undefined): number {
