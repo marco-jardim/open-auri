@@ -6,6 +6,18 @@ import adapter from '@sveltejs/adapter-cloudflare';
 import { sveltekit } from '@sveltejs/kit/vite';
 import paraglideOptions from './project.inlang/paraglide.config.mjs';
 
+const PENDING_ROUTES = new Set([
+	'/biblioteca',
+	'/comparar',
+	'/soe-como-x',
+	'/comunidade',
+	'/teste-cego',
+	'/cabo',
+	'/docs',
+	'/privacidade',
+	'/termos'
+]);
+
 export default defineConfig({
 	envDir: '..',
 	envPrefix: 'PUBLIC_',
@@ -18,6 +30,14 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 			adapter: adapter(),
+			prerender: {
+				// Routes linked from the shared chrome whose pages land in a later task or phase. A 404
+				// on any other path fails the build. Shrinks as pages are implemented.
+				handleHttpError: ({ status, path, message }) => {
+					if (status === 404 && PENDING_ROUTES.has(path)) return;
+					throw new Error(message);
+				}
+			},
 			env: { dir: '..' },
 			csp: {
 				mode: 'auto',
