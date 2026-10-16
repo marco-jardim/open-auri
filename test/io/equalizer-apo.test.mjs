@@ -94,7 +94,7 @@ test('comma decimals, UTF-8 BOM, CRLF, inline comments, blank lines and LS defau
   });
 });
 
-test('all pass aliases, optional pass gain, HS default Q, and explicit LS Q', () => {
+test('all pass aliases, optional zero pass gain, HS default Q, and explicit LS Q', () => {
   assert.deepEqual(
     parseEqualizerApo(`Filter 1: ON LP Fc 16000 Hz
 Filter 2: ON LPQ Fc 12000 Hz Q 0.65
@@ -108,8 +108,8 @@ Filter 8: OFF HP Fc 15 Hz
     pad([
       { kind: 'LP', freqHz: 16000, qFactor: 0.7071 },
       { kind: 'LP', freqHz: 12000, qFactor: 0.65 },
-      { kind: 'HP', freqHz: 20, gainDb: 0, qFactor: 0.7071 },
-      { kind: 'HP', freqHz: 30, gainDb: 0, qFactor: 1.1 },
+      { kind: 'HP', freqHz: 20, qFactor: 0.7071 },
+      { kind: 'HP', freqHz: 30, qFactor: 1.1 },
       { kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7071 },
       { kind: 'LS', freqHz: 100, gainDb: 2, qFactor: 0.8 },
       off(),
@@ -117,6 +117,22 @@ Filter 8: OFF HP Fc 15 Hz
     ]),
   );
 });
+
+for (const type of ['LP', 'LPQ', 'HP', 'HPQ']) {
+  test(`${type} omits gainDb for absent or zero gain, including disabled filters`, () => {
+    const kind = type.startsWith('LP') ? 'LP' : 'HP';
+    for (const gain of ['', ' Gain 0 dB', ' Gain -0 dB', ' Gain +0,0 dB']) {
+      for (const status of ['ON', 'OFF']) {
+        const { bands } = parseEqualizerApo(`Filter 1: ${status} ${type} Fc 18000 Hz${gain} Q 0.7`);
+        assert.deepEqual(
+          bands,
+          pad([status === 'OFF' ? off() : { kind, freqHz: 18000, qFactor: 0.7 }]),
+        );
+        assert.equal(Object.hasOwn(bands[0], 'gainDb'), false);
+      }
+    }
+  });
+}
 
 test('missing preamp defaults to zero; empty and comment-only files pad to ten OFFs', () => {
   for (const text of ['', '\uFEFF', '\n# no filters\r\n   # comment\n']) {
@@ -166,6 +182,7 @@ Filter\t2: oN hs Fc 9000 Hz Gain -,5 dB
 
 const ERROR_MESSAGES = {
   'apo:lsq-hsq': 'LSQ and HSQ are not supported: their Q semantics differ from the codec.',
+  'apo:pass-gain': 'Pass filters cannot represent non-zero gain.',
   'apo:too-many-filters': 'At most 10 filters are supported; no filters were truncated.',
   'apo:malformed': 'Malformed EqualizerAPO directive.',
   'apo:unknown-type': 'Unsupported EqualizerAPO filter type.',
@@ -182,6 +199,17 @@ function expectError(action, code, line) {
     assert.equal(error.message, ERROR_MESSAGES[code]);
     assert.equal(error.line, line);
     return true;
+  });
+}
+
+for (const type of ['LP', 'LPQ', 'HP', 'HPQ']) {
+  test(`${type} refuses non-zero gain with the original line number, even when disabled`, () => {
+    for (const gain of ['3', '-3', '0.1', '-0,1']) {
+      for (const status of ['ON', 'OFF']) {
+        const text = `# pass filter\r\nPreamp: -3 dB\r\nFilter 1: ${status} ${type} Fc 18000 Hz Gain ${gain} dB Q 0.7`;
+        expectError(() => parseEqualizerApo(text), 'apo:pass-gain', 3);
+      }
+    }
   });
 }
 
@@ -285,6 +313,7 @@ for (const text of [
 }
 
 test('canonical export maps every kind, pads OFF, trims zeros and uses LF', () => {
+  /** @type {import('../../src/io/equalizer-apo.mjs').EqualizerApoPreset} */
   const preset = {
     preampDb: -2.8,
     bands: [
@@ -293,8 +322,8 @@ test('canonical export maps every kind, pads OFF, trims zeros and uses LF', () =
       { kind: 'HS', freqHz: 8000, gainDb: -1, qFactor: 0.8 },
       { kind: 'LP', freqHz: 16000, qFactor: 0.7 },
       { kind: 'HP', freqHz: 30, qFactor: 1.1 },
-      { kind: 'LP', freqHz: 15000, gainDb: 0, qFactor: 0.9 },
-      { kind: 'HP', freqHz: 25, gainDb: 0, qFactor: 0.6 },
+      { kind: 'LP', freqHz: 15000, qFactor: 0.9 },
+      { kind: 'HP', freqHz: 25, qFactor: 0.6 },
       off(),
     ],
   };
@@ -304,8 +333,8 @@ Filter 2: ON LSC Fc 100 Hz Gain 2.5 dB Q 0.7071
 Filter 3: ON HSC Fc 8000 Hz Gain -1 dB Q 0.8
 Filter 4: ON LPQ Fc 16000 Hz Q 0.7
 Filter 5: ON HPQ Fc 30 Hz Q 1.1
-Filter 6: ON LPQ Fc 15000 Hz Gain 0 dB Q 0.9
-Filter 7: ON HPQ Fc 25 Hz Gain 0 dB Q 0.6
+Filter 6: ON LPQ Fc 15000 Hz Q 0.9
+Filter 7: ON HPQ Fc 25 Hz Q 0.6
 Filter 8: OFF PK Fc 1000 Hz Gain 0 dB Q 1
 Filter 9: OFF PK Fc 1000 Hz Gain 0 dB Q 1
 Filter 10: OFF PK Fc 1000 Hz Gain 0 dB Q 1
@@ -320,6 +349,31 @@ Filter 10: OFF PK Fc 1000 Hz Gain 0 dB Q 1
     warnings: [],
   });
   assert.equal(serializeEqualizerApo(parseEqualizerApo(expected)), expected);
+});
+
+test('explicit zero pass gains normalize to an exact gain-free LP/HP round trip', () => {
+  /** @type {import('../../src/io/equalizer-apo.mjs').EqualizerApoPreset} */
+  const preset = {
+    preampDb: -3,
+    bands: [
+      { kind: 'LP', freqHz: 18000, gainDb: 0, qFactor: 0.7 },
+      { kind: 'HP', freqHz: 30, gainDb: 0, qFactor: 1.1 },
+    ],
+  };
+  const parsed = parseEqualizerApo(serializeEqualizerApo(preset));
+  assert.deepEqual(parsed, {
+    preampDb: -3,
+    bands: pad([
+      { kind: 'LP', freqHz: 18000, qFactor: 0.7 },
+      { kind: 'HP', freqHz: 30, qFactor: 1.1 },
+    ]),
+    warnings: [],
+  });
+  const canonical = serializeEqualizerApo(parsed);
+  assert.match(canonical, /Filter 1: ON LPQ Fc 18000 Hz Q 0\.7\n/);
+  assert.match(canonical, /Filter 2: ON HPQ Fc 30 Hz Q 1\.1\n/);
+  assert.deepEqual(parseEqualizerApo(canonical), parsed);
+  assert.equal(serializeEqualizerApo(parseEqualizerApo(canonical)), canonical);
 });
 
 test('all eleven official presets round-trip exactly', () => {

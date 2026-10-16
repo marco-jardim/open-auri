@@ -9,6 +9,7 @@ import { BAND_COUNT } from '../dsp/eq0xcb.mjs';
 
 const ERROR_MESSAGES = Object.freeze({
   'apo:lsq-hsq': 'LSQ and HSQ are not supported: their Q semantics differ from the codec.',
+  'apo:pass-gain': 'Pass filters cannot represent non-zero gain.',
   'apo:too-many-filters': 'At most 10 filters are supported; no filters were truncated.',
   'apo:malformed': 'Malformed EqualizerAPO directive.',
   'apo:unknown-type': 'Unsupported EqualizerAPO filter type.',
@@ -131,9 +132,11 @@ function parseFilter(text, line) {
   const qFactor =
     fields.get('Q') ?? (DEFAULT_Q_TYPES.has(type) ? 0.7071 : requiredField(fields, 'Q', line));
   if (kind === 'LP' || kind === 'HP') {
-    if (status === 'OFF') return { kind: 'OFF' };
     const gainDb = fields.get('GAIN');
-    return gainDb === undefined ? { kind, freqHz, qFactor } : { kind, freqHz, gainDb, qFactor };
+    if (gainDb !== undefined && gainDb !== 0) {
+      throw new EqualizerApoError('apo:pass-gain', line);
+    }
+    return status === 'OFF' ? { kind: 'OFF' } : { kind, freqHz, qFactor };
   }
   const gainDb = requiredField(fields, 'GAIN', line);
   return status === 'OFF' ? { kind: 'OFF' } : { kind, freqHz, gainDb, qFactor };
@@ -144,7 +147,7 @@ function parseFilter(text, line) {
  * Missing Preamp defaults to 0 dB; the last Preamp wins. Filter numbers are labels:
  * bands retain source order, including disabled filters, and are padded to ten OFFs.
  * PK, LSC/HSC and LPQ/HPQ require Q; LS/HS and LP/HP default it to 0.7071.
- * Gain is required for peaking/shelves, optional (and preserved) for pass filters.
+ * Gain is required for peaking/shelves; pass filters accept only zero gain and omit it.
  * Disabled filters must still be syntactically valid; their parameters are discarded.
  * Directives/keywords are case-insensitive. Unknown lines are returned after stripping
  * comments/whitespace, with their original one-based line numbers.
