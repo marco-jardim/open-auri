@@ -143,13 +143,28 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 
 | ID | Status | Commit | Notas |
 |---|---|---|---|
-| PF4 | verificada | (este commit) | ver Pre-flights; brief `docs/plans/f4-delegate-brief.md` |
-| T4.1 | pendente | — | heavy (decisão do PF4); esquema 0004–0006, `repo.ts`, `types.ts`, `deletion.ts` social, seção social da exportação |
-| T4.1b | pendente | — | kit da API v1 (`web/src/lib/server/api/**`), criado no PF4 |
-| T4.2–T4.11 | pendente | — | W4.2 |
-| T4.12, T4.12b | pendente | — | W4.3 (T4.12b: cliente social `web/src/lib/social/**`, criado no PF4) |
-| T4.13–T4.18 | pendente | — | W4.4 |
-| T4.T | pendente | — | |
+| PF4 | verificada | 818074d | ver Pre-flights; brief `docs/plans/f4-delegate-brief.md` |
+| T4.1 | commitada | 61dd163 | heavy; esquema 0004–0006 (moderação separada do status do dono; gatilho impede versão de curva reprovada; versões só por acréscimo), `repo.ts`, partes de exclusão e exportação |
+| T4.1b | commitada | ddc3104, 6b58ea1 | kit da API v1 (origem, guardas, limites, Turnstile, ETag, códigos estáveis + códigos de domínio) |
+| T4.1c | commitada | 63de348 | criada na W4.2: `social/gate.ts` (`checkCurve`, cache por `curve_id` + `gate_ver`, `regateStale`) compartilhado por T4.2/T4.3 |
+| T4.2 | commitada | 7a8975b | heavy |
+| T4.3 | commitada | 5841717 | |
+| T4.4 | commitada | fdeb407 | heavy; anti-replay por `eventId` (8 dias, tabela de rate limit) |
+| T4.5 | commitada | aa38de2, cf7effd | link "abrir na Curva" com `l`/`v` |
+| T4.6 | commitada | eec3ecf | `GET /api/v1/feed` incluído |
+| T4.7 | commitada | ad076b9 | fontes OFL baixadas pelo orquestrador |
+| T4.8 | commitada | 2d302ac | link no `AdminNav` pelo orquestrador |
+| T4.9 | commitada | 55082e4 | sem cota D1 por IP (anonimato); pares embaralhados |
+| T4.10 | commitada | c8fa2d7 | heavy; parceiro cego sem `versionId` |
+| T4.11 | commitada | f942519 | 308 para grafia não canônica do apelido |
+| W4.2 (integração) | commitada | c5b300f | cursores tipados (repo compila com `noUncheckedIndexedAccess` do Worker de jobs); `rootDirs` e shim de `RequestInit` no TS project de integração |
+| T4.12 | commitada | 02df6f7 | crons `5 0 * * *` (rotate-salt, rate-limit-gc, access-log-retention, s6-aggregate, regate), `0 * * * *` (trades-expire), `*/15 * * * *` (rankings); OG aquecida na publicação não privada |
+| T4.12b | commitada | b28055c, 8d744b1 | cliente social, outbox, sessão, `origins.ts` (escrito pelo orquestrador) |
+| T4.13 | commitada | 6fa0a04 | heavy; `/comunidade` prerenderizada (shell offline) |
+| T4.14 | commitada | 7901c4a | `SocialSync` e ponte do cabo montados no layout pelo orquestrador |
+| T4.14b | commitada | 8487cd5 | criada na W4.4: `GET /api/v1/me/packs` e `/me/shares` |
+| T4.15–T4.18 | commitadas | 5f58550, 4d834ab, a1c0e94, b0136f0 | |
+| T4.T | pendente | — | inclui atualizar as referências visuais (Curva, Biblioteca, Comparar, Docs mudaram) e cobertura de branches ≥ 90% (estava 88,2%) |
 
 ### Mapa de locks da F4 (PF4)
 
@@ -277,6 +292,9 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 - 2026-10-16 · PF4: OG com `@cf-wasm/resvg` (sem Browser Rendering); import dinâmico dentro do handler (o estático quebra a análise do Kit no Node); fontes TTF em `web/static/og-font/` lidas via `ASSETS`. `gate_ver` derivado de SHA-256 de `THRESHOLDS` (o núcleo não tem constante de versão do gate). Perfil continua em colunas de `"user"` (0009) e `nickname_history` = `username_holds`: o anexo A.2 foi mapeado, não recriado.
 - 2026-10-16 · PF4, delegação: T4.1 marcada heavy (fundação de esquema e visibilidade de toda a fase). Duas tarefas novas: **T4.1b** (kit da API v1: o código da F3 não tem helpers de resposta JSON, erro estável, ETag nem checagem de origem para JSON; sem ele cada serviço reinventaria) e **T4.12b** (cliente social no navegador: API, outbox, estado de sessão, usado por T4.13–T4.16; o plano não atribuía esse código). `GET /api/v1/feed` atribuído à T4.6; exportação LGPD social e parte social da exclusão de conta na T4.1.
 - 2026-10-16 · Domínio `open-auri.com` registrado pelo operador no Cloudflare Domains. Libera o runbook "Ativação do .com" (T5.5) no PF5/F5: `PUBLIC_ORIGIN`, hostnames do Turnstile, domínio de envio do Resend (SPF/DKIM; o OAuth do wrangler não escreve DNS), rota de domínio próprio do Worker e `SIGNUP_ENABLED=true` depois disso.
+
+- 2026-10-16 · W4.2–W4.4: rotas de página importam `./$types`, que puxam tipos do layout e módulos de cliente; o TS project de integração ganhou `rootDirs` para `.svelte-kit/types` e um shim só de teste para `RequestInit.credentials` (o tipo do Workers não tem). O Worker de jobs importa módulos do web por caminho relativo (`#lib` resolve pelo `web/package.json`); o `repo.ts` foi ajustado para compilar também com `noUncheckedIndexedAccess`. Módulos de servidor usados pelos jobs importam `api/errors.ts`, nunca o barril do kit (o `handler.ts` depende de tipos do Kit). Origens de curva (`oa.social.origins`, curveId → linhagem/versão) decidem a atribuição de `previewed`/`installed`: só bytes exatos de uma versão publicada contam. A Biblioteca prerenderizada não pode ler `url.search`.
+- 2026-10-16 · Instabilidade conhecida: sob carga, o pool do `@cloudflare/vitest-plugin` às vezes falha ao iniciar um worker ("bad port") e o arquivo não roda; reexecutar o arquivo isolado resolve. Não rodar `test:web:unit` e `test:int` ao mesmo tempo.
 
 ## Bloqueios e perguntas ao humano
 
