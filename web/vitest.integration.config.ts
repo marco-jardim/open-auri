@@ -58,6 +58,9 @@ export default defineConfig({
 			main: './tests/integration/worker.ts',
 			remoteBindings: false,
 			miniflare: {
+				// Test-only empty D1 for tests/integration/social/repo/migrations.test.ts, which
+				// applies the migrations in the "already migrated" order (0004-0006 last).
+				d1Databases: { SOCIAL_ORDER_DB: 'social-migration-order-test' },
 				bindings: {
 					// Test-only binding consumed by tests/integration/setup/apply-migrations.ts.
 					TEST_MIGRATIONS: existsSync(MIGRATIONS_DIR) ? await readD1Migrations(MIGRATIONS_DIR) : [],

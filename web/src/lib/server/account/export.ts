@@ -6,6 +6,7 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { all, first, sql } from '../db.ts';
 import { listAcceptances } from '../legal/acceptance.ts';
+import { socialSection } from '../social/export.ts';
 import { readDeletionRequest } from './deletion.ts';
 import { pendingEmailChange } from './email-change.ts';
 import { listNicknameHolds } from './nickname.ts';
@@ -164,7 +165,8 @@ export const ACCOUNT_EXPORT_SECTIONS: readonly ExportSection[] = [
 	profileSection,
 	policyAcceptancesSection,
 	sessionsSection,
-	pendingRequestsSection
+	pendingRequestsSection,
+	socialSection
 ];
 
 export async function buildAccountExport(

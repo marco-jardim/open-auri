@@ -20,6 +20,7 @@ import type { BeforeDeleteUser } from '../auth.ts';
 import { batch, first, run, sql, type BoundStatement } from '../db.ts';
 import type { ServerEnv } from '../env.ts';
 import { deleteAcceptancesStatement } from '../legal/acceptance.ts';
+import { socialContentPart } from '../social/deletion.ts';
 import { NICKNAME_HOLD_MS } from './nickname.ts';
 
 export const DELETION_MODES = ['anonymize', 'delete-all'] as const;
@@ -84,6 +85,7 @@ export const policyAcceptancesPart: DeletionPart = {
  * fails after the policy ran, a retry still reads the mode the user chose.
  */
 export const ACCOUNT_DELETION_PARTS: readonly DeletionPart[] = [
+	socialContentPart,
 	nicknameHoldsPart,
 	emailChangePart,
 	policyAcceptancesPart
