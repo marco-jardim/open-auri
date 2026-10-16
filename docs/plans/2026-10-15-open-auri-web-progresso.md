@@ -139,10 +139,29 @@ Verificação central da W2.4: `check:web` 0 erros; `test:web:unit` 61 arquivos,
 
 Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos, 284 testes; lint do web limpo; build ok; raiz 613/613.
 
+## Tarefas F4
+
+| ID | Status | Commit | Notas |
+|---|---|---|---|
+| PF4 | verificada | (este commit) | ver Pre-flights; brief `docs/plans/f4-delegate-brief.md` |
+| T4.1 | pendente | — | heavy (decisão do PF4); esquema 0004–0006, `repo.ts`, `types.ts`, `deletion.ts` social, seção social da exportação |
+| T4.1b | pendente | — | kit da API v1 (`web/src/lib/server/api/**`), criado no PF4 |
+| T4.2–T4.11 | pendente | — | W4.2 |
+| T4.12, T4.12b | pendente | — | W4.3 (T4.12b: cliente social `web/src/lib/social/**`, criado no PF4) |
+| T4.13–T4.18 | pendente | — | W4.4 |
+| T4.T | pendente | — | |
+
+### Mapa de locks da F4 (PF4)
+
+- **W4.1 (paralelo):** T4.1 → `web/migrations/0004_social.sql`, `0005_s6_s7.sql`, `0006_rankings.sql`, `web/src/lib/server/social/{repo,types,deletion,export}.ts`, `web/src/lib/server/account/deletion.ts` (só acrescentar a parte social em `ACCOUNT_DELETION_PARTS`), `web/src/lib/server/account/export.ts` (só acrescentar a seção social), `web/tests/integration/social/repo/**`. T4.1b → `web/src/lib/server/api/**`, `web/tests/integration/api/**`.
+- **W4.2 (paralelo):** cada serviço é dono de `web/src/lib/server/social/<serviço>.ts`, de `web/src/lib/server/social/queries/<serviço>.ts` (se precisar), das suas rotas e de `web/tests/integration/social/<serviço>/**`. `repo.ts`, `types.ts`, o kit da API e as migrações ficam só leitura. Rotas com sobreposição resolvidas assim: T4.2 é dona de `api/v1/curves/+server.ts`, `api/v1/curves/[id]/+server.ts` e `api/v1/lineages/**`; T4.3 de `api/v1/curves/[id]/favorite/**`, `api/v1/me/library/**`; T4.4 de `api/v1/curves/[id]/activity/**`, `api/v1/curves/[id]/audience/**`, `api/v1/me/activity/**`; T4.6 de `api/v1/rankings/**` e `api/v1/feed/**`. Jobs (`workers/jobs/src/jobs/<job>.ts`) de cada serviço; o registro (`index.ts`, `registry.ts`, template) só na T4.12. Mensagens por staging. Serviços que dependem de outro (ex.: T4.5 usa a publicação da T4.2) leem só `repo.ts` e o kit, nunca o arquivo do outro serviço em edição.
+- **Fila de integração (orquestrador):** `package.json`, `web/package.json`, `vite.config.ts`, `+layout.*`, mensagens, migrações depois da W4.1, `hooks.server.ts`, templates do wrangler, `web/src/lib/server/types.ts`.
+
 ## Pre-flights
 
 | PF | Data | Resultado | Evidências |
 |---|---|---|---|
+| PF4 | 2026-10-16 | aprovado | Q3 PASS e árvore limpa (HEAD `ae6244d`); **spike OG:** `@cf-wasm/resvg` 0.4.0 no `wrangler dev`, PNG 1200×630 em ~30 ms (1ª chamada 80–120 ms), ~20 KB, determinístico (hash igual), fontes TTF via `ASSETS`; também validado dentro do build do Kit com import dinâmico (o import estático quebra a análise do Kit no Node: `wbg`); Worker com resvg 6,1 MiB / 1,6 MiB gzip (limite atual 64 MiB) → **aprovado, sem Browser Rendering**; **spike do gate:** `gateForWrite` (`full`) ~150 ms por curva no workerd (11 presets × 20) → abaixo de 1 s, cache por `curve_id` + `gate_ver` mantido; QR `uqr` 0.1.3 (MIT) já em uso; Bradley–Terry próprio (MM de Zermelo, Wikipedia eq. 3–4, Hunter 2004 doi:10.1214/aos/1079120141; existência pelo critério de Ford; empate = meia vitória); texto do usuário só por interpolação do Svelte (escapa; `{@html}` proibido) + `normalizeText` do núcleo; Clearmountain (texto do mock confirmado na Wikipedia) e Lord-Alge (1963; *American Idiot* e *21st Century Breakdown*; SSL 4000 E, fonte SSL) verificados; brief `docs/plans/f4-delegate-brief.md` |
 | PF3 | 2026-10-16 | aprovado | Q2 PASS e árvore limpa (push `03cd0ef`); versões abaixo; Better Auth 1.7.10 resolve `better-auth/crypto` para `node:crypto` no workerd (condição de export `workerd`); spike de CPU no `wrangler dev` (mediana local, 5 amostras): padrão do Better Auth (N=2^14, r=16, p=1) 53 ms, mas abaixo do custo OWASP; OWASP N=2^13 r=8 p=10 120 ms, **N=2^14 r=8 p=5 123 ms (adotado, 16 MiB)**, N=2^15 r=8 p=3 148 ms, N=2^16 r=8 p=2 202 ms, N=2^17 r=8 p=1 228 ms; recursos criados na conta do `.env` (whoami conferido): D1 `open-auri` e `-staging`, KV `open-auri-config` e `-staging`, R2 `open-auri-media` e `-staging` com ciclo de vida de 180 dias em `access-log/`, filas `open-auri-access-log` (+ `-staging`, DLQs); H-RESEND e H-TURNSTILE não bloqueiam (chaves no `.env`; domínio de envio espera o `.com`); Q-MCI resolvida (cumprir, `ACCESS_LOG_ENABLED=true`); Rupert Neve (1926–2021): eleito pelos pares a personalidade nº 1 do áudio do século XX (Studio Sound, dez. 1999) e gravou os discursos de guerra de Churchill para distribuição às rádios (Wikipedia, citando o WSJ) |
 | PF2 | 2026-10-16 | aprovado | Q1 PASS e árvore limpa; versões verificadas (abaixo); spike de áudio com `qa-audio.mjs --all`: 191 PASS (96 kHz exatos, `createMediaElementSource`, 20 nós IIR, IndexedDB), 1 FAIL estrutural no rodapé do mock da Docs (defeito do mock, não do áudio); fontes e licenças verificadas; AutoEq `master` em `7ae0f56` (2025-07-20), sem LFS, colisão `measurements/Rtings` × `rtings` |
 | PF1 | 2026-10-16 | aprovado | HEAD 1e2f241; `git status`: só `design/` não versionado (49 arquivos, ~33,7 MB; maior 4,24 MB); Node v24.21.0, npm 12.0.2; `npm test` 59/59 (52 codec + 6 scanner + 1 agregado do `design\analysis\gate.test.mjs`); `qa-parity.mjs` 0 falhas (Neutro 0x4FFF); `check-sensitive` saída 0; 16 núcleos |
@@ -178,6 +197,9 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 | zod | 4.6.7 | MIT | 2026-10-16 |
 | @cloudflare/vitest-plugin | 1.4.4 (peer vitest ^4.1 \|\| ^5) | MIT | 2026-10-16 |
 | @msw/cloudflare / msw | 0.2.0 / 3.0.3 | MIT | 2026-10-16 |
+| @cf-wasm/resvg (motor @resvg/resvg-wasm 2.6.2) | 0.4.0 | MPL-2.0 | 2026-10-16 (PF4) |
+| uqr | 0.1.3 | MIT | 2026-10-16 (PF4) |
+| wrangler, better-auth, zod, @cloudflare/vitest-plugin, kit, svelte, vite, vitest, playwright | sem mudança desde o PF3 (4.151.1, 1.7.10, 4.6.7, 1.4.4, 3.1.0, 5.57.2, 8.3.4, 5.0.5, 1.64.1) | — | 2026-10-16 (PF4) |
 | Fontsource (10 famílias) | 5.3.x | OFL-1.1; Special Elite e Permanent Marker Apache-2.0 | 2026-10-16 |
 
 ### Fatos do `node:test` (PF1.6)
@@ -251,6 +273,10 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 - 2026-10-16 · X1 (Q2): CSP com `style-src 'unsafe-inline'`, sem `frame-ancestors` e sem `Permissions-Policy` é escopo da T3.3 (cabeçalhos) e da T5.4 (CSP estrita com nonce, `Permissions-Policy: hid=(self)`); o requisito global de cabeçalhos do plano (§ "Cabeçalhos": HSTS, `frame-ancestors 'none'`, COOP) entra no checklist do PF3. Só documentado.
 
 - 2026-10-16 · W2.4: testes de componente que navegam ou recarregam a página derrubam o runner do Vitest browser ("failed to find the runner") nas execuções combinadas; o export da Comparar trocou o clique em link por callback e `location.assign` por link. Lint: `ignoreGoto: true` junto de `ignoreLinks` (mesma justificativa: sem `base`). Achados para o Q2: `1 unsaved changes` já no primeiro carregamento (curva `dirty` sem gravação anterior); estratégia `preferredLanguage` faz a página prerenderizada em pt-BR trocar para en-US no cliente em navegadores en-US (comportamento do plano, mas há flash de idioma).
+
+- 2026-10-16 · PF4: OG com `@cf-wasm/resvg` (sem Browser Rendering); import dinâmico dentro do handler (o estático quebra a análise do Kit no Node); fontes TTF em `web/static/og-font/` lidas via `ASSETS`. `gate_ver` derivado de SHA-256 de `THRESHOLDS` (o núcleo não tem constante de versão do gate). Perfil continua em colunas de `"user"` (0009) e `nickname_history` = `username_holds`: o anexo A.2 foi mapeado, não recriado.
+- 2026-10-16 · PF4, delegação: T4.1 marcada heavy (fundação de esquema e visibilidade de toda a fase). Duas tarefas novas: **T4.1b** (kit da API v1: o código da F3 não tem helpers de resposta JSON, erro estável, ETag nem checagem de origem para JSON; sem ele cada serviço reinventaria) e **T4.12b** (cliente social no navegador: API, outbox, estado de sessão, usado por T4.13–T4.16; o plano não atribuía esse código). `GET /api/v1/feed` atribuído à T4.6; exportação LGPD social e parte social da exclusão de conta na T4.1.
+- 2026-10-16 · Domínio `open-auri.com` registrado pelo operador no Cloudflare Domains. Libera o runbook "Ativação do .com" (T5.5) no PF5/F5: `PUBLIC_ORIGIN`, hostnames do Turnstile, domínio de envio do Resend (SPF/DKIM; o OAuth do wrangler não escreve DNS), rota de domínio próprio do Worker e `SIGNUP_ENABLED=true` depois disso.
 
 ## Bloqueios e perguntas ao humano
 
