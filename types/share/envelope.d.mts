@@ -31,7 +31,7 @@ export type Envelope = {
     lang: 'pt-BR' | 'en-US';
     createdAt: string;
 };
-export type EnvelopeErrorCode = 'env:type' | 'env:required' | 'env:extra' | 'env:length' | 'env:enum' | 'env:pattern' | 'env:range' | 'env:url' | 'env:code-mismatch' | 'env:s1' | 'env:bands' | 'env:json' | 'env:size';
+export type EnvelopeErrorCode = 'env:type' | 'env:required' | 'env:extra' | 'env:length' | 'env:enum' | 'env:pattern' | 'env:range' | 'env:url' | 'env:url-like' | 'env:code-mismatch' | 'env:s1' | 'env:bands' | 'env:json' | 'env:size';
 export type EnvelopeIssue = {
     path: string;
     code: EnvelopeErrorCode;

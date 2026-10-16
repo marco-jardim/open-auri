@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:open-auri:schema:preset-envelope-1",
   "title": "Open Auri preset envelope v1 (S5)",
-  "description": "Structure of normalized publication data. Runtime semantics additionally require NFKC, bidi/zero-width removal, whitespace normalization, URL/domain refusal in all free text, valid UTC calendar dates, exact S1 v1 decoding/coherence with bands in wire order and preampDb, and at most 8192 serialized UTF-8 bytes. Lengths count Unicode code points after normalization. The safety gate is a separate concern and is NOT checked by this envelope.",
+  "description": "Structure of normalized publication data. Runtime semantics additionally require NFKC, invisible removal (preserving emoji sequences), whitespace normalization, URL/domain/IP refusal in prose, valid UTC calendar dates, exact S1 v1 decoding/coherence with bands in wire order and preampDb, and at most 8192 serialized UTF-8 bytes. URL detection strips all invisibles and combining marks; spaced dots and middle dots are not links. Prose abbreviations (case-insensitive): p.ex., p. ex., a.C., d.C., S.A., Ltda., e.g., i.e., a.m., p.m., vs. An isolated letter-only word.Word with an uppercase initial after the dot or a non-ASCII letter is still refused as env:url-like, suggesting a space after the period; schemes/www/IPs retain env:url. Recipe measurement/target filenames and solver SemVer versions use structural patterns instead of URL detection. Lengths count Unicode code points after normalization. The safety gate is separate and is NOT checked by this envelope.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -93,7 +93,8 @@
               "type": "string",
               "$ref": "#/$defs/singleLine",
               "minLength": 1,
-              "maxLength": 32
+              "maxLength": 32,
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$(?![\\s\\S])"
             }
           }
         },
@@ -130,9 +131,9 @@
     },
     "recipeName": {
       "type": "string",
-      "$ref": "#/$defs/singleLine",
       "minLength": 1,
-      "maxLength": 96
+      "maxLength": 120,
+      "pattern": "^(?!.*[wW][wW][wW]\\.)[\\p{L}\\p{N} ._()+,'&-]{1,120}$(?![\\s\\S])"
     },
     "frequency": { "type": "integer", "minimum": 1, "maximum": 20000 },
     "gain": { "type": "number", "minimum": -25.6, "maximum": 12.7, "multipleOf": 0.1 },

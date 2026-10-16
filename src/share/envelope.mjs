@@ -9,7 +9,7 @@ import { decodeS1, encodeS1 } from './s1.mjs';
  * @typedef {string | number | boolean | null} Primitive
  * @typedef {{source: string, name: string, sha256?: string}} Measurement
  * Recipe limits (normalized code points): source/solver name 64, measurement or
- * target name 96, solver version 32; at most 32 params with ASCII keys of 1–32
+ * target filename 120, solver SemVer version 32; at most 32 params with ASCII keys of 1–32
  * characters and primitive values (strings at most 128, numbers finite).
  * @typedef {{measurement?: Measurement, target?: {source: string, name: string},
  *   solver?: {name: string, version: string}, params?: Record<string, Primitive>}} Recipe
@@ -18,7 +18,7 @@ import { decodeS1, encodeS1 } from './s1.mjs';
  *   code: string, preampDb: number, bands: Band[], recipe?: Recipe,
  *   lang: 'pt-BR' | 'en-US', createdAt: string}} Envelope
  * @typedef {'env:type' | 'env:required' | 'env:extra' | 'env:length' | 'env:enum'
- *   | 'env:pattern' | 'env:range' | 'env:url' | 'env:code-mismatch' | 'env:s1'
+ *   | 'env:pattern' | 'env:range' | 'env:url' | 'env:url-like' | 'env:code-mismatch' | 'env:s1'
  *   | 'env:bands' | 'env:json' | 'env:size'} EnvelopeErrorCode
  * @typedef {{path: string, code: EnvelopeErrorCode, message: string}} EnvelopeIssue
  * @typedef {{ok: true, value: Envelope} | {ok: false, errors: EnvelopeIssue[]}} EnvelopeResult
@@ -52,16 +52,37 @@ const REQUIRED = [
 const SOURCE = /^(?:custom|import|(?:preset|community):[A-Za-z0-9][A-Za-z0-9_-]{0,63})$(?![\s\S])/;
 const SHA256 = /^[a-fA-F0-9]{64}$(?![\s\S])/;
 const PARAM_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,31}$(?![\s\S])/;
+// Dataset/file names are not prose: dots are allowed, links and path syntax are not.
+const RECIPE_NAME = /^(?!.*www\.)[\p{L}\p{N} ._()+,'&-]{1,120}$(?![\s\S])/iu;
+const SEMVER_IDENTIFIER = '(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)';
+const SEMVER = new RegExp(
+  '^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)' +
+    `(?:-${SEMVER_IDENTIFIER}(?:\\.${SEMVER_IDENTIFIER})*)?` +
+    '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$(?![\\s\\S])',
+);
 // Calendar validity is checked separately, including leap years. UTC only, no offsets.
 const UTC =
   /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$(?![\s\S])/;
 const INVISIBLE =
   /[\p{Default_Ignorable_Code_Point}\p{Cf}\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
+// Protect complete tag flags first, then pictographic ZWJ chains (including skin
+// tones), and selectors immediately after pictographs or keycap bases. Unmatched
+// joiners, selectors and tags are still stripped. Detection never uses this exemption.
+const EMOJI_SEQUENCE =
+  /\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f}|\p{Extended_Pictographic}[\ufe0e\ufe0f]?\p{Emoji_Modifier}?(?:\u200d\p{Extended_Pictographic}[\ufe0e\ufe0f]?\p{Emoji_Modifier}?)*|[0-9#*][\ufe0e\ufe0f]/gu;
 // Detection only: retain the normalized punctuation in published text.
 const URL_DOTS = /[\u3002\uff0e\uff61\u2024\ufe52]/gu;
-// A letter-only TLD of at least two letters permits decimals, Sr. and e.g., not x.co.
-const URL =
-  /\b[a-z][a-z0-9+.-]*:\/\/|\bhxxps?\b|www\.|(?:^|[^\p{L}\p{N}_-])[\p{L}\p{N}-]{1,63}\.[\p{L}]{2,24}(?=$|[^\p{L}\p{N}_-])/iu;
+// Consume scheme candidates BEFORE checking their suffix: a failed suffix must
+// not retry every dotted suffix of a long token (quadratic backtracking).
+const SCHEME_CANDIDATE = /\b[a-z][a-z0-9+.-]*/giu;
+const URL_PREFIX = /\bhxxps?\b|www\./iu;
+const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/u;
+const DOMAIN =
+  /(?:^|[^\p{L}\p{N}])([\p{L}\p{N}-]{1,63}\.(?:xn--[a-z0-9-]{1,59}|\p{L}{2,24}))(?=$|[^\p{L}\p{N}])/giu;
+// Case-insensitive prose allowlist: pt-BR p.ex., p. ex., a.C., d.C., S.A.,
+// Ltda.; English e.g., i.e., a.m., p.m., vs. Never mask a domain component.
+const ABBREVIATION =
+  /(^|[^\p{L}\p{N}_.-])(?:p\. ?ex\.|a\.c\.|d\.c\.|s\.a\.|ltda\.|e\.g\.|i\.e\.|a\.m\.|p\.m\.|vs\.)(?=$|[^\p{L}\p{N}_.-])/giu;
 const MAX_BYTES = 8192;
 const MAX_RAW_UNITS = 65536;
 
@@ -85,6 +106,47 @@ function issue(path, code, message) {
   return { path, code, message };
 }
 
+/** @param {string} text @returns {string} */
+function stripInvisibles(text) {
+  const parts = [];
+  let end = 0;
+  for (const match of text.matchAll(EMOJI_SEQUENCE)) {
+    parts.push(text.slice(end, match.index).replace(INVISIBLE, ''), match[0]);
+    end = match.index + match[0].length;
+  }
+  parts.push(text.slice(end).replace(INVISIBLE, ''));
+  return parts.join('');
+}
+
+/** @param {string} text @returns {'env:url' | 'env:url-like' | undefined} */
+function urlCode(text) {
+  const detection = text.replace(INVISIBLE, '').replace(/\p{M}/gu, '').replace(URL_DOTS, '.');
+  if (URL_PREFIX.test(detection) || IPV4.test(detection)) return 'env:url';
+  for (const match of detection.matchAll(SCHEME_CANDIDATE)) {
+    if (detection.startsWith('://', match.index + match[0].length)) return 'env:url';
+  }
+  const prose = detection.replace(ABBREVIATION, '$1 ');
+  const matches = [...prose.matchAll(DOMAIN)];
+  if (!matches.length) return undefined;
+  const match = matches[0];
+  const word = match[1];
+  const start = match.index + match[0].length - word.length;
+  // An isolated letter-only word.Word with an uppercase initial after the dot,
+  // or any non-ASCII letter, may be missing sentence spacing (grave.Agudo,
+  // Sr.João). Still refuse it, but suggest adding a space. Schemes, www, IPs,
+  // subdomains and multiple matches always retain the unambiguous env:url code.
+  if (
+    matches.length === 1 &&
+    /^[\p{L}]+\.[\p{L}]+$/u.test(word) &&
+    /\.\p{Lu}|\P{ASCII}/u.test(word) &&
+    prose[start - 1] !== '.' &&
+    prose[start + word.length] !== '.'
+  ) {
+    return 'env:url-like';
+  }
+  return 'env:url';
+}
+
 /**
  * NFKC, invisible-control removal, whitespace collapse and trim. Description keeps
  * LF line boundaries (at most five lines); all other C0/C1 controls are refused
@@ -96,10 +158,20 @@ function issue(path, code, message) {
  * @returns {string}
  */
 export function normalizeText(text, { multiline = false, path = '' } = {}) {
+  return normalizeFieldText(text, multiline, path, true);
+}
+
+/**
+ * Structured recipe filenames and SemVer bypass URL detection, not normalization
+ * or their structural patterns. The public prose normalizer has no such bypass.
+ * @param {string} text @param {boolean} multiline @param {string} path
+ * @param {boolean} checkUrls @returns {string}
+ */
+function normalizeFieldText(text, multiline, path, checkUrls) {
   if (typeof text !== 'string') {
     throw new EnvelopeError([issue(path, 'env:type', 'Expected text')]);
   }
-  const clean = text.normalize('NFKC').replace(INVISIBLE, '');
+  const clean = stripInvisibles(text.normalize('NFKC'));
   const hasControl = [...clean].some((character) => {
     const point = character.charCodeAt(0);
     return (point <= 0x1f || (point >= 0x7f && point <= 0x9f)) && !(multiline && point === 10);
@@ -116,8 +188,17 @@ export function normalizeText(text, { multiline = false, path = '' } = {}) {
   if (multiline && value.split('\n').length > 5) {
     errors.push(issue(path, 'env:length', 'Description must have at most five lines'));
   }
-  if (URL.test(value.replace(URL_DOTS, '.'))) {
-    errors.push(issue(path, 'env:url', 'URLs and domain-like text are forbidden'));
+  const code = checkUrls ? urlCode(value) : undefined;
+  if (code) {
+    errors.push(
+      issue(
+        path,
+        code,
+        code === 'env:url-like'
+          ? 'Domain-like text is forbidden; try adding a space after the period'
+          : 'URLs and domain-like text are forbidden',
+      ),
+    );
   }
   if (errors.length) throw new EnvelopeError(errors);
   return value;
@@ -137,7 +218,11 @@ function normalize(input, errors) {
   const text = (object, key, path) => {
     if (typeof object[key] !== 'string') return;
     try {
-      object[key] = normalizeText(object[key], { multiline: path === '/description', path });
+      const structured =
+        path === '/recipe/measurement/name' ||
+        path === '/recipe/target/name' ||
+        path === '/recipe/solver/version';
+      object[key] = normalizeFieldText(object[key], path === '/description', path, !structured);
     } catch (error) {
       if (!(error instanceof EnvelopeError)) throw error;
       errors.push(...error.errors);
@@ -384,8 +469,12 @@ export function validateEnvelope(obj) {
         const keys = key === 'measurement' ? [...required, 'sha256'] : required;
         if (!object(part, path, keys, required)) continue;
         for (const field of required) {
-          const max = field === 'version' ? 32 : field === 'name' && key !== 'solver' ? 96 : 64;
+          const max = field === 'version' ? 32 : field === 'name' && key !== 'solver' ? 120 : 64;
           string(part[field], `${path}/${field}`, 1, max);
+          if (field === 'version') pattern(part[field], `${path}/${field}`, SEMVER);
+          else if (field === 'name' && key !== 'solver') {
+            pattern(part[field], `${path}/${field}`, RECIPE_NAME);
+          }
         }
         if (key === 'measurement' && Object.hasOwn(part, 'sha256')) {
           pattern(part.sha256, `${path}/sha256`, SHA256);

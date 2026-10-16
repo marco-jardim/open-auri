@@ -218,7 +218,8 @@ for (const key of ['measurement', 'target', 'solver']) {
     structural(`${key} type/required/extra`, withRecipe({ [key]: part }), false);
   }
   for (const field of fields) {
-    for (const entry of [null, '', 'x'.repeat(97)]) {
+    const max = field === 'version' ? 32 : field === 'name' && key !== 'solver' ? 120 : 64;
+    for (const entry of [null, '', 'x'.repeat(max + 1)]) {
       structural(
         `${key}/${field} invalid`,
         withRecipe({ [key]: { ...recipe[key], [field]: entry } }),
@@ -228,18 +229,83 @@ for (const key of ['measurement', 'target', 'solver']) {
     const missing = { ...recipe[key] };
     delete missing[field];
     structural(`${key}/${field} required`, withRecipe({ [key]: missing }), false);
-    const max = field === 'version' ? 32 : field === 'name' && key !== 'solver' ? 96 : 64;
+    const maximum = field === 'version' ? `1.0.0-${'a'.repeat(26)}` : 'x'.repeat(max);
     structural(
       `${key}/${field} max`,
-      withRecipe({ [key]: { ...recipe[key], [field]: 'x'.repeat(max) } }),
+      withRecipe({ [key]: { ...recipe[key], [field]: maximum } }),
       true,
     );
     structural(
       `${key}/${field} over max`,
-      withRecipe({ [key]: { ...recipe[key], [field]: 'x'.repeat(max + 1) } }),
+      withRecipe({ [key]: { ...recipe[key], [field]: `${maximum}x` } }),
       false,
     );
   }
+}
+for (const key of ['measurement', 'target']) {
+  for (const name of [
+    'HD600.csv',
+    'Sennheiser HD 600 (oratory1990).csv',
+    "Medição_東京 １２.0 (+1), O'Brien & Sons-dataset.csv".normalize('NFKC'),
+    'evil.com', // File/dataset names deliberately use a charset, not prose URL detection.
+    'x'.repeat(120),
+  ]) {
+    structural(`${key} filename ${name}`, withRecipe({ [key]: { ...recipe[key], name } }), true);
+  }
+  for (const name of [
+    'https://host',
+    'custom://host',
+    'www.dataset',
+    'WWW.dataset',
+    'user@host',
+    'folder/name.csv',
+    'folder\\name.csv',
+    'bad:name.csv',
+    'bad;name.csv',
+    'bad[name].csv',
+    'emoji🎧.csv',
+    'x'.repeat(121),
+  ]) {
+    structural(
+      `${key} forbidden filename ${name}`,
+      withRecipe({ [key]: { ...recipe[key], name } }),
+      false,
+    );
+  }
+}
+for (const version of [
+  '0.0.0',
+  '1.0.0-alpha.beta',
+  '1.0.0-0.3.7',
+  '1.0.0-x.7.z.92',
+  '1.0.0-1a.01a.-',
+  '1.0.0+001.build.01',
+  '1.0.0-beta+exp.sha.5114f85',
+]) {
+  structural(`SemVer ${version}`, withRecipe({ solver: { ...recipe.solver, version } }), true);
+}
+for (const version of [
+  '1',
+  '1.0',
+  'v1.0.0',
+  '01.0.0',
+  '1.01.0',
+  '1.0.01',
+  '1.0.0-01',
+  '1.0.0-alpha.01',
+  '1.0.0-',
+  '1.0.0-alpha..beta',
+  '1.0.0-alpha_beta',
+  '1.0.0+',
+  '1.0.0+build..1',
+  '1.0.0+build_1',
+  'https://host',
+]) {
+  structural(
+    `invalid SemVer ${version}`,
+    withRecipe({ solver: { ...recipe.solver, version } }),
+    false,
+  );
 }
 for (const sha256 of [null, 'a'.repeat(63), 'g'.repeat(64), `${'a'.repeat(64)}\n`]) {
   structural(
@@ -370,6 +436,7 @@ test('text strips every listed invisible and applies NFKC before URL checking', 
     0x2068,
     0x2069,
     0xfe0f,
+    0xfe0e,
     0xfeff,
     0xe0001,
     ...Array.from({ length: 4 }, (_, i) => 0x2061 + i),
@@ -393,6 +460,35 @@ test('text strips every listed invisible and applies NFKC before URL checking', 
   assert.throws(() => normalizeText('ｅｘａｍｐｌｅ．ｃｏｍ'), EnvelopeError);
   assert.throws(() => normalizeText('exa\u200dmple.com'), EnvelopeError);
   assert.throws(() => normalizeText(1), EnvelopeError);
+});
+
+test('emoji selectors, ZWJ families, keycaps and terminated tag flags survive byte-exact', () => {
+  const england = '\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}';
+  for (const emoji of ['❤️', '❤\ufe0e', '👨‍👩‍👧', '👩🏽‍💻', '👩‍❤️‍👩', '1️⃣', '#️⃣', '*\ufe0e\u20e3', england]) {
+    assert.deepEqual(Buffer.from(normalizeText(emoji)), Buffer.from(emoji));
+    const input = withField('name', emoji);
+    const result = validateEnvelope(input);
+    assert.equal(result.ok, true, emoji);
+    assert.equal(result.value.name, emoji);
+    assert.deepEqual(parseEnvelope(serializeEnvelope(input)), result);
+    assert.equal(normalizeText(normalizeText(emoji)), emoji);
+  }
+  for (const stray of [
+    'ex\u200dample',
+    'ex\ufe0fample',
+    'ex\ufe0eample',
+    'ex\u{e0067}\u{e007f}ample',
+  ]) {
+    assert.equal(normalizeText(stray), 'example');
+    expectIssue(withField('name', `${stray}.com`), 'env:url', '/name');
+  }
+  assert.equal(normalizeText('🏴\u{e0067}\u{e0062}'), '🏴'); // Unterminated tags.
+  assert.equal(normalizeText('❤\u{e0067}\u{e007f}'), '❤'); // Not a tag-flag base.
+  assert.equal(normalizeText('a\u200d👩'), 'a👩');
+  assert.equal(normalizeText('👩\u200da'), '👩a');
+  assert.equal(normalizeText('❤\ufe0f\ufe0f'), '❤️');
+  // Valid emoji selectors must not create a detection-only boundary in a domain.
+  expectIssue(withField('name', '1\ufe0f.com'), 'env:url', '/name');
 });
 
 test('limits count normalized code points, including combining marks and NFKC expansion', () => {
@@ -443,7 +539,7 @@ test('schemes, obfuscated dots and general domains are refused across all free-t
     'me',
     'co',
     'tv',
-  ].map((tld) => `EXAMPLE.${tld.toUpperCase()}`);
+  ].map((tld) => `example.${tld}`);
   const dotted = ['。', '．', '｡', '․', '﹒'].flatMap((dot) => [
     `evil${dot}com`,
     `www${dot}evil${dot}com`,
@@ -461,11 +557,21 @@ test('schemes, obfuscated dots and general domains are refused across all free-t
     'evil.tv',
     'loja.shop',
     'x.co',
-    'ação.música',
-    '例子.中国',
     '(abc-123.online)',
     '123.ab',
     `x.${'a'.repeat(24)}`,
+    '_evil.com',
+    'x_evil.com',
+    'evil.com_',
+    'evil.com-',
+    'evil.c\u0332om',
+    'example.xn--p1ai',
+    '1.1.1.1',
+    '1.1.1.1:80',
+    'www.p.ex.',
+    'p.ex.com',
+    'p.ex.-com',
+    '1.http://host',
     ...domains,
     ...dotted,
   ]) {
@@ -473,7 +579,7 @@ test('schemes, obfuscated dots and general domains are refused across all free-t
       expectIssue(withField(key, text), 'env:url', `/${key}`);
     }
     for (const key of ['measurement', 'target', 'solver']) {
-      const fields = key === 'solver' ? ['name', 'version'] : ['source', 'name'];
+      const fields = key === 'solver' ? ['name'] : ['source'];
       for (const field of fields) {
         expectIssue(
           withRecipe({ [key]: { ...recipe[key], [field]: text } }),
@@ -486,14 +592,60 @@ test('schemes, obfuscated dots and general domains are refused across all free-t
   }
 });
 
+test('ambiguous missing sentence spaces are refused with helpful env:url-like, never allowed', () => {
+  for (const text of ['grave.Agudo', 'Sr.João', 'ação.música', '例子.中国', 'EXAMPLE.COM']) {
+    for (const key of ['name', 'description', 'author']) {
+      const errors = expectIssue(withField(key, text), 'env:url-like', `/${key}`);
+      assert.ok(errors.some((error) => error.message.includes('space after the period')));
+      assert.ok(errors.every((error) => error.code !== 'env:url'));
+    }
+    expectIssue(
+      withRecipe({ solver: { ...recipe.solver, name: text } }),
+      'env:url-like',
+      '/recipe/solver/name',
+    );
+    expectIssue(withRecipe({ params: { note: text } }), 'env:url-like', '/recipe/params/note');
+  }
+  for (const text of [
+    'https://grave.Agudo',
+    'www.Sr.João',
+    'hxxp Sr.João',
+    'foo.Sr.João',
+    'x.c.Sr.João',
+    'Sr.João.com',
+    'grave.Agudo other.Word',
+    '_bad-name.Com',
+    '123.Com',
+  ]) {
+    expectIssue(withField('description', text), 'env:url', '/description');
+  }
+  // A caller-provided issue path cannot exempt public prose normalization.
+  assert.throws(() => normalizeText('example.com', { path: '/recipe/target/name' }), EnvelopeError);
+});
+
 test('decimals, abbreviations and punctuation without domain labels remain allowed', () => {
   for (const text of [
     '1.5 dB',
     'v2.0',
     'A warm mix, version 1.2; no advertising',
     'Sr. Silva',
+    'Dra.',
+    'etc.',
+    '1,5',
+    'Hz.',
+    'dB.',
+    'versão 2.1.3',
+    'evil . com',
+    'evil·com',
     'e.g. graves',
     'i.e. médios',
+    ...['p.ex.', 'p. ex.', 'a.C.', 'd.C.', 'S.A.', 'Ltda.', 'e.g.', 'i.e.', 'a.m.', 'p.m.', 'vs.']
+      .flatMap((abbreviation) => [
+        abbreviation,
+        abbreviation.toUpperCase(),
+        abbreviation.toLowerCase(),
+      ])
+      .flatMap((abbreviation) => [abbreviation, `${abbreviation} graves`]),
     'x.c',
     `x.${'a'.repeat(25)}`,
     'a。 b｡ c． d․ e﹒',
@@ -501,6 +653,28 @@ test('decimals, abbreviations and punctuation without domain labels remain allow
     assert.equal(validateEnvelope(withField('description', text)).ok, true, text);
   }
   assert.equal(normalizeText('a。 b｡'), 'a。 b。'); // NFKC applies; URL-only mapping does not.
+  assert.equal(
+    normalizeText('p.ex. graves, S.A. e e.g. médios'),
+    'p.ex. graves, S.A. e e.g. médios',
+  );
+});
+
+test('64 KiB adversarial dotted tokens, marks and emoji tags normalize in under 200 ms', () => {
+  // Warm the normalization paths before measuring; these used to make a scheme
+  // regex retry its unbounded tail at every dotted word boundary.
+  normalizeText('a.b a\u0332 🏴\u{e0067}');
+  for (const input of [
+    `${'a.'.repeat(32767)}a!`,
+    `${'-'.repeat(65535)}!`,
+    `${'a'.repeat(32768)}${'\u0332'.repeat(32768)}`,
+    `🏴${'\u{e0067}'.repeat(32767)}`,
+  ]) {
+    assert.equal(input.length, 65536);
+    const start = performance.now();
+    assert.equal(normalizeText(input).length > 0, true);
+    const elapsed = performance.now() - start;
+    assert.ok(elapsed < 200, `${elapsed.toFixed(1)} ms for 64 KiB adversarial input`);
+  }
 });
 
 test('normalization is nonmutating and clones every supported object level', () => {
@@ -510,7 +684,7 @@ test('normalization is nonmutating and clones every supported object level', () 
   input.author = '  Ａｕｔｏｒ ';
   input.recipe.measurement.source = ' local  source ';
   input.recipe.target.name = ' Flat  target ';
-  input.recipe.solver.version = ' １．０ ';
+  input.recipe.solver.version = ' １．０．０-alpha.beta ';
   input.recipe.params.note = ' nice  curve ';
   const before = structuredClone(input);
   const output = normalizeEnvelope(input);
@@ -520,7 +694,7 @@ test('normalization is nonmutating and clones every supported object level', () 
   assert.equal(output.author, 'Autor');
   assert.equal(output.recipe.measurement.source, 'local source');
   assert.equal(output.recipe.target.name, 'Flat target');
-  assert.equal(output.recipe.solver.version, '1.0');
+  assert.equal(output.recipe.solver.version, '1.0.0-alpha.beta');
   assert.equal(output.recipe.params.note, 'nice curve');
   for (const key of ['measurement', 'target', 'solver', 'params']) {
     assert.notEqual(output.recipe[key], input.recipe[key]);
