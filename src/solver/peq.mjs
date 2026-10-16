@@ -57,11 +57,18 @@
  * gate refuses it (a, b, c on the quantized section), pulled back with
  * `boundarySearch` along the step; when the fit peaks above 18 dB the whole curve
  * is projected with `gate(..., {grid: 'drag'})` at the lowest preamp, again with
- * `boundarySearch` along the step. Stopping: `maxTimeMs`, `maxIterations`,
+ * `boundarySearch` along the step. Stopping: `maxIterations` (the primary,
+ * deterministic work bound; default 400 LM trials), `maxTimeMs`,
  * `targetLoss`, or the AutoEq rule (std of the last 8 accepted losses < `minStd`).
  * After convergence small sections are pruned and free sections are re-seeded
  * from the residual (at most 3 rounds). No randomness is used: the result is
- * deterministic unless `stopReason === 'time'`; `seed` is validated and reserved.
+ * deterministic when `stopReason !== 'time'` (except `elapsedMs`); a time-limited
+ * result depends on CPU load. `seed` is validated and reserved. All searches,
+ * re-seeding and finalization loops also have finite bounds independent of time.
+ * The injectable `clock` defaults to performance.now(), or Date.now() if absent.
+ * In Cloudflare Workers, time does not advance during synchronous execution:
+ * servers must rely on `maxIterations`, not `maxTimeMs`, and should not run this
+ * solver per request.
  *
  * Output (`finalizeBands`): bands rounded to the UI grid (`roundToGrid`, then
  * `snapToGridAccepted` against the section predicate), ordered cuts first then
@@ -99,6 +106,7 @@ import {
  * @typedef {'iso226' | 'flat'} WeightMode
  * @typedef {'abs' | 'soft'} RangeMode
  * @typedef {'flat' | 'converged' | 'targetLoss' | 'time' | 'iterations'} StopReason
+ * @typedef {{now: () => number}} Clock
  * @typedef {{fMin: number, fMax: number, qMin: number, qMax: number, gMin: number,
  *   gMax: number}} Box
  */
@@ -121,8 +129,12 @@ import {
  *   (0 = AutoEq's treble averaging, 1 = plain error; default 0.5)
  * @property {number} [speed] correction speed 0–100 (default 50)
  * @property {boolean} [levelMatch] remove the weighted mean error (default true)
- * @property {number} [maxTimeMs] optimization time budget (default 1200)
- * @property {number} [maxIterations] LM trial budget (default 400)
+ * @property {number} [maxTimeMs] best-effort optimization time budget (default 1200),
+ *   only effective when `clock` advances during synchronous execution
+ * @property {Clock} [clock] nondecreasing finite milliseconds from now(); defaults to
+ *   performance.now() when available, otherwise Date.now()
+ * @property {number} [maxIterations] primary LM trial bound, a positive safe integer
+ *   shared across re-seeding rounds (default 400)
  * @property {number} [minStd] std of the last 8 accepted losses to stop (default 0.002)
  * @property {number} [targetLoss] stop when the loss is at or below this value
  * @property {number} [seed] integer, reserved (the solver uses no randomness)
@@ -135,7 +147,7 @@ import {
  * @property {number} rmsDb level-matched unweighted RMS of fit - correction, 20 Hz–20 kHz
  * @property {number} loss sqrt of the objective at the returned bands
  * @property {number} iterations LM trials
- * @property {number} elapsedMs wall time of the whole solve
+ * @property {number} elapsedMs whole-solve duration measured by `clock`
  * @property {StopReason} stopReason
  * @property {{ok: true, reasons: Reason[]}} gate `gateForWrite` verdict of the result
  */
@@ -169,9 +181,13 @@ const REFILL_ROUNDS = 3;
 const LINE_ITERATIONS = 10;
 const CASCADE_ITERATIONS = 8;
 const SHRINK_ITERATIONS = 12;
+const FINALIZE_ITERATIONS = 24;
+const SNAP_STEPS = 100;
 const BOX_TOLERANCE = 1e-9;
 
-const now = () => globalThis.performance.now();
+const DEFAULT_CLOCK = Object.freeze({
+  now: () => globalThis.performance?.now?.() ?? Date.now(),
+});
 
 /**
  * @param {number} value
@@ -780,7 +796,7 @@ function initialize(ctx) {
   }
   /** @type {number[]} */
   const used = [];
-  while (bands.length < ctx.maxBands) {
+  for (let slot = bands.length; slot < ctx.maxBands; slot++) {
     const band = seedPeaking(ctx, remaining, used);
     if (!band || !take(band)) break;
   }
@@ -791,6 +807,7 @@ function initialize(ctx) {
 
 /**
  * @typedef {object} Budget
+ * @property {Clock} clock
  * @property {number} deadline
  * @property {number} maxIterations
  * @property {number} iterations
@@ -805,8 +822,7 @@ function initialize(ctx) {
  */
 function budgetStop(budget, f) {
   if (budget.targetLoss !== undefined && Math.sqrt(f) <= budget.targetLoss) return 'targetLoss';
-  if (budget.iterations >= budget.maxIterations) return 'iterations';
-  if (now() >= budget.deadline) return 'time';
+  if (budget.clock.now() >= budget.deadline) return 'time';
   return null;
 }
 
@@ -960,7 +976,10 @@ function optimize(ctx, state, budget) {
   const P = 3 * state.bands.length;
   let mu = 1e-2;
   const history = [Math.sqrt(state.f)];
-  for (;;) {
+  // Each outer step consumes at least one trial from the shared finite budget.
+  while (budget.iterations < budget.maxIterations) {
+    const stop = budgetStop(budget, state.f);
+    if (stop) return { state, stopReason: stop };
     const columns = jacobian(ctx, state);
     const A = new Float64Array(P * P);
     const grad = new Float64Array(P);
@@ -987,7 +1006,7 @@ function optimize(ctx, state, budget) {
     });
     /** @type {State | null} */
     let accepted = null;
-    while (accepted === null) {
+    while (accepted === null && budget.iterations < budget.maxIterations) {
       const stop = budgetStop(budget, state.f);
       if (stop) return { state, stopReason: stop };
       budget.iterations++;
@@ -1007,6 +1026,7 @@ function optimize(ctx, state, budget) {
         if (mu > 1e8) return { state, stopReason: 'converged' };
       }
     }
+    if (accepted === null) break;
     state = accepted;
     history.push(Math.sqrt(state.f));
     if (history.length >= STD_WINDOW) {
@@ -1016,6 +1036,7 @@ function optimize(ctx, state, budget) {
       if (std < budget.minStd) return { state, stopReason: 'converged' };
     }
   }
+  return { state, stopReason: 'iterations' };
 }
 
 // --- Finalization -----------------------------------------------------------------
@@ -1034,8 +1055,11 @@ function snapBand(band, soft, feasible) {
   const anchor = anchorOf(band, soft);
   const near = feasible(band)
     ? band
-    : boundarySearch(anchor, band, feasible, { interpolate: lerpBand });
-  const snapped = snapToGridAccepted(near, anchor, feasible);
+    : boundarySearch(anchor, band, feasible, {
+        iterations: FINALIZE_ITERATIONS,
+        interpolate: lerpBand,
+      });
+  const snapped = snapToGridAccepted(near, anchor, feasible, { maxSteps: SNAP_STEPS });
   return snapped.gainDb !== 0 ? snapped : null;
 }
 
@@ -1141,11 +1165,16 @@ function checkNumber(value, min, max, name) {
  * given, `target` is the target curve and the correction is target - measurement
  * (both on `grid`, e.g. from io/measurement `toGrid` + `normalize`). The result
  * always passes `gateForWrite(bands, preampDb)`.
+ * Results (excluding `elapsedMs`) are deterministic when `stopReason !== 'time'`;
+ * stopping on time depends on CPU load. `maxIterations` is the primary work bound,
+ * shared across all LM/re-seeding rounds; other searches have fixed finite caps.
+ * `clock` controls both the best-effort `maxTimeMs` budget and `elapsedMs`.
+ * In Cloudflare Workers, time does not advance during synchronous code: servers
+ * must rely on `maxIterations` and should not run this solver per request.
  * @param {SolveOptions} options
  * @returns {SolveResult}
  */
 export function solvePeq(options) {
-  const started = now();
   const {
     target,
     grid = GRID,
@@ -1162,11 +1191,16 @@ export function solvePeq(options) {
     speed = SOLVER_DEFAULTS.speed,
     levelMatch = true,
     maxTimeMs = SOLVER_DEFAULTS.maxTimeMs,
+    clock = DEFAULT_CLOCK,
     maxIterations = SOLVER_DEFAULTS.maxIterations,
     minStd = SOLVER_DEFAULTS.minStd,
     targetLoss,
     seed = 1,
   } = options;
+  if (clock === null || typeof clock.now !== 'function') {
+    throw new TypeError('clock must provide now()');
+  }
+  const started = clock.now();
   checkGrid(grid);
   checkCurve(target, grid.length, 'target');
   if (measurement !== undefined) checkCurve(measurement, grid.length, 'measurement');
@@ -1182,7 +1216,10 @@ export function solvePeq(options) {
   checkNumber(trebleDetail, 0, 1, 'trebleDetail');
   checkNumber(speed, 0, 100, 'speed');
   checkNumber(maxTimeMs, Number.MIN_VALUE, Infinity, 'maxTimeMs');
-  checkNumber(maxIterations, 1, Infinity, 'maxIterations');
+  checkNumber(maxIterations, 1, Number.MAX_SAFE_INTEGER, 'maxIterations');
+  if (!Number.isSafeInteger(maxIterations)) {
+    throw new RangeError('maxIterations must be a positive safe integer');
+  }
   checkNumber(minStd, 0, Infinity, 'minStd');
   if (targetLoss !== undefined) checkNumber(targetLoss, 0, Infinity, 'targetLoss');
   if (!Number.isInteger(seed)) throw new RangeError('seed must be an integer');
@@ -1230,6 +1267,7 @@ export function solvePeq(options) {
   };
   /** @type {Budget} */
   const budget = {
+    clock,
     deadline: started + maxTimeMs,
     maxIterations,
     iterations: 0,
@@ -1266,7 +1304,7 @@ export function solvePeq(options) {
     rmsDb,
     loss: Math.sqrt(evaluateState(ctx, active).f),
     iterations: budget.iterations,
-    elapsedMs: now() - started,
+    elapsedMs: clock.now() - started,
     stopReason,
     gate: final.gate,
   };

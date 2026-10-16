@@ -127,6 +127,55 @@ test('deterministic: same input gives the same output', () => {
   assert.deepEqual(withoutTime(a), withoutTime(b));
 });
 
+test('a frozen clock gives identical gate-valid output within the iteration bound', () => {
+  const target = levelMatched(response(presets[3][1].eqBands));
+  const clock = { now: () => 0 };
+  for (const maxIterations of [1, 3, SOLVER_DEFAULTS.maxIterations]) {
+    const options = { target, clock, maxIterations, maxTimeMs: Number.MIN_VALUE, minStd: 0 };
+    const a = solvePeq(options);
+    const b = solvePeq(options);
+    assertValid(a);
+    assert.ok(a.iterations > 0 && a.iterations <= maxIterations);
+    assert.notEqual(a.stopReason, 'time');
+    if (maxIterations <= 3) {
+      assert.equal(a.stopReason, 'iterations');
+      assert.equal(a.iterations, maxIterations);
+    }
+    assert.equal(a.elapsedMs, 0);
+    assert.deepEqual(a, b);
+  }
+});
+
+test('a frozen clock also bounds cascade projection and finalization', () => {
+  const result = solvePeq({
+    target: bell(1000, 40, 1.5),
+    clock: { now: () => 0 },
+    maxTimeMs: Number.MIN_VALUE,
+    maxIterations: 3,
+    speed: 100,
+  });
+  assertValid(result);
+  assert.equal(result.stopReason, 'iterations');
+  assert.equal(result.iterations, 3);
+  assert.equal(result.elapsedMs, 0);
+});
+
+test('the default clock falls back to Date.now without performance.now', (t) => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'performance');
+  const dateNow = t.mock.method(Date, 'now', () => 1234);
+  try {
+    for (const performance of [undefined, {}]) {
+      Object.defineProperty(globalThis, 'performance', { configurable: true, value: performance });
+      const result = solvePeq({ target: GRID.map(() => 0) });
+      assertValid(result);
+      assert.equal(result.elapsedMs, 0);
+    }
+    assert.equal(dateNow.mock.callCount(), 4);
+  } finally {
+    Object.defineProperty(globalThis, 'performance', descriptor);
+  }
+});
+
 test('measurement: the correction is target - measurement', () => {
   const measurement = response([{ kind: 'PK', freqHz: 2500, gainDb: 5, qFactor: 2 }]);
   const curve = GRID.map(() => 1);
@@ -259,9 +308,36 @@ test('stopping rules: targetLoss, maxIterations, maxTimeMs', () => {
   assert.equal(capped.stopReason, 'iterations');
   assert.equal(capped.iterations, 3);
   assertValid(capped);
-  const timed = solvePeq({ target, maxTimeMs: 1 });
+  const clock = {
+    calls: 0,
+    now() {
+      return this.calls++ === 0 ? 100 : 125;
+    },
+  };
+  const timed = solvePeq({ target, maxTimeMs: 25, clock });
   assert.equal(timed.stopReason, 'time');
+  assert.equal(timed.iterations, 0);
+  assert.equal(timed.elapsedMs, 25);
   assertValid(timed);
+});
+
+test('an advancing injected clock can stop after some LM trials', () => {
+  const clock = {
+    time: 100,
+    now() {
+      return this.time++;
+    },
+  };
+  const result = solvePeq({
+    target: levelMatched(response(presets[3][1].eqBands)),
+    clock,
+    maxTimeMs: 4,
+    maxIterations: 10,
+  });
+  assertValid(result);
+  assert.equal(result.stopReason, 'time');
+  assert.ok(result.iterations > 0 && result.iterations < 10);
+  assert.ok(result.elapsedMs >= 4);
 });
 
 test('maxBands limits the number of sections', () => {
@@ -307,12 +383,19 @@ test('invalid options are rejected', () => {
     { target, speed: 101 },
     { target, maxTimeMs: 0 },
     { target, maxIterations: 0 },
+    { target, maxIterations: Infinity },
+    { target, maxIterations: NaN },
+    { target, maxIterations: 1.5 },
+    { target, maxIterations: Number.MAX_SAFE_INTEGER + 1 },
     { target, minStd: -1 },
     { target, targetLoss: -1 },
     { target, seed: 0.5 },
     { target: [0, 0], grid: [1, 2] },
   ];
   for (const options of bad) assert.throws(() => solvePeq(options), RangeError);
+  for (const clock of [null, {}, { now: 0 }]) {
+    assert.throws(() => solvePeq({ target, clock }), /clock must provide now\(\)/);
+  }
 });
 
 // --- Finalization ------------------------------------------------------------------
@@ -396,6 +479,7 @@ test('sharpness coefficient and opposition score', () => {
   ]);
   assert.ok(Math.abs(half - 0.25 * 12) < 1e-12);
   assert.equal(SOLVER_DEFAULTS.maxTimeMs, 1200);
+  assert.equal(SOLVER_DEFAULTS.maxIterations, 400);
   assert.deepEqual(parameterBox('LS', true, 0.6, 2), {
     fMin: SOFT_RANGES.LS.freqHz.min,
     fMax: SOFT_RANGES.LS.freqHz.max,
