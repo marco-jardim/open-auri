@@ -1,0 +1,234 @@
+<script lang="ts">
+	import { m } from '#lib/paraglide/messages.js';
+	import {
+		VuMeter,
+		PpmBar,
+		CorrelationMeter,
+		LoudnessReadout
+	} from '#lib/components/meters/index.ts';
+	import type { MeterUpdate } from '#lib/audio/meters.ts';
+	import type { CurveData } from '#lib/state/model.ts';
+	import DataDial from './DataDial.svelte';
+	import { dataReadings, number, type Locale, type GateResult } from './archive.ts';
+
+	let {
+		curve,
+		current,
+		verdict,
+		update,
+		locale
+	}: {
+		curve: CurveData;
+		current: CurveData;
+		verdict: GateResult | null;
+		update: MeterUpdate;
+		locale: Locale;
+	} = $props();
+	const data = $derived(dataReadings(curve, current, verdict));
+	const live = $derived(update.mode === 'live' && update.frame !== null);
+	const frame = $derived(live ? update.frame : null);
+</script>
+
+<section class="console" aria-label={m.biblioteca_console()} data-mode={live ? 'live' : 'data'}>
+	<div class="console-top">
+		<span class="plate">ARCHIVE MONITOR / 01</span>
+		<span class="mode"
+			><span class:active={live} class="lamp" aria-hidden="true"></span>{live
+				? m.biblioteca_live()
+				: m.biblioteca_data()}</span
+		>
+		<span class="enamel">{m.biblioteca_enamel()}</span>
+	</div>
+	{#if live}
+		<div class="live-meters">
+			<div class="vu-shell"><VuMeter mode="live" live={frame?.vuL} label="VU L" /></div>
+			<div class="vu-shell"><VuMeter mode="live" live={frame?.vuR} label="VU R" /></div>
+			<div class="correlation">
+				<CorrelationMeter
+					mode="live"
+					live={frame?.correlation}
+					label={m.biblioteca_correlation()}
+				/>
+			</div>
+			<div class="digital">
+				<PpmBar
+					mode="live"
+					live={frame ? Math.max(frame.ppmL, frame.ppmR) : null}
+					label="PPM I · L/R max"
+				/>
+			</div>
+			<div class="digital">
+				<LoudnessReadout mode="live" live={frame} label="LUFS-M / LUFS-S" />
+			</div>
+		</div>
+	{:else}
+		<div class="data-meters">
+			<DataDial label={m.biblioteca_level()} value={data.levelDb} min={-30} max={3} {locale} />
+			<DataDial label={m.biblioteca_preamp()} value={data.preampDb} min={-30} max={3} {locale} />
+			<DataDial label={m.biblioteca_similarity()} value={data.rmsDb} min={0} max={12} {locale} />
+			<DataDial label={m.biblioteca_peak()} value={data.peakDb} min={-30} max={3} {locale} />
+			<DataDial label={m.biblioteca_jump()} value={data.jumpDb} min={-12} max={12} {locale} />
+		</div>
+	{/if}
+	<div class="meter-note">
+		<span>{curve.name}</span>
+		<span>{live ? m.biblioteca_live_note() : m.biblioteca_data_note()}</span>
+		{#if !live}<span
+				>S4 · RMS {number(data.rmsDb, locale)} dB · MAX {number(data.maxDb, locale)} dB / {number(
+					data.maxFreqHz,
+					locale,
+					0
+				)} Hz</span
+			>{/if}
+	</div>
+	{#if data.jumpDb >= 3}<p class="warning">{m.biblioteca_jump_warning()}</p>{/if}
+	<div class="quadrants" aria-hidden="true">
+		{#each Array.from({ length: 14 }).keys() as i (i)}<span class:central={i >= 5 && i <= 8}
+			></span>{/each}
+	</div>
+	<div class="calibration">20 Hz–20 kHz / Q27 + Q23 / 96 kHz</div>
+</section>
+
+<style>
+	.console {
+		max-width: 1500px;
+		margin: auto;
+		padding: 23px 24px 15px;
+		border: 1px solid #252a21;
+		border-inline: 19px solid #492d1d;
+		border-radius: 10px 10px 3px 3px;
+		background:
+			radial-gradient(ellipse at 15% 0, #b4b6a038, transparent 65%),
+			repeating-linear-gradient(0deg, #ffffff03 0 1px, #00000003 1px 3px),
+			linear-gradient(135deg, #6d7665, #505a4b);
+		box-shadow:
+			inset 2px 2px 3px #bec4a333,
+			inset -2px -3px 3px #0008,
+			0 15px 25px #0008;
+	}
+	.console-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 12px;
+		margin-bottom: 17px;
+		color: #f1eedc;
+		font:
+			10px 'JetBrains Mono',
+			monospace;
+	}
+	.plate {
+		padding: 5px 10px;
+		background: #343e31;
+		border: 1px solid #272e24;
+		letter-spacing: 0.1em;
+	}
+	.mode {
+		font-weight: 700;
+		letter-spacing: 0.1em;
+	}
+	.lamp {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		margin-right: 8px;
+		border-radius: 50%;
+		background: #d9a441;
+	}
+	.lamp.active {
+		background: #c6eeab;
+	}
+	.data-meters,
+	.live-meters {
+		display: grid;
+		grid-template-columns: 1fr 1fr 0.88fr 1fr 1fr;
+		gap: 15px;
+		align-items: center;
+	}
+	.vu-shell {
+		background: radial-gradient(ellipse at 25% 5%, #fff6ca, #e1cfa0 70%, #bdab7e);
+		border: 8px solid #242720;
+		border-radius: 14px;
+		--oa-meter-ink: #302c23;
+	}
+	.vu-shell :global(.oa-vu) {
+		display: flex;
+		width: 100%;
+	}
+	.correlation,
+	.digital {
+		padding: 12px;
+		background: #252e22;
+		color: #eee8cf;
+		border-radius: 4px;
+		overflow-wrap: anywhere;
+	}
+	.digital :global(.oa-ppm),
+	.digital :global(.oa-loudness-list) {
+		display: flex;
+		flex-wrap: wrap;
+	}
+	.meter-note {
+		display: flex;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 8px 20px;
+		margin-top: 18px;
+		font:
+			10px/1.7 'JetBrains Mono',
+			monospace;
+		color: #f0eedc;
+	}
+	.warning {
+		color: #ffe0a0;
+		font-size: 12px;
+	}
+	.quadrants {
+		display: flex;
+		height: 43px;
+		justify-content: space-evenly;
+		align-items: center;
+		border-top: 1px solid #c8d5a633;
+		margin-top: 12px;
+	}
+	.quadrants span {
+		width: 12px;
+		height: 18px;
+		background: linear-gradient(#4a5142, #292f23);
+		border: 2px solid #262d20;
+		box-shadow: 0 2px 2px #0006;
+	}
+	.quadrants .central {
+		background: #9a8a5a;
+	}
+	.calibration {
+		text-align: center;
+		color: #e5e4cb;
+		font:
+			8px 'JetBrains Mono',
+			monospace;
+		letter-spacing: 0.12em;
+	}
+	@media (max-width: 780px) {
+		.console {
+			padding: 14px 10px;
+			border-inline-width: 11px;
+		}
+		.data-meters,
+		.live-meters {
+			grid-template-columns: 1fr 1fr;
+		}
+		.data-meters :global(.dial:nth-child(3)),
+		.correlation {
+			grid-column: 1 / -1;
+			grid-row: 2;
+			max-width: 200px;
+			width: 100%;
+			justify-self: center;
+		}
+		.enamel {
+			font-size: 8px;
+		}
+	}
+</style>
