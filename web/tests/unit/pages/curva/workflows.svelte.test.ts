@@ -43,7 +43,7 @@ function gateClient(): GateClient {
 
 async function setup(
 	layer: Layer = 'ajustar',
-	curve: Curve = neutral,
+	curve: Curve | null = neutral,
 	hash = '',
 	gate = gateClient(),
 	/** null renders without the prop, to exercise the native default. */
@@ -52,7 +52,7 @@ async function setup(
 	const app = createClientApp(fakeAppOptions().options);
 	apps.push(app);
 	await app.state.ready;
-	app.state.curve.set({ ...curve, name: 'Editor', source: 'custom' });
+	if (curve) app.state.curve.set({ ...curve, name: 'Editor', source: 'custom' });
 	const onlayer = vi.fn();
 	const screen = await render(CurvaPage, {
 		app,
@@ -111,6 +111,33 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
+test('fresh-profile chrome stays clear despite unknown cable contents, then follows unsaved edits', async () => {
+	const { app, screen } = await setup('ouvir', null);
+	expect(app.state.curve.dirty).toBe(true);
+	expect(app.state.curve.unsaved).toBe(false);
+	expect(screen.container.querySelector('.np-dirty')).toBeNull();
+	expect(screen.container.querySelector('.ps-res .dirty')?.textContent).toContain(m.curva_saved());
+	expect(screen.container.textContent).not.toContain(m.curva_unsaved());
+
+	expect(app.state.curve.update({ preampDb: -1 })).toBe(true);
+	await tick();
+	expect(app.state.curve.unsaved).toBe(true);
+	expect(screen.container.querySelector('.np-dirty')?.textContent).toBe(m.curva_unsaved());
+	expect(screen.container.querySelector('.ps-res .dirty.on')?.textContent).toContain(
+		m.curva_unsaved()
+	);
+
+	// Model a successful real write; neither indicator should remain on.
+	expect(app.state.curve.markWritten()).toBe(true);
+	await tick();
+	expect(app.state.curve.dirty).toBe(false);
+	expect(app.state.curve.unsaved).toBe(false);
+	expect(screen.container.querySelector('.np-dirty')).toBeNull();
+	expect(screen.container.querySelector('.ps-res .dirty.on')).toBeNull();
+	expect(screen.container.querySelector('.ps-res .dirty')?.textContent).toContain(m.curva_saved());
+	expect(app.pendingWrite).toBeNull();
+});
+
 test('presets, undo/redo, neutral/default and rescue change only the editor or checklist', async () => {
 	const { app } = await setup('ouvir');
 	const preset = OFFICIAL_PRESETS.find((item) => item.id !== PADRAO_AURI.id);
@@ -165,29 +192,68 @@ test('valid file import is undoable and bad JSON/TXT and oversized files preserv
 	});
 });
 
-test('link imports wait for the client, load once and never navigate', async () => {
+test('each new link loads once while Curva stays mounted, without navigating or writing', async () => {
 	const linked: Curve = { bands: pad([cut]), preampDb: -1 };
 	const hash = linkHash(linked, 'ajustar');
 	if (!hash.ok) throw new Error('Invalid linked fixture');
 	const { app, screen, clearLinkHash } = await setup('ajustar', neutral, hash.value);
+	const notify = vi.spyOn(app.toasts, 'push');
 	await vi.waitFor(() => expect(app.state.curve.current.source).toBe('import'));
 	expect(app.state.curve.current.bands).toEqual(linked.bands);
 	expect(app.state.curve.current.name).toBe(m.curva_name_link());
 	// The consumed link leaves the address bar, so a reload does not apply it again.
 	expect(clearLinkHash).toHaveBeenCalledOnce();
-	await screen.rerender({ hash: '#p=broken' });
+	notify.mockClear();
+	await screen.rerender({ hash: '' });
+	await screen.rerender({ hash: hash.value, layer: 'engenharia' });
 	await tick();
-	expect(app.state.curve.current.bands).toEqual(linked.bands);
-	expect(screen.container.textContent).toContain(m.curva_link_loaded());
-	expect(app.pendingWrite).toBeNull();
 	expect(clearLinkHash).toHaveBeenCalledOnce();
+
+	const second: Curve = { bands: pad([{ ...cut, gainDb: -3 }]), preampDb: -2 };
+	const secondHash = linkHash(second, 'ajustar');
+	if (!secondHash.ok) throw new Error('Invalid second linked fixture');
+	await screen.rerender({ hash: secondHash.value });
+	await vi.waitFor(() => expect(app.state.curve.current.bands).toEqual(second.bands));
+	expect(app.state.curve.current.preampDb).toBe(second.preampDb);
+	expect(clearLinkHash).toHaveBeenCalledTimes(2);
+	expect(notify).toHaveBeenCalledWith(m.curva_link_loaded(), { tone: 'info' });
+
+	// Rerendering or changing layers must not reload a consumed link over a later edit.
+	app.state.curve.update({ preampDb: -3 });
+	await screen.rerender({ hash: '' });
+	await screen.rerender({ hash: secondHash.value, layer: 'ajustar' });
+	await tick();
+	expect(app.state.curve.current.preampDb).toBe(-3);
+	expect(clearLinkHash).toHaveBeenCalledTimes(2);
+	const beforeRefusal = app.state.curve.current;
+	await screen.rerender({ hash: '#p=broken' });
+	await vi.waitFor(() => expect(clearLinkHash).toHaveBeenCalledTimes(3));
+	expect(app.state.curve.current).toEqual(beforeRefusal);
+	expect(screen.container.textContent).toContain(
+		m.curva_link_refused({ reason: m.curva_io_error_link() })
+	);
+	await screen.rerender({ hash: '#section' });
+	await screen.rerender({ hash: '#p=broken', layer: 'engenharia' });
+	await tick();
+	expect(clearLinkHash).toHaveBeenCalledTimes(3);
+	expect(notify).toHaveBeenCalledTimes(2);
+	expect(app.pendingWrite).toBeNull();
 });
 
-test('without a link nothing is removed from the address bar', async () => {
-	const { app, clearLinkHash } = await setup('ajustar', neutral, '');
+test('empty and unrelated hashes do not prevent a later link from loading', async () => {
+	const { app, screen, clearLinkHash } = await setup('ajustar', neutral, '');
 	await app.state.ready;
+	await screen.rerender({ hash: '#section' });
 	await tick();
 	expect(clearLinkHash).not.toHaveBeenCalled();
+	expect(app.state.curve.current.source).toBe('custom');
+	const linked: Curve = { bands: pad([cut]), preampDb: -1 };
+	const hash = linkHash(linked, 'ajustar');
+	if (!hash.ok) throw new Error('Invalid linked fixture');
+	await screen.rerender({ hash: hash.value });
+	await vi.waitFor(() => expect(app.state.curve.current.source).toBe('import'));
+	expect(app.state.curve.current.bands).toEqual(linked.bands);
+	expect(clearLinkHash).toHaveBeenCalledOnce();
 });
 
 test('by default the consumed link is removed with history.replaceState, keeping path, query and state', async () => {

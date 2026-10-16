@@ -7,7 +7,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 
 	interface Props {
-		dirty: boolean;
+		unsaved: boolean;
 		canUndo: boolean;
 		canRedo: boolean;
 		journalCount: number;
@@ -21,7 +21,7 @@
 		onwrite: () => void;
 	}
 	let {
-		dirty,
+		unsaved,
 		canUndo,
 		canRedo,
 		journalCount,
@@ -57,9 +57,9 @@
 			>{m.curva_redo()}</button
 		>
 	</div>
-	<p class="dirty" class:on={dirty} aria-live="polite">
+	<p class="dirty" class:on={unsaved} aria-live="polite">
 		<span class="led" aria-hidden="true"></span>
-		{dirty ? m.curva_unsaved() : m.curva_saved()}
+		{unsaved ? m.curva_unsaved() : m.curva_saved()}
 	</p>
 	<div class="res-row">
 		<button type="button" class="btn-pl acc" disabled={disabled || writeDisabled} onclick={onwrite}

@@ -92,7 +92,7 @@ test('sequencer displays nine reports and commit; Send invokes only the supplied
 		.toBeDisabled();
 });
 
-test('rescue/history controls honour availability and report journal entries, dirty and saved state', async () => {
+test('rescue/history controls honour availability and report journal entries, unsaved and saved state', async () => {
 	const onneutral = vi.fn();
 	const ondefault = vi.fn();
 	const onrescue = vi.fn();
@@ -100,7 +100,7 @@ test('rescue/history controls honour availability and report journal entries, di
 	const onredo = vi.fn();
 	const onwrite = vi.fn();
 	const screen = await render(RescuePanel, {
-		dirty: false,
+		unsaved: false,
 		canUndo: false,
 		canRedo: false,
 		journalCount: 0,
@@ -119,7 +119,7 @@ test('rescue/history controls honour availability and report journal entries, di
 	await expect
 		.element(page.getByRole('button', { name: m.curva_redo(), exact: true }))
 		.toBeDisabled();
-	await screen.rerender({ dirty: true, canUndo: true, canRedo: true, journalCount: 3 });
+	await screen.rerender({ unsaved: true, canUndo: true, canRedo: true, journalCount: 3 });
 	await expect.element(page.getByText(m.curva_unsaved(), { exact: true })).toBeVisible();
 	await expect.element(page.getByText(m.curva_journal_count({ count: '3' }))).toBeVisible();
 	for (const [name, callback] of [

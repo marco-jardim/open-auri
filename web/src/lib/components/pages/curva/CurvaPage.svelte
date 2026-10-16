@@ -53,7 +53,7 @@
 	interface Props {
 		app: ClientApp | null;
 		layer: Layer;
-		/** `page.url.hash` (read once for `#p=` links). */
+		/** `page.url.hash` (each new `#p=` link is consumed once). */
 		hash: string;
 		/** `page.url` (only its `href` is read, on user actions). */
 		pageUrl: UrlLike;
@@ -275,12 +275,12 @@
 		);
 	}
 
-	let linkHandled = false;
+	let handledLinkHash: string | null = null;
 	$effect(() => {
 		const client = app;
 		const linkHashValue = hash;
-		if (!client || linkHandled) return;
-		linkHandled = true;
+		if (!client || !linkHashValue.startsWith('#p=') || linkHashValue === handledLinkHash) return;
+		handledLinkHash = linkHashValue;
 		void client.state.ready.then(() => {
 			const result = readLinkHash(
 				linkHashValue,
@@ -384,7 +384,7 @@
 					count: String(activeCount(curve.bands))
 				})}
 			</span>
-			{#if app?.state.curve.dirty}
+			{#if app?.state.curve.unsaved}
 				<span class="np-dirty">{m.curva_unsaved()}</span>
 			{/if}
 		</div>
@@ -435,7 +435,7 @@
 				frame={preview?.vu.frame ?? null}
 			/>
 			<RescuePanel
-				dirty={app?.state.curve.dirty ?? false}
+				unsaved={app?.state.curve.unsaved ?? false}
 				canUndo={app?.state.curve.canUndo ?? false}
 				canRedo={app?.state.curve.canRedo ?? false}
 				journalCount={app?.state.journal.entries.length ?? 0}
