@@ -1,0 +1,19 @@
+Fonts of the OG images (web/src/lib/server/og/render.ts), read at runtime through the ASSETS
+binding. Both are licensed under the SIL Open Font License, Version 1.1 (OFL-1.1):
+https://openfontlicense.org/open-font-license-official-text/
+
+InstrumentSerif-Regular.ttf
+  Copyright 2022 The Instrument Serif Project Authors
+  (https://github.com/Instrument/instrument-serif)
+  Source: https://github.com/google/fonts/raw/main/ofl/instrumentserif/InstrumentSerif-Regular.ttf
+  License text: https://github.com/google/fonts/blob/main/ofl/instrumentserif/OFL.txt
+
+JetBrainsMono.ttf
+  Copyright 2020 The JetBrains Mono Project Authors
+  (https://github.com/JetBrains/JetBrainsMono)
+  Source: https://github.com/google/fonts/raw/main/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf
+  (stored under the name JetBrainsMono.ttf; variable font, default instance wght 400)
+  License text: https://github.com/google/fonts/blob/main/ofl/jetbrainsmono/OFL.txt
+
+The files are redistributed unmodified (renaming the file does not change the font). The OFL
+permits bundling with software; the fonts themselves may not be sold on their own.
