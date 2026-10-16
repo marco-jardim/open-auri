@@ -1,6 +1,12 @@
 import { levelDb } from 'open-auri/dsp';
 import type { AudioEngine, PreviewChain } from '#lib/audio/engine.ts';
-import { tap, type MeterSource, type MeterTap } from '#lib/audio/meters.ts';
+import {
+	getReference,
+	tap,
+	type MeterSource,
+	type MeterTap,
+	type VuReference
+} from '#lib/audio/meters.ts';
 import type { Track } from './comparison.ts';
 
 type Engine = Pick<AudioEngine, 'buildChain' | 'matchGains'>;
@@ -13,18 +19,27 @@ interface RecordEntry {
 	loading: Promise<void> | null;
 }
 
-/** Owns chains, never sources. A/B only changes gains on the shared engine's existing fan-out. */
+/**
+ * Owns chains, never sources. A/B only changes gains on the shared engine's existing fan-out.
+ * Every chain stays silent until `setAudible(true)` (the page's own Play): building chains, or
+ * the engine having been left playing by another page, never makes a lane audible.
+ * `reference` gives the 0 VU alignment for new taps (the app's `meterRef`).
+ */
 export function createTrackChains(
 	engine: Engine,
 	onMeter: (id: number, meter: MeterSource | null) => void,
-	makeTap: TapFactory = (node) => tap(node, { kinds: ['vu'] })
+	makeTap?: TapFactory,
+	reference: () => VuReference = getReference
 ) {
+	const meterTap: TapFactory =
+		makeTap ?? ((node) => tap(node, { kinds: ['vu'], reference: reference() }));
 	const records = new Map<number, RecordEntry>();
 	let tracks: readonly Track[] = [];
 	let selected = 1;
 	let pair: readonly [number, number] = [1, 2];
 	let matched = true;
 	let disposed = false;
+	let audible = false;
 	let sequence = 0;
 
 	function remove(id: number, record: RecordEntry) {
@@ -49,7 +64,10 @@ export function createTrackChains(
 			const trim = track.id === pair[0] ? trims[0] : track.id === pair[1] ? trims[1] : 0;
 			records
 				.get(track.id)
-				?.chain.setGain(trim, track.id === selected && !track.mute && (!solo || track.solo));
+				?.chain.setGain(
+					trim,
+					audible && track.id === selected && !track.mute && (!solo || track.solo)
+				);
 		}
 	}
 
@@ -81,7 +99,7 @@ export function createTrackChains(
 				const entry = record;
 				// Before the audition switch: every armed lane meters its own filtered signal,
 				// even when another lane is audible. A tap is a silent analysis sink.
-				entry.loading = makeTap(entry.chain.stages.at(-1) ?? entry.chain.preamp)
+				entry.loading = meterTap(entry.chain.stages.at(-1) ?? entry.chain.preamp)
 					.then((meter) => {
 						if (disposed || records.get(track.id) !== entry) meter.disconnect();
 						else {
@@ -106,8 +124,16 @@ export function createTrackChains(
 			matched = levelMatch;
 			gains();
 		},
+		/** True only from the page's own Play; false silences every lane (chains are kept). */
+		setAudible(on: boolean) {
+			if (disposed) return;
+			audible = on;
+			gains();
+		},
+		audible: () => audible,
 		dispose() {
 			disposed = true;
+			audible = false;
 			for (const [id, record] of records) remove(id, record);
 		}
 	};

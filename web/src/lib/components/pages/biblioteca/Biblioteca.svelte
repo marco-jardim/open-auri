@@ -71,7 +71,8 @@
 		let cancelled = false;
 		let meter: MeterTap | null = null;
 		let unsubscribe: (() => void) | undefined;
-		void tap(engine.getAnalyserTap(), {
+		// Pre-volume meter bus: the reading reflects the signal, never the monitor volume.
+		void tap(engine.getMeterBus(), {
 			reference,
 			kinds: ['vu', 'ppm', 'loudness', 'correlation'],
 			ppmType: 'I'

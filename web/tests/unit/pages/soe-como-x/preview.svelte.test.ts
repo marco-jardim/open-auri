@@ -60,8 +60,50 @@ test('real A/B meters and spectrum are gesture-started and release on unmount', 
 	await cleanup();
 	expect(audio.getChainOutput(preview.a.id)).toBeNull();
 	expect(audio.getChainOutput(preview.b.id)).toBeNull();
-	// Unmount must not stop or dispose the engine shared with the chrome and other pages.
-	expect(audio.state().playing).toBe(true);
+	// This preview started chain mode, so leaving the page stops it (the engine is not disposed).
+	expect(audio.state().playing).toBe(false);
+	expect(audio.state().ready).toBe(true);
+}, 20000);
+
+test('unmount stops the engine only when this preview started it', async () => {
+	engine = createAudioEngine({ indexedDB: null, hasUserActivation: () => true });
+	const audio = engine;
+	const stop = vi.spyOn(audio, 'stop');
+	const curve = neutralCurve();
+	// Another page (or the chrome) left the engine playing: mounting/unmounting never touches it.
+	const state = vi
+		.spyOn(audio, 'state')
+		.mockReturnValue({ ...audio.state(), mode: 'raw', playing: true });
+	await render(Preview, { audio, current: curve, candidate: curve });
+	await cleanup();
+	expect(stop).not.toHaveBeenCalled();
+	state.mockRestore();
+
+	await render(Preview, { audio, current: curve, candidate: curve });
+	await page.getByRole('button', { name: m.soe_listen(), exact: true }).click();
+	await expect.poll(() => audio.state().mode).toBe('chains');
+	await cleanup();
+	expect(stop).toHaveBeenCalledOnce();
+	expect(audio.state().playing).toBe(false);
+}, 20000);
+
+test('unmount while the engine is still starting leaves nothing playing', async () => {
+	engine = createAudioEngine({ indexedDB: null, hasUserActivation: () => true });
+	const audio = engine;
+	const realStart = audio.start.bind(audio);
+	let release: (() => void) | undefined;
+	vi.spyOn(audio, 'start').mockImplementationOnce(async (mode) => {
+		await new Promise<void>((resolve) => (release = resolve));
+		await realStart(mode);
+	});
+	const curve = neutralCurve();
+	await render(Preview, { audio, current: curve, candidate: curve });
+	await page.getByRole('button', { name: m.soe_listen(), exact: true }).click();
+	await expect.poll(() => release).toBeDefined();
+	await cleanup();
+	release?.();
+	await expect.poll(() => audio.state().playing).toBe(false);
+	expect(audio.state().mode).toBe('off');
 }, 20000);
 
 async function accessible(container: HTMLElement) {

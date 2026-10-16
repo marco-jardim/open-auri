@@ -56,6 +56,7 @@ function audioUi(initial: Partial<AudioEngineState> = {}) {
 		matchGains: unavailable,
 		createAB: unavailable,
 		getAnalyserTap: unavailable,
+		getMeterBus: unavailable,
 		getChainOutput: unavailable,
 		getSourceBus: unavailable,
 		dispose: vi.fn<AudioEngine['dispose']>().mockResolvedValue(undefined)
@@ -225,6 +226,35 @@ test('play failures use engine codes or the suspended fallback and can be cleare
 	await expect.element(page.getByRole('alert')).toHaveTextContent(m.audio_error_suspended());
 	await page.getByRole('button', { name: m.audio_remove() }).click();
 	expect(page.getByRole('alert').elements()).toHaveLength(0);
+});
+
+test('the popover carries the global 0 VU reference selector bound to the store it is given', async () => {
+	const fake = audioUi();
+	let value: -18 | -20 | -14 = -18;
+	const store = {
+		get value() {
+			return value;
+		},
+		set: vi.fn((next: -18 | -20 | -14) => {
+			value = next;
+			return true;
+		})
+	};
+	await render(AudioLoader, { engine: fake.engine, meterRef: store });
+	await page.getByRole('button').first().click();
+	const group = page.getByRole('group', { name: m.meters_vu_reference() });
+	await expect.element(group).toBeVisible();
+	const minus20 = m.meters_vu_reference_option({ value: '−20' });
+	await page.getByRole('radio', { name: minus20 }).click();
+	expect(store.set).toHaveBeenCalledExactlyOnceWith(-20);
+	expect(fake.engine.start).not.toHaveBeenCalled();
+});
+
+test('without a store (and without the app context) the selector is not rendered', async () => {
+	const fake = audioUi();
+	await render(AudioLoader, { engine: fake.engine });
+	await page.getByRole('button').click();
+	expect(page.getByRole('group', { name: m.meters_vu_reference() }).elements()).toHaveLength(0);
 });
 
 const errors: [AudioErrorCode, () => string][] = [

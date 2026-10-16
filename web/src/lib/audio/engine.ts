@@ -17,7 +17,11 @@
  *
  *   source ─▶ bus ─┬─▶ raw ───────────────────────────────────────────────┐
  *                  ├─▶ chain.input ▶ preamp ▶ stage… ▶ chain.output ─▶ chains ┼─▶ volume ─▶ destination
- *                  └─▶ chain.input ▶ …                                      │        └─▶ tap (analyser)
+ *                  └─▶ chain.input ▶ …                                      │
+ *                                                                           └─▶ meter bus ─▶ tap (analyser)
+ *
+ * The meter bus is fed by `raw` and `chains` (pre-volume) and never reaches the destination:
+ * meters and analysers read the signal, not the browser-only monitor volume.
  */
 import {
 	SAMPLE_RATE,
@@ -158,8 +162,16 @@ export interface AudioEngine {
 		curveB: PreviewCurve,
 		options?: { experimental?: boolean; initial?: ABSide }
 	): ABPreview;
-	/** Analyser fed by the preview volume (post-chain, post-volume), for meters. */
+	/**
+	 * Analyser fed by the meter bus (post-chain, pre-volume), for spectrum displays. The preview
+	 * volume never changes what it shows.
+	 */
 	getAnalyserTap(): AnalyserNode;
+	/**
+	 * Pre-volume sum of what is playing (raw source or chains), for level meters. It does not feed
+	 * the preview volume nor the destination, so tapping it never changes what is heard.
+	 */
+	getMeterBus(): GainNode;
 	/** The output node of a chain (post-sections, post-trim), for meters; null if unknown. */
 	getChainOutput(id: string): GainNode | null;
 	/** The shared bus every chain hangs off (pre-chain source signal). */
@@ -470,6 +482,8 @@ interface Graph {
 	chainsGain: GainNode;
 	rawGain: GainNode;
 	bus: GainNode;
+	/** Pre-volume sum of `chainsGain` and `rawGain`; feeds meters only (never `master`). */
+	meter: GainNode;
 	tap: AnalyserNode | null;
 }
 
@@ -586,9 +600,12 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		const rawGain = created.createGain();
 		rawGain.gain.value = 0;
 		rawGain.connect(master);
+		const meter = created.createGain();
+		chainsGain.connect(meter);
+		rawGain.connect(meter);
 		const bus = created.createGain();
 		bus.connect(rawGain);
-		graph = { master, chainsGain, rawGain, bus, tap: null };
+		graph = { master, chainsGain, rawGain, bus, meter, tap: null };
 		created.addEventListener('statechange', onContextState);
 		if (env.document && !visibilityDoc) {
 			visibilityDoc = env.document;
@@ -992,10 +1009,14 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		if (!nodes.tap) {
 			const tap = context.createAnalyser();
 			tap.fftSize = 2048;
-			nodes.master.connect(tap);
+			nodes.meter.connect(tap);
 			nodes.tap = tap;
 		}
 		return nodes.tap;
+	}
+
+	function getMeterBus(): GainNode {
+		return ensure().nodes.meter;
 	}
 
 	// --- teardown ---
@@ -1016,8 +1037,8 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			visibilityDoc = null;
 		}
 		if (graph) {
-			const { master, chainsGain, rawGain, bus, tap } = graph;
-			for (const node of [bus, rawGain, chainsGain, master]) node.disconnect();
+			const { master, chainsGain, rawGain, bus, meter, tap } = graph;
+			for (const node of [bus, rawGain, chainsGain, meter, master]) node.disconnect();
 			tap?.disconnect();
 		}
 		const context = ctx;
@@ -1055,6 +1076,7 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		matchGains,
 		createAB,
 		getAnalyserTap,
+		getMeterBus,
 		getChainOutput: (id) => chains.get(id)?.chain.output ?? null,
 		getSourceBus: () => ensure().nodes.bus,
 		dispose

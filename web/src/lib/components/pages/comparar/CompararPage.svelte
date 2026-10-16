@@ -42,6 +42,17 @@
 	let meters = $state.raw<Record<number, MeterSource | null>>({});
 	let chains = $state.raw<ReturnType<typeof createTrackChains> | null>(null);
 	let disposed = false;
+	/** Play attempts; unmount bumps it so a start still in flight knows to stop. */
+	let attempt = 0;
+	/** The engine this page put in chain mode (only its own Play does that). */
+	let startedBy: ClientApp['audio'] | null = null;
+
+	/** Stops the engine only if this page started it and it is still in chain mode. */
+	function release() {
+		const engine = startedBy;
+		startedBy = null;
+		if (engine && engine.state().mode === 'chains') engine.stop();
+	}
 	const loadTokens = new SvelteMap<number, number>();
 	const loadGates = new SvelteMap<number, ReturnType<typeof createGateWorker>>();
 	const armed = $derived(tracks.filter((track) => track.armed));
@@ -52,16 +63,23 @@
 	const exportSvg = $derived(
 		a && b ? comparisonSvg(a.curve, b.curve, matched, threshold, includeDelta, locale, t) : ''
 	);
-	const playing = $derived(audioState.playing && audioState.mode === 'chains');
+	// This page's own audition: chain mode left on by another page does not count.
+	const playing = $derived(active && audioState.playing && audioState.mode === 'chains');
 
 	$effect(() => {
 		if (!app) return;
 		const engine = app.audio;
-		const manager = createTrackChains(engine, (id, meter) => {
-			untrack(() => {
-				meters = { ...meters, [id]: meter };
-			});
-		});
+		const meterRef = app.state.meterRef;
+		const manager = createTrackChains(
+			engine,
+			(id, meter) => {
+				untrack(() => {
+					meters = { ...meters, [id]: meter };
+				});
+			},
+			undefined,
+			() => meterRef.value
+		);
 		chains = manager;
 		audioState = engine.state();
 		const unsubscribe = engine.onChange((next) => {
@@ -69,13 +87,20 @@
 		});
 		return () => {
 			unsubscribe();
+			attempt++;
 			manager.dispose();
+			release();
+			untrack(() => {
+				active = false;
+			});
 		};
 	});
 	$effect(() => {
 		const nextTracks = tracks;
 		const manager = chains;
-		if ((active || audioState.playing) && manager)
+		// Only this page's own Play builds chains: the engine being left playing by another page
+		// (audioState.playing) must never make this page audible.
+		if (active && manager)
 			untrack(() => {
 				void manager.sync(nextTracks).catch((cause: unknown) => {
 					console.error('Comparison chains failed', cause);
@@ -89,7 +114,9 @@
 	});
 	onDestroy(() => {
 		disposed = true;
+		attempt++;
 		for (const gate of loadGates.values()) gate.dispose();
+		release();
 	});
 
 	async function source(id: number, value: string) {
@@ -144,24 +171,43 @@
 
 	async function play() {
 		if (!app || !chains || !a || !b) return;
+		const engine = app.audio;
+		const manager = chains;
+		const token = ++attempt;
 		if (playing) {
-			app.audio.stop();
+			manager.setAudible(false);
+			active = false;
+			startedBy = null;
+			engine.stop();
 			return;
 		}
 		error = '';
 		active = true;
 		try {
-			chains.configure([a.id, b.id], matched);
+			manager.configure([a.id, b.id], matched);
 			if (!armed.some((track) => track.id === selected)) selected = a.id;
-			chains.select(selected);
+			manager.select(selected);
+			// The page's own Play is the only path that makes a lane audible.
+			manager.setAudible(true);
 			// Both calls run in the click before yielding, preserving browser user activation.
-			const ready = chains.sync(tracks);
-			const started = app.audio.start('chains');
+			const ready = manager.sync(tracks);
+			const started = engine.start('chains');
+			startedBy = engine;
 			await Promise.all([ready, started]);
+			if (token !== attempt && (disposed || manager !== chains)) {
+				// Unmounted (or the app changed) while starting: the engine only reached chain mode
+				// after the cleanup ran, so stop it here; nothing of this page may keep playing.
+				if (engine.state().mode === 'chains') engine.stop();
+				if (startedBy === engine) startedBy = null;
+			}
 		} catch (cause) {
+			if (token !== attempt) return;
 			console.error('Comparison preview failed', cause);
 			error = t.audioFailed;
-			app.audio.stop();
+			manager.setAudible(false);
+			active = false;
+			startedBy = null;
+			engine.stop();
 		}
 	}
 

@@ -30,6 +30,8 @@
 		referenceName: string;
 		previewError?: string | null;
 		previewDisabled?: boolean;
+		/** The preview runs at a rate other than 96 kHz (recomputed coefficients). */
+		approximate?: boolean;
 		ondrag: (index: number, target: DragTarget) => void;
 		oncommit: (index: number, target: DragTarget) => void;
 		onpreview: () => void;
@@ -47,6 +49,7 @@
 		referenceName,
 		previewError = null,
 		previewDisabled = false,
+		approximate = false,
 		ondrag,
 		oncommit,
 		onpreview,
@@ -241,6 +244,9 @@
 			>
 		</div>
 		<p class="prev-note">{m.curva_preview_note()}</p>
+		{#if playing && approximate}
+			<p class="prev-note prev-approx" role="status">{m.curva_approximate()}</p>
+		{/if}
 		{#if previewError}
 			<p class="prev-error" role="alert">{previewError}</p>
 		{/if}

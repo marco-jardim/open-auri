@@ -199,6 +199,25 @@ test('.txt import/export and an S1 #p= link preserve the exact curve', async ({ 
 	).toHaveText('Curva carregada do link. Nada foi gravado.');
 	expect(await editorCrc(recipient)).toBe(originalCrc);
 	expect(await downloadBytes(await exportFile(recipient, 'bytes .bin'))).toEqual(originalBytes);
+	// The consumed link leaves the address bar (path and layer kept), so a reload keeps later edits.
+	await expect.poll(() => new URL(recipient.url()).hash).toBe('');
+	expect(new URL(recipient.url()).searchParams.get('camada')).toBe('ajustar');
+	await recipient
+		.getByRole('region', { name: 'Resgate', exact: true })
+		.getByRole('button', { name: 'Neutro', exact: true })
+		.click();
+	const editedCrc = await editorCrc(recipient);
+	expect(editedCrc).not.toBe(originalCrc);
+	await recipient.reload();
+	await expect(recipient.locator('.preview-row button.bat')).toBeEnabled();
+	expect(new URL(recipient.url()).hash).toBe('');
+	await expect(
+		recipient.getByRole('main').getByRole('status').filter({
+			hasText: 'Curva carregada do link. Nada foi gravado.'
+		})
+	).toHaveCount(0);
+	// Whatever the restored editor is, the link curve was not applied again.
+	expect(await editorCrc(recipient)).not.toBe(originalCrc);
 	expect((await hidLog(page)).reports).toEqual([]);
 	await recipient.close();
 });

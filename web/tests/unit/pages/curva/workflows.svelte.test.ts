@@ -45,7 +45,9 @@ async function setup(
 	layer: Layer = 'ajustar',
 	curve: Curve = neutral,
 	hash = '',
-	gate = gateClient()
+	gate = gateClient(),
+	/** null renders without the prop, to exercise the native default. */
+	clearLinkHash: (() => void) | null = vi.fn()
 ) {
 	const app = createClientApp(fakeAppOptions().options);
 	apps.push(app);
@@ -58,10 +60,11 @@ async function setup(
 		hash,
 		pageUrl: new URL('https://example.test/'),
 		onlayer,
-		gateClient: gate
+		gateClient: gate,
+		clearLinkHash: clearLinkHash ?? undefined
 	});
 	await tick();
-	return { app, screen, onlayer };
+	return { app, screen, onlayer, clearLinkHash };
 }
 
 function importFile(container: HTMLElement, text: string, name = 'curve.txt') {
@@ -166,21 +169,55 @@ test('link imports wait for the client, load once and never navigate', async () 
 	const linked: Curve = { bands: pad([cut]), preampDb: -1 };
 	const hash = linkHash(linked, 'ajustar');
 	if (!hash.ok) throw new Error('Invalid linked fixture');
-	const { app, screen } = await setup('ajustar', neutral, hash.value);
+	const { app, screen, clearLinkHash } = await setup('ajustar', neutral, hash.value);
 	await vi.waitFor(() => expect(app.state.curve.current.source).toBe('import'));
 	expect(app.state.curve.current.bands).toEqual(linked.bands);
 	expect(app.state.curve.current.name).toBe(m.curva_name_link());
+	// The consumed link leaves the address bar, so a reload does not apply it again.
+	expect(clearLinkHash).toHaveBeenCalledOnce();
 	await screen.rerender({ hash: '#p=broken' });
 	await tick();
 	expect(app.state.curve.current.bands).toEqual(linked.bands);
 	expect(screen.container.textContent).toContain(m.curva_link_loaded());
 	expect(app.pendingWrite).toBeNull();
+	expect(clearLinkHash).toHaveBeenCalledOnce();
+});
+
+test('without a link nothing is removed from the address bar', async () => {
+	const { app, clearLinkHash } = await setup('ajustar', neutral, '');
+	await app.state.ready;
+	await tick();
+	expect(clearLinkHash).not.toHaveBeenCalled();
+});
+
+test('by default the consumed link is removed with history.replaceState, keeping path, query and state', async () => {
+	const original = window.location.href;
+	const state = window.history.state;
+	const linked: Curve = { bands: pad([cut]), preampDb: -1 };
+	const hash = linkHash(linked, 'ajustar');
+	if (!hash.ok) throw new Error('Invalid linked fixture');
+	const address = new URL(window.location.href);
+	address.hash = hash.value;
+	window.history.replaceState(state, '', address.href);
+	const replace = vi.spyOn(window.history, 'replaceState');
+	try {
+		const { app } = await setup('ajustar', neutral, hash.value, gateClient(), null);
+		await vi.waitFor(() => expect(app.state.curve.current.source).toBe('import'));
+		expect(window.location.hash).toBe('');
+		expect(window.location.pathname + window.location.search).toBe(
+			address.pathname + address.search
+		);
+		expect(replace).toHaveBeenCalledExactlyOnceWith(state, '', address.pathname + address.search);
+	} finally {
+		replace.mockRestore();
+		window.history.replaceState(state, '', original);
+	}
 });
 
 test.each(['#p=broken', '#p='])(
 	'broken link %s is announced without replacing the current curve',
 	async (hash) => {
-		const { app, screen } = await setup('ajustar', neutral, hash);
+		const { app, screen, clearLinkHash } = await setup('ajustar', neutral, hash);
 		await vi.waitFor(() =>
 			expect(screen.container.textContent).toContain(
 				m.curva_link_refused({ reason: m.curva_io_error_link() })
@@ -188,6 +225,8 @@ test.each(['#p=broken', '#p='])(
 		);
 		expect(app.state.curve.current.source).toBe('custom');
 		expect(app.state.curve.current.bands).toEqual(NEUTRO.bands);
+		// A refused link is reported once, then removed too.
+		expect(clearLinkHash).toHaveBeenCalledOnce();
 	}
 );
 

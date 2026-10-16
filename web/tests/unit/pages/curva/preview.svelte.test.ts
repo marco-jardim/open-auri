@@ -10,7 +10,7 @@ import {
 import { tap, tapStages, type MeterListener, type MeterTap } from '#lib/audio/meters.ts';
 import { CurvaPreview } from '#lib/components/pages/curva/preview.svelte.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
-import { fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
+import { audioConfig, fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
 
 vi.mock(import('#lib/audio/meters.ts'), async (original) => ({
 	...(await original()),
@@ -239,6 +239,131 @@ test('a worklet failure leaves audio playing with meters honestly in DATA mode',
 	expect(preview.playing).toBe(true);
 	expect(preview.error).toBeNull();
 	expect(preview.vu.mode).toBe('data');
+});
+
+function deferredStart() {
+	let resolve: () => void = () => {
+		throw new Error('Engine start not begun');
+	};
+	const started = new Promise<void>((done) => {
+		resolve = done;
+	});
+	return { started, resolve: () => resolve() };
+}
+
+test('stop during the engine start wins: the late start is stopped and no chain remains', async () => {
+	const { preview, engine, start, stop, abInstances } = setup();
+	const gate = deferredStart();
+	start.mockImplementationOnce(() => gate.started);
+	const pending = preview.start(neutral, editor);
+	expect(preview.starting).toBe(true);
+	expect(preview.playing).toBe(false);
+	// The click that cancels: the engine is stopped even though `playing` never became true.
+	preview.stop();
+	expect(stop).toHaveBeenCalledTimes(1);
+	expect(preview.starting).toBe(false);
+	gate.resolve();
+	await pending;
+	// The start resolved after the stop: it is stopped again, nothing is rebuilt.
+	expect(stop).toHaveBeenCalledTimes(2);
+	expect(preview.playing).toBe(false);
+	expect(preview.analyser).toBeNull();
+	const ab = abInstances[0];
+	if (!ab) throw new Error('Missing A/B preview');
+	expect(ab.dispose).toHaveBeenCalledTimes(1);
+	expect(abInstances).toHaveLength(1);
+	expect(engine.getChainOutput(ab.a.id)).toBeNull();
+	expect(engine.getChainOutput(ab.b.id)).toBeNull();
+});
+
+test('dispose (unmount) during the engine start leaves the real engine off', async () => {
+	const { preview, engine, start, stop, abInstances } = setup();
+	start.mockRestore();
+	stop.mockRestore();
+	const realStart = engine.start.bind(engine);
+	const engineStop = vi.spyOn(engine, 'stop');
+	const gate = deferredStart();
+	vi.spyOn(engine, 'start').mockImplementationOnce(async (mode) => {
+		await gate.started;
+		await realStart(mode);
+	});
+	const pending = preview.start(neutral, editor);
+	preview.dispose();
+	gate.resolve();
+	await pending;
+	expect(engine.state().mode).toBe('off');
+	expect(engine.state().playing).toBe(false);
+	expect(engineStop).toHaveBeenCalled();
+	const ab = abInstances[0];
+	if (!ab) throw new Error('Missing A/B preview');
+	expect(engine.getChainOutput(ab.a.id)).toBeNull();
+	expect(engine.getChainOutput(ab.b.id)).toBeNull();
+	expect(preview.playing).toBe(false);
+});
+
+test('a second start while the first is still pending keeps the engine to the newer one', async () => {
+	const { preview, start, stop } = setup();
+	const first = deferredStart();
+	start.mockImplementationOnce(() => first.started);
+	const pendingFirst = preview.start(neutral, editor);
+	const pendingSecond = preview.start(neutral, editor);
+	first.resolve();
+	await Promise.all([pendingFirst, pendingSecond]);
+	expect(stop).not.toHaveBeenCalled();
+	expect(preview.playing).toBe(true);
+});
+
+test('an edit during the engine start is what plays once it resolves', async () => {
+	const { preview, start, createAB, abInstances } = setup();
+	const gate = deferredStart();
+	start.mockImplementationOnce(() => gate.started);
+	const pending = preview.start(neutral, neutral);
+	preview.update(neutral, editor);
+	// Nothing is rebuilt while starting; the latest curves are kept.
+	expect(createAB).toHaveBeenCalledTimes(1);
+	gate.resolve();
+	await pending;
+	expect(preview.playing).toBe(true);
+	expect(createAB).toHaveBeenCalledTimes(2);
+	expect(createAB).toHaveBeenLastCalledWith(neutral, editor, {
+		initial: 'B',
+		experimental: false
+	});
+	expect(abInstances[0]?.dispose).toHaveBeenCalledTimes(1);
+	expect(abInstances[1]?.dispose).not.toHaveBeenCalled();
+});
+
+test('without an edit during the start the chains are not rebuilt', async () => {
+	const { preview, createAB } = setup();
+	await preview.start(neutral, editor);
+	expect(createAB).toHaveBeenCalledTimes(1);
+});
+
+test('output and stage taps receive the app 0 VU reference', async () => {
+	const { engine } = setup();
+	const preview = new CurvaPreview(engine, { reference: () => -20 });
+	previews.push(preview);
+	await preview.start(neutral, editor);
+	await vi.waitFor(() => expect(tap).toHaveBeenCalledTimes(2));
+	for (const [, options] of vi.mocked(tap).mock.calls) {
+		expect(options).toMatchObject({ reference: -20 });
+	}
+	expect(vi.mocked(tapStages).mock.calls[0]?.[1]).toMatchObject({ reference: -20 });
+});
+
+test('reports an approximate preview when the browser refuses 96 kHz', async () => {
+	audioConfig.supportedRates = [48000];
+	const { preview, engine } = setup();
+	expect(preview.exact).toBe(true);
+	await preview.start(neutral, editor);
+	expect(engine.state().exact).toBe(false);
+	expect(preview.exact).toBe(false);
+});
+
+test('reports an exact preview at 96 kHz', async () => {
+	const { preview } = setup();
+	await preview.start(neutral, editor);
+	expect(preview.exact).toBe(true);
 });
 
 test('missing stage taps remain in DATA mode without preventing output metering', async () => {

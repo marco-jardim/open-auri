@@ -63,6 +63,7 @@ describe('parallel comparison chains', () => {
 		const second = build.mock.results[1].value;
 		const nodeCount = onlyContext().nodes.length;
 		manager.configure([1, 2], true);
+		manager.setAudible(true);
 		manager.select(2);
 		expect(second.output.gain.value).toBeGreaterThan(0);
 		expect(first.output.gain.value).toBe(0);
@@ -75,6 +76,27 @@ describe('parallel comparison chains', () => {
 		expect(makeTap).toHaveBeenCalledTimes(4);
 		expect(onlyContext().nodes.length).toBe(nodeCount);
 		manager.dispose();
+	});
+
+	test('built chains stay silent, even with the engine playing, until the page own Play', async () => {
+		const { engine, manager } = setup();
+		const build = vi.spyOn(engine, 'buildChain');
+		// Another page left the shared engine in chain mode.
+		await engine.start('chains');
+		manager.configure([1, 2], true);
+		manager.select(1);
+		await manager.sync(initialTracks());
+		const outputs = build.mock.results.map((result) => asFake(result.value.output, FakeGainNode));
+		expect(outputs.length).toBeGreaterThan(0);
+		expect(outputs.every((output) => output.gain.value === 0)).toBe(true);
+		expect(manager.audible()).toBe(false);
+		manager.setAudible(true);
+		expect(outputs.filter((output) => output.gain.value > 0)).toHaveLength(1);
+		manager.setAudible(false);
+		expect(outputs.every((output) => output.gain.value === 0)).toBe(true);
+		manager.dispose();
+		manager.setAudible(true);
+		expect(manager.audible()).toBe(false);
 	});
 
 	test('disarming or replacing a curve disposes only the affected chain and tap', async () => {

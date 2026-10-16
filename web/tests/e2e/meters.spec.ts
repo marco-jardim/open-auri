@@ -189,6 +189,47 @@ test('a running silent WAV stays in DADOS with zero meter mutations over 2 s', a
 	expect((await idleMeterMutations(page)).count).toBe(0);
 });
 
+test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU reference', async ({
+	page
+}) => {
+	await page.goto('/biblioteca');
+	const bridge = page.locator('section.console');
+	await expect(bridge).toHaveAttribute('data-mode', 'data');
+	await loadSineFile(page);
+	const popover = await openAudio(page);
+	// The raw preview from the global popover: a user gesture, as in the real flow.
+	await popover.locator('.oa-audio-row button').first().click();
+	await expect(bridge).toHaveAttribute('data-mode', 'live');
+	await expect(bridge.locator('.mode')).toHaveText('AO VIVO');
+	const vu = bridge.locator('.oa-vu').first();
+	await expect(vu).toHaveAttribute('data-mode', 'live');
+	const reading = async () => Number(await vu.getAttribute('aria-valuenow'));
+	// 440 Hz at −18 dBFS reads about 0 VU with the default −18 dBFS reference.
+	await expect.poll(reading, { timeout: 5000 }).toBeGreaterThan(-1);
+	await expect.poll(reading).toBeLessThan(1);
+	const before = await reading();
+
+	const volume = popover.getByRole('slider');
+	await volume.fill('-40');
+	await expect(volume).toHaveAttribute('aria-valuetext', '−40 dB');
+	// Measured window: the VU ballistics (300 ms) and the throttled readout settle well within it.
+	await page.waitForTimeout(1200);
+	await expect(bridge.locator('.mode')).toHaveText('AO VIVO');
+	expect(Math.abs((await reading()) - before)).toBeLessThanOrEqual(0.5);
+	await volume.fill('0');
+	await page.waitForTimeout(1200);
+	expect(Math.abs((await reading()) - before)).toBeLessThanOrEqual(0.5);
+
+	// 0 VU at −20 dBFS: the same −18 dBFS tone reads about +2 VU on every tap.
+	await popover.getByRole('radio', { name: '−20 dBFS' }).check();
+	await expect.poll(async () => (await reading()) - before, { timeout: 5000 }).toBeGreaterThan(1.5);
+	expect((await reading()) - before).toBeLessThan(2.5);
+	await popover.getByRole('radio', { name: '−18 dBFS' }).check();
+	await expect
+		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })
+		.toBeLessThanOrEqual(0.5);
+});
+
 test('stopping audio returns meters to DADOS and leaves the DOM at rest', async ({ page }) => {
 	await loadSineFile(page);
 	await startPreview(page);

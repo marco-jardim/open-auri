@@ -17,13 +17,29 @@
 		type AudioEngineState,
 		type AudioErrorCode
 	} from '#lib/audio/engine.ts';
+	import { getAppContext, type AppContext } from '#lib/app/index.ts';
+	import { VuReferenceSelect, type VuReferenceStore } from '#lib/components/meters/index.ts';
 
 	interface Props {
 		/** Engine to drive; defaults to the page-wide singleton (created on mount, never during SSR). */
 		engine?: AudioEngine;
+		/** 0 VU reference store (`app.state.meterRef`); defaults to the app context's, when present. */
+		meterRef?: VuReferenceStore | null;
 	}
 
-	let { engine: provided }: Props = $props();
+	let { engine: provided, meterRef }: Props = $props();
+
+	/** The layout provides the app context; isolated renders (tests) have none. */
+	function optionalAppContext(): AppContext | null {
+		try {
+			return getAppContext();
+		} catch (missing) {
+			console.debug('AudioLoader rendered without the app context', missing);
+			return null;
+		}
+	}
+	const appContext = optionalAppContext();
+	const referenceStore = $derived(meterRef ?? appContext?.client?.state.meterRef ?? null);
 
 	const uid = $props.id();
 	const ids = {
@@ -268,6 +284,10 @@
 				oninput={onVolume}
 			/>
 		</div>
+
+		{#if referenceStore}
+			<VuReferenceSelect store={referenceStore} />
+		{/if}
 
 		<p class="oa-audio-rate" class:approx={s.ready && !s.exact}>{rateText(s)}</p>
 		<p class="oa-audio-note">{m.audio_note()}</p>

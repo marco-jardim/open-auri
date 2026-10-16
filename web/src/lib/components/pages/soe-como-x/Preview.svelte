@@ -33,15 +33,26 @@
 	let a = $state.raw<MeterUpdate>({ mode: 'data', frame: null });
 	let b = $state.raw<MeterUpdate>({ mode: 'data', frame: null });
 	let preview: ABPreview | null = null;
-	let taps: MeterTap[] = [];
+	// Reactive so the reference effect also reaches taps attached after it last ran.
+	let taps = $state.raw<MeterTap[]>([]);
 	let stops: (() => void)[] = [];
 	let spectrumNode: AudioNode | null = null;
 	let generation = 0;
+	/** The engine this preview put in chain mode; it stops it when the audition ends. */
+	let startedBy: AudioEngine | null = null;
+
+	function release() {
+		const engine = startedBy;
+		startedBy = null;
+		if (engine && engine.state().mode === 'chains') engine.stop();
+	}
 
 	function dispose() {
 		generation++;
 		for (const stop of stops) stop();
 		stops = [];
+		// Whatever this preview made audible stops with it (page change, unmount, new snapshot).
+		release();
 		for (const handle of taps) handle.disconnect();
 		taps = [];
 		if (analyser && spectrumNode) spectrumNode.disconnect(analyser);
@@ -50,7 +61,7 @@
 		spectrumNode = null;
 		preview?.dispose();
 		preview = null;
-		// The shared source belongs to the chrome. Cleanup only releases this page's graph.
+		// The shared source belongs to the chrome: it is stopped only if this preview started it.
 		active = false;
 		playing = false;
 		pending = false;
@@ -84,6 +95,7 @@
 		if (!audio || !current || pending) return;
 		if (preview) {
 			if (audio.state().mode === 'chains') audio.stop();
+			startedBy = null;
 			dispose();
 			return;
 		}
@@ -102,23 +114,30 @@
 				engine.onChange((state) => {
 					playing = state.playing && state.mode === 'chains';
 					exact = state.exact;
+					// Stopped or switched to raw elsewhere (chrome): no longer ours to stop.
+					if (state.mode !== 'chains' && startedBy === engine) startedBy = null;
 				})
 			);
 			// Called before the first await, while the click still has user activation.
 			await engine.start('chains');
-			if (token !== generation) return;
+			if (token !== generation) {
+				// Disposed (unmount, new snapshot) while starting: nothing of ours may keep playing.
+				if (engine.state().mode === 'chains') engine.stop();
+				return;
+			}
+			startedBy = engine;
 			const first = await tap(aNode, { kinds: ['vu'], reference });
 			if (token !== generation) {
 				first.disconnect();
 				return;
 			}
-			taps.push(first);
+			taps = [...taps, first];
 			const second = await tap(bNode, { kinds: ['vu'], reference });
 			if (token !== generation) {
 				second.disconnect();
 				return;
 			}
-			taps.push(second);
+			taps = [...taps, second];
 			stops.push(first.subscribe((update) => (a = update)));
 			stops.push(second.subscribe((update) => (b = update)));
 			spectrum();

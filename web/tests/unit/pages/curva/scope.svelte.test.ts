@@ -176,3 +176,17 @@ test('preview controls expose playback, A/B, errors and disablement', async () =
 		.toBeDisabled();
 	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
 });
+
+test('the approximate-preview note shows only while playing at a rate other than 96 kHz', async () => {
+	const { screen } = await setup({ approximate: true });
+	// Not playing: no note, even if the engine reports a fallback rate.
+	await expect.element(page.getByText(m.curva_approximate())).not.toBeInTheDocument();
+	await screen.rerender({ playing: true, approximate: false });
+	await expect.element(page.getByText(m.curva_approximate())).not.toBeInTheDocument();
+	await screen.rerender({ playing: true, approximate: true });
+	const note = page.getByText(m.curva_approximate());
+	await expect.element(note).toBeVisible();
+	await expect.element(note).toHaveAttribute('role', 'status');
+	await screen.rerender({ playing: false, approximate: true });
+	await expect.element(page.getByText(m.curva_approximate())).not.toBeInTheDocument();
+});

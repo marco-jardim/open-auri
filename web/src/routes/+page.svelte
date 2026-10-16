@@ -23,7 +23,9 @@
 
 	function onlayer(next: Layer) {
 		if (!browser || next === layer) return;
-		const target = layerUrl(page.url, next);
+		// The address bar, not `page.url`: a consumed `#p=` link was removed from it without a
+		// navigation, and must not come back with the layer change.
+		const target = layerUrl(new URL(window.location.href), next);
 		void goto(resolve('/') + target.search + target.hash, { replace: true, reset: false });
 	}
 </script>

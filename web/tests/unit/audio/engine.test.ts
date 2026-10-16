@@ -222,12 +222,50 @@ describe('chains', () => {
 		expect(asFake(chain.output, FakeGainNode).connections).toEqual([]);
 	});
 
-	it('gives meters an analyser fed by the preview volume', () => {
+	it('gives spectra an analyser fed by the pre-volume meter bus', () => {
 		const { engine } = makeEngine();
 		const tap = engine.getAnalyserTap();
 		expect(engine.getAnalyserTap()).toBe(tap);
 		const chain = engine.buildChain([{ kind: 'OFF' }], 0);
-		expect(asFake(chain.volume, FakeGainNode).connections).toContain(tap);
+		const meter = asFake(engine.getMeterBus(), FakeGainNode);
+		expect(meter.connections).toContain(tap);
+		expect(asFake(chain.volume, FakeGainNode).connections).not.toContain(tap);
+	});
+
+	it('feeds the meter bus pre-volume: setVolume never changes what reaches it', async () => {
+		const { engine } = makeEngine();
+		const chain = engine.buildChain([{ kind: 'OFF' }], 0);
+		const context = onlyContext();
+		const meter = asFake(engine.getMeterBus(), FakeGainNode);
+		const master = asFake(chain.volume, FakeGainNode);
+		expect(engine.getMeterBus()).toBe(meter);
+		// The meter bus is reached from the chains (and from the raw path) but not through master.
+		const fromBus = context.reachable(asFake(engine.getSourceBus(), FakeGainNode));
+		expect(fromBus.has(meter)).toBe(true);
+		const fromChain = context.reachable(asFake(chain.output, FakeGainNode));
+		expect(fromChain.has(meter)).toBe(true);
+		expect(context.reachable(master).has(meter)).toBe(false);
+		// Nothing on the meter path reaches the destination nor passes through master.
+		const fromMeter = context.reachable(meter);
+		expect(fromMeter.has(context.destination)).toBe(false);
+		expect(fromMeter.has(master)).toBe(false);
+
+		await engine.start();
+		const feeding = context.nodes.filter(
+			(node) => node instanceof FakeGainNode && node.connections.includes(meter)
+		);
+		expect(feeding).toHaveLength(2);
+		const gainsBefore = feeding.map((node) => asFake(node, FakeGainNode).gain.value);
+		const eventsBefore = feeding.map((node) => asFake(node, FakeGainNode).gain.events.length);
+		const meterBefore = meter.gain.value;
+		engine.setVolume(-30);
+		expect(master.gain.value).toBeCloseTo(dbToGain(-30));
+		expect(feeding.map((node) => asFake(node, FakeGainNode).gain.value)).toEqual(gainsBefore);
+		expect(feeding.map((node) => asFake(node, FakeGainNode).gain.events.length)).toEqual(
+			eventsBefore
+		);
+		expect(meter.gain.value).toBe(meterBefore);
+		expect(meter.gain.events).toEqual([]);
 	});
 });
 

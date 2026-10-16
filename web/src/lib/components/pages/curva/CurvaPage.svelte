@@ -60,8 +60,20 @@
 		onlayer: (layer: Layer) => void;
 		/** Test injection; defaults to the gate Web Worker client. */
 		gateClient?: GateClient;
+		/**
+		 * Removes the consumed `#p=` link from the address bar, so a reload does not apply it again.
+		 * Defaults to `history.replaceState`, keeping the router's history state.
+		 */
+		clearLinkHash?: () => void;
 	}
-	let { app, layer, hash, pageUrl, onlayer, gateClient }: Props = $props();
+	let { app, layer, hash, pageUrl, onlayer, gateClient, clearLinkHash }: Props = $props();
+
+	/** Drops `#p=…` from the address bar without a navigation (path, query and state are kept). */
+	function clearAddressLink(): void {
+		if (typeof window === 'undefined' || !window.location.hash.startsWith('#p=')) return;
+		const { pathname, search } = window.location;
+		window.history.replaceState(window.history.state, '', pathname + search);
+	}
 
 	const injected = untrack(() => gateClient);
 	const owned = injected === undefined ? createGateWorker() : null;
@@ -275,12 +287,16 @@
 				untrack(() => layer)
 			);
 			if (result === null) return;
+			// Consumed either way: applied, or refused and reported. A reload must not repeat it.
+			const clear = untrack(() => clearLinkHash) ?? clearAddressLink;
 			if (!result.ok) {
 				notify(m.curva_link_refused({ reason: ioFailureText(result) }), 'error');
+				clear();
 				return;
 			}
 			apply(result.curve, { name: m.curva_name_link(), source: 'import' });
 			notify(m.curva_link_loaded());
+			clear();
 		});
 	});
 
@@ -290,7 +306,8 @@
 	$effect(() => {
 		const client = app;
 		if (!client) return;
-		const instance = new CurvaPreview(client.audio);
+		const meterRef = client.state.meterRef;
+		const instance = new CurvaPreview(client.audio, { reference: () => meterRef.value });
 		preview = instance;
 		return () => {
 			instance.dispose();
@@ -326,7 +343,8 @@
 	function onPreview() {
 		const instance = preview;
 		if (!instance) return;
-		if (instance.playing) instance.stop();
+		// A second press while the engine is still starting cancels, like a stop.
+		if (instance.playing || instance.starting) instance.stop();
 		else void instance.start(reference, curve);
 	}
 
@@ -403,6 +421,7 @@
 				{referenceName}
 				{previewError}
 				previewDisabled={!preview}
+				approximate={preview ? !preview.exact : false}
 				ondrag={(index, target) => void onDrag(index, target)}
 				oncommit={(index, target) => void onCommit(index, target)}
 				onpreview={onPreview}

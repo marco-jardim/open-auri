@@ -6,6 +6,8 @@ export { default as PeakLamp } from './PeakLamp.svelte';
 export { default as LoudnessReadout } from './LoudnessReadout.svelte';
 export { default as SpectrumOverlay } from './SpectrumOverlay.svelte';
 export { default as MeterModeLabel } from './MeterModeLabel.svelte';
+export { default as VuReferenceSelect } from './VuReferenceSelect.svelte';
+export type { VuReferenceStore } from './VuReferenceSelect.svelte';
 export { LiveMeter } from './live.svelte.ts';
 export { PeakHold, ThrottledNumber } from './motion.svelte.ts';
 export {
