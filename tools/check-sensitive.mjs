@@ -10,6 +10,8 @@ const safelist = new Set([
   'SIGNUP_ENABLED',
   'ADMIN_2FA_REQUIRED',
   'PUBLIC_GITHUB_URL',
+  // A calendar date; it collides with dated paths and fixtures and identifies nobody.
+  'PUBLIC_POLICY_EFFECTIVE_DATE',
   // Public resource names derived from the project name; their IDs stay scanned.
   'D1_DATABASE_NAME',
   'D1_DATABASE_NAME_STAGING',
