@@ -10,6 +10,15 @@ const safelist = new Set([
   'SIGNUP_ENABLED',
   'ADMIN_2FA_REQUIRED',
   'PUBLIC_GITHUB_URL',
+  // Public resource names derived from the project name; their IDs stay scanned.
+  'D1_DATABASE_NAME',
+  'D1_DATABASE_NAME_STAGING',
+  'R2_BUCKET',
+  'R2_BUCKET_STAGING',
+  'ACCESS_LOG_QUEUE',
+  'ACCESS_LOG_QUEUE_STAGING',
+  'ACCESS_LOG_DLQ',
+  'ACCESS_LOG_DLQ_STAGING',
 ]);
 const maxFileSize = 5 * 1024 * 1024;
 
