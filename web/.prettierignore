@@ -1,0 +1,20 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Miscellaneous
+/static/
+src/lib/paraglide/**
+.svelte-kit/**
+.wrangler/**
+worker-configuration.d.ts
+wrangler.jsonc
+coverage/
+test-results/
+playwright-report/
+project.inlang/cache/
+
+project.inlang/

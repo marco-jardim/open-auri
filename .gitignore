@@ -154,6 +154,11 @@ vite.config.ts.timestamp-*
 playwright-report/
 test-results/
 /web/wrangler.jsonc
+/web/src/lib/paraglide/
+/web/.svelte-kit/
+/web/test-results/
+/web/playwright-report/
+/web/coverage/
 /workers/jobs/wrangler.jsonc
 /web/static/data/autoeq/
 
