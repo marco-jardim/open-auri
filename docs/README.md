@@ -36,21 +36,78 @@ está marcado como hipótese ou pendência — não como fato.
 
 ## Índice do núcleo
 
-| Módulo ou documento | Estado |
-|---|---|
-| [`src/dsp/level.mjs`](../src/dsp/level.mjs) | em construção |
-| [`src/dsp/distance.mjs`](../src/dsp/distance.mjs) | em construção |
-| [`src/dsp/iso226.mjs`](../src/dsp/iso226.mjs) | em construção |
-| [`src/safety/`](../src/safety/) | em construção |
-| [`src/share/`](../src/share/) | em construção |
-| [`src/io/`](../src/io/) | em construção |
-| [`src/solver/`](../src/solver/) | em construção |
-| [`src/catalog/`](../src/catalog/) | em construção |
-| [`src/transport/`](../src/transport/) | em construção |
-| [`src/policy/`](../src/policy/) | em construção |
-| [`src/meter/`](../src/meter/) | em construção |
-| [`schemas/`](../schemas/) | em construção |
-| [`docs/s1-format.md`](s1-format.md) | em construção |
+A entrada [`src/index.mjs`](../src/index.mjs), importada como `open-auri`, oferece os
+namespaces `dsp`, `safety`, `share`, `io`, `solver`, `catalog`, `transport`, `policy` e
+`meter`, além dos atalhos mais usados. Cada área também tem uma entrada própria:
+
+```js
+import { encodePayload, gateForWrite, encodeS1, NEUTRO } from 'open-auri';
+import { autoPreamp } from 'open-auri/safety';
+```
+
+### DSP: `open-auri/dsp`
+
+- [`eq0xcb.mjs`](../src/dsp/eq0xcb.mjs): filtros, quantização Q27, payloads e reports HID.
+- [`grid.mjs`](../src/dsp/grid.mjs): grade logarítmica comum de frequências.
+- [`level.mjs`](../src/dsp/level.mjs): resposta e nível médio dos coeficientes quantizados.
+- [`distance.mjs`](../src/dsp/distance.mjs): comparação perceptual entre curvas, com ajuste de nível.
+- [`iso226.mjs`](../src/dsp/iso226.mjs): contornos de igual sonoridade e pesos perceptuais ISO 226.
+
+### Segurança: `open-auri/safety`
+
+- [`gate.mjs`](../src/safety/gate.mjs): análise de estabilidade, headroom e pré-amp seguro para gravação.
+- [`policy.mjs`](../src/safety/policy.mjs): limites de edição, grade, interpolação e busca de fronteira.
+- [`thresholds.mjs`](../src/safety/thresholds.mjs): limiares de segurança e sua proveniência.
+
+Os aliases `levelDb`, `MEAN_FREQUENCIES` e `sectionDb` vêm de `dsp/level.mjs`;
+`THRESHOLDS` e `PROVENANCE` vêm de `safety/thresholds.mjs`. Embora o gate também os
+reexporte, cada nome aparece uma única vez no índice da área.
+
+### Compartilhamento: `open-auri/share`
+
+- [`s1.mjs`](../src/share/s1.mjs): codec compacto S1, chave canônica e identificador da curva.
+- [`envelope.mjs`](../src/share/envelope.mjs): normalização, validação e JSON dos envelopes de presets.
+
+### Entrada e saída: `open-auri/io`
+
+- [`equalizer-apo.mjs`](../src/io/equalizer-apo.mjs): importação e exportação de curvas Equalizer APO.
+- [`measurement.mjs`](../src/io/measurement.mjs): leitura de medições, reamostragem,
+  normalização e suavização.
+
+### Ajuste paramétrico: `open-auri/solver`
+
+- [`peq.mjs`](../src/solver/peq.mjs): ajuste limitado de filtros PEQ e construção de curvas-alvo.
+
+### Catálogo: `open-auri/catalog`
+
+- [`presets.mjs`](../src/catalog/presets.mjs): presets oficiais imutáveis, Neutro e
+  consultas por ID ou grupo.
+
+### Transporte: `open-auri/transport`
+
+- [`webhid.mjs`](../src/transport/webhid.mjs): seleção do cabo e gravação com gate, espaçamento e commit.
+- [`fake-device.mjs`](../src/transport/fake-device.mjs): dispositivo, conexão HID e relógio simulados.
+
+### Políticas locais: `open-auri/policy`
+
+- [`flash.mjs`](../src/policy/flash.mjs): intervalo entre gravações, contadores e avisos de uso da flash.
+- [`loudness.mjs`](../src/policy/loudness.mjs): aviso de salto de nível entre curvas.
+- [`journal.mjs`](../src/policy/journal.mjs): validação, limite de entradas e JSON do diário local.
+
+### Medição de áudio: `open-auri/meter`
+
+- [`ballistics.mjs`](../src/meter/ballistics.mjs): medidores VU e PPM com balística temporal.
+- [`truepeak.mjs`](../src/meter/truepeak.mjs): pico verdadeiro por sobreamostragem.
+- [`loudness.mjs`](../src/meter/loudness.mjs): ponderação K e sonoridade momentânea e de curto prazo.
+- [`correlation.mjs`](../src/meter/correlation.mjs): correlação entre canais estéreo.
+- [`common.mjs`](../src/meter/common.mjs): constantes e auxiliares públicos dos medidores.
+
+### Formatos de referência
+
+- [`schemas/preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json):
+  esquema JSON do envelope v1, validado pela API `open-auri/share`.
+- [`docs/s1-format.md`](s1-format.md): especificação congelada do S1 v1, implementado em
+  `open-auri/share`.
 
 ## Créditos
 

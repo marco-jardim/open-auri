@@ -1,0 +1,5 @@
+/** Quantized-filter safety checks, editing policy and documented thresholds. @module */
+export { levelDb, MEAN_FREQUENCIES, sectionDb } from '../dsp/level.mjs';
+export { THRESHOLDS, PROVENANCE } from './thresholds.mjs';
+export { GRID_INTERVALS, poleRadius, sectionPeaks, sectionAnalysis, autoPreampForSection, gate, gateForWrite, autoPreamp, } from './gate.mjs';
+export { SOFT_RANGES, ABS_RANGES, EXPERIMENTAL_KINDS, LAYER_KINDS, GRID_STEPS, isKindAllowed, isExperimentalKind, roundToGrid, clampToAbs, interpolateLinear, interpolateBand, boundarySearch, snapToGridAccepted, } from './policy.mjs';
