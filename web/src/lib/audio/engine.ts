@@ -378,7 +378,11 @@ function openDbVersion(factory: IDBFactory, version: number | undefined): Promis
 		request.onupgradeneeded = () => {
 			const db = request.result;
 			for (const name of DB_STORES) {
-				if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+				// Same schema as the state layer (#lib/state/storage.ts): whichever layer opens a fresh
+				// profile first creates every store, and `library`/`outbox` records are keyed by `id`.
+				if (!db.objectStoreNames.contains(name)) {
+					db.createObjectStore(name, name === AUDIO_STORE ? undefined : { keyPath: 'id' });
+				}
 			}
 		};
 		request.onsuccess = () => {
