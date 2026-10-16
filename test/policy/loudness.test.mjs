@@ -7,6 +7,10 @@ import {
   loudnessWarning,
 } from '../../src/policy/loudness.mjs';
 
+/**
+ * @param {Partial<Parameters<typeof loudnessWarning>[0]>} [overrides]
+ * @returns {Parameters<typeof loudnessWarning>[0]}
+ */
 function input(overrides = {}) {
   return {
     newLevelDb: 0,
@@ -19,20 +23,26 @@ function input(overrides = {}) {
 
 test('loudness constants match the inclusive threshold and exact UI text', () => {
   assert.equal(LOUDNESS_JUMP_DB, 3);
-  assert.equal(LOUDNESS_TOLERANCE_DB, 1e-6);
+  assert.equal(LOUDNESS_TOLERANCE_DB, 1e-4);
   assert.equal(
     LOUDNESS_WARNING_TEXT,
     'A nova curva pode soar mais alta. Abaixe o volume antes de gravar.',
   );
 });
 
+test('loudness tolerance exceeds the worst-case Q23 level-difference error', () => {
+  const wordMin = Math.round(10 ** (-25.5 / 20) * 2 ** 23);
+  const worstCaseDifferenceDb = 2 * 20 * Math.log10(1 + 0.5 / wordMin);
+  assert.ok(LOUDNESS_TOLERANCE_DB > worstCaseDifferenceDb);
+});
+
 test('the 3.0 dB threshold tolerates Q23 rounding but not a larger shortfall', () => {
-  assert.deepEqual(loudnessWarning(input({ newLevelDb: 3 - 2e-6 })), {
+  assert.deepEqual(loudnessWarning(input({ newLevelDb: 3 - 2e-4 })), {
     warn: false,
     reasons: [],
-    deltaDb: 3 - 2e-6,
+    deltaDb: 3 - 2e-4,
   });
-  for (const deltaDb of [3 - 1e-6, 3 - 5e-7, 2.9999999999999996, 3, 3 + 5e-7]) {
+  for (const deltaDb of [3 - 1e-4, 3 - 5e-5, 2.9999999999999996, 3, 3 + 5e-7]) {
     assert.deepEqual(loudnessWarning(input({ newLevelDb: deltaDb })), {
       warn: true,
       reasons: ['jump'],
