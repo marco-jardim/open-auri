@@ -32,4 +32,12 @@ Leia antes de qualquer tarefa da F4, junto com `D:\git\open-auri\docs\plans\f2-d
 - **Rotas:** `export const prerender = false` em toda rota de servidor. Nada de `fetch` para URL vinda do usuário (SSRF).
 - **Testes:** integração em `web/tests/integration/social/<serviço>/**` (workerd, `npm run -w web test:int`, o orquestrador roda); componentes em `web/tests/unit/**`. Cobertura alvo ≥ 90% em `web/src/lib/server/social/**`.
 - **Mensagens:** staging `web/messages/_staging/<TASK>.{pt-BR,en-US}.json` (sem `$schema`). Sem travessão em pt-BR.
+## W4.2 (serviços de API): como trabalhar
+
+- Prontos e **só leitura** na W4.2: `web/src/lib/server/social/{repo,types,deletion,export}.ts` + `README.md` (T4.1, commit `61dd163`) e `web/src/lib/server/api/**` + `README.md` (T4.1b, commit `ddc3104`). Leia os dois READMEs primeiro: eles listam funções, predicados de visibilidade, códigos de erro do repositório (`RepoResult`) e da API, e um exemplo de rota.
+- Cada serviço: `web/src/lib/server/social/<serviço>.ts` (regras de negócio, sem SQL direto além de `queries/<serviço>.ts`), rotas `+server.ts` com `defineApi` e `export const prerender = false`, schemas zod, testes em `web/tests/integration/social/<serviço>/**` chamando as rotas reais (importe o `GET`/`POST` do `+server.ts` e chame com um evento sintético, como os testes de `web/tests/integration/api/handler.test.ts`) e o serviço diretamente. Use contas criadas pelo harness da F3 (`web/tests/integration/auth/harness.ts`) ou inserções diretas em `"user"` nos helpers do seu próprio diretório de testes.
+- Mapeie `RepoResult.code` para os códigos da API: `head-moved` → `HEAD_MOVED`, `gate-rejected` → `GATE_REJECTED`, `not-found` → `NOT_FOUND`, `already-active` → `ALREADY_ACTIVE`, `duplicate` → `DUPLICATE`, `invalid-input` → `INVALID_BODY`, `invalid-cursor` → `INVALID_CURSOR`. Cotas diárias → `QUOTA_EXCEEDED` (ou `RATE_LIMITED` do kit, via `quotas`).
+- Testes dividem o mesmo D1 entre arquivos: use ids e apelidos únicos por teste (prefixo do serviço + aleatório) e nunca dependa de contagem global.
+- Não rode testes (o orquestrador roda); informe no relatório o que não rodou. Linhas no padrão do Prettier do projeto (tabs, aspas simples, largura 100).
+
 - **Regras gerais:** nunca commitar; nunca `Co-Authored-By` nem "Generated with"; sem `as any`, `@ts-ignore`, `@ts-expect-error`; sem `catch` vazio; nada do `.env` em arquivo, teste ou log; logs sem PII.

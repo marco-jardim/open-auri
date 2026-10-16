@@ -17,7 +17,16 @@ export const API_ERROR_CODES = [
 	'RATE_LIMITED',
 	'RATE_LIMIT_UNAVAILABLE',
 	'TURNSTILE_FAILED',
-	'INTERNAL'
+	'INTERNAL',
+	'INVALID_CURSOR',
+	'INVALID_CURVE',
+	'GATE_REJECTED',
+	'HEAD_MOVED',
+	'ALREADY_ACTIVE',
+	'DUPLICATE',
+	'GONE',
+	'QUOTA_EXCEEDED',
+	'CONSENT_REQUIRED'
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -37,7 +46,16 @@ export const API_ERROR_STATUS: Readonly<Record<ApiErrorCode, number>> = {
 	RATE_LIMITED: 429,
 	RATE_LIMIT_UNAVAILABLE: 503,
 	TURNSTILE_FAILED: 403,
-	INTERNAL: 500
+	INTERNAL: 500,
+	INVALID_CURSOR: 400,
+	INVALID_CURVE: 422,
+	GATE_REJECTED: 422,
+	HEAD_MOVED: 409,
+	ALREADY_ACTIVE: 409,
+	DUPLICATE: 409,
+	GONE: 410,
+	QUOTA_EXCEEDED: 429,
+	CONSENT_REQUIRED: 400
 };
 
 /** JSON-serialisable detail payload (machine-readable; never echoes user input). */

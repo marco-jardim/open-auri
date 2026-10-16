@@ -92,5 +92,14 @@ Body: `{ "error": { "code": "…", "details"?: … } }`, `content-type: applicat
 | `RATE_LIMIT_UNAVAILABLE` | 503    | Binding, salt store or D1 failed (fail closed)                                             |
 | `TURNSTILE_FAILED`       | 403    | Missing, invalid, mismatched or unverifiable `x-turnstile-token`                           |
 | `INTERNAL`               | 500    | Any other error                                                                            |
+| `INVALID_CURSOR`         | 400    | Pagination cursor that does not decode (`SocialRepoError('invalid-cursor')`)               |
+| `INVALID_CURVE`          | 422    | S1/S5 that does not decode or validate (`details.codes`: core `s1:*` / `env:*` codes)      |
+| `GATE_REJECTED`          | 422    | Curve reproved by the safety gate (`details.reasons`: gate reason codes)                   |
+| `HEAD_MOVED`             | 409    | New version whose parent is no longer the lineage head                                     |
+| `ALREADY_ACTIVE`         | 409    | One-per-user resource already active (S7 trade)                                            |
+| `DUPLICATE`              | 409    | Unique resource already exists (e.g. second report of the same target)                     |
+| `GONE`                   | 410    | Retracted lineage (tombstone) read by someone other than the owner                         |
+| `QUOTA_EXCEEDED`         | 429    | Per-user daily quota of a domain action exceeded                                           |
+| `CONSENT_REQUIRED`       | 400    | S6 batch without the current consent version                                               |
 
 No error body or log line carries user input, e-mail, IP or token.
