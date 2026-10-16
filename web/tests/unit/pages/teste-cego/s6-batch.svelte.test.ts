@@ -1,0 +1,179 @@
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { page } from 'vitest/browser';
+import { cleanup, render } from 'vitest-browser-svelte';
+import serverS6 from '../../../../src/lib/server/social/s6.ts?raw';
+import serverTurnstile from '../../../../src/lib/server/security/turnstile.ts?raw';
+import {
+	officialCandidates,
+	recordRound,
+	startSession
+} from '#lib/components/pages/teste-cego/experiment.ts';
+import {
+	S6_CONSENT_VERSION,
+	S6_ITEM_PATTERN,
+	S6_RECEIPT_PATTERN,
+	S6_RECEIPTS_KEY,
+	S6_TURNSTILE_ACTION,
+	addReceipt,
+	buildBatch,
+	buildPairs,
+	newReceipt,
+	readReceipts,
+	removeReceipt,
+	type ReceiptStorage
+} from '#lib/components/pages/teste-cego/s6.ts';
+import S6Send from '#lib/components/pages/teste-cego/S6Send.svelte';
+
+function memory(): ReceiptStorage & { map: Map<string, string> } {
+	const map = new Map<string, string>();
+	return {
+		map,
+		getItem: (key) => map.get(key) ?? null,
+		setItem: (key, value) => void map.set(key, value)
+	};
+}
+
+function finished() {
+	const candidates = officialCandidates()
+		.filter((c) => c.accepted)
+		.slice(0, 2);
+	let session = startSession(candidates, 2, 'neutral', () => 0);
+	session = recordRound(session, [8, 3], () => 0);
+	session = recordRound(session, [5, 5], () => 0);
+	return session;
+}
+
+afterEach(async () => {
+	await cleanup();
+	vi.restoreAllMocks();
+});
+
+describe('S6 constants mirror the server', () => {
+	test('consent version, receipt and item patterns, Turnstile action', () => {
+		expect(serverS6).toContain(`export const S6_CONSENT_VERSION = '${S6_CONSENT_VERSION}';`);
+		expect(serverS6).toContain(`export const S6_ITEM_PATTERN = /${S6_ITEM_PATTERN.source}/;`);
+		expect(serverS6).toContain(`export const S6_RECEIPT_PATTERN = /${S6_RECEIPT_PATTERN.source}/;`);
+		expect(serverTurnstile).toContain(`s6: '${S6_TURNSTILE_ACTION}'`);
+		expect(S6_CONSENT_VERSION).toBe('s6-consent-v1');
+	});
+});
+
+describe('S6 batch', () => {
+	test('a receipt is 32 random bytes in unpadded base64url (43 chars)', () => {
+		const random = vi.fn((bytes: Uint8Array) => bytes.fill(0xff));
+		expect(newReceipt(random)).toBe(`${'_'.repeat(42)}8`);
+		expect(random.mock.calls[0]![0]).toHaveLength(32);
+		const fresh = newReceipt();
+		expect(fresh).toHaveLength(43);
+		expect(fresh).toMatch(S6_RECEIPT_PATTERN);
+		expect(newReceipt()).not.toBe(fresh);
+	});
+
+	test('pairs carry curve ids and the rated choice; the body has only the allowed keys', async () => {
+		const pairs = await buildPairs(finished());
+		expect(pairs).toHaveLength(2);
+		for (const pair of pairs) {
+			expect(Object.keys(pair)).toEqual(['a', 'b', 'choice', 'levelMatched']);
+			expect(pair.a).toMatch(S6_ITEM_PATTERN);
+			expect(pair.b).toMatch(S6_ITEM_PATTERN);
+			expect(pair.a).not.toBe(pair.b);
+			expect(pair.levelMatched).toBe(true);
+		}
+		expect(pairs.map((pair) => pair.choice)).toEqual(['a', 'tie']);
+		const batch = buildBatch('r'.repeat(43), pairs);
+		expect(Object.keys(batch)).toEqual(['consentVersion', 'receipt', 'pairs']);
+		expect(batch.consentVersion).toBe(S6_CONSENT_VERSION);
+		expect(await buildPairs(null)).toEqual([]);
+	});
+
+	test('local receipts: add, ignore invalid records, remove', () => {
+		const storage = memory();
+		const receipt = newReceipt();
+		expect(addReceipt(storage, { receipt, day: '2026-10-16', pairs: 3 })).toEqual([
+			{ receipt, day: '2026-10-16', pairs: 3 }
+		]);
+		storage.map.set(
+			S6_RECEIPTS_KEY,
+			JSON.stringify([...readReceipts(storage), { receipt: 'bad', day: 'x', pairs: 1 }])
+		);
+		expect(readReceipts(storage)).toHaveLength(1);
+		expect(removeReceipt(storage, receipt)).toEqual([]);
+		storage.map.set(S6_RECEIPTS_KEY, '{not json');
+		expect(readReceipts(storage)).toEqual([]);
+	});
+});
+
+describe('S6Send', () => {
+	test('previews the exact JSON and keeps sending disabled without consent and Turnstile', async () => {
+		const fetchSpy = vi.spyOn(globalThis, 'fetch');
+		const api = { postS6Batch: vi.fn(), deleteS6Batch: vi.fn() };
+		const screen = await render(S6Send, { session: finished(), api, storage: memory() });
+		const preview = screen.container.querySelector('textarea');
+		await expect.poll(() => JSON.parse(preview?.value ?? '{}').pairs?.length).toBe(2);
+		const body = JSON.parse(preview!.value) as Record<string, unknown>;
+		expect(Object.keys(body)).toEqual(['consentVersion', 'receipt', 'pairs']);
+		expect(body.consentVersion).toBe(S6_CONSENT_VERSION);
+		expect(body.receipt).toMatch(S6_RECEIPT_PATTERN);
+		const send = page.getByRole('button', { name: 'Enviar preferências', exact: true });
+		await expect.element(send).toBeDisabled();
+		await page.getByRole('checkbox').nth(0).click();
+		await page.getByRole('checkbox').nth(1).click();
+		await expect.element(send).toBeDisabled();
+		expect(api.postS6Batch).not.toHaveBeenCalled();
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
+	test('send posts exactly the previewed JSON with the token and keeps the receipt locally', async () => {
+		const storage = memory();
+		const postS6Batch = vi.fn(async () => ({ ok: true as const }));
+		const api = { postS6Batch, deleteS6Batch: vi.fn() };
+		const screen = await render(S6Send, { session: finished(), api, storage, token: 'tok-1' });
+		const preview = screen.container.querySelector('textarea');
+		await expect.poll(() => JSON.parse(preview?.value ?? '{}').pairs?.length).toBe(2);
+		const shown = preview!.value;
+		await page.getByRole('checkbox').nth(0).click();
+		await page.getByRole('checkbox').nth(1).click();
+		await page.getByRole('button', { name: 'Enviar preferências', exact: true }).click();
+		await vi.waitFor(() => expect(postS6Batch).toHaveBeenCalledOnce());
+		const [body, token] = postS6Batch.mock.calls[0] as unknown as [unknown, string];
+		expect(body).toEqual(JSON.parse(shown));
+		expect(token).toBe('tok-1');
+		const sent = JSON.parse(shown) as { receipt: string };
+		expect(readReceipts(storage).map((r) => r.receipt)).toEqual([sent.receipt]);
+		// A fresh receipt for the next batch; the single-use token is gone.
+		await expect.poll(() => JSON.parse(preview!.value).receipt).not.toBe(sent.receipt);
+		await expect
+			.element(page.getByRole('button', { name: 'Enviar preferências', exact: true }))
+			.toBeDisabled();
+	});
+
+	test('a refused batch forgets its receipt', async () => {
+		const storage = memory();
+		const { SocialApiError } = await import('#lib/social/index.ts');
+		const api = {
+			postS6Batch: vi.fn(async (): Promise<{ ok: true }> => {
+				throw new SocialApiError(400, 'CONSENT_REQUIRED');
+			}),
+			deleteS6Batch: vi.fn()
+		};
+		await render(S6Send, { session: finished(), api, storage, token: 'tok-2' });
+		await page.getByRole('checkbox').nth(0).click();
+		await page.getByRole('checkbox').nth(1).click();
+		const send = page.getByRole('button', { name: 'Enviar preferências', exact: true });
+		await expect.element(send).toBeEnabled();
+		await send.click();
+		await vi.waitFor(() => expect(api.postS6Batch).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(readReceipts(storage)).toEqual([]));
+	});
+
+	test('"apagar" withdraws the batch by receipt and forgets it locally', async () => {
+		const storage = memory();
+		const receipt = newReceipt();
+		addReceipt(storage, { receipt, day: '2026-10-16', pairs: 2 });
+		const api = { postS6Batch: vi.fn(), deleteS6Batch: vi.fn(async () => undefined) };
+		await render(S6Send, { session: null, api, storage });
+		await page.getByRole('button', { name: new RegExp(receipt.slice(0, 8)) }).click();
+		await vi.waitFor(() => expect(api.deleteS6Batch).toHaveBeenCalledWith(receipt));
+		await vi.waitFor(() => expect(readReceipts(storage)).toEqual([]));
+	});
+});

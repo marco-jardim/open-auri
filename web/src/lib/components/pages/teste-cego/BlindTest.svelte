@@ -10,15 +10,17 @@
 		type PreviewCurve
 	} from '#lib/audio/engine.ts';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
+	import type { SocialApi } from '#lib/social/index.ts';
 	import ListeningRoom from './ListeningRoom.svelte';
 	import CandidateMeter from './CandidateMeter.svelte';
+	import CommunityCandidates from './CommunityCandidates.svelte';
+	import S6Send from './S6Send.svelte';
 	import {
 		bracketStage,
 		candidate,
 		estimatedWrites,
 		nextSpread,
 		officialCandidates,
-		preferencePreview,
 		recordRound,
 		startSession,
 		variations,
@@ -29,16 +31,27 @@
 	} from './experiment.ts';
 	import { createBlindPreview } from './preview.ts';
 
+	type BlindSocialApi = Pick<
+		SocialApi,
+		'feed' | 'rankings' | 'getCurve' | 'postS6Batch' | 'deleteS6Batch'
+	>;
+
 	let {
 		audio = null,
 		current = null,
 		onopen,
-		reducedMotion
+		reducedMotion,
+		api = null,
+		siteKey = ''
 	}: {
 		audio?: AudioEngine | null;
 		current?: (PreviewCurve & { name: string }) | null;
 		onopen?: (value: Candidate) => boolean;
 		reducedMotion?: boolean;
+		/** Social client (T4.16): Comunidade candidates and the S6 submission; null = local only. */
+		api?: BlindSocialApi | null;
+		/** Turnstile site key for the S6 submission. */
+		siteKey?: string;
 	} = $props();
 	const uid = $props.id();
 	const official = officialCandidates();
@@ -46,9 +59,11 @@
 		current ? candidate('current', m.cego_current(), current) : null
 	);
 	let generated = $state.raw<Candidate[]>([]);
+	let community = $state.raw<Candidate[]>([]);
 	const allCandidates = $derived([
 		...official,
 		...(currentCandidate ? [currentCandidate] : []),
+		...community,
 		...generated
 	]);
 	let selected = $state<string[]>([]);
@@ -73,8 +88,6 @@
 	let labSwitch = $state(false);
 	let message = $state('');
 	let announcement = $state('');
-	let consentData = $state(false);
-	let consentWithdraw = $state(false);
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	const reduced = $derived(reducedMotion ?? prefersReducedMotion.current);
 	const labels = $derived([
@@ -99,7 +112,6 @@
 				)
 			: []
 	);
-	const payload = $derived(JSON.stringify(preferencePreview(!active ? session : null), null, 2));
 	const chartMin = $derived(
 		Math.min(0, ...(last?.results.map((r) => r.ci?.[0] ?? r.mean ?? 0) ?? []))
 	);
@@ -235,8 +247,6 @@
 		if (!keepHistory) history = [];
 		active = true;
 		tab = 2;
-		consentData = false;
-		consentWithdraw = false;
 		prepareRound();
 	}
 	async function play() {
@@ -309,8 +319,10 @@
 		tab = 1;
 		message = '';
 		announcement = m.cego_closed();
-		consentData = false;
-		consentWithdraw = false;
+	}
+	function addCommunity(value: Candidate) {
+		if (active || allCandidates.some((c) => c.id === value.id)) return;
+		community = [...community, value];
 	}
 	function continueTournament() {
 		if (!last) return;
@@ -514,6 +526,12 @@
 										{/each}
 									</div>
 									<p class="note">{m.cego_gate_note()}</p>
+									<CommunityCandidates
+										{api}
+										disabled={active}
+										added={community.map((c) => c.id)}
+										onadd={addCommunity}
+									/>
 									<div class="grid2">
 										<div class="card">
 											<h3>{m.cego_variations()}</h3>
@@ -760,30 +778,7 @@
 								{:else}
 									<h2>{m.cego_share_title()}</h2>
 									<p class="lede">{m.cego_share_note()}</p>
-									<div class="card">
-										<label class="opt"
-											><input type="checkbox" bind:checked={consentData} /><span
-												>{m.cego_consent_data()}</span
-											></label
-										><label class="opt"
-											><input type="checkbox" bind:checked={consentWithdraw} /><span
-												>{m.cego_consent_withdraw()}</span
-											></label
-										>
-										<p class="note">{m.cego_private()}</p>
-										<button class="accent" type="button" disabled aria-describedby="{uid}-send-note"
-											>{m.cego_send()}</button
-										>
-										<p id="{uid}-send-note" class="note">{m.cego_send_later()}</p>
-									</div>
-									<h3>{m.cego_preview()}</h3>
-									<textarea
-										class="payload"
-										readonly
-										rows="12"
-										wrap="off"
-										aria-label={m.cego_preview()}
-										value={payload}></textarea>
+									<S6Send session={!active ? session : null} {api} {siteKey} />
 								{/if}
 								{#if !audioState.exact}<p class="warn">{m.cego_approximate()}</p>{/if}
 								<p class="message" role="status">{message}</p>
@@ -1213,15 +1208,6 @@
 	.cost {
 		font: 36px var(--serif, 'Instrument Serif', Georgia, serif);
 		color: var(--accent);
-	}
-	.payload {
-		max-height: 300px;
-		overflow: auto;
-		font: 11px/1.5 var(--mono, monospace);
-		background: #0b0a09;
-		border: 1px solid var(--rule);
-		border-radius: 10px;
-		padding: 12px;
 	}
 	@media (max-width: 980px) {
 		.desk-grid {

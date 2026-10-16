@@ -25,9 +25,17 @@
 	import TransportTape from './TransportTape.svelte';
 	import Journal from './Journal.svelte';
 	import FlashCounters from './FlashCounters.svelte';
+	import SocialStatus from './SocialStatus.svelte';
 	import { encoderData, rackState, RACK_STATES, type RackState } from './model.ts';
 
-	let { app }: { app: ClientApp | null } = $props();
+	let {
+		app,
+		signedIn = false
+	}: {
+		app: ClientApp | null;
+		/** T4.16: shows "instalada" for a community curve; never affects writing. */
+		signedIn?: boolean;
+	} = $props();
 	const fallback = neutralCurve();
 	const curve = $derived(app?.state.curve.current ?? fallback);
 	const preset = $derived(
@@ -314,6 +322,7 @@
 		<div class="vent" aria-hidden="true"></div>
 		<RackUnit number="U5" title={m.cabo_journal()} model={m.cabo_journal_model()}>
 			<Journal {entries} onload={app === null ? undefined : loadEntry} />
+			<SocialStatus {entries} {signedIn} />
 		</RackUnit>
 		<RackUnit number="U6" title={m.cabo_counters()} model={m.cabo_flash_model()} silver>
 			<FlashCounters {counters} />
