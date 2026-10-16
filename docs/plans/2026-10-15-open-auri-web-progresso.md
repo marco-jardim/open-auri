@@ -2,7 +2,7 @@
 
 ## Estado
 
-Fase atual: F2 · Wave: W2.5 (T2.17, T2.18) · Último commit: af4061c
+Fase atual: F2 · Etapa: Q2 (rodada 1) · Último commit: 62d8f54
 
 ## Locks ativos
 
@@ -90,7 +90,11 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | T2.15 | commitada | 4ea5b62 | |
 | T2.16 | commitada | 187be25 | Escape no campo de busca fecha o diálogo (o Chrome consumia o 1º Escape para limpar o campo), corrigido pelo orquestrador |
 | W2.4 fix | commitada | 83c244b, af4061c | env LGPD público, ARIA dos medidores em repouso, `lang` do `<html>` sincronizado no cliente, `PENDING_ROUTES` só com `/comunidade`, e2e com `locale: 'pt-BR'` |
-| T2.19 (pipeline real) | pendente | — | `node tools/import-autoeq.mjs` falha com `write EOF` (stdin do `git cat-file --batch`); corrigir antes da T2.T |
+| T2.19 (pipeline real) | em execução | 5fb6dd3 | `write EOF` corrigido; falhas transitórias de rede retomam do cache (2 688/5 901 blobs na 1ª tentativa); pacotes gerados não são versionados |
+| T2.17 | commitada | a132d95, 73d83b3 | `\/manifest` (Kit 3); flag `__oaWriteInProgress` no serviço do cabo |
+| T2.18 | commitada | 77537f3 | todas as rotas ≤ 148 kB gzip de JS inicial (limite 250) |
+| T2.T | commitada | 390af8b, 62d8f54 | e2e 253 ok + 32 referências visuais (sem `/privacidade` e `/termos`, que exibem dados do operador); unidade 933 testes; cobertura web 96,7 % instruções, 87,9 % branches, 97,3 % funções, 97,2 % linhas; pendentes: smoke da Soe como X (depende dos pacotes AutoEq) e testes de componente instáveis sob carga (falhas diferentes a cada rodada, ex.: `cabo/edges.svelte.test.ts:112`) |
+| Q2 | em voo | — | heavy |
 
 Verificação central da W2.4: `check:web` 0 erros; `test:web:unit` 61 arquivos, 586 testes; lint do web limpo; build ok; e2e smoke 2/2; raiz 613/613.
 
