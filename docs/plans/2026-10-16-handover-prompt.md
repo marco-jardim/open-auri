@@ -17,13 +17,17 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 
 ## Primeira ação
 
-**Estado em 2026-10-16:** F1 concluída (PASS, push ``25b2ee1``, #1 fechada; minors #8–#13). F2 em andamento: T2.1–T2.16 e o código da T2.19 commitados até ``af4061c`` (sem push; push só ao fim da fase aprovada). Próximo: corrigir o pipeline real do AutoEq (``write EOF``), W2.5 (T2.17, T2.18), W2.6 (T2.T) e Q2 heavy. Leia o handover §5b e o registro de progresso antes de agir.
+**Estado (2026-10-16, antes de reiniciar a máquina):**
+- **F1 (núcleo):** concluída. QA heavy PASS, push `25b2ee1`, issue #1 fechada; minors adiados nas issues #8 a #13 (`qa-minor`).
+- **F2 (web local-first):** implementada e testada (PF2, T2.1–T2.19, T2.T). Último commit `71ef64a`. São **38 commits locais sem push**: o push acontece só quando o Q2 aprovar. Falta o **Q2**, que estava rodando e se perdeu no reinício.
+- **Decisões importantes já tomadas:** SvelteKit **3.1** (configuração no `web/vite.config.ts`, `#lib`, `$app/env/public`); TypeScript **6** no núcleo e no web; testes de componente em Chromium real (`vitest-browser-svelte`). Estão todas registradas no progresso.
 
-1. Leia o plano: §0 (diretivas 0.1 a 0.21), §3, §4, §5, §6 e a **Fase 2** completa (linhas ~1103–1614).
-2. Leia o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md`, principalmente a seção "Decisões durante a execução".
-3. Continue a F2 a partir da próxima ação do handover (issue #2: marque T2.2 a T2.16 se ainda não estiverem marcadas).
-4. Siga wave após wave na F2, depois F3, F4 e F5, **sem pausar entre waves ou fases**.
-
+**Ordem:**
+1. Leia `D:\git\open-auri\docs\plans\2026-10-16-handover.md`, **começando pela seção 0** (retomada após reinício, pendências e despacho do Q2) e depois a §5b. Em seguida leia o registro de progresso `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (seção "Decisões durante a execução") e o brief dos delegados `D:\git\open-auri\docs\plans\f2-delegate-brief.md`.
+2. Gere os dados AutoEq com cache persistente, porque o cache em `%TEMP%` foi apagado: crie `/.cache/` no `.gitignore` e rode `node tools/import-autoeq.mjs --cache D:\git\open-auri\.cache\autoeq`. Depois rode o smoke e2e da `/soe-como-x`.
+3. Estabilize os testes de componente instáveis sob carga, depois rode a verificação central completa (ver "Troubleshooting").
+4. Rode o **Q2** heavy (rodada 1) e siga o ciclo da §0.5. Com PASS: push para `origin/main`, marque e feche a issue #2, comente na #7.
+5. Siga para a **F3** (PF3 primeiro) e depois F4 e F5, **sem pausar entre waves ou fases**. Plano: F3 a partir da linha ~1615, F4 ~1976, F5 ~2269.
 ## Regras inegociáveis
 
 1. **Iteração contínua.** Pare só por bloqueio ou algo crítico: ambiguidade que muda o resultado, risco de segurança, de perda de dados, ao cabo ou à audição, licença, ou entrada humana ausente. Ao parar, registre no progresso, abra uma issue `bloqueio` sem dados sensíveis, proponha opções e continue o que não estiver bloqueado.
@@ -67,6 +71,8 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 
 ## Troubleshooting que já custou tempo
 
+- **Verificação central (o orquestrador roda depois de cada wave, porque o `router_run` só aceita `npm test`, `npm run lint` e `npm run typecheck` da raiz):** `npx prettier --write` (na raiz e em `web`); `npm test`; `npm run test:coverage`; `npm run lint`; `npm run typecheck`; `npm run types`; `npm run check:web`; `npm run test:web:unit`; `npm run -s -w web lint`; `npm run build:web`; `cd web; npx playwright test --workers=6`; `node web/scripts/check-budgets.mjs`; `node tools/check-sensitive.mjs`. Salve as saídas longas em `D:\git\open-auri\_qa\` e aponte os delegados para esses arquivos. Delegados nunca rodam testes do web.
+- **Capturas visuais e dados do operador:** nunca versione capturas de páginas que renderizam `PUBLIC_LGPD_*` ou `PUBLIC_ORIGIN` (o `check-sensitive` pula binários). `/privacidade` e `/termos` já estão fora da suíte visual.
 - **Recusas do `router_run`** (`node --test <arquivo>`, scripts fora da allowlist): use os scripts por área do `package.json`, um agente de tier com shell (`medium`) ou, em último caso, rode direto (regra 3).
 - **"NOT ACCEPTED" do verificador** em despachos paralelos costuma ser falso: ele vê no delta os arquivos de outras tarefas, ou o critério veio truncado. Verifique de forma independente antes de redespachar. Retome a MESMA `sessionID` só para defeitos reais.
 - **Implementers não leem fora do repositório** (`%TEMP%`): cole os fatos no prompt.
