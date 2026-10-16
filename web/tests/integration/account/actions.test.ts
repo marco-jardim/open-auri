@@ -7,8 +7,7 @@ import { POLICY_VERSION } from '#lib/content/legal/version.ts';
 import {
 	changeAccountPassword,
 	EMAIL_CHANGE_CALLBACK,
-	requestEmailChange,
-	verifyCurrentPassword
+	requestEmailChange
 } from '#lib/server/account/auth-actions.ts';
 import {
 	EMAIL_CHANGE_PENDING_MS,
@@ -29,6 +28,7 @@ import {
 	uniqueEmail
 } from '../auth/harness.ts';
 import { ANONYMOUS, authSession, count, locals, origin, seedSession, seedUser } from './helpers.ts';
+import { verifyCurrentPassword } from './verify-password.ts';
 
 const network = setupNetwork();
 
@@ -230,9 +230,30 @@ describe('change e-mail', () => {
 		expect(
 			await pendingEmailChange(env.DB, user.id, user.email, now + EMAIL_CHANGE_PENDING_MS)
 		).toBeNull();
+		// Reading never writes (the /conta page and the export run while read-only is on).
 		expect(
 			await count('SELECT count(*) AS n FROM email_change_requests WHERE user_id = ?', user.id)
+		).toBe(1);
+	});
+
+	it('expired requests are pruned by the next recorded request, oldest first', async () => {
+		const stale = await seedUser();
+		const other = await seedUser();
+		const now = Date.now();
+		// Expired long ago: the oldest row of the table, so the bounded prune reaches it first.
+		await env.DB.prepare(
+			'INSERT INTO email_change_requests (user_id, new_email, requested_at, expires_at) ' +
+				'VALUES (?, ?, 0, 1)'
+		)
+			.bind(stale.id, `${crypto.randomUUID()}@example.org`)
+			.run();
+		await recordEmailChangeRequest(env.DB, other.id, `${crypto.randomUUID()}@example.org`, now);
+		expect(
+			await count('SELECT count(*) AS n FROM email_change_requests WHERE user_id = ?', stale.id)
 		).toBe(0);
+		expect(
+			await count('SELECT count(*) AS n FROM email_change_requests WHERE user_id = ?', other.id)
+		).toBe(1);
 	});
 });
 

@@ -69,11 +69,26 @@ action runs the guard itself (SvelteKit does not make them wait for the layout l
   dot segments resolved, repeated/trailing slashes dropped, case-insensitive), since blocking more
   is harmless. The token is not consumed, so the link works again once the switch is off (unless
   it expired). Every other GET/HEAD/OPTIONS never reads KV.
+- **Writes that GETs still make while on (Q3 round 2, m2).** The switch blocks requests, not
+  every D1 write behind an allowed GET:
+  - Better Auth's session lookup (`getSession` in the auth step and in the auth hooks) refreshes a
+    session's `expiresAt` once `updateAge` (1 day) passed, and deletes a session row whose cookie
+    shows up after it expired. `createAuth(env, { readOnly: true })` sets Better Auth's
+    `session.disableSessionRefresh` for that (per-request) instance and removes the refresh
+    write; `src/hooks.server.ts` must pass `readOnly: await isReadOnly(env)` for it to apply (one
+    KV read per isolate per 10 s, shared with this switch's cache). The expired-session delete has
+    no switch in Better Auth 1.7.10 and stays: it only removes a dead row.
+  - The rate-limit counters of the auth guard (sign-in stays allowed) and the audit rows of the
+    `/admin` actions keep being written: they are the guards themselves.
+  - Reading the pending e-mail change (/conta, the LGPD export) no longer prunes expired rows; the
+    prune runs when a new change is recorded (`account/email-change.ts`).
 - **Response format.** JSON `{"code":"READ_ONLY"}` by default; browser navigations
   (`Sec-Fetch-Mode: navigate` or `Accept` with `text/html`, e.g. a clicked e-mail link or a form
   posted without JavaScript) get a static bilingual HTML page (pt-BR / en-US, no scripts, no
-  request data, `data-code="READ_ONLY"`). The page is static because the step runs before
-  paraglide (no locale yet).
+  request data, `data-code="READ_ONLY"`) with its own CSP (`default-src 'none'; style-src
+'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'`, kept by `applySecurityHeaders`
+  because it has `frame-ancestors`). The page is static because the step runs before paraglide
+  (no locale yet).
 - **Headers and access log.** The step runs first (before auth, whose session lookup can write),
   so the later hooks never see its 503. `createReadOnlyHandle({ finish })` applies the same
   security headers and access-log record to it; the access record of a blocked request has no

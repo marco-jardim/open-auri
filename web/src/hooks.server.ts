@@ -22,6 +22,7 @@ import { env as workerEnv, waitUntil as workerWaitUntil } from 'cloudflare:worke
 import { getTextDirection } from '#lib/paraglide/runtime.js';
 import { paraglideMiddleware } from '#lib/paraglide/server.js';
 import { accountDeletionHook } from '#lib/server/account/deletion.ts';
+import { isReadOnly } from '#lib/server/admin/read-only.ts';
 import { createAuth, toAuthLocals } from '#lib/server/auth.ts';
 import { createReadOnlyHandle, orderedHandles } from '#lib/server/auth/compose.ts';
 import { getServerEnv } from '#lib/server/env.ts';
@@ -61,7 +62,9 @@ const auth: Handle = async ({ event, resolve }) => {
 		plugins: [sveltekitCookies(getRequestEvent)],
 		waitUntil: (promise) => platform.ctx.waitUntil(promise),
 		// T3.7 content-deletion policy (recorded mode, holds, e-mail change rows, acceptances).
-		beforeDeleteUser: accountDeletionHook(env)
+		beforeDeleteUser: accountDeletionHook(env),
+		// Read-only switch (T3.8): no session-refresh writes while it is on.
+		readOnly: await isReadOnly(env)
 	});
 	event.locals.auth = instance;
 	try {

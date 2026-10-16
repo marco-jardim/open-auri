@@ -47,12 +47,21 @@ accountDeletionHook(env)` from T3.7), puts it in `locals.auth` and fills `locals
   `USERNAME_IS_ALREADY_TAKEN` (also for reserved names), `DISPLAY_USERNAME_MISMATCH`,
   `PASSWORD_REQUIRED` (delete without password), `INVALID_NAME`, `SESSION_NOT_FRESH` (403),
   `INVALID_PASSWORD` (400, change-email of a stale session), `TWO_FACTOR_REQUIRED` (403),
-  `LINK_ALREADY_USED`, plus Better Auth's own codes
+  `LINK_ALREADY_USED`, `INVALID_CALLBACK_URL` (403), `INVALID_TOKEN` (also for a malformed
+  `/verify-email` token), plus Better Auth's own codes
   (`EMAIL_NOT_VERIFIED`, `INVALID_EMAIL_OR_PASSWORD`, `INVALID_TOKEN`, `BANNED_USER`, ...).
 - **Links in e-mails:** reset → `/redefinir-senha?token=…` (the page POSTs `/reset-password`);
   verification, change-email steps and account deletion → Better Auth GET endpoints under
-  `/api/auth/` that redirect to the `callbackURL` sent by the page (relative paths or
-  `PUBLIC_ORIGIN` only). "Secure my account" links → `/esqueci-senha`.
+  `/api/auth/` that redirect to the `callbackURL` sent by the page. "Secure my account" links →
+  `/esqueci-senha`.
+- **Redirect targets** (Q3 round 2, M2): `callbackURL`, `redirectTo`, `errorCallbackURL` and
+  `newUserCallbackURL`, in the body or the query of any endpoint, must be a canonical path on
+  `PUBLIC_ORIGIN` (`/conta?email=alterado`, or `https://<origin>/…`), else 403
+  `INVALID_CALLBACK_URL` (Better Auth's own status and code) before Better Auth runs. Refused: other origins, `//host`, backslashes,
+  whitespace/controls, dot or empty segments (`/.//host`, which Better Auth's own check accepts
+  and its `appendQueryParams` turns into `//host`), and percent-encoded `/`, `\` or `.` in the
+  path. The hook's own error redirects re-check the resolved target (same origin, path not
+  starting with `//`) and fall back to `/`.
 - **Nickname:** set at sign-up (`displayUsername` may differ from `username` only in
   case/compatibility forms; a nickname on its 90-day hold answers `USERNAME_IS_ALREADY_TAKEN`, like
   a taken one). Every later change goes through `account/nickname.ts` (/conta: 30-day interval,
@@ -79,7 +88,8 @@ accountDeletionHook(env)` from T3.7), puts it in `locals.auth` and fills `locals
   `verifyTOTP`), `/change-password`, `/delete-user` with a password, `/two-factor/enable` and
   `/disable`, and the password `/change-email` takes from a stale session. 5 attempts per 5 min
   (counted before the check) and 20 wrong secrets per day (checked before, counted on failure:
-  the lockout) per user and kind; 429 `RATE_LIMITED` + `Retry-After`. The sign-in 2FA challenge
+  the lockout) per user and kind; 429 `RATE_LIMITED` + `Retry-After`. Sign-in by e-mail and by
+  nickname of one account share one per-account budget (keyed on the user id, Q3 round 2). The sign-in 2FA challenge
   (no session yet) keeps Better Auth's own lockout (5 tries per challenge, 10 consecutive failures
   lock the account 15 min). IP: `disableIpTracking`; the client IP (`cf-connecting-ip`) is only
   hashed by the guard.
@@ -127,14 +137,24 @@ accountDeletionHook(env)` from T3.7), puts it in `locals.auth` and fills `locals
   address's link switches the e-mail. That last link signs its opener in when no session is
   present (Better Auth behaviour; the change was already approved from the old mailbox). If the new
   address got registered in between, the unique index rejects the update (500, nothing changes).
-  Both links are single-use (Q3-4): the hook claims a link (SHA-256 of the token in
-  `auth_link_uses`) right before Better Auth acts on it, only when it would act (valid token,
-  account found, no session of another account); a reused link redirects to its same-origin
-  `callbackURL` with `?error=LINK_ALREADY_USED` (400 JSON otherwise). A claimed link whose step
-  then fails (e.g. the new address was taken meanwhile) needs a new request. The final messages
-  (`confirm-new-email`, `email-change-notice`) are keyed for Resend on (user, new address,
-  `email_change_requests.requested_at`), so they go out once per request; requests made outside
-  /conta (no row) fall back to the token key.
+  Both links are single-use (Q3-4): the hook claims a link right before Better Auth acts on it,
+  only when it would act (valid token, account found, no session of another account); a reused
+  link redirects to its same-origin `callbackURL` with `?error=LINK_ALREADY_USED` (400 JSON
+  otherwise). The claim key is SHA-256 of the JWT's signed part `header.payload`, not of the token
+  text (Q3 round 2, M1): jose decodes the signature leniently (whitespace and unused low bits are
+  ignored), so `<jwt>%20`, `%0A`, `%09` or a changed last signature character verify as the same
+  token. `/verify-email` also refuses any token that is not a strict compact JWS
+  (`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`) with `INVALID_TOKEN` (redirect to the
+  callback, or 401 JSON) before Better Auth sees it. Claims recorded before this change were keyed
+  on the full token, so a link already used then could be opened once more until it expires (1 h).
+  A claimed link whose step then fails (e.g. the new address was taken meanwhile) needs a new
+  request. The final messages (`confirm-new-email`, `email-change-notice`) are keyed for Resend on
+  (user, new address, `email_change_requests.requested_at`), so they go out once per request;
+  requests made outside /conta (no row) are keyed on (user, new address, id of the confirmation
+  link the hook just claimed), never on the token Better Auth mints for the new address.
+- **Verification link throttle** (Q3 round 2, m1): GET `/verify-email` goes through the T3.3
+  guard: RL_AUTH, then 30 per 10 min per IP hash (no Turnstile; 429 `RATE_LIMITED` /
+  503 `RATE_LIMIT_UNAVAILABLE`, fail closed).
 - **Account deletion:** password required, then a confirmation link (1 h) that only works in a
   browser signed in as that user. `beforeDelete` runs the injected content-deletion policy (default:
   delete `policy_acceptances`); `afterDelete` sends "account deleted". Child auth rows cascade.

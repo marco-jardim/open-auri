@@ -6,7 +6,9 @@
 //      endpoints the app does not use (CLOSED_AUTH_PATHS) answer 404; server-side `auth.api.*`
 //      calls (no request) keep working for the guarded /admin area (T3.8);
 //   1. strict origin: state-changing HTTP requests must come from PUBLIC_ORIGIN (Origin, or
-//      Referer when Origin is absent), on top of Better Auth's own CSRF/origin checks;
+//      Referer when Origin is absent), on top of Better Auth's own CSRF/origin checks; redirect
+//      targets (`callbackURL`, `redirectTo`, `errorCallbackURL`, `newUserCallbackURL`, body or
+//      query, every endpoint) must be canonical paths on PUBLIC_ORIGIN (403 INVALID_CALLBACK_URL);
 //   2. SIGNUP_ENABLED=false → `/sign-up/email` answers 403 `SIGNUP_DISABLED`;
 //   3. nickname and name rules: `/update-user` never changes the nickname (400
 //      `USERNAME_CHANGE_NOT_ALLOWED`; /conta changes it through account/nickname.ts, which writes
@@ -15,12 +17,15 @@
 //      characters, no control or bidi characters: it is the greeting of some e-mails);
 //   4. `/delete-user` without the confirmation token requires the password;
 //   5. the T3.3 guard (RL_AUTH → requester windows → Turnstile → per-account windows) on the
-//      guarded paths. The Turnstile token travels in the `x-turnstile-token` request header;
+//      guarded paths (GET `/verify-email` included: per-IP window, no Turnstile). The Turnstile
+//      token travels in the `x-turnstile-token` request header. Sign-in by e-mail or nickname of
+//      an existing account is keyed on the user id (one per-account budget for both paths);
 //   6. signed-in secret checks (auth/secret-guard.ts): admins with 2FA need the session's 2FA
 //      marker for 2FA management; every password / second-factor check of a session counts
 //      against the per-user limits; `/change-email` needs a fresh session (10 min) or the correct
 //      current password (`password` in the body, verified here);
-//   7. `/verify-email` with an e-mail-change token: single use (auth/link-uses.ts).
+//   7. `/verify-email`: only strict compact JWS tokens pass; an e-mail-change token is single use,
+//      claimed on its signed part (auth/link-uses.ts).
 // after:
 //   - wrong password / second factor of a session → counted toward the lockout budget;
 //   - 2FA session marker after a successful TOTP / backup-code verification;
@@ -33,7 +38,7 @@ import type { ServerEnv } from '../env.ts';
 import type { AuthGuard } from '../security/auth-guard.ts';
 import { isAuthGuardedPath } from '../security/ratelimit.ts';
 import type { AuthMailer } from './emails.ts';
-import { claimLinkUse } from './link-uses.ts';
+import { claimLinkUse, isCompactJws, linkUseId } from './link-uses.ts';
 import {
 	beginSecretAttempt,
 	checkUserPassword,
@@ -93,6 +98,7 @@ const CLOSED_PATHS: ReadonlySet<string> = new Set(CLOSED_AUTH_PATHS);
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const STATUS_NAME = {
 	400: 'BAD_REQUEST',
+	401: 'UNAUTHORIZED',
 	403: 'FORBIDDEN',
 	404: 'NOT_FOUND',
 	429: 'TOO_MANY_REQUESTS',
@@ -192,9 +198,29 @@ function limitedError(retryAfter: number): APIError {
 	);
 }
 
-/** Identifier the guard keys its per-account limits on, per path. */
-function guardIdentifier(path: string, body: Body): string | null {
-	if (path === '/sign-in/username') return text(body.username) ?? null;
+/**
+ * Identifier the guard keys its per-account limits on, per path. Sign-in by e-mail and by nickname
+ * reach the same account, so an existing account is keyed on its user id on both paths (one budget
+ * per account, not one per login name). Unknown names keep their own key; the response is the same
+ * either way (the guard's answers never depend on it), and the lookup runs on both paths alike.
+ */
+async function guardIdentifier(
+	db: AuthHookDeps['env']['db'],
+	path: string,
+	body: Body
+): Promise<string | null> {
+	if (path === '/sign-in/email' || path === '/sign-in/username') {
+		const byEmail = path === '/sign-in/email';
+		const name = text(byEmail ? body.email : body.username);
+		if (!name) return null;
+		// Same lookups Better Auth makes next: lowercased e-mail; normalized nickname.
+		const row = await first<{ id: string }>(
+			byEmail
+				? sql(db, 'SELECT id FROM "user" WHERE email = ? LIMIT 1', name.toLowerCase())
+				: sql(db, 'SELECT id FROM "user" WHERE username = ? LIMIT 1', normalizeUsername(name))
+		);
+		return row ? `user:${row.id}` : name;
+	}
 	if (path === '/change-email') return text(body.newEmail) ?? null;
 	return text(body.email) ?? null;
 }
@@ -237,15 +263,85 @@ function apiErrorCode(error: unknown): string | null {
 	return typeof code === 'string' ? code : null;
 }
 
-/** A same-origin relative path (`/x?y`), never `//host` or `/\host`. */
-function safeRelativePath(value: unknown): string | null {
-	if (typeof value !== 'string' || !/^\/(?![/\\])/.test(value)) return null;
-	return value;
+/**
+ * Request fields Better Auth turns into a redirect (its `originCheck` reads the same names, from
+ * the body and, for `callbackURL`, the query).
+ */
+export const CALLBACK_FIELDS = [
+	'callbackURL',
+	'redirectTo',
+	'errorCallbackURL',
+	'newUserCallbackURL'
+] as const;
+
+export const INVALID_CALLBACK_URL = 'INVALID_CALLBACK_URL';
+
+/**
+ * Whether `value` is a redirect target the app accepts: a path on PUBLIC_ORIGIN, relative (`/x?y`)
+ * or absolute (`https://origin/x`), in canonical form. Refused (Q3 round 2, M2): anything that
+ * resolves to another origin (`https://evil`, `//evil`), backslashes (`/\evil`: browsers read `\`
+ * as `/`), whitespace and control characters, and paths the URL parser would rewrite: dot
+ * segments (`/.//evil` resolves to the path `//evil`, which a later `pathname`-based Location turns
+ * into a protocol-relative URL, as Better Auth's own `appendQueryParams` does), empty segments
+ * (`//`), percent-encoded `/`, `\` or `.`, and characters the parser re-encodes.
+ */
+export function isSafeCallbackURL(value: string, publicOrigin: string): boolean {
+	if (value === '') return false;
+	for (let index = 0; index < value.length; index += 1) {
+		const code = value.charCodeAt(index);
+		// Controls, space, DEL and `\`.
+		if (code <= 0x20 || code === 0x7f || code === 0x5c) return false;
+	}
+	let origin: string;
+	try {
+		origin = new URL(publicOrigin).origin;
+	} catch {
+		return false;
+	}
+	let relative: string;
+	if (value.startsWith('/')) relative = value;
+	else if (value === origin) relative = '/';
+	else if (value.startsWith(`${origin}/`)) relative = value.slice(origin.length);
+	else return false;
+	if (relative.startsWith('//')) return false;
+	let url: URL;
+	try {
+		url = new URL(relative, origin);
+	} catch {
+		return false;
+	}
+	if (url.origin !== origin) return false;
+	const rawPath = relative.split(/[?#]/, 1)[0] ?? '';
+	return rawPath === url.pathname && !url.pathname.includes('//') && !/%(2f|5c|2e)/i.test(rawPath);
+}
+
+/**
+ * Same answer shape as Better Auth's own link errors: back to the page (a safe `callbackURL`)
+ * with `?error=<code>`; null when there is no callback (the caller answers JSON). The Location is
+ * rebuilt as `pathname + search + hash` only after checking the resolved target is on
+ * PUBLIC_ORIGIN and its path does not start with `//`; otherwise it is `/`.
+ */
+function errorRedirect(callbackURL: unknown, publicOrigin: string, code: string): APIError | null {
+	if (typeof callbackURL !== 'string' || callbackURL === '') return null;
+	let location = '/';
+	if (isSafeCallbackURL(callbackURL, publicOrigin)) {
+		const origin = new URL(publicOrigin).origin;
+		const target = new URL(callbackURL, origin);
+		if (target.origin === origin && !target.pathname.startsWith('//')) {
+			target.searchParams.set('error', code);
+			location = `${target.pathname}${target.search}${target.hash}`;
+		}
+	}
+	return new APIError('FOUND', undefined, new Headers({ location }));
 }
 
 const USERNAME_TAKEN = 'USERNAME_IS_ALREADY_TAKEN';
 export const USERNAME_CHANGE_NOT_ALLOWED = 'USERNAME_CHANGE_NOT_ALLOWED';
 export const LINK_ALREADY_USED = 'LINK_ALREADY_USED';
+/** Better Auth's code for a bad verification token (we answer it for malformed ones too). */
+const INVALID_TOKEN = 'INVALID_TOKEN';
+/** `requestType` of the change-email link mailed to the current address. */
+const CHANGE_EMAIL_CONFIRMATION = 'change-email-confirmation';
 
 /** Endpoints of Better Auth's admin plugin (all live under `/admin/`). */
 export function isAdminPluginPath(path: string | undefined): boolean {
@@ -267,6 +363,19 @@ export function createBeforeHook(deps: AuthHookDeps) {
 		if (request && !SAFE_METHODS.has(request.method)) {
 			if (requestOrigin(request.headers) !== deps.env.publicOrigin) {
 				throw fail(403, 'INVALID_ORIGIN', 'Invalid origin');
+			}
+		}
+
+		// Redirect targets, on every endpoint and before Better Auth (whose own check accepts
+		// `/.//host`): body and query alike. Same status and code as Better Auth's own refusal.
+		const query = asBody(ctx.query);
+		for (const source of [body, query]) {
+			for (const field of CALLBACK_FIELDS) {
+				const value = source[field];
+				if (value === undefined || value === null || value === '') continue;
+				if (typeof value !== 'string' || !isSafeCallbackURL(value, deps.env.publicOrigin)) {
+					throw fail(403, INVALID_CALLBACK_URL, 'Invalid callback URL');
+				}
 			}
 		}
 
@@ -327,10 +436,16 @@ export function createBeforeHook(deps: AuthHookDeps) {
 		if (isAuthGuardedPath(path)) {
 			const headers = request?.headers ?? ctx.headers ?? new Headers();
 			const userId = path === '/change-email' ? ((await currentSession())?.user.id ?? null) : null;
+			let identifier: string | null;
+			try {
+				identifier = await guardIdentifier(db, path, body);
+			} catch {
+				throw fail(503, 'RATE_LIMIT_UNAVAILABLE', 'RATE_LIMIT_UNAVAILABLE');
+			}
 			const result = await deps.guard({
 				path,
 				ip: headers.get('cf-connecting-ip'),
-				email: guardIdentifier(path, body),
+				email: identifier,
 				userId,
 				turnstileToken: headers.get(TURNSTILE_HEADER)
 			});
@@ -382,34 +497,44 @@ export function createBeforeHook(deps: AuthHookDeps) {
 		}
 
 		if (path === '/verify-email') {
-			const query = asBody(ctx.query);
-			const token = text(query.token);
+			const rawToken = query.token;
+			// Only strict compact JWS reach Better Auth: jose would also accept the same token with
+			// whitespace or other padding characters in its signature (Q3 round 2, M1).
+			if (rawToken !== undefined && (typeof rawToken !== 'string' || !isCompactJws(rawToken))) {
+				throw (
+					errorRedirect(query.callbackURL, deps.env.publicOrigin, INVALID_TOKEN) ??
+					fail(401, INVALID_TOKEN, 'Invalid token')
+				);
+			}
+			const token = text(rawToken);
 			const payload = token ? await verifyJWT(token, ctx.context.secret) : null;
 			const owner = text(payload?.email);
-			if (token && payload && owner && text(payload.updateTo)) {
+			const updateTo = text(payload?.updateTo);
+			if (token && payload && owner && updateTo) {
 				// Claim only a link Better Auth is about to act on, so a link opened in the wrong
 				// browser (signed in as someone else) still works afterwards in the right one.
 				const found = await ctx.context.internalAdapter.findUserByEmail(owner);
 				const current = await currentSession();
 				if (found && (!current || current.user.email === owner)) {
 					const expiresAt = typeof payload.exp === 'number' ? payload.exp * 1000 : 0;
+					let linkId: string;
 					let firstUse: boolean;
 					try {
-						firstUse = await claimLinkUse(db, token, expiresAt, now().getTime());
+						// Keyed on the signed part, so every spelling of one token is one link.
+						linkId = await linkUseId(token);
+						firstUse = await claimLinkUse(db, linkId, expiresAt, now().getTime());
 					} catch {
 						throw fail(503, 'SERVICE_UNAVAILABLE', 'Try again later');
 					}
 					if (!firstUse) {
-						// Same answer shape as Better Auth's own link errors: back to the page with
-						// `?error=`, when the page is a same-origin path; JSON otherwise.
-						const callback = safeRelativePath(query.callbackURL);
-						if (callback) {
-							const target = new URL(callback, deps.env.publicOrigin);
-							target.searchParams.set('error', LINK_ALREADY_USED);
-							const location = `${target.pathname}${target.search}${target.hash}`;
-							throw new APIError('FOUND', undefined, new Headers({ location }));
-						}
-						throw fail(400, LINK_ALREADY_USED, 'This link was already used');
+						throw (
+							errorRedirect(query.callbackURL, deps.env.publicOrigin, LINK_ALREADY_USED) ??
+							fail(400, LINK_ALREADY_USED, 'This link was already used')
+						);
+					}
+					if (payload.requestType === CHANGE_EMAIL_CONFIRMATION) {
+						// Better Auth now mails the new address; key that mail on this link.
+						deps.mailer.noteChangeConfirmation(found.user.id, updateTo, linkId);
 					}
 				}
 			}

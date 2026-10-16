@@ -169,7 +169,9 @@ export const AUTH_GUARDED_PATHS = [
 	'/sign-in/username',
 	'/request-password-reset',
 	'/change-email',
-	'/send-verification-email'
+	'/send-verification-email',
+	// GET of the e-mailed verification / change-email links (Q3 round 2, m1).
+	'/verify-email'
 ] as const;
 export type AuthGuardedPath = (typeof AUTH_GUARDED_PATHS)[number];
 
@@ -242,6 +244,13 @@ export const AUTH_POLICIES: Readonly<Record<AuthGuardedPath, AuthRoutePolicy>> =
 			// can make one mailbox receive (IP rotation included).
 			{ scope: 'id', limit: 10, windowSeconds: 86_400 }
 		]
+	},
+	'/verify-email': {
+		group: 'auth.verify-link',
+		// A link click: no widget and no identifier in the request. Per client only; the RL_AUTH
+		// burst guard runs first. Fails closed like the other routes.
+		turnstileAction: null,
+		limits: [{ scope: 'ip', limit: 30, windowSeconds: 600 }]
 	},
 	'/change-email': {
 		group: 'auth.change-email',

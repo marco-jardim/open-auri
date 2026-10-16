@@ -9,7 +9,6 @@ import { isAPIError } from 'better-auth/api';
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, type Auth } from '../auth.ts';
 import { emailLocaleFromHeaders, withEmailLocale } from '../auth/emails.ts';
 import { TURNSTILE_HEADER } from '../auth/hooks.ts';
-import { verifyUserPassword } from '../auth/secret-guard.ts';
 import { isFreshSession } from '../auth/session-policy.ts';
 import type { AuthSession } from '../types.ts';
 import { recordDeletionRequest, type DeletionMode, isDeletionMode } from './deletion.ts';
@@ -71,19 +70,6 @@ function failure(error: unknown): AuthFailure {
 /** Runs a Better Auth call in the e-mail locale of the request behind `headers`. */
 function inRequestLocale<T>(headers: Headers, call: () => Promise<T>): Promise<T> {
 	return withEmailLocale(emailLocaleFromHeaders(headers), call);
-}
-
-/**
- * Raw check of `password` against the credential account of `userId` (scrypt, constant time),
- * WITHOUT the per-user attempt limits. The /conta actions never call it: they pass the password to
- * Better Auth, whose hooks apply the limits (auth/secret-guard.ts). Kept for tests and tooling.
- */
-export function verifyCurrentPassword(
-	db: D1Database,
-	userId: string,
-	password: string
-): Promise<boolean> {
-	return verifyUserPassword(db, userId, password);
 }
 
 export interface ChangePasswordInput {

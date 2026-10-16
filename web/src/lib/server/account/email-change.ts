@@ -5,7 +5,7 @@
 // them. Anti-enumeration: the request is recorded whether or not the new address is taken, like
 // Better Auth's own answer.
 import type { D1Database } from '@cloudflare/workers-types';
-import { first, run, sql } from '../db.ts';
+import { batch, first, run, sql } from '../db.ts';
 import { LINK_TTL_SECONDS } from '../auth/emails.ts';
 
 export const EMAIL_CHANGE_PENDING_MS = 2 * LINK_TTL_SECONDS.verification * 1000;
@@ -26,6 +26,14 @@ export function isPlausibleEmail(value: string): boolean {
 	return value.length >= 3 && value.length <= EMAIL_MAX && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+/** Expired requests (any user) removed per recorded request: the reads never write. */
+const PRUNE_BATCH = 20;
+
+/**
+ * Records (or replaces) the pending change of `userId`, and removes a few expired requests of
+ * any user, oldest first. Pruning lives here, on a write action, so that reading the pending
+ * change (the /conta page, the LGPD export) never writes: both run while read-only is on (Q3 m2).
+ */
 export async function recordEmailChangeRequest(
 	db: D1Database,
 	userId: string,
@@ -34,7 +42,14 @@ export async function recordEmailChangeRequest(
 ): Promise<PendingEmailChange> {
 	const email = normalizeEmail(newEmail);
 	const expiresAt = now + EMAIL_CHANGE_PENDING_MS;
-	await run(
+	await batch(db, [
+		sql(
+			db,
+			'DELETE FROM email_change_requests WHERE user_id IN (SELECT user_id FROM ' +
+				'email_change_requests WHERE expires_at <= ? ORDER BY expires_at LIMIT ?)',
+			now,
+			PRUNE_BATCH
+		),
 		sql(
 			db,
 			'INSERT INTO email_change_requests (user_id, new_email, requested_at, expires_at) ' +
@@ -45,7 +60,7 @@ export async function recordEmailChangeRequest(
 			now,
 			expiresAt
 		)
-	);
+	]);
 	return { newEmail: email, requestedAt: now, expiresAt };
 }
 
@@ -79,7 +94,9 @@ export async function clearEmailChangeRequest(db: D1Database, userId: string): P
 
 /**
  * The pending change of `userId`, or null. A request that expired or already happened (the
- * account address is now the new one) is removed and reported as none.
+ * account address is now the new one) is reported as none. Read only: it never writes, so the
+ * /conta page and the export stay write-free while read-only is on; expired rows are pruned by
+ * {@link recordEmailChangeRequest} and replaced by the user's next request.
  */
 export async function pendingEmailChange(
 	db: D1Database,
@@ -96,7 +113,6 @@ export async function pendingEmailChange(
 	);
 	if (!row) return null;
 	if (row.expires_at <= now || row.new_email === normalizeEmail(currentEmail)) {
-		await clearEmailChangeRequest(db, userId);
 		return null;
 	}
 	return { newEmail: row.new_email, requestedAt: row.requested_at, expiresAt: row.expires_at };

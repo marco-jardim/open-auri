@@ -93,6 +93,12 @@ export interface CreateAuthOptions {
 	/** Defaults to PUBLIC_ORIGIN. */
 	baseURL?: string;
 	beforeDeleteUser?: BeforeDeleteUser;
+	/**
+	 * The T3.8 read-only switch is on (`isReadOnly(env)`): Better Auth's session refresh (the
+	 * `expiresAt` write of `getSession` once `updateAge` passed) is turned off for this instance.
+	 * Other session writes of a GET remain (see admin/README.md, "Read-only switch").
+	 */
+	readOnly?: boolean;
 	/** Test seams. */
 	emailProvider?: EmailProvider;
 	guard?: AuthGuard;
@@ -217,6 +223,8 @@ export function createAuth(env: ServerEnv, options: CreateAuthOptions) {
 		session: {
 			freshAge: FRESH_SESSION_MS / 1000,
 			cookieCache: { enabled: false },
+			// One instance per request, so this follows the read-only switch of that request.
+			disableSessionRefresh: options.readOnly === true,
 			additionalFields: {
 				twoFactorVerifiedAt: { type: 'date', required: false, input: false }
 			}

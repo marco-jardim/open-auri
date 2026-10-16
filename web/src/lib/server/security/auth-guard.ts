@@ -44,7 +44,11 @@ export interface AuthGuardInput {
 	path: string;
 	/** Client IP (`cf-connecting-ip`); only hashed here, never stored or logged. */
 	ip: string | null;
-	/** E-mail (or username for `/sign-in/username`; the new e-mail for `/change-email`). */
+	/**
+	 * Identifier of the per-account rules: e-mail (or username for `/sign-in/username`; the new
+	 * e-mail for `/change-email`). The auth hook passes `user:<id>` for a sign-in to an existing
+	 * account, so both sign-in paths share one budget per account.
+	 */
 	email?: string | null;
 	/** Signed-in user, when there is one (`/change-email`). */
 	userId?: string | null;

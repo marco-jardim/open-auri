@@ -15,7 +15,8 @@
 // (`/api/auth/verify-email`: marks the address verified, switches e-mail, creates a session,
 // sends mail; `/api/auth/delete-user/callback`: runs the deletion policy and deletes the user),
 // so GET/HEAD on those paths are blocked too while the switch is on. Blocked browser navigations
-// (Accept: text/html) get a small static HTML page instead of the JSON body; both carry 503,
+// (Accept: text/html) get a small static HTML page (own CSP: it loads nothing) instead of the
+// JSON body; both carry 503,
 // `Retry-After`, `Cache-Control: no-store` and the code `READ_ONLY` (`x-error-code` header).
 // The 503 skips the later hooks, so hooks.server.ts hands `createReadOnlyHandle` a `finish`
 // step that adds the security headers and the access-log record to it (auth/compose.ts).
@@ -182,6 +183,13 @@ const READ_ONLY_HTML = `<!doctype html>
 `;
 
 /**
+ * CSP of the static HTML page: it loads nothing. `applySecurityHeaders` keeps a policy that already
+ * has `frame-ancestors` and only adds the other security headers.
+ */
+export const READ_ONLY_HTML_CSP =
+	"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
+
+/**
  * The 503 answered to blocked requests: JSON with the stable code, or a small HTML page for
  * browser navigations. Always retryable, never cached, `x-error-code: READ_ONLY`.
  */
@@ -190,14 +198,16 @@ export function readOnlyResponse(request?: Request): Response {
 	const body = html
 		? READ_ONLY_HTML
 		: JSON.stringify({ code: READ_ONLY_CODE, message: 'The service is temporarily read-only' });
+	const headers: Record<string, string> = {
+		'content-type': html ? 'text/html; charset=utf-8' : 'application/json; charset=utf-8',
+		'cache-control': 'no-store',
+		'retry-after': String(READ_ONLY_RETRY_AFTER_S),
+		'x-error-code': READ_ONLY_CODE
+	};
+	if (html) headers['content-security-policy'] = READ_ONLY_HTML_CSP;
 	return new Response(request?.method.toUpperCase() === 'HEAD' ? null : body, {
 		status: 503,
-		headers: {
-			'content-type': html ? 'text/html; charset=utf-8' : 'application/json; charset=utf-8',
-			'cache-control': 'no-store',
-			'retry-after': String(READ_ONLY_RETRY_AFTER_S),
-			'x-error-code': READ_ONLY_CODE
-		}
+		headers
 	});
 }
 

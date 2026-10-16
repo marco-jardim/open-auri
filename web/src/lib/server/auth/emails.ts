@@ -214,7 +214,20 @@ export function createAuthMailer(options: AuthMailerOptions) {
 	/** Greeting name only for verified addresses (T3.2: no free text to unverified inboxes). */
 	const nameFor = (user: Recipient) => (user.emailVerified ? (user.name ?? null) : null);
 
+	/**
+	 * (user, new address) → id of the change-email confirmation link being opened. Set by the auth
+	 * before-hook when it claims that link, read once by the `verification` call Better Auth makes
+	 * right after. The instance lives for one request in the app, so this holds one entry at most.
+	 */
+	const changeLinks = new Map<string, string>();
+	const changeLinkKey = (userId: string, newEmail: string) => `${userId}\n${newEmail}`;
+
 	return {
+		/** The hook claimed confirmation link `linkId` of `userId` → `newEmail` (see `verification`). */
+		noteChangeConfirmation(userId: string, newEmail: string, linkId: string): void {
+			changeLinks.set(changeLinkKey(userId, newEmail), linkId);
+		},
+
 		async verification(user: Recipient, url: string, token: string, request?: Request) {
 			const locale = emailLocaleFromRequest(request);
 			const { email: currentEmail, updateTo } = readEmailTokenPayload(token);
@@ -233,12 +246,18 @@ export function createAuthMailer(options: AuthMailerOptions) {
 			// Auth mints a new token on every opening of the first link, so a token key would let one
 			// link mail the new address (and the account's own) again and again. With the request key,
 			// Resend sends each message once per request (repeats are deduplicated for 24 h). Without a
-			// recorded request (an API call outside /conta), the token keys it; the single-use claim of
-			// the first link (auth/link-uses.ts) still limits that to one message per link.
+			// recorded request (a direct API call outside /conta), the key is the ORIGINAL confirmation
+			// link the hook just claimed (its stable id, auth/link-uses.ts), so one first link maps to
+			// one key on top of its single-use claim; the fresh token is only the last resort.
+			const noteKey = changeLinkKey(user.id, updateTo);
+			const linkId = changeLinks.get(noteKey);
+			changeLinks.delete(noteKey);
 			const lookup = options.emailChangeRequestedAt;
 			const requestedAt = lookup ? await lookup(user.id, updateTo).catch(() => null) : null;
 			const keyParts =
-				requestedAt === null ? [user.id, token] : [user.id, updateTo, String(requestedAt)];
+				requestedAt !== null
+					? [user.id, updateTo, String(requestedAt)]
+					: [user.id, updateTo, linkId ? `link:${linkId}` : token];
 			const tasks = [
 				send(
 					'confirm-new-email',

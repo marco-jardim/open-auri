@@ -11,9 +11,11 @@ import {
 	isWriteAllowlisted,
 	READ_ONLY_CACHE_MS,
 	READ_ONLY_CODE,
+	READ_ONLY_HTML_CSP,
 	READ_ONLY_KEY,
 	setReadOnly
 } from '#lib/server/admin/read-only.ts';
+import { applySecurityHeaders } from '#lib/server/security/headers.ts';
 
 const ORIGIN = 'https://open-auri.test';
 const config: KVNamespace = env.CONFIG;
@@ -213,6 +215,14 @@ describe('enforceWritable', () => {
 		expect(html).toContain('somente leitura');
 		expect(html).not.toContain('abc');
 		expect(html).not.toContain('<script');
+		// The page loads nothing; the security-header step keeps this policy (it has frame-ancestors).
+		expect(response?.headers.get('content-security-policy')).toBe(READ_ONLY_HTML_CSP);
+		const secured = applySecurityHeaders(response as Response, { origin: ORIGIN });
+		expect(secured.headers.get('content-security-policy')).toBe(READ_ONLY_HTML_CSP);
+		expect(secured.headers.get('x-frame-options')).toBe('DENY');
+		// The JSON answer gets the generic non-HTML policy from the security-header step.
+		const json = await enforceWritable(request('GET', '/api/auth/verify-email?token=abc'), target);
+		expect(json?.headers.get('content-security-policy')).toBeNull();
 
 		const form = new Request(`${ORIGIN}/conta`, {
 			method: 'POST',
