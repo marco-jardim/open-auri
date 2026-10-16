@@ -2,7 +2,7 @@
 
 ## Estado
 
-Fase atual: F2 · Etapa: PF2 · Último commit da F1: (ver tabela)
+Fase atual: F2 · Wave: W2.3 (T2.9) · Último commit: cd07501
 
 ## Locks ativos
 
@@ -72,6 +72,17 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 |---|---|---|---|
 | PF2 | verificada | — | ver Pre-flights |
 | T2.1 | commitada | a46cd60, 19fc321 | scaffold e instalação pelo orquestrador; configuração pelo implementer; verificação central (check, unit 2/2, e2e 2/2, build) |
+| T2.2 | commitada | c6201b8, cd07501 | binários das fontes copiados pelo orquestrador (o editor do implementer não copia binários) |
+| T2.3 | commitada | b425684 | Footer recebe `githubUrl` por prop (`\/env/public` não roda em teste de componente) |
+| T2.4 | commitada | a2341bf | |
+| T2.5 | commitada | 4f6d309 | preamp Q23 antes das seções (ordem do chip) |
+| T2.6 | commitada | 1439d0b | núcleo puro do worklet em `components/meters/meter-core.js`; worklet via `?worker&url` |
+| T2.7 | commitada | c0e1640 | |
+| T2.8 | commitada | 5afd7c1 | |
+| T2.19 | commitada | 54afef7, cd07501 | pipeline real rodando (pacotes gerados não versionados) |
+| msgs | commitada | 298db8e | T2.3, T2.5, T2.6, T2.7 mescladas |
+
+Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos, 284 testes; lint do web limpo; build ok; raiz 613/613.
 
 ## Pre-flights
 
@@ -153,6 +164,9 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 - 2026-10-16 · T2.1: testes de componente em Chromium real (`@vitest/browser-playwright`), em vez de jsdom, que é o padrão atual do `sv` para runes. Opções do Paraglide em `web/project.inlang/paraglide.config.mjs` (o `.gitignore` do inlang ignora `.json`), importado pelo `vite.config.ts`; cookie `oa_lang` e localStorage `oa.lang` confirmados no runtime gerado. O npm 12 bloqueia scripts de instalação: `esbuild` e `workerd` aprovados em `allowScripts`.
 - 2026-10-16 · Fontes: Special Elite e Permanent Marker são Apache-2.0 (não OFL); mantidas por serem permissivas e compatíveis com a AGPL, com atribuição no THIRD_PARTY_NOTICES (T2.2). Fontes usadas pelos mocks: Instrument Serif, Geist, JetBrains Mono, Courier Prime, Barlow Condensed, Oswald, Special Elite, EB Garamond, Permanent Marker e VT323.
 - 2026-10-16 · AutoEq: `measurements/Rtings` e `measurements/rtings` colidem em sistema de arquivos sem distinção de maiúsculas. A T2.19 lê os blobs via git (`ls-tree` + `cat-file`), sem checkout.
+
+- 2026-10-16 · W2.2: nenhum delegado consegue rodar os testes do web (o `router_run` só aceita `test`, `lint` e `typecheck` da raiz). O orquestrador roda `check:web`, `test:web:unit`, lint do web e build depois de cada wave e devolve as falhas com a saída colada. O WASM do `@lix-js/sdk` corrompeu no disco durante instalações concorrentes (erro `Invalid opcode` no compile do Paraglide); remover a pasta e rodar `npm install` resolve.
+- 2026-10-16 · Lint do web: `svelte/no-navigation-without-resolve` com `ignoreLinks: true` (app servido na raiz da origem, sem `base`; `resolve()` exige o runtime do Kit, ausente nos testes de componente).
 
 ## Bloqueios e perguntas ao humano
 
