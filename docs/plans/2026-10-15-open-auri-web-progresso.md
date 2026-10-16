@@ -2,7 +2,7 @@
 
 ## Estado
 
-Fase atual: F2 · Etapa: Q2 (rodada 1) · Último commit: 62d8f54
+Fase atual: F3 · Etapa: PF3 · F2 concluída (Q2 PASS, push 008315f)
 
 ## Locks ativos
 
@@ -95,6 +95,15 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | T2.18 | commitada | 77537f3 | todas as rotas ≤ 148 kB gzip de JS inicial (limite 250) |
 | T2.T | commitada | 390af8b, 62d8f54 | e2e 253 ok + 32 referências visuais (sem `/privacidade` e `/termos`, que exibem dados do operador); unidade 933 testes; cobertura web 96,7 % instruções, 87,9 % branches, 97,3 % funções, 97,2 % linhas; pendentes: smoke da Soe como X (depende dos pacotes AutoEq) e testes de componente instáveis sob carga (falhas diferentes a cada rodada, ex.: `cabo/edges.svelte.test.ts:112`) |
 | Q2.1 | concluída | — | FAIL: 4 major (S1, A1, M1, M2), minors S2–S4, A2, A3, E1, E2, I1–I3, X1, T1, T2; revisão incompleta (orçamento): faltam capturas visuais, passada completa de a11y, outros testes instáveis, asserts vazios e paridade de chaves i18n → corrigir tudo (rodada 1) e completar esses itens na rodada 2 |
+| T2.19 (dados) | concluída | — | pipeline real completo a partir do cache: 5 840 medições, 59 alvos, 2 ignorados, 39 pacotes; smoke 20/20 |
+| FX2.1 | commitada | 48bb9f0, 8b84937 | S1–S4 (heavy); regressão de espaçamento achada no e2e e corrigida (2 s contados a partir do fim da gravação anterior) |
+| FX2.2 | commitada | 588b8f2 | A1, A2, A3, M1, M2, E2 (heavy) |
+| FX2.3 | commitada | 945781f | E1, I1, I2, I3, T1 |
+| FX2.4 | commitada | a866f7a | T2 (referências visuais com dados AutoEq); `expect.poll` com 5 s no Vitest (instabilidade sob carga) |
+| Q2.2 | concluída | — | FAIL: 2 major (R2-01 diálogo dispensável durante a gravação, R2-02 `structuredClone` de proxy na Biblioteca), 6 minor, 5 nit → FX2.5, FX2.6, todos corrigidos |
+| FX2.5 | commitada | 7e965bd | R2-01, R2-02, R2-03, R2-05, R2-06, R2-07, R2-08, R2-12 (heavy) |
+| FX2.6 | commitada | 008315f | R2-04, R2-09, R2-10, R2-11, R2-13 |
+| Q2.3 | PASS | — | verificação pós-rodada 2: nenhum major ou pior; minors N-1…N-5 e T-1 → issues #14–#19 (`qa-minor`) |
 
 Verificação central da W2.4: `check:web` 0 erros; `test:web:unit` 61 arquivos, 586 testes; lint do web limpo; build ok; e2e smoke 2/2; raiz 613/613.
 
@@ -157,6 +166,9 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 | Q1 | 1 | FAIL | C1 (gate/transporte liam campos várias vezes: getter/Proxy burlava D7, tipo e bytes enviados), M1 (gate injetável), M2 (arrays esparsos), M3 (diário recusava LP/HP sem ganho e contava UTF-16), M4 (bypass de URL no envelope), 12 minor → FX1.1–FX1.7, todos corrigidos; bateria 571/571, cobertura 99,78% |
 | Q1 | 2 | FAIL | B1 major (reentrada burlava o mutex por dispositivo), B2–B7 minor, N1–N4 → FX1.8–FX1.10, todos corrigidos; 591/591 |
 | Q1 | 3 (verificação) | 2 major → FX1.11 | M-1 (campos de receita aceitavam texto de link), M-2 (texto escondido em tags de bandeira emoji); minors m-1…m-6 → issues #8–#13; após FX1.11: 594/594, cobertura 99,77% · **PASS** |
+| Q2 | 1 | FAIL | S1, A1, M1, M2 major + 13 minor → FX2.1–FX2.4 |
+| Q2 | 2 | FAIL | R2-01, R2-02 major + 6 minor + 5 nit → FX2.5, FX2.6; unidade web 1 051/1 051, e2e 256 (5 falhas corrigidas e reexecutadas), raiz 625/625, cobertura lib 97,4 % linhas e 88,1 % branches |
+| Q2 | 3 (verificação) | **PASS** | minors N-1…N-5, T-1 → issues #14–#19 |
 
 ## Achados do Q2 rodada 1 (a corrigir: FX2.k)
 
@@ -195,6 +207,7 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 - 2026-10-16 · FX2.1 (S1–S4): exclusão entre abas com Web Locks (`oa-cable-write`, `ifAvailable`, injetável); marcador `oa.cable.inflight` gravado antes do I/O e removido dentro do lock; tentativa de flash registrada antes do primeiro byte; marcador órfão vira entrada `interrupted` + resgate ao carregar (esquema do diário do núcleo inalterado); nível da última gravação derivado da última entrada `ok` do diário; dispositivos restaurados nunca viram alvo em silêncio (alvo implícito só com exatamente um cabo, exibido no checklist); contadores da Cabo vêm de `cable.counters()`, a mesma fonte do checklist.
 - 2026-10-16 · FX2.2 (A1, A2, A3, M1, M2, E2): cada página só para o motor se ela o iniciou (token por tentativa); Comparar só fica audível depois do próprio Play; barramento de medição pré-volume (`getMeterBus()`), também usado pelos analisadores de espectro; seletor global de referência 0 VU no popover de áudio, ligado a `meterRef` e a `setReference`; hash `#p=` removido com `history.replaceState` nativo depois de aplicado.
 - 2026-10-16 · FX2.3 (E1, I1, I2, I3, T1): indicador booleano `unsaved` (só depois de uma gravação ou edição na sessão) e `oa.curve.written` persistido; I1 com script externo bloqueante `web/static/lang-boot.js` (a estratégia `preferredLanguage` é exigida pelo plano §3.5), que oculta a página até o idioma do cliente ser aplicado; `biblioteca_jump_warning` igual ao texto literal; ajuda com 1/2/3 e Ctrl/⌘+K; `TransportTape` com relógio injetável.
+- 2026-10-16 · Verificação central: nunca rode `build:web` junto com `test:web:unit`; o plugin do Paraglide regenera `src/lib/paraglide` durante o build e derruba o Vitest browser ("error when mocking a module", módulos de mensagens ausentes).
 - 2026-10-16 · X1 (Q2): CSP com `style-src 'unsafe-inline'`, sem `frame-ancestors` e sem `Permissions-Policy` é escopo da T3.3 (cabeçalhos) e da T5.4 (CSP estrita com nonce, `Permissions-Policy: hid=(self)`); o requisito global de cabeçalhos do plano (§ "Cabeçalhos": HSTS, `frame-ancestors 'none'`, COOP) entra no checklist do PF3. Só documentado.
 
 - 2026-10-16 · W2.4: testes de componente que navegam ou recarregam a página derrubam o runner do Vitest browser ("failed to find the runner") nas execuções combinadas; o export da Comparar trocou o clique em link por callback e `location.assign` por link. Lint: `ignoreGoto: true` junto de `ignoreLinks` (mesma justificativa: sem `base`). Achados para o Q2: `1 unsaved changes` já no primeiro carregamento (curva `dirty` sem gravação anterior); estratégia `preferredLanguage` faz a página prerenderizada em pt-BR trocar para en-US no cliente em navegadores en-US (comportamento do plano, mas há flash de idioma).
