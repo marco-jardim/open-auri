@@ -2,13 +2,13 @@
 
 ## Estado
 
-Fase atual: F1 · Etapa: Q1 (rodada 2) · Último commit: c00be9e
+Fase atual: F2 · Etapa: PF2 · Último commit da F1: (ver tabela)
 
 ## Locks ativos
 
 | Tarefa | Agente/sessão | W | R | Início |
 |---|---|---|---|---|
-| Q1 | reviewer heavy | — (só leitura) | repositório inteiro | 2026-10-16 |
+| — | — | — | — | — |
 
 ## Mapa de locks da F1 (calculado no PF1, ajustado na execução)
 
@@ -56,7 +56,13 @@ Fase atual: F1 · Etapa: Q1 (rodada 2) · Último commit: c00be9e
 | FX1.5 | commitada | da08a72 | M3, minor 1 |
 | FX1.6 | commitada | 0858ed5 | minor 6 (libebur128), pelo orquestrador |
 | FX1.7 | commitada | 79a1110 | minor 5 |
-| Q1.2 | em voo | | heavy |
+| Q1.2 | concluída | — | FAIL: 1 major (B1), 6 minor, 4 nits → FX1.8–FX1.10, todos corrigidos |
+| FX1.8 | commitada | bb21283 | B1, B2, B3, B4, B7, N2, N4 |
+| FX1.9 | commitada | 785fee0 | B5, B6, N3 |
+| FX1.10 | commitada | 35aabf7 | N1 |
+| Q1.3 | concluída | — | verificação pós-rodada 2: 2 major novos no envelope (M-1, M-2) → FX1.11; 6 minor → issues #8–#13 (qa-minor) |
+| FX1.11 | commitada | df46bb3 | M-1, M-2 |
+| Q1 | PASS | — | nenhum achado major, critical ou blocking aberto |
 
 Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,45% branches, 99,55% funções; lint, typecheck, prettier e scanner limpos; `npm run types` emite 34 declarações.
 
@@ -99,6 +105,8 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | Q | Ciclo | Resultado | Achados → FX |
 |---|---|---|---|
 | Q1 | 1 | FAIL | C1 (gate/transporte liam campos várias vezes: getter/Proxy burlava D7, tipo e bytes enviados), M1 (gate injetável), M2 (arrays esparsos), M3 (diário recusava LP/HP sem ganho e contava UTF-16), M4 (bypass de URL no envelope), 12 minor → FX1.1–FX1.7, todos corrigidos; bateria 571/571, cobertura 99,78% |
+| Q1 | 2 | FAIL | B1 major (reentrada burlava o mutex por dispositivo), B2–B7 minor, N1–N4 → FX1.8–FX1.10, todos corrigidos; 591/591 |
+| Q1 | 3 (verificação) | 2 major → FX1.11 | M-1 (campos de receita aceitavam texto de link), M-2 (texto escondido em tags de bandeira emoji); minors m-1…m-6 → issues #8–#13; após FX1.11: 594/594, cobertura 99,77% · **PASS** |
 
 ## Decisões durante a execução
 
@@ -114,6 +122,8 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 
 - 2026-10-16 · Q1.1 minor 10: `writeCurve` devolve `{status, crc, startedAt, finishedAt, reportsSent, committed, error?}` em vez de `reports` (plano T1.9). Contagem e estado do commit são o que o diário e o aviso de loudness precisam; os bytes exatos saem de `reportsFromPayload(metrics.payload)`.
 - 2026-10-16 · FX1.1: o transporte importa `gateForWrite` e o aplica sempre; um gate injetado só acrescenta checagens. O gate e o transporte trabalham sobre um snapshot congelado das bandas (uma leitura por campo). O scan refina também o primeiro e o último intervalo: fica até 3,06e-6 dB mais estrito que a referência, e os 11 presets e o Neutro continuam aprovados.
+
+- 2026-10-16 · FX1.11: nomes de receita (medição, alvo) passam pela detecção de URL depois de remover uma extensão permitida (csv, txt, json, frd, zma, mdat, wav, rew); versão do solver só `X.Y.Z` com pré-release alpha/beta/rc/dev/pre e build hexadecimal. Só as três bandeiras de subdivisão RGI (Inglaterra, Escócia, País de Gales) mantêm tags; demais sequências de tag são removidas.
 
 ## Bloqueios e perguntas ao humano
 
