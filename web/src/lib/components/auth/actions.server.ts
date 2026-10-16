@@ -42,16 +42,24 @@ export interface AuthPagesApi {
 	resetPassword(body: { newPassword: string; token: string }, init: AuthCallInit): Promise<unknown>;
 }
 
+/**
+ * `asResponse: false` is required: Better Auth 1.7 switches `auth.api.*` to Response mode whenever
+ * a `request` is passed (`asResponse ?? isRequestLike(request)`), and then an endpoint error
+ * (wrong password, bad reset token) comes back as a 4xx Response instead of a thrown APIError,
+ * which the flows below would take for success. Hook errors (Turnstile, rate limits) still threw,
+ * so only endpoint-level failures were affected.
+ */
 export function authPagesApi(auth: Auth): AuthPagesApi {
 	const { api } = auth;
+	const call = (init: AuthCallInit) => ({ ...init, asResponse: false as const });
 	return {
-		signIn: (body, init) => api.signInEmail({ body, ...init }),
-		verifyTotp: (body, init) => api.verifyTOTP({ body, ...init }),
-		verifyBackupCode: (body, init) => api.verifyBackupCode({ body, ...init }),
-		signUp: (body, init) => api.signUpEmail({ body, ...init }),
-		sendVerification: (body, init) => api.sendVerificationEmail({ body, ...init }),
-		requestReset: (body, init) => api.requestPasswordReset({ body, ...init }),
-		resetPassword: (body, init) => api.resetPassword({ body, ...init })
+		signIn: (body, init) => api.signInEmail({ body, ...call(init) }),
+		verifyTotp: (body, init) => api.verifyTOTP({ body, ...call(init) }),
+		verifyBackupCode: (body, init) => api.verifyBackupCode({ body, ...call(init) }),
+		signUp: (body, init) => api.signUpEmail({ body, ...call(init) }),
+		sendVerification: (body, init) => api.sendVerificationEmail({ body, ...call(init) }),
+		requestReset: (body, init) => api.requestPasswordReset({ body, ...call(init) }),
+		resetPassword: (body, init) => api.resetPassword({ body, ...call(init) })
 	};
 }
 
