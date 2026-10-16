@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  auditRequestSql,
   decryptLines,
   exportedCountSql,
   indexQuerySql,
@@ -77,6 +78,35 @@ test('SQL builders quote every value', () => {
     `UPDATE access_log_requests SET exported_count = 3 WHERE id = '${ID_A}'`,
   );
   assert.throws(() => exportedCountSql(ID_A, -1), RenderError);
+});
+
+test('auditRequestSql mirrors the request into audit_log without the case reference', () => {
+  const sql = auditRequestSql({
+    id: ID_A,
+    from: new Date('2026-10-16T13:30:00Z'),
+    to: new Date('2026-10-16T14:15:00Z'),
+    requestedAt: new Date('2026-10-20T10:00:00Z'),
+    operator: "o'perador",
+  });
+  assert.equal(
+    sql,
+    'INSERT INTO audit_log (id, actor_id, actor_kind, action, target_kind, target_id, detail, created_at) ' +
+      `VALUES ('${ID_A}', 'o''perador', 'operator', 'access_log.query', 'access_log_request', '${ID_A}', ` +
+      `'{"requestId":"${ID_A}","windowFrom":"2026-10-16T13:30:00.000Z","windowTo":"2026-10-16T14:15:00.000Z"}', ` +
+      `${Date.parse('2026-10-20T10:00:00Z')})`,
+  );
+  assert.doesNotMatch(sql, /Processo|Ofício/);
+  assert.throws(
+    () =>
+      auditRequestSql({
+        id: ID_A,
+        from: new Date('2026-10-16T13:30:00Z'),
+        to: new Date('2026-10-16T14:15:00Z'),
+        requestedAt: new Date(Number.NaN),
+        operator: 'x',
+      }),
+    RenderError,
+  );
 });
 
 test('parseD1Rows and toIndexRows accept Wrangler JSON and reject anything else', () => {
@@ -226,6 +256,8 @@ test('queryAccessLog records the request, decrypts only the window and never pri
     const sqls = calls.filter((args) => args[0] === 'd1').map((args) => args[args.length - 1]);
     assert.match(sqls[0] ?? '', /^INSERT INTO access_log_requests/);
     assert.match(sqls[0] ?? '', /'2026-10-16T13:30:00.000Z', '2026-10-16T14:15:00.000Z'/);
+    // The audit mirror travels in the same command as the request row.
+    assert.match(sqls[0] ?? '', /; INSERT INTO audit_log .*'operator', 'access_log\.query'/);
     assert.match(sqls[1] ?? '', /^SELECT object_key/);
     assert.equal(sqls[2], `UPDATE access_log_requests SET exported_count = 2 WHERE id = '${ID_A}'`);
     for (const args of calls.filter((a) => a[0] === 'd1')) assert.ok(args.includes('--remote'));

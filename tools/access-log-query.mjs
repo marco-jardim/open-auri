@@ -6,7 +6,9 @@
 // --from/--to are ISO 8601 date-times with an explicit offset (Z or ±hh:mm); the window is
 // inclusive. Steps:
 //   1. records the request in D1 `access_log_requests` (migration 0007; append-only, it is the
-//      request's audit trail) before anything is decrypted;
+//      request's audit trail) and mirrors it into the admin trail `audit_log` (migration 0003,
+//      action `access_log.query`, actor_kind `operator`), both in one command, before anything is
+//      decrypted;
 //   2. finds the objects of the window in `access_log_objects` (Wrangler cannot list R2 objects);
 //   3. downloads only those objects (`wrangler r2 object get --remote`) into a private temporary
 //      directory, decrypts them in memory with ACCESS_LOG_KEY from the repository .env (a keyring:
@@ -114,6 +116,39 @@ export function insertRequestSql(request) {
   return (
     'INSERT INTO access_log_requests ' +
     '(id, case_ref, window_from, window_to, requested_at, requested_by) ' +
+    `VALUES (${values.join(', ')})`
+  );
+}
+
+/**
+ * Mirror of the request in the admin audit trail (migration 0003 `audit_log`, append-only):
+ * actor_kind 'operator', action 'access_log.query', target the request id. The detail holds only
+ * the request id and the window (no case reference, no personal data). The row id is the request
+ * id (unique per run). Sent in the same `--command` as {@link insertRequestSql}, so both rows are
+ * written together.
+ * @param {{ id: string, from: Date, to: Date, requestedAt: Date, operator: string }} request
+ */
+export function auditRequestSql(request) {
+  const detail = JSON.stringify({
+    requestId: request.id,
+    windowFrom: request.from.toISOString(),
+    windowTo: request.to.toISOString(),
+  });
+  const createdAt = request.requestedAt.getTime();
+  if (!Number.isSafeInteger(createdAt)) throw new RenderError('Invalid request time');
+  const values = [
+    sqlString(request.id),
+    sqlString(request.operator),
+    "'operator'",
+    "'access_log.query'",
+    "'access_log_request'",
+    sqlString(request.id),
+    sqlString(detail),
+    String(createdAt),
+  ];
+  return (
+    'INSERT INTO audit_log ' +
+    '(id, actor_id, actor_kind, action, target_kind, target_id, detail, created_at) ' +
     `VALUES (${values.join(', ')})`
   );
 }
@@ -306,8 +341,11 @@ export async function queryAccessLog(args, deps) {
 
   const id = (deps.uuid ?? randomUUID)();
   const requestedAt = (deps.now ?? (() => new Date()))();
-  await d1(insertRequestSql({ id, caseRef, from, to, requestedAt, operator }));
-  log(`Recorded request ${id} in access_log_requests`);
+  await d1(
+    `${insertRequestSql({ id, caseRef, from, to, requestedAt, operator })}; ` +
+      auditRequestSql({ id, from, to, requestedAt, operator }),
+  );
+  log(`Recorded request ${id} in access_log_requests and audit_log`);
 
   const rows = toIndexRows(await d1(indexQuerySql(from, to))).filter((row) =>
     objectInWindow(row, from, to),
