@@ -66,10 +66,18 @@ Fase atual: F2 · Etapa: PF2 · Último commit da F1: (ver tabela)
 
 Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,45% branches, 99,55% funções; lint, typecheck, prettier e scanner limpos; `npm run types` emite 34 declarações.
 
+## Tarefas F2
+
+| ID | Status | Commit | Notas |
+|---|---|---|---|
+| PF2 | verificada | — | ver Pre-flights |
+| T2.1 | commitada | a46cd60, 19fc321 | scaffold e instalação pelo orquestrador; configuração pelo implementer; verificação central (check, unit 2/2, e2e 2/2, build) |
+
 ## Pre-flights
 
 | PF | Data | Resultado | Evidências |
 |---|---|---|---|
+| PF2 | 2026-10-16 | aprovado | Q1 PASS e árvore limpa; versões verificadas (abaixo); spike de áudio com `qa-audio.mjs --all`: 191 PASS (96 kHz exatos, `createMediaElementSource`, 20 nós IIR, IndexedDB), 1 FAIL estrutural no rodapé do mock da Docs (defeito do mock, não do áudio); fontes e licenças verificadas; AutoEq `master` em `7ae0f56` (2025-07-20), sem LFS, colisão `measurements/Rtings` × `rtings` |
 | PF1 | 2026-10-16 | aprovado | HEAD 1e2f241; `git status`: só `design/` não versionado (49 arquivos, ~33,7 MB; maior 4,24 MB); Node v24.21.0, npm 12.0.2; `npm test` 59/59 (52 codec + 6 scanner + 1 agregado do `design\analysis\gate.test.mjs`); `qa-parity.mjs` 0 falhas (Neutro 0x4FFF); `check-sensitive` saída 0; 16 núcleos |
 
 ### Versões verificadas (0.14)
@@ -85,6 +93,21 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 | fast-check | 4.10.2 | MIT | 2026-10-16 |
 | @types/node | 24.x | MIT | 2026-10-16 |
 | ajv | 8.20.0 | MIT | 2026-10-16 |
+| typescript (núcleo e web, a partir da F2) | 6.0.3 | Apache-2.0 | 2026-10-16 |
+| @sveltejs/kit | 3.1.0 | MIT | 2026-10-16 |
+| svelte | 5.57.2 | MIT | 2026-10-16 |
+| vite | 8.3.4 | MIT | 2026-10-16 |
+| @sveltejs/adapter-cloudflare | 8.0.1 | MIT | 2026-10-16 |
+| tailwindcss / @tailwindcss/vite | 4.3.3 | MIT | 2026-10-16 |
+| @inlang/paraglide-js | 2.29.0 | MIT | 2026-10-16 |
+| vitest / @vitest/coverage-v8 / @vitest/browser-playwright | 5.0.5 | MIT | 2026-10-16 |
+| @playwright/test | 1.64.1 | Apache-2.0 | 2026-10-16 |
+| @axe-core/playwright | 4.14.0 | MPL-2.0 (só dev) | 2026-10-16 |
+| svelte-check | 4.7.6 | MIT | 2026-10-16 |
+| typescript-eslint | 8.71.2 | MIT | 2026-10-16 |
+| fake-indexeddb | 6.2.5 | Apache-2.0 | 2026-10-16 |
+| wrangler | 4.151.0 | MIT OR Apache-2.0 | 2026-10-16 |
+| Fontsource (10 famílias) | 5.3.x | OFL-1.1; Special Elite e Permanent Marker Apache-2.0 | 2026-10-16 |
 
 ### Fatos do `node:test` (PF1.6)
 
@@ -124,6 +147,12 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 - 2026-10-16 · FX1.1: o transporte importa `gateForWrite` e o aplica sempre; um gate injetado só acrescenta checagens. O gate e o transporte trabalham sobre um snapshot congelado das bandas (uma leitura por campo). O scan refina também o primeiro e o último intervalo: fica até 3,06e-6 dB mais estrito que a referência, e os 11 presets e o Neutro continuam aprovados.
 
 - 2026-10-16 · FX1.11: nomes de receita (medição, alvo) passam pela detecção de URL depois de remover uma extensão permitida (csv, txt, json, frd, zma, mdat, wav, rew); versão do solver só `X.Y.Z` com pré-release alpha/beta/rc/dev/pre e build hexadecimal. Só as três bandeiras de subdivisão RGI (Inglaterra, Escócia, País de Gales) mantêm tags; demais sequências de tag são removidas.
+
+- 2026-10-16 · PF2: adotado o **SvelteKit 3** (estável desde 2026-10-01; 0.14). Itens do plano escritos para o Kit 2 foram mapeados: configuração no `sveltekit({...})` do `web/vite.config.ts` (não há `svelte.config.js`), `#lib` no lugar de ``, `/env/public` no lugar de `/static/public`. Brief comum dos delegados em `docs/plans/f2-delegate-brief.md`.
+- 2026-10-16 · PF2: **TypeScript 6** no núcleo e no web. O TS 7 (port nativo) não tem API JavaScript, e Kit 3, svelte-check e typescript-eslint exigem TS 6. O typecheck do núcleo passa igual; as declarações foram regeneradas.
+- 2026-10-16 · T2.1: testes de componente em Chromium real (`@vitest/browser-playwright`), em vez de jsdom, que é o padrão atual do `sv` para runes. Opções do Paraglide em `web/project.inlang/paraglide.config.mjs` (o `.gitignore` do inlang ignora `.json`), importado pelo `vite.config.ts`; cookie `oa_lang` e localStorage `oa.lang` confirmados no runtime gerado. O npm 12 bloqueia scripts de instalação: `esbuild` e `workerd` aprovados em `allowScripts`.
+- 2026-10-16 · Fontes: Special Elite e Permanent Marker são Apache-2.0 (não OFL); mantidas por serem permissivas e compatíveis com a AGPL, com atribuição no THIRD_PARTY_NOTICES (T2.2). Fontes usadas pelos mocks: Instrument Serif, Geist, JetBrains Mono, Courier Prime, Barlow Condensed, Oswald, Special Elite, EB Garamond, Permanent Marker e VT323.
+- 2026-10-16 · AutoEq: `measurements/Rtings` e `measurements/rtings` colidem em sistema de arquivos sem distinção de maiúsculas. A T2.19 lê os blobs via git (`ls-tree` + `cat-file`), sem checkout.
 
 ## Bloqueios e perguntas ao humano
 
