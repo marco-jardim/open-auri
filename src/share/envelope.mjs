@@ -54,22 +54,22 @@ const SHA256 = /^[a-fA-F0-9]{64}$(?![\s\S])/;
 const PARAM_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,31}$(?![\s\S])/;
 // Dataset/file names are not prose: dots are allowed, links and path syntax are not.
 const RECIPE_NAME = /^(?!.*www\.)[\p{L}\p{N} ._()+,'&-]{1,120}$(?![\s\S])/iu;
-const SEMVER_IDENTIFIER = '(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)';
-const SEMVER = new RegExp(
-  '^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)' +
-    `(?:-${SEMVER_IDENTIFIER}(?:\\.${SEMVER_IDENTIFIER})*)?` +
-    '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$(?![\\s\\S])',
-);
+// Ignore only one known file extension when checking the remaining name for links.
+const RECIPE_EXTENSION = /\.(?:csv|txt|json|frd|zma|mdat|wav|rew)$(?![\s\S])/iu;
+// Narrow SemVer subset: release channels, canonical numeric identifiers and git SHAs.
+const SEMVER =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:alpha|beta|rc|dev|pre)(?:\.(?:0|[1-9]\d*))*)?(?:\+[0-9A-Fa-f]{1,40})?$(?![\s\S])/;
 // Calendar validity is checked separately, including leap years. UTC only, no offsets.
 const UTC =
   /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$(?![\s\S])/;
 const INVISIBLE =
   /[\p{Default_Ignorable_Code_Point}\p{Cf}\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
-// Protect complete tag flags first, then pictographic ZWJ chains (including skin
-// tones), and selectors immediately after pictographs or keycap bases. Unmatched
-// joiners, selectors and tags are still stripped. Detection never uses this exemption.
+// Protect only the RGI subdivision tag flags (gbeng, gbsct, gbwls): two tag letters,
+// then three tag letters and CANCEL TAG. Other tag runs cannot hide arbitrary ASCII.
+// Also protect pictographic ZWJ chains (including skin tones) and selectors after
+// pictographs or keycap bases. Detection never uses these invisible exemptions.
 const EMOJI_SEQUENCE =
-  /\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f}|\p{Extended_Pictographic}[\ufe0e\ufe0f]?\p{Emoji_Modifier}?(?:\u200d\p{Extended_Pictographic}[\ufe0e\ufe0f]?\p{Emoji_Modifier}?)*|[0-9#*][\ufe0e\ufe0f]/gu;
+  /\u{1f3f4}\u{e0067}\u{e0062}(?:\u{e0065}\u{e006e}\u{e0067}|\u{e0073}\u{e0063}\u{e0074}|\u{e0077}\u{e006c}\u{e0073})\u{e007f}|\p{Extended_Pictographic}[\ufe0e\ufe0f]?\p{Emoji_Modifier}?(?:\u200d\p{Extended_Pictographic}[\ufe0e\ufe0f]?\p{Emoji_Modifier}?)*|[0-9#*][\ufe0e\ufe0f]/gu;
 // Detection only: retain the normalized punctuation in published text.
 const URL_DOTS = /[\u3002\uff0e\uff61\u2024\ufe52]/gu;
 // Consume scheme candidates BEFORE checking their suffix: a failed suffix must
@@ -158,16 +158,16 @@ function urlCode(text) {
  * @returns {string}
  */
 export function normalizeText(text, { multiline = false, path = '' } = {}) {
-  return normalizeFieldText(text, multiline, path, true);
+  return normalizeFieldText(text, multiline, path, 'prose');
 }
 
 /**
- * Structured recipe filenames and SemVer bypass URL detection, not normalization
- * or their structural patterns. The public prose normalizer has no such bypass.
+ * Recipe names check URLs after removing one known file extension. Versions rely
+ * on their narrow structural pattern. Neither exception applies to public prose.
  * @param {string} text @param {boolean} multiline @param {string} path
- * @param {boolean} checkUrls @returns {string}
+ * @param {'prose' | 'recipe-name' | 'version'} kind @returns {string}
  */
-function normalizeFieldText(text, multiline, path, checkUrls) {
+function normalizeFieldText(text, multiline, path, kind) {
   if (typeof text !== 'string') {
     throw new EnvelopeError([issue(path, 'env:type', 'Expected text')]);
   }
@@ -188,7 +188,8 @@ function normalizeFieldText(text, multiline, path, checkUrls) {
   if (multiline && value.split('\n').length > 5) {
     errors.push(issue(path, 'env:length', 'Description must have at most five lines'));
   }
-  const code = checkUrls ? urlCode(value) : undefined;
+  const detection = kind === 'recipe-name' ? value.replace(RECIPE_EXTENSION, '') : value;
+  const code = kind === 'version' ? undefined : urlCode(detection);
   if (code) {
     errors.push(
       issue(
@@ -218,11 +219,13 @@ function normalize(input, errors) {
   const text = (object, key, path) => {
     if (typeof object[key] !== 'string') return;
     try {
-      const structured =
-        path === '/recipe/measurement/name' ||
-        path === '/recipe/target/name' ||
-        path === '/recipe/solver/version';
-      object[key] = normalizeFieldText(object[key], path === '/description', path, !structured);
+      const kind =
+        path === '/recipe/solver/version'
+          ? 'version'
+          : path === '/recipe/measurement/name' || path === '/recipe/target/name'
+            ? 'recipe-name'
+            : 'prose';
+      object[key] = normalizeFieldText(object[key], path === '/description', path, kind);
     } catch (error) {
       if (!(error instanceof EnvelopeError)) throw error;
       errors.push(...error.errors);

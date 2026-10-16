@@ -57,6 +57,12 @@ const withBand = (band, coherent = false) => {
 };
 const withRecipe = (value) => withField('recipe', value);
 
+/** @param {string} ascii @returns {string} */
+const tagFlag = (ascii) =>
+  `🏴${[...ascii]
+    .map((character) => String.fromCodePoint(0xe0000 + character.charCodeAt(0)))
+    .join('')}\u{e007f}`;
+
 function expectIssue(value, code, path, validate = validateEnvelope) {
   const result = validate(value);
   assert.equal(result.ok, false, JSON.stringify(value));
@@ -229,7 +235,7 @@ for (const key of ['measurement', 'target', 'solver']) {
     const missing = { ...recipe[key] };
     delete missing[field];
     structural(`${key}/${field} required`, withRecipe({ [key]: missing }), false);
-    const maximum = field === 'version' ? `1.0.0-${'a'.repeat(26)}` : 'x'.repeat(max);
+    const maximum = field === 'version' ? `1.0.0+${'a'.repeat(26)}` : 'x'.repeat(max);
     structural(
       `${key}/${field} max`,
       withRecipe({ [key]: { ...recipe[key], [field]: maximum } }),
@@ -237,7 +243,7 @@ for (const key of ['measurement', 'target', 'solver']) {
     );
     structural(
       `${key}/${field} over max`,
-      withRecipe({ [key]: { ...recipe[key], [field]: `${maximum}x` } }),
+      withRecipe({ [key]: { ...recipe[key], [field]: `${maximum}a` } }),
       false,
     );
   }
@@ -247,10 +253,31 @@ for (const key of ['measurement', 'target']) {
     'HD600.csv',
     'Sennheiser HD 600 (oratory1990).csv',
     "Medição_東京 １２.0 (+1), O'Brien & Sons-dataset.csv".normalize('NFKC'),
-    'evil.com', // File/dataset names deliberately use a charset, not prose URL detection.
+    ...['csv', 'txt', 'json', 'frd', 'zma', 'mdat', 'wav', 'rew'].flatMap((extension) => [
+      `HD600.${extension}`,
+      `HD600.${extension.toUpperCase()}`,
+    ]),
     'x'.repeat(120),
   ]) {
     structural(`${key} filename ${name}`, withRecipe({ [key]: { ...recipe[key], name } }), true);
+  }
+  for (const name of [
+    'evil.com',
+    'bit.ly',
+    't.me',
+    'x evil.com.csv',
+    'Promo em evil.com agora',
+    'evil.com.CsV',
+    'HD600.csv.csv',
+    'HD600.csv.txt',
+    'HD600.zip',
+    'grave.Agudo.csv',
+  ]) {
+    semantic(
+      `${key} filename link ${name}`,
+      withRecipe({ [key]: { ...recipe[key], name } }),
+      false,
+    );
   }
   for (const name of [
     'https://host',
@@ -275,12 +302,15 @@ for (const key of ['measurement', 'target']) {
 }
 for (const version of [
   '0.0.0',
-  '1.0.0-alpha.beta',
-  '1.0.0-0.3.7',
-  '1.0.0-x.7.z.92',
-  '1.0.0-1a.01a.-',
-  '1.0.0+001.build.01',
-  '1.0.0-beta+exp.sha.5114f85',
+  '1.0.0-alpha',
+  '1.0.0-alpha.0.3.7',
+  '1.0.0-beta.12',
+  '1.0.0-rc.1',
+  '1.0.0-dev',
+  '1.0.0-pre.1.2',
+  '1.0.0+0',
+  '1.0.0+ABCDEF0123456789',
+  '1.0.0-beta+5114f85',
 ]) {
   structural(`SemVer ${version}`, withRecipe({ solver: { ...recipe.solver, version } }), true);
 }
@@ -293,6 +323,22 @@ for (const version of [
   '1.0.01',
   '1.0.0-01',
   '1.0.0-alpha.01',
+  '1.0.0-alpha.1.01',
+  '1.0.0-alpha.1a',
+  '1.0.0-alpha.beta',
+  '1.0.0-0.3.7',
+  '1.0.0-x.7.z.92',
+  '1.0.0-1a.01a.-',
+  '1.0.0+001.build.01',
+  '1.0.0-beta+exp.sha.5114f85',
+  '1.0.0-www.evil.com',
+  '1.0.0+evil.com',
+  '1.0.0-bit.ly',
+  '1.0.0-preview',
+  '1.0.0-RC.1',
+  '1.0.0+g',
+  `1.0.0+${'a'.repeat(40)}`, // Preserve the existing 32-code-point total limit.
+  `1.0.0+${'a'.repeat(41)}`,
   '1.0.0-',
   '1.0.0-alpha..beta',
   '1.0.0-alpha_beta',
@@ -358,8 +404,8 @@ semantic('different wire order', reversed, false);
 test('shared structural corpus agrees with Ajv 2020; semantic exclusions are explicit', (t) => {
   const structuralCases = corpus.filter((entry) => !entry.semantic);
   assert.ok(structuralCases.length >= 30, String(structuralCases.length));
-  assert.equal(corpus.filter((entry) => entry.semantic).length, 12);
-  t.diagnostic(`${structuralCases.length} structural cases; 12 tagged semantic exclusions`);
+  assert.equal(corpus.filter((entry) => entry.semantic).length, 32);
+  t.diagnostic(`${structuralCases.length} structural cases; 32 tagged semantic exclusions`);
   for (const { name, value, valid, semantic: excluded } of corpus) {
     const result = validateEnvelope(value);
     assert.equal(result.ok, valid, `${name}: ${JSON.stringify(result)}`);
@@ -385,6 +431,62 @@ test('official base and complete recipe round-trip; optional description is defa
     assert.equal(result.value.description, '');
     assert.deepEqual(parseEnvelope(serializeEnvelope(input)), result);
   }
+});
+
+test('recipe names keep one approved extension but refuse domains and link text', () => {
+  for (const key of ['measurement', 'target']) {
+    const input = withRecipe({ [key]: { ...recipe[key], name: '  ＨＤ６００.CsV  ' } });
+    const result = validateEnvelope(input);
+    assert.equal(result.ok, true);
+    assert.equal(result.value.recipe[key].name, 'HD600.CsV');
+    assert.equal(schemaValidate(result.value), true);
+    assert.deepEqual(parseEnvelope(serializeEnvelope(input)), result);
+    for (const name of [
+      'evil.com',
+      'bit.ly',
+      't.me',
+      'x evil.com.csv',
+      'Promo em evil.com agora',
+      'evil.com.CsV',
+      'HD600.csv.csv',
+      'HD600.csv.txt',
+      'evil.c\u200dom.csv',
+      'ｅｖｉｌ．ｃｏｍ.csv',
+    ]) {
+      const linked = withRecipe({ [key]: { ...recipe[key], name } });
+      expectIssue(linked, 'env:url', `/recipe/${key}/name`);
+      expectIssue(JSON.stringify(linked), 'env:url', `/recipe/${key}/name`, parseEnvelope);
+      assert.throws(() => normalizeEnvelope(linked), EnvelopeError);
+      assert.throws(() => serializeEnvelope(linked), EnvelopeError);
+    }
+  }
+});
+
+test('recipe solver versions refuse arbitrary prerelease/build text with env:pattern', () => {
+  for (const version of [
+    '1.0.0-www.evil.com',
+    '1.0.0+evil.com',
+    '1.0.0-bit.ly',
+    '1.0.0-alpha.beta',
+    '1.0.0-beta+exp.sha.5114f85',
+    '1.0.0-alpha.01',
+    '1.0.0+gg',
+  ]) {
+    const input = withRecipe({ solver: { ...recipe.solver, version } });
+    const errors = expectIssue(input, 'env:pattern', '/recipe/solver/version');
+    assert.deepEqual(
+      errors.map((error) => error.code),
+      ['env:pattern'],
+    );
+    assert.equal(schemaValidate(input), false);
+    expectIssue(JSON.stringify(input), 'env:pattern', '/recipe/solver/version', parseEnvelope);
+    assert.throws(() => serializeEnvelope(input), EnvelopeError);
+  }
+  expectIssue(
+    withRecipe({ solver: { ...recipe.solver, version: `1.0.0+${'a'.repeat(27)}` } }),
+    'env:length',
+    '/recipe/solver/version',
+  );
 });
 
 test('APO pass filters fit the envelope without gainDb; even zero gain is an extra field', () => {
@@ -462,9 +564,19 @@ test('text strips every listed invisible and applies NFKC before URL checking', 
   assert.throws(() => normalizeText(1), EnvelopeError);
 });
 
-test('emoji selectors, ZWJ families, keycaps and terminated tag flags survive byte-exact', () => {
-  const england = '\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}';
-  for (const emoji of ['❤️', '❤\ufe0e', '👨‍👩‍👧', '👩🏽‍💻', '👩‍❤️‍👩', '1️⃣', '#️⃣', '*\ufe0e\u20e3', england]) {
+test('emoji selectors, ZWJ families, keycaps and RGI subdivision flags survive byte-exact', () => {
+  for (const emoji of [
+    '❤️',
+    '❤\ufe0e',
+    '👨‍👩‍👧',
+    '👩🏽‍💻',
+    '👩‍❤️‍👩',
+    '🏴‍☠️',
+    '1️⃣',
+    '#️⃣',
+    '*\ufe0e\u20e3',
+    ...['gbeng', 'gbsct', 'gbwls'].map(tagFlag),
+  ]) {
     assert.deepEqual(Buffer.from(normalizeText(emoji)), Buffer.from(emoji));
     const input = withField('name', emoji);
     const result = validateEnvelope(input);
@@ -489,6 +601,39 @@ test('emoji selectors, ZWJ families, keycaps and terminated tag flags survive by
   assert.equal(normalizeText('❤\ufe0f\ufe0f'), '❤️');
   // Valid emoji selectors must not create a detection-only boundary in a domain.
   expectIssue(withField('name', '1\ufe0f.com'), 'env:url', '/name');
+});
+
+test('non-RGI emoji tags cannot publish hidden ASCII or change visible URL detection', () => {
+  for (const ascii of [
+    'https://evil.example/claim',
+    'a'.repeat(278),
+    'gb',
+    'gba',
+    'gb12',
+    'gb123',
+    'gbengx',
+    'useng',
+    'GBENG',
+    'gbenghttps://evil.example/claim',
+  ]) {
+    const hidden = tagFlag(ascii);
+    assert.equal(normalizeText(hidden), '🏴', ascii);
+    const input = withField('description', hidden);
+    const result = validateEnvelope(input);
+    assert.equal(result.ok, true, ascii);
+    assert.equal(result.value.description, '🏴', ascii);
+    assert.equal(JSON.parse(serializeEnvelope(input)).description, '🏴', ascii);
+    assert.deepEqual(parseEnvelope(JSON.stringify(input)), result);
+    expectIssue(withField('description', `${hidden} evil.com`), 'env:url', '/description');
+    // All tag characters are stripped for detection, even inside a visible domain.
+    expectIssue(withField('description', `evil.c${hidden.slice(2)}om`), 'env:url', '/description');
+  }
+  for (const flag of ['gbeng', 'gbsct', 'gbwls'].map(tagFlag)) {
+    expectIssue(withField('name', `evil.c${flag.slice(2)}om`), 'env:url', '/name');
+  }
+  const long = tagFlag('g'.repeat(32766));
+  assert.equal(long.length, 65536);
+  assert.equal(normalizeText(long), '🏴');
 });
 
 test('limits count normalized code points, including combining marks and NFKC expansion', () => {
@@ -579,7 +724,7 @@ test('schemes, obfuscated dots and general domains are refused across all free-t
       expectIssue(withField(key, text), 'env:url', `/${key}`);
     }
     for (const key of ['measurement', 'target', 'solver']) {
-      const fields = key === 'solver' ? ['name'] : ['source'];
+      const fields = key === 'solver' ? ['name'] : ['source', 'name'];
       for (const field of fields) {
         expectIssue(
           withRecipe({ [key]: { ...recipe[key], [field]: text } }),
@@ -605,6 +750,13 @@ test('ambiguous missing sentence spaces are refused with helpful env:url-like, n
       '/recipe/solver/name',
     );
     expectIssue(withRecipe({ params: { note: text } }), 'env:url-like', '/recipe/params/note');
+    for (const key of ['measurement', 'target']) {
+      expectIssue(
+        withRecipe({ [key]: { ...recipe[key], name: `${text}.csv` } }),
+        'env:url-like',
+        `/recipe/${key}/name`,
+      );
+    }
   }
   for (const text of [
     'https://grave.Agudo',
@@ -668,6 +820,7 @@ test('64 KiB adversarial dotted tokens, marks and emoji tags normalize in under 
     `${'-'.repeat(65535)}!`,
     `${'a'.repeat(32768)}${'\u0332'.repeat(32768)}`,
     `🏴${'\u{e0067}'.repeat(32767)}`,
+    tagFlag('g'.repeat(32766)),
   ]) {
     assert.equal(input.length, 65536);
     const start = performance.now();
@@ -684,7 +837,7 @@ test('normalization is nonmutating and clones every supported object level', () 
   input.author = '  Ａｕｔｏｒ ';
   input.recipe.measurement.source = ' local  source ';
   input.recipe.target.name = ' Flat  target ';
-  input.recipe.solver.version = ' １．０．０-alpha.beta ';
+  input.recipe.solver.version = ' １．０．０-alpha.1 ';
   input.recipe.params.note = ' nice  curve ';
   const before = structuredClone(input);
   const output = normalizeEnvelope(input);
@@ -694,7 +847,7 @@ test('normalization is nonmutating and clones every supported object level', () 
   assert.equal(output.author, 'Autor');
   assert.equal(output.recipe.measurement.source, 'local source');
   assert.equal(output.recipe.target.name, 'Flat target');
-  assert.equal(output.recipe.solver.version, '1.0.0-alpha.beta');
+  assert.equal(output.recipe.solver.version, '1.0.0-alpha.1');
   assert.equal(output.recipe.params.note, 'nice curve');
   for (const key of ['measurement', 'target', 'solver', 'params']) {
     assert.notEqual(output.recipe[key], input.recipe[key]);
