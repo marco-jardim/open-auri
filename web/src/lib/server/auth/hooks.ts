@@ -199,28 +199,14 @@ function limitedError(retryAfter: number): APIError {
 }
 
 /**
- * Identifier the guard keys its per-account limits on, per path. Sign-in by e-mail and by nickname
- * reach the same account, so an existing account is keyed on its user id on both paths (one budget
- * per account, not one per login name). Unknown names keep their own key; the response is the same
- * either way (the guard's answers never depend on it), and the lookup runs on both paths alike.
+ * Identifier the guard keys its per-account limits on: the submitted name, never a lookup. Keying on
+ * whether an account exists would make the (pre-Turnstile) `ip+id` window answer differently for
+ * registered and unregistered names, i.e. an account-existence oracle (Q3 round 3). E-mail and
+ * nickname sign-in share the rule group, so the same string spends one budget on both paths.
  */
-async function guardIdentifier(
-	db: AuthHookDeps['env']['db'],
-	path: string,
-	body: Body
-): Promise<string | null> {
-	if (path === '/sign-in/email' || path === '/sign-in/username') {
-		const byEmail = path === '/sign-in/email';
-		const name = text(byEmail ? body.email : body.username);
-		if (!name) return null;
-		// Same lookups Better Auth makes next: lowercased e-mail; normalized nickname.
-		const row = await first<{ id: string }>(
-			byEmail
-				? sql(db, 'SELECT id FROM "user" WHERE email = ? LIMIT 1', name.toLowerCase())
-				: sql(db, 'SELECT id FROM "user" WHERE username = ? LIMIT 1', normalizeUsername(name))
-		);
-		return row ? `user:${row.id}` : name;
-	}
+function guardIdentifier(path: string, body: Body): string | null {
+	if (path === '/sign-in/email') return text(body.email) ?? null;
+	if (path === '/sign-in/username') return text(body.username) ?? null;
 	if (path === '/change-email') return text(body.newEmail) ?? null;
 	return text(body.email) ?? null;
 }
@@ -436,12 +422,7 @@ export function createBeforeHook(deps: AuthHookDeps) {
 		if (isAuthGuardedPath(path)) {
 			const headers = request?.headers ?? ctx.headers ?? new Headers();
 			const userId = path === '/change-email' ? ((await currentSession())?.user.id ?? null) : null;
-			let identifier: string | null;
-			try {
-				identifier = await guardIdentifier(db, path, body);
-			} catch {
-				throw fail(503, 'RATE_LIMIT_UNAVAILABLE', 'RATE_LIMIT_UNAVAILABLE');
-			}
+			const identifier = guardIdentifier(path, body);
 			const result = await deps.guard({
 				path,
 				ip: headers.get('cf-connecting-ip'),

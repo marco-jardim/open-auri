@@ -363,27 +363,32 @@ describe('m2: read-only mode and session refresh', () => {
 	});
 });
 
-describe('nit: one sign-in budget per account', () => {
-	it('sign-ins by e-mail and by nickname count against the same account window', async () => {
+describe('Q3 round 3: sign-in limits never reveal whether an account exists', () => {
+	it('token-less attempts by e-mail then by nickname answer the same for known and unknown names', async () => {
 		const h = harness();
-		const email = uniqueEmail('r2-budget');
-		const username = uniqueUsername('b');
-		await createVerifiedUser(h, email, { username });
-		for (let index = 0; index < 10; index += 1) {
-			const wrong = await h.client().signIn(email, `wrong password ${index} xx`);
-			expect(wrong.status).toBe(401);
+		const registered = uniqueEmail('r3-known');
+		await createVerifiedUser(h, registered, { username: uniqueUsername('k') });
+		const unknown = uniqueEmail('r3-unknown');
+		const answers: number[][] = [];
+		for (const email of [registered, unknown]) {
+			const client = h.client();
+			const seen: number[] = [];
+			for (let index = 0; index < 3; index += 1) {
+				const response = await client.post(
+					'/sign-in/email',
+					{ email, password: 'whatever pw 1' },
+					{ turnstile: null }
+				);
+				seen.push(response.status);
+			}
+			const byName = await client.post(
+				'/sign-in/username',
+				{ username: email, password: 'whatever pw 1' },
+				{ turnstile: null }
+			);
+			seen.push(byName.status);
+			answers.push(seen);
 		}
-		const byName = await h
-			.client()
-			.post('/sign-in/username', { username, password: 'wrong password zz' });
-		expect(byName.status).toBe(429);
-		expect(await errorCode(byName)).toBe('RATE_LIMITED');
-
-		// An unknown nickname keeps its own window (and answers like any wrong sign-in).
-		const stranger = uniqueUsername('nx');
-		const unknown = await h
-			.client()
-			.post('/sign-in/username', { username: stranger, password: 'whatever pw 1' });
-		expect(unknown.status).toBe(401);
+		expect(answers[0]).toEqual(answers[1]);
 	});
 });
