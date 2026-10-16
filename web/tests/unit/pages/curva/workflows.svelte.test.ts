@@ -1,0 +1,450 @@
+import { afterEach, expect, test, vi } from 'vitest';
+import { page } from 'vitest/browser';
+import { cleanup, render } from 'vitest-browser-svelte';
+import { tick } from 'svelte';
+import { NEUTRO, OFFICIAL_PRESETS, PADRAO_AURI } from 'open-auri/catalog';
+import { createClientApp, type ClientApp } from '#lib/app/index.ts';
+import { AudioEngineError, type AudioErrorCode } from '#lib/audio/engine.ts';
+import { m } from '#lib/paraglide/messages.js';
+import { handleGateRequest } from '#lib/workers/gate-handler.ts';
+import CurvaPage from '#lib/components/pages/curva/CurvaPage.svelte';
+import { exportS5, linkHash } from '#lib/components/pages/curva/io.ts';
+import type { GateClient } from '#lib/components/pages/curva/drag.ts';
+import type { Layer } from '#lib/components/pages/curva/layers.ts';
+import type { Band, Curve } from '#lib/components/pages/curva/model.ts';
+import { fakeAppOptions } from '../../app/fakes.ts';
+
+const neutral: Curve = { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb };
+const cut: Band = { kind: 'PK', freqHz: 1000, gainDb: -6, qFactor: 1 };
+const pad = (bands: Band[]) => [...bands, ...NEUTRO.bands.slice(bands.length)];
+const apps: ClientApp[] = [];
+
+afterEach(async () => {
+	await cleanup();
+	for (const app of apps.splice(0)) app.dispose();
+	vi.restoreAllMocks();
+});
+
+function gateClient(): GateClient {
+	let id = 0;
+	return {
+		async drag(input) {
+			const result = handleGateRequest({ ...input, type: 'drag', id: ++id });
+			if (result.type !== 'drag') throw new Error('Unexpected drag response');
+			return result;
+		},
+		async commit(input) {
+			const result = handleGateRequest({ ...input, type: 'commit', id: ++id });
+			if (result.type !== 'commit') throw new Error('Unexpected commit response');
+			return result;
+		}
+	};
+}
+
+async function setup(
+	layer: Layer = 'ajustar',
+	curve: Curve = neutral,
+	hash = '',
+	gate = gateClient()
+) {
+	const app = createClientApp(fakeAppOptions().options);
+	apps.push(app);
+	await app.state.ready;
+	app.state.curve.set({ ...curve, name: 'Editor', source: 'custom' });
+	const onlayer = vi.fn();
+	const screen = await render(CurvaPage, {
+		app,
+		layer,
+		hash,
+		pageUrl: new URL('https://example.test/'),
+		onlayer,
+		gateClient: gate
+	});
+	await tick();
+	return { app, screen, onlayer };
+}
+
+function importFile(container: HTMLElement, text: string, name = 'curve.txt') {
+	const input = container.querySelector('input[type="file"]');
+	if (!(input instanceof HTMLInputElement)) throw new Error('Missing import input');
+	const files = new DataTransfer();
+	files.items.add(new File([text], name));
+	input.files = files.files;
+	input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function changeRange(element: Element, value: number) {
+	if (!(element instanceof HTMLInputElement)) throw new Error('Missing macro range');
+	element.valueAsNumber = value;
+	element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function pointerEditor(container: HTMLElement) {
+	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
+	const overlay = container.querySelector('svg.handles');
+	if (!overlay) throw new Error('Missing handle overlay');
+	const rect = overlay.getBoundingClientRect();
+	return (type: string, horizontal = 0.4) => {
+		handle.dispatchEvent(
+			new PointerEvent(type, {
+				bubbles: true,
+				cancelable: true,
+				pointerId: 7,
+				clientX: rect.left + rect.width * horizontal,
+				clientY: rect.top + rect.height * 0.65
+			})
+		);
+	};
+}
+
+function deferred<T>() {
+	let resolve: (value: T) => void = () => {
+		throw new Error('Deferred response not initialised');
+	};
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
+test('presets, undo/redo, neutral/default and rescue change only the editor or checklist', async () => {
+	const { app } = await setup('ouvir');
+	const preset = OFFICIAL_PRESETS.find((item) => item.id !== PADRAO_AURI.id);
+	if (!preset) throw new Error('Missing preset');
+	await page.getByRole('button', { name: preset.label, exact: true }).click();
+	expect(app.state.curve.current.source).toBe(`preset:${preset.id}`);
+	expect(app.state.curve.current.bands).toEqual(preset.bands);
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	expect(app.state.curve.current.name).toBe('Editor');
+	await page.getByRole('button', { name: m.curva_redo(), exact: true }).click();
+	expect(app.state.curve.current.bands).toEqual(preset.bands);
+	await page.getByRole('button', { name: m.curva_rescue_neutral(), exact: true }).click();
+	expect(app.state.curve.current.bands).toEqual(NEUTRO.bands);
+	await page.getByRole('button', { name: m.curva_rescue_default(), exact: true }).click();
+	expect(app.state.curve.current.bands).toEqual(PADRAO_AURI.bands);
+	expect(app.pendingWrite).toBeNull();
+	const request = vi.spyOn(app, 'requestRescue');
+	await page.getByRole('button', { name: m.curva_rescue_cable(), exact: true }).click();
+	expect(request).toHaveBeenCalledOnce();
+	expect(app.pendingWrite?.bands).toEqual(NEUTRO.bands);
+});
+
+test('valid file import is undoable and bad JSON/TXT and oversized files preserve the editor', async () => {
+	const { app, screen } = await setup();
+	const before = app.state.curve.current;
+	const notify = vi.spyOn(app.toasts, 'push');
+	let failures = 0;
+	for (const [text, name] of [
+		['{"format":', 'bad.json'],
+		['Filter 1: ON PK Fc abc Hz Gain 1 dB Q 1', 'bad.txt'],
+		['x'.repeat(65537), 'large.txt'],
+		['Preamp: -1 dB\nFilter 1: ON HS Fc 8000 Hz Gain -3 dB Q 0.7', 'hs.txt']
+	]) {
+		importFile(screen.container, text, name);
+		failures += 1;
+		await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(failures));
+		expect(screen.container.textContent).toContain('Nada foi carregado no editor:');
+		expect(app.state.curve.current).toEqual(before);
+	}
+	importFile(screen.container, 'Preamp: -1 dB\nFilter 1: ON PK Fc 1000 Hz Gain -6 dB Q 1\n');
+	await vi.waitFor(() => expect(app.state.curve.current.source).toBe('import'));
+	expect(app.state.curve.current.bands[0]).toEqual(cut);
+	expect(app.state.curve.current.name).toBe(m.curva_name_imported());
+	expect(app.state.curve.current.preampDb).toBe(-1);
+	expect(app.pendingWrite).toBeNull();
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	expect(app.state.curve.current).toMatchObject({
+		name: before.name,
+		source: before.source,
+		bands: before.bands,
+		preampDb: before.preampDb
+	});
+});
+
+test('link imports wait for the client, load once and never navigate', async () => {
+	const linked: Curve = { bands: pad([cut]), preampDb: -1 };
+	const hash = linkHash(linked, 'ajustar');
+	if (!hash.ok) throw new Error('Invalid linked fixture');
+	const { app, screen } = await setup('ajustar', neutral, hash.value);
+	await vi.waitFor(() => expect(app.state.curve.current.source).toBe('import'));
+	expect(app.state.curve.current.bands).toEqual(linked.bands);
+	expect(app.state.curve.current.name).toBe(m.curva_name_link());
+	await screen.rerender({ hash: '#p=broken' });
+	await tick();
+	expect(app.state.curve.current.bands).toEqual(linked.bands);
+	expect(screen.container.textContent).toContain(m.curva_link_loaded());
+	expect(app.pendingWrite).toBeNull();
+});
+
+test.each(['#p=broken', '#p='])(
+	'broken link %s is announced without replacing the current curve',
+	async (hash) => {
+		const { app, screen } = await setup('ajustar', neutral, hash);
+		await vi.waitFor(() =>
+			expect(screen.container.textContent).toContain(
+				m.curva_link_refused({ reason: m.curva_io_error_link() })
+			)
+		);
+		expect(app.state.curve.current.source).toBe('custom');
+		expect(app.state.curve.current.bands).toEqual(NEUTRO.bands);
+	}
+);
+
+test('macros accumulate against one base and reset their readouts after undo', async () => {
+	const { app } = await setup('ouvir');
+	const bass = page.getByRole('slider', { name: /Grave/ });
+	changeRange(bass.element(), -1);
+	await tick();
+	expect(app.state.curve.current.bands[0]).toMatchObject({ kind: 'LS', gainDb: -1 });
+	changeRange(bass.element(), -2);
+	await tick();
+	expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -2 });
+	changeRange(page.getByRole('slider', { name: /Corpo/ }).element(), -1);
+	await tick();
+	expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -2 });
+	expect(app.state.curve.current.bands[1]).toMatchObject({ kind: 'PK', freqHz: 500, gainDb: -1 });
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	await expect.element(bass).toHaveAttribute('aria-valuetext', '0,0 dB');
+	expect(app.pendingWrite).toBeNull();
+});
+
+test('a bounded macro reports why it could not reach the requested boost', async () => {
+	const { app, screen } = await setup('ouvir', {
+		bands: pad([{ kind: 'PK', freqHz: 15000, gainDb: 3, qFactor: 1 }]),
+		preampDb: -6
+	});
+	changeRange(page.getByRole('slider', { name: /Brilho/ }).element(), 6);
+	await vi.waitFor(() => expect(screen.container.textContent).toContain('Brilho parou em'));
+	const first = app.state.curve.current.bands[0];
+	if (first?.kind !== 'PK') throw new Error('Expected PK band');
+	expect(first.gainDb).toBeGreaterThan(3);
+	expect(first.gainDb).toBeLessThan(9);
+});
+
+test('bank kind changes, typed gate-bounded edits and restoring default order are undoable', async () => {
+	const { app } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 });
+	await page.getByRole('combobox').first().selectOptions('LS');
+	expect(app.state.curve.current.bands[0]).toMatchObject({ kind: 'LS' });
+	await page.getByRole('combobox').first().selectOptions('OFF');
+	expect(app.state.curve.current.bands[0]).toEqual({ kind: 'OFF' });
+	await page.getByRole('combobox').first().selectOptions('PK');
+	expect(app.state.curve.current.bands[0]).toMatchObject({ kind: 'PK' });
+	const frequency = page
+		.getByRole('spinbutton', { name: 'Freq (Hz)', exact: true })
+		.first()
+		.element();
+	if (!(frequency instanceof HTMLInputElement)) throw new Error('Missing frequency field');
+	frequency.valueAsNumber = 1500;
+	frequency.dispatchEvent(new Event('change', { bubbles: true }));
+	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ freqHz: 1500 }));
+	await page.getByRole('button', { name: m.curva_order_reset(), exact: true }).click();
+	expect(app.state.curve.canUndo).toBe(true);
+});
+
+test.each([
+	['gesture', 'curva_preview_error_gesture'],
+	['suspended', 'curva_preview_error_suspended'],
+	['unsupported', 'curva_preview_error_unsupported'],
+	['invalid-file', 'curva_preview_error_failed']
+] as const satisfies readonly (readonly [AudioErrorCode, keyof typeof m])[])(
+	'page translates preview failure %s',
+	async (code, key) => {
+		const { app } = await setup('ouvir');
+		vi.spyOn(app.audio, 'createAB').mockImplementationOnce(() => {
+			throw new AudioEngineError(code);
+		});
+		await page.getByRole('button', { name: m.curva_preview(), exact: true }).click();
+		await expect.element(page.getByRole('alert')).toHaveTextContent(m[key]());
+		await expect
+			.element(page.getByRole('button', { name: m.curva_preview(), exact: true }))
+			.toHaveAttribute('aria-pressed', 'false');
+	}
+);
+
+test('worker errors are reported, whereas aborted edits leave the curve untouched without an error', async () => {
+	const client = gateClient();
+	const commit = vi.spyOn(client, 'commit');
+	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
+	const error = new Error('worker unavailable');
+	const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	commit.mockRejectedValueOnce(error);
+	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+	await vi.waitFor(() => expect(screen.container.textContent).toContain(m.curva_gate_error()));
+	expect(log).toHaveBeenCalledWith('Gate worker failed', error);
+	expect(app.state.curve.current.bands[0]).toEqual(cut);
+	log.mockClear();
+	commit.mockRejectedValueOnce(new DOMException('superseded', 'AbortError'));
+	handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+	await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(2));
+	await tick();
+	expect(log).not.toHaveBeenCalled();
+	expect(app.state.curve.current.bands[0]).toEqual(cut);
+});
+
+test('layer shortcuts yield to modal dialogs', async () => {
+	const { screen, onlayer } = await setup();
+	const modal = document.createElement('div');
+	modal.setAttribute('role', 'dialog');
+	modal.setAttribute('aria-modal', 'true');
+	screen.container.append(modal);
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true }));
+	expect(onlayer).not.toHaveBeenCalled();
+	modal.remove();
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }));
+	expect(onlayer).toHaveBeenCalledExactlyOnceWith('ouvir');
+});
+
+test('before client mount the neutral page is readable and write/preview/import are disabled', async () => {
+	await render(CurvaPage, {
+		app: null,
+		layer: 'ouvir',
+		hash: '',
+		pageUrl: new URL('https://example.test/'),
+		onlayer: vi.fn(),
+		gateClient: gateClient()
+	});
+	await expect.element(page.getByRole('heading', { name: 'Curva', exact: true })).toBeVisible();
+	for (const name of [
+		m.curva_preview(),
+		m.curva_write(),
+		m.curva_export_txt(),
+		m.curva_rescue_neutral()
+	]) {
+		await expect.element(page.getByRole('button', { name, exact: true })).toBeDisabled();
+	}
+});
+
+test('named S5 imports preserve metadata and report editor refusal', async () => {
+	const { app, screen } = await setup();
+	const result = exportS5(
+		{ bands: pad([cut]), preampDb: -1 },
+		{ name: 'Named import', source: 'custom', lang: 'pt-BR', now: 0 },
+		'ajustar'
+	);
+	if (!result.ok) throw new Error('Invalid named import fixture');
+	importFile(screen.container, result.value, 'named.json');
+	await vi.waitFor(() => expect(app.state.curve.current.name).toBe('Named import'));
+	expect(app.state.curve.current.source).toBe('import');
+	const before = app.state.curve.current;
+	const set = vi.spyOn(app.state.curve, 'set').mockReturnValueOnce(false);
+	importFile(screen.container, 'Preamp: -0.5 dB\n');
+	await vi.waitFor(() =>
+		expect(screen.container.textContent).toContain(
+			m.curva_import_refused({ reason: m.curva_io_error_format() })
+		)
+	);
+	expect(set).toHaveBeenCalledOnce();
+	expect(app.state.curve.current).toEqual(before);
+});
+
+test('removing a compensating cut is gate-refused instead of exposing its boost', async () => {
+	const boost: Band = { ...cut, gainDb: 6 };
+	const { app, screen } = await setup('ajustar', { bands: pad([cut, boost]), preampDb: -1 });
+	const before = app.state.curve.current;
+	await page.getByRole('combobox').first().selectOptions('OFF');
+	expect(app.state.curve.current).toEqual(before);
+	expect(screen.container.textContent).toContain('Tipo recusado:');
+});
+
+test('Ajustar rejects experimental kinds offered by a stale select', async () => {
+	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 });
+	const select = page.getByRole('combobox').first().element();
+	if (!(select instanceof HTMLSelectElement)) throw new Error('Missing kind selector');
+	const hs = document.createElement('option');
+	hs.value = 'HS';
+	hs.textContent = 'HS';
+	select.append(hs);
+	select.value = 'HS';
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	await tick();
+	expect(app.state.curve.current.bands[0]).toEqual(cut);
+	expect(screen.container.textContent).toContain(m.curva_exp_hint());
+	expect(select.value).toBe('PK');
+});
+
+test('pointer movement previews a draft and release alone commits it to the editor', async () => {
+	const client = gateClient();
+	const drag = vi.spyOn(client, 'drag');
+	const commit = vi.spyOn(client, 'commit');
+	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
+	const pointer = pointerEditor(screen.container);
+	const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
+	pointer('pointerdown');
+	pointer('pointermove');
+	await vi.waitFor(() => expect(handle.element().getAttribute('aria-valuenow')).not.toBe('1000'));
+	expect(drag).toHaveBeenCalled();
+	expect(commit).not.toHaveBeenCalled();
+	expect(app.state.curve.current.bands[0]).toEqual(cut);
+	const frequency = Number(handle.element().getAttribute('aria-valuenow'));
+	pointer('pointerup');
+	await vi.waitFor(() =>
+		expect(app.state.curve.current.bands[0]).toMatchObject({ freqHz: frequency })
+	);
+	expect(commit).toHaveBeenCalledOnce();
+	expect(app.pendingWrite).toBeNull();
+});
+
+test('a late advisory response cannot overwrite the newer pointer draft', async () => {
+	const client = gateClient();
+	const realDrag = client.drag;
+	const pending = deferred<Awaited<ReturnType<GateClient['drag']>>>();
+	const drag = vi.spyOn(client, 'drag').mockReturnValueOnce(pending.promise);
+	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
+	const pointer = pointerEditor(screen.container);
+	const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
+	pointer('pointerdown');
+	pointer('pointermove', 0.35);
+	const first = drag.mock.calls[0]?.[0];
+	if (!first) throw new Error('Missing first advisory request');
+	pointer('pointermove', 0.6);
+	await vi.waitFor(() => expect(handle.element().getAttribute('aria-valuenow')).not.toBe('1000'));
+	const latest = handle.element().getAttribute('aria-valuenow');
+	pending.resolve(await realDrag(first));
+	await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	await tick();
+	expect(handle.element().getAttribute('aria-valuenow')).toBe(latest);
+	expect(app.state.curve.current.bands[0]).toEqual(cut);
+});
+
+test('a late commit cannot replace a newer keyboard edit', async () => {
+	const client = gateClient();
+	const realCommit = client.commit;
+	const pending = deferred<Awaited<ReturnType<GateClient['commit']>>>();
+	const commit = vi.spyOn(client, 'commit').mockReturnValueOnce(pending.promise);
+	const { app } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
+	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+	await vi.waitFor(() => expect(commit).toHaveBeenCalledOnce());
+	const first = commit.mock.calls[0]?.[0];
+	if (!first) throw new Error('Missing first commit request');
+	handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -6.5 }));
+	pending.resolve(await realCommit(first));
+	await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -6.5 });
+	expect(app.pendingWrite).toBeNull();
+});
+
+test.each(['abort', 'failure'] as const)('advisory %s preserves the editor', async (kind) => {
+	const client = gateClient();
+	const cause =
+		kind === 'abort' ? new DOMException('superseded', 'AbortError') : new Error('crash');
+	const drag = vi.spyOn(client, 'drag').mockRejectedValueOnce(cause);
+	const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
+	const pointer = pointerEditor(screen.container);
+	pointer('pointerdown');
+	pointer('pointermove');
+	await vi.waitFor(() => expect(drag).toHaveBeenCalledOnce());
+	await tick();
+	if (kind === 'failure') {
+		await vi.waitFor(() => expect(screen.container.textContent).toContain(m.curva_gate_error()));
+		expect(log).toHaveBeenCalledWith('Gate worker failed', cause);
+	} else {
+		expect(log).not.toHaveBeenCalled();
+		expect(screen.container.textContent).not.toContain(m.curva_gate_error());
+	}
+	expect(app.state.curve.current.bands[0]).toEqual(cut);
+});

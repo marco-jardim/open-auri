@@ -84,4 +84,49 @@ describe('confirmed local-only removal', () => {
 			database.close();
 		}
 	});
+
+	for (const error of [null, new DOMException('Database deletion refused', 'UnknownError')]) {
+		test(`asynchronous database errors surface ${error ? 'their cause' : 'a fallback'}`, async () => {
+			const factory = new IDBFactory();
+			const request = factory.deleteDatabase('fixture');
+			await new Promise<void>((resolve, reject) => {
+				request.onsuccess = () => resolve();
+				request.onerror = () => reject(request.error);
+			});
+			// A completed request supplies the real IDBRequest API; trigger its error callback
+			// explicitly to exercise both error and missing-error browser responses.
+			vi.spyOn(request, 'error', 'get').mockReturnValue(error);
+			vi.spyOn(factory, 'deleteDatabase').mockReturnValue(request);
+			const operation = clearLocalData({
+				local: storage({}),
+				session: storage({}),
+				indexedDB: factory
+			});
+			const assertion = expect(operation).rejects.toThrow(
+				error?.message ?? 'IndexedDB deletion failed'
+			);
+			request.onerror?.call(request, new Event('error'));
+			await assertion;
+		});
+	}
+
+	test('failed preparation cannot touch storage or delete the database', async () => {
+		const backend = vi.fn();
+		await expect(
+			confirmedClear(true, backend, async () => {
+				throw new Error('could not close active resources');
+			})
+		).rejects.toThrow('could not close active resources');
+		expect(backend).not.toHaveBeenCalled();
+	});
+
+	test('keys removed by another tab are ignored rather than passed to removeItem', async () => {
+		const removeItem = vi.fn();
+		await clearLocalData({
+			local: { length: 1, key: () => null, removeItem },
+			session: storage({}),
+			indexedDB: new IDBFactory()
+		});
+		expect(removeItem).not.toHaveBeenCalled();
+	});
 });

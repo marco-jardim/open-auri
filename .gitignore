@@ -165,3 +165,6 @@ test-results/
 # Design sources, analysis outputs and QA images are versioned.
 !/design/
 !/design/**
+
+# Generated audio fixtures (web/scripts/gen-fixtures.mjs)
+/web/tests/fixtures/*.wav

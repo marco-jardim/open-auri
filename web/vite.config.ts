@@ -58,11 +58,17 @@ export default defineConfig({
 		expect: { requireAssertions: true },
 		coverage: {
 			provider: 'v8',
-			include: ['src/lib/**'],
-			exclude: ['src/lib/paraglide/**'],
+			include: ['src/lib/**/*.{ts,js,svelte}'],
+			exclude: [
+				'src/lib/paraglide/**',
+				// Purely decorative presentation (fixed SVG geometry or layout wrappers, no logic).
+				'src/lib/components/pages/biblioteca/ReelHousing.svelte',
+				'src/lib/components/pages/cabo/RackUnit.svelte',
+				'src/lib/components/pages/comparar/TapeDeck.svelte'
+			],
 			reporter: ['text', 'json-summary'],
 			// Coverage (and therefore thresholds) is enabled only by test:coverage.
-			thresholds: { lines: 80, branches: 80, functions: 80, statements: 80 }
+			thresholds: { lines: 85, branches: 85, functions: 85, statements: 85 }
 		},
 		projects: [
 			{

@@ -1,0 +1,4 @@
+/* Render offscreen plates in full-page captures; content-visibility is only an optimization. */
+* {
+	content-visibility: visible !important;
+}

@@ -11,12 +11,17 @@ import { CSV, fakeDataClient, fitResult, measurement } from './fixtures.ts';
 
 afterEach(async () => {
 	await cleanup();
+	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	await setLocale('pt-BR', { reload: false });
 });
 
 async function select(id: string, value: string) {
 	const input = document.getElementById(id);
 	if (!(input instanceof HTMLSelectElement)) throw new Error(`Missing select ${id}`);
+	if (![...input.options].some((option) => option.value === value)) {
+		throw new Error(`Unknown option ${value} for ${id}`);
+	}
 	input.value = value;
 	input.dispatchEvent(new Event('change', { bubbles: true }));
 	await tick();
@@ -183,5 +188,94 @@ test('late data cannot replace CSV input; cancelled workers cannot expose a resu
 	resolveFit?.({ result: fitResult() });
 	await tick();
 	expect(worker.cancel).toHaveBeenCalled();
+	await expect.element(page.getByRole('button', { name: m.soe_use() })).not.toBeInTheDocument();
+});
+
+for (const locale of ['pt-BR', 'en-US'] as const) {
+	test(`empty index, unmatched searches and cleared selections do not enable solving in ${locale}`, async () => {
+		await setLocale(locale, { reload: false });
+		const client = fakeDataClient();
+		vi.mocked(client.loadIndex).mockResolvedValueOnce([]);
+		await render(Workstation, { dataClient: client });
+		await expect.element(page.getByText(m.soe_missing(), { exact: true })).toBeVisible();
+		await page.getByRole('button', { name: m.soe_retry() }).click();
+		await expect.poll(() => document.querySelectorAll('#soe-measurement option').length).toBe(2);
+		await page.getByRole('searchbox', { name: m.soe_search() }).first().fill('no measurement');
+		await page.getByRole('searchbox', { name: m.soe_search() }).last().fill('no target');
+		await expect.element(page.getByText(m.soe_no_matches(), { exact: true }).first()).toBeVisible();
+		expect(document.querySelectorAll('#soe-measurement option')).toHaveLength(1);
+		expect(document.querySelectorAll('#soe-target option')).toHaveLength(1);
+		await page.getByRole('searchbox', { name: m.soe_search() }).first().fill('');
+		await page.getByRole('searchbox', { name: m.soe_search() }).last().fill('');
+		await select('soe-measurement', measurement.id);
+		await select('soe-target', 'target-0');
+		await expect.element(page.getByRole('button', { name: m.soe_solve() })).toBeEnabled();
+		await select('soe-measurement', '');
+		await expect.element(page.getByRole('button', { name: m.soe_solve() })).toBeDisabled();
+		await expect.element(page.getByText(m.soe_wait_measurement(), { exact: true })).toBeVisible();
+	});
+
+	test(`solver failure retries and a refused editor use never claims success in ${locale}`, async () => {
+		await setLocale(locale, { reload: false });
+		const result: ReturnType<typeof fitResult> = {
+			...fitResult(),
+			bands: [{ kind: 'PK', freqHz: 1000, gainDb: -1, qFactor: 1 }, ...fitResult().bands.slice(1)]
+		};
+		const worker = {
+			solve: vi
+				.fn()
+				.mockRejectedValueOnce(new Error('solver crashed'))
+				.mockResolvedValue({ result }),
+			cancel: vi.fn(),
+			dispose: vi.fn()
+		};
+		const onuse = vi.fn(() => false);
+		await render(Workstation, {
+			dataClient: fakeDataClient(),
+			solverFactory: () => worker,
+			current: neutralCurve(),
+			onuse
+		});
+		await expect.poll(() => document.querySelectorAll('#soe-measurement option').length).toBe(2);
+		await select('soe-measurement', measurement.id);
+		await select('soe-target-kind', 'preset');
+		await select('soe-preset', 'pref6');
+		await page.getByRole('checkbox', { name: m.soe_iso() }).click();
+		const d5 = document.getElementById('soe-d5');
+		if (!(d5 instanceof HTMLInputElement)) throw new Error('Missing D5 control');
+		d5.value = '0';
+		d5.dispatchEvent(new Event('input', { bubbles: true }));
+		await page.getByRole('button', { name: m.soe_solve() }).click();
+		await expect.element(page.getByText(m.soe_solver_error(), { exact: true })).toBeVisible();
+		await page.getByRole('button', { name: m.soe_solve() }).click();
+		await expect.element(page.getByText(m.soe_gate_pass(), { exact: true })).toBeVisible();
+		await page.getByRole('button', { name: m.soe_use() }).click();
+		expect(onuse).toHaveBeenCalledOnce();
+		await expect.element(page.getByText(m.soe_used(), { exact: true })).not.toBeInTheDocument();
+		expect(worker.solve).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				options: expect.objectContaining({ d5Weight: 0, weights: 'flat' })
+			})
+		);
+	});
+}
+
+test('missing Worker and factory failure are explicit and never expose a usable result', async () => {
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	const factory = vi.fn(() => {
+		throw new Error('worker creation refused');
+	});
+	await render(Workstation, { dataClient: fakeDataClient(), solverFactory: factory });
+	await expect.poll(() => document.querySelectorAll('#soe-measurement option').length).toBe(2);
+	await select('soe-measurement', measurement.id);
+	await select('soe-target-kind', 'preset');
+	vi.stubGlobal('Worker', undefined);
+	await page.getByRole('button', { name: m.soe_solve() }).click();
+	await expect.element(page.getByText(m.soe_worker_unavailable(), { exact: true })).toBeVisible();
+	expect(factory).not.toHaveBeenCalled();
+	vi.unstubAllGlobals();
+	await page.getByRole('button', { name: m.soe_solve() }).click();
+	expect(factory).toHaveBeenCalledOnce();
+	await expect.element(page.getByText(m.soe_worker_unavailable(), { exact: true })).toBeVisible();
 	await expect.element(page.getByRole('button', { name: m.soe_use() })).not.toBeInTheDocument();
 });

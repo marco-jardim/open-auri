@@ -1,0 +1,45 @@
+import { fileURLToPath } from 'node:url';
+import { expect, test } from '@playwright/test';
+import { openApp, settleRendering } from './helpers/a-app';
+import { routes } from './helpers/a-routes';
+import { dynamicRegions } from './helpers/a-visual';
+
+// Both configured projects run every case: desktop 1440 px and mobile 390 px.
+const visualCss = fileURLToPath(new URL('./helpers/visual.css', import.meta.url));
+
+for (const motion of [
+	{ name: 'default-motion', preference: 'no-preference' },
+	{ name: 'reduced-motion', preference: 'reduce' }
+] as const) {
+	test.describe(motion.name, () => {
+		test.describe.configure({ mode: 'parallel' });
+		test.use({ reducedMotion: motion.preference });
+
+		// Legal pages render operator data from the build env; their captures must never be versioned.
+		for (const route of routes.filter(
+			({ path }) => path !== '/privacidade' && path !== '/termos'
+		)) {
+			test(`${route.path} reference`, async ({ page }, testInfo) => {
+				await openApp(page, route.path);
+				await settleRendering(page);
+				expect(
+					await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
+				).toBe(motion.preference === 'reduce');
+				// Project and motion are explicit so update-snapshots cannot overwrite another variant.
+				await expect(page).toHaveScreenshot(
+					`${route.name}-${testInfo.project.name}-${motion.name}.png`,
+					{
+						fullPage: true,
+						animations: 'disabled',
+						caret: 'hide',
+						mask: dynamicRegions(page),
+						maxDiffPixelRatio: 0.02,
+						// Long pages (Docs) need more than the 5 s default to capture two identical frames.
+						timeout: 30_000,
+						stylePath: visualCss
+					}
+				);
+			});
+		}
+	});
+}
