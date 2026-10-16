@@ -7,9 +7,9 @@
 	import { ResponseChart } from '#lib/charts/index.ts';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
 	import { m } from '#lib/paraglide/messages.js';
+	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
 	import { presetUrl, qrSvg } from '#lib/qr/index.ts';
 	import { envelopeView, number, type Locale, type Tape, type GateResult } from './archive.ts';
-	import { downloadBlob, sheetPng, sheetSvg } from './sheet-export.ts';
 
 	let {
 		tape,
@@ -49,7 +49,8 @@
 			const url = presetUrl(origin, code);
 			return { url, image: `data:image/svg+xml,${encodeURIComponent(qrSvg(url))}` };
 		} catch (error) {
-			return { url: null, image: null, error };
+			console.error('Biblioteca QR generation failed', error);
+			return { url: null, image: null };
 		}
 	});
 	const envelope = $derived.by(() => {
@@ -119,6 +120,7 @@
 		if (exporting) return;
 		exporting = true;
 		try {
+			const { sheetSvg, sheetPng, downloadBlob } = await import('./sheet-export.ts');
 			const svg = sheetSvg(tape, origin, locale, {
 				title: m.biblioteca_sheet(),
 				response: m.biblioteca_response(),
@@ -139,6 +141,18 @@
 			console.error('Biblioteca sheet export failed', error);
 		} finally {
 			exporting = false;
+		}
+	}
+	async function exportEnvelope() {
+		try {
+			const { downloadBlob } = await import('./sheet-export.ts');
+			downloadBlob(
+				new Blob([envelope.json], { type: 'application/json' }),
+				'open-auri-preset.json'
+			);
+		} catch (error) {
+			onStatus(m.biblioteca_export_error());
+			console.error('Biblioteca envelope export failed', error);
 		}
 	}
 	async function copyCode() {
@@ -306,14 +320,8 @@
 			{#if envelope.error}<p role="alert">
 					{m.biblioteca_s5_error()}
 				</p>{:else}<pre>{envelope.json}</pre>{/if}
-			<button
-				type="button"
-				disabled={!envelope.exportable}
-				onclick={() =>
-					downloadBlob(
-						new Blob([envelope.json], { type: 'application/json' }),
-						'open-auri-preset.json'
-					)}>{m.biblioteca_s5_export()}</button
+			<button type="button" disabled={!envelope.exportable} onclick={exportEnvelope}
+				>{m.biblioteca_s5_export()}</button
 			>
 		</details>
 		<div class="actions bottom">

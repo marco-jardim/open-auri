@@ -355,7 +355,7 @@
 				</div>
 			{:else}<p class="note">{t.empty}</p>{/if}
 		</section>
-		<section class="panel" aria-labelledby="comparar-bay-title">
+		<section class="panel patch-bay-panel" aria-labelledby="comparar-bay-title">
 			<h2 class="plate" id="comparar-bay-title">{t.bay}</h2>
 			<p class="note">{t.bayNote}</p>
 			{#if armed.length > 1}

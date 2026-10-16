@@ -42,29 +42,31 @@
 	<pre use:keyboardScroll role="region" aria-label={ui.reports}>{reportHex}</pre>
 </details>
 <figure class="plate">
-	<svg viewBox="0 0 760 220" role="img" aria-label={ui.sampling}>
-		<title>{ui.sampling}</title>
-		<path d="M30 95H730" stroke="#ad9c81" />
-		<path d={path(frequency)} fill="none" stroke="#8c2f2f" stroke-width="1" />
-		<path
-			d={path(96 - frequency)}
-			fill="none"
-			stroke="#365c55"
-			stroke-width="2"
-			stroke-dasharray="5 3"
-		/>
-		{#each Array.from({ length: 13 }, (_, i) => i) as sample (sample)}
-			<circle
-				cx={30 + (sample * 700) / 12}
-				cy={95 - 62 * Math.cos((2 * Math.PI * frequency * sample) / 96)}
-				r="3"
-				fill="#29251f"
+	<div class="sampling-scene">
+		<svg viewBox="0 0 760 220" role="img" aria-label={ui.sampling}>
+			<title>{ui.sampling}</title>
+			<path d="M30 95H730" stroke="#ad9c81" />
+			<path d={path(frequency)} fill="none" stroke="#8c2f2f" stroke-width="1" />
+			<path
+				d={path(96 - frequency)}
+				fill="none"
+				stroke="#365c55"
+				stroke-width="2"
+				stroke-dasharray="5 3"
 			/>
-		{/each}
-		<text x="30" y="205">0</text><text x="730" y="205" text-anchor="end"
-			>{exactNumber(0.125, content.locale)} ms · 96 kHz</text
-		>
-	</svg>
+			{#each Array.from({ length: 13 }, (_, i) => i) as sample (sample)}
+				<circle
+					cx={30 + (sample * 700) / 12}
+					cy={95 - 62 * Math.cos((2 * Math.PI * frequency * sample) / 96)}
+					r="3"
+					fill="#29251f"
+				/>
+			{/each}
+			<text x="30" y="205">0</text><text x="730" y="205" text-anchor="end"
+				>{exactNumber(0.125, content.locale)} ms · 96 kHz</text
+			>
+		</svg>
+	</div>
 	<label for="{id}-frequency">{ui.frequency}</label>
 	<input id="{id}-frequency" type="range" min="49" max="90" step="1" bind:value={frequency} />
 	<output for="{id}-frequency">{frequency} kHz → {ui.alias} {96 - frequency} kHz</output>
@@ -107,6 +109,24 @@
 		padding: 14px;
 		border: 1px solid #ad9c81;
 	}
+	.plate :global(.chart),
+	.sampling-scene {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 240px;
+	}
+	.plate :global(.chart) {
+		/* Match the SVG viewBox before or after rendering, including its existing border.
+		   This keeps every later TOC/anchor offset stable while the scene is skipped. */
+		box-sizing: content-box;
+		width: auto;
+		aspect-ratio: 820 / 245;
+	}
+	.framing :global(.chart) {
+		aspect-ratio: 820 / 240;
+	}
+	.sampling-scene {
+		aspect-ratio: 760 / 220;
+	}
 	figcaption {
 		margin-top: 10px;
 		font-size: 16px;
@@ -122,6 +142,7 @@
 		padding: 12px;
 	}
 	svg {
+		display: block;
 		width: 100%;
 		height: auto;
 	}
@@ -180,6 +201,13 @@
 	@media (max-width: 760px) {
 		.widgets {
 			grid-template-columns: 1fr;
+		}
+	}
+	@media print {
+		.plate :global(.chart),
+		.sampling-scene {
+			content-visibility: visible;
+			contain-intrinsic-size: none;
 		}
 	}
 </style>

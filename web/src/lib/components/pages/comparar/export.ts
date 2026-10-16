@@ -70,28 +70,6 @@ export async function downloadComparison(
 		saveFile(blob, 'open-auri-comparar.svg');
 		return;
 	}
-	const url = URL.createObjectURL(blob);
-	try {
-		const image = new Image();
-		await new Promise<void>((resolve, reject) => {
-			image.onload = () => resolve();
-			image.onerror = () => reject(new Error('Could not render comparison SVG'));
-			image.src = url;
-		});
-		const canvas = document.createElement('canvas');
-		canvas.width = image.naturalWidth * 2;
-		canvas.height = image.naturalHeight * 2;
-		const context = canvas.getContext('2d');
-		if (!context) throw new Error('Canvas is unavailable');
-		context.drawImage(image, 0, 0, canvas.width, canvas.height);
-		const png = await new Promise<Blob>((resolve, reject) =>
-			canvas.toBlob((value) => {
-				if (value) resolve(value);
-				else reject(new Error('Could not encode PNG'));
-			}, 'image/png')
-		);
-		saveFile(png, 'open-auri-comparar.png');
-	} finally {
-		URL.revokeObjectURL(url);
-	}
+	const { comparisonPng } = await import('./png.ts');
+	saveFile(await comparisonPng(blob), 'open-auri-comparar.png');
 }

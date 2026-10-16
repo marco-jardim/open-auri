@@ -13,7 +13,6 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import MeterBridge from './MeterBridge.svelte';
 	import ReelHousing from './ReelHousing.svelte';
-	import TrackSheet from './TrackSheet.svelte';
 	import {
 		archiveTapes,
 		selectTapes,
@@ -25,7 +24,6 @@
 		type Shelf,
 		type GateResult
 	} from './archive.ts';
-	import { downloadBlob } from './sheet-export.ts';
 
 	let { app = null, origin }: { app?: ClientApp | null; origin: string } = $props();
 	const id = $props.id();
@@ -107,7 +105,12 @@
 		let cancelled = false;
 		verdict = null;
 		void worker
-			.commit({ bands: curve.bands, preampDb: curve.preampDb, experimental: true })
+			.commit({
+				// Selecting a tape stores it in deep $state. Worker messages cannot clone its proxy.
+				bands: $state.snapshot(curve.bands),
+				preampDb: curve.preampDb,
+				experimental: true
+			})
 			.then((result) => {
 				if (!cancelled) verdict = result.verdict;
 			})
@@ -140,8 +143,9 @@
 			saving = false;
 		}
 	}
-	function exportPack() {
+	async function exportPack() {
 		try {
+			const { downloadBlob } = await import('./sheet-export.ts');
 			downloadBlob(
 				new Blob([referencePack()], { type: 'application/json' }),
 				'open-auri-reference-pack.json'
@@ -326,21 +330,26 @@
 </div>
 
 {#if selected}
-	{#key selected.id}<TrackSheet
-			tape={selected}
-			{current}
-			{origin}
-			{locale}
-			{app}
-			{verdict}
-			{audioState}
-			onClose={() => {
-				selected = null;
-			}}
-			onStatus={(message) => {
-				notice = message;
-			}}
-		/>{/key}
+	{@const tape = selected}
+	{#await import('./TrackSheet.svelte') then { default: TrackSheet }}
+		{#key tape.id}<TrackSheet
+				{tape}
+				{current}
+				{origin}
+				{locale}
+				{app}
+				{verdict}
+				{audioState}
+				onClose={() => {
+					selected = null;
+				}}
+				onStatus={(message) => {
+					notice = message;
+				}}
+			/>{/key}
+	{:catch}
+		<p role="alert">{m.layout_error_generic()}</p>
+	{/await}
 {/if}
 
 <style>
@@ -636,6 +645,11 @@
 	}
 	.reference p {
 		margin-top: 12px;
+	}
+	.shelf-group {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 600px;
+		overflow-clip-margin: 16px;
 	}
 	.shelf-title {
 		display: flex;

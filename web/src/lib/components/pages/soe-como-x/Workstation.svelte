@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
-	import { createAutoEqClient, searchEntries, type AutoEqEntry } from '#lib/data/autoeq.ts';
+	import type { AutoEqEntry, searchEntries } from '#lib/data/autoeq.ts';
 	import { createSolverWorker } from '#lib/workers/solver-client.ts';
 	import { OFFICIAL_PRESETS, PADRAO_AURI } from 'open-auri/catalog';
 	import { curveResponseDb, GRID } from 'open-auri/dsp';
@@ -44,7 +44,7 @@
 		audio = null,
 		reference = -18,
 		onuse = () => false,
-		dataClient = createAutoEqClient(),
+		dataClient,
 		solverFactory = createSolverWorker
 	}: {
 		current?: CurveData | null;
@@ -76,17 +76,25 @@
 	let measurementSequence = 0;
 	let targetSequence = 0;
 	let worker: PageSolver | null = null;
+	let ownedDataClient: AutoEqClient | undefined;
+	let search = $state.raw<typeof searchEntries | null>(null);
+	async function getDataClient(): Promise<AutoEqClient> {
+		if (dataClient) return dataClient;
+		if (ownedDataClient) return ownedDataClient;
+		const { createAutoEqClient } = await import('#lib/data/autoeq.ts');
+		return (ownedDataClient ??= createAutoEqClient());
+	}
 	const measurements = $derived(
-		searchEntries(
+		search?.(
 			entries.filter((entry) => entry.type !== 'target'),
 			query
-		)
+		) ?? []
 	);
 	const targets = $derived(
-		searchEntries(
+		search?.(
 			entries.filter((entry) => entry.type === 'target'),
 			targetQuery
-		)
+		) ?? []
 	);
 	const preset = $derived(OFFICIAL_PRESETS.find((entry) => entry.id === presetId) ?? PADRAO_AURI);
 	const candidate = $derived(
@@ -132,8 +140,10 @@
 		dataLoading = true;
 		dataMissing = false;
 		try {
-			const index = await dataClient.loadIndex();
+			const [client, helpers] = await Promise.all([getDataClient(), import('#lib/data/autoeq.ts')]);
+			const index = await client.loadIndex();
 			if (alive && token === indexSequence) {
+				search = helpers.searchEntries;
 				entries = index;
 				dataMissing = index.length === 0;
 				missingPacks = { measurement: false, target: false };
@@ -177,7 +187,7 @@
 		send({ type: role, trace: null });
 		if (!entry) return;
 		try {
-			const trace = await autoEqTrace(dataClient, entry);
+			const trace = await autoEqTrace(await getDataClient(), entry);
 			if (alive && token === (role === 'measurement' ? measurementSequence : targetSequence)) {
 				send({ type: role, trace });
 			}

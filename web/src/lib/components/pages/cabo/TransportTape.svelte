@@ -63,6 +63,13 @@
 		}
 	});
 	$effect(() => () => cancelAnimationFrame(frame));
+	$effect(() => {
+		if (!prefersReducedMotion.current) return;
+		untrack(() => {
+			stop();
+			if (snapshot) elapsed = snapshot.durationMs;
+		});
+	});
 </script>
 
 <div class="tape-window" role="region" aria-label={m.cabo_tape()}>
@@ -145,6 +152,8 @@
 
 <style>
 	.tape-window {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 260px;
 		overflow-x: auto;
 		background: #0d0f10;
 		border-radius: 6px;

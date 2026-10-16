@@ -60,6 +60,8 @@
 
 <style>
 	.mod-panel {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 650px;
 		padding: 14px;
 		border-radius: 6px;
 		background: linear-gradient(#2e2d2b, #1f1e1c);

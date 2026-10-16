@@ -151,6 +151,8 @@
 
 <style>
 	.cab {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 300px;
 		padding: 16px;
 		border-radius: 6px;
 		background: linear-gradient(#2e2d2b, #1f1e1c);

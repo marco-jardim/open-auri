@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { prefersReducedMotion } from 'svelte/motion';
 	import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 	import { PolarDiagram } from '#lib/charts/index.ts';
 	import ConfirmDialog from '#lib/components/chrome/ConfirmDialog.svelte';
@@ -74,7 +75,10 @@
 		await tick();
 		const section = document.getElementById(id);
 		if (!section) return;
-		section.scrollIntoView({ block: 'start' });
+		section.scrollIntoView({
+			block: 'start',
+			behavior: prefersReducedMotion.current ? 'instant' : 'auto'
+		});
 		section.focus({ preventScroll: true });
 		active = id;
 	}
@@ -595,6 +599,7 @@
 		line-height: 1;
 	}
 	.chapter {
+		/* Keep anchor/TOC geometry real. Only the fixed-ratio protocol scenes skip rendering. */
 		position: relative;
 		padding: 31px 0 33px;
 		border-bottom: 1px solid #29251f;

@@ -19,14 +19,12 @@
 	import Cabinet from './Cabinet.svelte';
 	import FilterBank from './FilterBank.svelte';
 	import ImportExport from './ImportExport.svelte';
-	import Inspector from './Inspector.svelte';
 	import LayerSelector from './LayerSelector.svelte';
 	import MacroKnobs from './MacroKnobs.svelte';
 	import OutputPanel from './OutputPanel.svelte';
 	import PresetTabs from './PresetTabs.svelte';
 	import RescuePanel from './RescuePanel.svelte';
 	import ScopePanel from './ScopePanel.svelte';
-	import Sequencer from './Sequencer.svelte';
 	import { dragBand, isAbortError, moveBand, type DragTarget, type GateClient } from './drag.ts';
 	import { changeKind, defaultOrder, reorderSections } from './edit.ts';
 	import { formatSignedDb, payloadCrc } from './format.ts';
@@ -459,12 +457,20 @@
 				onreorder={onReorder}
 			/>
 			<div class="below">
-				<Inspector {curve} {verdict} {selected} {locale} />
-				<Sequencer
-					{curve}
-					disabled={!app || (app?.cableState.writing ?? true)}
-					onsend={() => app?.requestWrite()}
-				/>
+				{#await import('./Inspector.svelte') then { default: Inspector }}
+					<Inspector {curve} {verdict} {selected} {locale} />
+				{:catch}
+					<p role="alert">{m.layout_error_generic()}</p>
+				{/await}
+				{#await import('./Sequencer.svelte') then { default: Sequencer }}
+					<Sequencer
+						{curve}
+						disabled={!app || (app?.cableState.writing ?? true)}
+						onsend={() => app?.requestWrite()}
+					/>
+				{:catch}
+					<p role="alert">{m.layout_error_generic()}</p>
+				{/await}
 			</div>
 		</div>
 	{/if}
@@ -637,6 +643,8 @@
 		min-width: 0;
 	}
 	.below {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 650px;
 		display: grid;
 		grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
 		gap: 18px;

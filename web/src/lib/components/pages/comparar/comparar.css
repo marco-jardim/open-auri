@@ -374,6 +374,10 @@
 	background: linear-gradient(#1e1f1e, #121312);
 	box-shadow: inset 0 2px 8px #000c;
 }
+.comparar .patch-bay-panel {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 500px;
+}
 .comparar .bay table {
 	margin: auto;
 	border-collapse: separate;
