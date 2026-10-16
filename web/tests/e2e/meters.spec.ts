@@ -222,8 +222,10 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 
 	// 0 VU at −20 dBFS: the same −18 dBFS tone reads about +2 VU on every tap.
 	await popover.getByRole('radio', { name: '−20 dBFS' }).check();
-	await expect.poll(async () => (await reading()) - before, { timeout: 5000 }).toBeGreaterThan(1.5);
-	expect((await reading()) - before).toBeLessThan(2.5);
+	// The needle overshoots briefly on the 2 dB step (IEC ballistics); wait for it to settle.
+	await expect
+		.poll(async () => Math.abs((await reading()) - before - 2), { timeout: 5000 })
+		.toBeLessThanOrEqual(0.5);
 	await popover.getByRole('radio', { name: '−18 dBFS' }).check();
 	await expect
 		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })

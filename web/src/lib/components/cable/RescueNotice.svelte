@@ -22,13 +22,14 @@
 </script>
 
 {#if cable.rescue !== null}
+	<!-- A labelled region with buttons; only the body is live. An interruption detected in this
+	     session is announced assertively, once; one restored from the journal on load is polite. -->
 	<section
-		role="alert"
 		aria-labelledby={`${titleId}-title`}
 		class="flex flex-col gap-2 rounded border-2 border-current p-3"
 	>
 		<h2 id={`${titleId}-title`} class="font-semibold">{m.cable_rescue_title()}</h2>
-		<p>{m.cable_rescue_body()}</p>
+		<p role={cable.rescue.fresh === true ? 'alert' : 'status'}>{m.cable_rescue_body()}</p>
 		{#if cable.rescue.reportsSent !== null}
 			<p class="text-sm">{m.cable_rescue_reports({ count: String(cable.rescue.reportsSent) })}</p>
 		{/if}

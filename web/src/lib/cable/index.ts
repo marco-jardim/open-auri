@@ -35,4 +35,5 @@ export {
 	type GestureEventLike,
 	type GestureOptions
 } from './gesture.ts';
+export { isWriteInProgress, onWriteProgress } from './write-flag.ts';
 export type * from './types.ts';

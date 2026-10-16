@@ -3,7 +3,7 @@
  * recorded before I/O, stale-marker recovery, journal-derived last written level, counters.
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { FakeHIDDevice } from 'open-auri/transport';
+import { FakeHIDDevice, WRITE_SPACING_MS } from 'open-auri/transport';
 import { NEUTRAL_BANDS } from 'open-auri/dsp';
 import { levelDb } from 'open-auri/safety';
 import { localDateKey } from 'open-auri/policy';
@@ -16,6 +16,7 @@ import {
 import { lastWrittenLevelDbOf, writtenLevelDb } from '../../../src/lib/cable/checklist.ts';
 import type {
 	CableService,
+	Clock,
 	InflightMarker,
 	JournalEntry,
 	WriteLock,
@@ -31,7 +32,7 @@ import {
 	setup,
 	type SetupOptions
 } from './harness.ts';
-import { memoryInflight, memoryLocks, type MemoryLocks } from './locks-fake.ts';
+import { killHolder, memoryInflight, memoryLocks, type MemoryLocks } from './locks-fake.ts';
 
 type Harness = Awaited<ReturnType<typeof setup>>;
 
@@ -201,14 +202,15 @@ describe('cross-tab write lock', () => {
 		h.inflight.value = JSON.stringify(abandoned);
 		expect(await h.service.write(request(h.service))).toMatchObject({
 			status: 'refused',
-			reason: 'busy'
+			reason: 'interrupted-elsewhere'
 		});
 		expect(h.device.attempts).toBe(0);
 		expect(h.journal.entries).toMatchObject([interruptedEntry(abandoned)]);
 		expect(h.service.getState().rescue).toEqual({
 			at: abandoned.at,
 			deviceLabel: 'USB DSP Audio',
-			reportsSent: null
+			reportsSent: null,
+			fresh: true
 		});
 		expect(h.inflight.value).toBeNull();
 		expect((await h.service.write(request(h.service))).status).toBe('ok');
@@ -221,7 +223,7 @@ describe('cross-tab write lock', () => {
 		h.inflight.value = JSON.stringify(closed);
 		expect(await h.service.write(request(h.service))).toMatchObject({
 			status: 'refused',
-			reason: 'busy'
+			reason: 'interrupted-elsewhere'
 		});
 		expect(h.device.attempts).toBe(0);
 		expect(h.flash.records).toEqual([]);
@@ -365,7 +367,8 @@ describe('stale marker on load', () => {
 		expect(h.service.getState().rescue).toEqual({
 			at: closed.at,
 			deviceLabel: 'USB DSP Audio',
-			reportsSent: null
+			reportsSent: null,
+			fresh: true
 		});
 		expect(inflight.value).toBeNull();
 		expect(h.flash.records).toEqual([]);
@@ -419,7 +422,8 @@ describe('stale marker on load', () => {
 		expect(h.service.getState().rescue).toEqual({
 			at: T0,
 			deviceLabel: null,
-			reportsSent: null
+			reportsSent: null,
+			fresh: true
 		});
 		expect(inflight.value).toBeNull();
 	});
@@ -670,5 +674,217 @@ describe('flash counters have one source', () => {
 		const checklist = h.service.checklist(request(h.service));
 		expect(h.service.counters()).toEqual(checklist.counters);
 		expect(h.service.counters()).toEqual({ session: 1, day: 5, total: 10 });
+	});
+});
+
+/** Holds the 2 s spacing between two queued cables open until `release()`. */
+function gappedClock() {
+	let release: (() => void) | null = null;
+	let entered: (() => void) | null = null;
+	const inGap = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	const wrap = (clock: Clock): Clock => ({
+		now: () => clock.now(),
+		sleep(ms, signal) {
+			if (ms !== WRITE_SPACING_MS) return clock.sleep(ms, signal);
+			entered?.();
+			return new Promise<void>((resolve) => {
+				release = resolve;
+			}).then(() => clock.sleep(ms, signal));
+		}
+	});
+	return { wrap, inGap, release: () => release?.() };
+}
+
+describe('X9 queue settles each cable as it ends (R2-03)', () => {
+	test('a committed cable is journaled and announced before the spacing to the next one', async () => {
+		const gap = gappedClock();
+		const h = await tab({ wrapClock: gap.wrap, tabId: 'queue-tab' });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		const running = h.service.writeQueue({ ...request(h.service), devices: [h.device, second] });
+		await gap.inGap;
+		expect(h.journal.entries.map((entry) => [entry.status, entry.device])).toEqual([
+			['ok', 'USB DSP Audio']
+		]);
+		expect(h.written.map((detail) => detail.deviceLabel)).toEqual(['USB DSP Audio']);
+		expect(h.service.getState().queue?.items.map((item) => item.status)).toEqual(['ok', 'pending']);
+		// The marker no longer names a cable being written.
+		expect(stored(h.inflight.value)).toMatchObject({
+			tabId: 'queue-tab',
+			device: 'USB DSP Audio',
+			between: true
+		});
+		expect(second.sent).toEqual([]);
+		gap.release();
+		const outcome = await running;
+		expect(outcome.status).toBe('done');
+		if (outcome.status !== 'done') return;
+		expect(outcome.items.map((item) => item.status)).toEqual(['ok', 'ok']);
+		expect(outcome.items[0]?.entry).toMatchObject({ status: 'ok', device: 'USB DSP Audio' });
+		// Settled once each: no duplicate journal entry or event for the first cable.
+		expect(h.journal.entries.map((entry) => entry.status)).toEqual(['ok', 'ok']);
+		expect(h.written.map((detail) => detail.deviceLabel)).toEqual([
+			'USB DSP Audio',
+			'USB DSP Audio #2'
+		]);
+		expect(second.sent).toHaveLength(10);
+		expect(h.inflight.value).toBeNull();
+	});
+
+	test('the second cable is marked as written while it is being written', async () => {
+		const gap = gappedClock();
+		const h = await tab({ wrapClock: gap.wrap });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		const markers: (InflightMarker | null)[] = [];
+		const send = second.sendReport.bind(second);
+		vi.spyOn(second, 'sendReport').mockImplementation((reportId, data) => {
+			markers.push(stored(h.inflight.value));
+			return send(reportId, data);
+		});
+		const running = h.service.writeQueue({ ...request(h.service), devices: [h.device, second] });
+		await gap.inGap;
+		gap.release();
+		expect((await running).status).toBe('done');
+		expect(markers).toHaveLength(10);
+		for (const seen of markers) {
+			expect(seen?.device).toBe('USB DSP Audio #2');
+			expect(seen?.between).toBeUndefined();
+		}
+	});
+
+	test('a tab closed during the spacing leaves no committed cable to recover as interrupted', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		const gap = gappedClock();
+		const writer = await tab({
+			wrapClock: gap.wrap,
+			tabId: 'writer',
+			locks: memoryLocks(held),
+			inflight
+		});
+		const second = new FakeHIDDevice({ clock: writer.clock });
+		writer.hid.addDevice(second);
+		void writer.service.writeQueue({
+			...request(writer.service),
+			devices: [writer.device, second]
+		});
+		await gap.inGap;
+		expect(writer.journal.entries.map((entry) => entry.status)).toEqual(['ok']);
+		expect(writer.written).toHaveLength(1);
+		// The writer tab dies in the gap: the browser releases its lock; the marker stays.
+		killHolder(held, CABLE_WRITE_LOCK);
+		const reloaded = await tab({
+			tabId: 'reloaded',
+			locks: memoryLocks(held),
+			inflight,
+			connect: false
+		});
+		expect(reloaded.journal.entries).toEqual([]);
+		expect(reloaded.service.getState().rescue).toBeNull();
+		expect(inflight.value).toBeNull();
+		expect(second.sent).toEqual([]);
+	});
+
+	test('a write that finds a dead between-cables marker clears it and proceeds', async () => {
+		const h = await tab();
+		h.inflight.value = JSON.stringify(marker({ at: T0 - 100, between: true }));
+		const outcome = await h.service.write(request(h.service));
+		expect(outcome.status).toBe('ok');
+		expect(h.journal.entries.map((entry) => entry.status)).toEqual(['ok']);
+		expect(h.service.getState().rescue).toBeNull();
+		expect(h.inflight.value).toBeNull();
+	});
+});
+
+describe('other tabs surface an interruption by waiting for the writer (R2-07)', () => {
+	/** Another tab writing: it holds the write lock and its marker was just stored. */
+	function liveWriter(held: Set<string>, inflight: ReturnType<typeof memoryInflight>) {
+		const writing = marker({ at: T0, tabId: 'writer' });
+		held.add(CABLE_WRITE_LOCK);
+		inflight.value = JSON.stringify(writing);
+		inflight.announce();
+		return writing;
+	}
+
+	test('the writer dies: the waiting tab records the interruption and raises the notice', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		const locks = memoryLocks(held);
+		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
+		const writing = liveWriter(held, inflight);
+		await Promise.resolve();
+		expect(locks.waits).toEqual([{ name: CABLE_WRITE_LOCK, granted: false }]);
+		expect(h.journal.entries).toEqual([]);
+		expect(h.service.getState().rescue).toBeNull();
+		// A second storage event while waiting does not queue another wait.
+		inflight.announce();
+		expect(locks.waits).toHaveLength(1);
+		killHolder(held, CABLE_WRITE_LOCK);
+		await vi.waitFor(() => expect(h.journal.entries).toHaveLength(1));
+		expect(h.journal.entries).toMatchObject([interruptedEntry(writing)]);
+		expect(h.service.getState().rescue).toEqual({
+			at: writing.at,
+			deviceLabel: 'USB DSP Audio',
+			reportsSent: null,
+			fresh: true
+		});
+		expect(inflight.value).toBeNull();
+		// Waiting and recording never wrote: no write lock request, no flash, no byte.
+		expect(locks.requests).toEqual([]);
+		expect(h.flash.records).toEqual([]);
+		expect(h.device.attempts).toBe(0);
+		await vi.waitFor(() => expect(held.size).toBe(0));
+	});
+
+	test('the writer finishes normally: nothing is recorded', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		const locks = memoryLocks(held);
+		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
+		liveWriter(held, inflight);
+		// A writer removes its marker before it releases the lock.
+		inflight.value = null;
+		killHolder(held, CABLE_WRITE_LOCK);
+		await vi.waitFor(() => expect(locks.waits[0]?.granted).toBe(true));
+		await vi.waitFor(() => expect(held.size).toBe(0));
+		expect(h.journal.entries).toEqual([]);
+		expect(h.service.getState().rescue).toBeNull();
+	});
+
+	test('a tab loaded while another writes waits for it as well', async () => {
+		const held = new Set<string>([CABLE_WRITE_LOCK]);
+		const live = marker({ at: T0 - 100, tabId: 'writer' });
+		const inflight = memoryInflight(JSON.stringify(live));
+		const locks = memoryLocks(held);
+		const h = await tab({ tabId: 'late', locks, inflight, connect: false });
+		expect(h.journal.entries).toEqual([]);
+		expect(locks.waits).toHaveLength(1);
+		killHolder(held, CABLE_WRITE_LOCK);
+		await vi.waitFor(() => expect(h.journal.entries).toMatchObject([interruptedEntry(live)]));
+		expect(h.service.getState().rescue?.fresh).toBe(true);
+	});
+
+	test('own markers are ignored and disposal stops the wait', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		const locks = memoryLocks(held);
+		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
+		held.add(CABLE_WRITE_LOCK);
+		inflight.value = JSON.stringify(marker({ tabId: 'watcher' }));
+		inflight.announce();
+		expect(locks.waits).toEqual([]);
+		inflight.value = JSON.stringify(marker({ tabId: 'writer' }));
+		inflight.announce();
+		await Promise.resolve();
+		expect(locks.waits).toHaveLength(1);
+		h.service.dispose();
+		killHolder(held, CABLE_WRITE_LOCK);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(locks.waits[0]?.granted).toBe(false);
+		expect(h.journal.entries).toEqual([]);
+		expect(h.service.getState().rescue).toBeNull();
 	});
 });

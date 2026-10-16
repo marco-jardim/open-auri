@@ -5,7 +5,7 @@ import { cleanup, render } from 'vitest-browser-svelte';
 import { gateForWrite } from 'open-auri/safety';
 import { parseEnvelope } from 'open-auri/share';
 import { createClientApp, type ClientApp } from '#lib/app/client.svelte.ts';
-import { createAudioEngine, IDLE_STATE } from '#lib/audio/engine.ts';
+import { createAudioEngine, IDLE_STATE, type AudioEngineState } from '#lib/audio/engine.ts';
 import { neutralCurve } from '#lib/state/model.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
@@ -203,6 +203,8 @@ test('a data dial has no needle without data and clamps only its drawing, not th
 test('sheet A/B reuses its audition and an editor change releases that frozen comparison', async () => {
 	const client = await isolatedApp();
 	vi.spyOn(client.audio, 'start').mockResolvedValue(undefined);
+	// The (mocked) start put the engine in chain mode: the sheet's own audition.
+	vi.spyOn(client.audio, 'state').mockReturnValue({ ...IDLE_STATE, playing: true, mode: 'chains' });
 	const createAB = vi.spyOn(client.audio, 'createAB');
 	const stop = vi.spyOn(client.audio, 'stop');
 	const props = sheetProps();
@@ -234,6 +236,7 @@ test('stopping a pending sheet start prevents a late audition from becoming sele
 	vi.spyOn(client.audio, 'start').mockImplementation(
 		() => new Promise<void>((resolve) => (finish = resolve))
 	);
+	vi.spyOn(client.audio, 'state').mockReturnValue({ ...IDLE_STATE, playing: true, mode: 'chains' });
 	const stop = vi.spyOn(client.audio, 'stop');
 	await render(TrackSheet, {
 		...sheetProps(),
@@ -244,12 +247,81 @@ test('stopping a pending sheet start prevents a late audition from becoming sele
 		.element(page.getByRole('button', { name: m.biblioteca_listen_current(), exact: true }))
 		.toBeDisabled();
 	await page.getByRole('button', { name: m.biblioteca_stop(), exact: true }).click();
+	// Not started yet, so not stopped by the button; the late start is stopped once it lands.
+	expect(stop).not.toHaveBeenCalled();
 	finish?.();
 	await tick();
-	expect(stop).toHaveBeenCalledTimes(2);
+	await expect.poll(() => stop.mock.calls.length).toBe(1);
 	await expect
 		.element(page.getByRole('button', { name: m.biblioteca_listen_tape(), exact: true }))
 		.toHaveAttribute('aria-pressed', 'false');
+});
+
+test('Gravar on a tape selected in the archive (deep $state) opens the checklist (R2-02)', async () => {
+	const client = await isolatedApp();
+	const screen = await render(Biblioteca, { app: client, origin: 'https://example.test' });
+	const tape = screen.container.querySelector<HTMLButtonElement>('.tape');
+	const name = tape?.querySelector('.tape-label strong')?.textContent;
+	if (!tape || !name) throw new Error('Missing tape');
+	tape.click();
+	const write = page.getByRole('button', { name: m.biblioteca_write(), exact: true });
+	await expect.element(write).toBeEnabled();
+	await write.click();
+	await expect.poll(() => client.pendingWrite).not.toBeNull();
+	expect(client.pendingWrite).toMatchObject({ schema: 1, name });
+	expect(() => structuredClone(client.pendingWrite)).not.toThrow();
+	expect(client.cableState.writing).toBe(false);
+});
+
+test('the sheet stops only the audition it started, never raw playback (R2-08)', async () => {
+	const client = await isolatedApp();
+	let mode: AudioEngineState['mode'] = 'raw';
+	vi.spyOn(client.audio, 'start').mockImplementation((next = 'chains') => {
+		mode = next;
+		return Promise.resolve();
+	});
+	vi.spyOn(client.audio, 'state').mockImplementation(() => ({
+		...IDLE_STATE,
+		playing: true,
+		mode
+	}));
+	const stop = vi.spyOn(client.audio, 'stop');
+	// Raw playback (♪ Áudio) running, no audition: closing the sheet leaves it alone.
+	const idle = sheetProps();
+	await render(TrackSheet, { ...idle, audioState: client.audio.state() });
+	await page.getByRole('button', { name: m.biblioteca_close(), exact: true }).click();
+	expect(idle.onClose).toHaveBeenCalledOnce();
+	expect(stop).not.toHaveBeenCalled();
+	await cleanup();
+
+	// An audition, then the user switched to raw playback: no longer the sheet's to stop.
+	const props = sheetProps();
+	await render(TrackSheet, {
+		...props,
+		audioState: { ...IDLE_STATE, playing: true, mode: 'chains' }
+	});
+	await page.getByRole('button', { name: m.biblioteca_listen_current(), exact: true }).click();
+	await expect
+		.element(page.getByRole('button', { name: m.biblioteca_listen_current(), exact: true }))
+		.toHaveAttribute('aria-pressed', 'true');
+	mode = 'raw';
+	await page.getByRole('button', { name: m.biblioteca_close(), exact: true }).click();
+	expect(props.onClose).toHaveBeenCalledOnce();
+	expect(stop).not.toHaveBeenCalled();
+	await cleanup();
+
+	// Still its own chains audition: closing stops it.
+	const own = sheetProps();
+	await render(TrackSheet, {
+		...own,
+		audioState: { ...IDLE_STATE, playing: true, mode: 'chains' }
+	});
+	await page.getByRole('button', { name: m.biblioteca_listen_current(), exact: true }).click();
+	await expect
+		.element(page.getByRole('button', { name: m.biblioteca_listen_current(), exact: true }))
+		.toHaveAttribute('aria-pressed', 'true');
+	await page.getByRole('button', { name: m.biblioteca_close(), exact: true }).click();
+	expect(stop).toHaveBeenCalledOnce();
 });
 
 test('invalid share origins disable exports but do not prevent copying the standalone S1 code', async () => {

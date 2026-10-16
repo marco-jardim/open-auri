@@ -304,14 +304,12 @@ test('disconnect at report k: interrupted journal, no commit, rescue', async ({ 
 		log.reports.some((report) => report.bytes.every((byte, index) => byte === expected[9][index]))
 	).toBe(false);
 	await closeChecklist(dialog);
-	const rescue = page.getByRole('alert', { name: 'Gravação interrompida', exact: true });
+	const rescue = page.getByRole('region', { name: 'Gravação interrompida', exact: true });
+	const rescueText =
+		'O estado do cabo é desconhecido. Grave o Neutro ou uma curva conhecida antes de continuar ouvindo.';
 	await expect(rescue).toBeVisible();
-	await expect(
-		rescue.getByText(
-			'O estado do cabo é desconhecido. Grave o Neutro ou uma curva conhecida antes de continuar ouvindo.',
-			{ exact: true }
-		)
-	).toBeVisible();
+	// Interrupted in this session: the body is announced as an alert.
+	await expect(rescue.getByRole('alert')).toHaveText(rescueText);
 	await expect(rescue.getByRole('button', { name: 'Gravar Neutro', exact: true })).toBeVisible();
 	await expect(page.locator('#main-content li[data-status="interrupted"]')).toHaveCount(1);
 	expect(await exportedJournal(page)).toEqual([
@@ -319,6 +317,9 @@ test('disconnect at report k: interrupted journal, no commit, rescue', async ({ 
 	]);
 	await page.reload();
 	await expect(rescue).toBeVisible();
+	// Restored from the journal on load: a polite status, not a re-announced alert.
+	await expect(rescue.getByRole('status')).toHaveText(rescueText);
+	await expect(rescue.getByRole('alert')).toHaveCount(0);
 	expect((await hidLog(page)).reports).toEqual([]);
 });
 

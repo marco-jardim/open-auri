@@ -5,6 +5,7 @@
 	import type { CableService } from '#lib/cable/service.ts';
 	import type {
 		Band,
+		CableDevice,
 		CableState,
 		ChecklistResult,
 		Confirmations,
@@ -54,11 +55,22 @@
 	};
 
 	let cable = $state.raw<CableState>(untrack(() => service.getState()));
-	$effect(() => service.subscribe((next) => (cable = next)));
+	let confirmations = $state<Confirmations>({ ...UNCONFIRMED });
+	/** The write target the confirmations were given for (plain: compared, never rendered). */
+	let confirmedTarget: CableDevice | null = untrack(() => cable.device);
+	$effect(() =>
+		service.subscribe((next) => {
+			// Confirmations belong to one target: any change (unplugged, selected) asks again.
+			if (next.device !== confirmedTarget) {
+				confirmedTarget = next.device;
+				confirmations = { ...UNCONFIRMED };
+			}
+			cable = next;
+		})
+	);
 
 	const id = $props.id();
 	let dialog = $state<HTMLDialogElement>();
-	let confirmations = $state<Confirmations>({ ...UNCONFIRMED });
 	/** Re-evaluates the time-dependent items (2 s spacing countdown). */
 	let tick = $state(0);
 	let message = $state<string | null>(null);
@@ -120,7 +132,25 @@
 
 	function onCancel(event: Event) {
 		// Never close the dialog in the middle of a write.
-		if (cable.writing) event.preventDefault();
+		if (service.getState().writing) event.preventDefault();
+	}
+
+	/**
+	 * `cancel` is not always cancelable (Chromium's close watcher: a second Esc or Android back
+	 * without fresh user activation closes the modal anyway). Closed mid-write, the dialog is
+	 * shown again at once: the page stays inert, the outcome is shown here, and the parent's
+	 * checklist state is released only by a close after the write.
+	 */
+	function onDialogClose() {
+		if (open && service.getState().writing) {
+			queueMicrotask(() => {
+				if (open && dialog !== undefined && dialog.isConnected && !dialog.open) {
+					dialog.showModal();
+				}
+			});
+			return;
+		}
+		onclose();
 	}
 
 	function finish(outcome: WriteOutcome | QueueOutcome) {
@@ -151,9 +181,10 @@
 <dialog
 	bind:this={dialog}
 	aria-labelledby={`${id}-title`}
+	closedby={cable.writing ? 'none' : 'closerequest'}
 	class="m-auto max-h-[90vh] w-full max-w-xl overflow-y-auto rounded border border-current bg-[Canvas] p-4 text-[CanvasText] backdrop:bg-black/60"
 	oncancel={onCancel}
-	onclose={() => onclose()}
+	onclose={onDialogClose}
 >
 	{#if checklist !== null}
 		<div class="flex flex-col gap-4">

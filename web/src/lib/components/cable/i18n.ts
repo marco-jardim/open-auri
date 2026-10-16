@@ -67,6 +67,7 @@ export const refusalText: Record<RefusalReason, () => string> = {
 	gate: () => m.cable_refused_gate(),
 	unusable: () => m.cable_refused_unusable(),
 	aborted: () => m.cable_refused_aborted(),
+	'interrupted-elsewhere': () => m.cable_refused_interrupted_elsewhere(),
 	error: () => m.cable_refused_error()
 };
 

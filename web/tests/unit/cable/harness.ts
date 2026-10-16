@@ -14,6 +14,7 @@ import type {
 	Band,
 	CableServiceDeps,
 	CableWrittenDetail,
+	Clock,
 	Confirmations,
 	FlashState,
 	JournalEntry
@@ -110,6 +111,8 @@ export interface SetupOptions {
 	tabId?: string;
 	/** Initial epoch ms (default T0). */
 	now?: number;
+	/** Wraps the auto-advancing fake clock the service uses (e.g. to hold a sleep open). */
+	wrapClock?: (clock: Clock) => Clock;
 }
 
 export async function setup(options: SetupOptions = {}) {
@@ -132,7 +135,7 @@ export async function setup(options: SetupOptions = {}) {
 		now: () => time.value,
 		lastWrittenLevelDb: () => levels.lastWrittenLevelDb,
 		sessionWriteCount: () => levels.sessionWriteCount,
-		clock,
+		clock: options.wrapClock ? options.wrapClock(clock) : clock,
 		userActivation: () => ({ isActive: true }),
 		locks,
 		inflight,

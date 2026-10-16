@@ -1,10 +1,24 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale, setLocale } from '#lib/paraglide/runtime.js';
+	import { isWriteInProgress, onWriteProgress } from '#lib/cable/write-flag.ts';
 
 	let locale = $state(getLocale());
+	/** Switching the locale reloads the page: never while a cable write sends bytes. */
+	let writing = $state(isWriteInProgress());
+	$effect(() => {
+		writing = isWriteInProgress();
+		return onWriteProgress(() => {
+			writing = isWriteInProgress();
+		});
+	});
 
 	function toggle() {
+		if (isWriteInProgress()) {
+			// Refused, nothing else happens: the user switches after the write.
+			writing = true;
+			return;
+		}
 		locale = locale === 'pt-BR' ? 'en-US' : 'pt-BR';
 		return setLocale(locale);
 	}
@@ -15,6 +29,8 @@
 	class="language"
 	lang={locale === 'pt-BR' ? 'en-US' : 'pt-BR'}
 	aria-label={m.chrome_language_switch({}, { locale })}
+	aria-disabled={writing ? 'true' : undefined}
+	title={writing ? m.chrome_language_blocked() : undefined}
 	onclick={toggle}
 >
 	<span lang="pt-BR" class:on={locale === 'pt-BR'}>PT</span>
@@ -39,6 +55,11 @@
 		font: 11px/1.2 var(--mono, 'JetBrains Mono', monospace);
 		white-space: nowrap;
 		cursor: pointer;
+	}
+
+	.language[aria-disabled='true'] {
+		cursor: not-allowed;
+		opacity: 0.6;
 	}
 
 	.on {

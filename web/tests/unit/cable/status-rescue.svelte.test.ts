@@ -131,8 +131,13 @@ test('rescue is opt-in, shows zero sent reports, and hides missing journal metad
 	const onrescue = vi.fn();
 	await render(RescueNotice, { service: fake.service, onrescue });
 	expect(page.getByRole('alert').elements()).toHaveLength(0);
-	fake.publish({ rescue: { at: 1, reportsSent: 0, deviceLabel: 'Interrupted cable' } });
-	await expect.element(page.getByRole('alert')).toBeVisible();
+	fake.publish({
+		rescue: { at: 1, reportsSent: 0, deviceLabel: 'Interrupted cable', fresh: true }
+	});
+	await expect.element(page.getByRole('alert')).toHaveTextContent(m.cable_rescue_body());
+	// The alert is the body text only, not a container of buttons.
+	expect(page.getByRole('alert').getByRole('button').elements()).toHaveLength(0);
+	await expect.element(page.getByRole('region', { name: m.cable_rescue_title() })).toBeVisible();
 	await expect.element(page.getByText(m.cable_rescue_reports({ count: '0' }))).toBeVisible();
 	await expect
 		.element(page.getByText(m.cable_rescue_device({ device: 'Interrupted cable' })))
@@ -153,4 +158,13 @@ test('rescue is opt-in, shows zero sent reports, and hides missing journal metad
 	expect(page.getByRole('alert').elements()).toHaveLength(0);
 	await cleanup();
 	expect(fake.unsubscribe).toHaveBeenCalledOnce();
+});
+
+test('an interruption restored from the journal on load is a polite region, not an alert (R2-12)', async () => {
+	const fake = cableUi({ rescue: { at: 1, reportsSent: null, deviceLabel: 'Old cable' } });
+	await render(RescueNotice, { service: fake.service, onrescue: vi.fn() });
+	await expect.element(page.getByRole('region', { name: m.cable_rescue_title() })).toBeVisible();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_rescue_body());
+	expect(page.getByRole('alert').elements()).toHaveLength(0);
+	await expect.element(page.getByRole('button', { name: m.cable_rescue_action() })).toBeEnabled();
 });

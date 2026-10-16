@@ -9,6 +9,7 @@ import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import { cableUi } from './ui-fake.ts';
 import { writtenOutcome } from './outcomes.ts';
+import type { WriteOutcome } from '#lib/cable/types.ts';
 
 beforeEach(async () => {
 	await setLocale('pt-BR', { reload: false });
@@ -118,6 +119,12 @@ test('the target cable is shown next to the write button; without one the user m
 		m.cable_target_device({ device: 'Right cable' })
 	);
 	expect((select.element() as HTMLSelectElement).value).toBe('1');
+	// The confirmations were given before a target existed: a new target asks for them again.
+	await expect
+		.element(page.getByRole('checkbox', { name: m.cable_confirm_volume() }))
+		.not.toBeChecked();
+	await expect.element(button).toBeDisabled();
+	await confirm();
 	await expect.element(button).toBeEnabled();
 	expect(write).not.toHaveBeenCalled();
 	// One cable: the label is shown and no selector is needed.
@@ -126,6 +133,98 @@ test('the target cable is shown next to the write button; without one the user m
 		.element(page.getByText(m.cable_target_device({ device: 'Right cable' }), { exact: true }))
 		.toBeVisible();
 	expect(page.getByRole('dialog').getByRole('combobox').elements()).toHaveLength(0);
+});
+
+test('unplugging the target clears the confirmations and never shows another cable as the target', async () => {
+	const left = new FakeHIDDevice();
+	const right = new FakeHIDDevice();
+	const fake = cableUi({
+		connection: 'connected',
+		devices: [left, right],
+		deviceLabels: ['Left cable', 'Right cable'],
+		device: left,
+		deviceLabel: 'Left cable'
+	});
+	const write = vi.fn<typeof fake.service.write>();
+	fake.service.write = write;
+	const screen = await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose: vi.fn()
+	});
+	const button = page.getByRole('button', { name: m.cable_write_simulated(), exact: true });
+	await confirm();
+	await expect.element(button).toBeEnabled();
+	// The service leaves no target after an unplug; the ticked boxes were for "Left cable".
+	fake.publish({
+		devices: [right],
+		deviceLabels: ['Right cable'],
+		device: null,
+		deviceLabel: null
+	});
+	await expect.element(page.getByText(m.cable_target_required())).toBeVisible();
+	expect(screen.container.querySelector('[data-target-device]')).toBeNull();
+	await expect
+		.element(page.getByRole('checkbox', { name: m.cable_confirm_volume() }))
+		.not.toBeChecked();
+	await expect
+		.element(page.getByRole('checkbox', { name: m.cable_confirm_connection() }))
+		.not.toBeChecked();
+	await expect.element(button).toBeDisabled();
+	// A state update that keeps the same target keeps the confirmations.
+	fake.publish({ device: right, deviceLabel: 'Right cable' });
+	await confirm();
+	fake.publish({ writing: false });
+	await expect.element(button).toBeEnabled();
+	expect(write).not.toHaveBeenCalled();
+});
+
+test('a dialog forced closed mid-write reopens at once, shows the outcome and closes only afterwards', async () => {
+	const device = new FakeHIDDevice();
+	const fake = cableUi({ device, devices: [device], deviceLabels: ['Test cable'] });
+	let finish: ((outcome: WriteOutcome) => void) | undefined;
+	fake.service.write = vi.fn<typeof fake.service.write>(() => {
+		fake.publish({ writing: true });
+		return new Promise<WriteOutcome>((resolve) => {
+			finish = resolve;
+		});
+	});
+	const onclose = vi.fn();
+	const onresult = vi.fn();
+	const screen = await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose,
+		onresult
+	});
+	const dialog = screen.container.querySelector('dialog');
+	if (!dialog) throw new Error('Missing dialog');
+	expect(dialog.getAttribute('closedby')).toBe('closerequest');
+	await confirm();
+	await page.getByRole('button', { name: m.cable_write_simulated(), exact: true }).click();
+	await expect.poll(() => dialog.getAttribute('closedby')).toBe('none');
+	// Chromium's close watcher can close a modal without a cancelable `cancel` (second Esc,
+	// Android back): emulate that forced close.
+	dialog.close();
+	expect(dialog.open).toBe(false);
+	await expect.poll(() => dialog.open).toBe(true);
+	expect(dialog.matches(':modal')).toBe(true);
+	expect(onclose).not.toHaveBeenCalled();
+	// The outcome still reaches the reopened dialog and the parent.
+	fake.publish({ writing: false });
+	finish?.(writtenOutcome('simulated'));
+	await expect
+		.element(page.getByRole('status'))
+		.toHaveTextContent(m.cable_result_simulated({ crc: '0x4FFF' }));
+	expect(onresult).toHaveBeenCalledOnce();
+	expect(dialog.getAttribute('closedby')).toBe('closerequest');
+	// After the write a close is an ordinary close: the parent releases its checklist state.
+	dialog.close();
+	await expect.poll(() => onclose.mock.calls.length).toBe(1);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(dialog.open).toBe(false);
 });
 
 test('diagnostics show failed/unknown lamps, loudness, experimental consent and cooldown; cancellation is blocked during writes', async () => {

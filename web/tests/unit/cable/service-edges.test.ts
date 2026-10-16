@@ -84,9 +84,11 @@ test('selection/disconnection reject strangers; closing a permitted cable can fa
 		value: vi.fn().mockRejectedValue(new Error('Already unplugged'))
 	});
 	expect(await h.service.disconnect()).toBe(true);
-	expect(h.service.getState().device).toBe(h.device);
-	expect(await h.service.disconnect()).toBe(true);
+	// The remaining cable is not made the target silently: nothing to disconnect by default.
+	expect(h.service.getState().device).toBeNull();
 	expect(await h.service.disconnect()).toBe(false);
+	expect(await h.service.disconnect(h.device)).toBe(true);
+	expect(await h.service.disconnect(h.device)).toBe(false);
 	expect(h.service.getState().connection).toBe('disconnected');
 });
 

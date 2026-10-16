@@ -74,13 +74,15 @@ export interface WriteLock {
 
 /**
  * Subset of the Web Locks API (`navigator.locks`) used for cross-tab write exclusion.
- * `request` is always called with `{ ifAvailable: true }`: the callback receives `null`
+ * Writes always call `request` with `{ ifAvailable: true }`: the callback receives `null`
  * when another tab holds the lock, and the lock is held until the callback settles.
+ * Only the interruption watcher waits (`{ signal }`, no `ifAvailable`): it is granted the lock
+ * once the writing tab released it (or died) and then only records, never writes.
  */
 export interface WriteLockManager {
 	request<T>(
 		name: string,
-		options: { ifAvailable: true },
+		options: { ifAvailable?: true; signal?: AbortSignal },
 		callback: (lock: WriteLock | null) => Promise<T>
 	): Promise<T>;
 	query?(): Promise<{ held?: readonly WriteLock[] }>;
@@ -93,6 +95,11 @@ export interface WriteLockManager {
 export interface InflightPort {
 	read(): string | null;
 	write(value: string | null): boolean;
+	/**
+	 * Optional: calls `listener` when another tab changed the marker (`storage` events). Returns
+	 * the unsubscribe function.
+	 */
+	subscribe?(listener: () => void): () => void;
 }
 
 /** In-flight marker: written before any I/O, removed when the write settles. */
@@ -103,10 +110,15 @@ export interface InflightMarker {
 	name: string;
 	preampDb: number;
 	bands: Band[];
-	/** Label of the device being written. */
+	/** Label of the device being written (the last one written when `between` is true). */
 	device: string;
 	/** Service instance (tab/page load) that owns the write. */
 	tabId: string;
+	/**
+	 * X9 queue between two cables: the previous cable committed (and is journaled) and the next
+	 * one has not started. No cable is being written, so recovering it records nothing.
+	 */
+	between?: true;
 }
 
 export interface CableServiceDeps {
@@ -271,6 +283,11 @@ export type RefusalReason =
 	| 'gate'
 	| 'unusable'
 	| 'aborted'
+	/**
+	 * Another tab died mid-write (its marker was left behind): the interruption was just recorded
+	 * and the rescue notice raised; nothing was sent by this attempt.
+	 */
+	| 'interrupted-elsewhere'
 	| 'error';
 
 export interface Refused {
@@ -298,7 +315,7 @@ export type WriteOutcome = Refused | Written;
 export type QueueItemStatus =
 	| 'pending'
 	| 'writing'
-	/** The sequence for this cable ended; its result is known when the whole queue ends. */
+	/** The sequence for this cable ended; its result is settled right after (same task). */
 	| 'sent'
 	| 'ok'
 	| 'simulated'
@@ -325,6 +342,11 @@ export interface RescueState {
 	deviceLabel: string | null;
 	/** Data reports the cable accepted before the interruption (null when restored from the journal). */
 	reportsSent: number | null;
+	/**
+	 * True when the interruption was detected in this page session (a write here, or a marker
+	 * recovered now); absent when restored from the journal on load, so it is not re-announced.
+	 */
+	fresh?: true;
 }
 
 export interface CableState {

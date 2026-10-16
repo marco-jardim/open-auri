@@ -33,9 +33,20 @@
   `localStorage` marker `oa.cable.inflight` and records the flash attempt (counters + lastWriteAt);
   when the sequence ends it only moves `lastWriteAt` to that time (`flash.touchWrite`), so the 2 s
   spacing runs from the end of the write. A marker left by a tab closed mid-write becomes an
-  `interrupted` journal entry and the rescue notice on the next start.
+  `interrupted` journal entry and the rescue notice on the next start, or at once in any open tab
+  that saw the marker appear (it waits for the writer's lock and then only records). A write that
+  finds such a marker is refused with `interrupted-elsewhere`. An X9 queue journals (and emits
+  `cable:written` for) each cable as it commits; between cables the marker is flagged `between`.
 - A restored cable is never chosen silently: with several cables the target stays unset until the
   user selects one (CableStatus or the checklist); the checklist always shows the target label.
+  Unplugging the target never makes another cable the target, and the checklist asks for its
+  confirmations again whenever the target changes.
+- `requestWrite(curve)` copies with `$state.snapshot`, so a page may pass a deep `$state` value.
+  `closeChecklist()` asked during a write closes the checklist when that write ends; the checklist
+  dialog itself cannot be dismissed mid-write (it reopens if the browser forces it closed).
+- While a write sends bytes, `isWriteInProgress()` (`#lib/cable/index.ts`, mirrors
+  `window.__oaWriteInProgress`) is true; anything that reloads the page (PWA update, language
+  toggle) must refuse then.
 - Cabo/rack flash counters come from `app.cable.counters()`, the same source as the checklist.
 - `app.toasts.push(message, options)` uses the layout's per-app toast region.
 

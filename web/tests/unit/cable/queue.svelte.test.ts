@@ -107,6 +107,38 @@ test('review/back preserves selection; only confirmation submits the reviewed qu
 	await expect.element(page.getByRole('button', { name: m.cable_queue_review() })).toBeVisible();
 });
 
+test('the reviewed queue is frozen: a cable plugged or unplugged during review requires a new review', async () => {
+	const devices = [new FakeHIDDevice(), new FakeHIDDevice()];
+	const fake = cableUi({ devices, deviceLabels: ['One', 'Two'] });
+	await render(MultiCableQueue, { ...input, service: fake.service });
+	await page.getByRole('button', { name: m.cable_queue_review() }).click();
+	const confirmTwo = page.getByRole('button', { name: m.cable_queue_confirm({ count: '2' }) });
+	await expect.element(confirmTwo).toBeVisible();
+	// A cable reconnects while the user reviews: it never joins the reviewed queue silently.
+	const late = new FakeHIDDevice();
+	fake.publish({ devices: [...devices, late], deviceLabels: ['One', 'Two', 'Three'] });
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_queue_changed());
+	expect(confirmTwo.elements()).toHaveLength(0);
+	await expect.element(page.getByRole('checkbox', { name: 'Three' })).toBeChecked();
+	expect(fake.writeQueue).not.toHaveBeenCalled();
+	expect(fake.createGesture).not.toHaveBeenCalled();
+	// Reviewed again, the list shown is exactly the list sent.
+	await page.getByRole('button', { name: m.cable_queue_review() }).click();
+	expect(
+		page
+			.getByRole('listitem')
+			.elements()
+			.map((item) => item.textContent)
+	).toEqual(['One', 'Two', 'Three']);
+	// Unplugging one also drops back out of review.
+	fake.publish({ devices: [devices[0], late], deviceLabels: ['One', 'Three'] });
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_queue_changed());
+	await page.getByRole('button', { name: m.cable_queue_review() }).click();
+	await page.getByRole('button', { name: m.cable_queue_confirm({ count: '2' }) }).click();
+	expect(fake.writeQueue).toHaveBeenCalledOnce();
+	expect(fake.writeQueue.mock.calls[0][0].devices).toEqual([devices[0], late]);
+});
+
 test('a refused queue has feedback without a result callback; missing labels do not break review', async () => {
 	const fake = cableUi({
 		devices: [new FakeHIDDevice(), new FakeHIDDevice()],

@@ -205,7 +205,8 @@ describe('browser app wiring with fake persistence and HID', () => {
 		expect(app.cableState.rescue).toEqual({
 			at: fake.time.value - 60_000,
 			deviceLabel: 'USB DSP Audio',
-			reportsSent: null
+			reportsSent: null,
+			fresh: true
 		});
 		expect(fake.local.getItem(CABLE_INFLIGHT_KEY)).toBeNull();
 		expect(fake.device.attempts).toBe(0);

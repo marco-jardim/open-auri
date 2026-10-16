@@ -69,10 +69,35 @@ test('active I/O prevents opening/replacing/closing checklists and a write witho
 	app.requestRescue();
 	expect(app.pendingWrite).toBe(pending);
 	await next;
+	// The close asked for mid-write is applied when the write ends: nothing stays wedged.
+	expect(app.pendingWrite).toBeNull();
+	time.value += 3000;
+	app.requestRescue();
+	expect(app.pendingWrite?.bands).toEqual(NEUTRO.bands);
+	app.closeChecklist();
+	expect(app.pendingWrite).toBeNull();
 	const stop = vi.spyOn(audio, 'stop');
 	app.dispose();
 	app.dispose();
 	expect(stop).toHaveBeenCalledOnce();
+});
+
+test('a write without a close request keeps the checklist open for its outcome', async () => {
+	const { app } = setup();
+	await app.cable.connect();
+	app.requestWrite();
+	const pending = app.pendingWrite;
+	expect(
+		(
+			await app.cable.write({
+				...app.state.curve.current,
+				experimental: false,
+				confirmations,
+				gesture: app.cable.createGesture(click)
+			})
+		).status
+	).toBe('ok');
+	expect(app.pendingWrite).toBe(pending);
 });
 
 test('the default audio singleton is restored only on creation, not a second time by start', async () => {

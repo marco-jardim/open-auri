@@ -67,11 +67,25 @@ export function createClientApp(options: ClientAppOptions = {}) {
 		// Same localStorage (and failure reporting) as the rest of the app state.
 		inflight: {
 			read: () => state.storage.readPersisted('local', CABLE_INFLIGHT_KEY),
-			write: (value) => state.storage.write('local', CABLE_INFLIGHT_KEY, value)
+			write: (value) => state.storage.write('local', CABLE_INFLIGHT_KEY, value),
+			// Another tab stored or removed its marker: the service waits for that writer's lock.
+			subscribe: (listener) =>
+				state.storage.onStorage((event) => {
+					if (event.area !== 'local') return;
+					if (event.key === CABLE_INFLIGHT_KEY || event.key === null) listener();
+				})
 		}
 	});
 	let cableState = $state.raw(cable.getState());
-	const unsubscribe = cable.subscribe((next) => (cableState = next));
+	/** A close asked for while writing; applied once the write ends, so `pending` never wedges. */
+	let closeAfterWrite = false;
+	const unsubscribe = cable.subscribe((next) => {
+		cableState = next;
+		if (closeAfterWrite && !next.writing) {
+			closeAfterWrite = false;
+			pending = null;
+		}
+	});
 
 	function written(event: Event) {
 		const detail = (event as CustomEvent<CableWrittenDetail>).detail;
@@ -104,9 +118,12 @@ export function createClientApp(options: ClientAppOptions = {}) {
 		/** Editor-only actions: these never connect, mint a gesture or write. */
 		loadNeutral: () => state.curve.loadPreset(NEUTRO.id),
 		loadAuriDefault: () => state.curve.loadPreset(PADRAO_AURI.id),
-		/** Open a checklist on an immutable copy. No cable I/O here. */
+		/**
+		 * Open a checklist on an immutable copy. No cable I/O here. `$state.snapshot` also copies
+		 * deep `$state` proxies (a page's selected tape), which `structuredClone` cannot clone.
+		 */
 		requestWrite(curve: CurrentCurve = state.curve.current) {
-			if (!cableState.writing && pending === null) pending = structuredClone(curve);
+			if (!cableState.writing && pending === null) pending = $state.snapshot(curve);
 		},
 		requestRescue() {
 			if (!cableState.writing && pending === null) {
@@ -119,8 +136,14 @@ export function createClientApp(options: ClientAppOptions = {}) {
 				};
 			}
 		},
+		/** Closes the checklist; asked mid-write, it closes as soon as that write ends. */
 		closeChecklist() {
-			if (!cableState.writing) pending = null;
+			if (cableState.writing) {
+				closeAfterWrite = pending !== null;
+				return;
+			}
+			closeAfterWrite = false;
+			pending = null;
 		},
 		/**
 		 * Called by PreWriteChecklist. Nothing to feed back: the last written level comes from the

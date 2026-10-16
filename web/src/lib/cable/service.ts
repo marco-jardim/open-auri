@@ -7,11 +7,13 @@
  * (Web Locks `oa-cable-write`, `ifAvailable`), the checklist again with fresh flash state,
  * then `writeCurve` / `writeMany` from `open-auri/transport`, which run `gateForWrite`
  * again on that snapshot. Nothing is ever retried or written automatically; the lock and
- * the in-flight marker only ever refuse.
+ * the in-flight marker only ever refuse or record.
  *
  * Before any I/O a marker (`oa.cable.inflight`) is persisted and, as each device sequence
  * starts, the flash attempt is recorded. A marker left behind by a closed tab becomes an
- * `interrupted` journal entry (and the rescue notice) on the next load.
+ * `interrupted` journal entry (and the rescue notice) on the next load, or in any open tab
+ * that saw the marker appear and waited for the writer's lock. An X9 queue journals each
+ * cable as it commits and, between cables, leaves a `between` marker that names no write.
  *
  * Create it in the browser only (never during SSR module evaluation).
  */
@@ -23,6 +25,7 @@ import {
 	FakeHIDDevice,
 	GateRejectedError,
 	PRODUCT_NAME,
+	WRITE_SPACING_MS,
 	requestCable,
 	systemClock,
 	writeCurve,
@@ -33,9 +36,11 @@ import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
 import { gateForWrite } from 'open-auri/safety';
 import { evaluateChecklist, flashCountersOf } from './checklist.ts';
 import { consumeGestureToken, createGestureToken, type GestureEventLike } from './gesture.ts';
+import { withWriteFlag } from './write-flag.ts';
 import type {
 	Band,
 	CableDevice,
+	Clock,
 	CableMode,
 	CableServiceDeps,
 	CableState,
@@ -115,6 +120,15 @@ function browserInflight(): InflightPort | null {
 				console.warn('cable in-flight marker write failed', cause);
 				return false;
 			}
+		},
+		subscribe(listener) {
+			// `storage` events only fire for changes made by other tabs of this origin.
+			const onStorage = (event: StorageEvent) => {
+				if (event.storageArea !== backend) return;
+				if (event.key === CABLE_INFLIGHT_KEY || event.key === null) listener();
+			};
+			window.addEventListener('storage', onStorage);
+			return () => window.removeEventListener('storage', onStorage);
 		}
 	};
 }
@@ -153,26 +167,12 @@ export function parseInflightMarker(raw: string): InflightMarker | null {
 	) {
 		return null;
 	}
-	return { at, crc, name, preampDb, bands: bands as Band[], device, tabId };
+	const marker: InflightMarker = { at, crc, name, preampDb, bands: bands as Band[], device, tabId };
+	if (candidate.between === true) marker.between = true;
+	return marker;
 }
 
 /** Event dispatched on `service.events` after each real, successful write (F4 outbox). */
-let activeWrites = 0;
-/**
- * Marks a write in progress on `window.__oaWriteInProgress` for the PWA update flow, which must
- * never reload the page mid-write (see web/src/lib/pwa/README.md). Counts overlapping writes.
- */
-async function withWriteFlag<T>(run: () => Promise<T>): Promise<T> {
-	const scope = globalThis as typeof globalThis & { __oaWriteInProgress?: boolean };
-	activeWrites += 1;
-	scope.__oaWriteInProgress = true;
-	try {
-		return await run();
-	} finally {
-		activeWrites -= 1;
-		scope.__oaWriteInProgress = activeWrites > 0;
-	}
-}
 export const CABLE_WRITTEN_EVENT = 'cable:written';
 /** Event dispatched on `service.events` whenever the state changes (detail: CableState). */
 export const CABLE_STATUS_EVENT = 'cable:status';
@@ -319,6 +319,7 @@ export function createCableService(deps: CableServiceDeps) {
 	let recheck: ReturnType<typeof setTimeout> | null = null;
 
 	const lastJournal = deps.journal.last();
+	// Restored from the journal: shown, but not announced as a new interruption (no `fresh`).
 	if (mode === 'real' && lastJournal?.status === 'interrupted') {
 		rescue = { at: lastJournal.at, deviceLabel: lastJournal.device, reportsSent: null };
 	}
@@ -434,16 +435,19 @@ export function createCableService(deps: CableServiceDeps) {
 		connection = 'connected';
 	}
 
-	/** With no explicit target, the single connected cable is the (visible) target. */
+	/**
+	 * With no explicit target, the single connected cable is the (visible) target. Only after a
+	 * restore or a connect, never after a removal.
+	 */
 	function implyTarget() {
 		if (primary === null && devices.length === 1) primary = devices[0] ?? null;
 	}
 
 	function removeDevice(device: CableDevice) {
 		devices = devices.filter((candidate) => candidate !== device);
-		// Never switch silently to another of several cables: the user must choose again.
+		// Never switch silently to another cable (even a single remaining one, whose label would
+		// replace the target's in an open checklist): the user must choose again.
 		if (primary === device) primary = null;
-		implyTarget();
 		connection = devices.length > 0 ? 'connected' : 'disconnected';
 	}
 
@@ -467,10 +471,16 @@ export function createCableService(deps: CableServiceDeps) {
 	/**
 	 * Turns a marker left by a tab that is gone into an `interrupted` journal entry (and the
 	 * rescue state), then removes it. Does nothing if the stored marker changed meanwhile.
+	 * A `between` marker (X9 queue, between two cables) names no cable being written: it is
+	 * only removed. Returns whether an interruption was recorded.
 	 */
 	function recoverMarker(raw: string, marker: InflightMarker | null): boolean {
 		if (inflight === null || inflight.read() !== raw) return false;
 		recoveredMarkers.add(raw);
+		if (marker?.between === true) {
+			if (!inflight.write(null)) console.warn('cable in-flight marker could not be removed');
+			return false;
+		}
 		if (marker !== null) {
 			const entry: JournalEntry = {
 				schema: 1,
@@ -494,7 +504,8 @@ export function createCableService(deps: CableServiceDeps) {
 			rescue = {
 				at: marker?.at ?? nowMs(),
 				deviceLabel: marker?.device ?? null,
-				reportsSent: null
+				reportsSent: null,
+				fresh: true
 			};
 		}
 		emit();
@@ -521,7 +532,12 @@ export function createCableService(deps: CableServiceDeps) {
 		const marker = parseInflightMarker(raw);
 		if (marker !== null && marker.tabId === tabId) return;
 		const held = await lockHeld();
-		if (disposed || held === true) return;
+		if (disposed) return;
+		if (held === true) {
+			// A live writer: wait for it, so its death mid-write surfaces here too.
+			watchWriter();
+			return;
+		}
 		if (held === null && marker !== null) {
 			const age = nowMs() - marker.at;
 			if (Math.abs(age) <= INFLIGHT_STALE_MS) {
@@ -545,23 +561,63 @@ export function createCableService(deps: CableServiceDeps) {
 		});
 	}
 
-	/**
-	 * Inside the write lock: refuses while another tab's marker is live. A marker from a tab
-	 * that is gone is recovered (journal + rescue) and this attempt is refused too, so the
-	 * user sees the interruption before any new byte is sent.
-	 */
-	function crossTabGuard(): Refused | null {
+	/** The stored marker when it belongs to another tab and was not recovered yet. */
+	function foreignMarker(): { raw: string; marker: InflightMarker | null } | null {
 		if (inflight === null) return null;
 		const raw = inflight.read();
 		if (raw === null || recoveredMarkers.has(raw)) return null;
 		const marker = parseInflightMarker(raw);
-		// Our own marker that could not be removed after its write settled.
 		if (marker !== null && marker.tabId === tabId) return null;
+		return { raw, marker };
+	}
+
+	/** Pending wait for another tab's write lock (at most one); aborted on dispose. */
+	let watching: AbortController | null = null;
+
+	/**
+	 * Another tab's marker is present: wait for its write lock (no `ifAvailable`). A writer
+	 * removes its marker before releasing the lock, so a marker still there once the lock is
+	 * granted means the writer died mid-write: it is recorded (journal + rescue notice) here,
+	 * without waiting for a reload. Holding the lock, this only records; it never writes.
+	 */
+	function watchWriter() {
+		if (disposed || watching !== null || foreignMarker() === null) return;
+		if (locks === null) {
+			// No Web Locks: the age-based recovery (and its recheck timer) is all there is.
+			void recover();
+			return;
+		}
+		const abort = new AbortController();
+		watching = abort;
+		void locks
+			.request(CABLE_WRITE_LOCK, { signal: abort.signal }, async () => {
+				if (disposed) return;
+				const found = foreignMarker();
+				if (found !== null) recoverMarker(found.raw, found.marker);
+			})
+			.catch((cause: unknown) => {
+				if (!abort.signal.aborted) console.warn('cable write lock wait failed', cause);
+			})
+			.finally(() => {
+				if (watching === abort) watching = null;
+			});
+	}
+
+	/**
+	 * Inside the write lock: refuses while another tab's marker is live. A marker from a tab
+	 * that is gone is recovered (journal + rescue) and this attempt is refused with
+	 * `interrupted-elsewhere`, so the user sees the interruption before any new byte is sent.
+	 */
+	function crossTabGuard(): Refused | null {
+		const found = foreignMarker();
+		if (found === null) return null;
+		const { raw, marker } = found;
 		const fresh = marker !== null && Math.abs(nowMs() - marker.at) <= INFLIGHT_STALE_MS;
 		// Without Web Locks a fresh marker means another tab may be writing right now.
 		if (locks === null && fresh) return refuse('busy');
-		recoverMarker(raw, marker);
-		return refuse('busy');
+		// A dead queue between two cables interrupted nothing: it is just cleared.
+		if (!recoverMarker(raw, marker)) return null;
+		return refuse('interrupted-elsewhere');
 	}
 
 	/** Persists the marker before any I/O (real mode). False: refuse, nothing is sent. */
@@ -609,11 +665,30 @@ export function createCableService(deps: CableServiceDeps) {
 		// Counted per attempt that reaches the cable (conservative for wear and spacing).
 		deps.flash.record(at);
 		const device = truncate(label, 64);
-		if (ownMarker !== null && inflight !== null && ownMarker.device !== device) {
-			ownMarker = { ...ownMarker, at, device };
-			if (!inflight.write(JSON.stringify(ownMarker))) {
+		if (
+			ownMarker !== null &&
+			inflight !== null &&
+			(ownMarker.device !== device || ownMarker.between === true)
+		) {
+			const next: InflightMarker = { ...ownMarker, at, device };
+			delete next.between;
+			ownMarker = next;
+			if (!inflight.write(JSON.stringify(next))) {
 				console.warn('cable in-flight marker could not be updated');
 			}
+		}
+	}
+
+	/**
+	 * X9 queue: the cable `label` committed and is journaled; the next one has not started. The
+	 * marker stops naming a cable being written, so a tab closed during the 2 s spacing leaves
+	 * nothing to recover as interrupted (it still marks a write in progress for other tabs).
+	 */
+	function betweenCables(label: string) {
+		if (ownMarker === null || inflight === null) return;
+		ownMarker = { ...ownMarker, at: nowMs(), device: truncate(label, 64), between: true };
+		if (!inflight.write(JSON.stringify(ownMarker))) {
+			console.warn('cable in-flight marker could not be updated');
 		}
 	}
 
@@ -751,21 +826,31 @@ export function createCableService(deps: CableServiceDeps) {
 
 	/**
 	 * Journal, rescue and events for one device sequence that started I/O (its flash attempt
-	 * was already recorded by `sequenceStarting`, before the first byte).
+	 * was already recorded by `sequenceStarting`, before the first byte). `committed`: the
+	 * sequence ended `ok`; otherwise it was interrupted after `reportsSent` data reports.
 	 */
-	function settle(result: WriteResult, label: string, authorized: Authorized): Written {
+	function journalSequence(
+		committed: boolean,
+		crc: number,
+		reportsSent: number | null,
+		label: string,
+		authorized: Authorized
+	): { status: Written['status']; entry: JournalEntry | null } {
 		const { checklist, snapshot, preampDb, name } = authorized;
 		const simulated = mode === 'simulated';
 		const at = nowMs();
-		const status: JournalStatus =
-			result.status === 'ok' ? (simulated ? 'simulated' : 'ok') : 'interrupted';
+		const status: Written['status'] & JournalStatus = committed
+			? simulated
+				? 'simulated'
+				: 'ok'
+			: 'interrupted';
 		let entry: JournalEntry | null = null;
-		if (!simulated || result.status === 'ok') {
+		if (!simulated || committed) {
 			entry = {
 				schema: 1,
 				at,
 				name,
-				crc: result.crc,
+				crc,
 				preampDb,
 				bands: copyBands(snapshot),
 				status,
@@ -779,18 +864,16 @@ export function createCableService(deps: CableServiceDeps) {
 			}
 		}
 		if (simulated) {
-			if (result.status === 'ok') simulatedLevelDb = checklist.newLevelDb;
+			if (committed) simulatedLevelDb = checklist.newLevelDb;
+		} else if (committed) {
+			rescue = null;
 		} else {
-			if (result.status === 'ok') {
-				rescue = null;
-			} else {
-				rescue = { at, deviceLabel: label, reportsSent: result.reportsSent };
-			}
+			rescue = { at, deviceLabel: label, reportsSent, fresh: true };
 		}
-		if (!simulated && result.status === 'ok' && entry !== null) {
+		if (!simulated && committed && entry !== null) {
 			const detail: CableWrittenDetail = {
 				entry,
-				crc: result.crc,
+				crc,
 				preampDb,
 				bands: copyBands(snapshot),
 				deviceLabel: label,
@@ -799,19 +882,34 @@ export function createCableService(deps: CableServiceDeps) {
 			};
 			events.dispatchEvent(new CustomEvent(CABLE_WRITTEN_EVENT, { detail }));
 		}
+		return { status, entry };
+	}
+
+	/** `journalSequence` for a finished `writeCurve` result. */
+	function settle(result: WriteResult, label: string, authorized: Authorized): Written {
+		const committed = result.status === 'ok';
+		const { status, entry } = journalSequence(
+			committed,
+			result.crc,
+			result.reportsSent,
+			label,
+			authorized
+		);
 		return {
-			status: result.status === 'ok' ? (simulated ? 'simulated' : 'ok') : 'interrupted',
-			simulated,
+			status,
+			simulated: mode === 'simulated',
 			result,
 			entry,
 			deviceLabel: label,
 			crc: result.crc,
-			levelDb: checklist.newLevelDb
+			levelDb: authorized.checklist.newLevelDb
 		};
 	}
 
 	// A marker left by a tab closed mid-write becomes an `interrupted` entry and the rescue notice.
 	const ready = recover();
+	// A marker another tab writes later: wait for that writer, so its death surfaces here too.
+	const stopWatching = inflight?.subscribe?.(() => watchWriter()) ?? null;
 
 	return {
 		/** Service EventTarget: `cable:written` (real ok writes) and `cable:status`. */
@@ -1016,9 +1114,14 @@ export function createCableService(deps: CableServiceDeps) {
 					if (abort.signal.aborted) return refuse('aborted', { checklist });
 					if (!mark(authorized, labels[0] ?? '')) return refuse('error', { checklist });
 					let started = 0;
+					/** Index of the cable whose sequence just ended, while its result is unknown. */
+					let ended: number | null = null;
+					/** Cables already journaled (as they ended), not settled again at the end. */
+					const settled = new Set<number>();
 					const progressHid = observedHid(
 						hid,
 						() => {
+							ended = null;
 							const item = items[started];
 							if (item !== undefined) {
 								sequenceStarting(item.deviceLabel);
@@ -1030,17 +1133,45 @@ export function createCableService(deps: CableServiceDeps) {
 							sequenceEnded();
 							const item = items[started];
 							if (item !== undefined) item.status = 'sent';
+							ended = started;
 							started += 1;
 							emit();
 						}
 					);
+					// writeMany waits WRITE_SPACING_MS before the next cable only after an `ok`
+					// (committed) write. That wait is where the previous cable is settled: journal,
+					// rescue cleared, `cable:written`; then the marker stops naming it. So a tab closed
+					// during the spacing never turns a committed cable into an interruption.
+					const spacedClock: Clock = {
+						now: () => clock.now(),
+						sleep(ms, signal) {
+							const previous = ended;
+							const item = previous === null ? undefined : items[previous];
+							if (previous !== null && item !== undefined && ms === WRITE_SPACING_MS) {
+								ended = null;
+								settled.add(previous);
+								const written = journalSequence(
+									true,
+									authorized.crc,
+									null,
+									item.deviceLabel,
+									authorized
+								);
+								item.status = written.status;
+								item.entry = written.entry;
+								betweenCables(item.deviceLabel);
+								emit();
+							}
+							return clock.sleep(ms, signal);
+						}
+					};
 					let results: ManyResult[];
 					try {
 						results = await withWriteFlag(() =>
 							writeMany(list, snapshot, preampDb, {
 								experimental,
 								signal: abort.signal,
-								clock,
+								clock: spacedClock,
 								hid: progressHid
 							})
 						);
@@ -1055,6 +1186,13 @@ export function createCableService(deps: CableServiceDeps) {
 					results.forEach((result, index) => {
 						const item = items[index];
 						if (item === undefined) return;
+						if (settled.has(index)) {
+							// Journaled when it ended; writeMany only continued because it was `ok`.
+							if (result.status !== 'ok') {
+								console.error('cable queue: a settled cable reported', result.status);
+							}
+							return;
+						}
 						if (result.status === 'ok' || result.status === 'interrupted') {
 							const written = settle(result, item.deviceLabel, authorized);
 							item.status = written.status;
@@ -1108,8 +1246,12 @@ export function createCableService(deps: CableServiceDeps) {
 			hid.removeEventListener('disconnect', onDisconnect);
 			if (recheck !== null) clearTimeout(recheck);
 			recheck = null;
+			stopWatching?.();
 			listeners.clear();
 			disposed = true;
+			// Stop waiting for another tab's write lock (the wait only ever records).
+			watching?.abort(new DOMException('cable service disposed', 'AbortError'));
+			watching = null;
 		}
 	};
 }

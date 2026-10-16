@@ -2,7 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { encodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
-	import type { ABPreview, ABSide, AudioEngineState } from '#lib/audio/engine.ts';
+	import type { ABPreview, ABSide, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
 	import type { CurveData } from '#lib/state/model.ts';
 	import { ResponseChart } from '#lib/charts/index.ts';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
@@ -65,10 +65,20 @@
 		locale === 'en-US' && tape.descriptionEn ? tape.descriptionEn : tape.description
 	);
 
+	/** The engine this sheet put in chain mode; only that audition is stopped by the sheet. */
+	let startedBy: AudioEngine | null = null;
+
+	/** Stops the engine only if this sheet started it and it still plays chains (not ♪ raw). */
+	function release() {
+		const engine = startedBy;
+		startedBy = null;
+		if (engine && engine.state().mode === 'chains') engine.stop();
+	}
+
 	function stop() {
 		attempt++;
+		release();
 		if (preview) {
-			app?.audio.stop();
 			preview.dispose();
 			preview = null;
 		}
@@ -99,9 +109,11 @@
 			side = selected;
 			await engine.start('chains');
 			if (token !== attempt) {
-				engine.stop();
+				// Stopped/closed while starting: nothing of ours may keep playing (raw is not ours).
+				if (engine.state().mode === 'chains') engine.stop();
 				return;
 			}
+			startedBy = engine;
 			listening = true;
 		} catch (error) {
 			stop();
@@ -174,7 +186,8 @@
 	function requestWrite() {
 		if (!app) return;
 		stop();
-		app.requestWrite({ ...tape, schema: 1, updatedAt: Date.now() });
+		// The selected tape may be a deep $state proxy: hand over a plain copy (R2-02).
+		app.requestWrite({ ...$state.snapshot(tape), schema: 1, updatedAt: Date.now() });
 		onClose();
 	}
 </script>
