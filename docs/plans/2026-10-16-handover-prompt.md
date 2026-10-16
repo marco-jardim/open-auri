@@ -17,7 +17,9 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 
 ## Primeira ação
 
-**Estado (2026-10-16, ao reiniciar a máquina):**
+**Estado mais recente:** F1, F2 e F3 concluídas (QA PASS; push até `2a1f3f6`; minors em #8–#24). Próximo: PF4 e F4. Leia a seção 00 do handover e `docs/plans/f3-delegate-brief.md`.
+
+**Estado anterior (2026-10-16, ao reiniciar a máquina):**
 - **F1 (núcleo):** concluída. QA heavy PASS, push `25b2ee1`, issue #1 fechada; minors adiados nas issues #8 a #13 (`qa-minor`).
 - **F2 (web local-first):** implementada e testada (PF2, T2.1–T2.19, T2.T). Último commit `5d811b3`. Os commits da F2 estão **locais, sem push**: o push acontece só quando o Q2 aprovar.
 - **Q2 (QA heavy da F2):** rodada 1 **concluída: FAIL** (4 major, vários minor, nenhum blocking/critical). Achados e correções propostas estão no progresso, seção "Achados do Q2 rodada 1". Próximo: implementar todas as FX2.k (rodada 1 corrige tudo), depois a rodada 2 heavy.
