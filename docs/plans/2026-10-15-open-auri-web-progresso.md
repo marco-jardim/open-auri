@@ -2,7 +2,7 @@
 
 ## Estado
 
-Fase atual: F1 · Etapa: Q1 (rodada 1) · Último commit: 1811c06
+Fase atual: F1 · Etapa: Q1 (rodada 2) · Último commit: c00be9e
 
 ## Locks ativos
 
@@ -49,7 +49,14 @@ Fase atual: F1 · Etapa: Q1 (rodada 1) · Último commit: 1811c06
 | T1.12 | commitada | 1deacf2, 2ba3f7c | RMS por preset 0,107–0,289 dB; 61–210 ms por solução |
 | T1.13 | commitada | ca72131 | "NOT ACCEPTED" do verificador era falso (rodou durante a escrita da T1.T); verificação independente verde |
 | T1.T | commitada | 1811c06 | 36 testes de integração; 8 propriedades × 1 000 execuções (semente 20261016) |
-| Q1 | em voo | | heavy |
+| Q1.1 | concluída | — | FAIL: 1 critical, 4 major, 12 minor → FX1.1–FX1.7 |
+| FX1.1 | commitada | 140a931, c00be9e | C1, M1, M2 (codec/gate/transporte), minors 2, 3, 4, 11, 12; barris e regressão ajustados pelo orquestrador |
+| FX1.2 | commitada | b15ac9f | M2 (S1), M4, minors 7 e 9 |
+| FX1.4 | commitada | 56c35ff | minor 8 |
+| FX1.5 | commitada | da08a72 | M3, minor 1 |
+| FX1.6 | commitada | 0858ed5 | minor 6 (libebur128), pelo orquestrador |
+| FX1.7 | commitada | 79a1110 | minor 5 |
+| Q1.2 | em voo | | heavy |
 
 Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,45% branches, 99,55% funções; lint, typecheck, prettier e scanner limpos; `npm run types` emite 34 declarações.
 
@@ -91,6 +98,7 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 
 | Q | Ciclo | Resultado | Achados → FX |
 |---|---|---|---|
+| Q1 | 1 | FAIL | C1 (gate/transporte liam campos várias vezes: getter/Proxy burlava D7, tipo e bytes enviados), M1 (gate injetável), M2 (arrays esparsos), M3 (diário recusava LP/HP sem ganho e contava UTF-16), M4 (bypass de URL no envelope), 12 minor → FX1.1–FX1.7, todos corrigidos; bateria 571/571, cobertura 99,78% |
 
 ## Decisões durante a execução
 
@@ -103,6 +111,9 @@ Bateria completa no fim da W1.4: 517/517; cobertura `src\**` 99,80% linhas, 99,4
 - 2026-10-16 · S1: além dos códigos de decodificação do plano, a codificação usa `s1:bands` e `s1:grid`. LP/HP são gravados com ganho 0 e decodificados sem `gainDb`; o payload continua idêntico.
 - 2026-10-16 · Solver: as caixas padrão são as `ABS_RANGES`, porque os presets oficiais ficam fora das `SOFT_RANGES` (PK em 20–25 Hz, Q 0,1–0,5, +9,2 dB); `ranges: 'soft'` continua disponível. Termo `trebleDetail` (padrão 0,5) acrescentado à perda do AutoEq: com 0 a perda é exatamente a do AutoEq, mas o preset Enérgico fica com 1,22 dB e falha o critério de < 1 dB. O otimizador é Levenberg–Marquardt próprio sobre (log f, log Q, ganho).
 - 2026-10-16 · ISO 226: tabela 1 confirmada por duas implementações independentes e pelo texto da norma até 5 kHz; linhas de 6,3 a 12,5 kHz só pelas implementações. Delta da revisão 2023 documentado (até 0,6 dB).
+
+- 2026-10-16 · Q1.1 minor 10: `writeCurve` devolve `{status, crc, startedAt, finishedAt, reportsSent, committed, error?}` em vez de `reports` (plano T1.9). Contagem e estado do commit são o que o diário e o aviso de loudness precisam; os bytes exatos saem de `reportsFromPayload(metrics.payload)`.
+- 2026-10-16 · FX1.1: o transporte importa `gateForWrite` e o aplica sempre; um gate injetado só acrescenta checagens. O gate e o transporte trabalham sobre um snapshot congelado das bandas (uma leitura por campo). O scan refina também o primeiro e o último intervalo: fica até 3,06e-6 dB mais estrito que a referência, e os 11 presets e o Neutro continuam aprovados.
 
 ## Bloqueios e perguntas ao humano
 
