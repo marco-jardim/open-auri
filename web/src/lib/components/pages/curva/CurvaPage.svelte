@@ -25,6 +25,8 @@
 	import PresetTabs from './PresetTabs.svelte';
 	import RescuePanel from './RescuePanel.svelte';
 	import ScopePanel from './ScopePanel.svelte';
+	import SocialActions from './SocialActions.svelte';
+	import { currentS1 } from './social.ts';
 	import { dragBand, isAbortError, moveBand, type DragTarget, type GateClient } from './drag.ts';
 	import { changeKind, defaultOrder, reorderSections } from './edit.ts';
 	import { formatSignedDb, payloadCrc } from './format.ts';
@@ -276,10 +278,14 @@
 	}
 
 	let handledLinkHash: string | null = null;
+	let originHint = $state.raw<{ s1: string; lineageId: string; versionId: string } | null>(null);
 	$effect(() => {
 		const client = app;
 		const linkHashValue = hash;
 		if (!client || !linkHashValue.startsWith('#p=') || linkHashValue === handledLinkHash) return;
+		const params = new URL(pageUrl.href).searchParams;
+		const lineageId = params.get('l');
+		const versionId = params.get('v');
 		handledLinkHash = linkHashValue;
 		void client.state.ready.then(() => {
 			const result = readLinkHash(
@@ -294,7 +300,12 @@
 				clear();
 				return;
 			}
-			apply(result.curve, { name: m.curva_name_link(), source: 'import' });
+			if (!apply(result.curve, { name: m.curva_name_link(), source: 'import' })) {
+				clear();
+				return;
+			}
+			const code = currentS1(result.curve);
+			originHint = code && lineageId && versionId ? { s1: code, lineageId, versionId } : null;
 			notify(m.curva_link_loaded());
 			clear();
 		});
@@ -500,6 +511,7 @@
 	{/if}
 
 	<div class="layer-block">
+		<SocialActions {app} {curve} name={curveName} {locale} {pageUrl} {preview} {originHint} />
 		<ImportExport
 			{curve}
 			name={curveName}

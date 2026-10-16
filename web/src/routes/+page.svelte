@@ -19,6 +19,8 @@
 	const layer = $derived(
 		browser ? parseLayer(page.url.searchParams.get(LAYER_PARAM)) : DEFAULT_LAYER
 	);
+	// Community links: /?l=<lineageId>&v=<versionId>#p=<S1>. Curva verifies the exact S1
+	// against that version before remembering its origin; the offline hash still stands alone.
 	const hash = $derived(browser ? page.url.hash : '');
 
 	function onlayer(next: Layer) {

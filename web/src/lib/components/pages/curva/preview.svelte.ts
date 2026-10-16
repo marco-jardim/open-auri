@@ -31,6 +31,8 @@ export interface CurvaPreviewOptions {
 
 export class CurvaPreview {
 	playing = $state(false);
+	/** A new user-started session, shared by the social activity bridge. */
+	session = $state(0);
 	/** True between the gesture and the engine start resolving. */
 	starting = $state(false);
 	/** False when the engine runs at a rate other than 96 kHz (approximate preview). */
@@ -55,6 +57,7 @@ export class CurvaPreview {
 	/** The latest curves requested while starting. */
 	#latest: { reference: Curve; editor: Curve } | null = null;
 	#unsubscribe: (() => void) | null = null;
+	#samples: Float32Array<ArrayBuffer> | null = null;
 
 	constructor(engine: AudioEngine, options: CurvaPreviewOptions = {}) {
 		this.#engine = engine;
@@ -63,6 +66,7 @@ export class CurvaPreview {
 
 	/** Call from a click or key handler only. */
 	async start(reference: Curve, editor: Curve): Promise<void> {
+		this.session++;
 		this.error = null;
 		const attempt = ++this.#attempt;
 		this.#latest = { reference, editor };
@@ -137,6 +141,27 @@ export class CurvaPreview {
 		this.side = side;
 		this.#ab?.select(side);
 		this.vu.connect(this.#outputs[side]);
+	}
+
+	/** Conservative proof of audible editor output; no context is created while idle. */
+	audibleEditorTime(): number | null {
+		const analyser = this.analyser;
+		const ab = this.#ab;
+		if (!this.playing || this.side !== 'B' || !analyser || !ab) return null;
+		const state = this.#engine.state();
+		const context = this.#engine.getContext();
+		if (!state.playing || state.mode !== 'chains' || context.state !== 'running') return null;
+		const volume = ab.b.volume.gain.value;
+		if (!(volume > 0)) return null;
+		if (this.#samples?.length !== analyser.fftSize) {
+			this.#samples = new Float32Array(analyser.fftSize);
+		}
+		analyser.getFloatTimeDomainData(this.#samples);
+		// The analyser is pre-monitor-volume. Inspect real PCM and the actual monitor gain, not
+		// a peak-hold meter, so a silent file/muted output can never earn an activity event.
+		return this.#samples.some((sample) => Math.abs(sample) * volume > 0.00001)
+			? context.currentTime
+			: null;
 	}
 
 	dispose(): void {
@@ -215,5 +240,6 @@ export class CurvaPreview {
 		this.#ab = null;
 		this.#built = null;
 		this.analyser = null;
+		this.#samples = null;
 	}
 }
