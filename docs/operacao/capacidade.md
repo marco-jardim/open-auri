@@ -101,16 +101,16 @@ ou pela interface) se a visibilidade não for privada.
 
 ## Resultados
 
-Execução em staging: a preencher após a execução em staging.
+Execução em staging em 2026-10-17, de uma única máquina cliente no Brasil, com o rate limit de staging inalterado (120 leituras por 60 s por IP). Com 4 conexões sem limite de taxa, 90% das respostas do feed foram 429: o limite por IP funciona como projetado e impede medir capacidade a partir de um único IP. A medição de latência usou `--rate 1` (1 requisição por segundo, 30 s). O p50 de cerca de 210 ms é dominado pela ida e volta da rede entre o cliente e a borda. Curva compartilhada e publicação ficaram sem execução: o staging ainda não tem curva pública nem conta de teste (cadastro fechado até a ativação do domínio de e-mail, issue #32).
 
-Células marcadas "a preencher": a preencher após a execução em staging.
+O veredito "FAIL" da ferramenta nas linhas com `--rate 1` vem do mínimo de 50 leituras bem-sucedidas por cenário, não da meta de latência, que foi cumprida.
 
 | Cenário      | Conexões    | Duração ou quantidade | p50 (ms)    | p95 (ms)    | p99 (ms)    | req/s       | non-2xx     | Meta p95 | Resultado   |
 | ------------ | ----------- | --------------------- | ----------- | ----------- | ----------- | ----------- | ----------- | -------- | ----------- |
-| `feed`       | a preencher | a preencher           | a preencher | a preencher | a preencher | a preencher | a preencher | 300 ms   | a preencher |
-| `curve-page` | a preencher | a preencher           | a preencher | a preencher | a preencher | a preencher | a preencher | 300 ms   | a preencher |
-| `rankings`   | a preencher | a preencher           | a preencher | a preencher | a preencher | a preencher | a preencher | 300 ms   | a preencher |
-| `publish`    | a preencher | a preencher           | a preencher | a preencher | a preencher | a preencher | a preencher | 1500 ms  | a preencher |
+| `feed`       | 1 (`--rate 1`) | 30 s                  | 213,8       | 271,9       | 452,6       | 1           | 0           | 300 ms   | meta de p95 cumprida |
+| `curve-page` | não executado | não executado | não executado | não executado | não executado | não executado | não executado | 300 ms   | sem curva pública em staging |
+| `rankings`   | 1 (`--rate 1`) | 30 s                  | 207,6       | 232,6       | 422,2       | 1           | 0           | 300 ms   | meta de p95 cumprida |
+| `publish`    | não executado | não executado | não executado | não executado | não executado | não executado | não executado | 1500 ms  | sem conta de teste em staging |
 
 Registrar também: data, versão do Worker de staging, escolha sobre o rate limit (subida temporária
 ou `--rate`), contagem de 429 por cenário e o tempo de CPU por requisição visto no painel de
@@ -158,7 +158,7 @@ Referências de escala, sem dados medidos ainda:
   teto diário de requisições, só cobrança além do incluído.
 - 30 milhões de CPU ms divididos por 10 milhões de requisições dão 3 ms de CPU por requisição em
   média antes de qualquer cobrança extra. O tempo de CPU por rota sai do painel de métricas do
-  Worker na janela da carga (a preencher após a execução em staging).
+  Worker na janela da carga (não lido nesta execução; conferir no painel na próxima).
 - O D1 executa as consultas de um banco em série. O teto de vazão de escrita e leitura ao vivo
   (`sort=new` do feed, publicação) é aproximadamente 1000 ms dividido pela duração média das
   consultas por requisição; as leituras cacheadas por 60 s não chegam ao D1 enquanto o cache vale.
@@ -166,8 +166,7 @@ Referências de escala, sem dados medidos ainda:
   os usuários no teto, as linhas escritas ficam muito abaixo de 50 milhões por mês para a escala
   prevista.
 
-Conclusão: a preencher após a execução em staging, com o recurso que se esgota primeiro e a
-margem em relação ao incluído.
+Conclusão: nas leituras cacheadas a latência fica dentro da meta e o primeiro limite atingido é o rate limit por IP, de propósito. Pela plataforma, o recurso que se esgota primeiro na escala prevista é o tempo de CPU incluído, puxado pelo gate (cerca de 150 ms por curva nova), que fica limitado pelas cotas por usuário e pelo cache por `curve_id`. Repetir com várias origens de cliente e com a conta de teste depois da ativação do e-mail.
 
 ## Fontes
 
