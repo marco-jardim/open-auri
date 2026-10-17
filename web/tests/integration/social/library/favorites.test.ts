@@ -186,6 +186,30 @@ describe('share attribution (?s=)', () => {
 		expect(await attributed(shareId)).toBe(1);
 	});
 
+	it("does not attribute the share owner's favorite but still attributes other users", async () => {
+		const owner = await member();
+		const fan = await member();
+		await publicActivity(owner.user.id);
+		await publicActivity(fan.user.id);
+		const { lineageId } = await publish(owner.user.id);
+		const shareId = await shareOf(lineageId, owner.user.id);
+
+		expect(await favoriteLineage(env.DB, owner.user.id, lineageId, { shareId })).toEqual({
+			ok: true,
+			created: true,
+			attributed: false
+		});
+		expect(await favoriteRows(owner.user.id, lineageId)).toBe(1);
+		expect(await attributed(shareId)).toBe(0);
+
+		expect(await favoriteLineage(env.DB, fan.user.id, lineageId, { shareId })).toEqual({
+			ok: true,
+			created: true,
+			attributed: true
+		});
+		expect(await attributed(shareId)).toBe(1);
+	});
+
 	it('FX4.6: a private-activity fan is never attributed', async () => {
 		const owner = await member();
 		const fan = await member();

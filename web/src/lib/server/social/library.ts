@@ -169,7 +169,7 @@ function utcDay(now: number): string {
  * else's private lineage, retracted, moderated...). With `shareId`, a newly created favorite is
  * attributed to that share as a `favorited` funnel event when the share points to the same lineage
  * and the user's `activity_visibility` is 'public' (once per user and share; a share of another
- * lineage, a missing share or a private actor is ignored: FX4.6).
+ * lineage, a missing share, the share owner or a private actor is ignored: FX4.6).
  */
 export async function favoriteLineage(
 	db: D1Database,
@@ -187,7 +187,12 @@ export async function favoriteLineage(
 	const shareId = options.shareId ?? null;
 	if (added.value.created && shareId !== null && isSocialId(shareId)) {
 		const share = await getShare(db, shareId);
-		if (share && share.lineageId === lineageId && (await hasPublicActivity(db, userId))) {
+		if (
+			share &&
+			share.lineageId === lineageId &&
+			share.ownerUserId !== userId &&
+			(await hasPublicActivity(db, userId))
+		) {
 			attributed = await recordShareEvent(db, {
 				shareId,
 				kind: 'favorited',
