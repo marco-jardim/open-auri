@@ -19,6 +19,9 @@ export default defineConfig({
       wrangler: { configPath: './wrangler.jsonc' },
       remoteBindings: false,
       miniflare: {
+        // Test-only empty D1 for test/phase5.test.ts (T5.T): a backup produced by the job is
+        // restored into it with tools/restore-backup.mjs and the row counts are compared.
+        d1Databases: { RESTORE_DB: 'jobs-restore-round-trip-test' },
         bindings: {
           TEST_MIGRATIONS: existsSync(MIGRATIONS_DIR) ? await readD1Migrations(MIGRATIONS_DIR) : [],
           ...JOBS_TEST_SECRETS,

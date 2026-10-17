@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
 
 // Two servers over the same build:
 //   - :4173 `npm run preview`: the real .env flags (sign-up closed, Resend transport). Every spec
@@ -12,6 +12,14 @@ import { defineConfig, devices } from '@playwright/test';
 //     widget script, which hands out the dummy token the local stub accepts.
 // Servers start one after the other (in array order), so only the first one builds.
 // tests/e2e/global-setup.ts applies the local D1 migrations to both databases.
+//
+// Staging (T5.T): the deployed staging Worker. Its origin comes ONLY from the environment (the
+// workers.dev subdomain is sensitive and never versioned). With STAGING_ORIGIN set the config has
+// a single project, `staging` (tests/e2e/staging.spec.ts), and neither the local servers nor the
+// local D1 setup start:
+//   $env:STAGING_ORIGIN = '<staging origin>'; npx playwright test --project=staging
+// Without STAGING_ORIGIN the `staging` project does not exist (`--project=staging` stops before
+// any server starts) and staging.spec.ts is ignored by the local projects (it also skips itself).
 const AUTH_FLOW_SPECS = [
 	'**/auth.spec.ts',
 	'**/account.spec.ts',
@@ -21,14 +29,59 @@ const AUTH_FLOW_SPECS = [
 // Timing budgets are measured after every other project has finished, so 8 parallel browsers do
 // not steal the main thread from the page under measurement.
 const PERF_SPECS = ['**/perf.spec.ts'];
+const STAGING_SPECS = ['**/staging.spec.ts'];
 const FUNCTIONAL_PROJECTS = ['desktop', 'mobile', 'auth-flow'];
+const STAGING_ORIGIN = process.env.STAGING_ORIGIN;
 
-export default defineConfig({
-	testDir: 'tests/e2e',
+const LOCAL_PROJECTS: PlaywrightTestConfig['projects'] = [
+	{
+		name: 'desktop',
+		testIgnore: [...AUTH_FLOW_SPECS, ...PERF_SPECS, ...STAGING_SPECS],
+		use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } }
+	},
+	{
+		name: 'mobile',
+		testIgnore: [...AUTH_FLOW_SPECS, ...PERF_SPECS, ...STAGING_SPECS],
+		use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } }
+	},
+	{
+		// Accounts, mail and rate limits are server state: one browser profile is enough.
+		name: 'auth-flow',
+		testMatch: AUTH_FLOW_SPECS,
+		use: {
+			...devices['Desktop Chrome'],
+			viewport: { width: 1440, height: 900 },
+			baseURL: 'http://localhost:4174'
+		}
+	},
+	{
+		name: 'perf-desktop',
+		testMatch: PERF_SPECS,
+		dependencies: FUNCTIONAL_PROJECTS,
+		use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } }
+	},
+	{
+		name: 'perf-mobile',
+		testMatch: PERF_SPECS,
+		dependencies: FUNCTIONAL_PROJECTS,
+		use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } }
+	}
+];
+
+const STAGING_PROJECTS: PlaywrightTestConfig['projects'] = [
+	{
+		name: 'staging',
+		testMatch: STAGING_SPECS,
+		use: {
+			...devices['Desktop Chrome'],
+			viewport: { width: 1440, height: 900 },
+			baseURL: STAGING_ORIGIN
+		}
+	}
+];
+
+const LOCAL_SETUP: Pick<PlaywrightTestConfig, 'globalSetup' | 'webServer'> = {
 	globalSetup: './tests/e2e/global-setup.ts',
-	workers: '50%',
-	retries: process.env.CI ? 2 : 0,
-	use: { baseURL: 'http://localhost:4173', trace: 'on-first-retry', locale: 'pt-BR' },
 	webServer: [
 		{
 			command: 'npm run build && npm run preview',
@@ -43,39 +96,15 @@ export default defineConfig({
 			reuseExistingServer: !process.env.CI,
 			timeout: 120000
 		}
-	],
-	projects: [
-		{
-			name: 'desktop',
-			testIgnore: [...AUTH_FLOW_SPECS, ...PERF_SPECS],
-			use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } }
-		},
-		{
-			name: 'mobile',
-			testIgnore: [...AUTH_FLOW_SPECS, ...PERF_SPECS],
-			use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } }
-		},
-		{
-			// Accounts, mail and rate limits are server state: one browser profile is enough.
-			name: 'auth-flow',
-			testMatch: AUTH_FLOW_SPECS,
-			use: {
-				...devices['Desktop Chrome'],
-				viewport: { width: 1440, height: 900 },
-				baseURL: 'http://localhost:4174'
-			}
-		},
-		{
-			name: 'perf-desktop',
-			testMatch: PERF_SPECS,
-			dependencies: FUNCTIONAL_PROJECTS,
-			use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } }
-		},
-		{
-			name: 'perf-mobile',
-			testMatch: PERF_SPECS,
-			dependencies: FUNCTIONAL_PROJECTS,
-			use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } }
-		}
 	]
+};
+
+export default defineConfig({
+	testDir: 'tests/e2e',
+	...(STAGING_ORIGIN ? {} : LOCAL_SETUP),
+	// Staging rate limits key on the runner's single public IP: stay gentle there.
+	workers: STAGING_ORIGIN ? 2 : '50%',
+	retries: process.env.CI ? 2 : 0,
+	use: { baseURL: 'http://localhost:4173', trace: 'on-first-retry', locale: 'pt-BR' },
+	projects: STAGING_ORIGIN ? STAGING_PROJECTS : LOCAL_PROJECTS
 });

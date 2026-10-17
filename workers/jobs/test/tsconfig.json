@@ -13,6 +13,9 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
+    // test/phase5.test.ts imports tools/restore-backup.mjs (typed by its JSDoc; not checked here).
+    "allowJs": true,
+    "checkJs": false,
     "skipLibCheck": true
   },
   "include": ["./**/*.ts", "../src/**/*.ts", "../worker-configuration.d.ts"]
