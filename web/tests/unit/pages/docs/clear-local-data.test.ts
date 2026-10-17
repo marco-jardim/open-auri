@@ -37,6 +37,7 @@ describe('confirmed local-only removal', () => {
 		const local = storage({
 			'oa.current': 'curve',
 			'oa.lang': 'pt-BR',
+			'oa.audio.volume': '-20',
 			'oa.tour.v1': '{"curva":"visto","cabo":"dispensado"}',
 			'oa.future.key': 'owned',
 			'other.app': 'keep',
@@ -50,6 +51,7 @@ describe('confirmed local-only removal', () => {
 		).toBe(true);
 		expect(prepare).toHaveBeenCalledOnce();
 		expect(local.data.has('oa.tour.v1')).toBe(false);
+		expect(local.data.has('oa.audio.volume')).toBe(false);
 		expect(deletion).toHaveBeenCalledExactlyOnceWith('open-auri');
 		expect([...local.data.entries()]).toEqual([
 			['other.app', 'keep'],

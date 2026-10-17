@@ -101,6 +101,9 @@ test('opens and closes the idle popover without starting audio, and unsubscribes
 		.toBeDisabled();
 	await expect.element(page.getByRole('button', { name: m.audio_remove() })).toBeDisabled();
 	await expect.element(page.getByText(m.audio_rate_idle())).toBeVisible();
+	await expect.element(page.getByRole('slider')).toHaveValue('-6');
+	await expect.element(page.getByRole('slider')).toHaveAttribute('aria-valuetext', '−6 dB');
+	expect(screen.container.querySelector('.oa-audio-vol output')?.textContent).toBe('−6 dB');
 	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
 	dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 	await tick();

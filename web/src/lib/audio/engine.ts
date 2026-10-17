@@ -191,6 +191,7 @@ export interface AudioEngineEnv {
 	AudioContext?: AudioContextConstructor | null;
 	createAudioElement?: () => HTMLAudioElement;
 	indexedDB?: IDBFactory | null;
+	localStorage?: Pick<Storage, 'getItem' | 'setItem'> | null;
 	document?: VisibilityDocument | null;
 	createObjectURL?: (blob: Blob) => string;
 	revokeObjectURL?: (url: string) => void;
@@ -212,9 +213,10 @@ export class AudioEngineError extends Error {
 /** The chip's rate: chains are exact only at this context rate. */
 export const PREVIEW_RATE: number = SAMPLE_RATE;
 export const MAX_FILE_BYTES = 200 * 1024 * 1024;
-export const DEFAULT_VOLUME_DB = -12;
+export const DEFAULT_VOLUME_DB = -6;
 export const MIN_VOLUME_DB = -40;
 export const MAX_VOLUME_DB = 0;
+const VOLUME_STORAGE_KEY = 'oa.audio.volume';
 export const FADE_IN_S = 0.2;
 export const CROSSFADE_S = 0.03;
 export const FADE_OUT_S = 0.03;
@@ -451,10 +453,36 @@ interface ResolvedEnv {
 	AudioContext: AudioContextConstructor | null;
 	createAudioElement: () => HTMLAudioElement;
 	indexedDB: IDBFactory | null;
+	localStorage: Pick<Storage, 'getItem' | 'setItem'> | null;
 	document: VisibilityDocument | null;
 	createObjectURL: (blob: Blob) => string;
 	revokeObjectURL: (url: string) => void;
 	hasUserActivation: () => boolean | null;
+}
+
+function resolveVolumeStorage(env: AudioEngineEnv): ResolvedEnv['localStorage'] {
+	try {
+		if (env.localStorage !== undefined) return env.localStorage;
+		return typeof window !== 'undefined' ? window.localStorage : null;
+	} catch (storageError) {
+		console.warn('audio engine: could not access preview volume storage', storageError);
+		return null;
+	}
+}
+
+function readVolume(storage: ResolvedEnv['localStorage']): number {
+	if (!storage) return DEFAULT_VOLUME_DB;
+	try {
+		const stored = storage.getItem(VOLUME_STORAGE_KEY);
+		// Stored values must be integer dB in range; never round or clamp them on restore.
+		if (stored !== null && /^-?\d+$/.test(stored)) {
+			const db = Number(stored);
+			if (Number.isInteger(db) && db >= MIN_VOLUME_DB && db <= MAX_VOLUME_DB) return db;
+		}
+	} catch (storageError) {
+		console.warn('audio engine: could not restore preview volume', storageError);
+	}
+	return DEFAULT_VOLUME_DB;
 }
 
 function resolveEnv(env: AudioEngineEnv): ResolvedEnv {
@@ -466,6 +494,7 @@ function resolveEnv(env: AudioEngineEnv): ResolvedEnv {
 				: (g.AudioContext ?? g.webkitAudioContext ?? null),
 		createAudioElement: env.createAudioElement ?? (() => new Audio()),
 		indexedDB: env.indexedDB !== undefined ? env.indexedDB : (g.indexedDB ?? null),
+		localStorage: resolveVolumeStorage(env),
 		document: env.document !== undefined ? env.document : (g.document ?? null),
 		createObjectURL: env.createObjectURL ?? ((blob) => URL.createObjectURL(blob)),
 		revokeObjectURL: env.revokeObjectURL ?? ((url) => URL.revokeObjectURL(url)),
@@ -511,7 +540,7 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 	let rate = PREVIEW_RATE;
 	let exact = true;
 	let mode: EngineMode = 'off';
-	let volumeDb = DEFAULT_VOLUME_DB;
+	let volumeDb = readVolume(env.localStorage);
 	let error: AudioErrorCode | null = null;
 	let persisted = true;
 	let file: Omit<AudioFileInfo, 'duration'> | null = null;
@@ -803,6 +832,11 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 
 	function setVolume(db: number): void {
 		volumeDb = clampVolumeDb(db);
+		try {
+			env.localStorage?.setItem(VOLUME_STORAGE_KEY, String(volumeDb));
+		} catch (storageError) {
+			console.warn('audio engine: could not store preview volume', storageError);
+		}
 		if (ctx && graph && mode !== 'off') {
 			ramp(graph.master.gain, dbToGain(volumeDb), ctx.currentTime, CROSSFADE_S);
 		}

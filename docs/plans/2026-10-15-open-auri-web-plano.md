@@ -338,7 +338,7 @@ Uma curva só pode ser gravada ou publicada se, nos valores reais Q27/Q23 que v�
 
 - **Motor:** porta definitiva do bloco `audio-loader v1` dos mocks.
   - IndexedDB, `HTMLAudioElement` em streaming e `AudioContext({ sampleRate: 96000 })`. Se o navegador recusar, usa a taxa do dispositivo, recalcula os coeficientes e exibe nota de prévia aproximada.
-  - Cadeias `IIRFilterNode` com os coeficientes Q27 exatos, depois o preamp Q23, depois o volume da prévia (padrão −12 dB).
+  - Cadeias `IIRFilterNode` com os coeficientes Q27 exatos, depois o preamp Q23, depois o volume da prévia (padrão −6 dB, decisão do PO em 2026-10-17; a escolha do usuário persiste em `oa.audio.volume`).
   - Uma fonte distribuída em cadeias paralelas, com troca por ganho e nível igualado por `levelDb`.
 - **Medição em AudioWorklet** (`web\src\lib\audio\meter-processor.js`), usando o DSP puro de `D:\git\open-auri\src\meter\`:
   - **VU** com balística IEC 60268-17 (subida a 99% em 300 ms; overshoot no limite da norma);
@@ -508,6 +508,7 @@ D:\git\open-auri\
 | `oa.flash.day` / `oa.flash.total` / `oa.flash.lastWriteAt` | localStorage | `{date, count}` / número / epoch ms |
 | `oa.flash.session` | sessionStorage | número |
 | `oa.meter.ref` | localStorage | `-18` \| `-20` \| `-14` |
+| `oa.audio.volume` | localStorage | inteiro em dB, −40…0 (volume da prévia no navegador; padrão −6; inválido volta ao padrão; nunca sobe sozinho) |
 | `oa.tour.v1` | localStorage | `{ [pagina]: 'visto' \| 'dispensado' }` (tour guiado, FUX.3; nunca enviado; apagado por "Apagar dados locais") |
 | `open-auri` | IndexedDB | stores `audio` (`current`), `library` (curvas e favoritos locais), `outbox` (eventos sociais pendentes offline) |
 
@@ -1259,7 +1260,7 @@ deliverable: D:\git\open-auri\web\src\lib\state\
    - ruído rosa em loop;
    - `buildChain(bands, preampDb, {experimental})`, que usa os coeficientes Q27 do núcleo (recalculados na taxa real se ≠ 96 kHz);
    - `matchGains(levels)`, `start` / `stop`, `onChange`, `state()`;
-   - fade de entrada; início só com gesto do usuário; volume da prévia (padrão −12 dB).
+   - fade de entrada; início só com gesto do usuário; volume da prévia (padrão −6 dB; persistido em `oa.audio.volume`).
 2. **`AudioLoader`:** popover com carregar, nome, duração, tocar/pausar, volume, remover e o texto "O arquivo fica só neste navegador. Nada é enviado.".
 3. **Prévias A/B:** `createAB(curveA, curveB)` com nível igualado.
 4. **Erros:** arquivo inválido, decodificação recusada, contexto suspenso, troca de aba (pausa).

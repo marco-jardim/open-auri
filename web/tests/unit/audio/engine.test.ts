@@ -346,7 +346,7 @@ describe('level matching and A/B', () => {
 });
 
 describe('transport', () => {
-	it('starts with a 200 ms fade-in to the default −12 dB preview volume', async () => {
+	it('starts with a 200 ms fade-in to the default −6 dB preview volume', async () => {
 		const { engine } = makeEngine();
 		const chain = engine.buildChain([{ kind: 'OFF' }], 0);
 		await engine.start();
@@ -359,7 +359,7 @@ describe('transport', () => {
 		const fade = events.find((event) => event.type === 'linear');
 		expect(fade?.value).toBeCloseTo(dbToGain(DEFAULT_VOLUME_DB), 12);
 		expect(fade?.time).toBeCloseTo(context.currentTime + FADE_IN_S, 12);
-		expect(engine.state().volumeDb).toBe(-12);
+		expect(engine.state().volumeDb).toBe(-6);
 	});
 
 	it('refuses to start outside a user gesture', async () => {
