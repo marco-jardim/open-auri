@@ -1,8 +1,10 @@
 /*
  * Page accents (plan 3.4). Set data-page="<slug>" on the page root (T2.9 wires it in
- * the layout). Chrome components read --accent, --accent-hi and --accent-ink.
+ * the layout). Chrome components read --accent, --accent-hi, --accent-ink and --accent-text.
  * --accent-ink is the text colour on an accent background (primary button, skip link,
  * ::selection), taken from the mocks.
+ * --accent-text (FUX.1, spec §2.2) is the accent used AS TEXT: guaranteed >= 4.5:1 on the
+ * page's dominant surface (checked in tests/unit/styles/contrast.test.ts).
  */
 
 @layer base {
@@ -12,6 +14,11 @@
 	[data-chrome] {
 		--accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
 		--accent-glow: color-mix(in srgb, var(--accent) 55%, transparent);
+		--accent-text: var(--accent);
+		--glow-1:
+			0 0 0 1px var(--accent-soft), 0 0 14px color-mix(in srgb, var(--accent) 30%, transparent);
+		--glow-2:
+			0 0 0 1px var(--accent-glow), 0 0 28px color-mix(in srgb, var(--accent) 45%, transparent);
 	}
 
 	/* / · Curva · Bob Moog */
@@ -19,6 +26,8 @@
 		--accent: #ff7a2f;
 		--accent-hi: #ffa266;
 		--accent-ink: #120a05;
+		--accent-text: var(--accent); /* 7.4:1 on ink */
+		--face-engrave: var(--cond);
 	}
 
 	/* /biblioteca and /c/[id] · Biblioteca · Geoff Emerick */
@@ -26,6 +35,8 @@
 		--accent: #d9a441;
 		--accent-hi: color-mix(in srgb, #d9a441 75%, white);
 		--accent-ink: #0f0f0e;
+		--accent-text: var(--accent); /* 8.5:1 on ink */
+		--face-engrave: var(--type);
 	}
 
 	/* /comparar · Comparar · Les Paul */
@@ -33,6 +44,8 @@
 		--accent: #f2b33d;
 		--accent-hi: color-mix(in srgb, #f2b33d 75%, white);
 		--accent-ink: #1b1404;
+		--accent-text: var(--accent);
+		--face-engrave: var(--plate);
 	}
 
 	/* /soe-como-x · Soe como X · Andy Hildebrand */
@@ -40,6 +53,9 @@
 		--accent: #ff3d8b;
 		--accent-hi: #ff78af;
 		--accent-ink: #190b12;
+		/* #ff3d8b passes on ink (5.7:1) but fails on #2b2a27 panels (4.3:1); #ff78af gives 5.8:1 */
+		--accent-text: var(--accent-hi);
+		--face-engrave: var(--cond);
 	}
 
 	/* /comunidade · Comunidade · Bob Clearmountain */
@@ -47,6 +63,8 @@
 		--accent: #3ddc97;
 		--accent-hi: #6be8b2;
 		--accent-ink: #06140d;
+		--accent-text: var(--accent);
+		--face-engrave: var(--marker);
 	}
 
 	/* /teste-cego · Teste cego · Floyd Toole e Sean Olive */
@@ -54,6 +72,8 @@
 		--accent: #ffd27a;
 		--accent-hi: color-mix(in srgb, #ffd27a 75%, white);
 		--accent-ink: #1d1606;
+		--accent-text: var(--accent);
+		--face-engrave: var(--cond);
 	}
 
 	/* /cabo · Cabo · Ray Dolby */
@@ -61,6 +81,9 @@
 		--accent: #4fd1c5;
 		--accent-hi: color-mix(in srgb, #4fd1c5 75%, white);
 		--accent-ink: #06201d;
+		--accent-text: var(--accent); /* on ink */
+		--accent-on-metal: #12554f; /* accent as text on brushed metal (--mat-metal), >= 4.5:1 */
+		--face-engrave: var(--cond);
 	}
 
 	/*
@@ -75,6 +98,8 @@
 		--accent-ink: #efe6d2;
 		--accent-chrome: #dea6a0;
 		--accent-chrome-hi: #ebc0bb;
+		--accent-text: var(--accent); /* 6.6:1 on paper #efe6d2 */
+		--face-engrave: var(--journal);
 		color-scheme: light;
 	}
 
@@ -82,6 +107,7 @@
 		--accent: var(--accent-chrome);
 		--accent-hi: var(--accent-chrome-hi);
 		--accent-ink: #0f0f0e;
+		--accent-text: var(--accent-chrome);
 		color-scheme: dark;
 	}
 }

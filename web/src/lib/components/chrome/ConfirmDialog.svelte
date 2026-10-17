@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { modalDialog } from './modal.ts';
 
 	interface Props {
@@ -10,6 +11,8 @@
 		confirmLabel?: string;
 		cancelLabel?: string;
 		confirmDisabled?: boolean;
+		/** Why the confirmation is unavailable (T8); a generic reason is used when omitted. */
+		confirmDisabledReason?: string;
 		children?: Snippet;
 		onResult?: (confirmed: boolean) => void;
 	}
@@ -21,10 +24,14 @@
 		confirmLabel = m.chrome_confirm(),
 		cancelLabel = m.chrome_cancel(),
 		confirmDisabled = false,
+		confirmDisabledReason,
 		children,
 		onResult
 	}: Props = $props();
 	const id = $props.id();
+	const confirmReason = $derived(
+		confirmDisabled ? (confirmDisabledReason ?? m.fux1_confirm_unavailable()) : null
+	);
 
 	function finish(confirmed: boolean) {
 		if (!open || (confirmed && confirmDisabled)) return;
@@ -47,10 +54,15 @@
 			{@render children()}
 		{/if}
 		<div class="dlg-actions">
-			<button type="button" data-cancel onclick={() => finish(false)}>{cancelLabel}</button>
-			<button type="button" class="go" disabled={confirmDisabled} onclick={() => finish(true)}>
+			<Button variant="plate" data-cancel onclick={() => finish(false)}>{cancelLabel}</Button>
+			<Button
+				variant="primary"
+				class="go"
+				disabledReason={confirmReason}
+				onclick={() => finish(true)}
+			>
 				{confirmLabel}
-			</button>
+			</Button>
 		</div>
 	</div>
 </dialog>
@@ -63,12 +75,14 @@
 		max-height: calc(100dvh - 32px);
 		padding: 0;
 		overflow-y: auto;
-		border: 1px solid #57554e;
-		border-radius: 8px;
-		background: #171715;
-		color: #ece7dd;
-		font: 12px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
-		box-shadow: 0 30px 60px rgb(0 0 0 / 80%);
+		border: 1px solid var(--pop-rule, #34332f);
+		border-radius: var(--rad-xl, 10px);
+		/* Own dark face: colours keep fallbacks so the dialog stays legible anywhere */
+		background: var(--ink-2, #171715);
+		color: var(--text, #ece7dd);
+		font: 400 var(--fs-small, 13px) / var(--lh-body, 1.55)
+			var(--face-body, 'Geist', system-ui, sans-serif);
+		box-shadow: var(--elev-3, 0 24px 64px -16px rgba(0, 0, 0, 0.8));
 	}
 
 	dialog::backdrop {
@@ -77,50 +91,26 @@
 	}
 
 	.dlg {
-		padding: 22px 24px 20px;
+		padding: var(--panel-pad);
 	}
 
 	h2 {
-		margin: 4px 0 12px;
-		font: italic 400 34px/1.1 var(--serif, 'Instrument Serif', Georgia, serif);
+		margin: 0 0 var(--space-3);
+		font: italic 400 var(--fs-display-m) / var(--lh-display-m) var(--face-display);
+		letter-spacing: var(--tracking-display-m);
 	}
 
 	p {
-		color: #d3cdc2;
+		margin: 0 0 var(--space-3, 12px);
+		color: var(--text-2, #cfc9be);
+		font-size: var(--fs-body, 15px);
 	}
 
 	.dlg-actions {
 		display: flex;
 		flex-wrap: wrap;
 		justify-content: flex-end;
-		gap: 10px;
-		margin-top: 14px;
-	}
-
-	button {
-		min-height: 36px;
-		padding: 7px 11px;
-		border: 1px solid #77736b;
-		border-radius: 3px;
-		background: #262725;
-		color: inherit;
-		font: inherit;
-		cursor: pointer;
-	}
-
-	.go {
-		border-color: var(--accent, #ff7a2f);
-		background: var(--accent, #ff7a2f);
-		color: #140a04;
-	}
-
-	button:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
-
-	button:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+		gap: var(--space-3);
+		margin-top: var(--space-4);
 	}
 </style>

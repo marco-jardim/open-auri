@@ -7,6 +7,7 @@
 
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button, IconButton } from '#lib/components/primitives/index.ts';
 	import { modalDialog } from './modal.ts';
 
 	interface Props {
@@ -63,14 +64,15 @@
 <svelte:window onkeydown={shortcut} />
 
 {#if showTrigger}
-	<button
-		type="button"
+	<IconButton
+		size="sm"
+		variant="plate"
 		class="help-btn"
-		aria-label={m.chrome_help_open()}
+		label={m.chrome_help_open()}
 		aria-haspopup="dialog"
 		aria-controls={id}
 		aria-expanded={open}
-		onclick={() => changeOpen(true)}>?</button
+		onclick={() => changeOpen(true)}>?</IconButton
 	>
 {/if}
 
@@ -90,7 +92,9 @@
 			{/each}
 		</dl>
 		<div class="dlg-actions">
-			<button type="button" data-close onclick={() => changeOpen(false)}>{m.chrome_close()}</button>
+			<Button variant="plate" data-close onclick={() => changeOpen(false)}
+				>{m.chrome_close()}</Button
+			>
 		</div>
 	</div>
 </dialog>
@@ -103,12 +107,14 @@
 		max-height: calc(100dvh - 32px);
 		padding: 0;
 		overflow-y: auto;
-		border: 1px solid #57554e;
-		border-radius: 8px;
-		background: #171715;
-		color: #ece7dd;
-		font: 12px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
-		box-shadow: 0 30px 60px rgb(0 0 0 / 80%);
+		border: 1px solid var(--pop-rule, #34332f);
+		border-radius: var(--rad-xl, 10px);
+		/* Own dark face: colours keep fallbacks so the dialog stays legible anywhere */
+		background: var(--ink-2, #171715);
+		color: var(--text, #ece7dd);
+		font: 400 var(--fs-small, 13px) / var(--lh-body, 1.55)
+			var(--face-body, 'Geist', system-ui, sans-serif);
+		box-shadow: var(--elev-3, 0 24px 64px -16px rgba(0, 0, 0, 0.8));
 	}
 
 	dialog::backdrop {
@@ -117,30 +123,40 @@
 	}
 
 	.dlg {
-		padding: 22px 24px 20px;
+		padding: var(--panel-pad);
 	}
 
 	h2 {
-		margin: 4px 0 12px;
-		font: italic 400 34px/1.1 var(--serif, 'Instrument Serif', Georgia, serif);
+		margin: 0 0 var(--space-3);
+		font: italic 400 var(--fs-display-m) / var(--lh-display-m) var(--face-display);
+		letter-spacing: var(--tracking-display-m);
 	}
 
 	p {
-		color: #d3cdc2;
+		margin: 0 0 var(--space-4, 16px);
+		color: var(--text-2, #cfc9be);
 	}
 
 	.help-grid {
 		display: grid;
 		grid-template-columns: auto 1fr;
-		gap: 6px 16px;
+		align-items: baseline;
+		gap: var(--space-2) var(--space-4);
+		margin: 0;
 	}
 
 	dt {
-		color: var(--accent, #ff7a2f);
+		color: var(--accent-text, var(--accent, #ece7dd));
 	}
 
+	/* Key caps: data face at 400, never bold mono (T4) */
 	kbd {
-		font: 11px var(--mono, 'JetBrains Mono', monospace);
+		display: inline-block;
+		padding: 2px 6px;
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-sm);
+		box-shadow: var(--bevel);
+		font: 400 var(--fs-caption) / 1.3 var(--face-data);
 		white-space: nowrap;
 	}
 
@@ -151,30 +167,11 @@
 	.dlg-actions {
 		display: flex;
 		justify-content: flex-end;
-		margin-top: 14px;
+		margin-top: var(--space-4);
 	}
 
-	button {
-		min-height: 36px;
-		padding: 7px 11px;
-		border: 1px solid #77736b;
-		border-radius: 3px;
-		background: #262725;
-		color: #ece7dd;
-		font: 12px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
-		cursor: pointer;
-	}
-
-	.help-btn {
-		width: 32px;
-		min-height: 32px;
-		padding: 0;
-		border-radius: 50%;
-		font: 600 14px var(--mono, 'JetBrains Mono', monospace);
-	}
-
-	button:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+	/* The "?" glyph in Geist (actions never in mono, T4) */
+	:global(.help-btn) {
+		font-weight: 600;
 	}
 </style>

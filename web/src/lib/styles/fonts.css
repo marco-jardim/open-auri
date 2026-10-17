@@ -4,7 +4,49 @@
  * Licenses sit next to the files (LICENSE.txt): OFL-1.1, except Special Elite and
  * Permanent Marker (Apache-2.0).
  * The unicode-range is the Fontsource "latin" subset (covers pt-BR, en-US and U+2212 minus).
+ *
+ * Weights (FUX.1, spec §2.1 and §5.6): every weight the app asks for exists below, and
+ * base.css sets `font-synthesis: none`, so nothing is ever faked. JetBrains Mono ships only
+ * 400 and 500: data text never goes above 500 and actions never use mono (T4).
+ * font-display: `swap` for body, UI, display and the period fonts that show above the fold
+ * on their page; `optional` for the decorative period face that only appears below the fold
+ * (Permanent Marker, the Comunidade masking tape).
  */
+
+/*
+ * Metric-adjusted local fallbacks (§5.6): while the web font loads, the local face is scaled
+ * to the web font's average width and given its ascent and descent, so the swap does not move
+ * the layout (CLS). Values measured with `node scripts/measure-font-fallbacks.mjs` on 2026-10-17 (published metrics for reference: Geist ascent 1005,
+ * descent 295 per 1000 units; Instrument Serif: ascent 935, descent 265); refresh them
+ * with that script (Playwright, measureText), which prints this block.
+ */
+@font-face {
+	font-family: 'Geist Fallback';
+	src: local('Arial'), local('ArialMT'), local('Liberation Sans'), local('Arimo');
+	size-adjust: 100.92%;
+	ascent-override: 100.08%;
+	descent-override: 29.73%;
+	line-gap-override: 0%;
+}
+
+@font-face {
+	font-family: 'Instrument Serif Fallback';
+	src: local('Georgia'), local('Gelasio');
+	size-adjust: 75.2%;
+	ascent-override: 131.64%;
+	descent-override: 41.22%;
+	line-gap-override: 0%;
+}
+
+@font-face {
+	font-family: 'Instrument Serif Fallback';
+	font-style: italic;
+	src: local('Georgia Italic'), local('Georgia-Italic'), local('Gelasio Italic');
+	size-adjust: 77.13%;
+	ascent-override: 128.36%;
+	descent-override: 40.19%;
+	line-gap-override: 0%;
+}
 
 /* Instrument Serif: display */
 @font-face {
@@ -239,7 +281,7 @@
 	font-family: 'Permanent Marker';
 	font-style: normal;
 	font-weight: 400;
-	font-display: swap;
+	font-display: optional; /* decorative, below the fold (§5.6) */
 	src: url('/fonts/permanent-marker/permanent-marker-latin-400-normal.woff2') format('woff2');
 	unicode-range:
 		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,

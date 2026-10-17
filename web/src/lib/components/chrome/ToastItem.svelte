@@ -41,6 +41,7 @@
 
 <li
 	class="toast"
+	class:ok={notification.tone === 'success'}
 	class:bad={notification.tone === 'error'}
 	onmouseenter={() => {
 		hovered = true;
@@ -62,7 +63,28 @@
 		resume();
 	}}
 >
-	<span>{notification.message}</span>
+	<!-- Tone icon (decorative: the message carries the meaning) -->
+	<svg class="tone" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+		<circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5" />
+		{#if notification.tone === 'success'}
+			<path d="M4.8 8.2 7 10.4l4.2-4.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+		{:else if notification.tone === 'error'}
+			<path
+				d="M8 4.2v4.6M8 10.9v.9"
+				stroke="currentColor"
+				stroke-width="1.6"
+				stroke-linecap="round"
+			/>
+		{:else}
+			<path
+				d="M8 7.2v4.4M8 4.3v.9"
+				stroke="currentColor"
+				stroke-width="1.6"
+				stroke-linecap="round"
+			/>
+		{/if}
+	</svg>
+	<span class="message">{notification.message}</span>
 	<button
 		type="button"
 		aria-label={m.chrome_toast_dismiss()}
@@ -72,46 +94,61 @@
 
 <style>
 	.toast {
+		--tone: var(--accent);
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 14px;
-		padding: 10px 14px;
-		border: 1px solid #57554e;
-		border-left: 3px solid var(--accent, #ff7a2f);
-		border-radius: 4px;
-		background: #1b1b19;
-		color: #ece7dd;
-		font: 12.5px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
-		box-shadow: 0 14px 30px rgb(0 0 0 / 60%);
+		gap: var(--space-3);
+		padding: 10px 8px 10px 14px;
+		border: 1px solid var(--pop-rule);
+		border-left: 3px solid var(--tone);
+		border-radius: var(--rad-md);
+		background: var(--pop-bg);
+		color: var(--text);
+		font: 400 var(--fs-small) / var(--lh-small) var(--face-body);
+		box-shadow: var(--elev-3);
 		pointer-events: auto;
-		animation: appear 150ms ease-out;
+		animation: appear var(--dur-base) var(--ease-out);
+	}
+
+	.toast.ok {
+		--tone: var(--ok);
 	}
 
 	.toast.bad {
-		border-left-color: #e5484d;
+		--tone: var(--danger);
 	}
 
-	span {
+	.tone {
+		flex: none;
+		color: var(--tone);
+	}
+
+	.message {
+		flex: 1 1 auto;
 		overflow-wrap: anywhere;
 	}
 
 	button {
 		flex: none;
-		width: 32px;
-		height: 32px;
+		width: var(--hit);
+		height: var(--hit);
 		padding: 0;
 		border: 0;
-		border-radius: 3px;
+		border-radius: var(--rad-sm);
 		background: transparent;
-		color: inherit;
-		font-size: 22px;
+		color: var(--text-2);
+		font: 400 22px/1 var(--face-body);
 		cursor: pointer;
 	}
 
+	button:hover {
+		background: var(--lamp-off);
+		color: var(--text);
+	}
+
 	button:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: 1px;
 	}
 
 	@keyframes appear {

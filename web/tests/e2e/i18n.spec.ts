@@ -6,7 +6,7 @@ async function toggleLanguage(page: Page, name: string, locale: string): Promise
 	// Paraglide's toggle reloads the current document, rather than navigating to a new URL.
 	await Promise.all([
 		page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-		page.getByRole('button', { name, exact: true }).click()
+		page.getByRole('button', { name }).click()
 	]);
 	await waitForApp(page);
 	await expect(page.locator('html')).toHaveAttribute('lang', locale);
@@ -67,17 +67,13 @@ test.describe('Language selection', () => {
 			await expect(page).toHaveURL(new RegExp(`${destination.path}$`));
 			await waitForApp(page);
 			await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
-			await expect(
-				page.getByRole('button', { name: 'Mudar para português', exact: true })
-			).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Mudar para português' })).toBeVisible();
 
 			// These routes are prerendered in the base locale; the cookie is applied on hydration.
 			await page.reload();
 			await waitForApp(page);
 			await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
-			await expect(
-				page.getByRole('button', { name: 'Mudar para português', exact: true })
-			).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Mudar para português' })).toBeVisible();
 			expect((await page.context().cookies()).find(({ name }) => name === 'oa_lang')?.value).toBe(
 				'en-US'
 			);

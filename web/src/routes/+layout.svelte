@@ -22,6 +22,7 @@
 		revealLocale
 	} from '#lib/components/chrome/index.ts';
 	import { AudioLoader } from '#lib/components/audio/index.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { CableStatus, PreWriteChecklist, RescueNotice } from '#lib/components/cable/index.ts';
 	import {
 		PolicyBanner,
@@ -205,8 +206,8 @@
 				{#if app}
 					<AudioLoader engine={app.audio} />
 				{:else}
-					<button type="button" disabled
-						><span aria-hidden="true">♪</span> {m.chrome_audio()}</button
+					<Button size="sm" variant="plate" disabledReason={m.fux1_audio_loading()}
+						><span aria-hidden="true">♪</span> {m.chrome_audio()}</Button
 					>
 				{/if}
 			{/snippet}
@@ -215,7 +216,12 @@
 					user={accountSession.current}
 					currentPath={page.url.pathname}
 					pending={!accountSession.known}
+					admin={data.sessionResolved && data.admin}
 				/>
+			{/snippet}
+			{#snippet help()}
+				<!-- T3: help lives in the bar instead of floating over the page's right edge. -->
+				<span class="help-slot" data-chrome="help"><HelpOverlay {shortcuts} /></span>
 			{/snippet}
 		</CableBar>
 	</div>
@@ -255,9 +261,6 @@
 			onresult={(outcome) => app?.onWriteResult(outcome)}
 		/>
 	{/if}
-	<div class="help-trigger" data-chrome="help">
-		<HelpOverlay {shortcuts} />
-	</div>
 	<Toast store={app?.toasts ?? emptyToasts} />
 	<SocialSync
 		{app}
@@ -312,10 +315,7 @@
 		margin: auto;
 		padding-inline: var(--gutter);
 	}
-	.help-trigger {
-		position: fixed;
-		right: 16px;
-		bottom: 16px;
-		z-index: 50;
+	.help-slot {
+		display: contents;
 	}
 </style>

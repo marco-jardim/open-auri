@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { createRawSnippet, tick } from 'svelte';
+import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import {
 	appShortcuts,
@@ -203,8 +204,13 @@ test('supports confirmation content, disabled confirmation, custom labels and ca
 	});
 	await expect.element(page.getByRole('dialog', { name: 'Experimental filters' })).toBeVisible();
 	await expect.element(page.getByText('Coefficient details')).toBeVisible();
-	await expect.element(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
+	// T8: unavailable but focusable, with the reason announced; a click does nothing.
+	const confirm = page.getByRole('button', { name: 'Continue' });
+	await expect.element(confirm).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(confirm).toHaveAccessibleDescription(m.fux1_confirm_unavailable());
 	await expect.element(page.getByRole('button', { name: 'Go back' })).toHaveFocus();
+	// DOM click: Playwright's actionability check would refuse an aria-disabled target.
+	(confirm.element() as HTMLElement).click();
 	expect(onResult).not.toHaveBeenCalled();
 	await screen.rerender({ confirmDisabled: false });
 	await page.getByRole('button', { name: 'Continue' }).click();

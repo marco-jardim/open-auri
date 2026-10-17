@@ -1,26 +1,36 @@
 /*
- * Design tokens (T2.2). Values copied from the :root of design/mocks/v2/*.html
- * (identical across the 8 mocks). Page accents live in accents.css.
+ * Design tokens (T2.2, design system v2.1 from FUX.1, spec docs/plans/fux-spec.md §2).
+ * Base values copied from the :root of design/mocks/v2/*.html (identical across the 8 mocks).
+ * Page accents and --accent-text live in accents.css.
  * Token names deliberately avoid Tailwind's theme namespaces (--color-*, --font-*,
  * --radius-*, --spacing-*, --text-*) so theme.css can map them without cycles.
+ * Renamed tokens keep their old names as aliases so pages that still read them keep working.
  */
 
 @layer base {
 	:root {
-		/* Chrome */
-		--ink: #0f0f0e;
-		--ink-2: #171715;
+		/* Chrome surfaces (§2.2). Every text/surface pair is checked in tests/unit/styles/contrast.test.ts */
+		--ink: #0f0f0e; /* page background */
+		--ink-2: #171715; /* bar, popover */
+		--ink-3: #1d1c1a; /* raised panel */
+		--ink-4: #2b2a27; /* dark hardware panel */
 		--text: #ece7dd;
-		--muted: #8f8a80;
-		--rule: rgba(236, 231, 221, 0.12);
+		--text-2: #cfc9be; /* secondary text */
+		--muted: #8f8a80; /* only on --ink and --ink-2 (T7) */
+		--muted-hi: #a39d92; /* muted text on --ink-3 and --ink-4 */
+		--rule: rgba(236, 231, 221, 0.12); /* decorative rules only */
+		--rule-control: rgba(236, 231, 221, 0.4); /* control borders, >= 3:1 (WCAG 1.4.11, T6) */
+		--ok: #4cc38a;
+		--warn: #e5a23a;
 		--danger: #e5484d;
+		--lamp-off: rgba(236, 231, 221, 0.1); /* unlit lamp, disabled control face */
 
 		/* Chrome surfaces seen in the mocks (bar, popovers, footer) */
-		--bar-bg: #171715;
+		--bar-bg: var(--ink-2);
 		--pop-bg: #1b1b19;
 		--pop-rule: #34332f;
 		--footer-bg: rgba(15, 15, 14, 0.9);
-		--nav-link: #cfc9be;
+		--nav-link: var(--text-2); /* alias kept for pages */
 		--state-text: #b5afa4;
 
 		/* Neutral accent (admin and pages without an honoree); pages override in accents.css */
@@ -34,9 +44,10 @@
 		--paper-muted: #6b5e4c;
 		--paper-rule: rgba(66, 47, 28, 0.29);
 
-		/* Font stacks: core */
-		--serif: 'Instrument Serif', Georgia, serif;
-		--sans: 'Geist', system-ui, Arial, sans-serif;
+		/* Font stacks: core. Each family falls back first to a metric-adjusted local face
+		   (fonts.css) so the swap does not move the layout. */
+		--serif: 'Instrument Serif', 'Instrument Serif Fallback', Georgia, serif;
+		--sans: 'Geist', 'Geist Fallback', system-ui, Arial, sans-serif;
 		--ui: var(--sans);
 		--mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
 
@@ -50,13 +61,59 @@
 		--marker: 'Permanent Marker', 'Comic Sans MS', cursive; /* Comunidade */
 		--crt: 'VT323', ui-monospace, monospace; /* Comunidade */
 
-		/* Type sizes used by the chrome */
-		--fs-body: 14px;
-		--fs-ui: 13px;
-		--label-min: 11px; /* minimum label size on desktop; 10px on mobile (below) */
+		/* Type roles (§2.1): action never in mono, mono never above 500 */
+		--face-display: var(--serif); /* Instrument Serif 400, normal and italic */
+		--face-body: var(--sans); /* Geist 400, 500, 600: text, buttons, forms */
+		--face-data: var(--mono); /* JetBrains Mono 400 and 500: numbers, codes, eyebrows, readouts */
+		--face-engrave: var(--cond); /* panel engraving; pages override (accents.css) */
+
+		/* Type scale (§2.1) */
+		--fs-display-xl: clamp(64px, 3.2rem + 3.5vw, 120px);
+		--fs-display-l: clamp(48px, 2.4rem + 2.2vw, 84px);
+		--fs-display-m: clamp(32px, 1.6rem + 1.2vw, 48px);
+		--fs-title: clamp(22px, 1.1rem + 0.6vw, 28px);
+		--fs-lede: clamp(16px, 0.95rem + 0.25vw, 19px);
+		--fs-body: 15px;
+		--fs-ui: 14px;
+		--fs-small: 13px;
+		--fs-caption: 12px;
+		--label-min: 11px; /* minimum label size, desktop and mobile */
+		--fs-eyebrow: 11px;
+		--fs-readout-l: clamp(22px, 1.2rem + 0.5vw, 28px);
+		--fs-readout: 14px;
+		--fs-honoree: clamp(28px, 1.4rem + 0.8vw, 36px);
 		--fs-wordmark: 27px;
-		--fs-honoree: 30px;
+
+		--lh-display: 0.92;
+		--lh-display-l: 0.95;
+		--lh-display-m: 1;
+		--lh-title: 1.1;
+		--lh-lede: 1.5;
+		--lh-body: 1.55;
+		--lh-ui: 1.3;
+		--lh-small: 1.4;
+		--lh-caps: 1.35;
+		--lh-readout: 1.2;
+
+		--tracking-display: -0.025em;
+		--tracking-display-l: -0.02em;
+		--tracking-display-m: -0.015em;
+		--tracking-title: -0.01em;
+		--tracking-caption: 0.01em;
 		--tracking-caps: 0.14em;
+		--tracking-eyebrow: 0.18em;
+		--tracking-data: 0.02em;
+
+		/* Elevation, glow and material (§2.3) */
+		--elev-1: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 0 rgba(0, 0, 0, 0.6);
+		--elev-2: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 24px -10px rgba(0, 0, 0, 0.75);
+		--elev-3: 0 24px 64px -16px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(236, 231, 221, 0.06);
+		--well:
+			inset 0 2px 6px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(0, 0, 0, 0.6); /* LCD, readout, tape slot */
+		--bevel: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+		--mat-metal: linear-gradient(180deg, #d4d4cf 0%, #bdbdb7 48%, #c9c9c4 100%);
+		--mat-lcd: radial-gradient(120% 80% at 50% 30%, #0e2a26 0%, #071513 70%);
+		/* --glow-1 and --glow-2 depend on the accent: declared in accents.css */
 
 		/* Spacing scale (px values recurring in the mocks) */
 		--space-1: 4px;
@@ -67,6 +124,9 @@
 		--space-6: 32px;
 		--space-7: 48px;
 		--space-8: 80px;
+		--space-9: 120px;
+		--section-gap: clamp(48px, 6vw, 96px);
+		--panel-pad: clamp(16px, 1.6vw, 28px);
 
 		/* Radii */
 		--rad-xs: 2px;
@@ -74,27 +134,35 @@
 		--rad-md: 4px;
 		--rad-lg: 6px;
 		--rad-xl: 10px;
+		--rad-2xl: 16px;
+		--rad-bezel: 20px;
 		--rad-pill: 999px;
 
 		/* Layout */
 		--bar-h: 56px;
 		--frame-max: 1480px;
 		--gutter: 24px;
+		--hit: 36px; /* touch target: 36px desktop, 44px mobile (below) */
 
 		/* Focus ring */
 		--focus-width: 2px;
 		--focus-offset: 3px;
 
-		/* Motion */
+		/* Motion (§2.5). Meters never use these: they follow real ballistics (plan §3.6). */
+		--dur-instant: 80ms;
 		--dur-fast: 0.12s;
 		--dur-base: 0.2s;
+		--dur-slow: 0.36s;
+		--dur-scene: 0.72s;
 		--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+		--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+		--ease-mech: cubic-bezier(0.3, 1.4, 0.5, 1); /* lever and knob with a slight detent */
 	}
 
 	@media (max-width: 640px) {
 		:root {
-			--label-min: 10px; /* minimum label size on mobile */
 			--gutter: 16px;
+			--hit: 44px;
 		}
 	}
 }

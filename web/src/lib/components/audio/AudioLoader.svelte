@@ -233,7 +233,7 @@
 <div class="oa-audio" bind:this={root}>
 	<button
 		type="button"
-		class="oa-audio-btn"
+		class="oa-audio-btn btn btn--plate btn--sm"
 		class:has-file={s.file !== null}
 		id={ids.button}
 		bind:this={button}
@@ -328,10 +328,9 @@
 		--oa-text: var(--text, #f1ece2);
 		--oa-rule: var(--rule, #34332f);
 	}
+	/* T1: the trigger is a bar button (Button recipe `.btn.btn--plate.btn--sm`, components.css),
+	   bordered and sized like Neutro and Padrão Auri. */
 	.oa-audio-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
 		max-width: 190px;
 	}
 	.oa-audio-name {
@@ -341,8 +340,8 @@
 		max-width: 150px;
 	}
 	.oa-audio-btn.has-file {
-		border-color: color-mix(in srgb, var(--oa-accent) 55%, transparent);
-		color: var(--oa-accent);
+		--btn-border: color-mix(in srgb, var(--oa-accent) 55%, transparent);
+		--btn-fg: var(--accent-text, var(--oa-accent));
 	}
 	.oa-audio-pop {
 		position: fixed;

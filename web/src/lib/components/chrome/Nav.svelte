@@ -43,37 +43,43 @@
 		display: flex;
 		align-items: center;
 		align-self: stretch;
-		gap: 15px;
+		gap: 14px;
+		width: max-content;
+		height: 100%;
 		white-space: nowrap;
-		font: 11.5px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
+		font: 400 var(--fs-caption) / var(--lh-ui) var(--face-body);
 	}
 
 	a {
 		position: relative;
 		display: inline-flex;
 		align-items: center;
+		align-self: stretch;
 		min-height: 44px;
-		color: #cfc9be;
+		color: var(--text-2);
 		text-decoration: none;
+		transition: color var(--dur-fast) var(--ease-out);
 	}
 
 	a:hover,
 	a[aria-current='page'] {
-		color: #ece7dd;
+		color: var(--text);
 	}
 
+	/* Accent underline sits on the bar's bottom edge, as in the mocks */
 	a[aria-current='page']::after {
 		position: absolute;
 		right: 0;
 		bottom: 0;
 		left: 0;
 		height: 2px;
-		background: var(--accent, #ff7a2f);
+		background: var(--accent);
+		box-shadow: 0 0 8px var(--accent-glow);
 		content: '';
 	}
 
 	a:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
 	}
 </style>

@@ -1,24 +1,35 @@
 /*
- * Tailwind 4 mapping (T2.2). `inline` makes utilities emit var(--token) directly, so a
- * [data-page] accent override reaches bg-accent, text-accent, ring-accent, etc.
- * Usage: bg-ink, bg-ink-2, text-text, text-muted, border-rule, text-danger, bg-accent,
- * text-accent-ink, bg-paper, font-serif, font-sans, font-mono, font-cond, font-type,
- * font-plate, font-tape, font-journal, font-marker, font-crt, text-label, h-bar,
- * rounded-xs/sm/md/lg/xl/pill, max-w-frame.
+ * Tailwind 4 mapping (T2.2, extended by FUX.1). `inline` makes utilities emit var(--token)
+ * directly, so a [data-page] accent override reaches bg-accent, text-accent, ring-accent, etc.
+ * Usage: bg-ink, bg-ink-2, bg-ink-3, bg-ink-4, text-text, text-text-2, text-muted,
+ * text-muted-hi, border-rule, border-rule-control, text-ok, text-warn, text-danger, bg-accent,
+ * text-accent-text, text-accent-ink, bg-paper, font-serif, font-sans, font-mono, font-cond,
+ * font-type, font-plate, font-tape, font-journal, font-marker, font-crt, font-engrave,
+ * text-display-xl/l/m, text-title, text-lede, text-body, text-ui, text-small, text-caption,
+ * text-label, h-bar, rounded-xs/sm/md/lg/xl/2xl/bezel/pill, max-w-frame.
  */
 
 @theme inline {
 	/* Colours */
 	--color-ink: var(--ink);
 	--color-ink-2: var(--ink-2);
+	--color-ink-3: var(--ink-3);
+	--color-ink-4: var(--ink-4);
 	--color-text: var(--text);
+	--color-text-2: var(--text-2);
 	--color-muted: var(--muted);
+	--color-muted-hi: var(--muted-hi);
 	--color-rule: var(--rule);
+	--color-rule-control: var(--rule-control);
+	--color-ok: var(--ok);
+	--color-warn: var(--warn);
 	--color-danger: var(--danger);
+	--color-lamp-off: var(--lamp-off);
 	--color-accent: var(--accent);
 	--color-accent-hi: var(--accent-hi);
 	--color-accent-ink: var(--accent-ink);
 	--color-accent-soft: var(--accent-soft);
+	--color-accent-text: var(--accent-text);
 	--color-paper: var(--paper);
 	--color-paper-ink: var(--paper-ink);
 	--color-paper-muted: var(--paper-muted);
@@ -29,6 +40,10 @@
 	--font-sans: var(--sans);
 	--font-mono: var(--mono);
 	--font-ui: var(--ui);
+	--font-display: var(--face-display);
+	--font-body: var(--face-body);
+	--font-data: var(--face-data);
+	--font-engrave: var(--face-engrave);
 
 	/* Font families: period fonts */
 	--font-cond: var(--cond);
@@ -39,11 +54,32 @@
 	--font-marker: var(--marker);
 	--font-crt: var(--crt);
 
-	/* Type */
-	--text-label: var(--label-min);
-	--text-label--line-height: 1.35;
-	--text-ui: var(--fs-ui);
+	/* Type (§2.1) */
+	--text-display-xl: var(--fs-display-xl);
+	--text-display-xl--line-height: var(--lh-display);
+	--text-display-xl--letter-spacing: var(--tracking-display);
+	--text-display-l: var(--fs-display-l);
+	--text-display-l--line-height: var(--lh-display-l);
+	--text-display-l--letter-spacing: var(--tracking-display-l);
+	--text-display-m: var(--fs-display-m);
+	--text-display-m--line-height: var(--lh-display-m);
+	--text-display-m--letter-spacing: var(--tracking-display-m);
+	--text-title: var(--fs-title);
+	--text-title--line-height: var(--lh-title);
+	--text-title--letter-spacing: var(--tracking-title);
+	--text-lede: var(--fs-lede);
+	--text-lede--line-height: var(--lh-lede);
 	--text-body: var(--fs-body);
+	--text-body--line-height: var(--lh-body);
+	--text-ui: var(--fs-ui);
+	--text-ui--line-height: var(--lh-ui);
+	--text-small: var(--fs-small);
+	--text-small--line-height: var(--lh-small);
+	--text-caption: var(--fs-caption);
+	--text-caption--line-height: var(--lh-small);
+	--text-caption--letter-spacing: var(--tracking-caption);
+	--text-label: var(--label-min);
+	--text-label--line-height: var(--lh-caps);
 
 	/* Radii */
 	--radius-xs: var(--rad-xs);
@@ -51,9 +87,12 @@
 	--radius-md: var(--rad-md);
 	--radius-lg: var(--rad-lg);
 	--radius-xl: var(--rad-xl);
+	--radius-2xl: var(--rad-2xl);
+	--radius-bezel: var(--rad-bezel);
 	--radius-pill: var(--rad-pill);
 
 	/* Layout */
 	--spacing-bar: var(--bar-h);
+	--spacing-hit: var(--hit);
 	--container-frame: var(--frame-max);
 }

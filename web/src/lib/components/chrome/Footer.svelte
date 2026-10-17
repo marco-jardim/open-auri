@@ -52,19 +52,19 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 90px;
-		max-width: 1480px;
-		margin: 80px auto 0;
-		padding: 32px 24px 36px;
-		border-top: 1px solid #353530;
-		background: rgb(15 15 14 / 90%);
-		color: #aaa499;
-		font: 11.5px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
+		max-width: var(--frame-max);
+		margin: var(--space-8) auto 0;
+		padding: var(--space-6) var(--gutter) 36px;
+		border-top: 1px solid var(--rule);
+		background: var(--footer-bg);
+		color: var(--state-text);
+		font: 400 var(--fs-small) / var(--lh-body) var(--face-body);
 	}
 
+	/* Eyebrow: data face, caps, at the label minimum (no 10 px labels, T5) */
 	.f-eyebrow {
-		font-size: 10px;
-		font-weight: 550;
-		letter-spacing: 0.14em;
+		font: 500 var(--fs-eyebrow) / var(--lh-caps) var(--face-data);
+		letter-spacing: var(--tracking-eyebrow);
 		text-transform: uppercase;
 	}
 
@@ -78,12 +78,14 @@
 
 	.honoree h2 {
 		margin: 0;
-		color: #ece7dd;
-		font: 400 30px/1.1 var(--serif, 'Instrument Serif', Georgia, serif);
+		color: var(--text);
+		font: 400 var(--fs-honoree) / 1 var(--face-display);
+		letter-spacing: var(--tracking-title);
 	}
 
 	.honoree span {
-		font: 11px var(--mono, 'JetBrains Mono', monospace);
+		font: 400 var(--fs-caption) / 1 var(--face-data);
+		font-variant-numeric: tabular-nums;
 	}
 
 	p {
@@ -93,8 +95,8 @@
 
 	.notice-title {
 		margin: 0 0 9px;
-		color: #ece7dd;
-		font-size: 12px;
+		color: var(--text);
+		font-size: var(--fs-ui);
 		font-weight: 500;
 	}
 
@@ -116,13 +118,19 @@
 	}
 
 	a {
-		color: inherit;
+		color: var(--text-2);
 		text-underline-offset: 4px;
+		text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+	}
+
+	a:hover {
+		color: var(--text);
+		text-decoration-color: var(--accent);
 	}
 
 	a:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
 	}
 
 	@media (max-width: 1100px) {

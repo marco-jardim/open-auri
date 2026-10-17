@@ -13,12 +13,16 @@ import {
 	Nav,
 	revealLocale
 } from '#lib/components/chrome/index.ts';
+// The bar's buttons take their recipe from the design system (components.css), loaded here as
+// the root layout loads it in the app.
+import '../primitives/design-system.ts';
 
 const locales = [
 	{
 		locale: 'pt-BR',
 		curve: 'Curva',
 		write: 'Gravar no cabo',
+		writeLoading: 'Carregando o motor do cabo…',
 		legal: 'Aviso legal completo',
 		github: 'Código-fonte no GitHub',
 		license: 'Licença AGPL-3.0',
@@ -30,6 +34,7 @@ const locales = [
 		locale: 'en-US',
 		curve: 'Curve',
 		write: 'Write to cable',
+		writeLoading: 'Loading the cable engine…',
 		legal: 'Full legal notice',
 		github: 'Source code on GitHub',
 		license: 'AGPL-3.0 license',
@@ -63,7 +68,10 @@ for (const copy of locales) {
 		await render(Footer, { honoree });
 		await render(EmBreve);
 		await expect.element(page.getByRole('link', { name: copy.curve, exact: true })).toBeVisible();
-		await expect.element(page.getByRole('button', { name: copy.write })).toBeDisabled();
+		// No app yet: unavailable with a reason, still focusable (T8).
+		const write = page.getByRole('button', { name: copy.write });
+		await expect.element(write).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(write).toHaveAccessibleDescription(copy.writeLoading);
 		await expect.element(page.getByText(copy.notice, { exact: true })).toBeVisible();
 		await expect.element(page.getByText(copy.soon, { exact: true })).toBeVisible();
 		await expect.element(page.getByRole('heading', { name: honoree.name })).toBeVisible();
@@ -117,7 +125,13 @@ test('only invokes cable/audio callbacks on explicit clicks and honors writeDisa
 	await expect
 		.element(page.getByText('Alterações não gravadas no cabo', { exact: true }))
 		.toBeVisible();
-	await expect.element(page.getByRole('button', { name: 'Gravar no cabo' })).toBeDisabled();
+	const write = page.getByRole('button', { name: 'Gravar no cabo' });
+	await expect.element(write).toHaveAttribute('aria-disabled', 'true');
+	await expect
+		.element(write)
+		.toHaveAccessibleDescription('Gravando no cabo. Espere a gravação terminar.');
+	(write.element() as HTMLElement).click();
+	expect(onWrite).not.toHaveBeenCalled();
 	await page.getByRole('button', { name: 'Neutro' }).click();
 	await page.getByRole('button', { name: 'Padrão Auri' }).click();
 	await page.getByRole('button', { name: 'Áudio' }).click();
@@ -173,12 +187,12 @@ test('switches locale through Paraglide and lets its runtime persist both prefer
 	overwriteSetLocale(switchLocale);
 	try {
 		await render(LanguageToggle);
-		await page.getByRole('button', { name: 'Switch to English' }).click();
+		await page.getByRole('button', { name: /Switch to English/ }).click();
 		expect(switchLocale).toHaveBeenLastCalledWith('en-US');
 		expect(getLocale()).toBe('en-US');
 		expect(localStorage.getItem('oa.lang')).toBe('en-US');
 		expect(document.cookie).toContain('oa_lang=en-US');
-		await page.getByRole('button', { name: 'Mudar para português' }).click();
+		await page.getByRole('button', { name: /Mudar para português/ }).click();
 		expect(switchLocale).toHaveBeenLastCalledWith('pt-BR');
 		expect(getLocale()).toBe('pt-BR');
 	} finally {
@@ -200,11 +214,76 @@ test('revealLocale syncs lang/dir and clears the lang-boot hide only when it was
 	expect(root.style.visibility).toBe('');
 });
 
+test('counts unsaved changes with the right singular and plural (T2)', async () => {
+	const screen = await render(CableBar, { unsavedCount: 1 });
+	const indicator = screen.container.querySelector('.dirty');
+	if (!(indicator instanceof HTMLElement)) throw new Error('Missing unsaved indicator');
+	await expect.element(indicator).toHaveTextContent('1 alteração não gravada');
+	expect(indicator.classList.contains('has')).toBe(true);
+	await screen.rerender({ unsavedCount: 3 });
+	await expect.element(indicator).toHaveTextContent('3 alterações não gravadas');
+	await screen.rerender({ unsavedCount: 0 });
+	await expect.poll(() => indicator.textContent?.trim()).toBe('');
+	expect(indicator.classList.contains('has')).toBe(false);
+	await setLocale('en-US', { reload: false });
+	await cleanup();
+	const english = await render(CableBar, { unsavedCount: 1 });
+	const englishIndicator = english.container.querySelector<HTMLElement>('.dirty')!;
+	await expect.element(englishIndicator).toHaveTextContent('1 unsaved change');
+	await english.rerender({ unsavedCount: 2 });
+	await expect.element(englishIndicator).toHaveTextContent('2 unsaved changes');
+});
+
+const barCallbacks = () => ({
+	onNeutro: vi.fn(),
+	onPadraoAuri: vi.fn(),
+	onWrite: vi.fn(),
+	onAudio: vi.fn()
+});
+
+test('bar actions are bordered sm buttons in Geist, never mono (T1, T4, T6)', async () => {
+	await render(CableBar, barCallbacks());
+	for (const name of ['Áudio', 'Neutro', 'Padrão Auri', 'Gravar no cabo']) {
+		const button = page.getByRole('button', { name }).element();
+		const style = getComputedStyle(button);
+		expect(button.getBoundingClientRect().height, name).toBe(28);
+		expect(style.borderTopStyle, name).toBe('solid');
+		expect(style.fontFamily, name).not.toMatch(/JetBrains Mono/);
+		expect(Number(style.fontWeight), name).toBeLessThanOrEqual(600);
+	}
+});
+
+test('renders the help snippet in the bar after the language toggle (T3)', async () => {
+	await render(CableBar, {
+		help: createRawSnippet(() => ({
+			render: () => '<button type="button" aria-label="Ajuda e atalhos de teclado">?</button>'
+		}))
+	});
+	const help = page.getByRole('button', { name: 'Ajuda e atalhos de teclado' }).element();
+	const toggle = page.getByRole('button', { name: /Switch to English/ }).element();
+	expect(page.getByRole('banner').element().contains(help)).toBe(true);
+	expect(toggle.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	expect(getComputedStyle(help).position).not.toBe('fixed');
+});
+
+test('on mobile the bar actions stay on screen above the navigation', async () => {
+	await page.viewport(390, 844);
+	await render(CableBar, barCallbacks());
+	const nav = page.getByRole('navigation').element().getBoundingClientRect();
+	for (const name of ['Áudio', 'Neutro', 'Padrão Auri', 'Gravar no cabo']) {
+		const rect = page.getByRole('button', { name }).element().getBoundingClientRect();
+		expect(rect.left, name).toBeGreaterThanOrEqual(0);
+		expect(rect.right, name).toBeLessThanOrEqual(390);
+		expect(rect.bottom, name).toBeLessThanOrEqual(nav.top + 1);
+		expect(rect.height, name).toBeGreaterThanOrEqual(44);
+	}
+});
+
 test('keeps PT · EN on a single mobile line', async () => {
 	await page.viewport(390, 844);
 	await render(CableBar);
-	const button = page.getByRole('button', { name: 'Switch to English' }).element();
-	const spans = [...button.querySelectorAll('span')];
+	const button = page.getByRole('button', { name: /Switch to English/ }).element();
+	const spans = [...button.querySelectorAll('span:not(.sr-only)')];
 	expect(getComputedStyle(button).whiteSpace).toBe('nowrap');
 	expect(getComputedStyle(button).flexWrap).toBe('nowrap');
 	expect(new Set(spans.map((span) => span.getBoundingClientRect().top)).size).toBe(1);

@@ -24,6 +24,7 @@ test('comprehension messages have identical keys in both locales and no pt-BR em
 test('no staging pt-BR message contains an em dash', () => {
 	const directory = new URL('../../../messages/_staging/', import.meta.url);
 	const files = readdirSync(directory).filter((name) => name.endsWith('.pt-BR.json'));
+	expect(Array.isArray(files)).toBe(true);
 	for (const file of files) {
 		const messages: Record<string, unknown> = JSON.parse(
 			readFileSync(new URL(file, directory), 'utf8')

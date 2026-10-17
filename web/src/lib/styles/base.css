@@ -1,5 +1,6 @@
 /*
- * Base styles (T2.2): typography, focus, selection, reduced motion, label minimums.
+ * Base styles (T2.2, design system v2.1 from FUX.1): typography roles, focus, selection,
+ * reduced motion, label minimums, disabled state.
  * Lives in Tailwind's base layer so utilities can override it.
  */
 
@@ -13,15 +14,17 @@
 
 	html {
 		scroll-padding-top: calc(var(--bar-h) + var(--space-5));
+		/* Never fake a bold or an italic: every weight in use exists in fonts.css (T4). */
+		font-synthesis: none;
 	}
 
 	body {
 		margin: 0;
 		background: var(--ink);
 		color: var(--text);
-		font-family: var(--sans);
+		font-family: var(--face-body);
 		font-size: var(--fs-body);
-		line-height: 1.5;
+		line-height: var(--lh-body);
 		font-optical-sizing: auto;
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
@@ -49,25 +52,110 @@
 		text-underline-offset: 4px;
 	}
 
-	button:disabled,
+	/*
+	 * Disabled (T8). A control that cannot act explains why: the primitives use
+	 * aria-disabled="true" plus a reason (Button disabledReason) and stay focusable; the face
+	 * goes to the unlit-lamp tone instead of fading the whole control. Native disabled
+	 * controls (not focusable, no reason possible) keep a light fade.
+	 */
 	[aria-disabled='true'] {
-		opacity: 0.45;
 		cursor: not-allowed;
+	}
+
+	:where(button, [role='button'], [role='menuitem'])[aria-disabled='true'] {
+		background-color: var(--lamp-off);
+	}
+
+	button:disabled,
+	input:disabled,
+	select:disabled,
+	textarea:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
 	}
 
 	/* Display: Instrument Serif (one weight only, never synthesise bold) */
 	h1,
 	.display {
-		font-family: var(--serif);
+		font-family: var(--face-display);
 		font-weight: 400;
 		font-synthesis-weight: none;
-		letter-spacing: -0.02em;
+		letter-spacing: var(--tracking-display-l);
 		line-height: 1;
 	}
 
 	.wordmark {
-		font: italic 400 var(--fs-wordmark) / 1 var(--serif);
+		font: italic 400 var(--fs-wordmark) / 1 var(--face-display);
 		font-synthesis-weight: none;
+	}
+
+	/* Typographic roles (§2.1). Pages use these instead of ad hoc pixel sizes. */
+	.h-display-xl,
+	.h-display-l,
+	.h-display-m,
+	.title {
+		margin: 0;
+		font-family: var(--face-display);
+		font-weight: 400;
+	}
+
+	.h-display-xl {
+		font-size: var(--fs-display-xl);
+		line-height: var(--lh-display);
+		letter-spacing: var(--tracking-display);
+	}
+
+	.h-display-l {
+		font-size: var(--fs-display-l);
+		line-height: var(--lh-display-l);
+		letter-spacing: var(--tracking-display-l);
+	}
+
+	.h-display-m {
+		font-size: var(--fs-display-m);
+		line-height: var(--lh-display-m);
+		letter-spacing: var(--tracking-display-m);
+	}
+
+	.title {
+		font-size: var(--fs-title);
+		line-height: var(--lh-title);
+		letter-spacing: var(--tracking-title);
+	}
+
+	.lede {
+		font-family: var(--face-body);
+		font-size: var(--fs-lede);
+		line-height: var(--lh-lede);
+		color: var(--text-2);
+	}
+
+	.eyebrow {
+		font-family: var(--face-data);
+		font-size: var(--fs-eyebrow);
+		font-weight: 500;
+		line-height: var(--lh-caps);
+		letter-spacing: var(--tracking-eyebrow);
+		text-transform: uppercase;
+	}
+
+	.readout {
+		font-family: var(--face-data);
+		font-size: var(--fs-readout);
+		font-weight: 400;
+		line-height: var(--lh-readout);
+		letter-spacing: var(--tracking-data);
+		font-variant-numeric: tabular-nums slashed-zero;
+	}
+
+	.readout--l {
+		font-size: var(--fs-readout-l);
+		line-height: 1;
+	}
+
+	/* Counts in Geist keep their columns */
+	.count {
+		font-variant-numeric: tabular-nums;
 	}
 
 	/* Numerals and readouts: JetBrains Mono with tabular figures */
@@ -77,11 +165,11 @@
 	samp,
 	output,
 	[data-num] {
-		font-family: var(--mono);
+		font-family: var(--face-data);
 		font-variant-numeric: tabular-nums;
 	}
 
-	/* Label minimums: >= 11px desktop, >= 10px mobile (--label-min switches in tokens.css) */
+	/* Label minimums: >= 11px on desktop and mobile */
 	small {
 		font-size: max(var(--label-min), 0.8em);
 	}
@@ -89,9 +177,19 @@
 	.label,
 	.caps {
 		font-size: var(--label-min);
-		line-height: 1.35;
+		line-height: var(--lh-caps);
 		letter-spacing: var(--tracking-caps);
 		text-transform: uppercase;
+	}
+
+	/* Screen-reader only text */
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 
 	/* Visible focus ring (WCAG 2.4.7 / 2.4.11) */

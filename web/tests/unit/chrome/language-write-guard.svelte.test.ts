@@ -22,7 +22,7 @@ test('the language toggle never switches (and reloads) while a cable write sends
 	const switchLocale = vi.fn((locale: 'pt-BR' | 'en-US') => original(locale, { reload: false }));
 	overwriteSetLocale(switchLocale);
 	await render(LanguageToggle);
-	const toggle = page.getByRole('button', { name: 'Switch to English' });
+	const toggle = page.getByRole('button', { name: /Switch to English/ });
 	await expect.element(toggle).not.toHaveAttribute('aria-disabled');
 
 	let finish!: () => void;
@@ -33,16 +33,18 @@ test('the language toggle never switches (and reloads) while a cable write sends
 			})
 	);
 	await expect.element(toggle).toHaveAttribute('aria-disabled', 'true');
-	await expect.element(toggle).toHaveAttribute('title', m.chrome_language_blocked());
+	// The reason is announced (aria-describedby) and shown in a tooltip, not only in a title (T8).
+	await expect.element(toggle).toHaveAccessibleDescription(m.chrome_language_blocked());
 	// aria-disabled keeps it focusable; a click (or Enter) must still do nothing.
 	(toggle.element() as HTMLElement).click();
 	expect(switchLocale).not.toHaveBeenCalled();
 	expect(getLocale()).toBe('pt-BR');
+	await expect.element(page.getByRole('tooltip')).toHaveTextContent(m.chrome_language_blocked());
 
 	finish();
 	await writing;
 	await expect.element(toggle).not.toHaveAttribute('aria-disabled');
-	expect(toggle.element().hasAttribute('title')).toBe(false);
+	await expect.element(toggle).not.toHaveAttribute('aria-describedby');
 	await toggle.click();
 	expect(switchLocale).toHaveBeenLastCalledWith('en-US');
 	expect(getLocale()).toBe('en-US');
@@ -55,7 +57,7 @@ test('a write flag set outside the event (PWA contract) still refuses the click'
 	scope.__oaWriteInProgress = true;
 	try {
 		await render(LanguageToggle);
-		const toggle = page.getByRole('button', { name: 'Switch to English' });
+		const toggle = page.getByRole('button', { name: /Switch to English/ });
 		await expect.element(toggle).toHaveAttribute('aria-disabled', 'true');
 		(toggle.element() as HTMLElement).click();
 		expect(switchLocale).not.toHaveBeenCalled();

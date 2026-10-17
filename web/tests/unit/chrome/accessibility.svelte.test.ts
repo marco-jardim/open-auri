@@ -6,6 +6,9 @@ import { tick } from 'svelte';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import { createToastStore } from '#lib/components/chrome/toast.ts';
 import ChromeFixture from './ChromeFixture.svelte';
+// Axe judges the chrome as users see it: with the app's global styles (tokens, base, the
+// design system recipes the bar buttons use), as the root layout loads them.
+import '../primitives/design-system.ts';
 
 afterEach(async () => {
 	await cleanup();

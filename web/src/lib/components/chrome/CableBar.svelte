@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import Nav from './Nav.svelte';
 	import LanguageToggle from './LanguageToggle.svelte';
 
@@ -8,9 +9,17 @@
 		currentPath?: string;
 		statusText?: string;
 		connected?: boolean;
-		/** Current curve differs from what is on the cable (boolean; there is no change count). */
+		/** Current curve differs from what is on the cable. */
 		unsaved?: boolean;
+		/**
+		 * Number of unsaved changes, when the caller counts them. Shown with the right
+		 * singular/plural ("1 alteração não gravada", "3 alterações não gravadas"); without
+		 * it the indicator stays a boolean ("Alterações não gravadas no cabo").
+		 */
+		unsavedCount?: number;
 		writeDisabled?: boolean;
+		/** Why "Gravar no cabo" is unavailable; defaults explain loading or a write in progress. */
+		writeDisabledReason?: string;
 		onNeutro?: () => void;
 		onPadraoAuri?: () => void;
 		onWrite?: () => void;
@@ -22,6 +31,8 @@
 		actions?: Snippet;
 		/** Header account entry (the layout renders AccountEntry here). */
 		account?: Snippet;
+		/** Help trigger (the layout renders HelpOverlay here; it used to float over pages, T3). */
+		help?: Snippet;
 	}
 
 	let {
@@ -29,7 +40,9 @@
 		statusText = m.chrome_cable_disconnected(),
 		connected = false,
 		unsaved = false,
+		unsavedCount,
 		writeDisabled = false,
+		writeDisabledReason,
 		onNeutro,
 		onPadraoAuri,
 		onWrite,
@@ -39,8 +52,31 @@
 		unsavedIndicator,
 		audio,
 		actions,
-		account
+		account,
+		help
 	}: Props = $props();
+
+	const dirty = $derived(
+		unsavedCount !== undefined ? Number.isFinite(unsavedCount) && unsavedCount > 0 : unsaved
+	);
+	const unsavedText = $derived(
+		!dirty
+			? ''
+			: unsavedCount === undefined
+				? m.chrome_unsaved()
+				: unsavedCount === 1
+					? m.fux1_unsaved_one()
+					: m.fux1_unsaved_other({ count: String(unsavedCount) })
+	);
+	// T8: an unavailable bar action always says why.
+	const writeReason = $derived(
+		!onWrite
+			? (writeDisabledReason ?? m.fux1_write_loading())
+			: writeDisabled
+				? (writeDisabledReason ?? m.fux1_write_busy())
+				: null
+	);
+	const editorReason = $derived(m.fux1_editor_loading());
 </script>
 
 <header class="cable-bar">
@@ -54,80 +90,107 @@
 			{/if}
 		</div>
 		<div class="cable-actions">
-			<div class="cable-state" role="status">
-				{#if status}
-					{@render status()}
+			<div class="bar-status">
+				<div class="cable-state" class:on={connected} role="status">
+					{#if status}
+						{@render status()}
+					{:else}
+						<span class="status-dot" class:connected aria-hidden="true">●</span>
+						<span>{statusText}</span>
+					{/if}
+				</div>
+				<div class="dirty" class:has={dirty} aria-live="polite" aria-atomic="true">
+					{#if unsavedIndicator}
+						{@render unsavedIndicator()}
+					{:else}
+						{unsavedText}
+					{/if}
+				</div>
+			</div>
+			<div class="bar-tools">
+				{#if audio}
+					{@render audio()}
 				{:else}
-					<span class="status-dot" class:connected aria-hidden="true">●</span>
-					<span>{statusText}</span>
+					<Button
+						size="sm"
+						variant="plate"
+						disabledReason={onAudio ? null : m.fux1_audio_loading()}
+						onclick={() => onAudio?.()}
+					>
+						<span aria-hidden="true">♪</span>
+						{m.chrome_audio()}
+					</Button>
+				{/if}
+				{#if actions}
+					{@render actions()}
+				{:else}
+					<Button
+						size="sm"
+						variant="plate"
+						disabledReason={onNeutro ? null : editorReason}
+						onclick={() => onNeutro?.()}
+					>
+						{m.chrome_neutral()}
+					</Button>
+					<Button
+						size="sm"
+						variant="plate"
+						disabledReason={onPadraoAuri ? null : editorReason}
+						onclick={() => onPadraoAuri?.()}
+					>
+						{m.chrome_default_auri()}
+					</Button>
+					<Button
+						size="sm"
+						variant="primary"
+						class="primary"
+						disabledReason={writeReason}
+						onclick={() => onWrite?.()}
+					>
+						{m.chrome_write()}
+					</Button>
 				{/if}
 			</div>
-			<div class="dirty" class:has={unsaved} aria-live="polite" aria-atomic="true">
-				{#if unsavedIndicator}
-					{@render unsavedIndicator()}
-				{:else if unsaved}
-					{m.chrome_unsaved()}
-				{/if}
+			<div class="bar-meta">
+				{#if account}{@render account()}{/if}
+				<LanguageToggle />
+				{#if help}{@render help()}{/if}
 			</div>
-			{#if audio}
-				{@render audio()}
-			{:else}
-				<button type="button" onclick={() => onAudio?.()} disabled={!onAudio}>
-					<span aria-hidden="true">♪</span>
-					{m.chrome_audio()}
-				</button>
-			{/if}
-			{#if actions}
-				{@render actions()}
-			{:else}
-				<button type="button" onclick={() => onNeutro?.()} disabled={!onNeutro}>
-					{m.chrome_neutral()}
-				</button>
-				<button type="button" onclick={() => onPadraoAuri?.()} disabled={!onPadraoAuri}>
-					{m.chrome_default_auri()}
-				</button>
-				<button
-					type="button"
-					class="primary"
-					onclick={() => onWrite?.()}
-					disabled={writeDisabled || !onWrite}
-				>
-					{m.chrome_write()}
-				</button>
-			{/if}
-			{#if account}{@render account()}{/if}
-			<LanguageToggle />
 		</div>
 	</div>
 </header>
 <div class="bar-space" aria-hidden="true"></div>
 
 <style>
+	/* Material from the mocks' bar: ink-2 with a hairline and a soft top highlight. */
 	.cable-bar {
 		box-sizing: border-box;
 		position: fixed;
 		inset: 0 0 auto;
 		z-index: 60;
-		height: 56px;
-		border-bottom: 1px solid #353530;
-		background: #171715;
-		color: #ece7dd;
-		font-family: var(--ui, 'Geist', system-ui, sans-serif);
+		height: var(--bar-h);
+		border-bottom: 1px solid var(--rule);
+		background: var(--bar-bg);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.03),
+			0 1px 0 rgba(0, 0, 0, 0.6);
+		color: var(--text);
+		font-family: var(--face-body);
 	}
 
 	.bar-space {
-		height: 56px;
+		height: var(--bar-h);
 	}
 
 	.cable-inner {
 		box-sizing: border-box;
 		display: flex;
 		align-items: center;
-		gap: 22px;
-		max-width: 1480px;
+		gap: 20px;
+		max-width: var(--frame-max);
 		height: 100%;
 		margin: auto;
-		padding: 0 24px;
+		padding: 0 var(--gutter);
 		overflow-x: auto;
 		scrollbar-width: thin;
 	}
@@ -135,7 +198,7 @@
 	.wordmark {
 		flex: none;
 		color: inherit;
-		font: italic 27px/1 var(--serif, 'Instrument Serif', Georgia, serif);
+		font: italic 400 var(--fs-wordmark) / 1 var(--face-display);
 		text-decoration: none;
 		white-space: nowrap;
 	}
@@ -145,7 +208,10 @@
 		margin-inline: auto;
 	}
 
-	.cable-actions {
+	.cable-actions,
+	.bar-status,
+	.bar-tools,
+	.bar-meta {
 		display: flex;
 		flex: none;
 		align-items: center;
@@ -153,72 +219,158 @@
 		white-space: nowrap;
 	}
 
-	button {
-		min-height: 32px;
-		padding: 7px 10px;
-		border: 1px solid #57554e;
-		border-radius: 3px;
-		background: transparent;
-		color: inherit;
-		font: 11px/1.2 var(--ui, 'Geist', system-ui, sans-serif);
+	/*
+	 * Bar buttons handed in through snippets as plain <button> get the same plate recipe as
+	 * the bar's own buttons, like the mock's `.cable-actions button` (T1).
+	 */
+	.bar-tools > :global(button:not(.btn)) {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		box-sizing: border-box;
+		min-height: 28px;
+		padding: 0 10px;
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-sm);
+		background: color-mix(in srgb, var(--text) 4%, transparent);
+		box-shadow: var(--bevel);
+		color: var(--text);
+		font: 500 var(--fs-caption) / var(--lh-ui) var(--face-body);
+		white-space: nowrap;
 		cursor: pointer;
 	}
 
-	button:hover:not(:disabled) {
-		border-color: #aaa499;
-	}
-
-	button.primary {
-		border-color: var(--accent, #ff7a2f);
-		background: var(--accent, #ff7a2f);
-		color: #120a05;
-		font-weight: 650;
-	}
-
-	button:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
-
 	.cable-state {
-		padding: 4px 9px;
-		border: 1px solid #353530;
-		border-radius: 999px;
-		color: #b5afa4;
-		font-size: 10.5px;
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		padding: 0 10px;
+		border: 1px solid var(--rule);
+		border-radius: var(--rad-pill);
+		color: var(--state-text);
+		font-size: var(--label-min);
+		line-height: var(--lh-caps);
+	}
+
+	.cable-state.on {
+		border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+		color: var(--accent-text);
 	}
 
 	.status-dot {
 		margin-right: 5px;
-		color: #aaa499;
+		color: var(--muted);
 		font-size: 8px;
 	}
 
 	.status-dot.connected {
-		color: #3ddc97;
+		color: var(--ok);
 	}
 
+	/* Status text, not data: Geist at the label minimum (T4, T5), counts in tabular figures. */
 	.dirty {
-		max-width: 100px;
-		color: #aaa499;
-		font: 9.5px/1.35 var(--mono, 'JetBrains Mono', monospace);
+		max-width: 116px;
+		color: var(--muted);
+		font: 500 var(--label-min) / var(--lh-ui) var(--face-body);
+		font-variant-numeric: tabular-nums;
 		white-space: normal;
 	}
 
 	.dirty.has {
-		color: var(--accent, #ff7a2f);
+		color: var(--accent-text);
 	}
 
-	a:focus-visible,
-	button:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+	.wordmark:focus-visible {
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
 	}
 
+	/*
+	 * Mobile (spec §1.4b, mock biblioteca-mobile-top.png): the actions stay on screen above the
+	 * navigation instead of hiding at the end of one scrolling strip. Rows: wordmark with
+	 * account, language and help; cable status; Áudio, Neutro, Padrão Auri, Gravar no cabo;
+	 * then the navigation, which alone scrolls sideways. The bar is tall here, so it scrolls
+	 * away with the page instead of covering a sixth of the screen.
+	 */
 	@media (max-width: 720px) {
+		.cable-bar {
+			position: relative;
+			height: auto;
+		}
+
+		.bar-space {
+			display: none;
+		}
+
 		.cable-inner {
-			gap: 16px;
-			padding-inline: 14px;
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			grid-template-areas:
+				'brand meta'
+				'status status'
+				'tools tools'
+				'nav nav';
+			align-items: center;
+			gap: 8px 12px;
+			height: auto;
+			padding-top: 8px;
+			overflow: visible;
+		}
+
+		.wordmark {
+			grid-area: brand;
+		}
+
+		.cable-actions {
+			display: contents;
+		}
+
+		.bar-meta {
+			grid-area: meta;
+			justify-self: end;
+			gap: 4px;
+		}
+
+		.bar-status {
+			grid-area: status;
+			flex-wrap: wrap;
+			white-space: normal;
+		}
+
+		.dirty {
+			max-width: none;
+		}
+
+		.bar-tools {
+			grid-area: tools;
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			white-space: normal;
+		}
+
+		.bar-tools > :global(*) {
+			flex: 0 0 auto;
+		}
+
+		/* Touch targets: 44 px on mobile (--hit) */
+		.bar-tools :global(.btn),
+		.bar-tools > :global(button),
+		.bar-meta :global(.btn) {
+			min-height: var(--hit);
+		}
+
+		.bar-meta :global(.btn--icon) {
+			width: var(--hit);
+		}
+
+		.navigation {
+			grid-area: nav;
+			align-self: stretch;
+			margin-inline: calc(-1 * var(--gutter));
+			padding-inline: var(--gutter);
+			overflow-x: auto;
+			border-top: 1px solid var(--rule);
+			scrollbar-width: thin;
 		}
 	}
 </style>
