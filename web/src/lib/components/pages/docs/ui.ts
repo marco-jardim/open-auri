@@ -48,7 +48,13 @@ export function docsUi() {
 		noGain: m.docs_no_gain(),
 		officialPresets: m.docs_official_presets(),
 		descriptionAttribution: m.docs_description_attribution(),
-		licensePending: m.docs_license_pending()
+		licensePending: m.docs_license_pending(),
+		backToTop: m.docs_back_to_top(),
+		copyLink: (section: string) => m.docs_copy_link({ section }),
+		linkCopied: m.docs_link_copied(),
+		linkCopyFailed: m.docs_link_copy_failed(),
+		glossaryInterface: m.docs_glossary_interface(),
+		glossaryTechnical: m.docs_glossary_technical()
 	};
 }
 export type DocsUi = ReturnType<typeof docsUi>;

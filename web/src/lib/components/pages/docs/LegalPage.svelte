@@ -53,50 +53,75 @@
 </main>
 
 <style>
+	/* Typography from the tokens: display title, lede opening, body 15 at --lh-body, ~68ch. */
 	.legal-paper {
+		--legal-measure: 68ch;
 		box-sizing: border-box;
 		max-width: 100%;
 		background: #efe6d2;
 		color: #29251f;
-		padding: 30px max(24px, calc((100% - 860px) / 2)) 60px;
-		font:
-			19px/1.6 'EB Garamond',
-			Georgia,
-			serif;
-		overflow-wrap: anywhere;
+		padding: var(--space-6, 32px) var(--space-5, 24px) var(--space-8, 64px);
+		font: 400 var(--fs-body) / var(--lh-body) var(--face-body);
+		font-kerning: normal;
+		hyphens: auto;
+		overflow-wrap: break-word;
+	}
+	.legal-paper > :global(*) {
+		max-width: var(--legal-measure);
+		margin-inline: auto;
+	}
+	.legal-paper > .table-scroll {
+		max-width: min(100%, 960px);
 	}
 	nav {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 12px 24px;
-		font: 12px/1.6 var(--font-sans, sans-serif);
+		font: 500 var(--fs-small) / var(--lh-small) var(--face-body);
 	}
 	header {
 		text-align: center;
-		padding: 30px 0;
+		padding: var(--space-6, 32px) 0;
 		border-bottom: 3px double #29251f;
-		margin-bottom: 30px;
+		margin-bottom: var(--space-6, 32px);
 	}
 	header p {
-		font: 11px/1.7 var(--font-mono, monospace);
+		margin: 0;
+		color: #6b5e4c;
+		font: 400 var(--fs-eyebrow) / var(--lh-caps) var(--face-data);
+		letter-spacing: var(--tracking-eyebrow, 0.18em);
+		text-transform: uppercase;
+		font-variant-numeric: tabular-nums slashed-zero;
 	}
 	h1 {
-		font:
-			400 clamp(36px, 5vw, 56px)/1.1 'EB Garamond',
-			Georgia,
-			serif;
-		margin: 20px 0;
+		font: 400 var(--fs-display-m) / var(--lh-display-m) var(--journal);
+		letter-spacing: -0.015em;
+		text-wrap: balance;
+		margin: var(--space-4, 16px) 0 0;
+	}
+	/* The opening paragraph reads as the lede; the text itself is literal and unchanged. */
+	header + p {
+		font-size: var(--fs-lede);
+		line-height: var(--lh-lede);
 	}
 	h2 {
-		font-size: 27px;
-		font-weight: 400;
-		margin: 36px 0 16px;
+		font: 400 var(--fs-title) / var(--lh-title) var(--journal);
+		letter-spacing: -0.01em;
+		text-wrap: balance;
+		margin: var(--space-7, 48px) auto var(--space-3, 12px);
 		border-top: 1px solid #ad9c81;
-		padding-top: 20px;
+		padding-top: var(--space-5, 24px);
 	}
 	p,
 	li {
-		margin-bottom: 14px;
+		margin-block: 0 var(--space-3, 12px);
+		text-wrap: pretty;
+	}
+	ul {
+		padding-left: 1.25em;
+	}
+	li::marker {
+		color: #8c2f2f;
 	}
 	a {
 		color: #8c2f2f;
@@ -109,7 +134,7 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font: 13px/1.65 var(--font-sans, sans-serif);
+		font: 400 var(--fs-small) / var(--lh-small) var(--face-body);
 	}
 	th,
 	td {

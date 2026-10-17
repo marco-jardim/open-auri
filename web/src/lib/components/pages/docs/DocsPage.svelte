@@ -4,7 +4,9 @@
 	import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 	import { PolarDiagram } from '#lib/charts/index.ts';
 	import ConfirmDialog from '#lib/components/chrome/ConfirmDialog.svelte';
-	import { creditSources, type DocsContent } from '#lib/content/docs/index.ts';
+	// Only `creditSources` (no prose) from the index; the locale prose arrives as `content` (L7).
+	import { creditSources } from '#lib/content/docs/credits.ts';
+	import type { DocsContent } from '#lib/content/docs/types.ts';
 	import { autoEqMitNotice } from '#lib/content/docs/mit.ts';
 	import { activeSection, isSearchShortcut } from './search.ts';
 	import { auriPreset, softRangeRows, tapeHex, thresholdRows } from './model.ts';
@@ -13,7 +15,10 @@
 	import SearchDialog from './SearchDialog.svelte';
 	import ProtocolWidgets from './ProtocolWidgets.svelte';
 	import { keyboardScroll } from './keyboard-scroll.ts';
+	import { glossaryEntries } from './glossary-entries.ts';
+	import { traceOnce } from './trace.ts';
 
+	type NotifyTone = 'success' | 'error';
 	let {
 		content,
 		ui,
@@ -21,6 +26,7 @@
 		clearDisabled = false,
 		prepareClear,
 		onCleared,
+		notify,
 		getBackends = () => ({
 			local: window.localStorage,
 			session: window.sessionStorage,
@@ -33,8 +39,39 @@
 		clearDisabled?: boolean;
 		prepareClear?: () => void | Promise<void>;
 		onCleared?: () => void;
+		/** Shows a toast when the app's toast store is reachable; returns false otherwise. */
+		notify?: (message: string, tone: NotifyTone) => boolean;
 		getBackends?: () => LocalDataBackends;
 	} = $props();
+	const glossaryTerms = $derived(glossaryEntries());
+	let progress = $state(0);
+	let showTop = $state(false);
+	let barBottom = $state(56);
+	let copyNote = $state('');
+	let copyTimer = 0;
+	let titleHeading: HTMLHeadingElement;
+
+	/** Copies the absolute link to an anchor without touching the document URL or history. */
+	async function copyLink(id: string) {
+		const href = new URL(`#${id}`, window.location.href).href;
+		let message = ui.linkCopied;
+		let tone: NotifyTone = 'success';
+		try {
+			await navigator.clipboard.writeText(href);
+		} catch (cause) {
+			message = ui.linkCopyFailed;
+			tone = 'error';
+			console.warn('Clipboard unavailable for the Docs anchor', cause);
+		}
+		if (notify?.(message, tone)) return;
+		copyNote = message;
+		clearTimeout(copyTimer);
+		copyTimer = window.setTimeout(() => (copyNote = ''), 2600);
+	}
+	function backToTop() {
+		window.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'instant' : 'smooth' });
+		titleHeading.focus({ preventScroll: true });
+	}
 	let searchOpen = $state(false);
 	let confirmOpen = $state(false);
 	let clearing = $state(false);
@@ -84,34 +121,82 @@
 	}
 	onMount(() => {
 		let frame = 0;
+		let offset = 80;
+		let atEnd = false;
+		let dirty = true;
+		let bandKey = '';
+		let sections: HTMLElement[] = [];
+		let sectionObserver: IntersectionObserver | undefined;
+		/** Same rule as before (last heading above the chrome, explicit end), read on demand. */
+		const pick = () => {
+			active = activeSection(
+				sections.map((section) => ({ id: section.id, top: section.getBoundingClientRect().top })),
+				offset,
+				atEnd
+			);
+		};
+		/**
+		 * The current section changes only when a chapter crosses the reading band just below the
+		 * chrome, so the index follows IntersectionObserver instead of reading every chapter on
+		 * every scroll frame. The band is rebuilt only when the chrome or the viewport changes.
+		 */
+		const observeBand = () => {
+			const top = Math.round(offset);
+			const height = Math.max(48, Math.round(window.innerHeight * 0.35));
+			const bottom = Math.max(0, window.innerHeight - top - height);
+			const key = `${top}:${bottom}:${sections.length}`;
+			if (key === bandKey) return;
+			bandKey = key;
+			sectionObserver?.disconnect();
+			sectionObserver = new IntersectionObserver(pick, {
+				root: document,
+				rootMargin: `-${top}px 0px -${bottom}px 0px`,
+				threshold: 0
+			});
+			for (const section of sections) sectionObserver.observe(section);
+		};
 		const update = () => {
 			frame = 0;
-			const offset =
-				(document.querySelector('[data-chrome="bar"]')?.getBoundingClientRect().bottom ?? 56) + 24;
+			barBottom =
+				document.querySelector('[data-chrome="bar"]')?.getBoundingClientRect().bottom ?? 56;
+			offset = barBottom + 24;
 			const padding =
 				Number.parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
 			// Native anchor navigation adds root scroll-padding and section scroll-margin.
 			scrollMargin = Math.max(0, offset - padding);
-			const sections = [...article.querySelectorAll<HTMLElement>('section.chapter')];
-			active = activeSection(
-				sections.map((section) => ({ id: section.id, top: section.getBoundingClientRect().top })),
-				offset,
-				window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2
-			);
+			const root = document.documentElement;
+			const travel = root.scrollHeight - window.innerHeight;
+			// Reading progress is real scroll state: no easing, no transition.
+			progress = travel > 0 ? Math.min(1, Math.max(0, window.scrollY / travel)) : 0;
+			showTop = window.scrollY > window.innerHeight * 0.75;
+			const end = window.scrollY + window.innerHeight >= root.scrollHeight - 2;
+			if (dirty) sections = [...article.querySelectorAll<HTMLElement>('section.chapter')];
+			observeBand();
+			if (dirty || end !== atEnd) {
+				atEnd = end;
+				dirty = false;
+				pick();
+			}
 		};
 		const schedule = () => {
 			if (!frame) frame = requestAnimationFrame(update);
 		};
+		const relayout = () => {
+			dirty = true;
+			schedule();
+		};
 		window.addEventListener('scroll', schedule, { passive: true });
-		window.addEventListener('resize', schedule);
-		const observer = new ResizeObserver(schedule);
+		window.addEventListener('resize', relayout);
+		const observer = new ResizeObserver(relayout);
 		observer.observe(article);
 		update();
 		return () => {
 			window.removeEventListener('scroll', schedule);
-			window.removeEventListener('resize', schedule);
+			window.removeEventListener('resize', relayout);
 			observer.disconnect();
+			sectionObserver?.disconnect();
 			cancelAnimationFrame(frame);
+			clearTimeout(copyTimer);
 		};
 	});
 	async function clear(confirmed: boolean) {
@@ -139,6 +224,12 @@
 	lang={content.locale}
 	style:--docs-scroll-offset={`${scrollMargin}px`}
 >
+	<div
+		class="reading-progress"
+		aria-hidden="true"
+		style:top={`${barBottom}px`}
+		style:transform={`scaleX(${progress})`}
+	></div>
 	<div class="tape-wrap">
 		<p>{ui.tape}</p>
 		<div class="tape" use:keyboardScroll role="region" aria-label={ui.tape}>
@@ -179,7 +270,9 @@
 			</div>
 			<header class="title-block">
 				<p class="reprint">{content.reprint}</p>
-				<h1>{content.titleLead}<br /><em>{content.titleEmphasis}</em></h1>
+				<h1 bind:this={titleHeading} id="docs-top" tabindex="-1">
+					{content.titleLead}<br /><em>{content.titleEmphasis}</em>
+				</h1>
 				<p class="subtitle">{content.subtitle}</p>
 				<p class="byline">{content.introduction}</p>
 			</header>
@@ -187,7 +280,7 @@
 				<figure>
 					<!-- A full 480-unit plot plus separate caption/legend keeps polar labels apart, including at 390px. -->
 					<div class="polar-scroll" use:keyboardScroll role="region" aria-label={ui.polar}>
-						<div class="polar-chart">
+						<div class="polar-chart" use:traceOnce>
 							<PolarDiagram curve={preset} label={ui.polar} description={content.polarCaption} />
 						</div>
 					</div>
@@ -223,15 +316,24 @@
 						aria-labelledby="heading-{section.id}"
 						data-folio={String(index + 2).padStart(3, '0')}
 					>
-						<h2 id="heading-{section.id}">
-							<span class="section-number">{String(index + 1).padStart(2, '0')}</span><a
-								href="#{section.id}"
-								onclick={(event) => {
-									event.preventDefault();
-									void navigate(section.id);
-								}}>{section.title}</a
+						<div class="chapter-head">
+							<h2 id="heading-{section.id}">
+								<span class="section-number">{String(index + 1).padStart(2, '0')}</span><a
+									href="#{section.id}"
+									onclick={(event) => {
+										event.preventDefault();
+										void navigate(section.id);
+									}}>{section.title}</a
+								>
+							</h2>
+							<button
+								type="button"
+								class="anchor-copy"
+								aria-label={ui.copyLink(section.title)}
+								title={ui.copyLink(section.title)}
+								onclick={() => void copyLink(section.id)}><span aria-hidden="true">¶</span></button
 							>
-						</h2>
+						</div>
 						<div class="columns">
 							{#each section.paragraphs as paragraph (paragraph)}<p>{paragraph}</p>{/each}
 							{#if section.items}<ul>
@@ -290,7 +392,32 @@
 											? ui.clearError
 											: ''}
 							</p>
-						{:else if section.id === 'glossario'}<dl>
+						{:else if section.id === 'glossario'}
+							<h3 class="glossary-head">{ui.glossaryInterface}</h3>
+							<dl class="glossary-terms">
+								{#each glossaryTerms as entry (entry.term)}<div
+										class="term"
+										id={entry.id}
+										data-glossary-term={entry.term}
+									>
+										<dt>
+											<a href="#{entry.id}">{entry.title}</a><button
+												type="button"
+												class="anchor-copy"
+												aria-label={ui.copyLink(entry.title)}
+												title={ui.copyLink(entry.title)}
+												onclick={() => void copyLink(entry.id)}
+												><span aria-hidden="true">¶</span></button
+											>
+										</dt>
+										<dd>
+											{entry.body}
+											{#if entry.warning}<strong class="literal">{entry.warning}</strong>{/if}
+										</dd>
+									</div>{/each}
+							</dl>
+							<h3 class="glossary-head">{ui.glossaryTechnical}</h3>
+							<dl>
 								{#each content.glossary as [term, definition] (term)}<div>
 										<dt>{term}</dt>
 										<dd>{definition}</dd>
@@ -333,6 +460,10 @@
 			<div class="endmark"><span>open-auri / 15.X.2026</span><span>FINIS · 021</span></div>
 		</div>
 	</div>
+	{#if showTop}<button type="button" class="to-top" onclick={backToTop}
+			><span aria-hidden="true">↑</span> {ui.backToTop}</button
+		>{/if}
+	<p class="copy-note" role="status">{copyNote}</p>
 </main>
 <SearchDialog
 	{content}
@@ -621,10 +752,154 @@
 			serif;
 		font-variant: small-caps;
 		letter-spacing: 0.055em;
-		margin: 0 0 20px;
+		margin: 0;
 	}
 	h2 a {
 		text-decoration: none;
+	}
+	.chapter-head {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2, 8px);
+		margin: 0 0 20px;
+	}
+	/* Copyable anchor: quiet at rest (the page reads as print), visible on hover and focus. */
+	.anchor-copy {
+		display: inline-grid;
+		place-items: center;
+		flex: none;
+		min-width: var(--hit, 36px);
+		min-height: var(--hit, 36px);
+		padding: 0;
+		border: 0;
+		background: none;
+		color: #8c2f2f;
+		font: 400 var(--fs-title) / 1 var(--journal);
+		opacity: 0;
+		transition: opacity var(--dur-fast) var(--ease-out);
+	}
+	.chapter-head:hover .anchor-copy,
+	.term:hover .anchor-copy,
+	.term:target .anchor-copy,
+	.anchor-copy:focus-visible {
+		opacity: 1;
+	}
+	@media (hover: none) {
+		/* Touch has no hover: the anchor stays visible at full contrast. */
+		.anchor-copy {
+			opacity: 1;
+		}
+	}
+	h1[tabindex]:focus:not(:focus-visible) {
+		outline: none;
+	}
+	.reading-progress {
+		position: fixed;
+		left: 0;
+		right: 0;
+		z-index: 4;
+		height: 2px;
+		background: #8c2f2f;
+		transform-origin: left center;
+		pointer-events: none;
+	}
+	.glossary-head {
+		margin: 8px 0 14px;
+		font: 400 var(--fs-title) / var(--lh-title) var(--journal);
+		font-variant: small-caps;
+		letter-spacing: 0.04em;
+	}
+	.glossary-terms {
+		margin-bottom: 32px;
+	}
+	.term {
+		scroll-margin-top: var(--docs-scroll-offset);
+		padding: 6px 0 6px 12px;
+		border-left: 2px solid transparent;
+	}
+	.term:target {
+		border-left-color: #8c2f2f;
+		background: #8c2f2f0d;
+	}
+	.term dt {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.term dt a {
+		color: #8c2f2f;
+		text-decoration: none;
+	}
+	.term dt a:hover {
+		text-decoration: underline;
+	}
+	.term .anchor-copy {
+		min-width: 28px;
+		min-height: 28px;
+		font-size: var(--fs-lede);
+	}
+	.literal {
+		display: block;
+		margin-top: 8px;
+		color: #8c2f2f;
+	}
+	.to-top {
+		position: fixed;
+		left: max(16px, env(safe-area-inset-left));
+		bottom: calc(16px + env(safe-area-inset-bottom));
+		z-index: 4;
+		min-height: var(--hit, 36px);
+		padding: 0 14px;
+		border: 1px solid #29251f;
+		background: #efe6d2;
+		color: #29251f;
+		font: 500 var(--fs-caption) / 1 var(--face-body);
+		box-shadow: 0 6px 16px -8px #29251f99;
+	}
+	.to-top:hover {
+		color: #8c2f2f;
+		border-color: #8c2f2f;
+	}
+	.copy-note {
+		position: fixed;
+		left: 50%;
+		bottom: calc(16px + env(safe-area-inset-bottom));
+		z-index: 4;
+		margin: 0;
+		padding: 8px 14px;
+		transform: translateX(-50%);
+		background: #29251f;
+		color: #efe6d2;
+		font: 500 var(--fs-small) / var(--lh-small) var(--face-body);
+		pointer-events: none;
+	}
+	.copy-note:empty {
+		opacity: 0;
+	}
+	/* traceOnce (trace.ts): a plotter sweep that reveals the real figure once, left to right. */
+	.paper :global([data-trace='armed'] svg) {
+		clip-path: inset(0 100% 0 0);
+	}
+	.paper :global([data-trace='run'] svg) {
+		animation: docs-trace calc(var(--dur-scene, 0.72s) * 1.5)
+			var(--ease-in-out, cubic-bezier(0.65, 0, 0.35, 1)) both;
+	}
+	@keyframes -global-docs-trace {
+		from {
+			clip-path: inset(0 100% 0 0);
+		}
+		to {
+			clip-path: inset(0 0 0 0);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.paper :global([data-trace] svg) {
+			clip-path: none;
+			animation: none;
+		}
+		.anchor-copy {
+			transition: none;
+		}
 	}
 	.section-number {
 		font: 11px var(--font-mono, monospace);
@@ -863,8 +1138,16 @@
 	@media print {
 		.toc,
 		.tape-wrap,
-		.erase {
+		.erase,
+		.reading-progress,
+		.to-top,
+		.copy-note,
+		.anchor-copy {
 			display: none;
+		}
+		.paper :global([data-trace] svg) {
+			clip-path: none;
+			animation: none;
 		}
 		.doc-layout {
 			display: block;

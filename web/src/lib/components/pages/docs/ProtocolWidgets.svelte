@@ -5,6 +5,7 @@
 	import type { DocsUi } from './ui.ts';
 	import { auriPreset, crcExample, exactNumber, q23Example, reportHex } from './model.ts';
 	import { keyboardScroll } from './keyboard-scroll.ts';
+	import { traceOnce } from './trace.ts';
 	let { ui, content }: { ui: DocsUi; content: DocsContent } = $props();
 	let preamp = $state('−6');
 	let crcInput = $state('123456789');
@@ -21,7 +22,7 @@
 		}).join(' ');
 </script>
 
-<figure class="plate">
+<figure class="plate" use:traceOnce>
 	<ByteMap
 		curve={auriPreset}
 		label={ui.bytes}
@@ -29,7 +30,7 @@
 	/>
 	<figcaption>{ui.bytes} · 0…13 / 14…17 / 18…217 / 218…219</figcaption>
 </figure>
-<figure class="plate framing">
+<figure class="plate framing" use:traceOnce>
 	<ReportTimeline
 		curve={auriPreset}
 		label={ui.framing}
@@ -41,7 +42,7 @@
 	<summary>{ui.reports}</summary>
 	<pre use:keyboardScroll role="region" aria-label={ui.reports}>{reportHex}</pre>
 </details>
-<figure class="plate">
+<figure class="plate" use:traceOnce>
 	<div class="sampling-scene">
 		<svg viewBox="0 0 760 220" role="img" aria-label={ui.sampling}>
 			<title>{ui.sampling}</title>

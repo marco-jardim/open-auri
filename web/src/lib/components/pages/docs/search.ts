@@ -1,13 +1,17 @@
 import type { DocsContent } from '#lib/content/docs/types.ts';
-import { creditSources } from '#lib/content/docs/index.ts';
+import { creditSources } from '#lib/content/docs/credits.ts';
 import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 import { softRangeRows, thresholdRows } from './model.ts';
+import { glossaryEntries } from './glossary-entries.ts';
 
 const normalize = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 export function buildSearchIndex(content: DocsContent) {
 	return content.sections.map((section) => {
 		const additions = {
-			glossario: content.glossary.flat().join(' '),
+			glossario: [
+				...glossaryEntries().flatMap((entry) => [entry.title, entry.body]),
+				...content.glossary.flat()
+			].join(' '),
 			envelope: [
 				content.safetyCaveat,
 				...thresholdRows(content).map((row) => `${row.label} ${row.value}`),
