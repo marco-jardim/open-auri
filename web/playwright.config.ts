@@ -28,6 +28,13 @@ const AUTH_FLOW_SPECS = [
 ];
 // Timing budgets are measured after every other project has finished, so 8 parallel browsers do
 // not steal the main thread from the page under measurement.
+// Caveat (issue #24): perf-desktop and perf-mobile depend on FUNCTIONAL_PROJECTS, and Playwright
+// does not run a project when any test of a dependency fails (after retries). So one functional
+// failure silently drops every perf budget: the report counts them as "did not run", not as
+// failures, and the run fails only for the functional test. Budgets are checked only by a green
+// functional run; to measure them on their own, run the perf projects in a separate invocation
+// that skips the dependencies (CI has no such step today; `npm run test:e2e` runs everything):
+//   npx playwright test --project=perf-desktop --project=perf-mobile --no-deps
 const PERF_SPECS = ['**/perf.spec.ts'];
 const STAGING_SPECS = ['**/staging.spec.ts'];
 const FUNCTIONAL_PROJECTS = ['desktop', 'mobile', 'auth-flow'];

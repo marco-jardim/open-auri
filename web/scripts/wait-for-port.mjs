@@ -11,21 +11,42 @@ if (!Number.isInteger(port) || port <= 0) {
 }
 
 const deadline = Date.now() + timeoutMs;
+// The preview may listen on IPv4 or IPv6 only (on Windows `localhost` often resolves to ::1).
+const HOSTS = ['127.0.0.1', '::1', 'localhost'];
 
-function attempt() {
-	const socket = connect({ port, host: '127.0.0.1' });
-	socket.once('connect', () => {
-		socket.end();
+/** Resolves when `host:port` accepts a connection, rejects on any error. */
+function probe(host) {
+	return new Promise((resolve, reject) => {
+		const socket = connect({ port, host });
+		socket.once('connect', () => {
+			socket.end();
+			resolve(host);
+		});
+		socket.once('error', (error) => {
+			socket.destroy();
+			reject(error);
+		});
+		// A host that neither connects nor refuses must not stall the other probes' retries.
+		socket.setTimeout(2000, () => {
+			socket.destroy();
+			reject(new Error(`connect to ${host}:${port} timed out`));
+		});
+	});
+}
+
+async function attempt() {
+	try {
+		// Succeeds on the first host that connects; rejects only when every host failed.
+		await Promise.any(HOSTS.map(probe));
 		process.exit(0);
-	});
-	socket.once('error', () => {
-		socket.destroy();
-		if (Date.now() > deadline) {
-			console.error(`Port ${port} did not open within ${timeoutMs} ms`);
-			process.exit(1);
-		}
-		setTimeout(attempt, 500);
-	});
+	} catch {
+		// Every host refused (or failed to resolve): retry below.
+	}
+	if (Date.now() > deadline) {
+		console.error(`Port ${port} did not open within ${timeoutMs} ms on ${HOSTS.join(', ')}`);
+		process.exit(1);
+	}
+	setTimeout(attempt, 500);
 }
 
 attempt();
