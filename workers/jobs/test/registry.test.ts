@@ -62,7 +62,9 @@ describe('job registry', () => {
     // The re-gate has its own hourly tick and runs first in it: no daily job can starve it.
     expect(scheduledNames(CRONS.hourly)).toEqual(['regate', 'trades-expire']);
     expect(scheduledNames(CRONS.daily)).not.toContain('regate');
-    expect(scheduledNames(CRONS.quarterHour)).toEqual(['rankings']);
+    // FX4.9: the re-gate also runs every 15 minutes, before rankings (shorter list drain window).
+    expect(scheduledNames(CRONS.quarterHour)).toEqual(['regate', 'rankings']);
+    expect(registry.scheduled[CRONS.quarterHour]?.[0]).toBe(registry.scheduled[CRONS.hourly]?.[0]);
     expect(CRONS).toEqual({
       daily: '5 0 * * *',
       hourly: '0 * * * *',
@@ -72,13 +74,20 @@ describe('job registry', () => {
     expect(registry.queues['access-log']?.name).toBe('access-log-consumer');
   });
 
-  it('gives every job a unique name', () => {
-    const names = [
-      ...Object.values(registry.scheduled).flatMap((jobs) => (jobs ?? []).map((job) => job.name)),
-      ...Object.values(registry.queues).map((job) => job.name),
+  it('gives every job a unique name (one job may be registered on several crons)', () => {
+    const jobs = [
+      ...new Set([
+        ...Object.values(registry.scheduled).flatMap((list) => list ?? []),
+        ...Object.values(registry.queues),
+      ]),
     ];
+    const names = jobs.map((job) => job.name);
     expect(names.length).toBeGreaterThan(0);
     expect(new Set(names).size).toBe(names.length);
+    for (const list of Object.values(registry.scheduled)) {
+      const perCron = (list ?? []).map((job) => job.name);
+      expect(new Set(perCron).size).toBe(perCron.length);
+    }
   });
 
   it('keeps the template crons and the registry in sync in every environment', () => {
@@ -132,6 +141,7 @@ describe('job registry', () => {
       env,
       ctx,
     );
+    const hourlyCount = logs.mock.calls.length;
     await dispatchScheduled(
       createScheduledController({ cron: CRONS.quarterHour, scheduledTime: at }),
       env,
@@ -143,6 +153,10 @@ describe('job registry', () => {
       expect.arrayContaining(['job.regate', 'job.trades_expire', 'job.rankings']),
     );
     expect(events.indexOf('job.regate')).toBeLessThan(events.indexOf('job.trades_expire'));
+    // The quarter-hour tick re-gates first, then materializes the rankings.
+    const quarter = events.slice(hourlyCount);
+    expect(quarter).toContain('job.regate');
+    expect(quarter.indexOf('job.regate')).toBeLessThan(quarter.indexOf('job.rankings'));
   });
 
   it('keeps running the other jobs of a tick when one fails and logs the failure without data', async () => {

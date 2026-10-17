@@ -109,10 +109,19 @@ export type ActivityEventInput = z.output<typeof ActivityEventBody>;
 export const OutboxItem = z.object({ ...eventFields, lineageId: z.string().min(1).max(128) });
 export type OutboxItemInput = z.output<typeof OutboxItem>;
 
-/** Body of `POST /api/v1/me/activity/outbox`; items are validated one by one. */
+/**
+ * Body of `POST /api/v1/me/activity/outbox`; items are validated one by one. `actor` is the
+ * account id the client queued the events for (FX4.10): a batch whose actor is not the session's
+ * user is refused as a whole (see `recordOutbox`). The app's client always sends it; it stays
+ * optional so a tab loaded before FX4.10 keeps working until it reloads.
+ */
 export const OutboxBody = z.object({
+	actor: z.string().min(1).max(128).optional(),
 	events: z.array(z.unknown()).min(1).max(OUTBOX_MAX_ITEMS)
 });
+
+/** `details.reason` of the 409 answered when the outbox actor is not the signed-in user. */
+export const OUTBOX_ACTOR_MISMATCH = 'actor-mismatch';
 
 export type ActivityRejection = 'invalid' | 'too-short' | 'out-of-window' | 'not-found';
 
@@ -292,6 +301,12 @@ export interface OutboxResult {
 export interface OutboxOptions {
 	/** BETTER_AUTH_SECRET; required as soon as one item reaches the event-id claim. */
 	claimSecret?: string;
+	/**
+	 * Account id the client queued the batch for (body `actor`). When given and not `userId`, the
+	 * whole batch is refused with 409 `CONFLICT` (`details.reason: 'actor-mismatch'`) and nothing
+	 * is recorded, claimed or counted: the cookie now belongs to someone else (FX4.10).
+	 */
+	actor?: string;
 	now?: number;
 }
 
@@ -305,7 +320,8 @@ function eventIdOf(item: unknown): string | null {
  * Offline outbox: each item is validated and recorded on its own (partial acceptance). Items are
  * processed in order, so a repeated `eventId` inside one batch is a duplicate too. Every item
  * that passes the cheap checks costs one unit of the per-user daily quota (see the header); once
- * it is spent, that item and the rest answer `limited` without touching D1 again.
+ * it is spent, that item and the rest answer `limited` without touching D1 again. A batch whose
+ * `options.actor` is not `userId` throws 409 before any item is looked at.
  */
 export async function recordOutbox(
 	db: D1Database,
@@ -313,6 +329,9 @@ export async function recordOutbox(
 	items: readonly unknown[],
 	options: OutboxOptions = {}
 ): Promise<OutboxResult[]> {
+	if (options.actor !== undefined && options.actor !== userId) {
+		throw new ApiError(409, 'CONFLICT', { reason: OUTBOX_ACTOR_MISMATCH });
+	}
 	const now = options.now ?? Date.now();
 	let subjectMemo: Promise<string> | null = null;
 	const subject = (): Promise<string> => {

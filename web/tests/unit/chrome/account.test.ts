@@ -4,6 +4,7 @@ import {
 	SESSION_ENDPOINT,
 	fetchAccount,
 	postPolicyAcceptance,
+	probeAccount,
 	signInHref,
 	toAccountSummary,
 	type FetchLike
@@ -88,6 +89,44 @@ describe('fetchAccount', () => {
 		controller.abort();
 		await expect(
 			fetchAccount(async () => {
+				throw new DOMException('aborted', 'AbortError');
+			}, controller.signal)
+		).rejects.toThrow('aborted');
+	});
+});
+
+describe('probeAccount (FX4.10)', () => {
+	test('a successful answer with a user is signed in', async () => {
+		expect(await probeAccount(async () => json({ user: { id: 'u1', username: 'ana' } }))).toEqual({
+			status: 'signed-in',
+			account: { id: 'u1', username: 'ana', emailVerified: false }
+		});
+	});
+
+	test('only a successful answer without a usable session is a definitive sign-out', async () => {
+		expect(await probeAccount(async () => json(null))).toEqual({ status: 'signed-out' });
+		expect(await probeAccount(async () => json({ user: null }))).toEqual({ status: 'signed-out' });
+		expect(await probeAccount(async () => json({ user: { id: '' } }))).toEqual({
+			status: 'signed-out'
+		});
+	});
+
+	test('failures are errors, never signed out', async () => {
+		expect(await probeAccount(async () => json({ error: 'x' }, 503))).toEqual({ status: 'error' });
+		expect(await probeAccount(async () => json(null, 404))).toEqual({ status: 'error' });
+		expect(await probeAccount(async () => new Response('not json'))).toEqual({ status: 'error' });
+		expect(
+			await probeAccount(async () => {
+				throw new TypeError('offline');
+			})
+		).toEqual({ status: 'error' });
+	});
+
+	test('aborts propagate', async () => {
+		const controller = new AbortController();
+		controller.abort();
+		await expect(
+			probeAccount(async () => {
 				throw new DOMException('aborted', 'AbortError');
 			}, controller.signal)
 		).rejects.toThrow('aborted');

@@ -1,5 +1,6 @@
 // T4.4: POST /api/v1/me/activity/outbox: batch of offline events with partial acceptance,
-// bounded age, replay of the whole batch, size limit and authorization.
+// bounded age, replay of the whole batch, size limit and authorization; FX4.10: the batch is
+// bound to its `actor` (409 actor-mismatch, nothing recorded).
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import {
@@ -37,14 +38,14 @@ interface OutboxResponse {
 	results: { index: number; eventId: string | null; status: string; reason?: string }[];
 }
 
-function outbox(auth: AuthLocals, events: unknown) {
+function outbox(auth: AuthLocals, events: unknown, actor?: string) {
 	return POST(
 		routeEvent({
 			method: 'POST',
 			path: '/api/v1/me/activity/outbox',
 			routeId: OUTBOX_ROUTE,
 			locals: auth,
-			body: { events }
+			body: actor === undefined ? { events } : { actor, events }
 		})
 	);
 }
@@ -150,6 +151,57 @@ describe('activity outbox', () => {
 			installBody({ lineageId })
 		]);
 		expect(((await errorCode(refused, 403)) as { code: string }).code).toBe('EMAIL_NOT_VERIFIED');
+	});
+});
+
+describe('activity outbox: batch bound to its actor (FX4.10)', () => {
+	it('records a batch whose actor is the signed-in user', async () => {
+		const owner = await member();
+		const viewer = await member();
+		const { lineageId } = await publish(owner.id);
+		const response = await outbox(signedIn(viewer), [installBody({ lineageId })], viewer.id);
+		expect(response.status).toBe(200);
+		const answer = ((await response.json()) as OutboxResponse).results;
+		expect(answer.map((entry) => entry.status)).toEqual(['recorded']);
+	});
+
+	it('a batch for another account answers 409 actor-mismatch, records nothing', async () => {
+		const owner = await member();
+		const ana = await member();
+		const bia = await member();
+		const { lineageId } = await publish(owner.id);
+		const event = installBody({ lineageId });
+		// Ana's tab flushes after another tab switched the cookie to Bia.
+		const refused = await outbox(signedIn(bia), [event, previewBody({ lineageId })], ana.id);
+		const body = (await errorCode(refused, 409)) as {
+			code: string;
+			details?: { reason?: string };
+		};
+		expect(body.code).toBe('CONFLICT');
+		expect(body.details?.reason).toBe('actor-mismatch');
+		expect(await count('SELECT count(*) AS n FROM activity WHERE user_id = ?', bia.id)).toBe(0);
+		expect(await count('SELECT count(*) AS n FROM activity WHERE user_id = ?', ana.id)).toBe(0);
+		expect(await publicCounts(lineageId)).toEqual({ favorites: 0, previewed: 0, installed: 0 });
+		const biaSubject = await eventClaimSubject(String(env.BETTER_AUTH_SECRET), bia.id);
+		expect(await claimRows(`:${biaSubject}:`)).toBe(0);
+
+		// Nothing was claimed: the same event is still recorded once its owner sends it.
+		const later = await outbox(signedIn(ana), [event], ana.id);
+		expect(later.status).toBe(200);
+		const answer = ((await later.json()) as OutboxResponse).results;
+		expect(answer.map((entry) => entry.status)).toEqual(['recorded']);
+	});
+
+	it('recordOutbox refuses a mismatched actor before looking at any item', async () => {
+		const viewer = await member();
+		const other = await member();
+		await expect(
+			recordOutbox(env.DB, viewer.id, ['garbage'], { actor: other.id })
+		).rejects.toMatchObject({
+			status: 409,
+			code: 'CONFLICT',
+			details: { reason: 'actor-mismatch' }
+		});
 	});
 });
 

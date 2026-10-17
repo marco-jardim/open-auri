@@ -118,7 +118,21 @@ await outbox.purge(); // on sign-out (removes all) or account switch (keeps the 
   (counted in `dropped`); it stops (`signed-out` / `unverified`) if the session changes between
   batches. `pending()` lists only the current account's events. Payloads without an owner (v1,
   before FX4.2) are unreadable and dropped. `SocialSync` calls `purge` when the signed-in account
-  changes (keep the new one) or signs out while online (purge everything).
+  changes (keep the new one) or signs out (purge everything). A sign-out purges only on a
+  **definitive** answer: a session read as signed out is confirmed with `probeAccount`
+  (`#lib/components/chrome/account.ts`), which returns `signed-out` only when the auth API answered
+  successfully without a session and `error` for any failure (offline, HTTP error, bad body). On
+  `error` the queue is kept and the probe is retried when the tab comes back online or visible.
+  `fetchAccount` keeps its old behaviour (any failure reads as signed out) for the other consumers.
+- **The server binds the batch too (FX4.10).** Every POST carries `actor` = the owner of its items.
+  When the session cookie belongs to someone else (another tab switched account while a flush or a
+  stale tab was running), the server answers 409 `CONFLICT` with
+  `details.reason: 'actor-mismatch'` and records, claims and counts nothing. `flush` then stops with
+  status
+  `actor-mismatch` and keeps the items (no backoff; `isActorMismatch(error)` tells the case);
+  `SocialSync` re-probes the session and follows it (switch: purge the old owner's events and flush
+  for the new one; definitive sign-out: purge everything). `SocialSync` also flushes whenever the
+  signed-in account id changes.
 - Each event gets `eventId = crypto.randomUUID()` and `at`; the server deduplicates by `eventId`.
 - Stored in the IndexedDB `outbox` store of `#lib/state` (`type: 'oa.social.outbox'`, `id` =
   `eventId`). `enqueue` never throws (failures logged without PII, result `storage`).
@@ -130,6 +144,17 @@ await outbox.purge(); // on sign-out (removes all) or account switch (keeps the 
   `EMAIL_NOT_VERIFIED` and `BANNED` stop the flush without counting an attempt. It resolves a
   `FlushReport` (`status`, `sent`, `removed`, `dropped`, `kept`, `error?`) and never throws.
 - `pending()` lists the queued events (e.g. "3 atividades aguardando conexão").
+
+### Curve origins per account (FX4.10)
+
+`rememberOrigin` / `originOf` (`origins.ts`) keep the published lineage of a curve by its exact
+bytes. A signed-in account's origins live under `oa.social.origins:<accountId>` (they can hold its
+private lineage ids, e.g. from Minha Biblioteca); the plain `oa.social.origins` key is the
+anonymous one (public/unlisted curves opened while signed out, or before the session is known).
+The account is the one bound by `setOriginsActor` (SocialSync binds the tab's signed-in account;
+`options.actor` overrides it). `purgeOrigins(keep)` removes every other account's key and the
+anonymous key; SocialSync calls it together with the outbox purge (first signed-in account seen,
+switch, definitive sign-out), so another account's private lineage ids are never kept nor read.
 
 ## Offline (plan §3.9: "O social degrada com aviso")
 

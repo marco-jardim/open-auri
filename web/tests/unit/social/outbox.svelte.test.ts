@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { JsonValue, PendingEvent } from '#lib/state/outbox.svelte.ts';
 import {
 	BACKOFF_BASE_MS,
+	OUTBOX_ACTOR_MISMATCH,
 	OUTBOX_BATCH_MAX,
 	OUTBOX_MAX_AGE_MS,
+	isActorMismatch,
 	SOCIAL_OUTBOX_LOCK,
 	SOCIAL_OUTBOX_TYPE,
 	SocialApiError,
@@ -477,6 +479,46 @@ describe('account ownership', () => {
 		const report = await context.outbox.flush(api);
 		expect(report).toMatchObject({ status: 'signed-out', sent: OUTBOX_BATCH_MAX, kept: 5 });
 		expect(batches).toHaveLength(1);
+	});
+
+	it('binds every batch to its owner with `actor` (FX4.10)', async () => {
+		const context = setup();
+		const { api } = fakeApi();
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'L1' });
+		await context.outbox.flush(api);
+		expect(api.postActivityOutbox).toHaveBeenCalledWith(expect.any(Array), { actor: 'user-a' });
+		const controller = new AbortController();
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'L2' });
+		await context.outbox.flush(api, { signal: controller.signal });
+		expect(api.postActivityOutbox).toHaveBeenLastCalledWith(expect.any(Array), {
+			actor: 'user-a',
+			signal: controller.signal
+		});
+	});
+
+	it("keeps the owner's items without backoff when the server answers actor-mismatch", async () => {
+		const context = setup();
+		const mismatch = new SocialApiError(409, 'CONFLICT', { reason: OUTBOX_ACTOR_MISMATCH });
+		const { api } = fakeApi(() => Promise.reject(mismatch));
+		expect(isActorMismatch(mismatch)).toBe(true);
+		expect(isActorMismatch(new SocialApiError(409, 'CONFLICT'))).toBe(false);
+		expect(isActorMismatch(new SocialApiError(409, 'CONFLICT', { reason: 'other' }))).toBe(false);
+		for (let index = 0; index < OUTBOX_BATCH_MAX + 5; index += 1) {
+			context.advance(1);
+			await context.outbox.enqueue({ kind: 'installed', lineageId: `L${index}` });
+		}
+		const report = await context.outbox.flush(api);
+		expect(report).toMatchObject({
+			status: 'actor-mismatch',
+			sent: 0,
+			removed: 0,
+			kept: OUTBOX_BATCH_MAX + 5
+		});
+		// One request only; nothing removed or postponed: the items wait for their owner.
+		expect(api.postActivityOutbox).toHaveBeenCalledTimes(1);
+		const pending = await context.outbox.pending();
+		expect(pending).toHaveLength(OUTBOX_BATCH_MAX + 5);
+		expect(pending.every((item) => item.attempts === 0 && item.owner === 'user-a')).toBe(true);
 	});
 
 	it('drops stored items without an owner (v1, before FX4.2) instead of sending them', async () => {

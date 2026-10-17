@@ -30,7 +30,7 @@ import {
 	retractCurve,
 	type ForkBody
 } from '#lib/server/social/curves.ts';
-import { checkCurve, regateStale } from '#lib/server/social/gate.ts';
+import { checkCurve, gateVersion, regateStale } from '#lib/server/social/gate.ts';
 import {
 	favoriteLineage,
 	listLibrary,
@@ -675,7 +675,9 @@ async function linkableVersion(): Promise<{ versionId: string; curveId: string }
 	const owner = await seedUser({});
 	const s1 = randomS1();
 	const id = await curveId(s1);
-	const pub = await publish(owner.id, { curve: curveInput({ id, s1 }) });
+	// Cached under the current gate version: the OG store re-gates stale verdicts (FX4.9).
+	const curve = curveInput({ id, s1, gateVer: await gateVersion() });
+	const pub = await publish(owner.id, { curve });
 	return { versionId: pub.versionId, curveId: id };
 }
 

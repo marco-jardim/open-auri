@@ -1,12 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
 import { curveId, encodeS1 } from 'open-auri/share';
 import {
 	ORIGINS_KEY,
 	ORIGINS_MAX,
 	originOf,
+	originsKey,
+	purgeOrigins,
 	rememberOrigin,
-	type OriginsStorage
+	setOriginsActor,
+	type OriginsStorage,
+	type PurgeableOriginsStorage
 } from '#lib/social/origins.ts';
 
 function memory(): OriginsStorage & { map: Map<string, string> } {
@@ -66,5 +70,73 @@ describe('curve origins', () => {
 		expect(Object.keys(stored)).toHaveLength(ORIGINS_MAX);
 		expect(stored[id]).toBeDefined();
 		expect(stored['c0']).toBeUndefined();
+	});
+});
+
+function purgeable(): PurgeableOriginsStorage & { map: Map<string, string> } {
+	const base = memory();
+	return {
+		...base,
+		removeItem: (key) => void base.map.delete(key),
+		key: (index) => [...base.map.keys()][index] ?? null,
+		get length() {
+			return base.map.size;
+		}
+	};
+}
+
+describe('curve origins per account (FX4.10)', () => {
+	afterEach(() => {
+		setOriginsActor(null);
+	});
+
+	it('keeps each account under its own key; anonymous uses the plain key', async () => {
+		const storage = memory();
+		expect(originsKey(null)).toBe(ORIGINS_KEY);
+		expect(originsKey('user-a')).toBe(`${ORIGINS_KEY}:user-a`);
+
+		await rememberOrigin({ s1: neutro, lineageId: 'lin_pub', versionId: 'v1' }, { storage });
+		setOriginsActor('user-a');
+		await rememberOrigin({ s1: padrao, lineageId: 'lin_priv', versionId: 'v1' }, { storage });
+		expect(storage.map.get(originsKey('user-a'))).toContain('lin_priv');
+		expect(storage.map.get(ORIGINS_KEY)).not.toContain('lin_priv');
+
+		// The bound account reads only its own origins.
+		expect((await originOf(padrao, { storage }))?.lineageId).toBe('lin_priv');
+		expect(await originOf(neutro, { storage })).toBeNull();
+		// Another account and anonymous never see them.
+		expect(await originOf(padrao, { storage, actor: 'user-b' })).toBeNull();
+		expect(await originOf(padrao, { storage, actor: null })).toBeNull();
+		expect((await originOf(neutro, { storage, actor: null }))?.lineageId).toBe('lin_pub');
+
+		setOriginsActor(null);
+		expect(await originOf(padrao, { storage })).toBeNull();
+	});
+
+	it("purges every other account's origins and the anonymous key", () => {
+		const storage = purgeable();
+		storage.map.set(ORIGINS_KEY, '{}');
+		storage.map.set(originsKey('user-a'), '{}');
+		storage.map.set(originsKey('user-b'), '{}');
+		storage.map.set('oa.other', 'x');
+
+		expect(purgeOrigins('user-a', { storage })).toBe(2);
+		expect([...storage.map.keys()].sort()).toEqual([originsKey('user-a'), 'oa.other'].sort());
+
+		expect(purgeOrigins(null, { storage })).toBe(1);
+		expect([...storage.map.keys()]).toEqual(['oa.other']);
+		expect(purgeOrigins(null, { storage: null })).toBe(0);
+	});
+
+	it('logs a purge failure without throwing', () => {
+		const storage = purgeable();
+		storage.map.set(originsKey('user-b'), '{}');
+		storage.removeItem = () => {
+			throw new DOMException('denied', 'SecurityError');
+		};
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		expect(purgeOrigins('user-a', { storage })).toBe(0);
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('social.origins.purge'));
+		warn.mockRestore();
 	});
 });

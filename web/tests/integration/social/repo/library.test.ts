@@ -180,7 +180,8 @@ describe('shares', () => {
 	it('funnel: anonymous daily counters and attributed users once per kind, owner only', async () => {
 		const owner = await seedUser();
 		const sharer = await seedUser();
-		const visitor = await seedUser();
+		// Attributed users are counted only while verified, not banned and public (FX4.9).
+		const visitor = await member({ activity: 'public' });
 		const { lineageId, versionId } = await publish(owner.id);
 		const id = sid('share');
 		const created = await createShare(env.DB, {

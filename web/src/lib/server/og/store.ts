@@ -1,15 +1,16 @@
 // OG images in R2 (T4.7): `og/<curveId>-<versionId>.png` (./keys.ts). The bytes of a key never
 // change for a given card layout (versions are append-only, curves content-addressed, and the card
 // carries no author: FX4.3). Visibility is always checked first, through the repository
-// (`getVersionForViewer` with the anonymous viewer = linkable lineage, gate_ok = 1), so a private,
-// hidden, retracted or gate-rejected version is never rendered nor served, even when its PNG is
-// still in R2 (the jobs Worker's `og-sweep` deletes such objects). A stored object of another card
+// (`readCurrentVersion` with the anonymous viewer = linkable lineage, gate_ok = 1; a verdict cached
+// under a stale gate version is re-gated first, FX4.9), so a private, hidden, retracted or
+// gate-rejected version is never rendered nor served, even when its PNG is still in R2 (the jobs
+// Worker's `og-sweep` deletes such objects). A stored object of another card
 // layout (`customMetadata.card`) is treated as a miss and overwritten. Concurrency: two
 // simultaneous misses render twice at most and write the same bytes (the SVG and the renderer are
 // deterministic), so the last write wins harmlessly.
 import { strongEtag } from '#lib/server/api/cache.ts';
 import type { ServerEnv } from '#lib/server/env.ts';
-import { getVersionForViewer } from '#lib/server/social/repo.ts';
+import { readCurrentVersion, type PublicReadDeps } from '#lib/server/social/shares.ts';
 import { ANONYMOUS_VIEWER } from '#lib/server/social/types.ts';
 import { isCurrentCard, OG_CARD_VERSION, ogKey } from './keys.ts';
 import { loadOgFonts, renderPng, toArrayBuffer, type OgAssets } from './render.ts';
@@ -44,6 +45,8 @@ export interface OgDeps {
 	render?: (svg: string) => Promise<Uint8Array>;
 	/** Runs before a render (cache miss only), e.g. the per-IP rate limit. May throw. */
 	beforeRender?: () => Promise<void>;
+	/** Gate used to refresh a stale verdict before serving (tests; default: the core's gate). */
+	gate?: PublicReadDeps['gate'];
 }
 
 export type OgResult =
@@ -72,7 +75,12 @@ export async function getOrCreateOg(
 	deps: OgDeps = {}
 ): Promise<OgResult> {
 	if (!ID_PATTERN.test(versionId)) return { ok: false, code: 'not-found' };
-	const view = await getVersionForViewer(env.db, versionId, ANONYMOUS_VIEWER);
+	const view = await readCurrentVersion(
+		env.db,
+		versionId,
+		ANONYMOUS_VIEWER,
+		deps.gate ? { gate: deps.gate } : {}
+	);
 	if (!view) return { ok: false, code: 'not-found' };
 	const key = ogKey(view.curve.id, view.version.id);
 

@@ -486,11 +486,17 @@ export function createSocialApi(options: SocialApiOptions = {}) {
 			call<Page<ActivityRecord>>('GET', `/me/activity${queryString({ ...query })}`, opts),
 		deleteMyActivity: (filter: MyActivityDeleteFilter = {}, opts: RequestOptions = {}) =>
 			call<{ deleted: number }>('DELETE', `/me/activity${queryString({ ...filter })}`, opts),
-		postActivityOutbox: (events: OutboxItemInput[], opts: RequestOptions = {}) =>
-			call<{ results: OutboxResult[] }>('POST', '/me/activity/outbox', {
-				...opts,
-				body: { events }
-			}),
+		/** `actor`: account id the events were queued for; another session answers 409 (FX4.10). */
+		postActivityOutbox: (
+			events: OutboxItemInput[],
+			opts: RequestOptions & { actor?: string } = {}
+		) => {
+			const { actor, ...rest } = opts;
+			return call<{ results: OutboxResult[] }>('POST', '/me/activity/outbox', {
+				...rest,
+				body: actor === undefined ? { events } : { actor, events }
+			});
+		},
 		myLibrary: (query: LibraryQuery, opts: RequestOptions = {}) =>
 			call<LibraryPage>('GET', `/me/library${queryString({ ...query })}`, opts),
 		mergeLibrary: (items: LibraryMergeItem[], opts: RequestOptions = {}) =>

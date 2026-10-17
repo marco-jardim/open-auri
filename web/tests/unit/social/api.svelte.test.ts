@@ -152,6 +152,14 @@ describe('createSocialApi: request shapes', () => {
 		expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
 			events: [{ lineageId: 'L1', kind: 'installed', eventId, at: 5 }]
 		});
+		// FX4.10: the batch carries its actor in the body.
+		await api.postActivityOutbox([{ lineageId: 'L1', kind: 'installed', eventId, at: 5 }], {
+			actor: 'user-a'
+		});
+		expect(JSON.parse(String(calls[2]?.init.body))).toEqual({
+			actor: 'user-a',
+			events: [{ lineageId: 'L1', kind: 'installed', eventId, at: 5 }]
+		});
 	});
 
 	it('puts the Turnstile token in x-turnstile-token', async () => {

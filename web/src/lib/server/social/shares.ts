@@ -15,7 +15,9 @@ import { z } from 'zod';
 import type { SharedCurveData, SharedCurveMeta } from '#lib/components/pages/shared-curve/types.ts';
 import { ApiError } from '#lib/server/api/errors.ts';
 import { apiRateLimit, type ApiLimitEnv, type ApiRateRule } from '#lib/server/api/limits.ts';
+import type { gateForWrite } from 'open-auri/safety';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
+import { isGateCurrent, regateCurve } from '#lib/server/social/gate.ts';
 import { isLineageOwner, isRetractedLinkable } from '#lib/server/social/queries/shares.ts';
 import {
 	createShare,
@@ -24,9 +26,68 @@ import {
 	getShareStats,
 	getVersionForViewer,
 	isSocialId,
-	recordShareEvent
+	recordShareEvent,
+	type VersionView
 } from '#lib/server/social/repo.ts';
-import type { SocialErrorCode, Viewer } from '#lib/server/social/types.ts';
+import type { LineageSummary, SocialErrorCode, Viewer } from '#lib/server/social/types.ts';
+
+/** Injection points of the by-id public reads (tests); the defaults are the production ones. */
+export interface PublicReadDeps {
+	/** Gate used when a stored verdict is stale (default: the core's gateForWrite). */
+	gate?: typeof gateForWrite;
+	now?: number;
+}
+
+function regateOptions(deps: PublicReadDeps): { gate?: typeof gateForWrite } {
+	return deps.gate ? { gate: deps.gate } : {};
+}
+
+/**
+ * The lineage as `viewer` may read it by id, with a current gate verdict on its head (FX4.9): a
+ * head cached under a stale gate version is re-gated and the lineage read again, so a head the
+ * current gate rejects is not linkable (null for anyone but the owner or an admin). Same rule as
+ * `readLineage` in curves.ts. The id must already be valid (`isSocialId`).
+ */
+export async function readCurrentLineage(
+	db: D1Database,
+	lineageId: string,
+	viewer: Viewer,
+	deps: PublicReadDeps = {}
+): Promise<LineageSummary | null> {
+	const summary = await getLineageForViewer(db, lineageId, viewer);
+	if (!summary || (await isGateCurrent(summary.curve.gateVer))) return summary;
+	await regateCurve(db, summary.curve, deps.now ?? Date.now(), regateOptions(deps));
+	return getLineageForViewer(db, lineageId, viewer);
+}
+
+/**
+ * A version as `viewer` may read it by id, with current gate verdicts (FX4.9): its own curve and,
+ * for an older version, the head curve of its lineage (the head decides linkability) are re-gated
+ * when stale, then the version is read again. Null when it is not readable afterwards.
+ */
+export async function readCurrentVersion(
+	db: D1Database,
+	versionId: string,
+	viewer: Viewer,
+	deps: PublicReadDeps = {}
+): Promise<VersionView | null> {
+	const view = await getVersionForViewer(db, versionId, viewer);
+	if (!view) return null;
+	const now = deps.now ?? Date.now();
+	let regated = false;
+	if (!(await isGateCurrent(view.curve.gateVer))) {
+		await regateCurve(db, view.curve, now, regateOptions(deps));
+		regated = true;
+	}
+	if (view.lineage.headVersion !== view.version.id) {
+		const lineage = await getLineageForViewer(db, view.lineage.id, viewer);
+		if (lineage && !(await isGateCurrent(lineage.curve.gateVer))) {
+			await regateCurve(db, lineage.curve, now, regateOptions(deps));
+			regated = true;
+		}
+	}
+	return regated ? getVersionForViewer(db, versionId, viewer) : view;
+}
 
 export const SHARE_CHANNELS = ['link', 'qr', 'whatsapp', 'x', 'email', 'other'] as const;
 export type ShareChannel = (typeof SHARE_CHANNELS)[number];
@@ -190,16 +251,18 @@ export type SharedCurveResult =
  * Data of `/c/[id]` for `viewer`, read through the repository visibility (linkable, or the
  * viewer's own). Retracted lineages are `gone` (410); unknown, private or moderated ones are
  * `not-found`. With a share of this lineage that names a version the viewer can read, that
- * version is shown; otherwise the head.
+ * version is shown; otherwise the head. Stale gate verdicts are refreshed first (FX4.9), so a
+ * head the current gate rejects is `not-found` for anyone but the owner or an admin.
  */
 export async function loadSharedCurve(
 	db: D1Database,
 	viewer: Viewer,
 	lineageId: string,
-	shareId: string | null
+	shareId: string | null,
+	deps: PublicReadDeps = {}
 ): Promise<SharedCurveResult> {
 	if (!isSocialId(lineageId)) return { kind: 'not-found' };
-	const lineage = await getLineageForViewer(db, lineageId, viewer);
+	const lineage = await readCurrentLineage(db, lineageId, viewer, deps);
 	if (!lineage) {
 		return (await isRetractedLinkable(db, lineageId)) ? { kind: 'gone' } : { kind: 'not-found' };
 	}
@@ -211,7 +274,7 @@ export async function loadSharedCurve(
 	let version = lineage.head;
 	let curve = lineage.curve;
 	if (ownShare?.versionId && ownShare.versionId !== lineage.head.id) {
-		const view = await getVersionForViewer(db, ownShare.versionId, viewer);
+		const view = await readCurrentVersion(db, ownShare.versionId, viewer, deps);
 		if (view && view.version.lineageId === lineage.id) {
 			version = view.version;
 			curve = view.curve;

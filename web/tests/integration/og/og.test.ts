@@ -16,6 +16,7 @@ import {
 	type OgEnv
 } from '#lib/server/og/store.ts';
 import { NAME_MAX_CHARS, ogSvg, type OgSvgInput } from '#lib/server/og/svg.ts';
+import { gateVersion } from '#lib/server/social/gate.ts';
 import { randomIp, signedOut } from '../api/helpers.ts';
 import { curveInput, publish, seedUser, type Published } from '../social/repo/helpers.ts';
 
@@ -82,7 +83,9 @@ async function published(
 ): Promise<Published> {
 	const owner = await seedUser({});
 	const s1 = randomS1();
-	return publish(owner.id, { visibility, curve: curveInput({ id: await curveId(s1), s1 }) });
+	// Cached under the current gate version: the store re-gates stale verdicts (FX4.9).
+	const curve = curveInput({ id: await curveId(s1), s1, gateVer: await gateVersion() });
+	return publish(owner.id, { visibility, curve });
 }
 
 async function setLineage(

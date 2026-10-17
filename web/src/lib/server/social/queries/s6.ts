@@ -9,8 +9,9 @@ import { S6_CHOICES, isOneOf, type S6Choice } from '#lib/server/social/types.ts'
 export const S6_LOOKUP_CHUNK = 500;
 
 /**
- * The ids in `ids` that are the curve of some version of a publicly LISTABLE lineage. Curves of
- * unlisted, private, retracted, hidden or banned-owner lineages are never returned.
+ * The ids in `ids` that are the curve of the HEAD version of a publicly LISTABLE lineage. Curves
+ * of older versions (FX4.9), and of unlisted, private, retracted, hidden or banned-owner lineages,
+ * are never returned.
  */
 export async function listableCurveIds(
 	db: D1Database,
@@ -23,7 +24,7 @@ export async function listableCurveIds(
 		const rows = await all<{ id: string }>(
 			sql(
 				db,
-				'SELECT DISTINCT v.curve_id AS id FROM versions v JOIN lineages l ON l.id = v.lineage_id ' +
+				'SELECT DISTINCT v.curve_id AS id FROM lineages l JOIN versions v ON v.id = l.head_version ' +
 					`WHERE v.curve_id IN (SELECT value FROM json_each(?)) AND ${publicLineageSql('l')}`,
 				JSON.stringify(chunk)
 			)

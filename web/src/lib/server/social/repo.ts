@@ -1563,10 +1563,15 @@ export async function getShareStats(
 				shareId
 			)
 		),
+		// Attributed users are counted only while they still are: counted (verified, not banned)
+		// and with public activity. A user who later went private or was banned drops out (FX4.9).
 		all<{ kind: string; n: number }>(
 			sql(
 				db,
-				'SELECT kind, count(*) AS n FROM share_event_users WHERE share_id = ? GROUP BY kind',
+				'SELECT seu.kind AS kind, count(*) AS n FROM share_event_users seu ' +
+					'JOIN "user" su ON su."id" = seu.user_id ' +
+					`WHERE seu.share_id = ? AND ${countedUserSql('su')} ` +
+					`AND su."activity_visibility" = 'public' GROUP BY seu.kind`,
 				shareId
 			)
 		)

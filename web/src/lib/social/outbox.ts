@@ -15,6 +15,12 @@
 // only the current account's items and removes those of any other owner, so on a shared browser
 // one person's activity is never recorded as another's. `purge` clears what the current account
 // does not own (everything when signed out).
+//
+// The server binds the batch too (FX4.10): every POST carries `actor` = the owner of its items, and
+// a session cookie that now belongs to someone else (another tab switched account while this flush
+// or a stale tab was running) answers 409 `actor-mismatch` and records nothing. The flush then
+// stops with status `actor-mismatch`, keeps the items (no backoff) and the caller re-reads the
+// session (SocialSync does).
 import type { JsonValue, PendingEvent } from '#lib/state/outbox.svelte.ts';
 import { SocialApiError, type OutboxItemInput, type OutboxResult, type SocialApi } from './api.ts';
 
@@ -62,8 +68,30 @@ export type EnqueueRefusal = 'signed-out' | 'unverified' | 'too-short' | 'invali
 export type EnqueueResult =
 	{ ok: true; event: QueuedActivity } | { ok: false; reason: EnqueueRefusal };
 
+/**
+ * `actor-mismatch`: the server's session is not the account the items belong to (409, FX4.10);
+ * nothing was recorded and the items stay queued for their owner. Re-read the session.
+ */
 export type FlushStatus =
-	'done' | 'signed-out' | 'unverified' | 'offline' | 'busy' | 'aborted' | 'error';
+	| 'done'
+	| 'signed-out'
+	| 'unverified'
+	| 'offline'
+	| 'busy'
+	| 'aborted'
+	| 'actor-mismatch'
+	| 'error';
+
+/** `details.reason` of the server's 409 when the batch `actor` is not the session's user. */
+export const OUTBOX_ACTOR_MISMATCH = 'actor-mismatch';
+
+/** True for the 409 that refuses a batch sent under another account's session (FX4.10). */
+export function isActorMismatch(error: unknown): boolean {
+	if (!(error instanceof SocialApiError) || error.code !== 'CONFLICT') return false;
+	const details: unknown = error.details;
+	if (typeof details !== 'object' || details === null || Array.isArray(details)) return false;
+	return Reflect.get(details, 'reason') === OUTBOX_ACTOR_MISMATCH;
+}
 
 export interface FlushReport {
 	status: FlushStatus;
@@ -401,13 +429,19 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 			try {
 				const answer = await api.postActivityOutbox(
 					batch.map((entry) => toWire(entry.item)),
-					signal ? { signal } : {}
+					signal ? { signal, actor: owner } : { actor: owner }
 				);
 				results = Array.isArray(answer.results) ? answer.results : [];
 			} catch (error) {
 				report.kept += due.length - start;
 				if (isAbort(error)) {
 					report.status = 'aborted';
+					break;
+				}
+				if (isActorMismatch(error)) {
+					// The cookie belongs to another account now: nothing was recorded; the items wait
+					// for their owner (no backoff) and the caller re-reads the session.
+					report.status = 'actor-mismatch';
 					break;
 				}
 				report.status = 'error';

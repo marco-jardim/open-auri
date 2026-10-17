@@ -37,25 +37,49 @@ export function toAccountSummary(body: unknown): AccountSummary | null {
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 /**
- * Session probe for prerendered pages (their layout data is built without a session).
- * Any failure (offline, no auth service in dev, non-JSON) reads as signed out.
+ * Outcome of a session probe that keeps "nobody is signed in" apart from "could not tell"
+ * (FX4.10): `signed-out` only when the auth API answered successfully without a usable session;
+ * `error` for any failure (offline, HTTP error, no auth service in dev, non-JSON body).
  */
-export async function fetchAccount(
+export type AccountProbeResult =
+	{ status: 'signed-in'; account: AccountSummary } | { status: 'signed-out' } | { status: 'error' };
+
+/**
+ * Session probe with the definitive/failed distinction. Callers that destroy local per-account
+ * data on sign-out must act only on `signed-out`. Rethrows an abort; never throws otherwise.
+ */
+export async function probeAccount(
 	fetcher: FetchLike = (input, init) => fetch(input, init),
 	signal?: AbortSignal
-): Promise<AccountSummary | null> {
+): Promise<AccountProbeResult> {
+	let body: unknown;
 	try {
 		const response = await fetcher(SESSION_ENDPOINT, {
 			credentials: 'same-origin',
 			headers: { accept: 'application/json' },
 			...(signal ? { signal } : {})
 		});
-		if (!response.ok) return null;
-		return toAccountSummary(await response.json());
+		if (!response.ok) return { status: 'error' };
+		body = await response.json();
 	} catch (error) {
 		if (error instanceof DOMException && error.name === 'AbortError') throw error;
-		return null;
+		return { status: 'error' };
 	}
+	const account = toAccountSummary(body);
+	return account === null ? { status: 'signed-out' } : { status: 'signed-in', account };
+}
+
+/**
+ * Session probe for prerendered pages (their layout data is built without a session).
+ * Any failure (offline, no auth service in dev, non-JSON) reads as signed out; use
+ * `probeAccount` to tell a failure from a definitive signed-out answer.
+ */
+export async function fetchAccount(
+	fetcher: FetchLike = (input, init) => fetch(input, init),
+	signal?: AbortSignal
+): Promise<AccountSummary | null> {
+	const result = await probeAccount(fetcher, signal);
+	return result.status === 'signed-in' ? result.account : null;
 }
 
 function isAuthPage(pathname: string): boolean {

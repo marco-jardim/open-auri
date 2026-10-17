@@ -23,7 +23,29 @@ import {
 	serverEnv,
 	signedOut
 } from '../../api/helpers.ts';
-import { publish, seedUser } from '../repo/helpers.ts';
+import { gateVersion } from '#lib/server/social/gate.ts';
+import {
+	ban,
+	curveInput,
+	member,
+	publish as publishFixture,
+	seedUser,
+	type Published
+} from '../repo/helpers.ts';
+
+/**
+ * Publishes with a verdict cached under the CURRENT gate version: /c/[id] re-gates stale verdicts
+ * (FX4.9), and the fixture S1 is not decodable, so a stale fixture would be re-gated as rejected.
+ */
+async function publish(
+	ownerUserId: string,
+	options: NonNullable<Parameters<typeof publishFixture>[1]> = {}
+): Promise<Published> {
+	return publishFixture(ownerUserId, {
+		...options,
+		curve: options.curve ?? curveInput({ gateVer: await gateVersion() })
+	});
+}
 
 type Handler = (event: unknown) => Promise<Response>;
 type Load = (event: unknown) => Promise<unknown>;
@@ -168,7 +190,8 @@ describe('shares service', () => {
 	it('stats are for the lineage author only and split anonymous opens from attributed users', async () => {
 		const owner = await seedUser({});
 		const sharer = await seedUser({});
-		const viewer = await seedUser({});
+		// Attributed users are counted only while their activity is public (FX4.9).
+		const viewer = await member({ activity: 'public' });
 		const pub = await publish(owner.id);
 		const { shareId } = await createShareFor(env.DB, owner.id, { lineageId: pub.lineageId });
 		const now = Date.UTC(2026, 9, 16, 12);
@@ -204,6 +227,48 @@ describe('shares service', () => {
 
 		await expectApiError(() => shareStatsFor(env.DB, sharer.id, shareId), 404, 'NOT_FOUND');
 		await expectApiError(() => shareStatsFor(env.DB, owner.id, 'nope'), 404, 'NOT_FOUND');
+	});
+
+	it('FX4.9: attributed users who went private, were banned or are unverified are not counted', async () => {
+		const owner = await seedUser({});
+		const pub = await publish(owner.id);
+		const { shareId } = await createShareFor(env.DB, owner.id, { lineageId: pub.lineageId });
+		const now = Date.UTC(2026, 9, 16, 12);
+		const stays = await member({ activity: 'public' });
+		const goesPrivate = await member({ activity: 'public' });
+		const banned = await member({ activity: 'public' });
+		const unverified = await member({ activity: 'public' });
+		for (const user of [stays, goesPrivate, banned, unverified]) {
+			expect(
+				await recordShareEvent(env.DB, {
+					shareId,
+					kind: 'previewed',
+					userId: user.id,
+					day: utcDay(now),
+					at: now
+				})
+			).toBe(true);
+		}
+		expect((await shareStatsFor(env.DB, owner.id, shareId)).attributed.previewed).toBe(4);
+
+		await env.DB.prepare('UPDATE "user" SET "activity_visibility" = \'private\' WHERE "id" = ?')
+			.bind(goesPrivate.id)
+			.run();
+		await ban(banned.id);
+		await env.DB.prepare('UPDATE "user" SET "emailVerified" = 0 WHERE "id" = ?')
+			.bind(unverified.id)
+			.run();
+		expect((await shareStatsFor(env.DB, owner.id, shareId)).attributed).toEqual({
+			previewed: 1,
+			installed: 0,
+			favorited: 0
+		});
+
+		// Back to public: counted again (the event row was never lost).
+		await env.DB.prepare('UPDATE "user" SET "activity_visibility" = \'public\' WHERE "id" = ?')
+			.bind(goesPrivate.id)
+			.run();
+		expect((await shareStatsFor(env.DB, owner.id, shareId)).attributed.previewed).toBe(2);
 	});
 
 	it('FX4.6: a non-author sharer gets 404 on the stats of their own share (not even opens)', async () => {

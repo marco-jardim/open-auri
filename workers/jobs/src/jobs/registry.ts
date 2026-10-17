@@ -72,7 +72,10 @@ export class JobFailedError extends Error {
  *   step, ~150 ms per curve, time-budgeted in regate.ts and only non-zero after a threshold
  *   change; on its own cron so no daily job can starve it, and the next hour continues where it
  *   stopped), then S7 trade expiry and re-pairing.
- * - Every 15 minutes: rankings materialization.
+ * - Every 15 minutes: the re-gate again (FX4.9: shortens the window in which lists still show a
+ *   head the current gate rejects; idempotent, so its overlap with the hourly run at minute 0
+ *   only re-reads an empty stale set or redoes the same verdicts), THEN rankings
+ *   materialization, so a fresh ranking already sees the refreshed verdicts.
  * Queue: the access-log consumer.
  * Each invocation runs under `limits.cpu_ms` of wrangler.template.jsonc.
  */
@@ -86,7 +89,7 @@ export const registry: JobRegistry = {
       ogSweepJob,
     ],
     [CRONS.hourly]: [regateJob, tradesExpireJob],
-    [CRONS.quarterHour]: [createRankingsJob(runRankingsJob)],
+    [CRONS.quarterHour]: [regateJob, createRankingsJob(runRankingsJob)],
   },
   queues: {
     'access-log': accessLogConsumerJob,

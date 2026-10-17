@@ -29,30 +29,27 @@
 	let chosen = $state<string[]>([]);
 	let name = $state('');
 	let description = $state('');
-	let visibility = $state<Visibility>('public');
+	let visibility = $state<Visibility>('private');
 	let busy = $state(false);
 	let message = $state('');
 
 	$effect(() => {
 		if (!session.verified || !online) return;
-		const nickname = session.nickname;
-		void load(nickname);
+		void load();
 	});
 
-	async function load(nickname: string | null) {
+	async function load() {
 		try {
 			const [shelf, list] = await Promise.all([
 				api.myLibrary({ shelf: 'favorites', limit: 100 }),
-				nickname ? api.getUserList(nickname, 'packs', { limit: 50 }) : null
+				api.myPacks({ limit: 50 })
 			]);
 			favorites = shelf.items;
-			if (list) {
-				packs = list.items.map((pack) => ({
-					id: pack.id,
-					name: pack.name,
-					description: pack.description
-				}));
-			}
+			packs = list.items.map((pack) => ({
+				id: pack.id,
+				name: pack.name,
+				description: pack.description
+			}));
 		} catch (error) {
 			message = errorText(error);
 		}

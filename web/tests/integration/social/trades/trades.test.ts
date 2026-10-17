@@ -28,8 +28,29 @@ import { DELETE as cancelRoute } from '../../../../src/routes/api/v1/trades/[id]
 import { POST as scoreRoute } from '../../../../src/routes/api/v1/trades/[id]/score/+server.ts';
 import { POST as joinRoute } from '../../../../src/routes/api/v1/trades/+server.ts';
 import { GET as meRoute } from '../../../../src/routes/api/v1/trades/me/+server.ts';
+import { gateVersion } from '#lib/server/social/gate.ts';
 import { count, locals, nick, origin, uid, type SeededUser } from '../../account/helpers.ts';
-import { ban, publish, seedUser, type Published } from '../repo/helpers.ts';
+import {
+	ban,
+	curveInput,
+	publish as publishFixture,
+	seedUser,
+	type Published
+} from '../repo/helpers.ts';
+
+/**
+ * Publishes with a verdict cached under the CURRENT gate version: S7 re-gates stale verdicts
+ * (FX4.9), and the fixture S1 is not decodable, so a stale fixture would be re-gated as rejected.
+ */
+async function publish(
+	ownerUserId: string,
+	options: NonNullable<Parameters<typeof publishFixture>[1]> = {}
+): Promise<Published> {
+	return publishFixture(ownerUserId, {
+		...options,
+		curve: options.curve ?? curveInput({ gateVer: await gateVersion() })
+	});
+}
 
 const BASE = Date.now() + 1000 * TRADE_TTL_MS;
 let slot = 0;

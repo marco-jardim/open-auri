@@ -2,7 +2,9 @@
 // (ownership, public listing and gate verdict of a version), the pairing candidates (other users,
 // other lineages, both lineages still tradeable, curves still approved, both users verified and
 // not banned), the waiting trades the hourly job retries, the partners that stopped qualifying,
-// and the partner facts shown after the reveal. Visibility comes from the predicates of repo.ts.
+// and the partner facts shown after the reveal; plus the gate cache (`gate_ver`) of the curves a
+// trade rests on, so the service re-gates stale verdicts before trusting them (FX4.9).
+// Visibility comes from the predicates of repo.ts.
 // The only write is `cancelPairWithUnavailablePartner` (one conditional UPDATE).
 import type { D1Database } from '@cloudflare/workers-types';
 import { all, first, run, sql } from '#lib/server/db.ts';
@@ -48,6 +50,22 @@ export interface TradeTarget {
 	tradeable: boolean;
 	/** The curve of this version passed the gate (stored verdict). */
 	gateOk: boolean;
+	/**
+	 * Gate cache of the curves the verdicts above rest on (this version's curve and the head's):
+	 * the service re-gates a stale one and reads the target again (FX4.9).
+	 */
+	curves: CurveGateRef[];
+}
+
+/** A curve and the gate version its cached verdict was computed under. */
+export interface CurveGateRef {
+	curveId: string;
+	gateVer: string;
+}
+
+/** A curve a trade's eligibility rests on (see `tradeCurveGates`). */
+export interface TradeCurveGateRef extends CurveGateRef {
+	tradeId: string;
 }
 
 /** The version to trade (`versionId`, or the head when null) of `lineageId`, or null. */
@@ -64,15 +82,23 @@ export async function findTradeTarget(
 		listable: number;
 		tradeable: number;
 		gate_ok: number;
+		curve_id: string;
+		gate_ver: string;
+		head_curve_id: string | null;
+		head_gate_ver: string | null;
 	}>(
 		sql(
 			db,
 			'SELECT l.id AS lineage_id, v.id AS version_id, ' +
 				'(l.owner_user_id IS NOT NULL AND l.owner_user_id = ?) AS own, ' +
 				`(${publicLineageSql('l')}) AS listable, ` +
-				`(${tradeableLineageSql('l', '?')}) AS tradeable, c.gate_ok AS gate_ok ` +
+				`(${tradeableLineageSql('l', '?')}) AS tradeable, c.gate_ok AS gate_ok, ` +
+				'c.id AS curve_id, c.gate_ver AS gate_ver, ' +
+				'hc.id AS head_curve_id, hc.gate_ver AS head_gate_ver ' +
 				'FROM lineages l JOIN versions v ON v.lineage_id = l.id AND v.id = COALESCE(?, l.head_version) ' +
-				'JOIN curves c ON c.id = v.curve_id WHERE l.id = ?',
+				'JOIN curves c ON c.id = v.curve_id ' +
+				'LEFT JOIN versions hv ON hv.id = l.head_version LEFT JOIN curves hc ON hc.id = hv.curve_id ' +
+				'WHERE l.id = ?',
 			userId,
 			userId,
 			versionId,
@@ -80,14 +106,51 @@ export async function findTradeTarget(
 		)
 	);
 	if (!row) return null;
+	const curves: CurveGateRef[] = [{ curveId: row.curve_id, gateVer: row.gate_ver }];
+	if (row.head_curve_id !== null && row.head_gate_ver !== null) {
+		curves.push({ curveId: row.head_curve_id, gateVer: row.head_gate_ver });
+	}
 	return {
 		lineageId: row.lineage_id,
 		versionId: row.version_id,
 		own: row.own === 1,
 		listable: row.listable === 1,
 		tradeable: row.tradeable === 1,
-		gateOk: row.gate_ok === 1
+		gateOk: row.gate_ok === 1,
+		curves
 	};
+}
+
+/**
+ * Gate cache of the curves the eligibility of each trade in `tradeIds` rests on: the curve of its
+ * traded version and the head curve of its lineage, with the trade each one belongs to. Unordered,
+ * possibly with repeated curves. Internal use (no owner check): callers pass trade ids they
+ * already scoped (the caller's own trades, their partners, or pairing candidates).
+ */
+export async function tradeCurveGates(
+	db: D1Database,
+	tradeIds: readonly string[]
+): Promise<TradeCurveGateRef[]> {
+	if (tradeIds.length === 0) return [];
+	const ids = JSON.stringify([...tradeIds]);
+	const where = 'x.id IN (SELECT value FROM json_each(?))';
+	const rows = await all<{ trade_id: string; curve_id: string; gate_ver: string }>(
+		sql(
+			db,
+			'SELECT x.id AS trade_id, c.id AS curve_id, c.gate_ver AS gate_ver FROM trades x ' +
+				`JOIN versions v ON v.id = x.version_id JOIN curves c ON c.id = v.curve_id WHERE ${where} ` +
+				'UNION ALL SELECT x.id AS trade_id, hc.id AS curve_id, hc.gate_ver AS gate_ver FROM trades x ' +
+				'JOIN lineages l ON l.id = x.lineage_id JOIN versions hv ON hv.id = l.head_version ' +
+				`JOIN curves hc ON hc.id = hv.curve_id WHERE ${where}`,
+			ids,
+			ids
+		)
+	);
+	return rows.map((row) => ({
+		tradeId: row.trade_id,
+		curveId: row.curve_id,
+		gateVer: row.gate_ver
+	}));
 }
 
 /**

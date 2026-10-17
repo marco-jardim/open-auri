@@ -95,10 +95,24 @@ Use the predicates of `repo.ts`; never rewrite them.
   isolate during a deploy cannot flip a curve back to a stale verdict.
 - **Lazy re-gate:** every by-id read or action of `curves.ts` (curve read, history, fork, append,
   retract, restore, visibility) re-gates a head or requested version whose verdict is not current
-  (`regateCurve`) and reads it again, so a head that now fails is not linkable.
+  (`regateCurve`) and reads it again, so a head that now fails is not linkable. The other by-id
+  public reads do the same (FX4.9): `/c/[id]` (`loadSharedCurve` through `readCurrentLineage` /
+  `readCurrentVersion` in `shares.ts`), the OG image (`og/store.ts`, which also re-gates the head
+  of an older version) and S7 (`trades.ts`: the join target, the own trade and the candidates
+  before pairing, and the partner's curve before it is served; at most `TRADE_REGATE_PER_READ`
+  partner curves per read, a partner still stale is withheld for that read). A head the current
+  gate rejects is then 404 / not tradeable / withheld.
 - **Job:** `regateStale` (jobs Worker, `regate`) drains the rest within a wall-clock budget
   (`REGATE_BUDGET_MS`, 20 s), heads of linkable lineages first, then oldest
-  (`listStaleCurvesByPriority` in `queries/curves.ts`).
+  (`listStaleCurvesByPriority` in `queries/curves.ts`). It runs hourly AND every 15 minutes
+  (before rankings on the quarter-hour tick).
+- **Accepted decision: list drain window.** Lists (feed, rankings, profiles, packs, S6 eligibility)
+  and the hourly S7 pairing retry (`retryWaitingPairs`) read the STORED verdict and never run the
+  gate (a list page would need ~150 ms of CPU per stale head). After a gate change, a head the new
+  gate rejects can still appear in a list until the job reaches it: up to ~15 minutes when the
+  stale set fits one run's budget (about 130 curves per 20 s run), longer for a larger backlog
+  (linkable heads go first). Opening any such item by id re-gates it at once and returns 404,
+  so no S1 of a rejected head is served by id, by OG or by S7 during the window.
 - **CPU quota:** every attempt that reaches the gate through the curves service (publish, version,
   fork; accepted or rejected) counts toward `DAILY_GATE_ATTEMPT_QUOTA` per user (D1 sliding window,
   429 `QUOTA_EXCEEDED`), on top of the successful-publication quota.

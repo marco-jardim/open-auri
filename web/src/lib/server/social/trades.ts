@@ -10,13 +10,24 @@
 // same batch as the second score), it also sees the partner's nickname, the lineage when it can
 // be linked, and both scores. Trades expire 72 h after joining or after pairing (hourly job).
 //
+//
+// Gate verdicts (FX4.9): every verdict S7 relies on (the traded version's curve and its lineage's
+// head curve) is re-gated first when cached under a stale gate version: on join (target), before
+// pairing (own trade and candidates; a candidate still stale is skipped) and before serving a
+// partner's curve (at most TRADE_REGATE_PER_READ curves per read; a partner whose curve is still
+// stale is withheld for that read, never served). The hourly job's pairing retry never runs the
+// gate: it trusts stored verdicts like the lists do (drain window, README.md "Gate cache").
+//
 // No SvelteKit or API-kit runtime imports: the jobs Worker imports this module as well.
 import type { D1Database } from '@cloudflare/workers-types';
+import type { gateForWrite } from 'open-auri/safety';
 import type { ApiErrorCode } from '#lib/server/api/errors.ts';
+import { isGateCurrent, regateCurve } from '#lib/server/social/gate.ts';
 import {
 	cancelTrade as repoCancelTrade,
 	createTrade,
 	expireTrades,
+	getCurve,
 	getTradeForUser,
 	isSocialId,
 	listOwnTrades,
@@ -30,7 +41,9 @@ import {
 	listWaitingTradeIds,
 	readTradeState,
 	revealedPartnerFacts,
+	tradeCurveGates,
 	unavailablePartnerTradeIds,
+	type CurveGateRef,
 	type RevealedPartnerFacts
 } from '#lib/server/social/queries/trades.ts';
 import {
@@ -45,6 +58,80 @@ import {
 export const TRADE_PAIR_ATTEMPTS = 5;
 /** Waiting trades the hourly job retries per run. */
 export const TRADE_RETRY_LIMIT = 50;
+/** Stale partner curves re-gated per trade read (~150 ms of CPU each); the rest are withheld. */
+export const TRADE_REGATE_PER_READ = 4;
+
+/** Injection points (tests); the defaults are the production ones. */
+export interface TradeDeps {
+	/** Gate used when a stored verdict is stale (default: the core's gateForWrite). */
+	gate?: typeof gateForWrite;
+}
+
+interface Refreshed {
+	/** Curves re-gated by this call. */
+	regated: number;
+	/** Ids of the stale curves left as they were (over `max`, or missing). */
+	left: Set<string>;
+}
+
+/**
+ * Re-gates the curves among `refs` cached under a stale gate version, each once and at most
+ * `max` of them; the stale ones beyond `max` are reported in `left`.
+ */
+async function refreshCurves(
+	db: D1Database,
+	refs: readonly CurveGateRef[],
+	now: number,
+	deps: TradeDeps,
+	max: number = Number.POSITIVE_INFINITY
+): Promise<Refreshed> {
+	const seen = new Set<string>();
+	const left = new Set<string>();
+	let regated = 0;
+	for (const ref of refs) {
+		if (seen.has(ref.curveId)) continue;
+		seen.add(ref.curveId);
+		if (await isGateCurrent(ref.gateVer)) continue;
+		const record = regated < max ? await getCurve(db, ref.curveId) : null;
+		if (!record) {
+			left.add(ref.curveId);
+			continue;
+		}
+		await regateCurve(db, record, now, deps.gate ? { gate: deps.gate } : {});
+		regated++;
+	}
+	return { regated, left };
+}
+
+/** Ids among `tradeIds` with a curve still cached under a stale gate version. */
+async function staleTradeIds(db: D1Database, tradeIds: readonly string[]): Promise<Set<string>> {
+	const stale = new Set<string>();
+	for (const ref of await tradeCurveGates(db, tradeIds)) {
+		if (!stale.has(ref.tradeId) && !(await isGateCurrent(ref.gateVer))) stale.add(ref.tradeId);
+	}
+	return stale;
+}
+
+/**
+ * Pairing candidates of `tradeId` whose verdicts are current: stale candidates are re-gated and
+ * the list read again; a candidate still stale afterwards (a newcomer of the second read) is
+ * skipped, never paired on a stale verdict.
+ */
+async function currentCandidates(
+	db: D1Database,
+	tradeId: string,
+	now: number,
+	limit: number,
+	deps: TradeDeps
+): Promise<string[]> {
+	let candidates = await listPairCandidates(db, tradeId, now, limit);
+	if (candidates.length === 0) return candidates;
+	const refreshed = await refreshCurves(db, await tradeCurveGates(db, candidates), now, deps);
+	if (refreshed.regated === 0) return candidates;
+	candidates = await listPairCandidates(db, tradeId, now, limit);
+	const stale = await staleTradeIds(db, candidates);
+	return candidates.filter((id) => !stale.has(id));
+}
 
 export type TradeErrorCode =
 	| 'invalid-input'
@@ -116,12 +203,16 @@ export interface TradeDto {
 function toDto(
 	view: TradeView,
 	facts: RevealedPartnerFacts | undefined,
-	unavailable: boolean
+	unavailable: boolean,
+	withheld: boolean
 ): TradeDto {
 	let partner: TradeDto['partner'] = null;
 	let status = view.status;
 	if (unavailable) {
 		if (status === 'matched') status = 'cancelled';
+	} else if (withheld) {
+		// A partner verdict still stale (re-gate budget of this read spent): not served this time.
+		partner = null;
 	} else if (view.partner && view.status === 'revealed') {
 		const { lineageId, versionId } = view.partner;
 		partner = {
@@ -156,34 +247,64 @@ function toDto(
 /**
  * DTOs of the caller's trades. The partner's lineage is re-checked on every read: when it no
  * longer qualifies, its curve is withheld, and a matched pair is cancelled (conditional UPDATE).
+ * Stale partner verdicts are re-gated first (FX4.9, at most TRADE_REGATE_PER_READ curves); a
+ * partner whose verdict is still stale is withheld for this read (never served, never cancelled).
  */
-async function toDtos(db: D1Database, userId: string, views: TradeView[]): Promise<TradeDto[]> {
-	const paired = views
-		.filter((view) => view.status === 'matched' || view.status === 'revealed')
-		.map((view) => view.id);
-	const unavailable = await unavailablePartnerTradeIds(db, userId, paired);
+async function toDtos(
+	db: D1Database,
+	userId: string,
+	views: TradeView[],
+	now: number,
+	deps: TradeDeps
+): Promise<TradeDto[]> {
+	const pairedViews = views.filter(
+		(view) => view.status === 'matched' || view.status === 'revealed'
+	);
+	const paired = pairedViews.map((view) => view.id);
+	const partnerIds = pairedViews.flatMap((view) => (view.matchId === null ? [] : [view.matchId]));
+	const partnerRefs = await tradeCurveGates(db, partnerIds);
+	const { left } = await refreshCurves(db, partnerRefs, now, deps, TRADE_REGATE_PER_READ);
+	const stalePartners = new Set(
+		partnerRefs.filter((ref) => left.has(ref.curveId)).map((ref) => ref.tradeId)
+	);
+	const withheld = new Set(
+		pairedViews
+			.filter((view) => view.matchId !== null && stalePartners.has(view.matchId))
+			.map((view) => view.id)
+	);
+	// A withheld partner is judged on its next read, never on a stale verdict.
+	const unavailable = await unavailablePartnerTradeIds(
+		db,
+		userId,
+		paired.filter((id) => !withheld.has(id))
+	);
 	for (const view of views) {
 		if (view.status === 'matched' && unavailable.has(view.id)) {
 			await cancelPairWithUnavailablePartner(db, userId, view.id);
 		}
 	}
 	const revealed = views
-		.filter((view) => view.status === 'revealed' && !unavailable.has(view.id))
+		.filter(
+			(view) => view.status === 'revealed' && !unavailable.has(view.id) && !withheld.has(view.id)
+		)
 		.map((view) => view.id);
 	const facts = await revealedPartnerFacts(db, userId, revealed);
-	return views.map((view) => toDto(view, facts.get(view.id), unavailable.has(view.id)));
+	return views.map((view) =>
+		toDto(view, facts.get(view.id), unavailable.has(view.id), withheld.has(view.id))
+	);
 }
 
 /** The caller's trade as a DTO, or null when it does not exist or is someone else's. */
 export async function getMyTrade(
 	db: D1Database,
 	userId: string,
-	tradeId: string
+	tradeId: string,
+	deps: TradeDeps & { now?: number } = {}
 ): Promise<TradeDto | null> {
 	if (!isSocialId(tradeId)) return null;
 	const view = await getTradeForUser(db, tradeId, userId);
 	if (!view) return null;
-	const [dto] = await toDtos(db, userId, [view]);
+	const [dto] = await toDtos(db, userId, [view], deps.now ?? Date.now(), deps);
 	return dto ?? null;
 }
 
@@ -191,15 +312,18 @@ export async function getMyTrade(
  * Tries to pair the waiting trade `tradeId` with the oldest eligible waiting trades at `now`.
  * Each try is the repository's atomic primitive; a candidate taken by someone else meanwhile just
  * fails and the next one is tried. `matched` also when another join paired this trade first.
+ * Stale verdicts of this trade and of the candidates are re-gated first (FX4.9).
  */
 export async function pairWaitingTrade(
 	db: D1Database,
 	tradeId: string,
 	now: number,
-	attempts: number = TRADE_PAIR_ATTEMPTS
+	attempts: number = TRADE_PAIR_ATTEMPTS,
+	deps: TradeDeps = {}
 ): Promise<PairResult> {
 	const limit = Math.min(Math.max(Math.trunc(attempts), 1), 20);
-	const candidates = await listPairCandidates(db, tradeId, now, limit);
+	await refreshCurves(db, await tradeCurveGates(db, [tradeId]), now, deps);
+	const candidates = await currentCandidates(db, tradeId, now, limit, deps);
 	for (const candidateId of candidates) {
 		if (await tryPairTrades(db, tradeId, candidateId, now)) {
 			return { status: 'matched', matchId: candidateId };
@@ -222,14 +346,18 @@ export interface JoinOptions {
 	attempts?: number;
 	/** Trade id (tests); a random UUID by default. */
 	id?: string;
+	/** Gate used when a stored verdict is stale (tests; default: the core's gateForWrite). */
+	gate?: TradeDeps['gate'];
 }
 
 /**
  * Joins the queue with a version (`versionId`, or the head) of a lineage that is publicly
  * listable, or the caller's own while active and not hidden by moderation, whose curve passed the
- * gate; then tries to pair at once. Errors: `invalid-input`, `not-found` (missing; unlisted or
- * private and not own; own but retracted or hidden by moderation), `gate-rejected`,
- * `already-active`.
+ * gate; then tries to pair at once. Stale verdicts of the version's curve and of the head curve
+ * are re-gated first and the target read again (FX4.9). Errors: `invalid-input`, `not-found`
+ * (missing; unlisted or private and not own; own but retracted or hidden by moderation; someone
+ * else's lineage whose head the current gate rejects), `gate-rejected` (also the caller's own
+ * lineage whose curve the current gate now rejects), `already-active`.
  */
 export async function joinTrade(
 	db: D1Database,
@@ -242,7 +370,11 @@ export async function joinTrade(
 	if (!isSocialId(input.lineageId) || (versionId !== null && !isSocialId(versionId))) {
 		return { ok: false, code: 'invalid-input' };
 	}
-	const target = await findTradeTarget(db, userId, input.lineageId, versionId);
+	const deps: TradeDeps = options.gate ? { gate: options.gate } : {};
+	let target = await findTradeTarget(db, userId, input.lineageId, versionId);
+	if (target && (await refreshCurves(db, target.curves, now, deps)).regated > 0) {
+		target = await findTradeTarget(db, userId, input.lineageId, versionId);
+	}
 	if (!target || !target.tradeable) return { ok: false, code: 'not-found' };
 	if (!target.gateOk) return { ok: false, code: 'gate-rejected' };
 
@@ -259,27 +391,34 @@ export async function joinTrade(
 		// The lineage or curve changed between the check and the insert.
 		return { ok: false, code: 'not-found' };
 	}
-	await pairWaitingTrade(db, created.value.id, now, options.attempts);
-	const dto = await getMyTrade(db, userId, created.value.id);
+	await pairWaitingTrade(db, created.value.id, now, options.attempts, deps);
+	const dto = await getMyTrade(db, userId, created.value.id, { ...deps, now });
 	return dto ? { ok: true, value: dto } : { ok: false, code: 'not-found' };
 }
 
 /**
  * The caller scores the partner's curve (integer 1-5), once. The second score of a pair reveals
  * both trades in the same batch. Errors: `invalid-input` (score), `not-found` (no such trade of
- * the caller), `duplicate` (already scored), `not-active` (not matched, or expired).
+ * the caller), `duplicate` (already scored), `not-active` (not matched, or expired). The
+ * partner's stale verdicts are re-gated first (FX4.9).
  */
 export async function scoreMyTrade(
 	db: D1Database,
 	userId: string,
 	tradeId: string,
 	score: number,
-	now: number = Date.now()
+	now: number = Date.now(),
+	deps: TradeDeps = {}
 ): Promise<TradeResult<{ revealed: boolean; trade: TradeDto }>> {
 	if (!Number.isInteger(score) || score < 1 || score > 5) {
 		return { ok: false, code: 'invalid-input' };
 	}
 	if (!isSocialId(tradeId)) return { ok: false, code: 'not-found' };
+	// Refreshing a cached verdict is harmless whoever owns the trade; the checks below are scoped.
+	const state = await readTradeState(db, tradeId);
+	if (state?.matchId) {
+		await refreshCurves(db, await tradeCurveGates(db, [state.matchId]), now, deps);
+	}
 	// A partner whose lineage stopped qualifying ends the pair instead of being scored.
 	if (
 		(await unavailablePartnerTradeIds(db, userId, [tradeId])).has(tradeId) &&
@@ -294,7 +433,7 @@ export async function scoreMyTrade(
 		// The score is valid, so 'invalid-input' means the trade is not matched or expired.
 		return { ok: false, code: 'not-active' };
 	}
-	const trade = await getMyTrade(db, userId, tradeId);
+	const trade = await getMyTrade(db, userId, tradeId, { ...deps, now });
 	if (!trade) return { ok: false, code: 'not-found' };
 	return { ok: true, value: { revealed: scored.value.revealed, trade } };
 }
@@ -315,7 +454,8 @@ export async function cancelMyTrade(
 export async function listMyTrades(
 	db: D1Database,
 	userId: string,
-	page: PageRequest = {}
+	page: PageRequest = {},
+	deps: TradeDeps & { now?: number } = {}
 ): Promise<TradeResult<{ items: TradeDto[]; nextCursor: string | null }>> {
 	let views: { items: TradeView[]; nextCursor: string | null };
 	try {
@@ -329,7 +469,10 @@ export async function listMyTrades(
 	}
 	return {
 		ok: true,
-		value: { items: await toDtos(db, userId, views.items), nextCursor: views.nextCursor }
+		value: {
+			items: await toDtos(db, userId, views.items, deps.now ?? Date.now(), deps),
+			nextCursor: views.nextCursor
+		}
 	};
 }
 
@@ -341,6 +484,9 @@ export function expireOverdueTrades(db: D1Database, now: number): Promise<number
 /**
  * Retries pairing of up to `limit` waiting trades, oldest first (trades that missed each other,
  * e.g. when every candidate tried at join time was taken meanwhile). Returns the pairs made.
+ * Batch path: it never runs the gate and pairs on the stored verdicts, like the lists (the regate
+ * job refreshes stale ones every 15 min; README.md, "Gate cache", list drain window). Every
+ * served trade still re-gates the partner's curve before showing it (toDtos).
  */
 export async function retryWaitingPairs(
 	db: D1Database,

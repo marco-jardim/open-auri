@@ -1,7 +1,8 @@
 <script lang="ts">
 	// Offer to merge the anonymous browser library into the account (T4.14). Never automatic: the
 	// banner appears after sign-in while local items are not merged, and only a click sends them,
-	// in batches of at most 100. Rejected items stay local only. The flag is kept per account.
+	// in batches of at most 20, continuing quota retries while they make progress. Rejected items
+	// stay local only. The flag is kept per account.
 	import { m } from '#lib/paraglide/messages.js';
 	import type { MergeReport, SocialApi } from '#lib/social/index.ts';
 	import {

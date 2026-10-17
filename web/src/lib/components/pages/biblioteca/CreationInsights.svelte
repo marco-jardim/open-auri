@@ -76,19 +76,27 @@
 
 	$effect(() => {
 		void reload;
-		const ids = shareIds;
+		const client = api;
 		const controller = new AbortController();
-		for (const shareId of ids) {
-			api.shareStats(shareId, { signal: controller.signal }).then(
-				(funnel) => {
-					funnels = { ...funnels, [shareId]: funnel };
-				},
-				(error: unknown) => {
-					if (isAbort(error)) return;
-					funnels = { ...funnels, [shareId]: errorKind(error) };
-				}
-			);
-		}
+		const requested: Record<string, true> = {};
+		// Adding a share must not abort in-flight stats or refetch existing shares. Only an
+		// explicit reload (or a new API) resets this request set and its controller.
+		$effect(() => {
+			for (const shareId of shareIds) {
+				if (requested[shareId]) continue;
+				requested[shareId] = true;
+				client.shareStats(shareId, { signal: controller.signal }).then(
+					(funnel) => {
+						if (controller.signal.aborted) return;
+						funnels = { ...funnels, [shareId]: funnel };
+					},
+					(error: unknown) => {
+						if (controller.signal.aborted || isAbort(error)) return;
+						funnels = { ...funnels, [shareId]: errorKind(error) };
+					}
+				);
+			}
+		});
 		return () => controller.abort();
 	});
 

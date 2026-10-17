@@ -17,13 +17,25 @@
 	// FX4.2: queued activity belongs to the account that acted. When the signed-in account goes
 	// away (sign-out) or changes (switch), the events it does not own are purged here; the outbox's
 	// own flush also drops other owners' events, so nothing is ever sent as someone else.
+	// FX4.10: a session read as signed out is confirmed with a probe that tells a definitive
+	// "nobody is signed in" from a failure (`probeAccount`); only the former purges (a failed probe
+	// keeps the queue and is confirmed again when the tab comes back online or visible). The
+	// community origins (`#lib/social/origins.ts`) are bound to the same account and purged with
+	// the outbox. A flush answered `actor-mismatch` (the cookie belongs to another account now)
+	// re-reads the session; an account switch flushes for the new account.
 	import { untrack, type Snippet } from 'svelte';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
-	import type { AccountSummary } from '#lib/components/chrome/account.ts';
+	import {
+		probeAccount,
+		type AccountProbeResult,
+		type AccountSummary
+	} from '#lib/components/chrome/account.ts';
 	import {
 		createSocialApi,
 		createSocialOutbox,
 		createSocialSession,
+		purgeOrigins,
+		setOriginsActor,
 		type OutboxStore,
 		type SocialApi,
 		type SocialOutbox,
@@ -36,6 +48,7 @@
 		session: givenSession,
 		api: givenApi,
 		outbox: givenOutbox,
+		probe = (signal: AbortSignal) => probeAccount(undefined, signal),
 		children
 	}: {
 		app?: ClientApp | null;
@@ -45,12 +58,15 @@
 		api?: Pick<SocialApi, 'postActivityOutbox'>;
 		/** Injected outbox (tests); default: one over `app.state.outbox`. */
 		outbox?: Pick<SocialOutbox, 'flush' | 'pending' | 'purge'> | null;
+		/** Session probe that tells signed out from a failure; default `probeAccount`. */
+		probe?: (signal: AbortSignal) => Promise<AccountProbeResult>;
 		children?: Snippet<[SocialSyncStatus]>;
 	} = $props();
 
 	const session = untrack(() => givenSession ?? createSocialSession());
 	const api = untrack(() => givenApi ?? createSocialApi());
 	const ownsSession = untrack(() => givenSession === undefined);
+	const controller = new AbortController();
 
 	let cache: { store: OutboxStore; outbox: SocialOutbox } | null = null;
 	const outbox = $derived.by(() => {
@@ -82,6 +98,7 @@
 		if (destroyed) return;
 		last = report;
 		await countPending(target);
+		if (report.status === 'actor-mismatch') void recheck();
 	}
 
 	async function purge(target: Pick<SocialOutbox, 'pending' | 'purge'>, keep: string | null) {
@@ -89,50 +106,127 @@
 		if (!destroyed) await countPending(target);
 	}
 
+	// Outbox purge asked for before the outbox existed (`undefined` = none).
+	let deferredPurge: string | null | undefined;
+	function purgeQueue(keep: string | null) {
+		const target = untrack(() => outbox);
+		if (target) void purge(target, keep);
+		else deferredPurge = keep;
+	}
+	$effect(() => {
+		const target = outbox;
+		if (!target) return;
+		untrack(() => {
+			if (deferredPurge === undefined) return;
+			const keep = deferredPurge;
+			deferredPurge = undefined;
+			void purge(target, keep);
+		});
+	});
+
+	/** Asks the auth API who is signed in; null when the probe threw (treated as a failure). */
+	async function ask(): Promise<AccountProbeResult | null> {
+		try {
+			return await probe(controller.signal);
+		} catch (error) {
+			if (!controller.signal.aborted) {
+				console.warn(JSON.stringify({ event: 'social.sync.probe', error: (error as Error).name }));
+			}
+			return null;
+		}
+	}
+
+	/** Purges everything local to the departed account (definitive sign-out only). */
+	function purgeAll() {
+		purgeOrigins(null);
+		purgeQueue(null);
+	}
+
+	// Last signed-in account seen by this tab (`null` = none yet or signed out). A session read as
+	// signed out before any account was seen (anonymous visit, or offline at load) purges nothing.
+	let lastOwner: string | null = null;
+	// A signed-out read not confirmed yet (offline or the probe failed): retried on online/visible.
+	let unconfirmed = false;
+
+	/** Purges only when the auth API answers that nobody is signed in (FX4.10, R2-3). */
+	async function confirmSignOut() {
+		if (!online) {
+			unconfirmed = true;
+			return;
+		}
+		unconfirmed = false;
+		const result = await ask();
+		if (destroyed || lastOwner !== null || session.signedIn) return;
+		if (result?.status === 'signed-out') purgeAll();
+		else if (result === null || result.status === 'error') unconfirmed = true;
+		// `signed-in`: the signed-out read was wrong; nothing is purged and the session catches up.
+	}
+
+	/** After an `actor-mismatch` flush: reads the session again and follows the server's answer. */
+	async function recheck() {
+		const result = await ask();
+		if (destroyed || result === null || result.status === 'error') return;
+		if (result.status === 'signed-in') {
+			session.set(result.account);
+		} else {
+			// Definitive sign-out: purge now, then the session effect has nothing left to confirm.
+			lastOwner = null;
+			unconfirmed = false;
+			setOriginsActor(null);
+			purgeAll();
+			session.set(null);
+		}
+	}
+
 	// Layout-provided summary: keep the session in step with it.
 	$effect(() => {
 		if (account !== undefined) session.set(account);
 	});
 
-	// Last signed-in account seen by this tab (`null` = none yet or signed out). A session read as
-	// signed out before any account was seen (anonymous visit, or offline at load) purges nothing.
-	let lastOwner: string | null = null;
 	$effect(() => {
-		const target = outbox;
-		if (!target || !session.known) return;
+		if (!session.known) return;
 		const owner = session.signedIn ? session.accountId : null;
 		untrack(() => {
 			const previous = lastOwner;
 			if (owner !== null && owner !== previous) {
-				// Signed in (first seen or switched): drop every other account's events.
+				// Signed in (first seen or switched): drop every other account's events and origins.
 				lastOwner = owner;
-				void purge(target, owner);
-			} else if (owner === null && previous !== null && online) {
-				// Signed out: nothing stays queued for whoever signs in next. Offline, a failed session
-				// probe also reads as signed out, so the queue is kept (the flush only ever sends the
-				// events of the account signed in at that time).
+				unconfirmed = false;
+				setOriginsActor(owner);
+				purgeOrigins(owner);
+				purgeQueue(owner);
+			} else if (owner === null && previous !== null) {
+				// Read as signed out: stop using the account's origins now, but purge only once the
+				// auth API confirms nobody is signed in (a failed probe also reads as signed out; the
+				// flush only ever sends the events of the account signed in at that time).
 				lastOwner = null;
-				void purge(target, null);
+				setOriginsActor(null);
+				void confirmSignOut();
 			}
 		});
 	});
 
-	// Mount, and every time the outbox becomes available or the session becomes signed-in + verified.
+	// Mount, and every time the outbox becomes available, the session becomes signed-in + verified
+	// or the signed-in account changes (switch between two verified accounts).
 	$effect(() => {
 		if (!outbox) return;
 		void ready;
+		void session.accountId;
 		untrack(() => {
 			void flush();
 		});
 	});
 
 	$effect(() => {
-		const controller = new AbortController();
 		if (ownsSession && untrack(() => account) === undefined) {
 			void session.refresh(controller.signal);
 		}
+		const retryConfirm = () => {
+			if (unconfirmed && lastOwner === null && !session.signedIn) void confirmSignOut();
+		};
 		const up = () => {
 			online = true;
+			retryConfirm();
 			void flush();
 		};
 		const down = () => {
@@ -144,6 +238,7 @@
 				// Sign-in elsewhere: the session effect above flushes when it turns verified.
 				void session.refresh(controller.signal);
 			}
+			retryConfirm();
 			void flush();
 		};
 		window.addEventListener('online', up);
@@ -152,6 +247,7 @@
 		return () => {
 			destroyed = true;
 			controller.abort();
+			setOriginsActor(null);
 			window.removeEventListener('online', up);
 			window.removeEventListener('offline', down);
 			document.removeEventListener('visibilitychange', visible);

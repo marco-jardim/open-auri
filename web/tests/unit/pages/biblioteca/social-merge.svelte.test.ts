@@ -6,6 +6,7 @@ import { SocialApiError, type LibraryMergeItem, type MergeReport } from '#lib/so
 import MergeBanner from '#lib/components/pages/biblioteca/MergeBanner.svelte';
 import {
 	MERGE_KEY,
+	accountKey,
 	readMergeFlag,
 	runMerge,
 	unmergedItems,
@@ -72,9 +73,9 @@ function locals(count: number, updatedAt = 10): LocalLibraryItem[] {
 	}));
 }
 
-/** Server stand-in: loc0 is created, loc1 a duplicate, loc2 a name conflict, loc3 fails the gate,
- * loc4 hits the daily quota (transient); every other item is created. */
-function fakeMerge() {
+/** Server stand-in: loc1 is a duplicate, loc2 a name conflict, loc3 fails the gate;
+ * optionally loc4 hits the daily quota (transient). Every other item is created. */
+function fakeMerge({ quota = false } = {}) {
 	const batches: LibraryMergeItem[][] = [];
 	const mergeLibrary = vi.fn(async (items: LibraryMergeItem[]): Promise<MergeReport> => {
 		batches.push(items);
@@ -90,7 +91,7 @@ function fakeMerge() {
 					code: 'GATE_REJECTED',
 					reasons: ['gain.max', 'slope']
 				});
-			else if (entry.localId === 'loc4')
+			else if (quota && entry.localId === 'loc4')
 				report.rejected.push({ localId: entry.localId, code: 'QUOTA_EXCEEDED' });
 			else report.created.push({ localId: entry.localId, lineageId });
 		}
@@ -99,16 +100,109 @@ function fakeMerge() {
 	return { batches, api: { mergeLibrary } };
 }
 
-test('runMerge sends batches of at most 100 and keeps transient rejections offerable', async () => {
+test('account merge flags use the stable id across nickname changes and isolate nickname reuse', () => {
+	const storage = memoryStorage();
+	const account = { id: 'u-ana', username: 'Ana', emailVerified: true };
+	const key = accountKey(account);
+	expect(key).toBe('u-ana');
+	storage.setItem(MERGE_KEY, JSON.stringify({ [key]: { offeredAt: 50, handled: ['loc0'] } }));
+	expect(readMergeFlag(storage, accountKey({ ...account, username: 'Outro' })).handled).toEqual([
+		'loc0'
+	]);
+	expect(accountKey({ ...account, username: null })).toBe(key);
+	expect(readMergeFlag(storage, accountKey({ ...account, id: 'u-other' })).handled).toEqual([]);
+	expect(accountKey(null)).toBe('~');
+});
+
+test('runMerge sends batches of at most 20 and remembers permanent rejections', async () => {
 	const { batches, api } = fakeMerge();
-	const items = locals(250).map((item) => ({ localId: item.id, s1: item.s1, name: item.name }));
+	const items = locals(45).map((item) => ({ localId: item.id, s1: item.s1, name: item.name }));
 	const outcome = await runMerge(api, items);
-	expect(batches.map((batch) => batch.length)).toEqual([100, 100, 50]);
+	expect(batches.map((batch) => batch.length)).toEqual([20, 20, 5]);
 	expect(outcome.error).toBeNull();
 	expect(outcome.unsent).toBe(0);
-	expect(outcome.report.created).toHaveLength(246);
+	expect(outcome.report.created).toHaveLength(42);
 	expect(outcome.handled).toContain('loc3');
+	expect(outcome.handled).toContain('loc4');
+});
+
+test('runMerge auto-continues quota items while retries make progress, without duplicate reports', async () => {
+	const batches: LibraryMergeItem[][] = [];
+	const progress = vi.fn();
+	const outcome = await runMerge(
+		{
+			mergeLibrary: async (batch) => {
+				batches.push(batch);
+				const accepted = batches.length === 1 ? 10 : batches.length === 2 ? 5 : batch.length;
+				return {
+					created: batch.slice(0, accepted).map((entry) => ({
+						localId: entry.localId,
+						lineageId: `lin-${entry.localId}`
+					})),
+					duplicates: [],
+					conflicts: [],
+					rejected: batch.slice(accepted).map((entry) => ({
+						localId: entry.localId,
+						code: 'QUOTA_EXCEEDED'
+					}))
+				};
+			}
+		},
+		locals(45).map((item) => ({ localId: item.id, s1: item.s1, name: item.name })),
+		progress
+	);
+	expect(batches.map((batch) => batch.length)).toEqual([20, 10, 5, 20, 5]);
+	expect(batches[1]?.map((entry) => entry.localId)).toEqual(
+		batches[0]?.slice(10).map((entry) => entry.localId)
+	);
+	expect(outcome.report.created).toHaveLength(45);
+	expect(outcome.report.rejected).toEqual([]);
+	expect(new Set(outcome.handled).size).toBe(45);
+	expect(outcome.error).toBeNull();
+	expect(outcome.unsent).toBe(0);
+	expect(progress.mock.calls).toEqual([
+		[10, 45],
+		[15, 45],
+		[20, 45],
+		[40, 45],
+		[45, 45]
+	]);
+});
+
+test('daily quota stops after one retry pass without progress and leaves the rest offerable', async () => {
+	const { batches, api } = fakeMerge({ quota: true });
+	const outcome = await runMerge(
+		api,
+		locals(45).map((item) => ({ localId: item.id, s1: item.s1, name: item.name }))
+	);
+	expect(batches.map((batch) => batch.length)).toEqual([20, 1]);
+	expect(batches[1]?.map((entry) => entry.localId)).toEqual(['loc4']);
+	expect(outcome.error).toBe('QUOTA_EXCEEDED');
+	expect(outcome.unsent).toBe(25);
+	expect(outcome.report.rejected.filter((entry) => entry.code === 'QUOTA_EXCEEDED')).toEqual([
+		{ localId: 'loc4', code: 'QUOTA_EXCEEDED' }
+	]);
+	expect(outcome.handled).toHaveLength(19);
 	expect(outcome.handled).not.toContain('loc4');
+});
+
+test('a fully spent daily quota gets only one retry, not a loop over the rest of the library', async () => {
+	const mergeLibrary = vi.fn(async (batch: LibraryMergeItem[]): Promise<MergeReport> => ({
+		created: [],
+		duplicates: [],
+		conflicts: [],
+		rejected: batch.map((entry) => ({ localId: entry.localId, code: 'QUOTA_EXCEEDED' }))
+	}));
+	const outcome = await runMerge(
+		{ mergeLibrary },
+		locals(45).map((item) => ({ localId: item.id, s1: item.s1, name: item.name }))
+	);
+	expect(mergeLibrary).toHaveBeenCalledTimes(2);
+	expect(mergeLibrary.mock.calls[1]?.[0]).toEqual(mergeLibrary.mock.calls[0]?.[0]);
+	expect(outcome.error).toBe('QUOTA_EXCEEDED');
+	expect(outcome.unsent).toBe(25);
+	expect(outcome.report.rejected).toHaveLength(20);
+	expect(outcome.handled).toEqual([]);
 });
 
 test('runMerge stops at the first failed batch and reports the unsent items', async () => {
@@ -130,13 +224,68 @@ test('runMerge stops at the first failed batch and reports the unsent items', as
 	);
 	expect(calls).toBe(2);
 	expect(outcome.error).toBe('OFFLINE');
-	expect(outcome.unsent).toBe(130);
-	expect(outcome.handled).toHaveLength(100);
+	expect(outcome.unsent).toBe(210);
+	expect(outcome.handled).toHaveLength(20);
+});
+
+test('a failed quota retry retains the unresolved rejection and does not resend handled items', async () => {
+	let calls = 0;
+	const mergeLibrary = vi.fn(async (batch: LibraryMergeItem[]): Promise<MergeReport> => {
+		if (++calls === 2) throw new SocialApiError(0, 'OFFLINE');
+		return {
+			created: batch.slice(1).map((entry) => ({ localId: entry.localId, lineageId: 'x' })),
+			duplicates: [],
+			conflicts: [],
+			rejected: [{ localId: 'loc0', code: 'QUOTA_EXCEEDED' }]
+		};
+	});
+	const outcome = await runMerge(
+		{ mergeLibrary },
+		locals(21).map((item) => ({ localId: item.id, s1: item.s1, name: item.name }))
+	);
+	expect(mergeLibrary.mock.calls[1]?.[0].map((entry) => entry.localId)).toEqual(['loc0']);
+	expect(outcome.error).toBe('OFFLINE');
+	expect(outcome.unsent).toBe(1);
+	expect(outcome.handled).toHaveLength(19);
+	expect(outcome.report.rejected).toEqual([{ localId: 'loc0', code: 'QUOTA_EXCEEDED' }]);
+});
+
+test('one banner click auto-continues request quota rejections and all remaining 20-item batches', async () => {
+	const storage = memoryStorage();
+	const onMerged = vi.fn();
+	let calls = 0;
+	const mergeLibrary = vi.fn(async (batch: LibraryMergeItem[]): Promise<MergeReport> => {
+		const quotaId = ++calls === 1 ? 'loc19' : null;
+		return {
+			created: batch
+				.filter((entry) => entry.localId !== quotaId)
+				.map((entry) => ({ localId: entry.localId, lineageId: `lin-${entry.localId}` })),
+			duplicates: [],
+			conflicts: [],
+			rejected: quotaId ? [{ localId: quotaId, code: 'QUOTA_EXCEEDED' }] : []
+		};
+	});
+	render(MergeBanner, {
+		items: locals(21),
+		account: 'u-ana',
+		verified: true,
+		api: { mergeLibrary },
+		storage,
+		locale: 'pt-BR',
+		onMerged
+	});
+	expect(mergeLibrary).not.toHaveBeenCalled();
+	await page.getByRole('button', { name: 'Mesclar biblioteca local' }).click();
+	await expect.element(page.getByText('Criadas na conta: 21')).toBeVisible();
+	await expect.element(page.getByText('Recusadas: 0 (ficam só neste navegador)')).toBeVisible();
+	expect(mergeLibrary.mock.calls.map(([batch]) => batch.length)).toEqual([20, 1, 1]);
+	expect(readMergeFlag(storage, 'u-ana').handled).toHaveLength(21);
+	expect(onMerged).toHaveBeenCalledTimes(1);
 });
 
 test('the banner never merges by itself; the click merges and shows the full report', async () => {
 	const storage = memoryStorage();
-	const { batches, api } = fakeMerge();
+	const { batches, api } = fakeMerge({ quota: true });
 	const onMerged = vi.fn();
 	render(MergeBanner, {
 		items: locals(6),
@@ -154,7 +303,7 @@ test('the banner never merges by itself; the click merges and shows the full rep
 
 	await page.getByRole('button', { name: 'Mesclar biblioteca local' }).click();
 	await expect.element(page.getByRole('heading', { name: 'Relatório da mescla' })).toBeVisible();
-	expect(batches).toHaveLength(1);
+	expect(batches).toHaveLength(2);
 	expect(batches[0]?.[0]).toEqual({ localId: 'loc0', s1: 's1-0', name: 'Curva 0', lang: 'pt-BR' });
 	await expect.element(page.getByText('Criadas na conta: 2')).toBeVisible();
 	await expect.element(page.getByText('Já estavam na conta: 1')).toBeVisible();

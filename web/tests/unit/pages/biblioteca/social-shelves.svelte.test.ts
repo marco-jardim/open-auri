@@ -6,10 +6,13 @@ import {
 	createSocialApi,
 	createSocialSession,
 	type LibraryItem,
+	type ShareFunnel,
+	type SocialApi,
 	type rememberOrigin
 } from '#lib/social/index.ts';
 import MinhaBiblioteca from '#lib/components/pages/biblioteca/MinhaBiblioteca.svelte';
 import Biblioteca from '#lib/components/pages/biblioteca/Biblioteca.svelte';
+import CreationInsights from '#lib/components/pages/biblioteca/CreationInsights.svelte';
 import type { KeyValueStorage } from '#lib/components/pages/biblioteca/social.ts';
 
 // Layer this task's staging copy over the generated catalogs (same pattern as the T2.11 tests).
@@ -267,7 +270,7 @@ test('audience with privacy and the funnel of the account shares', async () => {
 		// Two pages; only the shares of lin1 belong to this creation's funnel.
 		'GET /api/v1/me/shares': (url) =>
 			url.searchParams.get('cursor') === 'p2'
-				? json({ items: [share('sh_1', 'lin1')], nextCursor: null })
+				? json({ items: [share('sh_1', 'lin1'), share('sh_3', 'lin1')], nextCursor: null })
 				: json({ items: [share('sh_9', 'lin2')], nextCursor: 'p2' }),
 		'GET /api/v1/curves/lin1/audience': () =>
 			json({
@@ -295,6 +298,12 @@ test('audience with privacy and the funnel of the account shares', async () => {
 				shareId: 'sh_2',
 				opens: { total: 0, days: [] },
 				attributed: { previewed: 0, installed: 0, favorited: 0 }
+			}),
+		'GET /api/v1/shares/sh_3/stats': () =>
+			json({
+				shareId: 'sh_3',
+				opens: { total: 3, days: [] },
+				attributed: { previewed: 0, installed: 0, favorited: 0 }
 			})
 	});
 	render(MinhaBiblioteca, {
@@ -310,6 +319,7 @@ test('audience with privacy and the funnel of the account shares', async () => {
 	await expect.element(page.getByText('1 pessoas com perfil privado')).toBeVisible();
 	await expect.element(page.getByRole('link', { name: 'Bia' })).toHaveAttribute('href', '/u/bia');
 	await expect.element(page.getByText('Aberturas: 9')).toBeVisible();
+	await expect.element(page.getByText('Aberturas: 3')).toBeVisible();
 	await expect.element(page.getByText('2026-10-15: 5')).toBeVisible();
 	await expect
 		.element(page.getByText('Com conta: 2 experimentaram, 1 instalaram, 1 favoritaram'))
@@ -318,6 +328,10 @@ test('audience with privacy and the funnel of the account shares', async () => {
 	await page.getByRole('button', { name: 'Criar link de compartilhamento' }).click();
 	await expect.element(page.getByText('Aberturas: 0')).toBeVisible();
 	await expect.element(page.getByText('Aberturas: 9')).toBeVisible();
+	// Only the newly created share gets stats; the existing funnels stay cached.
+	for (const shareId of ['sh_1', 'sh_2', 'sh_3']) {
+		expect(calls.filter((call) => call.path === `/api/v1/shares/${shareId}/stats`)).toHaveLength(1);
+	}
 	expect(calls.some((call) => call.path.startsWith('/api/v1/shares/sh_9'))).toBe(false);
 	expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
 		lineageId: 'lin1',
@@ -325,6 +339,58 @@ test('audience with privacy and the funnel of the account shares', async () => {
 	});
 	// Nothing about shares is kept in the browser any more.
 	expect([...storage.data.keys()]).toEqual([]);
+});
+
+test('creating a share keeps existing in-flight stats alive and fetches only the new share', async () => {
+	let finishStats: ((funnel: ShareFunnel) => void) | undefined;
+	const pendingStats = new Promise<ShareFunnel>((resolve) => {
+		finishStats = resolve;
+	});
+	const funnel = (shareId: string, total: number): ShareFunnel => ({
+		shareId,
+		opens: { total, days: [] },
+		attributed: { previewed: 0, installed: 0, favorited: 0 }
+	});
+	const shareStats = vi.fn<SocialApi['shareStats']>((shareId) =>
+		shareId === 'sh_old' ? pendingStats : Promise.resolve(funnel(shareId, 0))
+	);
+	const group = { total: 0, named: [], privateCount: 0 };
+	const screen = await render(CreationInsights, {
+		lineageId: 'lin1',
+		name: 'Minha curva',
+		verified: true,
+		origin: 'https://example.test',
+		api: {
+			audience: async () => ({
+				audience: { previewed: group, installed: group, favorited: group }
+			}),
+			myShares: async () => ({
+				items: [
+					{
+						id: 'sh_old',
+						lineage: { id: 'lin1', name: 'Minha curva' },
+						versionId: null,
+						channel: 'link',
+						createdAt: 1
+					}
+				],
+				nextCursor: null
+			}),
+			createShare: async () => ({ shareId: 'sh_new', url: '/c/lin1?s=sh_new' }),
+			shareStats
+		}
+	});
+	await vi.waitFor(() => expect(shareStats).toHaveBeenCalledTimes(1));
+	const signal = shareStats.mock.calls[0]?.[1]?.signal;
+	expect(signal?.aborted).toBe(false);
+	await page.getByRole('button', { name: 'Criar link de compartilhamento' }).click();
+	await expect.element(page.getByText('Aberturas: 0')).toBeVisible();
+	expect(shareStats.mock.calls.map(([shareId]) => shareId)).toEqual(['sh_old', 'sh_new']);
+	expect(signal?.aborted).toBe(false);
+	finishStats?.(funnel('sh_old', 7));
+	await expect.element(page.getByText('Aberturas: 7')).toBeVisible();
+	await screen.unmount();
+	expect(signal?.aborted).toBe(true);
 });
 
 test('offline: one notice in place of the shelves, never an empty state', async () => {

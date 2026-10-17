@@ -1,5 +1,6 @@
 // "Minha biblioteca" (T4.14): pure helpers of the signed-in shelves, the local-library merge and the
 // share funnel. Nothing here touches the network or `window` at module load; storage is injected.
+import type { AccountSummary } from '#lib/components/chrome/account.ts';
 import {
 	isSocialApiError,
 	type LibraryMergeItem,
@@ -29,8 +30,8 @@ export interface LocalLibraryItem {
 }
 
 export const MERGE_KEY = 'oa.biblioteca.merge';
-/** Items per `POST /me/library/merge` (server limit). */
-export const MERGE_BATCH = 100;
+/** Mirror the server's MERGE_GATE_RUNS_MAX, not its larger request-size limit. No server import. */
+export const MERGE_BATCH = 20;
 const HANDLED_MAX = 2000;
 
 /** Rejections that will not change on a retry: the item stays local only and is not offered again. */
@@ -50,16 +51,9 @@ export function defaultStorage(): KeyValueStorage | null {
 	}
 }
 
-/**
- * Local key of an account for the merge flag. `AccountSummary` (chrome/account.ts) exposes only
- * the nickname and `emailVerified`, no stable user id, so the key is the lowercased nickname (`~`
- * before one is chosen). Known limitation: after a nickname change the flag starts empty, so the
- * banner may offer local items again; it never merges by itself, and a repeated merge only
- * reports server-side duplicates (the server deduplicates by curve).
- */
-export function accountKey(account: { username: string | null } | null): string {
-	const name = account?.username?.trim().toLowerCase() ?? '';
-	return name === '' ? '~' : name;
+/** Stable per-account merge flag, unaffected by nickname changes or nickname reuse. */
+export function accountKey(account: AccountSummary | null): string {
+	return account?.id ?? '~';
 }
 
 function readJson(storage: KeyValueStorage | null, key: string): Record<string, unknown> {
@@ -154,7 +148,12 @@ export interface MergeOutcome {
 	unsent: number;
 }
 
-/** Sends the items in batches of at most 100; stops at the first failed request. Never throws. */
+/**
+ * Sends at most 20 items at a time, retrying quota rejections before the next fresh batch.
+ * The API does not distinguish daily quotas from the per-request gate budget: stop and report
+ * QUOTA_EXCEEDED after one retry pass makes no progress. Other failed requests stop immediately
+ * (only cancellation throws). Transient rejections remain offerable on a later user action.
+ */
 export async function runMerge(
 	api: Pick<SocialApi, 'mergeLibrary'>,
 	items: readonly LibraryMergeItem[],
@@ -163,23 +162,38 @@ export async function runMerge(
 	const report: MergeReport = { created: [], duplicates: [], rejected: [], conflicts: [] };
 	let error: SocialErrorCode | null = null;
 	let sent = 0;
-	for (let start = 0; start < items.length; start += MERGE_BATCH) {
-		const batch = items.slice(start, start + MERGE_BATCH);
-		try {
-			const answer = await api.mergeLibrary([...batch]);
-			report.created.push(...answer.created);
-			report.duplicates.push(...answer.duplicates);
-			report.rejected.push(...answer.rejected);
-			report.conflicts.push(...answer.conflicts);
-			sent += batch.length;
-			onBatch?.(sent, items.length);
-		} catch (cause) {
-			if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
-			error = isSocialApiError(cause) ? cause.code : 'INTERNAL';
-			if (!isSocialApiError(cause)) {
-				console.error(JSON.stringify({ event: 'biblioteca.merge', error: String(cause) }));
+	batches: for (let start = 0; start < items.length; start += MERGE_BATCH) {
+		let batch = items.slice(start, start + MERGE_BATCH);
+		let retrying = false;
+		let quotaRejected: MergeReport['rejected'] = [];
+		while (batch.length > 0) {
+			try {
+				const answer = await api.mergeLibrary([...batch]);
+				report.created.push(...answer.created);
+				report.duplicates.push(...answer.duplicates);
+				report.rejected.push(...answer.rejected.filter((entry) => entry.code !== 'QUOTA_EXCEEDED'));
+				report.conflicts.push(...answer.conflicts);
+				if (!retrying) sent += batch.length;
+				quotaRejected = answer.rejected.filter((entry) => entry.code === 'QUOTA_EXCEEDED');
+				onBatch?.(sent - quotaRejected.length, items.length);
+				if (quotaRejected.length === 0) break;
+				if (retrying && quotaRejected.length === batch.length) {
+					error = 'QUOTA_EXCEEDED';
+					report.rejected.push(...quotaRejected);
+					break batches;
+				}
+				const retryIds = new Set(quotaRejected.map((entry) => entry.localId));
+				batch = batch.filter((entry) => retryIds.has(entry.localId));
+				retrying = true;
+			} catch (cause) {
+				if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+				error = isSocialApiError(cause) ? cause.code : 'INTERNAL';
+				if (!isSocialApiError(cause)) {
+					console.error(JSON.stringify({ event: 'biblioteca.merge', error: String(cause) }));
+				}
+				report.rejected.push(...quotaRejected);
+				break batches;
 			}
-			break;
 		}
 	}
 	const handled = [
