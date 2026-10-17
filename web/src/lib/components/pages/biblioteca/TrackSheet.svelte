@@ -6,6 +6,8 @@
 	import type { CurveData } from '#lib/state/model.ts';
 	import { ResponseChart } from '#lib/charts/index.ts';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
 	import { presetUrl, qrSvg } from '#lib/qr/index.ts';
@@ -63,6 +65,18 @@
 	const localRights = $derived(tape.group === 'local' && !tape.source.startsWith('preset:'));
 	const description = $derived(
 		locale === 'en-US' && tape.descriptionEn ? tape.descriptionEn : tape.description
+	);
+	/** Every unavailable control says why (spec §2.6): the Button primitive announces it. */
+	const audioReason = $derived(app ? null : m.biblioteca_reason_audio());
+	const linkReason = $derived(share.url ? null : m.biblioteca_reason_link());
+	const writeReason = $derived(
+		!app
+			? m.biblioteca_reason_loading()
+			: verdict === null
+				? m.biblioteca_gate_pending()
+				: verdict.ok
+					? null
+					: m.biblioteca_gate_refused()
 	);
 
 	/** The engine this sheet put in chain mode; only that audition is stopped by the sheet. */
@@ -234,22 +248,27 @@
 			</div>
 		</div>
 		<section class="listen" aria-label={m.biblioteca_listen()}>
-			<h3>{m.biblioteca_listen()}</h3>
+			<div class="head-row">
+				<h3>{m.biblioteca_listen()}</h3>
+				<Explainer term="ab-nivel" />
+			</div>
 			<div class="actions">
-				<button
-					type="button"
-					disabled={!app || busy}
+				<Button
+					disabledReason={audioReason}
+					loading={busy}
 					aria-pressed={listening && audioState.playing && side === 'A'}
-					onclick={() => listen('A')}>{m.biblioteca_listen_current()}</button
+					onclick={() => listen('A')}>{m.biblioteca_listen_current()}</Button
 				>
-				<button
-					type="button"
-					disabled={!app || busy}
+				<Button
+					disabledReason={audioReason}
+					loading={busy}
 					aria-pressed={listening && audioState.playing && side === 'B'}
-					onclick={() => listen('B')}>{m.biblioteca_listen_tape()}</button
+					onclick={() => listen('B')}>{m.biblioteca_listen_tape()}</Button
 				>
-				<button type="button" disabled={!listening && !busy} onclick={stop}
-					>{m.biblioteca_stop()}</button
+				<Button
+					variant="ghost"
+					disabledReason={listening || busy ? null : m.biblioteca_reason_idle()}
+					onclick={stop}>{m.biblioteca_stop()}</Button
 				>
 			</div>
 			<p>{m.biblioteca_listen_note()}</p>
@@ -291,20 +310,21 @@
 				</table>
 			</div>
 			<div class="actions">
-				<button type="button" disabled={exporting || !share.url} onclick={() => exportSheet('svg')}
-					>{m.biblioteca_svg()}</button
-				><button type="button" disabled={exporting || !share.url} onclick={() => exportSheet('png')}
-					>{m.biblioteca_png()}</button
+				<Button disabledReason={linkReason} loading={exporting} onclick={() => exportSheet('svg')}
+					>{m.biblioteca_svg()}</Button
+				><Button disabledReason={linkReason} loading={exporting} onclick={() => exportSheet('png')}
+					>{m.biblioteca_png()}</Button
 				>
 			</div>
 		</section>
-		<div class="sheet-grid">
+		<div class="sheet-grid" data-tour="biblioteca-share">
 			<section class="code">
-				<h3>{m.biblioteca_code()}</h3>
-				<textarea readonly aria-label={m.biblioteca_code()} value={code} rows="5"></textarea><button
-					type="button"
-					onclick={copyCode}>{m.biblioteca_copy()}</button
-				>
+				<div class="head-row">
+					<h3>{m.biblioteca_code()}</h3>
+					<Explainer term="s1" />
+				</div>
+				<textarea readonly aria-label={m.biblioteca_code()} value={code} rows="5"></textarea>
+				<Button onclick={copyCode}>{m.biblioteca_copy()}</Button>
 			</section>
 			<section class="print-card">
 				<h3>{m.biblioteca_card()}</h3>
@@ -320,29 +340,32 @@
 					</p>{/if}
 			</section>
 		</div>
-		<details class="envelope">
-			<summary>{m.biblioteca_s5()}</summary>
-			{#if localRights}<label
-					>{m.biblioteca_s5_license()}<select bind:value={license}
-						><option value="">{m.biblioteca_s5_choose()}</option><option value="CC0-1.0"
-							>CC0-1.0</option
-						><option value="CC-BY-4.0">CC-BY-4.0</option></select
-					></label
-				><label>{m.biblioteca_author()}<input bind:value={author} maxlength="64" /></label>{/if}
-			{#if !envelope.exportable}<p>{m.biblioteca_s5_note()}</p>{/if}
-			{#if envelope.error}<p role="alert">
-					{m.biblioteca_s5_error()}
-				</p>{:else}<pre>{envelope.json}</pre>{/if}
-			<button type="button" disabled={!envelope.exportable} onclick={exportEnvelope}
-				>{m.biblioteca_s5_export()}</button
-			>
-		</details>
+		<div class="envelope-row">
+			<details class="envelope">
+				<summary>{m.biblioteca_s5()}</summary>
+				{#if localRights}<label
+						>{m.biblioteca_s5_license()}<select bind:value={license}
+							><option value="">{m.biblioteca_s5_choose()}</option><option value="CC0-1.0"
+								>CC0-1.0</option
+							><option value="CC-BY-4.0">CC-BY-4.0</option></select
+						></label
+					><label>{m.biblioteca_author()}<input bind:value={author} maxlength="64" /></label>{/if}
+				{#if !envelope.exportable}<p>{m.biblioteca_s5_note()}</p>{/if}
+				{#if envelope.error}<p role="alert">
+						{m.biblioteca_s5_error()}
+					</p>{:else}<pre>{envelope.json}</pre>{/if}
+				<Button
+					disabledReason={envelope.exportable ? null : m.biblioteca_s5_note()}
+					onclick={exportEnvelope}>{m.biblioteca_s5_export()}</Button
+				>
+			</details>
+			<Explainer term="s5" />
+		</div>
 		<div class="actions bottom">
-			<button type="button" disabled={!app} onclick={useCurve}>{m.biblioteca_use()}</button><button
-				class="primary"
-				type="button"
-				disabled={!app || !verdict?.ok}
-				onclick={requestWrite}>{m.biblioteca_write()}</button
+			<Button disabledReason={app ? null : m.biblioteca_reason_loading()} onclick={useCurve}
+				>{m.biblioteca_use()}</Button
+			><Button variant="primary" disabledReason={writeReason} onclick={requestWrite}
+				>{m.biblioteca_write()}</Button
 			>
 		</div>
 	</div>
@@ -361,13 +384,19 @@
 		color: #ece7dd;
 		background: repeating-linear-gradient(90deg, #44291c 0, #5b3823 8px, #392318 90px);
 		box-shadow: 0 20px 90px #000b;
-		font:
-			13px/1.6 'Geist',
-			sans-serif;
+		font: 400 var(--fs-small, 13px) / 1.6 var(--face-body, 'Geist', sans-serif);
+		/* The box slides out of the shelf (spec §3, Biblioteca): UI transition, not data. */
+		animation: box-out var(--dur-scene, 0.72s) var(--ease-out, ease-out) both;
 	}
 	.sheet::backdrop {
 		background: #080906c9;
 		backdrop-filter: blur(5px);
+	}
+	/* Transform only: fading opacity would drop every text/surface pair below WCAG mid-motion. */
+	@keyframes box-out {
+		from {
+			transform: translateY(32px) scale(0.97) rotate(-0.6deg);
+		}
 	}
 	.dialog-head {
 		position: sticky;
@@ -379,14 +408,19 @@
 		padding: 10px 18px;
 		background: #232920;
 		color: #e4d9bc;
-		font:
-			11px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--fs-eyebrow, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 	.dialog-head button {
+		min-width: 44px;
+		min-height: 44px;
+		padding: 4px 9px;
 		background: transparent;
 		border: 0;
-		font-size: 28px;
+		color: #e4d9bc;
+		cursor: pointer;
+		font: 400 28px/1 var(--type, 'Courier Prime', monospace);
 	}
 	.sheet-body {
 		padding: 24px;
@@ -409,20 +443,34 @@
 		font-size: 118px;
 		line-height: 1;
 		box-shadow: inset 3px 5px 16px #0008;
+		perspective: 700px;
+	}
+	/* The lid swings open once on the hinge, like the mock (biblioteca.html lid-open). */
+	.reel::before {
+		content: '';
+		position: absolute;
+		inset: -5px;
+		z-index: 1;
+		border: 5px solid #b8a47e;
+		background: linear-gradient(135deg, #dbccaa, #ab976f);
+		transform-origin: top;
+		animation: lid-open var(--dur-scene, 0.72s) var(--ease-out, ease-out) forwards;
+	}
+	@keyframes lid-open {
+		to {
+			transform: rotateX(110deg);
+			opacity: 0;
+		}
 	}
 	.reel span {
 		position: absolute;
 		bottom: 8px;
-		font:
-			8px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1 var(--face-data, 'JetBrains Mono', monospace);
 	}
 	h2 {
 		margin: 0;
 		overflow-wrap: anywhere;
-		font:
-			48px/1.1 'Courier Prime',
-			monospace;
+		font: 400 48px/1.1 var(--type, 'Courier Prime', monospace);
 		color: #f0e3c4;
 		letter-spacing: -0.04em;
 	}
@@ -431,9 +479,7 @@
 	.credit,
 	.gate-note {
 		color: #e4d5ba;
-		font:
-			11px/1.7 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.7 var(--face-data, 'JetBrains Mono', monospace);
 	}
 	.description {
 		margin-bottom: 3px;
@@ -449,19 +495,28 @@
 	.listen {
 		margin-bottom: 22px;
 		padding: 16px 18px;
+		color: #ece7dd;
 		background: #1c211a;
 		border: 1px solid #a69f7144;
 	}
 	.listen p {
-		font-size: 11px;
+		font-size: var(--label-min, 11px);
 		color: #e2dcc3;
 	}
-	h3 {
-		font:
-			16px 'Courier Prime',
-			monospace;
+	.head-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
 		margin: 0 0 12px;
 	}
+	.head-row h3 {
+		margin: 0;
+	}
+	h3 {
+		font: 400 16px/1.3 var(--type, 'Courier Prime', monospace);
+		margin: 0 0 12px;
+	}
+	/* The track sheet unfolds like paper after the box opens. */
 	.paper {
 		padding: 23px;
 		color: #302c23;
@@ -469,6 +524,14 @@
 			repeating-linear-gradient(0deg, #0000 0 26px, #9f895617 27px 28px),
 			linear-gradient(125deg, #f0e6cb, #d7c6a0);
 		box-shadow: 2px 5px 12px #0007;
+		transform-origin: top center;
+		animation: paper-open var(--dur-scene, 0.72s) var(--ease-out, ease-out) both;
+		animation-delay: calc(var(--dur-scene, 0.72s) * 0.3);
+	}
+	@keyframes paper-open {
+		from {
+			transform: perspective(1200px) rotateX(-62deg);
+		}
 	}
 	.paper-title {
 		display: flex;
@@ -478,9 +541,7 @@
 		padding-top: 12px;
 	}
 	.paper-title span {
-		font:
-			9px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
 	}
 	.table-scroll {
 		overflow-x: auto;
@@ -489,9 +550,8 @@
 		width: 100%;
 		border-collapse: collapse;
 		margin: 14px 0;
-		font:
-			13px 'Courier Prime',
-			monospace;
+		font: 400 var(--fs-small, 13px) / 1.4 var(--type, 'Courier Prime', monospace);
+		font-variant-numeric: tabular-nums;
 	}
 	th,
 	td {
@@ -500,7 +560,7 @@
 		border-bottom: 1px solid #8b79584a;
 	}
 	thead th {
-		font-size: 11px;
+		font-size: var(--label-min, 11px);
 	}
 	.actions {
 		display: flex;
@@ -511,33 +571,6 @@
 		justify-content: flex-end;
 		margin-top: 20px;
 	}
-	button {
-		min-height: 38px;
-		padding: 8px 12px;
-		cursor: pointer;
-		color: #ece7dd;
-		background: #272d23;
-		border: 1px solid #a9a68e77;
-		border-radius: 2px;
-		font:
-			12px 'Geist',
-			sans-serif;
-	}
-	button[aria-pressed='true'],
-	.primary {
-		background: #d9a441;
-		color: #1c180e;
-		border-color: #d9a441;
-	}
-	button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.paper button {
-		color: #302c23;
-		background: #d7c6a0;
-		border-color: #6c5e42;
-	}
 	.sheet-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -545,6 +578,9 @@
 		margin-top: 22px;
 	}
 	.code {
+		display: grid;
+		gap: 10px;
+		justify-items: start;
 		min-width: 0;
 	}
 	textarea {
@@ -555,18 +591,14 @@
 		color: #e4dfca;
 		border: 1px solid #a9a68e77;
 		padding: 12px;
-		font:
-			11px/1.8 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.8 var(--face-data, 'JetBrains Mono', monospace);
 		overflow-wrap: anywhere;
 	}
 	.print-card {
 		padding: 18px;
 		background: #e4d8b8;
 		color: #302c23;
-		font:
-			12px 'Courier Prime',
-			monospace;
+		font: 400 var(--fs-caption, 12px) / 1.5 var(--type, 'Courier Prime', monospace);
 	}
 	.print-card strong {
 		display: block;
@@ -583,8 +615,15 @@
 		color: inherit;
 		text-underline-offset: 4px;
 	}
-	.envelope {
+	.envelope-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
 		margin-top: 22px;
+	}
+	.envelope {
+		flex: 1;
+		min-width: 0;
 		padding: 14px;
 		background: #1c211a;
 	}
@@ -596,13 +635,13 @@
 		overflow-wrap: anywhere;
 		max-height: 350px;
 		overflow: auto;
-		font-size: 11px;
+		font: 400 var(--label-min, 11px) / 1.5 var(--face-data, 'JetBrains Mono', monospace);
 	}
 	label {
 		display: grid;
 		gap: 6px;
 		margin-top: 12px;
-		font-size: 12px;
+		font-size: var(--fs-caption, 12px);
 	}
 	input,
 	select {
@@ -635,7 +674,7 @@
 			font-size: 70px;
 		}
 		.reel span {
-			font-size: 5px;
+			display: none;
 		}
 		h2 {
 			font-size: 30px;
@@ -651,6 +690,16 @@
 		}
 		.paper-title span {
 			margin-bottom: 10px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.sheet,
+		.paper {
+			animation: none;
+		}
+		.reel::before {
+			display: none;
+			animation: none;
 		}
 	}
 </style>

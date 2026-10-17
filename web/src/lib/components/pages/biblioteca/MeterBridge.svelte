@@ -1,3 +1,9 @@
+<!--
+	Biblioteca console (spec §1.4b, §3.6). Two honest modes, labelled by the Chip primitive:
+	AO VIVO only while the engine delivers real meter frames (VU L/R, correlation, PPM, LUFS);
+	otherwise DADOS: static dials of calculated electrical figures (level, preamp, correlator,
+	output peak, jump). The DATA needles never move on their own: no ballistics, no animation.
+-->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
 	import {
@@ -6,25 +12,40 @@
 		CorrelationMeter,
 		LoudnessReadout
 	} from '#lib/components/meters/index.ts';
+	import { Chip } from '#lib/components/primitives/index.ts';
 	import type { MeterUpdate } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';
 	import DataDial from './DataDial.svelte';
-	import { dataReadings, number, type Locale, type GateResult } from './archive.ts';
+	import {
+		correlationIndex,
+		dataReadings,
+		number,
+		type Locale,
+		type GateResult
+	} from './archive.ts';
 
 	let {
 		curve,
 		current,
+		reference,
 		verdict,
 		update,
 		locale
 	}: {
 		curve: CurveData;
+		/** The editor curve: level jump is always measured against what you have now. */
 		current: CurveData;
+		/** Comparison reference chosen in the page (defaults to the editor curve). */
+		reference?: CurveData;
 		verdict: GateResult | null;
 		update: MeterUpdate;
 		locale: Locale;
 	} = $props();
 	const data = $derived(dataReadings(curve, current, verdict));
+	const diff = $derived(
+		reference && reference !== current ? dataReadings(curve, reference, verdict) : data
+	);
+	const correlation = $derived(correlationIndex(diff.rmsDb));
 	const live = $derived(update.mode === 'live' && update.frame !== null);
 	const frame = $derived(live ? update.frame : null);
 </script>
@@ -32,11 +53,7 @@
 <section class="console" aria-label={m.biblioteca_console()} data-mode={live ? 'live' : 'data'}>
 	<div class="console-top">
 		<span class="plate">ARCHIVE MONITOR / 01</span>
-		<span class="mode"
-			><span class:active={live} class="lamp" aria-hidden="true"></span>{live
-				? m.biblioteca_live()
-				: m.biblioteca_data()}</span
-		>
+		<Chip mode={live ? 'live' : 'data'} aria-live="polite" />
 		<span class="enamel">{m.biblioteca_enamel()}</span>
 	</div>
 	{#if live}
@@ -65,7 +82,20 @@
 		<div class="data-meters">
 			<DataDial label={m.biblioteca_level()} value={data.levelDb} min={-30} max={3} {locale} />
 			<DataDial label={m.biblioteca_preamp()} value={data.preampDb} min={-30} max={3} {locale} />
-			<DataDial label={m.biblioteca_similarity()} value={data.rmsDb} min={0} max={12} {locale} />
+			<DataDial
+				label={m.biblioteca_correlator()}
+				value={correlation}
+				min={-1}
+				max={1}
+				unit=""
+				digits={2}
+				signed
+				detail={m.biblioteca_correlator_detail({
+					rms: number(diff.rmsDb, locale, 2),
+					max: number(diff.maxDb, locale, 2)
+				})}
+				{locale}
+			/>
 			<DataDial label={m.biblioteca_peak()} value={data.peakDb} min={-30} max={3} {locale} />
 			<DataDial label={m.biblioteca_jump()} value={data.jumpDb} min={-12} max={12} {locale} />
 		</div>
@@ -74,11 +104,11 @@
 		<span>{curve.name}</span>
 		<span>{live ? m.biblioteca_live_note() : m.biblioteca_data_note()}</span>
 		{#if !live}<span
-				>S4 · RMS {number(data.rmsDb, locale)} dB · MAX {number(data.maxDb, locale)} dB / {number(
-					data.maxFreqHz,
-					locale,
-					0
-				)} Hz</span
+				>{m.biblioteca_rms_note({
+					rms: number(diff.rmsDb, locale),
+					max: number(diff.maxDb, locale),
+					freq: number(diff.maxFreqHz, locale, 0)
+				})}</span
 			>{/if}
 	</div>
 	{#if data.jumpDb >= 3}<p class="warning">{m.biblioteca_jump_warning()}</p>{/if}
@@ -114,9 +144,7 @@
 		gap: 12px;
 		margin-bottom: 17px;
 		color: #f1eedc;
-		font:
-			10px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--fs-eyebrow, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
 	}
 	.plate {
 		padding: 5px 10px;
@@ -124,20 +152,9 @@
 		border: 1px solid #272e24;
 		letter-spacing: 0.1em;
 	}
-	.mode {
-		font-weight: 700;
-		letter-spacing: 0.1em;
-	}
-	.lamp {
-		display: inline-block;
-		width: 7px;
-		height: 7px;
-		margin-right: 8px;
-		border-radius: 50%;
-		background: #d9a441;
-	}
-	.lamp.active {
-		background: #c6eeab;
+	.enamel {
+		font-family: var(--type, 'Courier Prime', monospace);
+		font-size: var(--fs-caption, 12px);
 	}
 	.data-meters,
 	.live-meters {
@@ -175,14 +192,13 @@
 		flex-wrap: wrap;
 		gap: 8px 20px;
 		margin-top: 18px;
-		font:
-			10px/1.7 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.7 var(--face-data, 'JetBrains Mono', monospace);
+		font-variant-numeric: tabular-nums slashed-zero;
 		color: #f0eedc;
 	}
 	.warning {
 		color: #ffe0a0;
-		font-size: 12px;
+		font-size: var(--fs-caption, 12px);
 	}
 	.quadrants {
 		display: flex;
@@ -205,9 +221,7 @@
 	.calibration {
 		text-align: center;
 		color: #e5e4cb;
-		font:
-			8px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
 		letter-spacing: 0.12em;
 	}
 	@media (max-width: 780px) {
@@ -223,12 +237,9 @@
 		.correlation {
 			grid-column: 1 / -1;
 			grid-row: 2;
-			max-width: 200px;
+			max-width: 220px;
 			width: 100%;
 			justify-self: center;
-		}
-		.enamel {
-			font-size: 8px;
 		}
 	}
 </style>

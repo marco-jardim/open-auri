@@ -146,6 +146,16 @@ export function dataReadings(curve: CurveData, current: CurveData, verdict: Gate
 	};
 }
 
+/** RMS difference in dB between a tape and the comparison reference (same grid as the sort). */
+export function rmsTo(curve: CurveData, reference: CurveData): number {
+	return distance(curve, reference, { levelMatch: false, grid: ANALYSIS_GRID }).rmsDb;
+}
+
+/** Visual correlation shown on the DATA console: max(−1, 1 − RMS / 6), calculated, never audio. */
+export function correlationIndex(rmsDb: number): number {
+	return Math.max(-1, Math.min(1, 1 - rmsDb / 6));
+}
+
 export function number(value: number | null | undefined, locale: Locale, digits = 1): string {
 	if (value === null || value === undefined || !Number.isFinite(value)) return '∅';
 	return new Intl.NumberFormat(locale, {

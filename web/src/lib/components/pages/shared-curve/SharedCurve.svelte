@@ -1,19 +1,20 @@
 <!--
-	Shared-curve card of `/c/[id]` (T4.5), in the Biblioteca theme (tape box on the wood shelf).
+	Shared-curve card of `/c/[id]` (T4.5), in the Biblioteca theme: the same tape box as the shelf
+	cards and the same paper track sheet as the Biblioteca sheet (FUX.P1).
 	Safety (plan §0.12): this page never writes to a cable. "Instalar" hands a plain copy of the
 	curve to `app.requestWrite`, which opens the layout's PreWriteChecklist; only its explicit
 	confirmation writes, and the transport re-runs the gate on the snapshot. "Abrir na Curva" is the
 	`#p=<S1>` link, which works without the API. User text (name, description, nickname) is only
-	rendered through `{text}` interpolation.
+	rendered through `{text}` interpolation. Courier Prime (--type) comes from the global fonts.css.
 -->
 <script lang="ts">
-	import '@fontsource/courier-prime/400.css';
-	import '@fontsource/courier-prime/700.css';
 	import { onDestroy } from 'svelte';
 	import { decodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, AudioEngine } from '#lib/audio/engine.ts';
 	import { ResponseChart } from '#lib/charts/index.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { checkedCurve, type CurrentCurve } from '#lib/state/model.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
@@ -198,8 +199,10 @@
 	<article class="sheet" aria-labelledby="{id}-title">
 		<header class="tape-header">
 			<span class="caps">{m.shared_curve_eyebrow()}</span>
-			{#if shared.visibility !== 'public'}<span class="badge">{m.shared_curve_unlisted()}</span
-				>{/if}
+			<span class="header-end"
+				>{#if shared.visibility !== 'public'}<span class="badge">{m.shared_curve_unlisted()}</span
+					>{/if}<span>96 kHz</span><span class="dot" aria-hidden="true"></span></span
+			>
 		</header>
 		<div class="tape-label">
 			<h1 id="{id}-title" lang={shared.lang}>{shared.name}</h1>
@@ -211,39 +214,47 @@
 			</p>
 		</div>
 		{#if !shared.isHead}<p class="version-note">{m.shared_curve_version_note()}</p>{/if}
-		<div class="chart">
-			{#if curve}
-				<ResponseChart
-					{curve}
-					label={shared.name}
-					description={m.shared_curve_response()}
-					{locale}
-					theme="paper"
-				/>
-			{:else}
-				<p role="alert">{m.shared_curve_invalid()}</p>
-			{/if}
+		<div class="paper">
+			<div class="chart">
+				{#if curve}
+					<ResponseChart
+						{curve}
+						label={shared.name}
+						description={m.shared_curve_response()}
+						{locale}
+						theme="paper"
+					/>
+				{:else}
+					<p role="alert">{m.shared_curve_invalid()}</p>
+				{/if}
+			</div>
+			{#if shared.description}<p class="description" lang={shared.lang}>
+					{shared.description}
+				</p>{/if}
 		</div>
-		{#if shared.description}<p class="description" lang={shared.lang}>{shared.description}</p>{/if}
 		<dl class="facts">
 			<div>
 				<dt>{m.shared_curve_license()}</dt>
 				<dd data-testid="shared-curve-license">{shared.license}</dd>
 			</div>
 			<div>
-				<dt>{m.shared_curve_code()}</dt>
+				<dt class="term">
+					{m.shared_curve_code()}
+					<!-- The "?" trigger uses light ink (--text-2): give it its own dark key on the paper. -->
+					<span class="explain-key"><Explainer term="s1" /></span>
+				</dt>
 				<dd class="code">{shared.s1}</dd>
 			</div>
 		</dl>
 		<div class="actions">
-			<button type="button" onclick={listen} disabled={busy} aria-pressed={listening}
-				>{listening ? m.shared_curve_stop() : m.shared_curve_listen()}</button
+			<Button loading={busy} aria-pressed={listening} onclick={listen}
+				>{listening ? m.shared_curve_stop() : m.shared_curve_listen()}</Button
 			>
 			<a class="button" href={curvaHref} data-sveltekit-reload>{m.shared_curve_open()}</a>
-			<button type="button" onclick={favorite} disabled={favoriting} aria-pressed={favorited}
-				>{favorited ? m.shared_curve_favorited() : m.shared_curve_favorite()}</button
+			<Button loading={favoriting} aria-pressed={favorited} onclick={favorite}
+				>{favorited ? m.shared_curve_favorited() : m.shared_curve_favorite()}</Button
 			>
-			<button type="button" class="install" onclick={install}>{m.shared_curve_install()}</button>
+			<Button variant="primary" onclick={install}>{m.shared_curve_install()}</Button>
 		</div>
 		<p class="install-note">{m.shared_curve_install_note()}</p>
 		{#if loginPrompt}<div class="login" role="alert">
@@ -276,10 +287,7 @@
 				#6b4328 96px,
 				#4a2e1e 170px
 			);
-		font:
-			14px/1.5 'Geist',
-			Arial,
-			sans-serif;
+		font: 400 var(--fs-ui, 14px) / 1.5 var(--face-body, 'Geist', Arial, sans-serif);
 	}
 	.window {
 		position: absolute;
@@ -296,6 +304,7 @@
 			inset 0 0 70px #000,
 			0 0 90px #cba76d22;
 	}
+	/* Same tape box as the Biblioteca shelf; it slides out once on arrival (UI, not data). */
 	.sheet {
 		max-width: 760px;
 		margin: 40px auto 0;
@@ -311,6 +320,13 @@
 			3px 5px 5px #0008,
 			0 16px 0 -5px #805236,
 			0 18px 0 -5px #241910;
+		animation: box-out var(--dur-scene, 0.72s) var(--ease-out, ease-out) both;
+	}
+	/* Transform only: fading opacity would drop every text/surface pair below WCAG mid-motion. */
+	@keyframes box-out {
+		from {
+			transform: translateY(28px) rotate(-0.5deg);
+		}
 	}
 	h1,
 	p,
@@ -325,17 +341,28 @@
 		gap: 12px;
 		padding: 12px 18px 9px;
 		border-bottom: 1px solid #63543945;
-		font:
-			10px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+	}
+	.header-end {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
 	}
 	.caps {
-		letter-spacing: 0.15em;
+		font-weight: 500;
+		letter-spacing: 0.12em;
 		text-transform: uppercase;
 	}
 	.badge {
 		padding: 2px 8px;
 		border: 1px solid #6f6049;
+	}
+	.dot {
+		width: 8px;
+		height: 8px;
+		border: 1px solid #6f6049;
+		border-radius: 50%;
+		background: #716342;
 	}
 	.tape-label {
 		position: relative;
@@ -344,18 +371,24 @@
 		background: #eee5cc99;
 		border: 1px solid #81725255;
 	}
+	.tape-label::before {
+		content: '';
+		position: absolute;
+		top: -8px;
+		left: calc(50% - 23px);
+		width: 47px;
+		height: 14px;
+		background: #baa16a66;
+		transform: rotate(-6deg);
+	}
 	h1 {
-		font:
-			700 34px/1.05 'Courier Prime',
-			monospace;
+		font: 700 34px/1.05 var(--type, 'Courier Prime', monospace);
 		letter-spacing: -0.045em;
 		overflow-wrap: anywhere;
 	}
 	.author {
 		margin-top: 8px;
-		font:
-			13px 'Courier Prime',
-			monospace;
+		font: 400 var(--fs-small, 13px) / 1.4 var(--type, 'Courier Prime', monospace);
 	}
 	.author a {
 		color: inherit;
@@ -367,18 +400,31 @@
 	.version-note,
 	.install-note {
 		padding: 10px 18px 0;
-		font:
-			11px/1.6 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.6 var(--face-data, 'JetBrains Mono', monospace);
+	}
+	/* Paper track sheet, unfolding like the Biblioteca sheet. */
+	.paper {
+		margin: 16px 18px 0;
+		padding: 4px 0 8px;
+		background:
+			repeating-linear-gradient(0deg, #0000 0 26px, #9f895617 27px 28px),
+			linear-gradient(125deg, #f0e6cb, #d7c6a0);
+		box-shadow: 2px 5px 12px #0005;
+		transform-origin: top center;
+		animation: paper-open var(--dur-scene, 0.72s) var(--ease-out, ease-out) both;
+		animation-delay: calc(var(--dur-scene, 0.72s) * 0.3);
+	}
+	@keyframes paper-open {
+		from {
+			transform: perspective(1200px) rotateX(-62deg);
+		}
 	}
 	.chart {
-		padding: 16px 18px;
+		padding: 12px 14px;
 	}
 	.description {
-		padding: 0 18px 12px;
-		font:
-			13px/1.6 'Courier Prime',
-			monospace;
+		padding: 0 14px 8px;
+		font: 400 var(--fs-small, 13px) / 1.6 var(--type, 'Courier Prime', monospace);
 		overflow-wrap: anywhere;
 		white-space: pre-line;
 	}
@@ -386,15 +432,25 @@
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr);
 		gap: 18px;
+		margin-top: 14px;
 		padding: 12px 18px;
 		border-top: 1px solid #63543945;
-		font:
-			10px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--label-min, 11px) / 1.5 var(--face-data, 'JetBrains Mono', monospace);
 	}
 	dt {
 		text-transform: uppercase;
 		letter-spacing: 0.1em;
+	}
+	.term {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.explain-key {
+		display: inline-flex;
+		padding: 2px;
+		border-radius: 999px;
+		background: #232920;
 	}
 	.code {
 		overflow-wrap: anywhere;
@@ -405,32 +461,21 @@
 		gap: 10px;
 		padding: 14px 18px 0;
 	}
-	.actions button,
 	.actions .button {
 		box-sizing: border-box;
-		min-height: 44px;
-		padding: 10px 14px;
+		display: inline-flex;
+		align-items: center;
+		min-height: 36px;
+		padding: 8px 14px;
 		border: 1px solid #171c15;
-		border-radius: 2px;
+		border-radius: var(--rad-sm, 4px);
 		background: linear-gradient(#454b3e, #282e24);
 		box-shadow:
 			0 3px #1b2118,
 			inset 0 1px #a8ad8d33;
 		color: #f3efd9;
-		cursor: pointer;
-		font:
-			12px 'JetBrains Mono',
-			monospace;
+		font: 500 var(--fs-ui, 14px) / 1.2 var(--face-body, 'Geist', sans-serif);
 		text-decoration: none;
-	}
-	.actions button[aria-pressed='true'],
-	.actions .install {
-		background: linear-gradient(#edc57a, #bc8e3a);
-		color: #211e15;
-	}
-	.actions button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 	.login {
 		display: flex;
@@ -441,9 +486,7 @@
 		padding: 10px 12px;
 		background: #e1d6b9;
 		border: 1px dashed #6f6049;
-		font:
-			12px 'Courier Prime',
-			monospace;
+		font: 400 var(--fs-caption, 12px) / 1.5 var(--type, 'Courier Prime', monospace);
 	}
 	.login a {
 		color: inherit;
@@ -451,11 +494,9 @@
 	}
 	.notice {
 		padding: 12px 18px 18px;
-		font:
-			12px 'JetBrains Mono',
-			monospace;
+		font: 400 var(--fs-caption, 12px) / 1.5 var(--face-data, 'JetBrains Mono', monospace);
 	}
-	:where(button, a):focus-visible {
+	:where(a):focus-visible {
 		outline: 3px solid #f6bd55;
 		outline-offset: 4px;
 	}
@@ -475,10 +516,16 @@
 		.facts {
 			grid-template-columns: 1fr;
 		}
-		.actions button,
 		.actions .button {
 			flex: 1 1 100%;
-			text-align: center;
+			justify-content: center;
+			min-height: 44px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.sheet,
+		.paper {
+			animation: none;
 		}
 	}
 </style>

@@ -16,7 +16,7 @@ const copy: SheetCopy = {
 	frequency: 'Frequência / Hz',
 	gain: 'Ganho / dB',
 	license: 'licença: a confirmar',
-	card: 'S8 · cartão'
+	card: 'Cartão da curva'
 };
 
 test('S10 renders the entire sheet as deterministic SVG with ten tracks, core curve paths, S1 and a real QR', () => {

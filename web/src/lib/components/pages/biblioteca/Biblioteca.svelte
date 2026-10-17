@@ -1,7 +1,8 @@
 <script lang="ts">
-	import '@fontsource/courier-prime/400.css';
-	import '@fontsource/courier-prime/700.css';
+	// Courier Prime (--type) comes from the global fonts.css (spec §5.6): no page font imports.
 	import { presetsByGroup } from 'open-auri/catalog';
+	import { Button, EmptyState, Skeleton } from '#lib/components/primitives/index.ts';
+	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import { IDLE_STATE, type AudioEngineState } from '#lib/audio/engine.ts';
 	import { tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
@@ -19,6 +20,7 @@
 		archiveTapes,
 		selectTapes,
 		referencePack,
+		rmsTo,
 		number,
 		type Sort,
 		type Tag,
@@ -72,7 +74,39 @@
 		local: m.biblioteca_local()
 	});
 	const groups: Shelf[] = ['preferencia', 'referencia', 'local'];
-	const visible = $derived(selectTapes(tapes, { query, tag, sort, current, locale, tagLabels }));
+	const officialTapes = $derived(tapes.filter((tape) => tape.group !== 'local'));
+	/** Comparison reference: "Sua curva" is the editor curve from the existing state. */
+	let referenceId = $state('current');
+	const comparison = $derived(
+		referenceId === 'current'
+			? current
+			: (officialTapes.find((tape) => tape.id === referenceId) ?? current)
+	);
+	const visible = $derived(
+		selectTapes(tapes, { query, tag, sort, current: comparison, locale, tagLabels })
+	);
+	const masterRank = $derived(
+		new Map(
+			[...officialTapes]
+				.sort((a, b) => a.order - b.order)
+				.map((tape, index) => [tape.id, index + 1] as const)
+		)
+	);
+	const rmsByTape = $derived(new Map(visible.map((tape) => [tape.id, rmsTo(tape, comparison)])));
+	const pack = presetsByGroup('referencia');
+	const packOpen = $derived(query.trim() === '' && tag === 'all');
+	/** FUX.2: the runtime may still be loading (client null) or IndexedDB still restoring. */
+	const libraryLoading = $derived(!app || app.state.library.loading);
+	const hasLocal = $derived(tapes.some((tape) => tape.group === 'local'));
+	const examples = $derived(officialTapes.slice(0, 3));
+	const firstCard = $derived(visible[0]?.id ?? null);
+	const pad = (value: number) => String(value).padStart(2, '0');
+	function serial(tape: Tape): string {
+		const rank = masterRank.get(tape.id);
+		return tape.group === 'local' || rank === undefined
+			? 'LOCAL'
+			: m.biblioteca_master({ n: pad(rank), total: pad(officialTapes.length) });
+	}
 
 	$effect(() => {
 		if (!engine) return;
@@ -191,18 +225,18 @@
 			<h1 id="{id}-title">{m.biblioteca_title()}</h1>
 			<p>{m.biblioteca_intro()}</p>
 			<span class="room-number">{m.biblioteca_spec()}</span>
+			<div class="tour-trigger"><TourTrigger page="biblioteca" /></div>
 		</div>
 	</section>
-	<MeterBridge curve={monitor} {current} {verdict} update={meterUpdate} {locale} />
+	<MeterBridge
+		curve={monitor}
+		{current}
+		reference={comparison}
+		{verdict}
+		update={meterUpdate}
+		{locale}
+	/>
 	<section class="archive" aria-labelledby="{id}-vault">
-		{#if social}<MinhaBiblioteca
-				session={social.session}
-				api={social.api}
-				localItems={app?.state.library.items ?? []}
-				{origin}
-				{locale}
-				currentPath={social.currentPath ?? '/biblioteca'}
-			/>{/if}
 		<div class="archive-head">
 			<div>
 				<h2 id="{id}-vault">{m.biblioteca_vault()}</h2>
@@ -253,7 +287,13 @@
 			</div>
 		</div>
 		<div class="reference">
-			<span>{m.biblioteca_current()}: <strong>{current.name}</strong></span>
+			<label class="reference-select" for="{id}-reference"
+				>{m.biblioteca_current()}<select id="{id}-reference" bind:value={referenceId}
+					><option value="current">{m.biblioteca_your_curve({ name: current.name })}</option
+					>{#each officialTapes as tape (tape.id)}<option value={tape.id}>{tape.name}</option
+						>{/each}</select
+				></label
+			>
 			<details>
 				<summary>{m.biblioteca_method()}</summary>
 				<p>{m.biblioteca_method_note()}</p>
@@ -261,48 +301,115 @@
 		</div>
 		{#if visible.length === 0}<div class="empty">
 				<p>{m.biblioteca_empty()}</p>
-				<button type="button" onclick={clear}>{m.biblioteca_clear()}</button>
+				<Button variant="ghost" onclick={clear}>{m.biblioteca_clear()}</Button>
 			</div>{/if}
 		{#each groups as group (group)}
-			<section class="shelf-group" aria-labelledby="{id}-{group}">
+			<section
+				class="shelf-group"
+				aria-labelledby="{id}-{group}"
+				data-tour={group === 'local' ? 'biblioteca-shelf' : undefined}
+			>
 				<div class="shelf-title">
 					<h3 id="{id}-{group}">{shelfNames[group]}</h3>
 					<span>{visible.filter((tape) => tape.group === group).length}</span
-					>{#if group === 'local'}<button type="button" disabled={!app || saving} onclick={save}
-							>{m.biblioteca_save()}</button
+					>{#if group === 'local'}<span class="shelf-action"
+							><Button
+								size="sm"
+								disabledReason={app ? null : m.biblioteca_reason_loading()}
+								loading={saving}
+								onclick={save}>{m.biblioteca_save()}</Button
+							></span
 						>{/if}
 				</div>
 				{#if group === 'local' && app?.state.library.error}<p role="alert">
 						{m.biblioteca_local_error()}
 					</p>{/if}
-				{#if group === 'local' && !tapes.some((tape) => tape.group === 'local')}<p
-						class="local-empty"
-					>
-						{m.biblioteca_local_empty()}
-					</p>{/if}
+				{#if group === 'local' && !hasLocal}
+					{#if libraryLoading}
+						<div class="shelves" aria-busy="true">
+							{#each [0, 1] as slot (slot)}<Skeleton
+									class="tape-skeleton"
+									height="300px"
+									label={m.biblioteca_reason_loading()}
+								/>{/each}
+						</div>
+					{:else if !app?.state.library.error}
+						<div class="library-empty">
+							<EmptyState title={m.empty_library_title()} why={m.empty_library_body()}>
+								{#snippet illustration()}
+									<svg viewBox="0 0 96 64" width="96" height="64" fill="none" stroke="currentColor">
+										<rect x="10" y="10" width="76" height="46" rx="2" stroke-width="1.5" />
+										<rect x="22" y="18" width="52" height="14" stroke-width="1" />
+										<path d="M18 44h60M18 50h40" stroke-width="1" stroke-dasharray="3 4" />
+									</svg>
+								{/snippet}
+								{#snippet action()}
+									<Button variant="primary" loading={saving} onclick={save}
+										>{m.empty_library_action()}</Button
+									>
+								{/snippet}
+							</EmptyState>
+						</div>
+						<ul class="shelves examples" aria-label={m.biblioteca_example_box()}>
+							{#each examples as tape (tape.id)}<li class="example-box">
+									<span class="tape-header"
+										><span class="serial">{m.empty_example()}</span><span>96 kHz</span></span
+									>
+									<span class="tape-label"
+										><strong>{tape.name}</strong><span>{m.biblioteca_example_box()}</span></span
+									>
+									<span class="tape-chart" aria-hidden="true"
+										><MiniCurve
+											curve={tape}
+											label={tape.name}
+											description={m.biblioteca_response()}
+											color="#5b4725"
+											minDb={-15}
+											maxDb={15}
+										/></span
+									>
+								</li>{/each}
+						</ul>
+					{/if}
+				{/if}
 				<div class="shelves">
 					{#each visible.filter((tape) => tape.group === group) as tape (tape.id)}
 						<button
 							type="button"
 							class="tape"
 							class:active={selected?.id === tape.id}
+							data-tour={tape.id === firstCard ? 'biblioteca-card' : undefined}
 							onclick={() => {
 								selected = tape;
 							}}
 						>
 							<span class="tape-header"
-								><span
-									>{tape.group === 'local' ? 'LOCAL' : String(tape.order).padStart(2, '0')} / 96 kHz</span
-								><span class="dot" aria-hidden="true"></span></span
+								><span class="serial">{serial(tape)}</span><span>96 kHz</span><span
+									class="dot"
+									aria-hidden="true"
+								></span></span
 							>
-							<span class="tape-label"><strong>{tape.name}</strong><span>{tape.source}</span></span>
+							<span class="tape-label"
+								><strong>{tape.name}</strong><span class="tape-sub"
+									><span>{tape.source}</span><span>pre {number(tape.preampDb, locale)} dB</span
+									></span
+								></span
+							>
 							<span class="tape-chart"
-								><MiniCurve
-									curve={tape}
-									label={tape.name}
-									description={m.biblioteca_response()}
-									color="#5b4725"
-								/></span
+								><span class="mini-frame"
+									><MiniCurve
+										curve={tape}
+										label={tape.name}
+										description={m.biblioteca_response()}
+										color="#5b4725"
+										minDb={-15}
+										maxDb={15}
+									/><span class="mini-y" aria-hidden="true"
+										><span>+15</span><span>0</span><span>−15</span></span
+									></span
+								><span class="mini-x" aria-hidden="true"
+									><span>20</span><span>1k</span><span>20k</span></span
+								></span
 							>
 							{#if tape.description}<span
 									class="tape-description"
@@ -318,26 +425,54 @@
 							<span class="tape-tags">{tape.tags.map((value) => tagLabels[value]).join(' · ')}</span
 							>
 							<span class="tape-bottom"
-								><span>PRE {number(tape.preampDb, locale)} dB</span><span>10 × BIQUAD</span></span
+								><span
+									>{tape.group === 'local'
+										? m.biblioteca_local_license()
+										: m.biblioteca_license()}</span
+								><span>RMS {number(rmsByTape.get(tape.id) ?? null, locale, 2)}</span></span
 							>
 						</button>
 					{/each}
+					{#if group === 'referencia' && packOpen}
+						<article class="pack-box" aria-labelledby="{id}-pack">
+							<span class="tape-header"
+								><span class="serial">BOX SET · VOL. 01</span><span>v1 · JSON</span></span
+							>
+							<span class="tape-label"
+								><h4 id="{id}-pack">{m.biblioteca_pack_box({ count: pack.length })}</h4>
+								<span class="tape-sub"
+									><span>{m.biblioteca_pack()}</span><span
+										>{pack.length} / {officialTapes.length}</span
+									></span
+								></span
+							>
+							<span class="pack-art" aria-hidden="true">Vol. 01</span>
+							<p class="tape-description">{m.biblioteca_pack_note()}</p>
+							<p class="tape-tags">{pack.map((preset) => preset.label).join(' · ')}</p>
+							<p class="tape-tags">{m.biblioteca_pack_order()}</p>
+							<span class="tape-bottom"
+								><span>{m.biblioteca_license()}</span><span
+									>{pack.length} / {officialTapes.length}</span
+								></span
+							>
+							<div class="pack-action">
+								<Button size="sm" onclick={exportPack}>{m.biblioteca_pack_export()}</Button>
+							</div>
+						</article>
+					{/if}
 				</div>
 			</section>
 		{/each}
-		<section class="pack" aria-labelledby="{id}-pack">
-			<div>
-				<span class="caps">S9 / VOL. 01</span>
-				<h3 id="{id}-pack">{m.biblioteca_pack()}</h3>
-				<p>{m.biblioteca_pack_note()}</p>
-				<p class="pack-list">
-					{presetsByGroup('referencia')
-						.map((preset) => preset.label)
-						.join(' · ')}
-				</p>
-			</div>
-			<button type="button" onclick={exportPack}>{m.biblioteca_pack_export()}</button>
-		</section>
+		{#if social}<div class="account-card">
+				<MinhaBiblioteca
+					session={social.session}
+					api={social.api}
+					localItems={app?.state.library.items ?? []}
+					{origin}
+					{locale}
+					currentPath={social.currentPath ?? '/biblioteca'}
+				/>
+			</div>{/if}
 		<div class="community">
 			<div>
 				<h3>{m.biblioteca_community()}</h3>
@@ -352,6 +487,7 @@
 	</div>
 	<div class="notice" role="status">{notice}</div>
 </div>
+<Tour page="biblioteca" />
 
 {#if selected}
 	{@const tape = selected}
@@ -694,8 +830,8 @@
 			10px 'JetBrains Mono',
 			monospace;
 	}
-	.shelf-title button {
-		font-size: 11px;
+	.shelf-action {
+		display: inline-flex;
 	}
 	.shelves {
 		display: grid;
@@ -826,38 +962,185 @@
 			10px 'JetBrains Mono',
 			monospace;
 	}
-	.local-empty,
 	.empty {
+		display: grid;
+		justify-items: start;
+		gap: 12px;
 		padding: 15px 0 25px;
 		color: #e0cdae;
 	}
-	.empty button {
-		margin-top: 12px;
+	/* Design system v2.1 faces and scale (spec §2.1): Geist body, --type engraving, mono data. */
+	.room {
+		font: 400 var(--fs-ui, 14px) / 1.5 var(--face-body, 'Geist', Arial, sans-serif);
 	}
-	.pack {
+	.tour-trigger {
+		display: flex;
+		justify-content: center;
+		margin-top: 16px;
+	}
+	.reference-select {
+		display: grid;
+		gap: 6px;
+		font: 400 var(--label-min, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+	.reference-select select {
+		min-height: 36px;
+		max-width: 300px;
+		padding: 6px 8px;
+		color: #f3eed5;
+		background: #293023;
+		border: 1px solid #abb28c99;
+		font: 400 var(--fs-small, 13px) / 1.3 var(--face-body, 'Geist', sans-serif);
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.tape-header {
+		gap: 8px;
+		font: 400 var(--label-min, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+	}
+	.serial {
+		margin-right: auto;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+	}
+	.tape-label strong,
+	.tape-label h4 {
+		display: block;
+		margin: 0;
+		font: 700 23px/1.05 var(--type, 'Courier Prime', monospace);
+		letter-spacing: -0.045em;
+		overflow-wrap: anywhere;
+	}
+	.tape-label > .tape-sub {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
-		gap: 22px;
-		padding: 20px;
-		margin: 6px 0 22px;
-		color: #f1e7cb;
-		border: 1px solid #aea48366;
-		background: linear-gradient(135deg, #535d48, #2b3525);
+		flex-wrap: wrap;
+		gap: 4px 10px;
+		font: 400 var(--label-min, 11px) / 1.4 var(--type, 'Courier Prime', monospace);
 	}
-	.pack h3 {
-		font:
-			26px 'Courier Prime',
-			monospace;
-		margin: 8px 0;
+	.tape-description,
+	.tape small,
+	.tape-tags {
+		font-family: var(--type, 'Courier Prime', monospace);
 	}
-	.pack p {
-		font:
-			12px/1.7 'Courier Prime',
-			monospace;
+	.mini-frame {
+		position: relative;
+		display: block;
+		padding-left: 28px;
 	}
-	.pack-list {
-		margin-top: 8px;
+	.mini-frame :global(svg) {
+		border-left: 1px solid #63543977;
+		border-bottom: 1px solid #63543977;
+	}
+	.mini-y {
+		position: absolute;
+		inset: 0 auto 0 0;
+		display: flex;
+		flex-direction: column;
+		justify-content: space-between;
+	}
+	.mini-x {
+		position: relative;
+		display: block;
+		height: 1.4em;
+		margin: 3px 0 0 28px;
+	}
+	.mini-x span {
+		position: absolute;
+		top: 0;
+		transform: translateX(-50%);
+	}
+	/* Log axis: 20 Hz at 0, 1 kHz at log10(50) / 3 = 56.6 %, 20 kHz at 100 %. */
+	.mini-x span:nth-child(1) {
+		left: 0;
+		transform: none;
+	}
+	.mini-x span:nth-child(2) {
+		left: 56.6%;
+	}
+	.mini-x span:nth-child(3) {
+		left: 100%;
+		transform: translateX(-100%);
+	}
+	.mini-y,
+	.mini-x {
+		color: #4c4130;
+		font: 400 var(--label-min, 11px) / 1 var(--face-data, 'JetBrains Mono', monospace);
+		font-variant-numeric: tabular-nums;
+	}
+	.tape-bottom {
+		font: 400 var(--label-min, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+		font-variant-numeric: tabular-nums slashed-zero;
+	}
+	.tape {
+		transition: transform var(--dur-slow, 0.36s) var(--ease-out, ease-out);
+	}
+	/* The open box slides out of the shelf while its sheet is open (UI transition, not data). */
+	.tape.active {
+		transform: perspective(900px) rotateY(-2deg) translate(8px, -18px);
+		transition: transform var(--dur-scene, 0.72s) var(--ease-out, ease-out);
+	}
+	.pack-box,
+	.example-box {
+		position: relative;
+		display: block;
+		min-width: 0;
+		border: 1px solid #b6a17c;
+		border-radius: 2px 4px 3px 1px;
+		background:
+			repeating-linear-gradient(0deg, #0000 0 3px, #9b805408 4px),
+			linear-gradient(130deg, #eaddbd, #cab892 90%);
+		color: #302c23;
+		box-shadow:
+			inset 3px 0 #f5ebcc,
+			inset -7px 0 #9e896533,
+			3px 5px 5px #0008,
+			0 16px 0 -5px #805236,
+			0 18px 0 -5px #241910;
+	}
+	.pack-box {
+		background:
+			repeating-linear-gradient(0deg, #0000 0 3px, #9b805408 4px),
+			linear-gradient(130deg, #e2d5b2, #bfae86 90%);
+	}
+	.pack-box p {
+		margin: 0;
+	}
+	.pack-art {
+		display: grid;
+		place-items: center;
+		height: 72px;
+		margin: 14px 15px;
+		border: 2px solid #5b4725;
+		color: #5b4725;
+		font: italic 400 var(--fs-title, 26px) / 1 var(--face-display, 'Instrument Serif', serif);
+	}
+	.pack-action {
+		padding: 10px 15px 14px;
+	}
+	.examples {
+		margin: 0;
+		list-style: none;
+	}
+	.example-box {
+		border-style: dashed;
+		padding-bottom: 12px;
+	}
+	.library-empty {
+		color: #e0cdae;
+		padding: 6px 0 18px;
+	}
+	.account-card {
+		margin: 4px 0 22px;
+		padding: 16px 18px;
+		border: 1px solid #b99c6a44;
+		border-radius: var(--rad-md, 6px);
+		background: #17130fcc;
+	}
+	.shelves :global(.tape-skeleton) {
+		border-radius: 2px 4px 3px 1px;
 	}
 	.community {
 		display: flex;
@@ -1013,7 +1296,6 @@
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: 32px 19px;
 		}
-		.pack,
 		.community {
 			align-items: flex-start;
 			flex-direction: column;
@@ -1033,9 +1315,11 @@
 			margin-right: 0;
 			overflow-wrap: anywhere;
 		}
-		.shelf-title > button {
+		.shelf-title > .shelf-action {
 			/* Give the action its own full-width row, never the remainder beside the title. */
 			grid-column: 1 / -1;
+		}
+		.shelf-action :global(button) {
 			box-sizing: border-box;
 			width: 100%;
 			min-width: 44px;
@@ -1066,8 +1350,10 @@
 		.tape {
 			transition: none;
 		}
-		.tape:hover {
+		.tape:hover,
+		.tape.active {
 			transform: none;
+			transition: none;
 		}
 	}
 </style>

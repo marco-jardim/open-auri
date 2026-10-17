@@ -245,7 +245,12 @@ test('stopping a pending sheet start prevents a late audition from becoming sele
 	await page.getByRole('button', { name: m.biblioteca_listen_tape(), exact: true }).click();
 	await expect
 		.element(page.getByRole('button', { name: m.biblioteca_listen_current(), exact: true }))
-		.toBeDisabled();
+		.toHaveAttribute('aria-busy', 'true');
+	// Button primitive contract (spec §2.6): a pending start is busy (clicks swallowed), not a
+	// native disabled; both A/B keys share the busy state.
+	await expect
+		.element(page.getByRole('button', { name: m.biblioteca_listen_tape(), exact: true }))
+		.toHaveAttribute('aria-busy', 'true');
 	await page.getByRole('button', { name: m.biblioteca_stop(), exact: true }).click();
 	// Not started yet, so not stopped by the button; the late start is stopped once it lands.
 	expect(stop).not.toHaveBeenCalled();
