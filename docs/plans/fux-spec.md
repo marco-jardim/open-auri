@@ -61,6 +61,19 @@ Evidência: `curva-desktop-default-*` × `curva-ajustar.png`, `curva-ouvir.png`,
 - Neutro e Padrão: no mock são chaves listradas com o CRC (0x4FFF, 0x1970); atual quadrados vermelhos.
 - Abaixo do rack, "Sua curva, conectada" e "Importar e exportar" são cartões cinza fora do tema.
 
+### 1.1b Curva · estado depois do FX-UX (captura de 2026-10-17)
+
+Evidência: `web/test-results/.../curva-desktop-default-motion-actual.png` (build de `9eb5259`, camada Ouvir) × `curva-ajustar.png`. Unidade da Curva 335/335 e e2e `curva` verdes. O que o FX-UX resolveu: escala ±15, linha "pico de saída ≤ −0,47 dB", rótulo "perto do limite", readouts de saída, "Máximo sem clipping", envelope com lâmpada. O que falta para o FUX.P10:
+- Camada: os três botões OUVIR/AJUSTAR/ENGENHARIA continuam caixas mono; o knob acima deles é decorativo e solto. Mock: knob único com rótulos ao redor e lâmpada na camada ativa.
+- Layout do rack: o mock põe o osciloscópio em largura quase total, com presets em cartões (mini curva, lâmpada, nome em negrito) e ajuste fino (4 knobs graduados −6 a +6 com LCD e "n seções") **abaixo** do scope; o atual põe presets como botões de texto numa coluna à esquerda, com um vão vazio grande sob "CURVAS DE REFERÊNCIA" e o rótulo "PRESETS" boiando no meio da coluna.
+- Rótulos de seção (PRESETS, AJUSTE FINO, OSCILOSCÓPIO, SAÍDA, RESGATE) aparecem como títulos seguidos de vazio; no mock são gravações centradas sob o conteúdo, com filete.
+- Neutro e Padrão: quadrados vermelhos; mock: chaves listradas com CRC 0x4FFF e 0x1970.
+- Prévia: alavanca e "A · AURI"/"B · EDITOR" pequenos e apagados; mock tem duas alavancas com legenda de estado ("desligada · ruído rosa", "B · editor").
+- Em Neutro o gráfico não mostra os 10 pontos estacionados nem dica (T12).
+- Desfazer, Refazer, "Salvar na biblioteca da minha conta" e "Publicar curva" apagados sem motivo (T8); "Sua curva, conectada" e "Importar e exportar" seguem cartões cinza fora do tema, com botões mono negrito (T4).
+- "?" flutuante cobre a coluna SAÍDA (T3); "♪ Áudio" sem borda (T1).
+- Banco de filtros (camada Ajustar): conferir as 10 tiras com knobs FREQ/GANHO/Q, chave PK/LS/OFF, CORTE/REFORÇO e mini resposta, e a régua do gate v2 com as 7 lâmpadas (a) a (g) e valores.
+
 ### 1.2 Biblioteca (Geoff Emerick) · completar no FUX.0
 
 Capturas: `biblioteca.png`, `biblioteca-mobile.png`, `biblioteca-mobile-top.png`, `biblioteca-audio-popover.png` × `biblioteca-{desktop,mobile}-{default,reduced}-motion-*`. Verificar: material da estante e caixas com etiqueta em Courier Prime; abertura da ficha; VU L/R, PPM, LUFS e correlação com rótulo AO VIVO ou DADOS; vazio; exportar e compartilhar; popover de áudio; ordem no mobile. Transversais: T1 a T5, T8, T11.
