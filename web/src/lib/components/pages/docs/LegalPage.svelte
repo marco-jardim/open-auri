@@ -4,14 +4,14 @@
 		type LegalDocument,
 		type PublicLegalValues
 	} from '#lib/content/docs/legal.ts';
-	import type { DocsUi } from './ui.ts';
+	import type { LegalUi } from './legal-ui.ts';
 	import InlineText from './InlineText.svelte';
 	import { keyboardScroll } from './keyboard-scroll.ts';
 	let {
 		document: template,
 		values,
 		ui
-	}: { document: LegalDocument; values: PublicLegalValues; ui: DocsUi } = $props();
+	}: { document: LegalDocument; values: PublicLegalValues; ui: LegalUi } = $props();
 	const document = $derived(resolveLegalDocument(template, values));
 </script>
 

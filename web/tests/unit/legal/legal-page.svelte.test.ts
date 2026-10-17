@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'vitest';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import LegalPage from '#lib/components/pages/docs/LegalPage.svelte';
-import { docsUi } from '#lib/components/pages/docs/ui.ts';
+import { legalUi } from '#lib/components/pages/docs/legal-ui.ts';
 import { renderLegalPage } from '#lib/content/legal/render.ts';
 
 afterEach(async () => {
@@ -30,7 +30,7 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 			const screen = await render(LegalPage, {
 				document: data.documents[locale],
 				values: data.values,
-				ui: docsUi()
+				ui: legalUi()
 			});
 			const text = screen.container.textContent ?? '';
 			expect(text).toContain(hostile);

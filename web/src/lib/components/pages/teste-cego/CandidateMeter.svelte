@@ -4,7 +4,10 @@
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { tap, type MeterUpdate } from '#lib/audio/meters.ts';
 	import type { PreviewChain } from '#lib/audio/engine.ts';
-	import { MeterModeLabel, ThrottledNumber, formatSigned } from '#lib/components/meters/index.ts';
+	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
+	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
+	import { ThrottledNumber } from '#lib/components/meters/motion.svelte.ts';
+	import { formatSigned } from '#lib/components/meters/format.ts';
 	let {
 		chain = null,
 		enabled = false,

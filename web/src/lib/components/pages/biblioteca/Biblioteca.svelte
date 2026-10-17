@@ -6,7 +6,8 @@
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import { IDLE_STATE, type AudioEngineState } from '#lib/audio/engine.ts';
 	import { tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
-	import { MiniCurve } from '#lib/charts/index.ts';
+	// Direct chart imports (FUX.B): the charts barrel would bring every chart into the page.
+	import MiniCurve from '#lib/charts/MiniCurve.svelte';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
 	import { neutralCurve } from '#lib/state/model.ts';
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
@@ -14,8 +15,9 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi, SocialSession } from '#lib/social/index.ts';
 	import MeterBridge from './MeterBridge.svelte';
-	import MinhaBiblioteca from './MinhaBiblioteca.svelte';
 	import ReelHousing from './ReelHousing.svelte';
+	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
+	import { minhaBiblioteca } from './lazy.ts';
 	import {
 		archiveTapes,
 		selectTapes,
@@ -463,15 +465,20 @@
 				</div>
 			</section>
 		{/each}
-		{#if social}<div class="account-card">
-				<MinhaBiblioteca
-					session={social.session}
-					api={social.api}
-					localItems={app?.state.library.items ?? []}
-					{origin}
-					{locale}
-					currentPath={social.currentPath ?? '/biblioteca'}
-				/>
+		{#if social}{@const shelves = social}
+			<div class="account-card">
+				<Deferred module={minhaBiblioteca} height="9rem">
+					{#snippet children(MinhaBiblioteca)}
+						<MinhaBiblioteca
+							session={shelves.session}
+							api={shelves.api}
+							localItems={app?.state.library.items ?? []}
+							{origin}
+							{locale}
+							currentPath={shelves.currentPath ?? '/biblioteca'}
+						/>
+					{/snippet}
+				</Deferred>
 			</div>{/if}
 		<div class="community">
 			<div>

@@ -15,7 +15,9 @@
 <script lang="ts">
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { levelDb } from 'open-auri/safety';
-	import { MeterModeLabel, ThrottledNumber } from '#lib/components/meters/index.ts';
+	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
+	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
+	import { ThrottledNumber } from '#lib/components/meters/motion.svelte.ts';
 	import type { MeterFrame, MeterMode } from '#lib/audio/meters.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button } from '#lib/components/primitives/index.ts';

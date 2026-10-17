@@ -1,6 +1,17 @@
+<script module lang="ts">
+	import { LazyModule } from '#lib/app/lazy.svelte.ts';
+
+	// FUX.B: the social tabs (Comunidade candidates, S6 batch with its consent-gated Turnstile) are
+	// their own chunks, prefetched on idle and shown when their tab opens.
+	const communityCandidates = new LazyModule(() => import('./CommunityCandidates.svelte'));
+	const s6Send = new LazyModule(() => import('./S6Send.svelte'));
+</script>
+
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { prefersReducedMotion } from 'svelte/motion';
+	import { whenIdle } from '#lib/app/runtime.ts';
+	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import {
@@ -16,8 +27,6 @@
 	import type { SocialApi } from '#lib/social/index.ts';
 	import ListeningRoom from './ListeningRoom.svelte';
 	import CandidateMeter from './CandidateMeter.svelte';
-	import CommunityCandidates from './CommunityCandidates.svelte';
-	import S6Send from './S6Send.svelte';
 	import {
 		bracketStage,
 		candidate,
@@ -77,6 +86,13 @@
 	let generation = 0;
 	let output = $state<OutputConfirmation | null>(null);
 	let tab = $state(0);
+	// The social tabs are not on the first tab: warm their chunks once the page is quiet.
+	onMount(() =>
+		whenIdle(() => {
+			communityCandidates.request();
+			s6Send.request();
+		})
+	);
 	let audioState = $state.raw<AudioEngineState>(IDLE_STATE);
 	let session = $state.raw<Session | null>(null);
 	let history = $state.raw<BracketStage[]>([]);
@@ -710,12 +726,16 @@
 											{m.cego_fuxb_reason_limit()}
 										</p>{/if}
 									<p class="note">{m.cego_gate_note()}</p>
-									<CommunityCandidates
-										{api}
-										disabled={active}
-										added={community.map((c) => c.id)}
-										onadd={addCommunity}
-									/>
+									<Deferred module={communityCandidates} height="6rem">
+										{#snippet children(CommunityCandidates)}
+											<CommunityCandidates
+												{api}
+												disabled={active}
+												added={community.map((c) => c.id)}
+												onadd={addCommunity}
+											/>
+										{/snippet}
+									</Deferred>
 									<div class="grid2">
 										<div class="card">
 											<h3>{m.cego_variations()}</h3>
@@ -972,7 +992,11 @@
 										<Explainer term="s6" />
 									</div>
 									<p class="lede">{m.cego_share_note()}</p>
-									<S6Send session={!active ? session : null} {api} {siteKey} />
+									<Deferred module={s6Send} height="10rem">
+										{#snippet children(S6Send)}
+											<S6Send session={!active ? session : null} {api} {siteKey} />
+										{/snippet}
+									</Deferred>
 								{/if}
 								{#if !audioState.exact}<p class="warn">{m.cego_approximate()}</p>{/if}
 								<p class="message" role="status">{message}</p>

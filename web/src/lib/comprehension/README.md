@@ -111,3 +111,15 @@ A1 visual comparison, A2 axe, A3 route budgets and A4 executed results remain fo
 central/page QA. A5 reduced-motion disables the highlight transition; A6 has copy
 guards and no pre-existing literal was edited; A7 this layer never imports the
 cable or audio engine; A8 all task edits stay in the dispatch's allowed paths.
+
+## Loading (FUX.B budget pass)
+
+Pages keep only light modules in their initial JS: `Tour.svelte` (host: auto-open, Escape,
+dismiss on unmount), `TourTrigger.svelte`, `tour.svelte.ts`, `Explainer.svelte` (trigger) with
+`explainer-titles.ts` (term + title per explainer, for the accessible name) and `glossary.ts`.
+The prose is lazy: `TourPanel.svelte` (with `steps.ts`) loads when a tour opens or on hover/focus
+of its trigger; `ExplainerPanel.svelte` (with the bodies in `explainers.ts`) loads on hover, focus
+or press of an explainer trigger, and the explanation opens once it is there. One shared loader
+each (`components/comprehension/panels.ts`); a failed import is retried on the next intent.
+The page barrel no longer re-exports `tourSteps`, `explainers` or `gateReasonContext`: import
+them from their modules (Docs prints every body, so it imports `explainers.ts` statically).

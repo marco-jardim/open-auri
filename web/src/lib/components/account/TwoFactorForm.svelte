@@ -9,7 +9,10 @@
 	// component's memory until the setup is confirmed or cancelled: never in storage, a cookie or
 	// the URL.
 	import { m } from '#lib/paraglide/messages.js';
-	import { qrSvg } from '#lib/qr/index.ts';
+	// Server render only (the setup works without JavaScript). In the client build
+	// `import.meta.env.SSR` is false, so this binding is unused and the encoder (side-effect free,
+	// like uqr) leaves /conta's initial JS; the browser imports it when an enrolment appears (FUX.B).
+	import { qrSvg as serverQrSvg } from '#lib/qr/index.ts';
 	import { Button, Field } from '#lib/components/primitives/index.ts';
 	import Feedback from './Feedback.svelte';
 	import {
@@ -58,8 +61,20 @@
 	}
 
 	const key = $derived(enrolment ? manualKey(enrolment.totpURI) : '');
+	let browserQrSvg = $state.raw<((value: string) => string) | null>(null);
+	$effect(() => {
+		if (!enrolment || browserQrSvg) return;
+		import('#lib/qr/index.ts').then(
+			(module) => {
+				browserQrSvg = module.qrSvg;
+			},
+			// The manual key and the full link below stay usable without the image.
+			(error: unknown) => console.error('The QR encoder could not load', error)
+		);
+	});
+	const encode = $derived(import.meta.env.SSR ? serverQrSvg : browserQrSvg);
 	const qr = $derived(
-		enrolment ? `data:image/svg+xml,${encodeURIComponent(qrSvg(enrolment.totpURI))}` : ''
+		enrolment && encode ? `data:image/svg+xml,${encodeURIComponent(encode(enrolment.totpURI))}` : ''
 	);
 	/** The codes as a .txt download (a data: URL: works without JavaScript, nothing is uploaded). */
 	function codesFileOf(codes: readonly string[]): string {
@@ -120,7 +135,12 @@
 	{#if enrolment}
 		<section class="setup" aria-labelledby="{uid}-scan">
 			<h3 id="{uid}-scan" tabindex="-1" use:focusOnMount>{m.conta_2fa_scan_title()}</h3>
-			<img class="qr" src={qr} alt={m.conta_2fa_qr_alt()} width="200" height="200" />
+			{#if qr}
+				<img class="qr" src={qr} alt={m.conta_2fa_qr_alt()} width="200" height="200" />
+			{:else}
+				<!-- Same 200 × 200 box while the encoder chunk arrives: no layout shift. -->
+				<span class="qr qr--pending" aria-hidden="true"></span>
+			{/if}
 			<p class="acc-hint">{m.conta_2fa_manual_label()}</p>
 			<code class="acc-mono key" data-testid="two-factor-key">{key}</code>
 			<details>
@@ -266,6 +286,11 @@
 		height: 200px;
 		background: #ffffff;
 		image-rendering: pixelated;
+	}
+
+	.qr--pending {
+		display: inline-block;
+		vertical-align: baseline;
 	}
 
 	.key {

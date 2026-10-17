@@ -6,12 +6,11 @@
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import {
-		VuMeter,
-		PpmBar,
-		CorrelationMeter,
-		LoudnessReadout
-	} from '#lib/components/meters/index.ts';
+	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
+	import VuMeter from '#lib/components/meters/VuMeter.svelte';
+	import PpmBar from '#lib/components/meters/PpmBar.svelte';
+	import CorrelationMeter from '#lib/components/meters/CorrelationMeter.svelte';
+	import LoudnessReadout from '#lib/components/meters/LoudnessReadout.svelte';
 	import { Chip } from '#lib/components/primitives/index.ts';
 	import type { MeterUpdate } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';

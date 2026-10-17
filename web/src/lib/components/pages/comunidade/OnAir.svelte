@@ -10,7 +10,7 @@
 	The visibility default is unchanged ("Pública"): changing it needs the product owner (§4.1).
 -->
 <script lang="ts">
-	import { ResponseChart } from '#lib/charts/index.ts';
+	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';

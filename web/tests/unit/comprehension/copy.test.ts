@@ -150,18 +150,24 @@ test('no visible message carries a plan code outside the technical Docs threshol
 });
 
 test('highlight is static for reduced motion and touch triggers keep a 44px hit area', () => {
+	// FUX.B: the open tour (and its highlight) is the lazy TourPanel; Tour.svelte is the host.
 	const tour = readFileSync(
-		new URL('../../../src/lib/components/comprehension/Tour.svelte', import.meta.url),
+		new URL('../../../src/lib/components/comprehension/TourPanel.svelte', import.meta.url),
 		'utf8'
 	);
-	const explainer = readFileSync(
-		new URL('../../../src/lib/components/comprehension/Explainer.svelte', import.meta.url),
-		'utf8'
-	);
+	const read = (name: string) =>
+		readFileSync(
+			new URL(`../../../src/lib/components/comprehension/${name}`, import.meta.url),
+			'utf8'
+		);
 	expect(tour).toContain('@media (prefers-reduced-motion: reduce)');
 	expect(tour).toContain('transition: none');
 	expect(tour).toContain('animation: none');
-	expect(explainer).toContain('@media (pointer: coarse)');
-	expect(explainer).toContain('min-width: 44px');
-	expect(explainer).toContain('min-height: 44px');
+	// Both the eager trigger and the lazy panel's close button keep the 44px touch target.
+	for (const source of [read('Explainer.svelte'), read('ExplainerPanel.svelte'), tour]) {
+		expect(source).toContain('@media (pointer: coarse)');
+		expect(source).toContain('min-height: 44px');
+	}
+	expect(read('Explainer.svelte')).toContain('min-width: 44px');
+	expect(read('ExplainerPanel.svelte')).toContain('min-width: 44px');
 });

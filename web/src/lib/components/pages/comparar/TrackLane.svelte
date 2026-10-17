@@ -2,7 +2,7 @@
 	import { getPreset, OFFICIAL_PRESETS } from 'open-auri/catalog';
 	import { levelDb } from 'open-auri/dsp';
 	import { isExperimentalKind } from 'open-auri/safety';
-	import { MiniCurve } from '#lib/charts/index.ts';
+	import MiniCurve from '#lib/charts/MiniCurve.svelte';
 	import VuMeter from '#lib/components/meters/VuMeter.svelte';
 	import type { MeterSource, MeterUpdate } from '#lib/audio/meters.ts';
 	import { numberLabel } from '#lib/charts/scales.ts';

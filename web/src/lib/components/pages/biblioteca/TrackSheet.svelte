@@ -4,7 +4,7 @@
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, ABSide, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
 	import type { CurveData } from '#lib/state/model.ts';
-	import { ResponseChart } from '#lib/charts/index.ts';
+	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';

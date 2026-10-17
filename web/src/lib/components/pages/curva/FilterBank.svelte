@@ -14,7 +14,9 @@
 -->
 <script lang="ts">
 	import { isExperimentalKind } from 'open-auri/safety';
-	import { LedLadder, MeterModeLabel } from '#lib/components/meters/index.ts';
+	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
+	import LedLadder from '#lib/components/meters/LedLadder.svelte';
+	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
 	import type { MeterFrame, MeterMode } from '#lib/audio/meters.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button, Lamp } from '#lib/components/primitives/index.ts';

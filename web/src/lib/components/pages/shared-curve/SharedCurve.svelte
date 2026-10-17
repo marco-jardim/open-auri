@@ -12,7 +12,7 @@
 	import { decodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, AudioEngine } from '#lib/audio/engine.ts';
-	import { ResponseChart } from '#lib/charts/index.ts';
+	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { checkedCurve, type CurrentCurve } from '#lib/state/model.ts';

@@ -130,6 +130,41 @@ test('default viewport rule is desktop only at 1024px and respects stored dismis
 	expect(createTour().shouldAutoOpen('curva')).toBe(false);
 });
 
+test('Escape closes an open modal dialog first and leaves the tour open', async () => {
+	const state = controller();
+	await render(Fixture, { controller: state });
+	await page.getByRole('button', { name: 'Como funciona esta página' }).click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	const modal = document.createElement('dialog');
+	modal.innerHTML = '<button type="button">Dentro do diálogo</button>';
+	document.body.append(modal);
+	try {
+		modal.showModal();
+		await expect.poll(() => modal.contains(document.activeElement)).toBe(true);
+		await userEvent.keyboard('{Escape}');
+		// The native close request was not cancelled by the tour's window listener.
+		await expect.poll(() => modal.open).toBe(false);
+		expect(state.activePage).toBe('curva');
+		expect(state.history.curva).toBeUndefined();
+
+		// An ARIA modal open elsewhere also keeps Escape away from the tour.
+		const aria = document.createElement('div');
+		aria.setAttribute('role', 'dialog');
+		aria.setAttribute('aria-modal', 'true');
+		document.body.append(aria);
+		document.body.focus();
+		await userEvent.keyboard('{Escape}');
+		expect(state.activePage).toBe('curva');
+		aria.remove();
+	} finally {
+		modal.remove();
+	}
+	// With no modal left, Escape dismisses the tour as before.
+	await userEvent.keyboard('{Escape}');
+	await expect.poll(() => state.activePage).toBeNull();
+	expect(state.history.curva).toBe('dispensado');
+});
+
 for (const locale of ['pt-BR', 'en-US'] as const) {
 	test(`explainer keyboard, ARIA, glossary and focus return in ${locale}`, async () => {
 		await setLocale(locale, { reload: false });

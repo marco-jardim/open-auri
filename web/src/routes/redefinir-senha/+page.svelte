@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import { AuthShell, ResetForm } from '#lib/components/auth/index.ts';
+	// Direct imports: the auth barrel would put every auth form in this page's JS (FUX.B).
+	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import ResetForm from '#lib/components/auth/ResetForm.svelte';
 	import { kitEnhancer } from '#lib/components/auth/kit-enhance.ts';
 	import type { PageProps } from './$types';
 

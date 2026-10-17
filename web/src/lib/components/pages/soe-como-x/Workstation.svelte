@@ -6,7 +6,8 @@
 	import { createSolverWorker } from '#lib/workers/solver-client.ts';
 	import { OFFICIAL_PRESETS, PADRAO_AURI } from 'open-auri/catalog';
 	import { numberLabel } from '#lib/charts/scales.ts';
-	import { WiggleTrace } from '#lib/charts/index.ts';
+	// Direct chart imports (FUX.B): the charts barrel would bring every chart into the page.
+	import WiggleTrace from '#lib/charts/WiggleTrace.svelte';
 	import type { AudioEngine } from '#lib/audio/engine.ts';
 	import type { VuReference } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';
@@ -14,7 +15,8 @@
 	import { Explainer, Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import Attribution from './Attribution.svelte';
 	import CsvImport from './CsvImport.svelte';
-	import TargetEditor from './TargetEditor.svelte';
+	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
+	import { targetEditor } from './lazy.ts';
 	import TracePlot from './TracePlot.svelte';
 	import Preview from './Preview.svelte';
 	import { createCurveSocial, type CurveSocial } from '../comparar/social.svelte.ts';
@@ -618,7 +620,11 @@
 				{/if}
 				<div class="target-chart">
 					{#if targetKind === 'drawn'}
-						<TargetEditor {points} onchange={draw} />
+						<Deferred module={targetEditor} height="220px">
+							{#snippet children(TargetEditor)}
+								<TargetEditor {points} onchange={draw} />
+							{/snippet}
+						</Deferred>
 					{:else if station.target}
 						<TracePlot
 							compact

@@ -4,9 +4,22 @@
 	editor's curve and the journal. This page never writes: the only way to the cable is
 	`app.requestWrite()`, which opens the layout's checklist, whose GRAVAR lever is the gesture.
 -->
+<script module lang="ts">
+	import { LazyModule } from '#lib/app/lazy.svelte.ts';
+
+	// FUX.B: the rack units below the fold (U4 tape, U5 journal and social status, U6 counters,
+	// U7 cable list) are their own chunks, loaded on approach or idle behind same-size boxes.
+	const transportTape = new LazyModule(() => import('./TransportTape.svelte'));
+	const journal = new LazyModule(() => import('./Journal.svelte'));
+	const socialStatus = new LazyModule(() => import('./SocialStatus.svelte'));
+	const flashCounters = new LazyModule(() => import('./FlashCounters.svelte'));
+	const cableList = new LazyModule(() => import('./CableList.svelte'));
+</script>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { PRESETS_BY_ID } from 'open-auri/catalog';
+	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
 	import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
@@ -14,8 +27,12 @@
 	import type { JournalEntry } from '#lib/cable/types.ts';
 	import { lampsFromGate } from '#lib/cable/checklist.ts';
 	import { neutralCurve } from '#lib/state/model.ts';
-	import { ByteMap, ResponseChart, hexBytes } from '#lib/charts/index.ts';
-	import { EmBreve } from '#lib/components/chrome/index.ts';
+	// Direct imports (FUX.B): the charts and chrome barrels would bring every chart, HelpOverlay
+	// and ConfirmDialog into the page.
+	import ByteMap from '#lib/charts/ByteMap.svelte';
+	import ResponseChart from '#lib/charts/ResponseChart.svelte';
+	import { hexBytes } from '#lib/charts/protocol.ts';
+	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
 	import { formatCrc, formatNumber } from '#lib/components/cable/i18n.ts';
 	import { criteriaValues } from '#lib/components/cable/criteria.ts';
 	import LevelGauge from '#lib/components/cable/LevelGauge.svelte';
@@ -25,11 +42,7 @@
 	import { Explainer, Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import RackUnit from './RackUnit.svelte';
 	import StateDiagram from './StateDiagram.svelte';
-	import TransportTape from './TransportTape.svelte';
-	import Journal from './Journal.svelte';
-	import FlashCounters from './FlashCounters.svelte';
-	import SocialStatus from './SocialStatus.svelte';
-	import CableList from './CableList.svelte';
+
 	import {
 		CABLE_PROGRESS_EVENT,
 		diagramNode,
@@ -391,12 +404,14 @@
 
 		<RackUnit number="U4" title={m.cabo_transport()} model={m.cabo_timing()}>
 			<div data-tour="cabo-tape">
-				{#if encoder.ok}<TransportTape
-						{curve}
-						outcome={cable?.lastOutcome ?? null}
-						{writing}
-						{progress}
-					/>{:else}<p>
+				{#if encoder.ok}<Deferred module={transportTape} height="14rem">
+						{#snippet children(TransportTape)}<TransportTape
+								{curve}
+								outcome={cable?.lastOutcome ?? null}
+								{writing}
+								{progress}
+							/>{/snippet}
+					</Deferred>{:else}<p>
 						{m.cabo_invalid()}
 					</p>{/if}
 			</div>
@@ -404,16 +419,32 @@
 		<div class="vent" aria-hidden="true"></div>
 		<RackUnit number="U5" title={m.cabo_journal()} model={m.cabo_journal_model()}>
 			<div data-tour="cabo-journal">
-				<Journal {entries} onload={app === null ? undefined : loadEntry} />
-				<SocialStatus {entries} {signedIn} />
+				<Deferred module={journal} height="18rem">
+					{#snippet children(Journal)}
+						<Journal {entries} onload={app === null ? undefined : loadEntry} />
+					{/snippet}
+				</Deferred>
+				<Deferred module={socialStatus} height="2.5rem">
+					{#snippet children(SocialStatus)}
+						<SocialStatus {entries} {signedIn} />
+					{/snippet}
+				</Deferred>
 			</div>
 		</RackUnit>
 		<RackUnit number="U6" title={m.cabo_counters()} model={m.cabo_flash_model()} silver>
 			{#snippet aside()}<Explainer term="flash" />{/snippet}
-			<FlashCounters {counters} />
+			<Deferred module={flashCounters} height="6rem">
+				{#snippet children(FlashCounters)}
+					<FlashCounters {counters} />
+				{/snippet}
+			</Deferred>
 		</RackUnit>
 		<RackUnit number="U7" title={m.cabo_multi()} model={m.cabo_multi_model()}>
-			<CableList {cable} />
+			<Deferred module={cableList} height="6rem">
+				{#snippet children(CableList)}
+					<CableList {cable} />
+				{/snippet}
+			</Deferred>
 			<div class="multi-actions">
 				<Button variant="key" disabledReason={connectReason} onclick={() => app?.cable.connect()}
 					>{m.cabo_add()}</Button

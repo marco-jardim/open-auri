@@ -120,6 +120,8 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect.element(page.getByText(m.soe_missing(), { exact: true })).toBeVisible();
 		await select('soe-target-kind', 'drawn');
 		const first = page.getByRole('slider', { name: `${m.soe_point()} 1`, exact: true });
+		// FUX.B: the drawn-target editor is its own chunk; wait for it before focusing.
+		await expect.element(first).toBeVisible();
 		first.element().focus();
 		await userEvent.keyboard('{ArrowUp}');
 		await expect.element(first).toHaveAttribute('aria-valuenow', '0.5');

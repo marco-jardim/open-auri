@@ -4,7 +4,7 @@
 	`createAB`). "Gravar no cabo" only opens the layout's checklist through `requestWrite`.
 -->
 <script lang="ts">
-	import { FREQUENCY_TICKS, dbTicks, frequencyLabel } from '#lib/charts/index.ts';
+	import { FREQUENCY_TICKS, dbTicks, frequencyLabel } from '#lib/charts/scales.ts';
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button } from '#lib/components/primitives/index.ts';

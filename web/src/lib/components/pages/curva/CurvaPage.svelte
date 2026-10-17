@@ -26,9 +26,9 @@
 	import { curveSignature } from '#lib/state/model.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
-	import Cabinet from './Cabinet.svelte';
-	import FilterBank from './FilterBank.svelte';
-	import ImportExport from './ImportExport.svelte';
+	import { whenIdle } from '#lib/app/runtime.ts';
+	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
+	import { cabinet, filterBank, importExport } from './lazy.ts';
 	import LayerSelector from './LayerSelector.svelte';
 	import MacroKnobs from './MacroKnobs.svelte';
 	import OutputPanel from './OutputPanel.svelte';
@@ -80,6 +80,15 @@
 	import { firstReasonText, type Reason } from './reasons.ts';
 
 	type SocialComponent = typeof import('./SocialActions.svelte').default;
+
+	// FUX.B: warm the layer panels once the first screen is quiet, so Ajustar and Engenharia
+	// open on loaded chunks (the boxes in Deferred hold their size if a press comes first).
+	onMount(() =>
+		whenIdle(() => {
+			filterBank.request();
+			cabinet.request();
+		})
+	);
 
 	interface Props {
 		app: ClientApp | null;
@@ -614,7 +623,7 @@
 	});
 
 	/** Runs `callback` when the browser is idle (or after `timeout` ms at the latest). */
-	function whenIdle(callback: () => void, timeout: number): () => void {
+	function idleTask(callback: () => void, timeout: number): () => void {
 		if (typeof requestIdleCallback === 'function') {
 			const handle = requestIdleCallback(callback, { timeout });
 			return () => cancelIdleCallback(handle);
@@ -627,8 +636,8 @@
 		const cleanups: (() => void)[] = [];
 		// After the first paint: warm the gate worker (W4) and fetch the account panel when idle.
 		const frame = requestAnimationFrame(() => {
-			cleanups.push(whenIdle(() => void warmGateWorker(), 1500));
-			cleanups.push(whenIdle(loadSocial, 2500));
+			cleanups.push(idleTask(() => void warmGateWorker(), 1500));
+			cleanups.push(idleTask(loadSocial, 2500));
 		});
 		cleanups.push(() => cancelAnimationFrame(frame));
 		const slot = socialSlot;
@@ -751,7 +760,7 @@
 		<div class="np-preset" aria-live="polite">
 			<span class="np-k">{m.curva_in_editor()}</span>
 			<span class="np-name">{curveName}</span>
-			<span class="np-state">
+			<span class="np-state" data-testid="editor-state">
 				{m.curva_np_state({
 					preamp: formatSignedDb(curve.preampDb, locale),
 					crc,
@@ -852,33 +861,41 @@
 
 	{#if includesLayer(layer, 'ajustar')}
 		<div class="layer-block" transition:slide={{ duration: motionMs }}>
-			<FilterBank
-				{curve}
-				{verdict}
-				{layer}
-				{locale}
-				{selected}
-				stages={preview?.stages ?? idleStages}
-				message={bankMessage}
-				ondrag={onDrag}
-				onmove={onBankMove}
-				onkind={onKind}
-				onorder={onDefaultOrder}
-			/>
+			<Deferred module={filterBank} height="560px">
+				{#snippet children(FilterBank)}
+					<FilterBank
+						{curve}
+						{verdict}
+						{layer}
+						{locale}
+						{selected}
+						stages={preview?.stages ?? idleStages}
+						message={bankMessage}
+						ondrag={onDrag}
+						onmove={onBankMove}
+						onkind={onKind}
+						onorder={onDefaultOrder}
+					/>
+				{/snippet}
+			</Deferred>
 		</div>
 	{/if}
 
 	{#if layer === 'engenharia'}
 		<div class="layer-block" transition:slide={{ duration: motionMs }}>
-			<Cabinet
-				{curve}
-				{locale}
-				{selected}
-				{refused}
-				message={cabMessage}
-				onselect={(index) => (selected = index)}
-				onreorder={onReorder}
-			/>
+			<Deferred module={cabinet} height="420px">
+				{#snippet children(Cabinet)}
+					<Cabinet
+						{curve}
+						{locale}
+						{selected}
+						{refused}
+						message={cabMessage}
+						onselect={(index) => (selected = index)}
+						onreorder={onReorder}
+					/>
+				{/snippet}
+			</Deferred>
 			<div class="below">
 				{#await import('./Inspector.svelte') then { default: Inspector }}
 					<Inspector {curve} {verdict} {selected} {locale} />
@@ -908,18 +925,22 @@
 				<Skeleton height="148px" radius="var(--rad-lg)" label={m.curva_v2_social_loading()} />
 			{/if}
 		</div>
-		<ImportExport
-			{curve}
-			name={curveName}
-			source={stored?.source ?? `preset:${NEUTRO.id}`}
-			{layer}
-			{locale}
-			{pageUrl}
-			disabled={!app}
-			disabledReason={loadingReason}
-			onimport={(result) => onImport(result)}
-			{notify}
-		/>
+		<Deferred module={importExport} height="180px">
+			{#snippet children(ImportExport)}
+				<ImportExport
+					{curve}
+					name={curveName}
+					source={stored?.source ?? `preset:${NEUTRO.id}`}
+					{layer}
+					{locale}
+					{pageUrl}
+					disabled={!app}
+					disabledReason={loadingReason}
+					onimport={(result) => onImport(result)}
+					{notify}
+				/>
+			{/snippet}
+		</Deferred>
 	</div>
 
 	<p class="visually-hidden" role="status" aria-live="polite">{announcement}</p>
@@ -1188,8 +1209,11 @@
 		.curva {
 			padding: var(--space-4) 14px var(--space-5);
 		}
+		/* One column: beside an `auto` column, the "No editor" block (its state line is one long
+		   max-content run) took the whole width and squeezed the title's 1fr track to 0 px, so
+		   the h1 had no box on a phone. */
 		.nameplate {
-			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-columns: minmax(0, 1fr);
 		}
 		.nameplate :global(.mode) {
 			grid-column: 1 / -1;

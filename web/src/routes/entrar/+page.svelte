@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
 	import { PUBLIC_TURNSTILE_SITE_KEY } from '#lib/config/public.ts';
-	import { AuthShell, SignInForm, withNext } from '#lib/components/auth/index.ts';
+	// Direct imports: the auth barrel would put every auth form in this page's JS (FUX.B).
+	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import SignInForm from '#lib/components/auth/SignInForm.svelte';
+	import { withNext } from '#lib/components/auth/next.ts';
 	import { kitEnhancer } from '#lib/components/auth/kit-enhance.ts';
 	import type { PageProps } from './$types';
 

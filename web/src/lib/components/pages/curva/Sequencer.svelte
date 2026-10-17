@@ -4,7 +4,7 @@
 	layout's pre-write checklist via the `onsend` callback (`app.requestWrite()`); nothing is sent here.
 -->
 <script lang="ts">
-	import { ReportTimeline } from '#lib/charts/index.ts';
+	import ReportTimeline from '#lib/charts/ReportTimeline.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { hexBytes, payloadCrc } from './format.ts';
 	import type { Curve } from './model.ts';

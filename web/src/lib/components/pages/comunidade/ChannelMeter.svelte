@@ -12,7 +12,9 @@
 		type TapOptions
 	} from '#lib/audio/meters.ts';
 	import type { PreviewChain } from '#lib/audio/engine.ts';
-	import { LedLadder, MeterModeLabel } from '#lib/components/meters/index.ts';
+	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
+	import LedLadder from '#lib/components/meters/LedLadder.svelte';
+	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 
 	let {

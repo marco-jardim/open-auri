@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { ByteMap, ReportTimeline } from '#lib/charts/index.ts';
+	import ByteMap from '#lib/charts/ByteMap.svelte';
+	import ReportTimeline from '#lib/charts/ReportTimeline.svelte';
 	import { THRESHOLDS } from 'open-auri/safety';
 	import type { DocsContent } from '#lib/content/docs/types.ts';
 	import type { DocsUi } from './ui.ts';

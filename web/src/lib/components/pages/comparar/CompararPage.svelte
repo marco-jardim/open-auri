@@ -28,7 +28,8 @@
 	import ComparisonPlot from './ComparisonPlot.svelte';
 	import TrackLane from './TrackLane.svelte';
 	import TapeDeck from './TapeDeck.svelte';
-	import BlendPanel from './BlendPanel.svelte';
+	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
+	import { blendPanel } from './lazy.ts';
 	import './comparar.css';
 
 	let {
@@ -567,7 +568,14 @@
 				</div>
 			{:else}<p class="note">{t.empty}</p>{/if}
 		</section>
-		<BlendPanel {tracks} {t} {locale} {app} {social} onBounce={bounce} />
+		<!-- The anchor target lives outside the deferred chunk so #comparar-blend always resolves. -->
+		<div id="comparar-blend" class="blend-anchor">
+			<Deferred module={blendPanel} height="420px">
+				{#snippet children(BlendPanel)}
+					<BlendPanel {tracks} {t} {locale} {app} {social} onBounce={bounce} />
+				{/snippet}
+			</Deferred>
+		</div>
 		<section class="panel" aria-labelledby="comparar-export-title">
 			<h2 class="plate" id="comparar-export-title">{t.export}</h2>
 			<div class="grid-ex">

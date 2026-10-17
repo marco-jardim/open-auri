@@ -2,15 +2,19 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { tour, type TourController } from '#lib/comprehension/tour.svelte.ts';
 	import type { TourPage } from '#lib/comprehension/steps.ts';
+	import { tourPanel } from './panels.ts';
 
 	let { page, controller = tour }: { page: TourPage; controller?: TourController } = $props();
 </script>
 
+<!-- Intent warms the tour chunk (FUX.B), so the press opens it without a visible wait. -->
 <button
 	type="button"
 	aria-label={m.tour_trigger_label()}
 	aria-haspopup="dialog"
 	aria-expanded={controller.activePage === page}
+	onpointerenter={() => tourPanel.request()}
+	onfocus={() => tourPanel.request()}
 	onclick={() => controller.open(page)}
 >
 	<span class="symbol" aria-hidden="true">?</span>

@@ -19,7 +19,8 @@ import {
 	type MeterTap,
 	type VuReference
 } from '#lib/audio/meters.ts';
-import { LiveMeter } from '#lib/components/meters/index.ts';
+// Direct import (FUX.B): the meters barrel would bring every meter component into the page.
+import { LiveMeter } from '#lib/components/meters/live.svelte.ts';
 import { hasExperimental, type Curve } from './model.ts';
 
 export type PreviewError = 'gesture' | 'suspended' | 'unsupported' | 'failed';

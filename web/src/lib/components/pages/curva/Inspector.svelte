@@ -6,7 +6,8 @@
 <script lang="ts">
 	import { designSection } from 'open-auri/dsp';
 	import { THRESHOLDS } from 'open-auri/safety';
-	import { ByteMap, PoleZeroPlot } from '#lib/charts/index.ts';
+	import ByteMap from '#lib/charts/ByteMap.svelte';
+	import PoleZeroPlot from '#lib/charts/PoleZeroPlot.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { formatNumber, formatSignedDb, hex } from './format.ts';
 	import type { Curve } from './model.ts';

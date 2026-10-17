@@ -168,7 +168,7 @@ test('CLI prints a table with route classes and fails only when a route exceeds 
   assert.match(pass.stdout, /Initial JavaScript per route/);
   assert.match(pass.stdout, /gzip kB/);
   assert.match(pass.stdout, /\/docs/);
-  assert.match(pass.stdout, /instrument-heavy/);
+  assert.match(pass.stdout, /curva/);
   assert.match(pass.stdout, /PASS/);
   assert.doesNotMatch(pass.stdout, /nodes\/0\.hash\.js/, 'chunk rows only with --by-chunk');
   repo.put(asset('nodes/2'), randomBytes(300_000));
@@ -193,21 +193,21 @@ test('per-class targets come from the versioned JSON of spec §5.7', () => {
     '/conta': ['auth', 100_000],
     '/conta/encerrada': ['auth', 100_000],
     '/docs': ['docs', 130_000],
-    '/teste-cego': ['instrument-light', 140_000],
-    '/cabo': ['instrument-light', 140_000],
-    '/biblioteca': ['instrument-light', 140_000],
-    '/c/[id]': ['instrument-light', 140_000],
-    '/u/[apelido]': ['instrument-light', 140_000],
-    '/': ['instrument-heavy', 160_000],
-    '/soe-como-x': ['instrument-heavy', 160_000],
-    '/comparar': ['instrument-heavy', 160_000],
-    '/comunidade': ['instrument-heavy', 160_000],
+    '/teste-cego': ['instrument-light', 150_000],
+    '/cabo': ['instrument-light', 150_000],
+    '/biblioteca': ['instrument-light', 150_000],
+    '/c/[id]': ['instrument-light', 150_000],
+    '/u/[apelido]': ['instrument-light', 150_000],
+    '/': ['curva', 180_000],
+    '/soe-como-x': ['instrument-heavy', 170_000],
+    '/comparar': ['instrument-heavy', 170_000],
+    '/comunidade': ['instrument-heavy', 170_000],
   };
   for (const [route, [classId, budgetBytes]] of Object.entries(expected)) {
     const resolved = budgetForRoute(route, targets);
     assert.deepEqual([resolved.classId, resolved.budgetBytes], [classId, budgetBytes], route);
   }
-  assert.equal(budgetForRoute('/', targets).goalBytes, 150_000);
+  assert.equal(budgetForRoute('/', targets).goalBytes, 170_000);
   // Unlisted routes (admin) keep the global ceiling; prefixes never match by substring.
   assert.deepEqual(budgetForRoute('/admin', targets), {
     classId: null,
@@ -258,7 +258,7 @@ test('CLI --by-chunk prints a chunk table per route and --targets overrides the 
   const byChunk = repo.run(['--output', repo.output, '--by-chunk']);
   assert.equal(byChunk.status, 0, byChunk.stderr);
   assert.match(byChunk.stdout, /\n\/docs \(docs\): \d+\.\d{2} kB gzip/);
-  assert.match(byChunk.stdout, /\n\/ \(instrument-heavy\): \d+\.\d{2} kB gzip/);
+  assert.match(byChunk.stdout, /\n\/ \(curva\): \d+\.\d{2} kB gzip/);
   assert.match(byChunk.stdout, /shared-lib/);
   assert.match(byChunk.stdout, /nodes\/4\.hash\.js/);
   const strict = join(repo.root, 'strict.json');

@@ -15,8 +15,17 @@
 
 	Loading (spec §5.3 L6): the Turnstile widget and the QR module are imported on demand (after
 	the consent / when the drawer opens); the share, packs and report drawers mount their panels
-	only when opened.
+	only when opened; FUX.B: those three panels are their own chunks, warmed on hover or focus of
+	the drawer and loaded when it opens (a skeleton holds the drawer meanwhile).
 -->
+<script module lang="ts">
+	import { LazyModule } from '#lib/app/lazy.svelte.ts';
+
+	const sharePanel = new LazyModule(() => import('./SharePanel.svelte'));
+	const packsPanel = new LazyModule(() => import('./PacksPanel.svelte'));
+	const reportPanel = new LazyModule(() => import('./ReportPanel.svelte'));
+</script>
+
 <script lang="ts">
 	import './comunidade.css';
 	import { onDestroy, untrack } from 'svelte';
@@ -29,7 +38,7 @@
 		tour,
 		type TourController
 	} from '#lib/components/comprehension/index.ts';
-	import { Button, EmptyState, Lamp } from '#lib/components/primitives/index.ts';
+	import { Button, EmptyState, Lamp, Skeleton } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { checkedCurve, type CurrentCurve } from '#lib/state/model.ts';
@@ -46,12 +55,9 @@
 	import LoginPrompt from './LoginPrompt.svelte';
 	import MasterScope from './MasterScope.svelte';
 	import OnAir from './OnAir.svelte';
-	import PacksPanel from './PacksPanel.svelte';
 	import PrefersPanel from './PrefersPanel.svelte';
-	import ReportPanel from './ReportPanel.svelte';
 	import S6Panel from './S6Panel.svelte';
 	import S7Panel from './S7Panel.svelte';
-	import SharePanel from './SharePanel.svelte';
 	import TotalRecall from './TotalRecall.svelte';
 	import { createListener } from './listener.svelte.ts';
 	import {
@@ -410,6 +416,11 @@
 	let shareOpen = $state(false);
 	let packsOpen = $state(false);
 	let reportOpen = $state(false);
+	/** A drawer chunk that could not load (offline before it was cached): say so; retried on reopen. */
+	function drawerFailed(error: unknown): void {
+		console.error('A Comunidade drawer could not load', error);
+		notice = m.layout_error_generic();
+	}
 </script>
 
 {#snippet emptyDesk()}
@@ -655,34 +666,65 @@
 				<h2 id="{id}-tools" class="tools-title">{m.comunidade_v2_tools_title()}</h2>
 				<p class="tools-lede">{m.comunidade_v2_tools_lede()}</p>
 			</div>
-			<details class="drawer disclosure" bind:open={shareOpen} data-testid="drawer-share">
-				<summary
+			<!-- FUX.B: `toggle` fires for the reader's press and for programmatic opens alike. -->
+			<details
+				class="drawer disclosure"
+				bind:open={shareOpen}
+				data-testid="drawer-share"
+				ontoggle={(event) => event.currentTarget.open && sharePanel.request(drawerFailed)}
+			>
+				<summary onpointerenter={() => sharePanel.request()} onfocus={() => sharePanel.request()}
 					><span class="drawer-title">{m.comunidade_share_title()}</span><span class="drawer-lede"
 						>{m.comunidade_share_lede()}</span
 					></summary
 				>
 				{#if shareOpen}
-					<SharePanel {api} {session} channel={target} {online} />
+					{#if sharePanel.current}
+						{@const SharePanel = sharePanel.current}
+						<SharePanel {api} {session} channel={target} {online} />
+					{:else}
+						<Skeleton width="100%" height="12rem" />
+					{/if}
 				{/if}
 			</details>
-			<details class="drawer disclosure" bind:open={packsOpen} data-testid="drawer-packs">
-				<summary
+			<details
+				class="drawer disclosure"
+				bind:open={packsOpen}
+				data-testid="drawer-packs"
+				ontoggle={(event) => event.currentTarget.open && packsPanel.request(drawerFailed)}
+			>
+				<summary onpointerenter={() => packsPanel.request()} onfocus={() => packsPanel.request()}
 					><span class="drawer-title">{m.comunidade_packs_title()}</span><span class="drawer-lede"
 						>{m.comunidade_packs_lede()}</span
 					></summary
 				>
 				{#if packsOpen}
-					<PacksPanel {api} {session} {online} />
+					{#if packsPanel.current}
+						{@const PacksPanel = packsPanel.current}
+						<PacksPanel {api} {session} {online} />
+					{:else}
+						<Skeleton width="100%" height="12rem" />
+					{/if}
 				{/if}
 			</details>
-			<details class="drawer disclosure" bind:open={reportOpen} data-testid="drawer-report">
-				<summary
+			<details
+				class="drawer disclosure"
+				bind:open={reportOpen}
+				data-testid="drawer-report"
+				ontoggle={(event) => event.currentTarget.open && reportPanel.request(drawerFailed)}
+			>
+				<summary onpointerenter={() => reportPanel.request()} onfocus={() => reportPanel.request()}
 					><span class="drawer-title">{m.comunidade_report_title()}</span><span class="drawer-lede"
 						>{m.comunidade_report_lede()}</span
 					></summary
 				>
 				{#if reportOpen}
-					<ReportPanel {api} {session} channel={target} {siteKey} {online} />
+					{#if reportPanel.current}
+						{@const ReportPanel = reportPanel.current}
+						<ReportPanel {api} {session} channel={target} {siteKey} {online} />
+					{:else}
+						<Skeleton width="100%" height="12rem" />
+					{/if}
 				{/if}
 			</details>
 		</section>

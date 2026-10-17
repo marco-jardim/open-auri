@@ -83,9 +83,14 @@ for (const copy of [
 			await tick();
 			await expect.element(page.getByRole('heading', { level: 1, name: copy.title })).toBeVisible();
 			expect(screen.container.querySelector('main')).not.toBeNull();
-			const text = screen.container.textContent ?? '';
-			expect(text.includes(copy.bank)).toBe(layer !== 'ouvir');
-			expect(text.includes(copy.eng)).toBe(layer === 'engenharia');
+			// The bank is a deferred chunk (FUX.B): wait for it before reading the text.
+			const text = () => screen.container.textContent ?? '';
+			await expect
+				.poll(() => text().includes(copy.bank), { timeout: 5000 })
+				.toBe(layer !== 'ouvir');
+			await expect
+				.poll(() => text().includes(copy.eng), { timeout: 5000 })
+				.toBe(layer === 'engenharia');
 			await expectAccessible(screen.container);
 		}, 30000);
 	}

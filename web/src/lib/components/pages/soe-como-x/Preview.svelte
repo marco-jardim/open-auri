@@ -12,7 +12,10 @@
 		type MeterUpdate,
 		type VuReference
 	} from '#lib/audio/meters.ts';
-	import { VuMeter, MeterModeLabel, SpectrumOverlay } from '#lib/components/meters/index.ts';
+	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
+	import VuMeter from '#lib/components/meters/VuMeter.svelte';
+	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
+	import SpectrumOverlay from '#lib/components/meters/SpectrumOverlay.svelte';
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { CurveData } from '#lib/state/model.ts';

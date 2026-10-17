@@ -1,95 +1,60 @@
+<!--
+	Explainer trigger (eager, tiny). Only the localized title is in the page's chunk, for the
+	accessible name; the explanation panel and the §4.3 bodies load on first intent (hover, focus
+	or press) and open once they are there (FUX.B). The trigger owns open state and focus return.
+-->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import { explainers, type ExplainerId } from '#lib/comprehension/explainers.ts';
-	import { floating } from '#lib/comprehension/floating.ts';
-	import GlossaryLink from './GlossaryLink.svelte';
+	import { explainerHeadings, type ExplainerId } from '#lib/comprehension/explainer-titles.ts';
+	import { explainerPanel } from './panels.ts';
 
 	let { term }: { term: ExplainerId } = $props();
 	const id = $props.id();
 	let open = $state(false);
-	let trigger: HTMLButtonElement;
-	let panel: HTMLDivElement | undefined = $state();
-	const explanation = $derived(explainers[term]);
+	let trigger: HTMLButtonElement | undefined = $state();
+	const heading = $derived(explainerHeadings[term]);
 
 	function close() {
 		if (!open) return;
 		open = false;
-		trigger.focus({ preventScroll: true });
+		trigger?.focus({ preventScroll: true });
 	}
 
-	function focusPanel(node: HTMLDivElement) {
-		node.focus({ preventScroll: true });
-	}
-
-	function keydown(event: KeyboardEvent) {
-		if (open && event.key === 'Escape' && !event.defaultPrevented) {
-			event.preventDefault();
-			event.stopPropagation();
+	function toggle() {
+		if (open) {
 			close();
+			return;
 		}
-	}
-
-	function outside(event: MouseEvent) {
-		if (
-			open &&
-			event.target instanceof Node &&
-			!trigger.contains(event.target) &&
-			!panel?.contains(event.target)
-		) {
-			close();
-		}
+		// Opens once the panel chunk is there (at once after the first load, or warmed by intent).
+		explainerPanel.load().then(
+			() => {
+				open = true;
+			},
+			(error: unknown) => console.error('The explanation could not load', error)
+		);
 	}
 </script>
-
-<svelte:window onkeydown={keydown} onclick={outside} />
 
 <button
 	bind:this={trigger}
 	type="button"
 	class="trigger"
-	aria-label={m.explain_trigger({ term: explanation.title() })}
+	aria-label={m.explain_trigger({ term: heading.title() })}
 	aria-expanded={open}
 	aria-controls={id}
 	aria-haspopup="dialog"
-	onclick={() => (open ? close() : (open = true))}><span aria-hidden="true">?</span></button
+	onpointerenter={() => explainerPanel.request()}
+	onfocus={() => explainerPanel.request()}
+	onclick={toggle}><span aria-hidden="true">?</span></button
 >
 
-{#if open}
-	<div
-		bind:this={panel}
-		{id}
-		class="explanation"
-		popover="manual"
-		role="dialog"
-		aria-modal="false"
-		aria-labelledby="{id}-title"
-		aria-describedby="{id}-body"
-		tabindex="-1"
-		onkeydown={keydown}
-		use:floating={{ anchor: () => trigger }}
-		use:focusPanel
-	>
-		<header>
-			<h2 id="{id}-title">{explanation.title()}</h2>
-			<button type="button" class="close" aria-label={m.explain_close()} onclick={close}>×</button>
-		</header>
-		<p id="{id}-body">{explanation.preview()}</p>
-		{#if explanation.preview !== explanation.body}
-			<details>
-				<summary>{m.explain_full()}</summary>
-				<p>{explanation.body()}</p>
-			</details>
-		{/if}
-		{#if term === 'checklist'}
-			<p class="warning">{explainers.checklist.warning()}</p>
-		{/if}
-		<GlossaryLink term={explanation.term}>{m.explain_glossary()}</GlossaryLink>
-	</div>
+{#if open && explainerPanel.current}
+	{@const Panel = explainerPanel.current}
+	<Panel {term} {id} trigger={() => trigger ?? null} onclose={close} />
 {/if}
 
 <style>
-	.trigger,
-	.close {
+	.trigger {
 		display: inline-grid;
 		place-items: center;
 		min-width: 24px;
@@ -110,59 +75,12 @@
 		border: 1px solid var(--rule-control, rgba(236, 231, 221, 0.4));
 		border-radius: 50%;
 	}
-	.explanation {
-		position: fixed;
-		inset: auto;
-		z-index: 1000;
-		box-sizing: border-box;
-		width: min(360px, calc(100vw - 24px));
-		max-height: calc(100dvh - 24px);
-		overflow-y: auto;
-		margin: 0;
-		padding: 20px;
-		border: 1px solid var(--rule-control, rgba(236, 231, 221, 0.4));
-		border-radius: var(--rad-lg, 8px);
-		background: var(--ink-3, #1d1c1a);
-		color: var(--text, #ece7dd);
-		box-shadow: var(--elev-3, 0 24px 64px -16px rgba(0, 0, 0, 0.8));
-		font: var(--fs-small, 13px)/1.55 var(--face-body, 'Geist', system-ui, sans-serif);
-		font-synthesis: none;
-	}
-	header {
-		display: flex;
-		align-items: start;
-		justify-content: space-between;
-		gap: 12px;
-	}
-	h2 {
-		margin: 0;
-		font: inherit;
-		font-weight: 600;
-	}
-	p {
-		color: var(--text-2, #cfc9be);
-		margin: 12px 0;
-	}
-	.warning {
-		color: var(--text, #ece7dd);
-		font-weight: 600;
-	}
-	details {
-		margin: 12px 0;
-	}
-	summary {
-		color: var(--accent-text, #ff9a57);
-		cursor: pointer;
-	}
-	summary:focus-visible,
-	button:focus-visible,
-	.explanation:focus-visible {
+	.trigger:focus-visible {
 		outline: 2px solid var(--accent, #ff9a57);
 		outline-offset: 3px;
 	}
 	@media (pointer: coarse) {
-		.trigger,
-		.close {
+		.trigger {
 			min-width: 44px;
 			min-height: 44px;
 		}

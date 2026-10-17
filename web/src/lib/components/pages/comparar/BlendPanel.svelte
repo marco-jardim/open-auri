@@ -129,7 +129,7 @@
 	}
 </script>
 
-<section class="panel" id="comparar-blend" aria-labelledby="comparar-blend-title">
+<section class="panel" aria-labelledby="comparar-blend-title">
 	<h2 class="plate" id="comparar-blend-title">{t.blend}</h2>
 	<p class="note">{t.blendNote}</p>
 	<div class="grid-sos">

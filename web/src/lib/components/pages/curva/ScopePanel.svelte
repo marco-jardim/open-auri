@@ -21,7 +21,9 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import { prefersReducedMotion } from 'svelte/motion';
-	import { MeterModeLabel, SpectrumOverlay } from '#lib/components/meters/index.ts';
+	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
+	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
+	import SpectrumOverlay from '#lib/components/meters/SpectrumOverlay.svelte';
 	import type { MeterMode } from '#lib/audio/meters.ts';
 	import type { ABSide } from '#lib/audio/engine.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';

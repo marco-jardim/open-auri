@@ -3,7 +3,7 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { formatCrc, formatNumber } from '#lib/components/cable/i18n.ts';
 	import type { JournalEntry, JournalStatus } from '#lib/cable/types.ts';
-	import { MiniCurve } from '#lib/charts/index.ts';
+	import MiniCurve from '#lib/charts/MiniCurve.svelte';
 	import { Button, EmptyState } from '#lib/components/primitives/index.ts';
 	import Explainer from '#lib/components/comprehension/Explainer.svelte';
 	import { encoderData, exampleBoxes } from './model.ts';
