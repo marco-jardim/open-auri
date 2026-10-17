@@ -340,10 +340,7 @@ test('targets can tighten the 250 kB ceiling but never raise it', () => {
     [{ ...valid, defaultBytes: 1_000_000 }, /Invalid default budget/],
     [{ ...valid, classes: [cls({ targetBytes: above })] }, /Invalid target of a: above/],
     // Both above: the target is refused first.
-    [
-      { ...valid, classes: [cls({ targetBytes: above, goalBytes: above })] },
-      /Invalid target of a/,
-    ],
+    [{ ...valid, classes: [cls({ targetBytes: above, goalBytes: above })] }, /Invalid target of a/],
     [{ ...valid, classes: [cls({ goalBytes: above })] }, /Invalid goal of a: above/],
   ]) {
     assert.throws(() => parseBudgetTargets(bad), field);
