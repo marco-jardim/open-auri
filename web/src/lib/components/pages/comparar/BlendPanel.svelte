@@ -5,11 +5,12 @@
 	import { createSolverWorker } from '#lib/workers/solver-client.ts';
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { solveBlend, type BlendResult } from './blend.ts';
 	import { blendTarget, type Track, type NamedCurve } from './comparison.ts';
 	import ComparisonPlot from './ComparisonPlot.svelte';
 	import { reasonText, type Copy } from './copy.ts';
-	import SocialPublish from './SocialPublish.svelte';
 	import type { CurveSocial } from './social.svelte.ts';
 
 	let {
@@ -27,6 +28,7 @@
 		onBounce: (id: number, curve: NamedCurve) => void;
 		social?: CurveSocial;
 	} = $props();
+	const uid = $props.id();
 	let before = $state(1);
 	let after = $state(2);
 	let baseId = $state(1);
@@ -55,6 +57,11 @@
 	const crc = $derived(
 		payload ? ((payload[219] << 8) | payload[218]).toString(16).toUpperCase().padStart(4, '0') : ''
 	);
+	/** Why a result action is unavailable: every disabled control names its reason. */
+	const appReason = $derived(!accepted ? t.pending : !app ? t.reasonEngine : null);
+	const bounceReason = $derived(!accepted ? t.pending : null);
+	// L5: the publish island is fetched only once a layer passes the gate (below the fold).
+	const publishModule = $derived(accepted && social ? import('./SocialPublish.svelte') : null);
 	$effect(() => {
 		if (!signature) return;
 		generation++;
@@ -130,13 +137,21 @@
 			<div class="headblock">
 				<svg viewBox="0 0 600 160" role="img" aria-label={t.heads}>
 					<title>{t.heads}</title>
+					<defs>
+						<linearGradient id="{uid}-head"
+							><stop stop-color="#676e68" /><stop offset=".35" stop-color="#e3e7e0" /><stop
+								offset="1"
+								stop-color="#4c534d"
+							/></linearGradient
+						>
+					</defs>
 					<path d="M90 55 C90 5 380 5 380 55" fill="none" stroke="#f2b33d" stroke-dasharray="5 5" />
 					<text x="240" y="24" text-anchor="middle" fill="#f2b33d" font-size="17">+ k × Δ</text>
 					<path d="M20 115 H580" stroke="#785030" stroke-width="7" />
 					{#each [70, 210, 350, 490] as x, index (x)}
 						<path
 							d="M{x} 55 h50 v38 q0 16 -25 16 q-25 0 -25 -16z"
-							fill="url(#comparar-head)"
+							fill="url(#{uid}-head)"
 							stroke={index === 0 ? '#f2b33d' : '#141810'}
 							stroke-width="2"
 						/>
@@ -204,8 +219,8 @@
 					<label class="check"><input type="checkbox" bind:checked={automatic} />{t.auto}</label>
 				</div>
 			</div>
-			<button type="button" class="abtn primary" disabled={busy} onclick={calculate}
-				>{busy ? t.busy : t.solve}</button
+			<Button variant="primary" size="lg" loading={busy} onclick={calculate}
+				>{busy ? t.busy : t.solve}</Button
 			>
 		</div>
 		<div class="result-column">
@@ -229,6 +244,7 @@
 			>
 				<span class="lamp" aria-hidden="true"></span>
 				<div>
+					{#if accepted && !busy && !error}<span class="envelope-ok">{t.envelopeOk}</span>{/if}
 					<strong
 						>{busy
 							? t.busy
@@ -249,11 +265,14 @@
 						</ul>
 					{/if}
 				</div>
+				<span class="verdict-help"><Explainer term="gate" /></span>
 			</div>
-			{#if accepted}
-				{#if social}
+			{#if accepted && social && publishModule}
+				{#await publishModule then { default: SocialPublish }}
 					{#key accepted}<SocialPublish {social} curve={accepted.curve} path="/comparar" />{/key}
-				{/if}
+				{/await}
+			{/if}
+			{#if accepted}
 				<div class="stat-row">
 					<div class="stat">
 						<small>{t.preamp}</small><output
@@ -270,13 +289,16 @@
 					</div>
 					<div class="stat"><small>CRC</small><output>0x{crc}</output></div>
 				</div>
-				<div class="table-scroll">
-					<table class="sect-table">
-						<caption>{t.sections}</caption>
-						<thead>
-							<tr><th>#</th><th>{t.kind}</th><th>{t.frequency}</th><th>{t.gain}</th><th>Q</th></tr>
-						</thead>
-						<tbody>
+			{/if}
+			<!-- Always ten rows (the cable's ten sections); real values only after the gate passes. -->
+			<div class="table-scroll">
+				<table class={accepted ? 'sect-table' : 'sect-table-pending'}>
+					<caption>{t.sections}</caption>
+					<thead>
+						<tr><th>#</th><th>{t.kind}</th><th>{t.frequency}</th><th>{t.gain}</th><th>Q</th></tr>
+					</thead>
+					<tbody>
+						{#if accepted}
 							{#each accepted.curve.bands as band, index (index)}
 								<tr>
 									<td>{index + 1}</td><td>{band.kind}</td>
@@ -291,23 +313,32 @@
 									<td>{band.kind === 'OFF' ? '·' : numberLabel(band.qFactor ?? 0, locale, 2)}</td>
 								</tr>
 							{/each}
-						</tbody>
-					</table>
-				</div>
-			{/if}
+						{:else}
+							{#each Array.from({ length: 10 }, (_, index) => index + 1) as row (row)}
+								<tr class="pending-row"><td>{row}</td><td>·</td><td>·</td><td>·</td><td>·</td></tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+				{#if !accepted}<p class="note">{t.tablePending}</p>{/if}
+			</div>
+			<p class="note" id="{uid}-reason" hidden={!appReason}>{appReason ?? ''}</p>
 			<div class="actions">
-				<a class="abtn" href="/" aria-disabled={!accepted || !app} onclick={open}>{t.open}</a>
-				<button type="button" class="abtn" disabled={!accepted || !app} onclick={save}
-					>{t.save}</button
+				<a
+					class="abtn"
+					href="/"
+					aria-disabled={!accepted || !app}
+					aria-describedby={appReason ? `${uid}-reason` : undefined}
+					onclick={open}>{t.open}</a
 				>
-				<button
-					type="button"
-					class="abtn primary"
-					disabled={!accepted || !app}
+				<Button disabledReason={appReason} onclick={save}>{t.save}</Button>
+				<Button
+					variant="primary"
+					disabledReason={appReason}
 					onclick={() => {
 						if (accepted && app)
 							app.requestWrite({ ...accepted.curve, schema: 1, updatedAt: Date.now() });
-					}}>{t.write}</button
+					}}>{t.write}</Button
 				>
 				<label class="field">
 					{t.bounce}
@@ -317,16 +348,32 @@
 						{/each}
 					</select>
 				</label>
-				<button
-					type="button"
-					class="abtn"
-					disabled={!accepted}
+				<Button
+					disabledReason={bounceReason}
 					onclick={() => {
 						if (accepted) onBounce(bounceId, accepted.curve);
-					}}>{t.bounce}</button
+					}}>{t.bounce}</Button
 				>
 			</div>
 			<p role="status">{status}</p>
 		</div>
 	</div>
 </section>
+
+<style>
+	.envelope-ok {
+		display: block;
+		color: #f2b33d;
+		font-family: var(--plate);
+		font-size: var(--fs-ui, 14px);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+	.verdict-help {
+		margin-left: auto;
+		align-self: flex-start;
+	}
+	.pending-row td {
+		color: #8f8a80;
+	}
+</style>

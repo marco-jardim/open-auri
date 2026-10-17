@@ -4,7 +4,6 @@
 	import SocialSources from './SocialSources.svelte';
 	import { createCurveSocial, type CurveSocial } from './social.svelte.ts';
 	import { SvelteMap } from 'svelte/reactivity';
-	import './fonts.css';
 	import { curveResponseDb } from 'open-auri/dsp';
 	import { getPreset } from 'open-auri/catalog';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
@@ -12,6 +11,8 @@
 	import { IDLE_STATE } from '#lib/audio/engine.ts';
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
 	import { frequencyLabel, numberLabel } from '#lib/charts/scales.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
+	import { Explainer, Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import { copy } from './copy.ts';
 	import {
 		initialTracks,
@@ -23,6 +24,7 @@
 	} from './comparison.ts';
 	import { createTrackChains } from './chains.ts';
 	import { comparisonSvg, downloadComparison } from './export.ts';
+	import { OUTPUT_LIMIT_DB, OVERLAY_RANGE_DB } from './plot.ts';
 	import ComparisonPlot from './ComparisonPlot.svelte';
 	import TrackLane from './TrackLane.svelte';
 	import TapeDeck from './TapeDeck.svelte';
@@ -77,6 +79,24 @@
 	);
 	// This page's own audition: chain mode left on by another page does not count.
 	const playing = $derived(active && audioState.playing && audioState.mode === 'chains');
+	const playReason = $derived(!app ? t.reasonEngine : armed.length === 0 ? t.reasonArm : null);
+	/** Real writes counted by the cable service in this browser (never simulated ones). */
+	const writes = $derived(app ? app.state.flash.state.total : null);
+	const drums = $derived(
+		writes === null ? ['·', '·', '·', '·'] : [...String(Math.min(9999, writes)).padStart(4, '0')]
+	);
+	const bayStep = $derived(armed.length > 1 ? 840 / (armed.length - 1) : 0);
+	const bayX = (index: number) => 130 + index * bayStep;
+	const cableA = $derived(a ? armed.findIndex((track) => track.id === a.id) : -1);
+	const cableB = $derived(b ? armed.findIndex((track) => track.id === b.id) : -1);
+
+	/** The trim the A/B really applies to a lane (graph, distances and audition share it). */
+	function laneTrim(id: number): { tag: 'A' | 'B' | null; trim: number | null } {
+		if (!comparison || !a || !b) return { tag: null, trim: null };
+		if (id === a.id) return { tag: 'A', trim: comparison.trims[0] };
+		if (id === b.id) return { tag: 'B', trim: comparison.trims[1] };
+		return { tag: null, trim: null };
+	}
 
 	$effect(() => {
 		if (!app) return;
@@ -254,31 +274,49 @@
 			<p class="kicker">{t.kicker}</p>
 			<h1>{t.titleOne} <em>{t.titleTwo}</em></h1>
 			<p class="lede">{t.lede}</p>
+			<div class="intro-help"><TourTrigger page="comparar" /></div>
 		</header>
+		<Tour page="comparar" />
 		<div class="deck">
-			<TapeDeck label={t.deck} {playing} />
+			<TapeDeck
+				label={t.deck}
+				{playing}
+				plate={t.deckPlate}
+				heads={[t.headExtra, t.headErase, t.headRec, t.headPlay]}
+				status={playing ? t.deckPlaying : t.deckIdle}
+			/>
 			<div class="transport" role="group" aria-label={t.transport}>
-				<button
-					type="button"
-					class="tkey"
+				<Button
+					variant="key"
+					size="lg"
+					class="tkey-play"
+					lit={playing}
 					aria-pressed={playing}
-					disabled={!app || armed.length === 0}
+					disabledReason={playReason}
 					onclick={play}
 				>
 					<span aria-hidden="true">{playing ? '■' : '▶'}</span>
 					{playing ? t.stop : t.play}
-				</button>
+				</Button>
 				<a class="tkey rec" href="#comparar-blend">
 					<span aria-hidden="true">●</span>{t.rec}
 				</a>
 				<p>{t.sourceNote}</p>
+				<span class="counter">
+					<span class="drums" aria-hidden="true">
+						{#each drums as digit, index (index)}<span class="drum">{digit}</span>{/each}
+					</span>
+					{#if writes !== null}<span class="sr-only">{writes}</span>{/if}
+					<span>{t.counter}</span>
+				</span>
 			</div>
 		</div>
 		{#if !audioState.exact}<p class="notice">{t.rateNote}</p>{/if}
 		{#if error}<p class="notice error" role="alert">{error}</p>{/if}
-		<section class="panel" aria-labelledby="comparar-tracks-title">
+		<section class="panel" aria-labelledby="comparar-tracks-title" data-tour="comparar-tracks">
 			<h2 class="plate" id="comparar-tracks-title">{t.tracks}</h2>
 			<p class="note">{t.tracksNote}</p>
+			<p class="note level-note">{t.levelTrimNote} <Explainer term="ab-nivel" /></p>
 			<label class="field"
 				>{m.curve_social_track()}<select bind:value={socialTrack}>
 					{#each tracks as track (track.id)}<option value={track.id}>{t.track} {track.id}</option
@@ -288,11 +326,16 @@
 			<SocialSources {social} path="/comparar" onload={(curve) => bounce(socialTrack, curve)} />
 			<div class="lanes">
 				{#each tracks as track (track.id)}
+					{@const level = laneTrim(track.id)}
 					<TrackLane
 						{track}
 						{t}
 						{locale}
-						playing={audioState.playing}
+						{playing}
+						{matched}
+						pairTag={level.tag}
+						trimDb={level.trim}
+						tourArm={track.id === 1}
 						selected={selected === track.id}
 						meter={meters[track.id]}
 						library={app?.state.library.items ?? []}
@@ -311,18 +354,22 @@
 					label={t.overlay}
 					description={t.responseNote}
 					{locale}
+					fixedRange={OVERLAY_RANGE_DB}
+					limit={{ db: OUTPUT_LIMIT_DB, label: t.outputLimit }}
+					peakLabel={t.peak}
 					lines={visibleTracks(tracks).map((track) => ({
 						name: `${track.id} · ${track.curve.name}`,
 						values: curveResponseDb(track.curve),
 						color: track.color
 					}))}
 				/>
+				<p class="note scale-note">{t.scaleNote}</p>
 			</div>
 		</section>
 		<section class="panel difference-panel" aria-labelledby="comparar-difference-title">
 			<h2 class="plate" id="comparar-difference-title">{t.where}</h2>
 			{#if a && b && comparison}
-				<div class="difference-controls">
+				<div class="difference-controls" data-tour="comparar-level">
 					<label class="field">
 						{t.before}
 						<select
@@ -358,9 +405,12 @@
 							{/each}
 						</select>
 					</label>
-					<label class="check">
-						<input type="checkbox" bind:checked={matched} />{t.match}
-					</label>
+					<span class="match-row">
+						<label class="check">
+							<input type="checkbox" bind:checked={matched} />{t.match}
+						</label>
+						<Explainer term="ab-nivel" />
+					</span>
 					<label class="field threshold">
 						{t.threshold} · {numberLabel(threshold, locale, 1)} dB
 						<input type="range" min="0" max="12" step="0.1" bind:value={threshold} />
@@ -392,7 +442,7 @@
 							{#each comparison.regions as region (region.fromHz)}
 								<li>
 									{frequencyLabel(region.fromHz, locale)}–{frequencyLabel(region.toHz, locale)} Hz
-									<span class="mono">{t.peak} {numberLabel(region.peakDiffDb, locale, 1)} dB</span>
+									<span class="mono">{t.peak} {numberLabel(region.peakDiffDb, locale, 2)} dB</span>
 								</li>
 							{:else}<li>{t.noRegions}</li>{/each}
 						</ul>
@@ -422,6 +472,49 @@
 			<h2 class="plate" id="comparar-bay-title">{t.bay}</h2>
 			<p class="note">{t.bayNote}</p>
 			{#if armed.length > 1}
+				<svg class="bay-cables" viewBox="0 0 1000 132" role="img" aria-label={t.bayCables}>
+					<title>{t.bayCables}</title>
+					<rect x="2" y="2" width="996" height="128" rx="8" fill="#141311" stroke="#3a3833" />
+					<text class="bay-row" x="16" y="34">{t.bayOut}</text>
+					<text class="bay-row" x="16" y="104">{t.bayIn}</text>
+					{#each armed as track, index (track.id)}
+						{#each [30, 100] as cy (cy)}
+							<circle
+								cx={bayX(index)}
+								{cy}
+								r="11"
+								fill="#0a0a09"
+								stroke="#8c938a"
+								stroke-width="2"
+							/>
+							<circle cx={bayX(index)} {cy} r="4" fill="#000" />
+						{/each}
+						<text class="bay-id" x={bayX(index)} y="70" fill={track.color}>{track.id}</text>
+					{/each}
+					{#if cableA >= 0 && cableB >= 0 && cableA !== cableB}
+						{@const xa = bayX(cableA)}
+						{@const xb = bayX(cableB)}
+						<path
+							class="cable"
+							d="M{xa} 30 C{xa} {96 + Math.abs(xb - xa) / 6}, {xb} {34 +
+								Math.abs(xb - xa) / 6}, {xb} 100"
+							fill="none"
+							stroke={a?.color ?? '#f2b33d'}
+							stroke-width="6"
+							stroke-linecap="round"
+						/>
+						{#each [{ x: xa, y: 30 }, { x: xb, y: 100 }] as plug (plug.y)}
+							<circle
+								cx={plug.x}
+								cy={plug.y}
+								r="8"
+								fill="#d9d4c8"
+								stroke="#2a2724"
+								stroke-width="2"
+							/>
+						{/each}
+					{/if}
+				</svg>
 				<div class="bay">
 					<table>
 						<caption class="sr-only">{t.bay}</caption>
@@ -484,22 +577,20 @@
 						<input type="checkbox" bind:checked={includeDelta} />{t.exportDelta}
 					</label>
 					<div class="actions">
-						<button
-							type="button"
-							class="abtn"
-							disabled={!exportSvg}
+						<Button
+							variant="plate"
+							disabledReason={exportSvg ? null : t.empty}
 							onclick={() => exportFile('svg')}
 						>
 							{t.exportSvg}
-						</button>
-						<button
-							type="button"
-							class="abtn"
-							disabled={!exportSvg}
+						</Button>
+						<Button
+							variant="plate"
+							disabledReason={exportSvg ? null : t.empty}
 							onclick={() => exportFile('png')}
 						>
 							{t.exportPng}
-						</button>
+						</Button>
 					</div>
 				</div>
 				{#if exportSvg}
@@ -516,3 +607,82 @@
 		</section>
 	</div>
 </div>
+
+<style>
+	.intro {
+		position: relative;
+	}
+	.intro-help {
+		position: absolute;
+		top: 0;
+		right: 0;
+	}
+	.counter {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		margin-left: auto;
+		color: #cfc6b2;
+		font-size: var(--fs-caption, 12px);
+	}
+	.drums {
+		display: inline-flex;
+		gap: 2px;
+		padding: 3px;
+		border-radius: 3px;
+		background: #0a0a09;
+		box-shadow:
+			inset 0 1px 3px #000,
+			0 1px 0 #ffffff26;
+	}
+	.drum {
+		display: inline-block;
+		width: 16px;
+		padding: 2px 0;
+		border-radius: 2px;
+		color: #f4efe2;
+		background: linear-gradient(#111 0, #2b2a27 45%, #2b2a27 55%, #111 100%);
+		font-family: var(--face-data);
+		font-size: var(--fs-ui, 14px);
+		font-variant-numeric: tabular-nums slashed-zero;
+		text-align: center;
+	}
+	.match-row {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.level-note,
+	.scale-note {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px;
+	}
+	.bay-cables {
+		display: block;
+		width: 100%;
+		height: auto;
+		margin-bottom: 10px;
+	}
+	.bay-row {
+		fill: #cfc6b2;
+		font-family: var(--plate);
+		font-size: 12px;
+		letter-spacing: 0.1em;
+	}
+	.bay-id {
+		font-family: var(--face-data);
+		font-size: 13px;
+		text-anchor: middle;
+	}
+	.cable {
+		filter: drop-shadow(0 3px 2px #000a);
+		transition: d var(--dur-slow, 0.36s) var(--ease-out, ease-out);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.cable {
+			transition: none;
+		}
+	}
+</style>

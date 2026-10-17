@@ -93,7 +93,33 @@ export function copy(locale: 'pt-BR' | 'en-US') {
 		newName: m.comparar_new_name({}, options),
 		peak: m.comparar_peak({}, options),
 		live: m.comparar_live({}, options),
-		data: m.comparar_data({}, options)
+		data: m.comparar_data({}, options),
+		// FUX.P2 (staging FUX.P2.*): transport, level matching, overlay and export.
+		deckPlate: m.comparar_fux_deck_plate({}, options),
+		headExtra: m.comparar_fux_head_extra({}, options),
+		headErase: m.comparar_fux_head_erase({}, options),
+		headRec: m.comparar_fux_head_rec({}, options),
+		headPlay: m.comparar_fux_head_play({}, options),
+		deckPlaying: m.comparar_fux_deck_playing({}, options),
+		deckIdle: m.comparar_fux_deck_idle({}, options),
+		counter: m.comparar_fux_counter({}, options),
+		reasonEngine: m.comparar_fux_reason_engine({}, options),
+		reasonArm: m.comparar_fux_reason_arm({}, options),
+		levelPredicted: m.comparar_fux_level_predicted({}, options),
+		levelTrim: m.comparar_fux_level_trim({}, options),
+		levelTrimOff: m.comparar_fux_level_trim_off({}, options),
+		levelTrimUnmatched: m.comparar_fux_level_trim_unmatched({}, options),
+		levelTrimNote: m.comparar_fux_level_trim_note({}, options),
+		outputLimit: m.comparar_fux_output_limit({}, options),
+		scaleNote: m.comparar_fux_scale_note({}, options),
+		envelopeOk: m.comparar_fux_envelope_ok({}, options),
+		tablePending: m.comparar_fux_table_pending({}, options),
+		exportTrims: (values: { a: string; b: string }) => m.comparar_fux_export_trims(values, options),
+		exportLevelOff: m.comparar_fux_export_level_off({}, options),
+		exportBands: m.comparar_fux_export_bands({}, options),
+		bayCables: m.comparar_fux_bay_cables({}, options),
+		bayOut: m.comparar_fux_bay_out({}, options),
+		bayIn: m.comparar_fux_bay_in({}, options)
 	};
 }
 

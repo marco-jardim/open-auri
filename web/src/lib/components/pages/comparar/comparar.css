@@ -90,7 +90,7 @@
 	margin: 0 0 4px;
 	color: #e3d6b8;
 	font:
-		12px 'Oswald',
+		12px var(--plate),
 		sans-serif;
 	text-transform: uppercase;
 	letter-spacing: 0.2em;
@@ -135,7 +135,7 @@
 		inset 0 1px #ffffff19,
 		0 1px #ffffff24;
 	font:
-		500 15px 'Oswald',
+		500 15px var(--plate),
 		sans-serif;
 	text-transform: uppercase;
 	letter-spacing: 0.16em;
@@ -193,7 +193,7 @@
 		0 4px #050505;
 	text-decoration: none;
 	font:
-		13px 'Oswald',
+		13px var(--plate),
 		sans-serif;
 	text-transform: uppercase;
 	letter-spacing: 0.14em;
@@ -218,7 +218,7 @@
 	gap: 4px;
 	color: #f3eddf;
 	font:
-		12px 'Oswald',
+		12px var(--plate),
 		sans-serif;
 	letter-spacing: 0.1em;
 }
@@ -291,7 +291,7 @@
 	display: block;
 	color: #c9c0ad;
 	font:
-		11px 'Oswald',
+		11px var(--plate),
 		sans-serif;
 	text-transform: uppercase;
 	letter-spacing: 0.07em;
@@ -387,7 +387,7 @@
 	padding: 2px 4px;
 	color: #e9e4d6;
 	font-weight: 400;
-	font-family: 'Oswald', sans-serif;
+	font-family: var(--plate), sans-serif;
 }
 .comparar .bay tbody th {
 	text-align: left;
@@ -562,7 +562,7 @@
 }
 .comparar .knob-label {
 	font:
-		12px 'Oswald',
+		12px var(--plate),
 		sans-serif;
 	text-transform: uppercase;
 	letter-spacing: 0.18em;
@@ -601,7 +601,7 @@
 .comparar .verdict strong {
 	color: #f5d38b;
 	font:
-		500 14px 'Oswald',
+		500 14px var(--plate),
 		sans-serif;
 	letter-spacing: 0.08em;
 }
@@ -645,7 +645,7 @@
 .comparar .sect-table th {
 	color: #d0c5b0;
 	font:
-		11px 'Oswald',
+		11px var(--plate),
 		sans-serif;
 }
 .comparar .actions {

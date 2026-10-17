@@ -99,7 +99,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect.element(page.getByText(t.refused, { exact: true })).toBeVisible();
 		expect(document.querySelector('.reasons')?.textContent).toContain('#1');
 		expect(document.querySelectorAll('.reasons li')).toHaveLength(2);
-		await expect.element(page.getByRole('button', { name: t.bounce, exact: true })).toBeDisabled();
+		await expect
+			.element(page.getByRole('button', { name: t.bounce, exact: true }))
+			.toHaveAttribute('aria-disabled', 'true');
 	});
 }
 
@@ -115,7 +117,9 @@ test('a late blend cannot expose a result after the mix changes or the panel unm
 		onBounce: vi.fn()
 	});
 	await page.getByRole('button', { name: t.solve, exact: true }).click();
-	await expect.element(page.getByRole('button', { name: t.busy, exact: true })).toBeDisabled();
+	await expect
+		.element(page.getByRole('button', { name: t.busy, exact: true }))
+		.toHaveAttribute('aria-busy', 'true');
 	const range = screen.container.querySelector('input[type="range"]');
 	if (!(range instanceof HTMLInputElement)) throw new Error('Missing blend mix');
 	range.value = '50';
@@ -123,8 +127,10 @@ test('a late blend cannot expose a result after the mix changes or the panel unm
 	await tick();
 	finish?.(accepted());
 	await tick();
-	await expect.element(page.getByText(t.pending, { exact: true })).toBeVisible();
-	await expect.element(page.getByRole('button', { name: t.bounce, exact: true })).toBeDisabled();
+	await expect.element(page.getByText(t.pending, { exact: true }).first()).toBeVisible();
+	await expect
+		.element(page.getByRole('button', { name: t.bounce, exact: true }))
+		.toHaveAttribute('aria-disabled', 'true');
 	await page.getByRole('button', { name: t.solve, exact: true }).click();
 	await cleanup();
 	finish?.(accepted());

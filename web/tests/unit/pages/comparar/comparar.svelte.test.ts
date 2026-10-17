@@ -48,8 +48,10 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		range.value = '50';
 		range.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
-		await expect.element(page.getByRole('button', { name: t.bounce, exact: true })).toBeDisabled();
-		await expect.element(page.getByText(t.pending, { exact: true })).toBeVisible();
+		await expect
+			.element(page.getByRole('button', { name: t.bounce, exact: true }))
+			.toHaveAttribute('aria-disabled', 'true');
+		await expect.element(page.getByText(t.pending, { exact: true }).first()).toBeVisible();
 	}, 20000);
 
 	test(`unsafe manual preamp shows localized gate reasons and no usable result in ${locale}`, async () => {
@@ -62,7 +64,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect.element(page.getByText(t.refused, { exact: true })).toBeVisible();
 		expect(container.querySelector('.reasons')?.textContent).toContain(t.reasonPreamp);
 		expect(container.querySelector('.reasons')?.textContent).toContain('g:preamp');
-		await expect.element(page.getByRole('button', { name: t.bounce, exact: true })).toBeDisabled();
+		await expect
+			.element(page.getByRole('button', { name: t.bounce, exact: true }))
+			.toHaveAttribute('aria-disabled', 'true');
 	}, 20000);
 
 	test(`no armed tracks produces an accessible empty state in ${locale}`, async () => {
