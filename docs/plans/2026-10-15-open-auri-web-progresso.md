@@ -174,6 +174,18 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 - **W4.2 (paralelo):** cada serviço é dono de `web/src/lib/server/social/<serviço>.ts`, de `web/src/lib/server/social/queries/<serviço>.ts` (se precisar), das suas rotas e de `web/tests/integration/social/<serviço>/**`. `repo.ts`, `types.ts`, o kit da API e as migrações ficam só leitura. Rotas com sobreposição resolvidas assim: T4.2 é dona de `api/v1/curves/+server.ts`, `api/v1/curves/[id]/+server.ts` e `api/v1/lineages/**`; T4.3 de `api/v1/curves/[id]/favorite/**`, `api/v1/me/library/**`; T4.4 de `api/v1/curves/[id]/activity/**`, `api/v1/curves/[id]/audience/**`, `api/v1/me/activity/**`; T4.6 de `api/v1/rankings/**` e `api/v1/feed/**`. Jobs (`workers/jobs/src/jobs/<job>.ts`) de cada serviço; o registro (`index.ts`, `registry.ts`, template) só na T4.12. Mensagens por staging. Serviços que dependem de outro (ex.: T4.5 usa a publicação da T4.2) leem só `repo.ts` e o kit, nunca o arquivo do outro serviço em edição.
 - **Fila de integração (orquestrador):** `package.json`, `web/package.json`, `vite.config.ts`, `+layout.*`, mensagens, migrações depois da W4.1, `hooks.server.ts`, templates do wrangler, `web/src/lib/server/types.ts`.
 
+## Tarefas F5
+
+| ID | Status | Commit | Notas |
+|---|---|---|---|
+| PF5 | verificada | 8a1bd33 | ver Pre-flights; brief `docs/plans/f5-delegate-brief.md`; bloqueio #32 (DNS do Resend) |
+| T5.1 | commitada | 760c082 | CI com `PUBLIC_*` fictícias e modo `--no-env` do scanner; `tools/deploy.mjs` com plano testado; deploy pelo GitHub só com `CLOUDFLARE_API_TOKEN`; `PUBLIC_ORIGIN` do deploy vem de `--env` |
+| T5.2 | commitada | c421a31 | log de requisição sem PII (depois do `platformShim`), métricas no Analytics Engine (`METRICS`) |
+| T5.3 | commitada | 421e115 | backup semanal (sem registros de acesso), dump público, limpeza diária; migração 0011 permite apagar auditoria com mais de 5 anos; `tools/restore-backup.mjs` |
+| T5.4 | commitada | 91ac6f8 | CSP estrita (`default-src 'none'`, sem `unsafe-inline` em script/style; exceção só `style-src-attr`); `Permissions-Policy` mínima; redirecionamento 301 workers.dev → domínio próprio só em produção; rota de domínio próprio só em `env.production` (no topo quebrava o e2e); `visual.spec` com `bypassCSP` (estilo injetado pelo Playwright) |
+| T5.5 | commitada | 83dbe3f | README, CONTRIBUTING, runbooks (inclui ativação do .com com o bloqueio de DNS) |
+| T5.6 | commitada | 9ec9abb | `autocannon` 8; recusa origem de produção; execução em staging pendente |
+
 ## Pre-flights
 
 | PF | Data | Resultado | Evidências |
