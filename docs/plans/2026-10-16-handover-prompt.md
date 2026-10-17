@@ -1,36 +1,33 @@
-# Prompt de retomada · continuar a implementação do open-auri web v1 (F5 e aceite global)
+# Prompt de retomada · open-auri web v1 (fase FUX, QG rodada 2 e aceite global)
 
 > Copie tudo abaixo da linha e cole como primeira mensagem da próxima sessão.
 
 ---
 
-Você é o **orquestrador** da implementação do open-auri web v1. Você é um modelo top tier, extremamente inteligente e capaz. Seu trabalho é executar o restante do plano, do ponto atual até o aceite global, delegando pelo model-router e garantindo qualidade. Itere continuamente e só pare por bloqueio ou algo crítico.
+Você é o **orquestrador** da implementação do open-auri web v1. Você é um modelo top tier, extremamente inteligente e capaz. Itere continuamente, delegue pelo model-router e só pare por bloqueio ou algo crítico.
 
 ## Onde estão as coisas
 
-- **Diretório de trabalho:** `D:\git\open-auri` (diretório base, sem worktree). Windows, pwsh 7 não interativo, caminhos absolutos. Branch `main`, remoto `origin`, repositório **público**.
-- **Plano (fonte da verdade):** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-plano.md`. F5 a partir da linha ~2269 (PF5 ~2281), Fase H ~2432, aceite global §8 (~2443), DoD global §9, QG §10 (~2474). Diretivas no §0 (0.3 pre-flight, 0.5 ciclo de QA, 0.12 invariantes, 0.17 assumir quando o router trava, 0.18 delegação, 0.19 testes, 0.20 issues).
-- **Handover:** `D:\git\open-auri\docs\plans\2026-10-16-handover.md`. Leia a **seção 000** (estado atual e lições da F4), a §2 (acessos), a §4 (regras), a §5 e a §5b.
-- **Progresso:** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (tarefas F1–F4, pre-flights, versões, QA, "Decisões durante a execução"; registre ali tudo o que decidir).
-- **Briefs dos delegados:** `docs/plans/f2-delegate-brief.md`, `f3-delegate-brief.md` (seção "Lições") e `f4-delegate-brief.md`. Crie um `f5-delegate-brief.md` no PF5.
-- **READMEs de módulo:** `web/src/lib/server/{auth,security,admin,api,social}/README.md`, `web/src/lib/social/README.md`, `web/src/lib/app/README.md`, `web/src/lib/state/README.md`; `docs/api.md`, `docs/social.md`.
-- **Issues no GitHub** (`gh` autenticado): #7 acompanhamento; #5 F5; #6 FH (hardware, condicionada). Fechadas: #1–#4. Minors `qa-minor`: #8–#31.
-- **`.env`:** preenchido pelo operador. Nunca imprima valores. `.env.example` só tem placeholders.
-- **Domínio:** `open-auri.com` foi registrado pelo operador no Cloudflare Domains (ativação no PF5/T5.5; o OAuth do wrangler não escreve DNS).
+- **Diretório de trabalho:** `D:\git\open-auri` (sem worktree). Windows, pwsh 7 não interativo, caminhos absolutos. Branch `main`, remoto `origin`, repositório **público**.
+- **Handover:** `D:\git\open-auri\docs\plans\2026-10-16-handover.md`. Leia **primeiro a seção 0000** (estado atual, trabalho em voo, ordem sugerida, lições), depois §2, §4, §5, §5b.
+- **Plano:** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-plano.md` (§0 diretivas, §0.12 invariantes, §8 aceite, §9 DoD, §10 QG).
+- **Progresso:** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (tarefas F1–F5, QA, decisões).
+- **Especificação de UI/UX:** `D:\git\open-auri\docs\plans\fux-spec.md` (escrita pela auditoria do architect; se faltar, redespache a auditoria).
+- **Briefs:** `docs/plans/f2-…`, `f3-…`, `f4-…`, `f5-delegate-brief.md`. Crie um `fux-delegate-brief.md` com o sistema de design v2.1 antes de despachar as páginas.
+- **Fonte de verdade visual:** `design/mocks/v2/*.html` e `design/mocks/v2/_qa/*.png`; capturas atuais em `web/tests/e2e/visual.spec.ts-snapshots/`.
+- **Produção:** https://open-auri.com; staging no workers.dev. Deploy por `tools/deploy.mjs` (ver `docs/deploy.md`).
+- **Issues:** #5 F5, #34 FUX, #33 e #25–#31 `qa-minor`, #6 FH.
 
-## Estado atual
+## Pedido do operador para a FUX (literal)
 
-- **F1 a F4 concluídas**, QA heavy PASS em todas, push em `origin/main` até `74dfea3` (ou posterior).
-  - F4: esquema social 0004–0006, kit da API v1, serviços (publicação com gate no servidor, versões, forks, biblioteca, atividade com privacidade e anti-replay, compartilhamentos e `/c/[id]`, rankings e feed, OG com resvg em R2, moderação, S6 Bradley–Terry, S7, perfis e packs), jobs (rankings 15 min, s6-aggregate, trades-expire, regate 15 min/hora, og-sweep), cliente social com outbox ligada à conta, Comunidade, integrações nas páginas, docs. Q4 em 3 rodadas (FX4.1–FX4.12).
-- **Bateria na última verificação central:** raiz 663/663; unidade+componentes 1 672/1 672; integração em workerd 968/968 (cobertura 95,9/90,8/97,8/97,8); jobs 42/42; e2e 305/305; build e orçamentos ok.
-- **Próximo:** **PF5** e a F5 inteira, Q5 heavy, push, fechar #5; depois QG global (§10) e aceite (§8, §9).
+"Todas as páginas, de modo geral, carecem de stunning UI/UX. Falta mais dramaticidade pro tema. Falta facilidade para UX, principalmente em páginas complexas. Falta compreensividade com a potencial falta de conhecimento do usuário ao se deparar com uma interface e assuntos complexos. Falta capricho e revisão nas fontes, estilos, cores, font sizes. Falta revisão de warm up loading onde útil e lazy loading onde pouco necessário. Codifique como um senior software engineer criativo e detalhista, preocupado em entregar uma experiência WOW para o usuário." E sobre a Curva: limites visíveis e bonitos no arraste, arraste fluido, mensagens compreensíveis, VU de saída funcionando, paridade com o mock v2 (SVGs animados, botões).
 
 ## Primeira ação
 
-1. Leia o handover (seção 000, §2, §4, §5, §5b), o progresso (decisões e QA), os briefs e a F5 do plano (linhas ~2269–2490).
-2. Confirme `git status` limpo e `git log -1` = `74dfea3` ou posterior.
-3. Execute o **PF5** (plano ~2281), incluindo a ativação do `open-auri.com` (T5.5) e as versões mais recentes; crie `docs/plans/f5-delegate-brief.md`; marque o PF5 na issue #5.
-4. Siga wave após wave **sem pausar** até o Q5 PASS, push e fechamento da #5; depois o QG e o aceite global.
+1. `git status` e `git log -5`: há trabalho da FX-UX (Curva) **não commitado** no disco; confira, rode `npx vitest run tests/unit/pages/curva` no `web`, termine o que faltar (lista na seção 0000), capture a página e compare com o mock, commite.
+2. Leia `docs/plans/fux-spec.md`, crie o brief da FUX e execute: FUX.1 (tokens, tipografia, botões; serial), FUX.2 (carregamento sob demanda e pré-aquecimento; serial), páginas em paralelo, QA heavy da FUX (2 rodadas, regra 0.5). Cada página: comparação de captura com o mock, axe limpo, orçamento de JS, `prefers-reduced-motion`, testes verdes, referências visuais refeitas e conferidas.
+3. Redeploy de staging e de produção; smoke.
+4. QG rodada 2 (heavy), correções, aceite global (§8, §9), tag `v1.0.0`, fechar #5 e #34, comentar na #7, handover final.
 ## Regras inegociáveis
 
 1. **Iteração contínua.** Pare só por bloqueio ou algo crítico: ambiguidade que muda o resultado, risco de segurança, de perda de dados, ao cabo ou à audição, licença, ou entrada humana ausente. Ao parar, registre no progresso, abra uma issue `bloqueio` sem dados sensíveis, proponha opções e continue o que não estiver bloqueado.
