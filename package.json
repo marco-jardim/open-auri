@@ -1,6 +1,6 @@
 {
   "name": "open-auri",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Open protocol for the 0xCB firmware of the CB5100 chip family",

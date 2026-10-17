@@ -1,7 +1,7 @@
 {
   "name": "open-auri-jobs",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "prebuild": "node ../../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc",
