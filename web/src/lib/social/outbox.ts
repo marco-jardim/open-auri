@@ -12,9 +12,11 @@
 //
 // Events belong to the account that acted (FX4.2): `enqueue` refuses unless the session is signed
 // in and verified at that moment, and stamps the item with the account id (`owner`). `flush` sends
-// only the current account's items and removes those of any other owner, so on a shared browser
-// one person's activity is never recorded as another's. `purge` clears what the current account
-// does not own (everything when signed out).
+// only the current account's items and leaves those of any other owner in place, so on a shared
+// browser one person's activity is never recorded as another's, and a stale tab (still holding the
+// previous account) never deletes the new account's offline events (#25). `purge` clears what the
+// current account does not own (everything when signed out); SocialSync calls it once the session
+// change is confirmed.
 //
 // The server binds the batch too (FX4.10): every POST carries `actor` = the owner of its items, and
 // a session cookie that now belongs to someone else (another tab switched account while this flush
@@ -99,9 +101,9 @@ export interface FlushReport {
 	sent: number;
 	/** Items removed after a `recorded`, `duplicate` or `rejected` answer. */
 	removed: number;
-	/** Items removed locally: older than 7 days, unreadable or owned by another account. */
+	/** Items removed locally: older than 7 days or unreadable. */
 	dropped: number;
-	/** Items still queued after this flush. */
+	/** Items still queued after this flush (another account's items included: `purge` clears them). */
 	kept: number;
 	/** Code of the failure that stopped the flush (`status: 'error'`). */
 	error?: string;
@@ -399,9 +401,10 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 		const due: Entry[] = [];
 		for (const entry of entries) {
 			if (entry.item.owner !== owner) {
-				// Another account's activity: never sent under this session.
-				await store.remove(entry.item.eventId);
-				report.dropped += 1;
+				// Another account's activity: never sent under this session, and never removed here
+				// either. A stale tab may still hold `owner` while the cookie already belongs to that
+				// other account (#25); SocialSync's confirmed `purge` clears it on sign-out/switch.
+				report.kept += 1;
 			} else if (entry.item.at < t - OUTBOX_MAX_AGE_MS) {
 				await store.remove(entry.item.eventId);
 				report.dropped += 1;
@@ -492,9 +495,9 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 	}
 
 	/**
-	 * Sends the current account's due events (signed in, verified and online only) and removes the
-	 * events of any other account. Concurrent calls in one tab share the running flush; another tab
-	 * holding the lock makes this one answer `busy`.
+	 * Sends the current account's due events (signed in, verified and online only); the events of
+	 * any other account stay queued (counted as `kept`) for `purge`. Concurrent calls in one tab
+	 * share the running flush; another tab holding the lock makes this one answer `busy`.
 	 */
 	function flush(
 		api: Pick<SocialApi, 'postActivityOutbox'>,

@@ -435,7 +435,7 @@ describe('flush', () => {
 });
 
 describe('account ownership', () => {
-	it("never sends A's queued events as B and removes them", async () => {
+	it("never sends A's queued events as B and leaves them for purge", async () => {
 		const context = setup();
 		const { api, batches } = fakeApi();
 		await context.outbox.enqueue({ kind: 'previewed', lineageId: 'LA', durationMs: 15_000 });
@@ -446,9 +446,38 @@ describe('account ownership', () => {
 		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LB' });
 		expect((await context.outbox.pending()).map((item) => item.lineageId)).toEqual(['LB']);
 		const report = await context.outbox.flush(api);
-		expect(report).toMatchObject({ status: 'done', sent: 1, removed: 1, dropped: 2, kept: 0 });
+		expect(report).toMatchObject({ status: 'done', sent: 1, removed: 1, dropped: 0, kept: 2 });
 		expect(batches.flat().map((event) => event.lineageId)).toEqual(['LB']);
+		// The flush removes nothing it did not send (#25): clearing A's events is purge's job.
+		expect(context.records.size).toBe(2);
+		expect(await context.outbox.purge('user-b')).toBe(2);
 		expect(context.records.size).toBe(0);
+	});
+
+	it("a stale tab never deletes another account's events before the server refuses it", async () => {
+		const context = setup();
+		const mismatch = new SocialApiError(409, 'CONFLICT', { reason: OUTBOX_ACTOR_MISMATCH });
+		const { api, batches } = fakeApi(() => Promise.reject(mismatch));
+		// Another tab switched the cookie to B, and B queued an event offline.
+		context.session.accountId = 'user-b';
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LB' });
+		// This tab still holds A in memory and has A's own event queued.
+		context.session.accountId = 'user-a';
+		context.advance(1);
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LA' });
+		const report = await context.outbox.flush(api);
+		expect(report).toMatchObject({
+			status: 'actor-mismatch',
+			sent: 0,
+			removed: 0,
+			dropped: 0,
+			kept: 2
+		});
+		expect(batches.flat().map((event) => event.lineageId)).toEqual(['LA']);
+		expect(context.records.size).toBe(2);
+		// Once the tab re-reads the session, B's offline event is still there for B to send.
+		context.session.accountId = 'user-b';
+		expect((await context.outbox.pending()).map((item) => item.lineageId)).toEqual(['LB']);
 	});
 
 	it("keeps A's events for A until A signs in again", async () => {
