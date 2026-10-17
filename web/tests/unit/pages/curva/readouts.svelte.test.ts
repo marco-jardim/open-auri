@@ -66,9 +66,16 @@ test('inspector selects active/OFF sections and separates designed coefficients 
 	expect(screen.container.querySelectorAll('dl.coef dd')).toHaveLength(5);
 	expect(screen.container.querySelectorAll('ol.words li')).toHaveLength(5);
 	expect(screen.container.textContent).toContain('Raio do polo');
+	expect(screen.container.querySelectorAll('.insp-stats .stat')).toHaveLength(2);
+	expect(screen.container.querySelector('.pz-help')?.textContent).toContain(
+		m.curva_v2_pz_help_title()
+	);
 	await screen.rerender({ verdict: missingMetrics });
 	expect(screen.container.querySelectorAll('dl.coef dd')).toHaveLength(5);
 	expect(screen.container.querySelector('ol.words')).toBeNull();
+	// No gate analysis: no readouts at all (never a zero), the plot help still explains the chart.
+	expect(screen.container.querySelector('.insp-stats')).toBeNull();
+	expect(screen.container.querySelector('.pz-help')?.textContent).toContain(m.curva_v2_pz_help());
 	await screen.rerender({ selected: 1 });
 	await expect.element(page.getByText(m.curva_insp_off())).toBeVisible();
 	expect(screen.container.querySelector('dl.coef')).toBeNull();
