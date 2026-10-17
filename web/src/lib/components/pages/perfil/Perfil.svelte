@@ -7,6 +7,7 @@
 	import { goto } from '$app/navigation';
 	import { Button, EmptyState, Panel, Skeleton } from '#lib/components/primitives/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, AudioEngine } from '#lib/audio/engine.ts';
 	import { neutralCurve } from '#lib/state/model.ts';
@@ -55,6 +56,8 @@
 	let notice = $state('');
 
 	// ---- A/B preview (shared engine; this page only stops what it started) ----
+	/** Session tag of this page's comparison (Transport, navbar). */
+	const PERFIL_SESSION = 'perfil';
 	let preview: ABPreview | null = null;
 	let startedBy: AudioEngine | null = null;
 	let playingId = $state<string | null>(null);
@@ -62,12 +65,21 @@
 	let busy = $state(false);
 	let attempt = 0;
 	const fallback = neutralCurve();
+	/** The creation of the current comparison: the Transport's play starts it again. */
+	const playingItem = $derived(creations.find((item) => item.id === playingId) ?? null);
 
+	/** The engine plays or holds paused this page's session (not raw, not another page's). */
+	function owned(engine: AudioEngine): boolean {
+		const state = engine.state();
+		return state.session === PERFIL_SESSION && (state.playing || state.paused);
+	}
+
+	/** Ends the comparison (teardown, "Parar", unmount): `stop()` only on our own session. */
 	function stop() {
 		attempt++;
 		const engine = startedBy;
 		startedBy = null;
-		if (engine && engine.state().mode === 'chains') engine.stop();
+		if (engine && owned(engine)) engine.stop();
 		preview?.dispose();
 		preview = null;
 		playingId = null;
@@ -91,9 +103,18 @@
 	async function listen(item: LineageCard, chosen: 'A' | 'B') {
 		if (!app || busy) return;
 		const engine = app.audio;
-		if (preview && playingId === item.id && engine.state().playing) {
+		if (preview && playingId === item.id && startedBy === engine && owned(engine)) {
+			// Same comparison: switch sides at the same moment; a paused one continues.
 			preview.select(chosen);
 			side = chosen;
+			if (!engine.state().playing) {
+				try {
+					await engine.resume();
+				} catch (error) {
+					notice = m.perfil_audio_error();
+					console.error('Perfil resume failed', error instanceof Error ? error.name : 'unknown');
+				}
+			}
 			return;
 		}
 		const curve = previewCurve(item.s1);
@@ -109,9 +130,10 @@
 			preview = engine.createAB(current, curve, { experimental: true, initial: chosen });
 			playingId = item.id;
 			side = chosen;
-			await engine.start('chains');
+			// A comparison starts at a random point of the file (SEEK.2); the file loops.
+			await engine.start('chains', { startAt: 'random', session: PERFIL_SESSION });
 			if (token !== attempt) {
-				if (engine.state().mode === 'chains') engine.stop();
+				if (owned(engine)) engine.stop();
 				return;
 			}
 			startedBy = engine;
@@ -255,6 +277,13 @@
 						>
 					</div>
 					<p class="ab-note">{m.fux_p9_ab_note()} <Explainer term="ab-nivel" /></p>
+					<!-- Pause keeps the comparison (side, trims, position); a record's stop ends it. -->
+					<Transport
+						engine={app?.audio ?? null}
+						variant="compact"
+						session={PERFIL_SESSION}
+						onplay={playingItem ? () => listen(playingItem, side ?? 'B') : undefined}
+					/>
 				{/if}
 				{#if creations.length === 0}
 					<div data-testid="creations-empty">

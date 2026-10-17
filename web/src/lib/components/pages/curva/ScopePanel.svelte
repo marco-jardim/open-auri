@@ -1,7 +1,8 @@
 <!--
 	Oscilloscope (v2 mock): phosphor EQ sum, output with preamp, the reference curve (dashed), one
 	thin trace per section and draggable handles (Ajustar and Engenharia), plus the live spectrum
-	strip and the preview levers (Ouvir prévia, A/B).
+	strip and the preview levers (Ouvir prévia, A/B) with the compact Transport (SEEK.2: seek, back
+	to start, play/pause of the `curva` session; its play with nothing paused is the lever's start).
 	- Every trace is core data (`scope.ts`: core responses summed per section). The output limit
 	  line is the gate threshold; red/amber regions show where the drawn curve is over or near the
 	  output limit, or where it would clip inside the chain. They are a preview: the gate decides.
@@ -25,8 +26,11 @@
 	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
 	import SpectrumOverlay from '#lib/components/meters/SpectrumOverlay.svelte';
 	import type { MeterMode } from '#lib/audio/meters.ts';
-	import type { ABSide } from '#lib/audio/engine.ts';
+	import type { ABSide, AudioEngine } from '#lib/audio/engine.ts';
+	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { CURVA_SESSION } from './preview.svelte.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { formatHz, formatQ, formatSignedDb } from './format.ts';
 	import { isLockedKind, type Layer } from './layers.ts';
@@ -99,6 +103,8 @@
 		previewCaption?: string;
 		/** The preview runs at a rate other than 96 kHz (recomputed coefficients). */
 		approximate?: boolean;
+		/** Engine of the preview Transport (SEEK.2); defaults to the app context's `audio`. */
+		engine?: AudioEngine | null;
 		/** Overrides the `prefers-reduced-motion` media query. */
 		reducedMotion?: boolean;
 		ondrag: (index: number, target: DragTarget) => void;
@@ -134,6 +140,7 @@
 		previewReason = null,
 		previewCaption = '',
 		approximate = false,
+		engine = null,
 		reducedMotion,
 		ondrag,
 		oncommit,
@@ -471,6 +478,22 @@
 		if (event.key === 'Enter' || event.key === ' ') onpreviewwarm?.();
 	}
 	const previewNote = $derived(previewDisabled && previewReason ? previewReason : previewCaption);
+
+	/** The layout provides the app context; isolated renders (tests) pass `engine` instead. */
+	function optionalAppContext(): AppContext | null {
+		try {
+			return getAppContext();
+		} catch (missing) {
+			console.debug('ScopePanel rendered without the app context', missing);
+			return null;
+		}
+	}
+	const appContext = optionalAppContext();
+	const transportEngine = $derived(engine ?? appContext?.client?.audio ?? null);
+	/** Transport play with nothing of Curva paused: the page's own start (A/B, level match). */
+	function onTransportPlay(): void {
+		if (!previewDisabled && !playing) onpreview();
+	}
 </script>
 
 <section class="psec ps-scope" aria-labelledby={legendId}>
@@ -912,6 +935,15 @@
 		{#if !playing}
 			<small class="ab-why" id="{legendId}-ab">{m.curva_v2_ab_unavailable()}</small>
 		{/if}
+		<div class="transport">
+			<Transport
+				engine={transportEngine}
+				variant="compact"
+				session={CURVA_SESSION}
+				onplay={onTransportPlay}
+				playDisabledReason={previewDisabled ? previewReason : null}
+			/>
+		</div>
 		<div class="prev-note">{m.curva_preview_note()} <Explainer term="ab-nivel" /></div>
 		{#if playing && approximate}
 			<p class="prev-note prev-approx" role="status">{m.curva_approximate()}</p>
@@ -1532,6 +1564,10 @@
 	.ab-why {
 		color: var(--text-2);
 		font: 400 var(--label-min) / 1.3 var(--face-data);
+	}
+	.transport {
+		flex: 1 1 320px;
+		min-width: 0;
 	}
 	button:focus-visible {
 		outline: var(--focus-width) solid var(--accent);

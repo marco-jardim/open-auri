@@ -6,6 +6,12 @@ import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { encodeS1 } from 'open-auri/share';
 import type { ClientApp } from '#lib/app/client.svelte.ts';
+import {
+	IDLE_STATE,
+	type AudioEngineState,
+	type PlayMode,
+	type StartOptions
+} from '#lib/audio/engine.ts';
 import Perfil from '#lib/components/pages/perfil/Perfil.svelte';
 import ProfileRecord from '#lib/components/pages/perfil/ProfileRecord.svelte';
 import recordSource from '#lib/components/pages/perfil/ProfileRecord.svelte?raw';
@@ -63,12 +69,36 @@ function view(overrides: Partial<ProfileView> = {}): ProfileView {
 	};
 }
 
+/** A stateful fake engine: sessions, pause and resume as the SEEK.1 transport reports them. */
 function fakeApp() {
+	let current: AudioEngineState = { ...IDLE_STATE };
+	const listeners = new Set<(state: AudioEngineState) => void>();
+	const set = (next: Partial<AudioEngineState>) => {
+		current = { ...current, ...next };
+		for (const listener of listeners) listener(current);
+	};
 	const audio = {
 		createAB: vi.fn(() => ({ dispose: vi.fn(), select: vi.fn() })),
-		start: vi.fn(async () => undefined),
-		stop: vi.fn(),
-		state: () => ({ mode: 'chains', playing: true })
+		start: vi.fn(async (mode: PlayMode = 'chains', options: StartOptions = {}) => {
+			set({ mode, playing: true, paused: false, session: options.session ?? null });
+		}),
+		stop: vi.fn(() => set({ mode: 'off', playing: false, paused: false, session: null })),
+		pause: vi.fn(() => set({ mode: 'off', playing: false, paused: true })),
+		resume: vi.fn(async () => {
+			set({ mode: 'chains', playing: true, paused: false });
+			return true;
+		}),
+		seek: vi.fn(() => false),
+		restart: vi.fn(() => false),
+		// The Transport warms the engine on press; a running context needs nothing more.
+		getContext: () => ({ state: 'running', resume: async () => undefined }),
+		state: () => current,
+		onChange: (listener: (state: AudioEngineState) => void) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		}
 	};
 	const app = { state: { curve: { current: neutralCurve() } }, audio };
 	return { app: app as unknown as ClientApp, audio };
@@ -280,10 +310,32 @@ test('A/B preview goes through the shared audio engine and stops again', async (
 		.element(page.getByRole('button', { name: m.perfil_listen_b() }))
 		.toHaveAttribute('aria-pressed', 'true');
 	expect(audio.createAB).toHaveBeenCalledTimes(1);
-	expect(audio.start).toHaveBeenCalledWith('chains');
+	// A comparison starts at a random point of the file (SEEK.2), tagged with the page session.
+	expect(audio.start).toHaveBeenCalledWith('chains', { startAt: 'random', session: 'perfil' });
 	await page.getByRole('button', { name: m.perfil_stop() }).click();
 	await expect.poll(() => audio.stop.mock.calls.length, { timeout: 5000 }).toBeGreaterThan(0);
 	await expect.element(page.getByRole('button', { name: m.perfil_stop() })).not.toBeInTheDocument();
+});
+
+test('the Transport renders; its pause keeps the comparison and a listen key continues it', async () => {
+	const { app, audio } = fakeApp();
+	await render(Perfil, { data: view({ lineages: { items: [card()], nextCursor: null } }), app });
+	const transport = page.getByRole('group', { name: m.transport_group() });
+	await expect.element(transport).toBeVisible();
+	await expect
+		.element(transport.getByRole('slider', { name: m.transport_seek() }))
+		.toBeInTheDocument();
+	await page.getByRole('button', { name: m.perfil_listen_b() }).click();
+	await expect.poll(() => audio.start.mock.calls.length).toBe(1);
+	await transport.getByRole('button', { name: m.transport_pause(), exact: true }).click();
+	expect(audio.pause).toHaveBeenCalledOnce();
+	expect(audio.stop).not.toHaveBeenCalled();
+	expect(audio.state()).toMatchObject({ paused: true, session: 'perfil' });
+	// The Transport continues the paused Perfil session; no new A/B, no new random point.
+	await transport.getByRole('button', { name: m.transport_resume(), exact: true }).click();
+	await expect.poll(() => audio.resume.mock.calls.length).toBe(1);
+	expect(audio.createAB).toHaveBeenCalledOnce();
+	expect(audio.start).toHaveBeenCalledOnce();
 });
 
 test('filter with no match offers to clear it', async () => {

@@ -15,6 +15,7 @@
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import { checkedCurve, type CurrentCurve } from '#lib/state/model.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
@@ -83,12 +84,21 @@
 	let preview: ABPreview | null = null;
 	let startedBy: AudioEngine | null = null;
 	let attempt = 0;
+	/** Session tag of this page's comparison (Transport, navbar). */
+	const SHARED_CURVE_SESSION = 'shared-curve';
 
+	/** The engine plays or holds paused this page's session (not raw, not another page's). */
+	function owned(engine: AudioEngine): boolean {
+		const state = engine.state();
+		return state.session === SHARED_CURVE_SESSION && (state.playing || state.paused);
+	}
+
+	/** Ends the comparison ("Parar", unmount); the Transport's pause keeps it instead. */
 	function stopListening() {
 		attempt++;
 		const engine = startedBy;
 		startedBy = null;
-		if (engine && engine.state().mode === 'chains') engine.stop();
+		if (engine && owned(engine)) engine.stop();
 		if (preview) {
 			preview.dispose();
 			preview = null;
@@ -103,6 +113,17 @@
 			stopListening();
 			return;
 		}
+		await begin();
+	}
+
+	/** Transport play with nothing of this page paused: a fresh comparison (a stale one goes). */
+	async function transportPlay() {
+		if (busy) return;
+		if (listening) stopListening();
+		await begin();
+	}
+
+	async function begin() {
 		if (!app || !curve || busy) {
 			notice = m.shared_curve_audio_unavailable();
 			return;
@@ -115,9 +136,10 @@
 				experimental: true,
 				initial: 'B'
 			});
-			await engine.start('chains');
+			// A comparison starts at a random point of the file (SEEK.2); the file loops.
+			await engine.start('chains', { startAt: 'random', session: SHARED_CURVE_SESSION });
 			if (token !== attempt) {
-				if (engine.state().mode === 'chains') engine.stop();
+				if (owned(engine)) engine.stop();
 				return;
 			}
 			startedBy = engine;
@@ -256,6 +278,14 @@
 			>
 			<Button variant="primary" onclick={install}>{m.shared_curve_install()}</Button>
 		</div>
+		<!-- Pause keeps the comparison (trims, position); "Parar" ends it. -->
+		<Transport
+			engine={app?.audio ?? null}
+			variant="compact"
+			session={SHARED_CURVE_SESSION}
+			onplay={transportPlay}
+			playDisabledReason={app && curve ? null : m.shared_curve_audio_unavailable()}
+		/>
 		<p class="install-note">{m.shared_curve_install_note()}</p>
 		{#if loginPrompt}<div class="login" role="alert">
 				<p>{m.shared_curve_login_prompt()}</p>

@@ -7,6 +7,7 @@
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
 	import { Button } from '#lib/components/primitives/index.ts';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
@@ -34,6 +35,8 @@
 		onClose: () => void;
 		onStatus: (message: string) => void;
 	} = $props();
+	/** Session tag of this sheet's comparison (Transport, navbar). */
+	const BIBLIOTECA_SESSION = 'biblioteca';
 	const id = $props.id();
 	let preview: ABPreview | null = null;
 	let side = $state<ABSide>('B');
@@ -82,11 +85,17 @@
 	/** The engine this sheet put in chain mode; only that audition is stopped by the sheet. */
 	let startedBy: AudioEngine | null = null;
 
-	/** Stops the engine only if this sheet started it and it still plays chains (not ♪ raw). */
+	/** The engine plays or holds paused this sheet's session (not ♪ raw, not another page's). */
+	function owned(engine: AudioEngine): boolean {
+		const state = engine.state();
+		return state.session === BIBLIOTECA_SESSION && (state.playing || state.paused);
+	}
+
+	/** Ends the session only if this sheet started it and it is still this sheet's. */
 	function release() {
 		const engine = startedBy;
 		startedBy = null;
-		if (engine && engine.state().mode === 'chains') engine.stop();
+		if (engine && owned(engine)) engine.stop();
 	}
 
 	function stop() {
@@ -111,9 +120,11 @@
 		if (!app || busy) return;
 		const engine = app.audio;
 		try {
-			if (preview && audioState.playing) {
+			if (preview && startedBy === engine && owned(engine)) {
+				// Same comparison: switch sides at the same moment; a paused one continues.
 				preview.select(selected);
 				side = selected;
+				if (!engine.state().playing) await engine.resume();
 				return;
 			}
 			stop();
@@ -121,10 +132,11 @@
 			busy = true;
 			preview = engine.createAB(current, tape, { experimental: true, initial: selected });
 			side = selected;
-			await engine.start('chains');
+			// A comparison starts at a random point of the file (SEEK.2); the file loops.
+			await engine.start('chains', { startAt: 'random', session: BIBLIOTECA_SESSION });
 			if (token !== attempt) {
 				// Stopped/closed while starting: nothing of ours may keep playing (raw is not ours).
-				if (engine.state().mode === 'chains') engine.stop();
+				if (owned(engine)) engine.stop();
 				return;
 			}
 			startedBy = engine;
@@ -271,6 +283,15 @@
 					onclick={stop}>{m.biblioteca_stop()}</Button
 				>
 			</div>
+			<!-- Pause keeps the comparison (side, trims, position); "Parar prévia" ends it. -->
+			<Transport
+				engine={app?.audio ?? null}
+				state={app ? audioState : null}
+				variant="compact"
+				session={BIBLIOTECA_SESSION}
+				onplay={() => listen(side)}
+				playDisabledReason={audioReason}
+			/>
 			<p>{m.biblioteca_listen_note()}</p>
 			{#if !audioState.exact}<p>{m.biblioteca_approximate()}</p>{/if}
 		</section>

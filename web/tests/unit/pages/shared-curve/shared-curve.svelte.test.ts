@@ -5,6 +5,12 @@ import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { encodeS1 } from 'open-auri/share';
 import type { ClientApp } from '#lib/app/client.svelte.ts';
+import {
+	IDLE_STATE,
+	type AudioEngineState,
+	type PlayMode,
+	type StartOptions
+} from '#lib/audio/engine.ts';
 import SharedCurve from '#lib/components/pages/shared-curve/SharedCurve.svelte';
 import type { SharedCurveData, SharedCurveMeta } from '#lib/components/pages/shared-curve/types.ts';
 import { m } from '#lib/paraglide/messages.js';
@@ -40,19 +46,48 @@ const META: SharedCurveMeta = {
 	indexable: true
 };
 
+/** A stateful fake engine: sessions, pause and resume as the SEEK.1 transport reports them. */
+function fakeAudio() {
+	let current: AudioEngineState = { ...IDLE_STATE };
+	const listeners = new Set<(state: AudioEngineState) => void>();
+	const set = (next: Partial<AudioEngineState>) => {
+		current = { ...current, ...next };
+		for (const listener of listeners) listener(current);
+	};
+	return {
+		createAB: vi.fn(() => ({ dispose: vi.fn(), select: vi.fn() })),
+		start: vi.fn(async (mode: PlayMode = 'chains', options: StartOptions = {}) => {
+			set({ mode, playing: true, paused: false, session: options.session ?? null });
+		}),
+		stop: vi.fn(() => set({ mode: 'off', playing: false, paused: false, session: null })),
+		pause: vi.fn(() => set({ mode: 'off', playing: false, paused: true })),
+		resume: vi.fn(async () => {
+			set({ mode: 'chains', playing: true, paused: false });
+			return true;
+		}),
+		seek: vi.fn(() => false),
+		restart: vi.fn(() => false),
+		// The Transport warms the engine on press; a running context needs nothing more.
+		getContext: () => ({ state: 'running', resume: async () => undefined }),
+		state: () => current,
+		onChange: (listener: (state: AudioEngineState) => void) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		}
+	};
+}
+
 function fakeApp() {
 	const requestWrite = vi.fn();
+	const audio = fakeAudio();
 	const app = {
 		requestWrite,
 		state: { curve: { current: neutralCurve() } },
-		audio: {
-			createAB: vi.fn(() => ({ dispose: vi.fn(), select: vi.fn() })),
-			start: vi.fn(async () => undefined),
-			stop: vi.fn(),
-			state: () => ({ mode: 'chains' })
-		}
+		audio
 	};
-	return { app: app as unknown as ClientApp, requestWrite };
+	return { app: app as unknown as ClientApp, requestWrite, audio };
 }
 
 test('renders the card, the #p= fallback link and the OG meta tags', async () => {
@@ -188,6 +223,31 @@ test('listen previews through the shared audio engine and stops again', async ()
 	expect(audio.createAB).toHaveBeenCalledTimes(1);
 	await page.getByRole('button', { name: m.shared_curve_stop() }).click();
 	expect(audio.stop).toHaveBeenCalled();
+});
+
+test('the Transport renders, starts at a random point and its pause keeps the session', async () => {
+	const { app, audio } = fakeApp();
+	await render(SharedCurve, { curve: data(), meta: META, signedIn: false, app });
+	const transport = page.getByRole('group', { name: m.transport_group() });
+	await expect.element(transport).toBeVisible();
+	await expect
+		.element(transport.getByRole('slider', { name: m.transport_seek() }))
+		.toBeInTheDocument();
+	// Nothing paused: Transport play is the page's own A/B start (level-matched by createAB).
+	await transport.getByRole('button', { name: m.transport_play(), exact: true }).click();
+	await expect.poll(() => audio.start.mock.calls.length).toBe(1);
+	expect(audio.createAB).toHaveBeenCalledOnce();
+	expect(audio.start).toHaveBeenCalledWith('chains', {
+		startAt: 'random',
+		session: 'shared-curve'
+	});
+	await transport.getByRole('button', { name: m.transport_pause(), exact: true }).click();
+	expect(audio.pause).toHaveBeenCalledOnce();
+	expect(audio.stop).not.toHaveBeenCalled();
+	expect(audio.state()).toMatchObject({ paused: true, session: 'shared-curve' });
+	await transport.getByRole('button', { name: m.transport_resume(), exact: true }).click();
+	await expect.poll(() => audio.resume.mock.calls.length).toBe(1);
+	expect(audio.start).toHaveBeenCalledOnce();
 });
 
 test('an S1 that does not decode shows an error and keeps the page', async () => {

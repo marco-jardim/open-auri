@@ -8,6 +8,9 @@ import ScopePanel from '#lib/components/pages/curva/ScopePanel.svelte';
 import { formatSignedDb } from '#lib/components/pages/curva/format.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
 import { OUTPUT_LIMIT_DB } from '#lib/components/pages/curva/scope.ts';
+import { CURVA_SESSION } from '#lib/components/pages/curva/preview.svelte.ts';
+import { createAudioEngine } from '#lib/audio/engine.ts';
+import { fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
 
 const curve: Curve = {
 	bands: [
@@ -22,6 +25,7 @@ const curve: Curve = {
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
+	resetAudioConfig();
 });
 
 async function setup(overrides: Partial<ComponentProps<typeof ScopePanel>> = {}) {
@@ -106,7 +110,8 @@ test('locked handles reject keyboard and pointer edits; Ouvir omits all edit han
 	expect(ondrag).not.toHaveBeenCalled();
 	await expect.element(page.getByText(m.curva_exp_hint())).toBeVisible();
 	await screen.rerender({ layer: 'ouvir' });
-	await expect.element(page.getByRole('slider')).not.toBeInTheDocument();
+	// Only the handles go; the Transport's seek bar (SEEK.2) stays.
+	await expect.element(page.getByRole('slider', { name: /^Filtro / })).not.toBeInTheDocument();
 });
 
 test('pointer drags are advisory until release and clamp to visible limits', async () => {
@@ -188,6 +193,36 @@ test('preview controls expose playback, A/B, errors and disablement', async () =
 	if (leverElement instanceof HTMLElement) leverElement.click();
 	expect(onpreview).toHaveBeenCalledTimes(2);
 	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+});
+
+test('the compact Transport renders and starts through the lever, resuming only Curva', async () => {
+	const engine = createAudioEngine(fakeEnv(null).env);
+	try {
+		const { onpreview } = await setup({ engine });
+		const transport = page.getByRole('group', { name: m.transport_group() });
+		await expect.element(transport).toBeVisible();
+		await expect
+			.element(transport.getByRole('slider', { name: m.transport_seek() }))
+			.toBeInTheDocument();
+		// Nothing paused: Transport play is the page's own start (A/B, level match).
+		const play = transport.getByRole('button', { name: m.transport_play(), exact: true });
+		await play.click();
+		expect(onpreview).toHaveBeenCalledOnce();
+
+		// A paused Curva session: play continues it in the engine, without a new start.
+		const chain = engine.buildChain(NEUTRO.bands, 0);
+		await engine.start('chains', { startAt: 'random', session: CURVA_SESSION });
+		engine.pause();
+		const resume = vi.spyOn(engine, 'resume');
+		const cont = transport.getByRole('button', { name: m.transport_resume(), exact: true });
+		await cont.click();
+		await vi.waitFor(() => expect(resume).toHaveBeenCalledOnce());
+		expect(onpreview).toHaveBeenCalledOnce();
+		expect(engine.state()).toMatchObject({ playing: true, session: CURVA_SESSION });
+		chain.dispose();
+	} finally {
+		await engine.dispose();
+	}
 });
 
 test('the approximate-preview note shows only while playing at a rate other than 96 kHz', async () => {

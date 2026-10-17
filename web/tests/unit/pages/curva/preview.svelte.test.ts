@@ -8,7 +8,7 @@ import {
 	type AudioErrorCode
 } from '#lib/audio/engine.ts';
 import { tap, tapStages, type MeterListener, type MeterTap } from '#lib/audio/meters.ts';
-import { CurvaPreview } from '#lib/components/pages/curva/preview.svelte.ts';
+import { CURVA_SESSION, CurvaPreview } from '#lib/components/pages/curva/preview.svelte.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
 import { audioConfig, fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
 
@@ -107,7 +107,8 @@ test('idle operations allocate no chains; selection is retained at start', async
 	expect(preview.vu.mode).toBe('data');
 	await preview.start(neutral, editor);
 	expect(createAB).toHaveBeenCalledWith(neutral, editor, { initial: 'A', experimental: false });
-	expect(start).toHaveBeenCalledWith('chains');
+	// A comparison starts at a random point of the file, tagged for the Transport and navbar.
+	expect(start).toHaveBeenCalledWith('chains', { startAt: 'random', session: CURVA_SESSION });
 	expect(preview.playing).toBe(true);
 	expect(preview.error).toBeNull();
 	expect(preview.analyser).not.toBeNull();
@@ -221,7 +222,8 @@ test('late taps disconnect instead of resurrecting stopped meters', async () => 
 	vi.mocked(tap).mockReturnValue(pending);
 	vi.mocked(tapStages).mockResolvedValue([late.handle]);
 	await preview.start(neutral, editor);
-	preview.stop();
+	// The lever only pauses (taps kept); unmount is what releases them.
+	preview.dispose();
 	resolve(late.handle);
 	await vi.waitFor(() => expect(late.handle.disconnect).toHaveBeenCalled());
 	expect(late.handle.subscribe).not.toHaveBeenCalled();
@@ -364,6 +366,70 @@ test('reports an exact preview at 96 kHz', async () => {
 	const { preview } = setup();
 	await preview.start(neutral, editor);
 	expect(preview.exact).toBe(true);
+});
+
+test('the lever pauses: the session, chains and A/B stay, and a press continues them', async () => {
+	const { preview, engine, start, stop, abInstances } = setup();
+	start.mockRestore();
+	stop.mockRestore();
+	const engineStart = vi.spyOn(engine, 'start');
+	const engineStop = vi.spyOn(engine, 'stop');
+	const pause = vi.spyOn(engine, 'pause');
+	const resume = vi.spyOn(engine, 'resume');
+	await preview.start(neutral, editor);
+	expect(engineStart).toHaveBeenCalledExactlyOnceWith('chains', {
+		startAt: 'random',
+		session: CURVA_SESSION
+	});
+	expect(engine.state()).toMatchObject({ playing: true, session: CURVA_SESSION });
+	preview.select('A');
+	const session = preview.session;
+
+	preview.stop();
+	expect(pause).toHaveBeenCalledOnce();
+	expect(engineStop).not.toHaveBeenCalled();
+	expect(engine.state()).toMatchObject({ playing: false, paused: true, session: CURVA_SESSION });
+	expect(preview).toMatchObject({ playing: false, paused: true, side: 'A' });
+	const ab = abInstances[0];
+	if (!ab) throw new Error('Missing A/B preview');
+	expect(ab.dispose).not.toHaveBeenCalled();
+	expect(engine.getChainOutput(ab.b.id)).not.toBeNull();
+	expect(ab.selected()).toBe('A');
+
+	// An edit while paused is what the resume plays (the old A/B goes only after the new one).
+	preview.update(neutral, neutral);
+	expect(abInstances).toHaveLength(2);
+	expect(engine.state().paused).toBe(true);
+
+	await preview.start(neutral, neutral);
+	expect(resume).toHaveBeenCalledOnce();
+	expect(engineStart).toHaveBeenCalledOnce();
+	expect(preview.session).toBe(session);
+	expect(preview).toMatchObject({ playing: true, paused: false });
+	expect(engine.state()).toMatchObject({ playing: true, mode: 'chains', session: CURVA_SESSION });
+
+	preview.dispose();
+	expect(engineStop).toHaveBeenCalledOnce();
+	expect(engine.state()).toMatchObject({ playing: false, paused: false, session: null });
+});
+
+test('a pause and resume from the Transport or the navbar keep the preview in step', async () => {
+	const { preview, engine, start, stop } = setup();
+	start.mockRestore();
+	stop.mockRestore();
+	await preview.start(neutral, editor);
+	engine.pause();
+	// Before the line-175 fix this dropped the preview: `mode !== 'chains'` read as a stop.
+	expect(preview).toMatchObject({ playing: false, paused: true });
+	await engine.togglePlayback();
+	expect(preview).toMatchObject({ playing: true, paused: false });
+	expect(preview.analyser).not.toBeNull();
+	// Another page's session replaces ours: no longer this preview's to stop.
+	await engine.start('raw', { session: 'audio-panel' });
+	expect(preview).toMatchObject({ playing: false, paused: false });
+	const engineStop = vi.spyOn(engine, 'stop');
+	preview.dispose();
+	expect(engineStop).not.toHaveBeenCalled();
 });
 
 test('missing stage taps remain in DATA mode without preventing output metering', async () => {

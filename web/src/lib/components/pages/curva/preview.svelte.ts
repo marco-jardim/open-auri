@@ -5,8 +5,11 @@
  * - meters: VU of the selected chain output (`tap`), one LED per active section of B
  *   (`tapStages`, mapped back to band indices) and the spectrum from `getAnalyserTap()` (the
  *   engine's pre-volume meter bus). Taps use the app's 0 VU reference (`reference` option).
- * - `stop`/`dispose` release this page's chains and taps and stop the shared engine only when this
- *   preview started it (or is starting it); they never dispose the engine.
+ * - Transport (SEEK.2): a new preview starts at a random point in [25 %, 75 %] of the file
+ *   (`startAt: 'random'`), tagged `CURVA_SESSION`; the file loops. The lever off (`stop`) and
+ *   `pause` pause it, keeping the chains, the A/B selection, the trims and the taps: the
+ *   Transport, the navbar or the lever continue it where it was. Only `dispose` (unmount) ends
+ *   the session (`engine.stop()`) and releases this page's chains and taps; never the engine.
  * - A stop or dispose during the engine start wins: when the start resolves late, the engine is
  *   stopped again and nothing is left audible. An edit during the start is played once it resolves.
  */
@@ -25,6 +28,9 @@ import { hasExperimental, type Curve } from './model.ts';
 
 export type PreviewError = 'gesture' | 'suspended' | 'unsupported' | 'failed';
 
+/** Session tag of the Curva preview (`engine.state().session`, the Transport and the navbar). */
+export const CURVA_SESSION = 'curva';
+
 export interface CurvaPreviewOptions {
 	/** 0 VU reference for the taps (the app's `meterRef`); defaults to the module reference. */
 	reference?: () => VuReference;
@@ -32,7 +38,9 @@ export interface CurvaPreviewOptions {
 
 export class CurvaPreview {
 	playing = $state(false);
-	/** A new user-started session, shared by the social activity bridge. */
+	/** This preview's session is paused (resumable; chains, A/B and taps kept). */
+	paused = $state(false);
+	/** A new user-started session, shared by the social activity bridge (a resume is not new). */
 	session = $state(0);
 	/** True between the gesture and the engine start resolving. */
 	starting = $state(false);
@@ -65,19 +73,27 @@ export class CurvaPreview {
 		this.#reference = options.reference ?? getReference;
 	}
 
-	/** Call from a click or key handler only. */
+	/**
+	 * Call from a click or key handler only. Continues this preview's paused session where it
+	 * was; otherwise builds the A/B and starts a new one at a random point of the file.
+	 */
 	async start(reference: Curve, editor: Curve): Promise<void> {
-		this.session++;
+		const resuming = this.#resumable();
+		if (!resuming) this.session++;
 		this.error = null;
 		const attempt = ++this.#attempt;
 		this.#latest = { reference, editor };
 		try {
-			this.#build(reference, editor);
+			if (!resuming) this.#build(reference, editor);
 			this.starting = true;
 			this.#owns = true;
 			this.#watch();
 			// Called before the first await, while the gesture still grants user activation.
-			await this.#engine.start('chains');
+			if (resuming) {
+				if (!(await this.#engine.resume())) throw new AudioEngineError('suspended');
+			} else {
+				await this.#engine.start('chains', { startAt: 'random', session: CURVA_SESSION });
+			}
 			if (attempt !== this.#attempt) {
 				// Stopped or disposed while starting: the engine only reached chain mode now, after
 				// stop() ran, so stop it again unless a newer start owns it.
@@ -85,6 +101,7 @@ export class CurvaPreview {
 				return;
 			}
 			this.starting = false;
+			this.paused = false;
 			this.playing = true;
 			this.exact = this.#engine.state().exact;
 			// An edit during the start must be heard, not the curve captured at the click.
@@ -104,6 +121,7 @@ export class CurvaPreview {
 			this.#unwatch();
 			this.#teardown();
 			this.starting = false;
+			this.paused = false;
 			this.playing = false;
 			if (cause instanceof AudioEngineError) {
 				const { code } = cause;
@@ -116,26 +134,53 @@ export class CurvaPreview {
 		}
 	}
 
-	/** Stops the engine whenever this preview started it or is starting it. */
+	/**
+	 * The lever off: pauses a playing preview (resumable) and cancels a start still in flight
+	 * (the engine is stopped and the chains released). Teardown is `dispose`.
+	 */
 	stop(): void {
+		if (this.playing) this.pause();
+		else if (this.starting) this.#end();
+	}
+
+	/** Pauses this preview (`engine.pause()`): position, chains, A/B selection and trims stay. */
+	pause(): void {
+		if (!this.playing || !this.#owns) return;
+		this.playing = false;
+		this.paused = true;
+		this.#engine.pause();
+	}
+
+	/** This preview owns the engine's paused session and still has its chains. */
+	#resumable(): boolean {
+		if (!this.paused || !this.#owns || !this.#ab) return false;
+		const state = this.#engine.state();
+		return state.paused && state.session === CURVA_SESSION;
+	}
+
+	/** Ends the session (stopping the engine when this preview owns it) and releases everything. */
+	#end(): void {
 		this.#attempt++;
 		const owned = this.#owns;
 		this.#owns = false;
 		this.#unwatch();
 		if (owned) this.#engine.stop();
 		this.playing = false;
+		this.paused = false;
 		this.starting = false;
 		this.#latest = null;
 		this.#teardown();
 	}
 
 	/**
-	 * Rebuilds the chains with new curves while playing; while starting, keeps them for when the
-	 * start resolves (no-op when stopped).
+	 * Rebuilds the chains with new curves while playing or paused (a resume from the Transport or
+	 * the navbar plays the current curves); while starting, keeps them for when the start
+	 * resolves (no-op when stopped). The new A/B exists before the old one goes, so a paused
+	 * session never loses its chains.
 	 */
 	update(reference: Curve, editor: Curve): void {
-		if (this.playing) this.#build(reference, editor);
-		else if (this.starting) this.#latest = { reference, editor };
+		if (this.starting) this.#latest = { reference, editor };
+		else if (this.playing || this.paused) this.#build(reference, editor);
 	}
 
 	select(side: ABSide): void {
@@ -165,19 +210,41 @@ export class CurvaPreview {
 			: null;
 	}
 
+	/** Unmount: ends the session (`engine.stop()` when owned) and disposes the chains. */
 	dispose(): void {
-		this.stop();
+		this.#end();
 	}
 
-	/** Follows the engine: rate changes (exactness) and a stop or switch to raw from elsewhere. */
+	/**
+	 * Follows the engine: rate changes (exactness); a pause or resume of this session from the
+	 * Transport or the navbar; and a stop, another page's session or raw playback from elsewhere.
+	 */
 	#watch(): void {
 		if (this.#unsubscribe) return;
 		this.#unsubscribe = this.#engine.onChange((state) => {
 			this.exact = state.exact;
-			if (this.playing && state.mode !== 'chains') {
-				// Stopped by the chrome (or switched to raw): no longer this preview's to stop.
+			const ours = state.session === CURVA_SESSION;
+			if (ours && state.playing && state.mode === 'chains') {
+				// Continued from the Transport or the navbar (a resume of our own is still starting).
+				if (this.#owns && this.paused && !this.starting) {
+					this.paused = false;
+					this.playing = true;
+				}
+				return;
+			}
+			if (ours && state.paused) {
+				// Paused from the Transport or the navbar: the session, chains and taps stay.
+				if (this.playing) {
+					this.playing = false;
+					this.paused = true;
+				}
+				return;
+			}
+			if (this.playing || this.paused) {
+				// Stopped by the chrome, replaced or switched to raw: no longer this preview's to stop.
 				this.#owns = false;
 				this.playing = false;
+				this.paused = false;
 			}
 		});
 	}
