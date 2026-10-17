@@ -8,6 +8,7 @@
 // the same for every address; the exact credentials mapping is covered by the unit tests.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { waitForApp } from './helpers/a-app';
 import { randomIp } from './helpers/auth-flow';
 
 const AUTH_ROUTES = [
@@ -45,8 +46,9 @@ async function open(page: Page, path: string): Promise<void> {
 	const response = await page.goto(path);
 	expect(response?.status(), `${path} must return HTTP 200`).toBe(200);
 	await expect(page.locator('#main-content main')).toBeVisible();
-	// Hydrated: the chrome's audio button is enabled only after the app mounts.
-	await expect(page.locator('[data-chrome="bar"] button[popovertarget]')).toBeEnabled();
+	// Hydrated and the lazy runtime mounted (on idle on auth routes): data-runtime="ready", then
+	// the bar's cable-status trigger, which only exists once the app is there.
+	await waitForApp(page);
 }
 
 test.describe('auth pages', () => {

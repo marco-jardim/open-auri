@@ -1,8 +1,25 @@
 import { expect, type Page } from '@playwright/test';
 
-/** The shared cable-status control is disabled in SSR and enabled by the mounted client app. */
+/**
+ * FUX.2: the client runtime is a dynamic chunk. The layout imports it at once on instrument
+ * routes and on idle (requestIdleCallback, 1500 ms timeout) on static and auth routes, then
+ * publishes the app; only then does the bar render the cable-status trigger (a skeleton before).
+ * With the whole suite sharing the machine (and `wrangler dev` retrying dropped chunk
+ * connections) that can take longer than the default 5 s expect timeout, so the wait is explicit.
+ */
+export const RUNTIME_READY_TIMEOUT_MS = 20_000;
+
+/**
+ * Hydrated and the runtime mounted: the layout's `.app-root[data-runtime]` reaches `ready`
+ * (`error` ends the wait at once and fails with a clear message), then the bar's status trigger.
+ */
 export async function waitForApp(page: Page): Promise<void> {
 	await expect(page.locator('#main-content')).toBeVisible();
+	const root = page.locator('.app-root');
+	await expect(root).toHaveAttribute('data-runtime', /^(ready|error)$/, {
+		timeout: RUNTIME_READY_TIMEOUT_MS
+	});
+	await expect(root, 'the app runtime failed to load').toHaveAttribute('data-runtime', 'ready');
 	await expect(page.locator('[data-chrome="bar"] button[popovertarget]')).toBeEnabled();
 }
 

@@ -1,6 +1,7 @@
 // Every native dropdown stays readable: the closed control and its option list both keep
 // WCAG 4.5:1 between text and the background actually painted behind them.
 import { expect, test, type Page } from '@playwright/test';
+import { RUNTIME_READY_TIMEOUT_MS, settleRendering } from './helpers/a-app';
 
 const ROUTES = [
 	'/',
@@ -106,10 +107,25 @@ test.beforeEach(async ({ context }) => {
 	}, PAGES);
 });
 
+/**
+ * The page in its final state, from its own readiness signals (never `networkidle`: Biblioteca
+ * keeps a request open, and background work need not go quiet): the runtime mounted, the
+ * route's own readiness (settleRendering), and every below-the-fold island loaded. Each
+ * Deferred island loads on idle at the latest, so its placeholder always goes away; the
+ * dropdowns those islands hold are audited too.
+ */
+async function ready(page: Page, route: string): Promise<void> {
+	await page.goto(route);
+	await settleRendering(page);
+	await expect(page.locator('#main-content .deferred[aria-busy="true"]')).toHaveCount(0, {
+		timeout: RUNTIME_READY_TIMEOUT_MS
+	});
+	await settleRendering(page);
+}
+
 for (const route of ROUTES) {
 	test(`dropdowns on ${route} keep 4.5:1 for the control and its options`, async ({ page }) => {
-		await page.goto(route);
-		await page.waitForLoadState('networkidle');
+		await ready(page, route);
 		const failing = (await audit(page, route)).filter((finding) => finding.ratio < 4.5);
 		expect(failing, JSON.stringify(failing, null, 1)).toEqual([]);
 	});

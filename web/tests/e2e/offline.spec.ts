@@ -1,17 +1,28 @@
 import { expect, test } from '@playwright/test';
 
+/**
+ * The service worker registers on idle (the layout's lazy UpdatePrompt) and only takes control
+ * once its install has precached the whole build. With the suite on 8 workers that download
+ * competes with every other page, so it can take far longer than in isolation: an explicit
+ * budget, inside a test timeout that leaves room for the offline steps.
+ */
+const CONTROLLER_TIMEOUT_MS = 90_000;
+test.setTimeout(CONTROLLER_TIMEOUT_MS + 30_000);
+
 test('editor, presets and preview work after the first load without a network', async ({
 	page,
 	context
 }) => {
 	await page.goto('/');
-	await page.evaluate(async () => {
-		await navigator.serviceWorker.ready;
-		if (navigator.serviceWorker.controller) return;
-		await new Promise<void>((resolve) => {
-			navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true });
-		});
-	});
+	// Polled, not awaited inside the page: a missed `controllerchange` cannot hang the test, and
+	// a failure names what it waited for.
+	await expect
+		.poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null), {
+			message: 'the service worker controls the page (precache installed)',
+			timeout: CONTROLLER_TIMEOUT_MS,
+			intervals: [250]
+		})
+		.toBe(true);
 
 	await context.setOffline(true);
 	await page.reload();

@@ -65,6 +65,10 @@ test.describe('Soe como X states', () => {
 
 	test('no result teaches what to type', async ({ page }) => {
 		test.skip(NO_AUTOEQ, 'needs the AutoEq index (OA_NO_AUTOEQ=1)');
+		// The desktop tour's first step highlights this very station (`data-tour-active`); its lazy
+		// chunk opens it sooner or later depending on load, so the capture (whose baseline has no
+		// tour) only stays deterministic with the tour dismissed.
+		await dismissTour(page);
 		await settle(page);
 		await page.locator('#soe-search').fill('zzzz sem fone algum');
 		await expect(page.locator('.measurement .no-result')).toBeVisible();
@@ -92,6 +96,12 @@ test.describe('Soe como X states', () => {
 		await expect(page.locator('.map svg[role="img"] rect').first()).toBeVisible();
 		// No audio was started: meters are DATA, never live.
 		await expect(page.locator('[data-tour="soe-ab"] [data-mode="live"]')).toHaveCount(0);
+		// The workstation is taller than the mobile viewport, so the capture also shows the fixed
+		// chrome over it; whichever control happens to hold focus (RESOLVER, or the skip link, which
+		// only shows when focused) is not part of this state. Same focus on every run: none.
+		await page.evaluate(() => {
+			if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+		});
 		// Sub-pixel anti-aliasing on the solver's curves varies by 19 to 30 px between runs (it
 		// fails even right after --update-snapshots); nothing animates once the gate passed.
 		await expect(page.locator('.workstation')).toHaveScreenshot('soe-result.png', {

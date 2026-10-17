@@ -101,8 +101,14 @@
 	/** Display values of the criteria, from the same verdict (presentation only). */
 	const values = $derived(criteriaValues(gate));
 
+	// §0.12: the USB timing never shares the main thread with this countdown. A write records
+	// its flash attempt before the first byte, and that (reactive) record restarts the 2 s
+	// spacing at once; without this guard the countdown re-rendered the dialog every 200 ms
+	// between reports, which delayed the 16 ms pauses and the 150 ms settle. While writing the
+	// GRAVAR lever is locked for the write itself, so nothing here needs the countdown; it
+	// starts again when the write ends (`cable.writing` turns false).
 	$effect(() => {
-		if (checklist === null) return;
+		if (checklist === null || cable.writing) return;
 		const wait = checklist.spacing.waitMs;
 		if (wait <= 0) return;
 		const timer = setTimeout(() => (tick += 1), Math.min(wait, 200));

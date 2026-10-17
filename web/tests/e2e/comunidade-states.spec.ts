@@ -49,6 +49,11 @@ async function openEmptyCommunity(page: Page): Promise<void> {
 	await page.route('**/api/v1/feed**', (route) => route.fulfill({ json: EMPTY_FEED }));
 	await openApp(page, '/comunidade');
 	await settleRendering(page);
+	// The decorative art (LazyArt) arrives on idle, at the latest after 2 s; under a loaded
+	// machine idle comes late, so a capture could race it. Wait for the layer (the state the
+	// baselines show); `animations: 'disabled'` then freezes its motion in the capture.
+	await expect(page.locator('.art-layer').first()).toBeAttached({ timeout: 15_000 });
+	await settleRendering(page);
 }
 
 test.describe('comunidade states', () => {

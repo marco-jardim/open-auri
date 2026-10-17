@@ -15,6 +15,7 @@ import {
 	type BrowserContext,
 	type Page
 } from '@playwright/test';
+import { waitForApp } from './a-app';
 
 export const AUTH_FLOW_PORT = 4174;
 export const AUTH_FLOW_ORIGIN = `http://localhost:${AUTH_FLOW_PORT}`;
@@ -165,12 +166,21 @@ export async function turnstileReady(page: Page): Promise<void> {
 	);
 }
 
-/** Opens a page and waits for hydration (the chrome's audio button is enabled after mount). */
+/**
+ * Opens a page and waits for hydration and the app runtime (`waitForApp`: the layout's
+ * `data-runtime="ready"`, then the bar's cable-status trigger, which only exists once the lazy
+ * runtime has mounted; on auth routes that happens on idle).
+ */
 export async function open(page: Page, path: string): Promise<void> {
 	await page.goto(path);
-	await expect(page.locator('#main-content')).toBeVisible();
-	await expect(page.locator('[data-chrome="bar"] button[popovertarget]')).toBeEnabled();
+	await waitForApp(page);
 }
+
+/**
+ * A form action that runs scrypt on the Worker (sign-in, sign-up, reset) while the whole suite
+ * shares the machine: the redirect can come later than the default 5 s expect timeout.
+ */
+export const AUTH_SUBMIT_TIMEOUT_MS = 20_000;
 
 /** Sign-in through the /entrar form. */
 export async function uiSignIn(page: Page, email: string, password = PASSWORD, next = '/conta') {
@@ -180,7 +190,9 @@ export async function uiSignIn(page: Page, email: string, password = PASSWORD, n
 	await form.locator('input[name="password"]').fill(password);
 	await turnstileReady(page);
 	await form.locator('button[type="submit"]').click();
-	await expect(page).toHaveURL(new RegExp(`${next.replace(/[/?]/g, '\\$&')}(\\?|$)`));
+	await expect(page).toHaveURL(new RegExp(`${next.replace(/[/?]/g, '\\$&')}(\\?|$)`), {
+		timeout: AUTH_SUBMIT_TIMEOUT_MS
+	});
 }
 
 export async function expectNoSeriousAxe(page: Page): Promise<void> {

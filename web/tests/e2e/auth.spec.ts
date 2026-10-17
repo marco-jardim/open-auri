@@ -2,6 +2,7 @@
 // SIGNUP_ENABLED=true, EMAIL_TRANSPORT=capture; links come from the dev mailbox). Both locales.
 import { expect, test } from '@playwright/test';
 import {
+	AUTH_SUBMIT_TIMEOUT_MS,
 	createVerifiedAccount,
 	linkOf,
 	newContext,
@@ -15,7 +16,12 @@ import {
 	type Locale
 } from './helpers/auth-flow';
 
-test.describe.configure({ mode: 'parallel' });
+// Several scrypt form actions, captured mails and runtime mounts per test while the whole suite
+// shares the machine: the default 30 s is not enough (account.spec.ts gives 2 minutes).
+test.describe.configure({ mode: 'parallel', timeout: 90_000 });
+
+/** Waits for a form action answered by the Worker (scrypt, mail) under the shared load. */
+const submitted = { timeout: AUTH_SUBMIT_TIMEOUT_MS };
 
 const LOCALES: readonly Locale[] = ['pt-BR', 'en-US'];
 
@@ -36,14 +42,14 @@ for (const locale of LOCALES) {
 		await form.locator('input[name="confirm"]').fill(PASSWORD);
 		await turnstileReady(page);
 		await form.locator('button[type="submit"]').click();
-		await expect(page).toHaveURL(/\/verificar-email\?.*enviado=1/);
+		await expect(page).toHaveURL(/\/verificar-email\?.*enviado=1/, submitted);
 
 		// Not verified yet: the account exists but cannot sign in.
 		expect(await signedInAs(context)).toBeNull();
 		const mail = await waitForMail(context.request, email);
 		expect(mail.subject.length).toBeGreaterThan(0);
 		await page.goto(linkOf(mail));
-		await expect(page).toHaveURL(/\/verificar-email\?.*verificado=1/);
+		await expect(page).toHaveURL(/\/verificar-email\?.*verificado=1/, submitted);
 		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 		// The link signs nobody in.
 		expect(await signedInAs(context)).toBeNull();
@@ -68,7 +74,7 @@ test('the verification e-mail follows the language of the visitor', async ({ bro
 		await form.locator('input[name="confirm"]').fill(PASSWORD);
 		await turnstileReady(page);
 		await form.locator('button[type="submit"]').click();
-		await expect(page).toHaveURL(/enviado=1/);
+		await expect(page).toHaveURL(/enviado=1/, submitted);
 		subjects.push((await waitForMail(context.request, email)).subject);
 		await context.close();
 	}
@@ -95,7 +101,7 @@ test('keyboard only: Tab to the form, type, Enter signs in', async ({ browser })
 	await expect(page.locator('input[name="password"]')).toBeFocused();
 	await page.keyboard.type(PASSWORD);
 	await page.keyboard.press('Enter');
-	await expect(page).toHaveURL(/\/conta(\?|$)/);
+	await expect(page).toHaveURL(/\/conta(\?|$)/, submitted);
 	expect(await signedInAs(context)).toBe(email);
 	await context.close();
 });
@@ -115,7 +121,7 @@ test('wrong password and unknown address get the same answer and no session', as
 		await turnstileReady(page);
 		await form.locator('button[type="submit"]').click();
 		const alert = page.getByRole('alert').filter({ hasText: /\S/ }).first();
-		await expect(alert).toBeVisible();
+		await expect(alert).toBeVisible(submitted);
 		const text = (await alert.textContent())?.trim() ?? '';
 		expect(text).not.toContain(address);
 		answers.push(text);
@@ -145,8 +151,11 @@ test('password reset through the mailed link; the link works once', async ({ bro
 		await reset.locator('input[name="password"]').fill(newPassword);
 		await reset.locator('input[name="confirm"]').fill(newPassword);
 		await reset.locator('button[type="submit"]').click();
-		if (attempt === 1) await expect(page).toHaveURL(/\/entrar\?.*redefinida=1/);
-		else await expect(page.getByRole('alert').filter({ hasText: /\S/ }).first()).toBeVisible();
+		if (attempt === 1) await expect(page).toHaveURL(/\/entrar\?.*redefinida=1/, submitted);
+		else
+			await expect(page.getByRole('alert').filter({ hasText: /\S/ }).first()).toBeVisible(
+				submitted
+			);
 	}
 	await uiSignIn(page, email, newPassword);
 	await context.close();

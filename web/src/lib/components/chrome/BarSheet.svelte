@@ -351,9 +351,11 @@
 		}
 	}
 
+	/* Slide only: the sheet's text keeps full contrast on every frame of its entrance (an opacity
+	   fade put the open menu at ~36 % for 300 ms: 2.9:1, an axe failure while it is usable). The
+	   backdrop still fades. */
 	@keyframes sheet-in {
 		from {
-			opacity: 0;
 			translate: 24px 0;
 		}
 	}
