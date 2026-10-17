@@ -9,7 +9,7 @@
 	error can appear.
 -->
 <script lang="ts">
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi } from '#lib/social/index.ts';
 	import type { ReportReason } from '#lib/server/social/types.ts';

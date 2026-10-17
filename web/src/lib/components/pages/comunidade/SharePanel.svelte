@@ -7,7 +7,7 @@
 	(`#lib/qr`, uqr) is imported here on mount, so it never sits in the route's static closure.
 -->
 <script lang="ts">
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { CreatedShare, SocialApi } from '#lib/social/index.ts';
 	import CurveAvatar from './CurveAvatar.svelte';

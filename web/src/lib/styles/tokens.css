@@ -139,7 +139,7 @@
 		--rad-pill: 999px;
 
 		/* Layout */
-		--bar-h: 56px;
+		--bar-h: 40px; /* FUX.NAV: one compact row; 52px on mobile (below) */
 		--frame-max: 1480px;
 		--gutter: 24px;
 		--hit: 36px; /* touch target: 36px desktop, 44px mobile (below) */
@@ -157,6 +157,12 @@
 		--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 		--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 		--ease-mech: cubic-bezier(0.3, 1.4, 0.5, 1); /* lever and knob with a slight detent */
+	}
+
+	@media (max-width: 720px) {
+		:root {
+			--bar-h: 52px;
+		}
 	}
 
 	@media (max-width: 640px) {

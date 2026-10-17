@@ -1,5 +1,6 @@
 export { default as CableBar } from './CableBar.svelte';
-export { default as Nav, type NavItem } from './Nav.svelte';
+export { default as Nav } from './Nav.svelte';
+export type { NavItem } from './nav-links.ts';
 export { default as LanguageToggle } from './LanguageToggle.svelte';
 export { default as Footer, type Honoree } from './Footer.svelte';
 export { default as EmBreve } from './EmBreve.svelte';

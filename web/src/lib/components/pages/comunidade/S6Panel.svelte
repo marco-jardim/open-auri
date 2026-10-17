@@ -11,7 +11,8 @@
 -->
 <script lang="ts">
 	import { Explainer } from '#lib/components/comprehension/index.ts';
-	import { Button, Panel } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
+	import Panel from '#lib/components/primitives/Panel.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { S6PairInput, SocialApi } from '#lib/social/index.ts';

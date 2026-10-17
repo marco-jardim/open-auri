@@ -119,6 +119,8 @@ test('Sair waits while a cable write sends bytes, and says why', async () => {
 });
 
 test('CableBar renders the account snippet next to the language toggle', async () => {
+	// Desktop: on mobile both live in the menu sheet (FUX.NAV).
+	await page.viewport(1440, 900);
 	await render(CableBar, {
 		account: createRawSnippet(() => ({ render: () => '<a href="/entrar">Entrar</a>' }))
 	});

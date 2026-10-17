@@ -3,6 +3,7 @@
 // stack. Loading, failure and result run offline (mocked index route, pasted CSV, preset
 // target). "No result" needs the real AutoEq index: CI without it sets OA_NO_AUTOEQ=1.
 import { expect, test, type Page } from '@playwright/test';
+import { waitForApp } from './helpers/a-app';
 
 const NO_AUTOEQ = process.env.OA_NO_AUTOEQ === '1';
 const INDEX = '**/data/autoeq/index.json';
@@ -12,6 +13,20 @@ async function settle(page: Page) {
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	await page.goto('/soe-como-x');
 	await expect(page.locator('#soe-title')).toBeVisible();
+	// The title is in the prerendered HTML; client-only state (the paste panel behind "Colar
+	// texto") needs the hydrated page, so wait for the mounted client app as well.
+	await waitForApp(page);
+}
+
+/** The Soe como X tour auto-opens on a first desktop visit; mark it dismissed (`oa.tour.v1`). */
+async function dismissTour(page: Page) {
+	await page.addInitScript(() => {
+		if (!location.protocol.startsWith('http')) return;
+		const stored = localStorage.getItem('oa.tour.v1');
+		const tours: Record<string, string> = stored ? JSON.parse(stored) : {};
+		tours['soe-como-x'] ??= 'dispensado';
+		localStorage.setItem('oa.tour.v1', JSON.stringify(tours));
+	});
 }
 
 function shot(page: Page) {
@@ -59,9 +74,15 @@ test.describe('Soe como X states', () => {
 	test('solver result: real passes, deviation map, A/B in DATA and editor hand-off', async ({
 		page
 	}) => {
+		// This case drives the import and target stations and captures the whole workstation: the
+		// tour panel must not sit over them (nor in the new soe-result.png baseline).
+		await dismissTour(page);
 		await page.route(INDEX, (route) => route.fulfill({ status: 503, body: 'offline' }));
 		await settle(page);
-		await page.locator('#soe-input-file + .zone + .actions button').click();
+		// The measurement import's "Colar texto" toggle opens the paste panel (FUX.P3).
+		const paste = page.locator('#soe-input-file + .zone + .actions button');
+		await paste.click();
+		await expect(paste).toHaveAttribute('aria-expanded', 'true');
 		await page.locator('#soe-input-text').fill(CSV);
 		await page.locator('#soe-input-paste button').click();
 		await page.locator('#soe-target-kind').selectOption('preset');
@@ -71,7 +92,12 @@ test.describe('Soe como X states', () => {
 		await expect(page.locator('.map svg[role="img"] rect').first()).toBeVisible();
 		// No audio was started: meters are DATA, never live.
 		await expect(page.locator('[data-tour="soe-ab"] [data-mode="live"]')).toHaveCount(0);
-		await expect(page.locator('.workstation')).toHaveScreenshot('soe-result.png', shot(page));
+		// Sub-pixel anti-aliasing on the solver's curves varies by 19 to 30 px between runs (it
+		// fails even right after --update-snapshots); nothing animates once the gate passed.
+		await expect(page.locator('.workstation')).toHaveScreenshot('soe-result.png', {
+			...shot(page),
+			maxDiffPixels: 40
+		});
 	});
 
 	test('mobile stacks measurement and target in one column', async ({ page }) => {

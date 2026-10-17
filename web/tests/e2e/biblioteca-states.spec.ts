@@ -44,12 +44,31 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
 		});
 
 		test('open sheet slides out of the shelf and unfolds like paper', async ({ page }) => {
+			// The Biblioteca tour auto-opens on a first desktop visit: its panel is also a
+			// role="dialog" and its Escape handler would close it instead of the sheet. This case
+			// is about the sheet, so the tour starts dismissed (`oa.tour.v1`).
+			await page.addInitScript(() => {
+				if (!location.protocol.startsWith('http')) return;
+				const stored = localStorage.getItem('oa.tour.v1');
+				const tours: Record<string, string> = stored ? JSON.parse(stored) : {};
+				tours.biblioteca ??= 'dispensado';
+				localStorage.setItem('oa.tour.v1', JSON.stringify(tours));
+			});
 			await openLibrary(page);
 			await page.locator('[data-tour="biblioteca-card"]').click();
-			const dialog = page.getByRole('dialog');
+			// The track sheet is the native modal <dialog> holding the share block.
+			const dialog = page
+				.locator('dialog[open]')
+				.filter({ has: page.locator('[data-tour="biblioteca-share"]') });
 			await expect(dialog).toBeVisible();
+			// The box slides out (`box-out` on the dialog), then the paper unfolds (`.paper`).
 			const animation = await dialog.evaluate((node) => getComputedStyle(node).animationName);
 			expect(animation === 'none').toBe(reducedMotion === 'reduce');
+			const paper = await dialog
+				.locator('.paper')
+				.first()
+				.evaluate((node) => getComputedStyle(node).animationName);
+			expect(paper === 'none').toBe(reducedMotion === 'reduce');
 			await expect(dialog.locator('[data-tour="biblioteca-share"]')).toBeVisible();
 			await expect(page).toHaveScreenshot(`biblioteca-sheet-open-${reducedMotion}.png`, {
 				animations: 'disabled',

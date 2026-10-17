@@ -398,8 +398,16 @@ test('the four tour anchors exist once each and the trigger opens the Curva tour
 });
 
 test('explainers sit next to the technical terms of the page', async () => {
-	await curva('ajustar');
+	const { screen } = await curva('ajustar');
 	await tick();
+	// FUX.B: the bank, the cabinet and the import panel are deferred islands (idle or near the
+	// viewport, at the latest after 1.5 s): wait until every placeholder became its panel, so
+	// the terms inside them are counted too.
+	await expect
+		.poll(() => screen.container.querySelectorAll('.deferred[aria-busy="true"]').length, {
+			timeout: 5_000
+		})
+		.toBe(0);
 	const triggers = page.getByRole('button', { name: /^O que é isso\?/ }).elements();
 	// camadas, envelope (scope and bank), A/B, preamp, gate (output and bank), Neutro, Q, código.
 	expect(triggers.length).toBeGreaterThanOrEqual(9);

@@ -15,8 +15,9 @@ vi.mock('#lib/app/warm.ts', async (importOriginal) => {
 const SOUND_HREF = '/soe-como-x';
 const AUTOEQ_INDEX_URL = '/data/autoeq/index.json';
 
+/** The eight inline links (FUX.NAV: the "Mais" menu also renders the folded ones as items). */
 function links(container: HTMLElement): HTMLAnchorElement[] {
-	return [...container.querySelectorAll<HTMLAnchorElement>('a[href]')];
+	return [...container.querySelectorAll<HTMLAnchorElement>('a[data-nav-link]')];
 }
 
 function hover(link: HTMLAnchorElement): void {

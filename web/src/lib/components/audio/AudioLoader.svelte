@@ -3,6 +3,8 @@
 	light and eager; the panel (and with it the engine module and the meters barrel) is its own
 	chunk, imported on the trigger's first hover, focus or press, and opened once it arrived. The
 	trigger keeps the bar's plate look (T1). The file never leaves the browser.
+	FUX.NAV: a square bar button (♪, accent when a file is loaded) with the file name in its
+	accessible name and tooltip; from 1600 px, room permitting, the name shows beside the glyph.
 -->
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
@@ -10,6 +12,8 @@
 	import type { AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
 	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
 	import { LazyModule } from '#lib/app/lazy.svelte.ts';
+	// Direct file: the barrel would pull every primitive into the bar's first load.
+	import Tooltip from '#lib/components/primitives/Tooltip.svelte';
 	import type { VuReferenceStore } from '#lib/components/meters/index.ts';
 
 	interface Props {
@@ -94,9 +98,15 @@
 		await setOpen(true);
 	}
 
-	// The top bar scrolls horizontally (overflow-x: auto), which also clips vertically: the panel is
-	// positioned `fixed` from the button so it is never cut at the bar's height.
+	// The panel is positioned `fixed` from the button, so the bar (or the row it sits in) never
+	// clips it at its height.
 	const POP_WIDTH = 320;
+	const label = $derived(m.audio_button_aria({ name: s?.file ? s.file.name : m.audio_none() }));
+	let tipOpen = $state(false);
+	// The open panel names itself; the trigger's tooltip would cover it.
+	$effect(() => {
+		if (open && tipOpen) tipOpen = false;
+	});
 	const POP_MARGIN = 12;
 	let pos = $state<{ top: number; left: number } | null>(null);
 
@@ -147,23 +157,23 @@
 <div class="oa-audio" bind:this={root}>
 	<button
 		type="button"
-		class="oa-audio-btn btn btn--plate btn--sm"
+		class="oa-audio-btn btn btn--plate btn--sm btn--bar"
 		class:has-file={(s?.file ?? null) !== null}
 		id={ids.button}
 		bind:this={button}
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		aria-controls={panel.current ? ids.dialog : undefined}
-		aria-label={m.audio_button_aria({ name: s?.file ? s.file.name : m.audio_none() })}
-		title={s?.file?.name}
+		aria-label={label}
 		onpointerenter={warmPanel}
 		onpointerdown={warmPanel}
 		onfocus={warmPanel}
 		onclick={toggle}
 	>
-		<span aria-hidden="true">♪</span>
+		<span class="oa-audio-glyph" aria-hidden="true">♪</span>
 		<span class="oa-audio-name">{s?.file ? s.file.name : m.audio_button()}</span>
 	</button>
+	<Tooltip text={label} anchor={open ? null : button} bind:open={tipOpen} />
 
 	{#if panel.current && engine && s}
 		{@const Panel = panel.current}
@@ -179,16 +189,23 @@
 		--oa-text: var(--text, #f1ece2);
 		--oa-rule: var(--rule, #34332f);
 	}
-	/* T1: the trigger is a bar button (Button recipe `.btn.btn--plate.btn--sm`, components.css),
-	   bordered and sized like Neutro and Padrão Auri. */
+	/* T1: the trigger is a bar button (recipe `.btn.btn--plate.btn--sm.btn--bar`, components.css):
+	   square with the glyph by default; the name stays in the accessible name and the tooltip. */
 	.oa-audio-btn {
-		max-width: 190px;
+		width: var(--btn-h);
+		padding: 0;
+	}
+	.oa-audio-glyph {
+		font-size: var(--fs-ui);
+		line-height: 1;
 	}
 	.oa-audio-name {
+		position: absolute;
+		width: 1px;
+		height: 1px;
 		overflow: hidden;
-		text-overflow: ellipsis;
+		clip-path: inset(50%);
 		white-space: nowrap;
-		max-width: 150px;
 	}
 	.oa-audio-btn.has-file {
 		--btn-border: color-mix(in srgb, var(--oa-accent) 55%, transparent);
@@ -198,10 +215,31 @@
 		outline: 2px solid var(--oa-accent);
 		outline-offset: 3px;
 	}
-	/* Panel styles live in AudioPanel.svelte (its own chunk). */
-	@media (max-width: 720px) {
+	/* Wide bar (FUX.NAV): the file name beside the glyph, unless the bar's guard squeezes it. */
+	@media (min-width: 1600px) {
+		.oa-audio-btn {
+			width: auto;
+			max-width: 190px;
+			padding: 0 var(--btn-pad);
+		}
 		.oa-audio-name {
-			max-width: 70px;
+			position: static;
+			width: auto;
+			max-width: 150px;
+			height: auto;
+			clip-path: none;
+			text-overflow: ellipsis;
 		}
 	}
+	:global([data-squeeze~='1']) .oa-audio-btn {
+		width: var(--btn-h);
+		padding: 0;
+	}
+	:global([data-squeeze~='1']) .oa-audio-name {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		clip-path: inset(50%);
+	}
+	/* Panel styles live in AudioPanel.svelte (its own chunk). */
 </style>

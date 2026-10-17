@@ -349,21 +349,21 @@ test('A publishes, B listens, favorites and installs; rankings, privacy, deletio
 		await page.getByRole('button', { name: text(copy, 'biblioteca_save'), exact: true }).click();
 		await expect(page.getByText(text(copy, 'biblioteca_saved'), { exact: true })).toBeVisible();
 		await expect(local).not.toContainText(text(copy, 'biblioteca_local_error'));
-		await expect(local).not.toContainText(text(copy, 'biblioteca_local_empty'));
+		await expect(local).not.toContainText(text(copy, 'empty_library_body'));
 		// The local library lives in IndexedDB: the saved curve must survive a reload while still
 		// anonymous (otherwise there is nothing to merge at sign-in).
 		await open(page, '/biblioteca');
 		await expect(
 			local,
 			'the saved local curve survives a reload (IndexedDB, not memory)'
-		).not.toContainText(text(copy, 'biblioteca_local_empty'), { timeout: 10_000 });
+		).not.toContainText(text(copy, 'empty_library_body'), { timeout: 10_000 });
 		expect(await signedInAs(device)).toBeNull();
 
 		await uiSignIn(page, b.email, PASSWORD, '/biblioteca');
 		await expect(
 			local,
 			'the anonymous local library is still there after sign-in'
-		).not.toContainText(text(copy, 'biblioteca_local_empty'), { timeout: 10_000 });
+		).not.toContainText(text(copy, 'empty_library_body'), { timeout: 10_000 });
 		const banner = page.getByRole('region', {
 			name: text(copy, 'biblioteca_social_merge_title'),
 			exact: true

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import './account.css';
 
 	interface Props {

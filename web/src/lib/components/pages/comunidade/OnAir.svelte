@@ -12,7 +12,7 @@
 <script lang="ts">
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { isSocialApiError, type PublishedInfo, type SocialApi } from '#lib/social/index.ts';

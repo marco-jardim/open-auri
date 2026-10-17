@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { hidLog, installHidStub, type HidLog, type HidReport } from './helpers/b-hid';
 import {
 	apo,
+	barNavLink,
 	closeChecklist,
 	confirmBasics,
 	connectCable,
@@ -91,10 +92,7 @@ async function exportedJournal(page: Page): Promise<JournalRecord[]> {
 }
 
 async function editPreampThroughFile(page: Page, preampDb: number): Promise<void> {
-	await page
-		.getByRole('navigation', { name: 'Principal', exact: true })
-		.getByRole('link', { name: 'Curva', exact: true })
-		.click();
+	await (await barNavLink(page, 'Curva')).click();
 	await importTxt(page, apo(preampDb));
 	await goToCable(page);
 }

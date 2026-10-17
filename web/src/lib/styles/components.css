@@ -585,6 +585,10 @@
 		box-sizing: border-box;
 		min-width: 200px;
 		max-width: calc(100vw - 16px);
+		/* The bar's "Mais" list on a short landscape screen scrolls inside the popup (FUX.NAV) */
+		max-height: calc(100dvh - 64px);
+		overflow-y: auto;
+		overscroll-behavior: contain;
 		padding: 6px;
 		border: 1px solid var(--pop-rule);
 		border-radius: var(--rad-lg);
@@ -668,6 +672,36 @@
 		color: color-mix(in srgb, var(--danger) 70%, white);
 		font-size: var(--fs-caption);
 		line-height: var(--lh-small);
+	}
+
+	/* --------------------------------------------------------------------- Bar */
+	/*
+	 * Compact bar controls (FUX.NAV): every button, link-button and menu trigger of the global
+	 * bar (status, Áudio, tools, Gravar no cabo, account, language, help, menu) shares one
+	 * height. Desktop: 32 px face inside the 40 px bar, with an invisible ring that brings the
+	 * hit area to the 36 px desktop target. Touch widths: 44 px (--hit on mobile).
+	 */
+	.btn--bar {
+		--btn-h: 32px;
+		--btn-pad: 10px;
+		font-size: var(--fs-caption);
+	}
+
+	.btn--bar::after {
+		position: absolute;
+		inset: -2px;
+		content: '';
+	}
+
+	@media (max-width: 720px) {
+		.btn--bar {
+			--btn-h: max(44px, var(--hit));
+			--btn-pad: 12px;
+		}
+
+		.btn--bar::after {
+			inset: 0;
+		}
 	}
 
 	@keyframes oa-spin {

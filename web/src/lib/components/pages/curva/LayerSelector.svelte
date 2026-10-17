@@ -10,7 +10,7 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
-	import { Lamp } from '#lib/components/primitives/index.ts';
+	import Lamp from '#lib/components/primitives/Lamp.svelte';
 	import { LAYERS, layerRank, type Layer } from './layers.ts';
 
 	interface Props {

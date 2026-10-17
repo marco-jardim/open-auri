@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { createRawSnippet } from 'svelte';
+import { m } from '#lib/paraglide/messages.js';
 import { getLocale, overwriteSetLocale, setLocale } from '#lib/paraglide/runtime.js';
 import { DEFAULT_GITHUB_URL } from '#lib/components/chrome/Footer.svelte';
 import {
@@ -53,6 +54,8 @@ const honoree = {
 
 beforeEach(async () => {
 	await setLocale('pt-BR', { reload: false });
+	// FUX.NAV: the bar's layout depends on the width; desktop unless a test says otherwise.
+	await page.viewport(1440, 900);
 });
 
 afterEach(async () => {
@@ -97,9 +100,18 @@ for (const copy of locales) {
 
 test('marks only the current nav item and accepts custom items', async () => {
 	const screen = await render(Nav, { currentPath: '/cabo/?section=status' });
-	expect(screen.container.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+	expect(screen.container.querySelectorAll('a[data-nav-link][aria-current="page"]')).toHaveLength(
+		1
+	);
+	// At 1440 px "Cabo" is folded into "Mais": the trigger carries the mark, the item says page.
+	const more = page.getByRole('button', { name: m.fuxnav_more(), exact: true });
+	await expect.poll(() => getComputedStyle(more.element(), '::after').opacity).toBe('1');
+	// The menu is its own chunk: nothing of it is rendered until the first press opens it.
+	await expect.element(more).toHaveAttribute('aria-haspopup', 'menu');
+	expect(screen.container.querySelector('[role="menu"]')).toBeNull();
+	await more.click();
 	await expect
-		.element(page.getByRole('link', { name: 'Cabo', exact: true }))
+		.element(page.getByRole('menuitem', { name: 'Cabo', exact: true }))
 		.toHaveAttribute('aria-current', 'page');
 	await screen.rerender({ currentPath: '/custom', items: [{ href: '/custom', label: 'Custom' }] });
 	await expect
@@ -132,9 +144,16 @@ test('only invokes cable/audio callbacks on explicit clicks and honors writeDisa
 		.toHaveAccessibleDescription('Gravando no cabo. Espere a gravação terminar.');
 	(write.element() as HTMLElement).click();
 	expect(onWrite).not.toHaveBeenCalled();
-	await page.getByRole('button', { name: 'Neutro' }).click();
-	await page.getByRole('button', { name: 'Padrão Auri' }).click();
-	await page.getByRole('button', { name: 'Áudio' }).click();
+	// The click showed the reason; Escape dismisses it so it does not cover the menu below.
+	await expect.element(page.getByRole('tooltip')).toBeVisible();
+	await userEvent.keyboard('{Escape}');
+	// Below 1600 px the presets live in the "Carregar no editor" menu (FUX.NAV).
+	const tools = page.getByRole('button', { name: m.fuxnav_tools(), exact: true });
+	await tools.click();
+	await page.getByRole('menuitem', { name: 'Neutro', exact: true }).click();
+	await tools.click();
+	await page.getByRole('menuitem', { name: 'Padrão Auri', exact: true }).click();
+	await page.getByRole('button', { name: 'Áudio', exact: true }).click();
 	expect(onNeutro).toHaveBeenCalledExactlyOnceWith();
 	expect(onPadraoAuri).toHaveBeenCalledExactlyOnceWith();
 	expect(onAudio).toHaveBeenCalledExactlyOnceWith();
@@ -143,7 +162,38 @@ test('only invokes cable/audio callbacks on explicit clicks and honors writeDisa
 	await page.getByRole('button', { name: 'Gravar no cabo' }).click();
 	expect(onWrite).toHaveBeenCalledExactlyOnceWith();
 	expect(getComputedStyle(page.getByRole('banner').element()).position).toBe('fixed');
-	expect(page.getByRole('banner').element().getBoundingClientRect().height).toBe(56);
+	expect(page.getByRole('banner').element().getBoundingClientRect().height).toBe(40);
+});
+
+test('wide bars show Neutro and Padrão Auri inline, and they act on click', async () => {
+	await page.viewport(1920, 1080);
+	const callbacks = barCallbacks();
+	await render(CableBar, callbacks);
+	await page.getByRole('button', { name: 'Neutro', exact: true }).click();
+	await page.getByRole('button', { name: 'Padrão Auri', exact: true }).click();
+	expect(callbacks.onNeutro).toHaveBeenCalledExactlyOnceWith();
+	expect(callbacks.onPadraoAuri).toHaveBeenCalledExactlyOnceWith();
+	expect(page.getByRole('button', { name: m.fuxnav_tools(), exact: true }).elements()).toHaveLength(
+		0
+	);
+	// Every destination is inline: no "Mais".
+	expect(page.getByRole('navigation').getByRole('link').elements()).toHaveLength(8);
+	expect(page.getByRole('button', { name: m.fuxnav_more(), exact: true }).elements()).toHaveLength(
+		0
+	);
+});
+
+test('unsaved changes put a badge on "Gravar no cabo" and a tooltip when it can act', async () => {
+	const screen = await render(CableBar, { ...barCallbacks(), unsavedCount: 3 });
+	const write = page.getByRole('button', { name: 'Gravar no cabo', exact: true });
+	const badge = screen.container.querySelector('.write-badge');
+	expect(badge?.textContent).toBe('3');
+	await expect.element(write).toHaveAccessibleDescription('3 alterações não gravadas');
+	await screen.rerender({ unsavedCount: 0, unsaved: true });
+	await expect.poll(() => screen.container.querySelector('.write-badge')).toBeNull();
+	await screen.rerender({ unsavedCount: undefined, unsaved: true });
+	await expect.poll(() => screen.container.querySelector('.write-badge')?.textContent).toBe('');
+	await expect.element(write).toHaveAccessibleDescription('Alterações não gravadas no cabo');
 });
 
 test('renders the unsaved indicator as a boolean, never as a count', async () => {
@@ -159,9 +209,10 @@ test('renders the unsaved indicator as a boolean, never as a count', async () =>
 	await setLocale('en-US', { reload: false });
 	await cleanup();
 	await render(CableBar, { unsaved: true });
+	// Announced text (live region); seen as the dot on "Gravar no cabo".
 	await expect
 		.element(page.getByText('Unsaved changes on the cable', { exact: true }))
-		.toBeVisible();
+		.toBeInTheDocument();
 });
 
 test('renders navigation, status, unsaved, audio and actions snippets instead of fallbacks', async () => {
@@ -175,7 +226,7 @@ test('renders navigation, status, unsaved, audio and actions snippets instead of
 	});
 	await expect.element(page.getByRole('navigation', { name: 'Custom navigation' })).toBeVisible();
 	await expect.element(page.getByRole('status')).toHaveTextContent('USB DSP Audio');
-	await expect.element(page.getByText('Local draft')).toBeVisible();
+	await expect.element(page.getByText('Local draft')).toBeInTheDocument();
 	await expect.element(page.getByRole('button', { name: 'Preview audio' })).toBeVisible();
 	await expect.element(page.getByRole('button', { name: 'Custom action' })).toBeVisible();
 	expect(page.getByRole('button', { name: 'Gravar no cabo' }).elements()).toHaveLength(0);
@@ -241,16 +292,64 @@ const barCallbacks = () => ({
 	onAudio: vi.fn()
 });
 
-test('bar actions are bordered sm buttons in Geist, never mono (T1, T4, T6)', async () => {
+test('bar actions are bordered 32 px bar buttons in Geist, never mono (T1, T4, T6)', async () => {
 	await render(CableBar, barCallbacks());
-	for (const name of ['Áudio', 'Neutro', 'Padrão Auri', 'Gravar no cabo']) {
+	for (const name of ['Áudio', m.fuxnav_tools(), 'Gravar no cabo', /Switch to English/]) {
 		const button = page.getByRole('button', { name }).element();
 		const style = getComputedStyle(button);
-		expect(button.getBoundingClientRect().height, name).toBe(28);
-		expect(style.borderTopStyle, name).toBe('solid');
-		expect(style.fontFamily, name).not.toMatch(/JetBrains Mono/);
-		expect(Number(style.fontWeight), name).toBeLessThanOrEqual(600);
+		const label = String(name);
+		expect(button.getBoundingClientRect().height, label).toBe(32);
+		expect(style.borderTopStyle, label).toBe('solid');
+		expect(style.fontFamily, label).not.toMatch(/JetBrains Mono/);
+		expect(Number(style.fontWeight), label).toBeLessThanOrEqual(600);
 	}
+	// Icon-only controls are square and named (accessible name, plus a tooltip on hover/focus).
+	for (const name of ['Áudio', m.fuxnav_tools(), /Switch to English/]) {
+		const rect = page.getByRole('button', { name }).element().getBoundingClientRect();
+		expect(rect.width, String(name)).toBe(32);
+	}
+	await page.viewport(1920, 1080);
+	for (const name of ['Neutro', 'Padrão Auri']) {
+		const button = page.getByRole('button', { name, exact: true }).element();
+		expect(button.getBoundingClientRect().height, name).toBe(32);
+		expect(getComputedStyle(button).fontFamily, name).not.toMatch(/JetBrains Mono/);
+	}
+});
+
+test('the tools menu is keyboard-complete and says why a preset waits', async () => {
+	await render(CableBar, { onWrite: vi.fn() });
+	const tools = page.getByRole('button', { name: m.fuxnav_tools(), exact: true });
+	(tools.element() as HTMLElement).focus();
+	await userEvent.keyboard('{ArrowDown}');
+	const neutro = page.getByRole('menuitem', { name: 'Neutro', exact: true });
+	await expect.element(neutro).toHaveFocus();
+	await expect.element(neutro).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(neutro).toHaveAccessibleDescription('Carregando o editor…');
+	await userEvent.keyboard('{ArrowDown}');
+	await expect
+		.element(page.getByRole('menuitem', { name: 'Padrão Auri', exact: true }))
+		.toHaveFocus();
+	await userEvent.keyboard('{Escape}');
+	await expect.element(tools).toHaveFocus();
+	await expect.element(tools).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a lazy bar menu renders no menu before intent; ArrowUp opens it on the last item', async () => {
+	const screen = await render(CableBar, barCallbacks());
+	expect(screen.container.querySelectorAll('[role="menu"]')).toHaveLength(0);
+	const tools = page.getByRole('button', { name: m.fuxnav_tools(), exact: true });
+	await expect.element(tools).toHaveAttribute('aria-haspopup', 'menu');
+	await expect.element(tools).toHaveAttribute('aria-expanded', 'false');
+	(tools.element() as HTMLElement).focus();
+	await userEvent.keyboard('{ArrowUp}');
+	await expect
+		.element(page.getByRole('menuitem', { name: 'Padrão Auri', exact: true }))
+		.toHaveFocus();
+	await expect.element(tools).toHaveAttribute('aria-expanded', 'true');
+	await userEvent.keyboard('{Escape}');
+	// Later openings go straight through the Menu primitive.
+	await userEvent.keyboard('{Enter}');
+	await expect.element(page.getByRole('menuitem', { name: 'Neutro', exact: true })).toHaveFocus();
 });
 
 test('renders the help snippet in the bar after the language toggle (T3)', async () => {
@@ -266,22 +365,73 @@ test('renders the help snippet in the bar after the language toggle (T3)', async
 	expect(getComputedStyle(help).position).not.toBe('fixed');
 });
 
-test('on mobile the bar actions stay on screen above the navigation', async () => {
+test('on mobile the bar is one row of 44 px targets and the sheet holds the rest', async () => {
 	await page.viewport(390, 844);
-	await render(CableBar, barCallbacks());
-	const nav = page.getByRole('navigation').element().getBoundingClientRect();
-	for (const name of ['Áudio', 'Neutro', 'Padrão Auri', 'Gravar no cabo']) {
-		const rect = page.getByRole('button', { name }).element().getBoundingClientRect();
+	const callbacks = barCallbacks();
+	const onHelp = vi.fn();
+	await render(CableBar, { ...callbacks, onHelp, currentPath: '/cabo' });
+	const banner = page.getByRole('banner').element().getBoundingClientRect();
+	expect(banner.height).toBe(52);
+	expect(page.getByRole('navigation').elements()).toHaveLength(0);
+	const menuButton = page.getByRole('button', { name: m.fuxnav_menu_open(), exact: true });
+	for (const name of ['Áudio', 'Gravar no cabo', m.fuxnav_menu_open()]) {
+		const rect = page.getByRole('button', { name, exact: true }).element().getBoundingClientRect();
 		expect(rect.left, name).toBeGreaterThanOrEqual(0);
 		expect(rect.right, name).toBeLessThanOrEqual(390);
-		expect(rect.bottom, name).toBeLessThanOrEqual(nav.top + 1);
+		expect(rect.top, name).toBeGreaterThanOrEqual(banner.top);
+		expect(rect.bottom, name).toBeLessThanOrEqual(banner.bottom);
 		expect(rect.height, name).toBeGreaterThanOrEqual(44);
+		expect(rect.width, name).toBeGreaterThanOrEqual(44);
 	}
+	// Short visible label, full accessible name (label in name, WCAG 2.5.3).
+	await expect
+		.element(page.getByRole('button', { name: 'Gravar no cabo', exact: true }))
+		.toMatchTextContent(/Gravar/);
+
+	await menuButton.click();
+	const sheet = page.getByRole('dialog', { name: m.fuxnav_sheet_title() });
+	await expect.element(sheet).toBeVisible();
+	await expect.element(menuButton).toHaveAttribute('aria-expanded', 'true');
+	const nav = sheet.getByRole('navigation', { name: 'Principal' });
+	expect(nav.getByRole('link').elements()).toHaveLength(8);
+	await expect
+		.element(nav.getByRole('link', { name: 'Cabo', exact: true }))
+		.toHaveAttribute('aria-current', 'page');
+	for (const link of nav.getByRole('link').elements()) {
+		expect(link.getAttribute('data-sveltekit-preload-code')).toBe('hover');
+		expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+	}
+	await expect.element(sheet.getByRole('button', { name: /Switch to English/ })).toBeVisible();
+	// A preset closes the sheet first, then loads (never writes).
+	await sheet.getByRole('button', { name: 'Neutro', exact: true }).click();
+	await expect.poll(() => callbacks.onNeutro.mock.calls.length).toBe(1);
+	await expect.element(sheet).not.toBeInTheDocument();
+	expect(callbacks.onWrite).not.toHaveBeenCalled();
+	await expect.element(menuButton).toHaveFocus();
+	// Escape closes it too; the help item hands over to the help dialog.
+	await menuButton.click();
+	await expect.element(sheet).toBeVisible();
+	await userEvent.keyboard('{Escape}');
+	await expect.element(sheet).not.toBeInTheDocument();
+	await menuButton.click();
+	await sheet.getByRole('button', { name: 'Ajuda e atalhos de teclado', exact: true }).click();
+	await expect.poll(() => onHelp.mock.calls.length).toBe(1);
+	await expect.element(sheet).not.toBeInTheDocument();
 });
 
-test('keeps PT · EN on a single mobile line', async () => {
+test('the menu sheet closes when the window grows past 720 px', async () => {
 	await page.viewport(390, 844);
-	await render(CableBar);
+	await render(CableBar, barCallbacks());
+	await page.getByRole('button', { name: m.fuxnav_menu_open(), exact: true }).click();
+	const sheet = page.getByRole('dialog', { name: m.fuxnav_sheet_title() });
+	await expect.element(sheet).toBeVisible();
+	await page.viewport(1024, 844);
+	await expect.element(sheet).not.toBeInTheDocument();
+});
+
+test('keeps PT · EN on a single mobile line in the sheet', async () => {
+	await page.viewport(390, 844);
+	await render(LanguageToggle, { variant: 'full' });
 	const button = page.getByRole('button', { name: /Switch to English/ }).element();
 	const spans = [...button.querySelectorAll('span:not(.sr-only)')];
 	expect(getComputedStyle(button).whiteSpace).toBe('nowrap');

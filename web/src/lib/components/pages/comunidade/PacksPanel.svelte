@@ -5,7 +5,7 @@
 	only when its drawer opens, so nothing is requested before that.
 -->
 <script lang="ts">
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { LibraryItem, SocialApi } from '#lib/social/index.ts';
 	import {

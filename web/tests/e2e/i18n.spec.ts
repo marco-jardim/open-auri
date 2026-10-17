@@ -1,13 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openApp, settleRendering, waitForApp } from './helpers/a-app';
 import { routes } from './helpers/a-routes';
+import { barAction, barNavLink } from './helpers/b-ui';
+
+/** The bar's language toggle (in the menu sheet on mobile, FUX.NAV). */
+const languageToggle = (page: Page, name: string) => barAction(page, name, { exact: false });
 
 async function toggleLanguage(page: Page, name: string, locale: string): Promise<void> {
+	const toggle = await languageToggle(page, name);
 	// Paraglide's toggle reloads the current document, rather than navigating to a new URL.
-	await Promise.all([
-		page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-		page.getByRole('button', { name }).click()
-	]);
+	await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }), toggle.click()]);
 	await waitForApp(page);
 	await expect(page.locator('html')).toHaveAttribute('lang', locale);
 	await expect
@@ -60,20 +62,17 @@ test.describe('Language selection', () => {
 			{ name: 'Docs', path: '/docs' },
 			{ name: 'Cable', path: '/cabo' }
 		]) {
-			await page
-				.getByRole('navigation', { name: 'Main', exact: true })
-				.getByRole('link', { name: destination.name, exact: true })
-				.click();
+			await (await barNavLink(page, destination.name)).click();
 			await expect(page).toHaveURL(new RegExp(`${destination.path}$`));
 			await waitForApp(page);
 			await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
-			await expect(page.getByRole('button', { name: 'Mudar para português' })).toBeVisible();
+			await expect(await languageToggle(page, 'Mudar para português')).toBeVisible();
 
 			// These routes are prerendered in the base locale; the cookie is applied on hydration.
 			await page.reload();
 			await waitForApp(page);
 			await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
-			await expect(page.getByRole('button', { name: 'Mudar para português' })).toBeVisible();
+			await expect(await languageToggle(page, 'Mudar para português')).toBeVisible();
 			expect((await page.context().cookies()).find(({ name }) => name === 'oa_lang')?.value).toBe(
 				'en-US'
 			);
@@ -98,13 +97,8 @@ test.describe('Language selection', () => {
 			await openApp(page, '/');
 			await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
 			await expect(page.getByRole('radio', { name: 'Listen', exact: true })).toBeChecked();
-			await expect(
-				page.getByRole('navigation', { name: 'Main', exact: true }).getByRole('link', {
-					name: 'Library',
-					exact: true
-				})
-			).toBeVisible();
 			await expectNoRawKeys(page);
+			await expect(await barNavLink(page, 'Library')).toBeVisible();
 		});
 
 		// FX2.3/I1: plan §3.5 keeps preferredLanguage, so /lang-boot.js hides the prerendered
@@ -134,12 +128,7 @@ test.describe('Language selection', () => {
 			expect(await page.evaluate(() => getComputedStyle(document.documentElement).visibility)).toBe(
 				'visible'
 			);
-			await expect(
-				page.getByRole('navigation', { name: 'Main', exact: true }).getByRole('link', {
-					name: 'Library',
-					exact: true
-				})
-			).toBeVisible();
+			await expect(await barNavLink(page, 'Library')).toBeVisible();
 		});
 	});
 
@@ -171,8 +160,10 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				.getByRole('region', { name: 'Presets', exact: true })
 				.getByRole('button', { name: 'Auri', exact: true })
 				.click();
-			const readout = page.getByRole('main').getByText(/\bCRC 0x[0-9a-f]{4}\b/i);
+			// The nameplate "No editor" state line (the preset card's description also quotes a CRC).
+			const readout = page.getByRole('main').getByTestId('editor-state');
 			await expect(readout).toBeVisible();
+			await expect(readout).toContainText(/\bCRC 0x[0-9a-f]{4}\b/i);
 			await expect(readout).toContainText(
 				locale === 'pt-BR' ? /preamp [−+]?\d+,\d dB/ : /preamp [−+]?\d+\.\d dB/
 			);

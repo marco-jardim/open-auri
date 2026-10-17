@@ -20,7 +20,7 @@
 	import { ThrottledNumber } from '#lib/components/meters/motion.svelte.ts';
 	import type { MeterFrame, MeterMode } from '#lib/audio/meters.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { formatHz, formatNumber, formatSignedDb } from './format.ts';
 	import type { Curve } from './model.ts';

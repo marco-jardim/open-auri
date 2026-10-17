@@ -29,7 +29,11 @@
 	import { appShortcuts } from '#lib/components/chrome/shortcuts.ts';
 	import { createToastStore } from '#lib/components/chrome/toast.ts';
 	import AudioLoader from '#lib/components/audio/AudioLoader.svelte';
-	import { Button, IconButton, Skeleton } from '#lib/components/primitives/index.ts';
+	// Direct files, not the primitives barrel: every route loads the layout first (FUX.NAV budgets).
+	import IconButton from '#lib/components/primitives/IconButton.svelte';
+	import Lamp, { type LampTone } from '#lib/components/primitives/Lamp.svelte';
+	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
+	import Tooltip from '#lib/components/primitives/Tooltip.svelte';
 	import { resolveAnonymousSeen, writePolicySeen } from '#lib/components/legal/policy-seen.ts';
 	import { POLICY_VERSION } from '#lib/content/legal/version.ts';
 	import { loadSocialRuntime, type SocialRuntime } from '#lib/social/runtime.ts';
@@ -266,6 +270,25 @@
 						? m.cable_status_connected({ device: app.cableState.deviceLabel ?? '' })
 						: m.cable_status_disconnected()
 	);
+	// FUX.NAV: the bar shows a short label (a word of the full text) beside a lamp bound to the
+	// real link state; the full text stays announced, in the tooltip and in the popover.
+	const statusShort = $derived(
+		!app
+			? m.layout_initializing()
+			: app.cableState.writing
+				? m.fuxnav_cable_writing()
+				: app.cableState.connection === 'connecting'
+					? m.fuxnav_cable_waiting()
+					: app.cableState.connection === 'connected'
+						? m.fuxnav_cable_on()
+						: m.fuxnav_cable_off()
+	);
+	const cableLamp = $derived.by((): { on: boolean; tone: LampTone } => {
+		if (!app) return { on: false, tone: 'ok' };
+		if (app.cableState.writing) return { on: true, tone: 'accent' };
+		if (app.cableState.connection === 'connecting') return { on: true, tone: 'warn' };
+		return { on: app.cableState.connection === 'connected', tone: 'ok' };
+	});
 
 	// --- help (lazy dialog behind a stable bar trigger) --------------------------------------
 	let helpOpen = $state(false);
@@ -274,9 +297,16 @@
 		helpOverlay.request(islandFailed);
 	}
 
-	// --- cable status popover, placed from its trigger (also on the taller mobile bar) -------
+	// --- cable status popover, placed from its trigger (desktop and mobile rows) ------------
 	let statusTrigger: HTMLButtonElement | undefined = $state();
 	let statusPos = $state<{ top: number; left: number; maxHeight: number } | null>(null);
+	/** The popover is open: the trigger's tooltip stays closed (it would cover the popover). */
+	let statusShown = $state(false);
+	let statusTip = $state(false);
+	// Also when a hover delay that started before the popover opened fires afterwards.
+	$effect(() => {
+		if (statusShown && statusTip) statusTip = false;
+	});
 	const POPOVER_WIDTH = 440;
 	const POPOVER_MARGIN = 16;
 	function placeStatus(): void {
@@ -296,7 +326,9 @@
 		const before = (event: Event) => {
 			if (!('newState' in event)) return;
 			shown = event.newState === 'open';
+			statusShown = shown;
 			if (!shown) return;
+			statusTip = false;
 			cableStatus.request(islandFailed);
 			placeStatus();
 		};
@@ -377,8 +409,12 @@
 	style:--accent={meta.accent}
 >
 	<a class="skip-link" href="#main-content">{m.layout_skip()}</a>
+	{#snippet audioLoader()}
+		{#if app}<AudioLoader engine={app.audio} />{/if}
+	{/snippet}
 	<div data-chrome="bar" {@attach barIntent}>
-		<!-- CableBar owns Nav and LanguageToggle; slots retain one of each shared control. -->
+		<!-- CableBar owns Nav and LanguageToggle; slots retain one of each shared control.
+		     Before the runtime, its own ♪ Áudio fallback says why it waits (same geometry). -->
 		<CableBar
 			currentPath={page.url.pathname}
 			connected={app?.cableState.connection === 'connected'}
@@ -388,42 +424,35 @@
 			onNeutro={app ? () => loadEditor('neutral') : undefined}
 			onPadraoAuri={app ? () => loadEditor('auri') : undefined}
 			onWrite={app ? () => app?.requestWrite() : undefined}
+			onHelp={openHelp}
+			audio={app ? audioLoader : undefined}
 		>
 			{#snippet status()}
 				{#if app}
 					<button
 						type="button"
-						class="status-trigger"
+						class="status-trigger btn btn--ghost btn--sm btn--bar"
 						popovertarget={statusId}
 						bind:this={statusTrigger}
 						onpointerenter={() => cableStatus.request()}
 						onfocus={() => cableStatus.request()}
 					>
-						<span aria-hidden="true">●</span>
-						{statusText}
+						<Lamp on={cableLamp.on} tone={cableLamp.tone} />
+						<span class="status-short" aria-hidden="true">{statusShort}</span>
+						<span class="sr-only">{statusText}</span>
 					</button>
 				{:else}
-					<!-- §5.5: pill skeleton with the status text's geometry while the runtime loads. -->
-					<Skeleton
-						class="status-skeleton"
-						width="7.5rem"
-						height="0.75rem"
-						radius="var(--rad-pill)"
-						label={m.fux2_cable_runtime_loading()}
-					/>
-				{/if}
-			{/snippet}
-			{#snippet audio()}
-				{#if app}
-					<AudioLoader engine={app.audio} />
-				{:else}
-					<Button
-						size="sm"
-						variant="plate"
-						data-runtime-intent
-						disabledReason={m.fux1_audio_loading()}
-						><span aria-hidden="true">♪</span> {m.chrome_audio()}</Button
-					>
+					<!-- §5.5: skeleton with the lamp and label geometry while the runtime loads
+					     (CableBar sizes it per width through --status-skeleton-w/h). -->
+					<span class="status-skeleton-slot">
+						<Skeleton
+							class="status-skeleton"
+							width="var(--status-skeleton-w, 5.25rem)"
+							height="var(--status-skeleton-h, 0.75rem)"
+							radius="var(--rad-pill)"
+							label={m.fux2_cable_runtime_loading()}
+						/>
+					</span>
 				{/if}
 			{/snippet}
 			{#snippet account()}
@@ -440,7 +469,7 @@
 					<IconButton
 						size="sm"
 						variant="plate"
-						class="help-btn"
+						class="help-btn btn--bar"
 						label={m.chrome_help_open()}
 						aria-haspopup="dialog"
 						aria-expanded={helpOpen}
@@ -468,6 +497,10 @@
 		</div>
 	{/if}
 
+	{#if app}
+		<!-- The full cable status beside its short bar label; closed while the popover shows. -->
+		<Tooltip text={statusText} anchor={statusShown ? null : statusTrigger} bind:open={statusTip} />
+	{/if}
 	<div
 		id={statusId}
 		popover="auto"
@@ -546,10 +579,8 @@
 	.skip-link:focus {
 		transform: none;
 	}
+	/* A ghost bar button (recipe in components.css); CableBar sets its geometry per width. */
 	.status-trigger {
-		border: 0;
-		background: transparent;
-		color: inherit;
 		cursor: pointer;
 	}
 	.cable-popover {

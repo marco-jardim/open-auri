@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
-	import { Panel } from '#lib/components/primitives/index.ts';
+	import Panel from '#lib/components/primitives/Panel.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { S6Preferences, SocialApi } from '#lib/social/index.ts';
 	import { errorText, isUnreachable, type Channel } from './model.ts';

@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { openApp, waitForApp } from './helpers/a-app';
 import { neutralPreset, officialPresets } from './helpers/a-presets';
+import { barAction, barNavLink } from './helpers/b-ui';
 
 test.describe('Official payload CRC parity', () => {
 	test.describe.configure({ mode: 'parallel' });
@@ -9,7 +10,8 @@ test.describe('Official payload CRC parity', () => {
 		test(`${preset.id}: Curva and Cabo display golden CRC ${preset.crc}`, async ({ page }) => {
 			await openApp(page, '/');
 			if (preset.id === 'neutro') {
-				await page.getByRole('banner').getByRole('button', { name: 'Neutro', exact: true }).click();
+				// The bar's preset (a "Carregar no editor" item, or the sheet's button on mobile).
+				await (await barAction(page, 'Neutro')).click();
 			} else {
 				const button = page
 					.getByRole('region', { name: 'Presets', exact: true })
@@ -18,14 +20,12 @@ test.describe('Official payload CRC parity', () => {
 				await expect(button).toHaveAttribute('aria-pressed', 'true');
 			}
 
-			// Curva's nameplate is the visible CRC readout; the byte map renders raw LE bytes.
-			await expect(page.getByRole('main').getByText(/\bCRC 0x[0-9a-f]{4}\b/i)).toContainText(
-				`CRC ${preset.crc}`
-			);
-			await page
-				.getByRole('navigation', { name: 'Principal', exact: true })
-				.getByRole('link', { name: 'Cabo', exact: true })
-				.click();
+			// Curva's nameplate "No editor" state line is the visible CRC readout of the editor curve
+			// (the preset card's description also quotes a CRC; the byte map renders raw LE bytes).
+			const state = page.getByRole('main').getByTestId('editor-state');
+			await expect(state).toBeVisible();
+			await expect(state).toContainText(`CRC ${preset.crc}`);
+			await (await barNavLink(page, 'Cabo')).click();
 			await expect(page).toHaveURL(/\/cabo$/);
 			await waitForApp(page);
 			const main = page.locator('#main-content');

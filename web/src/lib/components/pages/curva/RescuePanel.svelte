@@ -10,7 +10,7 @@
 	import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
 	import { m } from '#lib/paraglide/messages.js';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { hex } from './format.ts';
 
 	interface Props {

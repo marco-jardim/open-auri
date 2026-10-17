@@ -13,7 +13,8 @@
 	// `import.meta.env.SSR` is false, so this binding is unused and the encoder (side-effect free,
 	// like uqr) leaves /conta's initial JS; the browser imports it when an enrolment appears (FUX.B).
 	import { qrSvg as serverQrSvg } from '#lib/qr/index.ts';
-	import { Button, Field } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
+	import Field from '#lib/components/primitives/Field.svelte';
 	import Feedback from './Feedback.svelte';
 	import {
 		feedbackFor,

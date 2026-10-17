@@ -2,7 +2,16 @@
 // WCAG 4.5:1 between text and the background actually painted behind them.
 import { expect, test, type Page } from '@playwright/test';
 
-const ROUTES = ['/', '/biblioteca', '/comparar', '/soe-como-x', '/comunidade', '/teste-cego', '/cabo', '/docs'];
+const ROUTES = [
+	'/',
+	'/biblioteca',
+	'/comparar',
+	'/soe-como-x',
+	'/comunidade',
+	'/teste-cego',
+	'/cabo',
+	'/docs'
+];
 const PAGES = ['curva', 'comunidade', 'cabo', 'soe-como-x', 'comparar', 'teste-cego', 'biblioteca'];
 
 interface Finding {
@@ -17,7 +26,10 @@ async function audit(page: Page, route: string): Promise<Finding[]> {
 		const parse = (value: string): [number, number, number, number] | null => {
 			const match = value.match(/rgba?\(([^)]+)\)/);
 			if (!match) return null;
-			const parts = match[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+			const parts = match[1]
+				.split(/[\s,/]+/)
+				.filter(Boolean)
+				.map(Number);
 			return [parts[0], parts[1], parts[2], parts[3] ?? 1];
 		};
 		const over = (top: number[], bottom: number[]) =>
@@ -69,7 +81,8 @@ async function audit(page: Page, route: string): Promise<Finding[]> {
 				const optionInk = parse(optionStyle.color);
 				const optionBack = parse(optionStyle.backgroundColor);
 				// A transparent option list is painted by the OS on white.
-				const list = optionBack && optionBack[3] > 0 ? over(optionBack, [255, 255, 255]) : [255, 255, 255];
+				const list =
+					optionBack && optionBack[3] > 0 ? over(optionBack, [255, 255, 255]) : [255, 255, 255];
 				if (optionInk) {
 					findings.push({
 						route,

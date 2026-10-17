@@ -3,6 +3,7 @@
 // stubs the Better Auth sign-out, so no real account is needed. Runs on desktop and mobile.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { barScope } from './helpers/b-ui';
 
 const SESSION = {
 	session: { id: 's-e2e', userId: 'u-e2e', expiresAt: '2099-01-01T00:00:00.000Z' },
@@ -32,19 +33,30 @@ async function signedIn(page: Page): Promise<void> {
 // The session answers come from page.route: keep the service worker out of the way.
 test.use({ serviceWorkers: 'block' });
 
-const trigger = (page: Page) =>
-	page.locator('[data-chrome="bar"]').getByRole('button', { name: /^Conta:\s*ana$/ });
+/** The account trigger: in the bar on desktop, in the menu sheet on mobile (FUX.NAV). */
+const trigger = async (page: Page) =>
+	(await barScope(page)).getByRole('button', { name: /^Conta:\s*ana$/ });
+
+/** A press outside the menu: the page on desktop, the sheet's title when the sheet is open. */
+async function pressOutside(page: Page): Promise<void> {
+	const sheet = page.locator('[data-chrome="bar"]').getByRole('dialog', { name: /^Menu$/ });
+	if (await sheet.isVisible()) {
+		await sheet.getByRole('heading', { name: /^Menu$/ }).click();
+		return;
+	}
+	await page.locator('#main-content').click({ position: { x: 2, y: 2 } });
+}
 
 test.beforeEach(async ({ page }) => {
 	await signedIn(page);
 	await page.goto('/docs');
-	await expect(trigger(page)).toBeVisible();
+	await expect(await trigger(page)).toBeVisible();
 });
 
 test('opens a menu with the account destinations, fixed below the name and not clipped', async ({
 	page
 }) => {
-	const button = trigger(page);
+	const button = await trigger(page);
 	await expect(button).toHaveAttribute('aria-haspopup', 'menu');
 	await expect(button).toHaveAttribute('aria-expanded', 'false');
 	await button.click();
@@ -94,7 +106,7 @@ test('opens a menu with the account destinations, fixed below the name and not c
 });
 
 test('keyboard: arrows, Home/End, Escape returns focus, Tab closes', async ({ page }) => {
-	const button = trigger(page);
+	const button = await trigger(page);
 	await button.focus();
 	await page.keyboard.press('ArrowDown');
 	const menu = page.getByRole('menu');
@@ -116,10 +128,10 @@ test('keyboard: arrows, Home/End, Escape returns focus, Tab closes', async ({ pa
 });
 
 test('a click outside closes it; a link navigates', async ({ page }) => {
-	const button = trigger(page);
+	const button = await trigger(page);
 	await button.click();
 	await expect(page.getByRole('menu')).toBeVisible();
-	await page.locator('#main-content').click({ position: { x: 2, y: 2 } });
+	await pressOutside(page);
 	await expect(button).toHaveAttribute('aria-expanded', 'false');
 	await button.click();
 	await page.getByRole('menuitem', { name: 'Minha biblioteca' }).click();
@@ -132,7 +144,7 @@ test('Sair ends the session with the existing sign-out and shows "Entrar" again'
 	const signOut = page.waitForRequest(
 		(request) => request.url().endsWith('/api/auth/sign-out') && request.method() === 'POST'
 	);
-	await trigger(page).click();
+	await (await trigger(page)).click();
 	await page.getByRole('menuitem', { name: 'Sair' }).click();
 	await signOut;
 	const entry = page.locator('[data-chrome="bar"] a[data-account]');

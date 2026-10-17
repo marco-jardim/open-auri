@@ -5,17 +5,58 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { installHidStub } from './helpers/b-hid';
-import { closeChecklist, confirmBasics, connectCable } from './helpers/b-ui';
+import { barAction, barScope, closeChecklist, confirmBasics, connectCable } from './helpers/b-ui';
 
 test.use({ locale: 'pt-BR', reducedMotion: 'reduce' });
 test.setTimeout(60_000);
 
 const RUNTIME_SOURCE = 'src/lib/app/client.svelte.ts';
+/** Rollup/Rolldown chunk name of a chunk built around RUNTIME_SOURCE (`[name]`). */
+const RUNTIME_NAME = 'client.svelte';
+/** SvelteKit's root layout node (always node 0): its static closure loads on every route. */
+const LAYOUT_NODE = /\/nodes\/0\.js$/;
 const LOADING_REASON = 'Carregando o motor do cabo…';
 
 interface ViteChunk {
 	file: string;
+	name?: string;
 	imports?: string[];
+	dynamicImports?: string[];
+}
+
+/**
+ * Manifest key of the chunk `loadAppRuntime` imports. Built alone, client.svelte.ts is a chunk
+ * keyed by its source. Once instrument pages import the `#lib/app` barrel statically, the
+ * bundler merges it into a shared chunk named after it, keyed `_<hash>.js`. Either way it is the
+ * target of a dynamic import made from the root layout's static closure, outside that closure
+ * (a chunk the layout loads eagerly is not the lazy runtime, e.g. SvelteKit's own
+ * `$app/state` `client.svelte` chunk).
+ */
+function runtimeKey(manifest: Record<string, ViteChunk>): string {
+	const own = Object.keys(manifest).find((name) => name.endsWith(RUNTIME_SOURCE));
+	if (own !== undefined) return own;
+	const layout = Object.keys(manifest).find((name) => LAYOUT_NODE.test(name));
+	if (layout === undefined) throw new Error('The root layout node is not in the manifest');
+	const eager = new Set<string>();
+	const load = (name: string) => {
+		if (eager.has(name)) return;
+		eager.add(name);
+		for (const dependency of manifest[name]?.imports ?? []) load(dependency);
+	};
+	load(layout);
+	const lazy = new Set(
+		[...eager]
+			.flatMap((name) => manifest[name]?.dynamicImports ?? [])
+			.filter((name) => !eager.has(name))
+	);
+	const matches = [...lazy].filter((name) => manifest[name]?.name === RUNTIME_NAME);
+	const [match, ...others] = matches;
+	if (match === undefined || others.length > 0) {
+		throw new Error(
+			`Expected one lazy ${RUNTIME_SOURCE} chunk behind the root layout, found ${matches.length}`
+		);
+	}
+	return match;
 }
 
 /** The runtime chunk and its static dependencies, from the build the preview server serves. */
@@ -26,8 +67,7 @@ function runtimeChunk(): { file: string; dependencies: string[] } {
 			'utf8'
 		)
 	) as Record<string, ViteChunk>;
-	const key = Object.keys(manifest).find((name) => name.endsWith(RUNTIME_SOURCE));
-	if (key === undefined) throw new Error(`${RUNTIME_SOURCE} is not a chunk of its own`);
+	const key = runtimeKey(manifest);
 	const dependencies = new Set<string>();
 	const visit = (name: string) => {
 		for (const dependency of manifest[name]?.imports ?? []) {
@@ -232,10 +272,10 @@ test('after a first visit, the runtime chunks are cached: editor and simulated c
 	await page.reload();
 	await expect(page.locator('.app-root')).toHaveAttribute('data-runtime', 'ready');
 	await expect(statusTrigger(page)).toBeEnabled();
-	await bar(page).getByRole('button', { name: 'Padrão Auri', exact: true }).click();
-	await expect(
-		bar(page).getByRole('button', { name: 'Padrão Auri', exact: true })
-	).not.toHaveAttribute('aria-disabled');
+	// FUX.NAV: a "Carregar no editor" item on desktop, a sheet button on mobile.
+	const auri = await barAction(page, 'Padrão Auri');
+	await expect(auri).not.toHaveAttribute('aria-disabled');
+	await auri.click();
 
 	// A document navigation (like offline.spec.ts): the prerendered page and its chunks come
 	// from the precache, and the runtime mounts again from cached chunks.
@@ -250,7 +290,7 @@ test('after a first visit, the runtime chunks are cached: editor and simulated c
 	await expect(dialog.getByRole('status')).toHaveText(/^Gravação simulada concluída\./);
 	await closeChecklist(dialog);
 	// The help dialog and the status popover are lazy too, and also in the offline cache.
-	await bar(page).getByRole('button', { name: 'Ajuda e atalhos de teclado', exact: true }).click();
+	await (await barAction(page, 'Ajuda e atalhos de teclado')).click();
 	await expect(page.locator('dialog[open]')).toBeVisible();
 	await page.keyboard.press('Escape');
 	await expect(page.locator('dialog[open]')).toHaveCount(0);
@@ -298,7 +338,10 @@ test('head hints: three global font preloads, Turnstile preconnect only on auth,
 		await expect(page.locator(`link[rel="preload"][as="font"][href$="${href}"]`)).toHaveCount(1);
 	}
 	await expect(preconnect).toHaveCount(0);
-	const links = page.getByRole('navigation', { name: 'Principal', exact: true }).getByRole('link');
+	// The visible links (inline on desktop, in the menu sheet on mobile).
+	const links = (await barScope(page))
+		.getByRole('navigation', { name: 'Principal', exact: true })
+		.getByRole('link');
 	expect(await links.count()).toBeGreaterThan(0);
 	for (const link of await links.all()) {
 		await expect(link).toHaveAttribute('data-sveltekit-preload-code', 'hover');

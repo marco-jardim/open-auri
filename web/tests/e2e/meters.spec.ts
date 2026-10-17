@@ -200,7 +200,9 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 	// The raw preview from the global popover: a user gesture, as in the real flow.
 	await popover.locator('.oa-audio-row button').first().click();
 	await expect(bridge).toHaveAttribute('data-mode', 'live');
-	await expect(bridge.locator('.mode')).toHaveText('AO VIVO');
+	// FUX.P1: the console's mode label is the meter-mode Chip; its text follows the real mode.
+	await expect(bridge.locator('.chip.chip--mode')).toHaveAttribute('data-mode', 'live');
+	await expect(bridge.locator('.chip.chip--mode')).toHaveText('AO VIVO');
 	const vu = bridge.locator('.oa-vu').first();
 	await expect(vu).toHaveAttribute('data-mode', 'live');
 	const reading = async () => Number(await vu.getAttribute('aria-valuenow'));
@@ -215,7 +217,7 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 	// Pre-volume: −40 dB of preview volume would move a post-volume VU by ~40; here the reading only
 	// has to stay within 1 VU (ballistics, throttled readout and audio-thread underruns when the e2e
 	// suite runs 8 browsers in parallel; a dependency on the volume would be ~40× larger).
-	await expect(bridge.locator('.mode')).toHaveText('AO VIVO');
+	await expect(bridge.locator('.chip.chip--mode')).toHaveText('AO VIVO');
 	await expect
 		.poll(async () => Math.abs((await reading()) - before), { timeout: 5000 })
 		.toBeLessThanOrEqual(1);

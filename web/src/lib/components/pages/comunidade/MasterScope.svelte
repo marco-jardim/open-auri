@@ -7,7 +7,7 @@
 	import { FREQUENCY_TICKS, dbTicks, frequencyLabel } from '#lib/charts/scales.ts';
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { Listener } from './listener.svelte.ts';
 	import {

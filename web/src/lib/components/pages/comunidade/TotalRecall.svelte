@@ -6,7 +6,7 @@
 	silently. Versions are append-only: nothing is rewritten.
 -->
 <script lang="ts">
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import {

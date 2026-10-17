@@ -6,7 +6,7 @@
 	(`Button` `disabledReason`).
 -->
 <script lang="ts">
-	import { EmptyState } from '#lib/components/primitives/index.ts';
+	import EmptyState from '#lib/components/primitives/EmptyState.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { requireLoginHref } from '#lib/social/index.ts';
 

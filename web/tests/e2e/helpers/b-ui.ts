@@ -55,19 +55,74 @@ export async function downloadBytes(download: Download): Promise<Buffer> {
 }
 
 export async function editorCrc(page: Page): Promise<string> {
-	const state = page.getByRole('main').locator('.np-state');
+	const state = page.getByRole('main').getByTestId('editor-state');
 	await expect(state).toContainText(/CRC (?:0x)?[\dA-F]{4}/i);
 	const crc = /CRC ((?:0x)?[\dA-F]{4})/i.exec((await state.textContent()) ?? '')?.[1];
 	if (!crc) throw new Error('The editor did not display its CRC');
 	return crc;
 }
 
+// ---- Global bar (FUX.NAV) ----------------------------------------------------------------
+// Desktop folds destinations into "Mais" and the presets into "Carregar no editor"; at 720 px
+// and below the row keeps the wordmark, cable lamp, Áudio, Gravar and a menu button, and the
+// menu sheet holds the navigation, presets, account, language and help.
+const BAR = '[data-chrome="bar"]';
+const MENU_BUTTON = /^(Abrir menu|Open menu)$/;
+const SHEET = /^Menu$/;
+
+/** Where the user operates the bar: the bar itself, or the menu sheet (opened here) on mobile. */
+export async function barScope(page: Page): Promise<Locator> {
+	const bar = page.locator(BAR);
+	const menuButton = bar.getByRole('button', { name: MENU_BUTTON });
+	if (!(await menuButton.isVisible())) return bar;
+	const sheet = bar.getByRole('dialog', { name: SHEET });
+	// Retried: a press before hydration opens nothing.
+	await expect(async () => {
+		if (!(await sheet.isVisible())) await menuButton.click();
+		await expect(sheet).toBeVisible({ timeout: 1_000 });
+	}).toPass();
+	return sheet;
+}
+
+/** A main-navigation destination as a user reaches it: inline link, "Mais" item or sheet link. */
+export async function barNavLink(page: Page, name: string): Promise<Locator> {
+	const scope = await barScope(page);
+	const nav = scope.getByRole('navigation', { name: /^(Principal|Main)$/ });
+	const link = nav.getByRole('link', { name, exact: true });
+	if (await link.isVisible()) return link;
+	const more = nav.getByRole('button', { name: /^(Mais|More)$/ });
+	const item = page.getByRole('menuitem', { name, exact: true });
+	await expect(async () => {
+		if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click();
+		await expect(item).toBeVisible({ timeout: 1_000 });
+	}).toPass();
+	return item;
+}
+
+/**
+ * A bar action (Neutro, Padrão Auri, help, language…): its visible button, the "Carregar no
+ * editor" item on desktop below 1600 px, or the sheet's button on mobile.
+ */
+export async function barAction(
+	page: Page,
+	name: string,
+	{ exact = true }: { exact?: boolean } = {}
+): Promise<Locator> {
+	const scope = await barScope(page);
+	const button = scope.getByRole('button', { name, exact });
+	if (await button.isVisible()) return button;
+	const tools = scope.getByRole('button', { name: /^(Carregar no editor|Load into the editor)$/ });
+	const item = page.getByRole('menuitem', { name, exact });
+	await expect(async () => {
+		if ((await tools.getAttribute('aria-expanded')) !== 'true') await tools.click();
+		await expect(item).toBeVisible({ timeout: 1_000 });
+	}).toPass();
+	return item;
+}
+
 /** Navigate in the UI, preserving the running app and the stub's permitted devices. */
 export async function goToCable(page: Page): Promise<void> {
-	await page
-		.getByRole('navigation', { name: 'Principal', exact: true })
-		.getByRole('link', { name: 'Cabo', exact: true })
-		.click();
+	await (await barNavLink(page, 'Cabo')).click();
 	await expect(page).toHaveURL(/\/cabo(?:[?#]|$)/);
 	await expect(
 		page.getByRole('button', { name: 'Levantar tampa do checklist', exact: true })

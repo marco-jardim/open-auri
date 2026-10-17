@@ -7,7 +7,8 @@
 
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import { Button, IconButton } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
+	import IconButton from '#lib/components/primitives/IconButton.svelte';
 	import { modalDialog } from './modal.ts';
 
 	interface Props {
@@ -59,6 +60,22 @@
 		event.preventDefault();
 		changeOpen(true);
 	}
+
+	/**
+	 * Escape closes this dialog, the top layer, and is consumed here: a page-level window
+	 * handler under it (a page's guided tour, which auto-opens on a first desktop visit) must not
+	 * take the key and cancel the dialog's close request. A control inside the dialog that
+	 * handled Escape first (prevented) keeps it.
+	 */
+	function escapeCloses(node: HTMLDialogElement): () => void {
+		const keydown = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+			event.preventDefault();
+			changeOpen(false);
+		};
+		node.addEventListener('keydown', keydown);
+		return () => node.removeEventListener('keydown', keydown);
+	}
 </script>
 
 <svelte:window onkeydown={shortcut} />
@@ -81,6 +98,7 @@
 	aria-labelledby="{id}-title"
 	aria-describedby="{id}-hint"
 	use:modalDialog={{ open, onDismiss: () => changeOpen(false), initialFocus: '[data-close]' }}
+	{@attach escapeCloses}
 >
 	<div class="dlg">
 		<h2 id="{id}-title">{title}</h2>

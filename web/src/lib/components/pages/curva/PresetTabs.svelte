@@ -8,7 +8,7 @@
 <script lang="ts">
 	import { presetsByGroup, type OFFICIAL_PRESETS } from 'open-auri/catalog';
 	import { m } from '#lib/paraglide/messages.js';
-	import { Lamp } from '#lib/components/primitives/index.ts';
+	import Lamp from '#lib/components/primitives/Lamp.svelte';
 	import { formatSignedDb, hex } from './format.ts';
 	import { miniPath } from './mini.ts';
 

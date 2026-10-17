@@ -8,7 +8,7 @@
 	import type { PreviewChain } from '#lib/audio/engine.ts';
 	import type { MeterTap, TapOptions } from '#lib/audio/meters.ts';
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
-	import { Button } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import ChannelMeter from './ChannelMeter.svelte';
 	import CurveAvatar from './CurveAvatar.svelte';

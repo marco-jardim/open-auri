@@ -2,6 +2,9 @@
 	Header account entry: "Entrar" when anonymous; when signed in, the nickname (or "Conta")
 	opens the user menu (FUX.1, spec §2.6): Minha conta, Meu perfil público, Minha biblioteca,
 	Admin (only when the admin role is effective in this session) and Sair.
+	FUX.NAV: inside the compact bar (an ancestor with `.bar-compact`) it is a square bar button,
+	a monogram (or a person glyph for "Entrar") with a tooltip, the name kept for screen readers;
+	in the mobile menu sheet it shows the full name.
 	Sair uses the existing Better Auth sign-out (POST /api/auth/sign-out, allowed even in
 	read-only mode), then reloads so every per-account view resets; it waits while a cable write
 	sends bytes, and says so.
@@ -14,7 +17,10 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
 	import { isWriteInProgress, onWriteProgress } from '#lib/cable/write-flag.ts';
-	import { Menu, type MenuItem } from '#lib/components/primitives/index.ts';
+	import Tooltip from '#lib/components/primitives/Tooltip.svelte';
+	import type { MenuItem } from '#lib/components/primitives/Menu.svelte';
+	// The menu itself is its own chunk, loaded on the trigger's first hover, focus or press.
+	import LazyMenu from './LazyMenu.svelte';
 	import { ACCOUNT_HREF, signInHref, type AccountSummary } from './account.ts';
 
 	interface Props {
@@ -45,6 +51,20 @@
 	const profileHref = $derived(user?.username ? `/u/${encodeURIComponent(user.username)}` : null);
 
 	let menuOpen = $state(false);
+	let triggerElement: HTMLButtonElement | undefined = $state();
+	let signInElement: HTMLAnchorElement | undefined = $state();
+	/** Rendered in the compact bar (not in the menu sheet): the name lives in a tooltip. */
+	let compact = $state(false);
+	let tipOpen = $state(false);
+	$effect(() => {
+		const element = triggerElement ?? signInElement;
+		compact = element?.closest('.bar-compact') != null;
+	});
+	// The open menu shows the destinations; the name tooltip would cover them.
+	$effect(() => {
+		if (menuOpen && tipOpen) tipOpen = false;
+	});
+	const initial = $derived(user?.username ? Array.from(user.username)[0]?.toUpperCase() : null);
 	let signingOut = $state(false);
 	let failure = $state<string | null>(null);
 	let writing = $state(false);
@@ -122,21 +142,32 @@
 {#if user}
 	{@const account = user}
 	<div class="account-entry">
-		<Menu
+		<LazyMenu
 			{items}
 			bind:open={menuOpen}
+			bind:triggerElement
 			note={failure}
-			class={['btn', 'btn--plate', 'btn--sm', 'account-trigger', onAccount && 'is-current']}
+			class={[
+				'btn',
+				'btn--plate',
+				'btn--sm',
+				'btn--bar',
+				'account-trigger',
+				onAccount && 'is-current'
+			]}
 			data-account="signed-in"
 			aria-busy={signingOut ? 'true' : undefined}
 		>
 			{#snippet trigger()}
-				<span class="dot" class:warn={!account.emailVerified} aria-hidden="true"></span>
+				<span class="avatar" aria-hidden="true">
+					{#if initial}{initial}{:else}{@render person()}{/if}
+					<span class="dot" class:warn={!account.emailVerified}></span>
+				</span>
 				{#if account.username}
 					<span class="sr-only">{m.auth_account_label()}:</span>
 					<span class="name">{account.username}</span>
 				{:else}
-					{m.auth_account_label()}
+					<span class="name">{m.auth_account_label()}</span>
 				{/if}
 				{#if !account.emailVerified}
 					<span class="sr-only">({m.auth_account_unverified()})</span>
@@ -145,19 +176,44 @@
 					<path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" />
 				</svg>
 			{/snippet}
-		</Menu>
+		</LazyMenu>
+		{#if compact}
+			<Tooltip
+				text={account.username ?? m.auth_account_label()}
+				anchor={menuOpen ? null : triggerElement}
+				bind:open={tipOpen}
+			/>
+		{/if}
 		<span class="sr-only" role="status">{failure ?? ''}</span>
 	</div>
 {:else}
 	<a
-		class="account btn btn--plate btn--sm"
+		bind:this={signInElement}
+		class="account btn btn--plate btn--sm btn--bar"
 		href={signInHref(currentPath)}
 		aria-current={pathname === '/entrar' ? 'page' : undefined}
 		data-account={pending ? 'pending' : 'anonymous'}
 	>
-		{m.auth_account_signin()}
+		<span class="glyph" aria-hidden="true">{@render person()}</span>
+		<span class="name">{m.auth_account_signin()}</span>
 	</a>
+	{#if compact}
+		<Tooltip text={m.auth_account_signin()} anchor={signInElement} />
+	{/if}
 {/if}
+
+{#snippet person()}
+	<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+		<circle cx="8" cy="5.5" r="2.75" fill="none" stroke="currentColor" stroke-width="1.4" />
+		<path
+			d="M2.75 14c.6-2.9 2.7-4.5 5.25-4.5s4.65 1.6 5.25 4.5"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.4"
+			stroke-linecap="round"
+		/>
+	</svg>
+{/snippet}
 
 <style>
 	.account-entry {
@@ -178,10 +234,29 @@
 		text-overflow: ellipsis;
 	}
 
-	.dot {
+	/* Monogram in the display face, on an elevated well; the lamp is the e-mail state. */
+	.avatar {
+		position: relative;
+		display: inline-grid;
 		flex: none;
-		width: 6px;
-		height: 6px;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border: 1px solid var(--rule-control);
+		border-radius: 50%;
+		background: var(--ink-4);
+		box-shadow: var(--bevel);
+		color: var(--text);
+		font: italic 400 var(--fs-body) / 1 var(--face-display);
+	}
+
+	.dot {
+		position: absolute;
+		right: -2px;
+		bottom: -2px;
+		width: 7px;
+		height: 7px;
+		border: 2px solid var(--bar-bg);
 		border-radius: 50%;
 		background: var(--ok);
 	}
@@ -190,8 +265,33 @@
 		background: var(--warn);
 	}
 
+	.glyph {
+		display: inline-grid;
+		place-items: center;
+	}
+
 	.caret {
 		flex: none;
 		opacity: 0.8;
+	}
+
+	/* Compact bar: a square button; the name stays in the accessible name and the tooltip. */
+	:global(.bar-compact) .account-entry :global(.account-trigger),
+	:global(.bar-compact) .account {
+		width: var(--btn-h);
+		padding: 0;
+	}
+
+	:global(.bar-compact) .name {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+
+	:global(.bar-compact) .caret {
+		display: none;
 	}
 </style>

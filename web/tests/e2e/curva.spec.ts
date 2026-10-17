@@ -100,7 +100,13 @@ for (const sample of [
 		await openCurva(page, 'engenharia');
 		await importTxt(page, apo(-1, sample.filter));
 		const bank = filterBank(page);
-		const module = bank.getByRole('listitem').first();
+		// The bank head also lists the envelope criteria (a)–(g); filter strips are the items with
+		// a kind switch.
+		const modules = bank
+			.getByRole('listitem')
+			.filter({ has: page.getByRole('combobox', { name: 'Tipo', exact: true }) });
+		await expect(modules).toHaveCount(10);
+		const module = modules.first();
 		const kind = module.getByRole('combobox', { name: 'Tipo', exact: true });
 		const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
 		await expect(kind).toHaveValue(sample.kind);
@@ -126,7 +132,7 @@ for (const sample of [
 				exact: true
 			})
 		).toBeVisible();
-		const unused = bank.getByRole('listitem').nth(1).getByRole('combobox');
+		const unused = modules.nth(1).getByRole('combobox');
 		await expect(unused.locator('option')).toHaveText(['Desligado', 'PK', 'LS']);
 		const before = await handle.getAttribute('aria-valuetext');
 		await handle.press('ArrowRight');
