@@ -1656,7 +1656,6 @@
 	"curva_v2_details_value": "Value",
 	"curva_v2_envelope_strip": "The gate's seven criteria, computed on the exact numbers that would go to the cable. Lamp lit: inside.",
 	"curva_v2_envelope_title": "Observed envelope",
-	"curva_v2_insp_heading": "Filter {index} · inspection",
 	"curva_v2_io_eyebrow": "Files and link",
 	"curva_v2_loading": "Loading the editor…",
 	"curva_v2_loading_reason": "The editor is still loading.",
@@ -2276,5 +2275,8 @@
 	"transport_toggle_pause": "Pause the preview",
 	"transport_toggle_resume": "Resume the preview",
 	"transport_toggle_unsupported": "This browser has no Web Audio.",
-	"transport_valuetext": "{elapsed} of {total}"
+	"transport_valuetext": "{elapsed} of {total}",
+	"curva_v2_insp_title": "Inspection",
+	"curva_v2_pz_help_title": "How to read the pole-zero chart",
+	"curva_v2_pz_help": "The chart shows the selected filter on the z-plane. The dashed circle is the stability limit (|z| = 1). The angle around the centre is frequency: low frequencies on the right, half the sample rate (48 kHz) on the left. Each × is a pole: near the circle it boosts the frequency at that angle, and the closer it is, the narrower and stronger the effect. Each ○ is a zero: near the circle it attenuates. A pole and a zero close together cancel out and the effect stays gentle. Outside the circle the filter would be unstable; the gate refuses well before that (pole radius up to the limit shown beside it)."
 }

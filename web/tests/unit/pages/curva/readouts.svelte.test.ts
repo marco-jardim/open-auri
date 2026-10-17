@@ -62,9 +62,7 @@ test('output labels real DATA/live values and explains refusal; absent metrics a
 
 test('inspector selects active/OFF sections and separates designed coefficients from unavailable gate metrics', async () => {
 	const screen = await render(Inspector, { curve, verdict, selected: 0, locale: 'pt-BR' });
-	await expect
-		.element(page.getByRole('heading', { name: m.curva_v2_insp_heading({ index: '1' }) }))
-		.toBeVisible();
+	await expect.element(page.getByRole('heading', { name: m.curva_v2_insp_title() })).toBeVisible();
 	expect(screen.container.querySelectorAll('dl.coef dd')).toHaveLength(5);
 	expect(screen.container.querySelectorAll('ol.words li')).toHaveLength(5);
 	expect(screen.container.textContent).toContain('Raio do polo');
@@ -75,9 +73,7 @@ test('inspector selects active/OFF sections and separates designed coefficients 
 	await expect.element(page.getByText(m.curva_insp_off())).toBeVisible();
 	expect(screen.container.querySelector('dl.coef')).toBeNull();
 	await screen.rerender({ selected: 99 });
-	await expect
-		.element(page.getByRole('heading', { name: m.curva_v2_insp_heading({ index: '100' }) }))
-		.toBeVisible();
+	await expect.element(page.getByRole('heading', { name: m.curva_v2_insp_title() })).toBeVisible();
 	await expect.element(page.getByText(m.curva_insp_off())).toBeVisible();
 });
 

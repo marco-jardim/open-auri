@@ -31,7 +31,7 @@
 </script>
 
 <section class="mod-panel" aria-labelledby={headingId}>
-	<h3 id={headingId}>{m.curva_v2_insp_heading({ index: String(selected + 1) })}</h3>
+	<h3 id={headingId}>{m.curva_v2_insp_title()}</h3>
 	{#if band.kind === 'OFF'}
 		<p class="note">{m.curva_insp_off()}</p>
 	{:else}
@@ -79,6 +79,10 @@
 					label={m.curva_pz_label()}
 					description={m.curva_pz_desc({ index: String(selected + 1) })}
 				/>
+				<p class="pz-help">
+					<strong>{m.curva_v2_pz_help_title()}</strong>
+					{m.curva_v2_pz_help()}
+				</p>
 			</div>
 		</div>
 	{/if}
@@ -91,6 +95,18 @@
 </section>
 
 <style>
+	.pz-help {
+		margin: var(--space-2) 0 0;
+		max-width: 42ch;
+		color: var(--text-2, #cfc9be);
+		font: 400 var(--fs-small) / var(--lh-body) var(--face-body);
+	}
+	.pz-help strong {
+		display: block;
+		margin-bottom: 2px;
+		color: var(--curva-silk, #e9e3d4);
+		font-weight: 600;
+	}
 	.mod-panel {
 		padding: 14px;
 		border-radius: 6px;

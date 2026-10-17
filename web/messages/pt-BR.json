@@ -1656,7 +1656,6 @@
 	"curva_v2_details_value": "Valor",
 	"curva_v2_envelope_strip": "Os sete critérios do gate, calculados sobre os números exatos que iriam para o cabo. Lâmpada acesa: dentro.",
 	"curva_v2_envelope_title": "Envelope observado",
-	"curva_v2_insp_heading": "Filtro {index} · inspeção",
 	"curva_v2_io_eyebrow": "Arquivos e link",
 	"curva_v2_loading": "Carregando o editor…",
 	"curva_v2_loading_reason": "O editor ainda está carregando.",
@@ -2276,5 +2275,8 @@
 	"transport_toggle_pause": "Pausar a prévia",
 	"transport_toggle_resume": "Continuar a prévia",
 	"transport_toggle_unsupported": "Este navegador não tem Web Audio.",
-	"transport_valuetext": "{elapsed} de {total}"
+	"transport_valuetext": "{elapsed} de {total}",
+	"curva_v2_insp_title": "Inspeção",
+	"curva_v2_pz_help_title": "Como ler o gráfico de polos e zeros",
+	"curva_v2_pz_help": "O gráfico mostra o filtro selecionado no plano z. O círculo tracejado é o limite de estabilidade (|z| = 1). O ângulo em volta do centro é a frequência: à direita ficam os graves, à esquerda a metade da taxa de amostragem (48 kHz). Cada × é um polo: perto do círculo, ele reforça a frequência daquele ângulo, e quanto mais perto, mais estreito e forte o efeito. Cada ○ é um zero: perto do círculo, ele atenua. Um polo e um zero próximos se compensam e o efeito fica suave. Fora do círculo o filtro seria instável; o gate recusa bem antes disso (raio do polo até o limite mostrado ao lado)."
 }
