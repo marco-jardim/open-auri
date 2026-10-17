@@ -10,13 +10,38 @@ export interface AccountSummary {
 	/** Public nickname (display form), or null before the nickname is chosen. */
 	username: string | null;
 	emailVerified: boolean;
+	/**
+	 * Menu hint only (FUX.2): present and true when the client probe of a prerendered page sees an
+	 * effective admin session, mirroring the layout's `admin` boolean. Never used for
+	 * authorisation; the /admin guard checks the session on the server.
+	 */
+	admin?: boolean;
 }
 
 export const SESSION_ENDPOINT = '/api/auth/get-session';
 
 /**
+ * Client mirror of the server's `isAdminEffective` for the user menu: the admin role, not banned,
+ * not impersonated and, because the client cannot read ADMIN_2FA_REQUIRED, always with 2FA
+ * enabled and verified in this session. The conservative side only hides the menu item; the
+ * /admin guard decides access on the server either way.
+ */
+function adminHint(body: object, user: object): boolean {
+	if (Reflect.get(user, 'role') !== 'admin' || Reflect.get(user, 'banned') === true) return false;
+	const session: unknown = Reflect.get(body, 'session');
+	if (typeof session !== 'object' || session === null) return false;
+	if (Reflect.get(session, 'impersonatedBy')) return false;
+	const verifiedAt: unknown = Reflect.get(session, 'twoFactorVerifiedAt');
+	const verified =
+		(typeof verifiedAt === 'string' && verifiedAt !== '') ||
+		(typeof verifiedAt === 'number' && Number.isFinite(verifiedAt));
+	return Reflect.get(user, 'twoFactorEnabled') === true && verified;
+}
+
+/**
  * Picks the non-sensitive fields of a Better Auth `get-session` body; null when signed out. A
- * user without a string `id` is not a usable session and reads as signed out.
+ * user without a string `id` is not a usable session and reads as signed out. The admin menu
+ * hint is the only role-derived value, a boolean added only when true (never the role itself).
  */
 export function toAccountSummary(body: unknown): AccountSummary | null {
 	if (typeof body !== 'object' || body === null) return null;
@@ -30,7 +55,8 @@ export function toAccountSummary(body: unknown): AccountSummary | null {
 	return {
 		id,
 		username: pick(display) ?? pick(username),
-		emailVerified: Reflect.get(user, 'emailVerified') === true
+		emailVerified: Reflect.get(user, 'emailVerified') === true,
+		...(adminHint(body, user) ? { admin: true } : {})
 	};
 }
 

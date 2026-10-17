@@ -3,6 +3,8 @@ import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
 import { levelDb } from 'open-auri/safety';
 import { CABLE_INFLIGHT_KEY, NEUTRAL_CURVE } from '../../../src/lib/cable/index.ts';
 import { createClientApp, createAppContext, type ClientApp } from '../../../src/lib/app/index.ts';
+import { get } from 'svelte/store';
+import { createToastStore } from '../../../src/lib/components/chrome/toast.ts';
 import { MemoryStorage, fakeAppOptions } from './fakes.ts';
 
 const apps: ClientApp[] = [];
@@ -20,12 +22,25 @@ const confirmations = { volumeLowered: true, keepConnected: true, experimental: 
 const click = { type: 'click', isTrusted: true } as const;
 
 describe('browser app wiring with fake persistence and HID', () => {
-	test('does not initialize browser state on the server', () => {
+	test('does not initialize browser state on the server', async () => {
 		const context = createAppContext();
 		expect(context.client).toBeNull();
-		expect(context.mount(fakeAppOptions().options)).toBeNull();
+		await expect(context.mount(fakeAppOptions().options)).resolves.toBeNull();
 		expect(context.client).toBeNull();
+		expect(context.status).toBe('idle');
 		context.dispose();
+	});
+
+	test('an injected toast store is the app region (the layout owns it before the mount)', () => {
+		const fake = fakeAppOptions();
+		const toasts = createToastStore();
+		const app = createClientApp({ ...fake.options, toasts });
+		apps.push(app);
+		expect(app.toasts).toBe(toasts);
+		app.toasts.push('ok');
+		expect(get(toasts)).toHaveLength(1);
+		app.dispose();
+		expect(get(toasts)).toHaveLength(0);
 	});
 
 	test('restores cable and audio once, without playing or writing', async () => {

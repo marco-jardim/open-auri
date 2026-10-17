@@ -7,7 +7,15 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { INITIAL_JS_BUDGET, measureBudgets } from '../../web/scripts/check-budgets.mjs';
+import {
+  DEFAULT_TARGETS,
+  INITIAL_JS_BUDGET,
+  budgetForRoute,
+  loadBudgetTargets,
+  measureBudgets,
+  parseArgs,
+  parseBudgetTargets,
+} from '../../web/scripts/check-budgets.mjs';
 
 const script = fileURLToPath(new URL('../../web/scripts/check-budgets.mjs', import.meta.url));
 const asset = (name) => `_app/immutable/${name}.hash.js`;
@@ -153,19 +161,164 @@ test('resolves reindexed server nodes without importing their application module
   assert.ok(!row.files.includes(asset('nodes/0')));
 });
 
-test('CLI prints a table and fails only when a route exceeds 250 kB gzip', (t) => {
+test('CLI prints a table with route classes and fails only when a route exceeds its target', (t) => {
   const repo = fixture(t);
   const pass = repo.run();
   assert.equal(pass.status, 0, pass.stderr);
   assert.match(pass.stdout, /Initial JavaScript per route/);
   assert.match(pass.stdout, /gzip kB/);
   assert.match(pass.stdout, /\/docs/);
+  assert.match(pass.stdout, /instrument-heavy/);
   assert.match(pass.stdout, /PASS/);
+  assert.doesNotMatch(pass.stdout, /nodes\/0\.hash\.js/, 'chunk rows only with --by-chunk');
   repo.put(asset('nodes/2'), randomBytes(300_000));
   const fail = repo.run();
   assert.equal(fail.status, 1, fail.stderr);
   assert.match(fail.stdout, /FAIL/);
   assert.match(fail.stdout, /PASS/);
+});
+
+test('per-class targets come from the versioned JSON of spec §5.7', () => {
+  const targets = loadBudgetTargets();
+  assert.equal(loadBudgetTargets(DEFAULT_TARGETS).defaultBytes, INITIAL_JS_BUDGET);
+  const expected = {
+    '/offline': ['static', 80_000],
+    '/privacidade': ['static', 80_000],
+    '/termos': ['static', 80_000],
+    '/verificar-email': ['static', 80_000],
+    '/esqueci-senha': ['static', 80_000],
+    '/redefinir-senha': ['static', 80_000],
+    '/entrar': ['auth', 100_000],
+    '/criar-conta': ['auth', 100_000],
+    '/conta': ['auth', 100_000],
+    '/conta/encerrada': ['auth', 100_000],
+    '/docs': ['docs', 130_000],
+    '/teste-cego': ['instrument-light', 140_000],
+    '/cabo': ['instrument-light', 140_000],
+    '/biblioteca': ['instrument-light', 140_000],
+    '/c/[id]': ['instrument-light', 140_000],
+    '/u/[apelido]': ['instrument-light', 140_000],
+    '/': ['instrument-heavy', 160_000],
+    '/soe-como-x': ['instrument-heavy', 160_000],
+    '/comparar': ['instrument-heavy', 160_000],
+    '/comunidade': ['instrument-heavy', 160_000],
+  };
+  for (const [route, [classId, budgetBytes]] of Object.entries(expected)) {
+    const resolved = budgetForRoute(route, targets);
+    assert.deepEqual([resolved.classId, resolved.budgetBytes], [classId, budgetBytes], route);
+  }
+  assert.equal(budgetForRoute('/', targets).goalBytes, 150_000);
+  // Unlisted routes (admin) keep the global ceiling; prefixes never match by substring.
+  assert.deepEqual(budgetForRoute('/admin', targets), {
+    classId: null,
+    budgetBytes: INITIAL_JS_BUDGET,
+    goalBytes: undefined,
+  });
+  assert.equal(budgetForRoute('/contas', targets).classId, null);
+  assert.equal(budgetForRoute('/docs/extra', targets).classId, null);
+});
+
+test('measures each route against its class target and lists labelled chunks', async (t) => {
+  const repo = fixture(t);
+  repo.vite.shared.name = 'shared-lib';
+  repo.vite.node2.src = 'src/routes/+page.svelte';
+  repo.saveVite();
+  const targets = parseBudgetTargets({
+    version: 1,
+    defaultBytes: 250_000,
+    classes: [{ id: 'docs', targetBytes: 1, routes: ['/docs'] }],
+  });
+  const [home, docs] = await measureBudgets(repo.output, targets);
+  assert.equal(home.classId, null);
+  assert.equal(home.budgetBytes, 250_000);
+  assert.equal(home.overBudget, false);
+  assert.equal(docs.classId, 'docs');
+  assert.equal(docs.budgetBytes, 1);
+  assert.equal(docs.overBudget, true);
+  for (const row of [home, docs]) {
+    assert.deepEqual(row.chunks.map((chunk) => chunk.file).sort(), row.files);
+    assert.equal(
+      row.chunks.reduce((sum, chunk) => sum + chunk.gzipBytes, 0),
+      row.gzipBytes,
+    );
+    for (let i = 1; i < row.chunks.length; i++) {
+      assert.ok(row.chunks[i - 1].gzipBytes >= row.chunks[i].gzipBytes, 'largest first');
+    }
+  }
+  const label = (row, name) => row.chunks.find((chunk) => chunk.file === asset(name))?.name;
+  assert.equal(label(home, 'chunks/shared'), 'shared-lib');
+  assert.equal(label(home, 'nodes/2'), 'src/routes/+page.svelte');
+  assert.equal(label(home, 'chunks/nested'), 'nested', 'falls back to the manifest key');
+});
+
+test('CLI --by-chunk prints a chunk table per route and --targets overrides the JSON', (t) => {
+  const repo = fixture(t);
+  repo.vite.shared.name = 'shared-lib';
+  repo.saveVite();
+  const byChunk = repo.run(['--output', repo.output, '--by-chunk']);
+  assert.equal(byChunk.status, 0, byChunk.stderr);
+  assert.match(byChunk.stdout, /\n\/docs \(docs\): \d+\.\d{2} kB gzip/);
+  assert.match(byChunk.stdout, /\n\/ \(instrument-heavy\): \d+\.\d{2} kB gzip/);
+  assert.match(byChunk.stdout, /shared-lib/);
+  assert.match(byChunk.stdout, /nodes\/4\.hash\.js/);
+  const strict = join(repo.root, 'strict.json');
+  writeFileSync(
+    strict,
+    JSON.stringify({
+      version: 1,
+      defaultBytes: 250_000,
+      classes: [{ id: 'docs', targetBytes: 1, routes: ['/docs'] }],
+    }),
+  );
+  const fail = repo.run(['--targets', strict, '--output', repo.output]);
+  assert.equal(fail.status, 1, fail.stderr);
+  assert.match(fail.stdout, /FAIL/);
+  writeFileSync(strict, '{"version":2}');
+  const invalid = repo.run(['--output', repo.output, '--targets', strict]);
+  assert.equal(invalid.status, 1);
+  assert.match(invalid.stderr, /Invalid budget targets version/);
+});
+
+test('rejects malformed targets and arguments', () => {
+  const valid = { version: 1, defaultBytes: 10, classes: [] };
+  assert.deepEqual(parseBudgetTargets(valid), { defaultBytes: 10, classes: [] });
+  const cls = (extra) => ({ id: 'a', targetBytes: 5, routes: ['/a'], ...extra });
+  for (const bad of [
+    null,
+    [],
+    { ...valid, version: 2 },
+    { ...valid, defaultBytes: -1 },
+    { ...valid, defaultBytes: 1.5 },
+    { ...valid, classes: {} },
+    { ...valid, classes: [cls({ id: 'Bad Id' })] },
+    { ...valid, classes: [cls(), cls({ routes: ['/b'] })] },
+    { ...valid, classes: [cls(), cls({ id: 'b' })] },
+    { ...valid, classes: [cls({ routes: ['a'] })] },
+    { ...valid, classes: [cls({ routes: '/a' })] },
+    { ...valid, classes: [cls({ targetBytes: -5 })] },
+    { ...valid, classes: [cls({ goalBytes: 6 })] },
+  ]) {
+    assert.throws(() => parseBudgetTargets(bad), /Invalid|Goal above/);
+  }
+  assert.throws(() => budgetForRoute('/', -1), /Invalid JS budget/);
+  assert.deepEqual(parseArgs([]), {
+    output: parseArgs([]).output,
+    targets: DEFAULT_TARGETS,
+    byChunk: false,
+  });
+  assert.deepEqual(parseArgs(['--by-chunk', '--output', 'out', '--targets', 't.json']), {
+    output: 'out',
+    targets: 't.json',
+    byChunk: true,
+  });
+  for (const args of [
+    ['--targets'],
+    ['--output', '--by-chunk'],
+    ['extra'],
+    ['--by-chunk', '--x'],
+  ]) {
+    assert.throws(() => parseArgs(args), /Usage:/);
+  }
 });
 
 test('fails closed for missing builds, manifests, chunks and static dependencies', async (t) => {

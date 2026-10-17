@@ -14,7 +14,7 @@ import {
 	type WriteOutcome
 } from '#lib/cable/index.ts';
 import { createClientState, type CurrentCurve, type StorageOptions } from '#lib/state/index.ts';
-import { createToastStore } from '#lib/components/chrome/toast.ts';
+import { createToastStore, type ToastStore } from '#lib/components/chrome/toast.ts';
 
 export interface ClientAppOptions {
 	storage?: StorageOptions;
@@ -22,6 +22,11 @@ export interface ClientAppOptions {
 	/** Browser singleton by default; tests supply an isolated engine. */
 	audio?: AudioEngine;
 	cable?: Pick<CableServiceDeps, 'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId'>;
+	/**
+	 * Toast region store. The root layout creates it before the runtime chunk loads and injects
+	 * it, so the same region serves messages from before and after the mount (FUX.2).
+	 */
+	toasts?: ToastStore;
 }
 
 /** Explicit factory: the layout calls this only on mount, never during SSR. */
@@ -29,7 +34,7 @@ export function createClientApp(options: ClientAppOptions = {}) {
 	const now = options.now ?? Date.now;
 	const state = createClientState({ ...options.storage, now });
 	const audio = options.audio ?? getAudioEngine();
-	const toasts = createToastStore();
+	const toasts = options.toasts ?? createToastStore();
 	let pending = $state.raw<CurrentCurve | null>(null);
 	let disposed = false;
 	let started: Promise<void> | undefined;

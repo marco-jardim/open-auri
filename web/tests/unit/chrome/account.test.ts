@@ -57,6 +57,45 @@ describe('toAccountSummary', () => {
 		expect(toAccountSummary({ user: { id: '', emailVerified: true } })).toBeNull();
 		expect(toAccountSummary({ user: { id: 42, emailVerified: true } })).toBeNull();
 	});
+
+	test('carries only a true admin menu hint for an effective admin session (FUX.2)', () => {
+		const admin = {
+			id: 'u9',
+			username: 'root',
+			emailVerified: true,
+			role: 'admin',
+			banned: false,
+			twoFactorEnabled: true
+		};
+		const session = { id: 's9', twoFactorVerifiedAt: '2026-10-17T10:00:00.000Z' };
+		const effective = toAccountSummary({ user: admin, session });
+		expect(effective).toStrictEqual({
+			id: 'u9',
+			username: 'root',
+			emailVerified: true,
+			admin: true
+		});
+		expect(JSON.stringify(effective)).not.toContain('role');
+		// Anything short of the server rule reads as "no hint" (the key is absent, never false).
+		for (const body of [
+			{ user: { ...admin, role: 'user' }, session },
+			{ user: { ...admin, role: 'admin,user' }, session },
+			{ user: { ...admin, banned: true }, session },
+			{ user: { ...admin, twoFactorEnabled: false }, session },
+			{ user: admin, session: { ...session, impersonatedBy: 'u1' } },
+			{ user: admin, session: { id: 's9', twoFactorVerifiedAt: null } },
+			{ user: admin, session: { id: 's9', twoFactorVerifiedAt: '' } },
+			{ user: admin, session: null },
+			{ user: admin }
+		]) {
+			const summary = toAccountSummary(body);
+			expect(summary).not.toBeNull();
+			expect(summary && Object.hasOwn(summary, 'admin')).toBe(false);
+		}
+		expect(
+			toAccountSummary({ user: admin, session: { twoFactorVerifiedAt: 1760695200000 } })
+		).toEqual(expect.objectContaining({ admin: true }));
+	});
 });
 
 describe('fetchAccount', () => {

@@ -13,9 +13,11 @@
 	} = $props();
 	const context = setAppContext();
 	onMount(() => {
-		const app = context.mount(options);
-		if (!app) throw new Error('Browser app not initialized');
-		onready(app);
+		// FUX.2: the runtime is a dynamic chunk, so the mount resolves after the first render.
+		void context.mount(options).then((app) => {
+			if (!app) throw new Error('Browser app not initialized');
+			onready(app);
+		});
 		return () => context.dispose();
 	});
 </script>

@@ -31,6 +31,13 @@ Render once in the root layout (outside conditional app initialization):
 <UpdatePrompt enabled={!dev} workerUrl={resolve('service-worker.js')} scope={resolve('/')} />
 ```
 
+FUX.2 (spec §5.3 L2): the layout imports UpdatePrompt dynamically and renders it on idle
+(`whenIdle`, `requestIdleCallback` with a 1500 ms timeout), so registration and the offline notice
+start right after the first paint instead of competing with it. Dynamic chunks need no extra
+precache entry: `$app/manifest` `immutable` lists every file Kit emits under `_app/immutable`,
+including dynamically imported chunks (runtime, checklist, panels); `tests/e2e/loading.spec.ts`
+checks the editor and a simulated write offline after a first visit.
+
 In `sveltekit({...})` in `vite.config.ts`, add this option so the component alone owns registration
 and dev never installs an inert service worker:
 

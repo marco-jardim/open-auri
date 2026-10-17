@@ -1,38 +1,39 @@
 <script lang="ts">
 	import '#lib/styles/index.css';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';
+	import { browser, dev } from '$app/env';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale, getTextDirection } from '#lib/paraglide/runtime.js';
 	import { PUBLIC_GITHUB_URL } from '#lib/config/public.ts';
-	import { setAppContext } from '#lib/app/index.ts';
-	import { dev } from '$app/env';
-	import UpdatePrompt from '#lib/pwa/UpdatePrompt.svelte';
+	// FUX.2: no static import of the runtime (#lib/app/index.ts re-exports createClientApp).
+	import { setAppContext } from '#lib/app/context.svelte.ts';
+	import type { ClientApp } from '#lib/app/client.svelte.ts';
+	import {
+		hasInflightMarker,
+		isInstrumentRoute,
+		isTurnstileRoute,
+		loadAppRuntime,
+		runtimeTrigger,
+		whenIdle
+	} from '#lib/app/runtime.ts';
+	import { LazyModule } from '#lib/app/lazy.svelte.ts';
 	import { getFooterHonoree, getPageMeta } from '#lib/page-meta.ts';
-	import {
-		AccountEntry,
-		AccountSession,
-		CableBar,
-		Footer,
-		HelpOverlay,
-		Toast,
-		appShortcuts,
-		createToastStore,
-		postPolicyAcceptance,
-		revealLocale
-	} from '#lib/components/chrome/index.ts';
-	import { AudioLoader } from '#lib/components/audio/index.ts';
-	import { Button } from '#lib/components/primitives/index.ts';
-	import { CableStatus, PreWriteChecklist, RescueNotice } from '#lib/components/cable/index.ts';
-	import {
-		PolicyBanner,
-		resolveAnonymousSeen,
-		writePolicySeen
-	} from '#lib/components/legal/index.ts';
+	import AccountEntry from '#lib/components/chrome/AccountEntry.svelte';
+	import CableBar from '#lib/components/chrome/CableBar.svelte';
+	import Footer from '#lib/components/chrome/Footer.svelte';
+	import Toast from '#lib/components/chrome/Toast.svelte';
+	import { AccountSession } from '#lib/components/chrome/account.svelte.ts';
+	import { postPolicyAcceptance } from '#lib/components/chrome/account.ts';
+	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
+	import { appShortcuts } from '#lib/components/chrome/shortcuts.ts';
+	import { createToastStore } from '#lib/components/chrome/toast.ts';
+	import AudioLoader from '#lib/components/audio/AudioLoader.svelte';
+	import { Button, IconButton, Skeleton } from '#lib/components/primitives/index.ts';
+	import { resolveAnonymousSeen, writePolicySeen } from '#lib/components/legal/policy-seen.ts';
 	import { POLICY_VERSION } from '#lib/content/legal/version.ts';
-	import SocialSync from '#lib/components/social/SocialSync.svelte';
-	import { startOutboxBridge } from '#lib/cable/outbox-bridge.ts';
-	import { createSocialApi, createSocialOutbox, createSocialSession } from '#lib/social/index.ts';
+	import { loadSocialRuntime, type SocialRuntime } from '#lib/social/runtime.ts';
+	import type { SocialOutbox, SocialSession, SocialApi } from '#lib/social/index.ts';
 	import type { LayoutProps } from './$types';
 
 	let { children, data }: LayoutProps = $props();
@@ -59,34 +60,164 @@
 			}
 		};
 	});
+	// The toast region exists before the runtime: the app gets this store injected (FUX.2).
+	const toasts = createToastStore();
 	const context = setAppContext();
 	const app = $derived(context.client);
-	const emptyToasts = createToastStore();
 	const meta = $derived(getPageMeta(page.route.id ?? page.url.pathname));
 	const homage = $derived(getFooterHonoree(meta));
 	const pending = $derived(app?.pendingWrite);
-	// Social activity (F4): one outbox over the app's store, flushed by SocialSync; real cable
-	// writes of a remembered community curve enqueue an installed event through the bridge, only
-	// for the signed-in, verified account that wrote (SocialSync purges on sign-out or switch).
-	const socialSession = createSocialSession();
-	const socialApi = createSocialApi();
-	const socialOutbox = $derived(
-		app ? createSocialOutbox({ store: app.state.outbox, session: socialSession }) : null
+	const statusId = $props.id();
+
+	// --- lazy chrome islands (spec §5.3 L2) -------------------------------------------------
+	const checklist = new LazyModule(() => import('#lib/components/cable/PreWriteChecklist.svelte'));
+	const cableStatus = new LazyModule(() => import('#lib/components/cable/CableStatus.svelte'));
+	const rescueNotice = new LazyModule(() => import('#lib/components/cable/RescueNotice.svelte'));
+	const helpOverlay = new LazyModule(() => import('#lib/components/chrome/HelpOverlay.svelte'));
+	const updatePrompt = new LazyModule(() => import('#lib/pwa/UpdatePrompt.svelte'));
+	const policyBannerIsland = new LazyModule(
+		() => import('#lib/components/legal/PolicyBanner.svelte')
 	);
-	$effect(() => {
-		const client = app;
-		const outbox = socialOutbox;
-		if (!client || !outbox) return;
-		return startOutboxBridge({
+
+	function islandFailed(error: unknown): void {
+		console.error('A page component could not load', error);
+		toasts.push(m.layout_error_generic(), { tone: 'error' });
+	}
+
+	// --- runtime (L1, W2) --------------------------------------------------------------------
+	// Read synchronously: a marker means an interrupted write; the rescue notice must not wait.
+	const marker = browser && hasInflightMarker();
+	if (browser && runtimeTrigger(page.route.id, marker) === 'now') {
+		// Start the chunk requests during hydration; onMount's mount() reuses the same promises.
+		loadAppRuntime().catch((error: unknown) => console.warn('Runtime prefetch failed', error));
+		loadSocialRuntime().catch((error: unknown) => console.warn('Social prefetch failed', error));
+		if (marker) rescueNotice.request();
+	}
+
+	// Social wiring (F4, FUX.2 L3): the bridge is attached in `prepare`, before the app is
+	// published, so a real cable write can never happen without it. SocialSync itself renders on
+	// idle, or at once with a session or queued items.
+	interface SocialWiring {
+		runtime: SocialRuntime;
+		session: SocialSession;
+		api: SocialApi;
+		outbox: SocialOutbox;
+		stop: () => void;
+	}
+	let social = $state.raw<SocialWiring | null>(null);
+	let syncReady = $state(false);
+	let cancelSyncIdle: (() => void) | undefined;
+
+	async function attachSocial(client: ClientApp): Promise<void> {
+		const runtime = await loadSocialRuntime();
+		const session = runtime.createSocialSession(
+			accountSession.known ? { initial: accountSession.current } : {}
+		);
+		const api = runtime.createSocialApi();
+		const outbox = runtime.createSocialOutbox({ store: client.state.outbox, session });
+		const stop = runtime.startOutboxBridge({
 			app: client,
 			outbox,
-			session: socialSession,
+			session,
 			onqueued: (result) => {
-				if (result.ok) void outbox.flush(socialApi);
+				if (result.ok) void outbox.flush(api);
 			}
 		});
+		social = { runtime, session, api, outbox, stop };
+		if (accountSession.current) {
+			syncReady = true;
+			return;
+		}
+		outbox.pending().then(
+			(items) => {
+				if (items.length > 0) syncReady = true;
+			},
+			(error: unknown) => console.warn('Social outbox could not be read', error)
+		);
+		cancelSyncIdle = whenIdle(() => (syncReady = true));
+	}
+
+	function startRuntime(): void {
+		if (!browser || context.client || context.status === 'loading') return;
+		loadSocialRuntime().catch((error: unknown) => console.warn('Social prefetch failed', error));
+		context.mount({ toasts }, { prepare: attachSocial }).then(
+			(client) => {
+				if (!client) return;
+				client.start().catch((error: unknown) => {
+					console.error('App restore failed', error);
+					toasts.push(m.layout_error_generic(), { tone: 'error' });
+				});
+				// Writes start on instrument pages: warm the checklist chunk once things are quiet.
+				if (isInstrumentRoute(page.route.id)) whenIdle(() => checklist.request());
+			},
+			(error: unknown) => {
+				console.error('App runtime failed to load', error);
+				toasts.push(m.layout_error_generic(), { tone: 'error' });
+			}
+		);
+	}
+
+	// Instrument routes and the rescue marker: at once (also after a client-side navigation).
+	$effect(() => {
+		if (runtimeTrigger(page.route.id, marker) === 'now') untrack(startRuntime);
 	});
-	const statusId = $props.id();
+
+	/**
+	 * First interaction that needs the runtime on a static route: pointer over, press or focus
+	 * on the bar's tools or status (Áudio, Neutro, Padrão Auri, Gravar no cabo). Once the app is
+	 * there, the same intent warms the checklist chunk.
+	 */
+	function barIntent(node: HTMLElement): () => void {
+		const intent = (event: Event) => {
+			const target = event.target;
+			if (!(target instanceof Element)) return;
+			if (!target.closest('.bar-tools, .bar-status, [data-runtime-intent]')) return;
+			startRuntime();
+			if (context.client) checklist.request();
+		};
+		const types = ['pointerover', 'pointerdown', 'focusin'] as const;
+		for (const type of types) node.addEventListener(type, intent, { passive: true });
+		return () => {
+			for (const type of types) node.removeEventListener(type, intent);
+		};
+	}
+
+	$effect(() => {
+		const wiring = social;
+		if (wiring && accountSession.known) wiring.session.set(accountSession.current);
+		if (wiring && accountSession.current) syncReady = true;
+	});
+	$effect(() => {
+		if (app && pending) checklist.request(onChecklistFailed);
+	});
+	$effect(() => {
+		if (app && app.cableState.rescue !== null) rescueNotice.request();
+	});
+	const showPolicy = $derived(policyBanner !== null && policyBanner.seen !== POLICY_VERSION);
+	$effect(() => {
+		if (showPolicy) policyBannerIsland.request();
+	});
+
+	function onChecklistFailed(error: unknown): void {
+		// Never leave a pending write that cannot be reviewed: close it, then say so.
+		app?.closeChecklist();
+		islandFailed(error);
+	}
+
+	onMount(() => {
+		anonymousSeen = resolveAnonymousSeen(POLICY_VERSION);
+		const cancelIdle = whenIdle(() => {
+			startRuntime();
+			updatePrompt.request();
+		});
+		return () => {
+			cancelIdle();
+			cancelSyncIdle?.();
+			social?.stop();
+			social = null;
+			context.dispose();
+		};
+	});
 
 	// References resolve after the integration queue merges T2.9's staging catalogs.
 	const metaMessages = {
@@ -136,20 +267,51 @@
 						: m.cable_status_disconnected()
 	);
 
-	onMount(() => {
-		anonymousSeen = resolveAnonymousSeen(POLICY_VERSION);
-	});
+	// --- help (lazy dialog behind a stable bar trigger) --------------------------------------
+	let helpOpen = $state(false);
+	function openHelp(): void {
+		helpOpen = true;
+		helpOverlay.request(islandFailed);
+	}
 
-	onMount(() => {
-		const client = context.mount();
-		if (client) {
-			void client.start().catch((error: unknown) => {
-				console.error('App restore failed', error);
-				client.toasts.push(m.layout_error_generic(), { tone: 'error' });
-			});
-		}
-		return () => context.dispose();
-	});
+	// --- cable status popover, placed from its trigger (also on the taller mobile bar) -------
+	let statusTrigger: HTMLButtonElement | undefined = $state();
+	let statusPos = $state<{ top: number; left: number; maxHeight: number } | null>(null);
+	const POPOVER_WIDTH = 440;
+	const POPOVER_MARGIN = 16;
+	function placeStatus(): void {
+		if (!statusTrigger) return;
+		const rect = statusTrigger.getBoundingClientRect();
+		const width = Math.min(POPOVER_WIDTH, window.innerWidth - 2 * POPOVER_MARGIN);
+		const left = Math.max(
+			POPOVER_MARGIN,
+			Math.min(rect.right - width, window.innerWidth - width - POPOVER_MARGIN)
+		);
+		const top = rect.bottom + 8;
+		statusPos = { top, left, maxHeight: Math.max(160, window.innerHeight - top - POPOVER_MARGIN) };
+	}
+	function statusPopover(node: HTMLElement): () => void {
+		// Tracked from the toggle events (no `:popover-open` query, which throws where unsupported).
+		let shown = false;
+		const before = (event: Event) => {
+			if (!('newState' in event)) return;
+			shown = event.newState === 'open';
+			if (!shown) return;
+			cableStatus.request(islandFailed);
+			placeStatus();
+		};
+		const follow = () => {
+			if (shown) placeStatus();
+		};
+		node.addEventListener('beforetoggle', before);
+		window.addEventListener('resize', follow);
+		window.addEventListener('scroll', follow, { passive: true });
+		return () => {
+			node.removeEventListener('beforetoggle', before);
+			window.removeEventListener('resize', follow);
+			window.removeEventListener('scroll', follow);
+		};
+	}
 
 	function loadEditor(which: 'neutral' | 'auri') {
 		if (!app) return;
@@ -157,8 +319,26 @@
 		if (loaded) app.toasts.push(m.layout_editor_loaded());
 	}
 
+	function helpShortcut(event: KeyboardEvent): boolean {
+		// Until HelpOverlay is loaded, the layout answers its "?" shortcut (same rules).
+		if (helpOverlay.current || event.key !== '?' || event.ctrlKey || event.metaKey) return false;
+		const target = event.target;
+		if (
+			target instanceof Element &&
+			target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+		) {
+			return false;
+		}
+		if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return false;
+		event.preventDefault();
+		openHelp();
+		return true;
+	}
+
 	function onKeydown(event: KeyboardEvent) {
-		if (!app || event.defaultPrevented || event.repeat || event.isComposing || event.altKey) return;
+		if (event.defaultPrevented || event.repeat || event.isComposing || event.altKey) return;
+		if (helpShortcut(event)) return;
+		if (!app) return;
 		if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
 		const target = event.target;
 		if (
@@ -183,30 +363,65 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="app-root" data-page={meta.page} style:--accent={meta.accent}>
+<svelte:head>
+	{#if isTurnstileRoute(page.route.id)}
+		<!-- W7: Turnstile's origin only where the auth form renders it. -->
+		<link rel="preconnect" href="https://challenges.cloudflare.com" />
+	{/if}
+</svelte:head>
+
+<div
+	class="app-root"
+	data-page={meta.page}
+	data-runtime={context.status}
+	style:--accent={meta.accent}
+>
 	<a class="skip-link" href="#main-content">{m.layout_skip()}</a>
-	<div data-chrome="bar">
+	<div data-chrome="bar" {@attach barIntent}>
 		<!-- CableBar owns Nav and LanguageToggle; slots retain one of each shared control. -->
 		<CableBar
 			currentPath={page.url.pathname}
 			connected={app?.cableState.connection === 'connected'}
 			unsaved={app?.state.curve.unsaved ?? false}
 			writeDisabled={!app || app.cableState.writing}
+			writeDisabledReason={app ? undefined : m.fux2_cable_runtime_loading()}
 			onNeutro={app ? () => loadEditor('neutral') : undefined}
 			onPadraoAuri={app ? () => loadEditor('auri') : undefined}
 			onWrite={app ? () => app?.requestWrite() : undefined}
 		>
 			{#snippet status()}
-				<button type="button" class="status-trigger" popovertarget={statusId} disabled={!app}>
-					<span aria-hidden="true">●</span>
-					{statusText}
-				</button>
+				{#if app}
+					<button
+						type="button"
+						class="status-trigger"
+						popovertarget={statusId}
+						bind:this={statusTrigger}
+						onpointerenter={() => cableStatus.request()}
+						onfocus={() => cableStatus.request()}
+					>
+						<span aria-hidden="true">●</span>
+						{statusText}
+					</button>
+				{:else}
+					<!-- §5.5: pill skeleton with the status text's geometry while the runtime loads. -->
+					<Skeleton
+						class="status-skeleton"
+						width="7.5rem"
+						height="0.75rem"
+						radius="var(--rad-pill)"
+						label={m.fux2_cable_runtime_loading()}
+					/>
+				{/if}
 			{/snippet}
 			{#snippet audio()}
 				{#if app}
 					<AudioLoader engine={app.audio} />
 				{:else}
-					<Button size="sm" variant="plate" disabledReason={m.fux1_audio_loading()}
+					<Button
+						size="sm"
+						variant="plate"
+						data-runtime-intent
+						disabledReason={m.fux1_audio_loading()}
 						><span aria-hidden="true">♪</span> {m.chrome_audio()}</Button
 					>
 				{/if}
@@ -216,17 +431,34 @@
 					user={accountSession.current}
 					currentPath={page.url.pathname}
 					pending={!accountSession.known}
-					admin={data.sessionResolved && data.admin}
+					admin={data.sessionResolved ? data.admin : accountSession.current?.admin === true}
 				/>
 			{/snippet}
 			{#snippet help()}
-				<!-- T3: help lives in the bar instead of floating over the page's right edge. -->
-				<span class="help-slot" data-chrome="help"><HelpOverlay {shortcuts} /></span>
+				<!-- T3: help lives in the bar. FUX.2: the dialog is its own chunk, loaded on open. -->
+				<span class="help-slot" data-chrome="help">
+					<IconButton
+						size="sm"
+						variant="plate"
+						class="help-btn"
+						label={m.chrome_help_open()}
+						aria-haspopup="dialog"
+						aria-expanded={helpOpen}
+						onpointerenter={() => helpOverlay.request()}
+						onfocus={() => helpOverlay.request()}
+						onclick={openHelp}>?</IconButton
+					>
+					{#if helpOverlay.current}
+						{@const Help = helpOverlay.current}
+						<Help {shortcuts} showTrigger={false} bind:open={helpOpen} />
+					{/if}
+				</span>
 			{/snippet}
 		</CableBar>
 	</div>
 
-	{#if policyBanner}
+	{#if policyBanner && showPolicy && policyBannerIsland.current}
+		{@const PolicyBanner = policyBannerIsland.current}
 		<div data-chrome="policy">
 			<PolicyBanner
 				version={POLICY_VERSION}
@@ -236,20 +468,35 @@
 		</div>
 	{/if}
 
-	<div id={statusId} popover="auto" class="cable-popover" data-chrome="status">
-		{#if app}
+	<div
+		id={statusId}
+		popover="auto"
+		class="cable-popover"
+		data-chrome="status"
+		style:top={statusPos ? `${statusPos.top}px` : null}
+		style:left={statusPos ? `${statusPos.left}px` : null}
+		style:right={statusPos ? 'auto' : null}
+		style:max-height={statusPos ? `${statusPos.maxHeight}px` : null}
+		{@attach statusPopover}
+	>
+		{#if app && cableStatus.current}
+			{@const CableStatus = cableStatus.current}
 			<CableStatus service={app.cable} />
 		{/if}
 	</div>
 
 	{#if app}
 		<div class="rescue-wrap" data-chrome="rescue">
-			<RescueNotice service={app.cable} onrescue={() => app?.requestRescue()} />
+			{#if rescueNotice.current && app.cableState.rescue !== null}
+				{@const RescueNotice = rescueNotice.current}
+				<RescueNotice service={app.cable} onrescue={() => app?.requestRescue()} />
+			{/if}
 		</div>
 	{/if}
 	<div id="main-content" tabindex="-1">{@render children()}</div>
 
-	{#if app && pending}
+	{#if app && pending && checklist.current}
+		{@const PreWriteChecklist = checklist.current}
 		<PreWriteChecklist
 			service={app.cable}
 			open={true}
@@ -261,20 +508,26 @@
 			onresult={(outcome) => app?.onWriteResult(outcome)}
 		/>
 	{/if}
-	<Toast store={app?.toasts ?? emptyToasts} />
-	<SocialSync
-		{app}
-		account={accountSession.known ? accountSession.current : undefined}
-		session={socialSession}
-		api={socialApi}
-		outbox={socialOutbox}
-	/>
+	<Toast store={toasts} />
+	{#if social && syncReady}
+		{@const SocialSync = social.runtime.SocialSync}
+		<SocialSync
+			{app}
+			account={accountSession.known ? accountSession.current : undefined}
+			session={social.session}
+			api={social.api}
+			outbox={social.outbox}
+		/>
+	{/if}
 	<div data-chrome="footer">
 		<Footer {honoree} githubUrl={PUBLIC_GITHUB_URL} />
 	</div>
 </div>
 
-<UpdatePrompt enabled={!dev} workerUrl="/service-worker.js" scope="/" />
+{#if updatePrompt.current}
+	{@const UpdatePrompt = updatePrompt.current}
+	<UpdatePrompt enabled={!dev} workerUrl="/service-worker.js" scope="/" />
+{/if}
 
 <style>
 	.app-root {
@@ -305,6 +558,7 @@
 		width: min(440px, calc(100vw - 32px));
 		margin: 0;
 		padding: 20px;
+		overflow-y: auto;
 		border: 1px solid var(--rule);
 		border-radius: var(--rad-md);
 		background: var(--ink-2);
@@ -317,5 +571,9 @@
 	}
 	.help-slot {
 		display: contents;
+	}
+	/* HelpOverlay's own rule, needed before its chunk loads: the "?" glyph in Geist 600 (T4). */
+	.help-slot :global(.help-btn) {
+		font-weight: 600;
 	}
 </style>

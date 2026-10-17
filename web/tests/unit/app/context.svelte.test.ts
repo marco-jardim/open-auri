@@ -20,7 +20,7 @@ test('Svelte context shares one app; preset buttons never write; only checklist 
 	const ready = vi.fn<(app: ClientApp) => void>();
 	const consumer = vi.fn<(app: ClientApp) => void>();
 	await render(AppFixture, { options: fake.options, onready: ready, onconsumer: consumer });
-	expect(ready).toHaveBeenCalledOnce();
+	await expect.poll(() => ready.mock.calls.length).toBe(1);
 	const app = ready.mock.calls[0]?.[0];
 	if (!app) throw new Error('Provider not mounted');
 	await expect.poll(() => consumer.mock.calls[0]?.[0]).toBe(app);
@@ -36,7 +36,7 @@ test('Svelte context shares one app; preset buttons never write; only checklist 
 	const dialog = page.getByRole('dialog');
 	await expect.element(dialog).toBeVisible();
 	const confirm = dialog.getByRole('button', { name: 'Gravar no cabo', exact: true });
-	await expect.element(confirm).toBeDisabled();
+	await expect.element(confirm).toHaveAttribute('aria-disabled', 'true');
 	expect(write).not.toHaveBeenCalled();
 	expect(gesture).not.toHaveBeenCalled();
 	const checks = dialog.getByRole('checkbox').elements();
@@ -45,7 +45,7 @@ test('Svelte context shares one app; preset buttons never write; only checklist 
 	await dialog.getByRole('checkbox').nth(0).click();
 	await dialog.getByRole('checkbox').nth(1).click();
 	expect(write).not.toHaveBeenCalled();
-	await expect.element(confirm).toBeEnabled();
+	await expect.element(confirm).not.toHaveAttribute('aria-disabled');
 	await confirm.click();
 	await expect.poll(() => app.cableState.lastOutcome?.status).toBe('ok');
 	expect(write).toHaveBeenCalledOnce();

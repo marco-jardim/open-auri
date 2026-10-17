@@ -6,6 +6,80 @@ import { gzipSync } from 'node:zlib';
 // kB is decimal. Sum individually gzipped HTTP resources, not one concatenated bundle.
 export const INITIAL_JS_BUDGET = 250_000;
 const defaultOutput = fileURLToPath(new URL('../.svelte-kit/output/', import.meta.url));
+/** Versioned per-class targets (spec §5.7), next to this script. */
+export const DEFAULT_TARGETS = fileURLToPath(new URL('./budget-targets.json', import.meta.url));
+const USAGE =
+	'Usage: node web/scripts/check-budgets.mjs [--output <.svelte-kit/output>] [--targets <file.json>] [--by-chunk]';
+
+function byteCount(value, label) {
+	if (!Number.isSafeInteger(value) || value < 0) throw new Error(`Invalid ${label}`);
+	return value;
+}
+
+/**
+ * Validates the targets document: a default ceiling plus route classes. A route pattern is an
+ * exact SvelteKit route id, or `<prefix>/**` for the prefix and everything below it. A route
+ * may belong to one class only; routes outside every class keep the default ceiling.
+ *
+ * @param {unknown} value Parsed JSON.
+ */
+export function parseBudgetTargets(value) {
+	const document = object(value, 'budget targets');
+	if (document.version !== 1) throw new Error('Invalid budget targets version');
+	const defaultBytes = byteCount(document.defaultBytes, 'default budget');
+	if (!Array.isArray(document.classes)) throw new Error('Invalid budget classes');
+	const seenIds = new Set();
+	const seenRoutes = new Set();
+	const classes = document.classes.map((entry, index) => {
+		const item = object(entry, `budget class ${index}`);
+		if (typeof item.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(item.id) || seenIds.has(item.id)) {
+			throw new Error(`Invalid or duplicate budget class id at ${index}`);
+		}
+		seenIds.add(item.id);
+		const routes = strings(item.routes, `routes of ${item.id}`);
+		for (const route of routes) {
+			if (!route.startsWith('/') || seenRoutes.has(route)) {
+				throw new Error(`Invalid or duplicate budget route: ${route}`);
+			}
+			seenRoutes.add(route);
+		}
+		const targetBytes = byteCount(item.targetBytes, `target of ${item.id}`);
+		const goalBytes =
+			item.goalBytes === undefined ? undefined : byteCount(item.goalBytes, `goal of ${item.id}`);
+		if (goalBytes !== undefined && goalBytes > targetBytes) {
+			throw new Error(`Goal above target in ${item.id}`);
+		}
+		return { id: item.id, targetBytes, goalBytes, routes };
+	});
+	return { defaultBytes, classes };
+}
+
+/** @param {string} [path] Targets JSON; defaults to the versioned file next to this script. */
+export function loadBudgetTargets(path = DEFAULT_TARGETS) {
+	return parseBudgetTargets(JSON.parse(readFileSync(path, 'utf8')));
+}
+
+function matchesRoute(pattern, route) {
+	if (!pattern.endsWith('/**')) return pattern === route;
+	const base = pattern.slice(0, -3);
+	return route === base || route.startsWith(`${base}/`);
+}
+
+/**
+ * @param {string} route SvelteKit route id.
+ * @param {number | ReturnType<typeof parseBudgetTargets>} budget Uniform bytes or targets.
+ */
+export function budgetForRoute(route, budget) {
+	if (typeof budget === 'number') {
+		return { classId: null, budgetBytes: byteCount(budget, 'JS budget'), goalBytes: undefined };
+	}
+	const matched = budget.classes.find((item) =>
+		item.routes.some((pattern) => matchesRoute(pattern, route))
+	);
+	return matched
+		? { classId: matched.id, budgetBytes: matched.targetBytes, goalBytes: matched.goalBytes }
+		: { classId: null, budgetBytes: budget.defaultBytes, goalBytes: undefined };
+}
 
 function object(value, label) {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -29,12 +103,12 @@ function strings(value, label) {
  * (Kit 3 dynamically imports its runtime even on the first navigation).
  *
  * @param {string} [outputDir] The .svelte-kit/output directory, after a successful build.
- * @param {number} [budgetBytes] Override for isolated tests; the CLI always uses 250 kB.
+ * @param {number | ReturnType<typeof parseBudgetTargets>} [budget] A uniform byte budget
+ *   (isolated tests; 250 kB by default) or the per-class targets the CLI loads from JSON.
  */
-export async function measureBudgets(outputDir = defaultOutput, budgetBytes = INITIAL_JS_BUDGET) {
-	if (!Number.isSafeInteger(budgetBytes) || budgetBytes < 0) {
-		throw new Error('Invalid JS budget');
-	}
+export async function measureBudgets(outputDir = defaultOutput, budget = INITIAL_JS_BUDGET) {
+	if (typeof budget === 'number') byteCount(budget, 'JS budget');
+	else if (!budget || !Array.isArray(budget.classes)) throw new Error('Invalid JS budget');
 	const output = resolve(outputDir);
 	const clientDir = join(output, 'client');
 	const vitePath = join(clientDir, '.vite', 'manifest.json');
@@ -114,12 +188,19 @@ export async function measureBudgets(outputDir = defaultOutput, budgetBytes = IN
 		}
 		const visited = new Set();
 		const files = new Set();
+		/** file → manifest label (chunk `name`, else entry `src`, else the manifest key). */
+		const labels = new Map();
 		function visit(key) {
 			if (visited.has(key)) return;
 			const chunk = entries.get(key);
 			if (!chunk) throw new Error(`Missing static import in Vite manifest: ${key}`);
 			visited.add(key);
-			if (/\.m?js$/.test(chunk.file)) files.add(chunk.file);
+			if (/\.m?js$/.test(chunk.file)) {
+				files.add(chunk.file);
+				const name = typeof chunk.name === 'string' && chunk.name ? chunk.name : undefined;
+				const src = typeof chunk.src === 'string' && chunk.src ? chunk.src : undefined;
+				labels.set(chunk.file, name ?? src ?? key);
+			}
 			for (const dependency of strings(chunk.imports ?? [], `imports of ${key}`)) {
 				visit(dependency);
 			}
@@ -136,17 +217,24 @@ export async function measureBudgets(outputDir = defaultOutput, budgetBytes = IN
 		}
 		let rawBytes = 0;
 		let gzipBytes = 0;
+		const chunks = [];
 		for (const file of files) {
 			const measured = size(file);
 			rawBytes += measured.rawBytes;
 			gzipBytes += measured.gzipBytes;
+			chunks.push({ file, name: labels.get(file) ?? file, ...measured });
 		}
+		chunks.sort((a, b) => b.gzipBytes - a.gzipBytes || a.file.localeCompare(b.file, 'en'));
+		const { classId, budgetBytes, goalBytes } = budgetForRoute(route.id, budget);
 		rows.push({
 			route: route.id,
+			classId,
 			files: [...files].sort(),
+			chunks,
 			rawBytes,
 			gzipBytes,
 			budgetBytes,
+			goalBytes,
 			overBudget: gzipBytes > budgetBytes
 		});
 	}
@@ -154,23 +242,56 @@ export async function measureBudgets(outputDir = defaultOutput, budgetBytes = IN
 	return rows.sort((a, b) => a.route.localeCompare(b.route, 'en'));
 }
 
-async function main() {
-	const args = process.argv.slice(2);
-	if (args.length && (args.length !== 2 || args[0] !== '--output')) {
-		throw new Error('Usage: node web/scripts/check-budgets.mjs [--output <.svelte-kit/output>]');
+/** @param {string[]} args */
+export function parseArgs(args) {
+	const options = { output: defaultOutput, targets: DEFAULT_TARGETS, byChunk: false };
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (arg === '--by-chunk') {
+			options.byChunk = true;
+			continue;
+		}
+		if (arg !== '--output' && arg !== '--targets') throw new Error(USAGE);
+		const value = args[++index];
+		if (value === undefined || value.startsWith('--')) throw new Error(USAGE);
+		if (arg === '--output') options.output = value;
+		else options.targets = value;
 	}
-	const rows = await measureBudgets(args[1] ?? defaultOutput);
+	return options;
+}
+
+const kB = (bytes) => (bytes / 1000).toFixed(2);
+
+async function main() {
+	const options = parseArgs(process.argv.slice(2));
+	const targets = loadBudgetTargets(options.targets);
+	const rows = await measureBudgets(options.output, targets);
 	console.log('Initial JavaScript per route (gzip; fonts and deferred imports excluded)');
 	console.table(
 		rows.map((row) => ({
 			route: row.route,
+			class: row.classId ?? 'default',
 			'JS files': row.files.length,
-			'raw kB': (row.rawBytes / 1000).toFixed(2),
-			'gzip kB': (row.gzipBytes / 1000).toFixed(2),
+			'raw kB': kB(row.rawBytes),
+			'gzip kB': kB(row.gzipBytes),
 			'budget kB': row.budgetBytes / 1000,
+			'goal kB': row.goalBytes === undefined ? '' : row.goalBytes / 1000,
 			status: row.overBudget ? 'FAIL' : 'PASS'
 		}))
 	);
+	if (options.byChunk) {
+		for (const row of rows) {
+			console.log(`\n${row.route} (${row.classId ?? 'default'}): ${kB(row.gzipBytes)} kB gzip`);
+			console.table(
+				row.chunks.map((chunk) => ({
+					chunk: chunk.name,
+					file: chunk.file,
+					'raw kB': kB(chunk.rawBytes),
+					'gzip kB': kB(chunk.gzipBytes)
+				}))
+			);
+		}
+	}
 	if (rows.some((row) => row.overBudget)) process.exitCode = 1;
 }
 

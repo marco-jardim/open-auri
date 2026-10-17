@@ -1,0 +1,40 @@
+{
+	"version": 1,
+	"source": "docs/plans/fux-spec.md §5.7 (initial JS, gzip, after FUX.2)",
+	"defaultBytes": 250000,
+	"classes": [
+		{
+			"id": "static",
+			"targetBytes": 80000,
+			"routes": [
+				"/offline",
+				"/privacidade",
+				"/termos",
+				"/verificar-email",
+				"/esqueci-senha",
+				"/redefinir-senha"
+			]
+		},
+		{
+			"id": "auth",
+			"targetBytes": 100000,
+			"routes": ["/entrar", "/criar-conta", "/conta/**"]
+		},
+		{
+			"id": "docs",
+			"targetBytes": 130000,
+			"routes": ["/docs"]
+		},
+		{
+			"id": "instrument-light",
+			"targetBytes": 140000,
+			"routes": ["/teste-cego", "/cabo", "/biblioteca", "/c/[id]", "/u/[apelido]"]
+		},
+		{
+			"id": "instrument-heavy",
+			"targetBytes": 160000,
+			"goalBytes": 150000,
+			"routes": ["/", "/soe-como-x", "/comparar", "/comunidade"]
+		}
+	]
+}

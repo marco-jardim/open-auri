@@ -32,7 +32,12 @@
 
 <nav class="main-nav" aria-label={label}>
 	{#each links as item (item.href)}
-		<a href={item.href} aria-current={pathname === item.href ? 'page' : undefined}>
+		<!-- W1 (FUX.2): route code on hover, focus or touch start; data stays per <body>. -->
+		<a
+			href={item.href}
+			data-sveltekit-preload-code="hover"
+			aria-current={pathname === item.href ? 'page' : undefined}
+		>
 			{item.label}
 		</a>
 	{/each}

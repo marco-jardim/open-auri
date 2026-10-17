@@ -87,13 +87,14 @@ test('opens and closes the idle popover without starting audio, and unsubscribes
 	vi.mocked(getAudioEngine).mockReturnValue(fake.engine);
 	const screen = await render(AudioLoader);
 	const trigger = page.getByRole('button', { name: m.audio_button_aria({ name: m.audio_none() }) });
-	const dialog = screen.container.querySelector<HTMLDivElement>('[role="dialog"]')!;
-	expect(dialog.hidden).toBe(true);
-	expect(getAudioEngine).toHaveBeenCalledOnce();
+	// FUX.2: the panel is its own chunk; none of it is in the DOM before the first interaction.
+	expect(screen.container.querySelector('[role="dialog"]')).toBeNull();
+	await expect.poll(() => vi.mocked(getAudioEngine).mock.calls.length).toBe(1);
 	expect(fake.engine.start).not.toHaveBeenCalled();
 	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 	await trigger.click();
 	await expect.element(page.getByRole('dialog')).toBeVisible();
+	const dialog = screen.container.querySelector<HTMLDivElement>('[role="dialog"]')!;
 	await expect.element(trigger).toHaveAttribute('aria-expanded', 'true');
 	await expect
 		.element(page.getByRole('button', { name: m.audio_play(), exact: true }))
@@ -123,6 +124,7 @@ test('file picking resets the input, ignores cancellation and reports both typed
 	const fake = audioUi();
 	const screen = await render(AudioLoader, { engine: fake.engine });
 	await page.getByRole('button').click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
 	const input = screen.container.querySelector<HTMLInputElement>('input[type="file"]')!;
 	input.dispatchEvent(new Event('change', { bubbles: true }));
 	expect(fake.engine.loadFile).not.toHaveBeenCalled();
@@ -154,6 +156,7 @@ test('drag/drop highlights only during a drag, ignores empty drops and detaches 
 	const fake = audioUi();
 	const screen = await render(AudioLoader, { engine: fake.engine });
 	await page.getByRole('button').click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
 	const zone = screen.container.querySelector<HTMLDivElement>('.oa-audio-drop')!;
 	const over = new DragEvent('dragover', { cancelable: true });
 	zone.dispatchEvent(over);
@@ -184,6 +187,7 @@ test('metadata, rate, volume and persistence follow engine updates; playback and
 	const fake = audioUi({ file: fileInfo, persisted: false });
 	const screen = await render(AudioLoader, { engine: fake.engine });
 	await page.getByRole('button', { name: m.audio_button_aria({ name: fileInfo.name }) }).click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
 	const meta = screen.container.querySelector('.oa-audio-meta')!;
 	expect(meta.textContent).toContain('Reference.wav');
 	expect(meta.textContent).toContain('1:05');
@@ -254,7 +258,37 @@ test('without a store (and without the app context) the selector is not rendered
 	const fake = audioUi();
 	await render(AudioLoader, { engine: fake.engine });
 	await page.getByRole('button').click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
 	expect(page.getByRole('group', { name: m.meters_vu_reference() }).elements()).toHaveLength(0);
+});
+
+test('hover or focus warms the panel chunk without opening it; a press on Play warms audio, never plays', async () => {
+	const fake = audioUi({ file: fileInfo });
+	const addModule = vi.fn<(url: string | URL) => Promise<void>>().mockResolvedValue(undefined);
+	const resume = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+	const context = { state: 'running', resume, audioWorklet: { addModule } };
+	const getContext = vi.fn(() => context as unknown as AudioContext);
+	fake.engine.getContext = getContext;
+	const screen = await render(AudioLoader, { engine: fake.engine });
+	const trigger = page.getByRole('button', { name: m.audio_button_aria({ name: fileInfo.name }) });
+	await expect.element(trigger).not.toHaveAttribute('aria-controls');
+	await trigger.hover();
+	await expect.poll(() => screen.container.querySelector('[role="dialog"]')).not.toBeNull();
+	const dialog = screen.container.querySelector<HTMLDivElement>('[role="dialog"]')!;
+	expect(dialog.hidden).toBe(true);
+	await expect.element(trigger).toHaveAttribute('aria-controls', dialog.id);
+	await expect.element(trigger).toHaveAttribute('aria-expanded', 'false');
+	await trigger.click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	const play = page.getByRole('button', { name: m.audio_play(), exact: true });
+	play.element().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+	await expect.poll(() => addModule.mock.calls.length).toBe(1);
+	expect(getContext).toHaveBeenCalled();
+	expect(resume).not.toHaveBeenCalled();
+	// Warm-up only prepares the context and the worklet: nothing starts before the click.
+	expect(fake.engine.start).not.toHaveBeenCalled();
+	await play.click();
+	expect(fake.engine.start).toHaveBeenCalledExactlyOnceWith('raw');
 });
 
 const errors: [AudioErrorCode, () => string][] = [
