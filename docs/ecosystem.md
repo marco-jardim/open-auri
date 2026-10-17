@@ -4,7 +4,7 @@ O mesmo chipset (VID `0x3302`) tem um **wire format irmão**, o `0x4B`, que é
 **bem documentado** em projetos abertos. O nosso `0xCB` não. Este documento
 registra os dois e o que dá para reusar de cada um.
 
-## `0x4B` × `0xCB` — comparação
+## `0x4B` × `0xCB`: comparação
 
 | | **`0x4B`** (padrão documentado) | **`0xCB`** (o do cabo analisado) |
 |---|---|---|
@@ -14,7 +14,7 @@ registra os dois e o que dá para reusar de cada um.
 | Fatiamento | **1 pacote por banda** | **bloco de 10 bandas** em 9 pacotes |
 | Escala dos coeficientes | **Q30** (`2^30`) ⇒ \|coef\| < 2 | **Q27** (`2^27`) ⇒ \|coef\| < 16 |
 | Ordem dos coeficientes | `[b0, b1, b2, -a1, -a2]` | `[b0, b2, -a1, b1, -a2]` |
-| Byte de tipo de filtro | **sim** (`LSQ=1, PK=2, HSQ=3, LP=4, HP=5`), mais `f`, `Q` e ganho no pacote | **não** — só coeficientes |
+| Byte de tipo de filtro | **sim** (`LSQ=1, PK=2, HSQ=3, LP=4, HP=5`), mais `f`, `Q` e ganho no pacote | **não**, só coeficientes |
 | CRC | não | **CRC16-CCITT** |
 | Leitura (*read*) | documentada (`0x80`) | **desconhecida** |
 | Gravação só na RAM | `TEMP_WRITE` (`0x0A`) | desconhecida |
@@ -23,20 +23,20 @@ registra os dois e o que dá para reusar de cada um.
 | **Confiança** | ✅ (código aberto) | ✅ (formato) / ❌ (device) |
 
 Consequência de projeto: um `core` agnóstico + **camada de protocolo plugável**
-com duas implementações (`0xCB`, `0x4B`) — porque **não sabemos** qual o cabo usa
+com duas implementações (`0xCB`, `0x4B`), porque **não sabemos** qual o cabo usa
 até plugá-lo. As duas coincidências na tabela (report ID e slot `101`) sugerem
 um SDK comum; o cabo pode expor **os dois** reports (sonda B1).
 
 **Faixa dos coeficientes.** Em Q30 nenhum coeficiente chega a 2: reforços
 grandes em frequências altas não cabem, e as ferramentas `0x4B` fazem *clamp*
-silencioso (`clamp_i32` no frost-tune) — o filtro gravado deixa de ser o
+silencioso (`clamp_i32` no frost-tune), de modo que o filtro gravado deixa de ser o
 projetado. O Q27 do `0xCB` dá 8× mais margem.
 
 **Projeto dos coeficientes no `0x4B`.** O `eqloader` comenta que calcula
 *"always a peaking design, whatever the band's type, matching the vendor tool"*.
 Como o pacote também leva `f`, `Q`, ganho e tipo, é provável que o firmware
 `0x4B` recalcule os coeficientes a partir dos parâmetros. No `0xCB` isso é
-impossível — só os coeficientes viajam.
+impossível: só os coeficientes viajam.
 
 ## Comandos do `0x4B` (referência)
 
@@ -69,14 +69,14 @@ têm um **buffer de hardware** (ex.: `-5 dB` no CrinEar Protocol Micro) somado a
 | [`jeromeof/devicePEQ`](https://github.com/jeromeof/devicePEQ) | Plugin JS WebHID multi-marca (`walkplayJS/`). | `0x4B` | possui `LICENSE.txt` (conteúdo não verificado) |
 | [`mandy321/Audiocular-Aura`](https://github.com/mandy321/Audiocular-Aura) | Web app WebHID; `dist/assets/index.js` traz implementação multi-protocolo + tabela de VID/PID. | `0x4B` (+ outros) | não verificado |
 | [`cheesyserg/pyBlackPearl`](https://github.com/cheesyserg/pyBlackPearl) | Scripts de query (TRN Black Pearl). | `0x4B` | não verificado |
-| [`eq.hangout.audio`](https://eq.hangout.audio) (Crinacle's EQ Tool) | **Só a matemática** (`shared/equalizer.js`): biquads RBJ, otimizador AutoEQ, graphic EQ. `DefaultSampleRate = 48000`. | — | site proprietário |
+| [`eq.hangout.audio`](https://eq.hangout.audio) (Crinacle's EQ Tool) | **Só a matemática** (`shared/equalizer.js`): biquads RBJ, otimizador AutoEQ, graphic EQ. `DefaultSampleRate = 48000`. | nenhum | site proprietário |
 
 > **Licença é bloqueador.** Antes de copiar código: `eqloader` **não tem licença**
 > e o `equalizer.js` é de um site proprietário. Algoritmos e fórmulas (RBJ,
 > AutoEQ) não são protegidos por direito autoral; **implementações** são. O
 > próprio `equalizer.js` declara que tirou os biquads do
 > [`AutoEq`](https://github.com/jaakkopasanen/AutoEq), que é **MIT** (verificado
-> em 2026-10-15) — e é de onde o codec do `open-auri` porta o projeto de PK, LS e
+> em 2026-10-15), e é de onde o codec do `open-auri` porta o projeto de PK, LS e
 > HS, com o aviso em [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md). A
 > fórmula de magnitude do AutoEq não foi portada: é 35× menos precisa em baixa
 > frequência ([`protocol-0xcb.md`](protocol-0xcb.md#design-dos-biquads-rbj)). O
@@ -112,5 +112,5 @@ Bom candidato a formato de import/export por ser interoperável.
 
 O codec só aceita `PK`, `LS`, `HS`, `LP`, `HP` e `OFF`, e recusa qualquer outro
 nome. Um importador precisa mapear `LSC`/`LSQ` → `LS` e `HSC`/`HSQ` → `HS`
-explicitamente — antes, o codec transformava silenciosamente um shelf
+explicitamente. Antes, o codec transformava silenciosamente um shelf
 desconhecido em peaking.

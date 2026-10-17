@@ -11,7 +11,7 @@ Não coloque valores reais neste arquivo: o repositório é público.
 
 # Política de Privacidade do open-auri
 
-**Versão:** 2026-10-16 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
+**Versão:** 2026-10-17 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
 
 Esta é a versão oficial da política. A tradução em inglês (`privacy-policy.en-US.md`) serve apenas como apoio. Em caso de diferença, vale este texto em português.
 
@@ -148,6 +148,7 @@ No teste cego, você pode, se quiser, enviar suas preferências para formar o re
 - Como toda requisição ao servidor, o envio gera um registro de acesso (seção 11) com IP, data, hora e o tipo de requisição. Esse registro não contém o conteúdo do lote nem o recibo, e o lote é gravado com atraso aleatório para dificultar o cruzamento.
 - Um **recibo aleatório** fica guardado só no seu aparelho. No servidor fica apenas um hash dele. Com o recibo você retira o consentimento e apaga seu lote.
 - Como não sabemos quem você é, **sem o recibo não conseguimos localizar seu lote**.
+- **Prazo máximo de 24 meses:** mesmo sem a retirada, o lote e seus pares são apagados automaticamente quando completam 24 meses do dia do envio.
 - Os resultados agregados (Bradley–Terry) são anônimos e publicados.
 
 O envio é protegido por Turnstile e por limite de taxa com hash do IP. Esse hash não fica no lote.
@@ -221,7 +222,7 @@ O armazenamento local do navegador está descrito na seção 2. O app também gu
 
 | Operador | O que faz |
 |---|---|
-| **Cloudflare, Inc.** | Hospedagem e processamento (Workers, banco D1, armazenamento R2, KV e filas), registros de acesso cifrados, limite de taxa, Turnstile, registros da plataforma e controle de acesso da administração (Cloudflare Access) |
+| **Cloudflare, Inc.** | Hospedagem e processamento (Workers, banco D1, armazenamento R2, KV e filas), registros de acesso cifrados, limite de taxa, Turnstile, registros da plataforma e, se for ativada, uma camada opcional de controle de acesso à administração (Cloudflare Access) |
 | **Resend** | Envio dos e-mails transacionais e avisos de bounce e reclamação |
 
 Esses fornecedores processam dados nos Estados Unidos e em outros países onde operam. Essa **transferência internacional** (LGPD, art. 33) se apoia nas cláusulas-padrão contratuais aprovadas pela Resolução CD/ANPD nº 19/2024 e nos acordos de tratamento de dados (DPAs) dos fornecedores.
@@ -240,7 +241,7 @@ Não vendemos nem alugamos dados. Só compartilhamos dados com esses operadores,
 | Curvas, versões, forks, packs e compartilhamentos | Até você apagar ou retirar, ou até o encerramento da conta (veja a seção 17) |
 | Atividade e favoritos | Até você apagar ou encerrar a conta |
 | Trocas às cegas (S7) | Não pareadas: expiram em 72 horas. Concluídas: até o encerramento da conta. As médias por curva não identificam ninguém |
-| Teste cego anônimo (S6) | Até você retirar o consentimento com o recibo. Resultados agregados são anônimos e permanecem |
+| Teste cego anônimo (S6) | Até você retirar o consentimento com o recibo, por no máximo 24 meses: depois disso, o lote e seus pares são apagados automaticamente. Resultados agregados são anônimos, continuam publicados e passam a refletir os lotes dos últimos 24 meses |
 | Denúncias | Enquanto sua conta existir. No encerramento, o vínculo com você é apagado |
 | Pedidos enviados a {{PUBLIC_LGPD_CONTACT_EMAIL}} e nossas respostas | 5 anos após a resposta, para comprovar que atendemos o pedido |
 | Registro de auditoria da moderação e dos acessos aos registros de acesso | 5 anos. Esse prazo acompanha o prazo de 5 anos para ações de reparação do Código de Defesa do Consumidor (art. 27) e permite defender decisões de moderação em eventuais processos |
@@ -249,7 +250,7 @@ Não vendemos nem alugamos dados. Só compartilhamos dados com esses operadores,
 | Hash do e-mail na lista de supressão | Até 12 meses após o último bounce ou reclamação |
 | Registros da plataforma Cloudflare | Conforme a retenção definida pela Cloudflare |
 | Cópias de segurança (backups) | Até 12 semanas. Dados apagados podem permanecer nos backups por até 12 semanas, sem uso, até serem sobrescritos |
-| Dump público semanal | Contém só dados públicos: curvas públicas, versões, licenças, o apelido creditado e números agregados. Não contém e-mail, atividade individual, hashes, IPs nem outros dados de conta |
+| Dump público semanal | Publicado só pelo endereço `{{PUBLIC_ORIGIN}}/dados/dump/latest.json.gz` e pelas edições datadas em `{{PUBLIC_ORIGIN}}/dados/dump/AAAA-MM-DD.json.gz`. O armazenamento onde os arquivos ficam não é público. Cada novo dump reflete exclusões e anonimizações. Contém só dados públicos: curvas públicas, versões, licenças, o apelido creditado e números agregados. Não contém e-mail, atividade individual, hashes, IPs nem outros dados de conta |
 
 ## 16. Seus direitos e como exercer
 
@@ -307,7 +308,7 @@ Contas são para pessoas com **18 anos ou mais**. O uso anônimo, que fica todo 
 - respostas iguais para e-mail cadastrado ou não, para dificultar a descoberta de contas;
 - Turnstile e limite de taxa, com hash de IP de curta duração;
 - registros de acesso cifrados em repouso (AES-GCM), com acesso restrito e auditado;
-- administração protegida por dupla checagem (papel de administrador e Cloudflare Access) e autenticação em dois fatores, com registro de auditoria;
+- administração restrita a contas com papel de administrador e autenticação em dois fatores obrigatória, com nova autenticação recente exigida para ações destrutivas e registro de auditoria (o Cloudflare Access pode ser ativado como camada extra opcional);
 - registros operacionais da aplicação sem dados pessoais;
 - coleta mínima: o áudio e o diário de gravações ficam no seu aparelho;
 - backups semanais com prazo de retenção limitado.

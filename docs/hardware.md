@@ -1,4 +1,4 @@
-# Hardware — fabricante do chip e identificação
+# Hardware: fabricante do chip e identificação
 
 ## Resumo
 
@@ -14,18 +14,18 @@ que estamos tratando, esse bridge é o **CB5100**, atribuído pela comunidade à
 | Integrador do módulo / dono do app *WalkPlay* | **Shenzhen TTGK Technology (通通高科)**, Shenzhen, desde 2014 | ✅ |
 | DAC decodificador (a jusante) | Cirrus Logic **CS43131** / **CS43198** (comum); AKM **AK4493S** | ✅ |
 
-O DAC decodificador **não** é onde o PEQ é aplicado — por isso ele varia entre
+O DAC decodificador **não** é onde o PEQ é aplicado. Por isso ele varia entre
 produtos sem afetar o protocolo.
 
 ## VID / PID
 
 | ID | Valor | Observação | Confiança |
 |---|---|---|---|
-| VID do produto analisado | `0x3302` | "Walkplay" — VID compartilhado por vários dongles | ✅ |
+| VID do produto analisado | `0x3302` | "Walkplay": VID compartilhado por vários dongles | ✅ |
 | PID do produto analisado | `0x8902` | string USB "USB DSP Audio" | ✅ |
 | VID registrado da Savitech | `0x262A` | aparece no `usb.ids` | ✅ |
 | PID do TRN Black Pearl | `0x43E8` (VID `0x3302`) | mesmo chipset CB5100 + CS43131 | ✅ |
-| Registrante do `0x3302` | — | **não confirmado** em nenhuma lista pública | 🟡 |
+| Registrante do `0x3302` | (desconhecido) | **não confirmado** em nenhuma lista pública | 🟡 |
 
 O `0x3302` **não** é o VID registrado da Savitech (`0x262A`); é um VID
 compartilhado pela família Walkplay. Quem o registrou não foi identificado.
@@ -39,7 +39,7 @@ O PID `0x8902` não aparece em nenhuma tabela pública de dispositivos.
 > secundária**: a tabela do AuraPEQ (projeto de hobby). Outros projetos falam em
 > "Walkplay/Savitech" para o protocolo, não para o chip. O indício a favor é
 > indireto: o Fosi DS2, que o AuraPEQ chama de "CB5100 series", enumera com o
-> VID registrado da Savitech (`0x262A`) — e essa informação também vem do
+> VID registrado da Savitech (`0x262A`), e essa informação também vem do
 > AuraPEQ. Confirmação real: foto da marcação do chip, ou a imagem de firmware (A2).
 
 ### 1. Datasheets de módulo da TTGK (públicos)
@@ -71,8 +71,8 @@ O bundle do projeto `mandy321/Audiocular-Aura` embute a identificação:
 
 ### 3. Specs de venda de produtos com o mesmo chip
 
-- **TRN Black Pearl** — "CB5100 USB audio bridge chip … inner DSP chip supports **8 bands PEQ** through the **Walk Play app**".
-- **Keysion KSHF-02 Pro** — "**CB5100 Pro** … 10-segment EQ, **five filter modes**, WALK PLAY APP EQ linkage".
+- **TRN Black Pearl:** "CB5100 USB audio bridge chip … inner DSP chip supports **8 bands PEQ** through the **Walk Play app**".
+- **Keysion KSHF-02 Pro:** "**CB5100 Pro** … 10-segment EQ, **five filter modes**, WALK PLAY APP EQ linkage".
 
 ## Precisão de preamp
 
@@ -85,7 +85,7 @@ Moondrop/FiiO. ✅ Fonte: `dist/assets/index.js` do AuraPEQ (`n === "SAVITECH" ?
 - O AuraPEQ afirma que o DSP executa "RBJ cookbook filters (Peak, Low Shelf,
   High Shelf, and Notch)". ✅ (do README do projeto)
 
-## FCC — beco sem saída
+## FCC: beco sem saída
 
 **Não** há FCC ID esperado para um cabo/dongle DAC USB **sem rádio** (FCC cobre
 emissor intencional). Nenhum arquivamento relacionado foi encontrado para
@@ -98,7 +98,7 @@ Savitech, TTGK ou o chip CB5100, e não deveria existir. ✅ (busca 2026-10-14/1
 Para tentar FCC seria preciso o **modelo/marca exato** do cabo e, ainda assim,
 só valeria se houvesse versão com Bluetooth.
 
-## Datasheets públicas — o que existe e o que não existe
+## Datasheets públicas: o que existe e o que não existe
 
 | Existe público | Não existe público |
 |---|---|
@@ -108,7 +108,7 @@ só valeria se houvesse versão com Bluetooth.
 
 A Savitech é notoriamente fechada; o guia de programação é **gated por NDA**
 (relato da comunidade: *"requires NDA to get FW USB programming app"*).
-Consequência: **a especificação do protocolo não sai de datasheet** — sai de
+Consequência: **a especificação do protocolo não sai de datasheet**, sai de
 engenharia reversa.
 
 ## O que ainda falta para confirmar o hardware do cabo

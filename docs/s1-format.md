@@ -122,7 +122,7 @@ Uma curva tem **um único** código S1, e um código válido tem uma única curv
 5. **Pré-amp 0** volta como `0`, nunca como `-0`.
 6. **Ordem do fio preservada:** as bandas não são ordenadas. O pico interno da
    cadeia depende da ordem (ver
-   [`protocol-0xcb.md`](protocol-0xcb.md#ordenação-das-bandas--cortes-antes-dos-reforços)),
+   [`protocol-0xcb.md`](protocol-0xcb.md#ordenação-das-bandas-cortes-antes-dos-reforços)),
    então duas ordens diferentes são dois códigos diferentes.
 
 ## Códigos de erro

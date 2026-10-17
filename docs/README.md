@@ -1,11 +1,11 @@
-# Documentação — open-auri
+# Documentação: open-auri
 
 Notas de engenharia reversa do firmware **`0xCB`** da família de chips **CB5100**
 (bridge USB de áudio do ecossistema *Walkplay*, atribuído à Savitech).
 
 Todo o conteúdo aqui é rastreável a uma fonte primária: código que funciona,
 código aberto de terceiros, ou um documento de fabricante. O que não tem fonte
-está marcado como hipótese ou pendência — não como fato.
+está marcado como hipótese ou pendência, não como fato.
 
 ## Legenda de confiança
 
@@ -32,7 +32,7 @@ está marcado como hipótese ou pendência — não como fato.
 | [`ideas.md`](ideas.md) | Usos previstos, excêntricos e não previstos abertos pelo protocolo. |
 | [`social.md`](social.md) | Camada social: formato compacto, proveniência, versionamento, hospedagem. |
 | [`probing.md`](probing.md) | Plano técnico: sondagem do firmware, testes cegos, otimizações de qualidade. |
-| [`open-questions.md`](open-questions.md) | O que está confirmado, o que é hipótese, o que falta — e a errata. |
+| [`open-questions.md`](open-questions.md) | O que está confirmado, o que é hipótese, o que falta, e a errata. |
 
 ## Produto web e operação
 
@@ -128,11 +128,11 @@ reexporte, cada nome aparece uma única vez no índice da área.
 - **Presets e implementação de referência:** [Kuba](https://equalizador.kuba.audio/)
   (`kuba.audio`). A própria página credita a curva padrão a **Leonardo**
   ("Padrão = filtros do Leonardo"). Os bytes de referência em
-  `test/fixtures/` derivam dessa implementação — ver
-  [`verification.md`](verification.md). O codec implementa o layout de bytes
+  `test/fixtures/` derivam dessa implementação (ver
+  [`verification.md`](verification.md)). O codec implementa o layout de bytes
   aprendido dessa referência, sem código nem nomes dela.
 - **Projeto dos filtros PK/LS/HS:** porte do [AutoEq](https://github.com/jaakkopasanen/AutoEq)
-  (MIT, Jaakko Pasanen) — ver [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
+  (MIT, Jaakko Pasanen); ver [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
 - **Fórmulas dos filtros:** Robert Bristow-Johnson, *Audio EQ Cookbook*.
 
 ## Resumo executivo
@@ -142,8 +142,8 @@ reexporte, cada nome aparece uma única vez no índice da área.
   atribuído à **Savitech** por uma única fonte secundária. 🟡
 - O cabo analisado enumera como VID `0x3302` / PID `0x8902` ("USB DSP Audio"). ✅
 - Existem **dois wire formats** na mesma família de VID:
-  - **`0x4B`** — padrão documentado em vários projetos abertos (Q30, byte de tipo de filtro, leitura). ✅
-  - **`0xCB`** — o do cabo analisado ("EQ1#", Q27, CRC16, bloco de 10 bandas, leitura desconhecida). ✅ (formato) / ❌ (device)
+  - **`0x4B`:** padrão documentado em vários projetos abertos (Q30, byte de tipo de filtro, leitura). ✅
+  - **`0xCB`:** o do cabo analisado ("EQ1#", Q27, CRC16, bloco de 10 bandas, leitura desconhecida). ✅ (formato) / ❌ (device)
   - Os dois parecem vir do mesmo SDK (`0xCB = 0x4B | 0x80`; slot `101` nos dois). 🟡
 - Entre os projetos abertos pesquisados, nenhum descreve o `0xCB`; a única fonte é
   a própria página do kuba. ✅

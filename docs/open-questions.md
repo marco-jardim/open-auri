@@ -1,6 +1,6 @@
 # Status: confirmado, hipótese e pendente
 
-> Nada no caminho de dispositivo foi validado em hardware — **não havia cabo
+> Nada no caminho de dispositivo foi validado em hardware: **não havia cabo
 > disponível** nas sessões que produziram esta documentação.
 
 ## Confirmado ✅
@@ -46,7 +46,7 @@
 | Pendência | Por quê |
 |---|---|
 | Confirmar que o firmware é o `0xCB` (e não o `0x4B`, ou ambos) | não sabemos o firmware do produto |
-| **Existência de leitura** no `0xCB` (pull/verify/rollback) | desconhecida — a página nunca lê; nenhum projeto aberto documenta |
+| **Existência de leitura** no `0xCB` (pull/verify/rollback) | desconhecida: a página nunca lê; nenhum projeto aberto documenta |
 | Significado dos bytes 6 e 12–13 do header | sem padrão aparente |
 | Se o firmware **valida** o CRC | B7 |
 | Se existe modo **só-RAM** (sem gravar na flash) | B12 |
@@ -62,7 +62,7 @@ Plano de sondagem para fechar cada linha, com prioridade e receita: [`probing.md
 O bundle do kuba usa `0xCB` / `"EQ1#"` / Q27 / CRC16, que **não bate** com o
 `0x4B` / Q30 / comando documentado da família. Duas coincidências (report ID
 `0x4B | 0x80` e o slot `0x65 = 101` no commit) sugerem que os dois saem do mesmo
-SDK — o `0xCB` pode ser um canal de baixo nível (bloco de coeficientes crus) ao
+SDK: o `0xCB` pode ser um canal de baixo nível (bloco de coeficientes crus) ao
 lado do protocolo por comandos. Não resolvido. ✅ (o fato de divergir) / 🟡 (o
 parentesco) / ❌ (a causa)
 
@@ -71,8 +71,8 @@ parentesco) / ❌ (a causa)
 1. **Core agnóstico de device** + camada de protocolo plugável com duas
    implementações: `0xCB` (do bundle) e `0x4B` (dos projetos abertos).
 2. **Dummy device** (ideia do `glacier-eq`) para desenvolver tudo sem cabo.
-3. **Teste de equivalência de payload** ✅ **feito** — ver [`verification.md`](verification.md).
-4. **Validação antes da flash** ✅ **feita no codec** — nada nocivo chega ao `encodePayload()`.
+3. **Teste de equivalência de payload** ✅ **feito**: ver [`verification.md`](verification.md).
+4. **Validação antes da flash** ✅ **feita no codec**: nada nocivo chega ao `encodePayload()`.
 5. **Console de pacotes TX/RX** para quando o cabo chegar.
 6. Formato de arquivo `.txt` (EqualizerAPO / eq.hangout.audio) para import/export,
    com mapeamento **explícito** de `LSQ`/`HSQ`.
@@ -88,7 +88,7 @@ parentesco) / ❌ (a causa)
 - **Desgaste da flash.** Cada commit grava; o teste cego e a gravação em lote
   multiplicam as gravações. Achar o modo só-RAM (B12) vem antes de usar X2/X9 em
   escala.
-- **Licenças.** `eqloader` sem licença e `equalizer.js` proprietário — nada deles
+- **Licenças.** `eqloader` sem licença e `equalizer.js` proprietário: nada deles
   foi usado. O codec porta o projeto de PK/LS/HS do AutoEq (**MIT**, aviso em
   `THIRD_PARTY_NOTICES.md`) e não contém código nem nomes da referência do kuba.
 
@@ -114,10 +114,10 @@ Correções da revisão de 2026-10-15. O texto antigo estava errado ou superesti
 | `probing.md` D9 | `FS` como "item nº 1" 🚨 | urgência rebaixada (3 fontes) | eqloader, frost-tune |
 | `hardware.md` | fabricante Savitech ✅ | 🟡, fonte única secundária | busca 2026-10-15 |
 | `ideas.md` | "sem leitura" ✅ e "sem L/R" ✅ | leitura desconhecida ❌; L/R 🟡 | header |
-| `ideas.md` X3 | pré-escuta "bit-exata" | com coeficientes exatos (aritmética interna desconhecida) | — |
-| `social.md` S1 | `f` inteiro "como a referência grava"; 46 B | o `0xCB` não guarda `f`; 48 B com discriminador e CRC-8 | — |
-| `social.md` S6 | agregação "anônima" via GitHub | pseudônima e pública; anônima exige servidor | — |
-| `verification.md` | CRC como "único" teste independente | 7 verificações independentes | — |
+| `ideas.md` X3 | pré-escuta "bit-exata" | com coeficientes exatos (aritmética interna desconhecida) | não se aplica |
+| `social.md` S1 | `f` inteiro "como a referência grava"; 46 B | o `0xCB` não guarda `f`; 48 B com discriminador e CRC-8 | não se aplica |
+| `social.md` S6 | agregação "anônima" via GitHub | pseudônima e pública; anônima exige servidor | não se aplica |
+| `verification.md` | CRC como "único" teste independente | 7 verificações independentes | não se aplica |
 
 ## Fontes
 

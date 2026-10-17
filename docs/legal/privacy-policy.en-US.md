@@ -11,7 +11,7 @@ Do not put real values in this file: the repository is public.
 
 # open-auri Privacy Policy
 
-**Version:** 2026-10-16 · **Effective date:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Address:** {{PUBLIC_ORIGIN}}/privacidade
+**Version:** 2026-10-17 · **Effective date:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Address:** {{PUBLIC_ORIGIN}}/privacidade
 
 This is an English translation provided for convenience. The authoritative version is the Brazilian Portuguese text (`politica-de-privacidade.md`). **If the two versions differ, the pt-BR version prevails.**
 
@@ -148,6 +148,7 @@ In the blind test you may, if you want, submit your preferences to build the "Co
 - Like every request to the server, the submission generates an access record (section 11) with IP, date, time and the request type. That record does not contain the batch content or the receipt, and the batch is stored with a random delay to make cross-referencing harder.
 - A **random receipt** is kept only on your device. The server keeps only a hash of it. With the receipt you can withdraw consent and delete your batch.
 - Since we do not know who you are, **without the receipt we cannot find your batch**.
+- **Maximum period of 24 months:** even without withdrawal, the batch and its pairs are deleted automatically once they are 24 months past the submission day.
 - Aggregated results (Bradley–Terry) are anonymous and published.
 
 Submission is protected by Turnstile and by rate limiting using a hash of the IP. That hash is not stored in the batch.
@@ -221,7 +222,7 @@ Browser local storage is described in section 2. The app also keeps a copy of it
 
 | Processor | What it does |
 |---|---|
-| **Cloudflare, Inc.** | Hosting and processing (Workers, D1 database, R2 storage, KV and queues), encrypted access records, rate limiting, Turnstile, platform logs and access control for administration (Cloudflare Access) |
+| **Cloudflare, Inc.** | Hosting and processing (Workers, D1 database, R2 storage, KV and queues), encrypted access records, rate limiting, Turnstile, platform logs and, if enabled, an optional access-control layer for administration (Cloudflare Access) |
 | **Resend** | Sending transactional emails and bounce and complaint notices |
 
 These providers process data in the United States and other countries where they operate. This **international transfer** (LGPD, art. 33) relies on the standard contractual clauses approved by Resolution CD/ANPD No. 19/2024 and on the providers' data processing agreements (DPAs).
@@ -240,7 +241,7 @@ We do not sell or rent data. We only share data with these processors, for the p
 | Curves, versions, forks, packs and shares | Until you delete or withdraw them, or until the account is closed (see section 17) |
 | Activity and favorites | Until you delete them or close the account |
 | Blind trades (S7) | Unpaired: expire after 72 hours. Completed: until the account is closed. Per-curve averages identify no one |
-| Anonymous blind test (S6) | Until you withdraw consent with the receipt. Aggregated results are anonymous and remain |
+| Anonymous blind test (S6) | Until you withdraw consent with the receipt, for at most 24 months: after that, the batch and its pairs are deleted automatically. Aggregated results are anonymous, stay published and come to reflect the batches of the last 24 months |
 | Reports | While your account exists. On closure, the link to you is deleted |
 | Requests sent to {{PUBLIC_LGPD_CONTACT_EMAIL}} and our replies | 5 years after the reply, to prove we handled the request |
 | Audit log of moderation and of accesses to the access records | 5 years. This matches the 5-year limitation period for damages claims under the Brazilian Consumer Protection Code (art. 27) and allows us to defend moderation decisions in any proceedings |
@@ -249,7 +250,7 @@ We do not sell or rent data. We only share data with these processors, for the p
 | Email hash in the suppression list | Up to 12 months after the last bounce or complaint |
 | Cloudflare platform logs | According to the retention set by Cloudflare |
 | Backups | Up to 12 weeks. Deleted data may remain in backups for up to 12 weeks, unused, until overwritten |
-| Weekly public dump | Contains only public data: public curves, versions, licences, the credited nickname and aggregate numbers. It contains no email, individual activity, hashes, IP addresses or other account data |
+| Weekly public dump | Published only at `{{PUBLIC_ORIGIN}}/dados/dump/latest.json.gz` and as dated editions at `{{PUBLIC_ORIGIN}}/dados/dump/YYYY-MM-DD.json.gz`. The storage holding the files is not public. Each new dump reflects deletions and anonymizations. Contains only public data: public curves, versions, licences, the credited nickname and aggregate numbers. It contains no email, individual activity, hashes, IP addresses or other account data |
 
 ## 16. Your rights and how to exercise them
 
@@ -307,7 +308,7 @@ Accounts are for people aged **18 or over**. Anonymous use, which stays entirely
 - identical responses whether or not an email is registered, to make account discovery harder;
 - Turnstile and rate limiting, with a short-lived IP hash;
 - access records encrypted at rest (AES-GCM), with restricted and audited access;
-- administration protected by a double check (admin role and Cloudflare Access) and two-factor authentication, with an audit log;
+- administration restricted to accounts with the admin role and mandatory two-factor authentication, with a recent re-authentication required for destructive actions and an audit log (Cloudflare Access may be enabled as an optional extra layer);
 - operational application logs without personal data;
 - minimal collection: audio and the write journal stay on your device;
 - weekly backups with limited retention.

@@ -178,7 +178,7 @@ ganho), o que torna diff, hash e comparação determinísticos de graça.
 
 **Mas essa ordem nunca vai para o cabo.** O **pico interno** da cadeia depende da
 ordem, e a referência ordena **cortes antes dos reforços** de propósito. Medido
-nos 11 presets ([`protocol-0xcb.md`](protocol-0xcb.md#ordenação-das-bandas--cortes-antes-dos-reforços)):
+nos 11 presets ([`protocol-0xcb.md`](protocol-0xcb.md#ordenação-das-bandas-cortes-antes-dos-reforços)):
 
 | Ordem | Pior pico interno | Presets acima de 0 dBFS |
 |---|---|---|
