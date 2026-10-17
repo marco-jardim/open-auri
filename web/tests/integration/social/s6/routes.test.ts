@@ -491,9 +491,22 @@ describe('aggregation bounds (FX4.7)', () => {
 });
 
 describe('GET /api/v1/s6/preferences', () => {
-	it('404 before the first run; then the R2 JSON with CACHE_PUBLIC_60 and a strong ETag', async () => {
+	it('an empty document before the first run; then the R2 JSON with CACHE_PUBLIC_60 and a strong ETag', async () => {
 		await env.MEDIA.delete(S6_PREFERENCES_KEY);
-		await expectErrorResponse(await getPreferences(), 404, 'NOT_FOUND');
+		const empty = await getPreferences();
+		expect(empty.status).toBe(200);
+		expect(empty.headers.get('cache-control')).toBe(CACHE_PUBLIC_60);
+		expect(empty.headers.get('content-type')).toContain('application/json');
+		const emptyEtag = empty.headers.get('etag');
+		expect(emptyEtag).toMatch(/^"/);
+		expect(await empty.json()).toEqual({
+			generatedAt: null,
+			consentVersion: S6_CONSENT_VERSION,
+			items: [],
+			pairs: 0,
+			converged: true
+		});
+		expect((await getPreferences({ 'if-none-match': emptyEtag ?? '' })).status).toBe(304);
 
 		const body = JSON.stringify({
 			generatedAt: '2026-10-16T00:05:00.000Z',

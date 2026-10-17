@@ -28,14 +28,14 @@
 2. Abra o conteúdo denunciado pelo link do item e avalie contra os termos (`/termos`).
 3. Escolha a ação no item, preencha o campo de motivo (texto curto, sem dados pessoais) e confirme:
 
-   | Botão | Efeito | Quando |
-   |---|---|---|
-   | Dispensar denúncias | Fecha as denúncias; o conteúdo continua como está | Denúncia improcedente |
-   | Restaurar | Volta para `visible` | Ocultação automática improcedente (revisão do art. 20) |
-   | Ocultar | `hidden`: some das listas e das páginas públicas, o autor ainda vê | Violação leve ou dúvida que precisa de contato |
-   | Retirar | `removed`: retirada definitiva da exibição | Violação clara dos termos ou conteúdo ilícito |
-   | Marcar curadoria / Tirar curadoria | Destaque editorial | Fora do fluxo de denúncia |
-   | Banir autor | Bane a conta pelo prazo escolhido em "Duração do banimento" | Abuso reiterado, spam, contas de ataque |
+   | Botão                              | Efeito                                                             | Quando                                                 |
+   | ---------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------ |
+   | Dispensar denúncias                | Fecha as denúncias; o conteúdo continua como está                  | Denúncia improcedente                                  |
+   | Restaurar                          | Volta para `visible`                                               | Ocultação automática improcedente (revisão do art. 20) |
+   | Ocultar                            | `hidden`: some das listas e das páginas públicas, o autor ainda vê | Violação leve ou dúvida que precisa de contato         |
+   | Retirar                            | `removed`: retirada definitiva da exibição                         | Violação clara dos termos ou conteúdo ilícito          |
+   | Marcar curadoria / Tirar curadoria | Destaque editorial                                                 | Fora do fluxo de denúncia                              |
+   | Banir autor                        | Bane a conta pelo prazo escolhido em "Duração do banimento"        | Abuso reiterado, spam, contas de ataque                |
 
 4. Para pedidos externos (ordem judicial de remoção, notificação de direitos), registre a
    referência no campo de motivo, sem nome de pessoas.

@@ -8,17 +8,17 @@ exceto os registros DNS do domínio de envio (passo 5, **bloqueado**, ver abaixo
 
 ## Estado
 
-| Passo | Estado |
-|---|---|
-| 1. Zona do domínio na conta | **Feito:** zona ativa na mesma conta de `CLOUDFLARE_ACCOUNT_ID`. |
-| 2. Domínio customizado do Worker + 301 do `workers.dev` | A fazer (depende do pré-requisito de código B). |
-| 3. `PUBLIC_ORIGIN` novo | A fazer. |
-| 4. Domínios do widget Turnstile | A fazer (API, coberto pelo OAuth). |
-| 5. Domínio de envio no Resend + registros DNS | **Bloqueado:** o OAuth do wrangler lê a zona, mas não escreve DNS. Opções na issue #32. |
-| 6. Verificação do domínio de envio | Depende do 5. |
-| 7. `RESEND_FROM` novo | Depende do 6. |
-| 8. `SIGNUP_ENABLED=true` | Depende do 7. Até lá, produção fica com o cadastro fechado e o remetente de teste. |
-| 9. Novo deploy e smoke | Duas vezes: fase A (domínio) e fase B (e-mail). |
+| Passo                                                   | Estado                                                                                  |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1. Zona do domínio na conta                             | **Feito:** zona ativa na mesma conta de `CLOUDFLARE_ACCOUNT_ID`.                        |
+| 2. Domínio customizado do Worker + 301 do `workers.dev` | A fazer (depende do pré-requisito de código B).                                         |
+| 3. `PUBLIC_ORIGIN` novo                                 | A fazer.                                                                                |
+| 4. Domínios do widget Turnstile                         | A fazer (API, coberto pelo OAuth).                                                      |
+| 5. Domínio de envio no Resend + registros DNS           | **Bloqueado:** o OAuth do wrangler lê a zona, mas não escreve DNS. Opções na issue #32. |
+| 6. Verificação do domínio de envio                      | Depende do 5.                                                                           |
+| 7. `RESEND_FROM` novo                                   | Depende do 6.                                                                           |
+| 8. `SIGNUP_ENABLED=true`                                | Depende do 7. Até lá, produção fica com o cadastro fechado e o remetente de teste.      |
+| 9. Novo deploy e smoke                                  | Duas vezes: fase A (domínio) e fase B (e-mail).                                         |
 
 ## Pré-condições
 
@@ -158,6 +158,7 @@ Opções (decisão registrada na issue #32):
 
   `name` no Resend é relativo à zona; a API da Cloudflare aceita o nome relativo ou o completo.
   Registros DKIM e SPF ficam "DNS only" (TXT e MX não passam pelo proxy).
+
 - **Painel:** o operador cria os mesmos registros à mão no painel de DNS da zona.
 - **Configuração automática do Resend** para domínios na Cloudflare, se disponível na conta, feita
   pelo operador no painel do Resend.
@@ -223,6 +224,7 @@ $r.StatusCode, $r.Headers.Location                                              
 
   Navegadores que já receberam HSTS de `open-auri.com` continuam exigindo HTTPS nele, o que não
   impede a volta. Sessões abertas no domínio novo não valem no antigo (cookies por host).
+
 - **Turnstile:** manter o domínio a mais no widget é inofensivo; para remover, repita o passo 4 sem
   ele.
 - **Resend:** o domínio de envio e os registros DNS podem ficar; não afetam o remetente de teste.

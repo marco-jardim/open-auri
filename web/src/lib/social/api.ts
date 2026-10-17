@@ -34,7 +34,7 @@ import type {
 	PublicRankingEntry,
 	RankingsPage
 } from '#lib/server/social/rankings.ts';
-import type { S6Preferences } from '#lib/server/social/s6.ts';
+import type { S6Preferences as S6PreferencesDocument } from '#lib/server/social/s6.ts';
 import type { CreateShareInput, CreatedShare, ShareFunnel } from '#lib/server/social/shares.ts';
 import type { TradeDto } from '#lib/server/social/trades.ts';
 import type {
@@ -72,9 +72,16 @@ export type {
 	PublishedInfo,
 	PublicRankingEntry,
 	RankingsPage,
-	S6Preferences,
 	ShareFunnel,
 	TradeDto
+};
+
+/**
+ * `GET /s6/preferences`: the published aggregate, or (before the first daily run) an empty
+ * document of the same shape with `generatedAt: null`, no items and `converged: true`.
+ */
+export type S6Preferences = Omit<S6PreferencesDocument, 'generatedAt'> & {
+	generatedAt: string | null;
 };
 
 /** Every stable code of the API kit (mirror of `API_ERROR_CODES`; the `Record` keeps it total). */

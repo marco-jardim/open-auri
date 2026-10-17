@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import { m } from '#lib/paraglide/messages.js';
-	import { isSocialApiError, type S6Preferences, type SocialApi } from '#lib/social/index.ts';
+	import type { S6Preferences, SocialApi } from '#lib/social/index.ts';
 	import { errorText, isUnreachable, type Channel } from './model.ts';
 
 	let { api, channels, online }: { api: SocialApi; channels: Channel[]; online: boolean } =
@@ -32,9 +32,7 @@
 			data = result;
 			status = result.items.length === 0 ? 'empty' : 'ready';
 		} catch (error) {
-			if (isSocialApiError(error) && error.code === 'NOT_FOUND') {
-				status = 'empty';
-			} else if (isUnreachable(error)) {
+			if (isUnreachable(error)) {
 				status = 'offline';
 			} else {
 				status = 'error';

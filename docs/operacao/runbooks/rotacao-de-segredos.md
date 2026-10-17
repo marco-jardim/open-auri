@@ -8,14 +8,14 @@
 
 ## Segredos dos Workers
 
-| Segredo no Worker | Chave no `.env` | Worker | Efeito da troca |
-|---|---|---|---|
-| `ACCESS_LOG_KEY` | `ACCESS_LOG_KEY` | web e jobs | Nenhum, se feita como keyring (abaixo). Trocar sem manter a chave antiga torna ilegíveis os registros de acesso dos últimos 6 meses. |
-| `BETTER_AUTH_SECRET` | `BETTER_AUTH_SECRET` | web | Forte: ver seção própria abaixo. |
-| `IPHASH_PEPPER` | `IPHASH_PEPPER` | web | Contadores de rate limit recomeçam (os hashes mudam). Inofensivo. |
-| `TURNSTILE_SECRET` | `TURNSTILE_SECRET_KEY` | web | Nenhum, se a chave antiga continuar válida até o deploy. |
-| `RESEND_API_KEY` | `RESEND_API_KEY` | web | Nenhum, se a chave antiga for apagada só depois do deploy. |
-| `RESEND_WEBHOOK_SECRET` | `RESEND_WEBHOOK_SECRET` | web | Eventos de bounce assinados com o segredo antigo passam a ser recusados (o Resend reenvia). |
+| Segredo no Worker       | Chave no `.env`         | Worker     | Efeito da troca                                                                                                                      |
+| ----------------------- | ----------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `ACCESS_LOG_KEY`        | `ACCESS_LOG_KEY`        | web e jobs | Nenhum, se feita como keyring (abaixo). Trocar sem manter a chave antiga torna ilegíveis os registros de acesso dos últimos 6 meses. |
+| `BETTER_AUTH_SECRET`    | `BETTER_AUTH_SECRET`    | web        | Forte: ver seção própria abaixo.                                                                                                     |
+| `IPHASH_PEPPER`         | `IPHASH_PEPPER`         | web        | Contadores de rate limit recomeçam (os hashes mudam). Inofensivo.                                                                    |
+| `TURNSTILE_SECRET`      | `TURNSTILE_SECRET_KEY`  | web        | Nenhum, se a chave antiga continuar válida até o deploy.                                                                             |
+| `RESEND_API_KEY`        | `RESEND_API_KEY`        | web        | Nenhum, se a chave antiga for apagada só depois do deploy.                                                                           |
+| `RESEND_WEBHOOK_SECRET` | `RESEND_WEBHOOK_SECRET` | web        | Eventos de bounce assinados com o segredo antigo passam a ser recusados (o Resend reenvia).                                          |
 
 ## Pré-condições
 

@@ -16,7 +16,8 @@
 - Também são bloqueados os dois links de e-mail que mudam estado por GET: verificação de e-mail e
   confirmação de encerramento de conta.
 - **Continuam funcionando:** navegação, editor, prévias, teste cego e gravação no cabo (tudo no
-  navegador); entrar, segundo fator e sair; exportação LGPD em `/conta/exportar`; toda a área
+  navegador); entrar, segundo fator e sair; exportação LGPD em `/conta/exportar`; o webhook `POST /api/webhooks/resend` (assinatura
+  verificada; supressão de endereços com bounce/reclamação é uma escrita de segurança); toda a área
   `/admin` (inclusive a moderação e o próprio interruptor).
 - Propagação: cada isolate guarda o valor por até 10 s e o KV leva até cerca de 60 s para chegar a
   todos os pontos. Uma falha de leitura do KV mantém o último valor conhecido (ou desligado).

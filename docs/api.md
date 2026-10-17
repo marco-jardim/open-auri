@@ -550,7 +550,9 @@ não, já retirado ou mal formado: não serve de oráculo. Rajada por hash de IP
 ### `GET /api/v1/s6/preferences`
 
 O JSON "Comunidade prefere", gerado uma vez por dia pelo job de agregação. Público; cache de 60 s
-com ETag; 404 antes da primeira execução.
+com ETag. Antes da primeira execução responde 200 com um documento vazio do mesmo formato:
+`{ "generatedAt": null, "consentVersion": "s6-consent-v1", "items": [], "pairs": 0, "converged": true }`
+(o painel mostra o estado vazio quando `items` está vazio).
 
 ```json
 {

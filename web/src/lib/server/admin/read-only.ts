@@ -10,7 +10,8 @@
 // `enforceWritable(request, env)` is the write middleware for hooks.server.ts: while the switch
 // is on, every request other than GET/HEAD/OPTIONS gets 503 with the stable code `READ_ONLY`,
 // except the allowlisted paths (sign-in, second factor and sign-out, the LGPD export, which only
-// reads, and the guarded /admin area so the switch itself can be turned off and moderation keeps
+// reads, the signature-verified Resend webhook, whose bounce suppression is a safety write, and
+// the guarded /admin area so the switch itself can be turned off and moderation keeps
 // working during an incident). Better Auth also changes state on two GET links sent by e-mail
 // (`/api/auth/verify-email`: marks the address verified, switches e-mail, creates a session,
 // sends mail; `/api/auth/delete-user/callback`: runs the deletion policy and deletes the user),
@@ -40,6 +41,9 @@ export const READ_ONLY_ALLOWED_PATHS: ReadonlySet<string> = new Set([
 	'/api/auth/sign-out',
 	// LGPD access right: the export is a POST (CSRF and download semantics) but only reads.
 	'/conta/exportar',
+	// Resend bounce/complaint events (signature-verified): suppressing bounced addresses is a
+	// safety write, and Resend only retries for a limited time.
+	'/api/webhooks/resend',
 	'/admin'
 ]);
 /** Path prefixes that stay writable (the admin area; every action there is guarded and audited). */

@@ -34,6 +34,7 @@
 
    O mesmo para o Worker de jobs em `workers/jobs`. O rollback não desfaz migrações do D1; para
    dados, veja [`../backups.md`](../backups.md) (Time Travel e export).
+
 3. Segredo vazado: rotacione na hora ([`rotacao-de-segredos.md`](rotacao-de-segredos.md)).
 4. Conta administrativa comprometida: em `/admin/usuarios`, bana a conta (revoga as sessões); se for
    a única conta admin, rode `node tools/grant-admin.mjs --email <outro-endereco-do-operador>` para

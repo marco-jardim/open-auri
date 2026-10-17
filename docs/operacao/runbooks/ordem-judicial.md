@@ -68,14 +68,14 @@ enquanto a preservação durar ([`rotacao-de-segredos.md`](rotacao-de-segredos.m
 
 ## Erros comuns
 
-| Mensagem | Causa e ação |
-|---|---|
-| `Usage: ...` | Flag faltando, repetida ou desconhecida. |
-| `--from/--to must be ISO 8601 date-times with an offset` | Falta o fuso (`Z` ou `±hh:mm`). |
-| `Invalid window: --from must be before --to` | Janela invertida ou vazia. |
-| `Refusing to overwrite an existing --out file` | Escolha outro nome de arquivo. |
-| `Wrangler is not logged in to CLOUDFLARE_ACCOUNT_ID` | Rode `npx wrangler login` com a conta certa. |
-| `ACCESS_LOG_KEY is not a valid keyring` | O `.env` está com formato inválido; compare com o Worker. |
+| Mensagem                                                       | Causa e ação                                                                      |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `Usage: ...`                                                   | Flag faltando, repetida ou desconhecida.                                          |
+| `--from/--to must be ISO 8601 date-times with an offset`       | Falta o fuso (`Z` ou `±hh:mm`).                                                   |
+| `Invalid window: --from must be before --to`                   | Janela invertida ou vazia.                                                        |
+| `Refusing to overwrite an existing --out file`                 | Escolha outro nome de arquivo.                                                    |
+| `Wrangler is not logged in to CLOUDFLARE_ACCOUNT_ID`           | Rode `npx wrangler login` com a conta certa.                                      |
+| `ACCESS_LOG_KEY is not a valid keyring`                        | O `.env` está com formato inválido; compare com o Worker.                         |
 | `Could not decrypt an access-log object (key id or integrity)` | Falta no keyring uma chave antiga, ou o objeto foi adulterado. Pare e investigue. |
 
 ## Verificação

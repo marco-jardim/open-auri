@@ -41,16 +41,16 @@ do modo somente leitura). Respostas 5xx vão para `console.error`; o resto para 
 }
 ```
 
-| Campo    | Conteúdo                                                                                     |
-| -------- | -------------------------------------------------------------------------------------------- |
-| `event`  | sempre `http.request`                                                                        |
-| `id`     | valor do cabeçalho `cf-ray` quando tem o formato esperado; senão um UUID aleatório           |
-| `route`  | id de rota do SvelteKit (`/curva/[id]`); `(unmatched)` quando nenhuma rota casou             |
-| `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` ou `OTHER`                        |
-| `status` | status HTTP da resposta (500 quando o handler lançou exceção)                                |
-| `ms`     | tempo de parede entre o hook e a resposta; o relógio do Worker só anda com E/S, então pode ser 0 |
+| Campo    | Conteúdo                                                                                                                      |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `event`  | sempre `http.request`                                                                                                         |
+| `id`     | valor do cabeçalho `cf-ray` quando tem o formato esperado; senão um UUID aleatório                                            |
+| `route`  | id de rota do SvelteKit (`/curva/[id]`); `(unmatched)` quando nenhuma rota casou                                              |
+| `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` ou `OTHER`                                                         |
+| `status` | status HTTP da resposta (500 quando o handler lançou exceção)                                                                 |
+| `ms`     | tempo de parede entre o hook e a resposta; o relógio do Worker só anda com E/S, então pode ser 0                              |
 | `code`   | opcional: código de erro em MAIÚSCULAS de uma resposta JSON de erro (`{ error: { code } }` da API, `{ code }` do Better Auth) |
-| `error`  | opcional: nome da classe da exceção (`TypeError`), nunca a mensagem                          |
+| `error`  | opcional: nome da classe da exceção (`TypeError`), nunca a mensagem                                                           |
 
 Nunca entram: URL, caminho com parâmetros, query string, IP, User-Agent, cookie, cabeçalho de
 autorização, e-mail, token, id de usuário, corpo da requisição ou da resposta. Testes:
@@ -64,23 +64,23 @@ linhas de contagem de cada job (`job.rotate_salt`, `job.regate` etc.).
 
 Esquema fixo, um ponto por evento:
 
-| Coluna SQL | Origem         | Conteúdo                                                            |
-| ---------- | -------------- | ------------------------------------------------------------------- |
-| `index1`   | `indexes[0]`   | nome do evento (chave de amostragem)                                |
-| `blob1`    | `blobs[0]`     | nome do evento (repetido, para filtrar e agrupar)                   |
-| `blob2`    | `blobs[1]`     | rótulo principal (ver tabela abaixo)                                |
-| `blob3`    | `blobs[2]`     | detalhe (ver tabela abaixo)                                         |
-| `double1`  | `doubles[0]`   | sempre 1 (contagem)                                                 |
-| `double2`  | `doubles[1]`   | valor: duração em ms (`job_run`), status HTTP (`http_5xx`), senão 0 |
+| Coluna SQL | Origem       | Conteúdo                                                            |
+| ---------- | ------------ | ------------------------------------------------------------------- |
+| `index1`   | `indexes[0]` | nome do evento (chave de amostragem)                                |
+| `blob1`    | `blobs[0]`   | nome do evento (repetido, para filtrar e agrupar)                   |
+| `blob2`    | `blobs[1]`   | rótulo principal (ver tabela abaixo)                                |
+| `blob3`    | `blobs[2]`   | detalhe (ver tabela abaixo)                                         |
+| `double1`  | `doubles[0]` | sempre 1 (contagem)                                                 |
+| `double2`  | `doubles[1]` | valor: duração em ms (`job_run`), status HTTP (`http_5xx`), senão 0 |
 
-| Evento          | `blob2`                          | `blob3`                                   | Onde é gravado                                                           |
-| --------------- | -------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------ |
-| `gate_rejected` | código do motivo do gate         | caminho: `publish`, `version` ou `fork`   | `social/curves.ts` (`prepare`), um ponto por motivo distinto (até 8)     |
-| `signup`        | `email`                          | vazio                                     | `auth/hooks.ts`, hook `after` de `/sign-up/email` com sucesso            |
-| `email_failed`  | modelo (tag `template`) ou `unknown` | tipo do erro (`suppressed`, `unexpected` etc.) | `email/index.ts` (`withFailureMetrics`, em todo `createEmailProvider`) |
-| `http_5xx`      | id da rota da API                | código (`RATE_LIMIT_UNAVAILABLE`) ou classe do erro | `api/handler.ts` (`defineApi`)                                 |
-| `report`        | tipo do alvo (`lineage`, `pack`, `user`) | motivo da denúncia                 | `social/moderation.ts` (`fileReport`, só denúncias novas)                |
-| `job_run`       | nome do job                      | `ok` ou `failed`                          | `workers/jobs/src/jobs/registry.ts` (cron e fila)                        |
+| Evento          | `blob2`                                  | `blob3`                                             | Onde é gravado                                                         |
+| --------------- | ---------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------- |
+| `gate_rejected` | código do motivo do gate                 | caminho: `publish`, `version` ou `fork`             | `social/curves.ts` (`prepare`), um ponto por motivo distinto (até 8)   |
+| `signup`        | `email`                                  | vazio                                               | `auth/hooks.ts`, hook `after` de `/sign-up/email` com sucesso          |
+| `email_failed`  | modelo (tag `template`) ou `unknown`     | tipo do erro (`suppressed`, `unexpected` etc.)      | `email/index.ts` (`withFailureMetrics`, em todo `createEmailProvider`) |
+| `http_5xx`      | id da rota da API                        | código (`RATE_LIMIT_UNAVAILABLE`) ou classe do erro | `api/handler.ts` (`defineApi`)                                         |
+| `report`        | tipo do alvo (`lineage`, `pack`, `user`) | motivo da denúncia                                  | `social/moderation.ts` (`fileReport`, só denúncias novas)              |
+| `job_run`       | nome do job                              | `ok` ou `failed`                                    | `workers/jobs/src/jobs/registry.ts` (cron e fila)                      |
 
 Rótulos que não são códigos curtos (mais de 96 caracteres, espaços, `@`, sequências de 6 ou mais
 dígitos) são trocados por `other` antes da escrita, para que nenhum chamador grave texto livre,
@@ -167,15 +167,15 @@ Para staging troque a tabela por `open_auri_metrics_staging`.
 Valores iniciais para produção; revisar depois do primeiro mês com tráfego real. "Aviso" pede
 olhar no mesmo dia; "crítico" pede ação imediata (ver `docs/operacao/` para os procedimentos).
 
-| Sinal                     | Aviso                                                                    | Crítico                                                     | Fonte                                     |
-| ------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------- | ----------------------------------------- |
-| Taxa de 5xx               | mais de 1% das requisições em 5 min, ou 10 ou mais `http_5xx` em 5 min    | mais de 5% em 5 min, ou 50 ou mais `http_5xx` em 5 min       | painel do Worker (taxa); `http_5xx` (contagem) |
-| Pico de rejeições do gate | na última hora, mais de 3 vezes a média horária dos 7 dias anteriores e pelo menos 20 rejeições | um único motivo com mais de 100 rejeições em 1 hora | `gate_rejected`                            |
-| Falhas de e-mail          | 5 ou mais falhas (fora `suppressed`) em 15 min                            | 20 ou mais em 15 min, ou falhas em todos os envios de 15 min | `email_failed`                             |
-| Falhas de jobs            | qualquer `job_run` com `failed`                                          | o mesmo job falhando em 2 execuções seguidas; `rotate-salt` falhando uma vez (o sal de amanhã precisa existir antes da meia-noite UTC) | `job_run` e linhas `job.failed`            |
-| Profundidade da DLQ       | qualquer mensagem na DLQ do registro de acesso                           | mais de 100 mensagens, ou crescendo por 2 horas seguidas      | painel de Queues ou `wrangler queues info` |
-| Cadastros                 | zero cadastros em 24 horas com `SIGNUP_ENABLED=true`                      |                                                             | `signup`                                  |
-| Denúncias                 | mais de 20 denúncias em 1 hora                                           | mais de 100 em 1 hora (possível ataque à ocultação automática) | `report`                                   |
+| Sinal                     | Aviso                                                                                           | Crítico                                                                                                                                | Fonte                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Taxa de 5xx               | mais de 1% das requisições em 5 min, ou 10 ou mais `http_5xx` em 5 min                          | mais de 5% em 5 min, ou 50 ou mais `http_5xx` em 5 min                                                                                 | painel do Worker (taxa); `http_5xx` (contagem) |
+| Pico de rejeições do gate | na última hora, mais de 3 vezes a média horária dos 7 dias anteriores e pelo menos 20 rejeições | um único motivo com mais de 100 rejeições em 1 hora                                                                                    | `gate_rejected`                                |
+| Falhas de e-mail          | 5 ou mais falhas (fora `suppressed`) em 15 min                                                  | 20 ou mais em 15 min, ou falhas em todos os envios de 15 min                                                                           | `email_failed`                                 |
+| Falhas de jobs            | qualquer `job_run` com `failed`                                                                 | o mesmo job falhando em 2 execuções seguidas; `rotate-salt` falhando uma vez (o sal de amanhã precisa existir antes da meia-noite UTC) | `job_run` e linhas `job.failed`                |
+| Profundidade da DLQ       | qualquer mensagem na DLQ do registro de acesso                                                  | mais de 100 mensagens, ou crescendo por 2 horas seguidas                                                                               | painel de Queues ou `wrangler queues info`     |
+| Cadastros                 | zero cadastros em 24 horas com `SIGNUP_ENABLED=true`                                            |                                                                                                                                        | `signup`                                       |
+| Denúncias                 | mais de 20 denúncias em 1 hora                                                                  | mais de 100 em 1 hora (possível ataque à ocultação automática)                                                                         | `report`                                       |
 
 A Cloudflare não dispara alertas sobre o Analytics Engine sozinha: as consultas acima rodam por um
 agendador do operador (ou manualmente na revisão diária). Para 5xx e filas existem notificações

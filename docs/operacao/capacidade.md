@@ -14,12 +14,12 @@ orquestrador depois da execução em staging.
   redireciona para o domínio de produção) e qualquer outra origem.
 - **Cenários:**
 
-  | Cenário      | Requisição                                         | Tipo                          | Meta p95 |
-  | ------------ | -------------------------------------------------- | ----------------------------- | -------- |
-  | `feed`       | `GET /api/v1/feed`                                 | leitura cacheada (60 s, ETag) | < 300 ms |
-  | `curve-page` | `GET /c/<id>` (`--curve` ou a primeira do feed)    | página SSR da curva           | < 300 ms |
-  | `rankings`   | `GET /api/v1/rankings`                             | leitura cacheada (60 s, ETag) | < 300 ms |
-  | `publish`    | `POST /api/v1/curves` com envelope já aprovado     | escrita, gate cacheado        | < 1,5 s  |
+  | Cenário      | Requisição                                      | Tipo                          | Meta p95 |
+  | ------------ | ----------------------------------------------- | ----------------------------- | -------- |
+  | `feed`       | `GET /api/v1/feed`                              | leitura cacheada (60 s, ETag) | < 300 ms |
+  | `curve-page` | `GET /c/<id>` (`--curve` ou a primeira do feed) | página SSR da curva           | < 300 ms |
+  | `rankings`   | `GET /api/v1/rankings`                          | leitura cacheada (60 s, ETag) | < 300 ms |
+  | `publish`    | `POST /api/v1/curves` com envelope já aprovado  | escrita, gate cacheado        | < 1,5 s  |
 
 - **Medida:** o script registra a latência de cada resposta e calcula p50, p95 e p99 só sobre as
   respostas 2xx. Respostas 429, 404 ou 3xx são rápidas e deixariam uma execução quebrada com cara
@@ -105,12 +105,12 @@ Execução em staging em 2026-10-17, de uma única máquina cliente no Brasil, c
 
 O veredito "FAIL" da ferramenta nas linhas com `--rate 1` vem do mínimo de 50 leituras bem-sucedidas por cenário, não da meta de latência, que foi cumprida.
 
-| Cenário      | Conexões    | Duração ou quantidade | p50 (ms)    | p95 (ms)    | p99 (ms)    | req/s       | non-2xx     | Meta p95 | Resultado   |
-| ------------ | ----------- | --------------------- | ----------- | ----------- | ----------- | ----------- | ----------- | -------- | ----------- |
-| `feed`       | 1 (`--rate 1`) | 30 s                  | 213,8       | 271,9       | 452,6       | 1           | 0           | 300 ms   | meta de p95 cumprida |
-| `curve-page` | não executado | não executado | não executado | não executado | não executado | não executado | não executado | 300 ms   | sem curva pública em staging |
-| `rankings`   | 1 (`--rate 1`) | 30 s                  | 207,6       | 232,6       | 422,2       | 1           | 0           | 300 ms   | meta de p95 cumprida |
-| `publish`    | não executado | não executado | não executado | não executado | não executado | não executado | não executado | 1500 ms  | sem conta de teste em staging |
+| Cenário      | Conexões       | Duração ou quantidade | p50 (ms)      | p95 (ms)      | p99 (ms)      | req/s         | non-2xx       | Meta p95 | Resultado                     |
+| ------------ | -------------- | --------------------- | ------------- | ------------- | ------------- | ------------- | ------------- | -------- | ----------------------------- |
+| `feed`       | 1 (`--rate 1`) | 30 s                  | 213,8         | 271,9         | 452,6         | 1             | 0             | 300 ms   | meta de p95 cumprida          |
+| `curve-page` | não executado  | não executado         | não executado | não executado | não executado | não executado | não executado | 300 ms   | sem curva pública em staging  |
+| `rankings`   | 1 (`--rate 1`) | 30 s                  | 207,6         | 232,6         | 422,2         | 1             | 0             | 300 ms   | meta de p95 cumprida          |
+| `publish`    | não executado  | não executado         | não executado | não executado | não executado | não executado | não executado | 1500 ms  | sem conta de teste em staging |
 
 Registrar também: data, versão do Worker de staging, escolha sobre o rate limit (subida temporária
 ou `--rate`), contagem de 429 por cenário e o tempo de CPU por requisição visto no painel de
@@ -122,23 +122,23 @@ Os valores abaixo são as referências do plano Workers Paid e dos produtos usad
 documentação da Cloudflare; o orquestrador confere cada um na fonte ao fechar o relatório, porque
 preços e limites mudam.
 
-| Recurso                  | Incluído no plano pago (referência)                                | Além do incluído (referência)        | Fonte |
-| ------------------------ | ------------------------------------------------------------------ | ------------------------------------ | ----- |
-| Requisições de Workers   | 10 milhões por mês                                                 | US$ 0,30 por milhão                  | [Workers pricing][wp] |
-| CPU de Workers           | 30 milhões de CPU ms por mês                                       | US$ 0,02 por milhão de CPU ms        | [Workers pricing][wp] |
-| CPU por invocação        | 30 s padrão, configurável até 5 min                                | não se aplica                        | [Workers limits][wl] |
-| Memória                  | 128 MB por isolate                                                 | não se aplica                        | [Workers limits][wl] |
-| D1, linhas lidas         | 25 bilhões por mês                                                 | US$ 0,001 por milhão                 | [D1 pricing][d1p] |
-| D1, linhas escritas      | 50 milhões por mês                                                 | US$ 1,00 por milhão                  | [D1 pricing][d1p] |
-| D1, armazenamento        | 5 GB                                                               | US$ 0,75 por GB-mês                  | [D1 pricing][d1p] |
-| D1, tamanho do banco     | 10 GB por banco; um banco processa uma consulta por vez            | não se aplica                        | [D1 limits][d1l] |
-| KV, leituras             | 10 milhões por mês                                                 | US$ 0,50 por milhão                  | [KV pricing][kvp] |
-| KV, escritas e exclusões | 1 milhão por mês de cada                                           | US$ 5,00 por milhão                  | [KV pricing][kvp] |
-| KV, mesma chave          | 1 escrita por segundo por chave                                    | não se aplica                        | [KV limits][kvl] |
-| R2, operações classe A   | 1 milhão por mês                                                   | US$ 4,50 por milhão                  | [R2 pricing][r2p] |
-| R2, operações classe B   | 10 milhões por mês                                                 | US$ 0,36 por milhão                  | [R2 pricing][r2p] |
-| R2, armazenamento        | 10 GB-mês; saída sem cobrança                                      | US$ 0,015 por GB-mês                 | [R2 pricing][r2p] |
-| Filas                    | 1 milhão de operações por mês                                      | US$ 0,40 por milhão                  | [Queues pricing][qp] |
+| Recurso                  | Incluído no plano pago (referência)                     | Além do incluído (referência) | Fonte                 |
+| ------------------------ | ------------------------------------------------------- | ----------------------------- | --------------------- |
+| Requisições de Workers   | 10 milhões por mês                                      | US$ 0,30 por milhão           | [Workers pricing][wp] |
+| CPU de Workers           | 30 milhões de CPU ms por mês                            | US$ 0,02 por milhão de CPU ms | [Workers pricing][wp] |
+| CPU por invocação        | 30 s padrão, configurável até 5 min                     | não se aplica                 | [Workers limits][wl]  |
+| Memória                  | 128 MB por isolate                                      | não se aplica                 | [Workers limits][wl]  |
+| D1, linhas lidas         | 25 bilhões por mês                                      | US$ 0,001 por milhão          | [D1 pricing][d1p]     |
+| D1, linhas escritas      | 50 milhões por mês                                      | US$ 1,00 por milhão           | [D1 pricing][d1p]     |
+| D1, armazenamento        | 5 GB                                                    | US$ 0,75 por GB-mês           | [D1 pricing][d1p]     |
+| D1, tamanho do banco     | 10 GB por banco; um banco processa uma consulta por vez | não se aplica                 | [D1 limits][d1l]      |
+| KV, leituras             | 10 milhões por mês                                      | US$ 0,50 por milhão           | [KV pricing][kvp]     |
+| KV, escritas e exclusões | 1 milhão por mês de cada                                | US$ 5,00 por milhão           | [KV pricing][kvp]     |
+| KV, mesma chave          | 1 escrita por segundo por chave                         | não se aplica                 | [KV limits][kvl]      |
+| R2, operações classe A   | 1 milhão por mês                                        | US$ 4,50 por milhão           | [R2 pricing][r2p]     |
+| R2, operações classe B   | 10 milhões por mês                                      | US$ 0,36 por milhão           | [R2 pricing][r2p]     |
+| R2, armazenamento        | 10 GB-mês; saída sem cobrança                           | US$ 0,015 por GB-mês          | [R2 pricing][r2p]     |
+| Filas                    | 1 milhão de operações por mês                           | US$ 0,40 por milhão           | [Queues pricing][qp]  |
 
 ### Raciocínio
 

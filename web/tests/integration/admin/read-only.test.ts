@@ -130,7 +130,7 @@ describe('enforceWritable', () => {
 			['DELETE', '/api/curvas/1'],
 			['POST', '/api/auth/sign-up/email'],
 			['POST', '/api/auth/change-password'],
-			['POST', '/api/webhooks/resend'],
+			['POST', '/api/webhooks/resend/'],
 			['POST', '/administrator'],
 			['POST', '/adminx/usuarios'],
 			['POST', '/api/auth/sign-in/email/../../../conta']
@@ -151,6 +151,7 @@ describe('enforceWritable', () => {
 			['POST', '/api/auth/two-factor/verify-totp'],
 			['POST', '/api/auth/two-factor/verify-backup-code'],
 			['POST', '/api/auth/sign-out'],
+			['POST', '/api/webhooks/resend'],
 			['POST', '/admin'],
 			['POST', '/admin/usuarios']
 		] as const) {
@@ -244,6 +245,8 @@ describe('enforceWritable', () => {
 		expect(isWriteAllowlisted('/admin')).toBe(true);
 		expect(isWriteAllowlisted('/conta/exportar')).toBe(true);
 		expect(isWriteAllowlisted('/conta/exportar/')).toBe(false);
+		expect(isWriteAllowlisted('/api/webhooks/resend')).toBe(true);
+		expect(isWriteAllowlisted('/api/webhooks/resend/x')).toBe(false);
 		expect(isWriteAllowlisted('/admin/auditoria')).toBe(true);
 		expect(isWriteAllowlisted('/admin.json')).toBe(false);
 		expect(isWriteAllowlisted('/api/auth/sign-in/email/')).toBe(false);

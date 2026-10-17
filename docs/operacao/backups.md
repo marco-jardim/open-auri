@@ -10,13 +10,13 @@ Todas as tabelas da aplicação no D1, lidas em páginas por chave (rowid ou cha
 
 ### O que não entra
 
-| Tabela ou dado | Motivo |
-|---|---|
-| Registros de acesso (prefixo `access-log/` do R2) | Ficam só no R2, cifrados, com ciclo de vida de 180 dias (operação 25). Nenhum backup os copia |
+| Tabela ou dado                                                       | Motivo                                                                                                            |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Registros de acesso (prefixo `access-log/` do R2)                    | Ficam só no R2, cifrados, com ciclo de vida de 180 dias (operação 25). Nenhum backup os copia                     |
 | Tabelas `access_log_*` (`access_log_objects`, `access_log_requests`) | Regra da T5.3: nada dos registros de acesso entra no backup. Veja a seção 7 sobre o efeito disso numa restauração |
-| `rate_limit_counters` | Contadores de janela curta, recriados sozinhos |
-| `d1_migrations` | Recriada ao aplicar as migrações; o nome da última migração vai no manifesto como versão do esquema |
-| `_cf_*` e `sqlite_*` | Tabelas internas do D1 e do SQLite |
+| `rate_limit_counters`                                                | Contadores de janela curta, recriados sozinhos                                                                    |
+| `d1_migrations`                                                      | Recriada ao aplicar as migrações; o nome da última migração vai no manifesto como versão do esquema               |
+| `_cf_*` e `sqlite_*`                                                 | Tabelas internas do D1 e do SQLite                                                                                |
 
 ### Formato e local
 
@@ -55,18 +55,18 @@ A rota pública que serve esses arquivos não faz parte da T5.3.
 
 `cleanup.ts` apaga só o que passou da retenção do `docs\lgpd.md`:
 
-| Passo | Tabela | Apaga quando |
-|---|---|---|
-| `sessions` | `session` | `expiresAt` já passou (operação 3) |
-| `verifications` | `verification` | `expiresAt` já passou (tokens, operação 2) |
-| `link-uses` | `auth_link_uses` | `expires_at` já passou |
-| `email-changes` | `email_change_requests` | `expires_at` já passou |
-| `access-log-index` | `access_log_objects` | dia com mais de 180 dias (índice; os objetos no R2 já têm o ciclo de vida e o job `access-log-retention`) |
-| `suppressions` | `email_suppressions` | criada há mais de 12 meses (operação 19) |
-| `audit` | `audit_log` | criada há mais de 5 anos e 1 dia (operação 12) |
-| `s6` | `s6_batches` e `s6_pairs` | dia do lote com mais de 24 meses (operação 13) |
-| `username-holds` | `username_holds` | `released_at` já passou (reserva de 90 dias, operação 4) |
-| `tombstones` | `lineages` (e trocas e denúncias dessas linhagens) | lápide (`status = 'retracted'`) sem alteração há 365 dias e sem nenhuma bifurcação de qualquer versão dela |
+| Passo              | Tabela                                             | Apaga quando                                                                                               |
+| ------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `sessions`         | `session`                                          | `expiresAt` já passou (operação 3)                                                                         |
+| `verifications`    | `verification`                                     | `expiresAt` já passou (tokens, operação 2)                                                                 |
+| `link-uses`        | `auth_link_uses`                                   | `expires_at` já passou                                                                                     |
+| `email-changes`    | `email_change_requests`                            | `expires_at` já passou                                                                                     |
+| `access-log-index` | `access_log_objects`                               | dia com mais de 180 dias (índice; os objetos no R2 já têm o ciclo de vida e o job `access-log-retention`)  |
+| `suppressions`     | `email_suppressions`                               | criada há mais de 12 meses (operação 19)                                                                   |
+| `audit`            | `audit_log`                                        | criada há mais de 5 anos e 1 dia (operação 12)                                                             |
+| `s6`               | `s6_batches` e `s6_pairs`                          | dia do lote com mais de 24 meses (operação 13)                                                             |
+| `username-holds`   | `username_holds`                                   | `released_at` já passou (reserva de 90 dias, operação 4)                                                   |
+| `tombstones`       | `lineages` (e trocas e denúncias dessas linhagens) | lápide (`status = 'retracted'`) sem alteração há 365 dias e sem nenhuma bifurcação de qualquer versão dela |
 
 Decisões:
 
@@ -81,11 +81,11 @@ Limites por execução: até 500 linhas por comando (90 lotes do S6 e 50 lápide
 
 Registrados na T5.7 em `workers\jobs\src\jobs\registry.ts` (ordem dentro de cada cron = ordem de execução):
 
-| Job | Export | Cron (UTC) |
-|---|---|---|
-| Backup | `backupJob` | `0 3 * * 1` (segunda, 03:00, antes do dump) e também no cron de hora em hora `0 * * * *` (depois do re-gate e da expiração de trocas), para continuar um backup que não terminou; depois de completo, cada execução é uma leitura de KV |
-| Dump público | `publicDumpJob` | `0 3 * * 1` (depois do backup) |
-| Limpeza | `cleanupJob` | `5 0 * * *` (cron diário, depois dos outros jobs diários) |
+| Job          | Export          | Cron (UTC)                                                                                                                                                                                                                              |
+| ------------ | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backup       | `backupJob`     | `0 3 * * 1` (segunda, 03:00, antes do dump) e também no cron de hora em hora `0 * * * *` (depois do re-gate e da expiração de trocas), para continuar um backup que não terminou; depois de completo, cada execução é uma leitura de KV |
+| Dump público | `publicDumpJob` | `0 3 * * 1` (depois do backup)                                                                                                                                                                                                          |
+| Limpeza      | `cleanupJob`    | `5 0 * * *` (cron diário, depois dos outros jobs diários)                                                                                                                                                                               |
 
 Um cron novo exige a lista `triggers.crons` do `workers\jobs\wrangler.template.jsonc` (nos três ambientes) e `CRONS` no `registry.ts`.
 
@@ -110,17 +110,20 @@ Guarde o bookmark impresso fora do repositório.
    ```
 
    A restauração sobrescreve o banco inteiro, inclusive `access_log_*` e contadores, e imprime um bookmark de desfazer: guarde-o.
+
 3. **Segunda opção: backup do R2** (fora da janela do Time Travel, ou banco perdido):
    1. Escolha a semana em `backups/` cujo `manifest.json` existe. Baixe o manifesto para um diretório temporário fora do repositório:
 
       ```
       npx wrangler r2 object get "<BUCKET>/backups/<SEMANA>/manifest.json" --file "<DIR>\manifest.json" --remote
       ```
+
    2. Gere e execute os comandos de download dos arquivos:
 
       ```
       node tools/restore-backup.mjs <DIR> --print-downloads <BUCKET>
       ```
+
    3. Crie um banco D1 novo e vazio (`npx wrangler d1 create <NOVO_BANCO>`) e aplique as migrações até a versão `schemaVersion` do manifesto (`npx wrangler d1 migrations apply <NOVO_BANCO> --remote`, a partir de `web\`, num checkout cuja última migração seja essa; migrações mais novas são aplicadas depois da importação).
    4. Gere o SQL. A ferramenta confere tamanho, SHA-256 e número de linhas de cada arquivo e aborta em qualquer divergência:
 
@@ -129,6 +132,7 @@ Guarde o bookmark impresso fora do repositório.
       ```
 
       O SQL liga `PRAGMA defer_foreign_keys`, remove os gatilhos do manifesto, insere as linhas tabela por tabela e recria os gatilhos. Nunca rode esse SQL contra um banco com dados.
+
    5. Importe: `npx wrangler d1 execute <NOVO_BANCO> --remote --file <DIR>\restore.sql`.
    6. Confira as contagens (`SELECT COUNT(*)`) de algumas tabelas contra `rows` do manifesto.
    7. Aponte `D1_DATABASE_ID` e `D1_DATABASE_NAME` do `.env` para o banco novo, rode `node tools/render-wrangler.mjs` e faça o deploy dos dois Workers (web e jobs).
@@ -151,6 +155,7 @@ Guarde o bookmark impresso fora do repositório.
    ```
 
    e, em outro terminal, dispare `http://localhost:8787/__scheduled?cron=0+3+*+*+1` (backup e dump) e `http://localhost:8787/__scheduled?cron=5+0+*+*+*` (limpeza e os outros jobs diários).
+
 2. Confirme no R2 de staging: `backups/<semana>/manifest.json`, nenhum arquivo `access_log*` ou `rate_limit*` na semana, `public/dump/latest.json.gz`.
 3. Siga a seção 6, passo 3, com um banco descartável (`<NOVO_BANCO>` só para o teste), confira as contagens e apague o banco descartável e o diretório local.
 4. Teste o Time Travel em staging: anote um bookmark, faça uma alteração inofensiva, restaure pelo bookmark e confira.

@@ -70,6 +70,32 @@ test('an empty feed says so', async () => {
 	await expect.element(page.getByTestId('feed-empty')).toHaveTextContent(m.comunidade_feed_empty());
 });
 
+test('"Comunidade prefere" shows its empty state for the empty document of the first deploy', async () => {
+	const fetch = fakeFetch((url) => {
+		if (url.pathname === '/api/v1/feed') return json(feedPage([]));
+		if (url.pathname === '/api/v1/s6/preferences') {
+			return json({
+				generatedAt: null,
+				consentVersion: 's6-consent-v1',
+				items: [],
+				pairs: 0,
+				converged: true
+			});
+		}
+		return undefined;
+	});
+	await render(Comunidade, {
+		api: apiWith(fetch, true),
+		session: ANONYMOUS,
+		storage: null,
+		isOnline: () => true
+	});
+	await expect.element(page.getByText(m.comunidade_prefers_empty())).toBeVisible();
+	expect(fetch.mock.calls.map(([url]) => url)).toContainEqual(
+		expect.stringContaining('/api/v1/s6/preferences')
+	);
+});
+
 test('offline: the feed shows the notice in place of the list and the page stays usable', async () => {
 	const fetch = fakeFetch(() => {
 		throw new TypeError('Failed to fetch');
