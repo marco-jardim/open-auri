@@ -1,8 +1,8 @@
 # API v1 do open-auri
 
-Contrato das rotas `/api/v1/**` do Worker web, mais a imagem OG (`/og/<versionId>.png`) e a página
-compartilhada (`/c/<id>`). Fonte de verdade: o código em `web/src/routes/api/v1/**`, o kit em
-`web/src/lib/server/api/**` (veja o `README.md` de lá) e os serviços em
+Contrato das rotas `/api/v1/**` do Worker web, mais o dump público (`/dados/dump/<file>`), a imagem
+OG (`/og/<versionId>.png`) e a página compartilhada (`/c/<id>`). Fonte de verdade: o código em
+`web/src/routes/api/v1/**`, o kit em `web/src/lib/server/api/**` (veja o `README.md` de lá) e os serviços em
 `web/src/lib/server/social/**` (veja `web/src/lib/server/social/README.md`) e
 `web/src/lib/server/og/**`. Se este documento e o código divergirem, vale o código; abra uma issue.
 
@@ -166,6 +166,7 @@ Para a próxima página, repita a requisição com `?cursor=<nextCursor>`; `next
 | `POST /api/v1/trades/:id/score`               | verificado, dono   | não       | `api.trades.score`                              |
 | `GET /og/:versionId.png`                      | público            | não       | `og` (leitura, só quando renderiza)             |
 | `GET /c/:id`                                  | público            | não       | contagem de abertura: regra de `shares.open`    |
+| `GET`, `HEAD /dados/dump/:file`                | público            | não       | `dump` (leitura, sem cota em D1)                 |
 
 "30 publicações/dia" é uma cota única por usuário e dia UTC que soma publicações, novas versões e
 forks bem-sucedidos. Além dela, as três rotas compartilham uma cota de 60 tentativas que chegam à
@@ -629,6 +630,24 @@ Expiração: 72 h depois de entrar na fila ou depois do pareamento. Um job de ho
 vencidas e tenta parear de novo as que ficaram esperando.
 
 ## Fora de `/api/v1`
+
+### Arquivos públicos: `GET` e `HEAD /dados/dump/<file>`
+
+Download público, sem sessão ou Turnstile, do dump semanal do acervo público. `<file>` aceita
+**somente** `latest.json.gz` ou `AAAA-MM-DD.json.gz` (padrão
+`^(latest|\d{4}-\d{2}-\d{2})\.json\.gz$`). Outros nomes, caminhos e tentativas de travessia recebem
+404 sem consultar o R2. Só a chave `public/dump/<file>` do bucket privado MEDIA é acessível;
+objeto ausente também responde 404 com `cache-control: no-store`.
+
+- 200 com o corpo gzip em streaming, `content-type: application/gzip`, sem `Content-Encoding`, e
+  `content-disposition: attachment; filename="open-auri-dump-<file>"`.
+- `ETag` do objeto R2; `If-None-Match` correspondente responde 304 sem corpo.
+- `latest.json.gz`: `cache-control: public, max-age=3600`.
+- Arquivo datado: `cache-control: public, max-age=31536000, immutable`.
+- HEAD retorna os mesmos cabeçalhos de GET, sem corpo. GET e HEAD passam pelo rate limit do grupo
+  `dump` (`RL_API`, por usuário ou hash de IP, sem cota em D1), inclusive para responder 304.
+  Limite excedido: 429 `RATE_LIMITED` com `retry-after`; contador indisponível: 503
+  `RATE_LIMIT_UNAVAILABLE`, sem ler o R2.
 
 ### `GET /og/<versionId>.png`
 
