@@ -49,4 +49,18 @@ A1 revisão lado a lado com o mock (checklist da §1 da página fechado, captura
 - **Repositório público:** nenhum dado pessoal, da empresa, ID de conta ou caminho `C:\Users\…` em arquivo.
 - **Nunca commitar.** Nunca `Co-Authored-By` nem "Generated with" em lugar algum.
 - **Invariantes §0.12:** nenhum byte ao cabo sem gate v2 + checklist + gesto; nunca gravar automaticamente; HS, LP e HP só na Engenharia; nenhum controle inexistente no protocolo; medidores só com dado real.
-- **Relatório final:** arquivos alterados, decisões, checklist A1 a A8 com evidência, mudanças pedidas para a fila de integração, chaves antigas a apagar, comandos de teste sugeridos.
+- **Relatório final** (detalhado abaixo)
+
+## Estado da FUX para as tarefas de página (2026-10-17)
+
+- **FUX.1 commitado (`e3982e4`):** tokens, escala, cores, material, movimento em `web/src/lib/styles/{tokens,accents,base,theme,components}.css`; primitivos em `web/src/lib/components/primitives/` (`Button` sem prop `disabled`, use `disabledReason`; `IconButton`, `Chip`, `Panel`, `Field`, `Tooltip`, `Lamp`, `Skeleton`, `EmptyState`, `Menu`; importe de `#lib/components/primitives/index.ts`); barra com ajuda "?" integrada (o "?" flutuante sumiu), menu do usuário. Leia os primitivos antes de usar; não os edite (fila: peça no relatório).
+- **FUX.3 commitado (`a9d3901`):** `#lib/components/comprehension/index.ts` exporta `Tour`, `TourTrigger`, `Explainer`, `GlossaryLink`; `#lib/comprehension/{tour.svelte.ts,steps.ts,explainers.ts,glossary.ts}`; contrato em `web/src/lib/comprehension/README.md`. Cada página: (1) `TourTrigger` no cabeçalho da página e `Tour` com os passos da página; (2) os atributos `data-tour` abaixo nos elementos certos; (3) `Explainer` ao lado de cada termo técnico visível (gate, envelope, Q, preamp, código da curva, A/B nivelado, teste cego, checklist, ficha técnica, preferência anônima, troca às cegas, camadas, Neutro), usando o registro `explainers.ts`; (4) vazios com os textos `empty_*` e o primitivo `EmptyState`.
+  - `data-tour`: Curva `curva-layers`, `curva-chart`, `curva-presets`, `curva-write`; Comunidade `comunidade-channels`, `comunidade-scope`, `comunidade-publish`, `comunidade-blind`; Cabo `cabo-connect`, `cabo-bytes`, `cabo-checklist`, `cabo-tape`, `cabo-journal`; Soe como X `soe-headphone`, `soe-target`, `soe-solver`, `soe-ab`, `soe-editor`; Comparar `comparar-tracks`, `comparar-arm`, `comparar-level`; Teste cego `cego-prepare`, `cego-listen`, `cego-result`; Biblioteca `biblioteca-shelf`, `biblioteca-card`, `biblioteca-share`.
+  - Códigos do plano ainda escritos no código (remova na sua página): `soe-como-x/Workstation.svelte:642` ("GATE v2 · Q27 / Q23", vira detalhe técnico recolhido), `biblioteca/MeterBridge.svelte:77` ("S4 · RMS…"), `biblioteca/Biblioteca.svelte:330` ("S9 / VOL. 01"), `curva/Cabinet.svelte:116` (`S{index + 1}`, vira "Filtro n"), `comunidade/TotalRecall.svelte:258` (`S{row.index + 1}`). Um teste já falha se qualquer mensagem tiver código do plano.
+- **FUX.2 em paralelo** (carregamento sob demanda no layout, `lib/app`, áudio, social). O contrato "o `client` do contexto é `null` antes do mount" continua; sua página precisa funcionar com `client === null` (skeleton, não erro). Não edite `+layout.svelte`, `lib/app/**`, `lib/components/audio/**`, `lib/social/**`.
+- **Capturas:** o orquestrador regenera os snapshots da sua página e compara com o mock. Se o teste precisar de um estado novo capturado (ficha aberta, popover, solver), escreva um spec e2e próprio da página (`web/tests/e2e/<pagina>-states.spec.ts`) com `toHaveScreenshot` e diga no relatório.
+- **Diagnóstico da sua página:** `docs/plans/fux-spec.md` §1 (inclui §1.1b Curva e §1.4b Biblioteca, Comparar, Soe como X) e §3 (drama).
+
+## Relatório final
+
+Arquivos alterados, decisões, checklist A1 a A8 com evidência, mudanças pedidas para a fila de integração, chaves antigas a apagar, comandos de teste sugeridos.
