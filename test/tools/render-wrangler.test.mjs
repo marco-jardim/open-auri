@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -323,8 +324,31 @@ const PRODUCTION_ROUTES = [{ pattern: 'open-auri.com', custom_domain: true }];
 /** Static Assets of the web Worker (the adapter's output directory and binding). */
 const WEB_ASSETS = { binding: 'ASSETS', directory: '.svelte-kit/cloudflare' };
 
-/** env.production only (#33): the Worker first, except the hashed /_app/* files. */
-const PRODUCTION_RUN_WORKER_FIRST = ['/*', '!/_app/*'];
+/**
+ * env.production and env.staging (#33): the Worker first on page routes only, i.e. every path but
+ * the hashed /_app/* files, the top-level entries of web/static and the generated service worker.
+ */
+const RUN_WORKER_FIRST = [
+  '/*',
+  '!/_app/*',
+  '!/art/*',
+  '!/data/*',
+  '!/fonts/*',
+  '!/icons/*',
+  '!/og-font/*',
+  '!/lang-boot.js',
+  '!/manifest.webmanifest',
+  '!/robots.txt',
+  '!/service-worker.js',
+  '!/third-party-licenses.txt',
+];
+
+/** The run_worker_first exclusion for each top-level entry of web/static (dir/* or the file). */
+function staticExclusions() {
+  return readdirSync(join(REPO, 'web', 'static'), { withFileTypes: true })
+    .map((entry) => (entry.isDirectory() ? `!/${entry.name}/*` : `!/${entry.name}`))
+    .sort();
+}
 
 /** Bindings the Workers runtime may omit (local dev and tests); declared optional in `Env`. */
 const OPTIONAL_BINDINGS = new Set(['METRICS']);
@@ -388,20 +412,29 @@ test('web template declares every binding at the top level and in each environme
     if (label === 'production') assert.deepEqual(target.routes, PRODUCTION_ROUTES, label);
     else assert.equal(target.routes, undefined, label);
   }
-  // #33: production runs the Worker (the canonical-host wrapper written by
-  // web/scripts/wrap-worker.mjs) before Static Assets on every path but the hashed /_app/* files,
-  // so prerendered pages on workers.dev get the 301; the top level (dev, tests) and staging keep
-  // assets first. An env `assets` replaces the top-level one, so binding and directory repeat.
+  // #33: production and staging run the Worker (the canonical-host wrapper written by
+  // web/scripts/wrap-worker.mjs) before Static Assets on page routes, so prerendered pages on
+  // workers.dev get the 301 (staging exercises the same path; its workers.dev origin passes
+  // through); static files (/_app/*, web/static, the service worker) stay assets first, and so
+  // does the top level (dev, tests). An env `assets` replaces the top-level one, so binding and
+  // directory repeat.
   assert.equal(config.main, '.svelte-kit/cloudflare/_worker.js');
   assert.deepEqual(config.assets, WEB_ASSETS);
-  assert.deepEqual(config.env.production.assets, {
-    ...WEB_ASSETS,
-    run_worker_first: PRODUCTION_RUN_WORKER_FIRST,
-  });
-  assert.equal(config.env.staging.assets, undefined, 'staging inherits the top-level assets');
-  for (const [label, target] of Object.entries({ top: config, staging: config.env.staging })) {
-    assert.equal((target.assets ?? config.assets).run_worker_first, undefined, label);
+  assert.equal(config.assets.run_worker_first, undefined, 'top level keeps assets first');
+  for (const label of ['production', 'staging']) {
+    assert.deepEqual(
+      config.env[label].assets,
+      { ...WEB_ASSETS, run_worker_first: RUN_WORKER_FIRST },
+      label,
+    );
   }
+  // Every top-level entry of web/static is excluded (data/ is generated, so it may be absent here).
+  const excluded = new Set(RUN_WORKER_FIRST);
+  assert.deepEqual(
+    staticExclusions().filter((pattern) => !excluded.has(pattern)),
+    [],
+    'every web/static entry has a run_worker_first exclusion',
+  );
   assert.equal(config.vars.PUBLIC_ORIGIN, 'fixture:PUBLIC_ORIGIN');
   assert.equal(
     config.env.staging.vars.PUBLIC_ORIGIN,
@@ -424,7 +457,7 @@ function handWrittenEnv() {
   );
 }
 
-/** Binding and var names a wrangler environment exposes (assets are inherited from the top). */
+/** Binding and var names a wrangler environment exposes (assets fall back to the top level). */
 function exposedNames(target, topLevel) {
   return [
     (target.assets ?? topLevel.assets)?.binding,

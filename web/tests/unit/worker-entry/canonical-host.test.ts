@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalHostResponse } from '#lib/server/security/canonical-host.ts';
 import {
+	isBareOrigin,
 	publicOriginOf,
 	withCanonicalHost,
 	type WorkerHandler
@@ -12,6 +13,19 @@ const CANONICAL = 'https://open-auri.example.org';
 const WORKERS_DEV = 'https://open-auri.someone.workers.dev';
 const PRODUCTION = { PUBLIC_ORIGIN: CANONICAL };
 const CTX = { waitUntil: () => undefined };
+/** Values getServerEnv refuses for PUBLIC_ORIGIN (src/lib/server/env.ts `isOrigin`). */
+const INVALID_ORIGINS = [
+	`${CANONICAL}/`,
+	`${CANONICAL}/app`,
+	`${CANONICAL}?x=1`,
+	`${CANONICAL}#top`,
+	` ${CANONICAL}`,
+	'https://OPEN-AURI.example.org',
+	'http://open-auri.example.org',
+	'ftp://open-auri.example.org',
+	'open-auri.example.org',
+	'not a url'
+];
 
 function app() {
 	const calls: { request: Request; env: unknown; ctx: unknown }[] = [];
@@ -83,6 +97,27 @@ describe('withCanonicalHost', () => {
 		expect(calls).toHaveLength(envs.length);
 	});
 
+	it('passes through on a PUBLIC_ORIGIN the env schema refuses (the hook fails as before)', async () => {
+		const { handler, calls } = app();
+		const wrapped = withCanonicalHost(handler);
+		for (const origin of INVALID_ORIGINS) {
+			const env = { PUBLIC_ORIGIN: origin };
+			const request = new Request(`${WORKERS_DEV}/docs`);
+			// Without the guard the wrapper would 301 some of these, where the hook answers 500.
+			const response = await call(wrapped, request, env);
+			expect(response.status, origin).toBe(200);
+			expect(response.headers.get('location'), origin).toBeNull();
+			expect(calls.at(-1), origin).toEqual({ request, env, ctx: CTX });
+		}
+		expect(calls).toHaveLength(INVALID_ORIGINS.length);
+		const write = await call(
+			wrapped,
+			new Request(`${WORKERS_DEV}/api/auth/sign-in/email`, { method: 'POST', body: '{}' }),
+			{ PUBLIC_ORIGIN: `${CANONICAL}/` }
+		);
+		expect(write.status).toBe(200);
+	});
+
 	it('passes through for loopback and workers.dev origins (dev, preview, e2e, staging)', async () => {
 		const { handler, calls } = app();
 		const wrapped = withCanonicalHost(handler);
@@ -110,9 +145,7 @@ describe('withCanonicalHost', () => {
 			const expected = canonicalHostResponse(new Request(url), CANONICAL);
 			const response = await call(wrapped, new Request(url), PRODUCTION);
 			expect(response.status, url).toBe(expected?.status ?? 200);
-			expect(response.headers.get('location'), url).toBe(
-				expected?.headers.get('location') ?? null
-			);
+			expect(response.headers.get('location'), url).toBe(expected?.headers.get('location') ?? null);
 		}
 	});
 
@@ -126,7 +159,29 @@ describe('withCanonicalHost', () => {
 	});
 });
 
+describe('isBareOrigin', () => {
+	it('accepts what the env schema accepts and refuses the rest', () => {
+		const valid = [
+			CANONICAL,
+			WORKERS_DEV,
+			'https://example.org:8443',
+			'http://localhost:4173',
+			'http://127.0.0.1:8787'
+		];
+		for (const origin of valid) expect(isBareOrigin(origin), origin).toBe(true);
+		for (const origin of [...INVALID_ORIGINS, '']) {
+			expect(isBareOrigin(origin), origin).toBe(false);
+		}
+	});
+});
+
 describe('publicOriginOf', () => {
+	it('answers empty for a PUBLIC_ORIGIN that is not a bare origin', () => {
+		for (const origin of INVALID_ORIGINS) {
+			expect(publicOriginOf({ PUBLIC_ORIGIN: origin }), origin).toBe('');
+		}
+	});
+
 	it('reads PUBLIC_ORIGIN when it is a string and answers empty otherwise', () => {
 		expect(publicOriginOf({ PUBLIC_ORIGIN: CANONICAL })).toBe(CANONICAL);
 		const unset: unknown[] = [

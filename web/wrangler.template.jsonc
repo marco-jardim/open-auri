@@ -26,11 +26,17 @@
 // Prerendered pages (#33): Static Assets answer before the Worker, and the adapter's worker serves
 // prerendered paths from ASSETS without reaching hooks.server.ts. So `main` is the wrapper that
 // scripts/wrap-worker.mjs writes after `vite build` (src/worker-entry/canonical-host.ts, same
-// decision as the hook), and env.production sets `assets.run_worker_first` to every path except
-// the hashed `/_app/*` files (those still answer 200 on workers.dev: static files, not pages).
-// Cost: every other asset request there is a Worker invocation. An env `assets` replaces the top
-// level one (no merge), so binding and directory are repeated; staging and the top level (dev,
-// tests) keep assets first.
+// decision as the hook), and env.production and env.staging set `assets.run_worker_first` to the
+// page routes: every path except what is a static file and never needs the 301, i.e. the hashed
+// `/_app/*` files, the top-level entries of web/static (art, data, fonts, icons, og-font,
+// lang-boot.js, manifest.webmanifest, robots.txt, third-party-licenses.txt) and the generated
+// service-worker.js. Those still answer 200 on workers.dev (static files, not pages); keep the
+// list in sync with web/static (test/tools/render-wrangler.test.mjs checks it). A new page route
+// needs no entry. Cost: every page request there is a Worker invocation (the wrapper then serves
+// the prerendered HTML through env.ASSETS.fetch, with the _headers CSP). Staging shares the list so
+// that path runs there before production; its PUBLIC_ORIGIN is its workers.dev origin, so the
+// wrapper passes through. An env `assets` replaces the top level one (no merge), so binding and
+// directory are repeated; the top level (dev, tests) keeps assets first.
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "${WORKER_NAME_WEB}",
@@ -86,7 +92,20 @@
 			"assets": {
 				"binding": "ASSETS",
 				"directory": ".svelte-kit/cloudflare",
-				"run_worker_first": ["/*", "!/_app/*"]
+				"run_worker_first": [
+					"/*",
+					"!/_app/*",
+					"!/art/*",
+					"!/data/*",
+					"!/fonts/*",
+					"!/icons/*",
+					"!/og-font/*",
+					"!/lang-boot.js",
+					"!/manifest.webmanifest",
+					"!/robots.txt",
+					"!/service-worker.js",
+					"!/third-party-licenses.txt"
+				]
 			},
 			"observability": {
 				"enabled": true,
@@ -126,6 +145,24 @@
 			"name": "${WORKER_NAME_WEB}-staging",
 			"workers_dev": true,
 			"preview_urls": true,
+			"assets": {
+				"binding": "ASSETS",
+				"directory": ".svelte-kit/cloudflare",
+				"run_worker_first": [
+					"/*",
+					"!/_app/*",
+					"!/art/*",
+					"!/data/*",
+					"!/fonts/*",
+					"!/icons/*",
+					"!/og-font/*",
+					"!/lang-boot.js",
+					"!/manifest.webmanifest",
+					"!/robots.txt",
+					"!/service-worker.js",
+					"!/third-party-licenses.txt"
+				]
+			},
 			"observability": {
 				"enabled": true,
 				"redact_query_string": true,

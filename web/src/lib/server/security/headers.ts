@@ -167,8 +167,12 @@ export function applySecurityHeaders(response: Response, options: { origin: stri
 }
 
 /**
- * Content of web/_headers: the same headers for everything Workers Static Assets serves without
- * running the Worker. HSTS is included unconditionally (browsers ignore it over plain http).
+ * Content of web/_headers: the same headers for everything Workers Static Assets serves, i.e. the
+ * static files answered before the Worker (/_app, web/static, the service worker) and, on the
+ * `assets.run_worker_first` page routes of production and staging (web/wrangler.template.jsonc),
+ * the prerendered pages the adapter's worker fetches from env.ASSETS behind the canonical-host
+ * wrapper (src/worker-entry/canonical-host.ts). HSTS is included unconditionally (browsers ignore
+ * it over plain http).
  */
 export function renderStaticHeadersFile(): string {
 	const headers = securityHeaders({ origin: 'https://static.invalid', isHtml: true });
