@@ -40,6 +40,12 @@
   that saw the marker appear (it waits for the writer's lock and then only records). A write that
   finds such a marker is refused with `interrupted-elsewhere`. An X9 queue journals (and emits
   `cable:written` for) each cable as it commits; between cables the marker is flagged `between`.
+- **Old-build tabs (accepted risk, #18):** During the PWA service worker update flow, a tab
+  still running the previous build ignores `between` and may record an already-written cable
+  as `interrupted`, showing a false rescue warning. This fails on the safe side, so #18 accepts
+  documentation rather than a compatibility change. The risk is limited to the mixed-build
+  update window, and the shared `oa-cable-write` lock still allows only one writer across tabs.
+  Revisit marker versioning if its format changes again.
 - A restored cable is never chosen silently: with several cables the target stays unset until the
   user selects one (CableStatus or the checklist); the checklist always shows the target label.
   Unplugging the target never makes another cable the target, and the checklist asks for its
