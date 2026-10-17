@@ -5,6 +5,7 @@ export interface LocalDataBackends {
 }
 
 function removeOwnedKeys(storage: LocalDataBackends['local']) {
+	// Includes oa.tour.v1 (guided-tour seen/dismissed states); never sent to the server.
 	const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
 	for (const key of keys) if (key?.startsWith('oa.')) storage.removeItem(key);
 }

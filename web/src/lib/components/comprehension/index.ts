@@ -1,0 +1,12 @@
+export { default as Tour } from './Tour.svelte';
+export { default as Explainer } from './Explainer.svelte';
+export { default as GlossaryLink } from './GlossaryLink.svelte';
+export { default as TourTrigger } from './TourTrigger.svelte';
+export { tour, createTour, TOUR_STORAGE_KEY } from '#lib/comprehension/tour.svelte.ts';
+export { tourSteps } from '#lib/comprehension/steps.ts';
+export { explainers, gateReasonContext } from '#lib/comprehension/explainers.ts';
+export { glossary, glossaryHref } from '#lib/comprehension/glossary.ts';
+export type { TourController, TourHistory, TourStatus } from '#lib/comprehension/tour.svelte.ts';
+export type { TourPage } from '#lib/comprehension/steps.ts';
+export type { ExplainerId } from '#lib/comprehension/explainers.ts';
+export type { GlossaryTerm } from '#lib/comprehension/glossary.ts';

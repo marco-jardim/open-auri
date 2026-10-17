@@ -508,6 +508,7 @@ D:\git\open-auri\
 | `oa.flash.day` / `oa.flash.total` / `oa.flash.lastWriteAt` | localStorage | `{date, count}` / número / epoch ms |
 | `oa.flash.session` | sessionStorage | número |
 | `oa.meter.ref` | localStorage | `-18` \| `-20` \| `-14` |
+| `oa.tour.v1` | localStorage | `{ [pagina]: 'visto' \| 'dispensado' }` (tour guiado, FUX.3; nunca enviado; apagado por "Apagar dados locais") |
 | `open-auri` | IndexedDB | stores `audio` (`current`), `library` (curvas e favoritos locais), `outbox` (eventos sociais pendentes offline) |
 
 ---
