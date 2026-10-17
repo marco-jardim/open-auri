@@ -1,5 +1,6 @@
 // Minimal, non-sensitive session summary for the chrome (header account entry, policy banner).
-// Never the e-mail, ids or roles. While prerendering there is no session: `sessionResolved` is
+// Never the e-mail, roles or other users' ids; only the user's own id, which ties per-account
+// local data (the social activity outbox) to the person who acted. While prerendering there is no session: `sessionResolved` is
 // false and the client asks /api/auth/get-session itself (see chrome/account.svelte.ts).
 import { building } from '$app/env';
 import type { AccountSummary } from '#lib/components/chrome/account.ts';
@@ -39,7 +40,11 @@ export const load: LayoutServerLoad = async ({ locals, platform }): Promise<Layo
 	const user = locals.user;
 	if (building || !user) return { user: null, sessionResolved: !building, policy: null };
 	return {
-		user: { username: user.displayUsername ?? user.username, emailVerified: user.emailVerified },
+		user: {
+			id: user.id,
+			username: user.displayUsername ?? user.username,
+			emailVerified: user.emailVerified
+		},
 		sessionResolved: true,
 		policy: await signedInPolicy(platform, user.id)
 	};

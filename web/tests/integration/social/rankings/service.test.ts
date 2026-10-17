@@ -22,6 +22,7 @@ import {
 	ban,
 	EXCLUSIONS,
 	exclude,
+	internalKeyPaths,
 	only,
 	publish,
 	rankedEntries,
@@ -202,7 +203,7 @@ describe('runRankingsJob', () => {
 		for (const victim of victims) await exclude(victim.kind, target(victim.item, victim.ownerId));
 		expect(only(await rankedEntries('favorites', '7d'), mine)).toEqual([control.lineageId]);
 		const feed = await readFeed(env.DB, { sort: 'favorites', window: '7d', limit: 100 });
-		expect(feed.items.every((item) => item.lineage.visibility === 'public')).toBe(true);
+		expect(internalKeyPaths(feed)).toEqual([]);
 	});
 
 	it('is idempotent: same input gives the same rows and an older run changes nothing', async () => {

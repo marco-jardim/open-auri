@@ -38,7 +38,7 @@ function fixture(signedIn = true) {
 		return Response.json({ items: library ? [lineage] : [{ lineage }], nextCursor: null });
 	});
 	const session = createSocialSession({
-		initial: signedIn ? { username: 'listener', emailVerified: true } : null
+		initial: signedIn ? { id: 'u-listener', username: 'listener', emailVerified: true } : null
 	});
 	return {
 		curve,

@@ -1,5 +1,6 @@
 // POST /api/v1/reports (T4.8): a verified user reports a lineage, pack or user, with a reason and
-// an optional private note (only admins read it). Turnstile action `report`. Answers 404 for
+// an optional private note (only admins read it). User targetId is a public nickname, never an
+// internal account id. Turnstile action `report`. Answers 404 for
 // targets the reporter cannot read (same as missing), 403 FORBIDDEN for one's own content or
 // profile, 409 DUPLICATE for a second report of the same target. The automatic hiding runs after
 // the insert (social/moderation.ts) and is not revealed to the reporter.
@@ -26,11 +27,12 @@ function noControl(value: string): boolean {
 const Body = z
 	.object({
 		targetKind: z.enum(REPORT_TARGET_KINDS),
-		targetId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+		targetId: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/),
 		reason: z.enum(REPORT_REASONS),
 		note: z.string().max(NOTE_MAX).refine(noControl).nullish()
 	})
-	.strict();
+	.strict()
+	.refine((body) => body.targetKind === 'user' || /^[A-Za-z0-9_-]+$/.test(body.targetId));
 
 export const POST: RequestHandler = defineApi(
 	{

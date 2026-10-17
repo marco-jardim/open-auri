@@ -24,7 +24,7 @@ test('anonymous: "Entrar" returns to the current page', async () => {
 
 test('signed in: the nickname links to the account, never the e-mail', async () => {
 	await render(AccountEntry, {
-		user: { username: 'ana', emailVerified: true },
+		user: { id: 'u-ana', username: 'ana', emailVerified: true },
 		currentPath: '/conta/seguranca'
 	});
 	const link = page.getByRole('link', { name: /^Conta:\s*ana$/ });
@@ -35,7 +35,7 @@ test('signed in: the nickname links to the account, never the e-mail', async () 
 });
 
 test('signed in without a nickname yet, and unverified e-mail', async () => {
-	await render(AccountEntry, { user: { username: null, emailVerified: false } });
+	await render(AccountEntry, { user: { id: 'u-x', username: null, emailVerified: false } });
 	await expect
 		.element(page.getByRole('link', { name: /^Conta\s*\(e-mail não confirmado\)$/ }))
 		.toHaveAttribute('href', '/conta');
@@ -58,7 +58,7 @@ test('CableBar without the snippet keeps its previous content', async () => {
 test('resolved session data is used as is, without probing', async () => {
 	const probe = vi.fn<AccountProbe>(async () => null);
 	await render(AccountSessionFixture, {
-		user: { username: 'ana', emailVerified: true },
+		user: { id: 'u-ana', username: 'ana', emailVerified: true },
 		resolved: true,
 		path: '/conta',
 		probe
@@ -68,7 +68,11 @@ test('resolved session data is used as is, without probing', async () => {
 });
 
 test('prerendered pages probe the session and show the answer', async () => {
-	const probe = vi.fn<AccountProbe>(async () => ({ username: 'bia', emailVerified: true }));
+	const probe = vi.fn<AccountProbe>(async () => ({
+		id: 'u-bia',
+		username: 'bia',
+		emailVerified: true
+	}));
 	const screen = await render(AccountSessionFixture, {
 		user: null,
 		resolved: false,

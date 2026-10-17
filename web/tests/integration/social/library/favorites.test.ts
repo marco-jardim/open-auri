@@ -156,22 +156,76 @@ describe('share attribution (?s=)', () => {
 		);
 	}
 
-	it('records one favorited event for a share of the same lineage', async () => {
-		const owner = await member();
-		const fan = await member();
-		const { lineageId } = await publish(owner.user.id);
+	async function publicActivity(userId: string): Promise<void> {
+		await env.DB.prepare(`UPDATE "user" SET "activity_visibility" = 'public' WHERE "id" = ?`)
+			.bind(userId)
+			.run();
+	}
+
+	async function shareOf(lineageId: string, ownerUserId: string): Promise<string> {
 		const share = await createShare(env.DB, {
 			id: sid('shr'),
 			lineageId,
 			versionId: null,
-			ownerUserId: owner.user.id,
+			ownerUserId,
 			channel: null,
 			now: Date.now()
 		});
 		if (!share.ok) throw new Error(share.code);
-		expect((await put(fan, lineageId, `?s=${share.value.id}`)).status).toBe(200);
-		expect((await put(fan, lineageId, `?s=${share.value.id}`)).status).toBe(200);
-		expect(await attributed(share.value.id)).toBe(1);
+		return share.value.id;
+	}
+
+	it('records one favorited event for a share of the same lineage', async () => {
+		const owner = await member();
+		const fan = await member();
+		await publicActivity(fan.user.id);
+		const { lineageId } = await publish(owner.user.id);
+		const shareId = await shareOf(lineageId, owner.user.id);
+		expect((await put(fan, lineageId, `?s=${shareId}`)).status).toBe(200);
+		expect((await put(fan, lineageId, `?s=${shareId}`)).status).toBe(200);
+		expect(await attributed(shareId)).toBe(1);
+	});
+
+	it('FX4.6: a private-activity fan is never attributed', async () => {
+		const owner = await member();
+		const fan = await member();
+		const { lineageId } = await publish(owner.user.id);
+		const shareId = await shareOf(lineageId, owner.user.id);
+		const result = await favoriteLineage(env.DB, fan.user.id, lineageId, { shareId });
+		expect(result).toEqual({ ok: true, created: true, attributed: false });
+		expect(await attributed(shareId)).toBe(0);
+	});
+
+	it('FX4.6: unfavorite removes the attributed favorited event of that lineage', async () => {
+		const owner = await member();
+		const fan = await member();
+		const other = await member();
+		await publicActivity(fan.user.id);
+		await publicActivity(other.user.id);
+		const { lineageId } = await publish(owner.user.id);
+		const shareId = await shareOf(lineageId, owner.user.id);
+		expect(await favoriteLineage(env.DB, fan.user.id, lineageId, { shareId })).toMatchObject({
+			attributed: true
+		});
+		expect(await favoriteLineage(env.DB, other.user.id, lineageId, { shareId })).toMatchObject({
+			attributed: true
+		});
+		expect(await attributed(shareId)).toBe(2);
+
+		expect(await unfavoriteLineage(env.DB, fan.user.id, lineageId)).toEqual({ removed: true });
+		expect(await attributed(shareId)).toBe(1);
+		expect(
+			await count(
+				'SELECT count(*) AS n FROM share_event_users WHERE share_id = ? AND user_id = ?',
+				shareId,
+				fan.user.id
+			)
+		).toBe(0);
+		// Favoriting again through the share attributes again (once).
+		expect(await favoriteLineage(env.DB, fan.user.id, lineageId, { shareId })).toMatchObject({
+			attributed: true
+		});
+		expect(await attributed(shareId)).toBe(2);
 	});
 
 	it('ignores a share of another lineage, a missing or malformed share', async () => {

@@ -421,7 +421,7 @@ test('hand-written web Env matches the template bindings, vars and the secret li
   }
 });
 
-test('jobs template consumes the access-log queue with a DLQ and runs the daily cron', (t) => {
+test('jobs template consumes the access-log queue with a DLQ and runs the daily, hourly and quarter-hour crons', (t) => {
   const { source, keys, config } = renderReal(t, 'workers/jobs/wrangler.template.jsonc');
   assertTemplateHygiene(source, keys);
   assert.equal(config.main, 'src/index.ts');
@@ -434,7 +434,8 @@ test('jobs template consumes the access-log queue with a DLQ and runs the daily 
       label === 'staging' ? 'fixture:WORKER_NAME_JOBS-staging' : 'fixture:WORKER_NAME_JOBS',
     );
     assert.deepEqual(target.observability, OBSERVABILITY, label);
-    assert.deepEqual(target.triggers, { crons: ['5 0 * * *'] });
+    assert.deepEqual(target.triggers, { crons: ['5 0 * * *', '0 * * * *', '*/15 * * * *'] });
+    assert.deepEqual(target.limits, { cpu_ms: 60000 }, label);
     assert.deepEqual(
       target.d1_databases.map((db) => [db.binding, db.database_id]),
       [['DB', `fixture:D1_DATABASE_ID${s}`]],

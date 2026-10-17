@@ -453,10 +453,13 @@ Verificado; Turnstile `report`; 30 por dia; corpo até 4 KiB.
 { "targetKind": "lineage", "targetId": "<id>", "reason": "spam", "note": "opcional" }
 ```
 
-- `targetKind` ∈ `lineage` | `pack` | `user`; `targetId` com `[A-Za-z0-9_-]{1,64}`; `reason` ∈
+- `targetKind` ∈ `lineage` | `pack` | `user`; para `lineage`/`pack`, `targetId` é o id com
+  `[A-Za-z0-9_-]{1,64}`; para `user`, é o **nickname público**, não o id interno da conta
+  (aceita ponto e resolve variações e nicknames anteriores ainda reservados no servidor). `reason` ∈
   `dangerous` | `spam` | `offensive` | `copyright` | `impersonation` | `other`; `note` até 500
   caracteres, sem caracteres de controle, lida só por administradores.
-- 201 `{ "reported": true }`; 404 (alvo inexistente ou ilegível); 403 `FORBIDDEN` (o próprio
+- 201 `{ "reported": true }`; 404 (alvo inexistente ou ilegível, nickname desconhecido ou conta
+  banida, inclusive tentativas por id interno, sem distinguir esses casos); 403 `FORBIDDEN` (o próprio
   conteúdo ou perfil); 409 `DUPLICATE` (segunda denúncia do mesmo alvo); 400 `INVALID_BODY`.
 - Ocultação automática: quando 3 contas distintas, verificadas, não banidas e com 3 dias ou mais
   denunciam a mesma linhagem ou pack ainda visível, o alvo passa a `auto_hidden`, com registro de

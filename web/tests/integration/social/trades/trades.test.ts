@@ -19,7 +19,6 @@ import {
 	expireOverdueTrades,
 	getMyTrade,
 	joinTrade,
-	lineageTradeAverages,
 	scoreMyTrade,
 	type JoinInput,
 	type TradeDto
@@ -355,24 +354,33 @@ describe('S7 scoring and reveal', () => {
 			s1: b.pub.curve.s1,
 			score: 2,
 			nickname: b.user.username,
+			username: b.user.username,
 			lineage: { id: b.pub.lineageId, versionId: b.pub.versionId, name: 'Warm vocal' }
 		});
 		expect(JSON.stringify(listed)).not.toContain(b.user.id);
 		expect(JSON.stringify(listed)).not.toContain(tb.id);
 		expect(await errorOf(await postScore(a.auth, ta.id, { score: 3 }), 409)).toBe('DUPLICATE');
+	});
 
-		expect(
-			await lineageTradeAverages(env.DB, [
-				a.pub.lineageId,
-				b.pub.lineageId,
-				'bad id!',
-				a.pub.lineageId
-			])
-		).toEqual({
-			[a.pub.lineageId]: { average: 2, count: 1 },
-			[b.pub.lineageId]: { average: 4, count: 1 }
+	it('the revealed partner link uses the canonical nickname, the display form is kept', async () => {
+		const now = epoch();
+		const a = await player();
+		const b = await player();
+		const display = (b.user.username ?? '').toUpperCase();
+		await env.DB.prepare('UPDATE "user" SET "displayUsername" = ? WHERE "id" = ?')
+			.bind(display, b.user.id)
+			.run();
+		const ta = await join(a, now);
+		const tb = await join(b, now + 1);
+		expect(tb.status).toBe('matched');
+		await scoreMyTrade(env.DB, a.user.id, ta.id, 3, now + 2);
+		await scoreMyTrade(env.DB, b.user.id, tb.id, 4, now + 3);
+		const view = await getMyTrade(env.DB, a.user.id, ta.id);
+		expect(view?.partner).toMatchObject({
+			revealed: true,
+			nickname: display,
+			username: b.user.username
 		});
-		expect(await lineageTradeAverages(env.DB, [])).toEqual({});
 	});
 
 	it('a partner banned after the match: no nickname and no lineage link after the reveal', async () => {
@@ -400,6 +408,7 @@ describe('S7 scoring and reveal', () => {
 			s1: b.pub.curve.s1,
 			score: 1,
 			nickname: null,
+			username: null,
 			lineage: null
 		});
 	});
@@ -454,6 +463,173 @@ describe('S7 refusals', () => {
 		const own = await join(owner, epoch());
 		expect(own.status).toBe('waiting');
 		await cancelTrade(env.DB, own.id, owner.user.id);
+	});
+});
+
+type LineageChange = 'retracted' | 'removed' | 'hidden' | 'private';
+
+/** What the owner (retract, make private) or an admin (moderation) does to a lineage. */
+async function changeLineage(lineageId: string, change: LineageChange): Promise<void> {
+	const statement =
+		change === 'retracted'
+			? "UPDATE lineages SET status = 'retracted' WHERE id = ?"
+			: change === 'private'
+				? "UPDATE lineages SET visibility = 'private' WHERE id = ?"
+				: 'UPDATE lineages SET moderation = ? WHERE id = ?';
+	const params = change === 'removed' || change === 'hidden' ? [change, lineageId] : [lineageId];
+	await env.DB.prepare(statement)
+		.bind(...params)
+		.run();
+}
+
+async function statusOf(tradeId: string): Promise<string | null> {
+	const row = await env.DB.prepare('SELECT status FROM trades WHERE id = ?')
+		.bind(tradeId)
+		.first<{ status: string }>();
+	return row?.status ?? null;
+}
+
+describe('S7 lineage state (listable, or own while active and visible)', () => {
+	it('refuses at join an own lineage retracted or hidden by moderation, and one made private by its author', async () => {
+		const owner = await player();
+		for (const change of ['retracted', 'removed', 'hidden'] as const) {
+			const own = await publish(owner.user.id);
+			await changeLineage(own.lineageId, change);
+			expect(await errorOf(await postJoin(owner.auth, { lineageId: own.lineageId }), 404)).toBe(
+				'NOT_FOUND'
+			);
+		}
+		// Someone else's public lineage the author made private: no longer joinable.
+		const author = await player();
+		await changeLineage(author.pub.lineageId, 'private');
+		expect(
+			await errorOf(await postJoin(owner.auth, { lineageId: author.pub.lineageId }), 404)
+		).toBe('NOT_FOUND');
+		expect(await count('SELECT count(*) AS n FROM trades WHERE user_id = ?', owner.user.id)).toBe(
+			0
+		);
+		// The author's own private lineage (active, visible) is still tradeable by the author.
+		const own = await join(author, epoch());
+		expect(own.status).toBe('waiting');
+		await cancelTrade(env.DB, own.id, author.user.id);
+	});
+
+	it('pairing skips waiting trades whose lineage was moderated, retracted or made private', async () => {
+		const now = epoch();
+		// Own lineage, then removed by an admin.
+		const moderated = await player();
+		const tModerated = await join(moderated, now);
+		await changeLineage(moderated.pub.lineageId, 'removed');
+		// Own lineage, then retracted by the owner.
+		const retracted = await player();
+		const tRetracted = await join(retracted, now + 1);
+		await changeLineage(retracted.pub.lineageId, 'retracted');
+		// A third party queued a public lineage; the author made it private afterwards.
+		const author = await player();
+		const fan = { user: await seedUser({ username: nick('tr') }) };
+		const tFan = await join(fan, now + 2, { lineageId: author.pub.lineageId });
+		await changeLineage(author.pub.lineageId, 'private');
+		for (const id of [tModerated.id, tRetracted.id, tFan.id]) {
+			expect(await statusOf(id)).toBe('waiting');
+		}
+
+		const d = await player();
+		const td = await join(d, now + 3);
+		expect(td).toMatchObject({ status: 'waiting', partner: null });
+		for (const id of [tModerated.id, tRetracted.id, tFan.id]) {
+			expect(await statusOf(id)).toBe('waiting');
+		}
+		// The stale trades cannot pair with each other either; a qualifying join pairs with d.
+		const e = await player();
+		const te = await join(e, now + 4);
+		expect(te.status).toBe('matched');
+		expect(te.partner).toEqual({ revealed: false, curveId: d.pub.curve.id, s1: d.pub.curve.s1 });
+		await cancelTrade(env.DB, tModerated.id, moderated.user.id);
+		await cancelTrade(env.DB, tRetracted.id, retracted.user.id);
+		await cancelTrade(env.DB, tFan.id, fan.user.id);
+	});
+
+	it('a matched trade whose partner lineage stops qualifying withholds the S1 and cancels the pair', async () => {
+		for (const change of ['removed', 'retracted', 'private'] as const) {
+			const now = epoch();
+			const a = await player();
+			// b trades an own lineage for moderation and retraction, a third party's otherwise.
+			const author = await player();
+			const b =
+				change === 'private'
+					? { user: await seedUser({ username: nick('tr') }), pub: author.pub }
+					: await player();
+			const ta = await join(a, now);
+			const tb = await join(b, now + 1);
+			expect(tb.status).toBe('matched');
+			expect(tb.partner).toMatchObject({ s1: a.pub.curve.s1 });
+			await changeLineage(b.pub.lineageId, change);
+
+			const auth = locals(a.user, uid('session'));
+			const text = await (await getMine(auth)).text();
+			expect(text).not.toContain(b.pub.curve.s1);
+			expect(text).not.toContain(b.pub.curve.id);
+			const items = (JSON.parse(text) as { items: TradeDto[] }).items;
+			expect(items.find((item) => item.id === ta.id)).toMatchObject({
+				status: 'cancelled',
+				partner: null
+			});
+			// Cancelled in the database too, on both sides; no score, no reveal.
+			expect(await statusOf(ta.id)).toBe('cancelled');
+			expect(await statusOf(tb.id)).toBe('cancelled');
+			expect(await getMyTrade(env.DB, b.user.id, tb.id)).toMatchObject({
+				status: 'cancelled',
+				partner: null
+			});
+			expect(await scoreMyTrade(env.DB, a.user.id, ta.id, 5, now + 2)).toEqual({
+				ok: false,
+				code: 'not-active'
+			});
+		}
+	});
+
+	it('scoring a matched trade whose partner stopped qualifying cancels the pair instead', async () => {
+		const now = epoch();
+		const [a, b] = [await player(), await player()];
+		const ta = await join(a, now);
+		const tb = await join(b, now + 1);
+		expect(tb.status).toBe('matched');
+		await changeLineage(b.pub.lineageId, 'hidden');
+		expect(await scoreMyTrade(env.DB, a.user.id, ta.id, 5, now + 2)).toEqual({
+			ok: false,
+			code: 'not-active'
+		});
+		expect(await statusOf(ta.id)).toBe('cancelled');
+		expect(await statusOf(tb.id)).toBe('cancelled');
+	});
+
+	it('a revealed trade stops serving the partner curve once its lineage no longer qualifies', async () => {
+		const now = epoch();
+		const a = await player();
+		const author = await player();
+		const fan = { user: await seedUser({ username: nick('tr') }), pub: author.pub };
+		const ta = await join(a, now);
+		const tFan = await join(fan, now + 1);
+		expect(tFan.status).toBe('matched');
+		await scoreMyTrade(env.DB, a.user.id, ta.id, 4, now + 2);
+		await scoreMyTrade(env.DB, fan.user.id, tFan.id, 3, now + 3);
+		expect((await getMyTrade(env.DB, a.user.id, ta.id))?.partner).toMatchObject({
+			revealed: true,
+			s1: author.pub.curve.s1
+		});
+
+		await changeLineage(author.pub.lineageId, 'private');
+		const view = await getMyTrade(env.DB, a.user.id, ta.id);
+		expect(view).toMatchObject({ status: 'revealed', score: 4, partner: null });
+		const text = await (await getMine(locals(a.user, uid('session')))).text();
+		expect(text).not.toContain(author.pub.curve.s1);
+		// The finished trade is left as it was.
+		expect(await statusOf(ta.id)).toBe('revealed');
+		// The fan's side (a's lineage still public) is unaffected.
+		expect((await getMyTrade(env.DB, fan.user.id, tFan.id))?.partner).toMatchObject({
+			revealed: true,
+			s1: a.pub.curve.s1
+		});
 	});
 });
 

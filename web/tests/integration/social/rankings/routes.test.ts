@@ -8,7 +8,7 @@ import { addFavorite, encodeCursor, recordActivity } from '#lib/server/social/re
 import { GET as feedGet } from '../../../../src/routes/api/v1/feed/+server.ts';
 import { GET as rankingsGet } from '../../../../src/routes/api/v1/rankings/+server.ts';
 import { expectErrorResponse } from '../../api/helpers.ts';
-import { getEvent, publish, seedUser } from './helpers.ts';
+import { getEvent, internalKeyPaths, publish, seedUser } from './helpers.ts';
 
 const RANKINGS = '/api/v1/rankings';
 const FEED = '/api/v1/feed';
@@ -39,7 +39,7 @@ describe('GET /api/v1/rankings', () => {
 		const body = (await response.json()) as RankingsPage;
 		expect(body).toMatchObject({ metric: 'installs', window: '30d' });
 		expect(body.computedAt).toBeGreaterThanOrEqual(now);
-		expect(body.items.every((entry) => entry.lineage.visibility === 'public')).toBe(true);
+		expect(internalKeyPaths(body)).toEqual([]);
 		const ranks = body.items.map((entry) => entry.rank);
 		expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
 
@@ -123,7 +123,7 @@ describe('GET /api/v1/feed', () => {
 		expect(response.status).toBe(200);
 		const body = (await response.json()) as FeedPage;
 		expect(body.sort).toBe('new');
-		expect(body.items.every((item) => item.lineage.visibility === 'public')).toBe(true);
+		expect(internalKeyPaths(body)).toEqual([]);
 		const etag = response.headers.get('etag') ?? '';
 		const again = await feed('?limit=5', { 'if-none-match': etag });
 		// A lineage published by another file in between changes the body (and the ETag).

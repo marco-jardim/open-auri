@@ -5,10 +5,16 @@ import { env } from 'cloudflare:workers';
 import { NEUTRAL_BANDS } from 'open-auri/dsp';
 import { curveId, encodeS1 } from 'open-auri/share';
 import { describe, expect, it } from 'vitest';
-import { CACHE_IMMUTABLE } from '#lib/server/api/cache.ts';
 import { getServerEnv } from '#lib/server/env.ts';
+import { isCurrentCard, OG_CARD_VERSION, parseOgKey } from '#lib/server/og/keys.ts';
 import { ogResponse } from '#lib/server/og/route.ts';
-import { getOrCreateOg, ogKey, warmOg, type OgEnv } from '#lib/server/og/store.ts';
+import {
+	getOrCreateOg,
+	OG_CACHE_CONTROL,
+	ogKey,
+	warmOg,
+	type OgEnv
+} from '#lib/server/og/store.ts';
 import { NAME_MAX_CHARS, ogSvg, type OgSvgInput } from '#lib/server/og/svg.ts';
 import { randomIp, signedOut } from '../api/helpers.ts';
 import { curveInput, publish, seedUser, type Published } from '../social/repo/helpers.ts';
@@ -29,7 +35,6 @@ function card(overrides: Partial<OgSvgInput> = {}): OgSvgInput {
 	return {
 		name: 'Warm vocal',
 		license: 'CC-BY-4.0',
-		author: 'mixer',
 		s1: encodeS1({ bands: NEUTRAL_BANDS, preampDb: 0 }),
 		lang: 'pt-BR',
 		...overrides
@@ -121,9 +126,9 @@ describe('ogSvg', () => {
 	});
 
 	it('escapes markup, quotes and ampersands', () => {
-		const svg = ogSvg(card({ name: `<script>&"'</script>`, author: '<b>&' }));
+		const svg = ogSvg(card({ name: `<script>&"'</script>`, license: '<b>&' }));
 		expect(svg).toContain('&lt;script&gt;&amp;&quot;&apos;&lt;/script&gt;');
-		expect(svg).toContain('@&lt;b&gt;&amp;');
+		expect(svg).toContain('&lt;b&gt;&amp;');
 		expect(svg).not.toContain('<script');
 		expect(svg).not.toContain('<b>');
 	});
@@ -143,18 +148,35 @@ describe('ogSvg', () => {
 		expect(svg).toContain(`>${kept}</text>`);
 	});
 
-	it('credits a removed author', () => {
-		expect(ogSvg(card({ author: null }))).toContain('autor removido');
-		expect(ogSvg(card({ author: null, lang: 'en-US' }))).toContain('removed author');
+	it('never shows an author (no nickname baked into the PNG)', () => {
+		for (const lang of ['pt-BR', 'en-US'] as const) {
+			const svg = ogSvg(card({ lang }));
+			expect(svg).not.toMatch(/autor|author|@/i);
+			// Only the mark, the license, the name, the axis labels and the legend are drawn.
+			const texts = Array.from(svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g), (m) => m[1]);
+			expect(texts.slice(0, 3)).toEqual(['open-auri', 'CC-BY-4.0', 'Warm vocal']);
+		}
 	});
 });
 
 describe('OG store', () => {
-	it('uses og/<curveId>-<versionId>.png', () => {
+	it('uses og/<curveId>-<versionId>.png and parses it back', () => {
 		expect(ogKey('abc', 'ver-1')).toBe('og/abc-ver-1.png');
+		expect(parseOgKey('og/abc-ver-1.png')).toEqual({ curveId: 'abc', versionId: 'ver-1' });
+		const invalid = [
+			'og/abc.png',
+			'og/-ver.png',
+			'og/abc-ver.jpg',
+			'x/abc-ver.png',
+			'og/a/b-c.png'
+		];
+		for (const key of invalid) expect(parseOgKey(key)).toBeNull();
+		expect(isCurrentCard({ card: OG_CARD_VERSION })).toBe(true);
+		expect(isCurrentCard({ etag: '"x"' })).toBe(false);
+		expect(isCurrentCard(undefined)).toBe(false);
 	});
 
-	it('renders once, stores immutable PNG metadata and then serves from R2', async () => {
+	it('renders once, stores PNG metadata (1-day cache, card) and then serves from R2', async () => {
 		const pub = await published();
 		const fake = fakeRenderer();
 		const { ctx, settle } = context();
@@ -172,7 +194,8 @@ describe('OG store', () => {
 		const key = ogKey(pub.curve.id, pub.versionId);
 		const head = await serverEnv().media.head(key);
 		expect(head?.httpMetadata?.contentType).toBe('image/png');
-		expect(head?.httpMetadata?.cacheControl).toBe(CACHE_IMMUTABLE);
+		expect(head?.httpMetadata?.cacheControl).toBe('public, max-age=86400');
+		expect(head?.customMetadata?.card).toBe(OG_CARD_VERSION);
 
 		const second = await getOrCreateOg(ogEnv(), ctx, pub.versionId, deps);
 		expect(second.ok && second.source).toBe('r2');
@@ -182,6 +205,27 @@ describe('OG store', () => {
 		expect(second.etag).toBe(first.etag);
 		expect(new Uint8Array(second.body)).toEqual(new Uint8Array(first.body));
 		expect(Array.from(new Uint8Array(second.body).slice(0, 8))).toEqual(PNG_SIGNATURE);
+	});
+
+	it('never serves an older card layout (author baked in): renders and overwrites', async () => {
+		const pub = await published();
+		const key = ogKey(pub.curve.id, pub.versionId);
+		const legacy = new Uint8Array([...PNG_SIGNATURE, 1, 2, 3]);
+		await serverEnv().media.put(key, legacy, {
+			httpMetadata: { contentType: 'image/png' },
+			customMetadata: { etag: '"legacy"' }
+		});
+		const fake = fakeRenderer();
+		const { ctx, settle } = context();
+		const result = await getOrCreateOg(ogEnv(), ctx, pub.versionId, { render: fake.render });
+		await settle();
+		if (!result.ok) throw new Error('expected the version to be linkable');
+		expect(result.source).toBe('render');
+		expect(result.etag).not.toBe('"legacy"');
+		expect(fake.svgs).toHaveLength(1);
+		const stored = await serverEnv().media.head(key);
+		expect(stored?.customMetadata?.card).toBe(OG_CARD_VERSION);
+		expect(stored?.customMetadata?.etag).toBe(result.etag);
 	});
 
 	it('renders the same bytes for concurrent misses', async () => {
@@ -256,7 +300,7 @@ describe('OG store', () => {
 });
 
 describe('GET /og/[id].png', () => {
-	it('answers 200 with immutable cache and ETag, then 304 on If-None-Match', async () => {
+	it('answers 200 with a 1-day public cache and ETag, then 304 on If-None-Match', async () => {
 		const pub = await published();
 		const pending: Promise<unknown>[] = [];
 		const fake = fakeRenderer();
@@ -269,7 +313,8 @@ describe('GET /og/[id].png', () => {
 		await Promise.all(pending);
 		expect(miss.status).toBe(200);
 		expect(miss.headers.get('content-type')).toBe('image/png');
-		expect(miss.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+		expect(miss.headers.get('cache-control')).toBe('public, max-age=86400');
+		expect(miss.headers.get('cache-control')).not.toContain('immutable');
 		const etag = miss.headers.get('etag');
 		expect(etag).toMatch(/^"[A-Za-z0-9_-]+"$/);
 
@@ -284,7 +329,7 @@ describe('GET /og/[id].png', () => {
 
 		const notModified = await ogResponse(event(pub.versionId, { 'if-none-match': etag ?? '' }));
 		expect(notModified.status).toBe(304);
-		expect(notModified.headers.get('cache-control')).toBe(CACHE_IMMUTABLE);
+		expect(notModified.headers.get('cache-control')).toBe(OG_CACHE_CONTROL);
 	});
 
 	it('answers 404 no-store for private and unknown versions', async () => {

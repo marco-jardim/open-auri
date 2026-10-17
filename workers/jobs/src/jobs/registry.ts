@@ -9,6 +9,7 @@
 import { runRankingsJob } from '../../../../web/src/lib/server/social/rankings.ts';
 import { accessLogConsumerJob } from './access-log-consumer.ts';
 import { accessLogRetentionJob } from './access-log-retention.ts';
+import { ogSweepJob } from './og-sweep.ts';
 import { createRankingsJob } from './rankings.ts';
 import { rateLimitGcJob } from './rate-limit-gc.ts';
 import { regateJob } from './regate.ts';
@@ -65,13 +66,15 @@ export class JobFailedError extends Error {
 
 /**
  * - Daily (00:05 UTC): salt rotation first (tomorrow's salt must exist before midnight), then the
- *   rate-limit and access-log retention sweeps, the S6 aggregation and, last, the re-gate of
- *   curves cached under an older gate version (the most CPU-heavy step, ~150 ms per curve, and
- *   only non-zero after a threshold change: if it ever hits the CPU limit, the jobs before it have
- *   already finished, and the next day continues where it stopped).
- * - Hourly: S7 trade expiry and re-pairing.
+ *   rate-limit and access-log retention sweeps, the S6 aggregation (bounded window, pair cap and
+ *   estimator budget) and the OG image sweep.
+ * - Hourly: the re-gate of curves cached under an older gate version FIRST (the most CPU-heavy
+ *   step, ~150 ms per curve, time-budgeted in regate.ts and only non-zero after a threshold
+ *   change; on its own cron so no daily job can starve it, and the next hour continues where it
+ *   stopped), then S7 trade expiry and re-pairing.
  * - Every 15 minutes: rankings materialization.
  * Queue: the access-log consumer.
+ * Each invocation runs under `limits.cpu_ms` of wrangler.template.jsonc.
  */
 export const registry: JobRegistry = {
   scheduled: {
@@ -80,9 +83,9 @@ export const registry: JobRegistry = {
       rateLimitGcJob,
       accessLogRetentionJob,
       s6AggregateJob,
-      regateJob,
+      ogSweepJob,
     ],
-    [CRONS.hourly]: [tradesExpireJob],
+    [CRONS.hourly]: [regateJob, tradesExpireJob],
     [CRONS.quarterHour]: [createRankingsJob(runRankingsJob)],
   },
   queues: {

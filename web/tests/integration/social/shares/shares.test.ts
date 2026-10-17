@@ -165,12 +165,12 @@ describe('shares service', () => {
 		);
 	});
 
-	it('stats are owner-only and split anonymous opens from attributed users', async () => {
+	it('stats are for the lineage author only and split anonymous opens from attributed users', async () => {
 		const owner = await seedUser({});
 		const sharer = await seedUser({});
 		const viewer = await seedUser({});
 		const pub = await publish(owner.id);
-		const { shareId } = await createShareFor(env.DB, sharer.id, { lineageId: pub.lineageId });
+		const { shareId } = await createShareFor(env.DB, owner.id, { lineageId: pub.lineageId });
 		const now = Date.UTC(2026, 9, 16, 12);
 
 		expect(await recordShareOpen(env.DB, shareId, now)).toBe(true);
@@ -191,7 +191,7 @@ describe('shares service', () => {
 			at: now
 		});
 
-		const stats = await shareStatsFor(env.DB, sharer.id, shareId);
+		const stats = await shareStatsFor(env.DB, owner.id, shareId);
 		expect(stats.opens).toEqual({
 			total: 3,
 			days: [
@@ -202,8 +202,43 @@ describe('shares service', () => {
 		expect(stats.attributed).toEqual({ previewed: 1, installed: 0, favorited: 1 });
 		expect(JSON.stringify(stats)).not.toContain(viewer.id);
 
+		await expectApiError(() => shareStatsFor(env.DB, sharer.id, shareId), 404, 'NOT_FOUND');
+		await expectApiError(() => shareStatsFor(env.DB, owner.id, 'nope'), 404, 'NOT_FOUND');
+	});
+
+	it('FX4.6: a non-author sharer gets 404 on the stats of their own share (not even opens)', async () => {
+		const owner = await seedUser({});
+		const sharer = await seedUser({});
+		const pub = await publish(owner.id);
+		const { shareId } = await createShareFor(env.DB, sharer.id, { lineageId: pub.lineageId });
+		expect(await recordShareOpen(env.DB, shareId)).toBe(true);
+		// Anyone may share a public lineage, but only the author reads a funnel...
+		await expectApiError(() => shareStatsFor(env.DB, sharer.id, shareId), 404, 'NOT_FOUND');
+		// ...and only of the author's own shares.
 		await expectApiError(() => shareStatsFor(env.DB, owner.id, shareId), 404, 'NOT_FOUND');
-		await expectApiError(() => shareStatsFor(env.DB, sharer.id, 'nope'), 404, 'NOT_FOUND');
+
+		const { GET } = await route<{ GET: Handler }>('api/v1/shares/[id]/stats/+server.ts');
+		const response = await GET(
+			apiEvent({
+				path: `/api/v1/shares/${shareId}/stats`,
+				routeId: '/api/v1/shares/[id]/stats',
+				params: { id: shareId },
+				locals: localsFor(sharer.id)
+			})
+		);
+		await expectErrorResponse(response, 404, 'NOT_FOUND');
+	});
+
+	it('FX4.6: a retracted lineage whose head failed the gate is a plain 404, not a tombstone', async () => {
+		const owner = await seedUser({});
+		const anon = { userId: null };
+		const failed = await publish(owner.id);
+		await retract(failed.lineageId);
+		expect((await loadSharedCurve(env.DB, anon, failed.lineageId, null)).kind).toBe('gone');
+		await env.DB.prepare('UPDATE curves SET gate_ok = 0, gate_reasons = \'["x"]\' WHERE id = ?')
+			.bind(failed.curve.id)
+			.run();
+		expect((await loadSharedCurve(env.DB, anon, failed.lineageId, null)).kind).toBe('not-found');
 	});
 
 	it('opens of unknown shares are not counted', async () => {

@@ -137,7 +137,8 @@ function library(): Handler {
 	};
 }
 
-const signedIn = () => createSocialSession({ initial: { username: 'Ana', emailVerified: true } });
+const signedIn = () =>
+	createSocialSession({ initial: { id: 'u-ana', username: 'Ana', emailVerified: true } });
 
 test('signed out: only the sign-in invite, no account request', async () => {
 	const { api, calls } = server({});

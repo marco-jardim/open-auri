@@ -96,7 +96,10 @@ test('the audio guard needs PCM, B side, monitor gain and a running context', as
 	expect(preview.audibleEditorTime()).toBeNull();
 });
 
-test('Curva uses the real outbox while signed out, never posts activity directly', async () => {
+async function listenOnCurva(
+	session: ReturnType<typeof createSocialSession>,
+	fetcher: (input: string, init: RequestInit) => Promise<Response>
+) {
 	await rememberOrigin({ s1, lineageId: origin.lineageId, versionId: origin.versionId });
 	const app = createClientApp(fakeAppOptions().options);
 	apps.push(app);
@@ -107,7 +110,6 @@ test('Curva uses the real outbox while signed out, never posts activity directly
 	preview.session = 1;
 	let seconds: number | null = null;
 	vi.spyOn(preview, 'audibleEditorTime').mockImplementation(() => seconds);
-	const fetcher = vi.fn(async () => new Response('{}', { status: 200 }));
 	vi.useFakeTimers();
 	const screen = await render(SocialActions, {
 		app,
@@ -117,33 +119,58 @@ test('Curva uses the real outbox while signed out, never posts activity directly
 		pageUrl: new URL('https://example.test/'),
 		preview,
 		api: curvaSocialApi(fetcher),
-		session: createSocialSession({ initial: null })
+		session
 	});
 	await vi.waitFor(() =>
 		expect(screen.container.querySelector('a[href="/c/audible"]')).not.toBeNull()
 	);
-	for (let n = 0; n <= 90; n++) {
-		seconds = n / 10;
-		await vi.advanceTimersByTimeAsync(100);
-	}
-	seconds = null;
-	await vi.advanceTimersByTimeAsync(20_000);
-	expect(await app.state.outbox.list()).toHaveLength(0);
-	for (let n = 0; n <= 100; n++) {
-		seconds = n / 10;
-		await vi.advanceTimersByTimeAsync(100);
-	}
+	return {
+		app,
+		async play(from: number, to: number) {
+			for (let n = from; n <= to; n++) {
+				seconds = n / 10;
+				await vi.advanceTimersByTimeAsync(100);
+			}
+		},
+		async silence(ms: number) {
+			seconds = null;
+			await vi.advanceTimersByTimeAsync(ms);
+		}
+	};
+}
+
+test('Curva never stores a signed-out preview (nothing waits for a later account)', async () => {
+	const fetcher = vi.fn(async () => new Response('{}', { status: 200 }));
+	const listen = await listenOnCurva(createSocialSession({ initial: null }), fetcher);
+	await listen.play(0, 250);
 	await tick();
-	const events = await app.state.outbox.list();
-	expect(events).toHaveLength(1);
+	expect(await listen.app.state.outbox.list()).toHaveLength(0);
+	expect(fetcher).not.toHaveBeenCalled();
+});
+
+test('Curva queues a verified listener preview through the outbox, stamped with the account', async () => {
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	// The API is down (503): the event stays queued and nothing is posted to /curves/[id]/activity.
+	const fetcher = vi.fn<(input: string, init: RequestInit) => Promise<Response>>(
+		async () => new Response('', { status: 503 })
+	);
+	const listen = await listenOnCurva(
+		createSocialSession({ initial: { id: 'u-ana', username: 'Ana', emailVerified: true } }),
+		fetcher
+	);
+	await listen.play(0, 90);
+	await listen.silence(20_000);
+	expect(await listen.app.state.outbox.list()).toHaveLength(0);
+	await listen.play(0, 100);
+	await tick();
+	await vi.waitFor(async () => expect(await listen.app.state.outbox.list()).toHaveLength(1));
+	const events = await listen.app.state.outbox.list();
 	expect(events[0]).toMatchObject({
 		type: SOCIAL_OUTBOX_TYPE,
-		payload: { kind: 'previewed', lineageId: 'audible', durationMs: 10_000 }
+		payload: { owner: 'u-ana', kind: 'previewed', lineageId: 'audible', durationMs: 10_000 }
 	});
-	for (let n = 101; n <= 250; n++) {
-		seconds = n / 10;
-		await vi.advanceTimersByTimeAsync(100);
-	}
-	expect(await app.state.outbox.list()).toHaveLength(1);
-	expect(fetcher).not.toHaveBeenCalled();
+	await listen.play(101, 250);
+	expect(await listen.app.state.outbox.list()).toHaveLength(1);
+	const urls = fetcher.mock.calls.map(([input]) => input);
+	expect(urls.some((url) => /\/curves\/[^/]+\/activity/.test(url))).toBe(false);
 });

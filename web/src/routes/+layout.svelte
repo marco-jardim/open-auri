@@ -65,7 +65,8 @@
 	const homage = $derived(getFooterHonoree(meta));
 	const pending = $derived(app?.pendingWrite);
 	// Social activity (F4): one outbox over the app's store, flushed by SocialSync; real cable
-	// writes of a remembered community curve enqueue an installed event through the bridge.
+	// writes of a remembered community curve enqueue an installed event through the bridge, only
+	// for the signed-in, verified account that wrote (SocialSync purges on sign-out or switch).
 	const socialSession = createSocialSession();
 	const socialApi = createSocialApi();
 	const socialOutbox = $derived(
@@ -78,7 +79,10 @@
 		return startOutboxBridge({
 			app: client,
 			outbox,
-			onqueued: () => void outbox.flush(socialApi)
+			session: socialSession,
+			onqueued: (result) => {
+				if (result.ok) void outbox.flush(socialApi);
+			}
 		});
 	});
 	const statusId = $props.id();

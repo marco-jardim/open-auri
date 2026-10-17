@@ -2,6 +2,8 @@
 // Public. The rate limit runs here (not through `rateLimit` of defineApi) so it always keys on the
 // daily-salted IP hash, never on a signed-in user's id, and uses only the burst binding: nothing
 // about the caller is persisted, in the batch or anywhere else. Then Turnstile, then the body.
+// Items must be official preset curve ids or curves of publicly listable lineages (FX4.7): any
+// other item refuses the whole batch with 400 INVALID_BODY, issue code `s6_unknown_item`.
 import { z } from 'zod';
 import {
 	ApiError,
@@ -16,6 +18,7 @@ import {
 	S6_ITEM_PATTERN,
 	S6_PAIRS_MAX,
 	S6_RECEIPT_PATTERN,
+	S6_UNKNOWN_ITEM_ISSUE,
 	submitBatch
 } from '#lib/server/social/s6.ts';
 import type { RequestHandler } from './$types';
@@ -57,6 +60,12 @@ export const POST: RequestHandler = defineApi(
 		if (!result.ok) {
 			if (result.code === 'consent-required') throw new ApiError(400, 'CONSENT_REQUIRED');
 			if (result.code === 'duplicate') throw new ApiError(409, 'DUPLICATE');
+			if (result.code === 'unknown-item') {
+				// Only official preset curve ids and curves of publicly listable lineages are items.
+				throw new ApiError(400, 'INVALID_BODY', {
+					issues: [{ path: ['pairs'], code: S6_UNKNOWN_ITEM_ISSUE }]
+				});
+			}
 			throw new ApiError(400, 'INVALID_BODY');
 		}
 		return json({ ok: true }, { status: 201 });

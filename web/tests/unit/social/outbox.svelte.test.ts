@@ -78,7 +78,11 @@ function fakeApi(respond: Responder = recordAll) {
 function setup(overrides: Partial<SocialOutboxOptions> = {}) {
 	const memory = memoryStore();
 	let clock = T0;
-	const session = { signedIn: true, verified: true };
+	const session: { signedIn: boolean; verified: boolean; accountId: string | null } = {
+		signedIn: true,
+		verified: true,
+		accountId: 'user-a'
+	};
 	const logs: string[][] = [];
 	const options: SocialOutboxOptions = {
 		store: memory.store,
@@ -127,6 +131,7 @@ describe('enqueue', () => {
 			ok: true,
 			event: {
 				eventId: '00000000-0000-4000-8000-000000000001',
+				owner: 'user-a',
 				lineageId: 'L1',
 				kind: 'previewed',
 				at: T0,
@@ -165,6 +170,49 @@ describe('enqueue', () => {
 		expect(result).toEqual({ ok: false, reason: 'storage' });
 		expect(logs).toEqual([['social outbox: enqueue failed', 'QuotaExceededError']]);
 		expect(JSON.stringify(logs)).not.toContain('secret-lineage');
+	});
+
+	it('refuses anonymous and unverified actors without storing anything', async () => {
+		const anonymous = setup({ session: { signedIn: false, verified: false, accountId: null } });
+		const unverified = setup({ session: { signedIn: true, verified: false, accountId: 'u' } });
+		const noId = setup({ session: { signedIn: true, verified: true, accountId: null } });
+		const preview = { kind: 'previewed', lineageId: 'L1', durationMs: 20_000 } as const;
+		expect(await anonymous.outbox.enqueue(preview)).toEqual({ ok: false, reason: 'signed-out' });
+		expect(await anonymous.outbox.enqueue({ kind: 'installed', lineageId: 'L1' })).toEqual({
+			ok: false,
+			reason: 'signed-out'
+		});
+		expect(await unverified.outbox.enqueue(preview)).toEqual({ ok: false, reason: 'unverified' });
+		expect(await noId.outbox.enqueue(preview)).toEqual({ ok: false, reason: 'signed-out' });
+		expect(anonymous.records.size + unverified.records.size + noId.records.size).toBe(0);
+	});
+
+	it('reads the session at the moment of the action and stamps that account', async () => {
+		const context = setup();
+		context.session.signedIn = false;
+		context.session.accountId = null;
+		expect((await context.outbox.enqueue({ kind: 'installed', lineageId: 'L1' })).ok).toBe(false);
+		context.session.signedIn = true;
+		context.session.accountId = 'user-b';
+		const result = await context.outbox.enqueue({ kind: 'installed', lineageId: 'L2' });
+		expect(result.ok && result.event.owner).toBe('user-b');
+		const [stored] = [...context.records.values()];
+		expect(stored?.payload).toMatchObject({ v: 2, owner: 'user-b', lineageId: 'L2' });
+	});
+
+	it('refuses an event whose actor is no longer the signed-in account (actedAs)', async () => {
+		const context = setup();
+		const input = { kind: 'installed', lineageId: 'L1' } as const;
+		expect(await context.outbox.enqueue(input, { actedAs: 'user-b' })).toEqual({
+			ok: false,
+			reason: 'signed-out'
+		});
+		expect(await context.outbox.enqueue(input, { actedAs: null })).toEqual({
+			ok: false,
+			reason: 'signed-out'
+		});
+		expect(context.records.size).toBe(0);
+		expect((await context.outbox.enqueue(input, { actedAs: 'user-a' })).ok).toBe(true);
 	});
 
 	it('rejects invalid ids', async () => {
@@ -344,13 +392,16 @@ describe('flush', () => {
 	});
 
 	it('does nothing when signed out, unverified or offline', async () => {
-		const signedOut = setup({ session: { signedIn: false, verified: false } });
-		const unverified = setup({ session: { signedIn: true, verified: false } });
+		const signedOut = setup();
+		const unverified = setup();
 		const offline = setup({ online: () => false });
 		const { api } = fakeApi();
 		for (const context of [signedOut, unverified, offline]) {
 			await context.outbox.enqueue({ kind: 'installed', lineageId: 'L1' });
 		}
+		signedOut.session.signedIn = false;
+		signedOut.session.accountId = null;
+		unverified.session.verified = false;
 		expect((await signedOut.outbox.flush(api)).status).toBe('signed-out');
 		expect((await unverified.outbox.flush(api)).status).toBe('unverified');
 		expect((await offline.outbox.flush(api)).status).toBe('offline');
@@ -378,6 +429,108 @@ describe('flush', () => {
 		expect(report).toMatchObject({ status: 'aborted', kept: 1 });
 		const [item] = await context.outbox.pending();
 		expect(item?.attempts).toBe(0);
+	});
+});
+
+describe('account ownership', () => {
+	it("never sends A's queued events as B and removes them", async () => {
+		const context = setup();
+		const { api, batches } = fakeApi();
+		await context.outbox.enqueue({ kind: 'previewed', lineageId: 'LA', durationMs: 15_000 });
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LA' });
+		// A signs out without flushing; B signs in on the same browser within 7 days.
+		context.session.accountId = 'user-b';
+		context.advance(60_000);
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LB' });
+		expect((await context.outbox.pending()).map((item) => item.lineageId)).toEqual(['LB']);
+		const report = await context.outbox.flush(api);
+		expect(report).toMatchObject({ status: 'done', sent: 1, removed: 1, dropped: 2, kept: 0 });
+		expect(batches.flat().map((event) => event.lineageId)).toEqual(['LB']);
+		expect(context.records.size).toBe(0);
+	});
+
+	it("keeps A's events for A until A signs in again", async () => {
+		const context = setup();
+		const { api, batches } = fakeApi();
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LA' });
+		context.session.signedIn = false;
+		context.session.accountId = null;
+		expect((await context.outbox.flush(api)).status).toBe('signed-out');
+		expect(await context.outbox.pending()).toEqual([]);
+		expect(context.records.size).toBe(1);
+		context.session.signedIn = true;
+		context.session.accountId = 'user-a';
+		expect(await context.outbox.flush(api)).toMatchObject({ status: 'done', removed: 1 });
+		expect(batches.flat().map((event) => event.lineageId)).toEqual(['LA']);
+	});
+
+	it('stops a running flush when the session changes between batches', async () => {
+		const context = setup();
+		const { api, batches } = fakeApi(async (events) => {
+			context.session.accountId = 'user-b';
+			return recordAll(events);
+		});
+		for (let index = 0; index < OUTBOX_BATCH_MAX + 5; index += 1) {
+			context.advance(1);
+			await context.outbox.enqueue({ kind: 'installed', lineageId: `L${index}` });
+		}
+		const report = await context.outbox.flush(api);
+		expect(report).toMatchObject({ status: 'signed-out', sent: OUTBOX_BATCH_MAX, kept: 5 });
+		expect(batches).toHaveLength(1);
+	});
+
+	it('drops stored items without an owner (v1, before FX4.2) instead of sending them', async () => {
+		const context = setup();
+		const { api, batches } = fakeApi();
+		const legacy = '00000000-0000-4000-8000-0000000000aa';
+		await context.store.append({
+			id: legacy,
+			type: SOCIAL_OUTBOX_TYPE,
+			payload: {
+				v: 1,
+				eventId: legacy,
+				lineageId: 'L1',
+				kind: 'installed',
+				at: T0,
+				attempts: 0,
+				nextAttemptAt: T0
+			}
+		});
+		expect(await context.outbox.flush(api)).toMatchObject({ status: 'done', dropped: 1, sent: 0 });
+		expect(batches).toHaveLength(0);
+		expect(context.records.size).toBe(0);
+	});
+
+	it('purges everything on sign-out and other accounts on a switch', async () => {
+		const context = setup();
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LA' });
+		context.session.accountId = 'user-b';
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'LB' });
+		await context.store.append({ id: 'other', type: 'something.else', payload: { x: 1 } });
+
+		// Switch to B: A's events go, B's stay.
+		expect(await context.outbox.purge()).toBe(1);
+		expect((await context.outbox.pending()).map((item) => item.lineageId)).toEqual(['LB']);
+
+		// Explicit keep, then sign-out: nothing social stays queued.
+		await context.outbox.purge('user-b');
+		expect(context.records.size).toBe(2);
+		context.session.signedIn = false;
+		context.session.accountId = null;
+		expect(await context.outbox.purge()).toBe(1);
+		expect([...context.records.keys()]).toEqual(['other']);
+	});
+
+	it('logs a purge failure without throwing', async () => {
+		const context = setup();
+		await context.outbox.enqueue({ kind: 'installed', lineageId: 'L1' });
+		const store: OutboxStore = {
+			...context.store,
+			remove: () => Promise.reject(new DOMException('gone', 'InvalidStateError'))
+		};
+		const outbox = createSocialOutbox({ ...context.options, store });
+		expect(await outbox.purge(null)).toBe(0);
+		expect(context.logs).toEqual([['social outbox: purge failed', 'InvalidStateError']]);
 	});
 });
 

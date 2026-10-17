@@ -15,6 +15,7 @@ import { getServerEnv } from '#lib/server/env.ts';
 import { loadOgFonts, resetOgFonts, toArrayBuffer, type OgAssets } from '#lib/server/og/render.ts';
 import { ogResponse } from '#lib/server/og/route.ts';
 import { errorName, getOrCreateOg, ogKey, type OgEnv } from '#lib/server/og/store.ts';
+import { OG_CARD_VERSION } from '#lib/server/og/keys.ts';
 import { ogEnvOf } from '#lib/server/og/warm.ts';
 import { recordOutbox } from '#lib/server/social/activity.ts';
 import {
@@ -61,7 +62,6 @@ import {
 import {
 	cancelMyTrade,
 	joinTrade,
-	lineageTradeAverages,
 	listMyTrades,
 	retryWaitingPairs,
 	scoreMyTrade
@@ -541,8 +541,6 @@ describe('trades service: input refusals, states and the pairing retry', () => {
 			ok: false,
 			code: 'invalid-cursor'
 		});
-		expect(await lineageTradeAverages(env.DB, [])).toEqual({});
-		expect(await lineageTradeAverages(env.DB, ['bad id!'])).toEqual({});
 	});
 
 	it('cancelling a trade twice: the second is not-active', async () => {
@@ -741,7 +739,9 @@ describe('OG image: fonts, store edge cases, route and warm-up environment', () 
 	it('an R2 object without the etag metadata gets a computed strong ETag', async () => {
 		const target = await linkableVersion();
 		const bytes = new Uint8Array([7, 7, 7, 7]);
-		await getServerEnv({ env }).media.put(ogKey(target.curveId, target.versionId), bytes);
+		await getServerEnv({ env }).media.put(ogKey(target.curveId, target.versionId), bytes, {
+			customMetadata: { card: OG_CARD_VERSION }
+		});
 		const { ctx } = collector();
 		const result = await getOrCreateOg(ogEnv(), ctx, target.versionId);
 		if (!result.ok) throw new Error('expected the stored image');

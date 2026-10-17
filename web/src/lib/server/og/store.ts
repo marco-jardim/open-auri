@@ -1,17 +1,29 @@
-// OG images in R2 (T4.7): `og/<curveId>-<versionId>.png`, immutable (versions are append-only and
-// curves content-addressed). Visibility is always checked first, through the repository
+// OG images in R2 (T4.7): `og/<curveId>-<versionId>.png` (./keys.ts). The bytes of a key never
+// change for a given card layout (versions are append-only, curves content-addressed, and the card
+// carries no author: FX4.3). Visibility is always checked first, through the repository
 // (`getVersionForViewer` with the anonymous viewer = linkable lineage, gate_ok = 1), so a private,
 // hidden, retracted or gate-rejected version is never rendered nor served, even when its PNG is
-// still in R2. Concurrency: two simultaneous misses render twice at most and write the same bytes
-// (the SVG and the renderer are deterministic), so the last write wins harmlessly.
-import { CACHE_IMMUTABLE, strongEtag } from '#lib/server/api/cache.ts';
+// still in R2 (the jobs Worker's `og-sweep` deletes such objects). A stored object of another card
+// layout (`customMetadata.card`) is treated as a miss and overwritten. Concurrency: two
+// simultaneous misses render twice at most and write the same bytes (the SVG and the renderer are
+// deterministic), so the last write wins harmlessly.
+import { strongEtag } from '#lib/server/api/cache.ts';
 import type { ServerEnv } from '#lib/server/env.ts';
-import { getLineageForViewer, getVersionForViewer } from '#lib/server/social/repo.ts';
+import { getVersionForViewer } from '#lib/server/social/repo.ts';
 import { ANONYMOUS_VIEWER } from '#lib/server/social/types.ts';
+import { isCurrentCard, OG_CARD_VERSION, ogKey } from './keys.ts';
 import { loadOgFonts, renderPng, toArrayBuffer, type OgAssets } from './render.ts';
 import { ogSvg } from './svg.ts';
 
+export { ogKey } from './keys.ts';
+
 export const OG_CONTENT_TYPE = 'image/png';
+/**
+ * One day, public (FX4.3): visibility is checked on every request, so a version that turns
+ * private stops being served at once; this bounds how long browsers and CDNs keep their copy.
+ * Revalidation is cheap (strong ETag, 304).
+ */
+export const OG_CACHE_CONTROL = 'public, max-age=86400';
 /** Version ids accepted before touching D1 (anything else is a 404 without a query). */
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -37,11 +49,6 @@ export interface OgDeps {
 export type OgResult =
 	| { ok: true; key: string; body: ArrayBuffer; etag: string; source: 'r2' | 'render' }
 	| { ok: false; code: 'not-found' };
-
-/** R2 key of the OG image of a version. */
-export function ogKey(curveId: string, versionId: string): string {
-	return `og/${curveId}-${versionId}.png`;
-}
 
 export function errorName(error: unknown): string {
 	return error instanceof Error ? error.name : typeof error;
@@ -70,18 +77,18 @@ export async function getOrCreateOg(
 	const key = ogKey(view.curve.id, view.version.id);
 
 	const stored = await env.media.get(key);
-	if (stored) {
+	if (stored && isCurrentCard(stored.customMetadata)) {
 		const body = await stored.arrayBuffer();
 		const etag = stored.customMetadata?.etag ?? (await strongEtag(body));
 		return { ok: true, key, body, etag, source: 'r2' };
 	}
+	// An object of an older card layout (e.g. one that still showed the author) is never served.
+	if (stored) await stored.body.cancel();
 
 	await deps.beforeRender?.();
-	const lineage = await getLineageForViewer(env.db, view.lineage.id, ANONYMOUS_VIEWER);
 	const svg = ogSvg({
 		name: view.version.name,
 		license: view.version.license,
-		author: lineage?.author?.displayUsername ?? null,
 		s1: view.curve.s1,
 		lang: view.version.lang
 	});
@@ -90,8 +97,8 @@ export async function getOrCreateOg(
 	ctx.waitUntil(
 		env.media
 			.put(key, body, {
-				httpMetadata: { contentType: OG_CONTENT_TYPE, cacheControl: CACHE_IMMUTABLE },
-				customMetadata: { etag }
+				httpMetadata: { contentType: OG_CONTENT_TYPE, cacheControl: OG_CACHE_CONTROL },
+				customMetadata: { etag, card: OG_CARD_VERSION }
 			})
 			.then(
 				() => undefined,

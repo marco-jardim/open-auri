@@ -2,23 +2,28 @@
 // predicates exported by repo.ts; the visibility rule itself is never rewritten here.
 import type { D1Database } from '@cloudflare/workers-types';
 import { first, sql } from '#lib/server/db.ts';
-import { isSocialId, ownerNotBannedSql } from '#lib/server/social/repo.ts';
+import { isLinkableTombstone } from '#lib/server/social/queries/curves.ts';
+import { isSocialId } from '#lib/server/social/repo.ts';
 
 /**
  * True when `lineageId` is a retracted lineage that was linkable before the retraction (public or
- * unlisted, not moderated, owner not banned): the shared page answers 410 instead of 404. Private,
- * moderated or unknown lineages stay a plain 404, so their existence is never revealed.
+ * unlisted, not moderated, head curve passed the gate, owner not banned): the shared page answers
+ * 410 instead of 404. Private, moderated, gate-failed or unknown lineages stay a plain 404, so
+ * their existence is never revealed. Same rule as the curves service (`isLinkableTombstone`).
  */
-export async function isRetractedLinkable(db: D1Database, lineageId: string): Promise<boolean> {
+export function isRetractedLinkable(db: D1Database, lineageId: string): Promise<boolean> {
+	return isLinkableTombstone(db, lineageId);
+}
+
+/** True when `userId` owns `lineageId` (any state): the lineage author. */
+export async function isLineageOwner(
+	db: D1Database,
+	lineageId: string,
+	userId: string
+): Promise<boolean> {
 	if (!isSocialId(lineageId)) return false;
 	const row = await first<{ one: number }>(
-		sql(
-			db,
-			"SELECT 1 AS one FROM lineages l WHERE l.id = ? AND l.status = 'retracted' " +
-				"AND l.visibility IN ('public', 'unlisted') AND l.moderation = 'visible' " +
-				`AND ${ownerNotBannedSql('l')}`,
-			lineageId
-		)
+		sql(db, 'SELECT 1 AS one FROM lineages WHERE id = ? AND owner_user_id = ?', lineageId, userId)
 	);
 	return Boolean(row);
 }

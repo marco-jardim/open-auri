@@ -2,8 +2,14 @@ import { describe, expect, test, vi } from 'vitest';
 import { encodeS1 } from 'open-auri/share';
 import { CABLE_WRITTEN_EVENT, NEUTRAL_CURVE } from '#lib/cable/service.ts';
 import { isRealWrite, startOutboxBridge } from '#lib/cable/outbox-bridge.ts';
-import { rememberOrigin, type OriginsStorage } from '#lib/social/origins.ts';
-import type { EnqueueInput, EnqueueResult } from '#lib/social/outbox.ts';
+import { rememberOrigin, type CurveOrigin, type OriginsStorage } from '#lib/social/origins.ts';
+import {
+	createSocialOutbox,
+	type EnqueueInput,
+	type EnqueueResult,
+	type OutboxStore
+} from '#lib/social/outbox.ts';
+import type { PendingEvent } from '#lib/state/outbox.svelte.ts';
 
 function memoryStorage(): OriginsStorage {
 	const map = new Map<string, string>();
@@ -28,7 +34,15 @@ function detail(status: string) {
 	};
 }
 
-async function setup(mode = 'real') {
+interface MutableSession {
+	signedIn: boolean;
+	verified: boolean;
+	accountId: string | null;
+}
+
+const signedInAna = (): MutableSession => ({ signedIn: true, verified: true, accountId: 'ana' });
+
+async function setup(mode = 'real', session: MutableSession = signedInAna()) {
 	const storage = memoryStorage();
 	await rememberOrigin(
 		{ s1: encodeS1({ bands, preampDb }), lineageId: 'lin_1', versionId: 'ver_1' },
@@ -44,12 +58,36 @@ async function setup(mode = 'real') {
 	const stop = startOutboxBridge({
 		app,
 		outbox: { enqueue },
+		session,
 		origins: { storage },
 		onqueued: queued
 	});
 	const fire = (value: unknown, name = CABLE_WRITTEN_EVENT) =>
 		events.dispatchEvent(new CustomEvent(name, { detail: value }));
-	return { enqueue, queued, stop, fire, app };
+	return { enqueue, queued, stop, fire, app, session };
+}
+
+function memoryStore() {
+	const records = new Map<string, PendingEvent>();
+	const store: OutboxStore = {
+		list: () => Promise.resolve([...records.values()]),
+		append(input) {
+			const event: PendingEvent = {
+				id: input.id ?? crypto.randomUUID(),
+				type: input.type,
+				payload: input.payload,
+				createdAt: input.updatedAt ?? 0,
+				updatedAt: input.updatedAt ?? 0
+			};
+			records.set(event.id, event);
+			return Promise.resolve(event);
+		},
+		remove(id) {
+			records.delete(id);
+			return Promise.resolve();
+		}
+	};
+	return { records, store };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
@@ -60,7 +98,73 @@ describe('outbox bridge', () => {
 		fire(detail('ok'));
 		await vi.waitFor(() => expect(queued).toHaveBeenCalledOnce());
 		expect(enqueue).toHaveBeenCalledOnce();
-		expect(enqueue).toHaveBeenCalledWith({ kind: 'installed', lineageId: 'lin_1' });
+		expect(enqueue).toHaveBeenCalledWith(
+			{ kind: 'installed', lineageId: 'lin_1' },
+			{ actedAs: 'ana' }
+		);
+	});
+
+	test('anonymous or unverified writes never enqueue', async () => {
+		const anonymous = await setup('real', { signedIn: false, verified: false, accountId: null });
+		const unverified = await setup('real', { signedIn: true, verified: false, accountId: 'bia' });
+		anonymous.fire(detail('ok'));
+		unverified.fire(detail('ok'));
+		await settle();
+		expect(anonymous.enqueue).not.toHaveBeenCalled();
+		expect(unverified.enqueue).not.toHaveBeenCalled();
+		expect(anonymous.queued).not.toHaveBeenCalled();
+	});
+
+	test('with the real outbox: an account switch before the enqueue drops the event', async () => {
+		const session = signedInAna();
+		const { records, store } = memoryStore();
+		const outbox = createSocialOutbox({ store, session, locks: null });
+		let resolveLookup: (origin: CurveOrigin | null) => void = () => undefined;
+		const lookup = vi.fn(
+			() =>
+				new Promise<CurveOrigin | null>((resolve) => {
+					resolveLookup = resolve;
+				})
+		);
+		const events = new EventTarget();
+		const results: EnqueueResult[] = [];
+		const logs: Record<string, string>[] = [];
+		startOutboxBridge({
+			app: { cable: { events }, cableState: { mode: 'real' } },
+			outbox,
+			session,
+			lookup,
+			onqueued: (result) => results.push(result),
+			log: (_event, data) => logs.push(data)
+		});
+		events.dispatchEvent(new CustomEvent(CABLE_WRITTEN_EVENT, { detail: detail('ok') }));
+		await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+		// Ana wrote; Bia signs in before the origin lookup answers.
+		session.accountId = 'bia';
+		resolveLookup({ lineageId: 'lin_1', versionId: 'ver_1', at: 1 });
+		await vi.waitFor(() => expect(results).toHaveLength(1));
+		expect(results[0]).toEqual({ ok: false, reason: 'signed-out' });
+		expect(logs).toEqual([{ status: 'not-queued', reason: 'signed-out' }]);
+		expect(records.size).toBe(0);
+	});
+
+	test('with the real outbox: the event is stamped with the writer', async () => {
+		const session = signedInAna();
+		const { records, store } = memoryStore();
+		const outbox = createSocialOutbox({ store, session, locks: null });
+		const events = new EventTarget();
+		const results: EnqueueResult[] = [];
+		startOutboxBridge({
+			app: { cable: { events } },
+			outbox,
+			session,
+			lookup: async () => ({ lineageId: 'lin_1', versionId: 'ver_1', at: 1 }),
+			onqueued: (result) => results.push(result)
+		});
+		events.dispatchEvent(new CustomEvent(CABLE_WRITTEN_EVENT, { detail: detail('ok') }));
+		await vi.waitFor(() => expect(results).toHaveLength(1));
+		expect(results[0]?.ok && results[0].event.owner).toBe('ana');
+		expect(records.size).toBe(1);
 	});
 
 	test('simulated writes never enqueue (detail status or simulated mode)', async () => {

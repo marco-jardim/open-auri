@@ -78,7 +78,30 @@ Use the predicates of `repo.ts`; never rewrite them.
   `activity_visibility = 'public'`; the others are a count.
 - Gate version: the predicates read the stored `gate_ok`. When the gate changes, the service
   re-gates stale rows (`listCurvesWithStaleGate`, `saveCurveGate`); a curve that now fails drops
-  out of every list at once.
+  out of every list at once. See "Gate cache" below.
+
+## Gate cache (`gate.ts`)
+
+- `gate_ver` = `v2.<GATE_IMPL>:<hash>`, where `GATE_IMPL` is an integer constant in `gate.ts` and
+  `<hash>` is the first 16 hex of SHA-256 over `GATE_IMPL + ':' + JSON.stringify(THRESHOLDS)`.
+  Rows written before the ordinal existed (`v2:<hash>`) have ordinal 0.
+- **Bump rule:** increase `GATE_IMPL` by one (never reuse or lower it) in the same commit as ANY
+  change that can alter a verdict: the core's `gateForWrite` or `THRESHOLDS`, the S1 codec
+  (`decodeS1`/`canonKey`), `levelDb`, or `runGate` in `gate.ts`. The threshold hash re-gates even if
+  the bump is forgotten, but only the ordinal makes the cache monotonic across a deploy.
+- **Monotonic upsert:** `upsertCurveStatement` (used by `saveCurveGate`, `publishLineage`,
+  `appendVersion`) never overwrites a row whose stored ordinal (`gateImplSql`) is greater than the
+  writer's, and a verdict of a newer ordinal is served as current (`isGateCurrent`): an older
+  isolate during a deploy cannot flip a curve back to a stale verdict.
+- **Lazy re-gate:** every by-id read or action of `curves.ts` (curve read, history, fork, append,
+  retract, restore, visibility) re-gates a head or requested version whose verdict is not current
+  (`regateCurve`) and reads it again, so a head that now fails is not linkable.
+- **Job:** `regateStale` (jobs Worker, `regate`) drains the rest within a wall-clock budget
+  (`REGATE_BUDGET_MS`, 20 s), heads of linkable lineages first, then oldest
+  (`listStaleCurvesByPriority` in `queries/curves.ts`).
+- **CPU quota:** every attempt that reaches the gate through the curves service (publish, version,
+  fork; accepted or rejected) counts toward `DAILY_GATE_ATTEMPT_QUOTA` per user (D1 sliding window,
+  429 `QUOTA_EXCEEDED`), on top of the successful-publication quota.
 
 ## Deletion semantics (account closure)
 

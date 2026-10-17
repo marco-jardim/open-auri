@@ -15,7 +15,6 @@ function svg(): string {
 	return ogSvg({
 		name: 'Warm vocal',
 		license: 'CC-BY-4.0',
-		author: 'mixer',
 		s1: encodeS1({ bands: NEUTRAL_BANDS.map((band, i) => (i === 0 ? peak : band)), preampDb: 0 }),
 		lang: 'pt-BR'
 	});

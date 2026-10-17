@@ -4,7 +4,7 @@
 import { createExecutionContext, createScheduledController } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
-import { gateVersion } from '../../../web/src/lib/server/social/gate.ts';
+import { gateVersion, regateStale } from '../../../web/src/lib/server/social/gate.ts';
 import {
   getCurve,
   listCurvesWithStaleGate,
@@ -12,6 +12,7 @@ import {
 } from '../../../web/src/lib/server/social/repo.ts';
 import {
   createRegateJob,
+  REGATE_BUDGET_MS,
   REGATE_JOB,
   REGATE_LIMIT,
   regateJob,
@@ -55,24 +56,53 @@ describe('regate job', () => {
     expect(REGATE_LIMIT).toBe(200);
   });
 
-  it('passes the D1 binding, the limit and the scheduled time, and logs counts only', async () => {
-    const calls: { limit: number; now: number; sameDb: boolean }[] = [];
-    const runner: RegateRunner = async (db, limit, now) => {
-      calls.push({ limit, now, sameDb: db === env.DB });
+  it('passes the D1 binding, limit, scheduled time and budget; logs counts only', async () => {
+    const calls: { limit: number; now: number; budgetMs: number; sameDb: boolean }[] = [];
+    const runner: RegateRunner = async (db, limit, now, options) => {
+      calls.push({ limit, now, budgetMs: options.budgetMs, sameDb: db === env.DB });
       return { checked: 3, changed: 1 };
     };
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const at = Date.UTC(2026, 9, 16, 0, 5);
     await createRegateJob(runner).run(controllerAt(at), env, createExecutionContext());
+    await createRegateJob(async () => ({ checked: 1, changed: 0, timedOut: true }), 5).run(
+      controllerAt(at),
+      env,
+      createExecutionContext(),
+    );
     const lines = log.mock.calls.map((call) => String(call[0]));
     log.mockRestore();
 
-    expect(calls).toEqual([{ limit: REGATE_LIMIT, now: at, sameDb: true }]);
-    const line = lines.find((text) => text.includes('job.regate'));
-    expect(line).toBeDefined();
-    const parsed = JSON.parse(line ?? '{}') as Record<string, unknown>;
-    expect(Object.keys(parsed).sort()).toEqual(['changed', 'checked', 'event', 'ms']);
-    expect(parsed).toMatchObject({ event: 'job.regate', checked: 3, changed: 1 });
+    expect(REGATE_BUDGET_MS).toBe(20_000);
+    expect(calls).toEqual([
+      { limit: REGATE_LIMIT, now: at, budgetMs: REGATE_BUDGET_MS, sameDb: true },
+    ]);
+    const parsed = lines
+      .filter((text) => text.includes('job.regate'))
+      .map((text) => JSON.parse(text) as Record<string, unknown>);
+    expect(parsed).toHaveLength(2);
+    expect(Object.keys(parsed[0] ?? {}).sort()).toEqual([
+      'changed',
+      'checked',
+      'event',
+      'ms',
+      'timedOut',
+    ]);
+    expect(parsed[0]).toMatchObject({
+      event: 'job.regate',
+      checked: 3,
+      changed: 1,
+      timedOut: false,
+    });
+    expect(parsed[1]).toMatchObject({ checked: 1, changed: 0, timedOut: true });
+  });
+
+  it('starts no curve once the time budget is spent and reports the stop', async () => {
+    const id = await seedStaleCurve();
+    // Zero budget: the run starts no curve at all; the stale row is left for the next run.
+    const result = await regateStale(env.DB, REGATE_LIMIT, Date.now(), { budgetMs: 0 });
+    expect(result).toEqual({ checked: 0, changed: 0, timedOut: true });
+    expect((await getCurve(env.DB, id))?.gateVer).toBe('v0:stale');
   });
 
   it('updates stale verdicts to the current gate version and is idempotent', async () => {

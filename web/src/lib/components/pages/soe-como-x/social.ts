@@ -16,15 +16,23 @@ export function socialTarget(curve: CurveData): Trace {
 	};
 }
 
-/** Do not sanitize provenance into invented names. The S5 validator refuses URL-like input. */
+/** Only AutoEq traces have names/credits selected from the embedded dataset, not user input. */
+function recipeTrace(trace: Trace, role: 'measurement' | 'target') {
+	if (trace.kind === 'autoeq') {
+		return { source: trace.credit?.source ?? 'autoeq', name: trace.name };
+	}
+	return {
+		source: trace.kind,
+		name: `${trace.kind === 'csv' ? 'imported' : trace.kind} ${role}`
+	};
+}
+
+/** Local file names and other free-text trace labels never become public recipe metadata. */
 export function solverRecipe(station: StationState): Envelope['recipe'] {
 	if (!station.measurement || !station.target || !station.result) return undefined;
 	return {
-		measurement: {
-			source: station.measurement.credit?.source ?? station.measurement.kind,
-			name: station.measurement.name
-		},
-		target: { source: station.target.kind, name: station.target.name },
+		measurement: recipeTrace(station.measurement, 'measurement'),
+		target: recipeTrace(station.target, 'target'),
 		solver: { name: 'open-auri', version: corePackage.version },
 		params: {
 			speed: station.controls.speed,

@@ -11,8 +11,16 @@ import {
 	normalizeText,
 	S1Error
 } from 'open-auri/share';
+import { gateForWrite } from 'open-auri/safety';
+import { ApiError } from '#lib/server/api/errors.ts';
+import { rateLimitKey, slidingWindowLimit } from '#lib/server/security/ratelimit.ts';
 import { checkCurve, type GateDeps } from '#lib/server/social/gate.ts';
-import { countOwnLineagesSince, ownHeadNames } from '#lib/server/social/queries/library.ts';
+import { hasPublicActivity } from '#lib/server/social/queries/activity.ts';
+import {
+	countOwnLineagesSince,
+	deleteFavoritedShareEvents,
+	ownHeadNames
+} from '#lib/server/social/queries/library.ts';
 import {
 	addFavorite,
 	findOwnLineagesByCurves,
@@ -160,7 +168,8 @@ function utcDay(now: number): string {
  * Idempotent favorite. 'not-found' when the lineage is not readable by the user (missing, someone
  * else's private lineage, retracted, moderated...). With `shareId`, a newly created favorite is
  * attributed to that share as a `favorited` funnel event when the share points to the same lineage
- * (once per user and share; a share of another lineage or a missing share is ignored).
+ * and the user's `activity_visibility` is 'public' (once per user and share; a share of another
+ * lineage, a missing share or a private actor is ignored: FX4.6).
  */
 export async function favoriteLineage(
 	db: D1Database,
@@ -178,7 +187,7 @@ export async function favoriteLineage(
 	const shareId = options.shareId ?? null;
 	if (added.value.created && shareId !== null && isSocialId(shareId)) {
 		const share = await getShare(db, shareId);
-		if (share && share.lineageId === lineageId) {
+		if (share && share.lineageId === lineageId && (await hasPublicActivity(db, userId))) {
 			attributed = await recordShareEvent(db, {
 				shareId,
 				kind: 'favorited',
@@ -191,14 +200,19 @@ export async function favoriteLineage(
 	return { ok: true, created: added.value.created, attributed };
 }
 
-/** Idempotent; `removed` is true when a favorite existed. Never reveals if the lineage exists. */
+/**
+ * Idempotent; `removed` is true when a favorite existed. Never reveals if the lineage exists.
+ * The user's attributed `favorited` share events of that lineage go too, so funnels drop at once.
+ */
 export async function unfavoriteLineage(
 	db: D1Database,
 	userId: string,
 	lineageId: string
 ): Promise<{ removed: boolean }> {
 	if (!isSocialId(lineageId)) return { removed: false };
-	return { removed: await removeFavorite(db, userId, lineageId) };
+	const removed = await removeFavorite(db, userId, lineageId);
+	await deleteFavoritedShareEvents(db, userId, lineageId);
+	return { removed };
 }
 
 // ---- Merge of the local library -------------------------------------------------------------
@@ -207,6 +221,17 @@ export async function unfavoriteLineage(
 export const MERGE_BATCH_MAX = 100;
 /** Lineages a user may have created in the last 24 hours for a merge to still create more. */
 export const MERGE_DAILY_MAX = 500;
+/**
+ * Uncached gate runs per merge request (~150 ms of CPU each): items past it are reported as
+ * QUOTA_EXCEEDED and the client retries them in a later request (their verdicts get cached).
+ */
+export const MERGE_GATE_RUNS_MAX = 20;
+/**
+ * Items a user may send through the gate step per day (accepted, rejected, cached or not). A
+ * D1 sliding-window counter (kit `slidingWindowLimit`), so rejected items use the quota too.
+ */
+export const MERGE_GATED_DAILY_MAX = MERGE_DAILY_MAX;
+const MERGE_GATED_GROUP = 'library.merge.gated';
 export const MERGE_DEFAULT_LICENSE: License = 'CC-BY-4.0';
 export const MERGE_DEFAULT_LANG: Lang = 'pt-BR';
 
@@ -302,6 +327,35 @@ async function mergeIds(
 	return { lineageId: `lm${suffix}`, versionId: `vm${suffix}` };
 }
 
+/** Thrown by the counting gate wrapper once MERGE_GATE_RUNS_MAX uncached runs were spent. */
+class GateBudgetSpent extends Error {
+	constructor() {
+		super('merge gate budget spent');
+		this.name = 'GateBudgetSpent';
+	}
+}
+
+/**
+ * Counts one item against the per-user daily gate quota. False once it is spent; fails closed
+ * (503 RATE_LIMIT_UNAVAILABLE) when D1 is unavailable.
+ */
+async function consumeGatedQuota(db: D1Database, userId: string, now: number): Promise<boolean> {
+	const outcome = await slidingWindowLimit(
+		db,
+		[
+			{
+				key: rateLimitKey.user(MERGE_GATED_GROUP, userId),
+				limit: MERGE_GATED_DAILY_MAX,
+				windowSeconds: DAY_MS / 1000
+			}
+		],
+		new Date(now)
+	);
+	if (outcome.ok) return true;
+	if (outcome.reason === 'limited') return false;
+	throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE');
+}
+
 const REPO_REJECT: Partial<Record<SocialErrorCode, MergeRejectCode>> = {
 	'gate-rejected': 'GATE_REJECTED',
 	duplicate: 'DUPLICATE',
@@ -315,8 +369,9 @@ const REPO_REJECT: Partial<Record<SocialErrorCode, MergeRejectCode>> = {
  * - `duplicates`: the user already owns a lineage with a version of the same curve (`curve_id` or
  *   `canonKey`), or an earlier item of the batch has it, with the same name;
  * - `conflicts`: same, but the name differs (`field: 'name'`); nothing is changed;
- * - `rejected`: invalid S1, curve reproved by the gate, text refused by the normalizer, or the
- *   daily quota is spent; the item stays local only;
+ * - `rejected`: invalid S1, curve reproved by the gate, text refused by the normalizer, or a quota
+ *   is spent (`QUOTA_EXCEEDED`: lineages created in 24 h, items gated in 24 h, or this request's
+ *   MERGE_GATE_RUNS_MAX uncached gate runs; retry later); the item stays local only;
  * - `created`: a new PRIVATE lineage (name and description normalized and cut to the limits).
  *
  * Idempotent: re-sending the same batch creates nothing new (every item is then a duplicate).
@@ -353,6 +408,15 @@ export async function mergeLocalLibrary(
 
 	const recent = await countOwnLineagesSince(db, userId, now - DAY_MS);
 	let quota = Math.max(0, MERGE_DAILY_MAX - recent);
+	/** False once the daily gate counter refused or this request spent its uncached gate runs. */
+	let gateOpen = true;
+	let gateRuns = 0;
+	const baseGate = options.deps?.gate ?? gateForWrite;
+	const countedGate: typeof gateForWrite = (bands, preampDb) => {
+		if (gateRuns >= MERGE_GATE_RUNS_MAX) throw new GateBudgetSpent();
+		gateRuns++;
+		return baseGate(bands, preampDb);
+	};
 
 	const existing = (localId: string, rawName: string, outcome: Outcome): void => {
 		if (outcome.kind === 'rejected') {
@@ -395,12 +459,25 @@ export async function mergeLocalLibrary(
 			report.rejected.push({ localId: item.localId, code: 'INVALID_TEXT', reasons });
 			continue;
 		}
-		if (quota <= 0) {
+		if (quota <= 0 || !gateOpen) {
+			report.rejected.push({ localId: item.localId, code: 'QUOTA_EXCEEDED' });
+			continue;
+		}
+		if (!(await consumeGatedQuota(db, userId, now))) {
+			gateOpen = false;
 			report.rejected.push({ localId: item.localId, code: 'QUOTA_EXCEEDED' });
 			continue;
 		}
 
-		const check = await checkCurve(db, item.s1, now, options.deps);
+		let check: Awaited<ReturnType<typeof checkCurve>>;
+		try {
+			check = await checkCurve(db, item.s1, now, { ...options.deps, gate: countedGate });
+		} catch (error) {
+			if (!(error instanceof GateBudgetSpent)) throw error;
+			gateOpen = false;
+			report.rejected.push({ localId: item.localId, code: 'QUOTA_EXCEEDED' });
+			continue;
+		}
 		if (!check.ok) {
 			const outcome: Outcome =
 				check.code === 'invalid-curve'

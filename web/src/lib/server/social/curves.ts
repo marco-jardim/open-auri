@@ -8,12 +8,18 @@
 // makes a gate-rejected curve visible. Publish, version and fork gate the new curve; fork, restore
 // and visibility changes that open a lineage re-gate its head first; the database trigger refuses
 // any version on a rejected curve; the visibility predicates hide lineages whose head fails.
+// Lazy re-gate: every by-id read or action (curve read, history, fork, append, retract, restore,
+// visibility) re-gates a head (or requested version) whose cached verdict is not current before
+// answering, then reads it again, so a head that now fails is no longer linkable.
+// Two daily quotas per user: successful publications (versions created) and attempts that reach
+// the gate (accepted or rejected), which bounds the gate CPU a user can spend.
 import type { D1Database } from '@cloudflare/workers-types';
 import type { gateForWrite } from 'open-auri/safety';
 import { decodeS1, S1Error, validateEnvelope } from 'open-auri/share';
 import { z } from 'zod';
 import { ApiError, CACHE_PUBLIC_60, cached, json } from '#lib/server/api/index.ts';
-import { checkCurve } from '#lib/server/social/gate.ts';
+import { rateLimitKey, slidingWindowLimit } from '#lib/server/security/ratelimit.ts';
+import { checkCurve, isGateCurrent, regateCurve } from '#lib/server/social/gate.ts';
 import { isLinkableTombstone } from '#lib/server/social/queries/curves.ts';
 import {
 	appendVersion,
@@ -27,7 +33,8 @@ import {
 	publishLineage,
 	restoreLineage,
 	retractLineage,
-	setLineageVisibility
+	setLineageVisibility,
+	type VersionView
 } from '#lib/server/social/repo.ts';
 import {
 	DAY_MS,
@@ -54,6 +61,15 @@ import {
 
 /** Publications + new versions + forks per user and UTC day (counted with countVersionsSince). */
 export const DAILY_PUBLICATION_QUOTA = 30;
+
+/**
+ * Attempts that reach the gate (publish, version, fork; accepted or rejected) per user over a
+ * sliding day (D1 sliding window of the security kit). Rejected attempts are not publications, so
+ * without this a user could spend unbounded gate CPU.
+ */
+export const DAILY_GATE_ATTEMPT_QUOTA = 60;
+
+const GATE_ATTEMPT_GROUP = 'curves.gate';
 
 /** Request body cap of the curve writes (the normalized envelope itself is at most 8 KiB). */
 export const CURVE_BODY_MAX_BYTES = 32 * 1024;
@@ -242,6 +258,32 @@ async function assertQuota(db: D1Database, userId: string, now: number): Promise
 	}
 }
 
+/**
+ * Counts one attempt that reaches the gate; 429 QUOTA_EXCEEDED once the user made
+ * DAILY_GATE_ATTEMPT_QUOTA of them over the sliding day. Fails closed (503) when D1 is unavailable.
+ */
+async function countGateAttempt(db: D1Database, userId: string, now: number): Promise<void> {
+	const outcome = await slidingWindowLimit(
+		db,
+		[
+			{
+				key: rateLimitKey.user(GATE_ATTEMPT_GROUP, userId),
+				limit: DAILY_GATE_ATTEMPT_QUOTA,
+				windowSeconds: DAY_MS / 1000
+			}
+		],
+		new Date(now)
+	);
+	if (outcome.ok) return;
+	if (outcome.reason === 'unavailable') throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE');
+	throw new ApiError(
+		429,
+		'QUOTA_EXCEEDED',
+		{ limit: DAILY_GATE_ATTEMPT_QUOTA },
+		{ headers: { 'retry-after': String(outcome.retryAfter) } }
+	);
+}
+
 /** Text with visible content before normalization (whitespace-only input is not content). */
 function hasContent(value: unknown): boolean {
 	return typeof value === 'string' && value.trim() !== '';
@@ -273,10 +315,12 @@ function versionInputOf(envelope: Envelope): VersionInput {
 /**
  * The publication path shared by publish, new version and fork: core validation (422
  * INVALID_CURVE with `details.codes`), text that normalizes to nothing refused, then the gate
- * through checkCurve (422 GATE_REJECTED with `details.reasons`; nothing is published).
+ * attempt quota and the gate through checkCurve (422 GATE_REJECTED with `details.reasons`;
+ * nothing is published).
  */
 async function prepare(
 	db: D1Database,
+	userId: string,
 	raw: Record<string, unknown>,
 	now: number,
 	deps: CurveDeps
@@ -288,6 +332,7 @@ async function prepare(
 	if (hasContent(raw.description) && envelope.description === '') {
 		throw invalidCurve(['env:length']);
 	}
+	await countGateAttempt(db, userId, now);
 	const verdict = await checkCurve(db, envelope.code, now, gateOptions(deps));
 	if (!verdict.ok) {
 		if (verdict.code === 'invalid-curve') throw invalidCurve(verdict.codes);
@@ -321,15 +366,49 @@ function announce(info: PublishedInfo, deps: CurveDeps): PublishedInfo {
 	return info;
 }
 
+/**
+ * The lineage as `viewer` may read it, with a current gate verdict on its head: a head cached
+ * under a stale gate version is re-gated and the lineage read again, so a head that now fails is
+ * not linkable (null for anyone but the owner or an admin). Invalid ids give null.
+ */
+async function readLineage(
+	db: D1Database,
+	lineageId: string,
+	viewer: Viewer,
+	now: number,
+	deps: CurveDeps
+): Promise<LineageSummary | null> {
+	if (!isSocialId(lineageId)) return null;
+	const summary = await getLineageForViewer(db, lineageId, viewer);
+	if (!summary || (await isGateCurrent(summary.curve.gateVer))) return summary;
+	await regateCurve(db, summary.curve, now, gateOptions(deps));
+	return getLineageForViewer(db, lineageId, viewer);
+}
+
+/** Same lazy re-gate as readLineage, for one version (its own curve) of a readable lineage. */
+async function readVersion(
+	db: D1Database,
+	versionId: string,
+	viewer: Viewer,
+	now: number,
+	deps: CurveDeps
+): Promise<VersionView | null> {
+	if (!isSocialId(versionId)) return null;
+	const view = await getVersionForViewer(db, versionId, viewer);
+	if (!view || (await isGateCurrent(view.curve.gateVer))) return view;
+	await regateCurve(db, view.curve, now, gateOptions(deps));
+	return getVersionForViewer(db, versionId, viewer);
+}
+
 /** The caller's own lineage (any state), or 404 (also for other people's lineages). */
 async function ownedLineage(
 	db: D1Database,
 	lineageId: string,
-	userId: string
+	userId: string,
+	now: number,
+	deps: CurveDeps
 ): Promise<LineageSummary> {
-	const summary = isSocialId(lineageId)
-		? await getLineageForViewer(db, lineageId, { userId })
-		: null;
+	const summary = await readLineage(db, lineageId, { userId }, now, deps);
 	if (!summary || summary.ownerUserId !== userId) throw new ApiError(404, 'NOT_FOUND');
 	return summary;
 }
@@ -423,7 +502,7 @@ export async function publishCurve(
 ): Promise<PublishedInfo> {
 	const now = clockOf(deps);
 	await assertQuota(db, userId, now);
-	const prepared = await prepare(db, body.envelope, now, deps);
+	const prepared = await prepare(db, userId, body.envelope, now, deps);
 	const result = await publishLineage(db, {
 		lineageId: newId(),
 		ownerUserId: userId,
@@ -448,11 +527,11 @@ export async function appendCurveVersion(
 	deps: CurveDeps = {}
 ): Promise<PublishedInfo> {
 	const now = clockOf(deps);
-	const lineage = await ownedLineage(db, lineageId, userId);
+	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
 	if (lineage.status !== 'active') throw new ApiError(409, 'CONFLICT');
 	if (body.parentVersionId !== lineage.headVersion) throw new ApiError(409, 'HEAD_MOVED');
 	await assertQuota(db, userId, now);
-	const prepared = await prepare(db, body.envelope, now, deps);
+	const prepared = await prepare(db, userId, body.envelope, now, deps);
 	const result = await appendVersion(db, {
 		lineageId: lineage.id,
 		ownerUserId: userId,
@@ -482,9 +561,7 @@ export async function forkCurve(
 ): Promise<ForkResult> {
 	const now = clockOf(deps);
 	const viewer: Viewer = { userId };
-	const source = isSocialId(sourceLineageId)
-		? await getLineageForViewer(db, sourceLineageId, viewer)
-		: null;
+	const source = await readLineage(db, sourceLineageId, viewer, now, deps);
 	if (!source) {
 		if ((await missing(db, sourceLineageId)).kind === 'gone') throw new ApiError(410, 'GONE');
 		throw new ApiError(404, 'NOT_FOUND');
@@ -493,14 +570,11 @@ export async function forkCurve(
 	if (source.moderation !== 'visible') throw new ApiError(404, 'NOT_FOUND');
 	await assertHeadPasses(db, source, now, deps);
 	const versionId = body.versionId ?? source.headVersion;
-	const view =
-		versionId !== null && isSocialId(versionId)
-			? await getVersionForViewer(db, versionId, viewer)
-			: null;
+	const view = versionId !== null ? await readVersion(db, versionId, viewer, now, deps) : null;
 	if (!view || view.version.lineageId !== source.id) throw new ApiError(404, 'NOT_FOUND');
 	await assertQuota(db, userId, now);
 	const raw = body.envelope ?? envelopeOf(view.version, view.curve, now);
-	const prepared = await prepare(db, raw, now, deps);
+	const prepared = await prepare(db, userId, raw, now, deps);
 	const byLicense = view.version.license === 'CC-BY-4.0';
 	if (byLicense && prepared.version.license !== 'CC-BY-4.0') throw invalidCurve(['env:enum']);
 	const result = await forkLineage(db, view.version.id, {
@@ -535,8 +609,9 @@ export async function retractCurve(
 	lineageId: string,
 	deps: CurveDeps = {}
 ): Promise<LineageState> {
-	const lineage = await ownedLineage(db, lineageId, userId);
-	const result = await retractLineage(db, lineage.id, userId, clockOf(deps));
+	const now = clockOf(deps);
+	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
+	const result = await retractLineage(db, lineage.id, userId, now);
 	if (!result.ok) throw repoError(result.code);
 	return {
 		lineageId: lineage.id,
@@ -557,7 +632,7 @@ export async function restoreCurve(
 	deps: CurveDeps = {}
 ): Promise<LineageState> {
 	const now = clockOf(deps);
-	const lineage = await ownedLineage(db, lineageId, userId);
+	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
 	if (lineage.visibility !== 'private') await assertHeadPasses(db, lineage, now, deps);
 	const result = await restoreLineage(db, lineage.id, userId, now);
 	if (!result.ok) throw repoError(result.code);
@@ -581,7 +656,7 @@ export async function changeVisibility(
 	deps: CurveDeps = {}
 ): Promise<LineageState> {
 	const now = clockOf(deps);
-	const lineage = await ownedLineage(db, lineageId, userId);
+	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
 	if (visibility !== 'private') await assertHeadPasses(db, lineage, now, deps);
 	const result = await setLineageVisibility(db, lineage.id, userId, visibility, now);
 	if (!result.ok) throw repoError(result.code);
@@ -598,21 +673,24 @@ export async function changeVisibility(
 /**
  * The lineage `lineageId` with its head version (or `versionId` of the same lineage) as `viewer`
  * may read it. 'gone' = a tombstone that was openable by id (410 for non-owners); 'not-found'
- * covers missing, private, moderated and unreadable alike.
+ * covers missing, private, moderated and unreadable alike. A head (or requested version) cached
+ * under a stale gate version is re-gated first (a head that now fails is not linkable).
  */
 export async function loadPublishedCurve(
 	db: D1Database,
 	lineageId: string,
 	viewer: Viewer,
-	versionId?: string | null
+	versionId?: string | null,
+	deps: CurveDeps = {}
 ): Promise<ReadResult<PublishedCurve>> {
 	if (!isSocialId(lineageId)) return { kind: 'not-found' };
-	const summary = await getLineageForViewer(db, lineageId, viewer);
+	const now = clockOf(deps);
+	const summary = await readLineage(db, lineageId, viewer, now, deps);
 	if (!summary) return missing(db, lineageId);
 	let version = summary.head;
 	let curve = summary.curve;
 	if (versionId !== undefined && versionId !== null && versionId !== summary.headVersion) {
-		const view = isSocialId(versionId) ? await getVersionForViewer(db, versionId, viewer) : null;
+		const view = await readVersion(db, versionId, viewer, now, deps);
 		if (!view || view.version.lineageId !== summary.id) return { kind: 'not-found' };
 		version = view.version;
 		curve = view.curve;
@@ -647,10 +725,11 @@ export async function loadLineageVersions(
 	db: D1Database,
 	lineageId: string,
 	viewer: Viewer,
-	page: PageRequest = {}
+	page: PageRequest = {},
+	deps: CurveDeps = {}
 ): Promise<ReadResult<LineageVersions>> {
 	if (!isSocialId(lineageId)) return { kind: 'not-found' };
-	const summary = await getLineageForViewer(db, lineageId, viewer);
+	const summary = await readLineage(db, lineageId, viewer, clockOf(deps), deps);
 	if (!summary) return missing(db, lineageId);
 	let versions: Awaited<ReturnType<typeof listVersions>>;
 	try {

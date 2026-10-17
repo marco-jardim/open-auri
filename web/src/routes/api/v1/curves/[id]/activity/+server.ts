@@ -4,7 +4,12 @@
 //   400 INVALID_BODY (schema; details.issues `preview_too_short` / `at_out_of_window`)
 //   404 NOT_FOUND (missing, or not readable by the caller)
 import { ApiError, defineApi, json, readJson, type ApiEvent } from '#lib/server/api/index.ts';
-import { ActivityEventBody, recordActivityEvent } from '#lib/server/social/activity.ts';
+import {
+	ACTIVITY_WRITE_GROUP,
+	ACTIVITY_WRITE_QUOTAS,
+	ActivityEventBody,
+	recordActivityEvent
+} from '#lib/server/social/activity.ts';
 import type { RequestHandler } from './$types';
 
 export const prerender = false;
@@ -14,17 +19,17 @@ interface CurveActivityEvent extends ApiEvent {
 	params: { id?: string };
 }
 
+// The daily quota (index 1) is shared with the items of POST /me/activity/outbox.
 export const POST = defineApi<CurveActivityEvent>(
 	{
 		auth: 'verified',
-		rateLimit: {
-			group: 'api.activity.write',
-			quotas: [{ limit: 120, windowSeconds: 3600 }, { limit: 1000 }]
-		}
+		rateLimit: { group: ACTIVITY_WRITE_GROUP, quotas: ACTIVITY_WRITE_QUOTAS }
 	},
 	async ({ event, env, user }) => {
 		const body = await readJson(event.request, ActivityEventBody, { maxBytes: 2048 });
-		const outcome = await recordActivityEvent(env.db, user.id, event.params.id ?? '', body);
+		const outcome = await recordActivityEvent(env.db, user.id, event.params.id ?? '', body, {
+			claimSecret: env.secrets.betterAuthSecret
+		});
 		switch (outcome.status) {
 			case 'recorded':
 				return json({ status: 'recorded', activity: outcome.activity }, { status: 201 });

@@ -16,6 +16,9 @@ import {
 	RANKING_WINDOWS,
 	SocialRepoError,
 	isOneOf,
+	type AuthorCredit,
+	type Lang,
+	type License,
 	type LineageSummary,
 	type PageRequest,
 	type RankingEntry,
@@ -88,6 +91,74 @@ export async function runRankingsJob(db: D1Database, now: number): Promise<Ranki
 	};
 }
 
+// ---- Public cards ---------------------------------------------------------------------------
+
+/**
+ * A publicly listable lineage as the feed and the rankings publish it (public cache). Built field
+ * by field from the summary: never the owner's user id, the curve's canonical key, gate version or
+ * gate reasons, nor the lineage's moderation, status or visibility. The author is the nickname.
+ */
+export interface FeedLineageCard {
+	id: string;
+	curated: boolean;
+	forked: boolean;
+	author: AuthorCredit | null;
+	createdAt: number;
+	updatedAt: number;
+	/** Head version (its id is the `versionId` of the curve-origin events). */
+	head: {
+		id: string;
+		name: string;
+		description: string;
+		license: License;
+		lang: Lang;
+		createdAt: number;
+	};
+	/** Head curve (only gate-approved curves are publicly listable). */
+	curve: { id: string; s1: string; levelDb: number | null };
+}
+
+/** One ranked lineage of GET /api/v1/rankings. */
+export interface PublicRankingEntry {
+	rank: number;
+	score: number;
+	computedAt: number;
+	lineage: FeedLineageCard;
+}
+
+export function feedLineageCard(summary: LineageSummary): FeedLineageCard {
+	const { author, head, curve } = summary;
+	return {
+		id: summary.id,
+		curated: summary.curated,
+		forked: summary.forkedFromVersion !== null,
+		author:
+			author === null
+				? null
+				: { username: author.username, displayUsername: author.displayUsername },
+		createdAt: summary.createdAt,
+		updatedAt: summary.updatedAt,
+		head: {
+			id: head.id,
+			name: head.name,
+			description: head.description,
+			license: head.license,
+			lang: head.lang,
+			createdAt: head.createdAt
+		},
+		curve: { id: curve.id, s1: curve.s1, levelDb: curve.levelDb }
+	};
+}
+
+function publicRankingEntry(entry: RankingEntry): PublicRankingEntry {
+	return {
+		rank: entry.rank,
+		score: entry.score,
+		computedAt: entry.computedAt,
+		lineage: feedLineageCard(entry.lineage)
+	};
+}
+
 // ---- Reads ----------------------------------------------------------------------------------
 
 export interface RankingsPage {
@@ -95,7 +166,7 @@ export interface RankingsPage {
 	window: RankingWindow;
 	/** Time of the materialized run being served, or null before the first run. */
 	computedAt: number | null;
-	items: RankingEntry[];
+	items: PublicRankingEntry[];
 	nextCursor: string | null;
 }
 
@@ -114,11 +185,17 @@ export async function readRankings(
 		listRankings(db, metric, window, page)
 	]);
 	const computedAt = list.items[0]?.computedAt ?? state?.computedAt ?? null;
-	return { metric, window, computedAt, items: list.items, nextCursor: list.nextCursor };
+	return {
+		metric,
+		window,
+		computedAt,
+		items: list.items.map(publicRankingEntry),
+		nextCursor: list.nextCursor
+	};
 }
 
 export interface FeedItem {
-	lineage: LineageSummary;
+	lineage: FeedLineageCard;
 	/** Rank and score of the ranked sorts; null for `new`. */
 	rank: number | null;
 	score: number | null;
@@ -158,7 +235,11 @@ export async function readFeed(db: D1Database, request: FeedRequest): Promise<Fe
 			sort,
 			window: null,
 			computedAt: null,
-			items: list.items.map((lineage) => ({ lineage, rank: null, score: null })),
+			items: list.items.map((lineage) => ({
+				lineage: feedLineageCard(lineage),
+				rank: null,
+				score: null
+			})),
 			nextCursor: list.nextCursor
 		};
 	}

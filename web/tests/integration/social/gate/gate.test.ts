@@ -6,7 +6,16 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { gateForWrite, THRESHOLDS } from 'open-auri/safety';
 import { curveId, encodeS1 } from 'open-auri/share';
-import { checkCurve, gateVersion, regateStale } from '#lib/server/social/gate.ts';
+import {
+	checkCurve,
+	GATE_IMPL,
+	gateImplOf,
+	gateVersion,
+	gateVersionInput,
+	isGateCurrent,
+	regateCurve,
+	regateStale
+} from '#lib/server/social/gate.ts';
 import { getCurve, listCurvesWithStaleGate, saveCurveGate } from '#lib/server/social/repo.ts';
 import type { CurveRecord } from '#lib/server/social/types.ts';
 import reference from '../../../../../test/fixtures/eq0xcb.reference.json';
@@ -72,14 +81,112 @@ async function storeStale(
 }
 
 describe('gateVersion', () => {
-	it('is v2 plus 16 hex chars of SHA-256 over the thresholds, memoized', async () => {
-		const bytes = new TextEncoder().encode(JSON.stringify(THRESHOLDS));
+	it('is v2.<GATE_IMPL>: plus 16 hex of SHA-256(ordinal + thresholds), memoized', async () => {
+		const input = `${GATE_IMPL}:${JSON.stringify(THRESHOLDS)}`;
+		expect(gateVersionInput()).toBe(input);
+		const bytes = new TextEncoder().encode(input);
 		const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
 		const hex = Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
 		const version = await gateVersion();
-		expect(version).toBe(`v2:${hex.slice(0, 16)}`);
-		expect(version).toMatch(/^v2:[0-9a-f]{16}$/);
+		expect(version).toBe(`v2.${GATE_IMPL}:${hex.slice(0, 16)}`);
+		expect(version).toMatch(/^v2\.\d+:[0-9a-f]{16}$/);
+		expect(Number.isInteger(GATE_IMPL) && GATE_IMPL >= 1).toBe(true);
 		expect(gateVersion()).toBe(gateVersion());
+	});
+
+	it('parses the implementation ordinal (legacy and foreign formats are 0)', async () => {
+		expect(gateImplOf(await gateVersion())).toBe(GATE_IMPL);
+		expect(gateImplOf('v2.17:0123456789abcdef')).toBe(17);
+		expect(gateImplOf('v2:0123456789abcdef')).toBe(0);
+		expect(gateImplOf('v1:stale')).toBe(0);
+		expect(gateImplOf('v2.x:abc')).toBe(0);
+		expect(await isGateCurrent(await gateVersion())).toBe(true);
+		expect(await isGateCurrent(`v2.${GATE_IMPL + 1}:ffffffffffffffff`)).toBe(true);
+		expect(await isGateCurrent(`v2.${GATE_IMPL}:0000000000000000`)).toBe(false);
+		expect(await isGateCurrent('v2:0123456789abcdef')).toBe(false);
+	});
+});
+
+describe('monotonic gate cache upsert', () => {
+	const newer = `v2.${GATE_IMPL + 1}:ffffffffffffffff`;
+
+	it('an older writer never overwrites a row of a newer gate implementation', async () => {
+		const s1 = encodeS1(rejectedCurve());
+		const id = await curveId(s1);
+		const row = {
+			id,
+			s1,
+			canonKey: `mono;${id}`,
+			gateVer: newer,
+			gateOk: false,
+			gateReasons: ['k:kind-not-allowed'],
+			levelDb: null
+		};
+		const first = await saveCurveGate(env.DB, row, 1);
+		expect(first.ok).toBe(true);
+
+		// This isolate (older ordinal) tries to flip the verdict back to accepted.
+		const current = await gateVersion();
+		const second = await saveCurveGate(
+			env.DB,
+			{ ...row, gateVer: current, gateOk: true, gateReasons: [], levelDb: -1 },
+			2
+		);
+		expect(second.ok).toBe(true);
+		if (!second.ok) return;
+		expect(second.value.gateVer).toBe(newer);
+		expect(second.value.gateOk).toBe(false);
+		expect(second.value.gateReasons).toEqual(['k:kind-not-allowed']);
+
+		// checkCurve serves the newer verdict as current, without running the gate.
+		const spy = countingGate();
+		const result = await checkCurve(env.DB, s1, Date.now(), { gate: spy.gate });
+		expect(spy.calls()).toBe(0);
+		expect(result.ok).toBe(false);
+		expect((await getCurve(env.DB, id))?.gateVer).toBe(newer);
+	});
+
+	it('a writer of the same or a newer implementation replaces a stale row', async () => {
+		const s1 = encodeS1(rejectedCurve());
+		const id = await storeStale(s1, { gateOk: true, gateReasons: [] });
+		const sameImplOtherHash = `v2.${GATE_IMPL}:0000000000000000`;
+		const base = { id, s1, canonKey: `stale;${id}`, levelDb: null };
+		const a = await saveCurveGate(
+			env.DB,
+			{ ...base, gateVer: sameImplOtherHash, gateOk: false, gateReasons: ['x'] },
+			2
+		);
+		expect(a.ok && a.value.gateVer).toBe(sameImplOtherHash);
+		const current = await gateVersion();
+		const b = await saveCurveGate(
+			env.DB,
+			{ ...base, gateVer: current, gateOk: false, gateReasons: ['y'] },
+			3
+		);
+		expect(b.ok && b.value.gateVer).toBe(current);
+		expect(b.ok && b.value.gateReasons).toEqual(['y']);
+		const c = await saveCurveGate(
+			env.DB,
+			{ ...base, gateVer: newer, gateOk: false, gateReasons: ['z'] },
+			4
+		);
+		expect(c.ok && c.value.gateVer).toBe(newer);
+	});
+});
+
+describe('regateCurve', () => {
+	it('returns a current row untouched and re-gates a stale one', async () => {
+		const s1 = encodeS1(rejectedCurve());
+		const id = await storeStale(s1, { gateOk: true, gateReasons: [] });
+		const stale = await getCurve(env.DB, id);
+		if (!stale) throw new Error('missing stale row');
+		const spy = countingGate();
+		const fresh = await regateCurve(env.DB, stale, Date.now(), { gate: spy.gate });
+		expect(spy.calls()).toBe(1);
+		expect(fresh.gateVer).toBe(await gateVersion());
+		expect(fresh.gateOk).toBe(false);
+		expect(await regateCurve(env.DB, fresh, Date.now(), { gate: spy.gate })).toEqual(fresh);
+		expect(spy.calls()).toBe(1);
 	});
 });
 
@@ -203,7 +310,7 @@ describe('regateStale', () => {
 		const spy = countingGate();
 
 		const result = await regateStale(env.DB, 50, Date.now(), { gate: spy.gate, list });
-		expect(result).toEqual({ checked: 3, changed: 2 });
+		expect(result).toStrictEqual({ checked: 3, changed: 2 });
 		expect(spy.calls()).toBe(2);
 
 		const version = await gateVersion();
@@ -229,6 +336,36 @@ describe('regateStale', () => {
 			changed: 0
 		});
 		expect(spy.calls()).toBe(2);
+	});
+
+	it('stops starting new curves once the time budget is spent', async () => {
+		const ids = [
+			await storeStale(encodeS1(rejectedCurve())),
+			await storeStale(encodeS1(rejectedCurve())),
+			await storeStale(encodeS1(rejectedCurve()))
+		];
+		const mine = new Set(ids);
+		const list: typeof listCurvesWithStaleGate = async (db, version) =>
+			(await listCurvesWithStaleGate(db, version, 1000)).filter((c) => mine.has(c.id));
+		// Each clock read advances 10 s: start 0, then 10 s (first curve runs), 20 s (stop).
+		let ticks = 0;
+		const clock = (): number => 10_000 * ticks++;
+		const spy = countingGate();
+		const result = await regateStale(env.DB, 50, Date.now(), {
+			gate: spy.gate,
+			list,
+			budgetMs: 15_000,
+			clock
+		});
+		expect(result).toEqual({ checked: 1, changed: 1, timedOut: true });
+		expect(spy.calls()).toBe(1);
+		const version = await gateVersion();
+		const stored = await Promise.all(ids.map((id) => getCurve(env.DB, id)));
+		expect(stored.filter((row) => row?.gateVer === version)).toHaveLength(1);
+
+		// The next run (fresh budget) drains the rest.
+		const rest = await regateStale(env.DB, 50, Date.now(), { gate: spy.gate, list });
+		expect(rest).toStrictEqual({ checked: 2, changed: 2 });
 	});
 });
 

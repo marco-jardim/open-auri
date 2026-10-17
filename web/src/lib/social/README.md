@@ -9,7 +9,8 @@ there is no singleton: create the session, API client and outbox once per client
 - `outbox.ts`: `createSocialOutbox(options)` (`store`, `session`, optional `locks`, `now`,
   `online`, `randomId`, `random`, `log`), `parseQueued`, constants (`SOCIAL_OUTBOX_TYPE`, `SOCIAL_OUTBOX_LOCK`, `PREVIEW_MIN_MS`,
   `OUTBOX_MAX_AGE_MS`, `OUTBOX_BATCH_MAX`, `BACKOFF_BASE_MS`, `BACKOFF_MAX_MS`).
-- `session.svelte.ts`: `createSocialSession({ initial?, fetch? })`, `requireLoginHref(currentPath)`.
+- `session.svelte.ts`: `createSocialSession({ initial?, fetch? })` (`signedIn`, `verified`,
+  `accountId`, `nickname`, `account`, `known`, `set`, `refresh`), `requireLoginHref(currentPath)`.
 
 ## API client
 
@@ -86,7 +87,7 @@ messages by code; never show `details` verbatim.
 ```ts
 const session = createSocialSession({ initial: data.account }); // or undefined, then:
 void session.refresh(); // reuses fetchAccount (GET /api/auth/get-session), failures = signed out
-// Rune-backed getters: session.signedIn, session.verified, session.nickname.
+// Rune-backed getters: session.signedIn, session.verified, session.accountId, session.nickname.
 const href = requireLoginHref(page.url.pathname + page.url.search); // "Entrar" that comes back
 ```
 
@@ -101,11 +102,23 @@ Record "experimentou" (preview ≥ 10 s) and "instalou" through the outbox, neve
 ```ts
 const outbox = createSocialOutbox({ store: app.state.outbox, session });
 const queued = await outbox.enqueue({ kind: 'previewed', lineageId, durationMs, shareId });
-// queued.ok === false: 'too-short' (< 10 s, nothing stored), 'invalid' or 'storage'
-await outbox.enqueue({ kind: 'installed', lineageId });
+// queued.ok === false: 'signed-out' / 'unverified' (nothing stored), 'too-short' (< 10 s,
+// nothing stored), 'invalid' or 'storage'
+await outbox.enqueue({ kind: 'installed', lineageId }, { actedAs }); // actedAs: id at the action
 void outbox.flush(api); // after enqueue, on page load, and on the window 'online' event
+await outbox.purge(); // on sign-out (removes all) or account switch (keeps the current account's)
 ```
 
+- **Events belong to who acted.** `enqueue` refuses unless the session is signed in **and**
+  verified at that moment (`signed-out`, `unverified`): anonymous activity is never stored. Each
+  event is stamped with the account id (`owner` = `session.accountId`, the user's own id from the
+  account summary). The optional `actedAs` (id captured when the action happened, e.g. at the cable
+  write) refuses the event as `signed-out` if the session changed meanwhile.
+- `flush` sends only the current account's events and removes the events of any other owner
+  (counted in `dropped`); it stops (`signed-out` / `unverified`) if the session changes between
+  batches. `pending()` lists only the current account's events. Payloads without an owner (v1,
+  before FX4.2) are unreadable and dropped. `SocialSync` calls `purge` when the signed-in account
+  changes (keep the new one) or signs out while online (purge everything).
 - Each event gets `eventId = crypto.randomUUID()` and `at`; the server deduplicates by `eventId`.
 - Stored in the IndexedDB `outbox` store of `#lib/state` (`type: 'oa.social.outbox'`, `id` =
   `eventId`). `enqueue` never throws (failures logged without PII, result `storage`).

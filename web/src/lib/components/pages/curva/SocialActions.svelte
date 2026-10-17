@@ -118,7 +118,8 @@
 				return;
 			}
 			if (cause.code === 'EMAIL_NOT_VERIFIED') {
-				session.set({ username: session.nickname, emailVerified: false });
+				const current = session.account;
+				if (current) session.set({ ...current, emailVerified: false });
 				message = m.curva_social_verify();
 				return;
 			}
@@ -196,7 +197,12 @@
 		const sessionId = instance.session;
 		const timer = setInterval(() => {
 			const event = activity.sample(sessionId, code, source, instance.audibleEditorTime());
-			if (event) void queue.enqueue(event).then(() => flush(queue));
+			// The outbox refuses signed-out or unverified listeners: nothing is kept for later.
+			if (event) {
+				void queue.enqueue(event).then((result) => {
+					if (result.ok) void flush(queue);
+				});
+			}
 		}, 100);
 		return () => {
 			clearInterval(timer);

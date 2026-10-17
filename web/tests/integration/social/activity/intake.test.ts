@@ -3,7 +3,9 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import {
+	ACTIVITY_DAILY_QUOTA,
 	checkEvent,
+	eventClaimSubject,
 	FUTURE_SKEW_MS,
 	OUTBOX_MAX_AGE_MS,
 	recordActivityEvent
@@ -14,21 +16,26 @@ import {
 	activityRow,
 	ACTIVITY_ROUTE,
 	ban,
+	claimRows,
 	count,
 	errorCode,
 	installBody,
 	member,
 	previewBody,
+	publicActivity,
 	publicCounts,
 	publish,
 	routeEvent,
 	seedUser,
 	share,
 	signedIn,
-	SIGNED_OUT
+	SIGNED_OUT,
+	spendDailyQuota
 } from './helpers.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
+/** The secret the routes use (env.secrets.betterAuthSecret). */
+const SECRET = String(env.BETTER_AUTH_SECRET);
 
 describe('activity intake: authorization', () => {
 	it('signed out → 401, unverified → 403, banned → 403', async () => {
@@ -278,6 +285,7 @@ describe('activity intake: share attribution', () => {
 		const owner = await member();
 		const sharer = await member();
 		const viewer = await member();
+		await publicActivity(viewer.id);
 		const { lineageId } = await publish(owner.id);
 		const shareId = await share(lineageId, sharer.id);
 		const auth = signedIn(viewer);
@@ -292,6 +300,7 @@ describe('activity intake: share attribution', () => {
 		const owner = await member();
 		const sharer = await member();
 		const viewer = await member();
+		await publicActivity(viewer.id);
 		const first = await publish(owner.id);
 		const second = await publish(owner.id);
 		const otherShare = await share(second.lineageId, sharer.id);
@@ -315,19 +324,80 @@ describe('activity intake: share attribution', () => {
 		const owner = await member();
 		const sharer = await member();
 		const viewer = await member();
+		await publicActivity(viewer.id);
 		const { lineageId } = await publish(owner.id);
 		const shareId = await share(lineageId, sharer.id);
-		const first = await recordActivityEvent(env.DB, viewer.id, lineageId, {
-			kind: 'installed',
-			eventId: crypto.randomUUID(),
-			shareId
-		});
+		const first = await recordActivityEvent(
+			env.DB,
+			viewer.id,
+			lineageId,
+			{ kind: 'installed', eventId: crypto.randomUUID(), shareId },
+			{ claimSecret: SECRET }
+		);
 		expect(first).toMatchObject({ status: 'recorded', shareAttributed: true });
-		const second = await recordActivityEvent(env.DB, viewer.id, lineageId, {
-			kind: 'installed',
-			eventId: crypto.randomUUID(),
-			shareId
-		});
+		const second = await recordActivityEvent(
+			env.DB,
+			viewer.id,
+			lineageId,
+			{ kind: 'installed', eventId: crypto.randomUUID(), shareId },
+			{ claimSecret: SECRET }
+		);
 		expect(second).toMatchObject({ status: 'recorded', shareAttributed: false });
+	});
+
+	it('FX4.6: a private-activity actor is never attributed (the share cannot reveal them)', async () => {
+		const owner = await member();
+		const viewer = await member();
+		const { lineageId } = await publish(owner.id);
+		const shareId = await share(lineageId, owner.id);
+		const auth = signedIn(viewer);
+
+		expect((await POST(activityEvent(lineageId, auth, previewBody({ shareId })))).status).toBe(201);
+		expect((await POST(activityEvent(lineageId, auth, installBody({ shareId })))).status).toBe(201);
+		expect(await attributed(shareId, viewer.id)).toBe(0);
+		// The activity itself is recorded and counted publicly as one distinct user.
+		expect(await publicCounts(lineageId)).toEqual({ favorites: 0, previewed: 1, installed: 1 });
+
+		await publicActivity(viewer.id);
+		const later = await recordActivityEvent(
+			env.DB,
+			viewer.id,
+			lineageId,
+			{ kind: 'installed', eventId: crypto.randomUUID(), shareId },
+			{ claimSecret: SECRET }
+		);
+		expect(later).toMatchObject({ status: 'recorded', shareAttributed: true });
+	});
+});
+
+describe('activity intake: event-id claims (FX4.6)', () => {
+	it('claim keys hold a keyed hash of the user id, never the id itself', async () => {
+		const owner = await member();
+		const viewer = await member();
+		const { lineageId } = await publish(owner.id);
+		const body = installBody();
+		expect((await POST(activityEvent(lineageId, signedIn(viewer), body))).status).toBe(201);
+
+		const eventId = String(body.eventId).toLowerCase();
+		const subject = await eventClaimSubject(SECRET, viewer.id);
+		expect(subject).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(await claimRows(`id:act.ev:${eventId}:${subject}:`)).toBe(1);
+		expect(await claimRows(`act.ev:${eventId}:${viewer.id}`)).toBe(0);
+		expect(await claimRows(`act.ev:${eventId}`)).toBe(1);
+		expect(await eventClaimSubject(SECRET, viewer.id)).toBe(subject);
+		expect(await eventClaimSubject(SECRET, owner.id)).not.toBe(subject);
+		await expect(eventClaimSubject('short', viewer.id)).rejects.toThrow(RangeError);
+	});
+});
+
+describe('activity intake: daily quota shared with the outbox (FX4.6)', () => {
+	it('a spent daily quota answers 429 on the single-event route', async () => {
+		const owner = await member();
+		const viewer = await member();
+		const { lineageId } = await publish(owner.id);
+		await spendDailyQuota(viewer.id, ACTIVITY_DAILY_QUOTA);
+		const response = await POST(activityEvent(lineageId, signedIn(viewer), installBody()));
+		expect(((await errorCode(response, 429)) as { code: string }).code).toBe('RATE_LIMITED');
+		expect(await activityRow(viewer.id, lineageId, 'installed')).toBeNull();
 	});
 });

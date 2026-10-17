@@ -237,9 +237,9 @@
 							</div>
 						{:else if trade.status === 'revealed' && trade.partner?.revealed}
 							<p class="reveal">
-								{#if trade.partner.nickname}
-									<a href="/u/{encodeURIComponent(trade.partner.nickname)}"
-										>@{trade.partner.nickname}</a
+								{#if trade.partner.username}
+									<a href="/u/{encodeURIComponent(trade.partner.username)}"
+										>@{trade.partner.nickname ?? trade.partner.username}</a
 									>
 								{:else}
 									{m.comunidade_author_removed()}

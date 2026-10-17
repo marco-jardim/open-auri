@@ -1,11 +1,21 @@
 // T4.4: POST /api/v1/me/activity/outbox: batch of offline events with partial acceptance,
 // bounded age, replay of the whole batch, size limit and authorization.
+import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { OUTBOX_MAX_ITEMS } from '#lib/server/social/activity.ts';
+import {
+	ACTIVITY_DAILY_QUOTA,
+	eventClaimSubject,
+	OUTBOX_MAX_ITEMS,
+	recordOutbox
+} from '#lib/server/social/activity.ts';
 import { POST } from '../../../../src/routes/api/v1/me/activity/outbox/+server.ts';
+import { DELETE as DELETE_ACTIVITY } from '../../../../src/routes/api/v1/me/activity/+server.ts';
 import {
 	activityRow,
+	claimRows,
 	count,
+	ME_ROUTE,
+	spendDailyQuota,
 	errorCode,
 	installBody,
 	member,
@@ -140,5 +150,95 @@ describe('activity outbox', () => {
 			installBody({ lineageId })
 		]);
 		expect(((await errorCode(refused, 403)) as { code: string }).code).toBe('EMAIL_NOT_VERIFIED');
+	});
+});
+
+describe('activity outbox: daily quota per item and claims (FX4.6)', () => {
+	const SECRET = String(env.BETTER_AUTH_SECRET);
+
+	it('items count against the daily quota of single events; past it they answer limited', async () => {
+		const owner = await member();
+		const viewer = await member();
+		const { lineageId } = await publish(owner.id);
+		await spendDailyQuota(viewer.id, ACTIVITY_DAILY_QUOTA - 2);
+
+		const items = [
+			installBody({ lineageId }),
+			{ eventId: 'not-a-uuid' },
+			previewBody({ lineageId }),
+			installBody({ lineageId, at: Date.now() - 8 * DAY }),
+			previewBody({ lineageId }),
+			installBody({ lineageId })
+		];
+		const answer = await results(viewer, items);
+		expect(answer.map((entry) => entry.status)).toEqual([
+			'recorded',
+			'rejected',
+			'recorded',
+			'rejected',
+			'limited',
+			'limited'
+		]);
+		expect(answer[4]?.reason).toBeUndefined();
+		expect((await activityRow(viewer.id, lineageId, 'previewed'))?.count).toBe(1);
+
+		// A limited item claimed nothing: once the quota is back it is recorded, not a duplicate.
+		await spendDailyQuota(viewer.id, 0);
+		const retry = await results(viewer, [items[4]]);
+		expect(retry.map((entry) => entry.status)).toEqual(['recorded']);
+	});
+
+	it('the service needs the claim secret only once an item reaches the claim', async () => {
+		const owner = await member();
+		const viewer = await member();
+		const { lineageId } = await publish(owner.id);
+		const rejectedOnly = await recordOutbox(env.DB, viewer.id, [{ eventId: 'x' }]);
+		expect(rejectedOnly.map((entry) => entry.status)).toEqual(['rejected']);
+		await expect(recordOutbox(env.DB, viewer.id, [installBody({ lineageId })])).rejects.toThrow(
+			/claimSecret/
+		);
+		const recorded = await recordOutbox(env.DB, viewer.id, [installBody({ lineageId })], {
+			claimSecret: SECRET
+		});
+		expect(recorded.map((entry) => entry.status)).toEqual(['recorded']);
+	});
+
+	it('"delete my activity" without a filter also deletes the event-id claims', async () => {
+		const owner = await member();
+		const viewer = await member();
+		const { lineageId } = await publish(owner.id);
+		const event = installBody({ lineageId });
+		expect((await results(viewer, [event])).map((entry) => entry.status)).toEqual(['recorded']);
+		const subject = await eventClaimSubject(SECRET, viewer.id);
+		expect(await claimRows(`:${subject}:`)).toBe(1);
+
+		const remove = (query: string) =>
+			DELETE_ACTIVITY(
+				routeEvent({
+					method: 'DELETE',
+					path: `/api/v1/me/activity${query}`,
+					routeId: ME_ROUTE,
+					locals: signedIn(viewer)
+				})
+			);
+		// A claim in the format before FX4.6 (raw user id) and another user's claim.
+		const legacyKey = `u:act.ev:${crypto.randomUUID()}:${viewer.id}:691200`;
+		const ownerSubject = await eventClaimSubject(SECRET, owner.id);
+		const othersKey = `id:act.ev:${crypto.randomUUID()}:${ownerSubject}:691200`;
+		for (const key of [legacyKey, othersKey]) {
+			await env.DB.prepare(
+				'INSERT INTO rate_limit_counters (key, window_start, count, expires_at) VALUES (?, 0, 1, ?)'
+			)
+				.bind(key, Math.floor(Date.now() / 1000) + 86_400)
+				.run();
+		}
+
+		expect((await remove(`?lineageId=${lineageId}`)).status).toBe(200);
+		expect(await claimRows(`:${subject}:`)).toBe(1);
+		expect((await remove('')).status).toBe(200);
+		expect(await claimRows(`:${subject}:`)).toBe(0);
+		expect(await claimRows(legacyKey)).toBe(0);
+		expect(await claimRows(othersKey)).toBe(1);
+		expect(await count('SELECT count(*) AS n FROM activity WHERE user_id = ?', viewer.id)).toBe(0);
 	});
 });

@@ -26,8 +26,12 @@ function fakeOutbox(pendingCount = 0) {
 	const flush = vi.fn<SocialOutbox['flush']>(async () => report);
 	const queued: QueuedActivity[] = [];
 	const pending = vi.fn<SocialOutbox['pending']>(async () => queued);
-	return { flush, pending, queued };
+	const purge = vi.fn<SocialOutbox['purge']>(async () => 0);
+	return { flush, pending, purge, queued };
 }
+
+const ANA = { id: 'user-ana', username: 'Ana', emailVerified: true };
+const BIA = { id: 'user-bia', username: 'Bia', emailVerified: true };
 
 const api: Pick<SocialApi, 'postActivityOutbox'> = {
 	postActivityOutbox: async () => ({ results: [] })
@@ -35,7 +39,7 @@ const api: Pick<SocialApi, 'postActivityOutbox'> = {
 
 test('flushes on mount, on "online" and when the tab becomes visible', async () => {
 	const outbox = fakeOutbox();
-	const session = createSocialSession({ initial: { username: 'Ana', emailVerified: true } });
+	const session = createSocialSession({ initial: ANA });
 	await render(SocialSync, { session, api, outbox });
 	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(1));
 	expect(outbox.flush).toHaveBeenCalledWith(api);
@@ -55,11 +59,63 @@ test('flushes when the session becomes signed in and verified', async () => {
 	await render(SocialSync, { session, api, outbox });
 	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(1));
 
-	session.set({ username: 'Ana', emailVerified: false });
+	session.set({ ...ANA, emailVerified: false });
 	flushSync();
-	session.set({ username: 'Ana', emailVerified: true });
+	session.set(ANA);
 	flushSync();
 	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(2));
+});
+
+test('an anonymous session purges nothing (offline probe or never signed in)', async () => {
+	const outbox = fakeOutbox();
+	const session = createSocialSession({ initial: null });
+	await render(SocialSync, { session, api, outbox });
+	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(1));
+	expect(outbox.purge).not.toHaveBeenCalled();
+});
+
+test("signing in purges other accounts' events; signing out purges everything", async () => {
+	const outbox = fakeOutbox();
+	const session = createSocialSession({ initial: ANA });
+	await render(SocialSync, { session, api, outbox });
+	await vi.waitFor(() => expect(outbox.purge).toHaveBeenCalledWith('user-ana'));
+
+	session.set(null);
+	flushSync();
+	await vi.waitFor(() => expect(outbox.purge).toHaveBeenLastCalledWith(null));
+	expect(outbox.purge).toHaveBeenCalledTimes(2);
+});
+
+test("an account switch purges the previous account's events", async () => {
+	const outbox = fakeOutbox();
+	const session = createSocialSession({ initial: ANA });
+	await render(SocialSync, { session, api, outbox });
+	await vi.waitFor(() => expect(outbox.purge).toHaveBeenCalledWith('user-ana'));
+
+	session.set(BIA);
+	flushSync();
+	await vi.waitFor(() => expect(outbox.purge).toHaveBeenLastCalledWith('user-bia'));
+	expect(outbox.purge).not.toHaveBeenCalledWith(null);
+
+	// The same account read again (e.g. verified later) does not purge again.
+	session.set({ ...BIA, emailVerified: false });
+	flushSync();
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	expect(outbox.purge).toHaveBeenCalledTimes(2);
+});
+
+test('a session read as signed out while offline keeps the queue', async () => {
+	const outbox = fakeOutbox();
+	const session = createSocialSession({ initial: ANA });
+	await render(SocialSync, { session, api, outbox });
+	await vi.waitFor(() => expect(outbox.purge).toHaveBeenCalledTimes(1));
+
+	window.dispatchEvent(new Event('offline'));
+	session.set(null);
+	flushSync();
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	expect(outbox.purge).not.toHaveBeenCalledWith(null);
+	window.dispatchEvent(new Event('online'));
 });
 
 test('a layout-provided account drives the session; no session request of its own', async () => {
@@ -68,7 +124,7 @@ test('a layout-provided account drives the session; no session request of its ow
 	await render(SocialSync, {
 		api,
 		outbox,
-		account: { username: 'Ana', emailVerified: true }
+		account: ANA
 	});
 	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalled());
 	expect(fetchSpy).not.toHaveBeenCalled();
@@ -79,13 +135,14 @@ test('stops listening after unmount and renders only the optional indicator', as
 	const outbox = fakeOutbox();
 	outbox.queued.push({
 		eventId: 'e1',
+		owner: 'user-ana',
 		kind: 'installed',
 		lineageId: 'lin1',
 		at: 1,
 		attempts: 0,
 		nextAttemptAt: 0
 	});
-	const session = createSocialSession({ initial: { username: 'Ana', emailVerified: true } });
+	const session = createSocialSession({ initial: ANA });
 	const indicator = createRawSnippet((status: () => SocialSyncStatus) => ({
 		render: () => '<span data-testid="sync-indicator"></span>',
 		setup: (node: Element) => {

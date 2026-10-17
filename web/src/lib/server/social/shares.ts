@@ -5,8 +5,10 @@
 //   rules), or the caller's own; anything else answers 404 (never "exists but forbidden").
 // - Opens are ALWAYS anonymous: one daily aggregate per share (`share_events.anon_count`). No IP,
 //   user agent or user id is stored for them; the rate limit uses the kit's daily-salted IP hash.
-// - Previews, installs and favorites of signed-in users are attributed by the routes that record
-//   them (`recordShareEvent`); the owner of the share only ever sees counts.
+// - Previews, installs and favorites of signed-in users with `activity_visibility = 'public'` are
+//   attributed by the routes that record them (`recordShareEvent`); private actors never are.
+// - Statistics (`shareStatsFor`) only for the lineage author's own shares: anyone may share a
+//   public lineage, but a non-author sharer gets 404 on the stats (FX4.6).
 // SQL lives in repo.ts and queries/shares.ts.
 import type { D1Database } from '@cloudflare/workers-types';
 import { z } from 'zod';
@@ -14,7 +16,7 @@ import type { SharedCurveData, SharedCurveMeta } from '#lib/components/pages/sha
 import { ApiError } from '#lib/server/api/errors.ts';
 import { apiRateLimit, type ApiLimitEnv, type ApiRateRule } from '#lib/server/api/limits.ts';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
-import { isRetractedLinkable } from '#lib/server/social/queries/shares.ts';
+import { isLineageOwner, isRetractedLinkable } from '#lib/server/social/queries/shares.ts';
 import {
 	createShare,
 	getLineageForViewer,
@@ -115,13 +117,23 @@ export interface ShareFunnel {
 	attributed: { previewed: number; installed: number; favorited: number };
 }
 
-/** Funnel of a share for its owner; anyone else (or an unknown id) gets 404. */
+/**
+ * Funnel of a share, only for the AUTHOR of the lineage who also made the share (FX4.6). A
+ * non-author sharer, anyone else and an unknown id all get 404: a share of someone else's
+ * lineage gives no statistics at all, not even anonymous opens, so sharing a curve with one
+ * person can never be used to learn what that person did. Attributed counts only include users
+ * with public activity (activity.ts, library.ts); the author's audience view keeps its exact
+ * `privateCount` (plan §3.7, "N pessoas com perfil privado").
+ */
 export async function shareStatsFor(
 	db: D1Database,
 	userId: string,
 	shareId: string
 ): Promise<ShareFunnel> {
 	if (!isSocialId(shareId)) throw new ApiError(404, 'NOT_FOUND');
+	const share = await getShare(db, shareId);
+	if (!share || share.ownerUserId !== userId) throw new ApiError(404, 'NOT_FOUND');
+	if (!(await isLineageOwner(db, share.lineageId, userId))) throw new ApiError(404, 'NOT_FOUND');
 	const stats = await getShareStats(db, shareId, userId);
 	if (!stats) throw new ApiError(404, 'NOT_FOUND');
 	const days = stats.days

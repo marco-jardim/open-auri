@@ -8,8 +8,9 @@
 // - The batch id is random (no time component). Pairs are shuffled before the insert so their
 //   order inside a batch does not reveal the order in which the person compared them.
 // - `s6_pairs.id` is an INTEGER PRIMARY KEY (schema 0005, needed by the keyset pagination of
-//   `listS6Pairs`): it reveals the relative insertion order of pairs, nothing about time beyond the
-//   batch day. It is never published: the public JSON has only per-curve scores and counts.
+//   `listS6Pairs` and of the aggregation window read): it reveals the relative insertion order
+//   of pairs, nothing about time beyond the batch day. It is never published: the public JSON
+//   has only per-curve scores and counts.
 // - The rate limit keys on the daily-salted IP hash in the Workers RateLimit binding only (not
 //   persisted); no D1 quota is used, so no stored row could be ordered against the pairs.
 // - Withdrawal is by receipt only and answers the same whether or not a batch existed.
@@ -19,8 +20,22 @@
 // every sweep, stop at max relative change < 1e-9 or 10 000 sweeps. The estimator exists only on
 // a strongly connected comparison graph (Ford 1957): only the largest strongly connected component
 // of the "beats" graph is scored.
+//
+// Abuse bounds (FX4.7): an item is accepted only when it is the curve id of an official preset
+// (`open-auri/catalog`) or the curve of a publicly listable lineage; a batch with any other item is
+// refused whole. The aggregation re-checks the same rule (a lineage may have been hidden since), so
+// only those ids reach the public JSON. It reads only the last S6_WINDOW_DAYS days, at most
+// S6_AGGREGATE_MAX_PAIRS pairs (newest first), and bounds Bradley–Terry by work and by time; when a
+// bound stops it, the best estimate so far is published with `converged: false`.
 import type { D1Database } from '@cloudflare/workers-types';
-import { deleteS6BatchByReceipt, insertS6Batch, listS6Pairs } from '#lib/server/social/repo.ts';
+import { OFFICIAL_PRESETS } from 'open-auri/catalog';
+import { curveId, encodeS1, S1Error } from 'open-auri/share';
+import {
+	listableCurveIds,
+	listS6WindowPairs,
+	s6WindowStartId
+} from '#lib/server/social/queries/s6.ts';
+import { deleteS6BatchByReceipt, insertS6Batch } from '#lib/server/social/repo.ts';
 import { S6_PAIRS_MAX, type S6Choice, type S6PairInput } from '#lib/server/social/types.ts';
 
 /** Current consent text version; a batch with any other version is refused (CONSENT_REQUIRED). */
@@ -44,7 +59,56 @@ export interface S6SubmitBody {
 }
 
 export type S6SubmitResult =
-	{ ok: true } | { ok: false; code: 'consent-required' | 'invalid-input' | 'duplicate' };
+	| { ok: true }
+	| { ok: false; code: 'consent-required' | 'invalid-input' | 'unknown-item' | 'duplicate' };
+
+/** Stable `details.issues[].code` of a 400 INVALID_BODY for a batch with an ineligible item. */
+export const S6_UNKNOWN_ITEM_ISSUE = 's6_unknown_item';
+
+let presetIds: Promise<ReadonlySet<string>> | null = null;
+
+async function computePresetIds(): Promise<ReadonlySet<string>> {
+	const ids = new Set<string>();
+	for (const preset of OFFICIAL_PRESETS) {
+		let s1: string;
+		try {
+			s1 = encodeS1({ bands: preset.bands, preampDb: preset.preampDb });
+		} catch (error) {
+			// A preset off the S1 grid has no curve id, so it cannot be an S6 item.
+			if (error instanceof S1Error) continue;
+			throw error;
+		}
+		ids.add(await curveId(s1));
+	}
+	return ids;
+}
+
+/** Curve ids of the official presets, computed once per isolate. */
+export function presetItemIds(): Promise<ReadonlySet<string>> {
+	if (!presetIds) {
+		presetIds = computePresetIds().catch((error: unknown) => {
+			presetIds = null;
+			throw error;
+		});
+	}
+	return presetIds;
+}
+
+/**
+ * The ids of `ids` that may be S6 items now: official preset curve ids and curves of publicly
+ * listable lineages (read-only lookup through the repository's visibility predicate).
+ */
+export async function eligibleItems(db: D1Database, ids: Iterable<string>): Promise<Set<string>> {
+	const presets = await presetItemIds();
+	const eligible = new Set<string>();
+	const rest: string[] = [];
+	for (const id of new Set(ids)) {
+		if (presets.has(id)) eligible.add(id);
+		else if (S6_ITEM_PATTERN.test(id)) rest.push(id);
+	}
+	for (const id of await listableCurveIds(db, rest)) eligible.add(id);
+	return eligible;
+}
 
 function toHex(bytes: ArrayBuffer): string {
 	return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -95,7 +159,8 @@ function shuffled<T>(items: readonly T[]): T[] {
 
 /**
  * Stores one anonymous batch: random id, receipt hash, consent version and day, plus the shuffled
- * pairs. `now` only contributes its UTC day.
+ * pairs. `now` only contributes its UTC day. A batch with any item that is neither an official
+ * preset curve id nor the curve of a publicly listable lineage is refused whole ('unknown-item').
  */
 export async function submitBatch(
 	db: D1Database,
@@ -104,6 +169,14 @@ export async function submitBatch(
 ): Promise<S6SubmitResult> {
 	if (body.consentVersion !== S6_CONSENT_VERSION) return { ok: false, code: 'consent-required' };
 	if (!isReceipt(body.receipt)) return { ok: false, code: 'invalid-input' };
+	if (body.pairs.length < 1 || body.pairs.length > S6_PAIRS_MAX) {
+		return { ok: false, code: 'invalid-input' };
+	}
+	const items = new Set(body.pairs.flatMap((pair) => [pair.a, pair.b]));
+	for (const id of items)
+		if (!S6_ITEM_PATTERN.test(id)) return { ok: false, code: 'invalid-input' };
+	const eligible = await eligibleItems(db, items);
+	for (const id of items) if (!eligible.has(id)) return { ok: false, code: 'unknown-item' };
 	const pairs = body.pairs.map((pair) => ({
 		a: pair.a,
 		b: pair.b,
@@ -145,6 +218,16 @@ export interface BtOptions {
 	tolerance?: number;
 	/** Hard cap on sweeps (default 10 000). */
 	maxIterations?: number;
+	/**
+	 * Cap on the work of all sweeps, in edge visits (each sweep costs items + directed edges of the
+	 * scored component). Deterministic: unlike a clock, it also bounds pure CPU in workerd, where
+	 * `Date.now()` only advances on I/O. Default: no cap.
+	 */
+	maxWork?: number;
+	/** Wall-clock budget in ms, read through `clock` after every sweep. Default: no budget. */
+	budgetMs?: number;
+	/** Clock for `budgetMs` (default `Date.now`). */
+	clock?: () => number;
 }
 
 export interface BtItem {
@@ -236,6 +319,12 @@ export function bradleyTerry(pairs: Iterable<BtPair>, options: BtOptions = {}): 
 	const tolerance = options.tolerance ?? BT_TOLERANCE;
 	if (!(tolerance > 0)) throw new RangeError('s6: invalid tolerance');
 	const maxIterations = positiveInteger(options.maxIterations, BT_MAX_ITERATIONS);
+	const maxWork = options.maxWork ?? Number.POSITIVE_INFINITY;
+	if (!(maxWork > 0)) throw new RangeError('s6: invalid work budget');
+	const budgetMs = options.budgetMs ?? Number.POSITIVE_INFINITY;
+	if (!(budgetMs > 0)) throw new RangeError('s6: invalid time budget');
+	const clock = options.clock ?? Date.now;
+	const started = clock();
 
 	const list = [...pairs].filter((pair) => pair.a !== pair.b);
 	const ids = [...new Set(list.flatMap((pair) => [pair.a, pair.b]))].sort(compareIds);
@@ -295,10 +384,16 @@ export function bradleyTerry(pairs: Iterable<BtPair>, options: BtOptions = {}): 
 	}
 
 	const size = members.length;
+	const sweepWork = size + edges.reduce((sum, row) => sum + row.length, 0);
 	let p = new Array<number>(size).fill(1);
 	let iterations = 0;
 	let converged = false;
 	while (iterations < maxIterations) {
+		// Budgets stop between sweeps (never before the first one): `p` is always a whole sweep.
+		if (iterations > 0) {
+			if ((iterations + 1) * sweepWork > maxWork) break;
+			if (clock() - started >= budgetMs) break;
+		}
 		iterations += 1;
 		const next = new Array<number>(size);
 		let logSum = 0;
@@ -341,12 +436,31 @@ export interface S6Preferences {
 	generatedAt: string;
 	consentVersion: string;
 	items: BtItem[];
-	/** Pairs read from the database and fed to the estimator. */
+	/** Pairs of the window fed to the estimator (eligible items only). */
 	pairs: number;
+	/** False when a bound (sweeps, work or time) stopped the estimator: best estimate so far. */
+	converged: boolean;
 }
 
-/** Page size of the aggregation read (the repository caps it at 5000). */
+/** Page size of the aggregation read (the query caps it at 5000). */
 export const S6_AGGREGATE_PAGE = 5000;
+/** Only batches whose UTC day is at most this many days before the run's day are read. */
+export const S6_WINDOW_DAYS = 90;
+/** At most this many pairs are read, newest first. */
+export const S6_AGGREGATE_MAX_PAIRS = 200_000;
+/** Bradley–Terry work cap of the aggregation (edge visits, see `BtOptions.maxWork`). */
+export const S6_BT_MAX_WORK = 100_000_000;
+/** Bradley–Terry wall-clock budget of the aggregation. */
+export const S6_BT_BUDGET_MS = 10_000;
+
+export interface AggregateOptions extends BtOptions {
+	/** Window in days (default S6_WINDOW_DAYS). */
+	windowDays?: number;
+	/** Cap on pairs read (default S6_AGGREGATE_MAX_PAIRS). */
+	maxPairs?: number;
+}
+
+const DAY_MS = 86_400_000;
 
 /** Published scores keep 6 decimals: stable output, no false precision. */
 function rounded(value: number): number {
@@ -354,36 +468,54 @@ function rounded(value: number): number {
 }
 
 /**
- * Reads every stored pair (keyset pages of `listS6Pairs`), folds identical comparisons and runs
- * Bradley–Terry. The result is the public JSON: per-curve scores and counts only (no day, no batch,
- * no pair ids).
+ * Reads the pairs of the last `windowDays` days, newest first, at most `maxPairs` (keyset pages),
+ * keeps those whose two items are still eligible (official preset or publicly listable curve),
+ * folds identical comparisons and runs Bradley–Terry under the work and time budgets. The result
+ * is the public JSON: per-curve scores and counts only (no day, no batch, no pair ids).
  */
 export async function aggregate(
 	db: D1Database,
 	now: Date,
-	options: BtOptions = {}
+	options: AggregateOptions = {}
 ): Promise<S6Preferences> {
+	const windowDays = positiveInteger(options.windowDays, S6_WINDOW_DAYS);
+	const maxPairs = positiveInteger(options.maxPairs, S6_AGGREGATE_MAX_PAIRS);
+	const fromDay = s6Day(new Date(now.getTime() - windowDays * DAY_MS));
+
 	const folded = new Map<string, BtPair & { weight: number }>();
-	let total = 0;
-	let afterId = 0;
-	for (;;) {
-		const page = await listS6Pairs(db, { afterId, limit: S6_AGGREGATE_PAGE });
-		for (const pair of page) {
-			total += 1;
+	let read = 0;
+	const minId = await s6WindowStartId(db, fromDay);
+	let beforeId = Number.MAX_SAFE_INTEGER;
+	while (minId !== null && read < maxPairs) {
+		const limit = Math.min(S6_AGGREGATE_PAGE, maxPairs - read);
+		const page = await listS6WindowPairs(db, { fromDay, minId, beforeId, limit });
+		read += page.rows;
+		for (const pair of page.pairs) {
 			const key = `${pair.a}\n${pair.b}\n${pair.choice}`;
 			const entry = folded.get(key);
 			if (entry) entry.weight += 1;
 			else folded.set(key, { a: pair.a, b: pair.b, choice: pair.choice, weight: 1 });
 		}
-		const last = page[page.length - 1];
-		if (!last || page.length < S6_AGGREGATE_PAGE) break;
-		afterId = last.id;
+		if (page.lastId === null || page.rows < limit) break;
+		beforeId = page.lastId;
 	}
-	const result = bradleyTerry(folded.values(), options);
+
+	const eligible = await eligibleItems(
+		db,
+		[...folded.values()].flatMap((pair) => [pair.a, pair.b])
+	);
+	const kept = [...folded.values()].filter((pair) => eligible.has(pair.a) && eligible.has(pair.b));
+	const total = kept.reduce((sum, pair) => sum + pair.weight, 0);
+	const result = bradleyTerry(kept, {
+		...options,
+		maxWork: options.maxWork ?? S6_BT_MAX_WORK,
+		budgetMs: options.budgetMs ?? S6_BT_BUDGET_MS
+	});
 	return {
 		generatedAt: now.toISOString(),
 		consentVersion: S6_CONSENT_VERSION,
 		items: result.items.map((item) => ({ ...item, score: rounded(item.score) })),
-		pairs: total
+		pairs: total,
+		converged: result.converged
 	};
 }

@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
 import { S6_CONSENT_VERSION } from '#lib/server/social/s6.ts';
 import { ORIGIN, randomIp, signedOut } from '../../api/helpers.ts';
+import { publish, seedUser } from '../repo/helpers.ts';
 
 export interface RouteEventInit {
 	method: string;
@@ -48,12 +49,55 @@ export function newReceipt(): string {
 	return base64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
-/** Unique item ids per test (the D1 database is shared between files). */
-export function itemIds(count: number): string[] {
+/**
+ * Unique ids that are NOT eligible S6 items (no preset, no listable lineage): refused by the
+ * route, and dropped by the aggregation when stored directly.
+ */
+export function unknownItemIds(count: number): string[] {
 	const prefix = `s6t-${base64Url(crypto.getRandomValues(new Uint8Array(6)))
 		.toLowerCase()
 		.replace(/[^a-z0-9]/g, 'x')}`;
 	return Array.from({ length: count }, (_, i) => `${prefix}-${i}`);
+}
+
+/**
+ * Unique eligible item ids: the curve ids of fresh lineages with the given visibility (public =
+ * publicly listable, the only kind S6 accepts besides the official presets).
+ */
+export async function itemIds(
+	count: number,
+	visibility: 'public' | 'unlisted' | 'private' = 'public'
+): Promise<string[]> {
+	const owner = await seedUser();
+	const ids: string[] = [];
+	for (let i = 0; i < count; i++) ids.push((await publish(owner.id, { visibility })).curve.id);
+	return ids;
+}
+
+/** Inserts a batch row and its pairs straight into D1 (any ids, any day), in the given order. */
+export async function storeBatch(
+	day: string,
+	pairs: readonly [string, string, 'a' | 'b' | 'tie'][]
+): Promise<string> {
+	const id = `s6seed-${base64Url(crypto.getRandomValues(new Uint8Array(9)))}`;
+	const statements = [
+		env.DB.prepare(
+			'INSERT INTO s6_batches (id, receipt_hash, consent_ver, day) VALUES (?, ?, ?, ?)'
+		).bind(id, await sha256Hex(newReceipt()), S6_CONSENT_VERSION, day)
+	];
+	for (const [a, b, choice] of pairs) {
+		statements.push(
+			env.DB.prepare(
+				'INSERT INTO s6_pairs (batch_id, a, b, choice, level_matched) VALUES (?, ?, ?, ?, 1)'
+			).bind(id, a, b, choice)
+		);
+	}
+	await env.DB.batch(statements);
+	return id;
+}
+
+export async function dropBatch(id: string): Promise<void> {
+	await env.DB.prepare('DELETE FROM s6_batches WHERE id = ?').bind(id).run();
 }
 
 export interface PairBody {

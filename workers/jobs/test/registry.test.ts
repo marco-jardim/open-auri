@@ -21,19 +21,27 @@ import {
   type ScheduledJob,
 } from '../src/jobs/registry.ts';
 
+interface TemplateEnv {
+  triggers?: { crons?: string[] };
+  limits?: { cpu_ms?: number };
+}
+
 /** The template only has whole-line `//` comments, so dropping them leaves plain JSON. */
-function templateCrons(): Record<string, string[]> {
+function templateEnvs(): Record<string, TemplateEnv> {
   const json = templateSource
     .split('\n')
     .filter((line) => !line.trim().startsWith('//'))
     .join('\n');
-  const config = JSON.parse(json) as {
-    triggers?: { crons?: string[] };
-    env?: Record<string, { triggers?: { crons?: string[] } }>;
-  };
-  const crons: Record<string, string[]> = { top: config.triggers?.crons ?? [] };
-  for (const name of ['production', 'staging']) {
-    crons[name] = config.env?.[name]?.triggers?.crons ?? [];
+  const config = JSON.parse(json) as TemplateEnv & { env?: Record<string, TemplateEnv> };
+  const envs: Record<string, TemplateEnv> = { top: config };
+  for (const name of ['production', 'staging']) envs[name] = config.env?.[name] ?? {};
+  return envs;
+}
+
+function templateCrons(): Record<string, string[]> {
+  const crons: Record<string, string[]> = {};
+  for (const [name, entry] of Object.entries(templateEnvs())) {
+    crons[name] = entry.triggers?.crons ?? [];
   }
   return crons;
 }
@@ -43,15 +51,17 @@ function scheduledNames(cron: CronExpression): string[] {
 }
 
 describe('job registry', () => {
-  it('registers the jobs per UTC cron (salt first, re-gate last) and the access-log consumer', () => {
+  it('registers the jobs per UTC cron (salt first daily, re-gate first hourly) and the access-log consumer', () => {
     expect(scheduledNames(CRONS.daily)).toEqual([
       'rotate-salt',
       'rate-limit-gc',
       'access-log-retention',
       's6-aggregate',
-      'regate',
+      'og-sweep',
     ]);
-    expect(scheduledNames(CRONS.hourly)).toEqual(['trades-expire']);
+    // The re-gate has its own hourly tick and runs first in it: no daily job can starve it.
+    expect(scheduledNames(CRONS.hourly)).toEqual(['regate', 'trades-expire']);
+    expect(scheduledNames(CRONS.daily)).not.toContain('regate');
     expect(scheduledNames(CRONS.quarterHour)).toEqual(['rankings']);
     expect(CRONS).toEqual({
       daily: '5 0 * * *',
@@ -83,6 +93,12 @@ describe('job registry', () => {
     for (const cron of Object.values(CRONS)) expect(scheduledNames(cron).length).toBeGreaterThan(0);
   });
 
+  it('caps CPU at 60 s per invocation in every environment of the template', () => {
+    const envs = templateEnvs();
+    expect(Object.keys(envs)).toEqual(['top', 'production', 'staging']);
+    for (const entry of Object.values(envs)) expect(entry.limits).toEqual({ cpu_ms: 60000 });
+  });
+
   it('runs every daily job from the cron trigger', async () => {
     const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const now = new Date();
@@ -99,9 +115,10 @@ describe('job registry', () => {
         'job.rate_limit_gc',
         'job.access_log_retention',
         'job.s6_aggregate',
-        'job.regate',
+        'job.og-sweep',
       ]),
     );
+    expect(events).not.toContain('job.regate');
     expect(await env.CONFIG.get(`salt:${utcDay(now, 1)}`, 'text')).not.toBeNull();
   });
 
@@ -122,7 +139,10 @@ describe('job registry', () => {
     );
     const events = logs.mock.calls.map((call) => JSON.parse(String(call[0])).event);
     logs.mockRestore();
-    expect(events).toEqual(expect.arrayContaining(['job.trades_expire', 'job.rankings']));
+    expect(events).toEqual(
+      expect.arrayContaining(['job.regate', 'job.trades_expire', 'job.rankings']),
+    );
+    expect(events.indexOf('job.regate')).toBeLessThan(events.indexOf('job.trades_expire'));
   });
 
   it('keeps running the other jobs of a tick when one fails and logs the failure without data', async () => {

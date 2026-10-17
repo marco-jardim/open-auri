@@ -43,7 +43,7 @@ async function setup(
 	await app.state.ready;
 	const fetcher = vi.fn<SocialFetch>(respond);
 	const session = createSocialSession({
-		initial: signedIn ? { username: 'Ana', emailVerified: verified } : null
+		initial: signedIn ? { id: 'u-ana', username: 'Ana', emailVerified: verified } : null
 	});
 	const clipboard = vi.fn<(text: string) => Promise<void>>().mockResolvedValue();
 	const screen = await render(SocialActions, {

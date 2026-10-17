@@ -4,6 +4,10 @@
 // the bridge also drops any detail whose journal entry is not `ok` and anything heard while the
 // service reports simulated mode. The event goes through the social outbox (`enqueue`), never
 // straight to the API, and only when `originOf` finds the exact published bytes.
+//
+// Only a signed-in, verified person's write counts (FX4.2): the account id is captured when the
+// write is heard, nothing is looked up or queued without one, and the outbox refuses the event if
+// the session changed before it was queued. Anonymous writes are never stored for later.
 import { encodeS1 } from 'open-auri/share';
 import { CABLE_WRITTEN_EVENT } from '#lib/cable/service.ts';
 import type { CableWrittenDetail } from '#lib/cable/types.ts';
@@ -17,12 +21,20 @@ export interface OutboxBridgeApp {
 }
 
 export interface OutboxBridgeOutbox {
-	enqueue(input: EnqueueInput): Promise<EnqueueResult>;
+	enqueue(input: EnqueueInput, options?: { actedAs?: string | null }): Promise<EnqueueResult>;
+}
+
+/** Who is signed in (`createSocialSession`): read when the write is heard. */
+export interface OutboxBridgeSession {
+	readonly signedIn: boolean;
+	readonly verified: boolean;
+	readonly accountId: string | null;
 }
 
 export interface OutboxBridgeOptions {
 	app: OutboxBridgeApp;
 	outbox: OutboxBridgeOutbox;
+	session: OutboxBridgeSession;
 	/** Storage options for the default `originOf` lookup. */
 	origins?: OriginsOptions;
 	/** Replaces the `originOf` lookup (tests). */
@@ -50,12 +62,12 @@ export function isRealWrite(value: unknown): value is CableWrittenDetail {
  * community origin. Returns the unsubscribe function (call it when the layout unmounts).
  */
 export function startOutboxBridge(options: OutboxBridgeOptions): () => void {
-	const { app, outbox } = options;
+	const { app, outbox, session } = options;
 	const log = options.log ?? defaultLog;
 	const lookup = options.lookup ?? ((s1: string) => originOf(s1, options.origins));
 	let stopped = false;
 
-	async function handle(detail: CableWrittenDetail): Promise<void> {
+	async function handle(detail: CableWrittenDetail, actedAs: string): Promise<void> {
 		let s1: string;
 		try {
 			s1 = encodeS1({ bands: detail.bands, preampDb: detail.preampDb });
@@ -65,8 +77,11 @@ export function startOutboxBridge(options: OutboxBridgeOptions): () => void {
 		}
 		const origin = await lookup(s1);
 		if (origin === null || stopped) return;
-		const result = await outbox.enqueue({ kind: 'installed', lineageId: origin.lineageId });
-		if (!result.ok) log('social.bridge.enqueue', { status: 'not-queued' });
+		const result = await outbox.enqueue(
+			{ kind: 'installed', lineageId: origin.lineageId },
+			{ actedAs }
+		);
+		if (!result.ok) log('social.bridge.enqueue', { status: 'not-queued', reason: result.reason });
 		options.onqueued?.(result);
 	}
 
@@ -75,7 +90,10 @@ export function startOutboxBridge(options: OutboxBridgeOptions): () => void {
 		if (app.cableState?.mode === 'simulated') return;
 		const detail: unknown = event.detail;
 		if (!isRealWrite(detail)) return;
-		handle(detail).catch((error: unknown) => {
+		// The person who wrote, read now: anonymous or unverified writes are not activity.
+		const actedAs = session.accountId;
+		if (!session.signedIn || !session.verified || actedAs === null) return;
+		handle(detail, actedAs).catch((error: unknown) => {
 			log('social.bridge.failed', { error: (error as Error).name });
 		});
 	};

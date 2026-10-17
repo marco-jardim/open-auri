@@ -1,5 +1,8 @@
 // S7 blind trade service (T4.10, plan §3.7). A verified user puts one gate-approved curve in the
-// queue (own lineage, or a publicly listable one); at most one active trade per user (partial
+// queue (a publicly listable lineage, or an own one while active and not hidden by moderation;
+// pairing re-checks that rule on both sides, and every served trade re-checks it on the partner's
+// side: a partner that stopped qualifying is never served, and a matched pair with such a partner
+// is cancelled); at most one active trade per user (partial
 // UNIQUE index). Pairing is asynchronous and atomic: candidates are read here, the match itself
 // is the repository's `tryPairTrades` (two conditional UPDATEs in one D1 batch), so two joins that
 // race for the same waiting trade match it at most once. While blind, each side sees only the
@@ -18,19 +21,19 @@ import {
 	isSocialId,
 	listOwnTrades,
 	scoreTrade as repoScoreTrade,
-	tradeAverages,
 	tryPairTrades
 } from '#lib/server/social/repo.ts';
 import {
+	cancelPairWithUnavailablePartner,
 	findTradeTarget,
 	listPairCandidates,
 	listWaitingTradeIds,
 	readTradeState,
 	revealedPartnerFacts,
+	unavailablePartnerTradeIds,
 	type RevealedPartnerFacts
 } from '#lib/server/social/queries/trades.ts';
 import {
-	LOOKUP_IDS_MAX,
 	SocialRepoError,
 	type PageRequest,
 	type PairResult,
@@ -82,8 +85,10 @@ export interface RevealedPartner {
 	s1: string;
 	/** Score the partner gave to the caller's curve. */
 	score: number | null;
-	/** Partner's nickname; null without one or when the partner is banned. */
+	/** Partner's nickname as displayed; null without one or when the partner is banned. */
 	nickname: string | null;
+	/** Partner's canonical nickname, for the `/u/` link; null exactly when `nickname` is. */
+	username: string | null;
 	lineage: { id: string; versionId: string; name: string | null } | null;
 }
 
@@ -100,12 +105,24 @@ export interface TradeDto {
 	matchedAt: number | null;
 	scoredAt: number | null;
 	expiresAt: number;
+	/**
+	 * Null while waiting, after expiry or cancellation, and when the partner's lineage stopped
+	 * qualifying (retracted, hidden by moderation, made private, curve no longer approved): its
+	 * curve is then never served (a matched pair is cancelled, a revealed trade keeps its status).
+	 */
 	partner: BlindPartner | RevealedPartner | null;
 }
 
-function toDto(view: TradeView, facts: RevealedPartnerFacts | undefined): TradeDto {
+function toDto(
+	view: TradeView,
+	facts: RevealedPartnerFacts | undefined,
+	unavailable: boolean
+): TradeDto {
 	let partner: TradeDto['partner'] = null;
-	if (view.partner && view.status === 'revealed') {
+	let status = view.status;
+	if (unavailable) {
+		if (status === 'matched') status = 'cancelled';
+	} else if (view.partner && view.status === 'revealed') {
 		const { lineageId, versionId } = view.partner;
 		partner = {
 			revealed: true,
@@ -113,6 +130,7 @@ function toDto(view: TradeView, facts: RevealedPartnerFacts | undefined): TradeD
 			s1: view.partner.s1,
 			score: view.partner.score,
 			nickname: facts?.nickname ?? null,
+			username: facts?.username ?? null,
 			lineage:
 				facts?.linkable && lineageId !== null && versionId !== null
 					? { id: lineageId, versionId, name: facts.versionName }
@@ -123,7 +141,7 @@ function toDto(view: TradeView, facts: RevealedPartnerFacts | undefined): TradeD
 	}
 	return {
 		id: view.id,
-		status: view.status,
+		status,
 		lineageId: view.lineageId,
 		versionId: view.versionId,
 		score: view.score,
@@ -135,10 +153,25 @@ function toDto(view: TradeView, facts: RevealedPartnerFacts | undefined): TradeD
 	};
 }
 
+/**
+ * DTOs of the caller's trades. The partner's lineage is re-checked on every read: when it no
+ * longer qualifies, its curve is withheld, and a matched pair is cancelled (conditional UPDATE).
+ */
 async function toDtos(db: D1Database, userId: string, views: TradeView[]): Promise<TradeDto[]> {
-	const revealed = views.filter((view) => view.status === 'revealed').map((view) => view.id);
+	const paired = views
+		.filter((view) => view.status === 'matched' || view.status === 'revealed')
+		.map((view) => view.id);
+	const unavailable = await unavailablePartnerTradeIds(db, userId, paired);
+	for (const view of views) {
+		if (view.status === 'matched' && unavailable.has(view.id)) {
+			await cancelPairWithUnavailablePartner(db, userId, view.id);
+		}
+	}
+	const revealed = views
+		.filter((view) => view.status === 'revealed' && !unavailable.has(view.id))
+		.map((view) => view.id);
 	const facts = await revealedPartnerFacts(db, userId, revealed);
-	return views.map((view) => toDto(view, facts.get(view.id)));
+	return views.map((view) => toDto(view, facts.get(view.id), unavailable.has(view.id)));
 }
 
 /** The caller's trade as a DTO, or null when it does not exist or is someone else's. */
@@ -192,10 +225,11 @@ export interface JoinOptions {
 }
 
 /**
- * Joins the queue with a version (`versionId`, or the head) of a lineage the caller owns or that
- * is publicly listable, whose curve passed the gate; then tries to pair at once.
- * Errors: `invalid-input`, `not-found` (missing, unlisted or private and not own),
- * `gate-rejected`, `already-active`.
+ * Joins the queue with a version (`versionId`, or the head) of a lineage that is publicly
+ * listable, or the caller's own while active and not hidden by moderation, whose curve passed the
+ * gate; then tries to pair at once. Errors: `invalid-input`, `not-found` (missing; unlisted or
+ * private and not own; own but retracted or hidden by moderation), `gate-rejected`,
+ * `already-active`.
  */
 export async function joinTrade(
 	db: D1Database,
@@ -209,7 +243,7 @@ export async function joinTrade(
 		return { ok: false, code: 'invalid-input' };
 	}
 	const target = await findTradeTarget(db, userId, input.lineageId, versionId);
-	if (!target || (!target.own && !target.listable)) return { ok: false, code: 'not-found' };
+	if (!target || !target.tradeable) return { ok: false, code: 'not-found' };
 	if (!target.gateOk) return { ok: false, code: 'gate-rejected' };
 
 	const created = await createTrade(db, {
@@ -246,6 +280,13 @@ export async function scoreMyTrade(
 		return { ok: false, code: 'invalid-input' };
 	}
 	if (!isSocialId(tradeId)) return { ok: false, code: 'not-found' };
+	// A partner whose lineage stopped qualifying ends the pair instead of being scored.
+	if (
+		(await unavailablePartnerTradeIds(db, userId, [tradeId])).has(tradeId) &&
+		(await cancelPairWithUnavailablePartner(db, userId, tradeId)) > 0
+	) {
+		return { ok: false, code: 'not-active' };
+	}
 	const scored = await repoScoreTrade(db, tradeId, userId, score, now);
 	if (!scored.ok) {
 		if (scored.code === 'not-found') return { ok: false, code: 'not-found' };
@@ -290,28 +331,6 @@ export async function listMyTrades(
 		ok: true,
 		value: { items: await toDtos(db, userId, views.items), nextCursor: views.nextCursor }
 	};
-}
-
-export interface TradeAverage {
-	average: number;
-	count: number;
-}
-
-/**
- * Average score each lineage received in REVEALED trades (for the UI). Invalid and duplicate ids
- * are dropped; at most LOOKUP_IDS_MAX ids are looked up. Lineages without revealed trades are
- * absent. Callers show it only next to lineages the viewer may already see.
- */
-export async function lineageTradeAverages(
-	db: D1Database,
-	lineageIds: readonly string[]
-): Promise<Record<string, TradeAverage>> {
-	const ids = [...new Set(lineageIds.filter((id) => isSocialId(id)))].slice(0, LOOKUP_IDS_MAX);
-	if (ids.length === 0) return {};
-	const averages = await tradeAverages(db, ids);
-	const out: Record<string, TradeAverage> = {};
-	for (const [id, value] of averages) out[id] = { average: value.average, count: value.count };
-	return out;
 }
 
 /** Expires waiting and matched trades whose deadline passed; returns how many. */

@@ -4,6 +4,7 @@ import { setupNetwork } from '@msw/cloudflare';
 import { env } from 'cloudflare:workers';
 import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { changeNickname } from '#lib/server/account/nickname.ts';
 import { listAudit } from '#lib/server/admin/audit.ts';
 import { TURNSTILE_HEADER } from '#lib/server/api/index.ts';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
@@ -141,14 +142,19 @@ describe('POST /api/v1/reports: targets', () => {
 		const priv = await publish(owner.id, { visibility: 'private' });
 		const unlisted = await publish(owner.id, { visibility: 'unlisted' });
 		const user = await reporter();
-		const banned = await reporter({ banned: true });
-		const nicked = await seedUser({ username: `m${crypto.randomUUID().slice(0, 12)}` });
+		const bannedNickname = `b${crypto.randomUUID().slice(0, 12)}`;
+		const banned = await seedUser({ username: bannedNickname, banned: true });
+		const nickname = `m${crypto.randomUUID().slice(0, 12)}`;
+		const nicked = await seedUser({ username: nickname });
 		turnstile(true);
 		const cases: [string, string][] = [
 			['lineage', priv.lineageId],
 			['lineage', uid('missing')],
 			['pack', uid('missing')],
 			['user', banned.id],
+			['user', bannedNickname],
+			['user', nicked.id], // even an existing public profile cannot be reported by internal id
+			['user', uid('missing')],
 			['user', owner.id] // no nickname: no public profile
 		];
 		for (const [targetKind, targetId] of cases) {
@@ -172,7 +178,7 @@ describe('POST /api/v1/reports: targets', () => {
 			(
 				await report(apiLocals(user), {
 					targetKind: 'user',
-					targetId: nicked.id,
+					targetId: nickname,
 					reason: 'impersonation'
 				})
 			).status
@@ -188,6 +194,54 @@ describe('POST /api/v1/reports: targets', () => {
 			'FORBIDDEN'
 		);
 		expect(await reportCount('lineage', priv.lineageId)).toBe(0);
+	});
+
+	it('resolves nicknames (including dots, case and held aliases), stores ids and deduplicates', async () => {
+		const nickname = `listener.${crypto.randomUUID().slice(0, 8)}`;
+		const profile = await seedUser({ username: nickname });
+		const user = await reporter();
+		const body = { targetKind: 'user', targetId: nickname.toUpperCase(), reason: 'impersonation' };
+		turnstile(true);
+		const response = await report(apiLocals(user), body);
+		expect(response.status).toBe(201);
+		expect(await response.json()).toEqual({ reported: true });
+		expect(await reportCount('user', profile.id)).toBe(1);
+		expect(await reportCount('user', nickname)).toBe(0);
+		await expectErrorResponse(
+			await report(apiLocals(user), { ...body, targetId: nickname }),
+			409,
+			'DUPLICATE'
+		);
+		await expectErrorResponse(await report(apiLocals(profile), body), 403, 'FORBIDDEN');
+		expect(
+			await fileReport(env.DB, {
+				reporterUserId: user.id,
+				targetKind: 'user',
+				targetId: profile.id,
+				reason: 'spam',
+				note: null,
+				now: Date.now()
+			})
+		).toEqual({ ok: false, code: 'NOT_FOUND' });
+
+		const nextNickname = `renamed.${crypto.randomUUID().slice(0, 8)}`;
+		expect((await changeNickname(env.DB, profile.id, nextNickname, Date.now())).ok).toBe(true);
+		for (const targetId of [nickname, nextNickname]) {
+			await expectErrorResponse(
+				await report(apiLocals(user), { ...body, targetId }),
+				409,
+				'DUPLICATE'
+			);
+		}
+		await env.DB.prepare('UPDATE "user" SET banned = 1 WHERE id = ?').bind(profile.id).run();
+		for (const targetId of [nickname, nextNickname, profile.id, uid('unknown')]) {
+			await expectErrorResponse(
+				await report(apiLocals(user), { ...body, targetId }),
+				404,
+				'NOT_FOUND'
+			);
+		}
+		expect(await reportCount('user', profile.id)).toBe(1);
 	});
 
 	it('the third eligible report through the API hides the lineage (audited, system)', async () => {
@@ -326,7 +380,8 @@ describe('automatic hiding threshold', () => {
 	});
 
 	it('hides packs too; reports on users never hide anything', async () => {
-		const owner = await seedUser({ username: `m${crypto.randomUUID().slice(0, 12)}` });
+		const nickname = `m${crypto.randomUUID().slice(0, 12)}`;
+		const owner = await seedUser({ username: nickname });
 		const packId = uid('pack');
 		const created = await createPack(env.DB, {
 			id: packId,
@@ -361,7 +416,7 @@ describe('automatic hiding threshold', () => {
 			const result = await fileReport(env.DB, {
 				reporterUserId: (await reporter()).id,
 				targetKind: 'user',
-				targetId: owner.id,
+				targetId: nickname,
 				reason: 'impersonation',
 				note: 'pretends to be someone',
 				now

@@ -53,7 +53,8 @@ export function createCurveSocial(
 					return m.curve_social_login();
 				}
 				if (error.code === 'EMAIL_NOT_VERIFIED') {
-					session.set({ username: session.nickname, emailVerified: false });
+					const current = session.account;
+					if (current) session.set({ ...current, emailVerified: false });
 					return m.curve_social_verify();
 				}
 			}

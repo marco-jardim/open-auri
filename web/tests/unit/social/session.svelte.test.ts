@@ -27,40 +27,60 @@ describe('createSocialSession', () => {
 			false,
 			null
 		]);
+		expect(session.accountId).toBeNull();
 	});
 
-	it('derives signedIn, verified and nickname from the account summary', async () => {
+	it('derives signedIn, verified, accountId and nickname from the account summary', async () => {
 		const { fetch, urls } = sessionFetch(() =>
-			body({ username: 'ana', displayUsername: 'Ana', emailVerified: true, email: 'x@y.z' })
+			body({
+				id: 'u-ana',
+				username: 'ana',
+				displayUsername: 'Ana',
+				emailVerified: true,
+				email: 'x@y.z'
+			})
 		);
 		const session = createSocialSession({ fetch });
 		const summary = await session.refresh();
 		expect(urls).toEqual([SESSION_ENDPOINT]);
-		expect(summary).toEqual({ username: 'Ana', emailVerified: true });
+		expect(summary).toEqual({ id: 'u-ana', username: 'Ana', emailVerified: true });
 		expect([session.known, session.signedIn, session.verified, session.nickname]).toEqual([
 			true,
 			true,
 			true,
 			'Ana'
 		]);
+		expect(session.accountId).toBe('u-ana');
 		expect(JSON.stringify(session.account)).not.toContain('x@y.z');
 	});
 
 	it('is signed in but not verified before the e-mail is confirmed', () => {
-		const session = createSocialSession({ initial: { username: null, emailVerified: false } });
+		const session = createSocialSession({
+			initial: { id: 'u1', username: null, emailVerified: false }
+		});
 		expect([session.signedIn, session.verified, session.nickname]).toEqual([true, false, null]);
+	});
+
+	it('follows set(): sign-out clears the accountId, a switch replaces it', () => {
+		const session = createSocialSession({
+			initial: { id: 'u-ana', username: 'Ana', emailVerified: true }
+		});
+		session.set({ id: 'u-bia', username: 'Bia', emailVerified: true });
+		expect(session.accountId).toBe('u-bia');
+		session.set(null);
+		expect(session.accountId).toBeNull();
 	});
 
 	it('reads any failure as signed out', async () => {
 		const unauthorized = createSocialSession({
-			initial: { username: 'ana', emailVerified: true },
+			initial: { id: 'u1', username: 'ana', emailVerified: true },
 			fetch: sessionFetch(() => new Response('', { status: 401 })).fetch
 		});
 		await unauthorized.refresh();
 		expect(unauthorized.signedIn).toBe(false);
 
 		const offline = createSocialSession({
-			initial: { username: 'ana', emailVerified: true },
+			initial: { id: 'u1', username: 'ana', emailVerified: true },
 			fetch: sessionFetch(() => Promise.reject(new TypeError('Failed to fetch'))).fetch
 		});
 		await offline.refresh();
@@ -75,7 +95,7 @@ describe('createSocialSession', () => {
 		const session = createSocialSession({ fetch: sessionFetch(() => pending).fetch });
 		const refreshing = session.refresh();
 		session.set(null);
-		resolve(body({ username: 'ana', emailVerified: true }));
+		resolve(body({ id: 'u1', username: 'ana', emailVerified: true }));
 		await refreshing;
 		expect(session.signedIn).toBe(false);
 		expect(session.known).toBe(true);

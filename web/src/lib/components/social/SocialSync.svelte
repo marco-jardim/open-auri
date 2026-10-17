@@ -14,6 +14,9 @@
 	// Headless social sync (T4.14): flushes the activity outbox on mount, on the window `online`
 	// event, when the tab becomes visible again and when the session turns signed-in + verified.
 	// Mount once in the root layout. No UI besides the optional `children` indicator snippet.
+	// FX4.2: queued activity belongs to the account that acted. When the signed-in account goes
+	// away (sign-out) or changes (switch), the events it does not own are purged here; the outbox's
+	// own flush also drops other owners' events, so nothing is ever sent as someone else.
 	import { untrack, type Snippet } from 'svelte';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { AccountSummary } from '#lib/components/chrome/account.ts';
@@ -41,7 +44,7 @@
 		session?: SocialSession;
 		api?: Pick<SocialApi, 'postActivityOutbox'>;
 		/** Injected outbox (tests); default: one over `app.state.outbox`. */
-		outbox?: Pick<SocialOutbox, 'flush' | 'pending'> | null;
+		outbox?: Pick<SocialOutbox, 'flush' | 'pending' | 'purge'> | null;
 		children?: Snippet<[SocialSyncStatus]>;
 	} = $props();
 
@@ -64,12 +67,7 @@
 	let last = $state.raw<FlushReport | null>(null);
 	let destroyed = false;
 
-	async function flush() {
-		const target = outbox;
-		if (!target || destroyed) return;
-		const report = await target.flush(api);
-		if (destroyed) return;
-		last = report;
+	async function countPending(target: Pick<SocialOutbox, 'pending'>) {
 		try {
 			pending = (await target.pending()).length;
 		} catch (error) {
@@ -77,9 +75,46 @@
 		}
 	}
 
+	async function flush() {
+		const target = outbox;
+		if (!target || destroyed) return;
+		const report = await target.flush(api);
+		if (destroyed) return;
+		last = report;
+		await countPending(target);
+	}
+
+	async function purge(target: Pick<SocialOutbox, 'pending' | 'purge'>, keep: string | null) {
+		await target.purge(keep);
+		if (!destroyed) await countPending(target);
+	}
+
 	// Layout-provided summary: keep the session in step with it.
 	$effect(() => {
 		if (account !== undefined) session.set(account);
+	});
+
+	// Last signed-in account seen by this tab (`null` = none yet or signed out). A session read as
+	// signed out before any account was seen (anonymous visit, or offline at load) purges nothing.
+	let lastOwner: string | null = null;
+	$effect(() => {
+		const target = outbox;
+		if (!target || !session.known) return;
+		const owner = session.signedIn ? session.accountId : null;
+		untrack(() => {
+			const previous = lastOwner;
+			if (owner !== null && owner !== previous) {
+				// Signed in (first seen or switched): drop every other account's events.
+				lastOwner = owner;
+				void purge(target, owner);
+			} else if (owner === null && previous !== null && online) {
+				// Signed out: nothing stays queued for whoever signs in next. Offline, a failed session
+				// probe also reads as signed out, so the queue is kept (the flush only ever sends the
+				// events of the account signed in at that time).
+				lastOwner = null;
+				void purge(target, null);
+			}
+		});
 	});
 
 	// Mount, and every time the outbox becomes available or the session becomes signed-in + verified.

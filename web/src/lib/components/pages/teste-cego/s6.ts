@@ -66,12 +66,16 @@ export async function itemIdOf(
 
 /**
  * One pair per two positions of each completed round. The higher rating wins, equal ratings tie.
- * Pairs whose curves cannot be named, or that name the same curve twice, are left out.
+ * Pairs whose curves cannot be named, or that name the same curve twice, are left out. Only
+ * official presets are named: the server refuses a whole batch with any item that is not an
+ * official preset or a publicly listable curve, so variations never leave the browser.
  */
 export async function buildPairs(session: Session | null, levelMatched = true): Promise<S6Pair[]> {
 	if (!session) return [];
 	const ids = new Map<string, string | null>();
-	for (const candidate of session.candidates) ids.set(candidate.id, await itemIdOf(candidate));
+	for (const candidate of session.candidates) {
+		ids.set(candidate.id, candidate.official ? await itemIdOf(candidate) : null);
+	}
 	const pairs: S6Pair[] = [];
 	for (const round of session.completed) {
 		for (let i = 0; i < round.order.length; i++) {

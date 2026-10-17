@@ -35,6 +35,10 @@ export function createSocialSession(options: SocialSessionOptions = {}) {
 		get verified() {
 			return account !== null && account.emailVerified;
 		},
+		/** The signed-in user's own account id (outbox owner); null when signed out. */
+		get accountId() {
+			return account?.id ?? null;
+		},
 		/** Public nickname; null when signed out or before the nickname is chosen. */
 		get nickname() {
 			return account?.username ?? null;

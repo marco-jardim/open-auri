@@ -16,7 +16,7 @@ const json = (body: unknown, status = 200) =>
 	});
 
 describe('toAccountSummary', () => {
-	test('keeps only the nickname and the verification flag (never the e-mail)', () => {
+	test('keeps only the own id, the nickname and the verification flag (never the e-mail)', () => {
 		const summary = toAccountSummary({
 			user: {
 				id: 'u1',
@@ -29,16 +29,17 @@ describe('toAccountSummary', () => {
 			},
 			session: { id: 's1' }
 		});
-		expect(summary).toEqual({ username: 'Ana', emailVerified: true });
+		expect(summary).toEqual({ id: 'u1', username: 'Ana', emailVerified: true });
 		expect(JSON.stringify(summary)).not.toContain('example.com');
+		expect(JSON.stringify(summary)).not.toContain('s1');
 	});
 
 	test('falls back to username, then null', () => {
-		expect(toAccountSummary({ user: { username: 'ana', emailVerified: false } })).toEqual({
-			username: 'ana',
-			emailVerified: false
-		});
-		expect(toAccountSummary({ user: { displayUsername: '' } })).toEqual({
+		expect(toAccountSummary({ user: { id: 'u1', username: 'ana', emailVerified: false } })).toEqual(
+			{ id: 'u1', username: 'ana', emailVerified: false }
+		);
+		expect(toAccountSummary({ user: { id: 'u2', displayUsername: '' } })).toEqual({
+			id: 'u2',
 			username: null,
 			emailVerified: false
 		});
@@ -49,12 +50,22 @@ describe('toAccountSummary', () => {
 		expect(toAccountSummary({ user: null })).toBeNull();
 		expect(toAccountSummary('x')).toBeNull();
 	});
+
+	test('a user without a string id is not a usable session', () => {
+		expect(toAccountSummary({ user: { username: 'ana', emailVerified: true } })).toBeNull();
+		expect(toAccountSummary({ user: { id: '', emailVerified: true } })).toBeNull();
+		expect(toAccountSummary({ user: { id: 42, emailVerified: true } })).toBeNull();
+	});
 });
 
 describe('fetchAccount', () => {
 	test('asks the same-origin session endpoint', async () => {
-		const fetcher = vi.fn<FetchLike>(async () => json({ user: { username: 'ana' } }));
-		expect(await fetchAccount(fetcher)).toEqual({ username: 'ana', emailVerified: false });
+		const fetcher = vi.fn<FetchLike>(async () => json({ user: { id: 'u1', username: 'ana' } }));
+		expect(await fetchAccount(fetcher)).toEqual({
+			id: 'u1',
+			username: 'ana',
+			emailVerified: false
+		});
 		expect(fetcher).toHaveBeenCalledWith(
 			SESSION_ENDPOINT,
 			expect.objectContaining({ credentials: 'same-origin' })

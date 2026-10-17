@@ -1,7 +1,8 @@
 // GET|DELETE /api/v1/me/activity (T4.4): the signed-in user's own activity history.
 //   GET ?cursor=&limit=          → { items: ActivityRecord[], nextCursor }
-//   DELETE ?lineageId=&kind=     → { deleted } (no filter: everything; matching attributed share
-//                                  events go too, so public counts drop at once)
+//   DELETE ?lineageId=&kind=     → { deleted } (no filter: everything, and the caller's event-id
+//                                  claims; matching attributed share events go too, so public
+//                                  counts drop at once)
 import { ApiError, defineApi, json, type ApiEvent } from '#lib/server/api/index.ts';
 import { deleteMyActivity, listMyActivity } from '#lib/server/social/activity.ts';
 import { isSocialId } from '#lib/server/social/repo.ts';
@@ -61,7 +62,12 @@ export const DELETE = defineApi<MyActivityEvent>(
 			if (!isOneOf(ACTIVITY_KINDS, rawKind)) throw invalidQuery('kind');
 			kind = rawKind;
 		}
-		const deleted = await deleteMyActivity(env.db, user.id, { lineageId, kind });
+		const deleted = await deleteMyActivity(
+			env.db,
+			user.id,
+			{ lineageId, kind },
+			{ claimSecret: env.secrets.betterAuthSecret }
+		);
 		return json({ deleted });
 	}
 ) satisfies RequestHandler;

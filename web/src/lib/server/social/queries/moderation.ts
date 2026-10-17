@@ -3,6 +3,7 @@
 // preview (reason counts, notes, target facts). Only admin code reads notes and reporter-free
 // aggregates; nothing here returns a reporter id.
 import type { D1Database } from '@cloudflare/workers-types';
+import { resolveNickname } from '#lib/server/account/nickname.ts';
 import { all, first, sql } from '#lib/server/db.ts';
 import { readableLineageSql, readablePackSql } from '#lib/server/social/repo.ts';
 import type {
@@ -24,13 +25,15 @@ export interface TargetFacts {
 
 /**
  * The target if `viewer` can read it (lineage and pack: the repo predicates; user: a profile with
- * a nickname whose account is not banned, or anything for an explicit admin), else null.
+ * a nickname whose account is not banned), else null. User targets are resolved by nickname;
+ * only explicit admin callers may pass internal user ids.
  */
 export async function findTarget(
 	db: D1Database,
 	kind: ReportTargetKind,
 	id: string,
-	viewer: Viewer
+	viewer: Viewer,
+	now: number = Date.now()
 ): Promise<TargetFacts | null> {
 	if (kind === 'lineage') {
 		const readable = readableLineageSql('l', viewer);
@@ -70,10 +73,17 @@ export async function findTarget(
 				}
 			: null;
 	}
+	let userId = id;
+	if (viewer.admin !== true) {
+		let nickname = await resolveNickname(db, id, now);
+		if (nickname?.kind === 'redirect') nickname = await resolveNickname(db, nickname.to, now);
+		if (nickname?.kind !== 'user') return null;
+		userId = nickname.userId;
+	}
 	const visible =
 		viewer.admin === true ? '1 = 1' : `u."username" IS NOT NULL AND COALESCE(u."banned", 0) = 0`;
 	const row = await first<{ id: string }>(
-		sql(db, `SELECT u."id" AS id FROM "user" u WHERE u."id" = ? AND ${visible}`, id)
+		sql(db, `SELECT u."id" AS id FROM "user" u WHERE u."id" = ? AND ${visible}`, userId)
 	);
 	return row ? { kind, id: row.id, ownerUserId: row.id, moderation: null } : null;
 }

@@ -9,6 +9,12 @@
 // One flusher across tabs: the Web Lock `oa-social-outbox` requested with `ifAvailable`; a tab that
 // does not get it skips (`busy`). Without Web Locks the server's `eventId` dedup keeps a concurrent
 // flush harmless (a replay answers `duplicate`). `enqueue` and `flush` never throw.
+//
+// Events belong to the account that acted (FX4.2): `enqueue` refuses unless the session is signed
+// in and verified at that moment, and stamps the item with the account id (`owner`). `flush` sends
+// only the current account's items and removes those of any other owner, so on a shared browser
+// one person's activity is never recorded as another's. `purge` clears what the current account
+// does not own (everything when signed out).
 import type { JsonValue, PendingEvent } from '#lib/state/outbox.svelte.ts';
 import { SocialApiError, type OutboxItemInput, type OutboxResult, type SocialApi } from './api.ts';
 
@@ -26,6 +32,8 @@ export const BACKOFF_BASE_MS = 30_000;
 export const BACKOFF_MAX_MS = 6 * 3_600_000;
 
 const ID_MAX = 128;
+/** Stored payload version; 2 added `owner` (FX4.2). */
+const PAYLOAD_VERSION = 2;
 
 export type OutboxActivityKind = 'previewed' | 'installed';
 
@@ -35,6 +43,8 @@ export type EnqueueInput =
 
 export interface QueuedActivity {
 	eventId: string;
+	/** Account id of who acted; only that account's session sends the event. */
+	owner: string;
 	lineageId: string;
 	kind: OutboxActivityKind;
 	/** Epoch ms of the event (sent as `at`). */
@@ -47,8 +57,10 @@ export interface QueuedActivity {
 	nextAttemptAt: number;
 }
 
+export type EnqueueRefusal = 'signed-out' | 'unverified' | 'too-short' | 'invalid' | 'storage';
+
 export type EnqueueResult =
-	{ ok: true; event: QueuedActivity } | { ok: false; reason: 'too-short' | 'invalid' | 'storage' };
+	{ ok: true; event: QueuedActivity } | { ok: false; reason: EnqueueRefusal };
 
 export type FlushStatus =
 	'done' | 'signed-out' | 'unverified' | 'offline' | 'busy' | 'aborted' | 'error';
@@ -59,7 +71,7 @@ export interface FlushReport {
 	sent: number;
 	/** Items removed after a `recorded`, `duplicate` or `rejected` answer. */
 	removed: number;
-	/** Items removed locally: older than 7 days or unreadable. */
+	/** Items removed locally: older than 7 days, unreadable or owned by another account. */
 	dropped: number;
 	/** Items still queued after this flush. */
 	kept: number;
@@ -91,6 +103,8 @@ export interface OutboxLockManager {
 export interface SocialSessionFlags {
 	readonly signedIn: boolean;
 	readonly verified: boolean;
+	/** Id of the signed-in account; null when signed out (`createSocialSession().accountId`). */
+	readonly accountId: string | null;
 }
 
 export interface SocialOutboxOptions {
@@ -150,8 +164,9 @@ function isInt(value: unknown): value is number {
 
 function toPayload(item: QueuedActivity): JsonValue {
 	const payload: { [key: string]: JsonValue } = {
-		v: 1,
+		v: PAYLOAD_VERSION,
 		eventId: item.eventId,
+		owner: item.owner,
 		lineageId: item.lineageId,
 		kind: item.kind,
 		at: item.at,
@@ -163,14 +178,21 @@ function toPayload(item: QueuedActivity): JsonValue {
 	return payload;
 }
 
-/** Reads a stored payload back; null when it is not a well-formed outbox item. */
+/**
+ * Reads a stored payload back; null when it is not a well-formed outbox item. Items without an
+ * owner (payload v1, before FX4.2) are not well formed: nobody can prove who acted, so they are
+ * dropped instead of being sent as whoever is signed in.
+ */
 export function parseQueued(payload: JsonValue): QueuedActivity | null {
 	if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;
-	const { v, eventId, lineageId, kind, at, attempts, nextAttemptAt, durationMs, shareId } = payload;
-	if (v !== 1 || !validId(eventId) || !validId(lineageId)) return null;
+	const { v, eventId, owner, lineageId, kind, at, attempts, nextAttemptAt, durationMs, shareId } =
+		payload;
+	if (v !== PAYLOAD_VERSION || !validId(eventId) || !validId(owner) || !validId(lineageId)) {
+		return null;
+	}
 	if (kind !== 'previewed' && kind !== 'installed') return null;
 	if (!isInt(at) || !isInt(attempts) || attempts < 0 || !isInt(nextAttemptAt)) return null;
-	const item: QueuedActivity = { eventId, lineageId, kind, at, attempts, nextAttemptAt };
+	const item: QueuedActivity = { eventId, owner, lineageId, kind, at, attempts, nextAttemptAt };
 	if (kind === 'previewed') {
 		if (!isInt(durationMs) || durationMs < PREVIEW_MIN_MS) return null;
 		item.durationMs = durationMs;
@@ -217,8 +239,30 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 		return Math.max(Math.round(base * jitter), retryAfterMs ?? 0);
 	}
 
-	async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
+	/** Account allowed to act right now: signed in, verified and with a known id. */
+	function actor(): { ok: true; id: string } | { ok: false; reason: 'signed-out' | 'unverified' } {
+		const id = session.accountId;
+		if (!session.signedIn || !validId(id)) return { ok: false, reason: 'signed-out' };
+		if (!session.verified) return { ok: false, reason: 'unverified' };
+		return { ok: true, id };
+	}
+
+	/**
+	 * Queues an event for the account signed in now. Signed out or unverified: refused and nothing
+	 * is stored (anonymous activity is never kept for a later account). `actedAs` is the account id
+	 * captured when the action happened (e.g. at the cable write, before an async lookup): when the
+	 * session now belongs to someone else (or nobody), the event is refused as `signed-out`.
+	 */
+	async function enqueue(
+		input: EnqueueInput,
+		enqueueOptions: { actedAs?: string | null } = {}
+	): Promise<EnqueueResult> {
 		try {
+			const who = actor();
+			if (!who.ok) return { ok: false, reason: who.reason };
+			if (enqueueOptions.actedAs !== undefined && enqueueOptions.actedAs !== who.id) {
+				return { ok: false, reason: 'signed-out' };
+			}
 			if (!validId(input.lineageId)) return { ok: false, reason: 'invalid' };
 			if (input.shareId !== undefined && !validId(input.shareId)) {
 				return { ok: false, reason: 'invalid' };
@@ -226,6 +270,7 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 			const at = Math.floor(now());
 			const item: QueuedActivity = {
 				eventId: randomId(),
+				owner: who.id,
 				lineageId: input.lineageId,
 				kind: input.kind,
 				at,
@@ -272,10 +317,13 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 		return { entries, invalid };
 	}
 
+	/** Queued events of the account signed in now (none when signed out). */
 	async function pending(): Promise<QueuedActivity[]> {
 		try {
+			const owner = session.signedIn ? session.accountId : null;
+			if (owner === null) return [];
 			const { entries } = await readAll();
-			return entries.map((entry) => entry.item);
+			return entries.filter((entry) => entry.item.owner === owner).map((entry) => entry.item);
 		} catch (error) {
 			log('social outbox: read failed', errorLabel(error));
 			return [];
@@ -310,7 +358,8 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 
 	async function drain(
 		api: Pick<SocialApi, 'postActivityOutbox'>,
-		signal: AbortSignal | undefined
+		signal: AbortSignal | undefined,
+		owner: string
 	): Promise<FlushReport> {
 		const report: FlushReport = { status: 'done', sent: 0, removed: 0, dropped: 0, kept: 0 };
 		const t = now();
@@ -321,7 +370,11 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 		}
 		const due: Entry[] = [];
 		for (const entry of entries) {
-			if (entry.item.at < t - OUTBOX_MAX_AGE_MS) {
+			if (entry.item.owner !== owner) {
+				// Another account's activity: never sent under this session.
+				await store.remove(entry.item.eventId);
+				report.dropped += 1;
+			} else if (entry.item.at < t - OUTBOX_MAX_AGE_MS) {
 				await store.remove(entry.item.eventId);
 				report.dropped += 1;
 			} else if (entry.item.nextAttemptAt > t) {
@@ -334,6 +387,13 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 			const batch = due.slice(start, start + OUTBOX_BATCH_MAX);
 			if (signal?.aborted) {
 				report.status = 'aborted';
+				report.kept += due.length - start;
+				break;
+			}
+			const who = actor();
+			if (!who.ok || who.id !== owner) {
+				// The session changed during the flush: the rest waits for its owner.
+				report.status = who.ok ? 'signed-out' : who.reason;
 				report.kept += due.length - start;
 				break;
 			}
@@ -378,12 +438,13 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 
 	async function guarded(
 		api: Pick<SocialApi, 'postActivityOutbox'>,
-		signal: AbortSignal | undefined
+		signal: AbortSignal | undefined,
+		owner: string
 	): Promise<FlushReport> {
 		try {
-			if (locks === null) return await drain(api, signal);
+			if (locks === null) return await drain(api, signal, owner);
 			return await locks.request(SOCIAL_OUTBOX_LOCK, { ifAvailable: true }, async (lock) =>
-				lock === null ? skipped('busy') : drain(api, signal)
+				lock === null ? skipped('busy') : drain(api, signal, owner)
 			);
 		} catch (error) {
 			if (isAbort(error)) return skipped('aborted');
@@ -397,25 +458,50 @@ export function createSocialOutbox(options: SocialOutboxOptions) {
 	}
 
 	/**
-	 * Sends what is due (signed in, verified and online only). Concurrent calls in one tab share
-	 * the running flush; another tab holding the lock makes this one answer `busy`.
+	 * Sends the current account's due events (signed in, verified and online only) and removes the
+	 * events of any other account. Concurrent calls in one tab share the running flush; another tab
+	 * holding the lock makes this one answer `busy`.
 	 */
 	function flush(
 		api: Pick<SocialApi, 'postActivityOutbox'>,
 		flushOptions: { signal?: AbortSignal } = {}
 	): Promise<FlushReport> {
-		if (!session.signedIn) return Promise.resolve(skipped('signed-out'));
-		if (!session.verified) return Promise.resolve(skipped('unverified'));
+		const who = actor();
+		if (!who.ok) return Promise.resolve(skipped(who.reason));
 		if (!online()) return Promise.resolve(skipped('offline'));
 		if (running) return running;
-		const current = guarded(api, flushOptions.signal).finally(() => {
+		const current = guarded(api, flushOptions.signal, who.id).finally(() => {
 			if (running === current) running = null;
 		});
 		running = current;
 		return current;
 	}
 
-	return { enqueue, flush, pending };
+	/**
+	 * Removes every queued event not owned by `keep` (default: the account signed in now; all of
+	 * them when signed out). Call on sign-out and on account switch. Resolves the number removed;
+	 * never throws.
+	 */
+	async function purge(keep: string | null = session.signedIn ? session.accountId : null) {
+		let removed = 0;
+		try {
+			const { entries, invalid } = await readAll();
+			for (const id of invalid) {
+				await store.remove(id);
+				removed += 1;
+			}
+			for (const { item } of entries) {
+				if (keep !== null && item.owner === keep) continue;
+				await store.remove(item.eventId);
+				removed += 1;
+			}
+		} catch (error) {
+			log('social outbox: purge failed', errorLabel(error));
+		}
+		return removed;
+	}
+
+	return { enqueue, flush, pending, purge };
 }
 
 export type SocialOutbox = ReturnType<typeof createSocialOutbox>;

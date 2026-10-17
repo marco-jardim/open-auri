@@ -4,6 +4,11 @@
 // characters XML 1.0 forbids), truncated by code points and XML-escaped. No external reference:
 // no <image>, no href, no URL from user data. Colours: Biblioteca theme tokens
 // (web/src/lib/styles/tokens.css and accents.css `[data-page='biblioteca']`).
+//
+// No author on the card (FX4.3): the PNG is stored in R2 and cached by browsers and CDNs, so a
+// nickname baked into it would outlive a rename or an account deletion (LGPD). The card carries
+// only the version name, its license, the curves and the open-auri mark. Any layout change must
+// bump OG_CARD_VERSION in ./keys.ts so stored images of the old layout are replaced.
 import { curveResponseDb, logGrid } from 'open-auri/dsp';
 import { decodeS1 } from 'open-auri/share';
 import type { Lang } from '#lib/server/social/types.ts';
@@ -25,7 +30,6 @@ export const OG_COLORS = {
 } as const;
 
 export const NAME_MAX_CHARS = 36;
-export const AUTHOR_MAX_CHARS = 32;
 
 const PLOT = { x: 80, y: 262, w: 1040, h: 268 } as const;
 const MIN_HZ = 20;
@@ -36,16 +40,14 @@ const DB_STEP = 6;
 const DB_MAX_RANGE = 24;
 
 const LABELS = {
-	'pt-BR': { before: 'antes', after: 'depois', removed: 'autor removido' },
-	'en-US': { before: 'before', after: 'after', removed: 'removed author' }
+	'pt-BR': { before: 'antes', after: 'depois' },
+	'en-US': { before: 'before', after: 'after' }
 } as const;
 
 export interface OgSvgInput {
 	/** Version name (already normalized at publication; cleaned again here). */
 	name: string;
 	license: string;
-	/** Author nickname, or null for "autor removido". */
-	author: string | null;
 	/** S1 string of the version's curve. */
 	s1: string;
 	lang: Lang;
@@ -140,10 +142,6 @@ export function ogSvg(input: OgSvgInput): string {
 	const range = dbRange(response);
 	const name = safeText(input.name, NAME_MAX_CHARS);
 	const license = safeText(input.license, 16);
-	const author =
-		input.author === null || cleanText(input.author) === ''
-			? escapeXml(labels.removed)
-			: `@${safeText(input.author, AUTHOR_MAX_CHARS)}`;
 	const { ink, ink2, text: fg, muted, accent } = OG_COLORS;
 	const top = PLOT.y;
 	const mid = PLOT.y + PLOT.h / 2;
@@ -157,8 +155,7 @@ export function ogSvg(input: OgSvgInput): string {
 		`<rect x="40" y="40" width="1120" height="550" rx="6" fill="${ink2}" stroke="${muted}" stroke-opacity="0.35"/>`,
 		text(80, 98, 'open-auri', { family: OG_MONO, size: 28, fill: accent }),
 		text(1120, 98, license, { family: OG_MONO, size: 22, fill: muted, anchor: 'end' }),
-		text(80, 172, name, { family: OG_SERIF, size: 64, fill: fg }),
-		text(80, 216, author, { family: OG_MONO, size: 24, fill: muted })
+		text(80, 182, name, { family: OG_SERIF, size: 64, fill: fg })
 	];
 
 	// Frequency grid: decades with labels.

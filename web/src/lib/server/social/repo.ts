@@ -514,9 +514,26 @@ function idList(ids: readonly string[]): string {
 
 // ---- Curves ---------------------------------------------------------------------------------
 
+const GATE_VER_COLUMN = /^[a-z][a-z0-9_]{0,15}\.gate_ver$/;
+
+/**
+ * SQL expression of the GATE_IMPL ordinal stored in a gate_ver column (`<alias>.gate_ver`):
+ * N for `v2.N:<hash>`, 0 for anything else (legacy `v2:<hash>`). Same rule as `gateImplOf` in
+ * gate.ts.
+ */
+export function gateImplSql(column: string): string {
+	if (!GATE_VER_COLUMN.test(column)) throw new Error(`Invalid gate_ver column: ${column}`);
+	return (
+		`(CASE WHEN ${column} LIKE 'v2.%:%' ` +
+		`THEN CAST(substr(${column}, 4, instr(${column}, ':') - 4) AS INTEGER) ELSE 0 END)`
+	);
+}
+
 /**
  * Inserts the curve or refreshes its gate cache when it was computed by another gate version
- * (same gate_ver: the stored result stands).
+ * (same gate_ver: the stored result stands). Monotonic: a row cached by a newer gate
+ * implementation (greater GATE_IMPL ordinal) is never overwritten by an older writer, so an older
+ * isolate during a deploy cannot flip a curve back to a stale verdict.
  */
 export function upsertCurveStatement(
 	db: D1Database,
@@ -528,7 +545,8 @@ export function upsertCurveStatement(
 		'INSERT INTO curves (id, s1, canon_key, gate_ver, gate_ok, gate_reasons, level_db, created_at) ' +
 			'VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET gate_ver = excluded.gate_ver, ' +
 			'gate_ok = excluded.gate_ok, gate_reasons = excluded.gate_reasons, level_db = excluded.level_db ' +
-			'WHERE curves.gate_ver IS NOT excluded.gate_ver',
+			'WHERE curves.gate_ver IS NOT excluded.gate_ver ' +
+			`AND ${gateImplSql('curves.gate_ver')} <= ${gateImplSql('excluded.gate_ver')}`,
 		curve.id,
 		curve.s1,
 		curve.canonKey,

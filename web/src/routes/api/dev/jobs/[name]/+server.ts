@@ -17,14 +17,14 @@ import { aggregate, S6_PREFERENCES_KEY } from '#lib/server/social/s6.ts';
 import { runTradeMaintenance } from '#lib/server/social/trades.ts';
 import type { RequestHandler } from './$types';
 
+// Same values as the jobs Worker (workers/jobs/src/jobs/regate.ts, s6-aggregate.ts). The web
+// build must not import Worker modules: their ambient types are not part of this program.
+const REGATE_LIMIT = 200;
+const S6_CACHE_CONTROL = 'public, max-age=300';
+
 export const prerender = false;
 
 const NO_STORE = { 'cache-control': 'no-store' };
-
-/** Same as REGATE_LIMIT of workers/jobs/src/jobs/regate.ts. */
-const REGATE_LIMIT = 200;
-/** Same as S6_CACHE_CONTROL of workers/jobs/src/jobs/s6-aggregate.ts. */
-const S6_CACHE_CONTROL = 'public, max-age=300';
 
 type JobEnv = Pick<ServerEnv, 'db' | 'media'>;
 

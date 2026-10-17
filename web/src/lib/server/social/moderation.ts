@@ -62,6 +62,7 @@ export const MODERATION_ACTIONS = {
 export interface FileReportInput {
 	reporterUserId: string;
 	targetKind: ReportTargetKind;
+	/** Public nickname for user targets; lineage/pack id otherwise. Never an internal user id. */
 	targetId: string;
 	reason: ReportReason;
 	note: string | null;
@@ -88,16 +89,20 @@ export async function fileReport(
 	if (!isOneOf(REPORT_TARGET_KINDS, input.targetKind) || !isOneOf(REPORT_REASONS, input.reason)) {
 		return { ok: false, code: 'INVALID' };
 	}
-	const target = await findTarget(db, input.targetKind, input.targetId, {
-		userId: input.reporterUserId
-	});
+	const target = await findTarget(
+		db,
+		input.targetKind,
+		input.targetId,
+		{ userId: input.reporterUserId },
+		input.now
+	);
 	if (!target) return { ok: false, code: 'NOT_FOUND' };
 	if (target.ownerUserId === input.reporterUserId) return { ok: false, code: 'SELF' };
 	const note = input.note === null ? null : input.note.trim();
 	const inserted = await insertReport(db, {
 		id: input.id ?? crypto.randomUUID(),
 		targetKind: input.targetKind,
-		targetId: input.targetId,
+		targetId: target.id,
 		reason: input.reason,
 		note: note === '' ? null : note,
 		reporterUserId: input.reporterUserId,

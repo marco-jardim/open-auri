@@ -4,10 +4,13 @@
 // and authz. Accepted curves are the official presets (real gate, cached per curve).
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import { gateForWrite } from 'open-auri/safety';
 import { canonKey, decodeS1 } from 'open-auri/share';
 import {
 	MERGE_BATCH_MAX,
 	MERGE_DAILY_MAX,
+	MERGE_GATE_RUNS_MAX,
+	MERGE_GATED_DAILY_MAX,
 	mergeLocalLibrary,
 	type MergeItem,
 	type MergeReport
@@ -206,5 +209,57 @@ describe('POST /api/v1/me/library/merge', () => {
 			now: now + 24 * 60 * 60 * 1000
 		});
 		expect(later.created).toHaveLength(1);
+	});
+
+	it('FX4.6: caps uncached gate runs per request; the rest is QUOTA_EXCEEDED to retry', async () => {
+		const me = await member();
+		const unique = new Set<string>();
+		while (unique.size < MERGE_GATE_RUNS_MAX + 5) unique.add(rejectedS1());
+		const items = [...unique].map((s1, i) => item(`g${i}`, s1));
+		let runs = 0;
+		const gate: typeof gateForWrite = (bands, preampDb) => {
+			runs++;
+			return gateForWrite(bands, preampDb);
+		};
+		const first = await mergeLocalLibrary(env.DB, me.user.id, items, { deps: { gate } });
+		expect(runs).toBe(MERGE_GATE_RUNS_MAX);
+		const codes = first.rejected.map((entry) => entry.code);
+		expect(codes.filter((code) => code === 'GATE_REJECTED')).toHaveLength(MERGE_GATE_RUNS_MAX);
+		expect(codes.filter((code) => code === 'QUOTA_EXCEEDED')).toHaveLength(5);
+
+		// The retry finds the first verdicts cached and gates the rest.
+		runs = 0;
+		const retry = await mergeLocalLibrary(env.DB, me.user.id, items, { deps: { gate } });
+		expect(runs).toBe(5);
+		expect(retry.rejected.every((entry) => entry.code === 'GATE_REJECTED')).toBe(true);
+		expect(await ownLineages(me.user.id)).toBe(0);
+	});
+
+	it('FX4.6: every gated item uses the daily quota, rejected ones included', async () => {
+		const me = await member();
+		const window = 86_400;
+		const start = Math.floor(Date.now() / 1000 / window) * window;
+		await env.DB.prepare(
+			'INSERT INTO rate_limit_counters (key, window_start, count, expires_at) VALUES (?, ?, ?, ?)'
+		)
+			.bind(
+				`u:library.merge.gated:${me.user.id}:${window}`,
+				start,
+				MERGE_GATED_DAILY_MAX - 1,
+				start + 2 * window
+			)
+			.run();
+		const result = await mergeLocalLibrary(env.DB, me.user.id, [
+			item('r', rejectedS1()),
+			item('a', presetS1(7)),
+			item('b', presetS1(8))
+		]);
+		expect(result.rejected.map((entry) => [entry.localId, entry.code])).toEqual([
+			['r', 'GATE_REJECTED'],
+			['a', 'QUOTA_EXCEEDED'],
+			['b', 'QUOTA_EXCEEDED']
+		]);
+		expect(result.created).toEqual([]);
+		expect(await ownLineages(me.user.id)).toBe(0);
 	});
 });

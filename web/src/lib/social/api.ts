@@ -27,7 +27,13 @@ import type {
 	ProfileList,
 	ProfileOverview
 } from '#lib/server/social/profiles.ts';
-import type { FeedPage, FeedSort, RankingsPage } from '#lib/server/social/rankings.ts';
+import type {
+	FeedLineageCard,
+	FeedPage,
+	FeedSort,
+	PublicRankingEntry,
+	RankingsPage
+} from '#lib/server/social/rankings.ts';
 import type { S6Preferences } from '#lib/server/social/s6.ts';
 import type { CreateShareInput, CreatedShare, ShareFunnel } from '#lib/server/social/shares.ts';
 import type { TradeDto } from '#lib/server/social/trades.ts';
@@ -51,6 +57,7 @@ export type {
 	ActivityRecord,
 	Audience,
 	CreatedShare,
+	FeedLineageCard,
 	FeedPage,
 	ForkResult,
 	LibraryItem,
@@ -63,6 +70,7 @@ export type {
 	ProfileOverview,
 	PublishedCurve,
 	PublishedInfo,
+	PublicRankingEntry,
 	RankingsPage,
 	S6Preferences,
 	ShareFunnel,

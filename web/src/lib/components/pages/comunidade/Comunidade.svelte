@@ -180,9 +180,11 @@
 	const listener = createListener({
 		engine: () => app?.audio ?? null,
 		onPreviewed: (lineageId, durationMs) => {
-			if (!outbox) return;
+			// Only a signed-in, verified listener's preview is activity; anonymous listening is never
+			// stored for a later account (the outbox refuses it as well).
+			if (!outbox || !session.signedIn || !session.verified) return;
 			void outbox.enqueue({ kind: 'previewed', lineageId, durationMs }).then((result) => {
-				if (!result.ok) {
+				if (!result.ok && result.reason !== 'signed-out' && result.reason !== 'unverified') {
 					console.warn(
 						JSON.stringify({ event: 'comunidade.previewed_not_queued', reason: result.reason })
 					);

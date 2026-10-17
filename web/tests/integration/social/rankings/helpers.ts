@@ -3,8 +3,8 @@
 // retraction, re-gating or a ban would. Every id is unique, so the files can share the database.
 import { env } from 'cloudflare:workers';
 import type { ApiEvent } from '#lib/server/api/index.ts';
-import { readRankings } from '#lib/server/social/rankings.ts';
-import type { RankingEntry, RankingMetric, RankingWindow } from '#lib/server/social/types.ts';
+import { readRankings, type PublicRankingEntry } from '#lib/server/social/rankings.ts';
+import type { RankingMetric, RankingWindow } from '#lib/server/social/types.ts';
 import { randomIp, signedOut } from '../../api/helpers.ts';
 
 export { ORIGIN } from '../../api/helpers.ts';
@@ -14,8 +14,8 @@ export { ban, publish, seedUser, type Published, type SeededUser } from '../repo
 export async function rankedEntries(
 	metric: RankingMetric,
 	window: RankingWindow
-): Promise<RankingEntry[]> {
-	const seen: RankingEntry[] = [];
+): Promise<PublicRankingEntry[]> {
+	const seen: PublicRankingEntry[] = [];
 	let cursor: string | null = null;
 	for (let guard = 0; guard < 50; guard += 1) {
 		const page = await readRankings(env.DB, metric, window, { cursor, limit: 100 });
@@ -27,8 +27,30 @@ export async function rankedEntries(
 }
 
 /** The lineage ids of `entries` that belong to `mine`, in ranking order. */
-export function only(entries: readonly RankingEntry[], mine: readonly string[]): string[] {
+export function only(entries: readonly PublicRankingEntry[], mine: readonly string[]): string[] {
 	return entries.map((entry) => entry.lineage.id).filter((id) => mine.includes(id));
+}
+
+/** Keys that must never reach a public response (internal ids and gate internals). */
+export const INTERNAL_KEYS: readonly string[] = [
+	'ownerUserId',
+	'userId',
+	'canonKey',
+	'gateVer',
+	'gateReasons',
+	'moderation'
+];
+
+/** Every key path of `value` (any depth) whose key is in `INTERNAL_KEYS`. */
+export function internalKeyPaths(value: unknown, path = '$'): string[] {
+	if (Array.isArray(value)) {
+		return value.flatMap((item, index) => internalKeyPaths(item, `${path}[${index}]`));
+	}
+	if (value === null || typeof value !== 'object') return [];
+	return Object.entries(value).flatMap(([key, child]) => [
+		...(INTERNAL_KEYS.includes(key) ? [`${path}.${key}`] : []),
+		...internalKeyPaths(child, `${path}.${key}`)
+	]);
 }
 
 export type Exclusion =

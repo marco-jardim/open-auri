@@ -1,15 +1,23 @@
 // Handler of the public route /og/[id].png (T4.7), kept here so tests can call it with a narrow
 // event and an injected renderer. 404 for anything not linkable (private included); 200 with
-// `public, max-age=31536000, immutable` and a strong ETag (304 on If-None-Match). Only cache
+// `public, max-age=86400` and a strong ETag (304 on If-None-Match). Not `immutable` (FX4.3):
+// visibility is re-checked on every request, and a one-day lifetime bounds how long browsers and
+// CDNs keep serving a copy after the curve turns private. Only cache
 // misses render (~30 ms of CPU): they are rate limited per IP hash (or user) per minute through the
 // API kit (group `og`, RL_API binding), and only ids of linkable versions ever reach the renderer.
-import { CACHE_IMMUTABLE, ifNoneMatch } from '#lib/server/api/cache.ts';
+import { ifNoneMatch } from '#lib/server/api/cache.ts';
 import { ApiError, apiErrorFrom } from '#lib/server/api/errors.ts';
 import { apiRateLimit } from '#lib/server/api/limits.ts';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
 import { getServerEnv } from '#lib/server/env.ts';
 import type { OgAssets } from './render.ts';
-import { getOrCreateOg, OG_CONTENT_TYPE, type OgContext, type OgDeps } from './store.ts';
+import {
+	getOrCreateOg,
+	OG_CACHE_CONTROL,
+	OG_CONTENT_TYPE,
+	type OgContext,
+	type OgDeps
+} from './store.ts';
 
 export const OG_RATE_GROUP = 'og';
 
@@ -76,7 +84,7 @@ export async function ogResponse(
 	}
 	if (!result.ok) return notFound();
 
-	const headers = new Headers({ etag: result.etag, 'cache-control': CACHE_IMMUTABLE });
+	const headers = new Headers({ etag: result.etag, 'cache-control': OG_CACHE_CONTROL });
 	if (ifNoneMatch(event.request, result.etag)) return new Response(null, { status: 304, headers });
 	headers.set('content-type', OG_CONTENT_TYPE);
 	return new Response(event.request.method === 'HEAD' ? null : result.body, {

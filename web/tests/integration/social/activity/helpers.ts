@@ -123,6 +123,33 @@ export async function share(lineageId: string, ownerUserId: string): Promise<str
 	return id;
 }
 
+/** Makes the user's activity public (only those users are attributed to share funnels). */
+export async function publicActivity(userId: string): Promise<void> {
+	await env.DB.prepare(`UPDATE "user" SET "activity_visibility" = 'public' WHERE "id" = ?`)
+		.bind(userId)
+		.run();
+}
+
+/** Spends the user's daily activity quota (kit key of `api.activity.write`, quota index 1). */
+export async function spendDailyQuota(userId: string, used: number): Promise<void> {
+	const window = 86_400;
+	const start = Math.floor(Date.now() / 1000 / window) * window;
+	await env.DB.prepare(
+		'INSERT INTO rate_limit_counters (key, window_start, count, expires_at) VALUES (?, ?, ?, ?) ' +
+			'ON CONFLICT (key, window_start) DO UPDATE SET count = excluded.count'
+	)
+		.bind(`u:api.activity.write.q1:${userId}:${window}`, start, used, start + 2 * window)
+		.run();
+}
+
+/** Rows of the kit counter table whose key contains `fragment`. */
+export function claimRows(fragment: string): Promise<number> {
+	return env.DB.prepare('SELECT count(*) AS n FROM rate_limit_counters WHERE instr(key, ?) > 0')
+		.bind(fragment)
+		.first<{ n: number }>()
+		.then((row) => row?.n ?? 0);
+}
+
 export async function errorCode(response: Response, status: number): Promise<unknown> {
 	expect(response.status).toBe(status);
 	const body = (await response.json()) as { error: { code: string; details?: unknown } };
