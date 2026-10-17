@@ -209,6 +209,68 @@ test.each([1440, 1920])(
 	30000
 );
 
+// Regression (real build, 320×1000, /?camada=engenharia): the gap cables' 360 px boxes, placed
+// from 4% of the width, ended at 373 px and the page scrolled 68 px sideways.
+test.each([320, 390])(
+	'Curva: no art passes the right edge or widens the page at %i px',
+	async (width) => {
+		const viewport = { width: innerWidth, height: innerHeight };
+		try {
+			await page.viewport(width, 1000);
+			const app = createClientApp(fakeAppOptions().options);
+			apps.push(app);
+			const screen = await render(CurvaPage, {
+				app,
+				layer: 'engenharia',
+				hash: '',
+				pageUrl: new URL('https://example.test/'),
+				onlayer: () => {},
+				gateClient: gateClient()
+			});
+			const root = screen.container.querySelector<HTMLElement>('main.curva');
+			const layer = await expectPlaced(root);
+			if (!root) throw new Error('Missing the Curva root');
+			await document.fonts.ready;
+			// The deferred Engenharia modules keep resizing while they load: wait until the art sits
+			// in the gaps of the sections that are there now, with the cabled gaps among them.
+			await expect.poll(() => layer.querySelectorAll('.cv-gap .cv-c1').length).toBeGreaterThan(0);
+			await expect
+				.poll(() => artGaps(layer).join(' ') === sectionGaps(root, layer).join(' '))
+				.toBe(true);
+
+			// Mark every motif as seen so its reveal runs, then sample the plug-in swing (it starts
+			// rotated) and the final frame, paused, as for the hero cables.
+			for (const motif of layer.querySelectorAll<HTMLElement>('[data-art]')) {
+				motif.dataset.artSeen = '';
+			}
+			await expect
+				.poll(() => layer.querySelectorAll('.cv-gap .cv-swing')[0]?.getAnimations().length ?? 0)
+				.toBeGreaterThan(0);
+			const animations = layer.getAnimations({ subtree: true });
+			for (const animation of animations) animation.pause();
+			const edge = document.documentElement.clientWidth;
+			for (const time of [0, 150, 400, 720, 1200, 3000]) {
+				for (const animation of animations) animation.currentTime = time;
+				let measured = 0;
+				for (const part of [layer, ...layer.querySelectorAll('*')]) {
+					const rect = part.getBoundingClientRect();
+					if (rect.width === 0 && rect.height === 0) continue;
+					measured++;
+					const name = `${time} ms: ${part.tagName} ${part.getAttribute('class') ?? ''}`;
+					expect(rect.right, name).toBeLessThanOrEqual(edge);
+				}
+				expect(measured).toBeGreaterThan(4);
+				expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+					document.documentElement.clientWidth
+				);
+			}
+		} finally {
+			await page.viewport(viewport.width, viewport.height);
+		}
+	},
+	30000
+);
+
 test('Comparar: the art layer leads the cabinet, follows its sections and keeps axe clean', async () => {
 	const screen = await render(CompararPage, { app: null, locale: 'pt-BR' });
 	await expect.element(page.getByRole('heading', { level: 1 })).toBeVisible();

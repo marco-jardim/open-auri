@@ -6,6 +6,8 @@
 	- Down the page: a Eurorack rail with screws in every gap between modules, and patch cables
 	  that plug in (stroke draw plus a small swing on --ease-mech) when their gap scrolls into
 	  view; the last one drops toward the footer homage. Engraved waveforms run down both gutters.
+	  Every cable box ends inside the layer (narrower screens scale it down), and the layer clips
+	  and contains its paint, so the art never widens the page.
 	- A slow lamp glow behind the deepest open module (the rack, the filter bank or the cabinet).
 	Where the sections sit is read from the page root (its in-flow children) on every resize.
 	Heavy shapes are static files in /art/curva/. Paused off-screen and on hidden tabs
@@ -157,6 +159,8 @@
 		z-index: -1;
 		pointer-events: none;
 		overflow: hidden;
+		/* Paint containment as well: nothing drawn here may ever add to the page's scroll area. */
+		contain: paint;
 	}
 
 	/* Lamp: a warm halo bleeding out around the deepest open module (only its edges show). */
@@ -286,18 +290,25 @@
 		overflow: visible;
 		opacity: 0.85;
 	}
+	/* Each cable box ends inside the layer (left + max-width < 100%): where 360 px would pass the
+	   right edge, the box narrows and the drawing scales down with it (the viewBox keeps its
+	   proportions, the sag stays centred in the gap). Where 360 px fits, nothing changes. */
 	.cv-c1 {
 		left: 6%;
+		max-width: 93%;
 	}
 	.cv-c2 {
 		left: 58%;
+		max-width: 41%;
 	}
 	/* Every other gap: cables shifted, the crossing one mirrored (it runs the other way). */
 	.cv-alt .cv-c1 {
 		left: 30%;
+		max-width: 69%;
 	}
 	.cv-alt .cv-c2 {
 		left: 64%;
+		max-width: 35%;
 		transform: scaleX(-1);
 	}
 	.cv-alt .cv-c1 .cv-cord {
@@ -323,9 +334,11 @@
 			left: 46%;
 			width: 52%;
 		}
+		/* At 320 to ~380 px a 360 px box from 4% ran past the edge (and scrolled the page). */
 		.cv-c1,
 		.cv-alt .cv-c1 {
 			left: 4%;
+			max-width: 94%;
 		}
 	}
 
