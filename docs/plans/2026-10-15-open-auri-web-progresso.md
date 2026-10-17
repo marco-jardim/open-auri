@@ -327,6 +327,7 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
   - Glossário do Docs: link profundo derrubava a página (rootMargin negativo do IntersectionObserver após hidratação); corrigido em `34ced6d`.
   - Pedidos novos em andamento: barra de seek, voltar ao início, loop sempre, início aleatório entre 25 % e 75 % nos comparativos e play/pause na barra (SEEK.1 a SEEK.3); arte temática e animações por página (FUX.ART, `docs/plans/fux-art-brief.md`, que flexibiliza o loop decorativo da spec §2.5).
   - **Limite de JS por rota volta a 250 kB gzip (plano §3.9), decisão do PO em 2026-10-17** para dar liberdade às páginas WOW. As metas por classe da FUX (estática 80, auth 100, docs 130, instrumento leve 150, pesado 170, Curva 180) ficam como `goalBytes` informativos em `web/scripts/budget-targets.json`: aparecem na tabela, não falham o build.
+  - **Biblioteca: só VUs, decisão do PO em 2026-10-17** ("quero tudo VU reagindo em tempo real"): a ponte mantém os mesmos cinco mostradores parado e ao vivo, L/R viram o maior dos dois e a loudness momentânea deixa de ser exibida nesta página; plano §3.6 atualizado (fecha o major B do FUX.Q rodada 2).
   - Container local de avaliação reconstruído em segundo plano a cada commit (`_qa/preview-rebuild.ps1`, só a partir de commits).
   - Pendências para o QA: publicação "Não listada" como padrão (proposta, aguarda PO); pack de referência com 4 curvas (cartão mostra o número real); "Mais" e a folha mobile não abrem sem JavaScript.
 ## Bloqueios e perguntas ao humano

@@ -4,6 +4,8 @@ import { settleRendering } from './helpers/a-app';
 
 // State captures check the page's own UI; the late decorative art is hidden (helpers/no-art.css).
 const noArt = fileURLToPath(new URL('./helpers/no-art.css', import.meta.url));
+// The audio popover lives inside the bar: its capture keeps the bar visible (QA round 2, A).
+const noArtPanel = fileURLToPath(new URL('./helpers/no-art-panel.css', import.meta.url));
 // The strict CSP blocks the style Playwright injects for stylePath; CSP is covered by csp.spec.ts.
 test.use({ bypassCSP: true });
 
@@ -104,9 +106,12 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
 			await expect(panel).toBeVisible();
 			await expect(trigger).toHaveAttribute('aria-expanded', 'true');
 			// The panel itself is the subject; the page behind it carries late decorative art.
+			// Its own title must be in the capture, so the shot can only pass with the panel drawn.
+			await expect(panel.getByRole('heading').first()).toBeVisible();
+			expect(await panel.evaluate((node) => getComputedStyle(node).opacity)).toBe('1');
 			await expect(panel).toHaveScreenshot(`biblioteca-audio-popover-${reducedMotion}.png`, {
 				animations: 'disabled',
-				stylePath: noArt
+				stylePath: noArtPanel
 			});
 		});
 

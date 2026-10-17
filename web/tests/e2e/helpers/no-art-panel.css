@@ -1,0 +1,7 @@
+/* Captures of chrome-owned panels (the audio popover lives inside the bar): only the late
+   decorative art and the skip link are hidden; the bar itself, and so the panel, stay visible. */
+.art-layer,
+.skip-link,
+a[href='#main-content'] {
+	opacity: 0 !important;
+}

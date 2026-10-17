@@ -350,7 +350,7 @@ Uma curva só pode ser gravada ou publicada se, nos valores reais Q27/Q23 que v�
   - As constantes são conferidas em fonte primária no PF2.
 - **Ligações por página:**
   - **Curva:** VU de saída; LEDs de pico interno por estágio, com tap após cada seção; espectro ao vivo no osciloscópio.
-  - **Biblioteca:** VUs L/R, PPM, loudness momentânea e correlação reais. Em repouso, modo DADOS.
+  - **Biblioteca:** cinco mostradores VU fixos, os mesmos em repouso e ao vivo (decisão do PO em 2026-10-17: "quero tudo VU reagindo em tempo real"). Ao vivo: Nível = VU da fonte antes da curva (maior de L/R), Preamp = VU da saída da cadeia A/B escolhida, Correlator = correlação real, Pico = PPM real (maior de L/R); Salto fica em DADOS por não haver medida real separada. Em repouso, modo DADOS com os valores calculados. Loudness momentânea (LUFS) não é exibida nesta página.
   - **Comparar:** um VU por pista armada, com cadeias paralelas.
   - **Comunidade:** LEDs por canal com a cadeia do canal.
   - **Teste cego:** nível por candidato.
