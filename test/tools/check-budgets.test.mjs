@@ -182,32 +182,32 @@ test('per-class targets come from the versioned JSON of spec §5.7', () => {
   const targets = loadBudgetTargets();
   assert.equal(loadBudgetTargets(DEFAULT_TARGETS).defaultBytes, INITIAL_JS_BUDGET);
   const expected = {
-    '/offline': ['static', 80_000],
-    '/privacidade': ['static', 80_000],
-    '/termos': ['static', 80_000],
-    '/verificar-email': ['auth', 100_000],
-    '/esqueci-senha': ['auth', 100_000],
-    '/redefinir-senha': ['auth', 100_000],
-    '/entrar': ['auth', 100_000],
-    '/criar-conta': ['auth', 100_000],
-    '/conta': ['auth', 100_000],
-    '/conta/encerrada': ['auth', 100_000],
-    '/docs': ['docs', 130_000],
-    '/teste-cego': ['instrument-light', 150_000],
-    '/cabo': ['instrument-light', 150_000],
-    '/biblioteca': ['instrument-light', 150_000],
-    '/c/[id]': ['instrument-light', 150_000],
-    '/u/[apelido]': ['instrument-light', 150_000],
-    '/': ['curva', 180_000],
-    '/soe-como-x': ['instrument-heavy', 170_000],
-    '/comparar': ['instrument-heavy', 170_000],
-    '/comunidade': ['instrument-heavy', 170_000],
+    '/offline': ['static', 250_000],
+    '/privacidade': ['static', 250_000],
+    '/termos': ['static', 250_000],
+    '/verificar-email': ['auth', 250_000],
+    '/esqueci-senha': ['auth', 250_000],
+    '/redefinir-senha': ['auth', 250_000],
+    '/entrar': ['auth', 250_000],
+    '/criar-conta': ['auth', 250_000],
+    '/conta': ['auth', 250_000],
+    '/conta/encerrada': ['auth', 250_000],
+    '/docs': ['docs', 250_000],
+    '/teste-cego': ['instrument-light', 250_000],
+    '/cabo': ['instrument-light', 250_000],
+    '/biblioteca': ['instrument-light', 250_000],
+    '/c/[id]': ['instrument-light', 250_000],
+    '/u/[apelido]': ['instrument-light', 250_000],
+    '/': ['curva', 250_000],
+    '/soe-como-x': ['instrument-heavy', 250_000],
+    '/comparar': ['instrument-heavy', 250_000],
+    '/comunidade': ['instrument-heavy', 250_000],
   };
   for (const [route, [classId, budgetBytes]] of Object.entries(expected)) {
     const resolved = budgetForRoute(route, targets);
     assert.deepEqual([resolved.classId, resolved.budgetBytes], [classId, budgetBytes], route);
   }
-  assert.equal(budgetForRoute('/', targets).goalBytes, 170_000);
+  assert.equal(budgetForRoute('/', targets).goalBytes, 180_000);
   // Unlisted routes (admin) keep the global ceiling; prefixes never match by substring.
   assert.deepEqual(budgetForRoute('/admin', targets), {
     classId: null,

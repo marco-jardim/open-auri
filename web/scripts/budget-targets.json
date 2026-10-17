@@ -1,20 +1,21 @@
 {
   "version": 1,
-  "source": "docs/plans/fux-spec.md §5.7, revised after FUX.B measurement (2026-10-17): every instrument route carries ~118 kB (framework + layout ~76, static runtime ~38, tour/explainer triggers ~4) before page code",
+  "source": "Plan §3.9 hard limit (250 kB gzip initial JS per route), set by the PO on 2026-10-17 to leave room for WOW pages; goalBytes keep the FUX §5.7/FUX.B per-class targets as soft goals (reported, not failing)",
   "defaultBytes": 250000,
   "classes": [
     {
       "id": "static",
-      "targetBytes": 80000,
+      "targetBytes": 250000,
       "routes": [
         "/offline",
         "/privacidade",
         "/termos"
-      ]
+      ],
+      "goalBytes": 80000
     },
     {
       "id": "auth",
-      "targetBytes": 100000,
+      "targetBytes": 250000,
       "routes": [
         "/entrar",
         "/criar-conta",
@@ -22,18 +23,20 @@
         "/esqueci-senha",
         "/redefinir-senha",
         "/conta/**"
-      ]
+      ],
+      "goalBytes": 100000
     },
     {
       "id": "docs",
-      "targetBytes": 130000,
+      "targetBytes": 250000,
       "routes": [
         "/docs"
-      ]
+      ],
+      "goalBytes": 130000
     },
     {
       "id": "instrument-light",
-      "targetBytes": 150000,
+      "targetBytes": 250000,
       "routes": [
         "/teste-cego",
         "/cabo",
@@ -41,12 +44,12 @@
         "/c/[id]",
         "/u/[apelido]"
       ],
-      "goalBytes": 140000
+      "goalBytes": 150000
     },
     {
       "id": "instrument-heavy",
-      "targetBytes": 170000,
-      "goalBytes": 160000,
+      "targetBytes": 250000,
+      "goalBytes": 170000,
       "routes": [
         "/soe-como-x",
         "/comparar",
@@ -55,8 +58,8 @@
     },
     {
       "id": "curva",
-      "targetBytes": 180000,
-      "goalBytes": 170000,
+      "targetBytes": 250000,
+      "goalBytes": 180000,
       "routes": [
         "/"
       ]
