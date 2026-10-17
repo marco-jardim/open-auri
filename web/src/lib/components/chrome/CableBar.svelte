@@ -2,12 +2,12 @@
 	Global bar (FUX.NAV): one row that never scrolls sideways, from 320 to 2560 px.
 	- Desktop (> 720 px), 40 px tall: wordmark; the main navigation, whose links fold into
 	  "Mais" by tier as the bar narrows (Nav.svelte); then the cable status (lamp and a short
-	  label; full text for screen readers, in the tooltip and in the popover), ♪ Áudio, the
-	  editor presets (Neutro, Padrão Auri: a "Carregar no editor" menu, inline buttons from
+	  label; full text for screen readers, in the tooltip and in the popover), play/pause, ♪ Áudio,
+	  the editor presets (Neutro, Padrão Auri: a "Carregar no editor" menu, inline buttons from
 	  1600 px), "Gravar no cabo" (a dot, or the count, for unsaved changes), and the account,
 	  language and help as square buttons with tooltips.
-	- Mobile (≤ 720 px), 52 px tall: wordmark, cable lamp, ♪, "Gravar" and a menu button; the
-	  menu sheet (BarSheet, its own chunk) holds the navigation, the presets, the account, the
+	- Mobile (≤ 720 px), 52 px tall: wordmark, cable lamp, play/pause, ♪, "Gravar" and a menu button;
+	  the menu sheet (BarSheet, its own chunk) holds the navigation, the presets, the account, the
 	  language and the help. 44 px touch targets.
 	- Overflow guard: the CSS tiers fit the usual content; if something still does not fit
 	  (another locale, a long file name, a user font), `data-squeeze` folds more, one level at a
@@ -29,6 +29,7 @@
 	import LazyMenu from './LazyMenu.svelte';
 	import Nav from './Nav.svelte';
 	import LanguageToggle from './LanguageToggle.svelte';
+	import { togglePreview, type PlaybackEngine, type PlaybackErrorHandler } from './playback.ts';
 
 	interface Props {
 		currentPath?: string;
@@ -51,6 +52,9 @@
 		onPadraoAuri?: () => void;
 		onWrite?: () => void;
 		onAudio?: () => void;
+		/** Existing page-created preview only; absent until the lazy app runtime arrives. */
+		playbackEngine?: PlaybackEngine;
+		onPlaybackError?: PlaybackErrorHandler;
 		/** Opens the help dialog from the mobile menu sheet (the layout's lazy HelpOverlay). */
 		onHelp?: () => void;
 		navigation?: Snippet;
@@ -77,6 +81,8 @@
 		onPadraoAuri,
 		onWrite,
 		onAudio,
+		playbackEngine,
+		onPlaybackError,
 		onHelp,
 		navigation,
 		status,
@@ -116,6 +122,26 @@
 				: null
 	);
 	const editorReason = $derived(m.fux1_editor_loading());
+	let playbackState = $state.raw<ReturnType<PlaybackEngine['state']> | null>(null);
+	$effect(() => {
+		const engine = playbackEngine;
+		playbackState = engine?.state() ?? null;
+		return engine?.onChange((next) => {
+			playbackState = next;
+		});
+	});
+	const playbackLabel = $derived(
+		playbackState?.playing ? m.transport_toggle_pause() : m.transport_toggle_resume()
+	);
+	const playbackReason = $derived(
+		!playbackState
+			? m.seek3_audio_loading()
+			: playbackState.canToggle
+				? null
+				: playbackState.toggleReason === 'unsupported'
+					? m.transport_toggle_unsupported()
+					: m.transport_toggle_no_session()
+	);
 
 	const tools = $derived<MenuItem[]>([
 		{
@@ -284,6 +310,17 @@
 				</div>
 			</div>
 			<div class="bar-tools">
+				<IconButton
+					size="sm"
+					variant="plate"
+					class="btn--bar playback-btn"
+					label={playbackLabel}
+					aria-keyshortcuts="k"
+					disabledReason={playbackReason}
+					onclick={() => void togglePreview(playbackEngine, onPlaybackError)}
+				>
+					{playbackState?.playing ? '❚❚' : '▶'}
+				</IconButton>
 				{#if audio}
 					{@render audio()}
 				{:else}
@@ -699,7 +736,7 @@
 	}
 
 	/*
-	 * Mobile (≤ 720 px): one row. Wordmark, cable lamp, ♪, "Gravar" and the menu button; the
+	 * Mobile (≤ 720 px): one row. Wordmark, cable lamp, play/pause, ♪, "Gravar" and the menu button;
 	 * navigation, presets, account, language and help move into the menu sheet. 44 px targets.
 	 * The help snippet stays mounted (its dialog lives there); only its trigger hides.
 	 */
@@ -786,6 +823,17 @@
 
 		.cable-bar[data-squeeze~='1'] .wordmark {
 			font-size: var(--fs-body);
+		}
+
+		/* At 320 px retain every control and its 44 px target; fold spacing, not actions. */
+		.cable-bar[data-squeeze~='1'] .cable-inner {
+			gap: var(--space-1);
+			padding-inline: var(--space-1);
+		}
+
+		.cable-bar[data-squeeze~='1'] .cable-actions,
+		.cable-bar[data-squeeze~='1'] .bar-tools {
+			gap: 0;
 		}
 	}
 </style>

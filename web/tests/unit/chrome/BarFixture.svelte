@@ -6,6 +6,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { AccountEntry, CableBar } from '#lib/components/chrome/index.ts';
 	import { IconButton, Lamp } from '#lib/components/primitives/index.ts';
+	import type { PlaybackEngine } from '#lib/components/chrome/playback.ts';
 
 	interface Props {
 		currentPath?: string;
@@ -14,12 +15,21 @@
 		onWrite?: () => void;
 		onAudio?: () => void;
 		onHelp?: () => void;
+		playbackEngine?: PlaybackEngine;
 	}
 
-	let { currentPath = '/', onNeutro, onPadraoAuri, onWrite, onAudio, onHelp }: Props = $props();
+	let {
+		currentPath = '/',
+		onNeutro,
+		onPadraoAuri,
+		onWrite,
+		onAudio,
+		onHelp,
+		playbackEngine
+	}: Props = $props();
 </script>
 
-<CableBar {currentPath} {onNeutro} {onPadraoAuri} {onWrite} {onAudio} {onHelp}>
+<CableBar {currentPath} {onNeutro} {onPadraoAuri} {onWrite} {onAudio} {onHelp} {playbackEngine}>
 	{#snippet status()}
 		<button
 			type="button"

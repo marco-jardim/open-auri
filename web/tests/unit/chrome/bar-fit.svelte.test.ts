@@ -15,9 +15,11 @@ import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import BarFixture from './BarFixture.svelte';
 import LegacyBarFixture from './LegacyBarFixture.svelte';
+import { createPlaybackEngine } from './playback-fixture.ts';
 // Real geometry needs the app's global styles (tokens, base, components), as the layout loads.
 import '../primitives/design-system.ts';
 
+// Includes SEEK.3's playback button, even when unavailable before a preview exists.
 const CONTROLS = 'a[href], button, .cable-state';
 
 const destinations = () => [
@@ -36,7 +38,8 @@ const callbacks = () => ({
 	onPadraoAuri: vi.fn(),
 	onWrite: vi.fn(),
 	onAudio: vi.fn(),
-	onHelp: vi.fn()
+	onHelp: vi.fn(),
+	playbackEngine: createPlaybackEngine().engine
 });
 
 beforeEach(async () => {
@@ -221,6 +224,7 @@ for (const width of [320, 390, 768, 1024, 1280, 1440]) {
 			m.chrome_neutral(),
 			m.chrome_default_auri(),
 			m.chrome_audio(),
+			m.transport_toggle_pause(),
 			m.chrome_help_open(),
 			m.auth_account_signin()
 		]) {
@@ -250,6 +254,11 @@ for (const viewport of [
 		const bar = banner();
 		const after = footprint(bar);
 		const afterBox = bar.getBoundingClientRect();
+		const playback = bar.querySelector('.playback-btn');
+		expect(playback).not.toBeNull();
+		const playbackBox = playback!.getBoundingClientRect();
+		expect(playbackBox.width).toBe(viewport.width <= 720 ? 44 : 32);
+		expect(playbackBox.height).toBe(viewport.width <= 720 ? 44 : 32);
 		const ratio = after.area / before.area;
 		const box = (rect: DOMRect) =>
 			`${Math.round(rect.width)}×${Math.round(rect.height)} = ${Math.round(rect.width * rect.height)} px²`;
@@ -286,7 +295,8 @@ for (const scenario of [
 		await page.viewport(scenario.width, 900);
 		const frames = vi.spyOn(window, 'requestAnimationFrame');
 		try {
-			await render(BarFixture, callbacks());
+			const preview = createPlaybackEngine();
+			await render(BarFixture, { ...callbacks(), playbackEngine: preview.engine });
 			const header = banner();
 			if (scenario.squeezed) {
 				// Wider content than the row holds: the guard has to fold (label, nav tiers…).
@@ -308,7 +318,11 @@ for (const scenario of [
 				characterData: true,
 				subtree: true
 			});
-			await wait(1000);
+			// SEEK.3 subscribes to the playing engine: its 5 Hz position ticks must stay quiet too.
+			for (let position = 1; position <= 5; position++) {
+				preview.setState({ position });
+				await wait(200);
+			}
 			watch.disconnect();
 			expect(frames.mock.calls.length - settling, 'frames requested once settled').toBe(0);
 			expect(changes.length, 'DOM changes once settled').toBe(0);

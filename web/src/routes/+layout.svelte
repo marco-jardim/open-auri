@@ -26,7 +26,7 @@
 	import { AccountSession } from '#lib/components/chrome/account.svelte.ts';
 	import { postPolicyAcceptance } from '#lib/components/chrome/account.ts';
 	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
-	import { appShortcuts } from '#lib/components/chrome/shortcuts.ts';
+	import { appShortcuts, playbackShortcut } from '#lib/components/chrome/shortcuts.ts';
 	import { createToastStore } from '#lib/components/chrome/toast.ts';
 	import AudioLoader from '#lib/components/audio/AudioLoader.svelte';
 	// Direct files, not the primitives barrel: every route loads the layout first (FUX.NAV budgets).
@@ -370,6 +370,7 @@
 	function onKeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.repeat || event.isComposing || event.altKey) return;
 		if (helpShortcut(event)) return;
+		if (!helpOpen && playbackShortcut(event, app?.audio, playbackFailed)) return;
 		if (!app) return;
 		if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
 		const target = event.target;
@@ -383,6 +384,10 @@
 		event.preventDefault();
 		if (event.shiftKey) app.state.curve.redo();
 		else app.state.curve.undo();
+	}
+
+	function playbackFailed(message: string): void {
+		toasts.push(message, { tone: 'error' });
 	}
 
 	// Prerendered HTML carries the base locale; /lang-boot.js hides it when the visitor resolves to
@@ -425,6 +430,8 @@
 			onPadraoAuri={app ? () => loadEditor('auri') : undefined}
 			onWrite={app ? () => app?.requestWrite() : undefined}
 			onHelp={openHelp}
+			playbackEngine={app?.audio}
+			onPlaybackError={playbackFailed}
 			audio={app ? audioLoader : undefined}
 		>
 			{#snippet status()}

@@ -23,7 +23,7 @@
 	<h1>open-auri</h1>
 	<label>Curve name <input type="text" /></label>
 	<EmBreve title="DSP" />
-	<HelpOverlay shortcuts={[{ keys: 'Space', description: 'Play or pause the preview' }]} />
+	<HelpOverlay shortcuts={[{ keys: 'k', description: 'Pause or resume the preview' }]} />
 	<button type="button" onclick={() => (confirmOpen = true)}>Open confirmation</button>
 	<ConfirmDialog
 		bind:open={confirmOpen}

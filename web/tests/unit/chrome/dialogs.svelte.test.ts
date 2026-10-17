@@ -45,14 +45,14 @@ for (const copy of locales) {
 		await setLocale(copy.locale, { reload: false });
 		const onOpenChange = vi.fn();
 		await render(HelpOverlay, {
-			shortcuts: [{ keys: 'Space', description: 'Preview playback' }],
+			shortcuts: [{ keys: 'k', description: 'Preview playback' }],
 			onOpenChange
 		});
 		const trigger = page.getByRole('button');
 		trigger.element().focus();
 		await userEvent.keyboard('?');
 		await expect.element(page.getByRole('dialog', { name: copy.help })).toBeVisible();
-		await expect.element(page.getByText('Space', { exact: true })).toBeVisible();
+		await expect.element(page.getByText('k', { exact: true })).toBeVisible();
 		await expect.element(page.getByText('Preview playback')).toBeVisible();
 		const close = page.getByRole('button', { name: copy.close });
 		await expect.element(close).toHaveFocus();
@@ -101,12 +101,14 @@ const shortcutCopy = {
 	'pt-BR': {
 		help: 'Atalhos de teclado',
 		layers: 'Curva: trocar a camada (Ouvir, Ajustar, Engenharia)',
-		search: 'Docs: abrir a busca no caderno'
+		search: 'Docs: abrir a busca no caderno',
+		playback: 'Pausar ou continuar a prévia atual'
 	},
 	'en-US': {
 		help: 'Keyboard shortcuts',
 		layers: 'Curve: switch the layer (Listen, Adjust, Engineering)',
-		search: 'Docs: open the journal search'
+		search: 'Docs: open the journal search',
+		playback: 'Pause or resume the current preview'
 	}
 } as const;
 
@@ -117,6 +119,7 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		expect(shortcuts.map((shortcut) => shortcut.keys)).toEqual([
 			'?',
 			'Esc',
+			'k',
 			'Ctrl / ⌘ + Z',
 			'Ctrl / ⌘ + Shift + Z',
 			'1 / 2 / 3',
@@ -125,6 +128,10 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await render(HelpOverlay, { shortcuts, open: true });
 		const dialog = page.getByRole('dialog', { name: shortcutCopy[locale].help });
 		await expect.element(dialog).toBeVisible();
+		await expect.element(dialog.getByText('k', { exact: true })).toBeVisible();
+		await expect
+			.element(dialog.getByText(shortcutCopy[locale].playback, { exact: true }))
+			.toBeVisible();
 		await expect.element(dialog.getByText('1 / 2 / 3', { exact: true })).toBeVisible();
 		await expect
 			.element(dialog.getByText(shortcutCopy[locale].layers, { exact: true }))

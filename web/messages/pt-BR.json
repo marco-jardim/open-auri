@@ -2062,6 +2062,8 @@
 	"pwa_update_write_blocked": "Aguarde a gravação no cabo terminar e clique em Atualizar novamente.",
 	"security_turnstile_error": "Não foi possível carregar a verificação de segurança. Recarregue a página e tente de novo.",
 	"security_turnstile_label": "Verificação de segurança",
+	"seek3_audio_loading": "Carregando o motor de áudio…",
+	"seek3_shortcut_playback": "Pausar ou continuar a prévia atual",
 	"shared_curve_audio_error": "Não foi possível tocar a prévia.",
 	"shared_curve_audio_unavailable": "O áudio ainda está carregando. Tente de novo em instantes.",
 	"shared_curve_author_removed": "autor removido",

@@ -2062,6 +2062,8 @@
 	"pwa_update_write_blocked": "Wait for the cable write to finish, then click Update again.",
 	"security_turnstile_error": "The security check could not load. Reload the page and try again.",
 	"security_turnstile_label": "Security check",
+	"seek3_audio_loading": "Loading the audio engine…",
+	"seek3_shortcut_playback": "Pause or resume the current preview",
 	"shared_curve_audio_error": "The preview could not be played.",
 	"shared_curve_audio_unavailable": "Audio is still loading. Try again in a moment.",
 	"shared_curve_author_removed": "author removed",
