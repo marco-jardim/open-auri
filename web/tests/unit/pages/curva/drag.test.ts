@@ -10,6 +10,8 @@ import {
 	dragBand,
 	isAbortError,
 	moveBand,
+	releaseBand,
+	withTarget,
 	type GateClient
 } from '#lib/components/pages/curva/drag.ts';
 import type { Band, Curve } from '#lib/components/pages/curva/model.ts';
@@ -119,6 +121,82 @@ describe('gate-bounded drag', () => {
 		// The committed candidate was already rounded to the 0.1 dB grid.
 		const sent = vi.mocked(client.commit).mock.calls[0]?.[0];
 		expect(sent?.bands[0]).toMatchObject({ gainDb: 1.2 });
+	});
+
+	test('release: an accepted target is committed exactly, with one full-grid commit', async () => {
+		const client = handlerClient();
+		const start = curveWith({ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 });
+		const result = await releaseBand(client, start, 0, { freqHz: 1500, gainDb: -4.04 }, false);
+		expect(result.outcome).toBe('exact');
+		expect(result.committed).toBe(true);
+		expect(result.bands[0]).toMatchObject({ freqHz: 1500, gainDb: -4 });
+		expect(client.calls).toEqual(['commit']);
+	});
+
+	test('release outside the envelope stops at the last safe point and explains the target', async () => {
+		const client = handlerClient();
+		const start = curveWith({ kind: 'PK', freqHz: 15000, gainDb: 3, qFactor: 1 });
+		const result = await releaseBand(client, start, 0, { gainDb: 9.2 }, false);
+		expect(result.outcome).toBe('snapped');
+		expect(result.committed).toBe(true);
+		expect(result.stopped).toBe(true);
+		expect(result.reasons.length).toBeGreaterThan(0);
+		const band = result.bands[0];
+		if (band?.kind !== 'PK') throw new Error('Expected PK band');
+		expect(band.gainDb).toBeGreaterThan(3);
+		expect(band.gainDb).toBeLessThan(9.2);
+		expect(gateForWrite(result.bands, result.preampDb).ok).toBe(true);
+		// Exact target refused on the full grid, then the walk back and its own full-grid commit.
+		expect(client.calls).toEqual(['commit', 'drag:gainDb', 'commit']);
+	});
+
+	test('release reverts to the start when nothing on the way passes', async () => {
+		const start = curveWith({ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 });
+		const refused = {
+			...gateForWrite(start.bands, start.preampDb),
+			ok: false,
+			reasons: [{ code: 'd:prefix-peak' as const, stage: 1 }]
+		};
+		const client: GateClient = {
+			drag: vi.fn(async (input: Parameters<GateClient['drag']>[0]): Promise<DragResult> => ({
+				type: 'drag',
+				id: 1,
+				value: 0,
+				bands: input.bands,
+				verdict: refused,
+				requiresCommit: true,
+				firstRefused: { value: 0, reasons: refused.reasons },
+				reasons: refused.reasons
+			})),
+			commit: vi.fn(async (): Promise<CommitResult> => ({
+				type: 'commit',
+				id: 1,
+				verdict: refused
+			}))
+		};
+		const result = await releaseBand(client, start, 0, { gainDb: 6 }, false);
+		expect(result.outcome).toBe('reverted');
+		expect(result.committed).toBe(false);
+		expect(result.bands).toEqual(start.bands);
+		expect(result.reasons).toEqual(refused.reasons);
+		// A start the gate refuses cannot be walked back from: only the exact target is judged.
+		vi.mocked(client.drag).mockClear();
+		vi.mocked(client.commit).mockClear();
+		const unwalked = await releaseBand(client, start, 0, { gainDb: 6 }, false, false);
+		expect(unwalked.outcome).toBe('reverted');
+		expect(client.drag).not.toHaveBeenCalled();
+		expect(client.commit).toHaveBeenCalledOnce();
+		// An OFF band has nothing to move and asks nothing.
+		vi.mocked(client.commit).mockClear();
+		const off = await releaseBand(client, curveWith(OFF), 0, { freqHz: 100 }, false);
+		expect(off.outcome).toBe('reverted');
+		expect(client.commit).not.toHaveBeenCalled();
+	});
+
+	test('withTarget applies gain only where the kind has one', () => {
+		const hp: Band = { kind: 'HP', freqHz: 50, qFactor: 0.7 };
+		expect(withTarget(hp, { freqHz: 60, gainDb: 3 })).toEqual({ ...hp, freqHz: 60 });
+		expect(withTarget(OFF, { freqHz: 60 })).toEqual(OFF);
 	});
 
 	test('superseded requests are recognised as aborts', () => {

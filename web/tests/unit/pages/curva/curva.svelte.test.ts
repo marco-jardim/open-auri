@@ -156,7 +156,8 @@ test('keyboard nudges on a handle go through the gate and land in the editor', a
 	await tick();
 	focus(page.getByRole('slider', { name: /Filtro 1/ }));
 	await userEvent.keyboard('{ArrowUp}');
-	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -5.5 }));
+	// Mock step: ↑ adds 1 dB.
+	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -5 }));
 });
 
 test('"Gravar no cabo" only opens the layout checklist through requestWrite', async () => {

@@ -103,7 +103,7 @@ test('publish displays server gate reasons and remembers only an approved 201', 
 		.selectOptions('unlisted');
 	await dialog.getByRole('button', { name: m.curva_social_publish(), exact: true }).click();
 	await expect.element(dialog).toMatchTextContent(m.curva_social_gate());
-	await expect.element(dialog).toMatchTextContent(m.curva_reason_e_output_full());
+	await expect.element(dialog).toMatchTextContent(m.curva_why_output_full());
 	await expect.element(dialog).toMatchTextContent(m.curva_reason_unknown());
 	expect(document.querySelector('script[src="bad"]')).toBeNull();
 	expect(await originOf(s1)).toBeNull();
@@ -205,5 +205,8 @@ test.each([true, false])('origin hints require exact S1 bytes (%s)', async (matc
 test('gate details map strings and structured stages without rendering arbitrary API text', () => {
 	expect(
 		serverGateMessages({ reasons: [{ code: 'c:section-peak', stage: 3 }, 'unknown'] })
-	).toEqual([m.curva_reason_c_section_peak({ stage: '3' }), m.curva_reason_unknown()]);
+	).toEqual([
+		m.curva_why_section_peak({ where: m.curva_where_band_bare({ index: '3' }) }),
+		m.curva_reason_unknown()
+	]);
 });

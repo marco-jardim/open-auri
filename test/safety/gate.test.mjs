@@ -230,6 +230,24 @@ test('counterexample "cuts first but 11.49 dB" fails', () => {
   assert.equal(result.reasons[0].limit, THRESHOLDS.internalAudibleDb);
 });
 
+test('d:prefix-peak names the first stage whose prefix goes over the limit', () => {
+  const result = gateForWrite(counterexample, -0.5);
+  const reason = result.reasons.find((r) => r.code === 'd:prefix-peak');
+  assert.ok(reason);
+  // Stage 1 (a cut) keeps the prefix under the limit; stage 2 (+6 dB) is the first over it.
+  assert.equal(reason.stage, 2);
+  const firstOver = result.metrics.prefixAudible.find(
+    (p) => p.db > THRESHOLDS.internalAudibleDb + THRESHOLDS.dbNumericalTolerance,
+  );
+  assert.equal(reason.stage, firstOver.stage);
+  for (const [id, p] of presets) {
+    const reversed = gateForWrite([...p.eqBands].reverse(), p.preampDb);
+    const prefix = reversed.reasons.find((r) => r.code === 'd:prefix-peak');
+    assert.ok(prefix, id);
+    assert.ok(Number.isInteger(prefix.stage) && prefix.stage >= 0 && prefix.stage <= 10, id);
+  }
+});
+
 test('Neutro (10 × OFF, preamp −0.5 dB) passes with payload CRC 0x4FFF', () => {
   const result = gateForWrite(NEUTRAL_BANDS, -0.5);
   assert.ok(result.ok);

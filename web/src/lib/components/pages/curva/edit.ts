@@ -3,13 +3,30 @@
  * Engenharia) and changing a section's kind. A refusal leaves the curve untouched and returns the
  * reasons, so the UI snaps the module back and explains why.
  */
-import { clampToAbs, roundToGrid, SOFT_RANGES } from 'open-auri/safety';
-import { hasGain, replaceBand, verdictFor } from './model.ts';
+import { autoPreamp, clampToAbs, roundToGrid, SOFT_RANGES } from 'open-auri/safety';
+import { hasExperimental, hasGain, replaceBand, verdictFor } from './model.ts';
 import type { Band, BandKind, Curve } from './model.ts';
 import type { GateVerdict, Reason } from './reasons.ts';
 
 export type EditResult =
 	{ ok: true; bands: Band[]; verdict: GateVerdict } | { ok: false; reasons: Reason[] };
+
+export type PreampResult =
+	| { ok: true; preampDb: number; changed: boolean; verdict: GateVerdict }
+	| { ok: false; reasons: Reason[] };
+
+/**
+ * "Máximo sem clipping": the highest preamp on the 0.1 dB grid that the full gate accepts for these
+ * bands (core `autoPreamp`), verified again with the write gate. The bands are never touched. When
+ * no preamp can fix the curve (kinds, D7, coefficients…), the curve's own reasons explain why.
+ */
+export function maxPreamp(curve: Curve): PreampResult {
+	const preampDb = autoPreamp(curve.bands, { experimental: hasExperimental(curve.bands) });
+	const verdict =
+		preampDb === null ? verdictFor(curve) : verdictFor({ bands: curve.bands, preampDb });
+	if (preampDb === null || !verdict.ok) return { ok: false, reasons: verdict.reasons };
+	return { ok: true, preampDb, changed: preampDb !== curve.preampDb, verdict };
+}
 
 /** Section `from` moves to position `to`; the others keep their relative order. */
 export function moveSection(bands: readonly Band[], from: number, to: number): Band[] {

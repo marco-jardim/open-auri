@@ -1,16 +1,12 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { REASON_CODES, REASON_MESSAGE_KEYS } from '#lib/components/pages/curva/reasons.ts';
 
 const root = new URL('../../../../', import.meta.url);
 
 function messages(locale: string): Record<string, string> {
-	const staging = new URL(`messages/_staging/T2.10.${locale}.json`, root);
 	const merged = new URL(`messages/${locale}.json`, root);
-	return JSON.parse(readFileSync(existsSync(staging) ? staging : merged, 'utf8')) as Record<
-		string,
-		string
-	>;
+	return JSON.parse(readFileSync(merged, 'utf8')) as Record<string, string>;
 }
 
 const pt = messages('pt-BR');
@@ -58,13 +54,35 @@ describe('Curva messages', () => {
 		expect(pt.curva_reason_unknown).toBeTruthy();
 	});
 
+	test('reasons name the band through {where}, never through a raw stage placeholder', () => {
+		for (const catalog of [pt, en]) {
+			for (const key of curvaKeys(catalog)) {
+				expect(catalog[key], key).not.toContain('{stage}');
+				expect(catalog[key], key).not.toContain('?');
+			}
+			// The old stage-only explanations are gone; only the generic fallback remains.
+			expect(Object.keys(catalog).filter((key) => key.startsWith('curva_reason_'))).toEqual([
+				'curva_reason_unknown'
+			]);
+			expect(catalog.curva_stopped).toBeUndefined();
+		}
+		for (const code of REASON_CODES) {
+			const key = REASON_MESSAGE_KEYS[code];
+			const located = !code.startsWith('e:') && code !== 'f:codec' && code !== 'g:preamp';
+			expect(pt[key]?.startsWith('{where}'), key).toBe(located);
+			expect(en[key]?.startsWith('{where}'), key).toBe(located);
+		}
+	});
+
 	test('pt-BR uses no em dash, a real minus and decimal commas in limits', () => {
 		for (const key of curvaKeys(pt)) {
 			expect(pt[key], key).not.toContain('—');
 			expect(en[key], key).not.toContain('—');
 		}
-		expect(pt.curva_reason_d_prefix_peak).toContain('−0,20 dB');
-		expect(en.curva_reason_d_prefix_peak).toContain('−0.20 dB');
+		expect(pt.curva_why_prefix_peak).toContain('−0,20 dB');
+		expect(en.curva_why_prefix_peak).toContain('−0.20 dB');
+		expect(pt.curva_why_output_audible).toContain('−0,47 dB');
+		expect(en.curva_why_output_audible).toContain('−0.47 dB');
 		expect(pt.curva_preset_kuba).toBe('descrição da Kuba');
 		expect(pt.curva_preset_license).toBe('licença: a confirmar');
 	});

@@ -578,8 +578,13 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
 
   const tolerance = THRESHOLDS.dbNumericalTolerance;
   if (!(internalAudible.db <= THRESHOLDS.internalAudibleDb + tolerance)) {
+    // Where it first happens: the earliest prefix over the limit (0 = the preamp alone).
+    const first = prefixAudible.find(
+      (p) => !(p.db <= THRESHOLDS.internalAudibleDb + tolerance),
+    );
     reasons.push({
       code: 'd:prefix-peak',
+      stage: first ? first.stage : internalAudible.stage,
       value: internalAudible.db,
       limit: THRESHOLDS.internalAudibleDb,
     });

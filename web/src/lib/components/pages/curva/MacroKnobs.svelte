@@ -118,7 +118,8 @@
 		border-radius: 50%;
 		background: radial-gradient(circle at 38% 30%, #2f3030, #060606);
 		transform: rotate(var(--turn));
-		transition: transform 120ms ease-out;
+		/* Mock: the pointer turns to each new (gate-approved) value in .3 s. */
+		transition: transform 300ms cubic-bezier(0.3, 1.3, 0.5, 1);
 	}
 	.cap::after {
 		content: '';

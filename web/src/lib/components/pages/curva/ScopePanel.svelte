@@ -1,13 +1,22 @@
 <!--
-	Oscilloscope: the shared ResponseChart (core response), draggable filter handles (Ajustar and
-	Engenharia), the live spectrum strip and the A/B preview switches.
-	- Pointer moves ask the page for an advisory gate drag; release (or a key) commits: the page
-	  rounds to the UI grid and revalidates on the full grid. Where the gate stops the band, the
-	  reason is shown in plain language.
+	Oscilloscope (v2 mock): phosphor EQ sum, output with preamp, the reference curve (dashed), one
+	thin trace per section and draggable handles (Ajustar and Engenharia), plus the live spectrum
+	strip and the A/B preview switches.
+	- Every trace is core data (`scope.ts`: core responses summed per section). The output limit
+	  line is the gate threshold; red/amber regions show where the drawn curve is over or near the
+	  output limit, or where it would clip inside the chain. They are a preview: the gate decides.
+	- Selected section: its safe box (core SOFT_RANGES) and the hatched zones it can never reach
+	  (ABS_RANGES gain cap, D7: no PK boost above 16 kHz).
+	- Handles follow the pointer freely (the page draws a draft every frame and asks the worker for
+	  an advisory verdict without blocking). Release, keys and the wheel (Q) commit through the page,
+	  which judges the full grid and animates back when refused.
 	- HS/LP/HP handles are locked outside Engenharia, with a hint.
+	- Motion: the after-commit ghost, the refused shake and a faint CRT sweep (decorative, aria-hidden,
+	  never a reading) are all off under prefers-reduced-motion.
 -->
 <script lang="ts">
-	import { ResponseChart, RESPONSE_BOX, dbScale, logScale } from '#lib/charts/index.ts';
+	import { untrack } from 'svelte';
+	import { prefersReducedMotion } from 'svelte/motion';
 	import { MeterModeLabel, SpectrumOverlay } from '#lib/components/meters/index.ts';
 	import type { MeterMode } from '#lib/audio/meters.ts';
 	import type { ABSide } from '#lib/audio/engine.ts';
@@ -15,14 +24,56 @@
 	import { formatHz, formatQ, formatSignedDb } from './format.ts';
 	import { isLockedKind, type Layer } from './layers.ts';
 	import { hasGain, type Band, type Curve } from './model.ts';
-	import type { DragTarget } from './drag.ts';
+	import type { DragTarget, DragView } from './drag.ts';
+	import type { GateVerdict } from './reasons.ts';
+	import {
+		DB_MAX,
+		DB_MIN,
+		INTERNAL_LIMIT_DB,
+		MAJOR_FREQS,
+		MINOR_FREQS,
+		NEAR_MARGIN_DB,
+		OUTPUT_LIMIT_DB,
+		PLOT,
+		SCOPE_GRID,
+		VIEW_HEIGHT,
+		VIEW_WIDTH,
+		clamp,
+		handleGain,
+		hardZones,
+		keyTarget,
+		pathOf,
+		pointerTarget,
+		segmentPath,
+		softBox,
+		spansAbove,
+		stepQ,
+		traces,
+		xOf,
+		yOf
+	} from './scope.ts';
 
 	interface Props {
+		/** The curve drawn now (the page's draft while a handle moves, else the editor curve). */
 		curve: Curve;
 		layer: Layer;
 		locale: string;
-		/** Plain-language stop/refusal message from the last drag. */
+		/** Plain-language state of the last edit (advisory, snapped back, reverted). */
 		message?: string | null;
+		/** `danger` while the moving handle is outside the envelope or after a refusal. */
+		messageTone?: 'info' | 'danger';
+		/** The editor curve (committed); a change fades the previous one out as a ghost. */
+		committed?: Curve | null;
+		/** Full-grid verdict of `committed` (peak marker and envelope chip). */
+		verdict?: GateVerdict | null;
+		/** The A/B reference curve, drawn dashed. */
+		reference?: Curve | null;
+		/** Advisory state of the handle being moved. */
+		drag?: DragView | null;
+		/** Handle index to shake (a refused release). */
+		shake?: number | null;
+		/** Selected section (safe box and highlighted trace). */
+		selected?: number;
 		spectrumMode: MeterMode;
 		analyser: AnalyserNode | null;
 		playing: boolean;
@@ -32,6 +83,8 @@
 		previewDisabled?: boolean;
 		/** The preview runs at a rate other than 96 kHz (recomputed coefficients). */
 		approximate?: boolean;
+		/** Overrides the `prefers-reduced-motion` media query. */
+		reducedMotion?: boolean;
 		ondrag: (index: number, target: DragTarget) => void;
 		oncommit: (index: number, target: DragTarget) => void;
 		onpreview: () => void;
@@ -42,6 +95,13 @@
 		layer,
 		locale,
 		message = null,
+		messageTone = 'info',
+		committed = null,
+		verdict = null,
+		reference = null,
+		drag = null,
+		shake = null,
+		selected = $bindable(0),
 		spectrumMode,
 		analyser,
 		playing,
@@ -50,60 +110,191 @@
 		previewError = null,
 		previewDisabled = false,
 		approximate = false,
+		reducedMotion,
 		ondrag,
 		oncommit,
 		onpreview,
 		onside
 	}: Props = $props();
 
-	const MIN_DB = -24;
-	const MAX_DB = 12;
-	const box = RESPONSE_BOX;
-	const x = logScale(20, 20000, box.left, box.left + box.width);
-	const y = dbScale(MIN_DB, MAX_DB, box.top + box.height, box.top);
 	const editable = $derived(layer !== 'ouvir');
+	const reduced = $derived(reducedMotion ?? prefersReducedMotion.current);
 	const legendId = $props.id();
 	let overlay: SVGSVGElement | undefined = $state();
-	let active = $state<{ index: number; pointer: number; target: DragTarget } | null>(null);
+	let screenWidth = $state(0);
+	let active = $state<{ index: number; pointer: number; target: DragTarget; start: Band } | null>(
+		null
+	);
+	let wheelState = $state<{ index: number; q: number } | null>(null);
 
-	const kindLabel = (band: Band) => band.kind;
-	const gainOf = (band: Band) => (hasGain(band) ? band.gainDb : 0);
+	// Labels and handles keep a legible, touch-friendly size whatever the scope width.
+	const unit = $derived(screenWidth > 0 ? VIEW_WIDTH / screenWidth : 1);
+	const labelSize = $derived(Math.max(11, 11 * unit));
+	const hitR = $derived(Math.max(20, 17.5 * unit));
+	const ringR = $derived(Math.max(10, 8.5 * unit));
+	const handleFont = $derived(Math.max(10, 9 * unit));
+
+	// --- traces (core responses) ------------------------------------------------------------------
+
+	const live = $derived(traces(curve));
+	const eqPath = $derived(pathOf(live.eq));
+	const outPath = $derived(pathOf(live.output));
+	const bandPaths = $derived(live.bands.map((response) => (response ? pathOf(response) : '')));
+	const refPath = $derived(reference ? pathOf(traces(reference).output) : '');
+	const overOutput = $derived(spansAbove(live.output, OUTPUT_LIMIT_DB));
+	const nearOutput = $derived(
+		overOutput.length > 0 ? [] : spansAbove(live.output, OUTPUT_LIMIT_DB - NEAR_MARGIN_DB)
+	);
+	const overInternal = $derived(spansAbove(live.internal, INTERNAL_LIMIT_DB));
+	const widest = <T extends { fromHz: number; toHz: number }>(spans: readonly T[]): T | null =>
+		spans.reduce<T | null>(
+			(best, s) => (!best || s.toHz / s.fromHz > best.toHz / best.fromHz ? s : best),
+			null
+		);
+	const hotLabel = $derived(widest(overOutput));
+	const internalLabel = $derived(overOutput.length > 0 ? null : widest(overInternal));
+
+	const moving = $derived(drag !== null || active !== null || wheelState !== null);
+	/** Gate metrics when the drawn curve is the committed one; else the drawn preview's maximum. */
+	const peak = $derived.by(() => {
+		const audible = verdict?.metrics.outputAudible;
+		if (!moving && audible && curve === committed) {
+			return { db: audible.db, hz: audible.frequencyHz ?? SCOPE_GRID[0] ?? 20 };
+		}
+		let db = -Infinity;
+		let hz = SCOPE_GRID[0] ?? 20;
+		live.output.forEach((value, i) => {
+			if (value > db) {
+				db = value;
+				hz = SCOPE_GRID[i] ?? hz;
+			}
+		});
+		return Number.isFinite(db) ? { db, hz } : null;
+	});
+
+	// Ghost of the previous committed EQ, fading for 1.5 s after each commit (mock .tr-after).
+	const committedEq = $derived(committed ? pathOf(traces(committed).eq) : '');
+	let ghost = $state<{ path: string; key: number } | null>(null);
+	let previousEq = '';
+	$effect(() => {
+		const next = committedEq;
+		untrack(() => {
+			if (previousEq && next && previousEq !== next && !reduced) {
+				ghost = { path: previousEq, key: (ghost?.key ?? 0) + 1 };
+			}
+			previousEq = next;
+		});
+	});
+
+	// --- selection: safe box and hard zones -------------------------------------------------------
+
+	const selectedBand = $derived.by(() => {
+		const band = curve.bands[selected];
+		if (!editable || !band || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return null;
+		return band;
+	});
+	const box = $derived(selectedBand ? softBox(selectedBand) : null);
+	const zones = $derived(selectedBand ? hardZones(selectedBand) : []);
+	const boxRect = $derived(
+		box
+			? {
+					x: xOf(box.fMin),
+					y: yOf(Math.min(box.gMax, DB_MAX)),
+					width: xOf(box.fMax) - xOf(box.fMin),
+					height: yOf(Math.max(box.gMin, DB_MIN)) - yOf(Math.min(box.gMax, DB_MAX))
+				}
+			: null
+	);
+	const insideBox = $derived(
+		box && selectedBand
+			? selectedBand.freqHz >= box.fMin &&
+					selectedBand.freqHz <= box.fMax &&
+					handleGain(selectedBand) >= box.gMin &&
+					handleGain(selectedBand) <= box.gMax
+			: true
+	);
+
+	const chip = $derived(
+		drag ? drag.status : verdict ? (verdict.ok ? ('inside' as const) : ('outside' as const)) : null
+	);
+	const chipText = $derived(
+		chip === 'checking'
+			? m.curva_chip_checking()
+			: chip === 'outside'
+				? m.curva_chip_outside()
+				: m.curva_chip_inside()
+	);
+
+	// --- handles ----------------------------------------------------------------------------------
+
+	const handleX = (band: Band) => (band.kind === 'OFF' ? 0 : xOf(band.freqHz));
+	const handleY = (band: Band) => yOf(clamp(handleGain(band), DB_MIN, DB_MAX));
 
 	function handleLabel(band: Band, index: number): string {
 		if (band.kind === 'OFF') return '';
 		if (isLockedKind(band.kind, layer)) {
-			return m.curva_handle_locked({ index: String(index + 1), kind: kindLabel(band) });
+			return m.curva_handle_locked({ index: String(index + 1), kind: band.kind });
 		}
-		return m.curva_handle_aria({
+		return m.curva_handle_hint({
 			index: String(index + 1),
-			kind: kindLabel(band),
+			kind: band.kind,
 			freq: formatHz(band.freqHz, locale),
 			gain: hasGain(band) ? formatSignedDb(band.gainDb, locale) : '',
 			q: formatQ(band.qFactor, locale)
 		});
 	}
 
-	function toTarget(event: PointerEvent, band: Band): DragTarget {
-		if (!overlay) return {};
-		const rect = overlay.getBoundingClientRect();
-		const vx = ((event.clientX - rect.left) / rect.width) * 820;
-		const vy = ((event.clientY - rect.top) / rect.height) * 380;
-		const t = Math.min(1, Math.max(0, (vx - box.left) / box.width));
-		const freqHz = Math.round(20 * Math.pow(1000, t));
-		const db = MIN_DB + ((box.top + box.height - vy) / box.height) * (MAX_DB - MIN_DB);
-		const gainDb = Math.round(Math.min(9.2, Math.max(-24, db)) * 10) / 10;
-		return hasGain(band) ? { freqHz, gainDb } : { freqHz };
+	function readout(band: Band): string {
+		if (band.kind === 'OFF') return '';
+		const freq = formatHz(band.freqHz, locale);
+		const q = formatQ(band.qFactor, locale);
+		return hasGain(band)
+			? m.curva_bubble({ freq, gain: formatSignedDb(band.gainDb, locale), q })
+			: m.curva_bubble_nogain({ freq, q });
 	}
+
+	/** Readout bubble next to the handle being moved (pointer, wheel or advisory drag). */
+	const bubble = $derived.by(() => {
+		const index = active?.index ?? wheelState?.index ?? drag?.index ?? null;
+		if (index === null) return null;
+		const band = curve.bands[index];
+		if (!band || band.kind === 'OFF') return null;
+		const text = readout(band);
+		const width = text.length * labelSize * 0.62 + 16;
+		const height = labelSize + 12;
+		const hx = handleX(band);
+		const hy = handleY(band);
+		const above = hy - ringR - 10 - height > PLOT.top;
+		return {
+			text,
+			width,
+			height,
+			x: clamp(hx - width / 2, PLOT.left, PLOT.right - width),
+			y: above ? hy - ringR - 10 - height : hy + ringR + 10,
+			outside: drag?.index === index && drag.status === 'outside'
+		};
+	});
 
 	function onpointerdown(event: PointerEvent, band: Band, index: number) {
 		if (!editable || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
+		if (event.button > 0) return;
 		event.preventDefault();
-		(event.currentTarget as Element).setPointerCapture(event.pointerId);
-		active = { index, pointer: event.pointerId, target: {} };
+		if (event.currentTarget instanceof Element) {
+			event.currentTarget.setPointerCapture(event.pointerId);
+		}
+		selected = index;
+		active = { index, pointer: event.pointerId, target: {}, start: band };
 	}
-	function onpointermove(event: PointerEvent, band: Band) {
-		if (!active || active.pointer !== event.pointerId) return;
-		const target = toTarget(event, band);
+	function onpointermove(event: PointerEvent) {
+		if (!active || active.pointer !== event.pointerId || !overlay) return;
+		const rect = overlay.getBoundingClientRect();
+		const vx = ((event.clientX - rect.left) / rect.width) * VIEW_WIDTH;
+		const vy = ((event.clientY - rect.top) / rect.height) * VIEW_HEIGHT;
+		const start = active.start;
+		let target: DragTarget = pointerTarget(vx, vy, start);
+		// Shift keeps the frequency, Alt keeps the gain (mock).
+		if (event.shiftKey && start.kind !== 'OFF') target = { ...target, freqHz: start.freqHz };
+		if (event.altKey && hasGain(start)) target = { ...target, gainDb: start.gainDb };
 		active = { ...active, target };
 		ondrag(active.index, target);
 	}
@@ -116,57 +307,280 @@
 
 	function onkeydown(event: KeyboardEvent, band: Band, index: number) {
 		if (band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
-		const scale = event.shiftKey ? 6 : event.altKey ? 0.25 : 1;
-		let target: DragTarget;
-		switch (event.key) {
-			case 'ArrowLeft':
-			case 'ArrowRight': {
-				const octaves = (event.key === 'ArrowRight' ? 1 : -1) * (scale / 12);
-				target = { freqHz: Math.round(band.freqHz * Math.pow(2, octaves)) };
-				break;
-			}
-			case 'ArrowUp':
-			case 'ArrowDown':
-				if (!hasGain(band)) return;
-				target = {
-					gainDb:
-						Math.round((band.gainDb + (event.key === 'ArrowUp' ? 0.5 : -0.5) * scale) * 10) / 10
-				};
-				break;
-			case 'PageUp':
-			case 'PageDown': {
-				const factor = Math.pow(event.key === 'PageUp' ? 1.1 : 1 / 1.1, scale);
-				target = { qFactor: Math.round(band.qFactor * factor * 100) / 100 };
-				break;
-			}
-			default:
-				return;
-		}
+		const target = keyTarget(event.key, band, event);
+		if (!target) return;
 		event.preventDefault();
+		selected = index;
 		oncommit(index, target);
+	}
+
+	/** Wheel over a handle: Q in 0.1 steps (Shift ×10, Alt ×0.1), committed 260 ms after the last. */
+	function wheelQ(node: SVGSVGElement) {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const onwheel = (event: WheelEvent) => {
+			const element = event.target instanceof Element ? event.target.closest('.handle') : null;
+			if (!(element instanceof SVGGElement)) return;
+			const index = Number(element.dataset.index);
+			const band = curve.bands[index];
+			if (!band || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
+			const delta = event.deltaY || event.deltaX;
+			if (!delta) return;
+			event.preventDefault();
+			selected = index;
+			const base = wheelState?.index === index ? wheelState.q : band.qFactor;
+			const q = stepQ(base, delta < 0 ? 1 : -1, event.shiftKey ? 10 : event.altKey ? 0.1 : 1);
+			wheelState = { index, q };
+			ondrag(index, { qFactor: q });
+			clearTimeout(timer);
+			timer = setTimeout(() => {
+				const state = wheelState;
+				wheelState = null;
+				if (state) oncommit(state.index, { qFactor: state.q });
+			}, 260);
+		};
+		node.addEventListener('wheel', onwheel, { passive: false });
+		return () => {
+			node.removeEventListener('wheel', onwheel);
+			clearTimeout(timer);
+		};
 	}
 </script>
 
 <section class="psec ps-scope" aria-labelledby={legendId}>
 	<div class="bezel">
-		<div class="screen">
-			<ResponseChart
-				{curve}
-				{locale}
-				minDb={MIN_DB}
-				maxDb={MAX_DB}
-				label={m.curva_scope_label()}
-				description={m.curva_scope_desc()}
-				eqLabel={m.curva_scope_eq()}
-				outputLabel={m.curva_scope_out()}
-			/>
+		<span class="screw s1" aria-hidden="true"></span>
+		<span class="screw s2" aria-hidden="true"></span>
+		<span class="screw s3" aria-hidden="true"></span>
+		<span class="screw s4" aria-hidden="true"></span>
+		<div
+			class="screen"
+			class:reduced
+			bind:clientWidth={screenWidth}
+			style={`--gfs:${labelSize.toFixed(1)}px`}
+		>
+			<svg
+				class="scope"
+				viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+				role="img"
+				aria-label={m.curva_scope_label()}
+			>
+				<title>{m.curva_scope_label()}</title>
+				<desc>{m.curva_scope_desc()}</desc>
+				<defs>
+					<filter id="{legendId}-phos" x="-10%" y="-30%" width="120%" height="160%">
+						<feGaussianBlur stdDeviation="2.2" result="b" />
+						<feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+					</filter>
+					<clipPath id="{legendId}-clip">
+						<rect
+							x={PLOT.left}
+							y={PLOT.top}
+							width={PLOT.right - PLOT.left}
+							height={PLOT.bottom - PLOT.top}
+						/>
+					</clipPath>
+					<pattern
+						id="{legendId}-hatch"
+						width="7"
+						height="7"
+						patternUnits="userSpaceOnUse"
+						patternTransform="rotate(45)"
+					>
+						<line x1="0" y1="0" x2="0" y2="7" class="hatch-line" />
+					</pattern>
+					<linearGradient id="{legendId}-sweep" x1="0" x2="1">
+						<stop offset="0" stop-color="#ff7a2f" stop-opacity="0" />
+						<stop offset="1" stop-color="#ff7a2f" stop-opacity="0.08" />
+					</linearGradient>
+				</defs>
+				<g class="grat" aria-hidden="true">
+					{#each MINOR_FREQS as f (f)}
+						<line x1={xOf(f)} x2={xOf(f)} y1={PLOT.top} y2={PLOT.bottom} />
+					{/each}
+					{#each MAJOR_FREQS as f, k (f)}
+						<line class="gmaj" x1={xOf(f)} x2={xOf(f)} y1={PLOT.top} y2={PLOT.bottom} />
+						{#if f !== 10000}
+							<text
+								class:alt={f === 50 || f === 200 || f === 2000 || f === 5000}
+								x={xOf(f)}
+								y={PLOT.bottom + 20}
+								text-anchor={k === 0 ? 'start' : k === MAJOR_FREQS.length - 1 ? 'end' : 'middle'}
+								>{f >= 1000 ? `${f / 1000}k` : f}</text
+							>
+						{/if}
+					{/each}
+					{#each [-15, -10, -5, 0, 5, 10, 15] as db (db)}
+						<line
+							class={db === 0 ? 'g0' : 'gmaj'}
+							x1={PLOT.left}
+							x2={PLOT.right}
+							y1={yOf(db)}
+							y2={yOf(db)}
+						/>
+						<text x={PLOT.left - 8} y={yOf(db) + 4} text-anchor="end"
+							>{db > 0 ? `+${db}` : db < 0 ? `\u2212${-db}` : '0'}</text
+						>
+					{/each}
+				</g>
+				<g clip-path="url(#{legendId}-clip)" aria-hidden="true">
+					{#if !reduced}
+						<rect
+							class="sweep"
+							x={PLOT.left - 40}
+							y={PLOT.top}
+							width="40"
+							height={PLOT.bottom - PLOT.top}
+							fill="url(#{legendId}-sweep)"
+						/>
+					{/if}
+					{#each nearOutput as s (s.fromHz)}
+						<rect
+							class="zone-near"
+							x={xOf(s.fromHz)}
+							y={PLOT.top}
+							width={Math.max(2, xOf(s.toHz) - xOf(s.fromHz))}
+							height={PLOT.bottom - PLOT.top}
+						/>
+					{/each}
+					{#each overInternal as s (s.fromHz)}
+						<rect
+							class="zone-hot internal"
+							x={xOf(s.fromHz)}
+							y={PLOT.top}
+							width={Math.max(2, xOf(s.toHz) - xOf(s.fromHz))}
+							height={PLOT.bottom - PLOT.top}
+						/>
+					{/each}
+					{#each overOutput as s (s.fromHz)}
+						<rect
+							class="zone-hot"
+							x={xOf(s.fromHz)}
+							y={PLOT.top}
+							width={Math.max(2, xOf(s.toHz) - xOf(s.fromHz))}
+							height={PLOT.bottom - PLOT.top}
+						/>
+					{/each}
+					<line
+						class="lim"
+						x1={PLOT.left}
+						x2={PLOT.right}
+						y1={yOf(OUTPUT_LIMIT_DB)}
+						y2={yOf(OUTPUT_LIMIT_DB)}
+					/>
+					{#if boxRect}
+						<rect
+							class="safe"
+							class:out={!insideBox}
+							x={boxRect.x}
+							y={boxRect.y}
+							width={boxRect.width}
+							height={boxRect.height}
+						/>
+					{/if}
+					{#each zones as zone (zone.kind)}
+						<rect
+							class="hard"
+							x={xOf(zone.fMin)}
+							y={yOf(Math.min(zone.gMax, DB_MAX))}
+							width={xOf(zone.fMax) - xOf(zone.fMin)}
+							height={yOf(Math.max(zone.gMin, DB_MIN)) - yOf(Math.min(zone.gMax, DB_MAX))}
+							fill="url(#{legendId}-hatch)"
+						/>
+					{/each}
+					{#if refPath}<path class="tr-ref" d={refPath} />{/if}
+					{#if editable}
+						{#each bandPaths as d, index (index)}
+							{#if d}
+								<path
+									class="tr-band"
+									class:sel={index === selected}
+									class:out={drag?.index === index && drag.status === 'outside'}
+									{d}
+								/>
+							{/if}
+						{/each}
+					{/if}
+					{#if ghost}
+						{#key ghost.key}
+							<path class="tr-after" d={ghost.path} />
+						{/key}
+					{/if}
+					<path class="tr-out" d={outPath} />
+					<path class="tr-eq" d={eqPath} filter="url(#{legendId}-phos)" />
+					{#each overOutput as s (s.fromHz)}
+						<path class="tr-hot" d={segmentPath(live.output, s.fromHz, s.toHz)} />
+					{/each}
+					{#if peak && peak.db > DB_MIN && peak.db < DB_MAX}
+						<circle class="peakmk" cx={xOf(clamp(peak.hz, 20, 20000))} cy={yOf(peak.db)} r="3.5" />
+					{/if}
+				</g>
+				<g class="labels" aria-hidden="true">
+					<text class="lim-t" x={PLOT.right - 6} y={yOf(OUTPUT_LIMIT_DB) - 6} text-anchor="end"
+						>{m.curva_limit_line({ db: formatSignedDb(OUTPUT_LIMIT_DB, locale, 2) })}</text
+					>
+					{#if boxRect}
+						<text class="safe-t" class:out={!insideBox} x={boxRect.x + 6} y={boxRect.y + 14}
+							>{m.curva_safe_box()}</text
+						>
+					{/if}
+					{#each zones as zone (zone.kind)}
+						{#if zone.kind === 'pk-high-boost'}
+							<text
+								class="hard-t"
+								x={xOf(zone.fMin) - 4}
+								y={yOf(Math.min(zone.gMax, DB_MAX)) + 14}
+								text-anchor="end">{m.curva_d7_zone()}</text
+							>
+						{:else}
+							<text class="hard-t" x={PLOT.left + 8} y={yOf(DB_MAX) + 14}
+								>{m.curva_hard_limit()}</text
+							>
+						{/if}
+					{/each}
+					{#if hotLabel}
+						<text
+							class="hot-t"
+							x={clamp(
+								xOf(Math.sqrt(hotLabel.fromHz * hotLabel.toHz)),
+								PLOT.left + 70,
+								PLOT.right - 70
+							)}
+							y={PLOT.bottom - 10}
+							text-anchor="middle">{m.curva_hot_output()}</text
+						>
+					{:else if internalLabel}
+						<text
+							class="hot-t"
+							x={clamp(
+								xOf(Math.sqrt(internalLabel.fromHz * internalLabel.toHz)),
+								PLOT.left + 70,
+								PLOT.right - 70
+							)}
+							y={PLOT.bottom - 10}
+							text-anchor="middle">{m.curva_hot_internal()}</text
+						>
+					{:else if nearOutput.length > 0}
+						<text
+							class="near-t"
+							x={clamp(
+								xOf(Math.sqrt((nearOutput[0]?.fromHz ?? 20) * (nearOutput[0]?.toHz ?? 20))),
+								PLOT.left + 60,
+								PLOT.right - 60
+							)}
+							y={PLOT.bottom - 10}
+							text-anchor="middle">{m.curva_near_limit()}</text
+						>
+					{/if}
+				</g>
+			</svg>
 			{#if editable}
 				<svg
 					bind:this={overlay}
 					class="handles"
-					viewBox="0 0 820 380"
+					viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
 					role="group"
 					aria-label={m.curva_handles_label()}
+					{@attach wheelQ}
 				>
 					{#each curve.bands as band, index (index)}
 						{#if band.kind !== 'OFF'}
@@ -174,7 +588,11 @@
 							<g
 								class="handle"
 								class:locked
+								class:sel={selected === index && !locked}
 								class:dragging={active?.index === index}
+								class:outside={drag?.index === index && drag.status === 'outside'}
+								class:refused={shake === index}
+								data-index={index}
 								role="slider"
 								tabindex="0"
 								aria-label={handleLabel(band, index)}
@@ -183,25 +601,58 @@
 								aria-valuenow={band.freqHz}
 								aria-valuetext={`${formatHz(band.freqHz, locale)}${hasGain(band) ? `, ${formatSignedDb(band.gainDb, locale)}` : ''}`}
 								aria-disabled={locked}
-								transform={`translate(${x(band.freqHz)} ${y(Math.max(MIN_DB, Math.min(MAX_DB, gainOf(band))))})`}
+								transform={`translate(${handleX(band).toFixed(1)} ${handleY(band).toFixed(1)})`}
 								onpointerdown={(event) => onpointerdown(event, band, index)}
-								onpointermove={(event) => onpointermove(event, band)}
+								{onpointermove}
 								{onpointerup}
 								onpointercancel={onpointerup}
 								onkeydown={(event) => onkeydown(event, band, index)}
+								onfocus={() => {
+									if (!locked) selected = index;
+								}}
 							>
-								<circle r="14" class="hit" />
-								<circle r="8" class="dot" />
-								<text y="4" text-anchor="middle">{index + 1}</text>
+								<circle r={hitR} class="hit" />
+								<g class="body">
+									<circle r={ringR} class="ring" />
+									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text
+									>
+								</g>
 							</g>
 						{/if}
 					{/each}
+					{#if bubble}
+						<g class="bubble" class:out={bubble.outside} aria-hidden="true">
+							<rect x={bubble.x} y={bubble.y} width={bubble.width} height={bubble.height} rx="3" />
+							<text x={bubble.x + bubble.width / 2} y={bubble.y + bubble.height / 2}
+								>{bubble.text}</text
+							>
+						</g>
+					{/if}
 				</svg>
+			{/if}
+			{#if editable && chip}
+				<p class="chip" data-state={chip} aria-hidden="true">
+					<i class="led"></i><b>{m.curva_chip_label()}</b>{chipText}
+				</p>
 			{/if}
 		</div>
 	</div>
+	<div class="scope-legend">
+		<span><i class="sw"></i>{m.curva_scope_eq()}</span>
+		<span><i class="sw out"></i>{m.curva_scope_out()}</span>
+		{#if refPath}<span><i class="sw ref"></i>{m.curva_scope_ref({ name: referenceName })}</span
+			>{/if}
+		{#if peak}
+			<span class="pk"
+				>{m.curva_peak_at({
+					db: formatSignedDb(peak.db, locale, 2),
+					freq: formatHz(Math.round(peak.hz), locale)
+				})}</span
+			>
+		{/if}
+	</div>
 	{#if message}
-		<p class="scope-msg" role="status">{message}</p>
+		<p class="scope-msg" class:danger={messageTone === 'danger'} role="status">{message}</p>
 	{/if}
 	{#if editable && curve.bands.some((band) => band.kind !== 'OFF' && isLockedKind(band.kind, layer))}
 		<p class="exp-hint">{m.curva_exp_hint()}</p>
@@ -224,13 +675,14 @@
 			disabled={previewDisabled}
 			onclick={onpreview}
 		>
-			<span class="lever" aria-hidden="true"></span>
-			{playing ? m.curva_preview_stop() : m.curva_preview()}
+			<span class="well" aria-hidden="true"><span class="lever"></span></span>
+			<span class="bl">{playing ? m.curva_preview_stop() : m.curva_preview()}</span>
 		</button>
 		<div class="ab" role="radiogroup" aria-label={m.curva_ab_label()}>
 			<button
 				type="button"
 				role="radio"
+				class="tab"
 				aria-checked={side === 'A'}
 				disabled={!playing}
 				onclick={() => onside('A')}>{m.curva_ab_a({ name: referenceName })}</button
@@ -238,6 +690,7 @@
 			<button
 				type="button"
 				role="radio"
+				class="tab"
 				aria-checked={side === 'B'}
 				disabled={!playing}
 				onclick={() => onside('B')}>{m.curva_ab_b()}</button
@@ -256,17 +709,199 @@
 
 <style>
 	.bezel {
-		padding: 12px;
+		position: relative;
+		padding: 13px;
 		border-radius: 14px;
-		background: linear-gradient(#202020, #0b0b0b);
+		background: linear-gradient(150deg, #323331, #1a1b1a 45%, #111211);
 		box-shadow:
-			inset 0 1px 0 rgb(255 255 255 / 0.08),
-			0 6px 18px rgb(0 0 0 / 0.5);
+			inset 0 1px 0 rgb(255 255 255 / 0.09),
+			inset 0 -2px 6px rgb(0 0 0 / 0.6),
+			0 10px 22px rgb(0 0 0 / 0.55);
+	}
+	.screw {
+		position: absolute;
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		background:
+			linear-gradient(var(--r, 35deg), transparent 42%, #1a1a19 42% 58%, transparent 58%),
+			radial-gradient(circle at 35% 35%, #d9d5cc, #77736b 70%);
+	}
+	.s1 {
+		left: 5px;
+		top: 5px;
+	}
+	.s2 {
+		right: 5px;
+		top: 5px;
+		--r: -20deg;
+	}
+	.s3 {
+		left: 5px;
+		bottom: 5px;
+		--r: 80deg;
+	}
+	.s4 {
+		right: 5px;
+		bottom: 5px;
 	}
 	.screen {
 		position: relative;
-		border-radius: 16px / 12px;
 		overflow: hidden;
+		border-radius: 22px / 16px;
+		background: radial-gradient(ellipse at 50% 45%, #1d140d 0%, #0d0a07 68%, #050403 100%);
+		box-shadow:
+			inset 0 0 44px rgb(0 0 0 / 0.95),
+			inset 0 0 0 1px rgb(255 122 47 / 0.12);
+	}
+	.screen::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: inherit;
+		background:
+			linear-gradient(160deg, rgb(255 255 255 / 0.08), transparent 32%),
+			repeating-linear-gradient(0deg, rgb(0 0 0 / 0.2) 0 1px, transparent 1px 3px);
+		pointer-events: none;
+	}
+	.scope {
+		display: block;
+		width: 100%;
+		height: auto;
+		user-select: none;
+	}
+	.scope text {
+		font-family: var(--font-mono, 'JetBrains Mono', monospace);
+		font-size: var(--gfs, 11px);
+	}
+	.grat line {
+		stroke: rgb(255 140 70 / 0.12);
+		stroke-width: 1;
+	}
+	.grat .gmaj {
+		stroke: rgb(255 140 70 / 0.22);
+	}
+	.grat .g0 {
+		stroke: rgb(255 160 90 / 0.42);
+	}
+	.grat text {
+		fill: rgb(255 180 120 / 0.68);
+	}
+	.hatch-line {
+		stroke: rgb(229 72 77 / 0.35);
+		stroke-width: 2;
+	}
+	.sweep {
+		animation: sweep 9s linear infinite;
+	}
+	@keyframes sweep {
+		from {
+			transform: translateX(0);
+		}
+		to {
+			transform: translateX(764px);
+		}
+	}
+	.zone-near {
+		fill: rgb(255 176 64 / 0.08);
+	}
+	.zone-hot {
+		fill: rgb(229 72 77 / 0.16);
+	}
+	.zone-hot.internal {
+		fill: rgb(229 72 77 / 0.1);
+	}
+	.lim {
+		stroke: rgb(255 215 190 / 0.45);
+		stroke-dasharray: 2 5;
+	}
+	.lim-t {
+		fill: rgb(255 215 190 / 0.7);
+	}
+	.safe {
+		fill: rgb(255 122 47 / 0.06);
+		stroke: rgb(255 122 47 / 0.45);
+		stroke-dasharray: 3 4;
+		transition:
+			fill 0.2s,
+			stroke 0.2s;
+	}
+	.safe.out {
+		fill: rgb(255 176 64 / 0.04);
+		stroke: rgb(255 176 64 / 0.75);
+	}
+	.safe-t {
+		fill: rgb(255 160 110 / 0.8);
+	}
+	.safe-t.out {
+		fill: rgb(255 196 120 / 0.95);
+	}
+	.hard {
+		stroke: rgb(229 72 77 / 0.35);
+		stroke-dasharray: 2 3;
+	}
+	.hard-t {
+		fill: rgb(255 140 140 / 0.85);
+	}
+	.hot-t {
+		fill: #ff8f8f;
+		font-weight: 600;
+	}
+	.near-t {
+		fill: #ffc078;
+	}
+	.tr-ref {
+		fill: none;
+		stroke: rgb(255 210 175 / 0.34);
+		stroke-width: 1.2;
+		stroke-dasharray: 4 4;
+	}
+	.tr-band {
+		fill: none;
+		stroke: rgb(255 122 47 / 0.26);
+		stroke-width: 1;
+	}
+	.tr-band.sel {
+		stroke: rgb(255 200 160 / 0.8);
+		stroke-width: 1.4;
+	}
+	.tr-band.out {
+		stroke: rgb(229 72 77 / 0.9);
+	}
+	.tr-after {
+		fill: none;
+		stroke: var(--accent, #ff7a2f);
+		stroke-width: 2.2;
+		opacity: 0;
+		animation: after 1.5s ease-out;
+	}
+	@keyframes after {
+		from {
+			opacity: 0.5;
+		}
+		to {
+			opacity: 0;
+		}
+	}
+	.tr-out {
+		fill: none;
+		stroke: #ffe0c7;
+		stroke-width: 1.3;
+		opacity: 0.8;
+	}
+	.tr-eq {
+		fill: none;
+		stroke: var(--accent, #ff7a2f);
+		stroke-width: 2.6;
+		stroke-linejoin: round;
+	}
+	.tr-hot {
+		fill: none;
+		stroke: #ff4d55;
+		stroke-width: 2.4;
+	}
+	.peakmk {
+		fill: #ffe0c7;
 	}
 	.handles {
 		position: absolute;
@@ -274,6 +909,7 @@
 		width: 100%;
 		height: 100%;
 		touch-action: none;
+		user-select: none;
 	}
 	.handle {
 		cursor: grab;
@@ -282,47 +918,191 @@
 	.handle .hit {
 		fill: transparent;
 	}
-	.handle .dot {
-		fill: #101a16;
-		stroke: var(--accent, #ff7a2f);
+	.handle .ring {
+		fill: rgb(10 8 6 / 0.85);
+		stroke: #ffe0c7;
+		stroke-width: 1.6;
+		transition:
+			stroke 0.15s,
+			fill 0.15s;
+	}
+	.handle .num {
+		fill: #ffe0c7;
+		font-family: var(--font-mono, 'JetBrains Mono', monospace);
+		font-weight: 600;
+		text-anchor: middle;
+		dominant-baseline: central;
+		pointer-events: none;
+	}
+	.handle:hover .ring {
+		stroke: #fff3e8;
 		stroke-width: 2;
 	}
-	.handle text {
+	.handle.sel .ring {
+		stroke: var(--accent, #ff7a2f);
+		stroke-width: 2.4;
+		filter: drop-shadow(0 0 3px rgb(255 122 47 / 0.8));
+	}
+	.handle.sel .num {
 		fill: var(--accent, #ff7a2f);
-		font: 600 9px var(--font-mono, 'JetBrains Mono', monospace);
-		pointer-events: none;
+	}
+	.handle:focus-visible .ring {
+		stroke: var(--accent, #ff7a2f);
+		stroke-width: 3.2;
 	}
 	.handle.dragging {
 		cursor: grabbing;
 	}
-	.handle.dragging .dot,
-	.handle:focus-visible .dot {
+	.handle.dragging .ring {
 		fill: var(--accent, #ff7a2f);
-		stroke: #fff;
-		stroke-width: 3;
+		stroke: #fff3e8;
 	}
-	.handle:focus-visible text,
-	.handle.dragging text {
-		fill: #101a16;
+	.handle.dragging .num {
+		fill: #120c08;
+	}
+	.handle.outside .ring {
+		fill: rgb(60 8 10 / 0.9);
+		stroke: #ff4d55;
+		filter: drop-shadow(0 0 4px rgb(229 72 77 / 0.9));
+	}
+	.handle.outside .num {
+		fill: #ffb3b6;
+	}
+	.handle.refused .body {
+		animation: refused 0.42s ease-out;
+	}
+	@keyframes refused {
+		0%,
+		100% {
+			transform: translateX(0);
+		}
+		20% {
+			transform: translateX(-5px);
+		}
+		40% {
+			transform: translateX(4px);
+		}
+		60% {
+			transform: translateX(-3px);
+		}
+		80% {
+			transform: translateX(2px);
+		}
 	}
 	.handle.locked {
 		cursor: not-allowed;
 	}
-	.handle.locked .dot {
+	.handle.locked .ring {
 		stroke: #8d8778;
 		stroke-dasharray: 3 2;
 	}
-	.handle.locked text {
+	.handle.locked .num {
 		fill: #c9c1ae;
+	}
+	.bubble rect {
+		fill: rgb(8 6 4 / 0.92);
+		stroke: rgb(255 122 47 / 0.6);
+	}
+	.bubble text {
+		fill: #ffe0c7;
+		font-family: var(--font-mono, 'JetBrains Mono', monospace);
+		font-size: var(--gfs, 11px);
+		text-anchor: middle;
+		dominant-baseline: central;
+	}
+	.bubble.out rect {
+		stroke: #ff4d55;
+	}
+	.bubble.out text {
+		fill: #ffd6d7;
+	}
+	.chip {
+		position: absolute;
+		top: 10px;
+		left: 50%;
+		display: flex;
+		gap: 6px;
+		align-items: center;
+		margin: 0;
+		padding: 3px 9px;
+		border: 1px solid rgb(255 122 47 / 0.25);
+		border-radius: 999px;
+		background: rgb(8 6 4 / 0.8);
+		color: #cbc5ba;
+		font: 10px/1.2 var(--font-mono, 'JetBrains Mono', monospace);
+		pointer-events: none;
+		transform: translateX(-50%);
+	}
+	.chip b {
+		font-weight: 600;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: #e9e3d4;
+	}
+	.chip .led {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: #3ddc97;
+		box-shadow: 0 0 6px #3ddc97;
+	}
+	.chip[data-state='checking'] .led {
+		background: #ffb040;
+		box-shadow: 0 0 6px #ffb040;
+	}
+	.chip[data-state='outside'] {
+		border-color: rgb(229 72 77 / 0.7);
+		color: #ffd6d7;
+	}
+	.chip[data-state='outside'] .led {
+		background: #e5484d;
+		box-shadow: 0 0 8px #e5484d;
+	}
+	.scope-legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 14px;
+		align-items: center;
+		margin-top: 9px;
+		font: 11px var(--font-mono, 'JetBrains Mono', monospace);
+		color: #cbc5ba;
+	}
+	.sw {
+		display: inline-block;
+		width: 16px;
+		height: 0;
+		margin-right: 5px;
+		border-top: 2px solid var(--accent, #ff7a2f);
+		vertical-align: 3px;
+	}
+	.sw.out {
+		border-top: 1px solid #ffe0c7;
+	}
+	.sw.ref {
+		border-top: 1px dashed rgb(255 210 175 / 0.7);
+	}
+	.pk {
+		margin-left: auto;
+		color: var(--accent, #ff7a2f);
 	}
 	.scope-msg,
 	.exp-hint,
 	.prev-error {
 		margin: 8px 0 0;
-		padding: 6px 8px;
+		padding: 7px 10px;
 		border-left: 3px solid var(--accent, #ff7a2f);
+		border-radius: 3px;
+		background: rgb(255 122 47 / 0.06);
 		font-size: 12px;
+		line-height: 1.45;
 		color: var(--curva-silk, #e9e3d4);
+	}
+	.scope-msg.danger,
+	.prev-error {
+		border: 1px solid #e5484d;
+		border-left-width: 3px;
+		background: rgb(20 6 6 / 0.92);
+		color: #ffd6d7;
 	}
 	.spectrum {
 		display: grid;
@@ -333,43 +1113,93 @@
 	.preview-row {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 8px 12px;
+		gap: 8px 14px;
 		align-items: center;
 		margin-top: 10px;
 	}
-	.bat,
-	.ab button {
-		min-height: 32px;
-		padding: 4px 10px;
-		border: 1px solid rgb(238 233 222 / 0.25);
-		border-radius: 3px;
-		background: linear-gradient(#2c2b29, #1d1c1b);
-		color: var(--curva-silk, #e9e3d4);
-		font: 600 11px/1.2 var(--font-mono, 'JetBrains Mono', monospace);
-		letter-spacing: 0.06em;
-		cursor: pointer;
-	}
 	.bat {
-		display: inline-flex;
+		display: flex;
 		gap: 8px;
 		align-items: center;
+		min-height: 40px;
+		padding: 2px;
+		border: 0;
+		background: none;
+		color: inherit;
+		cursor: pointer;
+	}
+	.well {
+		position: relative;
+		width: 26px;
+		height: 40px;
+		border-radius: 13px;
+		background: radial-gradient(
+			circle at 50% 50%,
+			#d7d2c8 0 7px,
+			#77736b 8px,
+			#262523 10px,
+			#121211 13px
+		);
+		box-shadow: 0 2px 4px rgb(0 0 0 / 0.7);
 	}
 	.lever {
-		width: 10px;
-		height: 18px;
-		border-radius: 2px;
-		background: #555;
+		position: absolute;
+		top: 0;
+		left: 9px;
+		width: 8px;
+		height: 20px;
+		border-radius: 4px;
+		background: linear-gradient(90deg, #8a867e, #f4f0e7 45%, #a19c93);
+		box-shadow: 0 2px 2px rgb(0 0 0 / 0.6);
+		transition: top 0.16s;
 	}
 	.bat[aria-pressed='true'] .lever {
-		background: var(--accent, #ff7a2f);
+		top: 20px;
+	}
+	.bl {
+		font: 600 11.5px/1.15 var(--font-cond, 'Barlow Condensed', 'Arial Narrow', sans-serif);
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--curva-silk, #e9e3d4);
+		text-align: left;
+	}
+	.bat:hover:not(:disabled) .lever {
+		filter: brightness(1.08);
 	}
 	.ab {
 		display: inline-flex;
 		gap: 2px;
 	}
-	.ab button[aria-checked='true'] {
-		border-color: var(--accent, #ff7a2f);
+	.tab {
+		min-height: 32px;
+		padding: 6px 11px;
+		border: 1px solid #2c2c2a;
+		border-radius: 3px;
+		background: linear-gradient(#262725, #141514);
+		box-shadow:
+			inset 0 1px 0 rgb(255 255 255 / 0.07),
+			0 2px 3px rgb(0 0 0 / 0.6);
+		color: var(--curva-silk, #e9e3d4);
+		font: 600 12px/1 var(--font-cond, 'Barlow Condensed', 'Arial Narrow', sans-serif);
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		cursor: pointer;
+		transition:
+			transform 0.08s,
+			border-color 0.15s;
+	}
+	.tab:hover:not(:disabled) {
+		border-color: #4a4a46;
+	}
+	.tab:active:not(:disabled) {
+		transform: translateY(1px);
+		box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7);
+	}
+	.tab[aria-checked='true'] {
+		border-color: rgb(255 122 47 / 0.55);
 		color: var(--accent, #ff7a2f);
+		box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7);
+		transform: translateY(2px);
 	}
 	button:disabled {
 		opacity: 0.55;
@@ -377,12 +1207,36 @@
 	}
 	button:focus-visible {
 		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 2px;
+		outline-offset: 3px;
 	}
 	.prev-note {
-		flex: 1 1 100%;
+		flex: 1 1 260px;
 		margin: 0;
-		font-size: 11px;
+		font-size: 10.5px;
+		line-height: 1.45;
 		color: var(--curva-silk-2, #c9c1ae);
+	}
+	.reduced .sweep,
+	.reduced .tr-after,
+	.reduced .handle.refused .body {
+		animation: none;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.sweep,
+		.tr-after,
+		.handle.refused .body {
+			animation: none;
+		}
+		.safe,
+		.handle .ring,
+		.lever,
+		.tab {
+			transition: none;
+		}
+	}
+	@media (max-width: 720px) {
+		.grat :global(.alt) {
+			display: none;
+		}
 	}
 </style>

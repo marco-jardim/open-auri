@@ -19,6 +19,16 @@ export function formatHz(value: number, locale: string): string {
 	return `${formatNumber(value, locale, 0)} Hz`;
 }
 
+/** Short frequency for sentences: "2,2 kHz", "16 kHz", "250 Hz". */
+export function formatHzCompact(value: number, locale: string): string {
+	if (!Number.isFinite(value)) return '';
+	if (value >= 1000) {
+		const text = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value / 1000);
+		return `${text} kHz`;
+	}
+	return `${Math.round(value)} Hz`;
+}
+
 export function formatQ(value: number, locale: string): string {
 	return formatNumber(value, locale, 2);
 }

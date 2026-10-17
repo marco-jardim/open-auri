@@ -48,10 +48,11 @@ test('output labels real DATA/live values and explains refusal; absent metrics a
 	expect(screen.container.querySelectorAll('dd')[0]?.textContent).toBe('−1,0 dB');
 	await screen.rerender({ verdict: missingMetrics, mode: 'live', frame });
 	expect(screen.container.querySelector('.gate')?.textContent).toContain(m.curva_gate_no());
-	await expect.element(page.getByText(m.curva_reason_g_preamp())).toBeVisible();
+	await expect.element(page.getByText(m.curva_why_preamp())).toBeVisible();
 	const values = screen.container.querySelectorAll('dd');
-	expect(values[1]?.textContent?.trim()).toBe('?');
-	expect(values[2]?.textContent?.trim()).toBe('?');
+	// Absent metrics are said in words, never a bare "?" and never a zero.
+	expect(values[1]?.textContent?.trim()).toBe(m.curva_out_unknown());
+	expect(values[2]?.textContent?.trim()).toBe(m.curva_out_unknown());
 	await expect
 		.element(page.getByRole('meter', { name: m.curva_vu_label() }))
 		.toHaveAttribute('aria-valuenow', '-1');

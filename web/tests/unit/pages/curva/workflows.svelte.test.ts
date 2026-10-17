@@ -525,10 +525,11 @@ test('a late commit cannot replace a newer keyboard edit', async () => {
 	const first = commit.mock.calls[0]?.[0];
 	if (!first) throw new Error('Missing first commit request');
 	handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -6.5 }));
+	// Mock step: ↑/↓ move the gain by 1 dB.
+	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -7 }));
 	pending.resolve(await realCommit(first));
 	await new Promise<void>((resolve) => setTimeout(resolve, 0));
-	expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -6.5 });
+	expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -7 });
 	expect(app.pendingWrite).toBeNull();
 });
 

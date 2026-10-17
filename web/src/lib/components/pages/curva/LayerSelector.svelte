@@ -124,7 +124,8 @@
 	}
 	.pointer {
 		transform: rotate(var(--turn));
-		transition: transform 280ms cubic-bezier(0.3, 1.4, 0.5, 1);
+		/* Mock: the mode dial swings to the selected layer in .55 s. */
+		transition: transform 550ms cubic-bezier(0.3, 1.4, 0.5, 1);
 	}
 	.mode-lbl {
 		min-height: 32px;

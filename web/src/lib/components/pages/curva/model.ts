@@ -27,8 +27,8 @@ export function verdictFor(curve: Curve): GateVerdict {
 	const verdict = gateForWrite(curve.bands, curve.preampDb, {
 		experimental: hasExperimental(curve.bands)
 	});
-	// The aggregate prefix reason has no stage field in core; its measured maximum does.
-	// Preserve that location when presenting a rejected order, without changing the verdict.
+	// Core names the first prefix over the limit; older cores sent no stage, so fall back to the
+	// stage of the measured maximum. Presentation only: the verdict itself is unchanged.
 	const stage = verdict.metrics.internalAudible?.stage;
 	if (stage === undefined) return verdict;
 	return {

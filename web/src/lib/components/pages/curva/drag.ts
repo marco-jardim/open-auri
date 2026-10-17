@@ -6,6 +6,10 @@
  * refused candidate's reasons; the band is rounded to the UI grid (gain 0.1 dB, f 1 Hz, Q 0.01)
  * and revalidated with `client.commit` (full grid, the verdict a write uses). A commit refusal
  * keeps the previous curve.
+ *
+ * The page uses `dragBand` only as an advisory verdict while the pointer moves (the handle follows
+ * the pointer freely) and `releaseBand` on release: exact target first, else the last safe point
+ * on the way, else the start curve. Nothing here touches the cable.
  */
 import { roundToGrid } from 'open-auri/safety';
 import type {
@@ -46,6 +50,16 @@ export interface DragTarget {
 	freqHz?: number;
 	gainDb?: number;
 	qFactor?: number;
+}
+
+/**
+ * Advisory state of the handle being moved: `checking` until the worker answers for the latest
+ * position, then `inside` or `outside` the envelope. Never blocks the pointer; only a release
+ * (full grid) decides.
+ */
+export interface DragView {
+	index: number;
+	status: 'checking' | 'inside' | 'outside';
 }
 
 /**
@@ -109,6 +123,88 @@ export async function commitBand(
 		reasons: verdict.reasons,
 		committed: false
 	};
+}
+
+export type ReleaseOutcome = 'exact' | 'snapped' | 'reverted';
+
+export interface ReleaseResult extends DragOutcome {
+	/** `exact`: the target passed; `snapped`: the band stopped at the last safe point on the way;
+	 * `reverted`: nothing between the start and the target passed, the start curve is kept. */
+	outcome: ReleaseOutcome;
+}
+
+/**
+ * Release of a free drag (and keyboard/wheel/typed values): the target itself, rounded to the UI
+ * grid, is judged on the full grid first. When it is refused, the band is walked back towards the
+ * start (worker bisection) and that boundary is committed; when even that fails, the start curve
+ * stays. Every accepted result passed `client.commit` (full grid), the verdict a write uses.
+ */
+export async function releaseBand(
+	client: GateClient,
+	curve: Curve,
+	bandIndex: number,
+	target: DragTarget,
+	experimental: boolean,
+	/** Whether the start curve passes the gate; the walk back needs an accepted start. */
+	startAccepted = true
+): Promise<ReleaseResult> {
+	const band = curve.bands[bandIndex];
+	if (!band || band.kind === 'OFF') {
+		return {
+			bands: curve.bands.slice(),
+			preampDb: curve.preampDb,
+			stopped: false,
+			reasons: [],
+			committed: false,
+			outcome: 'reverted'
+		};
+	}
+	const moved = withTarget(band, target);
+	const exact = await commitBand(
+		client,
+		curve,
+		{
+			bands: replaceBand(curve.bands, bandIndex, moved),
+			preampDb: curve.preampDb,
+			stopped: false,
+			reasons: [],
+			committed: false
+		},
+		bandIndex,
+		experimental
+	);
+	if (exact.committed) return { ...exact, outcome: 'exact' };
+	const walked = startAccepted
+		? await moveBand(client, curve, bandIndex, target, experimental)
+		: null;
+	if (walked?.committed && !sameBand(walked.bands[bandIndex], band)) {
+		// Explain with the reason of the target the user asked for, not of a later candidate.
+		return { ...walked, stopped: true, reasons: exact.reasons, outcome: 'snapped' };
+	}
+	return {
+		bands: curve.bands.slice(),
+		preampDb: curve.preampDb,
+		stopped: true,
+		reasons: exact.reasons,
+		committed: false,
+		outcome: 'reverted'
+	};
+}
+
+/** The band with the target's parameters applied (gain only where the kind has one). */
+export function withTarget(band: Band, target: DragTarget): Band {
+	if (band.kind === 'OFF') return band;
+	const freqHz = target.freqHz ?? band.freqHz;
+	const qFactor = target.qFactor ?? band.qFactor;
+	if (hasGain(band)) return { ...band, freqHz, qFactor, gainDb: target.gainDb ?? band.gainDb };
+	return { ...band, freqHz, qFactor };
+}
+
+function sameBand(a: Band | undefined, b: Band): boolean {
+	if (!a || a.kind !== b.kind || a.kind === 'OFF' || b.kind === 'OFF') return false;
+	const gainA = hasGain(a) ? a.gainDb : 0;
+	const gainB = hasGain(b) ? b.gainDb : 0;
+	return a.freqHz === b.freqHz && a.qFactor === b.qFactor && gainA === gainB;
 }
 
 /** Keyboard and typed values: drag to the target, then round and commit in one step. */

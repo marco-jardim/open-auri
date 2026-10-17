@@ -74,8 +74,10 @@ test('pointer drag stops at the gate boundary with a reason', async ({ page }) =
 	const reason = page
 		.getByRole('region', { name: 'Osciloscópio', exact: true })
 		.getByRole('status')
-		.filter({ hasText: /^PAROU:/ });
-	await expect(reason).toHaveText(/^PAROU: .*(?:saída|pico interno)/);
+		.filter({ hasText: /^A banda 1 parou no último ponto seguro\./ });
+	await expect(reason).toHaveText(
+		/^A banda 1 parou no último ponto seguro\. A banda 1 \(1 kHz\) .*(?:saída|pico interno)/
+	);
 	const gain = filterBank(page)
 		.getByRole('spinbutton', { name: 'Ganho (dB)', exact: true })
 		.first();
@@ -147,7 +149,7 @@ test('a refused reorder snaps back without changing the curve or its CRC', async
 	const crc = await editorCrc(page);
 	await cabinet.getByRole('button', { name: 'Mover S2 para a esquerda', exact: true }).click();
 	await expect(cabinet.getByRole('status')).toHaveText(
-		/^Ordem recusada: O pico interno.*estágio 1/
+		/^Ordem recusada: A banda 1 \(1 kHz\) faria o sinal saturar.*pico interno/
 	);
 	await expect.poll(() => modules.allTextContents()).toEqual(order);
 	await expect(cabinet.getByRole('listitem').nth(1)).not.toHaveClass(/\bspring\b/);
