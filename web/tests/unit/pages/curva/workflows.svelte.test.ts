@@ -1,3 +1,4 @@
+import '../../primitives/design-system.ts';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -443,6 +444,46 @@ test('named S5 imports preserve metadata and report editor refusal', async () =>
 	);
 	expect(set).toHaveBeenCalledOnce();
 	expect(app.state.curve.current).toEqual(before);
+});
+
+test('the engineering sequencer stays disabled with the loading or writing reason exposed', async () => {
+	const { app, screen } = await setup('engenharia');
+	const request = vi.spyOn(app, 'requestWrite');
+	const send = page.getByRole('button', { name: m.curva_seq_send(), exact: true });
+	const sequencer = page.getByRole('group', { name: m.curva_seq_heading(), exact: true });
+	await expect.element(send).not.toBeDisabled();
+	await expect.element(sequencer).not.toHaveAttribute('aria-describedby');
+
+	await screen.rerender({ app: null });
+	await expect.element(send).toBeDisabled();
+	await expect.element(sequencer).toHaveAttribute('disabled');
+	await expect.element(sequencer).toHaveAccessibleDescription(m.curva_v2_loading_reason());
+	await expect
+		.element(sequencer.getByText(m.curva_v2_loading_reason(), { exact: true }))
+		.toBeVisible();
+	const button = send.element();
+	if (!(button instanceof HTMLButtonElement)) throw new Error('Missing sequencer send button');
+	button.click();
+	expect(request).not.toHaveBeenCalled();
+
+	const state = vi
+		.spyOn(app, 'cableState', 'get')
+		.mockReturnValue({ ...app.cableState, writing: true });
+	await screen.rerender({ app });
+	await expect.element(send).toBeDisabled();
+	await expect.element(sequencer).toHaveAttribute('disabled');
+	await expect.element(sequencer).toHaveAccessibleDescription(m.curva_v2_writing_reason());
+	await expect
+		.element(sequencer.getByText(m.curva_v2_writing_reason(), { exact: true }))
+		.toBeVisible();
+	button.click();
+	expect(request).not.toHaveBeenCalled();
+
+	state.mockRestore();
+	await screen.rerender({ app: null });
+	await screen.rerender({ app });
+	await expect.element(send).not.toBeDisabled();
+	await expect.element(sequencer).not.toHaveAttribute('aria-describedby');
 });
 
 test('removing a compensating cut is gate-refused instead of exposing its boost', async () => {

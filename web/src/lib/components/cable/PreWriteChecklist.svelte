@@ -278,7 +278,11 @@
 					{/if}
 
 					<div class="guards">
-						<fieldset class="levers" disabled={cable.writing}>
+						<fieldset
+							class="levers"
+							disabled={cable.writing}
+							aria-describedby={cable.writing ? `${id}-levers-why` : undefined}
+						>
 							<legend class="engrave">{m.cable_confirmations_heading()}</legend>
 							<ConfirmLever
 								bind:checked={confirmations.volumeLowered}
@@ -319,7 +323,7 @@
 							</span>
 						</div>
 					</div>
-					<p class="lever-hint">
+					<p id={`${id}-levers-why`} class="lever-hint">
 						{cable.writing ? m.cable_fux_levers_locked() : m.cable_fux_lever_hint()}
 					</p>
 				</div>
@@ -384,7 +388,13 @@
 					{#if cable.devices.length > 1 || targetIndex === ''}
 						<label class="select">
 							<span>{m.cable_select_device()}</span>
-							<select disabled={cable.writing} value={targetIndex} onchange={onSelectTarget}>
+							<select
+								disabled={cable.writing}
+								aria-disabled={cable.writing ? 'true' : undefined}
+								aria-describedby={cable.writing ? `${id}-target-why` : undefined}
+								value={targetIndex}
+								onchange={onSelectTarget}
+							>
 								{#if targetIndex === ''}
 									<option value="" disabled>{m.cable_target_choose()}</option>
 								{/if}
@@ -393,6 +403,9 @@
 								{/each}
 							</select>
 						</label>
+						{#if cable.writing}
+							<p id={`${id}-target-why`}>{m.cabo_fux_busy_writing()}</p>
+						{/if}
 					{/if}
 				{/if}
 			</section>

@@ -1,3 +1,4 @@
+import '../primitives/design-system.ts';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { page, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -143,6 +144,107 @@ test('the target cable is shown next to the write button; without one the user m
 		.element(page.getByText(m.cable_target_device({ device: 'Right cable' }), { exact: true }))
 		.toBeVisible();
 	expect(page.getByRole('dialog').getByRole('combobox').elements()).toHaveLength(0);
+});
+
+test('confirmation levers and target selection stay natively locked with an accessible reason during a write', async () => {
+	const devices = [new FakeHIDDevice(), new FakeHIDDevice()];
+	const fake = cableUi({
+		device: devices[0],
+		devices,
+		deviceLabels: ['Left cable', 'Right cable']
+	});
+	await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose: vi.fn()
+	});
+	const dialog = page.getByRole('dialog');
+	const levers = dialog.getByRole('group', { name: m.cable_confirmations_heading(), exact: true });
+	const target = dialog.getByRole('combobox', { name: m.cable_select_device(), exact: true });
+	await confirm();
+	fake.publish({ writing: true });
+	// Browser disabled-state matchers target controls, not the fieldset group itself.
+	await expect.element(levers).toHaveAttribute('disabled');
+	await expect.element(levers).toHaveAccessibleDescription(m.cable_fux_levers_locked());
+	await expect
+		.element(dialog.getByText(m.cable_fux_levers_locked(), { exact: true }))
+		.toBeVisible();
+	for (const label of [m.cable_confirm_volume(), m.cable_confirm_connection()]) {
+		const lever = levers.getByRole('checkbox', { name: label, exact: true });
+		await expect.element(lever).toBeDisabled();
+		await expect.element(lever).toBeChecked();
+		const input = lever.element();
+		if (!(input instanceof HTMLInputElement)) throw new Error('Missing confirmation input');
+		input.click();
+		await expect.element(lever).toBeChecked();
+	}
+	await expect.element(target).toBeDisabled();
+	await expect.element(target).toHaveAccessibleDescription(m.cabo_fux_busy_writing());
+	expect(fake.selectDevice).not.toHaveBeenCalled();
+	fake.publish({ writing: false });
+	await expect.element(levers).not.toHaveAttribute('disabled');
+	await expect.element(target).not.toBeDisabled();
+	await expect.element(levers).not.toHaveAttribute('aria-describedby');
+	await expect.element(target).not.toHaveAttribute('aria-describedby');
+});
+
+test('the spacing countdown cancels a pending tick, stays paused while writing and resumes afterwards', async () => {
+	const fake = cableUi();
+	const original = fake.service.checklist;
+	let lastWriteAt = 0;
+	const checklist = vi.fn<typeof fake.service.checklist>((request, gate) => {
+		const result = original(request, gate);
+		const waitMs = Math.max(0, 2000 - (Date.now() - lastWriteAt));
+		return { ...result, spacing: { ok: waitMs === 0, waitMs }, canWrite: false };
+	});
+	fake.service.checklist = checklist;
+	const screen = await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose: vi.fn()
+	});
+	const spacing = screen.container.querySelector('.spacing');
+	if (!spacing) throw new Error('Missing spacing countdown');
+	vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+	try {
+		vi.setSystemTime(10_000);
+		lastWriteAt = Date.now();
+		fake.publish({ writing: false });
+		await tick();
+		expect(spacing.textContent?.trim()).toBe(m.cable_spacing_wait({ seconds: '2,0' }));
+		checklist.mockClear();
+		await vi.advanceTimersByTimeAsync(200);
+		await tick();
+		expect(checklist).toHaveBeenCalledOnce();
+		expect(spacing.textContent?.trim()).toBe(m.cable_spacing_wait({ seconds: '1,8' }));
+
+		// Start writing with a countdown tick already scheduled: it must be cancelled too.
+		fake.publish({ writing: true });
+		await tick();
+		const pausedText = spacing.textContent;
+		checklist.mockClear();
+		await vi.advanceTimersByTimeAsync(1000);
+		await tick();
+		expect(checklist).not.toHaveBeenCalled();
+		expect(spacing.textContent).toBe(pausedText);
+
+		fake.publish({ writing: false });
+		await tick();
+		expect(spacing.textContent?.trim()).toBe(m.cable_spacing_wait({ seconds: '0,8' }));
+		checklist.mockClear();
+		await vi.advanceTimersByTimeAsync(200);
+		await tick();
+		expect(checklist).toHaveBeenCalledOnce();
+		expect(spacing.textContent?.trim()).toBe(m.cable_spacing_wait({ seconds: '0,6' }));
+		await vi.advanceTimersByTimeAsync(600);
+		await tick();
+		expect(spacing.textContent?.trim()).toBe(m.cable_spacing_ready());
+	} finally {
+		await cleanup();
+		vi.useRealTimers();
+	}
 });
 
 test('unplugging the target clears the confirmations and never shows another cable as the target', async () => {

@@ -119,11 +119,18 @@
 <section aria-labelledby={headingId} class="flex flex-col gap-2">
 	<h3 id={headingId} class="font-semibold">{m.cable_queue_title()}</h3>
 	<p class="text-sm opacity-80">{m.cable_queue_hint()}</p>
+	{#if cable.writing}
+		<p id={`${headingId}-busy`} class="text-sm">{m.cabo_fux_busy_writing()}</p>
+	{/if}
 
 	{#if cable.devices.length < 2}
 		<p class="text-sm">{m.cable_queue_need_two()}</p>
 	{:else if reviewed === null}
-		<fieldset class="flex flex-col gap-1" disabled={cable.writing}>
+		<fieldset
+			class="flex flex-col gap-1"
+			disabled={cable.writing}
+			aria-describedby={cable.writing ? `${headingId}-busy` : undefined}
+		>
 			<legend class="text-sm">{m.cable_queue_select()}</legend>
 			{#each cable.devices as device, index (device)}
 				<label class="flex items-center gap-2">
@@ -155,6 +162,8 @@
 				type="button"
 				class="rounded border border-current px-3 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
 				disabled={cable.writing}
+				aria-disabled={cable.writing ? 'true' : undefined}
+				aria-describedby={cable.writing ? `${headingId}-busy` : undefined}
 				onclick={endReview}
 			>
 				{m.cable_queue_back()}

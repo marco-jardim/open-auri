@@ -1,3 +1,4 @@
+import '../../primitives/design-system.ts';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -73,6 +74,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect
 			.element(page.getByRole('combobox', { name: m.cabo_presets(), exact: true }))
 			.toBeDisabled();
+		await expect
+			.element(page.getByRole('combobox', { name: m.cabo_presets(), exact: true }))
+			.toHaveAccessibleDescription(m.cabo_fux_loading());
 		// The empty journal teaches (spec §4.4) and shows three EXAMPLE boxes.
 		await expect.element(page.getByText(m.empty_journal_body(), { exact: true })).toBeVisible();
 		expect(screen.container.querySelectorAll('[data-example]')).toHaveLength(3);
@@ -80,6 +84,12 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		app = createClientApp(fake.options);
 		const request = vi.spyOn(app, 'requestWrite');
 		await screen.rerender({ app });
+		await expect
+			.element(page.getByRole('combobox', { name: m.cabo_presets(), exact: true }))
+			.not.toBeDisabled();
+		await expect
+			.element(page.getByRole('combobox', { name: m.cabo_presets(), exact: true }))
+			.not.toHaveAttribute('aria-describedby');
 		await page.getByRole('button', { name: m.cabo_lift(), exact: true }).click();
 		await expect
 			.element(page.getByRole('button', { name: m.cabo_close_cover(), exact: true }))
@@ -93,6 +103,24 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		expect(fake.device.sent).toHaveLength(0);
 	});
 }
+
+test('the preset selector remains natively disabled and describes the active write', async () => {
+	await setLocale('pt-BR', { reload: false });
+	app = createClientApp(fakeAppOptions().options);
+	vi.spyOn(app, 'cableState', 'get').mockReturnValue({ ...app.cableState, writing: true });
+	const load = vi.spyOn(app.state.curve, 'loadPreset');
+	await render(CaboPage, { app, tourAutoOpen: false });
+	const preset = page.getByRole('combobox', { name: m.cabo_presets(), exact: true });
+	await expect.element(preset).toBeDisabled();
+	await expect.element(preset).toHaveAccessibleDescription(m.cabo_fux_busy_writing());
+	// Other disabled Buttons have hidden tooltip copies of the same message.
+	const reasonId = preset.element().getAttribute('aria-describedby');
+	if (!reasonId) throw new Error('Missing preset disabled reason reference');
+	const reason = document.getElementById(reasonId);
+	if (!reason) throw new Error('Missing preset disabled reason');
+	await expect.element(reason).toBeVisible();
+	expect(load).not.toHaveBeenCalled();
+});
 
 for (const status of ['ok', 'simulated', 'interrupted'] as const) {
 	test(`transport replays ${status} acceptance, not an unconditional commit`, async () => {

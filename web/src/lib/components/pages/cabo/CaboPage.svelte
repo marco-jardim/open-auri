@@ -288,6 +288,8 @@
 							id={`${id}-preset`}
 							value={curve.source.startsWith('preset:') ? curve.source.slice(7) : ''}
 							disabled={!app || writing}
+							aria-disabled={busyReason ? 'true' : undefined}
+							aria-describedby={busyReason ? `${id}-preset-why` : undefined}
 							onchange={(event) => app?.state.curve.loadPreset(event.currentTarget.value)}
 						>
 							<option value="" disabled>{m.cabo_custom()}</option>
@@ -295,6 +297,9 @@
 									>{preset.label}</option
 								>{/each}
 						</select>
+						{#if busyReason}
+							<p id={`${id}-preset-why`} class="note">{busyReason}</p>
+						{/if}
 						<p class="curve-label">{m.cabo_current()}</p>
 						<h3 class="curve-name">{curve.name}</h3>
 						{#if preset && 'description' in preset}

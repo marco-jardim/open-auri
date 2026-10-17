@@ -1,3 +1,4 @@
+import '../primitives/design-system.ts';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -55,8 +56,22 @@ test('queue requires two connected and selected cables, a passing checklist and 
 	await screen.rerender({ canWrite: true });
 	fake.publish({ writing: true });
 	await expectRefused(review, m.cabo_fux_busy_writing());
-	await expect.element(page.getByRole('checkbox', { name: 'One' })).toBeDisabled();
+	const selection = page.getByRole('group', { name: m.cable_queue_select(), exact: true });
+	// The group owns the native gate; its checkboxes inherit the browser's disabled state.
+	await expect.element(selection).toHaveAttribute('disabled');
+	await expect.element(selection).toHaveAccessibleDescription(m.cabo_fux_busy_writing());
+	await expect
+		.element(page.getByText(m.cabo_fux_busy_writing(), { exact: true }).first())
+		.toBeVisible();
+	const firstCable = selection.getByRole('checkbox', { name: 'One' });
+	await expect.element(firstCable).toBeDisabled();
+	const cableInput = firstCable.element();
+	if (!(cableInput instanceof HTMLInputElement)) throw new Error('Missing cable selection input');
+	cableInput.click();
+	await expect.element(firstCable).toBeChecked();
 	fake.publish({ writing: false });
+	await expect.element(selection).not.toHaveAttribute('disabled');
+	await expect.element(selection).not.toHaveAttribute('aria-describedby');
 	await page.getByRole('checkbox', { name: 'Two' }).click();
 	await expectRefused(review, m.fuxq1_queue_select_two());
 	// None of the refused presses opened the review.
@@ -106,12 +121,19 @@ test('review/back preserves selection; only confirmation submits the reviewed qu
 	await screen.rerender({ canWrite: true });
 	fake.publish({ writing: true });
 	await expectRefused(confirm, m.cabo_fux_busy_writing());
-	await expect.element(page.getByRole('button', { name: m.cable_queue_back() })).toBeDisabled();
+	const back = page.getByRole('button', { name: m.cable_queue_back() });
+	await expect.element(back).toBeDisabled();
+	await expect.element(back).toHaveAccessibleDescription(m.cabo_fux_busy_writing());
+	await expect
+		.element(page.getByText(m.cabo_fux_busy_writing(), { exact: true }).first())
+		.toBeVisible();
 	// The write path never moved: no gesture, no queue write, still in review.
 	expect(fake.createGesture).not.toHaveBeenCalled();
 	expect(fake.writeQueue).not.toHaveBeenCalled();
 	await expect.element(confirm).toBeVisible();
 	fake.publish({ writing: false });
+	await expect.element(back).not.toBeDisabled();
+	await expect.element(back).not.toHaveAttribute('aria-describedby');
 	await confirm.click();
 	expect(fake.createGesture).toHaveBeenCalledOnce();
 	expect(fake.createGesture.mock.calls[0][0]).toBeInstanceOf(MouseEvent);

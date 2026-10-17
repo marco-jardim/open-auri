@@ -906,11 +906,23 @@
 					<p role="alert">{m.layout_error_generic()}</p>
 				{/await}
 				{#await import('./Sequencer.svelte') then { default: Sequencer }}
-					<Sequencer
-						{curve}
+					{@const sequencerReason =
+						loadingReason ?? (app?.cableState.writing ? m.curva_v2_writing_reason() : null)}
+					<fieldset
+						class="min-w-0 border-0 p-0"
 						disabled={!app || (app?.cableState.writing ?? true)}
-						onsend={() => app?.requestWrite()}
-					/>
+						aria-describedby={sequencerReason ? `${titleId}-sequencer-why` : undefined}
+					>
+						<legend class="visually-hidden">{m.curva_seq_heading()}</legend>
+						<Sequencer
+							{curve}
+							disabled={!app || (app?.cableState.writing ?? true)}
+							onsend={() => app?.requestWrite()}
+						/>
+						{#if sequencerReason}
+							<p id={`${titleId}-sequencer-why`} role="status">{sequencerReason}</p>
+						{/if}
+					</fieldset>
 				{:catch}
 					<p role="alert">{m.layout_error_generic()}</p>
 				{/await}
