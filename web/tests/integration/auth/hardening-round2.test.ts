@@ -9,7 +9,12 @@ import { env } from 'cloudflare:workers';
 import { http, HttpResponse } from 'msw';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { isCompactJws, linkUseId } from '#lib/server/auth/link-uses.ts';
-import { INVALID_CALLBACK_URL, isSafeCallbackURL } from '#lib/server/auth/hooks.ts';
+import { MAX_NEXT_LENGTH } from '#lib/components/auth/next.ts';
+import {
+	INVALID_CALLBACK_URL,
+	isSafeCallbackURL,
+	MAX_CALLBACK_URL_LENGTH
+} from '#lib/server/auth/hooks.ts';
 import { buildIdempotencyKey, RESEND_ENDPOINT } from '#lib/server/email/index.ts';
 import { getServerEnv } from '#lib/server/env.ts';
 import { createAuthGuard } from '#lib/server/security/auth-guard.ts';
@@ -232,6 +237,31 @@ describe('M2: callback URLs never leave the site', () => {
 		for (const bad of [...EVIL, `${origin}.evil.example/`, `${origin}//evil.example`]) {
 			expect(isSafeCallbackURL(bad, origin), bad).toBe(false);
 		}
+	});
+
+	// Q3 round 3, m-c (#22): the callback ends up in mailed links, so it is bounded like `?next=`.
+	it('isSafeCallbackURL refuses values longer than MAX_CALLBACK_URL_LENGTH', () => {
+		const origin = getServerEnv({ env }).publicOrigin;
+		expect(MAX_CALLBACK_URL_LENGTH).toBe(MAX_NEXT_LENGTH);
+		const relative = `/${'a'.repeat(MAX_CALLBACK_URL_LENGTH - 1)}`;
+		expect(relative).toHaveLength(MAX_CALLBACK_URL_LENGTH);
+		expect(isSafeCallbackURL(relative, origin)).toBe(true);
+		expect(isSafeCallbackURL(`${relative}a`, origin)).toBe(false);
+		const prefix = `${origin}/`;
+		const absolute = `${prefix}${'a'.repeat(MAX_CALLBACK_URL_LENGTH - prefix.length)}`;
+		expect(absolute).toHaveLength(MAX_CALLBACK_URL_LENGTH);
+		expect(isSafeCallbackURL(absolute, origin)).toBe(true);
+		expect(isSafeCallbackURL(`${absolute}a`, origin)).toBe(false);
+	});
+
+	it('a callback over the length limit is refused before Better Auth runs', async () => {
+		const h = harness();
+		const callbackURL = `/${'a'.repeat(MAX_CALLBACK_URL_LENGTH)}`;
+		const response = await h
+			.client()
+			.post('/send-verification-email', { email: uniqueEmail('r2-long'), callbackURL });
+		expect(response.status).toBe(403);
+		expect(await errorCode(response)).toBe(INVALID_CALLBACK_URL);
 	});
 
 	it('garbage, unknown and used tokens with an evil callback never redirect off-site', async () => {

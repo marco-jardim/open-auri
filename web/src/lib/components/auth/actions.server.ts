@@ -14,7 +14,7 @@
 import type { Auth } from '#lib/server/auth.ts';
 import { TURNSTILE_HEADER } from '#lib/server/auth/hooks.ts';
 import { TURNSTILE_FIELD } from './fields.ts';
-import { afterSignIn, safeNext, withNext } from './next.ts';
+import { afterSignIn, MAX_NEXT_LENGTH, safeNext, withNext } from './next.ts';
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-strength.ts';
 import type { AuthErrorKind, AuthFormState, FieldIssue } from './types.ts';
 
@@ -393,7 +393,11 @@ export async function twoFactorFlow(form: FormData, ctx: FlowContext): Promise<A
 
 /** Verification link target (relative: Better Auth redirects there after checking the token). */
 export function verificationCallback(next: string | null): string {
-	return withNext('/verificar-email?verificado=1', next);
+	const landing = '/verificar-email?verificado=1';
+	const target = withNext(landing, next);
+	// The callback is capped like `next` itself (hooks refuse longer ones): an encoded `next`
+	// near the cap is dropped rather than failing sign-up.
+	return target.length > MAX_NEXT_LENGTH ? landing : target;
 }
 
 export async function signUpFlow(

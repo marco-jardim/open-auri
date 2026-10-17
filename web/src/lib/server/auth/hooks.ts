@@ -33,6 +33,7 @@
 //   - one `signup` Analytics Engine metric after a successful `/sign-up/email` (T5.2).
 import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from 'better-auth/api';
 import { verifyJWT } from 'better-auth/crypto';
+import { MAX_NEXT_LENGTH } from '#lib/components/auth/next.ts';
 import { isNicknameHeld } from '../account/nickname.ts';
 import { first, sql } from '../db.ts';
 import type { ServerEnv } from '../env.ts';
@@ -265,6 +266,9 @@ export const CALLBACK_FIELDS = [
 
 export const INVALID_CALLBACK_URL = 'INVALID_CALLBACK_URL';
 
+/** Longest accepted redirect target: the same limit as the pages' `?next=` (Q3 round 3, m-c). */
+export const MAX_CALLBACK_URL_LENGTH = MAX_NEXT_LENGTH;
+
 /**
  * Whether `value` is a redirect target the app accepts: a path on PUBLIC_ORIGIN, relative (`/x?y`)
  * or absolute (`https://origin/x`), in canonical form. Refused (Q3 round 2, M2): anything that
@@ -272,10 +276,11 @@ export const INVALID_CALLBACK_URL = 'INVALID_CALLBACK_URL';
  * as `/`), whitespace and control characters, and paths the URL parser would rewrite: dot
  * segments (`/.//evil` resolves to the path `//evil`, which a later `pathname`-based Location turns
  * into a protocol-relative URL, as Better Auth's own `appendQueryParams` does), empty segments
- * (`//`), percent-encoded `/`, `\` or `.`, and characters the parser re-encodes.
+ * (`//`), percent-encoded `/`, `\` or `.`, and characters the parser re-encodes. Values longer
+ * than MAX_CALLBACK_URL_LENGTH are refused too: the callback ends up in mailed links.
  */
 export function isSafeCallbackURL(value: string, publicOrigin: string): boolean {
-	if (value === '') return false;
+	if (value === '' || value.length > MAX_CALLBACK_URL_LENGTH) return false;
 	for (let index = 0; index < value.length; index += 1) {
 		const code = value.charCodeAt(index);
 		// Controls, space, DEL and `\`.
