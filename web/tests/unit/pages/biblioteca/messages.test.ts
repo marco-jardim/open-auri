@@ -41,3 +41,8 @@ test('the bridge explains pre-volume metering and the calculated jump in both lo
 	expect(messages('en-US').biblioteca_live_note).toContain('before browser volume');
 	expect(messages('en-US').biblioteca_live_note).toContain('Jump stays calculated');
 });
+
+test('the level label is neutral in DATA and LIVE in both locales', () => {
+	expect(messages('pt-BR').biblioteca_level).toBe('Nível');
+	expect(messages('en-US').biblioteca_level).toBe('Level');
+});

@@ -1,3 +1,4 @@
+import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -31,6 +32,7 @@ afterEach(async () => {
 	app = null;
 	taps = [];
 	fakeTap.mockReset();
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 });
 
@@ -53,27 +55,29 @@ const frame = (vu: number): MeterFrame => ({
 	active: true
 });
 
-test('the Preamp tap is the selected A/B chain output, only while the sheet audition plays', async () => {
-	fakeTap.mockImplementation(async (node: AudioNode) => {
-		const listeners = new Set<(update: MeterUpdate) => void>();
-		const handle = {
-			node,
-			disconnect: vi.fn(),
-			setReference: vi.fn(),
-			emit(update: MeterUpdate) {
-				for (const listener of listeners) listener(update);
-			},
-			subscribe(listener: (update: MeterUpdate) => void) {
-				listeners.add(listener);
-				listener({ mode: 'data', frame: null });
-				return () => {
-					listeners.delete(listener);
-				};
-			}
-		};
-		taps.push(handle);
-		return handle;
-	});
+function makeTap(node: AudioNode) {
+	const listeners = new Set<(update: MeterUpdate) => void>();
+	const handle = {
+		node,
+		disconnect: vi.fn(),
+		setReference: vi.fn(),
+		emit(update: MeterUpdate) {
+			for (const listener of listeners) listener(update);
+		},
+		subscribe(listener: (update: MeterUpdate) => void) {
+			listeners.add(listener);
+			listener({ mode: 'data', frame: null });
+			return () => {
+				listeners.delete(listener);
+			};
+		}
+	};
+	taps.push(handle);
+	return handle;
+}
+
+async function setupSheet() {
+	fakeTap.mockImplementation(async (node: AudioNode) => makeTap(node));
 	app = createClientApp({
 		storage: { local: null, session: null, indexedDB: null, channel: null },
 		audio: createAudioEngine({ indexedDB: null })
@@ -97,6 +101,23 @@ test('the Preamp tap is the selected A/B chain output, only while the sheet audi
 		onStatus: vi.fn(),
 		onOutputMeter
 	});
+	return { screen, client, createAB, onOutputMeter };
+}
+
+// Native activation keeps these timer-boundary tests independent of driver polling timers.
+async function press(container: HTMLElement, label: string) {
+	const button = [...container.querySelectorAll('button')].find(
+		(node) => node.textContent?.trim() === label
+	);
+	if (!button) throw new Error(`Missing sheet button: ${label}`);
+	button.click();
+	await tick();
+	await Promise.resolve();
+	await tick();
+}
+
+test('the Preamp tap is the selected A/B chain output, only while the sheet audition plays', async () => {
+	const { screen, client, createAB, onOutputMeter } = await setupSheet();
 	// Nothing of this sheet is audible yet: no tap.
 	expect(fakeTap).not.toHaveBeenCalled();
 
@@ -146,4 +167,107 @@ test('the Preamp tap is the selected A/B chain output, only while the sheet audi
 	await expect.poll(() => taps[3].disconnect.mock.calls.length).toBe(1);
 	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
 	expect(fakeTap).toHaveBeenCalledTimes(4);
+});
+
+test('A/B and reference handoffs keep a fresh reading until the first replacement frame or 250 ms', async () => {
+	const { screen, client, onOutputMeter } = await setupSheet();
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+	await press(screen.container, m.biblioteca_listen_tape());
+	expect(taps).toHaveLength(1);
+	// A tap with no real frames must stay in DATA, even while the audition is playing.
+	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
+	const first = { mode: 'live', frame: frame(-2) } as const;
+	taps[0].emit(first);
+	onOutputMeter.mockClear();
+	await vi.advanceTimersByTimeAsync(100);
+	await press(screen.container, m.biblioteca_listen_current());
+	expect(taps[0].disconnect).toHaveBeenCalledOnce();
+	expect(taps).toHaveLength(2);
+	taps[1].emit({ mode: 'live', frame: null });
+	// Neither teardown nor the new subscription's initial DATA may flash the dial to DATA.
+	expect(onOutputMeter).not.toHaveBeenCalled();
+	await vi.advanceTimersByTimeAsync(149);
+	expect(onOutputMeter).not.toHaveBeenCalled();
+	const replacement = { mode: 'live', frame: frame(-5) } as const;
+	taps[1].emit(replacement);
+	expect(onOutputMeter).toHaveBeenLastCalledWith(replacement);
+	await vi.advanceTimersByTimeAsync(100);
+	// Silence can still arrive labelled live within the shared tap's grace window, but cannot
+	// extend the last active frame's expiry when the tap is replaced.
+	taps[1].emit({ mode: 'live', frame: { ...frame(-5), active: false } });
+	client.state.meterRef.set(-14);
+	await tick();
+	await Promise.resolve();
+	await tick();
+	expect(fakeTap.mock.calls[2]?.[1]).toMatchObject({ kinds: ['vu'], reference: -14 });
+	expect(taps[1].disconnect).toHaveBeenCalledOnce();
+	expect(onOutputMeter).toHaveBeenCalledTimes(1);
+	await vi.advanceTimersByTimeAsync(149);
+	expect(onOutputMeter).toHaveBeenLastCalledWith(replacement);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
+	// A late but real replacement can go LIVE again; its own DATA clears immediately.
+	taps[2].emit(first);
+	expect(onOutputMeter).toHaveBeenLastCalledWith(first);
+	taps[2].emit({ mode: 'data', frame: null });
+	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
+});
+
+test('rapid side changes and a pending tap cannot renew the last reading or revive a cancelled tap', async () => {
+	const { screen, onOutputMeter } = await setupSheet();
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+	await press(screen.container, m.biblioteca_listen_tape());
+	const live = { mode: 'live', frame: frame(-3) } as const;
+	taps[0].emit(live);
+	let finish: (() => void) | undefined;
+	const pending = new Promise<void>((resolve) => {
+		finish = resolve;
+	});
+	fakeTap.mockImplementationOnce(async (node: AudioNode) => {
+		const source = makeTap(node);
+		await pending;
+		return source;
+	});
+	await vi.advanceTimersByTimeAsync(100);
+	await press(screen.container, m.biblioteca_listen_current());
+	expect(onOutputMeter).toHaveBeenLastCalledWith(live);
+	await vi.advanceTimersByTimeAsync(100);
+	await press(screen.container, m.biblioteca_listen_tape());
+	await vi.advanceTimersByTimeAsync(49);
+	expect(onOutputMeter).toHaveBeenLastCalledWith(live);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
+	finish?.();
+	await pending;
+	await tick();
+	expect(taps[1].disconnect).toHaveBeenCalledOnce();
+	onOutputMeter.mockClear();
+	taps[0].emit(live);
+	taps[1].emit(live);
+	expect(onOutputMeter).not.toHaveBeenCalled();
+	taps[2].emit(live);
+	expect(onOutputMeter).toHaveBeenLastCalledWith(live);
+	await cleanup();
+	expect(taps[2].disconnect).toHaveBeenCalledOnce();
+	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
+	onOutputMeter.mockClear();
+	await vi.advanceTimersByTimeAsync(300);
+	expect(onOutputMeter).not.toHaveBeenCalled();
+});
+
+test('a failed replacement expires at the original last-frame deadline', async () => {
+	const { screen, onOutputMeter } = await setupSheet();
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+	vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	await press(screen.container, m.biblioteca_listen_tape());
+	const live = { mode: 'live', frame: frame(-4) } as const;
+	taps[0].emit(live);
+	await vi.advanceTimersByTimeAsync(100);
+	fakeTap.mockRejectedValueOnce(new Error('worklet unavailable'));
+	await press(screen.container, m.biblioteca_listen_current());
+	expect(onOutputMeter).toHaveBeenLastCalledWith(live);
+	await vi.advanceTimersByTimeAsync(149);
+	expect(onOutputMeter).toHaveBeenLastCalledWith(live);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
 });

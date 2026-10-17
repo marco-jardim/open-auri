@@ -3,7 +3,7 @@
 	import { encodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, ABSide, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
-	import { tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
+	import { LIVE_WINDOW_MS, tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
@@ -52,6 +52,7 @@
 	let attempt = 0;
 	let comparedCurrent: CurveData | undefined;
 	let comparedTape: Tape | undefined;
+	let outputExpiry: ReturnType<typeof setTimeout> | undefined;
 	let license = $state<'' | 'CC0-1.0' | 'CC-BY-4.0'>('');
 	let author = $state('');
 	const code = $derived(encodeS1(tape));
@@ -112,8 +113,15 @@
 		if (engine && owned(engine)) engine.stop();
 	}
 
+	function clearOutput() {
+		clearTimeout(outputExpiry);
+		outputExpiry = undefined;
+		onOutputMeter?.({ mode: 'data', frame: null });
+	}
+
 	function stop() {
 		attempt++;
+		clearOutput();
 		release();
 		if (preview) {
 			preview.dispose();
@@ -133,9 +141,13 @@
 	// Preamp dial: the selected chain only, never the shared meter bus or the other side.
 	$effect(() => {
 		const node = outputNode;
-		if (node === null) return;
+		if (node === null) {
+			clearOutput();
+			return;
+		}
 		const reference = meterReference;
 		let cancelled = false;
+		let receivedFrame = false;
 		let meter: MeterTap | null = null;
 		let unsubscribe: (() => void) | undefined;
 		void tap(node, { reference, kinds: ['vu'] })
@@ -145,7 +157,19 @@
 					return;
 				}
 				meter = source;
-				unsubscribe = source.subscribe((update) => onOutputMeter?.(update));
+				unsubscribe = source.subscribe((update) => {
+					if (cancelled) return;
+					if (update.mode === 'live' && update.frame?.active) {
+						receivedFrame = true;
+						clearTimeout(outputExpiry);
+						onOutputMeter?.(update);
+						// Expire from the last real reading, never from a side/reference change.
+						outputExpiry = setTimeout(clearOutput, LIVE_WINDOW_MS);
+					} else if ((update.mode === 'data' && receivedFrame) || outputExpiry === undefined) {
+						// Initial DATA must not erase a fresh handoff; empty/inactive frames cannot renew it.
+						clearOutput();
+					}
+				});
 			})
 			.catch((error: unknown) => {
 				if (!cancelled) console.error('Biblioteca output meter failed', error);
@@ -154,7 +178,7 @@
 			cancelled = true;
 			unsubscribe?.();
 			meter?.disconnect();
-			onOutputMeter?.({ mode: 'data', frame: null });
+			// Preserve the last reading while the replacement warms up, only until its expiry.
 		};
 	});
 

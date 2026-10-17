@@ -160,7 +160,7 @@
 			// What is playing (post-curve sum): correlation and peak.
 			listenTo(
 				engine.getMeterBus(),
-				{ reference, kinds: ['vu', 'ppm', 'loudness', 'correlation'], ppmType: 'I' },
+				{ reference, kinds: ['ppm', 'correlation'], ppmType: 'I' },
 				(update) => {
 					meterUpdate = update;
 				}

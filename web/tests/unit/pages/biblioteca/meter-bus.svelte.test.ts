@@ -44,7 +44,8 @@ test('the archive meters tap the pre-volume meter and source buses, never the po
 	// What is playing (post-curve sum, pre-volume): correlation, peak.
 	expect(calls.get(app.audio.getMeterBus())).toMatchObject({
 		reference: -14,
-		kinds: ['vu', 'ppm', 'loudness', 'correlation']
+		kinds: ['ppm', 'correlation'],
+		ppmType: 'I'
 	});
 	// Nível: the source before any curve, a tap of its own (never a copy of another dial).
 	expect(calls.get(app.audio.getSourceBus())).toMatchObject({ reference: -14, kinds: ['vu'] });

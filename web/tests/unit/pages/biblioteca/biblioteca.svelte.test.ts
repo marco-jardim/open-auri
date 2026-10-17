@@ -259,6 +259,7 @@ test('every dial reads its own real tap in LIVE on an unchanged face, then retur
 	const dials = [...screen.container.querySelectorAll('.dial')];
 	expect(dials).toHaveLength(5);
 	const labels = dials.map((dial) => dial.querySelector('.label')?.textContent);
+	expect(labels[0]).toBe('Level');
 	const geometry = () =>
 		dials.map((dial) => dial.querySelector('.face')?.getBoundingClientRect().toJSON());
 	const idleGeometry = geometry();
