@@ -158,8 +158,11 @@
 		const result = await ask();
 		if (destroyed || lastOwner !== null || session.signedIn) return;
 		if (result?.status === 'signed-out') purgeAll();
-		else if (result === null || result.status === 'error') unconfirmed = true;
-		// `signed-in`: the signed-out read was wrong; nothing is purged and the session catches up.
+		// The signed-out read was wrong (a failed `session.refresh` reads as signed out): nothing
+		// is purged and the session follows the probe at once, so the outbox flushes again
+		// instead of refusing events until the tab next turns visible (#26).
+		else if (result?.status === 'signed-in') session.set(result.account);
+		else unconfirmed = true;
 	}
 
 	/** After an `actor-mismatch` flush: reads the session again and follows the server's answer. */

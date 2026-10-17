@@ -192,8 +192,40 @@ test('a failed probe that turns out signed in keeps the queue and purges nothing
 	session.set(null);
 	flushSync();
 	await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
+	await vi.waitFor(() => expect(session.accountId).toBe('user-ana'));
 	await new Promise((resolve) => setTimeout(resolve, 20));
-	expect(outbox.purge).toHaveBeenCalledTimes(1);
+	// Ana's events stay: only other owners' could go (the same keep as at sign-in), never all.
+	expect(outbox.purge).not.toHaveBeenCalledWith(null);
+	expect(outbox.purge.mock.calls.every(([keep]) => keep === 'user-ana')).toBe(true);
+});
+
+test('a failed session read confirmed signed in restores the session at once (#26)', async () => {
+	const outbox = fakeOutbox();
+	// The session's own read fails (offline blip, 5xx): `refresh` reads that as signed out.
+	const failing = vi.fn(async (): Promise<Response> => {
+		throw new TypeError('network');
+	});
+	const session = createSocialSession({ initial: ANA, fetch: failing });
+	const probe = vi.fn(async (): Promise<AccountProbeResult> => ({
+		status: 'signed-in',
+		account: ANA
+	}));
+	await render(SocialSync, { session, api, outbox, probe });
+	await vi.waitFor(() => expect(outbox.purge).toHaveBeenCalledWith('user-ana'));
+	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(1));
+
+	await expect(session.refresh()).resolves.toBeNull();
+	expect(failing).toHaveBeenCalledOnce();
+	flushSync();
+	await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
+	// The probe says the account is still signed in: the session follows it without waiting
+	// for a visibility change, and the outbox flushes for it again.
+	await vi.waitFor(() => expect(session.accountId).toBe('user-ana'));
+	expect(session.signedIn).toBe(true);
+	expect(session.verified).toBe(true);
+	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(3));
+	expect(outbox.purge).not.toHaveBeenCalledWith(null);
+	expect(failing).toHaveBeenCalledOnce();
 });
 
 test('an actor-mismatch flush re-reads the session and follows it (R2-2)', async () => {

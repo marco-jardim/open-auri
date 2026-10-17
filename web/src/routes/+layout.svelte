@@ -18,6 +18,7 @@
 		whenIdle
 	} from '#lib/app/runtime.ts';
 	import { LazyModule } from '#lib/app/lazy.svelte.ts';
+	import { createSocialAttacher } from '#lib/app/social-attach.ts';
 	import { getFooterHonoree, getPageMeta } from '#lib/page-meta.ts';
 	import AccountEntry from '#lib/components/chrome/AccountEntry.svelte';
 	import CableBar from '#lib/components/chrome/CableBar.svelte';
@@ -103,12 +104,14 @@
 	// SocialSync itself renders on idle, or at once with a session or queued items.
 	//
 	// FUX.Q N6: social is an optional prepare. When its chunk cannot load (offline without the
-	// chunk cached, a deploy that replaced it), the app is published anyway and the outbox is
-	// marked unavailable (`data-social="unavailable"`): cable status, rescue notice and writes
-	// keep working. Writes and the rescue are never blocked or delayed by social; each request
-	// only retries the wiring in the background, and the bridge records the writes that come
-	// after it attached. The trade-off is deliberate: a missed "installed" activity in the social
-	// feed is acceptable, a device left half-written that cannot be rescued is not.
+	// chunk cached, a deploy that replaced it) or does not load within SOCIAL_ATTACH_TIMEOUT_MS
+	// (a stalled request, #35), the app is published anyway and the outbox is marked unavailable
+	// (`data-social="unavailable"`): cable status, rescue notice and writes keep working. Writes
+	// and the rescue are never blocked or delayed by social; a write or rescue request and a
+	// press or focus on the bar only retry the wiring in the background (at most once per
+	// SOCIAL_RETRY_INTERVAL_MS, `#lib/app/social-attach.ts`), and the bridge records the writes
+	// that come after it attached. The trade-off is deliberate: a missed "installed" activity in
+	// the social feed is acceptable, a device left half-written that cannot be rescued is not.
 	interface SocialWiring {
 		runtime: SocialRuntime;
 		session: SocialSession;
@@ -121,7 +124,6 @@
 	let cancelSyncIdle: (() => void) | undefined;
 	/** The social chunk failed to load: the outbox bridge is not attached (writes still work). */
 	let socialUnavailable = $state(false);
-	let socialRetry: Promise<void> | null = null;
 	/** Set by the layout's teardown: wiring that arrives later is undone at once. */
 	let destroyed = false;
 
@@ -157,7 +159,6 @@
 			return stop;
 		}
 		social = { runtime, session, api, outbox, stop };
-		socialUnavailable = false;
 		if (accountSession.current) {
 			syncReady = true;
 			return stop;
@@ -173,30 +174,29 @@
 		return stop;
 	}
 
-	/** The optional social prepare failed (the context logged it): mark the outbox unavailable. */
-	function socialFailed(): void {
-		socialUnavailable = true;
-	}
+	/**
+	 * First attach timeout, retry pace and ownership (#35). A failed or timed-out prepare marks
+	 * the outbox unavailable (the context logs it once); wiring that lands later, from a retry or
+	 * from a first attach that outlived its timeout, is kept for the live app and undone for an
+	 * app that was replaced or a layout that went away (the teardown stops a kept one).
+	 */
+	const socialAttach = createSocialAttacher<ClientApp>({
+		attach: attachSocial,
+		// Before the context publishes it (a late landing races the publication), the app is ours.
+		owns: (client) => !destroyed && (context.client === null || context.client === client),
+		onavailable: (available) => {
+			socialUnavailable = !available;
+		}
+	});
 
 	/**
 	 * Background retry of the social wiring after a failure, on a write or rescue request and on
-	 * bar intent. Never awaited by a write: see the FUX.Q N6 note above.
+	 * a press or focus on the bar (not on hover). Never awaited by a write: see the FUX.Q N6 note
+	 * above. Rate-limited and logged once per outage by `socialAttach`.
 	 */
 	function retrySocial(): void {
-		const client = context.client;
-		if (!socialUnavailable || social || socialRetry || !client || destroyed) return;
-		socialRetry = attachSocial(client)
-			.then(
-				(stop) => {
-					// The app was replaced or the layout went away meanwhile: nobody owns it.
-					if (destroyed || context.client !== client) stop();
-				},
-				(error: unknown) =>
-					console.warn('Social runtime still unavailable; the outbox stays unavailable', error)
-			)
-			.finally(() => {
-				socialRetry = null;
-			});
+		if (social || destroyed) return;
+		socialAttach.retry(context.client);
 	}
 
 	/** "Gravar no cabo": straight to the checklist; social only retries alongside. */
@@ -214,7 +214,12 @@
 	function startRuntime(): void {
 		if (!browser || context.client || context.status === 'loading') return;
 		loadSocialRuntime().catch((error: unknown) => console.warn('Social prefetch failed', error));
-		const mountOptions = { prepare: attachSocial, optional: true, onprepareerror: socialFailed };
+		// Raced against SOCIAL_ATTACH_TIMEOUT_MS: a stalled social chunk never holds the cable and
+		// rescue chrome back; the app is published without social and the wiring may land later.
+		const mountOptions = {
+			prepare: (client: ClientApp) => socialAttach.prepare(client),
+			optional: true
+		};
 		context.mount({ toasts }, mountOptions).then(
 			(client) => {
 				if (!client) return;
@@ -240,7 +245,8 @@
 	/**
 	 * First interaction that needs the runtime on a static route: pointer over, press or focus
 	 * on the bar's tools or status (Áudio, Neutro, Padrão Auri, Gravar no cabo). Once the app is
-	 * there, the same intent warms the checklist chunk.
+	 * there, the same intent warms the checklist chunk; only a press or focus also retries a
+	 * failed social wiring (a hover would re-import on every pass over the bar, #35).
 	 */
 	function barIntent(node: HTMLElement): () => void {
 		const intent = (event: Event) => {
@@ -250,7 +256,7 @@
 			startRuntime();
 			if (!context.client) return;
 			checklist.request();
-			retrySocial();
+			if (event.type !== 'pointerover') retrySocial();
 		};
 		const types = ['pointerover', 'pointerdown', 'focusin'] as const;
 		for (const type of types) node.addEventListener(type, intent, { passive: true });
