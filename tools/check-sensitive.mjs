@@ -24,6 +24,24 @@ const safelist = new Set([
 ]);
 const maxFileSize = 5 * 1024 * 1024;
 
+// Well-known credential shapes, scanned in every mode (also without a .env, as in CI with
+// --no-env). Case-sensitive; only the label is ever reported. Shapes that the repository's own
+// test fixtures use on purpose (e.g. `whsec_` webhook test secrets) are not listed.
+/** @type {{ pattern: RegExp, label: string }[]} */
+const genericPatterns = [
+  { pattern: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24,}/g, label: 'generic:RESEND_API_KEY' },
+  { pattern: /\b0x4AAAAAAA[A-Za-z0-9_-]{10,}/g, label: 'generic:TURNSTILE_KEY' },
+  { pattern: /\bgh[pousr]_[A-Za-z0-9]{36,}/g, label: 'generic:GITHUB_TOKEN' },
+  { pattern: /\bgithub_pat_[A-Za-z0-9_]{60,}/g, label: 'generic:GITHUB_TOKEN' },
+  { pattern: /\bAKIA[0-9A-Z]{16}\b/g, label: 'generic:AWS_ACCESS_KEY' },
+  { pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g, label: 'generic:PRIVATE_KEY' },
+  {
+    // A concrete Windows profile path (placeholders such as <nome> or an ellipsis do not match).
+    pattern: /\b[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}(?!(?:Public|Default|All Users)\b)[A-Za-z0-9]/g,
+    label: 'generic:WINDOWS_USER_PROFILE',
+  },
+];
+
 /** @param {string} text */
 function parseEnv(text) {
   /** @type {Map<string, string>} */
@@ -85,9 +103,37 @@ function sensitiveNeedles(values) {
   return needles;
 }
 
-/** @param {string} root */
-function scan(root) {
-  const values = parseEnv(readFileSync(resolve(root, '.env'), 'utf8'));
+/** @param {string} text */
+function lineStartsOf(text) {
+  const starts = [0];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === '\n') starts.push(index + 1);
+  }
+  return starts;
+}
+
+/**
+ * 1-based line of `offset`, by binary search over the line starts.
+ * @param {number[]} starts
+ * @param {number} offset
+ */
+function lineAt(starts, offset) {
+  let low = 0;
+  let high = starts.length;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (starts[middle] <= offset) low = middle;
+    else high = middle;
+  }
+  return low + 1;
+}
+
+/**
+ * @param {string} root
+ * @param {boolean} useEnv false (--no-env) scans only the generic shapes and the profile path
+ */
+function scan(root, useEnv) {
+  const values = useEnv ? parseEnv(readFileSync(resolve(root, '.env'), 'utf8')) : new Map();
   const needles = sensitiveNeedles(values);
   const files = execFileSync('git', ['ls-files', '-z', '-co', '--exclude-standard'], {
     cwd: root,
@@ -110,26 +156,31 @@ function scan(root) {
     if (!stat.isFile() || stat.size > maxFileSize) continue;
     const bytes = readFileSync(absolute);
     if (bytes.includes(0)) continue;
-    const text = bytes.toString('utf8').toLowerCase();
-    const lineStarts = [0];
-    for (let index = 0; index < text.length; index += 1) {
-      if (text[index] === '\n') lineStarts.push(index + 1);
-    }
+    const original = bytes.toString('utf8');
+    const text = original.toLowerCase();
+    const lowerStarts = lineStartsOf(text);
     const matches = new Map();
+    /**
+     * @param {number} line
+     * @param {string} label
+     */
+    const record = (line, label) => {
+      if (!matches.has(line)) matches.set(line, new Set());
+      matches.get(line).add(label);
+    };
     for (const needle of needles) {
       let offset = text.indexOf(needle.value);
       while (offset !== -1) {
-        let low = 0;
-        let high = lineStarts.length;
-        while (low + 1 < high) {
-          const middle = Math.floor((low + high) / 2);
-          if (lineStarts[middle] <= offset) low = middle;
-          else high = middle;
-        }
-        const line = low + 1;
-        if (!matches.has(line)) matches.set(line, new Set());
-        matches.get(line).add(needle.label);
+        record(lineAt(lowerStarts, offset), needle.label);
         offset = text.indexOf(needle.value, offset + 1);
+      }
+    }
+    // The generic shapes are case-sensitive, so they run on the original text with its own line
+    // index (toLowerCase() may change the length of a few code points).
+    const originalStarts = lineStartsOf(original);
+    for (const { pattern, label } of genericPatterns) {
+      for (const match of original.matchAll(pattern)) {
+        record(lineAt(originalStarts, match.index), label);
       }
     }
     for (const [line, labels] of [...matches].sort(([a], [b]) => a - b)) {
@@ -139,9 +190,12 @@ function scan(root) {
   return findings;
 }
 
+// --no-env: for CI, where no .env exists. Only the generic credential shapes and the user
+// profile path are scanned; the values of the operator's .env are covered by the local run.
 const json = process.argv.includes('--json');
+const useEnv = !process.argv.includes('--no-env');
 try {
-  const findings = scan(process.cwd());
+  const findings = scan(process.cwd(), useEnv);
   if (json) {
     console.log(JSON.stringify(findings, null, 2));
   } else {

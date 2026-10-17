@@ -13,7 +13,7 @@ function fixture(t, env, files) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   execFileSync('git', ['init', '--quiet', root], { stdio: 'pipe' });
   writeFileSync(join(root, '.gitignore'), '.env\nignored.txt\n');
-  writeFileSync(join(root, '.env'), env);
+  if (env !== null) writeFileSync(join(root, '.env'), env);
   for (const [path, contents] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), contents);
@@ -122,9 +122,66 @@ test('derives both Windows user-profile path spellings without echoing them', (t
   assert.equal(result.status, 1, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), [
     { path: 'profiles.txt', line: 1, label: 'derived:WINDOWS_USER_PROFILE' },
+    { path: 'profiles.txt', line: 1, label: 'generic:WINDOWS_USER_PROFILE' },
     { path: 'profiles.txt', line: 2, label: 'derived:WINDOWS_USER_PROFILE' },
+    { path: 'profiles.txt', line: 2, label: 'generic:WINDOWS_USER_PROFILE' },
   ]);
   assert.ok(!`${result.stdout}${result.stderr}`.toLowerCase().includes(match[2].toLowerCase()));
+});
+
+// Built by concatenation so this test file never contains a credential shape itself.
+const GENERIC = {
+  resend: ['re', '_Fixture1', '_', 'A'.repeat(24)].join(''),
+  turnstile: ['0x4', 'AAAAAAA', 'fixture-key-123'].join(''),
+  github: ['gh', 'p_', 'f'.repeat(36)].join(''),
+  privateKey: ['-----BEGIN ', 'PRIVATE KEY-----'].join(''),
+  profile: ['C:', '\\Users\\', 'fixtureuser\\scratch'].join(''),
+};
+
+test('--no-env works without a .env and scans only the generic shapes', (t) => {
+  const envOnly = 'fixture-env-only-value-321';
+  const repo = fixture(t, null, {
+    'keys.txt': [
+      'ordinary text',
+      GENERIC.resend,
+      GENERIC.turnstile,
+      GENERIC.github,
+      GENERIC.privateKey,
+      GENERIC.profile,
+      envOnly,
+    ].join('\n'),
+    'placeholders.md': 'C:\\Users\\<nome>\nC:\\Users\\Public\\x\nre_...\n<whsec_...>\n',
+  });
+  const result = repo.run('--no-env', '--json');
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    { path: 'keys.txt', line: 2, label: 'generic:RESEND_API_KEY' },
+    { path: 'keys.txt', line: 3, label: 'generic:TURNSTILE_KEY' },
+    { path: 'keys.txt', line: 4, label: 'generic:GITHUB_TOKEN' },
+    { path: 'keys.txt', line: 5, label: 'generic:PRIVATE_KEY' },
+    { path: 'keys.txt', line: 6, label: 'generic:WINDOWS_USER_PROFILE' },
+  ]);
+  const output = `${result.stdout}${result.stderr}`;
+  for (const value of Object.values(GENERIC)) assert.ok(!output.includes(value));
+});
+
+test('--no-env exits 0 on a clean tree, and without the flag a missing .env fails with 2', (t) => {
+  const repo = fixture(t, null, { 'clean.txt': 'nothing to see\n' });
+  const clean = repo.run('--no-env', '--json');
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.deepEqual(JSON.parse(clean.stdout), []);
+  const missing = repo.run('--json');
+  assert.equal(missing.status, 2);
+  assert.match(missing.stdout, /Sensitive-data scan failed/);
+});
+
+test('the generic shapes are also scanned when a .env exists', (t) => {
+  const repo = fixture(t, 'EMPTY_TOKEN=\n', { 'key.txt': `x\n${GENERIC.github}\n` });
+  const result = repo.run('--json');
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    { path: 'key.txt', line: 2, label: 'generic:GITHUB_TOKEN' },
+  ]);
 });
 
 test('accepts inline comments and exported or multiline quoted values', (t) => {

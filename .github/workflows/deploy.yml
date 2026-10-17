@@ -1,0 +1,109 @@
+# Optional deploy from GitHub (plan T5.1, H-CF-TOKEN). The default path is the operator's machine
+# (docs/deploy.md); this workflow runs the same tools/deploy.mjs and only when the repository
+# secret CLOUDFLARE_API_TOKEN exists (otherwise it ends with a notice). Every real value comes
+# from repository secrets (identifiers, PUBLIC_* and runtime secrets) or repository variables
+# (non-secret flags); nothing is written to the repository and deploy.mjs never prints values.
+# Production runs in the `production` GitHub environment: configure required reviewers there so
+# every production deploy waits for an approval.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Check for CLOUDFLARE_API_TOKEN
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.token.outputs.enabled }}
+    steps:
+      - id: token
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Deploy skipped::CLOUDFLARE_API_TOKEN is not set; deploy from the operator machine (docs/deploy.md)."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Deploy (${{ inputs.environment }})
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      WRANGLER_SEND_METRICS: 'false'
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+      WORKER_NAME_WEB: ${{ secrets.WORKER_NAME_WEB }}
+      WORKER_NAME_JOBS: ${{ secrets.WORKER_NAME_JOBS }}
+      D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_DATABASE_NAME_STAGING: ${{ secrets.D1_DATABASE_NAME_STAGING }}
+      D1_DATABASE_ID_STAGING: ${{ secrets.D1_DATABASE_ID_STAGING }}
+      KV_CONFIG_ID: ${{ secrets.KV_CONFIG_ID }}
+      KV_CONFIG_ID_STAGING: ${{ secrets.KV_CONFIG_ID_STAGING }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_BUCKET_STAGING: ${{ secrets.R2_BUCKET_STAGING }}
+      ACCESS_LOG_QUEUE: ${{ secrets.ACCESS_LOG_QUEUE }}
+      ACCESS_LOG_QUEUE_STAGING: ${{ secrets.ACCESS_LOG_QUEUE_STAGING }}
+      ACCESS_LOG_DLQ: ${{ secrets.ACCESS_LOG_DLQ }}
+      ACCESS_LOG_DLQ_STAGING: ${{ secrets.ACCESS_LOG_DLQ_STAGING }}
+      # PUBLIC_ORIGIN is derived from the target environment by tools/deploy.mjs.
+      PUBLIC_GITHUB_URL: ${{ secrets.PUBLIC_GITHUB_URL }}
+      PUBLIC_LGPD_CONTROLLER: ${{ secrets.PUBLIC_LGPD_CONTROLLER }}
+      PUBLIC_LGPD_CONTACT_EMAIL: ${{ secrets.PUBLIC_LGPD_CONTACT_EMAIL }}
+      PUBLIC_LGPD_CNPJ: ${{ secrets.PUBLIC_LGPD_CNPJ }}
+      PUBLIC_LGPD_ADDRESS: ${{ secrets.PUBLIC_LGPD_ADDRESS }}
+      PUBLIC_LGPD_DPO_NAME: ${{ secrets.PUBLIC_LGPD_DPO_NAME }}
+      PUBLIC_POLICY_EFFECTIVE_DATE: ${{ secrets.PUBLIC_POLICY_EFFECTIVE_DATE }}
+      PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.PUBLIC_TURNSTILE_SITE_KEY }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_FROM: ${{ secrets.RESEND_FROM }}
+      RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+      TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+      IPHASH_PEPPER: ${{ secrets.IPHASH_PEPPER }}
+      ACCESS_LOG_KEY: ${{ secrets.ACCESS_LOG_KEY }}
+      ACCESS_LOG_ENABLED: ${{ vars.ACCESS_LOG_ENABLED || 'true' }}
+      SIGNUP_ENABLED: ${{ vars.SIGNUP_ENABLED || 'false' }}
+      ADMIN_2FA_REQUIRED: ${{ vars.ADMIN_2FA_REQUIRED || 'true' }}
+      EMAIL_TRANSPORT: resend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: tools/deploy.mjs
+        run: |
+          args=(--env "$TARGET_ENV")
+          if [ "$TARGET_ENV" = "production" ]; then
+            # The approval of the `production` environment is the explicit confirmation.
+            args+=(--confirm-production)
+          fi
+          node tools/deploy.mjs "${args[@]}"

@@ -1,0 +1,194 @@
+# CI: lint, types, tests, build, e2e, dependency audit and sensitive-data scan on every PR and
+# push to main. Every value below is FICTITIOUS: CI never talks to Cloudflare, Resend or the
+# operator's account, and the real values live only in the operator's .env (and, for the
+# optional deploy workflow, in repository secrets). The templates' placeholders
+# (web/wrangler.template.jsonc, workers/jobs/wrangler.template.jsonc) and the PUBLIC_* keys of
+# web/src/env.ts are all covered here, so tools/render-wrangler.mjs and the build need no .env.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  WRANGLER_SEND_METRICS: 'false'
+  # Cloudflare (fictitious; local Miniflare only)
+  CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000'
+  CLOUDFLARE_WORKERS_SUBDOMAIN: ci-fixture
+  WORKER_NAME_WEB: open-auri-ci
+  WORKER_NAME_JOBS: open-auri-ci-jobs
+  D1_DATABASE_NAME: open-auri-ci
+  D1_DATABASE_ID: 00000000-0000-4000-8000-000000000001
+  D1_DATABASE_NAME_STAGING: open-auri-ci-staging
+  D1_DATABASE_ID_STAGING: 00000000-0000-4000-8000-000000000002
+  KV_CONFIG_ID: '00000000000000000000000000000001'
+  KV_CONFIG_ID_STAGING: '00000000000000000000000000000002'
+  R2_BUCKET: open-auri-ci-media
+  R2_BUCKET_STAGING: open-auri-ci-media-staging
+  ACCESS_LOG_QUEUE: open-auri-ci-access-log
+  ACCESS_LOG_QUEUE_STAGING: open-auri-ci-access-log-staging
+  ACCESS_LOG_DLQ: open-auri-ci-access-log-dlq
+  ACCESS_LOG_DLQ_STAGING: open-auri-ci-access-log-dlq-staging
+  # Public build values (fictitious; embedded in the CI bundle only)
+  PUBLIC_ORIGIN: https://open-auri-ci.ci-fixture.workers.dev
+  PUBLIC_GITHUB_URL: https://github.com/example/open-auri
+  PUBLIC_LGPD_CONTROLLER: Controlador Ficticio de CI
+  PUBLIC_LGPD_CONTACT_EMAIL: lgpd@example.com
+  PUBLIC_LGPD_CNPJ: 00.000.000/0000-00
+  PUBLIC_LGPD_ADDRESS: Endereco Ficticio, 0, Cidade Exemplo
+  PUBLIC_LGPD_DPO_NAME: Encarregado Ficticio
+  PUBLIC_POLICY_EFFECTIVE_DATE: '2026-01-01'
+  # Cloudflare's documented always-pass Turnstile test keys
+  PUBLIC_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+  TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
+  # Runtime secrets (fictitious; only written to web/.dev.vars for the local e2e preview)
+  BETTER_AUTH_SECRET: ci-fictitious-better-auth-secret-not-real-0000
+  RESEND_API_KEY: ci-fictitious-resend-key
+  IPHASH_PEPPER: ci-fictitious-iphash-pepper-not-real-0000
+  ACCESS_LOG_KEY: ci-fictitious-access-log-key-not-real-0000
+  RESEND_FROM: open-auri CI <ci@example.com>
+  # Flags
+  ACCESS_LOG_ENABLED: 'true'
+  SIGNUP_ENABLED: 'false'
+  ADMIN_2FA_REQUIRED: 'true'
+  EMAIL_TRANSPORT: resend
+
+jobs:
+  static:
+    name: Lint, types and scans
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Sensitive-data scan (generic shapes; no .env in CI)
+        run: node tools/check-sensitive.mjs --no-env
+      - name: Dependency audit (runtime dependencies)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Root lint
+        run: npm run lint
+      - name: Root typecheck
+        run: npm run typecheck
+      - name: Paraglide compile (web)
+        working-directory: web
+        run: >-
+          node --input-type=module -e "import { compile } from '@inlang/paraglide-js';
+          import options from './project.inlang/paraglide.config.mjs';
+          await compile({ project: './project.inlang', outdir: './src/lib/paraglide', ...options });"
+      - name: Web svelte-kit sync
+        working-directory: web
+        run: npx svelte-kit sync
+      - name: Web prettier
+        working-directory: web
+        run: npx prettier --check .
+      - name: Web eslint
+        working-directory: web
+        run: npx eslint .
+      - name: Web svelte-check (runs svelte-kit sync first)
+        run: npm run -w web check
+      - name: Web integration types
+        run: npm run -w web check:int
+      - name: Jobs types
+        run: |
+          npm run -w workers/jobs gen
+          npm run -w workers/jobs check
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Core tests with coverage gates
+        run: npm run test:coverage
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium (Vitest browser project)
+        run: npx playwright install --with-deps chromium
+      - name: Web unit and component tests
+        run: npm run -w web test:unit
+      - name: Web integration tests
+        run: npm run -w web test:int
+      - name: Jobs tests
+        run: npm run -w workers/jobs test
+
+  build:
+    name: Build and budgets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Web build (fictitious PUBLIC_* values)
+        run: npm run -w web build
+      - name: Bundle budgets
+        run: npm run -w web budgets
+      - name: Jobs build (dry run)
+        run: npm run -w workers/jobs build
+
+  e2e:
+    name: E2E (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Render wrangler.jsonc and .dev.vars (fictitious values)
+        run: |
+          npm run -w web gen
+          npm run -w web dev-vars
+      - name: Playwright
+        run: npm run -w web test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
