@@ -7,7 +7,9 @@
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import { Button, Lamp } from '#lib/components/primitives/index.ts';
+	import TesteCegoArt from '#lib/components/art/TesteCegoArt.svelte';
+	import Button from '#lib/components/primitives/Button.svelte';
+	import Lamp from '#lib/components/primitives/Lamp.svelte';
 	import { Explainer, TourTrigger } from '#lib/components/comprehension/index.ts';
 
 	let {
@@ -176,6 +178,8 @@
 			{/if}
 			<circle class="lock" cx="800" cy="478" r="4" fill={settled ? '#ffd27a' : '#57401f'} />
 		</svg>
+		<!-- FUX.ART.3: decorative art over the drawing, under the plates and every text. -->
+		<TesteCegoArt place="scene" />
 		<div class="plates">
 			{#each plates as plate, position (position)}
 				<Button

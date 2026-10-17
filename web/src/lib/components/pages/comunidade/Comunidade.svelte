@@ -32,13 +32,17 @@
 	import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { MeterTap, TapOptions } from '#lib/audio/meters.ts';
+	import ComunidadeArt from '#lib/components/art/ComunidadeArt.svelte';
 	import {
 		Tour,
 		TourTrigger,
 		tour,
 		type TourController
 	} from '#lib/components/comprehension/index.ts';
-	import { Button, EmptyState, Lamp, Skeleton } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
+	import EmptyState from '#lib/components/primitives/EmptyState.svelte';
+	import Lamp from '#lib/components/primitives/Lamp.svelte';
+	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { checkedCurve, type CurrentCurve } from '#lib/state/model.ts';
@@ -434,6 +438,7 @@
 {/snippet}
 
 <div class="oa-comunidade">
+	<ComunidadeArt />
 	<Tour page="comunidade" controller={tourController} />
 
 	<section class="hero" aria-labelledby="{id}-title">

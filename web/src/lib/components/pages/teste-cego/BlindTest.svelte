@@ -21,8 +21,10 @@
 		type PreviewCurve
 	} from '#lib/audio/engine.ts';
 	import { warmAudio } from '#lib/audio/warm.ts';
+	import TesteCegoArt from '#lib/components/art/TesteCegoArt.svelte';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
-	import { Button, Lamp } from '#lib/components/primitives/index.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
+	import Lamp from '#lib/components/primitives/Lamp.svelte';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { SocialApi } from '#lib/social/index.ts';
 	import ListeningRoom from './ListeningRoom.svelte';
@@ -448,6 +450,7 @@
 <svelte:window onkeydown={keyboard} />
 
 <div class="blind-test">
+	<TesteCegoArt />
 	<ListeningRoom
 		revealed={!active && last !== null}
 		{moving}
@@ -1014,6 +1017,9 @@
 		--accent: #ffd27a;
 		--muted: #b5ad9f;
 		--rule: #ece7dd24;
+		/* FUX.ART.3: the art layer (TesteCegoArt) is positioned inside this stacking context. */
+		position: relative;
+		isolation: isolate;
 		color: #ece7dd;
 		font: var(--fs-body) / 1.5 var(--face-body);
 	}
