@@ -484,3 +484,38 @@ test('loading a preset draws its trace in and throws the matching guard lever', 
 	).toHaveLength(1);
 	expect(app?.pendingWrite).toBeNull();
 });
+
+test('bank strips never overflow: the stage ladder and its dB readout fit each strip', async () => {
+	await page.viewport(1440, 900);
+	const curve: Curve = { preampDb: PADRAO_AURI.preampDb, bands: PADRAO_AURI.bands };
+	const screen = await render(FilterBank, {
+		curve,
+		verdict: verdictFor(curve),
+		layer: 'ajustar',
+		locale: 'pt-BR',
+		stages: [],
+		selected: 0,
+		ondrag: vi.fn(),
+		onmove: vi.fn(),
+		onkind: vi.fn(),
+		onorder: vi.fn()
+	});
+	await tick();
+	const strips = [...screen.container.querySelectorAll<HTMLElement>('.module')];
+	expect(strips.length).toBe(10);
+	for (const strip of strips) {
+		const box = strip.getBoundingClientRect();
+		for (const child of strip.querySelectorAll<HTMLElement>('.led-row, .led-row > *')) {
+			const rect = child.getBoundingClientRect();
+			expect(rect.left, child.className).toBeGreaterThanOrEqual(box.left - 0.5);
+			expect(rect.right, child.className).toBeLessThanOrEqual(box.right + 0.5);
+		}
+		const wide = [...strip.querySelectorAll<HTMLElement>('*')]
+			.filter((node) => node.getBoundingClientRect().right > box.right + 0.5)
+			.map(
+				(node) =>
+					`${node.tagName.toLowerCase()}.${String(node.getAttribute('class') ?? '').split(' ')[0]} ${Math.round(node.getBoundingClientRect().width)}px`
+			);
+		expect(wide, 'elements wider than their strip').toEqual([]);
+	}
+});

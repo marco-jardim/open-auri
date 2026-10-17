@@ -558,7 +558,9 @@
 	}
 	.module {
 		position: relative;
+		min-width: 0;
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		align-content: start;
 		justify-items: center;
 		gap: 6px;
@@ -672,15 +674,20 @@
 		outline: var(--focus-width) solid var(--accent);
 		outline-offset: 1px;
 	}
+	/* CORTE / REFORÇO wrap onto two lines in a narrow strip instead of pushing it wider. */
 	.signs {
+		max-width: 100%;
 		display: flex;
-		gap: 8px;
+		flex-wrap: wrap;
+		gap: 4px 8px;
 		justify-content: center;
 	}
 	.sign {
+		min-width: 0;
 		display: inline-flex;
 		gap: 4px;
 		align-items: center;
+		white-space: nowrap;
 		color: var(--text-2);
 		font: 600 var(--label-min) / 1 var(--face-engrave);
 		letter-spacing: 0.08em;
@@ -791,12 +798,38 @@
 		stroke: var(--accent);
 		stroke-width: 1.3;
 	}
+	/* The stage ladder fills the strip and the dB readout sits under it, so neither can push
+	   the strip wider than its column (the ladder's LEDs shrink to share the width). */
 	.led-row {
-		display: flex;
-		gap: 6px;
-		align-items: center;
+		width: 100%;
+		min-width: 0;
+		display: grid;
+		justify-items: center;
+		gap: 3px;
 		color: var(--text-2);
-		font: 400 var(--label-min) var(--face-data);
+		font: 400 var(--label-min) / 1 var(--face-data);
+		font-variant-numeric: tabular-nums;
+	}
+	.led-row :global(.oa-leds) {
+		display: flex;
+		width: 100%;
+		min-width: 0;
+	}
+	.led-row :global(.oa-leds-list) {
+		flex: 1 1 auto;
+		min-width: 0;
+		gap: 1px;
+	}
+	.led-row :global(.oa-led) {
+		flex: 1 1 0;
+		min-width: 2px;
+		width: auto;
+	}
+	.led-row small {
+		max-width: 100%;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
 	}
 	.tech {
 		margin-top: var(--space-4);
