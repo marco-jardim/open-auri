@@ -148,7 +148,14 @@ test('without data the needle rests and nothing claims a reading', async () => {
 	expect(rotation(screen.container.querySelector('.needle'))).toBe(-50);
 	await expect.element(page.getByText(m.meter_mode_data(), { exact: true })).toBeVisible();
 	expect(screen.container.textContent).toContain(m.curva_out_unknown());
-	expect(screen.container.textContent).not.toContain('?');
+	// No reading prints the "?" of a non-finite number. The "o que é isso?" explainer triggers
+	// (preamp, gate) carry a "?" glyph by design: they are not readings, so leave them out.
+	const readings = screen.container.cloneNode(true);
+	if (!(readings instanceof Element)) throw new Error('Expected an element');
+	const triggers = readings.querySelectorAll('button[aria-haspopup="dialog"]');
+	expect(triggers.length).toBeGreaterThan(0);
+	for (const trigger of triggers) trigger.remove();
+	expect(readings.textContent).not.toContain('?');
 });
 
 test('reduced motion: no needle easing and a numeric readout instead', async () => {

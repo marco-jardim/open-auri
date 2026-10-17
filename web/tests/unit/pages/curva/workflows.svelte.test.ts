@@ -411,14 +411,15 @@ test('before client mount the neutral page is readable and write/preview/import 
 		gateClient: gateClient()
 	});
 	await expect.element(page.getByRole('heading', { name: 'Curva', exact: true })).toBeVisible();
-	for (const name of [
-		m.curva_preview(),
-		m.curva_write(),
-		m.curva_export_txt(),
-		m.curva_rescue_neutral()
-	]) {
-		await expect.element(page.getByRole('button', { name, exact: true })).toBeDisabled();
+	// Unavailable, focusable and saying why (T8): the editor is still loading.
+	for (const name of [m.curva_write(), m.curva_export_txt(), m.curva_rescue_neutral()]) {
+		const button = page.getByRole('button', { name, exact: true });
+		await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(button).toHaveAccessibleDescription(m.curva_v2_loading_reason());
 	}
+	const lever = page.getByRole('button', { name: m.curva_preview(), exact: true });
+	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(lever).toHaveAccessibleDescription(m.curva_v2_preview_unavailable());
 });
 
 test('named S5 imports preserve metadata and report editor refusal', async () => {

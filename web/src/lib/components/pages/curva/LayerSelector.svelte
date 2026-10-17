@@ -1,10 +1,16 @@
 <!--
-	Rotary layer selector (Ouvir ⊂ Ajustar ⊂ Engenharia). A radiogroup with roving focus: arrows move
-	between layers, 1/2/3 are handled by the page. The knob turns with a CSS transition that is
-	removed under prefers-reduced-motion.
+	Rotary layer selector (mock v2 .mode-sel): one chicken-head knob with OUVIR, AJUSTAR and
+	ENGENHARIA engraved around it and a lamp on the active layer.
+	- Keyboard: a radiogroup with roving focus; arrows (and Home/End) move between layers, 1/2/3 are
+	  handled by the page. The labels are the radios.
+	- Pointer: clicking the knob turns it to the next layer (a shortcut; the radios stay the control).
+	- Motion: the knob swings with the mechanical detent easing (--ease-mech); no motion under
+	  prefers-reduced-motion. The lamp reflects the real current layer.
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Lamp } from '#lib/components/primitives/index.ts';
 	import { LAYERS, layerRank, type Layer } from './layers.ts';
 
 	interface Props {
@@ -24,46 +30,79 @@
 		engenharia: () => m.curva_layer_desc_engenharia()
 	};
 	const buttons = $state<HTMLButtonElement[]>([]);
-	const descId = $props.id();
+	const uid = $props.id();
+	const descId = `${uid}-desc`;
+	const turn = $derived((layerRank(layer) - 1) * 45);
 
-	function onkeydown(event: KeyboardEvent, index: number) {
-		const delta =
-			event.key === 'ArrowRight' || event.key === 'ArrowDown'
-				? 1
-				: event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-					? -1
-					: 0;
-		if (delta === 0) return;
-		event.preventDefault();
-		const next = LAYERS[(index + delta + LAYERS.length) % LAYERS.length];
-		if (!next) return;
+	function select(next: Layer) {
 		onlayer(next);
 		buttons[LAYERS.indexOf(next)]?.focus();
 	}
+
+	function onkeydown(event: KeyboardEvent, index: number) {
+		let next: Layer | undefined;
+		if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+			next = LAYERS[(index + 1) % LAYERS.length];
+		} else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+			next = LAYERS[(index - 1 + LAYERS.length) % LAYERS.length];
+		} else if (event.key === 'Home') {
+			next = LAYERS[0];
+		} else if (event.key === 'End') {
+			next = LAYERS[LAYERS.length - 1];
+		}
+		if (!next) return;
+		event.preventDefault();
+		select(next);
+	}
+
+	/** Pointer shortcut on the knob face: one detent to the next layer (keyboard uses the radios). */
+	function dialClick(node: HTMLElement) {
+		const onclick = () => {
+			const next = LAYERS[(LAYERS.indexOf(layer) + 1) % LAYERS.length];
+			if (next) onlayer(next);
+		};
+		node.addEventListener('click', onclick);
+		return () => node.removeEventListener('click', onclick);
+	}
 </script>
 
-<div class="mode">
+<div class="mode" data-tour="curva-layers">
 	<div
 		class="mode-sel"
 		role="radiogroup"
 		aria-label={m.curva_layer_aria()}
 		aria-describedby={descId}
 	>
-		<svg class="dial" viewBox="-60 -60 120 120" aria-hidden="true">
-			<g class="scale">
-				<line x1="-36" y1="-36" x2="-42" y2="-42" />
-				<line x1="0" y1="-52" x2="0" y2="-58" />
-				<line x1="36" y1="-36" x2="42" y2="-42" />
-			</g>
-			<circle r="45" class="skirt" />
-			<g class="pointer" style:--turn={`${(layerRank(layer) - 1) * 45}deg`}>
-				<path
-					d="M0 -50 C9 -50 14 -20 16 0 C18 22 12 36 0 36 C-12 36 -18 22 -16 0 C-14 -20 -9 -50 0 -50 Z"
-					class="face"
-				/>
-				<line x1="0" y1="-44" x2="0" y2="-14" class="index" />
-			</g>
-		</svg>
+		<div class="dial" aria-hidden="true" {@attach dialClick}>
+			<svg viewBox="-60 -60 120 120">
+				<defs>
+					<radialGradient id="{uid}-skirt" cx="40%" cy="35%" r="70%">
+						<stop offset="0" stop-color="#3a3b3a" />
+						<stop offset="0.6" stop-color="#151616" />
+						<stop offset="1" stop-color="#050505" />
+					</radialGradient>
+					<linearGradient id="{uid}-face" x1="0" y1="0" x2="1" y2="1">
+						<stop offset="0" stop-color="#3d3e3d" />
+						<stop offset="1" stop-color="#121212" />
+					</linearGradient>
+				</defs>
+				<g class="scale">
+					<line x1="-36" y1="-36" x2="-42" y2="-42" />
+					<line x1="0" y1="-52" x2="0" y2="-58" />
+					<line x1="36" y1="-36" x2="42" y2="-42" />
+				</g>
+				<circle cx="4" cy="6" r="44" class="shadow" />
+				<circle r="45" fill="url(#{uid}-skirt)" class="skirt" />
+				<g class="pointer" style:--turn={`${turn}deg`}>
+					<path
+						d="M0 -50 C9 -50 14 -20 16 0 C18 22 12 36 0 36 C-12 36 -18 22 -16 0 C-14 -20 -9 -50 0 -50 Z"
+						fill="url(#{uid}-face)"
+						class="face"
+					/>
+					<line x1="0" y1="-44" x2="0" y2="-14" class="index" />
+				</g>
+			</svg>
+		</div>
 		{#each LAYERS as option, index (option)}
 			<button
 				bind:this={buttons[index]}
@@ -75,100 +114,144 @@
 				onclick={() => onlayer(option)}
 				onkeydown={(event) => onkeydown(event, index)}
 			>
-				{labels[option]()}
+				<Lamp on={option === layer} class="mode-lamp" />{labels[option]()}
 			</button>
 		{/each}
 	</div>
 	<div class="mode-side">
 		<p class="mode-desc" id={descId}>{descriptions[layer]()}</p>
-		<span class="keyhint"><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> {m.curva_keys_hint()}</span>
+		<div class="keyhint">
+			<span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> {m.curva_keys_hint()}</span>
+			<Explainer term="camadas" />
+		</div>
 	</div>
 </div>
 
 <style>
 	.mode {
 		display: flex;
-		gap: 18px;
+		gap: var(--space-4);
 		align-items: center;
 	}
 	.mode-sel {
 		position: relative;
-		display: grid;
-		grid-template-columns: repeat(3, auto);
-		grid-template-rows: auto auto;
-		justify-items: center;
-		gap: 4px 10px;
-		padding: 6px 10px;
+		flex: none;
+		width: 320px;
+		height: 140px;
 	}
 	.dial {
-		grid-column: 1 / -1;
-		width: 84px;
-		height: 84px;
+		position: absolute;
+		top: 30px;
+		left: calc(50% - 50px);
+		width: 100px;
+		height: 100px;
+		border-radius: 50%;
+		cursor: pointer;
+	}
+	.dial svg {
+		display: block;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
 	}
 	.scale line {
-		stroke: var(--curva-silk, #e9e3d4);
+		stroke: var(--text);
 		stroke-width: 2.4;
 	}
-	.skirt {
-		fill: #121212;
-		stroke: #000;
+	.shadow {
+		fill: rgb(0 0 0 / 0.5);
 	}
+	.skirt,
 	.face {
-		fill: #262727;
 		stroke: #000;
 	}
 	.index {
-		stroke: #f6f2e8;
+		stroke: var(--text);
 		stroke-width: 3.4;
 		stroke-linecap: round;
 	}
 	.pointer {
 		transform: rotate(var(--turn));
-		/* Mock: the mode dial swings to the selected layer in .55 s. */
-		transition: transform 550ms cubic-bezier(0.3, 1.4, 0.5, 1);
+		transition: transform var(--dur-scene) var(--ease-mech);
 	}
 	.mode-lbl {
-		min-height: 32px;
-		padding: 4px 8px;
-		border: 1px solid transparent;
-		border-radius: 3px;
-		background: #1d1c1b;
-		color: var(--curva-silk-2, #c9c1ae);
-		font: 600 11px/1.2 var(--font-mono, 'JetBrains Mono', monospace);
-		letter-spacing: 0.08em;
+		position: absolute;
+		display: inline-flex;
+		gap: var(--space-2);
+		align-items: center;
+		min-height: var(--hit);
+		padding: 4px 6px;
+		border: 0;
+		border-radius: var(--rad-sm);
+		background: none;
+		color: var(--text-2);
+		font: 600 var(--fs-small) / 1 var(--face-engrave);
+		letter-spacing: 0.2em;
 		text-transform: uppercase;
 		cursor: pointer;
+		transition: color var(--dur-fast) var(--ease-out);
+	}
+	.mode-lbl:hover {
+		color: var(--text);
 	}
 	.mode-lbl[aria-checked='true'] {
-		border-color: var(--accent, #ff7a2f);
-		color: var(--accent, #ff7a2f);
+		color: var(--text);
+	}
+	.mode-lbl :global(.mode-lamp) {
+		width: 7px;
+		height: 7px;
+	}
+	.mode-lbl:not([aria-checked='true']) :global(.mode-lamp) {
+		visibility: hidden;
 	}
 	.mode-lbl:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
+		outline: var(--focus-width) solid var(--accent);
 		outline-offset: 2px;
+	}
+	.l0 {
+		top: 40px;
+		left: 0;
+	}
+	.l1 {
+		top: -6px;
+		left: 50%;
+		transform: translateX(-50%);
+	}
+	.l2 {
+		top: 40px;
+		right: 0;
 	}
 	.mode-side {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
-		max-width: 300px;
+		gap: var(--space-2);
+		max-width: 240px;
 	}
 	.mode-desc {
+		min-height: 3.6em;
 		margin: 0;
-		font-size: 13px;
-		color: var(--curva-silk, #e9e3d4);
+		color: var(--text-2);
+		font: 400 var(--fs-small) / var(--lh-small) var(--face-body);
 	}
 	.keyhint {
-		font: 11px/1.3 var(--font-mono, 'JetBrains Mono', monospace);
-		color: var(--curva-silk-2, #c9c1ae);
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		align-items: center;
+		margin: 0;
+		color: var(--muted);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-data);
 	}
 	kbd {
 		padding: 0 4px;
-		border: 1px solid currentColor;
-		border-radius: 3px;
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-sm);
+		color: var(--text-2);
+		font: inherit;
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.pointer {
+		.pointer,
+		.mode-lbl {
 			transition: none;
 		}
 	}
@@ -177,8 +260,15 @@
 			flex-direction: column;
 			align-items: stretch;
 		}
+		.mode-sel {
+			margin: 0 auto;
+			max-width: 100%;
+		}
 		.mode-side {
 			max-width: none;
+		}
+		.mode-desc {
+			min-height: 0;
 		}
 	}
 </style>

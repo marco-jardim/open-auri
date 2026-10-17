@@ -6,6 +6,8 @@
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Button, Panel } from '#lib/components/primitives/index.ts';
 	import type { Layer, UrlLike } from './layers.ts';
 	import type { Curve } from './model.ts';
 	import {
@@ -31,6 +33,8 @@
 		pageUrl: UrlLike;
 		now?: () => number;
 		disabled?: boolean;
+		/** Why the controls are unavailable while `disabled` (default: the editor is loading). */
+		disabledReason?: string | null;
 		onimport: (result: ImportResult) => void;
 		notify: (message: string, tone?: 'info' | 'error') => void;
 		download?: Downloader;
@@ -45,13 +49,16 @@
 		pageUrl,
 		now = Date.now,
 		disabled = false,
+		disabledReason = null,
 		onimport,
 		notify,
 		download = browserDownload,
 		clipboard = (text) => navigator.clipboard.writeText(text)
 	}: Props = $props();
 
-	const headingId = $props.id();
+	const uid = $props.id();
+	const reasonId = `${uid}-reason`;
+	const reason = $derived(disabled ? (disabledReason ?? m.curva_v2_loading_reason()) : null);
 	let link = $state('');
 
 	function browserDownload(file: string, blob: Blob) {
@@ -117,26 +124,31 @@
 	}
 </script>
 
-<section class="io" aria-labelledby={headingId}>
-	<h2 id={headingId}>{m.curva_io_heading()}</h2>
+<Panel variant="hardware" class="io" eyebrow={m.curva_v2_io_eyebrow()} title={m.curva_io_heading()}>
 	<div class="exports">
-		<button type="button" class="btn-pl" {disabled} onclick={onTxt}>{m.curva_export_txt()}</button>
-		<button type="button" class="btn-pl" {disabled} onclick={onJson}>{m.curva_export_json()}</button
-		>
-		<button type="button" class="btn-pl" {disabled} onclick={onBin}>{m.curva_export_bin()}</button>
-		<label class="btn-pl file">
+		<Button size="sm" caps disabledReason={reason} onclick={onTxt}>{m.curva_export_txt()}</Button>
+		<Button size="sm" caps disabledReason={reason} onclick={onJson}>{m.curva_export_json()}</Button>
+		<Button size="sm" caps disabledReason={reason} onclick={onBin}>{m.curva_export_bin()}</Button>
+		<label class="file" class:off={disabled}>
 			<span>{m.curva_import()}</span>
 			<input
 				type="file"
 				accept=".txt,.json,text/plain,application/json"
 				{disabled}
+				aria-describedby={reason ? reasonId : undefined}
 				onchange={(event) => void onFile(event.currentTarget)}
 			/>
 		</label>
-		<button type="button" class="btn-pl" {disabled} onclick={() => void onShare()}
-			>{m.curva_share()}</button
-		>
 	</div>
+	<div class="share">
+		<Button size="sm" caps disabledReason={reason} onclick={() => void onShare()}
+			>{m.curva_share()}</Button
+		>
+		<Explainer term="s1" />
+	</div>
+	{#if reason}
+		<p class="note" id={reasonId}>{reason}</p>
+	{/if}
 	{#if link}
 		<label class="link">
 			<span>{m.curva_link_field()}</span>
@@ -144,57 +156,78 @@
 		</label>
 	{/if}
 	<p class="note">{m.curva_io_note()}</p>
-</section>
+</Panel>
 
 <style>
-	.io {
-		padding: 14px 16px;
-		border-radius: 6px;
-		background: linear-gradient(#2e2d2b, #1f1e1c);
-		color: var(--curva-silk, #e9e3d4);
+	/* Rack panel under the instrument: the Curva satin with a wood-grain top edge. */
+	:global(.panel.io) {
+		--panel-material: linear-gradient(180deg, #2e2d2b, #1f1e1c);
+		border-top: 3px solid #4b2b16;
 	}
-	h2 {
-		margin: 0 0 10px;
-		font: 400 22px/1.1 var(--font-display, 'Instrument Serif', serif);
-	}
-	.exports {
+	.exports,
+	.share {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px;
+		align-items: center;
+	}
+	.share {
+		margin-top: var(--space-2);
 	}
 	.file {
 		position: relative;
+		display: inline-flex;
+		align-items: center;
+		min-height: 28px;
+		padding: 0 10px;
 		overflow: hidden;
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-sm);
+		background: color-mix(in srgb, var(--text) 4%, transparent);
+		box-shadow: var(--bevel);
+		color: var(--text);
+		font: 600 var(--fs-caption) / 1 var(--face-engrave);
+		letter-spacing: var(--tracking-caps);
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+	.file.off {
+		background: var(--lamp-off);
+		color: var(--muted-hi);
+		box-shadow: none;
+		cursor: not-allowed;
 	}
 	.file input {
 		position: absolute;
 		inset: 0;
 		opacity: 0;
-		cursor: pointer;
+		cursor: inherit;
 	}
 	.file:focus-within {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 2px;
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
 	}
 	.link {
 		display: grid;
 		gap: 4px;
 		margin-top: 10px;
-		font-size: 11px;
-		color: var(--curva-silk-2, #c9c1ae);
+		color: var(--text-2);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
 	.link input {
 		min-height: 30px;
 		padding: 4px 8px;
-		border: 1px solid rgb(238 233 222 / 0.25);
-		border-radius: 2px;
-		background: #0d1310;
-		color: #b6edb0;
-		font: 12px/1.2 var(--font-mono, 'JetBrains Mono', monospace);
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-xs);
+		background: #050505;
+		box-shadow: var(--well);
+		/* Fixed dark LCD: the text keeps a fallback even without the tokens. */
+		color: var(--accent-text, #ff7a2f);
+		font: 400 var(--fs-caption) / 1.2 var(--face-data);
 	}
 	.note {
 		margin: 8px 0 0;
-		font-size: 11px;
-		color: var(--curva-silk-2, #c9c1ae);
+		color: var(--muted);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
 </style>

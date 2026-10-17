@@ -236,8 +236,10 @@ test('cabinet keyboard boundaries, selection and pointer drops use callbacks', a
 		onselect,
 		onreorder
 	});
-	const first = page.getByRole('button', { name: /^S1 PK/ });
-	const second = page.getByRole('button', { name: /^S2 HS/ });
+	// Natural-language module names (no plan code): "Filtro 1 PK 1 kHz −3,0 dB".
+	const first = page.getByRole('button', { name: /^Filtro 1 PK/ });
+	const second = page.getByRole('button', { name: /^Filtro 2 HS/ });
+	expect(screen.container.textContent).not.toMatch(/\bS\d+\b/);
 	await second.click();
 	expect(onselect).toHaveBeenCalledExactlyOnceWith(1);
 	key(first.element(), 'ArrowLeft', { altKey: true });
@@ -251,10 +253,10 @@ test('cabinet keyboard boundaries, selection and pointer drops use callbacks', a
 		[1, 0]
 	]);
 	await expect
-		.element(page.getByRole('button', { name: m.curva_move_left({ index: '1' }) }))
+		.element(page.getByRole('button', { name: m.curva_v2_move_left({ index: '1' }) }))
 		.toBeDisabled();
 	await expect
-		.element(page.getByRole('button', { name: m.curva_move_right({ index: '10' }) }))
+		.element(page.getByRole('button', { name: m.curva_v2_move_right({ index: '10' }) }))
 		.toBeDisabled();
 	const modules = screen.container.querySelectorAll('li.cmod');
 	const from = modules[0];

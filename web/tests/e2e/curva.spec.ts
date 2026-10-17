@@ -139,15 +139,45 @@ for (const sample of [
 	});
 }
 
+test('Neutro parks ten points with a hint; one becomes a gated filter, nothing is written', async ({
+	page
+}) => {
+	await openCurva(page);
+	await page
+		.getByRole('region', { name: 'Resgate', exact: true })
+		.getByRole('button', { name: 'Neutro', exact: true })
+		.click();
+	await expect(
+		page.getByText('Arraste um ponto para criar um filtro, ou carregue um preset', { exact: true })
+	).toBeVisible();
+	await expect(page.getByRole('slider', { name: /^Ponto \d+ estacionado em 0 dB/ })).toHaveCount(
+		10
+	);
+	const bank = filterBank(page);
+	await expect(bank.getByText('Envelope observado', { exact: true })).toBeVisible();
+	await expect(bank.locator('.gaterow li')).toHaveCount(7);
+	await expect(page.getByText(/GATE v2/)).toHaveCount(0);
+	await page.getByRole('slider', { name: /^Ponto 6 estacionado/ }).focus();
+	await page.keyboard.press('ArrowDown');
+	await expect(page.getByRole('slider', { name: /^Filtro 6:/ })).toBeVisible();
+	await expect(
+		bank.getByRole('spinbutton', { name: 'Ganho (dB)', exact: true }).first()
+	).toHaveValue('-1');
+	await expect(page.getByRole('slider', { name: /^Ponto \d+ estacionado/ })).toHaveCount(0);
+	expect((await hidLog(page)).reports).toEqual([]);
+});
+
 test('a refused reorder snaps back without changing the curve or its CRC', async ({ page }) => {
 	await openCurva(page, 'engenharia');
 	await importTxt(page, apo(-0.5, 'PK Fc 1000 Hz Gain -6 dB Q 1', 'PK Fc 1000 Hz Gain 6 dB Q 1'));
 	const cabinet = page.getByRole('region', { name: 'Gabinete modular', exact: true });
-	const modules = cabinet.getByRole('button', { name: /^S\d+ / });
+	const modules = cabinet.getByRole('button', { name: /^Filtro \d+ / });
 	await expect(modules).toHaveCount(10);
 	const order = await modules.allTextContents();
 	const crc = await editorCrc(page);
-	await cabinet.getByRole('button', { name: 'Mover S2 para a esquerda', exact: true }).click();
+	await cabinet
+		.getByRole('button', { name: 'Mover o filtro 2 para a esquerda', exact: true })
+		.click();
 	await expect(cabinet.getByRole('status')).toHaveText(
 		/^Ordem recusada: A banda 1 \(1 kHz\) faria o sinal saturar.*pico interno/
 	);

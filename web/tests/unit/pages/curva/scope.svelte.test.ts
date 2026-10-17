@@ -173,10 +173,20 @@ test('preview controls expose playback, A/B, errors and disablement', async () =
 	expect(onside.mock.calls).toEqual([['B'], ['A']]);
 	await page.getByRole('button', { name: m.curva_preview_stop(), exact: true }).click();
 	expect(onpreview).toHaveBeenCalledTimes(2);
-	await screen.rerender({ playing: false, previewDisabled: true, previewError: null });
-	await expect
-		.element(page.getByRole('button', { name: m.curva_preview(), exact: true }))
-		.toBeDisabled();
+	await screen.rerender({
+		playing: false,
+		previewDisabled: true,
+		previewReason: 'Engine loading',
+		previewError: null
+	});
+	// Unavailable, but focusable and saying why (T8); a press does nothing.
+	const lever = page.getByRole('button', { name: m.curva_preview(), exact: true });
+	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(lever).toHaveAccessibleDescription('Engine loading');
+	// A DOM click: Playwright refuses to click an aria-disabled control, which is the point.
+	const leverElement = lever.element();
+	if (leverElement instanceof HTMLElement) leverElement.click();
+	expect(onpreview).toHaveBeenCalledTimes(2);
 	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
 });
 

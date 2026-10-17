@@ -63,7 +63,7 @@ test('output labels real DATA/live values and explains refusal; absent metrics a
 test('inspector selects active/OFF sections and separates designed coefficients from unavailable gate metrics', async () => {
 	const screen = await render(Inspector, { curve, verdict, selected: 0, locale: 'pt-BR' });
 	await expect
-		.element(page.getByRole('heading', { name: m.curva_insp_heading({ index: '1' }) }))
+		.element(page.getByRole('heading', { name: m.curva_v2_insp_heading({ index: '1' }) }))
 		.toBeVisible();
 	expect(screen.container.querySelectorAll('dl.coef dd')).toHaveLength(5);
 	expect(screen.container.querySelectorAll('ol.words li')).toHaveLength(5);
@@ -76,7 +76,7 @@ test('inspector selects active/OFF sections and separates designed coefficients 
 	expect(screen.container.querySelector('dl.coef')).toBeNull();
 	await screen.rerender({ selected: 99 });
 	await expect
-		.element(page.getByRole('heading', { name: m.curva_insp_heading({ index: '100' }) }))
+		.element(page.getByRole('heading', { name: m.curva_v2_insp_heading({ index: '100' }) }))
 		.toBeVisible();
 	await expect.element(page.getByText(m.curva_insp_off())).toBeVisible();
 });
@@ -114,12 +114,22 @@ test('rescue/history controls honour availability and report journal entries, un
 	});
 	await expect.element(page.getByText(m.curva_saved(), { exact: true })).toBeVisible();
 	await expect.element(page.getByText(m.curva_journal_none())).toBeVisible();
+	// Unavailable actions stay focusable and say why (aria-disabled + aria-describedby, T8).
+	const undo = page.getByRole('button', { name: m.curva_undo(), exact: true });
+	const redo = page.getByRole('button', { name: m.curva_redo(), exact: true });
+	await expect.element(undo).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(undo).toHaveAccessibleDescription(m.curva_v2_undo_none());
+	await expect.element(redo).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(redo).toHaveAccessibleDescription(m.curva_v2_redo_none());
+	// A DOM click: Playwright refuses to click an aria-disabled control, which is the point.
+	const undoElement = undo.element();
+	if (undoElement instanceof HTMLElement) undoElement.click();
+	expect(onundo).not.toHaveBeenCalled();
 	await expect
-		.element(page.getByRole('button', { name: m.curva_undo(), exact: true }))
-		.toBeDisabled();
-	await expect
-		.element(page.getByRole('button', { name: m.curva_redo(), exact: true }))
-		.toBeDisabled();
+		.element(page.getByRole('button', { name: m.curva_rescue_neutral(), exact: true }))
+		.not.toHaveAttribute('aria-disabled');
+	expect(screen.container.textContent).toContain('0x4FFF');
+	expect(screen.container.textContent).toContain('0x1970');
 	await screen.rerender({ unsaved: true, canUndo: true, canRedo: true, journalCount: 3 });
 	await expect.element(page.getByText(m.curva_unsaved(), { exact: true })).toBeVisible();
 	await expect.element(page.getByText(m.curva_journal_count({ count: '3' }))).toBeVisible();
@@ -135,13 +145,28 @@ test('rescue/history controls honour availability and report journal entries, un
 		expect(callback).toHaveBeenCalledOnce();
 	}
 	await screen.rerender({ writeDisabled: true });
-	await expect
-		.element(page.getByRole('button', { name: m.curva_write(), exact: true }))
-		.toBeDisabled();
-	await expect
-		.element(page.getByRole('button', { name: m.curva_rescue_cable(), exact: true }))
-		.toBeDisabled();
+	for (const name of [m.curva_write(), m.curva_rescue_cable()]) {
+		const button = page.getByRole('button', { name, exact: true });
+		await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(button).toHaveAccessibleDescription(m.curva_v2_writing_reason());
+	}
 	await screen.rerender({ disabled: true });
-	for (const button of screen.container.querySelectorAll('button'))
-		expect(button.disabled).toBe(true);
+	for (const name of [
+		m.curva_rescue_neutral(),
+		m.curva_rescue_default(),
+		m.curva_undo(),
+		m.curva_redo(),
+		m.curva_write(),
+		m.curva_rescue_cable()
+	]) {
+		const button = page.getByRole('button', { name, exact: true });
+		await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(button).toHaveAccessibleDescription(m.curva_v2_loading_reason());
+	}
+	onneutral.mockClear();
+	const neutralButton = page
+		.getByRole('button', { name: m.curva_rescue_neutral(), exact: true })
+		.element();
+	if (neutralButton instanceof HTMLElement) neutralButton.click();
+	expect(onneutral).not.toHaveBeenCalled();
 });

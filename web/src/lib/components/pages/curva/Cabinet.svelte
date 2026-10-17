@@ -112,8 +112,8 @@
 						onclick={() => onselect(index)}
 						onkeydown={(event) => onkeydown(event, index)}
 					>
-						<!-- The visible text is the accessible name (WCAG 2.5.3): "S1 PK 1 kHz −6,0 dB". -->
-						<span class="jt">S{index + 1}</span>
+						<!-- The visible text is the accessible name (WCAG 2.5.3): "Filtro 1 PK 1 kHz −6,0 dB". -->
+						<span class="jt">{m.curva_filter({ index: String(index + 1) })}</span>
 						<small>{describe(band)}</small>
 					</button>
 					<span class="moves">
@@ -121,14 +121,14 @@
 							type="button"
 							class="mv"
 							disabled={index === 0}
-							aria-label={m.curva_move_left({ index: String(index + 1) })}
+							aria-label={m.curva_v2_move_left({ index: String(index + 1) })}
 							onclick={() => move(index, index - 1)}>←</button
 						>
 						<button
 							type="button"
 							class="mv"
 							disabled={index === curve.bands.length - 1}
-							aria-label={m.curva_move_right({ index: String(index + 1) })}
+							aria-label={m.curva_v2_move_right({ index: String(index + 1) })}
 							onclick={() => move(index, index + 1)}>→</button
 						>
 					</span>

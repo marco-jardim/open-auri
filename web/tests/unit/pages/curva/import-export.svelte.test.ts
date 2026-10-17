@@ -187,11 +187,30 @@ test('off-grid JSON/link and a gate-refused binary never reach a download callba
 	expect(clipboard).not.toHaveBeenCalled();
 });
 
-test('disabled import/export controls expose their native disabled state', async () => {
-	const { screen, download, clipboard, onimport } = await setup({ disabled: true });
-	for (const button of screen.container.querySelectorAll('button'))
-		expect(button.disabled).toBe(true);
-	expect(screen.container.querySelector('input[type="file"]')).toHaveProperty('disabled', true);
+test('disabled import/export controls say why and do nothing (T8)', async () => {
+	const { screen, download, clipboard, onimport, notify } = await setup({ disabled: true });
+	for (const name of [
+		m.curva_export_txt(),
+		m.curva_export_json(),
+		m.curva_export_bin(),
+		m.curva_share()
+	]) {
+		const button = page.getByRole('button', { name, exact: true });
+		await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(button).toHaveAccessibleDescription(m.curva_v2_loading_reason());
+		// A DOM click, so an open reason tooltip never intercepts the next press.
+		const element = button.element();
+		if (element instanceof HTMLElement) element.click();
+	}
+	const file = screen.container.querySelector('input[type="file"]');
+	expect(file).toHaveProperty('disabled', true);
+	expect(file?.getAttribute('aria-describedby')).toBeTruthy();
+	expect(screen.container.textContent).toContain(m.curva_v2_loading_reason());
+	expect(notify).not.toHaveBeenCalled();
+	await screen.rerender({ disabled: true, disabledReason: 'Custom reason' });
+	await expect
+		.element(page.getByRole('button', { name: m.curva_export_bin(), exact: true }))
+		.toHaveAccessibleDescription('Custom reason');
 	expect(download).not.toHaveBeenCalled();
 	expect(clipboard).not.toHaveBeenCalled();
 	expect(onimport).not.toHaveBeenCalled();

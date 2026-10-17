@@ -14,6 +14,7 @@
 		type SocialSession
 	} from '#lib/social/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button, Panel } from '#lib/components/primitives/index.ts';
 	import type { Curve } from './model.ts';
 	import type { UrlLike } from './layers.ts';
 	import type { CurvaPreview } from './preview.svelte.ts';
@@ -65,6 +66,22 @@
 	let shared = $state.raw<{ s1: string; url: string } | null>(null);
 	const link = $derived(shared && shared.s1 === s1 ? shared.url : '');
 	const unavailable = $derived(!app || !s1 || offline || busy || !session.verified);
+	/** Why the account actions are unavailable, in the order a person can fix it (T8). */
+	const reason = $derived(
+		!app
+			? m.curva_v2_loading_reason()
+			: !session.signedIn
+				? m.curva_v2_social_login_reason()
+				: !session.verified
+					? m.curva_v2_social_verify_reason()
+					: offline
+						? m.curva_v2_social_offline_reason()
+						: busy
+							? m.curva_v2_social_busy_reason()
+							: !s1
+								? m.curva_v2_social_code_reason()
+								: null
+	);
 	const loginHref = $derived(
 		requireLoginHref(new URL(pageUrl.href).pathname + new URL(pageUrl.href).search)
 	);
@@ -351,34 +368,40 @@
 
 <svelte:window ononline={connected} onoffline={() => (offline = true)} />
 
-<section class="social" aria-labelledby={headingId}>
-	<h2 id={headingId}>{m.curva_social_heading()}</h2>
+<Panel
+	variant="hardware"
+	class="social"
+	eyebrow={m.curva_v2_social_eyebrow()}
+	title={m.curva_social_heading()}
+>
 	{#if !session.signedIn}
-		<a href={loginHref}>{m.curva_social_login()}</a>
+		<a class="login" href={loginHref}>{m.curva_social_login()}</a>
 	{:else if !session.verified}
 		<p>{m.curva_social_verify()} <a href="/conta">{m.curva_social_account()}</a></p>
 	{/if}
 	<div class="actions">
-		<button class="btn-pl" disabled={unavailable} onclick={() => void publish(true)}
-			>{m.curva_social_save()}</button
+		<Button size="sm" caps disabledReason={reason} onclick={() => void publish(true)}
+			>{m.curva_social_save()}</Button
 		>
-		<button class="btn-pl" disabled={unavailable} onclick={openPublish}
-			>{m.curva_social_publish()}</button
+		<Button size="sm" caps disabledReason={reason} onclick={openPublish}
+			>{m.curva_social_publish()}</Button
 		>
 		{#if origin}
-			<button
-				class="btn-pl"
-				disabled={unavailable || favoriteLoading}
+			<Button
+				size="sm"
+				caps
+				disabledReason={reason ?? (favoriteLoading ? m.curva_v2_social_busy_reason() : null)}
 				aria-pressed={favorites[origin.lineageId] ?? false}
 				onclick={() => void toggleFavorite()}
 			>
 				{favorites[origin.lineageId] ? m.curva_social_unfavorite() : m.curva_social_favorite()}
-			</button>
-			<a class="btn-pl" href={`/c/${encodeURIComponent(origin.lineageId)}`}
-				>{m.curva_social_open()}</a
+			</Button>
+			<a
+				class="btn btn--plate btn--sm btn--caps"
+				href={`/c/${encodeURIComponent(origin.lineageId)}`}>{m.curva_social_open()}</a
 			>
-			<button class="btn-pl" disabled={unavailable} onclick={() => void share()}
-				>{m.curva_social_share()}</button
+			<Button size="sm" caps disabledReason={reason} onclick={() => void share()}
+				>{m.curva_social_share()}</Button
 			>
 		{:else}
 			<span class="note">{m.curva_social_share_publish()}</span>
@@ -392,20 +415,20 @@
 			{m.curva_social_link()}
 			<input readonly value={link} onfocus={(event) => event.currentTarget.select()} />
 		</label>
-		<button class="btn-pl" onclick={() => void copy()}>{m.curva_social_copy()}</button>
+		<Button size="sm" caps onclick={() => void copy()}>{m.curva_social_copy()}</Button>
 	{/if}
 	<p class="note">{m.curva_social_fallback()}</p>
 	<div role="status" aria-live="polite">
 		{message}
 		{#if !dialogOpen && gateMessages.length}
 			<ul>
-				{#each gateMessages as reason, index (`${index}:${reason}`)}
-					<li>{reason}</li>
+				{#each gateMessages as text, index (`${index}:${text}`)}
+					<li>{text}</li>
 				{/each}
 			</ul>
 		{/if}
 	</div>
-</section>
+</Panel>
 
 <dialog
 	bind:this={dialog}
@@ -452,33 +475,35 @@
 			{message}
 			{#if gateMessages.length}
 				<ul>
-					{#each gateMessages as reason, index (`${index}:${reason}`)}
-						<li>{reason}</li>
+					{#each gateMessages as text, index (`${index}:${text}`)}
+						<li>{text}</li>
 					{/each}
 				</ul>
 			{/if}
 		</div>
 		<div class="actions">
-			<button class="btn-pl" type="submit" disabled={unavailable}
-				>{busy ? m.curva_social_busy() : m.curva_social_publish()}</button
+			<Button variant="primary" type="submit" loading={busy} disabledReason={busy ? null : reason}
+				>{busy ? m.curva_social_busy() : m.curva_social_publish()}</Button
 			>
-			<button class="btn-pl" type="button" disabled={busy} onclick={() => dialog?.close()}
-				>{m.curva_social_cancel()}</button
+			<Button
+				variant="ghost"
+				disabledReason={busy ? m.curva_v2_social_busy_reason() : null}
+				onclick={() => dialog?.close()}>{m.curva_social_cancel()}</Button
 			>
 		</div>
 	</form>
 </dialog>
 
 <style>
-	.social {
-		padding: 14px 16px;
-		border-radius: 6px;
-		background: #262523;
-		color: var(--curva-silk, #e9e3d4);
+	/* Rack panel under the instrument: the Curva satin with a wood-grain top edge. */
+	:global(.panel.social) {
+		--panel-material: linear-gradient(180deg, #2e2d2b, #1f1e1c);
+		border-top: 3px solid #4b2b16;
+		font: 400 var(--fs-small) / var(--lh-small) var(--face-body);
 	}
 	h2 {
 		margin: 0 0 10px;
-		font: 400 22px/1.2 var(--font-display, 'Instrument Serif', serif);
+		font: 400 var(--fs-title) / var(--lh-title) var(--face-display);
 	}
 	.actions {
 		display: flex;
@@ -488,11 +513,14 @@
 		margin: 10px 0;
 	}
 	.note {
-		color: var(--curva-silk-2, #c9c1ae);
-		font-size: 12px;
+		color: var(--muted);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
-	a {
-		color: #ffb780;
+	a:not(.btn) {
+		color: var(--accent-text);
+	}
+	.login {
+		font: 500 var(--fs-ui) / var(--lh-ui) var(--face-body);
 	}
 	label {
 		display: grid;
@@ -506,10 +534,11 @@
 		width: 100%;
 		min-height: 36px;
 		padding: 6px 8px;
-		color: #ece7dd;
-		background: #151513;
-		border: 1px solid #898373;
-		font: inherit;
+		color: var(--text);
+		background: var(--ink);
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-sm);
+		font: 400 var(--fs-ui) / var(--lh-ui) var(--face-body);
 	}
 	textarea {
 		min-height: 80px;
@@ -520,30 +549,17 @@
 		max-height: 85vh;
 		overflow: auto;
 		padding: 20px;
-		color: #ece7dd;
-		background: #262523;
-		border: 1px solid #898373;
-		border-radius: 6px;
+		color: var(--text);
+		background: var(--ink-3);
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-lg);
+		box-shadow: var(--elev-3);
 	}
 	dialog::backdrop {
 		background: rgb(0 0 0 / 0.7);
 	}
 	:focus-visible {
-		outline: 2px solid #ffb780;
-		outline-offset: 3px;
-	}
-	.btn-pl {
-		min-height: 36px;
-		padding: 6px 10px;
-		border: 1px solid #898373;
-		border-radius: 3px;
-		background: #242321;
-		color: #ece7dd;
-		font: inherit;
-		cursor: pointer;
-	}
-	.btn-pl:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
 	}
 </style>

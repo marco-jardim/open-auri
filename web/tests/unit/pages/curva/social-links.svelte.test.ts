@@ -54,9 +54,13 @@ test('the editor imports /?l=<id>&v=<version>#p=<S1> without writing', async () 
 			}
 		}
 	});
-	await vi.waitFor(async () => {
-		expect((await originOf(s1))?.lineageId).toBe('linked-page');
-	});
+	// The account panel is a dynamic import (L5), fetched at once for a community link.
+	await vi.waitFor(
+		async () => {
+			expect((await originOf(s1))?.lineageId).toBe('linked-page');
+		},
+		{ timeout: 5000 }
+	);
 	expect(app.state.curve.current.preampDb).toBe(-1);
 	expect(clearLinkHash).toHaveBeenCalledOnce();
 	expect(
@@ -64,9 +68,12 @@ test('the editor imports /?l=<id>&v=<version>#p=<S1> without writing', async () 
 			([input]) => String(input) === '/api/v1/curves/linked-page?v=linked-version'
 		)
 	).toBe(true);
-	await vi.waitFor(() => {
-		expect(screen.container.textContent).toContain(m.curva_social_open());
-	});
+	await vi.waitFor(
+		() => {
+			expect(screen.container.textContent).toContain(m.curva_social_open());
+		},
+		{ timeout: 5000 }
+	);
 	expect(app.state.curve.update({ preampDb: -2 })).toBe(true);
 	await tick();
 	expect(screen.container.textContent).not.toContain(m.curva_social_open());

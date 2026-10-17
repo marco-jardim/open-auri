@@ -2,16 +2,26 @@
 	Curva page (homage: Robert Moog). Container for the three layers Ouvir ⊂ Ajustar ⊂ Engenharia.
 	- The layer comes from the route (`?camada=`) as a prop; changes go back through `onlayer`.
 	- Editor state is `app.state.curve` (undo/redo/dirty); every change is gate-approved first
-	  (macros, drags, typed values, kinds, reorders, imports, links).
+	  (macros, drags, knobs, typed values, kinds, reorders, imports, links, parked points).
 	- Writing is only ever `app.requestWrite()` / `app.requestRescue()` (layout checklist).
-	- Works without `app` (SSR, before mount): renders Neutro read-only.
+	- Works without `app` (SSR, before mount): renders Neutro read-only, `aria-busy`, and every
+	  action says it is still loading.
+	- Rack (mock v2): the scope runs across the top beside the output; presets, fine adjust and
+	  rescue sit under it, each engraved with its name under the content.
+	- Loading: the account panel (SocialActions) is a dynamic import, fetched when it comes into
+	  view, on idle, or at once for a community link; the gate worker warms on idle after the first
+	  paint; the audio engine warms on the preview lever's pointer or key down.
 -->
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
 	import type { ClientApp } from '#lib/app/index.ts';
+	import { warmGateWorker } from '#lib/app/warm.ts';
+	import { warmAudio } from '#lib/audio/warm.ts';
+	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
+	import { Skeleton } from '#lib/components/primitives/index.ts';
 	import { createGateWorker } from '#lib/workers/index.ts';
 	import { curveSignature } from '#lib/state/model.ts';
 	import { m } from '#lib/paraglide/messages.js';
@@ -25,7 +35,6 @@
 	import PresetTabs from './PresetTabs.svelte';
 	import RescuePanel from './RescuePanel.svelte';
 	import ScopePanel from './ScopePanel.svelte';
-	import SocialActions from './SocialActions.svelte';
 	import { currentS1 } from './social.ts';
 	import {
 		dragBand,
@@ -66,8 +75,11 @@
 		type BandKind,
 		type Curve
 	} from './model.ts';
+	import { parkedBand } from './parked.ts';
 	import { CurvaPreview } from './preview.svelte.ts';
 	import { firstReasonText, type Reason } from './reasons.ts';
+
+	type SocialComponent = typeof import('./SocialActions.svelte').default;
 
 	interface Props {
 		app: ClientApp | null;
@@ -84,8 +96,22 @@
 		 * Defaults to `history.replaceState`, keeping the router's history state.
 		 */
 		clearLinkHash?: () => void;
+		/**
+		 * Opens the guided tour on a first desktop visit. Defaults to on, except under automation
+		 * (`navigator.webdriver`), where a popover would cover the controls under test.
+		 */
+		tourAutoOpen?: boolean;
 	}
-	let { app, layer, hash, pageUrl, onlayer, gateClient, clearLinkHash }: Props = $props();
+	let {
+		app,
+		layer,
+		hash,
+		pageUrl,
+		onlayer,
+		gateClient,
+		clearLinkHash,
+		tourAutoOpen = typeof navigator !== 'undefined' && navigator.webdriver !== true
+	}: Props = $props();
 
 	/** Drops `#p=…` from the address bar without a navigation (path, query and state are kept). */
 	function clearAddressLink(): void {
@@ -114,19 +140,26 @@
 	);
 	const curveName = $derived(stored?.name ?? NEUTRO.label);
 	const motionMs = $derived(prefersReducedMotion.current ? 0 : 280);
+	/** Why every editor action is unavailable before the client mounts (T8). */
+	const loadingReason = $derived(app ? null : m.curva_v2_loading_reason());
 
 	let draft = $state.raw<Curve | null>(null);
 	const display = $derived(draft ?? curve);
 	let dragMessage = $state<string | null>(null);
 	let dragTone = $state<'info' | 'danger'>('info');
+	/** The gate's reason while the advisory says "outside" (scope chip). */
+	let dragReason = $state<string | null>(null);
 	let dragView = $state.raw<DragView | null>(null);
 	let shake = $state<number | null>(null);
 	let bankMessage = $state<string | null>(null);
 	let cabMessage = $state<string | null>(null);
 	let macroMessage = $state<string | null>(null);
+	let macroStopped = $state<number | null>(null);
 	let selected = $state(0);
 	let refused = $state<number | null>(null);
 	let announcement = $state('');
+	/** Bumped when a preset loads: the scope traces the new curve once. */
+	let drawKey = $state(0);
 
 	// --- editor writes (never the cable) ------------------------------------------------------
 
@@ -143,6 +176,12 @@
 		announcement = message;
 		app?.toasts.push(message, { tone });
 	}
+	/** A preset, Neutro or Padrão loaded into the editor: say so and draw the new trace. */
+	function loaded(ok: boolean | undefined) {
+		if (!ok) return;
+		announcement = m.curva_loaded();
+		drawKey++;
+	}
 
 	// --- free drags with an advisory gate, gate-decided releases ----------------------------------
 	//
@@ -150,8 +189,8 @@
 	// every animation frame (`draft`, never written anywhere), while the worker judges the latest
 	// position on the drag grid in the background (one request in flight, the newest position
 	// queued). The verdict only colours the handle and explains itself. Release (and keys, wheel,
-	// typed values) goes through `releaseBand`: full grid on the exact target, else the last safe
-	// point, else back to the start, animated.
+	// typed values, knobs) goes through `releaseBand`: full grid on the exact target, else the last
+	// safe point, else back to the start, animated.
 
 	// Pointer, key and wheel handlers only run in the browser, where animation frames exist.
 	const schedule = (callback: FrameRequestCallback) => requestAnimationFrame(callback);
@@ -170,6 +209,7 @@
 		console.error('Gate worker failed', cause);
 		dragMessage = m.curva_gate_error();
 		dragTone = 'danger';
+		dragReason = null;
 	}
 
 	/** The curve with one band moved to `target` (drawing only; never committed as such). */
@@ -233,9 +273,12 @@
 					if (generation !== advisoryGeneration || advisoryNext) return;
 					dragView = { index, status: result.refused ? 'outside' : 'inside' };
 					if (result.refused) {
-						dragMessage = m.curva_drag_outside({ reason: explain(result.reasons, candidate) });
+						const reason = explain(result.reasons, candidate);
+						dragReason = reason;
+						dragMessage = m.curva_drag_outside({ reason });
 						dragTone = 'danger';
 					} else {
+						dragReason = null;
 						dragMessage = null;
 					}
 				},
@@ -309,6 +352,7 @@
 		const start = curve;
 		const released = draft;
 		dragView = null;
+		dragReason = null;
 		try {
 			const result = await releaseBand(gate, start, index, target, experimental, verdict.ok);
 			if (token !== dragToken) return;
@@ -338,6 +382,26 @@
 		cancelFrames();
 		clearTimeout(shakeTimer);
 	});
+
+	// --- Neutro's parked points: grabbing one creates a PK filter there -----------------------
+
+	function onPark(index: number, target: DragTarget) {
+		if (!app) return;
+		const bands = replaceBand(curve.bands, index, parkedBand(index));
+		const check = verdictFor({ bands, preampDb: curve.preampDb });
+		if (!check.ok) {
+			dragMessage = m.curva_v2_parked_refused({
+				index: String(index + 1),
+				reason: firstReasonText(check.reasons, { bands, locale })
+			});
+			dragTone = 'danger';
+			return;
+		}
+		if (!apply({ bands, preampDb: curve.preampDb })) return;
+		selected = index;
+		// The flat filter exists; moving it where the point was dropped is a normal gated release.
+		void onCommit(index, target);
+	}
 
 	// --- macros (Ouvir) ------------------------------------------------------------------------
 
@@ -374,6 +438,7 @@
 			macroValues = [pick(0), pick(1), pick(2), pick(3)];
 			macroSignature = curveSignature(app.state.curve.current);
 		}
+		macroStopped = proposal.stopped ? index : null;
 		macroMessage =
 			proposal.stopped && macro
 				? m.curva_macro_stopped({
@@ -437,6 +502,13 @@
 			});
 		}
 	}
+	/** Typed values and knob releases from the bank: gated like a handle, reported in the bank. */
+	function onBankMove(index: number, target: DragTarget) {
+		void onCommit(index, target, (message) => {
+			bankMessage = message;
+			dragMessage = null;
+		});
+	}
 	let springTimer: ReturnType<typeof setTimeout> | undefined;
 	function onReorder(from: number, to: number) {
 		if (!app) return;
@@ -494,6 +566,8 @@
 		const lineageId = params.get('l');
 		const versionId = params.get('v');
 		handledLinkHash = linkHashValue;
+		// A community link: the account panel will verify its origin, so fetch it now.
+		if (lineageId && versionId) loadSocial();
 		void client.state.ready.then(() => {
 			const result = readLinkHash(
 				linkHashValue,
@@ -518,6 +592,64 @@
 		});
 	});
 
+	// --- account panel: loaded on demand (L5) ---------------------------------------------------
+
+	let Social = $state.raw<SocialComponent | null>(null);
+	let socialFailed = $state(false);
+	let socialLoad: Promise<void> | null = null;
+	let socialSlot = $state<HTMLElement | undefined>();
+	function loadSocial() {
+		socialLoad ??= import('./SocialActions.svelte').then(
+			(module) => {
+				Social = module.default;
+			},
+			(cause: unknown) => {
+				console.error('Curva account panel failed to load', cause);
+				socialFailed = true;
+			}
+		);
+	}
+	$effect(() => {
+		if (originHint) untrack(loadSocial);
+	});
+
+	/** Runs `callback` when the browser is idle (or after `timeout` ms at the latest). */
+	function whenIdle(callback: () => void, timeout: number): () => void {
+		if (typeof requestIdleCallback === 'function') {
+			const handle = requestIdleCallback(callback, { timeout });
+			return () => cancelIdleCallback(handle);
+		}
+		const handle = setTimeout(callback, Math.min(timeout, 300));
+		return () => clearTimeout(handle);
+	}
+
+	onMount(() => {
+		const cleanups: (() => void)[] = [];
+		// After the first paint: warm the gate worker (W4) and fetch the account panel when idle.
+		const frame = requestAnimationFrame(() => {
+			cleanups.push(whenIdle(() => void warmGateWorker(), 1500));
+			cleanups.push(whenIdle(loadSocial, 2500));
+		});
+		cleanups.push(() => cancelAnimationFrame(frame));
+		const slot = socialSlot;
+		if (slot && typeof IntersectionObserver === 'function') {
+			const observer = new IntersectionObserver(
+				(entries) => {
+					if (entries.some((entry) => entry.isIntersecting)) {
+						loadSocial();
+						observer.disconnect();
+					}
+				},
+				{ rootMargin: '400px 0px' }
+			);
+			observer.observe(slot);
+			cleanups.push(() => observer.disconnect());
+		}
+		return () => {
+			for (const cleanup of cleanups) cleanup();
+		};
+	});
+
 	// --- preview and meters -------------------------------------------------------------------
 
 	let preview = $state.raw<CurvaPreview | null>(null);
@@ -531,6 +663,16 @@
 			instance.dispose();
 			if (preview === instance) preview = null;
 		};
+	});
+	/** What the preview plays (the ♪ Áudio file or pink noise), for the lever's caption. */
+	let audioSource = $state<'file' | 'noise'>('noise');
+	$effect(() => {
+		const client = app;
+		if (!client) return;
+		audioSource = client.audio.state().source;
+		return client.audio.onChange((state) => {
+			audioSource = state.source;
+		});
 	});
 	const lastWritten = $derived(app?.state.curve.lastWritten ?? null);
 	const reference = $derived<Curve>(
@@ -556,6 +698,16 @@
 				return null;
 		}
 	});
+	const previewCaption = $derived(
+		m.curva_v2_preview_state({
+			state: preview?.starting
+				? m.curva_v2_preview_starting()
+				: preview?.playing
+					? m.curva_v2_preview_on()
+					: m.curva_v2_preview_off(),
+			source: audioSource === 'file' ? m.curva_v2_source_file() : m.curva_v2_source_noise()
+		})
+	);
 	const idleStages = Array.from({ length: 10 }, () => ({ mode: 'data' as const, frame: null }));
 
 	function onPreview() {
@@ -564,6 +716,10 @@
 		// A second press while the engine is still starting cancels, like a stop.
 		if (instance.playing || instance.starting) instance.stop();
 		else void instance.start(reference, curve);
+	}
+	/** Pointer or key down on the lever: create/resume the AudioContext before the click (W3). */
+	function onPreviewWarm() {
+		void warmAudio(app?.audio ?? null);
 	}
 
 	// --- keyboard -----------------------------------------------------------------------------
@@ -587,7 +743,7 @@
 
 <main class="curva" data-layer={layer} aria-labelledby={titleId}>
 	<section class="nameplate">
-		<div>
+		<div class="np-title">
 			<p class="np-eyebrow"><b>01 /</b> {m.curva_eyebrow()}</p>
 			<h1 id={titleId}>{m.curva_title()}</h1>
 			<p class="np-lede">{m.curva_lede()}</p>
@@ -607,26 +763,12 @@
 			{/if}
 		</div>
 		<LayerSelector {layer} {onlayer} />
+		<div class="np-help"><TourTrigger page="curva" /></div>
 	</section>
 
-	<div class="instrument">
+	<div class="instrument" aria-busy={app === null ? 'true' : 'false'}>
 		<div class="cheek" aria-hidden="true"></div>
-		<div class="panel">
-			<PresetTabs
-				activeId={activePreset}
-				{locale}
-				onload={(id) => {
-					if (app?.state.curve.loadPreset(id)) announcement = m.curva_loaded();
-				}}
-			/>
-			<MacroKnobs
-				values={shownMacros}
-				scopes={macroScopes}
-				{locale}
-				disabled={!app}
-				message={macroMessage}
-				onchange={onMacro}
-			/>
+		<div class="rack">
 			<ScopePanel
 				curve={display}
 				committed={curve}
@@ -637,8 +779,10 @@
 				bind:selected
 				{layer}
 				{locale}
+				{drawKey}
 				message={dragMessage}
 				messageTone={dragTone}
+				chipReason={dragReason}
 				spectrumMode={preview?.vu.mode ?? 'data'}
 				analyser={preview?.analyser ?? null}
 				playing={preview?.playing ?? false}
@@ -646,10 +790,14 @@
 				{referenceName}
 				{previewError}
 				previewDisabled={!preview}
+				previewReason={m.curva_v2_preview_unavailable()}
+				{previewCaption}
 				approximate={preview ? !preview.exact : false}
 				ondrag={onDrag}
 				oncommit={(index, target) => void onCommit(index, target)}
+				onpark={onPark}
 				onpreview={onPreview}
+				onpreviewwarm={onPreviewWarm}
 				onside={(side) => preview?.select(side)}
 			/>
 			<OutputPanel
@@ -662,6 +810,21 @@
 				onmaxclip={onMaxClip}
 				{maxClipMessage}
 				disabled={!app}
+				disabledReason={loadingReason}
+			/>
+			<PresetTabs
+				activeId={activePreset}
+				{locale}
+				onload={(id) => loaded(app?.state.curve.loadPreset(id))}
+			/>
+			<MacroKnobs
+				values={shownMacros}
+				scopes={macroScopes}
+				{locale}
+				disabled={!app}
+				message={macroMessage}
+				stopped={macroStopped}
+				onchange={onMacro}
 			/>
 			<RescuePanel
 				unsaved={app?.state.curve.unsaved ?? false}
@@ -669,9 +832,12 @@
 				canRedo={app?.state.curve.canRedo ?? false}
 				journalCount={app?.state.journal.entries.length ?? 0}
 				disabled={!app}
+				disabledReason={loadingReason}
 				writeDisabled={app?.cableState.writing ?? true}
-				onneutral={() => app?.loadNeutral() && (announcement = m.curva_loaded())}
-				ondefault={() => app?.loadAuriDefault() && (announcement = m.curva_loaded())}
+				neutralActive={activePreset === NEUTRO.id}
+				defaultActive={activePreset === PADRAO_AURI.id}
+				onneutral={() => loaded(app?.loadNeutral())}
+				ondefault={() => loaded(app?.loadAuriDefault())}
 				onrescue={() => app?.requestRescue()}
 				onundo={() => app?.state.curve.undo()}
 				onredo={() => app?.state.curve.redo()}
@@ -680,6 +846,9 @@
 		</div>
 		<div class="cheek r" aria-hidden="true"></div>
 	</div>
+	{#if !app}
+		<p class="visually-hidden" role="status">{m.curva_v2_loading()}</p>
+	{/if}
 
 	{#if includesLayer(layer, 'ajustar')}
 		<div class="layer-block" transition:slide={{ duration: motionMs }}>
@@ -688,10 +857,11 @@
 				{verdict}
 				{layer}
 				{locale}
+				{selected}
 				stages={preview?.stages ?? idleStages}
 				message={bankMessage}
-				onmove={(index, target) =>
-					void onCommit(index, target, (message) => (bankMessage = message))}
+				ondrag={onDrag}
+				onmove={onBankMove}
 				onkind={onKind}
 				onorder={onDefaultOrder}
 			/>
@@ -728,8 +898,16 @@
 		</div>
 	{/if}
 
-	<div class="layer-block">
-		<SocialActions {app} {curve} name={curveName} {locale} {pageUrl} {preview} {originHint} />
+	<div class="lower">
+		<div class="social-slot" bind:this={socialSlot}>
+			{#if Social}
+				<Social {app} {curve} name={curveName} {locale} {pageUrl} {preview} {originHint} />
+			{:else if socialFailed}
+				<p role="alert">{m.layout_error_generic()}</p>
+			{:else}
+				<Skeleton height="148px" radius="var(--rad-lg)" label={m.curva_v2_social_loading()} />
+			{/if}
+		</div>
 		<ImportExport
 			{curve}
 			name={curveName}
@@ -738,132 +916,166 @@
 			{locale}
 			{pageUrl}
 			disabled={!app}
+			disabledReason={loadingReason}
 			onimport={(result) => onImport(result)}
 			{notify}
 		/>
 	</div>
 
 	<p class="visually-hidden" role="status" aria-live="polite">{announcement}</p>
+	<Tour page="curva" autoOpen={tourAutoOpen} />
 </main>
 
 <style>
 	.curva {
-		--curva-silk: #e9e3d4;
-		--curva-silk-2: #c9c1ae;
+		/* Panel legends read the design-system text tokens (silk on the satin panel). */
+		--curva-silk: var(--text);
+		--curva-silk-2: var(--text-2);
+		--curva-satin:
+			linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 30%),
+			linear-gradient(#2e2d2b, #1f1e1c);
+		--curva-wood: linear-gradient(90deg, #26140a, #5b351c 30%, #4b2b16 62%, #22120a);
 		display: grid;
-		/* minmax(0, …): wide content (cabinet rack, tape) scrolls inside its box instead of
+		/* minmax(0, …): wide content (cabinet rack, bank strips) scrolls inside its box instead of
 		   widening the page and pushing the nameplate controls off-screen. */
 		grid-template-columns: minmax(0, 1fr);
-		gap: 18px;
+		gap: var(--space-5);
 		max-width: var(--frame-max, 1440px);
 		margin: 0 auto;
-		padding: 24px var(--gutter, 24px) 32px;
-		background: var(--ink, #0f0f0e);
-		color: var(--text, #ece7dd);
+		padding: var(--space-5) var(--gutter, 24px) var(--space-6);
+		background: var(--ink);
+		color: var(--text);
 	}
 	.nameplate {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto auto;
-		gap: 18px 28px;
+		grid-template-columns: minmax(0, 1fr) auto auto auto;
+		gap: var(--space-4) var(--space-6);
 		align-items: end;
 	}
 	.np-eyebrow {
 		margin: 0;
-		font: 11px/1.3 var(--font-mono, 'JetBrains Mono', monospace);
-		letter-spacing: 0.1em;
+		color: var(--accent-text);
+		font: 400 var(--fs-eyebrow) / var(--lh-caps) var(--face-data);
+		letter-spacing: var(--tracking-eyebrow);
 		text-transform: uppercase;
-		color: var(--accent, #ff7a2f);
+	}
+	.np-eyebrow b {
+		font-weight: 500;
 	}
 	h1 {
-		margin: 4px 0;
-		font: 400 clamp(40px, 6vw, 72px) / 1 var(--font-display, 'Instrument Serif', serif);
+		margin: var(--space-1) 0;
+		font: 400 var(--fs-display-xl) / var(--lh-display) var(--face-display);
+		font-style: italic;
+		letter-spacing: var(--tracking-display);
 	}
 	.np-lede {
-		max-width: 60ch;
+		max-width: 52ch;
 		margin: 0;
-		color: var(--curva-silk-2);
+		color: var(--text-2);
+		font: 400 var(--fs-body) / var(--lh-body) var(--face-body);
 	}
 	.np-preset {
 		display: grid;
 		gap: 2px;
-		padding-left: 18px;
-		border-left: 1px solid rgb(238 233 222 / 0.2);
+		padding-left: var(--space-4);
+		border-left: 1px solid var(--rule);
 	}
 	.np-k,
 	.np-state {
-		font: 11px/1.3 var(--font-mono, 'JetBrains Mono', monospace);
-		color: var(--curva-silk-2);
+		color: var(--text-2);
+		font: 400 var(--label-min) / var(--lh-caps) var(--face-data);
+		letter-spacing: 0.08em;
+	}
+	.np-k {
+		letter-spacing: var(--tracking-eyebrow);
+		text-transform: uppercase;
 	}
 	.np-name {
-		font: 400 26px/1.1 var(--font-display, 'Instrument Serif', serif);
+		font: 400 var(--fs-display-m) / var(--lh-display-m) var(--face-display);
 		overflow-wrap: anywhere;
 	}
 	.np-dirty {
-		font: 600 11px/1.3 var(--font-mono, 'JetBrains Mono', monospace);
-		color: var(--accent, #ff7a2f);
+		color: var(--accent-text);
+		font: 500 var(--label-min) / var(--lh-caps) var(--face-data);
+	}
+	.np-help {
+		align-self: start;
 	}
 	.instrument {
 		display: grid;
-		grid-template-columns: 22px minmax(0, 1fr) 22px;
+		grid-template-columns: 24px minmax(0, 1fr) 24px;
+		border-radius: var(--rad-lg);
+		box-shadow: var(--elev-3);
 	}
 	.cheek {
-		border-radius: 6px 0 0 6px;
-		background: linear-gradient(90deg, #26140a, #5b351c 30%, #4b2b16 62%, #22120a);
+		border-radius: var(--rad-lg) 0 0 var(--rad-lg);
+		background: var(--curva-wood);
+		box-shadow: inset -2px 0 4px rgb(0 0 0 / 0.5);
 	}
 	.cheek.r {
-		border-radius: 0 6px 6px 0;
+		border-radius: 0 var(--rad-lg) var(--rad-lg) 0;
+		box-shadow: inset 2px 0 4px rgb(0 0 0 / 0.5);
 	}
-	.panel {
+	/* The rack (mock v2, Ajustar geometry for every layer): the scope runs almost the full width
+	   beside the output; presets, fine adjust and rescue sit under it. */
+	.rack {
 		display: grid;
-		grid-template-columns: 290px minmax(0, 1fr) 200px;
+		grid-template-columns: minmax(280px, 1.15fr) minmax(0, 1fr) minmax(0, 0.95fr) 204px;
 		grid-template-areas:
-			'pre scope out'
-			'mac scope res';
-		gap: 18px;
-		padding: 18px;
-		background:
-			linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 30%),
-			linear-gradient(#2e2d2b, #1f1e1c);
-		box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+			'scope scope scope out'
+			'pre pre mac res';
+		gap: var(--space-5) 0;
+		padding: var(--space-5) var(--space-2) var(--space-4);
+		border-top: 1px solid rgb(255 255 255 / 0.07);
+		border-bottom: 2px solid #050505;
+		background: var(--curva-satin);
 	}
-	.curva:not([data-layer='ouvir']) .panel {
-		grid-template-areas:
-			'scope scope out'
-			'pre mac res';
-	}
-	.panel :global(.ps-pre) {
-		grid-area: pre;
-	}
-	.panel :global(.ps-mac) {
-		grid-area: mac;
-	}
-	.panel :global(.ps-scope) {
-		grid-area: scope;
-		min-width: 0;
-	}
-	.panel :global(.ps-out) {
-		grid-area: out;
-	}
-	.panel :global(.ps-res) {
-		grid-area: res;
-	}
-	.curva :global(.psec) {
+	.rack :global(.psec) {
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		padding: 0 var(--space-4);
 	}
+	.rack :global(.ps-scope) {
+		grid-area: scope;
+	}
+	.rack :global(.ps-out) {
+		grid-area: out;
+		box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
+	}
+	.rack :global(.ps-pre) {
+		grid-area: pre;
+	}
+	.rack :global(.ps-mac) {
+		grid-area: mac;
+		box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
+	}
+	.rack :global(.ps-res) {
+		grid-area: res;
+		box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
+	}
+	/* Engraved section names: centred under the content, on a rule (mock .legend-bar). The rule
+	   sits a fixed distance below the content; `margin-top: auto` aligns the names of a row. */
 	.curva :global(.legend-bar) {
+		position: relative;
 		order: 99;
-		margin: 12px 0 0;
-		padding: 3px 8px;
-		border-top: 1px solid rgb(238 233 222 / 0.25);
-		font: 600 10px/1.3 var(--font-mono, 'JetBrains Mono', monospace);
-		letter-spacing: 0.14em;
+		margin: auto 0 0;
+		padding-top: calc(var(--space-4) + 7px);
+		color: var(--text);
+		font: 600 var(--fs-caption) / 1 var(--face-engrave);
+		letter-spacing: 0.3em;
+		text-align: center;
 		text-transform: uppercase;
-		color: var(--curva-silk);
 	}
-	/* Panel buttons (mock .btn-pl): machined plate, condensed caps, hover brightens the edge,
-	   press sinks 1 px. */
+	.curva :global(.legend-bar::before) {
+		content: '';
+		position: absolute;
+		top: var(--space-4);
+		right: 0;
+		left: 0;
+		border-top: 1.5px solid currentColor;
+	}
+	/* Panel buttons kept by the Engenharia modules (mock .btn-pl): machined plate, condensed caps. */
 	.curva :global(.btn-pl) {
 		display: inline-flex;
 		gap: 6px;
@@ -871,63 +1083,66 @@
 		justify-content: center;
 		min-height: 32px;
 		padding: 7px 11px;
-		border: 1px solid #2c2c2a;
-		border-radius: 3px;
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-sm);
 		background: linear-gradient(#262725, #141514);
 		box-shadow:
-			inset 0 1px 0 rgb(255 255 255 / 0.07),
+			var(--bevel),
 			0 2px 3px rgb(0 0 0 / 0.6);
-		color: var(--curva-silk);
-		font: 600 12px/1 var(--font-cond, 'Barlow Condensed', 'Arial Narrow', sans-serif);
-		letter-spacing: 0.14em;
+		color: var(--text);
+		font: 600 var(--fs-caption) / 1 var(--face-engrave);
+		letter-spacing: var(--tracking-caps);
 		text-transform: uppercase;
 		cursor: pointer;
 		transition:
-			border-color 0.15s,
-			color 0.15s,
-			transform 0.08s;
+			border-color var(--dur-fast) var(--ease-out),
+			color var(--dur-fast) var(--ease-out),
+			transform var(--dur-instant) var(--ease-mech);
 	}
 	.curva :global(.btn-pl:hover:not(:disabled):not([aria-disabled='true'])) {
-		border-color: #4a4a46;
-		color: #fff7ec;
+		border-color: color-mix(in srgb, var(--text) 62%, transparent);
 	}
 	.curva :global(.btn-pl:active:not(:disabled):not([aria-disabled='true'])) {
 		transform: translateY(1px);
-		box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7);
+		box-shadow: var(--well);
 	}
 	.curva :global(.btn-pl[aria-pressed='true']) {
-		border-color: rgb(255 122 47 / 0.55);
-		color: var(--accent, #ff7a2f);
-		box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7);
+		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+		color: var(--accent-text);
+		box-shadow: var(--well);
 	}
 	.curva :global(.btn-pl.acc) {
-		border-color: rgb(255 122 47 / 0.45);
-		color: var(--accent, #ff7a2f);
-	}
-	.curva :global(.btn-pl.acc:hover:not(:disabled)) {
-		border-color: var(--accent, #ff7a2f);
+		border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+		color: var(--accent-text);
 	}
 	.curva :global(.btn-pl:disabled),
-	.curva :global(.btn-pl[aria-disabled='true']),
-	.curva :global(.guard:disabled) {
-		opacity: 0.5;
+	.curva :global(.btn-pl[aria-disabled='true']) {
+		background: var(--lamp-off);
+		color: var(--muted-hi);
 		cursor: not-allowed;
 	}
 	.curva :global(.btn-pl:focus-visible),
-	.curva :global(.guard:focus-visible),
 	.curva :global(.soon-ctl:focus-visible) {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.curva :global(.btn-pl) {
 			transition: none;
 		}
 	}
-	.layer-block {
+	.layer-block,
+	.lower {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
-		gap: 18px;
+		gap: var(--space-5);
+		min-width: 0;
+	}
+	.lower {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		align-items: start;
+	}
+	.social-slot {
 		min-width: 0;
 	}
 	.below {
@@ -935,7 +1150,7 @@
 		contain-intrinsic-size: auto 650px;
 		display: grid;
 		grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-		gap: 18px;
+		gap: var(--space-5);
 	}
 	.visually-hidden {
 		position: absolute;
@@ -945,20 +1160,39 @@
 		clip-path: inset(50%);
 		white-space: nowrap;
 	}
-	@media (max-width: 1100px) {
+	@media (max-width: 1280px) {
 		.nameplate {
-			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-columns: minmax(0, 1fr) auto auto;
 		}
-		.below {
+		.nameplate :global(.mode) {
+			grid-column: 1 / 3;
+		}
+	}
+	@media (max-width: 1100px) {
+		.rack {
+			grid-template-columns: minmax(0, 1fr) 204px;
+			grid-template-areas:
+				'scope scope'
+				'pre out'
+				'mac res';
+		}
+		.rack :global(.ps-mac) {
+			box-shadow: none;
+		}
+		.below,
+		.lower {
 			grid-template-columns: minmax(0, 1fr);
 		}
 	}
 	@media (max-width: 720px) {
 		.curva {
-			padding: 18px 14px 24px;
+			padding: var(--space-4) 14px var(--space-5);
 		}
 		.nameplate {
-			grid-template-columns: minmax(0, 1fr);
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+		.nameplate :global(.mode) {
+			grid-column: 1 / -1;
 		}
 		.np-preset {
 			padding-left: 0;
@@ -967,11 +1201,18 @@
 		.instrument {
 			grid-template-columns: 10px minmax(0, 1fr) 10px;
 		}
-		.panel,
-		.curva:not([data-layer='ouvir']) .panel {
+		.rack {
 			grid-template-columns: minmax(0, 1fr);
-			grid-template-areas: 'scope' 'pre' 'mac' 'out' 'res';
-			padding: 12px;
+			grid-template-areas: 'scope' 'out' 'pre' 'mac' 'res';
+			padding: var(--space-3) 0;
+		}
+		.rack :global(.psec) {
+			padding: 0 var(--space-3);
+		}
+		.rack :global(.psec + .psec) {
+			padding-top: var(--space-3);
+			border-top: 1px solid var(--rule);
+			box-shadow: none;
 		}
 	}
 </style>

@@ -17,6 +17,8 @@
 	import { levelDb } from 'open-auri/safety';
 	import { MeterModeLabel, ThrottledNumber } from '#lib/components/meters/index.ts';
 	import type { MeterFrame, MeterMode } from '#lib/audio/meters.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { formatHz, formatNumber, formatSignedDb } from './format.ts';
 	import type { Curve } from './model.ts';
@@ -38,6 +40,8 @@
 		/** Result of the last "Máximo sem clipping" press, in plain language. */
 		maxClipMessage?: string | null;
 		disabled?: boolean;
+		/** Why "Máximo sem clipping" is unavailable while `disabled` (default: the editor is loading). */
+		disabledReason?: string | null;
 	}
 	let {
 		curve,
@@ -49,7 +53,8 @@
 		reducedMotion,
 		onmaxclip,
 		maxClipMessage = null,
-		disabled = false
+		disabled = false,
+		disabledReason = null
 	}: Props = $props();
 
 	const legendId = $props.id();
@@ -148,7 +153,7 @@
 	{/if}
 	<dl class="ro-list">
 		<div class="ro-row">
-			<dt>{m.curva_out_preamp()}</dt>
+			<dt>{m.curva_out_preamp()} <Explainer term="preamp" /></dt>
 			<dd><span class="ro-win">{formatSignedDb(curve.preampDb, locale)}</span></dd>
 		</div>
 		<div class="ro-row">
@@ -176,18 +181,26 @@
 		</div>
 	</dl>
 	{#if onmaxclip}
-		<button type="button" class="btn-pl maxclip" {disabled} onclick={onmaxclip}
-			>{m.curva_maxclip()}</button
+		<Button
+			variant="plate"
+			size="sm"
+			caps
+			class="maxclip"
+			disabledReason={disabled ? (disabledReason ?? m.curva_v2_loading_reason()) : null}
+			onclick={onmaxclip}>{m.curva_maxclip()}</Button
 		>
 		{#if maxClipMessage}
 			<p class="maxclip-msg" role="status">{maxClipMessage}</p>
 		{/if}
 	{/if}
-	<p class="gate" class:no={!verdict.ok}>
-		<span class="lamp" aria-hidden="true"></span>
-		{verdict.ok ? m.curva_gate_ok() : m.curva_gate_no()}
-		{#if !verdict.ok}<small>{firstReasonText(verdict.reasons, reasonContext)}</small>{/if}
-	</p>
+	<div class="gate-row">
+		<p class="gate" class:no={!verdict.ok}>
+			<span class="lamp" aria-hidden="true"></span>
+			{verdict.ok ? m.curva_gate_ok() : m.curva_gate_no()}
+			{#if !verdict.ok}<small>{firstReasonText(verdict.reasons, reasonContext)}</small>{/if}
+		</p>
+		<Explainer term="gate" />
+	</div>
 	<p class="caveat">{m.curva_gate_note()}</p>
 	<h2 class="legend-bar" id={legendId}>{m.curva_out_heading()}</h2>
 </section>
@@ -265,15 +278,15 @@
 		gap: 4px 8px;
 		align-items: center;
 		margin: 4px 0 8px;
-		font: 10px/1.3 var(--font-mono, 'JetBrains Mono', monospace);
-		color: var(--curva-silk-2, #c9c1ae);
+		font: 400 var(--label-min) / var(--lh-small) var(--face-data);
+		color: var(--text-2);
 	}
 	.vu-readout {
 		display: block;
 		margin: 0 0 8px;
-		font: 12px var(--font-mono, 'JetBrains Mono', monospace);
-		font-variant-numeric: tabular-nums;
-		color: var(--curva-silk, #e9e3d4);
+		font: 400 var(--fs-caption) / var(--lh-readout) var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
+		color: var(--text);
 	}
 	.ro-list {
 		display: grid;
@@ -287,8 +300,11 @@
 		align-items: baseline;
 	}
 	dt {
-		font: 600 10.5px/1.2 var(--font-mono, 'JetBrains Mono', monospace);
-		color: var(--curva-silk-2, #c9c1ae);
+		display: inline-flex;
+		gap: var(--space-1);
+		align-items: center;
+		font: 500 var(--fs-caption) / var(--lh-ui) var(--face-body);
+		color: var(--text-2);
 	}
 	dd {
 		display: grid;
@@ -301,43 +317,52 @@
 		border-radius: 2px;
 		background: #050505;
 		box-shadow: inset 0 1px 4px #000;
-		color: var(--accent, #ff7a2f);
-		font: 500 13px var(--font-mono, 'JetBrains Mono', monospace);
-		text-shadow: 0 0 6px rgb(255 122 47 / 0.55);
+		/* The LCD well is a fixed dark surface: its text keeps a fallback even without the tokens. */
+		color: var(--accent-text, #ff7a2f);
+		font: 500 var(--fs-readout) / var(--lh-readout) var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
+		letter-spacing: var(--tracking-data);
+		text-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent);
 		white-space: nowrap;
 	}
 	.ro-win.none {
-		color: var(--curva-silk-2, #c9c1ae);
+		color: var(--text-2, #cfc9be);
 		text-shadow: none;
-		font-size: 11px;
+		font-size: var(--label-min);
 	}
 	dd small {
 		margin-top: 2px;
-		color: var(--curva-silk-2, #c9c1ae);
-		font: 9.5px var(--font-mono, 'JetBrains Mono', monospace);
+		color: var(--text-2);
+		font: 400 var(--label-min) var(--face-data);
 	}
-	.maxclip {
+	.ps-out :global(.maxclip) {
 		width: 100%;
 		margin-top: 10px;
 	}
 	.maxclip-msg {
 		margin: 6px 0 0;
-		font-size: 11px;
-		line-height: 1.45;
-		color: var(--curva-silk, #e9e3d4);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
+		color: var(--text);
+	}
+	.gate-row {
+		display: flex;
+		gap: var(--space-2);
+		align-items: flex-start;
+		margin: 10px 0 0;
 	}
 	.gate {
 		display: flex;
+		flex: 1;
 		flex-wrap: wrap;
 		gap: 7px;
 		align-items: center;
-		margin: 10px 0 0;
-		font: 10.5px/1.3 var(--font-mono, 'JetBrains Mono', monospace);
-		color: #cbc5ba;
+		margin: 0;
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-data);
+		color: var(--text-2);
 	}
 	.gate small {
 		flex: 1 1 100%;
-		font: 11px/1.45 var(--font-ui, system-ui, sans-serif);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 		color: #ffd6d7;
 	}
 	.lamp {
@@ -353,9 +378,8 @@
 	}
 	.caveat {
 		margin: 6px 0 0;
-		font-size: 10.5px;
-		line-height: 1.45;
-		color: var(--curva-silk-2, #c9c1ae);
+		font: 400 var(--label-min) / var(--lh-small) var(--face-body);
+		color: var(--text-2);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.meter,

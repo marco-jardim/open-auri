@@ -1,30 +1,36 @@
 <!--
 	Oscilloscope (v2 mock): phosphor EQ sum, output with preamp, the reference curve (dashed), one
 	thin trace per section and draggable handles (Ajustar and Engenharia), plus the live spectrum
-	strip and the A/B preview switches.
+	strip and the preview levers (Ouvir prévia, A/B).
 	- Every trace is core data (`scope.ts`: core responses summed per section). The output limit
 	  line is the gate threshold; red/amber regions show where the drawn curve is over or near the
 	  output limit, or where it would clip inside the chain. They are a preview: the gate decides.
 	- Selected section: its safe box (core SOFT_RANGES) and the hatched zones it can never reach
-	  (ABS_RANGES gain cap, D7: no PK boost above 16 kHz).
+	  (ABS_RANGES gain cap, D7: no PK boost above 16 kHz). The box lights while a point is grabbed.
 	- Handles follow the pointer freely (the page draws a draft every frame and asks the worker for
-	  an advisory verdict without blocking). Release, keys and the wheel (Q) commit through the page,
-	  which judges the full grid and animates back when refused.
+	  an advisory verdict without blocking). When that verdict first says "outside", the handle hits
+	  a 120 ms detent and the chip shows the gate's reason. Release, keys and the wheel (Q) commit
+	  through the page, which judges the full grid and animates back when refused.
+	- Neutro (every section OFF): ten points parked at 0 dB with the empty-state hint. Grabbing one
+	  (pointer or arrow keys) asks the page to create a filter there (`onpark`, gate-checked).
 	- HS/LP/HP handles are locked outside Engenharia, with a hint.
-	- Motion: the after-commit ghost, the refused shake and a faint CRT sweep (decorative, aria-hidden,
-	  never a reading) are all off under prefers-reduced-motion.
+	- Motion: the trace draws in once when a preset loads (`drawKey`), the after-commit ghost, the
+	  detent and refused shake and a faint CRT sweep (decorative, aria-hidden, never a reading); all
+	  off under prefers-reduced-motion.
 -->
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { MeterModeLabel, SpectrumOverlay } from '#lib/components/meters/index.ts';
 	import type { MeterMode } from '#lib/audio/meters.ts';
 	import type { ABSide } from '#lib/audio/engine.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { formatHz, formatQ, formatSignedDb } from './format.ts';
 	import { isLockedKind, type Layer } from './layers.ts';
 	import { hasGain, type Band, type Curve } from './model.ts';
 	import type { DragTarget, DragView } from './drag.ts';
+	import { isEmptyCurve, PARKED_HZ, parkedBand } from './parked.ts';
 	import type { GateVerdict } from './reasons.ts';
 	import {
 		DB_MAX,
@@ -62,6 +68,8 @@
 		message?: string | null;
 		/** `danger` while the moving handle is outside the envelope or after a refusal. */
 		messageTone?: 'info' | 'danger';
+		/** The gate's reason for the advisory "outside", shown in the chip while dragging. */
+		chipReason?: string | null;
 		/** The editor curve (committed); a change fades the previous one out as a ghost. */
 		committed?: Curve | null;
 		/** Full-grid verdict of `committed` (peak marker and envelope chip). */
@@ -74,6 +82,8 @@
 		shake?: number | null;
 		/** Selected section (safe box and highlighted trace). */
 		selected?: number;
+		/** Bumped by the page when a preset loads: the traces draw in once. */
+		drawKey?: number;
 		spectrumMode: MeterMode;
 		analyser: AnalyserNode | null;
 		playing: boolean;
@@ -81,13 +91,21 @@
 		referenceName: string;
 		previewError?: string | null;
 		previewDisabled?: boolean;
+		/** Why the preview is unavailable while `previewDisabled`. */
+		previewReason?: string | null;
+		/** State caption under the preview lever ("desligada · ruído rosa"). */
+		previewCaption?: string;
 		/** The preview runs at a rate other than 96 kHz (recomputed coefficients). */
 		approximate?: boolean;
 		/** Overrides the `prefers-reduced-motion` media query. */
 		reducedMotion?: boolean;
 		ondrag: (index: number, target: DragTarget) => void;
 		oncommit: (index: number, target: DragTarget) => void;
+		/** A parked Neutro point was moved: create a filter there (page, gate-checked). */
+		onpark?: (index: number, target: DragTarget) => void;
 		onpreview: () => void;
+		/** Pointer down or key down on the preview lever: warm the audio engine before the click. */
+		onpreviewwarm?: () => void;
 		onside: (side: ABSide) => void;
 	}
 	let {
@@ -96,12 +114,14 @@
 		locale,
 		message = null,
 		messageTone = 'info',
+		chipReason = null,
 		committed = null,
 		verdict = null,
 		reference = null,
 		drag = null,
 		shake = null,
 		selected = $bindable(0),
+		drawKey = 0,
 		spectrumMode,
 		analyser,
 		playing,
@@ -109,14 +129,19 @@
 		referenceName,
 		previewError = null,
 		previewDisabled = false,
+		previewReason = null,
+		previewCaption = '',
 		approximate = false,
 		reducedMotion,
 		ondrag,
 		oncommit,
+		onpark,
 		onpreview,
+		onpreviewwarm,
 		onside
 	}: Props = $props();
 
+	const DETENT_MS = 120;
 	const editable = $derived(layer !== 'ouvir');
 	const reduced = $derived(reducedMotion ?? prefersReducedMotion.current);
 	const legendId = $props.id();
@@ -186,11 +211,28 @@
 		});
 	});
 
+	// --- Neutro: parked points ----------------------------------------------------------------------
+
+	const parked = $derived(isEmptyCurve(curve.bands));
+	let parkedFocus = $state<number | null>(null);
+	let parkedActive = $state<{
+		index: number;
+		pointer: number;
+		target: DragTarget;
+		x: number;
+		y: number;
+	} | null>(null);
+
 	// --- selection: safe box and hard zones -------------------------------------------------------
 
 	const selectedBand = $derived.by(() => {
+		if (!editable) return null;
+		if (parked) {
+			const index = parkedActive?.index ?? parkedFocus;
+			return index === null ? null : parkedBand(index);
+		}
 		const band = curve.bands[selected];
-		if (!editable || !band || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return null;
+		if (!band || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return null;
 		return band;
 	});
 	const box = $derived(selectedBand ? softBox(selectedBand) : null);
@@ -206,12 +248,19 @@
 			: null
 	);
 	const insideBox = $derived(
-		box && selectedBand
+		box && selectedBand && selectedBand.kind !== 'OFF'
 			? selectedBand.freqHz >= box.fMin &&
 					selectedBand.freqHz <= box.fMax &&
 					handleGain(selectedBand) >= box.gMin &&
 					handleGain(selectedBand) <= box.gMax
 			: true
+	);
+	/** A point of the selected section is in the hand: its safe box lights up. */
+	const grabbed = $derived(
+		parkedActive !== null ||
+			active?.index === selected ||
+			wheelState?.index === selected ||
+			drag?.index === selected
 	);
 
 	const chip = $derived(
@@ -224,6 +273,25 @@
 				? m.curva_chip_outside()
 				: m.curva_chip_inside()
 	);
+	const chipWhy = $derived(drag?.status === 'outside' && chipReason ? chipReason : null);
+
+	// --- the 120 ms detent when the advisory verdict first says "outside" -------------------------
+
+	let detent = $state<number | null>(null);
+	let detentTimer: ReturnType<typeof setTimeout> | undefined;
+	let lastOutside: number | null = null;
+	$effect(() => {
+		const outsideIndex = drag?.status === 'outside' ? drag.index : null;
+		untrack(() => {
+			if (outsideIndex !== null && outsideIndex !== lastOutside) {
+				detent = outsideIndex;
+				clearTimeout(detentTimer);
+				detentTimer = setTimeout(() => (detent = null), DETENT_MS);
+			}
+			lastOutside = outsideIndex;
+		});
+	});
+	$effect(() => () => clearTimeout(detentTimer));
 
 	// --- handles ----------------------------------------------------------------------------------
 
@@ -275,6 +343,15 @@
 		};
 	});
 
+	function viewPoint(event: PointerEvent): { vx: number; vy: number } | null {
+		if (!overlay) return null;
+		const rect = overlay.getBoundingClientRect();
+		return {
+			vx: ((event.clientX - rect.left) / rect.width) * VIEW_WIDTH,
+			vy: ((event.clientY - rect.top) / rect.height) * VIEW_HEIGHT
+		};
+	}
+
 	function onpointerdown(event: PointerEvent, band: Band, index: number) {
 		if (!editable || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
 		if (event.button > 0) return;
@@ -286,12 +363,11 @@
 		active = { index, pointer: event.pointerId, target: {}, start: band };
 	}
 	function onpointermove(event: PointerEvent) {
-		if (!active || active.pointer !== event.pointerId || !overlay) return;
-		const rect = overlay.getBoundingClientRect();
-		const vx = ((event.clientX - rect.left) / rect.width) * VIEW_WIDTH;
-		const vy = ((event.clientY - rect.top) / rect.height) * VIEW_HEIGHT;
+		if (!active || active.pointer !== event.pointerId) return;
+		const point = viewPoint(event);
+		if (!point) return;
 		const start = active.start;
-		let target: DragTarget = pointerTarget(vx, vy, start);
+		let target: DragTarget = pointerTarget(point.vx, point.vy, start);
 		// Shift keeps the frequency, Alt keeps the gain (mock).
 		if (event.shiftKey && start.kind !== 'OFF') target = { ...target, freqHz: start.freqHz };
 		if (event.altKey && hasGain(start)) target = { ...target, gainDb: start.gainDb };
@@ -314,12 +390,56 @@
 		oncommit(index, target);
 	}
 
+	// Parked points: the dragged point is drawn here (the band is still OFF); release asks the page.
+	function parkDown(event: PointerEvent, index: number) {
+		if (!editable || !onpark || event.button > 0) return;
+		event.preventDefault();
+		if (event.currentTarget instanceof Element) {
+			event.currentTarget.setPointerCapture(event.pointerId);
+		}
+		parkedFocus = index;
+		const hz = PARKED_HZ[index] ?? 1000;
+		parkedActive = { index, pointer: event.pointerId, target: {}, x: xOf(hz), y: yOf(0) };
+	}
+	function parkMove(event: PointerEvent) {
+		if (!parkedActive || parkedActive.pointer !== event.pointerId) return;
+		const point = viewPoint(event);
+		if (!point) return;
+		const target = pointerTarget(point.vx, point.vy, parkedBand(parkedActive.index));
+		parkedActive = {
+			...parkedActive,
+			target,
+			x: xOf(target.freqHz),
+			y: yOf(clamp(target.gainDb ?? 0, DB_MIN, DB_MAX))
+		};
+	}
+	function parkUp(event: PointerEvent) {
+		if (!parkedActive || parkedActive.pointer !== event.pointerId) return;
+		const { index, target } = parkedActive;
+		parkedActive = null;
+		if (event.type !== 'pointercancel' && Object.keys(target).length > 0) create(index, target);
+	}
+	function parkKey(event: KeyboardEvent, index: number) {
+		if (!onpark) return;
+		const target = keyTarget(event.key, parkedBand(index), event);
+		if (!target) return;
+		event.preventDefault();
+		create(index, target);
+	}
+	/** Asks the page for the filter, then hands keyboard focus to its new handle. */
+	async function create(index: number, target: DragTarget) {
+		selected = index;
+		onpark?.(index, target);
+		await tick();
+		overlay?.querySelector<SVGGElement>(`.handle[data-index="${index}"]`)?.focus();
+	}
+
 	/** Wheel over a handle: Q in 0.1 steps (Shift ×10, Alt ×0.1), committed 260 ms after the last. */
 	function wheelQ(node: SVGSVGElement) {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const onwheel = (event: WheelEvent) => {
 			const element = event.target instanceof Element ? event.target.closest('.handle') : null;
-			if (!(element instanceof SVGGElement)) return;
+			if (!(element instanceof SVGGElement) || element.classList.contains('parked')) return;
 			const index = Number(element.dataset.index);
 			const band = curve.bands[index];
 			if (!band || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
@@ -344,10 +464,15 @@
 			clearTimeout(timer);
 		};
 	}
+
+	function previewKey(event: KeyboardEvent) {
+		if (event.key === 'Enter' || event.key === ' ') onpreviewwarm?.();
+	}
+	const previewNote = $derived(previewDisabled && previewReason ? previewReason : previewCaption);
 </script>
 
 <section class="psec ps-scope" aria-labelledby={legendId}>
-	<div class="bezel">
+	<div class="bezel" data-tour="curva-chart">
 		<span class="screw s1" aria-hidden="true"></span>
 		<span class="screw s2" aria-hidden="true"></span>
 		<span class="screw s3" aria-hidden="true"></span>
@@ -471,6 +596,7 @@
 						<rect
 							class="safe"
 							class:out={!insideBox}
+							class:lit={grabbed}
 							x={boxRect.x}
 							y={boxRect.y}
 							width={boxRect.width}
@@ -505,13 +631,32 @@
 							<path class="tr-after" d={ghost.path} />
 						{/key}
 					{/if}
-					<path class="tr-out" d={outPath} />
-					<path class="tr-eq" d={eqPath} filter="url(#{legendId}-phos)" />
+					{#key drawKey}
+						<path class="tr-out" class:draw={drawKey > 0 && !reduced} pathLength="1" d={outPath} />
+						<path
+							class="tr-eq"
+							class:draw={drawKey > 0 && !reduced}
+							pathLength="1"
+							d={eqPath}
+							filter="url(#{legendId}-phos)"
+						/>
+					{/key}
 					{#each overOutput as s (s.fromHz)}
 						<path class="tr-hot" d={segmentPath(live.output, s.fromHz, s.toHz)} />
 					{/each}
 					{#if peak && peak.db > DB_MIN && peak.db < DB_MAX}
 						<circle class="peakmk" cx={xOf(clamp(peak.hz, 20, 20000))} cy={yOf(peak.db)} r="3.5" />
+					{/if}
+					{#if parked && !editable}
+						{#each PARKED_HZ as hz, index (hz)}
+							<g
+								class="parked-dot"
+								transform={`translate(${xOf(hz).toFixed(1)} ${yOf(0).toFixed(1)})`}
+							>
+								<circle r={ringR} />
+								<text style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text>
+							</g>
+						{/each}
 					{/if}
 				</g>
 				<g class="labels" aria-hidden="true">
@@ -519,8 +664,12 @@
 						>{m.curva_limit_line({ db: formatSignedDb(OUTPUT_LIMIT_DB, locale, 2) })}</text
 					>
 					{#if boxRect}
-						<text class="safe-t" class:out={!insideBox} x={boxRect.x + 6} y={boxRect.y + 14}
-							>{m.curva_safe_box()}</text
+						<text
+							class="safe-t"
+							class:out={!insideBox}
+							class:lit={grabbed}
+							x={boxRect.x + 6}
+							y={boxRect.y + 14}>{m.curva_safe_box()}</text
 						>
 					{/if}
 					{#each zones as zone (zone.kind)}
@@ -591,6 +740,7 @@
 								class:sel={selected === index && !locked}
 								class:dragging={active?.index === index}
 								class:outside={drag?.index === index && drag.status === 'outside'}
+								class:detent={detent === index}
 								class:refused={shake === index}
 								data-index={index}
 								role="slider"
@@ -620,6 +770,41 @@
 							</g>
 						{/if}
 					{/each}
+					{#if parked}
+						{#each PARKED_HZ as hz, index (hz)}
+							{@const held = parkedActive?.index === index ? parkedActive : null}
+							<g
+								class="handle parked"
+								class:sel={parkedFocus === index}
+								class:dragging={held !== null}
+								data-parked={index}
+								role="slider"
+								tabindex="0"
+								aria-label={m.curva_v2_parked({ index: String(index + 1) })}
+								aria-valuemin={20}
+								aria-valuemax={20000}
+								aria-valuenow={hz}
+								aria-valuetext={`${formatHz(hz, locale)}, ${formatSignedDb(0, locale)}`}
+								transform={`translate(${(held?.x ?? xOf(hz)).toFixed(1)} ${(held?.y ?? yOf(0)).toFixed(1)})`}
+								onpointerdown={(event) => parkDown(event, index)}
+								onpointermove={parkMove}
+								onpointerup={parkUp}
+								onpointercancel={parkUp}
+								onkeydown={(event) => parkKey(event, index)}
+								onfocus={() => (parkedFocus = index)}
+								onblur={() => {
+									if (parkedFocus === index && !parkedActive) parkedFocus = null;
+								}}
+							>
+								<circle r={hitR} class="hit" />
+								<g class="body">
+									<circle r={ringR} class="ring" />
+									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text
+									>
+								</g>
+							</g>
+						{/each}
+					{/if}
 					{#if bubble}
 						<g class="bubble" class:out={bubble.outside} aria-hidden="true">
 							<rect x={bubble.x} y={bubble.y} width={bubble.width} height={bubble.height} rx="3" />
@@ -633,7 +818,11 @@
 			{#if editable && chip}
 				<p class="chip" data-state={chip} aria-hidden="true">
 					<i class="led"></i><b>{m.curva_chip_label()}</b>{chipText}
+					{#if chipWhy}<span class="chip-why">{chipWhy}</span>{/if}
 				</p>
+			{/if}
+			{#if parked}
+				<p class="park-hint">{m.empty_neutral_body()}</p>
 			{/if}
 		</div>
 	</div>
@@ -642,6 +831,9 @@
 		<span><i class="sw out"></i>{m.curva_scope_out()}</span>
 		{#if refPath}<span><i class="sw ref"></i>{m.curva_scope_ref({ name: referenceName })}</span
 			>{/if}
+		{#if editable}<span class="leg-help"><i class="sw box"></i>{m.curva_safe_box()}</span><Explainer
+				term="envelope"
+			/>{/if}
 		{#if peak}
 			<span class="pk"
 				>{m.curva_peak_at({
@@ -672,31 +864,53 @@
 			type="button"
 			class="bat"
 			aria-pressed={playing}
-			disabled={previewDisabled}
-			onclick={onpreview}
+			aria-disabled={previewDisabled ? 'true' : undefined}
+			aria-describedby="{legendId}-prev"
+			onpointerdown={() => onpreviewwarm?.()}
+			onkeydown={previewKey}
+			onclick={() => {
+				if (!previewDisabled) onpreview();
+			}}
 		>
 			<span class="well" aria-hidden="true"><span class="lever"></span></span>
-			<span class="bl">{playing ? m.curva_preview_stop() : m.curva_preview()}</span>
+			<span class="bl">
+				<span>{playing ? m.curva_preview_stop() : m.curva_preview()}</span>
+				<small id="{legendId}-prev" aria-hidden="true">{previewNote}</small>
+			</span>
 		</button>
-		<div class="ab" role="radiogroup" aria-label={m.curva_ab_label()}>
-			<button
-				type="button"
-				role="radio"
-				class="tab"
-				aria-checked={side === 'A'}
-				disabled={!playing}
-				onclick={() => onside('A')}>{m.curva_ab_a({ name: referenceName })}</button
-			>
-			<button
-				type="button"
-				role="radio"
-				class="tab"
-				aria-checked={side === 'B'}
-				disabled={!playing}
-				onclick={() => onside('B')}>{m.curva_ab_b()}</button
-			>
+		<div
+			class="ab"
+			role="radiogroup"
+			aria-label={m.curva_ab_label()}
+			aria-describedby={playing ? undefined : `${legendId}-ab`}
+		>
+			<span class="well" data-pos={side} aria-hidden="true"><span class="lever"></span></span>
+			<span class="ab-body">
+				<span class="bl" aria-hidden="true">{m.curva_v2_ab_title()}</span>
+				<span class="ab-keys">
+					<button
+						type="button"
+						role="radio"
+						class="tab"
+						aria-checked={side === 'A'}
+						disabled={!playing}
+						onclick={() => onside('A')}>{m.curva_ab_a({ name: referenceName })}</button
+					>
+					<button
+						type="button"
+						role="radio"
+						class="tab"
+						aria-checked={side === 'B'}
+						disabled={!playing}
+						onclick={() => onside('B')}>{m.curva_ab_b()}</button
+					>
+				</span>
+			</span>
 		</div>
-		<p class="prev-note">{m.curva_preview_note()}</p>
+		{#if !playing}
+			<small class="ab-why" id="{legendId}-ab">{m.curva_v2_ab_unavailable()}</small>
+		{/if}
+		<div class="prev-note">{m.curva_preview_note()} <Explainer term="ab-nivel" /></div>
 		{#if playing && approximate}
 			<p class="prev-note prev-approx" role="status">{m.curva_approximate()}</p>
 		{/if}
@@ -711,7 +925,7 @@
 	.bezel {
 		position: relative;
 		padding: 13px;
-		border-radius: 14px;
+		border-radius: var(--rad-2xl);
 		background: linear-gradient(150deg, #323331, #1a1b1a 45%, #111211);
 		box-shadow:
 			inset 0 1px 0 rgb(255 255 255 / 0.09),
@@ -752,14 +966,17 @@
 		background: radial-gradient(ellipse at 50% 45%, #1d140d 0%, #0d0a07 68%, #050403 100%);
 		box-shadow:
 			inset 0 0 44px rgb(0 0 0 / 0.95),
-			inset 0 0 0 1px rgb(255 122 47 / 0.12);
+			inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
+			0 0 28px color-mix(in srgb, var(--accent) 8%, transparent);
 	}
+	/* Curved glass: a reflection and fine scanlines over the phosphor (decorative). */
 	.screen::after {
 		content: '';
 		position: absolute;
 		inset: 0;
 		border-radius: inherit;
 		background:
+			radial-gradient(120% 70% at 30% 0%, rgb(255 255 255 / 0.07), transparent 55%),
 			linear-gradient(160deg, rgb(255 255 255 / 0.08), transparent 32%),
 			repeating-linear-gradient(0deg, rgb(0 0 0 / 0.2) 0 1px, transparent 1px 3px);
 		pointer-events: none;
@@ -771,7 +988,7 @@
 		user-select: none;
 	}
 	.scope text {
-		font-family: var(--font-mono, 'JetBrains Mono', monospace);
+		font-family: var(--face-data);
 		font-size: var(--gfs, 11px);
 	}
 	.grat line {
@@ -823,8 +1040,16 @@
 		stroke: rgb(255 122 47 / 0.45);
 		stroke-dasharray: 3 4;
 		transition:
-			fill 0.2s,
-			stroke 0.2s;
+			fill var(--dur-fast) var(--ease-out),
+			stroke var(--dur-fast) var(--ease-out),
+			stroke-width var(--dur-fast) var(--ease-out);
+	}
+	/* A grabbed point: the box it may roam lights up. */
+	.safe.lit {
+		fill: rgb(255 122 47 / 0.13);
+		stroke: var(--accent);
+		stroke-width: 1.6;
+		filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent));
 	}
 	.safe.out {
 		fill: rgb(255 176 64 / 0.04);
@@ -832,6 +1057,9 @@
 	}
 	.safe-t {
 		fill: rgb(255 160 110 / 0.8);
+	}
+	.safe-t.lit {
+		fill: var(--accent-hi);
 	}
 	.safe-t.out {
 		fill: rgb(255 196 120 / 0.95);
@@ -845,7 +1073,7 @@
 	}
 	.hot-t {
 		fill: #ff8f8f;
-		font-weight: 600;
+		font-weight: 500;
 	}
 	.near-t {
 		fill: #ffc078;
@@ -870,7 +1098,7 @@
 	}
 	.tr-after {
 		fill: none;
-		stroke: var(--accent, #ff7a2f);
+		stroke: var(--accent);
 		stroke-width: 2.2;
 		opacity: 0;
 		animation: after 1.5s ease-out;
@@ -891,9 +1119,20 @@
 	}
 	.tr-eq {
 		fill: none;
-		stroke: var(--accent, #ff7a2f);
+		stroke: var(--accent);
 		stroke-width: 2.6;
 		stroke-linejoin: round;
+	}
+	/* A preset loads: the beam traces the new curve once, left to right (pathLength = 1). */
+	.draw {
+		stroke-dasharray: 1;
+		stroke-dashoffset: 1;
+		animation: draw var(--dur-slow) var(--ease-out) forwards;
+	}
+	@keyframes draw {
+		to {
+			stroke-dashoffset: 0;
+		}
 	}
 	.tr-hot {
 		fill: none;
@@ -902,6 +1141,17 @@
 	}
 	.peakmk {
 		fill: #ffe0c7;
+	}
+	.parked-dot circle {
+		fill: rgb(10 8 6 / 0.85);
+		stroke: rgb(255 224 199 / 0.6);
+		stroke-width: 1.4;
+		stroke-dasharray: 3 2;
+	}
+	.parked-dot text {
+		fill: rgb(255 224 199 / 0.8);
+		text-anchor: middle;
+		dominant-baseline: central;
 	}
 	.handles {
 		position: absolute;
@@ -923,13 +1173,13 @@
 		stroke: #ffe0c7;
 		stroke-width: 1.6;
 		transition:
-			stroke 0.15s,
-			fill 0.15s;
+			stroke var(--dur-fast) var(--ease-out),
+			fill var(--dur-fast) var(--ease-out);
 	}
 	.handle .num {
 		fill: #ffe0c7;
-		font-family: var(--font-mono, 'JetBrains Mono', monospace);
-		font-weight: 600;
+		font-family: var(--face-data);
+		font-weight: 500;
 		text-anchor: middle;
 		dominant-baseline: central;
 		pointer-events: none;
@@ -938,27 +1188,31 @@
 		stroke: #fff3e8;
 		stroke-width: 2;
 	}
+	.handle.parked .ring {
+		stroke-dasharray: 3 2;
+	}
 	.handle.sel .ring {
-		stroke: var(--accent, #ff7a2f);
+		stroke: var(--accent);
 		stroke-width: 2.4;
 		filter: drop-shadow(0 0 3px rgb(255 122 47 / 0.8));
 	}
 	.handle.sel .num {
-		fill: var(--accent, #ff7a2f);
+		fill: var(--accent);
 	}
 	.handle:focus-visible .ring {
-		stroke: var(--accent, #ff7a2f);
+		stroke: var(--accent);
 		stroke-width: 3.2;
 	}
 	.handle.dragging {
 		cursor: grabbing;
 	}
 	.handle.dragging .ring {
-		fill: var(--accent, #ff7a2f);
+		fill: var(--accent);
 		stroke: #fff3e8;
+		stroke-dasharray: none;
 	}
 	.handle.dragging .num {
-		fill: #120c08;
+		fill: var(--accent-ink);
 	}
 	.handle.outside .ring {
 		fill: rgb(60 8 10 / 0.9);
@@ -967,6 +1221,20 @@
 	}
 	.handle.outside .num {
 		fill: #ffb3b6;
+	}
+	/* The boundary detent: the ring knocks once against the stop (120 ms, mechanical easing). */
+	.handle.detent .body {
+		transform-box: fill-box;
+		transform-origin: center;
+		animation: detent var(--dur-fast) var(--ease-mech);
+	}
+	@keyframes detent {
+		0% {
+			transform: scale(1.28);
+		}
+		100% {
+			transform: scale(1);
+		}
 	}
 	.handle.refused .body {
 		animation: refused 0.42s ease-out;
@@ -1005,7 +1273,7 @@
 	}
 	.bubble text {
 		fill: #ffe0c7;
-		font-family: var(--font-mono, 'JetBrains Mono', monospace);
+		font-family: var(--face-data);
 		font-size: var(--gfs, 11px);
 		text-anchor: middle;
 		dominant-baseline: central;
@@ -1021,42 +1289,64 @@
 		top: 10px;
 		left: 50%;
 		display: flex;
-		gap: 6px;
+		flex-wrap: wrap;
+		gap: 4px 6px;
 		align-items: center;
+		justify-content: center;
+		max-width: min(70%, 520px);
 		margin: 0;
-		padding: 3px 9px;
+		padding: 3px 10px;
 		border: 1px solid rgb(255 122 47 / 0.25);
-		border-radius: 999px;
-		background: rgb(8 6 4 / 0.8);
-		color: #cbc5ba;
-		font: 10px/1.2 var(--font-mono, 'JetBrains Mono', monospace);
+		border-radius: var(--rad-xl);
+		background: rgb(8 6 4 / 0.86);
+		color: var(--text-2, #cfc9be);
+		font: 400 var(--label-min) / 1.3 var(--face-data);
 		pointer-events: none;
 		transform: translateX(-50%);
 	}
 	.chip b {
-		font-weight: 600;
+		font-weight: 500;
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
-		color: #e9e3d4;
+		color: var(--text, #ece7dd);
 	}
 	.chip .led {
 		width: 7px;
 		height: 7px;
 		border-radius: 50%;
-		background: #3ddc97;
-		box-shadow: 0 0 6px #3ddc97;
+		background: var(--ok);
+		box-shadow: 0 0 6px var(--ok);
 	}
 	.chip[data-state='checking'] .led {
-		background: #ffb040;
-		box-shadow: 0 0 6px #ffb040;
+		background: var(--warn);
+		box-shadow: 0 0 6px var(--warn);
 	}
 	.chip[data-state='outside'] {
 		border-color: rgb(229 72 77 / 0.7);
 		color: #ffd6d7;
 	}
 	.chip[data-state='outside'] .led {
-		background: #e5484d;
-		box-shadow: 0 0 8px #e5484d;
+		background: var(--danger);
+		box-shadow: 0 0 8px var(--danger);
+	}
+	.chip-why {
+		flex: 1 1 100%;
+		font-family: var(--face-body);
+		text-align: center;
+	}
+	.park-hint {
+		position: absolute;
+		right: 5%;
+		bottom: 17%;
+		max-width: 46%;
+		margin: 0;
+		padding: 4px 10px;
+		border: 1px dashed rgb(255 224 199 / 0.4);
+		border-radius: var(--rad-md);
+		background: rgb(8 6 4 / 0.78);
+		color: #ffe0c7;
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
+		pointer-events: none;
 	}
 	.scope-legend {
 		display: flex;
@@ -1064,15 +1354,19 @@
 		gap: 6px 14px;
 		align-items: center;
 		margin-top: 9px;
-		font: 11px var(--font-mono, 'JetBrains Mono', monospace);
-		color: #cbc5ba;
+		color: var(--text-2);
+		font: 400 var(--label-min) / 1.3 var(--face-data);
+	}
+	.leg-help {
+		display: inline-flex;
+		align-items: center;
 	}
 	.sw {
 		display: inline-block;
 		width: 16px;
 		height: 0;
 		margin-right: 5px;
-		border-top: 2px solid var(--accent, #ff7a2f);
+		border-top: 2px solid var(--accent);
 		vertical-align: 3px;
 	}
 	.sw.out {
@@ -1081,25 +1375,29 @@
 	.sw.ref {
 		border-top: 1px dashed rgb(255 210 175 / 0.7);
 	}
+	.sw.box {
+		height: 8px;
+		border: 1px dashed rgb(255 122 47 / 0.7);
+		vertical-align: -1px;
+	}
 	.pk {
 		margin-left: auto;
-		color: var(--accent, #ff7a2f);
+		color: var(--accent-text);
 	}
 	.scope-msg,
 	.exp-hint,
 	.prev-error {
 		margin: 8px 0 0;
 		padding: 7px 10px;
-		border-left: 3px solid var(--accent, #ff7a2f);
-		border-radius: 3px;
+		border-left: 3px solid var(--accent);
+		border-radius: var(--rad-sm);
 		background: rgb(255 122 47 / 0.06);
-		font-size: 12px;
-		line-height: 1.45;
-		color: var(--curva-silk, #e9e3d4);
+		color: var(--text);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
 	.scope-msg.danger,
 	.prev-error {
-		border: 1px solid #e5484d;
+		border: 1px solid var(--danger);
 		border-left-width: 3px;
 		background: rgb(20 6 6 / 0.92);
 		color: #ffd6d7;
@@ -1113,7 +1411,7 @@
 	.preview-row {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 8px 14px;
+		gap: 8px 18px;
 		align-items: center;
 		margin-top: 10px;
 	}
@@ -1121,15 +1419,23 @@
 		display: flex;
 		gap: 8px;
 		align-items: center;
-		min-height: 40px;
+		min-height: 44px;
 		padding: 2px;
 		border: 0;
+		border-radius: var(--rad-sm);
 		background: none;
 		color: inherit;
 		cursor: pointer;
 	}
+	.bat[aria-disabled='true'] {
+		cursor: not-allowed;
+	}
+	.bat[aria-disabled='true'] .well {
+		opacity: 0.55;
+	}
 	.well {
 		position: relative;
+		flex: none;
 		width: 26px;
 		height: 40px;
 		border-radius: 13px;
@@ -1151,81 +1457,107 @@
 		border-radius: 4px;
 		background: linear-gradient(90deg, #8a867e, #f4f0e7 45%, #a19c93);
 		box-shadow: 0 2px 2px rgb(0 0 0 / 0.6);
-		transition: top 0.16s;
+		transition: top var(--dur-fast) var(--ease-mech);
 	}
-	.bat[aria-pressed='true'] .lever {
+	.bat[aria-pressed='true'] .lever,
+	.well[data-pos='B'] .lever {
 		top: 20px;
 	}
 	.bl {
-		font: 600 11.5px/1.15 var(--font-cond, 'Barlow Condensed', 'Arial Narrow', sans-serif);
+		display: grid;
+		gap: 2px;
+		color: var(--text);
+		font: 600 var(--fs-caption) / 1.15 var(--face-engrave);
 		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: var(--curva-silk, #e9e3d4);
 		text-align: left;
+		text-transform: uppercase;
 	}
-	.bat:hover:not(:disabled) .lever {
+	.bl small {
+		color: var(--text-2);
+		font: 400 var(--label-min) / 1.2 var(--face-data);
+		letter-spacing: 0;
+		text-transform: none;
+	}
+	.bat:hover:not([aria-disabled='true']) .lever {
 		filter: brightness(1.08);
 	}
 	.ab {
 		display: inline-flex;
+		gap: 8px;
+		align-items: center;
+	}
+	.ab-body {
+		display: grid;
+		gap: 3px;
+	}
+	.ab-keys {
+		display: inline-flex;
 		gap: 2px;
 	}
 	.tab {
-		min-height: 32px;
-		padding: 6px 11px;
+		min-height: 28px;
+		padding: 4px 9px;
 		border: 1px solid #2c2c2a;
-		border-radius: 3px;
+		border-radius: var(--rad-sm);
 		background: linear-gradient(#262725, #141514);
 		box-shadow:
-			inset 0 1px 0 rgb(255 255 255 / 0.07),
+			var(--bevel),
 			0 2px 3px rgb(0 0 0 / 0.6);
-		color: var(--curva-silk, #e9e3d4);
-		font: 600 12px/1 var(--font-cond, 'Barlow Condensed', 'Arial Narrow', sans-serif);
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
+		color: var(--text);
+		font: 500 var(--label-min) / 1 var(--face-body);
 		cursor: pointer;
 		transition:
-			transform 0.08s,
-			border-color 0.15s;
+			transform var(--dur-instant) var(--ease-mech),
+			border-color var(--dur-fast) var(--ease-out);
 	}
 	.tab:hover:not(:disabled) {
-		border-color: #4a4a46;
+		border-color: var(--rule-control);
 	}
 	.tab:active:not(:disabled) {
 		transform: translateY(1px);
-		box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7);
+		box-shadow: var(--well);
 	}
 	.tab[aria-checked='true'] {
-		border-color: rgb(255 122 47 / 0.55);
-		color: var(--accent, #ff7a2f);
-		box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7);
-		transform: translateY(2px);
+		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+		color: var(--accent-text);
+		box-shadow: var(--well);
+		transform: translateY(1px);
 	}
-	button:disabled {
-		opacity: 0.55;
+	.tab:disabled {
+		color: var(--muted-hi);
 		cursor: not-allowed;
 	}
+	.ab-why {
+		color: var(--text-2);
+		font: 400 var(--label-min) / 1.3 var(--face-data);
+	}
 	button:focus-visible {
-		outline: 2px solid var(--accent, #ff7a2f);
-		outline-offset: 3px;
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
 	}
 	.prev-note {
 		flex: 1 1 260px;
 		margin: 0;
-		font-size: 10.5px;
-		line-height: 1.45;
-		color: var(--curva-silk-2, #c9c1ae);
+		color: var(--text-2);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
 	.reduced .sweep,
 	.reduced .tr-after,
+	.reduced .draw,
+	.reduced .handle.detent .body,
 	.reduced .handle.refused .body {
 		animation: none;
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.sweep,
 		.tr-after,
+		.draw,
+		.handle.detent .body,
 		.handle.refused .body {
 			animation: none;
+		}
+		.draw {
+			stroke-dashoffset: 0;
 		}
 		.safe,
 		.handle .ring,
@@ -1237,6 +1569,11 @@
 	@media (max-width: 720px) {
 		.grat :global(.alt) {
 			display: none;
+		}
+		.park-hint {
+			right: 3%;
+			bottom: 20%;
+			max-width: 70%;
 		}
 	}
 </style>

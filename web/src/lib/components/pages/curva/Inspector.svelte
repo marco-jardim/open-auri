@@ -30,7 +30,7 @@
 </script>
 
 <section class="mod-panel" aria-labelledby={headingId}>
-	<h3 id={headingId}>{m.curva_insp_heading({ index: String(selected + 1) })}</h3>
+	<h3 id={headingId}>{m.curva_v2_insp_heading({ index: String(selected + 1) })}</h3>
 	{#if band.kind === 'OFF'}
 		<p class="note">{m.curva_insp_off()}</p>
 	{:else}

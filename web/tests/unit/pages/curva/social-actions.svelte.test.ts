@@ -162,8 +162,16 @@ test('an existing account favorite starts in the remove state', async () => {
 
 test.each([false, true])('account guards never write (%s)', async (signedIn) => {
 	const { fetcher, screen } = await setup(undefined, signedIn, false);
-	await expect.element(page.getByRole('button', { name: m.curva_social_save() })).toBeDisabled();
-	await expect.element(page.getByRole('button', { name: m.curva_social_publish() })).toBeDisabled();
+	// Unavailable, focusable and saying why (T8); a press does nothing.
+	const why = signedIn ? m.curva_v2_social_verify_reason() : m.curva_v2_social_login_reason();
+	for (const name of [m.curva_social_save(), m.curva_social_publish()]) {
+		const button = page.getByRole('button', { name, exact: true });
+		await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(button).toHaveAccessibleDescription(why);
+		const element = button.element();
+		if (element instanceof HTMLElement) element.click();
+	}
+	expect(page.getByRole('dialog').elements()).toHaveLength(0);
 	expect(screen.container.textContent).toContain(
 		signedIn ? m.curva_social_verify() : m.curva_social_login()
 	);

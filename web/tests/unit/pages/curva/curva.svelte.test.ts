@@ -113,7 +113,7 @@ test('the layer selector radiogroup calls onlayer', async () => {
 test('a reorder the gate refuses springs back with the reason', async () => {
 	const { app } = await setup('engenharia', pad([CUT, BOOST]));
 	await tick();
-	await page.getByRole('button', { name: 'Mover S2 para a esquerda' }).click();
+	await page.getByRole('button', { name: 'Mover o filtro 2 para a esquerda' }).click();
 	await expect.element(page.getByText(/Ordem recusada/).first()).toBeVisible();
 	expect(app.state.curve.current.bands.slice(0, 2)).toEqual([CUT, BOOST]);
 });
@@ -121,7 +121,7 @@ test('a reorder the gate refuses springs back with the reason', async () => {
 test('an accepted reorder updates the editor (undoable)', async () => {
 	const { app } = await setup('engenharia', pad([CUT, BOOST]));
 	await tick();
-	await page.getByRole('button', { name: 'Mover S2 para a direita' }).click();
+	await page.getByRole('button', { name: 'Mover o filtro 2 para a direita' }).click();
 	await tick();
 	expect(app.state.curve.current.bands[2]).toEqual(BOOST);
 	expect(app.state.curve.canUndo).toBe(true);
