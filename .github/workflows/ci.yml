@@ -182,6 +182,9 @@ jobs:
           npm run -w web gen
           npm run -w web dev-vars
       - name: Playwright
+        # No embedded AutoEq data in CI (generated locally, git-ignored); see tests/e2e/smoke.spec.ts.
+        env:
+          OA_NO_AUTOEQ: '1'
         run: npm run -w web test:e2e
       - name: Upload Playwright report
         if: failure()

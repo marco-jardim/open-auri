@@ -98,7 +98,8 @@ export default defineConfig({
 					name: 'component',
 					browser: {
 						enabled: true,
-						provider: playwright(),
+						// Tests read pt-BR copy; the default locale follows navigator.language (CI runs en-US).
+						provider: playwright({ contextOptions: { locale: 'pt-BR' } }),
 						instances: [{ browser: 'chromium', headless: true }]
 					},
 					include: ['tests/unit/**/*.svelte.test.ts', 'src/**/*.svelte.test.ts'],

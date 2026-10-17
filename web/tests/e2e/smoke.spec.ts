@@ -2,6 +2,11 @@ import { expect, test } from '@playwright/test';
 import { openApp, settleRendering } from './helpers/a-app';
 import { routes } from './helpers/a-routes';
 
+// CI has no embedded AutoEq data (web/static/data/autoeq is generated locally and git-ignored);
+// the workflow sets OA_NO_AUTOEQ=1 so only those requests and their console echo are tolerated.
+const NO_AUTOEQ = process.env.OA_NO_AUTOEQ === '1';
+const AUTOEQ_PATH = /\/data\/autoeq\//;
+
 test.describe('Phase 2 route smoke', () => {
 	test.describe.configure({ mode: 'parallel' });
 
@@ -10,12 +15,22 @@ test.describe('Phase 2 route smoke', () => {
 			page
 		}) => {
 			const errors: string[] = [];
+			const autoeqMisses = new Set<string>();
 			page.on('console', (message) => {
-				if (message.type() === 'error') errors.push(`console: ${message.text()}`);
+				if (message.type() !== 'error') return;
+				const url = message.location().url;
+				if (NO_AUTOEQ && (AUTOEQ_PATH.test(url) || /AutoEq/.test(message.text()))) return;
+				errors.push(`console: ${message.text()}`);
 			});
 			page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
 			page.on('response', (response) => {
-				if (response.status() >= 400) errors.push(`HTTP ${response.status()}: ${response.url()}`);
+				if (response.status() >= 400) {
+					if (NO_AUTOEQ && AUTOEQ_PATH.test(response.url())) {
+						autoeqMisses.add(response.url());
+						return;
+					}
+					errors.push(`HTTP ${response.status()}: ${response.url()}`);
+				}
 			});
 
 			await openApp(page, route.path);
