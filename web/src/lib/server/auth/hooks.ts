@@ -29,12 +29,14 @@
 // after:
 //   - wrong password / second factor of a session → counted toward the lockout budget;
 //   - 2FA session marker after a successful TOTP / backup-code verification;
-//   - "password changed" notice after `/change-password`.
+//   - "password changed" notice after `/change-password`;
+//   - one `signup` Analytics Engine metric after a successful `/sign-up/email` (T5.2).
 import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from 'better-auth/api';
 import { verifyJWT } from 'better-auth/crypto';
 import { isNicknameHeld } from '../account/nickname.ts';
 import { first, sql } from '../db.ts';
 import type { ServerEnv } from '../env.ts';
+import { recordSignup } from '../observability/metrics.ts';
 import type { AuthGuard } from '../security/auth-guard.ts';
 import { isAuthGuardedPath } from '../security/ratelimit.ts';
 import type { AuthMailer } from './emails.ts';
@@ -156,7 +158,8 @@ function hasForbiddenNameChar(value: string): boolean {
 }
 
 export interface AuthHookDeps {
-	env: Pick<ServerEnv, 'db' | 'publicOrigin' | 'flags'>;
+	/** `metrics` (T5.2) is optional: hooks built without it record no sign-up metric. */
+	env: Pick<ServerEnv, 'db' | 'publicOrigin' | 'flags'> & Partial<Pick<ServerEnv, 'metrics'>>;
 	guard: AuthGuard;
 	mailer: AuthMailer;
 	now?: () => Date;
@@ -575,6 +578,12 @@ export function createAfterHook(deps: AuthHookDeps) {
 		}
 		if (returned === undefined || returned === null) return;
 		if (returned instanceof Response && !returned.ok) return;
+
+		if (ctx.path === '/sign-up/email') {
+			// T5.2: one `signup` metric per accepted sign-up (no user id, address or name).
+			if (returnedUser(returned)) recordSignup(deps.env.metrics, 'email');
+			return;
+		}
 
 		if (TWO_FACTOR_VERIFY_PATHS.has(ctx.path)) {
 			// A session created by this request (sign-in challenge, or the TOTP verification that

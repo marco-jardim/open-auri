@@ -10,6 +10,7 @@ const ENV_KEYS = [
 	'RL_AUTH',
 	'RL_API',
 	'RL_WRITE',
+	'METRICS',
 	'PUBLIC_ORIGIN',
 	'GITHUB_URL',
 	'RESEND_FROM',
@@ -115,6 +116,15 @@ describe('getServerEnv', () => {
 			expect.arrayContaining(['DB', 'RL_WRITE', 'PUBLIC_ORIGIN', 'SIGNUP_ENABLED', 'IPHASH_PEPPER'])
 		);
 		for (const leak of leaks) expect(message).not.toContain(leak);
+	});
+
+	it('treats the METRICS binding as optional (null when absent) and checks its shape', () => {
+		expect(getServerEnv({ env: envWith({ METRICS: undefined }) }).metrics).toBeNull();
+		const fake = { writeDataPoint: () => undefined };
+		expect(getServerEnv({ env: envWith({ METRICS: fake }) }).metrics).toBe(fake);
+		expect(() => getServerEnv({ env: envWith({ METRICS: { writeDataPoint: 1 } }) })).toThrow(
+			/METRICS: binding missing or of the wrong type/
+		);
 	});
 
 	it('fails clearly outside the Workers runtime', () => {

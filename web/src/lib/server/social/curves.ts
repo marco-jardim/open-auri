@@ -19,6 +19,11 @@ import { decodeS1, S1Error, validateEnvelope } from 'open-auri/share';
 import { z } from 'zod';
 import { ApiError, CACHE_PUBLIC_60, cached, json } from '#lib/server/api/index.ts';
 import { rateLimitKey, slidingWindowLimit } from '#lib/server/security/ratelimit.ts';
+import {
+	recordGateRejection,
+	type MetricsDataset,
+	type PublicationPath
+} from '#lib/server/observability/metrics.ts';
 import { checkCurve, isGateCurrent, regateCurve } from '#lib/server/social/gate.ts';
 import { isLinkableTombstone } from '#lib/server/social/queries/curves.ts';
 import {
@@ -107,6 +112,8 @@ export interface CurveDeps {
 	/** Gate injection for tests (default: the core's gateForWrite through checkCurve). */
 	gate?: typeof gateForWrite;
 	now?: number;
+	/** Analytics Engine dataset (T5.2): gate rejections of the publication path, by reason. */
+	metrics?: MetricsDataset | null;
 }
 
 /** Credit a CC-BY 4.0 fork must keep (null for CC0 sources). */
@@ -323,7 +330,8 @@ async function prepare(
 	userId: string,
 	raw: Record<string, unknown>,
 	now: number,
-	deps: CurveDeps
+	deps: CurveDeps,
+	path: PublicationPath
 ): Promise<Prepared> {
 	const checked = validateEnvelope(raw);
 	if (!checked.ok) throw invalidCurve(checked.errors.map((issue) => issue.code));
@@ -336,6 +344,7 @@ async function prepare(
 	const verdict = await checkCurve(db, envelope.code, now, gateOptions(deps));
 	if (!verdict.ok) {
 		if (verdict.code === 'invalid-curve') throw invalidCurve(verdict.codes);
+		recordGateRejection(deps.metrics, verdict.reasons, path);
 		throw gateRejected(verdict.reasons);
 	}
 	return { curve: curveInputOf(verdict.curve), version: versionInputOf(envelope) };
@@ -502,7 +511,7 @@ export async function publishCurve(
 ): Promise<PublishedInfo> {
 	const now = clockOf(deps);
 	await assertQuota(db, userId, now);
-	const prepared = await prepare(db, userId, body.envelope, now, deps);
+	const prepared = await prepare(db, userId, body.envelope, now, deps, 'publish');
 	const result = await publishLineage(db, {
 		lineageId: newId(),
 		ownerUserId: userId,
@@ -531,7 +540,7 @@ export async function appendCurveVersion(
 	if (lineage.status !== 'active') throw new ApiError(409, 'CONFLICT');
 	if (body.parentVersionId !== lineage.headVersion) throw new ApiError(409, 'HEAD_MOVED');
 	await assertQuota(db, userId, now);
-	const prepared = await prepare(db, userId, body.envelope, now, deps);
+	const prepared = await prepare(db, userId, body.envelope, now, deps, 'version');
 	const result = await appendVersion(db, {
 		lineageId: lineage.id,
 		ownerUserId: userId,
@@ -574,7 +583,7 @@ export async function forkCurve(
 	if (!view || view.version.lineageId !== source.id) throw new ApiError(404, 'NOT_FOUND');
 	await assertQuota(db, userId, now);
 	const raw = body.envelope ?? envelopeOf(view.version, view.curve, now);
-	const prepared = await prepare(db, userId, raw, now, deps);
+	const prepared = await prepare(db, userId, raw, now, deps, 'fork');
 	const byLicense = view.version.license === 'CC-BY-4.0';
 	if (byLicense && prepared.version.license !== 'CC-BY-4.0') throw invalidCurve(['env:enum']);
 	const result = await forkLineage(db, view.version.id, {

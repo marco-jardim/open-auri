@@ -12,6 +12,8 @@
 // hourly re-gate and the daily S6 aggregation; checked by test/registry.test.ts).
 // Observability keeps our own (PII-free) console lines but turns the
 // platform's invocation logs off and redacts query strings, as in web/wrangler.template.jsonc.
+// Metrics (T5.2): one job_run data point per job to the METRICS Analytics Engine dataset (same
+// datasets as the web Worker); schema in docs/operacao/observabilidade.md.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "${WORKER_NAME_JOBS}",
@@ -48,6 +50,7 @@
       }
     ]
   },
+  "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "open_auri_metrics" }],
   "vars": {
     "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
     "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE}"
@@ -84,6 +87,7 @@
           }
         ]
       },
+      "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "open_auri_metrics" }],
       "vars": {
         "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
         "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE}"
@@ -120,6 +124,9 @@
           }
         ]
       },
+      "analytics_engine_datasets": [
+        { "binding": "METRICS", "dataset": "open_auri_metrics_staging" }
+      ],
       "vars": {
         "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
         "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE_STAGING}"

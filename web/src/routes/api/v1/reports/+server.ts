@@ -43,6 +43,7 @@ export const POST: RequestHandler = defineApi(
 	async ({ event, env, user }) => {
 		const body = await readJson(event.request, Body, { maxBytes: 4096 });
 		const result = await fileReport(env.db, {
+			metrics: env.metrics,
 			reporterUserId: user.id,
 			targetKind: body.targetKind,
 			targetId: body.targetId,

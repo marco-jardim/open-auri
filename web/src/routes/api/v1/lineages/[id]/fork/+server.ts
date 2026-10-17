@@ -23,7 +23,10 @@ export const POST: RequestHandler = defineApi(
 			(body.visibility ?? 'private') === 'private'
 				? {}
 				: { onPublished: (info) => void scheduleOgWarm(event, info) };
-		const forked = await forkCurve(env.db, user.id, event.params.id ?? '', body, deps);
+		const forked = await forkCurve(env.db, user.id, event.params.id ?? '', body, {
+			...deps,
+			metrics: env.metrics
+		});
 		return json(forked, { status: 201 });
 	}
 );

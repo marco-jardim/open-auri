@@ -7,6 +7,7 @@
 // interface drifts from web/wrangler.template.jsonc (bindings + vars, every environment) or from
 // the secret list in tools/render-wrangler.mjs.
 import type {
+	AnalyticsEngineDataset,
 	CacheStorage,
 	D1Database,
 	ExecutionContext,
@@ -28,6 +29,8 @@ export interface Env {
 	RL_AUTH: RateLimit;
 	RL_API: RateLimit;
 	RL_WRITE: RateLimit;
+	/** Analytics Engine metrics (T5.2); optional: absent in tests and local dev (no-op). */
+	METRICS?: AnalyticsEngineDataset;
 	// Vars (wrangler.template.jsonc), always strings
 	PUBLIC_ORIGIN: string;
 	GITHUB_URL: string;

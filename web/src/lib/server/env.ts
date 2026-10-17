@@ -11,6 +11,8 @@ export interface ServerEnv {
 	media: Env['MEDIA'];
 	accessLogQueue: Env['ACCESS_LOG_QUEUE'];
 	rateLimit: { auth: Env['RL_AUTH']; api: Env['RL_API']; write: Env['RL_WRITE'] };
+	/** Analytics Engine dataset (T5.2), or null when the binding is absent (metrics become no-ops). */
+	metrics: NonNullable<Env['METRICS']> | null;
 	/** Canonical origin, e.g. `https://example.org` (no path, no trailing slash). */
 	publicOrigin: string;
 	githubUrl: string;
@@ -101,6 +103,7 @@ const schema = z.object({
 	RL_AUTH: binding<Env['RL_AUTH']>('limit'),
 	RL_API: binding<Env['RL_API']>('limit'),
 	RL_WRITE: binding<Env['RL_WRITE']>('limit'),
+	METRICS: binding<NonNullable<Env['METRICS']>>('writeDataPoint').optional(),
 	PUBLIC_ORIGIN: z
 		.string('expected a string')
 		.refine(isOrigin, 'not a bare https origin (scheme://host[:port])'),
@@ -152,6 +155,7 @@ export function getServerEnv(platform: { readonly env?: unknown } | undefined): 
 		media: data.MEDIA,
 		accessLogQueue: data.ACCESS_LOG_QUEUE,
 		rateLimit: { auth: data.RL_AUTH, api: data.RL_API, write: data.RL_WRITE },
+		metrics: data.METRICS ?? null,
 		publicOrigin: data.PUBLIC_ORIGIN,
 		githubUrl: data.GITHUB_URL,
 		resendFrom: data.RESEND_FROM,

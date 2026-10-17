@@ -15,6 +15,7 @@ import {
 	type BanDuration,
 	type ModerationDeps
 } from '#lib/server/admin/users.ts';
+import { recordReport, type MetricsDataset } from '#lib/server/observability/metrics.ts';
 import {
 	countEligibleReporters,
 	insertReport,
@@ -69,6 +70,8 @@ export interface FileReportInput {
 	now: number;
 	/** Report id (defaults to a random UUID). */
 	id?: string;
+	/** Analytics Engine dataset (T5.2): one `report` point (target kind, reason) per new report. */
+	metrics?: MetricsDataset | null;
 }
 
 export type FileReportResult =
@@ -110,6 +113,7 @@ export async function fileReport(
 	});
 	if (!inserted.ok) return { ok: false, code: 'INVALID' };
 	if (!inserted.value.created) return { ok: false, code: 'DUPLICATE' };
+	recordReport(input.metrics, input.targetKind, input.reason);
 	if (target.kind === 'user') return { ok: true, autoHidden: false };
 	const autoHidden = await maybeAutoHide(db, target.kind, target.id, input.now, auditOptions);
 	return { ok: true, autoHidden };

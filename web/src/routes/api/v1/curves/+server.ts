@@ -22,7 +22,10 @@ export const POST: RequestHandler = defineApi(
 			body.visibility === 'private'
 				? {}
 				: { onPublished: (info) => void scheduleOgWarm(event, info) };
-		const published = await publishCurve(env.db, user.id, body, deps);
+		const published = await publishCurve(env.db, user.id, body, {
+			...deps,
+			metrics: env.metrics
+		});
 		return json(published, { status: 201 });
 	}
 );

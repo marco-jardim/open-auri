@@ -6,6 +6,7 @@
 import type { RequestEvent } from '@sveltejs/kit';
 import { checkUser, type AuthLocals } from '../auth/guards.ts';
 import { getServerEnv, type ServerEnv } from '../env.ts';
+import { metricsFromEnv, recordServerError } from '../observability/metrics.ts';
 import type { TurnstileAction } from '../security/turnstile.ts';
 import type { AuthSession, AuthUser } from '../types.ts';
 import { ApiError, apiError, apiErrorFrom } from './errors.ts';
@@ -152,14 +153,18 @@ async function runApi<E extends ApiEvent>(
 
 		return await invoke({ event, env, user, session });
 	} catch (error) {
+		// T5.2: every 5xx also becomes one `http_5xx` metric (route id + code; no-op without METRICS).
+		const metrics = metricsFromEnv(event.platform?.env);
 		if (error instanceof ApiError) {
 			if (error.status >= 500) {
 				console.error(logLine({ event: 'api.error', route, code: error.code }));
+				recordServerError(metrics, route, error.code, error.status);
 			}
 			return apiErrorFrom(error);
 		}
 		const name = error instanceof Error ? error.name : typeof error;
 		console.error(logLine({ event: 'api.error', route, error: name }));
+		recordServerError(metrics, route, name, 500);
 		return apiError(500, 'INTERNAL');
 	}
 }

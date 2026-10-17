@@ -10,8 +10,9 @@
 //       tags: [{ name: 'template', value: 'verify-email' }] }
 //   });
 import type { ServerEnv } from '../env.ts';
+import { recordEmailFailure, type MetricsDataset } from '../observability/metrics.ts';
 import { createCaptureProvider } from './capture.ts';
-import type { EmailProvider } from './provider.ts';
+import { isEmailError, type EmailMessage, type EmailProvider } from './provider.ts';
 import { ResendProvider, type ResendProviderOptions } from './resend.ts';
 import { SuppressionList, withSuppression } from './suppression.ts';
 
@@ -40,7 +41,8 @@ export function createEmailProvider(
 ): EmailProvider {
 	const suppression = new SuppressionList(env.db, env.secrets.betterAuthSecret);
 	if (env.emailTransport === 'capture') {
-		return withSuppression(createCaptureProvider(env), suppression);
+		const capture = withSuppression(createCaptureProvider(env), suppression);
+		return withFailureMetrics(capture, env.metrics);
 	}
 	const resend = new ResendProvider({
 		...overrides,
@@ -48,5 +50,30 @@ export function createEmailProvider(
 		from: env.resendFrom,
 		userAgent: EMAIL_USER_AGENT
 	});
-	return withSuppression(resend, suppression);
+	return withFailureMetrics(withSuppression(resend, suppression), env.metrics);
+}
+
+/** Template id of a message (its `template` tag), or `unknown`; never another message field. */
+function templateOf(message: EmailMessage): string {
+	return message.tags?.find((tag) => tag.name === 'template')?.value ?? 'unknown';
+}
+
+/**
+ * T5.2: every failed send becomes one `email_failed` metric (template tag and error kind only;
+ * `unexpected` for non-EmailError failures). The rejection is passed on unchanged. A no-op
+ * wrapper when the METRICS binding is absent.
+ */
+export function withFailureMetrics(
+	provider: EmailProvider,
+	metrics: MetricsDataset | null | undefined
+): EmailProvider {
+	if (!metrics) return provider;
+	return {
+		send: (message) =>
+			provider.send(message).catch((error: unknown) => {
+				const kind = isEmailError(error) ? error.kind : 'unexpected';
+				recordEmailFailure(metrics, templateOf(message), kind);
+				throw error;
+			})
+	};
 }

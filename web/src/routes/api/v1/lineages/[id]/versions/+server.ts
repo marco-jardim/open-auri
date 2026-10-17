@@ -20,6 +20,7 @@ export const POST: RequestHandler = defineApi(
 			maxBytes: CURVE_BODY_MAX_BYTES
 		});
 		const appended = await appendCurveVersion(env.db, user.id, event.params.id ?? '', body, {
+			metrics: env.metrics,
 			onPublished: (info) => void scheduleOgWarm(event, info)
 		});
 		return json(appended, { status: 201 });

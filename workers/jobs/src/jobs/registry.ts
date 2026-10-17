@@ -6,6 +6,13 @@
 // Every cron is UTC (Cloudflare cron triggers always are). Each job is idempotent for a given
 // `scheduledTime` (a retried or duplicated tick redoes the same work or finds nothing left), logs
 // one JSON line with counts only on success, and the dispatcher logs one JSON line per failure.
+//
+// Metrics (T5.2): every job run writes one `job_run` data point (job name, ok/failed, ms) to the
+// METRICS Analytics Engine dataset; a no-op when the binding is absent (tests, local).
+import {
+  metricsFromEnv,
+  recordJobRun,
+} from '../../../../web/src/lib/server/observability/metrics.ts';
 import { runRankingsJob } from '../../../../web/src/lib/server/social/rankings.ts';
 import { accessLogConsumerJob } from './access-log-consumer.ts';
 import { accessLogRetentionJob } from './access-log-retention.ts';
@@ -131,10 +138,14 @@ export async function dispatchScheduled(
   }
   const failed: string[] = [];
   let firstError: unknown;
+  const metrics = metricsFromEnv(env);
   for (const job of list) {
+    const started = Date.now();
     try {
       await job.run(controller, env, ctx);
+      recordJobRun(metrics, job.name, true, Date.now() - started);
     } catch (error) {
+      recordJobRun(metrics, job.name, false, Date.now() - started);
       failed.push(job.name);
       firstError ??= error;
       console.error(
@@ -167,5 +178,13 @@ export async function dispatchQueue(
       `No queue job registered for ${kind ? `queue kind "${kind}"` : 'this queue'}`,
     );
   }
-  await job.run(batch, env, ctx);
+  const metrics = metricsFromEnv(env);
+  const started = Date.now();
+  try {
+    await job.run(batch, env, ctx);
+  } catch (error) {
+    recordJobRun(metrics, job.name, false, Date.now() - started);
+    throw error;
+  }
+  recordJobRun(metrics, job.name, true, Date.now() - started);
 }
