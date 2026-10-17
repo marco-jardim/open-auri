@@ -25,11 +25,13 @@
 
 	let boxes = $state.raw<Box[]>([]);
 	let height = $state(0);
+	let heroJacks = $state<{ left: number; top: number } | null>(null);
 
 	/** Reads the page sections (the root's in-flow children) whenever the root changes size. */
 	const measure: Attachment<HTMLElement> = (layer) => {
 		const root = layer.parentElement;
 		if (!root || typeof ResizeObserver !== 'function') return;
+		const help = root.querySelector<HTMLElement>('.np-help');
 		const observer = new ResizeObserver(() => {
 			const next: Box[] = [];
 			for (const child of root.children) {
@@ -45,8 +47,17 @@
 			}
 			boxes = next;
 			height = root.clientHeight;
+			// The help column is beyond the selector's copy. Hang the narrow cable bundle below
+			// its button, not over that copy; omit it if the column cannot hold the jacks.
+			const helpBox = help?.getBoundingClientRect();
+			const rootBox = root.getBoundingClientRect();
+			heroJacks =
+				helpBox && helpBox.width >= 120
+					? { left: helpBox.right - rootBox.left - 120, top: helpBox.bottom - rootBox.top + 12 }
+					: null;
 		});
 		observer.observe(root);
+		if (help) observer.observe(help);
 		return () => observer.disconnect();
 	};
 
@@ -93,18 +104,24 @@
 				d="M0 60C10.9 41.1 20.8 24 32.5 24S54.1 41.1 65 60S85.8 96 97.5 96S119.1 78.9 130 60S150.8 24 162.5 24S184.1 41.1 195 60S215.8 96 227.5 96S249.1 78.9 260 60L300 24V96L380 24V96L460 24V96L500 60V24H550V96H600V24H650V96H700V24H750V96H800V60H820"
 			/>
 		</svg>
-		<svg class="cv-jacks" viewBox="0 0 240 300">
-			<circle class="cv-nut" cx="70" cy="44" r="9" />
-			<circle class="cv-nut" cx="123" cy="30" r="9" />
-			<circle class="cv-nut" cx="176" cy="38" r="9" />
-			<circle class="cv-hole" cx="123" cy="30" r="3.5" />
+		<svg
+			class="cv-jacks"
+			class:cv-jacks-ready={heroJacks !== null}
+			style:left={heroJacks ? `${heroJacks.left}px` : undefined}
+			style:top={heroJacks ? `${heroJacks.top}px` : undefined}
+			viewBox="0 0 120 300"
+		>
+			<circle class="cv-nut" cx="26" cy="44" r="9" />
+			<circle class="cv-nut" cx="60" cy="30" r="9" />
+			<circle class="cv-nut" cx="94" cy="38" r="9" />
+			<circle class="cv-hole" cx="60" cy="30" r="3.5" />
 			<g class="cv-swing cv-ja">
-				<path class="cv-cord cv-draw" pathLength="1" d="M70 58C70 150 26 196 34 300" />
-				<path class="cv-plug" d="M70 44v14" />
+				<path class="cv-cord cv-draw" pathLength="1" d="M26 58C26 150 8 196 14 300" />
+				<path class="cv-plug" d="M26 44v14" />
 			</g>
 			<g class="cv-swing cv-jb">
-				<path class="cv-cord cv-draw cv-cream" pathLength="1" d="M176 52C176 140 230 180 222 300" />
-				<path class="cv-plug" d="M176 38v14" />
+				<path class="cv-cord cv-draw cv-cream" pathLength="1" d="M94 52C94 140 112 180 106 300" />
+				<path class="cv-plug" d="M94 38v14" />
 			</g>
 		</svg>
 	</div>
@@ -202,13 +219,11 @@
 		stroke-linejoin: round;
 		opacity: 0.5;
 	}
-	/* Jacks and their cables sit right of the nameplate, only where it fits on one row. */
+	/* Below the help button, in its text-free column; hidden until that space is measured. */
 	.cv-jacks {
 		position: absolute;
-		right: 1.5%;
-		bottom: -60px;
 		display: none;
-		width: 240px;
+		width: 120px;
 		height: 300px;
 		overflow: visible;
 		opacity: 0.85;
@@ -240,10 +255,10 @@
 		transform-origin: 180px 0;
 	}
 	.cv-ja {
-		transform-origin: 70px 44px;
+		transform-origin: 26px 44px;
 	}
 	.cv-jb {
-		transform-origin: 176px 38px;
+		transform-origin: 94px 38px;
 	}
 
 	/* Gaps between modules: a rail, and below the rack two hanging patch cables. The cable box
@@ -293,7 +308,7 @@
 	}
 
 	@media (min-width: 1281px) {
-		.cv-jacks {
+		.cv-jacks.cv-jacks-ready {
 			display: block;
 		}
 	}

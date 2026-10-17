@@ -10,6 +10,7 @@ import CurvaPage from '#lib/components/pages/curva/CurvaPage.svelte';
 import type { GateClient } from '#lib/components/pages/curva/drag.ts';
 import { fakeAppOptions } from '../app/fakes.ts';
 import '../primitives/design-system.ts';
+import { simulateReducedMotion } from './helpers.ts';
 
 let apps: ClientApp[] = [];
 
@@ -120,6 +121,93 @@ test('Curva: the art layer leads the page root, follows its sections and keeps a
 	expect(screen.container.querySelector('img')).toBeNull();
 	await expectAccessible(screen.container);
 }, 30000);
+
+test.each([1440, 1920])(
+	'Curva: hero cables clear every text box at %i px',
+	async (width) => {
+		const viewport = { width: innerWidth, height: innerHeight };
+		let restoreMotion: (() => void) | undefined;
+		try {
+			await page.viewport(width, 1000);
+			const app = createClientApp(fakeAppOptions().options);
+			apps.push(app);
+			const screen = await render(CurvaPage, {
+				app,
+				layer: 'ouvir',
+				hash: '',
+				pageUrl: new URL('https://example.test/'),
+				onlayer: () => {},
+				gateClient: gateClient()
+			});
+			const root = screen.container.querySelector<HTMLElement>('main.curva');
+			const layer = await expectPlaced(root);
+			const hero = root?.querySelector<HTMLElement>('.nameplate');
+			const artHero = layer.querySelector<HTMLElement>('.cv-hero');
+			if (!hero || !artHero) throw new Error('Missing the Curva hero');
+			await document.fonts.ready;
+			hero.scrollIntoView({ block: 'start' });
+			await expect.poll(() => artHero.style.height).not.toBe('');
+			await expect.poll(() => artHero.hasAttribute('data-art-seen')).toBe(true);
+			const cords = [...layer.querySelectorAll<SVGPathElement>('.cv-jacks .cv-cord')];
+			expect(cords).toHaveLength(2);
+
+			// Use actual text-node line boxes (including the selector copy and help button), not
+			// just a paragraph's enclosing block. Check the entire stroke, even while it draws in.
+			const expectClear = () => {
+				const walker = document.createTreeWalker(hero, NodeFilter.SHOW_TEXT);
+				const textBoxes: DOMRect[] = [];
+				while (walker.nextNode()) {
+					if (!walker.currentNode.textContent?.trim()) continue;
+					const range = document.createRange();
+					range.selectNodeContents(walker.currentNode);
+					textBoxes.push(...[...range.getClientRects()].filter((box) => box.width && box.height));
+				}
+				expect(textBoxes.length).toBeGreaterThan(0);
+				for (const cord of cords) {
+					const box = cord.getBoundingClientRect();
+					if (!box.width || !box.height) {
+						// A column narrower than the bundle intentionally omits the decoration.
+						const help = hero.querySelector('.np-help');
+						if (!help) throw new Error('Missing the help column');
+						expect(help.getBoundingClientRect().width).toBeLessThan(120);
+						continue;
+					}
+					for (const text of textBoxes) {
+						const overlaps =
+							box.left - 2 < text.right &&
+							box.right + 2 > text.left &&
+							box.top - 2 < text.bottom &&
+							box.bottom + 2 > text.top;
+						expect(overlaps, `Cable over hero text at ${width} px`).toBe(false);
+					}
+				}
+			};
+
+			// Sample the plug-in swing as well as its final pose; reduced motion must also be clear.
+			const animations = artHero.getAnimations({ subtree: true });
+			for (const animation of animations) animation.pause();
+			for (const time of [0, 150, 400, 720, 1200, 2000, 3000]) {
+				for (const animation of animations) animation.currentTime = time;
+				expectClear();
+			}
+			restoreMotion = simulateReducedMotion();
+			expectClear();
+
+			// A font/locale or container change can shrink just the help column without resizing
+			// the page root. That column is observed too, so the bundle disappears rather than spills.
+			const help = hero.querySelector<HTMLElement>('.np-help');
+			const jacks = artHero.querySelector('.cv-jacks');
+			if (!help || !jacks) throw new Error('Missing the hero jacks or their column');
+			help.style.width = '100px';
+			await expect.poll(() => getComputedStyle(jacks).display).toBe('none');
+			expectClear();
+		} finally {
+			restoreMotion?.();
+			await page.viewport(viewport.width, viewport.height);
+		}
+	},
+	30000
+);
 
 test('Comparar: the art layer leads the cabinet, follows its sections and keeps axe clean', async () => {
 	const screen = await render(CompararPage, { app: null, locale: 'pt-BR' });

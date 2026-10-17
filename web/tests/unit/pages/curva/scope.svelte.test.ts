@@ -7,10 +7,11 @@ import { m } from '#lib/paraglide/messages.js';
 import ScopePanel from '#lib/components/pages/curva/ScopePanel.svelte';
 import { formatSignedDb } from '#lib/components/pages/curva/format.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
-import { OUTPUT_LIMIT_DB } from '#lib/components/pages/curva/scope.ts';
+import { OUTPUT_LIMIT_DB, PLOT, yOf } from '#lib/components/pages/curva/scope.ts';
 import { CURVA_SESSION } from '#lib/components/pages/curva/preview.svelte.ts';
 import { createAudioEngine } from '#lib/audio/engine.ts';
 import { fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
+import '../../primitives/design-system.ts';
 
 const curve: Curve = {
 	bands: [
@@ -301,6 +302,56 @@ test('the selected section shows its safe box and hard zones; the output limit i
 	expect(text()).not.toContain(m.curva_safe_box());
 	expect(text()).toContain(limit);
 });
+
+test.each([390, 1440, 1920])(
+	'Neutro: the limit label clears all parked handles at %i px',
+	async (width) => {
+		const viewport = { width: innerWidth, height: innerHeight };
+		try {
+			await page.viewport(width, 1000);
+			const { screen } = await setup({ curve: NEUTRO, reducedMotion: true });
+			await document.fonts.ready;
+			for (const layer of ['engenharia', 'ajustar', 'ouvir'] as const) {
+				await screen.rerender({ layer });
+				const label = screen.container.querySelector<HTMLElement>('.lim-t');
+				const limit = screen.container.querySelector<SVGLineElement>('line.lim');
+				const plot = screen.container.querySelector('svg.scope');
+				const handles = [...screen.container.querySelectorAll('.handle.parked, .parked-dot')];
+				if (!label || !limit || !plot) throw new Error('Missing the output limit');
+				expect(handles).toHaveLength(10);
+				expect(label.textContent?.trim()).toBe(
+					m.curva_limit_line({ db: formatSignedDb(OUTPUT_LIMIT_DB, 'pt-BR', 2) })
+				);
+				// Only the caption moves: the gate threshold and the plot's line endpoints stay exact.
+				expect(limit.getAttribute('x1')).toBe(String(PLOT.left));
+				expect(limit.getAttribute('x2')).toBe(String(PLOT.right));
+				expect(limit.getAttribute('y1')).toBe(String(yOf(OUTPUT_LIMIT_DB)));
+				expect(limit.getAttribute('y2')).toBe(String(yOf(OUTPUT_LIMIT_DB)));
+				await expect
+					.poll(() => {
+						const box = label.getBoundingClientRect();
+						if (!box.width || !box.height) return false;
+						if (box.bottom > plot.getBoundingClientRect().top) return false;
+						return handles.every((handle) => {
+							// Includes the transparent hit target, not just the visible numbered ring.
+							const point = handle.getBoundingClientRect();
+							return (
+								point.width > 0 &&
+								point.height > 0 &&
+								(box.right <= point.left ||
+									box.left >= point.right ||
+									box.bottom <= point.top ||
+									box.top >= point.bottom)
+							);
+						});
+					})
+					.toBe(true);
+			}
+		} finally {
+			await page.viewport(viewport.width, viewport.height);
+		}
+	}
+);
 
 test('a curve over the output limit is marked where it happens, with its peak', async () => {
 	const { screen } = await setup({

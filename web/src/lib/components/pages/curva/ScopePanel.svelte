@@ -519,6 +519,11 @@
 		<span class="screw s2" aria-hidden="true"></span>
 		<span class="screw s3" aria-hidden="true"></span>
 		<span class="screw s4" aria-hidden="true"></span>
+		<!-- A separate caption plate stays outside every handle's clipped plotting area. The
+		     threshold line below still uses its exact dB coordinate, including for Neutro. -->
+		<p class="lim-t" aria-hidden="true">
+			{m.curva_limit_line({ db: formatSignedDb(OUTPUT_LIMIT_DB, locale, 2) })}
+		</p>
 		<div
 			class="screen"
 			class:reduced
@@ -702,9 +707,6 @@
 					{/if}
 				</g>
 				<g class="labels" aria-hidden="true">
-					<text class="lim-t" x={PLOT.right - 6} y={yOf(OUTPUT_LIMIT_DB) - 6} text-anchor="end"
-						>{m.curva_limit_line({ db: formatSignedDb(OUTPUT_LIMIT_DB, locale, 2) })}</text
-					>
 					{#if boxRect}
 						<text
 							class="safe-t"
@@ -1086,7 +1088,16 @@
 		stroke-dasharray: 2 5;
 	}
 	.lim-t {
-		fill: rgb(255 215 190 / 0.7);
+		width: fit-content;
+		max-width: 100%;
+		margin: 0 0 8px auto;
+		padding: 3px 8px;
+		border-radius: var(--rad-sm);
+		background: #0d0a07;
+		color: rgb(255 215 190 / 0.7);
+		font: 400 var(--label-min) / 1.3 var(--face-data);
+		pointer-events: none;
+		user-select: none;
 	}
 	.safe {
 		fill: rgb(255 122 47 / 0.06);
