@@ -12,7 +12,7 @@ import {
 import { SEEK_END_GUARD_S } from '#lib/audio/transport.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
-import '#lib/styles/index.css';
+import '../primitives/design-system.ts';
 
 const FILE_STATE: Partial<AudioEngineState> = {
 	source: 'file',
@@ -356,4 +356,51 @@ test('without an engine yet, every control says the audio is still loading', asy
 	await expect.element(seek).toHaveAccessibleDescription(m.transport_reason_no_engine());
 	const play = page.getByRole('button', { name: m.transport_play(), exact: true });
 	await expect.element(play).toHaveAccessibleDescription(m.transport_reason_no_engine());
+});
+
+test('in 264 px (Curva at a 320 px screen) every part stays inside; wide rows keep one line', async () => {
+	const cases: { name: string; state: Partial<AudioEngineState> }[] = [
+		{ name: 'file', state: FILE_STATE },
+		{ name: 'pink noise', state: { position: 0 } }
+	];
+	const middle = (rect: DOMRect) => rect.top + rect.height / 2;
+	for (const variant of ['compact', 'full'] as const) {
+		for (const { name, state } of cases) {
+			const where = `${variant}, ${name}`;
+			const fake = fakeEngine(state);
+			await render(Transport, { engine: fake.engine, variant, onplay: vi.fn() });
+			const group = page.getByRole('group', { name: m.transport_group() }).element() as HTMLElement;
+			const seek = page.getByRole('slider', { name: m.transport_seek() }).element() as HTMLElement;
+			const box = group.parentElement;
+			if (!box) throw new Error('Transport is not mounted');
+			box.style.width = '264px';
+			await document.fonts.ready;
+
+			const right = box.getBoundingClientRect().right;
+			expect(box.scrollWidth, where).toBeLessThanOrEqual(box.clientWidth);
+			expect(group.scrollWidth, where).toBeLessThanOrEqual(group.clientWidth);
+			expect(seek.getBoundingClientRect().right, where).toBeLessThanOrEqual(right + 0.5);
+			for (const part of group.querySelectorAll<HTMLElement>(
+				'.tp-buttons, .tp-time, .tp-noise, .tp-track, .tp-loop'
+			)) {
+				expect(
+					part.getBoundingClientRect().right,
+					`${where}: ${part.className}`
+				).toBeLessThanOrEqual(right + 0.5);
+			}
+			// The bar keeps its 28 px target and a usable length.
+			const target = seek.getBoundingClientRect();
+			expect(target.height, where).toBeGreaterThanOrEqual(24);
+			expect(target.width, where).toBeGreaterThanOrEqual(72);
+
+			// Wide rows (desktop): the compact transport stays one line, as before.
+			if (variant === 'compact') {
+				box.style.width = '640px';
+				const play = page.getByRole('button', { name: m.transport_play(), exact: true }).element();
+				const offset = middle(seek.getBoundingClientRect()) - middle(play.getBoundingClientRect());
+				expect(Math.abs(offset), where).toBeLessThan(1);
+			}
+			await cleanup();
+		}
+	}
 });

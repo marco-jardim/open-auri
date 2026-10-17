@@ -254,54 +254,63 @@
 		</IconButton>
 	</div>
 
-	{#if noise}
-		<span class="tp-noise" aria-hidden="true">{m.transport_noise()}</span>
-	{:else}
-		<span class="tp-time tp-elapsed" aria-hidden="true">{elapsedText}</span>
-	{/if}
+	<!-- The bar (times and seek) wraps as one piece under the buttons when the row is too narrow. -->
+	<div class="tp-bar">
+		{#if noise}
+			<span class="tp-noise" aria-hidden="true">{m.transport_noise()}</span>
+		{:else}
+			<span class="tp-time tp-elapsed" aria-hidden="true">{elapsedText}</span>
+		{/if}
 
-	<div
-		class="tp-seek"
-		role="slider"
-		tabindex="0"
-		aria-label={label ?? m.transport_seek()}
-		aria-valuemin={0}
-		aria-valuemax={Math.floor(total ?? 0)}
-		aria-valuenow={Math.floor(shown)}
-		aria-valuetext={valueText}
-		aria-disabled={seekReason ? 'true' : undefined}
-		aria-describedby={seekReason ? seekReasonId : undefined}
-		data-scrubbing={scrub !== null ? 'true' : undefined}
-		bind:this={slider}
-		onkeydown={onKeydown}
-		onpointerdown={onPointerDown}
-		onpointermove={onPointerMove}
-		onpointerup={onPointerUp}
-		onpointercancel={onPointerCancel}
-		onlostpointercapture={onPointerCancel}
-	>
-		<span class="tp-track" aria-hidden="true">
-			<span class="tp-fill" style:width={`${fraction * 100}%`}></span>
-			{#if !seekReason}
-				<span class="tp-thumb" style:left={`${fraction * 100}%`}></span>
-			{/if}
-		</span>
+		<div
+			class="tp-seek"
+			role="slider"
+			tabindex="0"
+			aria-label={label ?? m.transport_seek()}
+			aria-valuemin={0}
+			aria-valuemax={Math.floor(total ?? 0)}
+			aria-valuenow={Math.floor(shown)}
+			aria-valuetext={valueText}
+			aria-disabled={seekReason ? 'true' : undefined}
+			aria-describedby={seekReason ? seekReasonId : undefined}
+			data-scrubbing={scrub !== null ? 'true' : undefined}
+			bind:this={slider}
+			onkeydown={onKeydown}
+			onpointerdown={onPointerDown}
+			onpointermove={onPointerMove}
+			onpointerup={onPointerUp}
+			onpointercancel={onPointerCancel}
+			onlostpointercapture={onPointerCancel}
+		>
+			<span class="tp-track" aria-hidden="true">
+				<span class="tp-fill" style:width={`${fraction * 100}%`}></span>
+				{#if !seekReason}
+					<span class="tp-thumb" style:left={`${fraction * 100}%`}></span>
+				{/if}
+			</span>
+		</div>
+		{#if seekReason}
+			<Tooltip id={seekReasonId} text={seekReason} anchor={slider} bind:open={seekTipOpen} />
+		{/if}
+
+		{#if !noise}
+			<span class="tp-time tp-total" aria-hidden="true">{totalText}</span>
+		{/if}
 	</div>
-	{#if seekReason}
-		<Tooltip id={seekReasonId} text={seekReason} anchor={slider} bind:open={seekTipOpen} />
-	{/if}
-
-	{#if !noise}
-		<span class="tp-time tp-total" aria-hidden="true">{totalText}</span>
-	{/if}
 	{#if variant === 'full'}
 		<span class="tp-loop">{m.transport_loop()}</span>
 	{/if}
 </div>
 
 <style>
+	/*
+		Compact: one row while it fits. Narrower (Curva's panel is 264 px on a 320 px screen),
+		the bar drops under the buttons instead of pushing the seek past its container; the bar
+		shrinks (`min-width: 0`), the buttons keep their size.
+	*/
 	.tp {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--space-2);
 		min-width: 0;
@@ -313,6 +322,17 @@
 		align-items: center;
 		gap: var(--space-1);
 		flex: none;
+	}
+	.tp-bar {
+		display: flex;
+		flex: 1 1 auto;
+		align-items: center;
+		gap: var(--space-2);
+		min-width: 0;
+	}
+	/* Full: the bar's parts are the grid's own cells. */
+	.tp--full .tp-bar {
+		display: contents;
 	}
 	/* Room for "Continuar" so the row does not jump when the label changes. */
 	.tp :global(.tp-play) {
@@ -349,6 +369,12 @@
 		letter-spacing: var(--tracking-data);
 		color: var(--muted);
 		white-space: nowrap;
+	}
+	/* Narrower than the caption plus the seek's minimum: the caption wraps, not the page. */
+	.tp-noise {
+		flex: 0 1 auto;
+		min-width: 0;
+		white-space: normal;
 	}
 	.tp-seek {
 		position: relative;
