@@ -8,6 +8,28 @@ import { dynamicRegions } from './helpers/a-visual';
 // injected styles. CSP itself is covered by csp.spec.ts, which runs without this bypass.
 test.use({ bypassCSP: true });
 
+/**
+ * Every page of web/src/lib/comprehension/steps.ts dismissed (the `oa.tour.v1` contract), so a
+ * first-visit guided tour never opens over a capture. Kept local: the shared helpers have no
+ * fixture every spec uses, and community.spec.ts opens the tour on purpose.
+ */
+const TOURS_DISMISSED = JSON.stringify({
+	curva: 'dispensado',
+	comunidade: 'dispensado',
+	cabo: 'dispensado',
+	'soe-como-x': 'dispensado',
+	comparar: 'dispensado',
+	'teste-cego': 'dispensado',
+	biblioteca: 'dispensado'
+});
+
+test.beforeEach(async ({ context }) => {
+	await context.addInitScript((value) => {
+		// Only real documents have a storage of the app's origin (not about:blank).
+		if (location.protocol.startsWith('http')) localStorage.setItem('oa.tour.v1', value);
+	}, TOURS_DISMISSED);
+});
+
 // Both configured projects run every case: desktop 1440 px and mobile 390 px.
 const visualCss = fileURLToPath(new URL('./helpers/visual.css', import.meta.url));
 // Comunidade (Phase 4) is added here only: the shared route list (helpers/a-routes.ts) also drives

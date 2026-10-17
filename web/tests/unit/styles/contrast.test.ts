@@ -321,3 +321,60 @@ describe('surfaces from the mocks (design/mocks/v2 :root)', () => {
 		).toBeGreaterThanOrEqual(TEXT);
 	});
 });
+
+// FUX integration queue: text/surface pairs the page stylesheets paint with literal colours (no
+// token or mock :root holds them). Named tokens are still read from tokens.css / accents.css.
+describe('page text on page surfaces (FUX integration queue)', () => {
+	const hex = parseColor;
+	const muted = token('--muted');
+	const mutedHi = token('--muted-hi');
+	const text2 = token('--text-2');
+	const soeAccentHi = pageAccent('soe-como-x', '--accent-hi');
+	// Curva's --accent-text is var(--accent) (asserted in "page accents" above).
+	const curvaAccentText = pageAccent('curva');
+
+	const textPairs: [string, Rgba, Rgba][] = [
+		// Comparar
+		['comparar: #cfc6b2 on #0c0a08', hex('#cfc6b2'), hex('#0c0a08')],
+		['comparar: #ff9b9e on #0b0a09', hex('#ff9b9e'), hex('#0b0a09')],
+		['comparar: #f2b33d on #0c0a08', hex('#f2b33d'), hex('#0c0a08')],
+		// Biblioteca
+		['biblioteca: #4c4130 on #eaddbd', hex('#4c4130'), hex('#eaddbd')],
+		['biblioteca: #302c23 on #eaddbd', hex('#302c23'), hex('#eaddbd')],
+		['biblioteca: #e0cdae on #17130f', hex('#e0cdae'), hex('#17130f')],
+		// Soe como X
+		['soe-como-x: #a39d92 on #2c3227', hex('#a39d92'), hex('#2c3227')],
+		['soe-como-x: #cfc9be on #2c3227', hex('#cfc9be'), hex('#2c3227')],
+		['soe-como-x: --accent-hi on #363a30', soeAccentHi, hex('#363a30')],
+		// Auth
+		['auth: #a9b2bd on #1b2028', hex('#a9b2bd'), hex('#1b2028')],
+		['auth: #e3e7ec on #1b2028', hex('#e3e7ec'), hex('#1b2028')],
+		['auth: #ffb4a8 on #1b2028', hex('#ffb4a8'), hex('#1b2028')],
+		// Comunidade
+		['comunidade: --muted on #1a1c1f', muted, hex('#1a1c1f')],
+		['comunidade: --muted-hi on #17181a', mutedHi, hex('#17181a')],
+		['comunidade: --muted-hi on #1b1c1e', mutedHi, hex('#1b1c1e')],
+		['comunidade: #4a3a1c on #f8f5ec', hex('#4a3a1c'), hex('#f8f5ec')],
+		// Cabo
+		['cabo: #24282a on #b5b8b4', hex('#24282a'), hex('#b5b8b4')],
+		['cabo: #123b38 on #b5b8b4', hex('#123b38'), hex('#b5b8b4')],
+		['cabo: #761115 on #b5b8b4', hex('#761115'), hex('#b5b8b4')],
+		['cabo: #4a1013 on #b5b8b4', hex('#4a1013'), hex('#b5b8b4')],
+		['cabo: #8fe9df on #0b1312', hex('#8fe9df'), hex('#0b1312')],
+		['cabo: #a6f6ed on #0d0f10', hex('#a6f6ed'), hex('#0d0f10')],
+		// Curva
+		['curva: --text-2 on #2e2d2b', text2, hex('#2e2d2b')],
+		['curva: --text-2 on #1f1e1c', text2, hex('#1f1e1c')],
+		['curva: --accent-text on #050505', curvaAccentText, hex('#050505')],
+		['curva: --muted-hi on #2b2a27', mutedHi, hex('#2b2a27')]
+	];
+
+	it.each(textPairs)('%s reads as text (>= 4.5:1)', (_pair, fg, bg) => {
+		expect(contrast(fg, bg)).toBeGreaterThanOrEqual(TEXT);
+	});
+
+	// Below 4.5:1 with this file's formula; routed to the page owner, never relaxed here.
+	it.todo('soe-como-x: --accent-hi (#ff78af) on #45483e reads as text (3.80:1 today)');
+	it.todo('soe-como-x: --muted-hi (#a39d92) on #45483e reads as text (3.47:1 today)');
+	it.todo('soe-como-x: --muted-hi (#a39d92) on #363a30 reads as text (4.32:1 today)');
+});

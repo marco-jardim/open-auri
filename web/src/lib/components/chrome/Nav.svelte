@@ -1,7 +1,21 @@
 <script module lang="ts">
+	import { prefetchUrl } from '#lib/app/warm.ts';
+
 	export interface NavItem {
 		href: string;
 		label: string;
+	}
+
+	/** W5 (FUX.2): the "Soe como X" link warms the AutoEq index the page fetches first. */
+	const SOUND_HREF = '/soe-como-x';
+	const AUTOEQ_INDEX_URL = '/data/autoeq/index.json';
+	// Module scope: one prefetch per session, however many times the bar remounts.
+	let autoEqIndexWarmed = false;
+
+	function warmLink(href: string): void {
+		if (href !== SOUND_HREF || autoEqIndexWarmed) return;
+		autoEqIndexWarmed = true;
+		prefetchUrl(AUTOEQ_INDEX_URL);
 	}
 </script>
 
@@ -32,11 +46,14 @@
 
 <nav class="main-nav" aria-label={label}>
 	{#each links as item (item.href)}
-		<!-- W1 (FUX.2): route code on hover, focus or touch start; data stays per <body>. -->
+		<!-- W1 (FUX.2): route code on hover, focus or touch start; data stays per <body>.
+		     W5: pointer or keyboard intent on "Soe como X" also prefetches its AutoEq index. -->
 		<a
 			href={item.href}
 			data-sveltekit-preload-code="hover"
 			aria-current={pathname === item.href ? 'page' : undefined}
+			onpointerenter={() => warmLink(item.href)}
+			onfocus={() => warmLink(item.href)}
 		>
 			{item.label}
 		</a>
