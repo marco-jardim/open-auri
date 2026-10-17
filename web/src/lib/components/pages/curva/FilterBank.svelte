@@ -11,6 +11,8 @@
 	The head carries the observed-envelope strip: the gate's seven criteria (a) to (g), each with a
 	lamp that is lit while it passes and the measured value; limits and the gate's technical words
 	sit behind "Ver detalhes técnicos" (open in Engenharia).
+	The technical words themselves open their explainers (term variant, dotted underline): the
+	strip title, the word "gate" in the strip's note and every strip's Q label.
 -->
 <script lang="ts">
 	import { isExperimentalKind } from 'open-auri/safety';
@@ -76,6 +78,18 @@
 	const options = $derived(['OFF', ...kindsForLayer(layer).filter((kind) => kind !== 'OFF')]);
 	const stageMode = $derived(stages.some((stage) => stage.mode === 'live') ? 'live' : 'data');
 	const rows = $derived(criteria(verdict, locale));
+	// The note's own word "gate" (both locales say it) is the gate explainer; no text is added.
+	// Should a translation drop the word, the whole note becomes the trigger.
+	const envNote = $derived.by(() => {
+		const text = m.curva_v2_envelope_strip();
+		const match = /\bgate\b/i.exec(text);
+		if (!match) return { before: '', word: text, after: '' };
+		return {
+			before: text.slice(0, match.index),
+			word: match[0],
+			after: text.slice(match.index + match[0].length)
+		};
+	});
 
 	// Rotary kind switch: where each position sits (degrees from 12 o'clock).
 	const SWITCH: readonly { kind: BandKind; angle: number }[] = [
@@ -240,9 +254,9 @@
 		</div>
 		<div class="envelope">
 			<div class="env-head">
-				<h3 class="env-title" id="{headingId}-env">{m.curva_v2_envelope_title()}</h3>
-				<Explainer term="envelope" />
-				<Explainer term="gate" />
+				<h3 class="env-title" id="{headingId}-env">
+					<Explainer term="envelope" variant="term">{m.curva_v2_envelope_title()}</Explainer>
+				</h3>
 			</div>
 			<ul class="gaterow" aria-labelledby="{headingId}-env" aria-describedby="{headingId}-envnote">
 				{#each rows as row (row.id)}
@@ -256,7 +270,10 @@
 					</li>
 				{/each}
 			</ul>
-			<p class="env-note" id="{headingId}-envnote">{m.curva_v2_envelope_strip()}</p>
+			<p class="env-note" id="{headingId}-envnote">
+				{envNote.before}<Explainer term="gate" variant="term">{envNote.word}</Explainer
+				>{envNote.after}
+			</p>
 		</div>
 	</header>
 	{#if message}
@@ -357,10 +374,12 @@
 						{@const q = shownValue(band, index, 'qFactor') ?? band.qFactor}
 						<div class="kctl">
 							{@render dial(index, 'qFactor', q, locked)}
-							<label class="field">
-								<span>{m.curva_q()}</span>
+							<!-- Not a <label>: its first labelable child would be the explainer button. -->
+							<div class="field">
+								<span><Explainer term="q" variant="term">{m.curva_q()}</Explainer></span>
 								<input
 									type="number"
+									aria-label={m.curva_q()}
 									min="0.1"
 									max="20"
 									step="0.01"
@@ -368,11 +387,8 @@
 									disabled={locked}
 									onchange={(event) => oncommit(index, 'qFactor', event.currentTarget)}
 								/>
-							</label>
+							</div>
 						</div>
-						{#if index === 0 || selected === index}
-							<div class="q-help"><Explainer term="q" /></div>
-						{/if}
 						{#if locked}
 							<p class="hint">{m.curva_exp_hint()}</p>
 						{/if}

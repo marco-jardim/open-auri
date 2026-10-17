@@ -237,6 +237,22 @@ test('bank strips: lamps, envelope strip, technical details and knob drags', asy
 	const details = screen.container.querySelector('details.tech');
 	expect(details?.hasAttribute('open')).toBe(false);
 	expect(details?.querySelectorAll('tbody tr')).toHaveLength(7);
+	// The bank's technical words are their own explainers: the strip title, "gate" in the note
+	// and the Q label, each named by its visible word and "O que é isso?", with no "?" button.
+	const ask = m.fux1_what_is_this();
+	for (const word of [m.curva_v2_envelope_title(), 'gate', m.curva_q()]) {
+		const trigger = page.getByRole('button', { name: `${word} ${ask}`, exact: true }).first();
+		await expect.element(trigger).toHaveAttribute('aria-haspopup', 'dialog');
+		expect(trigger.element().textContent).toBe(word);
+	}
+	expect(screen.container.querySelector('.q-help')).toBeNull();
+	const explainers = screen.container.querySelectorAll('button[aria-haspopup="dialog"]');
+	expect([...explainers].filter((button) => button.textContent?.includes('?'))).toHaveLength(0);
+	// One Q explainer per active strip (only filter 1 is on here); the input keeps its name.
+	expect(first.querySelectorAll('button[aria-haspopup="dialog"]')).toHaveLength(1);
+	await expect
+		.element(page.getByRole('spinbutton', { name: m.curva_q(), exact: true }).first())
+		.toHaveValue(1);
 	// Freq knob: drag previews every move, proposes once on release.
 	const dial = first.querySelector('.kdial');
 	if (!dial) throw new Error('Missing knob');
@@ -408,9 +424,18 @@ test('explainers sit next to the technical terms of the page', async () => {
 			timeout: 5_000
 		})
 		.toBe(0);
-	const triggers = page.getByRole('button', { name: /^O que é isso\?/ }).elements();
+	// "?" buttons are named "O que é isso? <term>"; the bank's inline terms (term variant) are
+	// named by their visible word first, then "O que é isso?".
+	const triggers = page.getByRole('button', { name: /O que é isso\?/ }).elements();
 	// camadas, envelope (scope and bank), A/B, preamp, gate (output and bank), Neutro, Q, código.
 	expect(triggers.length).toBeGreaterThanOrEqual(9);
+	const bank = screen.container.querySelector('section.bank');
+	if (!bank) throw new Error('Missing bank');
+	const inBank = triggers.filter((trigger) => bank.contains(trigger));
+	const names = inBank.map((trigger) => trigger.textContent);
+	// Envelope and gate (plus the Q of each active strip, see the bank test), as inline terms.
+	expect(names).toEqual(expect.arrayContaining([m.curva_v2_envelope_title(), 'gate']));
+	for (const trigger of inBank) expect(trigger.textContent).not.toContain('?');
 });
 
 test('before the client mounts: aria-busy, a loading status and reasons on every action', async () => {

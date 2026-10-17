@@ -170,4 +170,7 @@ test('highlight is static for reduced motion and touch triggers keep a 44px hit 
 	}
 	expect(read('Explainer.svelte')).toContain('min-width: 44px');
 	expect(read('ExplainerPanel.svelte')).toContain('min-width: 44px');
+	// The inline term trigger gets its 44px from an out-of-flow box, so the text does not move.
+	const coarse = read('Explainer.svelte').split('@media (pointer: coarse)')[1] ?? '';
+	expect(coarse).toMatch(/\.term::after\s*\{[^}]*position: absolute;[^}]*min-height: 44px;/);
 });
