@@ -85,7 +85,15 @@ const URL_PREFIX = /hxxps?\b|www\./iu;
 // Accepted false positive: dotted four-part versions in prose ("firmware
 // 1.2.3.4") read as an IPv4 address and are refused (env:url). Shared text must
 // not carry links (plan §0.12), so the detector stays on the safe side.
-const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/u;
+// Digit-only lookarounds, not `\b`: a letter, `_` or punctuation glued before or
+// after the address cannot hide it (`v1.2.3.4`, `_10.0.0.1:8080`,
+// `x192.168.0.1/admin`, `...10.0.0.1`), while a longer digit run is not a 1–3
+// digit group (`1234.1.1.1` and `1.1.1.1234` stay allowed). Any run of four or
+// more dotted 1–3 digit groups contains an address and is refused, whatever is
+// glued to it (`1.2.3.4.5`, `v1.2.3.4.5`); three groups or fewer stay allowed
+// (`firmware 1.2.3`, `versão 2.1.3`). Linear: each start position is checked by
+// one-character lookbehind and tries at most 3^4 splits of at most 15 characters.
+const IPV4 = /(?<!\d)\d{1,3}(?:\.\d{1,3}){3}(?!\d)/u;
 const DOMAIN =
   /(?:^|[^\p{L}\p{N}])([\p{L}\p{N}-]{1,63}\.(?:xn--[a-z0-9-]{1,59}|\p{L}{2,24}))(?=$|[^\p{L}\p{N}])/giu;
 // Case-insensitive prose allowlist: pt-BR p.ex., p. ex., a.C., d.C., S.A.,

@@ -335,14 +335,16 @@ test('HS/LP/HP need experimental; unknown kinds and non-objects are always refus
   assert.deepEqual(codes(unknown), ['k:kind-not-allowed', 'f:codec']);
   assert.match(unknown.reasons[1].value, /unknown filter kind/);
   // A non-object element cannot be snapshotted: f:codec alone (the snapshot
-  // happens before the kind checks, which only ever see the snapshot). A failed
-  // copy has a fixed text: what it threw is never read (issue #8).
+  // happens before the kind checks, which only ever see the snapshot). The
+  // gate's own copy-step refusals keep their message (issue #8 follow-up).
   const notObject = gateForWrite([null, ...NEUTRAL_BANDS.slice(1)], -0.5);
-  assert.deepEqual(notObject.reasons, [{ code: 'f:codec', value: 'the bands could not be read' }]);
+  assert.deepEqual(notObject.reasons, [{ code: 'f:codec', value: 'band 0: not an object' }]);
   assert.deepEqual(notObject.metrics, { thresholds: THRESHOLDS, grid: 'full' });
   const notArray = gateForWrite('nope', -0.5);
-  assert.deepEqual(codes(notArray), ['f:codec']);
-  assert.deepEqual(codes(gateForWrite(NEUTRAL_BANDS.slice(1), -0.5)), ['f:codec']);
+  assert.deepEqual(notArray.reasons, [{ code: 'f:codec', value: 'bands must be an array' }]);
+  assert.deepEqual(gateForWrite(NEUTRAL_BANDS.slice(1), -0.5).reasons, [
+    { code: 'f:codec', value: 'expected 10 bands' },
+  ]);
 });
 
 test('D7: no PK boost above 16 kHz, boost Q ≤ 4', () => {
@@ -970,11 +972,13 @@ test('M2: sparse arrays, non-arrays and throwing getters give f:codec, never a t
     const result = gateForWrite(sparse, -0.5);
     assert.deepEqual(result, {
       ok: false,
-      reasons: [{ code: 'f:codec', value: 'the bands could not be read' }],
+      reasons: [{ code: 'f:codec', value: `band ${index}: missing (hole in a sparse array)` }],
       metrics: bare,
     });
   }
-  assert.deepEqual(codes(gateForWrite(new Array(10), -0.5)), ['f:codec']);
+  assert.deepEqual(gateForWrite(new Array(10), -0.5).reasons, [
+    { code: 'f:codec', value: 'band 0: missing (hole in a sparse array)' },
+  ]);
   for (const value of [undefined, null, 42, 'x', {}, { length: 10 }, new Uint8Array(10)]) {
     const result = gateForWrite(value, -0.5);
     assert.deepEqual(result.reasons, [{ code: 'f:codec', value: 'bands must be an array' }]);
@@ -1093,6 +1097,32 @@ test('#8: a thrown value is never inspected: no trap, getter or conversion runs'
   });
   assert.deepEqual(gateForWrite(list, -0.5).reasons, unreadable);
   assert.equal(calls, 0);
+  // A caller value carrying one of the gate's own messages is still never read:
+  // only the errors the copy step threw itself keep their text.
+  for (const message of [
+    'band 0: not an object',
+    'band 0: missing (hole in a sparse array)',
+    'expected 10 bands',
+    'bands must be an array',
+  ]) {
+    for (const thrown of [new TypeError(message), counted(new RangeError(message))]) {
+      assert.deepEqual(gateForWrite(thrower(thrown), -0.5).reasons, unreadable, message);
+    }
+  }
+  assert.equal(calls, 0);
+  // The copy step's own refusals keep their message, also behind a Proxy list.
+  const proxied = (target) => new Proxy(target, {});
+  assert.deepEqual(gateForWrite(proxied([null, ...offTail()]), -0.5).reasons, [
+    { code: 'f:codec', value: 'band 0: not an object' },
+  ]);
+  assert.deepEqual(gateForWrite(proxied(offTail()), -0.5).reasons, [
+    { code: 'f:codec', value: 'expected 10 bands' },
+  ]);
+  const holed = [...NEUTRAL_BANDS];
+  delete holed[3];
+  assert.deepEqual(gateForWrite(proxied(holed), -0.5).reasons, [
+    { code: 'f:codec', value: 'band 3: missing (hole in a sparse array)' },
+  ]);
   // Non-primitive values reach the codec by reference: it refuses them without
   // touching them, and its own message is kept.
   const gain = gateForWrite(

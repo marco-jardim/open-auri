@@ -498,10 +498,19 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
     // Outside the catch: once the commit is accepted, nothing can make it 'interrupted'.
     return result('ok');
   } finally {
+    // The signal and the hid may be caller objects: an error thrown by either
+    // removal is dropped here, so it never replaces what the write produced
+    // (a committed 'ok', an 'interrupted' result or a thrown TypeError), which
+    // these catches never see. Both removals are always attempted.
     try {
       signal?.removeEventListener('abort', onAbort);
-    } finally {
+    } catch {
+      // Dropped: the listener removal is not part of the write's outcome.
+    }
+    try {
       hid?.removeEventListener('disconnect', onDisconnect);
+    } catch {
+      // Dropped: the listener removal is not part of the write's outcome.
     }
   }
 }

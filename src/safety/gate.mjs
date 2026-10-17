@@ -16,8 +16,9 @@
 // once, and prefix sums are accumulated incrementally (prefix k adds sections in
 // the same order, starting from 0, as the reference's per-prefix reduce does).
 //
-// One read per field: gate() copies the bands once with snapshotBands() on
-// entry and evaluates only that frozen copy (policy, codec, analysis). The copy
+// One read per field: gate() copies the bands once on entry (copyBands(): the
+// reads of snapshotBands(), which then freezes the values read) and evaluates
+// only that frozen copy (policy, codec, analysis). The copy
 // and the exact payload bytes are returned in `metrics.bands` and
 // `metrics.payload`, so a transport can send exactly what was gated.
 //
@@ -470,13 +471,63 @@ function payloadCrc(payload) {
   return `0x${hex(payload[payload.length - 1])}${hex(payload[payload.length - 2])}`;
 }
 
-// `f:codec` text when the copy fails. The caller's getters and Proxy traps run
-// during the copy, so what was thrown may be theirs: it is never inspected (no
-// `instanceof`, `message`, `String` or `toString`, all of which can run caller code).
+// `f:codec` text when the copy fails because of something it did not throw
+// itself. The caller's getters and Proxy traps run during the copy, so such a
+// value may be theirs: it is never inspected (no `instanceof`, `message`,
+// `String` or `toString`, all of which can run caller code).
 const UNREADABLE = 'the bands could not be read';
 // Same text as `snapshotBands`, checked by the gate itself (`Array.isArray`
 // runs no Proxy trap), so this refusal keeps its message.
 const NOT_AN_ARRAY = 'bands must be an array';
+// The errors `copyBands` throws itself, and only those. `WeakSet.prototype.has`
+// compares identity only: it runs no getter, Proxy trap or conversion, whatever
+// the value (a primitive is simply absent), so it is safe on a caller's value.
+/** @type {WeakSet<Error>} */
+const COPY_ERRORS = new WeakSet();
+
+/**
+ * Registers an error of the copy step's own, whose `message` (a plain data
+ * property set by the constructor) the gate may report.
+ * @param {Error} error
+ * @returns {Error}
+ */
+function copyError(error) {
+  COPY_ERRORS.add(error);
+  return error;
+}
+
+/**
+ * The gate's one-read copy of `bands`, with `snapshotBands`'s reads, order and
+ * messages: `length` once, then for each index `in`, the element, and its
+ * `kind`, `freqHz`, `gainDb` and `qFactor` once each, in that order. The values
+ * read are put in plain records that `snapshotBands` then normalizes and
+ * freezes; it runs no caller code on them (plain data, compared with `===`
+ * only) and cannot refuse them. The structural refusals (`expected 10 bands`,
+ * `band <i>: missing (hole in a sparse array)`, `band <i>: not an object`) are
+ * registered in {@link COPY_ERRORS}; anything else that escapes was thrown by
+ * caller code (a getter or a Proxy trap).
+ * @param {readonly unknown[]} bands Already checked with `Array.isArray`.
+ * @returns {readonly Readonly<Band>[]}
+ */
+function copyBands(bands) {
+  const length = bands.length;
+  if (length !== BAND_COUNT) throw copyError(new RangeError(`expected ${BAND_COUNT} bands`));
+  /** @type {Record<string, unknown>[]} */
+  const records = [];
+  for (let index = 0; index < BAND_COUNT; index++) {
+    if (!(index in bands)) {
+      throw copyError(new TypeError(`band ${index}: missing (hole in a sparse array)`));
+    }
+    /** @type {unknown} */
+    const band = bands[index];
+    if (band === null || typeof band !== 'object') {
+      throw copyError(new TypeError(`band ${index}: not an object`));
+    }
+    const { kind, freqHz, gainDb, qFactor } = /** @type {Record<string, unknown>} */ (band);
+    records.push({ kind, freqHz, gainDb, qFactor });
+  }
+  return snapshotBands(records, BAND_COUNT);
+}
 
 /**
  * Message of a codec refusal of the frozen copy; never throws.
@@ -490,9 +541,7 @@ const NOT_AN_ARRAY = 'bands must be an array';
  */
 function codecMessage(error) {
   try {
-    return error instanceof Error && typeof error.message === 'string'
-      ? error.message
-      : UNREADABLE;
+    return error instanceof Error && typeof error.message === 'string' ? error.message : UNREADABLE;
   } catch {
     return UNREADABLE;
   }
@@ -511,9 +560,11 @@ function codecMessage(error) {
  * frozen copy and `metrics.payload` a copy of the exact 220 payload bytes, so
  * callers send what was gated. Never throws because of `bands` (anything that
  * cannot be copied or encoded is `f:codec`); only an invalid `grid` throws.
- * A copy that fails is `f:codec` with a fixed text (except `bands must be an
- * array`): a value thrown by a getter or trap is never inspected. A codec
- * refusal of the copy keeps the codec's message.
+ * A copy that fails is `f:codec`: the gate's own refusals keep their message
+ * (`bands must be an array`, `expected 10 bands`, `band <i>: missing (hole in a
+ * sparse array)`, `band <i>: not an object`), and a value thrown by a getter or
+ * trap is never inspected (fixed text). A codec refusal of the copy keeps the
+ * codec's message.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {GateOptions} [options]
@@ -532,10 +583,13 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
     if (!Array.isArray(bands)) {
       return { ok: false, reasons: [{ code: 'f:codec', value: NOT_AN_ARRAY }], metrics };
     }
-    snapshot = snapshotBands(bands, BAND_COUNT);
-  } catch {
-    // Never read what was thrown (it may be the caller's): fixed text.
-    return { ok: false, reasons: [{ code: 'f:codec', value: UNREADABLE }], metrics };
+    snapshot = copyBands(bands);
+  } catch (error) {
+    // Only the copy step's own errors keep their message; `COPY_ERRORS.has`
+    // runs no caller code. Anything else may be the caller's and is never read.
+    const own = COPY_ERRORS.has(/** @type {Error} */ (error));
+    const value = own ? /** @type {Error} */ (error).message : UNREADABLE;
+    return { ok: false, reasons: [{ code: 'f:codec', value }], metrics };
   }
   const reasons = policyReasons(snapshot, experimental === true);
   /** @type {number[]} */
@@ -601,9 +655,7 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
   const tolerance = THRESHOLDS.dbNumericalTolerance;
   if (!(internalAudible.db <= THRESHOLDS.internalAudibleDb + tolerance)) {
     // Where it first happens: the earliest prefix over the limit (0 = the preamp alone).
-    const first = prefixAudible.find(
-      (p) => !(p.db <= THRESHOLDS.internalAudibleDb + tolerance),
-    );
+    const first = prefixAudible.find((p) => !(p.db <= THRESHOLDS.internalAudibleDb + tolerance));
     reasons.push({
       code: 'd:prefix-peak',
       stage: first ? first.stage : internalAudible.stage,

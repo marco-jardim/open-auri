@@ -1071,6 +1071,60 @@ test('#11: if hid.addEventListener throws, the abort listener is removed', async
   assert.equal((await writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid: fine })).status, 'ok');
 });
 
+test('#9: a listener removal that throws after the commit never replaces the ok', async () => {
+  for (const broken of ['signal', 'hid']) {
+    const { clock, device, hid: fake } = setup();
+    const failure = new Error(`${broken} removal broke`);
+    const added = [];
+    const removed = [];
+    const hid = {
+      addEventListener(type, listener, options) {
+        added.push({ from: 'hid', type, listener });
+        fake.addEventListener(type, listener, options);
+      },
+      removeEventListener(type, listener, options) {
+        removed.push({ from: 'hid', type, listener });
+        fake.removeEventListener(type, listener, options);
+        if (broken === 'hid') throw failure;
+      },
+    };
+    const { signal } = new AbortController();
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = (type, listener, options) => {
+      added.push({ from: 'signal', type, listener });
+      add(type, listener, options);
+    };
+    signal.removeEventListener = (type, listener, options) => {
+      removed.push({ from: 'signal', type, listener });
+      remove(type, listener, options);
+      if (broken === 'signal') throw failure;
+    };
+    const result = await writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid, signal });
+    assert.equal(result.status, 'ok', broken);
+    assert.equal(result.committed, true, broken);
+    assert.equal(result.reportsSent, 9, broken);
+    assert.equal(result.error, undefined, broken);
+    assert.equal(commits(device), 1, broken);
+    // Both removals were attempted, each with the listener that was added,
+    // whichever of them threw.
+    assert.deepEqual(
+      removed.map(({ from, type }) => [from, type]),
+      [
+        ['signal', 'abort'],
+        ['hid', 'disconnect'],
+      ],
+      broken,
+    );
+    for (const { from, listener } of removed) {
+      const original = added.find((entry) => entry.from === from);
+      assert.equal(listener, original.listener, `${broken}: ${from}`);
+    }
+    // The lock was released: the next write goes through.
+    assert.equal((await writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid: fake })).status, 'ok');
+  }
+});
+
 test('#12: the extra gate verdict reasons are read once', async () => {
   const { clock, device, hid } = setup();
   const runs = [

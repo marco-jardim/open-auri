@@ -874,6 +874,61 @@ test('#13: four-part dotted versions read as IPv4 and are refused (accepted fals
   }
 });
 
+test('#13: an IPv4 address glued to letters, `_` or punctuation is still refused', () => {
+  // Digit-only lookarounds: what is glued before or after the address no longer
+  // decides (with `\b`, a glued letter or `_` used to hide it).
+  for (const text of [
+    '1.2.3.4',
+    '_10.0.0.1:8080',
+    'x192.168.0.1/admin',
+    'v1.2.3.4',
+    'ver...10.0.0.1',
+    'IP:10.0.0.1.',
+    'é192.168.0.1',
+    '10.0.0.1x',
+  ]) {
+    for (const key of ['name', 'description', 'author']) {
+      expectIssue(withField(key, text), 'env:url', `/${key}`);
+    }
+    expectIssue(withRecipe({ params: { note: text } }), 'env:url', '/recipe/params/note');
+  }
+  // Pinned decision: a run of four or more dotted 1–3 digit groups contains an
+  // address and is refused, whatever is glued to it.
+  for (const text of ['1.2.3.4.5', 'v1.2.3.4.5', 'firmware 1.2.3.4.5', '_1.2.3.4.5.6']) {
+    expectIssue(withField('description', text), 'env:url', '/description');
+  }
+  // Three groups or fewer, or a group of four or more digits, is no address,
+  // glued or not.
+  for (const text of [
+    'firmware 1.2.3',
+    'versão 2.1.3',
+    'v1.2.3',
+    '_1.2.3',
+    '1234.1.1.1',
+    '1.1.1.1234',
+    '1.22.333.4444',
+  ]) {
+    assert.equal(validateEnvelope(withField('description', text)).ok, true, text);
+  }
+});
+
+test('#13: 64 KiB adversarial dotted digit runs normalize in under 200 ms', () => {
+  // Every group start is an IPv4 candidate; each must fail in bounded work.
+  normalizeText('1.2.3 1234.1');
+  for (const input of [
+    `${'1.2.3 '.repeat(10922)}1.2!`,
+    `${'1234.'.repeat(13107)}!`,
+    `${'1.22.333.4444.'.repeat(4681)}!!`,
+    `${'9'.repeat(65535)}.`,
+  ]) {
+    assert.equal(input.length, 65536);
+    const start = performance.now();
+    assert.equal(normalizeText(input).length > 0, true);
+    const elapsed = performance.now() - start;
+    assert.ok(elapsed < 200, `${elapsed.toFixed(1)} ms for 64 KiB adversarial input`);
+  }
+});
+
 test('normalization is nonmutating and clones every supported object level', () => {
   const input = withRecipe(structuredClone(recipe));
   input.name = '  Ｐａｄｒａ̃ｏ  ';
