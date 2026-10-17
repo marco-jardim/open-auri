@@ -1,6 +1,6 @@
 // Auth pages (T3.6) against the built Worker (`wrangler dev`, local D1).
 // Prerequisites (run by the orchestrator): `wrangler d1 migrations apply --local` for the web DB,
-// and the real .env flags (SIGNUP_ENABLED=false there).
+// and SIGNUP_ENABLED=false, forced by the preview script whatever the .env says.
 //
 // Turnstile: the widget script is stubbed (no third-party network in tests). The stub hands out a
 // dummy token, so the Worker's siteverify call decides between "security check failed" and the

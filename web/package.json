@@ -11,7 +11,7 @@
 		"predeploy": "node ../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc",
 		"deploy": "wrangler deploy",
 		"prepreview": "node ../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc",
-		"preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
+		"preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173 --var SIGNUP_ENABLED:false",
 		"prepreview:auth-flow": "node ../tools/render-wrangler.mjs wrangler.template.jsonc wrangler.jsonc",
 		"preview:auth-flow": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4174 --persist-to .wrangler/e2e-auth-flow --var SIGNUP_ENABLED:true --var EMAIL_TRANSPORT:capture --var PUBLIC_ORIGIN:http://localhost:4174 --var TURNSTILE_SECRET:1x0000000000000000000000000000000AA",
 		"measure:login": "node scripts/measure-login-cpu.mjs",
