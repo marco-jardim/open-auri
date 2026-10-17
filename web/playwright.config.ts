@@ -12,7 +12,12 @@ import { defineConfig, devices } from '@playwright/test';
 //     widget script, which hands out the dummy token the local stub accepts.
 // Servers start one after the other (in array order), so only the first one builds.
 // tests/e2e/global-setup.ts applies the local D1 migrations to both databases.
-const AUTH_FLOW_SPECS = ['**/auth.spec.ts', '**/account.spec.ts'];
+const AUTH_FLOW_SPECS = [
+	'**/auth.spec.ts',
+	'**/account.spec.ts',
+	'**/social.spec.ts',
+	'**/community.spec.ts'
+];
 // Timing budgets are measured after every other project has finished, so 8 parallel browsers do
 // not steal the main thread from the page under measurement.
 const PERF_SPECS = ['**/perf.spec.ts'];
