@@ -22,6 +22,30 @@
  *
  * The meter bus is fed by `raw` and `chains` (pre-volume) and never reaches the destination:
  * meters and analysers read the signal, not the browser-only monitor volume.
+ *
+ * Transport (SEEK.1), for page previews, the audio panel and the navbar:
+ *
+ *   start(mode?, { startAt?, session? })  user gesture only. `startAt`: 'beginning' | 'random'
+ *                                          (uniform in [25 %, 75 %] of the file; blind tests and
+ *                                          comparisons) | seconds. Omitted keeps the position.
+ *                                          `session` tags the page's preview (state().session).
+ *   pause()                                30 ms fade-out; keeps position, chains, A/B selection
+ *                                          and trims. The session stays resumable.
+ *   resume(): Promise<boolean>             continues the paused session; no new gesture while the
+ *                                          context runs, else 'gesture' / 'suspended' as start().
+ *   stop()                                 ends the session (page teardown): nothing to resume.
+ *   seek(s): boolean / restart(): boolean  file only, clamped to [0, duration), 30 ms fade on
+ *                                          the master while playing; false when not seekable.
+ *   togglePlayback(): Promise<ToggleOutcome>  navbar: pause when playing, resume a paused session,
+ *                                          else nothing ('no-session' | 'unsupported'); it never
+ *                                          starts a new preview.
+ *   state(): position (s), duration (s | null for noise or unknown), paused, loop: true,
+ *            session, canToggle, toggleReason. While playing, listeners get position updates at
+ *            5 Hz (POSITION_TICK_MS), whatever the motion preference.
+ *
+ * The file and the noise always loop. A random-start session applies a new random point when
+ * another file is loaded during it. A paused 'chains' session ends when its last chain is
+ * disposed, so the navbar never revives chains a page has released.
  */
 import {
 	SAMPLE_RATE,
@@ -35,6 +59,9 @@ import {
 } from 'open-auri/dsp';
 import { isExperimentalKind } from 'open-auri/safety';
 import { createPinkNoiseBuffer, createPinkNoiseSource } from './pink-noise.ts';
+import { clampSeek, knownDuration, resolveStart, type StartAt } from './transport.ts';
+
+export type { StartAt } from './transport.ts';
 
 // --- types -------------------------------------------------------------------------------------
 
@@ -76,7 +103,37 @@ export interface AudioEngineState {
 	persisted: boolean;
 	source: 'file' | 'noise';
 	file: AudioFileInfo | null;
+	/** Position of the file in seconds (0 for pink noise); updated at 5 Hz while playing. */
+	position: number;
+	/** Length of the file in seconds; null for pink noise or before the metadata is read. */
+	duration: number | null;
+	/** A preview session is paused and `resume()` / `togglePlayback()` can continue it. */
+	paused: boolean;
+	/** The source always loops (file element and pink noise). */
+	loop: true;
+	/** Tag of the playing or paused session (`start(mode, { session })`); null if untagged or none. */
+	session: string | null;
+	/** `togglePlayback()` would act now (pause while playing, or resume a paused session). */
+	canToggle: boolean;
+	/** Why `togglePlayback()` would do nothing; null when `canToggle`. */
+	toggleReason: ToggleReason | null;
 }
+
+export interface StartOptions {
+	/**
+	 * Where the file starts: `'beginning'`, `'random'` (uniform in [25 %, 75 %] of its length) or
+	 * seconds (clamped to [0, duration)). Omitted keeps the current position. Pink noise ignores
+	 * it. Deferred until the metadata is read; applied with the seek fade when already playing.
+	 */
+	startAt?: StartAt;
+	/** Tag of the page that owns this preview, exposed as `state().session` (e.g. `'curva'`). */
+	session?: string;
+}
+
+/** Why `togglePlayback()` cannot act: nothing paused to resume, or no Web Audio at all. */
+export type ToggleReason = 'no-session' | 'unsupported';
+/** What `togglePlayback()` did; `'failed'` leaves the engine code in `state().error`. */
+export type ToggleOutcome = 'paused' | 'resumed' | 'failed' | ToggleReason;
 
 export interface IIRCoefficients {
 	feedforward: [number, number, number];
@@ -148,10 +205,36 @@ export interface AudioEngine {
 	/**
 	 * Starts playback with a 200 ms fade-in. Call only from a user gesture: throws
 	 * AudioEngineError('gesture') outside one (when the browser reports it) and
-	 * AudioEngineError('suspended') if the context cannot resume.
+	 * AudioEngineError('suspended') if the context cannot resume. Opens a new session (replacing
+	 * any paused one); see `StartOptions` for the start position and the session tag.
 	 */
-	start(mode?: PlayMode): Promise<void>;
+	start(mode?: PlayMode, options?: StartOptions): Promise<void>;
+	/** Fades out (30 ms) and ends the session: `resume()` and `togglePlayback()` will not revive it. */
 	stop(): void;
+	/**
+	 * Fades out (30 ms) and pauses, keeping the position, the chains, the A/B selection and the
+	 * trims. The session stays resumable (`state().paused`).
+	 */
+	pause(): void;
+	/**
+	 * Continues the paused session where it stopped. No new gesture is needed while the context
+	 * runs; a suspended context needs one, and fails like `start()` ('gesture' | 'suspended').
+	 * Resolves false when there is no session to resume, true once it plays.
+	 */
+	resume(): Promise<boolean>;
+	/**
+	 * The navbar shortcut: pauses when playing, resumes a paused session, otherwise does nothing
+	 * and says why ('no-session' | 'unsupported'). It never starts a new preview. Never rejects
+	 * with an engine error: a failed resume resolves `'failed'` (code in `state().error`).
+	 */
+	togglePlayback(): Promise<ToggleOutcome>;
+	/**
+	 * Moves the file to `seconds`, clamped to [0, duration), with a 30 ms fade-out/in on the
+	 * master while playing. False (nothing changes) for pink noise, an unknown length or NaN.
+	 */
+	seek(seconds: number): boolean;
+	/** `seek(0)`: back to the beginning of the file. */
+	restart(): boolean;
 	/** Plays the source without chains, or stops if it already does so. */
 	toggleRaw(): Promise<void>;
 	setVolume(db: number): void;
@@ -197,6 +280,8 @@ export interface AudioEngineEnv {
 	revokeObjectURL?: (url: string) => void;
 	/** True/false inside/outside a user gesture; null when the browser cannot tell. */
 	hasUserActivation?: () => boolean | null;
+	/** Uniform generator in [0, 1) for `startAt: 'random'`; defaults to Math.random. */
+	random?: () => number;
 }
 
 export class AudioEngineError extends Error {
@@ -220,6 +305,10 @@ const VOLUME_STORAGE_KEY = 'oa.audio.volume';
 export const FADE_IN_S = 0.2;
 export const CROSSFADE_S = 0.03;
 export const FADE_OUT_S = 0.03;
+/** Fade-out and fade-in of a seek while playing (on the master, around the jump). */
+export const SEEK_FADE_S = 0.03;
+/** Position updates to listeners while playing (5 Hz; independent of the motion preference). */
+export const POSITION_TICK_MS = 200;
 const RESUME_TIMEOUT_MS = 2000;
 
 /** Shared IndexedDB schema (also used by the state layer for `library` and `outbox`). */
@@ -243,7 +332,14 @@ export const IDLE_STATE: Readonly<AudioEngineState> = Object.freeze({
 	error: null,
 	persisted: true,
 	source: 'noise',
-	file: null
+	file: null,
+	position: 0,
+	duration: null,
+	paused: false,
+	loop: true,
+	session: null,
+	canToggle: false,
+	toggleReason: 'no-session'
 });
 
 // --- pure helpers ------------------------------------------------------------------------------
@@ -458,6 +554,7 @@ interface ResolvedEnv {
 	createObjectURL: (blob: Blob) => string;
 	revokeObjectURL: (url: string) => void;
 	hasUserActivation: () => boolean | null;
+	random: () => number;
 }
 
 function resolveVolumeStorage(env: AudioEngineEnv): ResolvedEnv['localStorage'] {
@@ -503,7 +600,8 @@ function resolveEnv(env: AudioEngineEnv): ResolvedEnv {
 			(() => {
 				const activation = g.navigator?.userActivation;
 				return activation ? activation.isActive : null;
-			})
+			}),
+		random: env.random ?? Math.random
 	};
 }
 
@@ -523,6 +621,14 @@ interface Graph {
 interface ChainRecord {
 	chain: PreviewChain;
 	disconnect: () => void;
+}
+
+/** A preview a page started: what `resume()` and `togglePlayback()` may continue. */
+interface Session {
+	mode: PlayMode;
+	tag: string | null;
+	/** The start policy; `'random'` also applies to a file loaded during the session. */
+	startAt: StartAt | null;
 }
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -555,23 +661,64 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 	let stopGeneration = 0;
 	let chainSequence = 0;
 	let visibilityDoc: VisibilityDocument | null = null;
+	let session: Session | null = null;
+	/** Target of a seek waiting for its fade-out (reported as the position meanwhile). */
+	let seekTarget: number | null = null;
+	let seekGeneration = 0;
+	/** A start position waiting for the file's metadata. */
+	let pendingStart: StartAt | null = null;
+	let ticker: ReturnType<typeof setInterval> | null = null;
+	let lastPosition = 0;
 
-	const state = (): AudioEngineState => ({
-		mode,
-		playing: mode !== 'off',
-		ready: ctx !== null,
-		rate,
-		exact,
-		note: exact ? null : 'rate-fallback',
-		volumeDb,
-		error,
-		persisted,
-		source: element ? 'file' : 'noise',
-		file: file ? { ...file, duration } : null
-	});
+	function position(): number {
+		if (!element) return 0;
+		if (seekTarget !== null) return seekTarget;
+		const time = element.currentTime;
+		return Number.isFinite(time) && time > 0 ? time : 0;
+	}
+
+	/** The file's usable length, or null (pink noise, metadata not read). */
+	function fileDuration(): number | null {
+		return element ? knownDuration(duration) : null;
+	}
+
+	function resumable(): boolean {
+		return mode === 'off' && session !== null && (session.mode === 'raw' || chains.size > 0);
+	}
+
+	function toggleReason(): ToggleReason | null {
+		if (mode !== 'off') return null;
+		if (!env.AudioContext) return 'unsupported';
+		return resumable() ? null : 'no-session';
+	}
+
+	const state = (): AudioEngineState => {
+		const reason = toggleReason();
+		return {
+			mode,
+			playing: mode !== 'off',
+			ready: ctx !== null,
+			rate,
+			exact,
+			note: exact ? null : 'rate-fallback',
+			volumeDb,
+			error,
+			persisted,
+			source: element ? 'file' : 'noise',
+			file: file ? { ...file, duration } : null,
+			position: position(),
+			duration: fileDuration(),
+			paused: resumable(),
+			loop: true,
+			session: session?.tag ?? null,
+			canToggle: reason === null,
+			toggleReason: reason
+		};
+	};
 
 	function emit(): void {
 		const snapshot = state();
+		lastPosition = snapshot.position;
 		for (const listener of [...listeners]) {
 			try {
 				listener(snapshot);
@@ -595,6 +742,24 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		timers.add(id);
 	}
 
+	/** Position updates while playing; emits only when the position moved. */
+	function startTicker(): void {
+		if (ticker !== null) return;
+		ticker = setInterval(() => {
+			if (mode === 'off') {
+				stopTicker();
+				return;
+			}
+			if (position() !== lastPosition) emit();
+		}, POSITION_TICK_MS);
+	}
+
+	function stopTicker(): void {
+		if (ticker === null) return;
+		clearInterval(ticker);
+		ticker = null;
+	}
+
 	// --- context and graph ---
 
 	function onContextState(): void {
@@ -604,7 +769,8 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 
 	function onVisibility(): void {
 		if (visibilityDoc?.visibilityState === 'hidden' && mode !== 'off') {
-			stop();
+			// A pause, not a stop: the session stays resumable from the page or the navbar.
+			halt(true);
 			error = 'tab-hidden';
 			emit();
 		}
@@ -728,6 +894,9 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		}
 		file = null;
 		duration = NaN;
+		// A seek fade in flight still brings the master back (its jump is skipped).
+		seekTarget = null;
+		pendingStart = null;
 	}
 
 	function attach(record: StoredAudio | null): void {
@@ -739,6 +908,12 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			const onMetadata = () => {
 				if (element !== el) return;
 				duration = el.duration;
+				const total = knownDuration(duration);
+				if (pendingStart !== null && total !== null) {
+					const startAt = pendingStart;
+					pendingStart = null;
+					moveTo(el, resolveStart(startAt, total, env.random), mode !== 'off');
+				}
 				emit();
 			};
 			const onError = () => {
@@ -747,24 +922,91 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 				emit();
 			};
 			el.addEventListener('loadedmetadata', onMetadata);
+			el.addEventListener('durationchange', onMetadata);
 			el.addEventListener('error', onError);
 			elementCleanup = () => {
 				el.removeEventListener('loadedmetadata', onMetadata);
+				el.removeEventListener('durationchange', onMetadata);
 				el.removeEventListener('error', onError);
 			};
 			el.preload = 'metadata';
 			el.loop = true;
 			el.src = objectUrl;
 			element = el;
+			// A random-start session (blind test, comparison) starts a new file at a random point too.
+			if (session?.startAt === 'random') pendingStart = 'random';
 		}
 		routeSource();
 		emit();
 	}
 
+	// --- position ---
+
+	function setElementTime(target: HTMLAudioElement, seconds: number): void {
+		try {
+			target.currentTime = seconds;
+		} catch (seekError) {
+			console.warn('audio engine: could not move the file position', seekError);
+		}
+	}
+
+	/**
+	 * Moves the file to `seconds` (already clamped). With `fade`, the master fades out for
+	 * SEEK_FADE_S, the element jumps, and the master fades back in to the preview volume (unless
+	 * playback stopped meanwhile). Without it, the element jumps at once (master already silent).
+	 */
+	function moveTo(target: HTMLAudioElement, seconds: number, fade: boolean): void {
+		const generation = ++seekGeneration;
+		if (!fade || !ctx || !graph) {
+			seekTarget = null;
+			setElementTime(target, seconds);
+			return;
+		}
+		seekTarget = seconds;
+		ramp(graph.master.gain, 0, ctx.currentTime, SEEK_FADE_S);
+		later(() => {
+			// A newer seek owns the master now (a direct jump only happens while it is silent).
+			if (generation !== seekGeneration) return;
+			seekTarget = null;
+			// The file may have been replaced meanwhile: then only the master comes back.
+			if (element === target) setElementTime(target, seconds);
+			if (mode !== 'off' && ctx && graph) {
+				ramp(graph.master.gain, dbToGain(volumeDb), ctx.currentTime, SEEK_FADE_S);
+			}
+			emit();
+		}, SEEK_FADE_S * 1000);
+	}
+
+	/** Applies a start request to the file; deferred until its length is known. */
+	function applyStart(startAt: StartAt, fade: boolean): void {
+		const target = element;
+		if (!target) return;
+		const total = fileDuration();
+		if (total === null) {
+			pendingStart = startAt;
+			return;
+		}
+		pendingStart = null;
+		moveTo(target, resolveStart(startAt, total, env.random), fade);
+	}
+
+	function seek(seconds: number): boolean {
+		const target = element;
+		const total = fileDuration();
+		if (!target || total === null || Number.isNaN(seconds)) return false;
+		pendingStart = null;
+		moveTo(target, clampSeek(seconds, total), mode !== 'off');
+		emit();
+		return true;
+	}
+
 	// --- transport ---
 
-	async function start(playMode: PlayMode = 'chains'): Promise<void> {
-		if (env.hasUserActivation() === false) throw fail('gesture');
+	/**
+	 * Plays `next` (a new session from start(), or the paused one from resume()). The context
+	 * must already run or resume within RESUME_TIMEOUT_MS.
+	 */
+	async function begin(next: Session, startAt: StartAt | undefined): Promise<void> {
 		const { context, nodes } = ensure();
 		if (!isRunning(context)) {
 			let resumed: boolean;
@@ -775,8 +1017,10 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			}
 			if (!resumed || !isRunning(context)) throw fail('suspended');
 		}
+		const playMode = next.mode;
 		const wasPlaying = mode !== 'off';
 		mode = playMode;
+		session = next;
 		stopGeneration++;
 		error = null;
 		const t = context.currentTime;
@@ -789,11 +1033,19 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			volume.setValueAtTime(0, t);
 			volume.linearRampToValueAtTime(dbToGain(volumeDb), t + FADE_IN_S);
 		}
+		if (element) {
+			element.loop = true;
+			// Silent master (fading in from 0): jump at once; already audible: seek with the fade.
+			if (startAt !== undefined) applyStart(startAt, wasPlaying);
+		}
+		startTicker();
 		emit();
 		if (element) {
 			const problem = await playElement(element);
 			if (problem) {
 				mode = 'off';
+				session = null;
+				stopTicker();
 				nodes.master.gain.cancelScheduledValues(context.currentTime);
 				nodes.master.gain.setValueAtTime(0, context.currentTime);
 				throw fail(problem);
@@ -803,9 +1055,29 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		}
 	}
 
-	function stop(): void {
-		if (mode === 'off') return;
+	async function start(playMode: PlayMode = 'chains', options: StartOptions = {}): Promise<void> {
+		if (env.hasUserActivation() === false) throw fail('gesture');
+		await begin(
+			{ mode: playMode, tag: options.session ?? null, startAt: options.startAt ?? null },
+			options.startAt
+		);
+	}
+
+	async function resume(): Promise<boolean> {
+		if (mode !== 'off') return true;
+		const paused = session;
+		if (!paused || !resumable()) return false;
+		// The session was opened by a gesture; only a suspended context needs a new one.
+		if (ctx && !isRunning(ctx) && env.hasUserActivation() === false) throw fail('gesture');
+		await begin(paused, undefined);
+		return true;
+	}
+
+	/** Fades out and pauses the source; `keep` leaves the session resumable. */
+	function halt(keep: boolean): void {
 		mode = 'off';
+		if (!keep || (session?.mode === 'chains' && chains.size === 0)) session = null;
+		stopTicker();
 		const generation = ++stopGeneration;
 		if (ctx && graph) {
 			const volume = graph.master.gain;
@@ -819,10 +1091,42 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 				if (generation !== stopGeneration || mode !== 'off') return;
 				element?.pause();
 				stopNoise();
+				// The position the element settled on after the fade.
+				if (keep) emit();
 			},
 			FADE_OUT_S * 1000 + 30
 		);
 		emit();
+	}
+
+	function stop(): void {
+		if (mode !== 'off') {
+			halt(false);
+			return;
+		}
+		if (session) {
+			session = null;
+			emit();
+		}
+	}
+
+	function pause(): void {
+		if (mode !== 'off') halt(true);
+	}
+
+	async function togglePlayback(): Promise<ToggleOutcome> {
+		if (mode !== 'off') {
+			halt(true);
+			return 'paused';
+		}
+		const reason = toggleReason();
+		if (reason) return reason;
+		try {
+			return (await resume()) ? 'resumed' : 'no-session';
+		} catch (resumeError) {
+			if (resumeError instanceof AudioEngineError) return 'failed';
+			throw resumeError;
+		}
 	}
 
 	async function toggleRaw(): Promise<void> {
@@ -837,7 +1141,8 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		} catch (storageError) {
 			console.warn('audio engine: could not store preview volume', storageError);
 		}
-		if (ctx && graph && mode !== 'off') {
+		// During a seek fade the master is silent on purpose; the fade-in uses the new volume.
+		if (ctx && graph && mode !== 'off' && seekTarget === null) {
 			ramp(graph.master.gain, dbToGain(volumeDb), ctx.currentTime, CROSSFADE_S);
 		}
 		emit();
@@ -976,6 +1281,11 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 				if (disposed) return;
 				disposed = true;
 				chains.delete(id);
+				if (chains.size === 0 && mode === 'off' && session?.mode === 'chains') {
+					// The page released its last chain: its paused session is over.
+					session = null;
+					emit();
+				}
 				if (ctx !== context) {
 					disconnect();
 					return;
@@ -1062,7 +1372,9 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 	async function dispose(): Promise<void> {
 		for (const id of timers) clearTimeout(id);
 		timers.clear();
+		stopTicker();
 		mode = 'off';
+		session = null;
 		stopGeneration++;
 		for (const record of chains.values()) record.disconnect();
 		chains.clear();
@@ -1108,6 +1420,11 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		restore,
 		start,
 		stop,
+		pause,
+		resume,
+		togglePlayback,
+		seek,
+		restart: () => seek(0),
 		toggleRaw,
 		setVolume,
 		buildChain,

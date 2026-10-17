@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import AudioLoader from '#lib/components/audio/AudioLoader.svelte';
@@ -48,6 +48,11 @@ function audioUi(initial: Partial<AudioEngineState> = {}) {
 		removeFile: vi.fn<AudioEngine['removeFile']>().mockResolvedValue(undefined),
 		start: vi.fn<AudioEngine['start']>().mockResolvedValue(undefined),
 		stop: vi.fn(),
+		pause: vi.fn(),
+		resume: vi.fn<AudioEngine['resume']>().mockResolvedValue(true),
+		togglePlayback: unavailable,
+		seek: vi.fn<AudioEngine['seek']>().mockReturnValue(true),
+		restart: vi.fn<AudioEngine['restart']>().mockReturnValue(true),
 		setVolume: vi.fn(),
 		restore: vi.fn<AudioEngine['restore']>().mockResolvedValue(undefined),
 		toggleRaw: unavailable,
@@ -96,13 +101,15 @@ test('opens and closes the idle popover without starting audio, and unsubscribes
 	await expect.element(page.getByRole('dialog')).toBeVisible();
 	const dialog = screen.container.querySelector<HTMLDivElement>('[role="dialog"]')!;
 	await expect.element(trigger).toHaveAttribute('aria-expanded', 'true');
-	await expect
-		.element(page.getByRole('button', { name: m.audio_play(), exact: true }))
-		.toBeDisabled();
+	// Without a file the panel's play says why (focusable, aria-disabled) instead of playing noise.
+	const idlePlay = page.getByRole('button', { name: m.audio_play(), exact: true });
+	await expect.element(idlePlay).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(idlePlay).toHaveAccessibleDescription(m.transport_reason_no_file());
 	await expect.element(page.getByRole('button', { name: m.audio_remove() })).toBeDisabled();
 	await expect.element(page.getByText(m.audio_rate_idle())).toBeVisible();
-	await expect.element(page.getByRole('slider')).toHaveValue('-6');
-	await expect.element(page.getByRole('slider')).toHaveAttribute('aria-valuetext', '−6 dB');
+	const idleVolume = page.getByRole('slider', { name: m.audio_volume() });
+	await expect.element(idleVolume).toHaveValue('-6');
+	await expect.element(idleVolume).toHaveAttribute('aria-valuetext', '−6 dB');
 	expect(screen.container.querySelector('.oa-audio-vol output')?.textContent).toBe('−6 dB');
 	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
 	dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -198,12 +205,14 @@ test('metadata, rate, volume and persistence follow engine updates; playback and
 	await expect.element(page.getByText(m.audio_not_saved())).toBeVisible();
 	expect(fake.engine.start).not.toHaveBeenCalled();
 	await page.getByRole('button', { name: m.audio_play(), exact: true }).click();
-	expect(fake.engine.start).toHaveBeenCalledExactlyOnceWith('raw');
+	expect(fake.engine.start).toHaveBeenCalledExactlyOnceWith('raw', { session: 'audio-panel' });
 	fake.publish({ playing: true, mode: 'raw', ready: true, exact: true, persisted: true });
 	await expect.element(page.getByText(m.audio_rate_exact())).toBeVisible();
 	expect(page.getByText(m.audio_not_saved()).elements()).toHaveLength(0);
-	await page.getByRole('button', { name: m.audio_pause(), exact: true }).click();
-	expect(fake.engine.stop).toHaveBeenCalledExactlyOnceWith();
+	// Pause keeps the session (position, chains), so the navbar or a page can continue it.
+	await page.getByRole('button', { name: m.transport_pause(), exact: true }).click();
+	expect(fake.engine.pause).toHaveBeenCalledExactlyOnceWith();
+	expect(fake.engine.stop).not.toHaveBeenCalled();
 	fake.publish({ playing: false, exact: false, rate: 48000, file: { ...fileInfo, duration: NaN } });
 	await expect.element(page.getByText(m.audio_rate_approx({ rate: '48.000' }))).toBeVisible();
 	expect(meta.textContent).toContain('…');
@@ -211,10 +220,11 @@ test('metadata, rate, volume and persistence follow engine updates; playback and
 	volume.value = '0';
 	volume.dispatchEvent(new Event('input', { bubbles: true }));
 	expect(fake.engine.setVolume).toHaveBeenCalledExactlyOnceWith(0);
+	const volumeSlider = page.getByRole('slider', { name: m.audio_volume() });
 	fake.publish({ volumeDb: 0 });
-	await expect.element(page.getByRole('slider')).toHaveAttribute('aria-valuetext', '0 dB');
+	await expect.element(volumeSlider).toHaveAttribute('aria-valuetext', '0 dB');
 	fake.publish({ volumeDb: -20 });
-	await expect.element(page.getByRole('slider')).toHaveAttribute('aria-valuetext', '−20 dB');
+	await expect.element(volumeSlider).toHaveAttribute('aria-valuetext', '−20 dB');
 	await page.getByRole('button', { name: m.audio_remove() }).click();
 	expect(fake.engine.removeFile).toHaveBeenCalledExactlyOnceWith();
 	fake.publish({ file: null });
@@ -291,7 +301,70 @@ test('hover or focus warms the panel chunk without opening it; a press on Play w
 	// Warm-up only prepares the context and the worklet: nothing starts before the click.
 	expect(fake.engine.start).not.toHaveBeenCalled();
 	await play.click();
-	expect(fake.engine.start).toHaveBeenCalledExactlyOnceWith('raw');
+	expect(fake.engine.start).toHaveBeenCalledExactlyOnceWith('raw', { session: 'audio-panel' });
+});
+
+test('the panel carries the transport: seek bar, back to start and play, in that order of the row', async () => {
+	const fake = audioUi({ file: fileInfo, source: 'file', duration: 65.9, position: 12.5 });
+	const screen = await render(AudioLoader, { engine: fake.engine });
+	await page.getByRole('button').click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	const group = page.getByRole('group', { name: m.transport_group() });
+	await expect.element(group).toBeVisible();
+	const seek = page.getByRole('slider', { name: m.transport_seek() });
+	await expect
+		.element(seek)
+		.toHaveAttribute('aria-valuetext', m.transport_valuetext({ elapsed: '0:12', total: '1:05' }));
+	await expect.element(seek).not.toHaveAttribute('aria-disabled');
+	await expect.element(page.getByText(m.transport_loop())).toBeVisible();
+	// The play button stays the first button of the row (flows and e2e rely on it).
+	const first = screen.container.querySelector('.oa-audio-row button');
+	expect(first?.textContent).toContain(m.audio_play());
+	await page.getByRole('button', { name: m.transport_restart() }).click();
+	expect(fake.engine.restart).toHaveBeenCalledExactlyOnceWith();
+	(seek.element() as HTMLElement).focus();
+	await userEvent.keyboard('{ArrowRight}');
+	expect(fake.engine.seek).toHaveBeenCalledExactlyOnceWith(17.5);
+	fake.publish({ position: 30 });
+	await expect
+		.element(seek)
+		.toHaveAttribute('aria-valuetext', m.transport_valuetext({ elapsed: '0:30', total: '1:05' }));
+	expect(fake.engine.start).not.toHaveBeenCalled();
+});
+
+test('the panel continues a page’s paused preview instead of starting the file raw', async () => {
+	const fake = audioUi({
+		file: fileInfo,
+		source: 'file',
+		duration: 65.9,
+		paused: true,
+		session: 'curva',
+		canToggle: true,
+		toggleReason: null
+	});
+	await render(AudioLoader, { engine: fake.engine });
+	await page.getByRole('button').click();
+	await page.getByRole('button', { name: m.transport_resume(), exact: true }).click();
+	expect(fake.engine.resume).toHaveBeenCalledExactlyOnceWith();
+	expect(fake.engine.start).not.toHaveBeenCalled();
+	vi.mocked(fake.engine.resume).mockRejectedValueOnce(new AudioEngineError('gesture'));
+	await page.getByRole('button', { name: m.transport_resume(), exact: true }).click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(m.audio_error_gesture());
+	fake.publish({ playing: true, mode: 'chains', paused: false });
+	await expect.poll(() => page.getByRole('alert').elements()).toHaveLength(0);
+});
+
+test('with pink noise the panel’s seek bar is unavailable and says why', async () => {
+	const fake = audioUi();
+	await render(AudioLoader, { engine: fake.engine });
+	await page.getByRole('button').click();
+	const seek = page.getByRole('slider', { name: m.transport_seek() });
+	await expect.element(seek).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(seek).toHaveAttribute('aria-valuetext', m.transport_noise());
+	await expect.element(seek).toHaveAccessibleDescription(m.transport_reason_noise());
+	(seek.element() as HTMLElement).focus();
+	await userEvent.keyboard('{End}');
+	expect(fake.engine.seek).not.toHaveBeenCalled();
 });
 
 const errors: [AudioErrorCode, () => string][] = [

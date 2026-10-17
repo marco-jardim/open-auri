@@ -1,8 +1,10 @@
 <!--
 	Preview-audio panel of the top-bar "♪ Áudio" trigger (FUX.2: its own chunk, imported on the
 	trigger's first hover, focus or press). Load (file input or drag and drop), name, duration,
-	play/pause, preview volume, 0 VU reference, remove. The file never leaves the browser. The
-	trigger (AudioLoader) owns the engine subscription, the open state and the placement.
+	transport (SEEK.1: seek bar, back to start, play/pause; it continues a page's paused preview,
+	else plays the file raw from where it is), preview volume, 0 VU reference, remove. The file
+	never leaves the browser. The trigger (AudioLoader) owns the engine subscription, the open
+	state and the placement.
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
@@ -16,8 +18,11 @@
 		type AudioEngineState,
 		type AudioErrorCode
 	} from '#lib/audio/engine.ts';
-	import { warmAudioOnPress } from '#lib/audio/warm.ts';
 	import { VuReferenceSelect, type VuReferenceStore } from '#lib/components/meters/index.ts';
+	import Transport from './Transport.svelte';
+
+	/** Session tag of the panel's own raw playback. */
+	const PANEL_SESSION = 'audio-panel';
 
 	interface Props {
 		engine: AudioEngine;
@@ -99,18 +104,20 @@
 		void useFile(file);
 	}
 
-	async function togglePlay(): Promise<void> {
+	/** Transport `onplay`: nothing paused to continue, so play the file raw (a user click). */
+	async function playRaw(): Promise<void> {
 		rejected = null;
-		if (s.playing) {
-			engine.stop();
-			return;
-		}
-		try {
-			await engine.start('raw');
-		} catch (error) {
-			rejected = codeOf(error, 'suspended');
-		}
+		await engine.start('raw', { session: PANEL_SESSION });
 	}
+
+	function onTransportError(error: unknown): void {
+		rejected = codeOf(error, 'suspended');
+	}
+
+	// Playback that started (here, on a page or from the navbar) clears a stale refusal.
+	$effect(() => {
+		if (s.playing) rejected = null;
+	});
 
 	function removeFile(): void {
 		rejected = null;
@@ -188,14 +195,18 @@
 	{/if}
 
 	<div class="oa-audio-row">
-		<button
-			type="button"
-			disabled={!s.file && !s.playing}
-			{@attach warmAudioOnPress(() => engine)}
-			onclick={togglePlay}
-		>
-			{s.playing ? m.audio_pause() : m.audio_play()}
-		</button>
+		<!-- Play stays the row's first button and keeps its name (the e2e flows rely on both). -->
+		<div class="oa-audio-transport">
+			<Transport
+				{engine}
+				state={s}
+				variant="full"
+				onplay={playRaw}
+				startLabel={m.audio_play()}
+				playDisabledReason={s.file ? null : m.transport_reason_no_file()}
+				onerror={onTransportError}
+			/>
+		</div>
 		<button type="button" disabled={!s.file} onclick={removeFile}>{m.audio_remove()}</button>
 	</div>
 
@@ -311,6 +322,11 @@
 		margin: 0 0 10px;
 		font-size: 11px;
 		color: color-mix(in srgb, var(--oa-accent) 40%, white);
+	}
+	.oa-audio-transport {
+		flex: 1 1 100%;
+		min-width: 0;
+		margin: 0 0 4px;
 	}
 	.oa-audio-row {
 		display: flex;

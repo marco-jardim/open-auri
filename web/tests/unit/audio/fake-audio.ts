@@ -237,6 +237,8 @@ export class FakeAudioElement extends EventTarget {
 	loop = false;
 	paused = true;
 	duration = NaN;
+	/** Playback position; tests move it by hand (the fake never advances on its own). */
+	currentTime = 0;
 	hasSource = false;
 	playCalls = 0;
 	/** Error name play() rejects with, or null to succeed. */
@@ -253,6 +255,7 @@ export class FakeAudioElement extends EventTarget {
 	}
 	load(): void {
 		this.duration = NaN;
+		this.currentTime = 0;
 	}
 	removeAttribute(name: string): void {
 		this.removedAttributes.push(name);
@@ -265,6 +268,11 @@ export class FakeAudioElement extends EventTarget {
 	}
 	fireError(): void {
 		this.dispatchEvent(new Event('error'));
+	}
+	/** Simulates a length correction (VBR files). */
+	fireDurationChange(seconds: number): void {
+		this.duration = seconds;
+		this.dispatchEvent(new Event('durationchange'));
 	}
 }
 

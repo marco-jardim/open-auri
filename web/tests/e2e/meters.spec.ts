@@ -211,7 +211,7 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 	await expect.poll(reading).toBeLessThan(1);
 	const before = await reading();
 
-	const volume = popover.getByRole('slider');
+	const volume = popover.getByRole('slider', { name: 'Volume da prévia (só no navegador)' });
 	await volume.fill('-40');
 	await expect(volume).toHaveAttribute('aria-valuetext', '−40 dB');
 	// Pre-volume: −40 dB of preview volume would move a post-volume VU by ~40; here the reading only
