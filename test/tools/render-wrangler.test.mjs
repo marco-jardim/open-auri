@@ -320,6 +320,12 @@ const METRICS_STAGING = 'open_auri_metrics_staging';
  */
 const PRODUCTION_ROUTES = [{ pattern: 'open-auri.com', custom_domain: true }];
 
+/** Static Assets of the web Worker (the adapter's output directory and binding). */
+const WEB_ASSETS = { binding: 'ASSETS', directory: '.svelte-kit/cloudflare' };
+
+/** env.production only (#33): the Worker first, except the hashed /_app/* files. */
+const PRODUCTION_RUN_WORKER_FIRST = ['/*', '!/_app/*'];
+
 /** Bindings the Workers runtime may omit (local dev and tests); declared optional in `Env`. */
 const OPTIONAL_BINDINGS = new Set(['METRICS']);
 
@@ -381,6 +387,20 @@ test('web template declares every binding at the top level and in each environme
     assert.equal(target.workers_dev, true, label);
     if (label === 'production') assert.deepEqual(target.routes, PRODUCTION_ROUTES, label);
     else assert.equal(target.routes, undefined, label);
+  }
+  // #33: production runs the Worker (the canonical-host wrapper written by
+  // web/scripts/wrap-worker.mjs) before Static Assets on every path but the hashed /_app/* files,
+  // so prerendered pages on workers.dev get the 301; the top level (dev, tests) and staging keep
+  // assets first. An env `assets` replaces the top-level one, so binding and directory repeat.
+  assert.equal(config.main, '.svelte-kit/cloudflare/_worker.js');
+  assert.deepEqual(config.assets, WEB_ASSETS);
+  assert.deepEqual(config.env.production.assets, {
+    ...WEB_ASSETS,
+    run_worker_first: PRODUCTION_RUN_WORKER_FIRST,
+  });
+  assert.equal(config.env.staging.assets, undefined, 'staging inherits the top-level assets');
+  for (const [label, target] of Object.entries({ top: config, staging: config.env.staging })) {
+    assert.equal((target.assets ?? config.assets).run_worker_first, undefined, label);
   }
   assert.equal(config.vars.PUBLIC_ORIGIN, 'fixture:PUBLIC_ORIGIN');
   assert.equal(

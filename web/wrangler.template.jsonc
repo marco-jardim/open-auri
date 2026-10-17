@@ -23,6 +23,14 @@
 // the request host to the custom domain); its workers.dev hostname stays on and the Worker answers there with a
 // 301 to PUBLIC_ORIGIN (src/lib/server/security/canonical-host.ts). Staging has no route and
 // keeps its workers.dev origin.
+// Prerendered pages (#33): Static Assets answer before the Worker, and the adapter's worker serves
+// prerendered paths from ASSETS without reaching hooks.server.ts. So `main` is the wrapper that
+// scripts/wrap-worker.mjs writes after `vite build` (src/worker-entry/canonical-host.ts, same
+// decision as the hook), and env.production sets `assets.run_worker_first` to every path except
+// the hashed `/_app/*` files (those still answer 200 on workers.dev: static files, not pages).
+// Cost: every other asset request there is a Worker invocation. An env `assets` replaces the top
+// level one (no merge), so binding and directory are repeated; staging and the top level (dev,
+// tests) keep assets first.
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "${WORKER_NAME_WEB}",
@@ -75,6 +83,11 @@
 			"workers_dev": true,
 			"preview_urls": true,
 			"routes": [{ "pattern": "open-auri.com", "custom_domain": true }],
+			"assets": {
+				"binding": "ASSETS",
+				"directory": ".svelte-kit/cloudflare",
+				"run_worker_first": ["/*", "!/_app/*"]
+			},
 			"observability": {
 				"enabled": true,
 				"redact_query_string": true,
