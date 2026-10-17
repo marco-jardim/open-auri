@@ -335,9 +335,10 @@ test('HS/LP/HP need experimental; unknown kinds and non-objects are always refus
   assert.deepEqual(codes(unknown), ['k:kind-not-allowed', 'f:codec']);
   assert.match(unknown.reasons[1].value, /unknown filter kind/);
   // A non-object element cannot be snapshotted: f:codec alone (the snapshot
-  // happens before the kind checks, which only ever see the snapshot).
+  // happens before the kind checks, which only ever see the snapshot). A failed
+  // copy has a fixed text: what it threw is never read (issue #8).
   const notObject = gateForWrite([null, ...NEUTRAL_BANDS.slice(1)], -0.5);
-  assert.deepEqual(notObject.reasons, [{ code: 'f:codec', value: 'band 0: not an object' }]);
+  assert.deepEqual(notObject.reasons, [{ code: 'f:codec', value: 'the bands could not be read' }]);
   assert.deepEqual(notObject.metrics, { thresholds: THRESHOLDS, grid: 'full' });
   const notArray = gateForWrite('nope', -0.5);
   assert.deepEqual(codes(notArray), ['f:codec']);
@@ -969,7 +970,7 @@ test('M2: sparse arrays, non-arrays and throwing getters give f:codec, never a t
     const result = gateForWrite(sparse, -0.5);
     assert.deepEqual(result, {
       ok: false,
-      reasons: [{ code: 'f:codec', value: `band ${index}: missing (hole in a sparse array)` }],
+      reasons: [{ code: 'f:codec', value: 'the bands could not be read' }],
       metrics: bare,
     });
   }
@@ -986,18 +987,16 @@ test('M2: sparse arrays, non-arrays and throwing getters give f:codec, never a t
     },
     ...offTail(),
   ];
-  assert.deepEqual(gateForWrite(thrower(new Error('boom')), -0.5).reasons, [
-    { code: 'f:codec', value: 'boom' },
-  ]);
-  assert.deepEqual(gateForWrite(thrower(42), -0.5).reasons, [{ code: 'f:codec', value: '42' }]);
+  // Issue #8: what a getter throws is never read, whatever it is.
+  const unreadable = [{ code: 'f:codec', value: 'the bands could not be read' }];
+  assert.deepEqual(gateForWrite(thrower(new Error('boom')), -0.5).reasons, unreadable);
+  assert.deepEqual(gateForWrite(thrower(42), -0.5).reasons, unreadable);
   const unprintable = {
     toString() {
       throw new Error('no');
     },
   };
-  assert.deepEqual(gateForWrite(thrower(unprintable), -0.5).reasons, [
-    { code: 'f:codec', value: 'the bands could not be read' },
-  ]);
+  assert.deepEqual(gateForWrite(thrower(unprintable), -0.5).reasons, unreadable);
   const trapped = new Proxy([...NEUTRAL_BANDS], {
     get(target, key) {
       if (key === 'length') throw new Error('length trap');
@@ -1025,6 +1024,89 @@ test('M2: sparse arrays, non-arrays and throwing getters give f:codec, never a t
   );
   assert.ok(codes(symbolGain).includes('f:codec'));
   assert.equal(autoPreamp(new Array(10)), null);
+});
+
+test('#8: a thrown value is never inspected: no trap, getter or conversion runs', () => {
+  let calls = 0;
+  const TRAPS = ['getPrototypeOf', 'get', 'getOwnPropertyDescriptor', 'has', 'ownKeys'];
+  const counted = (target) =>
+    new Proxy(
+      target,
+      Object.fromEntries(
+        TRAPS.map((trap) => [
+          trap,
+          (...args) => {
+            calls++;
+            return Reflect[trap](...args);
+          },
+        ]),
+      ),
+    );
+  const thrower = (thrown) => [
+    {
+      get kind() {
+        throw thrown;
+      },
+    },
+    ...offTail(),
+  ];
+  const messageGetter = Object.defineProperty(new Error('hidden'), 'message', {
+    get() {
+      calls++;
+      return 'read';
+    },
+  });
+  const convertible = {
+    toString() {
+      calls++;
+      return 'x';
+    },
+    valueOf() {
+      calls++;
+      return 1;
+    },
+    [Symbol.toPrimitive]() {
+      calls++;
+      return 'x';
+    },
+    get [Symbol.toStringTag]() {
+      calls++;
+      return 'Error';
+    },
+  };
+  const unreadable = [{ code: 'f:codec', value: 'the bands could not be read' }];
+  for (const thrown of [
+    counted(new Error('proxied')),
+    counted(new TypeError('proxied')),
+    counted({}),
+    messageGetter,
+    convertible,
+  ]) {
+    assert.deepEqual(gateForWrite(thrower(thrown), -0.5).reasons, unreadable);
+  }
+  // Thrown by a trap of the band list itself.
+  const list = new Proxy([...NEUTRAL_BANDS], {
+    get(target, key) {
+      if (key === 'length') throw counted(new Error('length'));
+      return Reflect.get(target, key);
+    },
+  });
+  assert.deepEqual(gateForWrite(list, -0.5).reasons, unreadable);
+  assert.equal(calls, 0);
+  // Non-primitive values reach the codec by reference: it refuses them without
+  // touching them, and its own message is kept.
+  const gain = gateForWrite(
+    [{ kind: 'PK', freqHz: 1000, gainDb: counted({}), qFactor: 1 }, ...offTail()],
+    -1,
+  );
+  assert.deepEqual(gain.reasons.at(-1), {
+    code: 'f:codec',
+    value: 'band 0: gainDb must be a number, got an object',
+  });
+  assert.deepEqual(gateForWrite(NEUTRAL_BANDS, counted({})).reasons, [
+    { code: 'f:codec', value: 'preamp must be a finite dB value, got an object' },
+  ]);
+  assert.equal(calls, 0);
 });
 
 test('gate is pure: same input, same output; arguments are not mutated', () => {

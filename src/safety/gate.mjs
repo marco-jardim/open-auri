@@ -470,16 +470,31 @@ function payloadCrc(payload) {
   return `0x${hex(payload[payload.length - 1])}${hex(payload[payload.length - 2])}`;
 }
 
+// `f:codec` text when the copy fails. The caller's getters and Proxy traps run
+// during the copy, so what was thrown may be theirs: it is never inspected (no
+// `instanceof`, `message`, `String` or `toString`, all of which can run caller code).
+const UNREADABLE = 'the bands could not be read';
+// Same text as `snapshotBands`, checked by the gate itself (`Array.isArray`
+// runs no Proxy trap), so this refusal keeps its message.
+const NOT_AN_ARRAY = 'bands must be an array';
+
 /**
- * Message of anything thrown while copying or encoding the bands; never throws.
+ * Message of a codec refusal of the frozen copy; never throws.
+ *
+ * `encodePayload` only sees the gate's frozen copy and a `preampDb` it checks
+ * without coercion (non-primitive values kept by reference are described by
+ * their type only), so it runs no caller code and throws only the codec's own
+ * errors, whose `message` is a plain data property.
  * @param {unknown} error
  * @returns {string}
  */
-function errorMessage(error) {
+function codecMessage(error) {
   try {
-    return error instanceof Error ? String(error.message) : String(error);
+    return error instanceof Error && typeof error.message === 'string'
+      ? error.message
+      : UNREADABLE;
   } catch {
-    return 'the bands could not be read';
+    return UNREADABLE;
   }
 }
 
@@ -496,6 +511,9 @@ function errorMessage(error) {
  * frozen copy and `metrics.payload` a copy of the exact 220 payload bytes, so
  * callers send what was gated. Never throws because of `bands` (anything that
  * cannot be copied or encoded is `f:codec`); only an invalid `grid` throws.
+ * A copy that fails is `f:codec` with a fixed text (except `bands must be an
+ * array`): a value thrown by a getter or trap is never inspected. A codec
+ * refusal of the copy keeps the codec's message.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {GateOptions} [options]
@@ -511,9 +529,13 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
   /** @type {readonly Readonly<Band>[]} */
   let snapshot;
   try {
+    if (!Array.isArray(bands)) {
+      return { ok: false, reasons: [{ code: 'f:codec', value: NOT_AN_ARRAY }], metrics };
+    }
     snapshot = snapshotBands(bands, BAND_COUNT);
-  } catch (error) {
-    return { ok: false, reasons: [{ code: 'f:codec', value: errorMessage(error) }], metrics };
+  } catch {
+    // Never read what was thrown (it may be the caller's): fixed text.
+    return { ok: false, reasons: [{ code: 'f:codec', value: UNREADABLE }], metrics };
   }
   const reasons = policyReasons(snapshot, experimental === true);
   /** @type {number[]} */
@@ -521,7 +543,7 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
   try {
     payload = encodePayload(snapshot, preampDb);
   } catch (error) {
-    reasons.push({ code: 'f:codec', value: errorMessage(error) });
+    reasons.push({ code: 'f:codec', value: codecMessage(error) });
     return { ok: false, reasons, metrics };
   }
   metrics.payloadCrc = payloadCrc(payload);
