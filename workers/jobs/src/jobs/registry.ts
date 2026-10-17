@@ -82,18 +82,19 @@ export class JobFailedError extends Error {
  *   rate-limit and access-log retention sweeps, the S6 aggregation (bounded window, pair cap and
  *   estimator budget), the OG image sweep and the retention cleanup (T5.3, bounded per run; what
  *   is left goes the next day).
- * - Hourly: the re-gate of curves cached under an older gate version FIRST (the most CPU-heavy
- *   step, ~150 ms per curve, time-budgeted in regate.ts and only non-zero after a threshold
- *   change; on its own cron so no daily job can starve it, and the next hour continues where it
- *   stopped), then S7 trade expiry and re-pairing, then the D1 backup to R2. The backup is
- *   registered ONLY here: its week starts Monday 03:00 UTC (backup.ts `backupWeek`), so the
- *   03:00 Monday tick starts it and later ticks resume it until the manifest exists; after that a
- *   run is one KV read (idempotent per backup week).
+ * - Hourly: S7 trade expiry and re-pairing, then the D1 backup to R2. The backup is registered
+ *   ONLY here: its week starts Monday 03:00 UTC (backup.ts `backupWeek`), so the 03:00 Monday
+ *   tick starts it and later ticks resume it until the manifest exists; after that a run is one KV
+ *   read (idempotent per backup week).
  * - Weekly (Monday 03:00 UTC): the public dump.
- * - Every 15 minutes: the re-gate again (FX4.9: shortens the window in which lists still show a
- *   head the current gate rejects; idempotent, so its overlap with the hourly run at minute 0
- *   only re-reads an empty stale set or redoes the same verdicts), THEN rankings
- *   materialization, so a fresh ranking already sees the refreshed verdicts.
+ * - Every 15 minutes: the re-gate of curves cached under an older gate version FIRST (the most
+ *   CPU-heavy step, ~150 ms per curve, time-budgeted in regate.ts and only non-zero after a
+ *   threshold change; FX4.9: the short period shortens the window in which lists still show a
+ *   head the current gate rejects, and the next tick continues where it stopped), THEN rankings
+ *   materialization, so a fresh ranking already sees the refreshed verdicts. The re-gate is
+ *   registered ONLY here (#28): the hourly cron also fires at minute 0, and listing it there too
+ *   started two runs over the same stale set every hour. Off the daily cron, no daily job can
+ *   starve it.
  * Queue: the access-log consumer.
  * Each invocation runs under `limits.cpu_ms` of wrangler.template.jsonc.
  */
@@ -107,7 +108,7 @@ export const registry: JobRegistry = {
       ogSweepJob,
       cleanupJob,
     ],
-    [CRONS.hourly]: [regateJob, tradesExpireJob, backupJob],
+    [CRONS.hourly]: [tradesExpireJob, backupJob],
     [CRONS.quarterHour]: [regateJob, createRankingsJob(runRankingsJob)],
     [CRONS.weekly]: [publicDumpJob],
   },

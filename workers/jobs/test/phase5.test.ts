@@ -356,9 +356,10 @@ describe('phase 5: jobs run twice with the same scheduled time', () => {
       's6-aggregate',
       'og-sweep',
       'cleanup',
-      'regate',
       'trades-expire',
       'backup',
+      // #28: the re-gate is registered on the quarter-hour cron only.
+      'regate',
       'rankings',
       'public-dump',
     ]);

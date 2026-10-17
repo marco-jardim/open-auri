@@ -51,7 +51,7 @@ function scheduledNames(cron: CronExpression): string[] {
 }
 
 describe('job registry', () => {
-  it('registers the jobs per UTC cron (salt first daily, re-gate first hourly) and the access-log consumer', () => {
+  it('registers the jobs per UTC cron (salt first daily, re-gate first every 15 min) and the access-log consumer', () => {
     expect(scheduledNames(CRONS.daily)).toEqual([
       'rotate-salt',
       'rate-limit-gc',
@@ -60,14 +60,17 @@ describe('job registry', () => {
       'og-sweep',
       'cleanup',
     ]);
-    // The re-gate has its own hourly tick and runs first in it: no daily job can starve it. The
-    // backup comes last; it is registered only here (its week starts Monday 03:00 UTC, the hourly
-    // tick at that time starts it and the next ticks resume it).
-    expect(scheduledNames(CRONS.hourly)).toEqual(['regate', 'trades-expire', 'backup']);
-    expect(scheduledNames(CRONS.daily)).not.toContain('regate');
-    // FX4.9: the re-gate also runs every 15 minutes, before rankings (shorter list drain window).
+    // The backup comes last hourly; it is registered only here (its week starts Monday 03:00 UTC,
+    // the hourly tick at that time starts it and the next ticks resume it).
+    expect(scheduledNames(CRONS.hourly)).toEqual(['trades-expire', 'backup']);
+    // FX4.9: the re-gate runs every 15 minutes, before rankings (shorter list drain window), and
+    // first in that tick: no daily job can starve it.
     expect(scheduledNames(CRONS.quarterHour)).toEqual(['regate', 'rankings']);
-    expect(registry.scheduled[CRONS.quarterHour]?.[0]).toBe(registry.scheduled[CRONS.hourly]?.[0]);
+    // #28: registered on that cron only. The hourly cron also fires at minute 0, so listing it
+    // there too would start two re-gate runs at :00.
+    for (const cron of [CRONS.daily, CRONS.hourly, CRONS.weekly]) {
+      expect(scheduledNames(cron), cron).not.toContain('regate');
+    }
     // Weekly (Monday 03:00 UTC): only the public dump; the backup is not registered twice.
     expect(scheduledNames(CRONS.weekly)).toEqual(['public-dump']);
     for (const cron of [CRONS.daily, CRONS.quarterHour, CRONS.weekly]) {
@@ -164,10 +167,13 @@ describe('job registry', () => {
     expect(events).toEqual(
       expect.arrayContaining(['job.regate', 'job.trades_expire', 'job.rankings']),
     );
-    expect(events.indexOf('job.regate')).toBeLessThan(events.indexOf('job.trades_expire'));
+    // #28: at minute 0 both ticks fire, and only the quarter-hour one re-gates.
+    const hourly = events.slice(0, hourlyCount);
+    expect(hourly).toContain('job.trades_expire');
+    expect(hourly).not.toContain('job.regate');
     // The quarter-hour tick re-gates first, then materializes the rankings.
     const quarter = events.slice(hourlyCount);
-    expect(quarter).toContain('job.regate');
+    expect(quarter.filter((event) => event === 'job.regate')).toHaveLength(1);
     expect(quarter.indexOf('job.regate')).toBeLessThan(quarter.indexOf('job.rankings'));
   });
 
