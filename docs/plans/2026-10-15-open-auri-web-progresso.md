@@ -164,7 +164,7 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 | T4.14 | commitada | 7901c4a | `SocialSync` e ponte do cabo montados no layout pelo orquestrador |
 | T4.14b | commitada | 8487cd5 | criada na W4.4: `GET /api/v1/me/packs` e `/me/shares` |
 | T4.15–T4.18 | commitadas | 5f58550, 4d834ab, a1c0e94, b0136f0 | |
-| T4.T | pendente | — | inclui atualizar as referências visuais (Curva, Biblioteca, Comparar, Docs mudaram) e cobertura de branches ≥ 90% (estava 88,2%) |
+| T4.T | commitada | 25c9316, 401ef1b, 2f04413, 61412ea | matriz de autorização autoverificada (33 rotas), paridade do gate em 560 curvas, invariantes de visibilidade, proteções; e2e social (9 passos) e Comunidade; bug real achado: o motor de áudio criava as stores library/outbox sem keyPath quando abria o IndexedDB primeiro (salvar na biblioteca local caía para memória); referências visuais refeitas (Comunidade com relógio e aleatório fixos). Verificação: unidade 1 625, integração 913 (cobertura 96,4/91,2/98,4/98,2), e2e 298/299 (1 instável de medidor sob carga, passa isolado) |
 
 ### Mapa de locks da F4 (PF4)
 
