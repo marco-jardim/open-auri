@@ -118,7 +118,11 @@ Leia [`CONTRIBUTING.md`](CONTRIBUTING.md) antes de abrir um PR.
 ## Licença
 
 Código sob [AGPL-3.0](LICENSE). Avisos de terceiros (AutoEq, fontes e demais dependências) em
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md); dados do AutoEq embutidos e processo de remoção
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) e lista completa de pacotes distribuídos em
+[`/third-party-licenses.txt`](web/static/third-party-licenses.txt), gerada após o build com
+`npm run notices`. A lista vem dos sourcemaps do cliente e do servidor/Worker, não das marcas
+`devDependencies`: runtimes como Svelte, SvelteKit e Paraglide também entram nos bundles.
+Dados do AutoEq embutidos e processo de remoção
 a pedido em [`docs/autoeq-data.md`](docs/autoeq-data.md). Os presets e descrições da Kuba aparecem
 com "licença: a confirmar". As curvas publicadas pelos usuários ficam sob a licença escolhida por
 eles (CC0 1.0 ou CC BY 4.0).

@@ -164,7 +164,8 @@ export const ptBR: DocsContent = {
 				'AutoEq: MIT, Copyright (c) 2018-2022 Jaakko Pasanen. Projeto PK/LS/HS derivado de autoeq/peq.py; LP/HP seguem o Audio EQ Cookbook de Robert Bristow-Johnson. Medições continuam creditadas às fontes originais, listadas no manifesto de cada geração.',
 				'Para solicitar remoção de medições, abra uma issue com fonte, modelos ou caminhos e motivo. A distribuição é regenerada com a fonte excluída, substitui os packs anteriores e invalida caches; isso não altera o upstream. O processo completo está no documento de dados AutoEq.',
 				'Os nomes abaixo são homenagens editoriais em texto, não marcas do open-auri nem indicação de endosso.'
-			]
+			],
+			links: [{ label: 'Licenças completas das dependências', href: '/third-party-licenses.txt' }]
 		},
 		{
 			id: 'contas',

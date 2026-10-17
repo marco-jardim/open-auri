@@ -25,6 +25,25 @@ const safelist = new Set([
 // The product's own public domain (and its subdomains, e.g. the sending domain) is published on
 // purpose; addresses and other values stay scanned through their keys.
 const publicDomains = ['open-auri.com'];
+// Public mailbox providers: their domain identifies nobody (third-party license texts are full of
+// such addresses); the operator's full address stays scanned through its own key.
+const publicMailProviders = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.com',
+  'live.com',
+  'yahoo.com',
+  'icloud.com',
+  'me.com',
+  'proton.me',
+  'protonmail.com',
+  'gmx.com',
+  'yandex.com',
+  'uol.com.br',
+  'bol.com.br',
+  'terra.com.br',
+]);
 /** @param {string} domain */
 const isPublicDomain = (domain) =>
   publicDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
@@ -83,7 +102,10 @@ function sensitiveNeedles(values) {
     for (const email of value.matchAll(
       /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,})/g,
     )) {
-      if (!isPublicDomain(email[1].toLowerCase())) add(email[1], `derived:EMAIL_DOMAIN(${key})`);
+      const domain = email[1].toLowerCase();
+      if (!isPublicDomain(domain) && !publicMailProviders.has(domain)) {
+        add(email[1], `derived:EMAIL_DOMAIN(${key})`);
+      }
     }
     if (key === 'CLOUDFLARE_WORKERS_SUBDOMAIN') {
       add(value, 'derived:WORKERS_SUBDOMAIN');

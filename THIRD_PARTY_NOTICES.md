@@ -1,5 +1,35 @@
 # Third-party notices
 
+## Bundled npm packages
+
+The full list of packages included in the client and server/Worker bundles,
+with installed versions, license identifiers and complete license texts, is
+served at [`/third-party-licenses.txt`](web/static/third-party-licenses.txt).
+After building the web app, run `npm run notices` to regenerate
+`web/static/third-party-licenses.txt` from the bundle sourcemaps under
+`web/.svelte-kit/output/`. This includes bundled runtimes even when their
+packages are declared as development dependencies, generated Paraglide runtime
+sources, and SSR imports left for Wrangler to bundle. For those external
+imports, the generator conservatively includes their production dependency
+closure (including resvg WASM). The resvg-wasm npm tarballs omit a license file;
+the generator uses the identical full MPL-2.0 text shipped by `@cf-wasm/resvg`
+and records that provenance. Missing license texts otherwise stop generation.
+
+## resvg (MPL-2.0)
+
+The server/Worker uses `@cf-wasm/resvg` and `@resvg/resvg-wasm` (including the
+`@resvg/resvg-wasm-legacy` npm alias) under the Mozilla Public License 2.0.
+These are unmodified npm packages; their corresponding source is available
+from the upstream repositories and npm releases below. The versions and full
+license texts are included in `/third-party-licenses.txt`.
+
+- `@cf-wasm/resvg`: <https://github.com/fineshopdesign/cf-wasm> and
+  <https://www.npmjs.com/package/@cf-wasm/resvg>.
+- `@resvg/resvg-wasm`: <https://github.com/yisibl/resvg-js> and
+  <https://www.npmjs.com/package/@resvg/resvg-wasm>.
+- MPL-2.0: <https://www.mozilla.org/MPL/2.0/>. Source files covered by the MPL
+  remain available under that license; the surrounding application is AGPL-3.0.
+
 ## AutoEq
 
 `src/dsp/eq0xcb.mjs` contains a JavaScript port of the peaking, low-shelf and
@@ -98,6 +128,16 @@ upstream by Fontsource.
 | VT323 | 400 | SIL OFL 1.1 | Copyright 2011, The VT323 Project Authors |
 | Special Elite | 400 | Apache License 2.0 | Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI) |
 | Permanent Marker | 400 | Apache License 2.0 | Copyright (c) 2010 by Font Diner, Inc. |
+
+### Open Graph fonts
+
+The server/Worker also uses the self-hosted TTF files
+`web/static/og-font/InstrumentSerif-Regular.ttf` (Instrument Serif) and
+`web/static/og-font/JetBrainsMono.ttf` (JetBrains Mono) to render Open Graph
+images. Both are licensed under SIL Open Font License 1.1 (OFL-1.1). Their
+copyright notices and upstream license-text links accompany the files in
+[`web/static/og-font/LICENSE-OFL.txt`](web/static/og-font/LICENSE-OFL.txt),
+also served at `/og-font/LICENSE-OFL.txt`.
 
 ## AutoEq measurement and target data
 

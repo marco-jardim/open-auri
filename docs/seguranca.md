@@ -135,9 +135,11 @@ Testado em:
 
 ## 8. Dependências e licenças
 
-O projeto é AGPL-3.0. Fonte: campos `license` e marcas `dev`/`devOptional` do `package-lock.json` da raiz (workspaces `web` e `workers/jobs`; não há lockfile separado). Nenhuma consulta de rede foi feita.
+O projeto é AGPL-3.0. Os campos `license` e marcas `dev`/`devOptional` do `package-lock.json` da raiz (workspaces `web` e `workers/jobs`; não há lockfile separado) descrevem a instalação, não o conteúdo distribuído. Nenhuma consulta de rede foi feita.
 
-Dependências de produção (as únicas que entram no bundle do Worker ou do cliente):
+Pacotes que entram no bundle do Worker ou do cliente incluem dependências de produção e runtimes declarados em `devDependencies`, como `svelte`, `@sveltejs/kit` e `@inlang/paraglide-js`. A lista é extraída dos `sources` dos sourcemaps de todos os chunks em `web/.svelte-kit/output/**/*.map` por `npm run notices`, após o build, incluindo o runtime gerado do Paraglide. O gerador também lê imports externos do JS emitido, que o Wrangler incorpora depois, e inclui conservadoramente suas dependências de produção (inclusive WASM do resvg). Nomes, versões instaladas, identificadores e textos completos das licenças ficam em `web/static/third-party-licenses.txt`, servido em `/third-party-licenses.txt`; avisos adicionais em [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
+
+Principais dependências de produção e runtimes distribuídos (a tabela não substitui a lista gerada):
 
 | Pacote | Origem | Licença | Compatível com AGPL-3.0 |
 | --- | --- | --- | --- |
@@ -146,11 +148,12 @@ Dependências de produção (as únicas que entram no bundle do Worker ou do cli
 | `better-auth` e `@better-auth/*`, `@better-fetch/fetch`, `better-call` | direta (web) e transitivas | MIT | Sim |
 | `zod` | direta (web) | MIT | Sim |
 | `uqr` | direta (web) | MIT | Sim |
+| `svelte`, `@sveltejs/kit`, runtime de `@inlang/paraglide-js` | diretas (web, `devDependencies`) | MIT | Sim |
 | Demais transitivas de produção (`jose`, `kysely`, `@noble/*`, `nanostores`, `defu`, `rou3` e outras) | transitivas | MIT, ISC, Apache-2.0 ou BSD | Sim |
 
 `workers/jobs` não tem dependência de produção (só ferramentas de desenvolvimento). A raiz também não.
 
-Licenças fora de MIT, ISC, Apache-2.0 e BSD encontradas no lockfile, todas só de desenvolvimento (não distribuídas no bundle):
+Outras licenças encontradas em pacotes marcados como de desenvolvimento no lockfile estão abaixo. Essa marca não prova ausência no bundle; a conferência de distribuição deve usar os sourcemaps e também os assets copiados.
 
 | Licença | Pacotes | Marca no lockfile |
 | --- | --- | --- |
@@ -162,7 +165,7 @@ Licenças fora de MIT, ISC, Apache-2.0 e BSD encontradas no lockfile, todas só 
 | `(MIT OR CC0-1.0)` | `type-fest` | `devOptional` |
 | `MIT OR Apache-2.0` | `wrangler`, `@cloudflare/*` | `dev` |
 
-Nenhuma licença incompatível com AGPL-3.0. As fontes `@fontsource*` (OFL-1.1 no lockfile) ficam em `devDependencies`, mas seus arquivos de fonte são copiados para o build e servidos ao navegador: a OFL-1.1 permite redistribuir as fontes junto de software sob qualquer licença, desde que a própria fonte continue sob OFL (o aviso de licença acompanha os pacotes).
+Nenhuma licença incompatível com AGPL-3.0 identificada nessa revisão. As fontes `@fontsource*` ficam em `devDependencies`, mas seus arquivos são copiados para o build e servidos ao navegador, com OFL-1.1 ou Apache-2.0 conforme a família (avisos em `web/static/fonts/`). Os TTF usados nas imagens Open Graph também são distribuídos, sob OFL-1.1, com avisos e links ao texto em `web/static/og-font/LICENSE-OFL.txt`. A OFL-1.1 permite redistribuir fontes junto de software sob qualquer licença, desde que a própria fonte continue sob OFL e o aviso a acompanhe.
 
 Vulnerabilidades: a revisão desta tarefa não usa rede. O orquestrador roda `npm audit --omit=dev` na raiz antes do deploy e registra o resultado no relatório da fase; achados em dependência de produção bloqueiam o deploy até correção ou justificativa escrita.
 

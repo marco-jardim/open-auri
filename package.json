@@ -74,6 +74,7 @@
     "typecheck": "tsc -p jsconfig.json --noEmit",
     "types": "tsc -p jsconfig.types.json",
     "check:sensitive": "node tools/check-sensitive.mjs",
+    "notices": "node tools/third-party-notices.mjs",
     "fixtures:reference": "node tools/extract-kuba-reference.mjs",
     "test:web:unit": "npm run -w web test:unit",
     "test:web:int": "npm run -w web test:int",

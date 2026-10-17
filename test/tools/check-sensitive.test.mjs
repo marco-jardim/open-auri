@@ -110,6 +110,18 @@ test('the product domain and its subdomains are public; the sender address stays
   ]);
 });
 
+test('a public mailbox provider domain is not a finding; the full address still is', (t) => {
+  const repo = fixture(t, 'ADMIN_EMAIL=fixture.operator@gmail.com\n', {
+    'licenses.txt': 'Copyright (c) Someone <someone@gmail.com>\n',
+    'leak.txt': 'fixture.operator@gmail.com\n',
+  });
+  const result = repo.run('--json');
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    { path: 'leak.txt', line: 1, label: 'ADMIN_EMAIL' },
+  ]);
+});
+
 test('skips binary files, files larger than 5 MB and ignored files', (t) => {
   const secret = 'fixture-binary-secret-456';
   const repo = fixture(t, `PRIVATE_TOKEN=${secret}\n`, {
