@@ -11,7 +11,9 @@
 	  language and the help. 44 px touch targets.
 	- Overflow guard: the CSS tiers fit the usual content; if something still does not fit
 	  (another locale, a long file name, a user font), `data-squeeze` folds more, one level at a
-	  time (status label and file name, then nav tiers 3, 2, 1, 0), until the row fits.
+	  time (status label and file name, then nav tiers 3, 2, 1, 0), until the row fits. On mobile
+	  the levels fold spacing, then the "Gravar" padding; below 360 px the folded spacing is the
+	  static CSS, so 320 px fits without the guard.
 	Every unavailable action says why (T8); writes only go through `onWrite` (the layout's
 	`app.requestWrite()`, which opens the checklist).
 -->
@@ -833,6 +835,34 @@
 
 		.cable-bar[data-squeeze~='1'] .cable-actions,
 		.cable-bar[data-squeeze~='1'] .bar-tools {
+			gap: 0;
+		}
+
+		/* Still too wide (a longer locale, a user font): a tighter "Gravar", same 44 px target. */
+		.cable-bar[data-squeeze~='2'] .bar-tools :global(.write-btn) {
+			--btn-pad: 8px;
+		}
+	}
+
+	/*
+	 * Narrow phones (< 360 px): the folded spacing above is the static layout, not only a guard
+	 * level. Unfolded, the mobile row needs about 350 px (wordmark at --fs-lede, 16 and 12 px
+	 * gutters, 8 and 4 px gaps), so at 320 px it fitted only while the guard held level 1;
+	 * whenever the guard sat at level 0 the actions and the menu button ran about 19 px past
+	 * the right edge. Now the row fits from CSS alone; the guard only folds the extra levels.
+	 */
+	@media (max-width: 359.98px) {
+		.wordmark {
+			font-size: var(--fs-body);
+		}
+
+		.cable-inner {
+			gap: var(--space-1);
+			padding-inline: var(--space-1);
+		}
+
+		.cable-actions,
+		.bar-tools {
 			gap: 0;
 		}
 	}

@@ -167,6 +167,50 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 	}
 }
 
+// Regression (real build, 320×1000): the actions, the bar meta and the menu button (with its
+// label, glyph and svg) ended at 339 px. The 320 px row fitted only while the guard held a
+// squeeze level; at level 0 it ran past the edge. Probe both the settled level and level 0,
+// synchronously as the guard does (one layout, never painted), then restore the settled level.
+for (const locale of ['pt-BR', 'en-US'] as const) {
+	test(`${locale}: at 320 px nothing in the bar passes its right edge, folded or not`, async () => {
+		await setLocale(locale, { reload: false });
+		await page.viewport(320, 1000);
+		await render(BarFixture, callbacks());
+		await settle();
+		const header = banner();
+		const row = header.firstElementChild;
+		if (!(row instanceof HTMLElement)) throw new Error('Missing bar row');
+		const settled = header.dataset.squeeze ?? '';
+		try {
+			for (const squeeze of new Set([settled, ''])) {
+				header.dataset.squeeze = squeeze;
+				const level = `squeeze "${squeeze}"`;
+				expect(header.scrollWidth, level).toBeLessThanOrEqual(header.clientWidth);
+				expect(row.scrollWidth, level).toBeLessThanOrEqual(row.clientWidth);
+				const edge = header.getBoundingClientRect().right;
+				let measured = 0;
+				for (const part of header.querySelectorAll('*')) {
+					const rect = part.getBoundingClientRect();
+					if (rect.width === 0 && rect.height === 0) continue;
+					measured++;
+					const name = `${level}: ${part.tagName.toLowerCase()} ${part.getAttribute('class') ?? ''}`;
+					expect(rect.right, name).toBeLessThanOrEqual(edge);
+				}
+				expect(measured).toBeGreaterThan(4);
+				// Every control keeps its 44 px touch target at this width.
+				for (const box of controlBoxes(header)) {
+					expect(box.height, level).toBeGreaterThanOrEqual(44);
+				}
+			}
+		} finally {
+			header.dataset.squeeze = settled;
+		}
+		expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+			document.documentElement.clientWidth
+		);
+	});
+}
+
 for (const width of [320, 390, 768, 1024, 1280, 1440]) {
 	test(`every destination and bar action is reachable by keyboard at ${width} px`, async () => {
 		await page.viewport(width, 900);
