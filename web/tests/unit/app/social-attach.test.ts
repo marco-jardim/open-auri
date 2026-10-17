@@ -35,6 +35,8 @@ async function settle(): Promise<void> {
 const RETRY_WARNING = 'Social runtime still unavailable; the outbox stays unavailable';
 const APP = { id: 'app' };
 type App = typeof APP;
+/** The app the context mounts after disposing `APP` without the layout going away. */
+const REPLACEMENT: App = { id: 'replacement' };
 
 function harness(overrides: Partial<SocialAttacherOptions<App>> = {}) {
 	const clock = { value: 0 };
@@ -267,6 +269,106 @@ describe('createSocialAttacher (layout prepare and retry, #35)', () => {
 		await settle();
 		expect(stop).toHaveBeenCalledOnce();
 		expect(h.attacher.unavailable).toBe(true);
+	});
+
+	test('a replaced app: its late wiring is stopped, the replacement keeps the only bridge', async () => {
+		const h = harness();
+		const stalled = deferred<SocialStop>();
+		h.attach.mockReturnValueOnce(stalled.promise);
+		h.attacher.prepare(APP).catch(() => undefined);
+		await vi.advanceTimersByTimeAsync(SOCIAL_ATTACH_TIMEOUT_MS);
+		await settle();
+		const late = vi.fn();
+		stalled.resolve(late);
+		await settle();
+		// Kept for the live app, but the context never saw this cleanup.
+		expect(h.attacher.unavailable).toBe(false);
+		expect(late).not.toHaveBeenCalled();
+
+		const next = vi.fn();
+		h.attach.mockResolvedValueOnce(next);
+		await expect(h.attacher.prepare(REPLACEMENT)).resolves.toBe(next);
+		expect(late).toHaveBeenCalledOnce();
+		expect(next).not.toHaveBeenCalled();
+		expect(h.attacher.keeps(REPLACEMENT)).toBe(true);
+		expect(h.attacher.keeps(APP)).toBe(false);
+	});
+
+	test('late plus retry: the retried wiring of the replacement is the only live bridge', async () => {
+		const h = harness();
+		const stalled = deferred<SocialStop>();
+		h.attach.mockReturnValueOnce(stalled.promise);
+		h.attacher.prepare(APP).catch(() => undefined);
+		await vi.advanceTimersByTimeAsync(SOCIAL_ATTACH_TIMEOUT_MS);
+		await settle();
+		const late = vi.fn();
+		stalled.resolve(late);
+		await settle();
+
+		// The replacement's first attach fails: the old wiring still goes with the old app.
+		const failure = new TypeError('offline');
+		h.attach.mockRejectedValueOnce(failure);
+		await expect(h.attacher.prepare(REPLACEMENT)).rejects.toBe(failure);
+		expect(late).toHaveBeenCalledOnce();
+		expect(h.attacher.unavailable).toBe(true);
+		// A retry for the replaced app never starts.
+		h.clock.value = SOCIAL_RETRY_INTERVAL_MS;
+		expect(h.attacher.retry(APP)).toBe(false);
+
+		const retried = vi.fn();
+		h.attach.mockResolvedValueOnce(retried);
+		expect(h.attacher.retry(REPLACEMENT)).toBe(true);
+		await settle();
+		expect(h.attach).toHaveBeenLastCalledWith(REPLACEMENT);
+		expect(h.attacher.unavailable).toBe(false);
+		expect(retried).not.toHaveBeenCalled();
+		expect(late).toHaveBeenCalledOnce();
+	});
+
+	test('a stale wiring landing after the replacement is undone and leaves the live one alone', async () => {
+		const h = harness();
+		const stalled = deferred<SocialStop>();
+		h.attach.mockReturnValueOnce(stalled.promise);
+		h.attacher.prepare(APP).catch(() => undefined);
+		await vi.advanceTimersByTimeAsync(SOCIAL_ATTACH_TIMEOUT_MS);
+		await settle();
+
+		// Replaced before the stalled chunk landed (the layout's owns still says yes for APP
+		// while the context has no published app); the replacement wires in time.
+		const live = vi.fn();
+		h.attach.mockResolvedValueOnce(live);
+		await expect(h.attacher.prepare(REPLACEMENT)).resolves.toBe(live);
+		expect(h.availability).toEqual([false, true]);
+
+		const stale = vi.fn();
+		stalled.resolve(stale);
+		await settle();
+		expect(stale).toHaveBeenCalledOnce();
+		expect(live).not.toHaveBeenCalled();
+		expect(h.attacher.unavailable).toBe(false);
+		expect(h.availability).toEqual([false, true]);
+	});
+
+	test('an attach replaced while it ran in time is left to the context, the live one is kept', async () => {
+		const h = harness();
+		const first = deferred<SocialStop>();
+		h.attach.mockReturnValueOnce(first.promise);
+		const superseded = h.attacher.prepare(APP);
+		const live = vi.fn();
+		h.attach.mockResolvedValueOnce(live);
+		await expect(h.attacher.prepare(REPLACEMENT)).resolves.toBe(live);
+
+		const stale = vi.fn();
+		first.resolve(stale);
+		// Returned to the context, which undoes it along with the disposed app.
+		await expect(superseded).resolves.toBe(stale);
+		expect(stale).not.toHaveBeenCalled();
+		expect(live).not.toHaveBeenCalled();
+		expect(h.attacher.keeps(REPLACEMENT)).toBe(true);
+		// A newer prepare still stops the live wiring it replaces.
+		h.attach.mockResolvedValueOnce(vi.fn());
+		await h.attacher.prepare(APP);
+		expect(live).toHaveBeenCalledOnce();
 	});
 
 	test('an attach that throws synchronously counts as a failed attempt', async () => {

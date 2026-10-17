@@ -154,3 +154,33 @@ test('a stalled social chunk times out: the cable chrome mounts without it, a la
 	expect(stop).not.toHaveBeenCalled();
 	expect(wiring.context.client).toBe(client);
 });
+
+test('an app replaced without the layout going away: its late wiring stops, one bridge stays', async () => {
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	const stalled = deferred<SocialStop>();
+	const late = vi.fn();
+	const next = vi.fn();
+	const attach = vi
+		.fn<(client: ClientApp) => Promise<SocialStop>>()
+		.mockReturnValueOnce(stalled.promise)
+		.mockResolvedValueOnce(next);
+	const wiring = layoutWiring(attach, 50);
+
+	const first = await wiring.mount(fakeAppOptions().options);
+	if (!first) throw new Error('The app was not published');
+	expect(wiring.state.unavailable).toBe(true);
+	stalled.resolve(late);
+	await expect.poll(() => wiring.state.unavailable).toBe(false);
+	expect(late).not.toHaveBeenCalled();
+
+	// The context only undoes the cleanup its prepare returned in time: not this late one.
+	wiring.context.dispose();
+	const second = await wiring.mount(fakeAppOptions().options);
+	if (!second) throw new Error('The replacement was not published');
+	expect(second).not.toBe(first);
+	expect(attach).toHaveBeenLastCalledWith(second);
+	expect(late).toHaveBeenCalledOnce();
+	expect(next).not.toHaveBeenCalled();
+	expect(wiring.attacher.keeps(second)).toBe(true);
+	expect(wiring.attacher.keeps(first)).toBe(false);
+});

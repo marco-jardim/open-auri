@@ -5,7 +5,7 @@ import { cleanup, render } from 'vitest-browser-svelte';
 import { gateForWrite } from 'open-auri/safety';
 import { createClientApp, type ClientApp } from '#lib/app/client.svelte.ts';
 import { createAudioEngine, IDLE_STATE, type AudioEngineState } from '#lib/audio/engine.ts';
-import type { MeterFrame, MeterUpdate } from '#lib/audio/meters.ts';
+import { LIVE_WINDOW_MS, type MeterFrame, type MeterUpdate } from '#lib/audio/meters.ts';
 import { neutralCurve } from '#lib/state/model.ts';
 import { m } from '#lib/paraglide/messages.js';
 import TrackSheet from '#lib/components/pages/biblioteca/TrackSheet.svelte';
@@ -252,6 +252,35 @@ test('rapid side changes and a pending tap cannot renew the last reading or revi
 	expect(onOutputMeter).toHaveBeenLastCalledWith({ mode: 'data', frame: null });
 	onOutputMeter.mockClear();
 	await vi.advanceTimersByTimeAsync(300);
+	expect(onOutputMeter).not.toHaveBeenCalled();
+});
+
+test('unmounting inside the live window: no meter callback fires after the sheet is gone', async () => {
+	const { screen, createAB, onOutputMeter } = await setupSheet();
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+	await press(screen.container, m.biblioteca_listen_tape());
+	expect(taps).toHaveLength(1);
+	const created = createAB.mock.results[0];
+	if (created?.type !== 'return') throw new Error('Missing sheet preview');
+	const preview = created.value;
+	const live = { mode: 'live', frame: frame(-6) } as const;
+	// The chain's last real frame lands while the sheet tears down (the preview is disposed
+	// before the tap is released), arming a fresh expiry that must not outlive the sheet.
+	const dispose = preview.dispose;
+	vi.spyOn(preview, 'dispose').mockImplementation(() => {
+		taps[0].emit(live);
+		dispose.call(preview);
+	});
+	taps[0].emit(live);
+	expect(onOutputMeter).toHaveBeenLastCalledWith(live);
+	await vi.advanceTimersByTimeAsync(100);
+
+	await cleanup();
+	expect(preview.dispose).toHaveBeenCalled();
+	expect(taps[0].disconnect).toHaveBeenCalledOnce();
+	onOutputMeter.mockClear();
+	await vi.advanceTimersByTimeAsync(LIVE_WINDOW_MS * 2);
+	taps[0].emit(live);
 	expect(onOutputMeter).not.toHaveBeenCalled();
 });
 

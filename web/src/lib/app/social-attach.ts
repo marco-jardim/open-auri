@@ -83,6 +83,11 @@ export interface SocialAttacherOptions<C> {
  *   never while one is still running (also one that outlived its timeout: the social chunk
  *   request is shared, so a second attempt would only wait on the same request). Only the first
  *   failed retry of an outage is logged; a successful attach ends the outage.
+ * - One live wiring at a time. The context only undoes the cleanup its prepare returned in time,
+ *   so the attacher keeps the cleanup of the wiring it kept last (in time, late or from a retry)
+ *   and stops it when a new `prepare` starts (the app was replaced) or a newer wiring lands.
+ *   Wiring for an app that is no longer the latest prepared one never replaces it: a late or
+ *   retried one is undone here, one in time is left to the context (which disposes that app).
  */
 export function createSocialAttacher<C>(options: SocialAttacherOptions<C>) {
 	const {
@@ -98,6 +103,28 @@ export function createSocialAttacher<C>(options: SocialAttacherOptions<C>) {
 	let inflight = false;
 	let lastAttemptAt = Number.NEGATIVE_INFINITY;
 	let warned = false;
+	/** The app of the latest `prepare`: only its wiring is kept. */
+	let latest: C | undefined;
+	/** Cleanup of the wiring kept last; stopped when it is replaced. */
+	let kept: SocialStop | undefined;
+
+	function keeps(client: C): boolean {
+		return latest !== undefined && client === latest && owns(client);
+	}
+
+	/** A newer wiring for the live app stops the one kept before it (a single live bridge). */
+	function keep(stop: SocialStop): void {
+		const previous = kept;
+		kept = stop;
+		if (previous !== undefined && previous !== stop) previous();
+	}
+
+	/** A new `prepare` means the app was replaced: its wiring goes with it. */
+	function release(): void {
+		const previous = kept;
+		kept = undefined;
+		previous?.();
+	}
 
 	function setAvailable(available: boolean): void {
 		const next = !available;
@@ -125,10 +152,11 @@ export function createSocialAttacher<C>(options: SocialAttacherOptions<C>) {
 
 	/** Wiring that landed outside the context's prepare: kept for the live app, else undone. */
 	function adopt(client: C, stop: SocialStop): void {
-		if (!owns(client)) {
+		if (!keeps(client)) {
 			stop();
 			return;
 		}
+		keep(stop);
 		setAvailable(true);
 	}
 
@@ -137,21 +165,31 @@ export function createSocialAttacher<C>(options: SocialAttacherOptions<C>) {
 		get unavailable() {
 			return unavailable;
 		},
+		/**
+		 * Whether wiring that lands for `client` now is kept: the app of the latest `prepare`,
+		 * still owned. The layout checks it before showing a landed wiring.
+		 */
+		keeps,
 		prepare(client: C): Promise<SocialStop> {
+			release();
+			latest = client;
 			return raceAttach(start(client), timeoutMs, (stop) => adopt(client, stop)).then(
 				(stop) => {
+					// Replaced while it ran: the context undoes it along with that app.
+					if (!keeps(client)) return stop;
+					keep(stop);
 					setAvailable(true);
 					return stop;
 				},
 				(error: unknown) => {
-					setAvailable(false);
+					if (keeps(client)) setAvailable(false);
 					throw error;
 				}
 			);
 		},
 		/** Never awaited by a write or the rescue. Returns whether an attempt started. */
 		retry(client: C | null | undefined): boolean {
-			if (!unavailable || inflight || !client || !owns(client)) return false;
+			if (!unavailable || inflight || !client || !keeps(client)) return false;
 			if (now() - lastAttemptAt < retryIntervalMs) return false;
 			const live: C = client;
 			start(live).then(

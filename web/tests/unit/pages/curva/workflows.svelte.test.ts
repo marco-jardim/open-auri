@@ -451,6 +451,13 @@ test('the engineering sequencer stays disabled with the loading or writing reaso
 	const request = vi.spyOn(app, 'requestWrite');
 	const send = page.getByRole('button', { name: m.curva_seq_send(), exact: true });
 	const sequencer = page.getByRole('group', { name: m.curva_seq_heading(), exact: true });
+	/** Re-queried after every rerender: a detached node would swallow the click trivially. */
+	const liveSend = (): HTMLButtonElement => {
+		const button = send.element();
+		if (!(button instanceof HTMLButtonElement)) throw new Error('Missing sequencer send button');
+		expect(button.isConnected).toBe(true);
+		return button;
+	};
 	await expect.element(send).not.toBeDisabled();
 	await expect.element(sequencer).not.toHaveAttribute('aria-describedby');
 
@@ -461,9 +468,7 @@ test('the engineering sequencer stays disabled with the loading or writing reaso
 	await expect
 		.element(sequencer.getByText(m.curva_v2_loading_reason(), { exact: true }))
 		.toBeVisible();
-	const button = send.element();
-	if (!(button instanceof HTMLButtonElement)) throw new Error('Missing sequencer send button');
-	button.click();
+	liveSend().click();
 	expect(request).not.toHaveBeenCalled();
 
 	const state = vi
@@ -476,7 +481,7 @@ test('the engineering sequencer stays disabled with the loading or writing reaso
 	await expect
 		.element(sequencer.getByText(m.curva_v2_writing_reason(), { exact: true }))
 		.toBeVisible();
-	button.click();
+	liveSend().click();
 	expect(request).not.toHaveBeenCalled();
 
 	state.mockRestore();

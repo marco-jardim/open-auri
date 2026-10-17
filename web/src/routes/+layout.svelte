@@ -154,10 +154,13 @@
 			stopBridge();
 			if (social?.stop === stop) social = null;
 		};
-		if (destroyed) {
+		// A layout that went away, or an app replaced while the chunk loaded: undone at once, and
+		// never shown in place of the live app's wiring (#35).
+		if (destroyed || !socialAttach.keeps(client)) {
 			stop();
 			return stop;
 		}
+		// The attacher stops the wiring it kept before (one live bridge); this one replaces it.
 		social = { runtime, session, api, outbox, stop };
 		if (accountSession.current) {
 			syncReady = true;
@@ -178,7 +181,9 @@
 	 * First attach timeout, retry pace and ownership (#35). A failed or timed-out prepare marks
 	 * the outbox unavailable (the context logs it once); wiring that lands later, from a retry or
 	 * from a first attach that outlived its timeout, is kept for the live app and undone for an
-	 * app that was replaced or a layout that went away (the teardown stops a kept one).
+	 * app that was replaced or a layout that went away (the teardown stops a kept one). The
+	 * context never sees the cleanup of such wiring, so the attacher stops it itself when the app
+	 * is replaced (a new prepare) or newer wiring lands: never two live outbox bridges.
 	 */
 	const socialAttach = createSocialAttacher<ClientApp>({
 		attach: attachSocial,

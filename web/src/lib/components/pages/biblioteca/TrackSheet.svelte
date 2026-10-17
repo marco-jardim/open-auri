@@ -181,6 +181,13 @@
 			// Preserve the last reading while the replacement warms up, only until its expiry.
 		};
 	});
+	// Last teardown, after the tap above is released: `stop()` (onDestroy above) runs first and
+	// disposes the preview, so a frame delivered meanwhile may have armed a fresh expiry. No
+	// `onOutputMeter` call may outlive the sheet.
+	onDestroy(() => {
+		clearTimeout(outputExpiry);
+		outputExpiry = undefined;
+	});
 
 	async function listen(selected: ABSide) {
 		if (!app || busy) return;

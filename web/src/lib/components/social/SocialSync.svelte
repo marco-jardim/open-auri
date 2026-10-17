@@ -16,7 +16,8 @@
 	// Mount once in the root layout. No UI besides the optional `children` indicator snippet.
 	// FX4.2: queued activity belongs to the account that acted. When the signed-in account goes
 	// away (sign-out) or changes (switch), the events it does not own are purged here; the outbox's
-	// own flush also drops other owners' events, so nothing is ever sent as someone else.
+	// own flush sends only the current account's events and leaves other owners' ones queued for
+	// that purge (#25), so nothing is ever sent as someone else.
 	// FX4.10: a session read as signed out is confirmed with a probe that tells a definitive
 	// "nobody is signed in" from a failure (`probeAccount`); only the former purges (a failed probe
 	// keeps the queue and is confirmed again when the tab comes back online or visible). The
