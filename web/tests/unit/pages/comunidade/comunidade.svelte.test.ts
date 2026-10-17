@@ -149,13 +149,11 @@ test('a removed author is credited as such', async () => {
 	await expect.element(page.getByText(m.comunidade_author_removed()).first()).toBeVisible();
 });
 
-test('the homage cites both sources', async () => {
+test('the page renders no homage of its own (the layout footer carries it)', async () => {
 	const { props } = setup([]);
 	await render(Comunidade, props);
-	await expect
-		.element(page.getByRole('link', { name: m.comunidade_homage_source_bob() }))
-		.toHaveAttribute('href', 'https://en.wikipedia.org/wiki/Bob_Clearmountain');
-	await expect
-		.element(page.getByRole('link', { name: m.comunidade_homage_source_live_aid() }))
-		.toHaveAttribute('href', 'https://en.wikipedia.org/wiki/Live_Aid');
+	await expect.element(page.getByTestId('feed-empty')).toBeVisible();
+	expect(document.querySelector('aside')).toBeNull();
+	expect(document.body.textContent).not.toContain('Bob Clearmountain');
+	expect(document.querySelector('a[href*="wikipedia.org"]')).toBeNull();
 });

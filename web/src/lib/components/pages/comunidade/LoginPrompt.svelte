@@ -33,6 +33,10 @@
 		margin: 0;
 	}
 	a {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		min-width: 24px;
 		color: var(--accent);
 		font-weight: 600;
 	}

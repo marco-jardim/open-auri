@@ -191,14 +191,17 @@
 	color: #d4cabb;
 	text-transform: uppercase;
 }
+/* Previews (S5 envelope, S6 payload) wrap instead of scrolling: a scroll box without focusable
+   content would be unreachable by keyboard (axe scrollable-region-focusable). */
 .oa-comunidade .out pre {
 	margin: 0;
 	padding: 10px 12px;
-	max-height: 340px;
-	overflow: auto;
+	max-height: none;
+	overflow: visible;
 	font: 11px/1.55 var(--mono);
 	color: #d9f2e6;
-	white-space: pre;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 .oa-comunidade .code-box {
 	padding: 12px;

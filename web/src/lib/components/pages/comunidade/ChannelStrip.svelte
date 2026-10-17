@@ -318,6 +318,18 @@
 		color: inherit;
 		text-decoration: none;
 	}
+	/* WCAG 2.2 target size: the tape links are at least 24 × 24 px. */
+	.scribble .m1,
+	.scribble .m2 {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		min-width: 24px;
+		min-height: 24px;
+		max-width: 100%;
+		padding: 2px 2px;
+	}
 	.scribble a:hover {
 		text-decoration: underline;
 	}

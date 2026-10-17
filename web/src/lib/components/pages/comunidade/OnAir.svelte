@@ -272,7 +272,8 @@
 		border-radius: 4px;
 		font: 700 25px var(--sans);
 		letter-spacing: 0.24em;
-		color: #4a3826;
+		/* Unlit but legible (≥ 4.5:1 on the dark glass). */
+		color: #a8916f;
 		background: linear-gradient(#2a2017, #1b140e);
 		box-shadow: inset 0 2px 6px #000;
 	}
@@ -350,6 +351,10 @@
 		margin-top: 6px;
 	}
 	.result a {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		margin-top: 4px;
 		color: var(--accent);
 	}
 	.outputs {

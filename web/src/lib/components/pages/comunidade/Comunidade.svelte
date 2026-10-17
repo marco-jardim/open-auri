@@ -29,7 +29,6 @@
 		type SocialOutbox
 	} from '#lib/social/index.ts';
 	import ChannelStrip from './ChannelStrip.svelte';
-	import Homage from './Homage.svelte';
 	import LoginPrompt from './LoginPrompt.svelte';
 	import MasterScope from './MasterScope.svelte';
 	import OnAir from './OnAir.svelte';
@@ -514,7 +513,6 @@
 			<ReportPanel {api} {session} channel={target} {siteKey} {online} />
 			<PrefersPanel {api} {channels} {online} />
 		</div>
-		<Homage />
 	</div>
 </div>
 
@@ -624,7 +622,8 @@
 		padding: 5px 10px;
 		border-radius: 3px;
 		background: #251c14;
-		color: #5b4632;
+		/* Unlit but legible (≥ 4.5:1 on the dark lens). */
+		color: #a8916f;
 		border: 1px solid #000;
 		box-shadow: inset 0 1px 3px #000;
 	}

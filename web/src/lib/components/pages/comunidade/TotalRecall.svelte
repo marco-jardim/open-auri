@@ -388,12 +388,12 @@
 	.bad {
 		color: #ff9fa2;
 	}
+	/* Not a scroll box: its items are not focusable, so it grows instead (the screen scrolls and
+	   contains focusable selects). */
 	.commits {
 		list-style: none;
 		margin: 0;
 		padding: 0;
-		max-height: 176px;
-		overflow: auto;
 	}
 	.commit {
 		display: grid;
