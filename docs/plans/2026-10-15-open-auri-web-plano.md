@@ -296,7 +296,7 @@ Uma curva só pode ser gravada ou publicada se, nos valores reais Q27/Q23 que v�
 ### 3.4 Design system, páginas e homenagens
 
 **Chrome compartilhado:**
-- **Barra superior** fixa, de 56 px: marca, navegação, estado do cabo, alterações não gravadas, ♪ Áudio, Neutro, Padrão Auri, Gravar no cabo, PT · EN.
+- **Barra superior** fixa e compacta (FUX.NAV, decisão do PO em 2026-10-17): uma linha de 40 px no desktop e 52 px no celular. Marca, navegação que dobra em "Mais" conforme a largura, estado do cabo, ♪ Áudio, play/pause da prévia (atalho k), menu "Carregar no editor" com Neutro e Padrão Auri (botões soltos a partir de 1600 px), Gravar no cabo com o indicador de alterações não gravadas, conta, PT · EN e ajuda. No celular, uma folha de menu reúne navegação, presets, conta, idioma e ajuda. Nunca rola na horizontal.
 - **Rodapé:** homenagem com curiosidade e fonte; Aviso; "Aviso legal completo"; "Código-fonte no GitHub"; "Licença AGPL-3.0".
 - **Fontes:** Instrument Serif, Geist, JetBrains Mono, mais até 2 fontes de época por página, todas auto-hospedadas e com licença OFL verificada.
 

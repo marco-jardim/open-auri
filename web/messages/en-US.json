@@ -1917,7 +1917,7 @@
 	"fuxnav_sheet_language": "Language",
 	"fuxnav_sheet_title": "Menu",
 	"fuxnav_tools": "Load into the editor",
-	"fuxnav_tools_hint": "Neutro and Padrão Auri load into the editor. Nothing reaches the cable without the Write button.",
+	"fuxnav_tools_hint": "Neutral and Auri default load into the editor. Nothing reaches the cable without Write to cable.",
 	"fuxnav_write_short": "Write",
 	"fuxp8_bio_over": "Shorten the bio to {max} characters or fewer.",
 	"fuxp8_email_wait_check": "Complete the security check above to send.",
