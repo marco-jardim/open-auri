@@ -98,6 +98,18 @@ test('derives email domains and workers subdomains and returns label-only JSON',
   assert.ok(!`${result.stdout}${result.stderr}`.includes(email));
 });
 
+test('the product domain and its subdomains are public; the sender address stays scanned', (t) => {
+  const repo = fixture(t, 'RESEND_FROM=fixture-sender@mail.open-auri.com\n', {
+    'docs.txt': 'Envio por mail.open-auri.com, site https://open-auri.com\n',
+    'leak.txt': 'fixture-sender@mail.open-auri.com\n',
+  });
+  const result = repo.run('--json');
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    { path: 'leak.txt', line: 1, label: 'RESEND_FROM' },
+  ]);
+});
+
 test('skips binary files, files larger than 5 MB and ignored files', (t) => {
   const secret = 'fixture-binary-secret-456';
   const repo = fixture(t, `PRIVATE_TOKEN=${secret}\n`, {

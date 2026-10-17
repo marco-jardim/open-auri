@@ -22,6 +22,12 @@ const safelist = new Set([
   'ACCESS_LOG_DLQ',
   'ACCESS_LOG_DLQ_STAGING',
 ]);
+// The product's own public domain (and its subdomains, e.g. the sending domain) is published on
+// purpose; addresses and other values stay scanned through their keys.
+const publicDomains = ['open-auri.com'];
+/** @param {string} domain */
+const isPublicDomain = (domain) =>
+  publicDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
 const maxFileSize = 5 * 1024 * 1024;
 
 // Well-known credential shapes, scanned in every mode (also without a .env, as in CI with
@@ -77,7 +83,7 @@ function sensitiveNeedles(values) {
     for (const email of value.matchAll(
       /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,})/g,
     )) {
-      add(email[1], `derived:EMAIL_DOMAIN(${key})`);
+      if (!isPublicDomain(email[1].toLowerCase())) add(email[1], `derived:EMAIL_DOMAIN(${key})`);
     }
     if (key === 'CLOUDFLARE_WORKERS_SUBDOMAIN') {
       add(value, 'derived:WORKERS_SUBDOMAIN');
