@@ -74,6 +74,64 @@ describe('first choice', () => {
 	});
 });
 
+describe('nickname blocklist', () => {
+	it('refuses each category on first choice and changes exactly like a taken name', async () => {
+		const taken = nick('occupied');
+		await seedUser({ username: taken });
+		for (const username of [null, nick('original')]) {
+			const user = await seedUser({ username });
+			const before = await userRow(user.id);
+			const takenResult = await changeNickname(env.DB, user.id, taken, T0);
+			expect(takenResult).toEqual({ ok: false, error: 'taken' });
+			for (const blocked of [
+				'admin',
+				'n1gg3r',
+				'crioulo',
+				'f4gg0t',
+				'tr4nny',
+				'b1tch',
+				'wetback',
+				'bolita',
+				'r37ardad0',
+				'nazista',
+				'moderadora',
+				'4dm1n',
+				'ádmín',
+				'аdmіn',
+				'a_d_m_i_n',
+				'admiiin',
+				'admin123',
+				'sennheiser',
+				'moondrop',
+				'fiio',
+				'audioquest',
+				'spotify',
+				'microsoft'
+			]) {
+				expect(await changeNickname(env.DB, user.id, blocked, T0)).toEqual(takenResult);
+			}
+			expect(await userRow(user.id)).toEqual(before);
+			expect(
+				await count('SELECT count(*) AS n FROM username_holds WHERE user_id = ?', user.id)
+			).toBe(0);
+		}
+	});
+
+	it('allows legitimate substring look-alikes on first choice and later changes', async () => {
+		for (const first of [true, false]) {
+			for (const base of ['modesto', 'computador', 'tidalwave']) {
+				const user = await seedUser({ username: first ? null : nick('original') });
+				const chosen = nick(base);
+				expect(await changeNickname(env.DB, user.id, chosen, T0)).toMatchObject({
+					ok: true,
+					username: chosen,
+					kind: first ? 'first' : 'change'
+				});
+			}
+		}
+	});
+});
+
 describe('uniqueness by skeleton', () => {
 	it('refuses a look-alike of a nickname in use', async () => {
 		const hex = crypto.randomUUID().replace(/-/g, '').slice(0, 12);

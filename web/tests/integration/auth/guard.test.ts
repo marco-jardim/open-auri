@@ -197,6 +197,63 @@ describe('nickname rules', () => {
 		}
 	});
 
+	it('refuses blocklist categories and evasions with exactly the taken-name response', async () => {
+		const h = harness();
+		const taken = uniqueUsername('resident');
+		await createVerifiedUser(h, uniqueEmail('owner'), { username: taken });
+		const takenResponse = await h.client().signUp(uniqueEmail('taken'), { username: taken });
+		expect(takenResponse.status).toBe(400);
+		expect(await errorCode(takenResponse)).toBe('USERNAME_IS_ALREADY_TAKEN');
+		const expected = await takenResponse.json();
+		for (const username of [
+			'admin',
+			'n1gg3r',
+			'crioulo',
+			'f4gg0t',
+			'tr4nny',
+			'b1tch',
+			'wetback',
+			'bolita',
+			'r37ardad0',
+			'nazista',
+			'moderadora',
+			'4dm1n',
+			'ádmín',
+			'аdmіn',
+			'a_d_m_i_n',
+			'admiiin',
+			'admin123',
+			'sennheiser',
+			'moondrop',
+			'fiio',
+			'audioquest',
+			'spotify',
+			'microsoft'
+		]) {
+			const email = uniqueEmail('blocked');
+			const response = await h.client().signUp(email, { username });
+			expect(response.status).toBe(takenResponse.status);
+			expect(await response.json()).toEqual(expected);
+			const row = await env.DB.prepare('SELECT id FROM "user" WHERE email = ?').bind(email).first();
+			expect(row).toBeNull();
+		}
+	});
+
+	it('accepts legitimate nicknames containing short blocked tokens as substrings', async () => {
+		const h = harness();
+		for (const base of ['modesto', 'computador', 'assassin', 'tidalwave']) {
+			const username = uniqueUsername(base);
+			const email = uniqueEmail('legitimate');
+			const response = await h.client().signUp(email, { username });
+			expect(response.status).toBe(200);
+			const row = await env.DB.prepare('SELECT username FROM "user" WHERE email = ?')
+				.bind(email)
+				.first<{ username: string }>();
+			expect(row?.username).toBe(username);
+		}
+		await h.flush();
+	});
+
 	it('refuses a nickname whose skeleton is already taken', async () => {
 		const h = harness();
 		const base = `pau1o${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
