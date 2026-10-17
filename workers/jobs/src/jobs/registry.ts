@@ -85,10 +85,11 @@ export class JobFailedError extends Error {
  * - Hourly: the re-gate of curves cached under an older gate version FIRST (the most CPU-heavy
  *   step, ~150 ms per curve, time-budgeted in regate.ts and only non-zero after a threshold
  *   change; on its own cron so no daily job can starve it, and the next hour continues where it
- *   stopped), then S7 trade expiry and re-pairing, then the D1 backup again so an unfinished
- *   weekly backup resumes (idempotent per ISO week: once the manifest exists, a run is one KV
- *   read).
- * - Weekly (Monday 03:00 UTC): the D1 backup to R2, then the public dump.
+ *   stopped), then S7 trade expiry and re-pairing, then the D1 backup to R2. The backup is
+ *   registered ONLY here: its week starts Monday 03:00 UTC (backup.ts `backupWeek`), so the
+ *   03:00 Monday tick starts it and later ticks resume it until the manifest exists; after that a
+ *   run is one KV read (idempotent per backup week).
+ * - Weekly (Monday 03:00 UTC): the public dump.
  * - Every 15 minutes: the re-gate again (FX4.9: shortens the window in which lists still show a
  *   head the current gate rejects; idempotent, so its overlap with the hourly run at minute 0
  *   only re-reads an empty stale set or redoes the same verdicts), THEN rankings
@@ -108,7 +109,7 @@ export const registry: JobRegistry = {
     ],
     [CRONS.hourly]: [regateJob, tradesExpireJob, backupJob],
     [CRONS.quarterHour]: [regateJob, createRankingsJob(runRankingsJob)],
-    [CRONS.weekly]: [backupJob, publicDumpJob],
+    [CRONS.weekly]: [publicDumpJob],
   },
   queues: {
     'access-log': accessLogConsumerJob,

@@ -26,8 +26,8 @@ import {
   BACKUP_STATE_KEY,
   backupJob,
   type BackupManifest,
+  backupWeek,
   isBackedUpTable,
-  isoWeek,
   sha256Hex,
   weekPrefix,
 } from '../src/jobs/backup.ts';
@@ -343,7 +343,7 @@ describe('phase 5: jobs run twice with the same scheduled time', () => {
   it('every registered job: no error, and the second run changes nothing', async () => {
     // Now (KV expirations must be in the future); fixed for both runs of every job.
     const scheduled = Date.now();
-    const week = isoWeek(new Date(scheduled));
+    const week = backupWeek(new Date(scheduled));
     await env.CONFIG.delete(BACKUP_STATE_KEY);
     await env.CONFIG.delete(OG_SWEEP_CURSOR_KEY);
     const fx = await seed(scheduled);
@@ -482,12 +482,12 @@ describe('phase 5: public dump without PII', () => {
 describe('phase 5: backup exclusions and restore round trip', () => {
   it('the job backup leaves out access logs and rate-limit counters, and restores into an empty D1', async () => {
     const scheduled = Date.now();
-    const week = isoWeek(new Date(scheduled));
+    const week = backupWeek(new Date(scheduled));
     await env.CONFIG.delete(BACKUP_STATE_KEY);
     const fx = await seed(scheduled);
-    const job = registry.scheduled[CRONS.weekly]?.find((entry) => entry.name === 'backup');
+    const job = registry.scheduled[CRONS.hourly]?.find((entry) => entry.name === 'backup');
     if (!job) throw new Error('backup is not registered');
-    expect(summary(await runJob(job, CRONS.weekly, scheduled), 'job.backup').status).toBe(
+    expect(summary(await runJob(job, CRONS.hourly, scheduled), 'job.backup').status).toBe(
       'complete',
     );
 

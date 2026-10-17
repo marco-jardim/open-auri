@@ -61,15 +61,18 @@ describe('job registry', () => {
       'cleanup',
     ]);
     // The re-gate has its own hourly tick and runs first in it: no daily job can starve it. The
-    // backup comes last so an unfinished weekly backup resumes every hour.
+    // backup comes last; it is registered only here (its week starts Monday 03:00 UTC, the hourly
+    // tick at that time starts it and the next ticks resume it).
     expect(scheduledNames(CRONS.hourly)).toEqual(['regate', 'trades-expire', 'backup']);
     expect(scheduledNames(CRONS.daily)).not.toContain('regate');
     // FX4.9: the re-gate also runs every 15 minutes, before rankings (shorter list drain window).
     expect(scheduledNames(CRONS.quarterHour)).toEqual(['regate', 'rankings']);
     expect(registry.scheduled[CRONS.quarterHour]?.[0]).toBe(registry.scheduled[CRONS.hourly]?.[0]);
-    // Weekly (Monday 03:00 UTC): the D1 backup, then the public dump.
-    expect(scheduledNames(CRONS.weekly)).toEqual(['backup', 'public-dump']);
-    expect(registry.scheduled[CRONS.weekly]?.[0]).toBe(registry.scheduled[CRONS.hourly]?.[2]);
+    // Weekly (Monday 03:00 UTC): only the public dump; the backup is not registered twice.
+    expect(scheduledNames(CRONS.weekly)).toEqual(['public-dump']);
+    for (const cron of [CRONS.daily, CRONS.quarterHour, CRONS.weekly]) {
+      expect(scheduledNames(cron), cron).not.toContain('backup');
+    }
     expect(CRONS).toEqual({
       daily: '5 0 * * *',
       hourly: '0 * * * *',

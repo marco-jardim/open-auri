@@ -59,6 +59,7 @@ test('planSecrets filters by worker, skips absent optional secrets and lists nam
       { name: 'ACCESS_LOG_KEY', source: 'ACCESS_LOG_KEY' },
     ],
     skipped: ['RESEND_WEBHOOK_SECRET'],
+    fallbacks: [],
   });
   const withWebhook = planSecrets(valuesOf({ RESEND_WEBHOOK_SECRET: 'whsec_x' }), 'web');
   assert.equal(withWebhook.uploads.at(-1)?.name, 'RESEND_WEBHOOK_SECRET');
@@ -66,7 +67,89 @@ test('planSecrets filters by worker, skips absent optional secrets and lists nam
   assert.deepEqual(planSecrets(valuesOf(), 'jobs'), {
     uploads: [{ name: 'ACCESS_LOG_KEY', source: 'ACCESS_LOG_KEY' }],
     skipped: [],
+    fallbacks: [],
   });
+});
+
+const STAGING_VALUES = {
+  BETTER_AUTH_SECRET_STAGING: 'fixture-auth-staging-FFFF',
+  ACCESS_LOG_KEY_STAGING: 'fixture-access-log-staging-GGGG',
+  IPHASH_PEPPER_STAGING: 'fixture-pepper-staging-HHHH',
+  RESEND_WEBHOOK_SECRET_STAGING: 'whsec_fixture_staging_IIII',
+};
+
+test('planSecrets reads <KEY>_STAGING for staging only, for the per-environment secrets', () => {
+  const values = valuesOf({ RESEND_WEBHOOK_SECRET: 'whsec_prod', ...STAGING_VALUES });
+  assert.deepEqual(planSecrets(values, 'web', 'staging'), {
+    uploads: [
+      { name: 'BETTER_AUTH_SECRET', source: 'BETTER_AUTH_SECRET_STAGING' },
+      { name: 'RESEND_API_KEY', source: 'RESEND_API_KEY' },
+      { name: 'TURNSTILE_SECRET', source: 'TURNSTILE_SECRET_KEY' },
+      { name: 'IPHASH_PEPPER', source: 'IPHASH_PEPPER_STAGING' },
+      { name: 'ACCESS_LOG_KEY', source: 'ACCESS_LOG_KEY_STAGING' },
+      { name: 'RESEND_WEBHOOK_SECRET', source: 'RESEND_WEBHOOK_SECRET_STAGING' },
+    ],
+    skipped: [],
+    fallbacks: [],
+  });
+  assert.deepEqual(planSecrets(values, 'jobs', 'staging').uploads, [
+    { name: 'ACCESS_LOG_KEY', source: 'ACCESS_LOG_KEY_STAGING' },
+  ]);
+  // Production (and the top level) never read the _STAGING keys.
+  for (const env of ['production', undefined]) {
+    const plan = planSecrets(values, 'web', env);
+    assert.ok(
+      plan.uploads.every(({ source }) => !source.endsWith('_STAGING')),
+      String(env),
+    );
+    assert.deepEqual(plan.fallbacks, []);
+  }
+  // A _STAGING key only satisfies a required secret for staging.
+  const onlyStaging = valuesOf(STAGING_VALUES);
+  onlyStaging.delete('BETTER_AUTH_SECRET');
+  const stagingPlan = planSecrets(onlyStaging, 'web', 'staging');
+  assert.equal(stagingPlan.uploads[0]?.source, 'BETTER_AUTH_SECRET_STAGING');
+  assert.throws(
+    () => planSecrets(onlyStaging, 'web', 'production'),
+    /^Error: Missing environment variables: BETTER_AUTH_SECRET$/,
+  );
+});
+
+test('planSecrets lists staging fallbacks to the shared key (names only, empty counts as unset)', () => {
+  const values = valuesOf({
+    RESEND_WEBHOOK_SECRET: 'whsec_prod',
+    IPHASH_PEPPER_STAGING: STAGING_VALUES.IPHASH_PEPPER_STAGING,
+    ACCESS_LOG_KEY_STAGING: '',
+  });
+  const plan = planSecrets(values, 'web', 'staging');
+  assert.deepEqual(plan.fallbacks, [
+    'BETTER_AUTH_SECRET',
+    'ACCESS_LOG_KEY',
+    'RESEND_WEBHOOK_SECRET',
+  ]);
+  const accessLog = plan.uploads.find(({ name }) => name === 'ACCESS_LOG_KEY');
+  assert.equal(accessLog?.source, 'ACCESS_LOG_KEY');
+  // An absent optional secret is skipped, not a fallback.
+  const bare = planSecrets(valuesOf(), 'web', 'staging');
+  assert.deepEqual(bare.skipped, ['RESEND_WEBHOOK_SECRET']);
+  assert.ok(!bare.fallbacks.includes('RESEND_WEBHOOK_SECRET'));
+});
+
+test('syncSecrets uploads the _STAGING values to staging and never prints them', async () => {
+  const { calls, lines, deps } = fakeDeps();
+  for (const [key, value] of Object.entries(STAGING_VALUES)) deps.values.set(key, value);
+  await syncSecrets(['--env', 'staging'], deps);
+  const puts = calls.filter((call) => call.args?.[0] === 'secret');
+  const inputs = Object.fromEntries(puts.map((call) => [call.args?.[2], call.input]));
+  assert.equal(inputs.BETTER_AUTH_SECRET, STAGING_VALUES.BETTER_AUTH_SECRET_STAGING);
+  assert.equal(inputs.IPHASH_PEPPER, STAGING_VALUES.IPHASH_PEPPER_STAGING);
+  assert.equal(inputs.ACCESS_LOG_KEY, STAGING_VALUES.ACCESS_LOG_KEY_STAGING);
+  assert.equal(inputs.RESEND_WEBHOOK_SECRET, STAGING_VALUES.RESEND_WEBHOOK_SECRET_STAGING);
+  assert.equal(inputs.RESEND_API_KEY, SECRET_VALUES.RESEND_API_KEY);
+  assert.ok(!lines.some((line) => line.startsWith('Warning:')));
+  for (const value of [...Object.values(SECRET_VALUES), ...Object.values(STAGING_VALUES)]) {
+    assert.ok(!lines.join('\n').includes(value));
+  }
 });
 
 test('planSecrets reports missing required secrets by .env name without values', () => {
@@ -155,6 +238,9 @@ test('syncSecrets renders, verifies the account, then pipes each value on stdin'
   );
   assert.deepEqual(lines, [
     'Skipped optional secret (not set): RESEND_WEBHOOK_SECRET',
+    'Warning: BETTER_AUTH_SECRET_STAGING is not set; staging uses the same BETTER_AUTH_SECRET as production',
+    'Warning: IPHASH_PEPPER_STAGING is not set; staging uses the same IPHASH_PEPPER as production',
+    'Warning: ACCESS_LOG_KEY_STAGING is not set; staging uses the same ACCESS_LOG_KEY as production',
     'Uploaded secret BETTER_AUTH_SECRET to web (staging)',
     'Uploaded secret RESEND_API_KEY to web (staging)',
     'Uploaded secret TURNSTILE_SECRET to web (staging)',

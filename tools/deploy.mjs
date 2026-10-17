@@ -13,8 +13,11 @@
 //   5. remote D1 migrations;
 //   6. `wrangler deploy` of the web Worker, then of the jobs Worker;
 //   7. smoke checks over HTTP against the environment's origin.
-// Production requires --confirm-production. PUBLIC_ORIGIN is derived from --env (production:
-// PRODUCTION_ORIGIN; staging: its workers.dev origin), never taken from .env.
+// Production requires --confirm-production and refuses --skip-tests (staging only). PUBLIC_ORIGIN
+// is derived from --env (production: PRODUCTION_ORIGIN; staging: its workers.dev origin), never
+// taken from .env. Staging reads its own BETTER_AUTH_SECRET, ACCESS_LOG_KEY, IPHASH_PEPPER and
+// RESEND_WEBHOOK_SECRET from `<KEY>_STAGING` when set (tools/sync-secrets.mjs, which warns by key
+// name when staging falls back to the production key).
 //
 // planDeploy() is pure (the ordered step list); runDeploy() executes it with injected effects;
 // the CLI at the bottom wires the real ones. Child processes run without a shell. Values from
@@ -150,6 +153,9 @@ export function planDeploy(args, values, { dotenv = true } = {}) {
   const { env, confirmProduction, skipTests } = args;
   if (env === 'production' && !confirmProduction) {
     throw new RenderError('Production deploy requires --confirm-production');
+  }
+  if (env === 'production' && skipTests) {
+    throw new RenderError('--skip-tests is not allowed for a production deploy');
   }
   const dbKey = env === 'production' ? 'D1_DATABASE_NAME' : 'D1_DATABASE_NAME_STAGING';
   const required = [

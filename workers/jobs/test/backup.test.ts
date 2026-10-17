@@ -11,6 +11,7 @@ import {
   backupFileKey,
   backupJob,
   type BackupManifest,
+  backupWeek,
   isBackedUpTable,
   isoWeek,
   runBackup,
@@ -78,6 +79,16 @@ describe('backup helpers', () => {
     expect(isoWeek(new Date('2024-12-30T00:00:00Z'))).toBe('2025-W01');
     expect(backupFileKey('2026-W42', 'user', 0)).toBe('backups/2026-W42/user.ndjson.gz');
     expect(backupFileKey('2026-W42', 'user', 2)).toBe('backups/2026-W42/user.3.ndjson.gz');
+  });
+
+  it('starts a backup week on Monday 03:00 UTC, not at midnight', () => {
+    // 2026-10-19 is a Monday (ISO 2026-W43).
+    expect(isoWeek(new Date('2026-10-19T00:00:00Z'))).toBe('2026-W43');
+    expect(backupWeek(new Date('2026-10-19T00:00:00Z'))).toBe('2026-W42');
+    expect(backupWeek(new Date('2026-10-19T02:59:59.999Z'))).toBe('2026-W42');
+    expect(backupWeek(new Date('2026-10-19T03:00:00Z'))).toBe('2026-W43');
+    expect(backupWeek(new Date('2026-10-25T23:59:59Z'))).toBe('2026-W43');
+    expect(backupWeek(new Date('2026-10-26T02:00:00Z'))).toBe('2026-W43');
   });
 
   it('excludes access logs, rate-limit counters, migrations and internals', () => {
@@ -249,7 +260,7 @@ describe('backup job', () => {
       await backupJob.run(
         createScheduledController({
           scheduledTime: Date.parse('2031-12-03T03:00:00Z'),
-          cron: '0 3 * * 1',
+          cron: '0 * * * *',
         }),
         env,
         createExecutionContext(),
@@ -265,5 +276,22 @@ describe('backup job', () => {
     } finally {
       log.mockRestore();
     }
+  });
+
+  it('keeps the previous week until Monday 03:00 UTC, then starts a new backup', async () => {
+    // 2032-01-07 is a Wednesday (ISO 2032-W02); 2032-01-12 is the next Monday (ISO 2032-W03).
+    const deps = { db: env.DB, bucket: env.MEDIA, state: env.CONFIG, limits: GENEROUS };
+    const done = await runBackup({ ...deps, now: new Date('2032-01-07T03:00:00Z') });
+    expect(done).toMatchObject({ week: '2032-W02', status: 'complete' });
+
+    // Monday before 03:00: still the completed week, one KV read, nothing written.
+    const early = await runBackup({ ...deps, now: new Date('2032-01-12T02:00:00Z') });
+    expect(early).toMatchObject({ week: '2032-W02', status: 'skipped', pages: 0, files: 0 });
+    expect(await listKeys(weekPrefix('2032-W03'))).toEqual([]);
+
+    // The 03:00 Monday hourly tick starts the new week.
+    const next = await runBackup({ ...deps, now: new Date('2032-01-12T03:00:00Z') });
+    expect(next).toMatchObject({ week: '2032-W03', status: 'complete' });
+    expect(await env.MEDIA.head(`${weekPrefix('2032-W03')}manifest.json`)).not.toBeNull();
   });
 });

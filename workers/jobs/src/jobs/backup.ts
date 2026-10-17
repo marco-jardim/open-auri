@@ -2,7 +2,8 @@
 //
 // Every application table of D1 is read in keyset pages (rowid, or the primary key of WITHOUT
 // ROWID tables) and written as gzip NDJSON to the R2 bucket MEDIA under
-// `backups/<YYYY>-W<ww>/<table>.ndjson.gz` (ISO week of the run, UTC). A table too large for one
+// `backups/<YYYY>-W<ww>/<table>.ndjson.gz` (backup week of the run: the ISO week, UTC, but
+// starting Monday 03:00 UTC instead of 00:00; see backupWeek). A table too large for one
 // run continues in `<table>.2.ndjson.gz`, `<table>.3.ndjson.gz`, ... When every table is done,
 // `backups/<week>/manifest.json` lists the tables (with their CREATE statement), row counts, files
 // (rows, bytes, SHA-256 of the gzip bytes), the triggers and the schema version (name of the last
@@ -16,9 +17,10 @@
 // checked before each page; a file is cut at `chunkBytes` of NDJSON. The progress (week, tables,
 // per-table keyset cursor, files written) is kept in KV `CONFIG` (`job:backup:state`), written once
 // at the end of the run. A run that dies halfway redoes its pages next time and overwrites the same
-// object keys. Idempotent per week: once the manifest is written, every later run of the same ISO
-// week is a single KV read. A new week starts a new backup; an unfinished older week is left
-// without a manifest (restore refuses it) and goes with the retention.
+// object keys. Idempotent per week: once the manifest is written, every later run of the same
+// backup week is a single KV read. A new week starts a new backup (registered only on the hourly
+// cron, so the first run of a week is Monday 03:00 UTC); an unfinished older week is left without a
+// manifest (restore refuses it) and goes with the retention.
 //
 // Retention: after a manifest is written, every `backups/<week>/` older than 12 weeks is deleted.
 // This is not a point-in-time snapshot (tables are read over minutes or hours); D1 Time Travel is
@@ -75,6 +77,17 @@ export function isoWeek(date: Date): string {
   return `${year}-W${String(week).padStart(2, '0')}`;
 }
 
+/** A backup week starts this long after the ISO week (Monday 03:00 UTC, the documented start). */
+export const BACKUP_WEEK_START_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * Backup week of `now`: the ISO week of `now` minus 3 hours, so Monday 00:00-02:59 UTC still
+ * belongs to the previous week (only resumes or skips it) and a new backup starts at 03:00.
+ */
+export function backupWeek(now: Date): string {
+  return isoWeek(new Date(now.getTime() - BACKUP_WEEK_START_MS));
+}
+
 /** `backups/<week>/` of the week of `now`. */
 export function weekPrefix(week: string): string {
   return `${BACKUP_PREFIX}${week}/`;
@@ -87,7 +100,7 @@ export function backupFileKey(week: string, table: string, index: number): strin
 
 /** Weeks strictly older than this one are deleted (the current week plus 12 earlier ones stay). */
 export function retentionCutoffWeek(now: Date): string {
-  return isoWeek(new Date(now.getTime() - BACKUP_RETENTION_WEEKS * 7 * DAY_MS));
+  return backupWeek(new Date(now.getTime() - BACKUP_RETENTION_WEEKS * 7 * DAY_MS));
 }
 
 type KeyValue = string | number | null;
@@ -314,7 +327,7 @@ export async function runBackup(deps: BackupDeps): Promise<BackupResult> {
   const limits = deps.limits ?? BACKUP_LIMITS;
   const clock = deps.clock ?? Date.now;
   const started = clock();
-  const week = isoWeek(deps.now);
+  const week = backupWeek(deps.now);
   const result: BackupResult = { week, status: 'resumed', pages: 0, rows: 0, files: 0, pruned: 0 };
 
   const stored = parseState(await deps.state.get(BACKUP_STATE_KEY));

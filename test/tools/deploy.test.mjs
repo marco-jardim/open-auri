@@ -139,6 +139,22 @@ test('planDeploy skips only the tests with --skip-tests', () => {
   assert.ok(names.includes('build-web'));
 });
 
+test('planDeploy refuses --skip-tests for production, even when confirmed', () => {
+  assert.throws(
+    () =>
+      planDeploy(
+        parseArgs(['--env', 'production', '--confirm-production', '--skip-tests']),
+        valuesOf(),
+      ),
+    /^Error: --skip-tests is not allowed for a production deploy$/,
+  );
+  const names = planDeploy(
+    parseArgs(['--env', 'production', '--confirm-production']),
+    valuesOf(),
+  ).map((step) => step.name);
+  assert.ok(names.includes('tests'));
+});
+
 test('without a .env (GitHub deploy) the scan runs in --no-env mode', () => {
   const plan = planDeploy(parseArgs(['--env', 'staging']), valuesOf(), { dotenv: false });
   assert.deepEqual(plan.find((step) => step.name === 'check-sensitive')?.args, [
@@ -191,6 +207,10 @@ test('plainEnv drops the project keys and keeps the rest', () => {
       EMAIL_TRANSPORT: 'x',
       SIGNUP_ENABLED: 'x',
       ACCESS_LOG_KEY: 'x',
+      BETTER_AUTH_SECRET_STAGING: 'x',
+      ACCESS_LOG_KEY_STAGING: 'x',
+      IPHASH_PEPPER_STAGING: 'x',
+      RESEND_WEBHOOK_SECRET_STAGING: 'x',
       NODE_OPTIONS: 'n',
     }),
     { PATH: 'p', HOME: 'h', NODE_OPTIONS: 'n' },

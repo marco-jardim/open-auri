@@ -31,13 +31,15 @@ Uma semana sem `manifest.json` está incompleta e não serve para restauração.
 
 Cada execução lê no máximo 400 páginas de 500 linhas e para depois de 25 s; um arquivo é fechado a cada 8 MiB de NDJSON. O progresso (semana, tabelas, cursor por tabela, arquivos já escritos) fica no KV `CONFIG`, chave `job:backup:state`, gravado uma vez no fim da execução. Uma execução interrompida refaz as suas páginas na próxima e sobrescreve as mesmas chaves. Depois do manifesto, toda execução da mesma semana é uma leitura de KV e nada mais (idempotente por semana).
 
+A semana do backup é a semana ISO deslocada de 3 horas (`backupWeek`): entre 00:00 e 02:59 UTC de segunda o job só retoma ou pula a semana anterior, e o backup novo começa na execução de hora em hora das 03:00.
+
 O backup não é um instantâneo de um único momento: as tabelas são lidas ao longo de minutos ou horas. Para voltar a um instante exato, use o Time Travel (seção 6).
 
 ### Retenção
 
 Ao concluir uma semana, o job apaga todo `backups/<semana>/` mais antigo que 12 semanas. Ficam a semana corrente e as 12 anteriores, ou seja, pelo menos 12 backups completos. Dados apagados depois de um backup (exclusões, encerramento de conta, retirada de consentimento) permanecem nesses arquivos, sem uso, até a semana sair da retenção (operação 22).
 
-O bucket não pode ter acesso público (domínio `r2.dev` ou domínio customizado) que alcance `backups/`. Somente o operador lê esse prefixo, pelo Wrangler.
+O bucket continua privado: não pode ter acesso público (domínio `r2.dev` ou domínio customizado) em nenhum prefixo. Somente o operador lê `backups/`, pelo Wrangler. O único conteúdo do bucket exposto ao público é o dump (seção 2), e só pela rota da aplicação.
 
 ## 2. Dump público semanal
 
@@ -49,7 +51,7 @@ O apelido do autor aparece só nas versões CC-BY-4.0, porque a licença exige a
 
 Nunca entram: e-mail, IDs de usuário, atividade nominal (quem favoritou ou instalou), hashes, IP, receitas, conteúdo privado, não listado, retirado ou oculto, dados de moderação. Uma nova execução no mesmo dia sobrescreve os dois arquivos. Novos dumps refletem exclusões e anonimizações; cópias já baixadas por terceiros permanecem, como diz a política.
 
-A rota pública que serve esses arquivos não faz parte da T5.3.
+O público baixa esses arquivos só pela rota da aplicação `GET /dados/dump/latest.json.gz` e pelas edições datadas `GET /dados/dump/<AAAA-MM-DD>.json.gz`, que leem o prefixo `public/dump/` pelo binding `MEDIA`. O bucket não tem acesso público; nenhum outro prefixo é alcançável por essa rota.
 
 ## 3. Limpeza diária
 
@@ -83,8 +85,8 @@ Registrados na T5.7 em `workers\jobs\src\jobs\registry.ts` (ordem dentro de cada
 
 | Job          | Export          | Cron (UTC)                                                                                                                                                                                                                              |
 | ------------ | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backup       | `backupJob`     | `0 3 * * 1` (segunda, 03:00, antes do dump) e também no cron de hora em hora `0 * * * *` (depois do re-gate e da expiração de trocas), para continuar um backup que não terminou; depois de completo, cada execução é uma leitura de KV |
-| Dump público | `publicDumpJob` | `0 3 * * 1` (depois do backup)                                                                                                                                                                                                          |
+| Backup       | `backupJob`     | Só no cron de hora em hora `0 * * * *` (depois do re-gate e da expiração de trocas). A semana do backup começa segunda às 03:00 UTC: essa execução inicia o backup novo e as seguintes continuam até o manifesto; depois de completo, cada execução é uma leitura de KV |
+| Dump público | `publicDumpJob` | `0 3 * * 1` (segunda, 03:00; único job desse cron)                                                                                                                                                                                                          |
 | Limpeza      | `cleanupJob`    | `5 0 * * *` (cron diário, depois dos outros jobs diários)                                                                                                                                                                               |
 
 Um cron novo exige a lista `triggers.crons` do `workers\jobs\wrangler.template.jsonc` (nos três ambientes) e `CRONS` no `registry.ts`.
@@ -154,7 +156,7 @@ Guarde o bookmark impresso fora do repositório.
    npx wrangler dev --env staging --remote --test-scheduled
    ```
 
-   e, em outro terminal, dispare `http://localhost:8787/__scheduled?cron=0+3+*+*+1` (backup e dump) e `http://localhost:8787/__scheduled?cron=5+0+*+*+*` (limpeza e os outros jobs diários).
+   e, em outro terminal, dispare `http://localhost:8787/__scheduled?cron=0+*+*+*+*` para o backup (repita até `job.backup` mostrar `complete` ou `skipped`), `http://localhost:8787/__scheduled?cron=0+3+*+*+1` para o dump e `http://localhost:8787/__scheduled?cron=5+0+*+*+*` (limpeza e os outros jobs diários).
 
 2. Confirme no R2 de staging: `backups/<semana>/manifest.json`, nenhum arquivo `access_log*` ou `rate_limit*` na semana, `public/dump/latest.json.gz`.
 3. Siga a seção 6, passo 3, com um banco descartável (`<NOVO_BANCO>` só para o teste), confira as contagens e apague o banco descartável e o diretório local.

@@ -16,6 +16,7 @@ O `PUBLIC_ORIGIN` usado no build e no `wrangler.jsonc` gerado vem do ambiente es
 - Node 24 e `npm ci` feito na raiz.
 - Login do Wrangler na conta certa: `npx wrangler login` e depois `npx wrangler whoami` (a conta listada precisa ser a de `CLOUDFLARE_ACCOUNT_ID`; o script confere de novo).
 - `.env` completo na raiz (modelo em `.env.example`): identificadores Cloudflare, nomes e IDs dos recursos de produção e staging, todas as `PUBLIC_*` (inclusive `PUBLIC_LGPD_*` e `PUBLIC_POLICY_EFFECTIVE_DATE`) e os segredos de runtime. `RESEND_WEBHOOK_SECRET` é opcional (o sync pula com aviso).
+- Segredos próprios de staging (recomendado): `BETTER_AUTH_SECRET_STAGING`, `ACCESS_LOG_KEY_STAGING`, `IPHASH_PEPPER_STAGING` e `RESEND_WEBHOOK_SECRET_STAGING`, gerados à parte. Com `--env staging`, `tools/sync-secrets.mjs` (e portanto o deploy) envia o valor de `<CHAVE>_STAGING` quando ela existe e não está vazia; senão usa `<CHAVE>`, o mesmo valor de produção, e imprime `Warning: <CHAVE>_STAGING is not set; staging uses the same <CHAVE> as production` (só o nome da chave, nunca o valor). Produção nunca lê as variantes `_STAGING`. Compartilhar esses segredos permite que uma sessão ou um hash de IP de staging valha em produção e que a chave dos registros de acesso de produção fique exposta em staging; evite.
 - Recursos já criados (PF3/PF5): D1, KV, R2, filas e DLQ de cada ambiente.
 - Para produção: o domínio customizado configurado no template web (seção "Domínio customizado").
 
@@ -33,7 +34,7 @@ Produção (exige a confirmação explícita):
 node --env-file=.env tools/deploy.mjs --env production --confirm-production
 ```
 
-`--skip-tests` pula só os testes da raiz (use apenas quando acabaram de passar no mesmo commit). A varredura de dados sensíveis e o build nunca são pulados.
+`--skip-tests` pula só os testes da raiz (use apenas quando acabaram de passar no mesmo commit) e só vale para staging: com `--env production` o script recusa (`--skip-tests is not allowed for a production deploy`). A varredura de dados sensíveis e o build nunca são pulados.
 
 O script executa, nesta ordem, e para no primeiro erro:
 
@@ -56,9 +57,13 @@ O workflow `.github/workflows/deploy.yml` roda o mesmo `tools/deploy.mjs`. É ma
 Configuração única:
 
 1. **Token da Cloudflare** (`CLOUDFLARE_API_TOKEN`), restrito à conta do projeto, com permissões de conta: Workers Scripts (editar), D1 (editar), Workers KV Storage (editar), Workers R2 Storage (editar), Queues (editar), Account Settings (ler, para o `whoami` listar a conta); e, na zona `open-auri.com`, Workers Routes (editar). Ajuste se o Wrangler acusar permissão faltando.
-2. **Segredos do repositório** com os mesmos nomes do `.env`: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_WORKERS_SUBDOMAIN`, `WORKER_NAME_WEB`, `WORKER_NAME_JOBS`, os recursos (`D1_*`, `KV_CONFIG_ID*`, `R2_BUCKET*`, `ACCESS_LOG_QUEUE*`, `ACCESS_LOG_DLQ*`), as `PUBLIC_*` (exceto `PUBLIC_ORIGIN`, derivada do ambiente) e os segredos de runtime (`BETTER_AUTH_SECRET`, `RESEND_API_KEY`, `RESEND_FROM`, `TURNSTILE_SECRET_KEY`, `IPHASH_PEPPER`, `ACCESS_LOG_KEY` e, quando existir, `RESEND_WEBHOOK_SECRET`).
+2. **Segredos do repositório** com os mesmos nomes do `.env`: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_WORKERS_SUBDOMAIN`, `WORKER_NAME_WEB`, `WORKER_NAME_JOBS`, os recursos (`D1_*`, `KV_CONFIG_ID*`, `R2_BUCKET*`, `ACCESS_LOG_QUEUE*`, `ACCESS_LOG_DLQ*`), as `PUBLIC_*` (exceto `PUBLIC_ORIGIN`, derivada do ambiente) e os segredos de runtime (`BETTER_AUTH_SECRET`, `RESEND_API_KEY`, `RESEND_FROM`, `TURNSTILE_SECRET_KEY`, `IPHASH_PEPPER`, `ACCESS_LOG_KEY` e, quando existir, `RESEND_WEBHOOK_SECRET`). Para staging, também `BETTER_AUTH_SECRET_STAGING`, `ACCESS_LOG_KEY_STAGING`, `IPHASH_PEPPER_STAGING` e `RESEND_WEBHOOK_SECRET_STAGING` (opcionais; sem eles staging usa os de produção, com aviso, como no deploy local). Os segredos só entram no ambiente do passo que roda `tools/deploy.mjs`, nunca no `checkout`, no `setup-node` ou no `npm ci`.
 3. **Variáveis do repositório** (opcionais, não secretas): `ACCESS_LOG_ENABLED` (padrão `true`), `SIGNUP_ENABLED` (padrão `false`), `ADMIN_2FA_REQUIRED` (padrão `true`).
-4. **Ambiente `production`** em Settings, Environments, com revisores obrigatórios. A aprovação desse ambiente é a confirmação explícita: o workflow passa `--confirm-production` só depois dela.
+4. **Ambiente `production`** em Settings, Environments, com revisores obrigatórios, para que todo deploy de produção espere uma aprovação.
+
+Confirmação de produção: ao rodar o workflow com `production`, digite `production` no campo `confirm`. Sem esse texto exato, o job `gate` falha antes de ler qualquer segredo e nada é implantado; só com ele o workflow passa `--confirm-production` ao `tools/deploy.mjs` (e o deploy ainda espera a aprovação do ambiente). Para staging, o campo é ignorado.
+
+As actions de terceiros (`actions/checkout`, `actions/setup-node`) ainda são referenciadas pela tag `v4`. Fixe cada uma pelo SHA completo do commit, com a versão em comentário (`uses: actions/checkout@<sha-de-40-caracteres> # v4.x.y`), depois de conferir o SHA no repositório da action.
 
 Sem `.env` no runner, a varredura do passo 2 roda em `--no-env` (só padrões genéricos); a varredura completa continua sendo a do operador, local. Os logs do Actions são públicos: o script não imprime valores, e o GitHub mascara os segredos.
 

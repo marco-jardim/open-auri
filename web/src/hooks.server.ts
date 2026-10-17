@@ -22,7 +22,7 @@
 // `event.platform`.
 import { building } from '$app/env';
 import { getRequestEvent } from '$app/server';
-import { sequence, type Handle } from '@sveltejs/kit/hooks';
+import { sequence, type Handle, type HandleServerError } from '@sveltejs/kit/hooks';
 import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { env as workerEnv, waitUntil as workerWaitUntil } from 'cloudflare:workers';
 import { getTextDirection } from '#lib/paraglide/runtime.js';
@@ -33,6 +33,7 @@ import { createAuth, toAuthLocals } from '#lib/server/auth.ts';
 import { createReadOnlyHandle, orderedHandles } from '#lib/server/auth/compose.ts';
 import { getServerEnv } from '#lib/server/env.ts';
 import { createRequestLogHandle } from '#lib/server/observability/request-log.ts';
+import { logServerError } from '#lib/server/observability/server-error.ts';
 import { captureAccess } from '#lib/server/security/access-log.ts';
 import { createCanonicalHostHandle } from '#lib/server/security/canonical-host.ts';
 import { applySecurityHeaders } from '#lib/server/security/headers.ts';
@@ -136,3 +137,8 @@ export const handle: Handle = sequence(
 	requestLog,
 	...orderedHandles({ readOnly, paraglide, auth, securityHeaders, accessLog })
 );
+
+// Replaces SvelteKit's default error log (message and stack, which may carry user input) with one
+// PII-free JSON line per unexpected error: route id, status and error class only
+// (observability/server-error.ts). The user-facing body stays `{ message: 'Internal Error' }`.
+export const handleError: HandleServerError = (input) => logServerError(input);

@@ -3,7 +3,10 @@
 //
 //   node tools/sync-secrets.mjs [--env staging|production] [--worker web|jobs]
 //
-// Without --env the top-level (production) Worker is targeted. Before uploading, the Wrangler
+// Without --env the top-level (production) Worker is targeted. With --env staging, the secrets in
+// STAGING_SOURCES come from `<KEY>_STAGING` when that key is set, so staging does not share them
+// with production; when it is not set, `<KEY>` is used and a warning names the key (never the
+// value). Before uploading, the Wrangler
 // login must include CLOUDFLARE_ACCOUNT_ID (checked with `wrangler whoami --json`), and the
 // Worker's wrangler.jsonc is re-rendered from its template.
 //
@@ -62,16 +65,42 @@ export function parseArgs(args) {
 }
 
 /**
- * Names-only plan: which secrets go to `worker`, which optional ones are skipped.
- * Throws (listing .env key names only) when a required secret is absent or empty.
+ * .env keys that staging may set apart from production as `<KEY>_STAGING` (session signing,
+ * access-log encryption, IP hash pepper, webhook signature). Other secrets are shared.
+ */
+export const STAGING_SOURCES = /** @type {const} */ ([
+  'BETTER_AUTH_SECRET',
+  'ACCESS_LOG_KEY',
+  'IPHASH_PEPPER',
+  'RESEND_WEBHOOK_SECRET',
+]);
+
+/**
+ * The .env key a secret is read from: `<source>_STAGING` for staging when it is set, else the
+ * shared `source`.
+ * @param {Map<string, string>} values
+ * @param {string} source
+ * @param {TargetEnv | undefined} env
+ */
+export function sourceFor(values, source, env) {
+  const perEnv = /** @type {readonly string[]} */ (STAGING_SOURCES).includes(source);
+  if (env === 'staging' && perEnv && values.get(`${source}_STAGING`)) return `${source}_STAGING`;
+  return source;
+}
+
+/**
+ * Names-only plan: which secrets go to `worker` (and from which .env key), which optional ones
+ * are skipped, and which staging secrets fall back to the production key (`fallbacks`, .env key
+ * names). Throws (listing .env key names only) when a required secret is absent or empty.
  * @param {Map<string, string>} values
  * @param {WorkerId} worker
- * @returns {{ uploads: { name: string, source: string }[], skipped: string[] }}
+ * @param {TargetEnv} [env]
+ * @returns {{ uploads: { name: string, source: string }[], skipped: string[], fallbacks: string[] }}
  */
-export function planSecrets(values, worker) {
+export function planSecrets(values, worker, env) {
   const specs = SECRETS.filter((spec) => spec.workers.includes(worker));
   const missing = specs
-    .filter((spec) => spec.required && !values.get(spec.source))
+    .filter((spec) => spec.required && !values.get(sourceFor(values, spec.source, env)))
     .map((spec) => spec.source)
     .sort();
   if (missing.length) {
@@ -81,11 +110,19 @@ export function planSecrets(values, worker) {
   const uploads = [];
   /** @type {string[]} */
   const skipped = [];
+  /** @type {string[]} */
+  const fallbacks = [];
   for (const spec of specs) {
-    if (values.get(spec.source)) uploads.push({ name: spec.name, source: spec.source });
-    else skipped.push(spec.name);
+    const source = sourceFor(values, spec.source, env);
+    if (!values.get(source)) {
+      skipped.push(spec.name);
+      continue;
+    }
+    uploads.push({ name: spec.name, source });
+    const perEnv = /** @type {readonly string[]} */ (STAGING_SOURCES).includes(spec.source);
+    if (env === 'staging' && perEnv && source === spec.source) fallbacks.push(spec.source);
   }
-  return { uploads, skipped };
+  return { uploads, skipped, fallbacks };
 }
 
 /**
@@ -140,7 +177,7 @@ export async function syncSecrets(args, { values, run, render, log, root = ROOT,
   const { env, worker } = parseArgs(args);
   const accountId = values.get('CLOUDFLARE_ACCOUNT_ID');
   if (!accountId) throw new RenderError('Missing environment variables: CLOUDFLARE_ACCOUNT_ID');
-  const { uploads, skipped } = planSecrets(values, worker);
+  const { uploads, skipped, fallbacks } = planSecrets(values, worker, env);
 
   const cwd = join(root, WORKER_DIRS[worker]);
   render(cwd);
@@ -155,6 +192,9 @@ export async function syncSecrets(args, { values, run, render, log, root = ROOT,
 
   const target = env ? `${worker} (${env})` : `${worker} (top level)`;
   for (const name of skipped) log(`Skipped optional secret (not set): ${name}`);
+  for (const key of fallbacks) {
+    log(`Warning: ${key}_STAGING is not set; staging uses the same ${key} as production`);
+  }
   for (const { name, source } of uploads) {
     const result = await run(secretPutArgs(name, env), {
       cwd,

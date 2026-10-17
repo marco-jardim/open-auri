@@ -3,8 +3,13 @@
 # secret CLOUDFLARE_API_TOKEN exists (otherwise it ends with a notice). Every real value comes
 # from repository secrets (identifiers, PUBLIC_* and runtime secrets) or repository variables
 # (non-secret flags); nothing is written to the repository and deploy.mjs never prints values.
-# Production runs in the `production` GitHub environment: configure required reviewers there so
-# every production deploy waits for an approval.
+# Secrets are set only on the step that runs tools/deploy.mjs (never on checkout, setup-node or
+# `npm ci`, whose dependency scripts must not see them).
+# Production needs the typed input `confirm` = `production` (checked before any secret is read),
+# and runs in the `production` GitHub environment: configure required reviewers there so every
+# production deploy also waits for an approval.
+# Third-party actions are still referenced by tag: pin each one to its full commit SHA (with the
+# version as a comment) once the SHA is checked against the action's repository.
 name: Deploy
 
 on:
@@ -17,6 +22,11 @@ on:
         options:
           - staging
           - production
+      confirm:
+        description: Type "production" to confirm a production deploy (ignored for staging)
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -32,6 +42,15 @@ jobs:
     outputs:
       enabled: ${{ steps.token.outputs.enabled }}
     steps:
+      - name: Production confirmation
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$TARGET_ENV" = "production" ] && [ "$CONFIRM" != "production" ]; then
+            echo "::error title=Deploy refused::A production deploy needs the input confirm = production."
+            exit 1
+          fi
       - id: token
         env:
           HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
@@ -51,45 +70,7 @@ jobs:
     timeout-minutes: 45
     environment: ${{ inputs.environment }}
     env:
-      TARGET_ENV: ${{ inputs.environment }}
       WRANGLER_SEND_METRICS: 'false'
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}
-      WORKER_NAME_WEB: ${{ secrets.WORKER_NAME_WEB }}
-      WORKER_NAME_JOBS: ${{ secrets.WORKER_NAME_JOBS }}
-      D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
-      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
-      D1_DATABASE_NAME_STAGING: ${{ secrets.D1_DATABASE_NAME_STAGING }}
-      D1_DATABASE_ID_STAGING: ${{ secrets.D1_DATABASE_ID_STAGING }}
-      KV_CONFIG_ID: ${{ secrets.KV_CONFIG_ID }}
-      KV_CONFIG_ID_STAGING: ${{ secrets.KV_CONFIG_ID_STAGING }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_BUCKET_STAGING: ${{ secrets.R2_BUCKET_STAGING }}
-      ACCESS_LOG_QUEUE: ${{ secrets.ACCESS_LOG_QUEUE }}
-      ACCESS_LOG_QUEUE_STAGING: ${{ secrets.ACCESS_LOG_QUEUE_STAGING }}
-      ACCESS_LOG_DLQ: ${{ secrets.ACCESS_LOG_DLQ }}
-      ACCESS_LOG_DLQ_STAGING: ${{ secrets.ACCESS_LOG_DLQ_STAGING }}
-      # PUBLIC_ORIGIN is derived from the target environment by tools/deploy.mjs.
-      PUBLIC_GITHUB_URL: ${{ secrets.PUBLIC_GITHUB_URL }}
-      PUBLIC_LGPD_CONTROLLER: ${{ secrets.PUBLIC_LGPD_CONTROLLER }}
-      PUBLIC_LGPD_CONTACT_EMAIL: ${{ secrets.PUBLIC_LGPD_CONTACT_EMAIL }}
-      PUBLIC_LGPD_CNPJ: ${{ secrets.PUBLIC_LGPD_CNPJ }}
-      PUBLIC_LGPD_ADDRESS: ${{ secrets.PUBLIC_LGPD_ADDRESS }}
-      PUBLIC_LGPD_DPO_NAME: ${{ secrets.PUBLIC_LGPD_DPO_NAME }}
-      PUBLIC_POLICY_EFFECTIVE_DATE: ${{ secrets.PUBLIC_POLICY_EFFECTIVE_DATE }}
-      PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.PUBLIC_TURNSTILE_SITE_KEY }}
-      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      RESEND_FROM: ${{ secrets.RESEND_FROM }}
-      RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
-      TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
-      IPHASH_PEPPER: ${{ secrets.IPHASH_PEPPER }}
-      ACCESS_LOG_KEY: ${{ secrets.ACCESS_LOG_KEY }}
-      ACCESS_LOG_ENABLED: ${{ vars.ACCESS_LOG_ENABLED || 'true' }}
-      SIGNUP_ENABLED: ${{ vars.SIGNUP_ENABLED || 'false' }}
-      ADMIN_2FA_REQUIRED: ${{ vars.ADMIN_2FA_REQUIRED || 'true' }}
-      EMAIL_TRANSPORT: resend
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,10 +81,60 @@ jobs:
           cache: npm
       - run: npm ci
       - name: tools/deploy.mjs
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          CONFIRM: ${{ inputs.confirm }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+          WORKER_NAME_WEB: ${{ secrets.WORKER_NAME_WEB }}
+          WORKER_NAME_JOBS: ${{ secrets.WORKER_NAME_JOBS }}
+          D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_DATABASE_NAME_STAGING: ${{ secrets.D1_DATABASE_NAME_STAGING }}
+          D1_DATABASE_ID_STAGING: ${{ secrets.D1_DATABASE_ID_STAGING }}
+          KV_CONFIG_ID: ${{ secrets.KV_CONFIG_ID }}
+          KV_CONFIG_ID_STAGING: ${{ secrets.KV_CONFIG_ID_STAGING }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_BUCKET_STAGING: ${{ secrets.R2_BUCKET_STAGING }}
+          ACCESS_LOG_QUEUE: ${{ secrets.ACCESS_LOG_QUEUE }}
+          ACCESS_LOG_QUEUE_STAGING: ${{ secrets.ACCESS_LOG_QUEUE_STAGING }}
+          ACCESS_LOG_DLQ: ${{ secrets.ACCESS_LOG_DLQ }}
+          ACCESS_LOG_DLQ_STAGING: ${{ secrets.ACCESS_LOG_DLQ_STAGING }}
+          # PUBLIC_ORIGIN is derived from the target environment by tools/deploy.mjs.
+          PUBLIC_GITHUB_URL: ${{ secrets.PUBLIC_GITHUB_URL }}
+          PUBLIC_LGPD_CONTROLLER: ${{ secrets.PUBLIC_LGPD_CONTROLLER }}
+          PUBLIC_LGPD_CONTACT_EMAIL: ${{ secrets.PUBLIC_LGPD_CONTACT_EMAIL }}
+          PUBLIC_LGPD_CNPJ: ${{ secrets.PUBLIC_LGPD_CNPJ }}
+          PUBLIC_LGPD_ADDRESS: ${{ secrets.PUBLIC_LGPD_ADDRESS }}
+          PUBLIC_LGPD_DPO_NAME: ${{ secrets.PUBLIC_LGPD_DPO_NAME }}
+          PUBLIC_POLICY_EFFECTIVE_DATE: ${{ secrets.PUBLIC_POLICY_EFFECTIVE_DATE }}
+          PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.PUBLIC_TURNSTILE_SITE_KEY }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM: ${{ secrets.RESEND_FROM }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          IPHASH_PEPPER: ${{ secrets.IPHASH_PEPPER }}
+          ACCESS_LOG_KEY: ${{ secrets.ACCESS_LOG_KEY }}
+          # Staging's own runtime secrets (optional; tools/sync-secrets.mjs falls back to the
+          # production key with a warning when one is empty).
+          BETTER_AUTH_SECRET_STAGING: ${{ secrets.BETTER_AUTH_SECRET_STAGING }}
+          RESEND_WEBHOOK_SECRET_STAGING: ${{ secrets.RESEND_WEBHOOK_SECRET_STAGING }}
+          IPHASH_PEPPER_STAGING: ${{ secrets.IPHASH_PEPPER_STAGING }}
+          ACCESS_LOG_KEY_STAGING: ${{ secrets.ACCESS_LOG_KEY_STAGING }}
+          ACCESS_LOG_ENABLED: ${{ vars.ACCESS_LOG_ENABLED || 'true' }}
+          SIGNUP_ENABLED: ${{ vars.SIGNUP_ENABLED || 'false' }}
+          ADMIN_2FA_REQUIRED: ${{ vars.ADMIN_2FA_REQUIRED || 'true' }}
+          EMAIL_TRANSPORT: resend
         run: |
           args=(--env "$TARGET_ENV")
           if [ "$TARGET_ENV" = "production" ]; then
-            # The approval of the `production` environment is the explicit confirmation.
+            # The typed input is the explicit confirmation (the gate job already refused others).
+            if [ "$CONFIRM" != "production" ]; then
+              echo "::error title=Deploy refused::A production deploy needs the input confirm = production."
+              exit 1
+            fi
             args+=(--confirm-production)
           fi
           node tools/deploy.mjs "${args[@]}"
