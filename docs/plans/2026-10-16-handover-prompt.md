@@ -1,4 +1,4 @@
-# Prompt de retomada · continuar a implementação do open-auri web v1 (F4 e F5)
+# Prompt de retomada · continuar a implementação do open-auri web v1 (F5 e aceite global)
 
 > Copie tudo abaixo da linha e cole como primeira mensagem da próxima sessão.
 
@@ -9,38 +9,28 @@ Você é o **orquestrador** da implementação do open-auri web v1. Você é um 
 ## Onde estão as coisas
 
 - **Diretório de trabalho:** `D:\git\open-auri` (diretório base, sem worktree). Windows, pwsh 7 não interativo, caminhos absolutos. Branch `main`, remoto `origin`, repositório **público**.
-- **Plano (fonte da verdade):** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-plano.md`. F4 a partir da linha ~1976 (PF4 ~1994), F5 a partir de ~2269. Diretivas de execução no §0 (0.3 pre-flight, 0.5 ciclo de QA, 0.12 invariantes, 0.17 assumir quando o router trava, 0.18 delegação e lista de tarefas heavy, 0.19 testes, 0.20 issues). Anexo A.2 tem o modelo de dados social; A.4 as homenagens.
-- **Handover:** `D:\git\open-auri\docs\plans\2026-10-16-handover.md`. Leia a **seção 00** (estado atual), a §2 (acessos), a §4 (regras), a §5 e a §5b (troubleshooting).
-- **Progresso:** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (tabelas de tarefas F1–F3, pre-flights, versões verificadas, QA e a seção "Decisões durante a execução"; registre ali tudo o que decidir).
-- **Briefs dos delegados:** `D:\git\open-auri\docs\plans\f2-delegate-brief.md` (stack web, SvelteKit 3, i18n por staging, qualidade) e `D:\git\open-auri\docs\plans\f3-delegate-brief.md` (backend, Better Auth 1.7.10, testes em workerd, **seção "Lições"**). Crie um `f4-delegate-brief.md` no PF4 com os fatos do pre-flight e aponte os despachos para os três.
-- **READMEs de módulo:** `web/src/lib/server/{auth,security,admin}/README.md`, `web/src/lib/app/README.md`, `web/src/lib/state/README.md`.
-- **Issues no GitHub** (`gh` autenticado): #7 acompanhamento; #4 F4; #5 F5; #6 FH (hardware, condicionada). Fechadas: #1, #2, #3. Minors abertos com rótulo `qa-minor`: #8–#24.
-- **`.env`:** preenchido pelo operador (inclui IDs dos recursos Cloudflare criados no PF3). Nunca imprima valores. `.env.example` só tem placeholders.
-- **Fonte de verdade visual:** `D:\git\open-auri\design\mocks\v2\*.html` (a Comunidade é `comunidade.html`) e `design\mocks\v2\_qa\*.png`.
+- **Plano (fonte da verdade):** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-plano.md`. F5 a partir da linha ~2269 (PF5 ~2281), Fase H ~2432, aceite global §8 (~2443), DoD global §9, QG §10 (~2474). Diretivas no §0 (0.3 pre-flight, 0.5 ciclo de QA, 0.12 invariantes, 0.17 assumir quando o router trava, 0.18 delegação, 0.19 testes, 0.20 issues).
+- **Handover:** `D:\git\open-auri\docs\plans\2026-10-16-handover.md`. Leia a **seção 000** (estado atual e lições da F4), a §2 (acessos), a §4 (regras), a §5 e a §5b.
+- **Progresso:** `D:\git\open-auri\docs\plans\2026-10-15-open-auri-web-progresso.md` (tarefas F1–F4, pre-flights, versões, QA, "Decisões durante a execução"; registre ali tudo o que decidir).
+- **Briefs dos delegados:** `docs/plans/f2-delegate-brief.md`, `f3-delegate-brief.md` (seção "Lições") e `f4-delegate-brief.md`. Crie um `f5-delegate-brief.md` no PF5.
+- **READMEs de módulo:** `web/src/lib/server/{auth,security,admin,api,social}/README.md`, `web/src/lib/social/README.md`, `web/src/lib/app/README.md`, `web/src/lib/state/README.md`; `docs/api.md`, `docs/social.md`.
+- **Issues no GitHub** (`gh` autenticado): #7 acompanhamento; #5 F5; #6 FH (hardware, condicionada). Fechadas: #1–#4. Minors `qa-minor`: #8–#31.
+- **`.env`:** preenchido pelo operador. Nunca imprima valores. `.env.example` só tem placeholders.
+- **Domínio:** `open-auri.com` foi registrado pelo operador no Cloudflare Domains (ativação no PF5/T5.5; o OAuth do wrangler não escreve DNS).
 
-## Estado atual (2026-10-16)
+## Estado atual
 
-- **F1, F2 e F3 concluídas**, QA heavy PASS em todas, push em `origin/main` até `550fcc2`.
-  - F2: Q2 em 3 rodadas (FX2.1–FX2.6).
-  - F3: backend no mesmo Worker do SvelteKit + Worker de jobs; Better Auth 1.7.10 em D1 com scrypt próprio (N=2^14, r=8, p=5), Turnstile, rate limit em D1, hash de IP com sal diário, cabeçalhos de segurança, registro de acesso cifrado (Marco Civil), páginas legais, páginas de auth, `/conta` (com 2FA), `/admin`. Q3 em 3 rodadas (FX3.1–FX3.6).
-- **Bateria na última verificação central:** núcleo 663/663; unidade+componentes web 1 462/1 462; integração em workerd 487/487 (cobertura `src/lib/server/**` 97,3/93,3/98,7/98,5); jobs 16/16; e2e 294/294; build e orçamentos de JS ok.
-- **Próximo:** **PF4** e depois a F4 inteira (W4.1 T4.1 serial; W4.2 T4.2–T4.11 em paralelo; W4.3 T4.12; W4.4 T4.13–T4.18 em paralelo; W4.5 T4.T; Q4 heavy), push, fechar #4; depois F5 (PF5, W5.x, T5.T, Q5 e QG global).
+- **F1 a F4 concluídas**, QA heavy PASS em todas, push em `origin/main` até `74dfea3` (ou posterior).
+  - F4: esquema social 0004–0006, kit da API v1, serviços (publicação com gate no servidor, versões, forks, biblioteca, atividade com privacidade e anti-replay, compartilhamentos e `/c/[id]`, rankings e feed, OG com resvg em R2, moderação, S6 Bradley–Terry, S7, perfis e packs), jobs (rankings 15 min, s6-aggregate, trades-expire, regate 15 min/hora, og-sweep), cliente social com outbox ligada à conta, Comunidade, integrações nas páginas, docs. Q4 em 3 rodadas (FX4.1–FX4.12).
+- **Bateria na última verificação central:** raiz 663/663; unidade+componentes 1 672/1 672; integração em workerd 968/968 (cobertura 95,9/90,8/97,8/97,8); jobs 42/42; e2e 305/305; build e orçamentos ok.
+- **Próximo:** **PF5** e a F5 inteira, Q5 heavy, push, fechar #5; depois QG global (§10) e aceite (§8, §9).
 
 ## Primeira ação
 
-1. Leia o handover (seção 00, §2, §4, §5, §5b), o progresso (decisões e QA), os dois briefs e a F4 do plano (linhas ~1976–2266).
-2. Confirme `git status` limpo e `git log -1` = `550fcc2` ou posterior.
-3. Execute o **PF4** (plano ~1994):
-   - Q3 PASS registrado (feito) e árvore limpa.
-   - **Spike de imagem OG:** SVG das bandas → `@cf-wasm/resvg` → PNG 1200×630 no `wrangler dev`; medir bundle, CPU e fonte embutida; se reprovar (bundle > 10 MiB, CPU > 2 s ou incompatibilidade), adotar Browser Rendering e registrar. Faça o spike numa pasta ignorada (`D:\git\open-auri\.cache\spike-og`) e apague depois.
-   - **Spike de CPU do gate no Worker** (grade `full`) para curvas típicas; se > 1 s, cachear por `curve_id` (já planejado) e registrar.
-   - Bibliotecas: QR (o app já usa `uqr`, MIT), Bradley–Terry (implementação própria, fórmula validada com fonte), sanitização de texto (sem HTML; renderizar como texto puro).
-   - Curiosidade e fonte de **Chris Lord-Alge** (página `/u/[apelido]`) e confirmar a de **Bob Clearmountain** (Comunidade) — `researcher`.
-   - Versões mais recentes estáveis (npm registry) do que for instalado; registre na tabela de versões.
-   - Mapa de locks da W4.2 (serviços em arquivos disjuntos; `repo.ts` e migrações 0004–0006 só de leitura depois da W4.1).
-   - Registre o PF4 no progresso, crie `docs/plans/f4-delegate-brief.md`, marque o PF4 na issue #4.
-4. Siga wave após wave **sem pausar** até o Q4 PASS, push e fechamento da #4; depois a F5 até o aceite global.
-
+1. Leia o handover (seção 000, §2, §4, §5, §5b), o progresso (decisões e QA), os briefs e a F5 do plano (linhas ~2269–2490).
+2. Confirme `git status` limpo e `git log -1` = `74dfea3` ou posterior.
+3. Execute o **PF5** (plano ~2281), incluindo a ativação do `open-auri.com` (T5.5) e as versões mais recentes; crie `docs/plans/f5-delegate-brief.md`; marque o PF5 na issue #5.
+4. Siga wave após wave **sem pausar** até o Q5 PASS, push e fechamento da #5; depois o QG e o aceite global.
 ## Regras inegociáveis
 
 1. **Iteração contínua.** Pare só por bloqueio ou algo crítico: ambiguidade que muda o resultado, risco de segurança, de perda de dados, ao cabo ou à audição, licença, ou entrada humana ausente. Ao parar, registre no progresso, abra uma issue `bloqueio` sem dados sensíveis, proponha opções e continue o que não estiver bloqueado.
