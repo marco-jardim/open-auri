@@ -156,7 +156,26 @@
 		engine?.setVolume(Number(event.currentTarget.value));
 	}
 
+	// The top bar scrolls horizontally (overflow-x: auto), which also clips vertically: the panel is
+	// positioned `fixed` from the button so it is never cut at the bar's height.
+	const POP_WIDTH = 320;
+	const POP_MARGIN = 12;
+	let pos = $state<{ top: number; left: number } | null>(null);
+
+	function place(): void {
+		if (!button) return;
+		const rect = button.getBoundingClientRect();
+		const width = Math.min(POP_WIDTH, window.innerWidth - 2 * POP_MARGIN);
+		const left = Math.max(POP_MARGIN, Math.min(rect.left, window.innerWidth - width - POP_MARGIN));
+		pos = { top: rect.bottom + 10, left };
+	}
+
+	function onWindowResize(): void {
+		if (open) place();
+	}
+
 	async function setOpen(next: boolean, returnFocus = false): Promise<void> {
+		if (next) place();
 		open = next;
 		if (next) {
 			await tick();
@@ -204,7 +223,12 @@
 	}
 </script>
 
-<svelte:window onclick={onWindowClick} onkeydown={onWindowKeydown} />
+<svelte:window
+	onclick={onWindowClick}
+	onkeydown={onWindowKeydown}
+	onresize={onWindowResize}
+	onscroll={onWindowResize}
+/>
 
 <div class="oa-audio" bind:this={root}>
 	<button
@@ -231,6 +255,8 @@
 		aria-labelledby={ids.title}
 		tabindex="-1"
 		hidden={!open}
+		style:top={pos ? `${pos.top}px` : null}
+		style:left={pos ? `${pos.left}px` : null}
 		bind:this={dialog}
 	>
 		<h3 id={ids.title}>{m.audio_title()}</h3>
@@ -319,9 +345,7 @@
 		color: var(--oa-accent);
 	}
 	.oa-audio-pop {
-		position: absolute;
-		left: 0;
-		top: calc(100% + 10px);
+		position: fixed;
 		z-index: 80;
 		width: 320px;
 		max-width: calc(100vw - 24px);
