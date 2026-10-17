@@ -1,68 +1,50 @@
 {
-  "version": 1,
-  "source": "Plan §3.9 hard limit (250 kB gzip initial JS per route), set by the PO on 2026-10-17 to leave room for WOW pages; goalBytes keep the FUX §5.7/FUX.B per-class targets as soft goals (reported, not failing)",
-  "defaultBytes": 250000,
-  "classes": [
-    {
-      "id": "static",
-      "targetBytes": 250000,
-      "routes": [
-        "/offline",
-        "/privacidade",
-        "/termos"
-      ],
-      "goalBytes": 80000
-    },
-    {
-      "id": "auth",
-      "targetBytes": 250000,
-      "routes": [
-        "/entrar",
-        "/criar-conta",
-        "/verificar-email",
-        "/esqueci-senha",
-        "/redefinir-senha",
-        "/conta/**"
-      ],
-      "goalBytes": 100000
-    },
-    {
-      "id": "docs",
-      "targetBytes": 250000,
-      "routes": [
-        "/docs"
-      ],
-      "goalBytes": 130000
-    },
-    {
-      "id": "instrument-light",
-      "targetBytes": 250000,
-      "routes": [
-        "/teste-cego",
-        "/cabo",
-        "/biblioteca",
-        "/c/[id]",
-        "/u/[apelido]"
-      ],
-      "goalBytes": 150000
-    },
-    {
-      "id": "instrument-heavy",
-      "targetBytes": 250000,
-      "goalBytes": 170000,
-      "routes": [
-        "/soe-como-x",
-        "/comparar",
-        "/comunidade"
-      ]
-    },
-    {
-      "id": "curva",
-      "targetBytes": 250000,
-      "goalBytes": 180000,
-      "routes": [
-        "/"
-      ]
-    }
-  ]
+	"version": 1,
+	"source": "Plan §3.9 hard limit (250 kB gzip initial JS per route), set by the PO on 2026-10-17 to leave room for WOW pages; goalBytes keep the FUX §5.7/FUX.B per-class targets as soft goals (reported, not failing)",
+	"defaultBytes": 250000,
+	"classes": [
+		{
+			"id": "static",
+			"targetBytes": 250000,
+			"routes": ["/offline", "/privacidade", "/termos"],
+			"goalBytes": 80000
+		},
+		{
+			"id": "auth",
+			"targetBytes": 250000,
+			"routes": [
+				"/entrar",
+				"/criar-conta",
+				"/verificar-email",
+				"/esqueci-senha",
+				"/redefinir-senha",
+				"/conta/**"
+			],
+			"goalBytes": 100000
+		},
+		{
+			"id": "docs",
+			"targetBytes": 250000,
+			"routes": ["/docs"],
+			"goalBytes": 130000
+		},
+		{
+			"id": "instrument-light",
+			"targetBytes": 250000,
+			"routes": ["/teste-cego", "/cabo", "/biblioteca", "/c/[id]", "/u/[apelido]"],
+			"goalBytes": 150000
+		},
+		{
+			"id": "instrument-heavy",
+			"targetBytes": 250000,
+			"goalBytes": 170000,
+			"routes": ["/soe-como-x", "/comparar", "/comunidade"]
+		},
+		{
+			"id": "curva",
+			"targetBytes": 250000,
+			"goalBytes": 180000,
+			"routes": ["/"]
+		}
+	]
 }

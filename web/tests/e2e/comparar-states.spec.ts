@@ -15,8 +15,12 @@ test.describe('comparar states', () => {
 		await installAudioProbe(page);
 		await page.goto('/comparar');
 		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-		// Dismiss the first-visit tour so it cannot cover the lanes.
+		// Dismiss the first-visit tour so it cannot cover the lanes. It mounts lazily, so wait for it
+		// before pressing Escape, and prove Escape really closes it.
+		const tour = page.getByRole('button', { name: 'Pular tour', exact: true });
+		await expect(tour).toBeVisible();
 		await page.keyboard.press('Escape');
+		await expect(tour).toBeHidden();
 		await loadSineFile(page);
 		await page.keyboard.press('Escape');
 

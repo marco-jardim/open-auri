@@ -105,6 +105,10 @@ export default defineConfig({
 	// Staging rate limits key on the runner's single public IP: stay gentle there.
 	workers: STAGING_ORIGIN ? 2 : '50%',
 	retries: process.env.CI ? 2 : 0,
+	// Screenshot baselines exist only for win32 (fonts and anti-aliasing differ per OS). Elsewhere
+	// (the Linux CI runner) every state spec still runs all its behavioural assertions and only
+	// the `toHaveScreenshot` comparisons are skipped (QG round 2, M1).
+	ignoreSnapshots: process.platform !== 'win32',
 	use: { baseURL: 'http://localhost:4173', trace: 'on-first-retry', locale: 'pt-BR' },
 	projects: STAGING_ORIGIN ? STAGING_PROJECTS : LOCAL_PROJECTS
 });
