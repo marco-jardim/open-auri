@@ -24,7 +24,9 @@ export const INNER = '_sveltekit.js';
 const ASSETS_IGNORE = '.assetsignore';
 const DEFAULT_DIR = fileURLToPath(new URL('../.svelte-kit/cloudflare/', import.meta.url));
 /** The wrapper module the generated entry imports. */
-export const ENTRY = fileURLToPath(new URL('../src/worker-entry/canonical-host.ts', import.meta.url));
+export const ENTRY = fileURLToPath(
+	new URL('../src/worker-entry/canonical-host.ts', import.meta.url)
+);
 const USAGE = 'Usage: node scripts/wrap-worker.mjs [<worker directory>]';
 
 /** Relative POSIX import specifier from `dir` to `file` (starts with ./ or ../). */
