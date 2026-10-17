@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import Feedback from './Feedback.svelte';
 	import { deviceLabel, formatDateTime } from './format.ts';
 	import {
@@ -15,18 +16,32 @@
 		sessions: SessionView[];
 		feedback?: FormFeedback | null;
 		enhance?: FormEnhance;
+		/**
+		 * A revocation is on its way and the list is being reloaded (real round trip, set by the
+		 * page): the rows turn into skeletons of the same height until the fresh list arrives.
+		 */
+		pending?: boolean;
 	}
 
-	let { sessions, feedback = null, enhance = noEnhance }: Props = $props();
+	let { sessions, feedback = null, enhance = noEnhance, pending = false }: Props = $props();
 
 	const mine = $derived(feedbackFor(feedback, 'sessions'));
 	const others = $derived(sessions.filter((session) => !session.current).length);
 </script>
 
 <div class="sessions">
-	<ul class="list">
+	<!-- While pending, the real rows stay in place (same geometry, CLS zero, the submitting form
+	     is not torn down) but are hidden and inert under skeleton bars. -->
+	<ul
+		class="list"
+		class:pending
+		aria-busy={pending ? 'true' : undefined}
+		inert={pending}
+		data-skeleton={pending ? '' : undefined}
+	>
 		{#each sessions as session (session.id)}
 			<li class="item" class:current={session.current}>
+				{#if pending}<span class="skeleton row-skeleton" aria-hidden="true"></span>{/if}
 				<div class="info">
 					<p class="device">
 						{deviceLabel(session)}
@@ -44,22 +59,29 @@
 				{#if !session.current}
 					<form method="POST" action="?/revokeSession" use:enhance>
 						<input type="hidden" name="sessionId" value={session.id} />
-						<button
-							class="acc-btn acc-btn--quiet"
+						<Button
+							variant="ghost"
+							size="sm"
 							type="submit"
 							aria-label={m.conta_sessions_revoke_aria({ device: deviceLabel(session) })}
 						>
 							{m.conta_sessions_revoke()}
-						</button>
+						</Button>
 					</form>
 				{/if}
 			</li>
 		{/each}
 	</ul>
+	<!-- Always mounted, so the change of text is announced. -->
+	<p class="sr-only" role="status">{pending ? m.fuxp8_sessions_loading() : ''}</p>
 	<form method="POST" action="?/revokeOthers" class="acc-row" use:enhance>
-		<button class="acc-btn" type="submit" disabled={others === 0}>
+		<Button
+			type="submit"
+			loading={pending}
+			disabledReason={others === 0 ? m.conta_sessions_none_other() : null}
+		>
 			{m.conta_sessions_revoke_others()}
-		</button>
+		</Button>
 		<p class="acc-hint">
 			{others === 0 ? m.conta_sessions_none_other() : m.conta_sessions_revoke_others_help()}
 		</p>
@@ -83,6 +105,7 @@
 	}
 
 	.item {
+		position: relative;
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
@@ -93,13 +116,31 @@
 	}
 
 	.info {
+		display: grid;
+		gap: 2px;
 		min-width: 0;
 	}
 
+	/* Skeleton over the row's own box: the row keeps its real height while hidden. */
+	.pending .item > .info,
+	.pending .item > form {
+		visibility: hidden;
+	}
+
+	.row-skeleton {
+		position: absolute;
+		inset: 12px 0;
+		width: auto;
+		height: auto;
+	}
+
 	.device {
-		margin: 0 0 2px;
+		margin: 0;
 		color: var(--text, #ece7dd);
-		font: 600 13px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
+		font-family: var(--face-body, var(--ui, 'Geist', system-ui, sans-serif));
+		font-size: var(--fs-small, 13px);
+		font-weight: 600;
+		line-height: 1.5;
 	}
 
 	.tag {
@@ -108,13 +149,16 @@
 		border: 1px solid var(--pop-rule, #34332f);
 		border-radius: var(--rad-xs, 2px);
 		color: var(--state-text, #b5afa4);
-		font: 600 10px/1.4 var(--mono, 'JetBrains Mono', monospace);
+		font-family: var(--face-data, var(--mono, 'JetBrains Mono', monospace));
+		font-size: var(--label-min, 11px);
+		font-weight: 500;
+		line-height: 1.4;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 	}
 
 	.tag--warn {
-		border-color: #f2b33d;
-		color: #f2b33d;
+		border-color: var(--warn, #f2b33d);
+		color: var(--warn, #f2b33d);
 	}
 </style>

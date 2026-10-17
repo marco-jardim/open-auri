@@ -12,6 +12,7 @@ import {
 	SignupClosed,
 	VerifyEmailView
 } from '#lib/components/auth/index.ts';
+import AuthChannelFixture from './AuthChannelFixture.svelte';
 import AuthShellFixture from './AuthShellFixture.svelte';
 
 beforeEach(async () => {
@@ -189,14 +190,29 @@ describe('signup disabled', () => {
 });
 
 describe('resend with cooldown', () => {
+	// The wait is also the button's disabled reason (its tooltip), so read the wait line itself.
+	function waitLine(): HTMLElement | null {
+		return document.querySelector<HTMLElement>('p.wait');
+	}
+
 	test('shows the remaining wait and disables the button until it ends', async () => {
 		let clock = 1_800_000_000_000;
 		await render(ResendForm, { availableAt: clock + 240_000, now: () => clock });
 		const button = page.getByRole('button', { name: 'Reenviar link' });
-		await expect.element(page.getByText('Próximo envio liberado em 4:00.')).toBeVisible();
-		await expect.element(button).toBeDisabled();
+		await expect
+			.poll(() => waitLine()?.textContent?.trim())
+			.toBe('Próximo envio liberado em 4:00.');
+		expect(waitLine()?.checkVisibility()).toBe(true);
+		// The reason is linked to the button (aria-describedby → tooltip), not only shown.
+		const describedBy = button.element().getAttribute('aria-describedby') ?? '';
+		expect(document.getElementById(describedBy)?.textContent?.trim()).toBe(
+			'Próximo envio liberado em 4:00.'
+		);
+		// Unavailable with a reason (Button primitive): focusable, aria-disabled, never bare.
+		await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(button).not.toHaveAttribute('disabled');
 		clock += 240_000;
-		await expect.element(button).toBeEnabled();
+		await expect.element(button).not.toHaveAttribute('aria-disabled');
 		await expect.element(page.getByText('Você já pode pedir outro envio.')).toBeInTheDocument();
 	});
 
@@ -215,7 +231,10 @@ describe('resend with cooldown', () => {
 			.toHaveTextContent(
 				'Se houver uma conta aguardando confirmação com esse e-mail, enviamos um novo link.'
 			);
-		await expect.element(page.getByText('Próximo envio liberado em 5:00.')).toBeVisible();
+		await expect
+			.poll(() => waitLine()?.textContent?.trim())
+			.toBe('Próximo envio liberado em 5:00.');
+		expect(waitLine()?.checkVisibility()).toBe(true);
 	});
 
 	test('an early no-JS click gets the wait from the server', async () => {
@@ -268,6 +287,79 @@ describe('password reset pages', () => {
 		await expect
 			.element(page.getByLabelText('Nova senha', { exact: true }))
 			.toHaveAttribute('autocomplete', 'new-password');
+	});
+});
+
+describe('console channel lamps (real validation only)', () => {
+	function lamp(stage: 'input' | 'gain' | 'eq' | 'output'): string | null | undefined {
+		return document.querySelector(`.stage[data-stage="${stage}"]`)?.getAttribute('data-on');
+	}
+
+	test('Entrada and Ganho light as their fields validate; EQ and Saída wait for a token', async () => {
+		await render(AuthChannelFixture);
+		const email = page.getByLabelText('E-mail', { exact: true });
+		const password = page.getByLabelText('Senha', { exact: true });
+		// Engraved stage names, decorative for assistive technology (the fields carry the state).
+		const marks = [...document.querySelectorAll('.stage')];
+		expect(marks.map((mark) => mark.getAttribute('data-stage'))).toEqual([
+			'input',
+			'gain',
+			'eq',
+			'output'
+		]);
+		expect(marks.every((mark) => mark.getAttribute('aria-hidden') === 'true')).toBe(true);
+		expect(marks.map((mark) => mark.querySelector('.stage__name')?.textContent)).toEqual([
+			'Entrada',
+			'Ganho',
+			'EQ',
+			'Saída'
+		]);
+		expect(lamp('input')).toBe('false');
+		expect(lamp('gain')).toBe('false');
+
+		await email.fill('ana');
+		// Not an address yet: the browser's own validation keeps the lamp dark.
+		await expect.poll(() => lamp('input')).toBe('false');
+		await email.fill('ana@example.com');
+		await expect.poll(() => lamp('input')).toBe('true');
+		expect(lamp('gain')).toBe('false');
+
+		await password.fill('qualquer-senha');
+		await expect.poll(() => lamp('gain')).toBe('true');
+		// No site key, so no Turnstile token: EQ stays dark and so does Saída (the server would
+		// refuse the attempt). The button still acts: the server is the judge.
+		expect(lamp('eq')).toBe('false');
+		expect(lamp('output')).toBe('false');
+		await expect
+			.element(page.getByRole('button', { name: 'Entrar', exact: true }))
+			.not.toHaveAttribute('aria-disabled');
+
+		await email.fill('');
+		await expect.poll(() => lamp('input')).toBe('false');
+	});
+
+	test('a server-refused value keeps its lamp dark until the user changes it', async () => {
+		await render(SignInForm, {
+			siteKey: '',
+			result: { fields: { email: 'email' }, values: { email: 'ana@example.com' } }
+		});
+		const email = page.getByLabelText('E-mail', { exact: true });
+		await expect.element(email).toHaveAttribute('aria-invalid', 'true');
+		expect(lamp('input')).toBe('false');
+		await email.fill('ana@example.org');
+		await expect.poll(() => lamp('input')).toBe('true');
+	});
+
+	test('the confirmation lights only when it matches the password', async () => {
+		await render(SignUpForm, { siteKey: '' });
+		await page.getByLabelText('Senha', { exact: true }).fill('violino-tarde-cobalto-ninho');
+		const confirm = page.getByLabelText('Repita a senha', { exact: true });
+		const confirmLamp = () =>
+			confirm.element().closest('.auth-field')?.querySelector('.stage')?.getAttribute('data-on');
+		await confirm.fill('violino-tarde');
+		await expect.poll(confirmLamp).toBe('false');
+		await confirm.fill('violino-tarde-cobalto-ninho');
+		await expect.poll(confirmLamp).toBe('true');
 	});
 });
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Turnstile from '#lib/components/security/Turnstile.svelte';
+	import { Button, Field } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import Feedback from './Feedback.svelte';
 	import { formatDateTime } from './format.ts';
@@ -63,35 +64,29 @@
 		</div>
 	{/if}
 	<form method="POST" action="?/email" class="acc-form" use:enhance>
-		<div class="acc-field">
-			<label class="acc-label" for="{uid}-new">{m.conta_email_new()}</label>
-			<input
-				id="{uid}-new"
-				class="acc-input"
-				name="newEmail"
-				type="email"
-				autocomplete="email"
-				maxlength={254}
-				required
-				value={mine && !mine.ok ? (mine.value ?? '') : ''}
-				aria-describedby="{uid}-how"
-			/>
-			<p class="acc-hint" id="{uid}-how">{m.conta_email_how()}</p>
-		</div>
-		{#if !fresh}
-			<div class="acc-field">
-				<label class="acc-label" for="{uid}-password">{m.conta_email_password()}</label>
+		<Field id="{uid}-new" label={m.conta_email_new()} hint={m.conta_email_how()} required>
+			{#snippet children(control)}
 				<input
-					id="{uid}-password"
-					class="acc-input"
-					name="password"
-					type="password"
-					autocomplete="current-password"
-					required
-					aria-describedby="{uid}-password-why"
+					{...control}
+					name="newEmail"
+					type="email"
+					autocomplete="email"
+					maxlength={254}
+					value={mine && !mine.ok ? (mine.value ?? '') : ''}
 				/>
-				<p class="acc-hint" id="{uid}-password-why">{m.conta_email_password_why()}</p>
-			</div>
+			{/snippet}
+		</Field>
+		{#if !fresh}
+			<Field
+				id="{uid}-password"
+				label={m.conta_email_password()}
+				hint={m.conta_email_password_why()}
+				required
+			>
+				{#snippet children(control)}
+					<input {...control} name="password" type="password" autocomplete="current-password" />
+				{/snippet}
+			</Field>
 		{/if}
 		{#if siteKey}
 			<!-- A Turnstile token is single use: a new widget after every answer. -->
@@ -100,9 +95,13 @@
 			{/key}
 		{/if}
 		<div class="acc-row">
-			<button class="acc-btn" type="submit" disabled={siteKey !== '' && token === ''}>
+			<!-- Waits for the Turnstile token and says so; the server checks the token anyway. -->
+			<Button
+				type="submit"
+				disabledReason={siteKey !== '' && token === '' ? m.fuxp8_email_wait_check() : null}
+			>
 				{m.conta_email_submit()}
-			</button>
+			</Button>
 		</div>
 		<Feedback feedback={mine} />
 	</form>
@@ -122,7 +121,7 @@
 
 	.address {
 		color: var(--text, #ece7dd);
-		font-size: 14px;
+		font-size: var(--fs-ui, 14px);
 		overflow-wrap: anywhere;
 	}
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button, Field } from '#lib/components/primitives/index.ts';
 	import Feedback from './Feedback.svelte';
 	import { formatDateTime } from './format.ts';
 	import {
@@ -69,17 +70,11 @@
 		<p class="acc-hint" id="{uid}-delete">{m.conta_close_mode_delete_help()}</p>
 	</fieldset>
 	{#if effect}<p class="acc-note" aria-live="polite">{effect}</p>{/if}
-	<div class="acc-field">
-		<label class="acc-label" for="{uid}-password">{m.conta_close_password()}</label>
-		<input
-			id="{uid}-password"
-			class="acc-input"
-			name="password"
-			type="password"
-			autocomplete="current-password"
-			required
-		/>
-	</div>
+	<Field id="{uid}-password" label={m.conta_close_password()} required>
+		{#snippet children(control)}
+			<input {...control} name="password" type="password" autocomplete="current-password" />
+		{/snippet}
+	</Field>
 	<label class="acc-check">
 		<input type="checkbox" name="acknowledged" required />
 		<span>{m.conta_close_ack()}</span>
@@ -87,9 +82,9 @@
 	<p class="acc-hint">{m.conta_close_how()}</p>
 	<div class="acc-row">
 		<!-- Not disabled: `required` fields do the checking, also without JavaScript. -->
-		<button class="acc-btn acc-btn--danger" type="submit">
+		<Button variant="danger" type="submit">
 			{m.conta_close_submit()}
-		</button>
+		</Button>
 	</div>
 	<Feedback feedback={mine} />
 </form>

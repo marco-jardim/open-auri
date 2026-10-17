@@ -63,6 +63,7 @@
 		autocomplete="new-password"
 		maxlength={PASSWORD_MAX}
 		revealable={false}
+		mustMatch={password}
 		issue={result?.fields?.confirm}
 	/>
 	<HumanCheck {siteKey} action={AUTH_TURNSTILE_ACTIONS.signUp} resetKey={controller.attempt} />

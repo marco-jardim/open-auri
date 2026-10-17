@@ -114,8 +114,14 @@ test('BioForm counts code points and blocks a bio over the limit', async () => {
 	await expect.element(page.getByText(m.conta_bio_count({ used: '5', max: '5' }))).toBeVisible();
 	const button = page.getByRole('button', { name: m.conta_bio_submit() });
 	await expect.element(button).toBeEnabled();
+	await expect.element(button).not.toHaveAttribute('aria-disabled');
 	await area.fill('🎧🎧🎧🎧🎧🎧');
-	await expect.element(button).toBeDisabled();
+	// Unavailable with a reason (Button primitive): focusable, aria-disabled, reason linked.
+	await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+	const reasonId = button.element().getAttribute('aria-describedby') ?? '';
+	expect(document.getElementById(reasonId)?.textContent?.trim()).toBe(
+		m.fuxp8_bio_over({ max: '5' })
+	);
 	await expect.element(area).toHaveAttribute('aria-invalid', 'true');
 	expect(formOf(area.element()).getAttribute('action')).toBe('?/bio');
 });
@@ -213,10 +219,16 @@ test('SessionList: nothing to revoke when this is the only session', async () =>
 	await render(SessionList, {
 		sessions: [session('only', { current: true, impersonated: false })]
 	});
-	await expect
-		.element(page.getByRole('button', { name: m.conta_sessions_revoke_others() }))
-		.toBeDisabled();
-	await expect.element(page.getByText(m.conta_sessions_none_other())).toBeVisible();
+	const others = page.getByRole('button', { name: m.conta_sessions_revoke_others() });
+	// Unavailable with a reason: aria-disabled, still focusable, the reason linked to it.
+	await expect.element(others).toHaveAttribute('aria-disabled', 'true');
+	const reasonId = others.element().getAttribute('aria-describedby') ?? '';
+	expect(document.getElementById(reasonId)?.textContent?.trim()).toBe(
+		m.conta_sessions_none_other()
+	);
+	// The reason is also on the page, not only in the tooltip.
+	const hint = formOf(others.element()).querySelector('p.acc-hint');
+	expect(hint?.textContent?.trim()).toBe(m.conta_sessions_none_other());
 	expect(page.getByRole('button', { name: m.conta_sessions_revoke() }).elements()).toHaveLength(0);
 });
 
@@ -225,6 +237,49 @@ test('SessionList flags a support (impersonation) session', async () => {
 		sessions: [session('me', { current: true }), session('support', { impersonated: true })]
 	});
 	await expect.element(page.getByText(m.conta_sessions_impersonated())).toBeVisible();
+});
+
+test('SessionList: while a revocation reloads the list, rows turn into skeletons of the same height', async () => {
+	const sessions = [session('me', { current: true }), session('other', { browser: 'Safari' })];
+	const screen = await render(SessionList, { sessions });
+	const rows = () => [...document.querySelectorAll<HTMLElement>('.list > li')];
+	await expect.poll(() => rows().length).toBe(2);
+	const heights = rows().map((row) => row.getBoundingClientRect().height);
+
+	await screen.rerender({ sessions, pending: true });
+	const list = document.querySelector<HTMLElement>('.list[data-skeleton]');
+	expect(list).not.toBeNull();
+	expect(list?.getAttribute('aria-busy')).toBe('true');
+	// Stale revoke buttons cannot be reached while the list is being reloaded.
+	expect(list?.inert).toBe(true);
+	expect(document.querySelectorAll('.row-skeleton')).toHaveLength(2);
+	// Same rows, same heights: the skeleton covers the real geometry (no layout shift).
+	expect(rows().map((row) => row.getBoundingClientRect().height)).toEqual(heights);
+	// The real content is hidden with `visibility` (it keeps its box); checkVisibility() ignores
+	// that property by default, so read the computed style.
+	const hidden = '.list .item > .info, .list .item > form';
+	const parts = document.querySelectorAll<HTMLElement>(hidden);
+	expect(parts).toHaveLength(3);
+	for (const part of parts) {
+		expect(getComputedStyle(part).visibility).toBe('hidden');
+	}
+	expect(document.querySelectorAll('.list .item > .info')).toHaveLength(2);
+	// Announced once for screen readers (Feedback keeps its own live regions).
+	expect(document.querySelector('.sessions > p.sr-only[role="status"]')?.textContent).toBe(
+		m.fuxp8_sessions_loading()
+	);
+	// The bulk action is busy too (no second submission).
+	await expect
+		.element(page.getByRole('button', { name: m.conta_sessions_revoke_others() }))
+		.toHaveAttribute('aria-busy', 'true');
+
+	await screen.rerender({ sessions: [sessions[0]], pending: false });
+	expect(document.querySelector('.list[data-skeleton]')).toBeNull();
+	expect(document.querySelectorAll('.row-skeleton')).toHaveLength(0);
+	expect(document.querySelector<HTMLElement>('.list')?.inert).toBe(false);
+	expect(rows()).toHaveLength(1);
+	const info = document.querySelector<HTMLElement>('.list .item > .info');
+	expect(info ? getComputedStyle(info).visibility : null).toBe('visible');
 });
 
 test('EmailForm: current address, pending change and no password on a fresh session', async () => {

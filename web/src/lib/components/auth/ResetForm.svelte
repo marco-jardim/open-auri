@@ -55,6 +55,7 @@
 			autocomplete="new-password"
 			maxlength={PASSWORD_MAX}
 			revealable={false}
+			mustMatch={password}
 			issue={result?.fields?.confirm}
 		/>
 		<SubmitSwitch

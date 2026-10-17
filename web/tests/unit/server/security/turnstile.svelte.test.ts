@@ -9,6 +9,7 @@ import Turnstile, {
 	type TurnstileApi,
 	type TurnstileRenderOptions
 } from '#lib/components/security/Turnstile.svelte';
+import TurnstileFormFixture from './TurnstileFormFixture.svelte';
 
 interface FakeTurnstile extends TurnstileApi {
 	options: TurnstileRenderOptions | null;
@@ -98,6 +99,73 @@ test('resets on errors a bounded number of times, then shows an alert', async ()
 	expect(codes).toEqual(['110200', '110200', '110200']);
 	await expect.element(page.getByRole('alert')).toBeVisible();
 	await expect.element(page.getByRole('group', { name: 'Custom label' })).toBeInTheDocument();
+});
+
+test('shows the 65 px "Preparando verificação…" box until the widget renders, without an error', async () => {
+	const fake = installFake();
+	// render() not giving an id yet: the widget is not on the page.
+	fake.render = (_container, options) => {
+		fake.options = options;
+		return null;
+	};
+	const screen = await render(Turnstile, { siteKey: 'k', action: 'sign-in' });
+	await rendered(fake);
+	// Visible text, and the same words for screen readers inside the busy skeleton.
+	expect(screen.container.querySelector('.preparing')?.textContent).toBe('Preparando verificação…');
+	expect(screen.container.querySelector('.skeleton-box .sr-only')?.textContent).toBe(
+		'Preparando verificação…'
+	);
+	const box = screen.container.querySelector<HTMLElement>('.placeholder');
+	expect(box?.getBoundingClientRect().height).toBe(65);
+	expect(box?.querySelector('[aria-busy="true"]')).not.toBeNull();
+	expect(page.getByRole('alert').elements()).toHaveLength(0);
+});
+
+test('the placeholder steps aside once the widget is rendered', async () => {
+	const fake = installFake();
+	const screen = await render(Turnstile, { siteKey: 'k', action: 'sign-in' });
+	await rendered(fake);
+	await expect.poll(() => screen.container.querySelector('.placeholder')).toBeNull();
+	expect(page.getByText('Preparando verificação…').elements()).toHaveLength(0);
+});
+
+test('inside a form, a failure waits for the user to act before it is announced', async () => {
+	const fake = installFake();
+	const screen = await render(TurnstileFormFixture);
+	const options = await rendered(fake);
+	// Bounded resets run out with nobody having touched the form: no alert yet.
+	for (let index = 0; index < 3; index += 1) options['error-callback']?.('110200');
+	await tick();
+	expect(fake.resets).toBe(2);
+	expect(page.getByRole('alert').elements()).toHaveLength(0);
+	// The token stays empty all along (nothing to submit as solved).
+	expect(
+		screen.container.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]')?.value
+	).toBe('');
+	// The first action on the form (focus) brings the error.
+	await page.getByLabelText('E-mail', { exact: true }).click();
+	await expect
+		.element(page.getByRole('alert'))
+		.toHaveTextContent(
+			'Não foi possível carregar a verificação de segurança. Recarregue a página e tente de novo.'
+		);
+});
+
+test('inside a form, a load failure keeps a still box and no text until the user acts', async () => {
+	const fake = installFake();
+	fake.render = () => {
+		throw new Error('render failed');
+	};
+	const screen = await render(TurnstileFormFixture);
+	// render() throwing rejects the load chain: failed, not announced, no "preparing" text.
+	await expect
+		.poll(() => screen.container.querySelector('.placeholder')?.getAttribute('data-state'))
+		.toBe('stalled');
+	expect(screen.container.querySelector('.preparing')).toBeNull();
+	expect(page.getByRole('alert').elements()).toHaveLength(0);
+	await page.getByLabelText('E-mail', { exact: true }).fill('ana@example.com');
+	await expect.element(page.getByRole('alert')).toBeVisible();
+	expect(screen.container.querySelector('.placeholder')).toBeNull();
 });
 
 test('removes the widget on unmount', async () => {

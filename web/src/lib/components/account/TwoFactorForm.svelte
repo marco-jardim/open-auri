@@ -10,6 +10,7 @@
 	// the URL.
 	import { m } from '#lib/paraglide/messages.js';
 	import { qrSvg } from '#lib/qr/index.ts';
+	import { Button, Field } from '#lib/components/primitives/index.ts';
 	import Feedback from './Feedback.svelte';
 	import {
 		feedbackFor,
@@ -136,9 +137,9 @@
 			</ul>
 			<div class="acc-row">
 				{#if mounted}
-					<button class="acc-btn acc-btn--quiet" type="button" onclick={copyCodes}>
+					<Button variant="ghost" size="sm" onclick={copyCodes}>
 						{m.conta_2fa_codes_copy()}
-					</button>
+					</Button>
 				{/if}
 				<a class="acc-link" href={codesFile} download="open-auri-recovery-codes.txt">
 					{m.conta_2fa_codes_download()}
@@ -151,24 +152,27 @@
 	{#if status === 'pending'}
 		<form method="POST" action="?/twoFactorConfirm" class="acc-form" use:enhance>
 			<h3>{m.conta_2fa_confirm_title()}</h3>
-			<div class="acc-field">
-				<label class="acc-label" for="{uid}-code">{m.conta_2fa_code_label()}</label>
-				<input
-					id="{uid}-code"
-					class="acc-input code"
-					name="code"
-					type="text"
-					inputmode="numeric"
-					autocomplete="one-time-code"
-					minlength="6"
-					maxlength="8"
-					required
-					aria-describedby="{uid}-code-hint"
-				/>
-				<p class="acc-hint" id="{uid}-code-hint">{m.conta_2fa_code_hint()}</p>
-			</div>
+			<Field
+				id="{uid}-code"
+				label={m.conta_2fa_code_label()}
+				hint={m.conta_2fa_code_hint()}
+				required
+			>
+				{#snippet children(control)}
+					<input
+						{...control}
+						class="input acc-mono code"
+						name="code"
+						type="text"
+						inputmode="numeric"
+						autocomplete="one-time-code"
+						minlength={6}
+						maxlength={8}
+					/>
+				{/snippet}
+			</Field>
 			<div class="acc-row">
-				<button class="acc-btn" type="submit">{m.conta_2fa_confirm_submit()}</button>
+				<Button variant="primary" type="submit">{m.conta_2fa_confirm_submit()}</Button>
 			</div>
 		</form>
 	{/if}
@@ -178,21 +182,15 @@
 			{#if status === 'pending'}
 				<p class="acc-hint">{m.conta_2fa_pending_hint()}</p>
 			{/if}
-			<div class="acc-field">
-				<label class="acc-label" for="{uid}-start-password">{m.conta_2fa_password()}</label>
-				<input
-					id="{uid}-start-password"
-					class="acc-input"
-					name="password"
-					type="password"
-					autocomplete="current-password"
-					required
-				/>
-			</div>
+			<Field id="{uid}-start-password" label={m.conta_2fa_password()} required>
+				{#snippet children(control)}
+					<input {...control} name="password" type="password" autocomplete="current-password" />
+				{/snippet}
+			</Field>
 			<div class="acc-row">
-				<button class="acc-btn" type="submit">
+				<Button type="submit">
 					{status === 'pending' ? m.conta_2fa_restart_submit() : m.conta_2fa_start_submit()}
-				</button>
+				</Button>
 			</div>
 		</form>
 	{/if}
@@ -202,26 +200,15 @@
 			{#if status === 'on'}
 				<p class="acc-hint">{m.conta_2fa_disable_help()}</p>
 			{/if}
-			<div class="acc-field">
-				<label class="acc-label" for="{uid}-disable-password">
-					{m.conta_2fa_disable_password()}
-				</label>
-				<input
-					id="{uid}-disable-password"
-					class="acc-input"
-					name="password"
-					type="password"
-					autocomplete="current-password"
-					required
-				/>
-			</div>
+			<Field id="{uid}-disable-password" label={m.conta_2fa_disable_password()} required>
+				{#snippet children(control)}
+					<input {...control} name="password" type="password" autocomplete="current-password" />
+				{/snippet}
+			</Field>
 			<div class="acc-row">
-				<button
-					class="acc-btn {status === 'on' ? 'acc-btn--danger' : 'acc-btn--quiet'}"
-					type="submit"
-				>
+				<Button variant={status === 'on' ? 'danger' : 'ghost'} type="submit">
 					{status === 'on' ? m.conta_2fa_disable_submit() : m.conta_2fa_cancel_submit()}
-				</button>
+				</Button>
 			</div>
 		</form>
 	{/if}

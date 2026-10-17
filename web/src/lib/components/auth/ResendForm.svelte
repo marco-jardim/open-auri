@@ -89,7 +89,9 @@
 		label={m.auth_verify_resend_submit()}
 		busyLabel={m.auth_verify_resend_busy()}
 		busy={controller.busy}
-		disabled={hydrated && waiting}
+		disabledReason={hydrated && waiting
+			? m.auth_verify_wait({ time: formatWait(remaining) })
+			: null}
 	/>
 </form>
 

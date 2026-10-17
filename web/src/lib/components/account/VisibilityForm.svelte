@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import Feedback from './Feedback.svelte';
 	import {
 		feedbackFor,
@@ -56,9 +57,9 @@
 	</div>
 	<p class="acc-hint">{m.conta_visibility_always()}</p>
 	<div class="acc-row">
-		<button class="acc-btn" type="submit" disabled={!emailVerified}>
+		<Button type="submit" disabledReason={emailVerified ? null : m.conta_error_unverified()}>
 			{m.conta_visibility_submit()}
-		</button>
+		</Button>
 	</div>
 	<Feedback feedback={mine} />
 </form>

@@ -24,12 +24,17 @@
 		margin: 0 auto;
 		padding: var(--space-7, 48px) var(--gutter, 24px) var(--space-8, 80px);
 		color: var(--text, #ece7dd);
-		font: 14px/1.6 var(--ui, 'Geist', system-ui, sans-serif);
+		font-family: var(--face-body, var(--ui, 'Geist', system-ui, sans-serif));
+		font-size: var(--fs-body, 15px);
+		line-height: var(--lh-body, 1.55);
 	}
 
 	h1 {
 		margin: 0;
-		font: 400 40px/1.1 var(--serif, 'Instrument Serif', Georgia, serif);
+		font-family: var(--face-display, var(--serif, 'Instrument Serif', Georgia, serif));
+		font-size: var(--fs-display-m, 40px);
+		font-weight: 400;
+		line-height: 1;
 	}
 
 	p {

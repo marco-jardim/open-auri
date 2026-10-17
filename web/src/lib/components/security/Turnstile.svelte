@@ -64,6 +64,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	// Direct import: the widget is used on several routes; only the skeleton is needed here.
+	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
 
 	interface Props {
 		/** PUBLIC_TURNSTILE_SITE_KEY (from `$app/env/public` in the page; passed in for tests). */
@@ -92,7 +94,17 @@
 	}: Props = $props();
 
 	let container: HTMLDivElement;
+	let root: HTMLDivElement;
 	let failed = $state(false);
+	/** The widget is on the page (render returned an id): the skeleton steps aside. */
+	let rendered = $state(false);
+	/**
+	 * The user has acted on the surrounding form (focus, typing, submit). Until then a failure
+	 * is not announced: nobody should meet an error before doing anything. Outside a form the
+	 * widget is the action, so failures are announced at once.
+	 */
+	let acted = $state(false);
+	const showError = $derived(failed && acted);
 
 	onMount(() => {
 		let api: TurnstileApi | null = null;
@@ -100,11 +112,22 @@
 		let destroyed = false;
 		let errorResets = 0;
 
+		const form = root.closest('form');
+		const markActed = () => {
+			acted = true;
+		};
+		const actEvents = ['focusin', 'input', 'submit', 'pointerdown'] as const;
+		if (form) {
+			for (const type of actEvents) form.addEventListener(type, markActed, { capture: true });
+		} else {
+			acted = true;
+		}
+
 		loadTurnstile()
 			.then((loaded) => {
 				if (destroyed) return;
 				api = loaded;
-				widgetId =
+				const id =
 					loaded.render(container, {
 						sitekey: siteKey,
 						action,
@@ -137,6 +160,8 @@
 							return true;
 						}
 					}) ?? null;
+				widgetId = id;
+				rendered = id !== null;
 			})
 			.catch(() => {
 				if (destroyed) return;
@@ -147,15 +172,39 @@
 
 		return () => {
 			destroyed = true;
+			if (form) {
+				for (const type of actEvents) {
+					form.removeEventListener(type, markActed, { capture: true });
+				}
+			}
 			if (api && widgetId !== null) api.remove(widgetId);
 		};
 	});
 </script>
 
-<div class="turnstile" role="group" aria-label={label ?? m.security_turnstile_label()}>
-	<div bind:this={container}></div>
+<div
+	class="turnstile"
+	role="group"
+	aria-label={label ?? m.security_turnstile_label()}
+	bind:this={root}
+>
+	<div class="frame">
+		<div bind:this={container}></div>
+		{#if !rendered && !showError}
+			<!-- Same 65 px box as the widget (CLS zero). After a silent failure it stays still and
+			     says nothing until the user acts; then the error below replaces it. -->
+			<div class="placeholder" data-state={failed ? 'stalled' : 'preparing'}>
+				{#if failed}
+					<span class="still" aria-hidden="true"></span>
+				{:else}
+					<Skeleton width="100%" height="65px" label={m.fuxp8_turnstile_preparing()} />
+					<span class="preparing" aria-hidden="true">{m.fuxp8_turnstile_preparing()}</span>
+				{/if}
+			</div>
+		{/if}
+	</div>
 	<input type="hidden" {name} value={token} />
-	{#if failed}
+	{#if showError}
 		<p class="error" role="alert">{m.security_turnstile_error()}</p>
 	{/if}
 </div>
@@ -165,9 +214,50 @@
 		min-height: 65px;
 	}
 
+	.frame {
+		position: relative;
+		min-height: 65px;
+	}
+
+	.placeholder {
+		position: absolute;
+		inset: 0 auto 0 0;
+		width: min(300px, 100%);
+		height: 65px;
+		border-radius: var(--rad-md, 4px);
+		overflow: hidden;
+	}
+
+	.placeholder :global(.skeleton-box),
+	.still {
+		display: block;
+		width: 100%;
+		height: 65px;
+	}
+
+	/* Silent failure before the user acts: a still, empty box (no shimmer, no text). */
+	.still {
+		border-radius: var(--rad-md, 4px);
+		background: var(--lamp-off, rgba(236, 231, 221, 0.1));
+	}
+
+	.preparing {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		padding: 0 16px;
+		color: var(--text-2, #cfc9be);
+		font-family: var(--face-body, var(--ui, 'Geist', system-ui, sans-serif));
+		font-size: var(--fs-caption, 12px);
+		line-height: var(--lh-small, 1.4);
+	}
+
 	.error {
 		margin: 6px 0 0;
 		color: #e0a39a;
-		font: 11px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
+		font-family: var(--face-body, var(--ui, 'Geist', system-ui, sans-serif));
+		font-size: var(--label-min, 11px);
+		line-height: 1.5;
 	}
 </style>

@@ -13,35 +13,19 @@
 	gap: 6px;
 }
 
+/* Mono stays at 500 at most (spec §2.1). */
 .acc-label {
 	color: var(--state-text, #b5afa4);
-	font: 600 var(--label-min, 11px) / 1.4 var(--mono, 'JetBrains Mono', monospace);
+	font-family: var(--face-data, var(--mono, 'JetBrains Mono', monospace));
+	font-size: var(--label-min, 11px);
+	font-weight: 500;
+	line-height: var(--lh-caps, 1.35);
 	letter-spacing: var(--tracking-caps, 0.14em);
 	text-transform: uppercase;
 }
 
-.acc-input,
-.acc-textarea {
-	width: 100%;
-	min-height: 40px;
-	padding: 8px 12px;
-	border: 1px solid var(--pop-rule, #34332f);
-	border-radius: var(--rad-sm, 3px);
-	background: var(--ink, #0f0f0e);
-	color: var(--text, #ece7dd);
-	font: 14px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
-}
-
-.acc-textarea {
-	min-height: 110px;
-	resize: vertical;
-}
-
-.acc-input:disabled,
-.acc-textarea:disabled {
-	opacity: 0.6;
-	cursor: not-allowed;
-}
+/* Inputs and buttons come from the Field and Button primitives (components.css); disabled
+   native controls follow base.css. */
 
 .acc-hint {
 	margin: 0;
@@ -72,51 +56,6 @@
 	accent-color: var(--accent, #ece7dd);
 }
 
-.acc-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	min-height: 36px;
-	padding: 6px 16px;
-	border: 1px solid var(--accent, #ece7dd);
-	border-radius: var(--rad-sm, 3px);
-	background: transparent;
-	color: var(--text, #ece7dd);
-	font: 600 12px/1.3 var(--mono, 'JetBrains Mono', monospace);
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	cursor: pointer;
-	transition: background-color var(--dur-fast, 0.12s) var(--ease-out, ease-out);
-}
-
-.acc-btn:hover:not(:disabled) {
-	background: rgba(236, 231, 221, 0.08);
-}
-
-.acc-btn:disabled {
-	opacity: 0.55;
-	cursor: not-allowed;
-}
-
-.acc-btn--danger {
-	border-color: var(--danger, #e5484d);
-	color: #ffb4a8;
-}
-
-.acc-btn--danger:hover:not(:disabled) {
-	background: rgba(229, 72, 77, 0.12);
-}
-
-.acc-btn--quiet {
-	min-height: 30px;
-	padding: 4px 12px;
-	border-color: var(--pop-rule, #34332f);
-	font-size: 11px;
-}
-
-.acc-input:focus-visible,
-.acc-textarea:focus-visible,
-.acc-btn:focus-visible,
 .acc-check input:focus-visible,
 .acc-link:focus-visible {
 	outline: var(--focus-width, 2px) solid var(--accent, #ece7dd);
@@ -148,10 +87,4 @@
 
 .acc-mono {
 	font-family: var(--mono, 'JetBrains Mono', monospace);
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.acc-btn {
-		transition: none;
-	}
 }

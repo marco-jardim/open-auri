@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button, Field } from '#lib/components/primitives/index.ts';
 	import Feedback from './Feedback.svelte';
 	import { formatDate } from './format.ts';
 	import {
@@ -45,26 +46,31 @@
 		<p class="acc-note acc-note--warn">{m.conta_nickname_first()}</p>
 	{/if}
 	<div class="acc-field">
-		<label class="acc-label" for="{uid}-nickname">{m.conta_nickname_label()}</label>
-		<input
+		<!-- The server's answer is announced by Feedback; the field only carries aria-invalid. -->
+		<Field
 			id="{uid}-nickname"
-			class="acc-input acc-mono"
-			name="nickname"
-			type="text"
-			autocomplete="username"
-			autocapitalize="none"
-			spellcheck="false"
-			minlength={min}
-			maxlength={max}
+			label={m.conta_nickname_label()}
+			hint={m.conta_nickname_rules({ min: String(min), max: String(max) })}
 			required
-			disabled={!emailVerified}
-			value={mine?.value ?? current ?? ''}
-			aria-describedby="{uid}-rules {uid}-clock"
-			aria-invalid={mine && !mine.ok ? 'true' : undefined}
-		/>
-		<p class="acc-hint" id="{uid}-rules">
-			{m.conta_nickname_rules({ min: String(min), max: String(max) })}
-		</p>
+		>
+			{#snippet children(control)}
+				<input
+					{...control}
+					class="input acc-mono"
+					name="nickname"
+					type="text"
+					autocomplete="username"
+					autocapitalize="none"
+					spellcheck="false"
+					minlength={min}
+					maxlength={max}
+					disabled={!emailVerified}
+					value={mine?.value ?? current ?? ''}
+					aria-describedby="{control['aria-describedby'] ?? ''} {uid}-clock"
+					aria-invalid={mine && !mine.ok ? 'true' : undefined}
+				/>
+			{/snippet}
+		</Field>
 		<p class="acc-hint" id="{uid}-clock">
 			{#if !emailVerified}
 				{m.conta_nickname_needs_verification()}
@@ -91,9 +97,13 @@
 		</div>
 	{/if}
 	<div class="acc-row">
-		<button class="acc-btn" type="submit" disabled={!emailVerified}>
+		<Button
+			type="submit"
+			variant={first ? 'primary' : 'plate'}
+			disabledReason={emailVerified ? null : m.conta_error_unverified()}
+		>
 			{first ? m.conta_nickname_submit_first() : m.conta_nickname_submit()}
-		</button>
+		</Button>
 	</div>
 	<Feedback feedback={mine} />
 </form>

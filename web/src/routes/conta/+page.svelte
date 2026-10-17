@@ -31,6 +31,21 @@
 		});
 	const plain: FormEnhance = (node) => enhance(node);
 
+	// Session revocations: same enhance as `plain`, plus the real round trip drives the list's
+	// skeleton (pending from submit until the reloaded list is in).
+	let sessionsPending = $state(false);
+	const sessionsEnhance: FormEnhance = (node) =>
+		enhance(node, () => {
+			sessionsPending = true;
+			return async ({ update }) => {
+				try {
+					await update();
+				} finally {
+					sessionsPending = false;
+				}
+			};
+		});
+
 	async function acceptPolicy(version: string): Promise<void> {
 		const response = await fetch('/conta/politica', {
 			method: 'POST',
@@ -129,7 +144,12 @@
 		<div class="sub">
 			<h3>{m.conta_sessions_title()}</h3>
 			<p class="acc-hint">{m.conta_sessions_description()}</p>
-			<SessionList sessions={data.sessions} {feedback} enhance={plain} />
+			<SessionList
+				sessions={data.sessions}
+				{feedback}
+				enhance={sessionsEnhance}
+				pending={sessionsPending}
+			/>
 		</div>
 	</Section>
 
@@ -184,23 +204,33 @@
 		gap: var(--space-2, 8px);
 	}
 
+	/* Type from the v2.1 scale (spec §2.1): mono at 500 at most, display serif for the title. */
 	.eyebrow {
 		margin: 0;
 		color: var(--muted, #8f8a80);
-		font: 600 var(--label-min, 11px) / 1.4 var(--mono, 'JetBrains Mono', monospace);
-		letter-spacing: var(--tracking-caps, 0.14em);
+		font-family: var(--face-data, var(--mono, 'JetBrains Mono', monospace));
+		font-size: var(--fs-eyebrow, 11px);
+		font-weight: 500;
+		line-height: var(--lh-caps, 1.35);
+		letter-spacing: var(--tracking-eyebrow, 0.18em);
 		text-transform: uppercase;
 	}
 
 	h1 {
 		margin: 0;
-		font: 400 44px/1.05 var(--serif, 'Instrument Serif', Georgia, serif);
+		font-family: var(--face-display, var(--serif, 'Instrument Serif', Georgia, serif));
+		font-size: var(--fs-display-m, 44px);
+		font-weight: 400;
+		line-height: 1;
+		letter-spacing: -0.015em;
 	}
 
 	.lede {
 		margin: 0;
 		color: var(--state-text, #b5afa4);
-		font: 14px/1.55 var(--ui, 'Geist', system-ui, sans-serif);
+		font-family: var(--face-body, var(--ui, 'Geist', system-ui, sans-serif));
+		font-size: var(--fs-lede, 16px);
+		line-height: 1.5;
 	}
 
 	nav ul {
@@ -210,7 +240,9 @@
 		margin: var(--space-2, 8px) 0 0;
 		padding: 0;
 		list-style: none;
-		font: 13px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
+		font-family: var(--face-body, var(--ui, 'Geist', system-ui, sans-serif));
+		font-size: var(--fs-small, 13px);
+		line-height: 1.5;
 	}
 
 	.sub {
@@ -221,12 +253,9 @@
 	h3 {
 		margin: 0;
 		color: var(--text, #ece7dd);
-		font: 600 14px/1.4 var(--ui, 'Geist', system-ui, sans-serif);
-	}
-
-	@media (max-width: 640px) {
-		h1 {
-			font-size: 34px;
-		}
+		font-family: var(--face-body, var(--ui, 'Geist', system-ui, sans-serif));
+		font-size: var(--fs-ui, 14px);
+		font-weight: 600;
+		line-height: 1.4;
 	}
 </style>
