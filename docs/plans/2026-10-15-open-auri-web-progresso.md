@@ -244,7 +244,8 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 | Q3 | 1 | FAIL | 6 major → FX3.1, FX3.2 |
 | Q3 | 2 | FAIL | 3 major → FX3.3, FX3.4 |
 | Q3 | 3 (verificação) | **PASS** | 2 major corrigidos (FX3.5, FX3.6); minors → #20–#24 |
-| Q4 | 1 | FAIL | 7 major: M1 ids internos no feed/rankings; M2 outbox não ligada a quem agiu; M3 apelido gravado na OG e PNGs órfãos; M4 cache do gate confiável demais (gate_ver só dos limites, regate lento, regressão por skew); M5 S7 entrega curva moderada/retirada/privada; M6 funil e audiência revelam atividade privada; M7 inundação S6 derruba os jobs diários. 8 minor, 3 nit → FX4.1–FX4.8 |
+| Q4 | 1 | FAIL (corrigido em 5701f13) | 7 major: M1 ids internos no feed/rankings; M2 outbox não ligada a quem agiu; M3 apelido gravado na OG e PNGs órfãos; M4 cache do gate confiável demais (gate_ver só dos limites, regate lento, regressão por skew); M5 S7 entrega curva moderada/retirada/privada; M6 funil e audiência revelam atividade privada; M7 inundação S6 derruba os jobs diários. 8 minor, 3 nit → FX4.1–FX4.8 |
+| Q4 | 2 | FAIL (corrigido em 5405850 + docs) | 1 major (R2-1: leituras por id /c, OG e S7 serviam veredito do gate desatualizado) + 7 minor (ator da outbox no servidor, purga por falha de sonda, PacksPanel, regressão da mescla, deriva do pi.md, origens entre contas, contagens do funil) + nits → FX4.9–FX4.12. Verificação: unidade 1 672, integração 968 (95,9/90,8/97,8/97,8), jobs 42, raiz 663, e2e 305/305 |
 
 ## Achados do Q2 rodada 1 (a corrigir: FX2.k)
 

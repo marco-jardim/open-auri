@@ -77,8 +77,16 @@ nenhum servidor. Isso foi substituído por **conta opcional com e-mail e senha**
 - **Histórico:** o usuário vê e apaga a própria atividade (tudo ou por curva e
   tipo); as contagens públicas caem na hora e os rankings no próximo recálculo.
 - **Compartilhamentos:** aberturas anônimas viram só um contador por dia, sem
-  identidade. Prévia, instalação e favorito de quem está logado entram no funil
-  uma vez por tipo, e só quem compartilhou vê os números.
+  identidade. Prévia, instalação e favorito só são atribuídos a atores com
+  atividade pública, uma vez por usuário e tipo; atividade privada nunca entra
+  no funil. Só quem criou o compartilhamento **e** é dono da linhagem vê os
+  números. Compartilhar a curva de outra pessoa não dá acesso nem às aberturas.
+  As contagens atribuídas só incluem usuários que continuam elegíveis, com
+  atividade pública, e-mail verificado e não banidos. Tornar a atividade privada
+  ou ser banido retira o usuário desses números, inclusive nos eventos antigos.
+- **Decisão aceita (plano §3.7):** o `privateCount` no público do autor permanece
+  exato ("N pessoas com perfil privado"). O limite de 50 nomes públicos não
+  aumenta esse contador. Essa visão do autor é separada do funil de compartilhamento.
 - **IP:** o rate limit usa HMAC do IP com sal diário, descartado em até 48 h.
   Nenhuma tabela social guarda IP.
 
@@ -219,7 +227,16 @@ estado no servidor:
   pessoas) e pode restaurá-la; a moderação não muda com isso.
 - **Gate:** toda publicação, versão e fork passa pelo gate v2 no servidor, com os
   mesmos códigos de motivo do navegador; um gatilho no banco recusa versão sobre
-  curva reprovada, e linhagem cujo head reprova some de toda lista.
+  curva reprovada, e linhagem cujo head reprova some de toda lista. As três ações
+  compartilham cotas de 30 publicações bem-sucedidas por dia UTC e 60 tentativas
+  na etapa de gate por usuário em janela móvel de 24 h, incluindo recusas e
+  pareceres em cache (429 `QUOTA_EXCEEDED`). Leituras por id de curvas, `/c`, OG
+  e S7 reavaliam pareceres desatualizados antes de servir; não basta haver um
+  parecer antigo aprovado ou um PNG no R2.
+- **Mescla local:** até 100 itens por lote; no máximo 20 execuções de gate sem
+  cache por requisição e contador separado de 500 itens na etapa de gate por
+  usuário em 24 h, incluindo recusas e acertos de cache. Os itens excedentes
+  recebem `QUOTA_EXCEEDED` no relatório e ficam locais para nova tentativa.
 
 ---
 
@@ -302,11 +319,18 @@ pede **consentimento explícito** e dados minimizados. Como funciona:
 - **Retirada:** o navegador gera um recibo de 32 bytes aleatórios e o guarda só
   localmente. Com ele, o lote e seus pares são apagados; a resposta é a mesma
   existindo ou não. Sem o recibo, não há como achar o lote.
+- **Itens elegíveis:** só `curveId` de preset oficial ou curva HEAD de uma
+  linhagem pública e listável. Um item inelegível recusa o lote inteiro com
+  400 `INVALID_BODY` e issue `s6_unknown_item`; curvas apenas locais ou históricas
+  não bastam. A agregação confere a elegibilidade novamente.
 - **"Comunidade prefere":** um job diário roda Bradley–Terry (iteração MM de
   Zermelo, empate = meia vitória, normalização pela média geométrica, parada em
   1e-9 ou 10 000 iterações) e publica só pontuação e número de comparações por
   curva. Só a maior componente fortemente conexa do grafo de comparações recebe
-  pontuação (Ford 1957); curvas fora dela ficam sem número publicado.
+  pontuação (Ford 1957); curvas fora dela ficam sem número publicado. Lê uma
+  janela de 90 dias, até 200 000 pares, e limita trabalho e tempo do estimador.
+  O JSON inclui `converged`; `false` indica uma estimativa interrompida por um
+  limite, não convergência confirmada.
 
 O caminho pseudônimo por PR ou issue no GitHub, previsto no desenho inicial, não
 é usado: ele expõe o usuário do GitHub junto com os dados.
@@ -319,7 +343,10 @@ Dois usuários trocam curvas **sem saber de quem são** e dão nota. O autor rec
 retorno sem viés de nome.
 
 - Um usuário verificado entra na fila com uma curva aprovada no gate: uma
-  linhagem própria ou uma pública e listável. No máximo uma troca ativa por vez.
+  linhagem própria, ativa e sem ocultação de moderação, ou uma pública e
+  listável. A versão precisa passar no gate; a listabilidade de linhagem alheia
+  exige também o head aprovado. A própria pode ser privada ou não listada.
+  No máximo uma troca ativa por vez.
 - **Pareamento assíncrono:** na entrada, com a troca em espera mais antiga
   elegível; senão, um job de hora em hora tenta de novo. O pareamento é atômico:
   duas entradas simultâneas nunca pegam a mesma troca.
@@ -327,17 +354,27 @@ retorno sem viés de nome.
   para a prévia no navegador. Instalar passa pelo checklist e pelo gesto de
   sempre.
 - **Nota de 1 a 5,** uma vez. A segunda nota do par revela as duas trocas no
-  mesmo lote: apelido do parceiro (se houver e não estiver banido), a linhagem
-  quando ela abre por link e as duas notas. O id de usuário do parceiro nunca é
-  exposto.
+  mesmo lote: apelido do parceiro (`nickname` de exibição e `username` canônico,
+  se houver e não estiver banido), a linhagem quando ela abre por link e as duas
+  notas. O id de usuário do parceiro nunca é exposto.
+- **Revalidação:** toda leitura confere se o parceiro continua elegível e
+  reavalia pareceres desatualizados do gate. Se deixar de qualificar, a curva
+  não é servida e `partner` vem `null`; pares `matched` viram `cancelled`, mas
+  trocas já `revealed` mantêm o estado. A leitura reavalia até 4 curvas; se ainda
+  restar parecer desatualizado para o parceiro, ele fica `null` nessa leitura,
+  sem cancelamento só por esse limite.
 - **Expiração em 72 h** depois de entrar na fila ou do pareamento; dá para
   cancelar enquanto espera.
 
 ## S8: curva como identidade 🟡 parcial
 
 Cada linhagem tem o link `/c/<id>` (com `?s=<shareId>` para o funil), imagem OG
-gerada no servidor e QR. Assinatura sonora como avatar e cartões impressos
-continuam como ideia.
+gerada no servidor e QR. A imagem OG não contém autor ou apelido, só nome da
+versão, licença, gráfico e marca do projeto. Usa `public, max-age=86400`, sem
+`immutable`; a visibilidade e os pareceres do gate são conferidos antes de
+servir, inclusive com imagem no R2 e na resposta 304. Cópias já guardadas por
+navegadores ou CDNs podem durar até um dia após a mudança de visibilidade.
+Assinatura sonora como avatar e cartões impressos continuam como ideia.
 
 ## S9: packs curados e licenciáveis ✅
 
@@ -356,6 +393,7 @@ ideia circular.
 ## Moderação e rankings (resumo)
 
 - **Denúncias** de curva, pack ou perfil por usuários verificados, com Turnstile.
+  Perfis são denunciados pelo apelido público, nunca pelo id interno da conta.
   Três contas distintas, verificadas, não banidas e com 3 dias ou mais ocultam
   automaticamente uma curva ou pack até a revisão. Administradores ocultam,
   restauram, removem, dispensam ou banem, sempre com registro de auditoria.
