@@ -58,7 +58,7 @@ import {
 export const TRADE_PAIR_ATTEMPTS = 5;
 /** Waiting trades the hourly job retries per run. */
 export const TRADE_RETRY_LIMIT = 50;
-/** Stale partner curves re-gated per trade read (~150 ms of CPU each); the rest are withheld. */
+/** Stale curves re-gated per trade read or join (~150 ms of CPU each); the rest are deferred. */
 export const TRADE_REGATE_PER_READ = 4;
 
 /** Injection points (tests); the defaults are the production ones. */
@@ -122,13 +122,14 @@ async function currentCandidates(
 	tradeId: string,
 	now: number,
 	limit: number,
-	deps: TradeDeps
+	deps: TradeDeps,
+	max: number
 ): Promise<string[]> {
 	let candidates = await listPairCandidates(db, tradeId, now, limit);
 	if (candidates.length === 0) return candidates;
-	const refreshed = await refreshCurves(db, await tradeCurveGates(db, candidates), now, deps);
-	if (refreshed.regated === 0) return candidates;
-	candidates = await listPairCandidates(db, tradeId, now, limit);
+	const refreshed = await refreshCurves(db, await tradeCurveGates(db, candidates), now, deps, max);
+	if (refreshed.regated > 0) candidates = await listPairCandidates(db, tradeId, now, limit);
+	if (refreshed.regated === 0 && refreshed.left.size === 0) return candidates;
 	const stale = await staleTradeIds(db, candidates);
 	return candidates.filter((id) => !stale.has(id));
 }
@@ -321,9 +322,29 @@ export async function pairWaitingTrade(
 	attempts: number = TRADE_PAIR_ATTEMPTS,
 	deps: TradeDeps = {}
 ): Promise<PairResult> {
+	return pairWithinBudget(db, tradeId, now, attempts, deps, TRADE_REGATE_PER_READ);
+}
+
+/** The join target and both pairing passes share one request's re-gate budget. */
+async function pairWithinBudget(
+	db: D1Database,
+	tradeId: string,
+	now: number,
+	attempts: number,
+	deps: TradeDeps,
+	max: number
+): Promise<PairResult> {
 	const limit = Math.min(Math.max(Math.trunc(attempts), 1), 20);
-	await refreshCurves(db, await tradeCurveGates(db, [tradeId]), now, deps);
-	const candidates = await currentCandidates(db, tradeId, now, limit, deps);
+	const refreshed = await refreshCurves(db, await tradeCurveGates(db, [tradeId]), now, deps, max);
+	if (refreshed.left.size > 0) return { status: 'waiting' };
+	const candidates = await currentCandidates(
+		db,
+		tradeId,
+		now,
+		limit,
+		deps,
+		max - refreshed.regated
+	);
 	for (const candidateId of candidates) {
 		if (await tryPairTrades(db, tradeId, candidateId, now)) {
 			return { status: 'matched', matchId: candidateId };
@@ -372,8 +393,10 @@ export async function joinTrade(
 	}
 	const deps: TradeDeps = options.gate ? { gate: options.gate } : {};
 	let target = await findTradeTarget(db, userId, input.lineageId, versionId);
-	if (target && (await refreshCurves(db, target.curves, now, deps)).regated > 0) {
-		target = await findTradeTarget(db, userId, input.lineageId, versionId);
+	let regated = 0;
+	if (target) {
+		regated = (await refreshCurves(db, target.curves, now, deps, TRADE_REGATE_PER_READ)).regated;
+		if (regated > 0) target = await findTradeTarget(db, userId, input.lineageId, versionId);
 	}
 	if (!target || !target.tradeable) return { ok: false, code: 'not-found' };
 	if (!target.gateOk) return { ok: false, code: 'gate-rejected' };
@@ -391,7 +414,14 @@ export async function joinTrade(
 		// The lineage or curve changed between the check and the insert.
 		return { ok: false, code: 'not-found' };
 	}
-	await pairWaitingTrade(db, created.value.id, now, options.attempts, deps);
+	await pairWithinBudget(
+		db,
+		created.value.id,
+		now,
+		options.attempts ?? TRADE_PAIR_ATTEMPTS,
+		deps,
+		TRADE_REGATE_PER_READ - regated
+	);
 	const dto = await getMyTrade(db, userId, created.value.id, { ...deps, now });
 	return dto ? { ok: true, value: dto } : { ok: false, code: 'not-found' };
 }
