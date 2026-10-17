@@ -61,15 +61,29 @@ test('pointer drag stops at the gate boundary with a reason', async ({ page }) =
 	await importTxt(page, apo(-0.5, 'PK Fc 1000 Hz Gain -6 dB Q 1'));
 	const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
 	const overlay = page.getByRole('group', { name: 'Alças dos filtros', exact: true });
-	await handle.scrollIntoViewIfNeeded();
+	// The whole plot, not only the handle, sits mid-viewport: on a phone it is about 290 × 135 px
+	// and the limit caption plate above it pushes it toward the fold. Every pointer position is
+	// taken from the plot's box as it is now (after the scroll, the press and each step), because
+	// the page may move under a pointer the handle has already captured.
+	await overlay.evaluate((element) => element.scrollIntoView({ block: 'center' }));
 	const start = await handle.boundingBox();
-	const screen = await overlay.boundingBox();
-	if (!start || !screen) throw new Error('The filter handle must have a visible bounding box');
-	const x = start.x + start.width / 2;
-	await page.mouse.move(x, start.y + start.height / 2);
+	const plot = await overlay.boundingBox();
+	if (!start || !plot) throw new Error('The filter handle must have a visible bounding box');
+	// The handle's place within the plot: across is its frequency, down its gain.
+	const across = (start.x + start.width / 2 - plot.x) / plot.width;
+	const down = (start.y + start.height / 2 - plot.y) / plot.height;
+	await page.mouse.move(plot.x + plot.width * across, plot.y + plot.height * down);
 	await page.mouse.down();
+	// The press reached the handle itself (it holds the pointer), not something lying over it.
+	await expect(handle).toHaveAttribute('class', /\bdragging\b/);
 	// Near the top of the plot requests +9.2 dB, far beyond the -0.5 dB preamp's headroom.
-	await page.mouse.move(x, screen.y + screen.height * 0.08, { steps: 8 });
+	const steps = 8;
+	for (let step = 1; step <= steps; step++) {
+		const screen = await overlay.boundingBox();
+		if (!screen) throw new Error('The filter handles lost their bounding box mid-drag');
+		const at = down + (0.08 - down) * (step / steps);
+		await page.mouse.move(screen.x + screen.width * across, screen.y + screen.height * at);
+	}
 	await page.mouse.up();
 	const reason = page
 		.getByRole('region', { name: 'Osciloscópio', exact: true })
