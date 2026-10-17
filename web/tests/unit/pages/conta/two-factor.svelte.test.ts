@@ -157,11 +157,43 @@ test('on: only the disable form, with the password; admin note for admins', asyn
 	await expect.element(password).toHaveAttribute('name', 'password');
 	await expect.element(password).toBeRequired();
 	expect(password.element().closest('form')?.getAttribute('action')).toBe('?/twoFactorDisable');
+	// The second factor too: one field for an app code or a backup code, in the same form.
+	const code = page.getByLabelText(m.conta_2fa_disable_code_label());
+	await expect.element(code).toHaveAttribute('name', 'code');
+	await expect.element(code).toHaveAttribute('type', 'text');
+	await expect.element(code).toHaveAttribute('autocomplete', 'one-time-code');
+	await expect.element(code).toBeRequired();
+	await expect.element(code).toHaveAccessibleDescription(m.conta_2fa_disable_code_hint());
+	expect(code.element().closest('form')).toBe(password.element().closest('form'));
 	await expect
 		.element(page.getByRole('button', { name: m.conta_2fa_disable_submit() }))
 		.toBeVisible();
 	expect(formByAction('?/twoFactorStart')).toBeNull();
 	expect(formByAction('?/twoFactorConfirm')).toBeNull();
+});
+
+test('cancelling a pending setup asks for the password only', async () => {
+	await render(TwoFactorForm, { status: 'pending' });
+	const cancel = formByAction('?/twoFactorDisable');
+	expect(cancel?.querySelector('input[name="password"]')).not.toBeNull();
+	expect(cancel?.querySelector('input[name="code"]')).toBeNull();
+});
+
+test('a refused disable gets one message that names neither factor; success is announced', async () => {
+	const screen = await render(TwoFactorForm, {
+		status: 'on',
+		feedback: { form: 'twoFactor', error: 'wrong-password-or-code' }
+	});
+	await expect.element(page.getByRole('alert')).toHaveTextContent(m.conta_2fa_error_disable());
+	expect(alertText()).not.toContain(m.conta_error_wrong_password());
+	expect(alertText()).not.toContain(m.conta_2fa_error_code());
+	// The notice the page builds from the redirect's ?2fa=desativada.
+	await screen.rerender({
+		status: 'off',
+		feedback: { form: 'twoFactor', ok: true, detail: 'disabled' }
+	});
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.conta_2fa_disabled());
+	expect(alertText()).toBe('');
 });
 
 test('errors are announced: admin without the 2FA marker, wrong password, rate limit', async () => {

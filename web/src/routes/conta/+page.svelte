@@ -162,7 +162,7 @@
 		<TwoFactorForm
 			status={data.twoFactor.status}
 			admin={data.twoFactor.admin}
-			{feedback}
+			feedback={feedback ?? data.twoFactorNotice}
 			enhance={plain}
 		/>
 	</Section>

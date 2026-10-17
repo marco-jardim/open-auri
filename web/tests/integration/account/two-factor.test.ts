@@ -1,16 +1,24 @@
 // Two-step verification in /conta (FX3.4): account/two-factor.ts through a real Better Auth
 // instance (the auth hooks apply: per-user attempt limits, the admin 2FA-marker rule). TOTP codes
 // are computed here (RFC 6238, HMAC over the key decoded from the otpauth URI), not by Better Auth.
+// Turning 2FA off needs the password plus a current code or a backup code (issue #21). Confirm and
+// disable rotate the session; the new cookie reaches the browser and the next load lists that
+// session as the current one (issue #20: /conta now redirects after both).
 import { setupNetwork } from '@msw/cloudflare';
+import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { env } from 'cloudflare:workers';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { listAccountSessions } from '#lib/server/account/sessions.ts';
 import {
 	confirmEnrolment,
 	disableTwoFactor,
 	normalizeTotpCode,
+	readSecondFactor,
 	readTwoFactorStatus,
-	startEnrolment
+	startEnrolment,
+	type DisableTwoFactorInput
 } from '#lib/server/account/two-factor.ts';
+import { toAuthLocals } from '#lib/server/auth.ts';
 import {
 	createVerifiedUser,
 	Harness,
@@ -39,12 +47,48 @@ afterEach(() => {
 
 const WRONG_PASSWORD = 'definitely not it 0';
 
+/** The one refusal of a disable with a missing or wrong password or code. */
+const REFUSED = { ok: false, code: 'wrong-password-or-code', status: 400 } as const;
+
+/**
+ * The browser of the server-side `auth.api.*` call in progress (the /conta actions). In production
+ * `sveltekitCookies(getRequestEvent)` copies the Set-Cookie of such calls onto the response (the
+ * 303 of confirm and disable included); here the same plugin writes into this client's jar.
+ */
+let cookieTarget: Client | null = null;
+
+const fakeRequestEvent = {
+	cookies: {
+		set(name: string, value: string, options: { maxAge?: number; expires?: Date } = {}) {
+			const expired =
+				value === '' ||
+				options.maxAge === 0 ||
+				(options.expires !== undefined && options.expires.getTime() <= Date.now());
+			if (expired) cookieTarget?.cookies.delete(name);
+			else cookieTarget?.cookies.set(name, value);
+		}
+	}
+};
+
+/** Runs a server-side auth call as `client` (its Set-Cookie lands in the client's jar). */
+async function as<T>(client: Client, run: () => Promise<T>): Promise<T> {
+	cookieTarget = client;
+	try {
+		return await run();
+	} finally {
+		cookieTarget = null;
+	}
+}
+
 function harness(logs?: string[]): Harness {
 	network.resetHandlers();
 	mockNetwork(network);
 	return new Harness(
 		{},
-		logs ? { log: (entry: unknown) => logs.push(JSON.stringify(entry) ?? '') } : {}
+		{
+			...(logs ? { log: (entry: unknown) => logs.push(JSON.stringify(entry) ?? '') } : {}),
+			plugins: [sveltekitCookies(() => (cookieTarget ? fakeRequestEvent : undefined) as never)]
+		}
 	);
 }
 
@@ -121,13 +165,20 @@ async function account(h: Harness, prefix: string) {
 }
 
 /** 2FA on through the HTTP endpoints (the client keeps the rotated session, with the marker). */
-async function enableOverHttp(client: Client): Promise<string> {
+async function enableOverHttp(client: Client): Promise<{ totpURI: string; backupCodes: string[] }> {
 	const enabled = await client.post('/two-factor/enable', { password: PASSWORD });
 	expect(enabled.status).toBe(200);
-	const { totpURI } = (await enabled.json()) as { totpURI: string };
+	const { totpURI, backupCodes } = (await enabled.json()) as {
+		totpURI: string;
+		backupCodes: string[];
+	};
 	const verified = await client.post('/two-factor/verify-totp', { code: await totp(totpURI) });
 	expect(verified.status).toBe(200);
-	return totpURI;
+	return { totpURI, backupCodes };
+}
+
+function disableInput(userId: string, password: string, code?: string): DisableTwoFactorInput {
+	return { db: env.DB, userId, password, ...(code === undefined ? {} : { code }) };
 }
 
 async function enabledFlag(userId: string): Promise<number> {
@@ -143,6 +194,32 @@ async function twoFactorRow(userId: string) {
 		.first<{ secret: string; codes: string }>();
 }
 
+/** Id of the session the client's cookie points at. */
+async function sessionIdOf(client: Client): Promise<string> {
+	const current = toAuthLocals(await client.session());
+	if (!current) throw new Error('signed out');
+	return current.session.id;
+}
+
+/**
+ * After a rotating step: the client holds a new session, and the list the next load renders (the
+ * redirect's GET, with that cookie) marks it as the current one. With the pre-rotation id, the one
+ * a same-request render used, the same session showed up as another one (issue #20).
+ */
+async function expectRotatedAndListedAsCurrent(
+	userId: string,
+	client: Client,
+	before: string
+): Promise<void> {
+	const after = await sessionIdOf(client);
+	expect(after).not.toBe(before);
+	const listed = await listAccountSessions(env.DB, userId, after, Date.now());
+	expect(listed.filter((session) => session.current).map((session) => session.id)).toEqual([after]);
+	expect(listed.some((session) => session.id === before)).toBe(false);
+	const stale = await listAccountSessions(env.DB, userId, before, Date.now());
+	expect(stale.find((session) => session.id === after)?.current).toBe(false);
+}
+
 // --- Tests ------------------------------------------------------------------------------------------
 
 describe('normalizeTotpCode', () => {
@@ -154,6 +231,16 @@ describe('normalizeTotpCode', () => {
 		expect(normalizeTotpCode('1234567')).toBeNull();
 		expect(normalizeTotpCode('12345a')).toBeNull();
 		expect(normalizeTotpCode('')).toBeNull();
+	});
+});
+
+describe('readSecondFactor', () => {
+	it('takes six digits as a TOTP code and other code-shaped input as a backup code', () => {
+		expect(readSecondFactor(' 123 456 ')).toEqual({ method: 'totp', code: '123456' });
+		expect(readSecondFactor(' aB3dE-fG4hI ')).toEqual({ method: 'backup', code: 'aB3dE-fG4hI' });
+		expect(readSecondFactor('')).toBeNull();
+		expect(readSecondFactor('12')).toBeNull();
+		expect(readSecondFactor('<script>')).toBeNull();
 	});
 });
 
@@ -198,16 +285,23 @@ describe('two-step verification from /conta', () => {
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('pending');
 	});
 
-	it('a pending setup can be cancelled with the password', async () => {
+	it('a pending setup is cancelled with the password alone; a code there is never checked', async () => {
 		const h = harness();
 		const { id, headers } = await account(h, 'tf-cancel');
-		expect((await startEnrolment(h.auth, headers(), PASSWORD)).ok).toBe(true);
-		expect(await disableTwoFactor(h.auth, headers(), WRONG_PASSWORD)).toMatchObject({
-			ok: false,
-			code: 'wrong-password'
-		});
+		const started = await startEnrolment(h.auth, headers(), PASSWORD);
+		if (!started.ok) throw new Error(`start failed: ${started.code}`);
+
+		// A valid code is ignored (checking it would confirm the setup): only the password counts.
+		const code = await totp(started.totpURI);
+		expect(
+			await disableTwoFactor(h.auth, headers(), disableInput(id, WRONG_PASSWORD, code))
+		).toEqual({ ok: false, code: 'wrong-password', status: 400 });
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('pending');
-		expect(await disableTwoFactor(h.auth, headers(), PASSWORD)).toEqual({ ok: true });
+		expect(await enabledFlag(id)).toBe(0);
+
+		expect(await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD))).toEqual({
+			ok: true
+		});
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('off');
 		expect(await twoFactorRow(id)).toBeNull();
 	});
@@ -232,21 +326,24 @@ describe('two-step verification from /conta', () => {
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('pending');
 		expect(await enabledFlag(id)).toBe(0);
 
+		const before = await sessionIdOf(client);
 		const code = await totp(started.totpURI);
 		const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
-		expect(await confirmEnrolment(h.auth, headers(), spaced)).toEqual({ ok: true });
+		expect(await as(client, () => confirmEnrolment(h.auth, headers(), spaced))).toEqual({
+			ok: true
+		});
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
 		expect(await enabledFlag(id)).toBe(1);
 
-		// Better Auth rotated the session (the page gets the new cookie through sveltekitCookies);
-		// the new one carries the 2FA marker, the old one is gone.
+		// Better Auth rotated the session; the new one carries the 2FA marker, the old one is gone,
+		// and the page after the redirect lists the new one as the current session.
 		const marked = await env.DB.prepare(
 			'SELECT count(*) AS n FROM "session" WHERE "userId" = ? AND "twoFactorVerifiedAt" IS NOT NULL'
 		)
 			.bind(id)
 			.first<{ n: number }>();
 		expect(marked?.n).toBe(1);
-		expect(await client.session()).toBeNull();
+		await expectRotatedAndListedAsCurrent(id, client, before);
 
 		// From now on, signing in asks for the second factor.
 		const signIn = await h.client().signIn(email);
@@ -254,10 +351,10 @@ describe('two-step verification from /conta', () => {
 		expect(((await signIn.json()) as { twoFactorRedirect?: boolean }).twoFactorRedirect).toBe(true);
 	});
 
-	it('disable needs the password; starting again while on is refused', async () => {
+	it('disable refuses the password alone, a wrong code, or a wrong password, with one answer', async () => {
 		const h = harness();
 		const { id, client } = await account(h, 'tf-disable');
-		await enableOverHttp(client);
+		const { totpURI } = await enableOverHttp(client);
 		const headers = () => client.headers({ origin: h.origin });
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
 
@@ -266,28 +363,79 @@ describe('two-step verification from /conta', () => {
 			code: 'already-enabled',
 			status: 400
 		});
-		expect(await disableTwoFactor(h.auth, headers(), '')).toEqual({
-			ok: false,
-			code: 'wrong-password',
-			status: 400
-		});
-		expect(await disableTwoFactor(h.auth, headers(), WRONG_PASSWORD)).toEqual({
-			ok: false,
-			code: 'wrong-password',
-			status: 400
-		});
+		const code = await totp(totpURI);
+		// Missing a field (the password alone was the old rule): refused before Better Auth.
+		expect(await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD))).toEqual(REFUSED);
+		expect(await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, ''))).toEqual(
+			REFUSED
+		);
+		expect(await disableTwoFactor(h.auth, headers(), disableInput(id, '', code))).toEqual(REFUSED);
+		// A wrong code, or the right code with a wrong password: the same refusal.
+		expect(
+			await disableTwoFactor(
+				h.auth,
+				headers(),
+				disableInput(id, PASSWORD, await wrongCode(totpURI))
+			)
+		).toEqual(REFUSED);
+		expect(
+			await disableTwoFactor(h.auth, headers(), disableInput(id, WRONG_PASSWORD, code))
+		).toEqual(REFUSED);
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
+		expect(await enabledFlag(id)).toBe(1);
+	});
 
-		expect(await disableTwoFactor(h.auth, headers(), PASSWORD)).toEqual({ ok: true });
+	it('the password plus a current TOTP code turns 2FA off; the new session is the current one', async () => {
+		const h = harness();
+		const { id, client } = await account(h, 'tf-disable-totp');
+		const { totpURI } = await enableOverHttp(client);
+		const headers = () => client.headers({ origin: h.origin });
+
+		const before = await sessionIdOf(client);
+		const code = await totp(totpURI);
+		expect(
+			await as(client, () => disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, code)))
+		).toEqual({ ok: true });
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('off');
 		expect(await enabledFlag(id)).toBe(0);
 		expect(await twoFactorRow(id)).toBeNull();
+		await expectRotatedAndListedAsCurrent(id, client, before);
 	});
 
-	it('an admin with 2FA on cannot disable it without the session 2FA marker', async () => {
+	it('a backup code works instead of the app code, and is spent once checked', async () => {
+		const h = harness();
+		const { id, client } = await account(h, 'tf-disable-backup');
+		const { backupCodes } = await enableOverHttp(client);
+		const headers = () => client.headers({ origin: h.origin });
+		const [spent, kept] = backupCodes;
+		if (!spent || !kept) throw new Error('fewer than two backup codes');
+
+		// The code is checked before the password: with a wrong password it is refused and used up.
+		expect(
+			await disableTwoFactor(h.auth, headers(), disableInput(id, WRONG_PASSWORD, spent))
+		).toEqual(REFUSED);
+		expect(await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, spent))).toEqual(
+			REFUSED
+		);
+		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
+
+		const before = await sessionIdOf(client);
+		expect(
+			await as(client, () =>
+				disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, ` ${kept} `))
+			)
+		).toEqual({ ok: true });
+		expect(await readTwoFactorStatus(env.DB, id)).toBe('off');
+		expect(await enabledFlag(id)).toBe(0);
+		// Every backup code went with the row.
+		expect(await twoFactorRow(id)).toBeNull();
+		await expectRotatedAndListedAsCurrent(id, client, before);
+	});
+
+	it('an admin without the session 2FA marker disables only with a code (which marks it)', async () => {
 		const h = harness();
 		const { id, client } = await account(h, 'tf-admin');
-		const uri = await enableOverHttp(client);
+		const { totpURI } = await enableOverHttp(client);
 		await env.DB.prepare(`UPDATE "user" SET role = 'admin' WHERE id = ?`).bind(id).run();
 		// A session of this admin that never went through the second factor.
 		await env.DB.prepare('UPDATE "session" SET "twoFactorVerifiedAt" = NULL WHERE "userId" = ?')
@@ -295,16 +443,13 @@ describe('two-step verification from /conta', () => {
 			.run();
 		const headers = () => client.headers({ origin: h.origin });
 
-		expect(await disableTwoFactor(h.auth, headers(), PASSWORD)).toEqual({
-			ok: false,
-			code: 'two-factor-required',
-			status: 403
-		});
+		expect(await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD))).toEqual(REFUSED);
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
 
-		// After a code in this session (the marker is set), the password is enough.
-		expect(await confirmEnrolment(h.auth, headers(), await totp(uri))).toEqual({ ok: true });
-		expect(await disableTwoFactor(h.auth, headers(), PASSWORD)).toEqual({ ok: true });
+		// The code of the same form verifies the second factor in this session first.
+		expect(
+			await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, await totp(totpURI)))
+		).toEqual({ ok: true });
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('off');
 	});
 
@@ -320,6 +465,27 @@ describe('two-step verification from /conta', () => {
 		expect(limited && !limited.ok ? limited.retryAfter : 0).toBeGreaterThan(0);
 	});
 
+	it('codes tried on disable are limited per user (429 + Retry-After)', async () => {
+		const h = harness();
+		const { id, client } = await account(h, 'tf-disable-limit');
+		const { totpURI } = await enableOverHttp(client);
+		const headers = () => client.headers({ origin: h.origin });
+		const wrong = await wrongCode(totpURI);
+
+		expect(
+			await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, 'zzzzz-zzzzz'))
+		).toEqual(REFUSED);
+		const results: Awaited<ReturnType<typeof disableTwoFactor>>[] = [];
+		for (let attempt = 0; attempt < 7; attempt += 1) {
+			results.push(await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, wrong)));
+		}
+		expect(results[0]).toEqual(REFUSED);
+		const limited = results.find((result) => !result.ok && result.code === 'RATE_LIMITED');
+		expect(limited).toMatchObject({ ok: false, code: 'RATE_LIMITED', status: 429 });
+		expect(limited && !limited.ok ? limited.retryAfter : 0).toBeGreaterThan(0);
+		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
+	});
+
 	it('without a session every step is refused as unauthenticated', async () => {
 		const h = harness();
 		const headers = new Headers({ origin: h.origin, 'cf-connecting-ip': '10.9.9.9' });
@@ -329,11 +495,9 @@ describe('two-step verification from /conta', () => {
 			status: 401
 		});
 		expect(await confirmEnrolment(h.auth, headers, '123456')).toMatchObject({ ok: false });
-		expect(await disableTwoFactor(h.auth, headers, PASSWORD)).toMatchObject({
-			ok: false,
-			code: 'unauthenticated',
-			status: 401
-		});
+		expect(
+			await disableTwoFactor(h.auth, headers, disableInput('no-such-user', PASSWORD, '123456'))
+		).toMatchObject({ ok: false });
 	});
 
 	it('nothing secret reaches the logs', async () => {
@@ -351,7 +515,7 @@ describe('two-step verification from /conta', () => {
 			vi.spyOn(console, level).mockImplementation(capture(level));
 		}
 		const h = harness(lines);
-		const { id, headers } = await account(h, 'tf-logs');
+		const { id, client, headers } = await account(h, 'tf-logs');
 
 		// Failures and successes of every step.
 		await startEnrolment(h.auth, headers(), WRONG_PASSWORD);
@@ -359,10 +523,17 @@ describe('two-step verification from /conta', () => {
 		if (!started.ok) throw new Error(`start failed: ${started.code}`);
 		const wrong = await wrongCode(started.totpURI);
 		await confirmEnrolment(h.auth, headers(), wrong);
-		await disableTwoFactor(h.auth, headers(), WRONG_PASSWORD);
+		await disableTwoFactor(h.auth, headers(), disableInput(id, WRONG_PASSWORD));
 		const code = await totp(started.totpURI);
-		expect(await confirmEnrolment(h.auth, headers(), code)).toEqual({ ok: true });
+		expect(await as(client, () => confirmEnrolment(h.auth, headers(), code))).toEqual({ ok: true });
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
+		await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, wrong));
+		await disableTwoFactor(h.auth, headers(), disableInput(id, WRONG_PASSWORD, code));
+		await disableTwoFactor(
+			h.auth,
+			headers(),
+			disableInput(id, WRONG_PASSWORD, started.backupCodes[0] ?? '')
+		);
 
 		const base32 = new URL(started.totpURI).searchParams.get('secret') ?? '';
 		const secrets = [

@@ -9,9 +9,16 @@
 //     in clear. `user.twoFactorEnabled` stays false; starting again replaces a pending enrolment.
 //   - `/two-factor/verify-totp` with the session's code marks the row verified, sets
 //     `twoFactorEnabled = true` and rotates the session (the auth after-hook sets the 2FA marker on
-//     the new one). A wrong code is 401 INVALID_CODE (mapped here to 400 'invalid-code').
+//     the new one). A wrong code is 401 INVALID_CODE (mapped here to 400 'invalid-code'). Once 2FA
+//     is on, the same call (and `/two-factor/verify-backup-code`, which spends the code) only
+//     checks the code: no rotation, and the after-hook marks the current session.
 //   - `/two-factor/disable` checks the password, sets `twoFactorEnabled = false`, deletes the row
 //     and rotates the session. It also cancels a pending enrolment.
+//
+// Turning 2FA off (issue #21) also needs the second factor: a current TOTP code or an unused
+// backup code, checked first with the same endpoints as the sign-in 2FA step (so the same per-user
+// limits apply), then the password through `/two-factor/disable`. A wrong code and a wrong password
+// get one answer ('wrong-password-or-code'), so a refusal never says which factor failed.
 //
 // The URI and the backup codes are secrets: they go back to the caller once and are never stored,
 // logged or put in a cookie or URL by this module.
@@ -22,7 +29,7 @@ import { readAuthError } from './auth-actions.ts';
 
 export type TwoFactorAuthApi = Pick<
 	Auth['api'],
-	'enableTwoFactor' | 'verifyTOTP' | 'disableTwoFactor'
+	'enableTwoFactor' | 'verifyTOTP' | 'verifyBackupCode' | 'disableTwoFactor'
 >;
 
 /** `locals.auth` (or a test harness's instance): only the 2FA endpoints are used. */
@@ -35,6 +42,8 @@ export type TwoFactorErrorCode =
 	| 'wrong-password'
 	/** Malformed or wrong 6-digit code. */
 	| 'invalid-code'
+	/** Disable while on: wrong or missing password or code (one answer, the factor is not named). */
+	| 'wrong-password-or-code'
 	/** Admin with 2FA on whose session has no 2FA marker: verify the second factor first. */
 	| 'two-factor-required'
 	/** Start while 2FA is already on. */
@@ -67,10 +76,29 @@ export type TwoFactorStatus = 'off' | 'pending' | 'on';
 
 export const TOTP_DIGITS = 6;
 
+/** Shape of a backup code as the sign-in 2FA step accepts it (Better Auth: `xxxxx-xxxxx`). */
+const BACKUP_CODE_PATTERN = /^[A-Za-z0-9-]{6,32}$/;
+
 /** "123 456" / "123-456" → "123456"; null unless exactly six digits remain. */
 export function normalizeTotpCode(value: string): string | null {
 	const code = value.replace(/[\s-]/g, '');
 	return code.length === TOTP_DIGITS && /^\d+$/.test(code) ? code : null;
+}
+
+export interface SecondFactor {
+	method: 'totp' | 'backup';
+	code: string;
+}
+
+/**
+ * One field for either factor: six digits (spaces or a hyphen allowed) are a TOTP code, anything
+ * else code-shaped is a backup code (trimmed, otherwise as typed); null when it is neither.
+ */
+export function readSecondFactor(value: string): SecondFactor | null {
+	const totp = normalizeTotpCode(value);
+	if (totp) return { method: 'totp', code: totp };
+	const code = value.trim();
+	return BACKUP_CODE_PATTERN.test(code) ? { method: 'backup', code } : null;
 }
 
 function failure(error: unknown): TwoFactorFailure {
@@ -80,6 +108,7 @@ function failure(error: unknown): TwoFactorFailure {
 		case 'INVALID_PASSWORD':
 			return { ok: false, code: 'wrong-password', status: 400 };
 		case 'INVALID_CODE':
+		case 'INVALID_BACKUP_CODE':
 			return { ok: false, code: 'invalid-code', status: 400 };
 		case 'TWO_FACTOR_REQUIRED':
 			return { ok: false, code: 'two-factor-required', status: 403 };
@@ -87,6 +116,7 @@ function failure(error: unknown): TwoFactorFailure {
 			return { ok: false, code: 'already-enabled', status: 400 };
 		case 'TOTP_NOT_ENABLED':
 		case 'TWO_FACTOR_NOT_ENABLED':
+		case 'BACKUP_CODES_NOT_ENABLED':
 			return { ok: false, code: 'not-enrolling', status: 400 };
 		case 'RATE_LIMITED':
 			return {
@@ -101,6 +131,16 @@ function failure(error: unknown): TwoFactorFailure {
 			if (read.status === 401) return { ok: false, code: 'unauthenticated', status: 401 };
 			return { ok: false, code: 'failed', status: read.status >= 500 ? read.status : 400 };
 	}
+}
+
+function refused(): TwoFactorFailure {
+	return { ok: false, code: 'wrong-password-or-code', status: 400 };
+}
+
+/** A wrong password or a wrong code of the disable step → the one refusal; anything else as is. */
+function disableFailure(error: unknown): TwoFactorFailure {
+	const result = failure(error);
+	return result.code === 'wrong-password' || result.code === 'invalid-code' ? refused() : result;
 }
 
 function enrolmentOf(value: unknown): Omit<TwoFactorEnrolment, 'ok'> | null {
@@ -154,18 +194,59 @@ export async function confirmEnrolment(
 	}
 }
 
-/** Turns 2FA off (or cancels a pending enrolment); needs the password. */
+export interface DisableTwoFactorInput {
+	/** D1 and the session's user: the current state decides whether a code is needed. */
+	db: D1Database;
+	userId: string;
+	password: string;
+	/** Current TOTP code or an unused backup code; required unless only a setup is pending. */
+	code?: string;
+}
+
+/**
+ * Turns 2FA off: the password plus a current TOTP code or an unused backup code. The code is
+ * checked first (`/two-factor/verify-totp` or `/verify-backup-code`, as in the sign-in 2FA step;
+ * for an admin it also sets the session's 2FA marker), then the password (`/two-factor/disable`).
+ * A missing or malformed field is refused before Better Auth (no attempt counted); a wrong code or
+ * a wrong password gets 'wrong-password-or-code'. A backup code that passed is spent even when the
+ * password is then wrong: Better Auth has no password check without side effects that the auth
+ * hooks limit, and the password is only known to be right once 2FA is off.
+ *
+ * A pending setup (2FA not on yet) is cancelled with the password alone, and any code is ignored
+ * there: checking it would confirm the setup instead.
+ */
 export async function disableTwoFactor(
 	auth: TwoFactorAuth,
 	headers: Headers,
-	password: string
+	input: DisableTwoFactorInput
 ): Promise<{ ok: true } | TwoFactorFailure> {
-	if (!password) return { ok: false, code: 'wrong-password', status: 400 };
+	const { db, userId, password } = input;
+	const status = await readTwoFactorStatus(db, userId);
+	if (status === 'pending') {
+		if (!password) return { ok: false, code: 'wrong-password', status: 400 };
+		try {
+			await auth.api.disableTwoFactor({ headers, body: { password } });
+			return { ok: true };
+		} catch (error) {
+			return failure(error);
+		}
+	}
+	const factor = readSecondFactor(input.code ?? '');
+	if (!password || !factor) return refused();
+	try {
+		if (factor.method === 'totp') {
+			await auth.api.verifyTOTP({ headers, body: { code: factor.code } });
+		} else {
+			await auth.api.verifyBackupCode({ headers, body: { code: factor.code } });
+		}
+	} catch (error) {
+		return disableFailure(error);
+	}
 	try {
 		await auth.api.disableTwoFactor({ headers, body: { password } });
 		return { ok: true };
 	} catch (error) {
-		return failure(error);
+		return disableFailure(error);
 	}
 }
 

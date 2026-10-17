@@ -6,9 +6,11 @@
 //   - CSRF: SvelteKit's origin check on form actions (kept on; never disabled for this route);
 //   - sensitive actions: password change needs the current password, e-mail change a fresh
 //     session or the password, closure the password plus the mailed confirmation link;
-//   - two-step verification (FX3.4): start and disable need the password, confirm the first code
+//   - two-step verification (FX3.4): start needs the password, confirm the first code, disable
+//     the password plus a current code or a backup code (cancelling a pending setup: the password)
 //     (admins with 2FA on also need the session's 2FA marker, enforced by the auth hooks). The
 //     otpauth URI and the backup codes go out only in the `?/twoFactorStart` action result;
+//     confirm and disable answer 303 /conta?2fa=…#duas-etapas (the session rotated);
 //   - responses are `Cache-Control: private, no-store` (load, and the 2FA actions' own JSON
 //     results when enhanced; set once per request, as SvelteKit refuses a second set).
 import { error, fail, redirect, type ActionFailure, type RequestEvent } from '@sveltejs/kit';
@@ -102,6 +104,7 @@ export const load: PageServerLoad = async (event) => {
 		twoFactor: { status: twoFactorStatus, admin: user.role === 'admin' },
 		fresh: isFreshSession(session, undefined, now),
 		emailChanged: url.searchParams.get('email') === 'alterado',
+		twoFactorNotice: twoFactorNotice(url),
 		limits: {
 			bioMax: BIO_MAX,
 			nicknameMin: USERNAME_MIN,
@@ -301,19 +304,44 @@ export const actions: Actions = {
 		const code = field(await event.request.formData(), 'code', 16);
 		const result = await confirmEnrolment(auth, event.request.headers, code);
 		if (!result.ok) return authFailure('twoFactor', result);
-		return { form: 'twoFactor', ok: true, detail: 'enabled' };
+		redirect(303, twoFactorDone('enabled'));
 	},
 
-	/** Password → 2FA off, or a pending setup cancelled (admins: needs the 2FA marker). */
+	/**
+	 * Password + current code or backup code → 2FA off (one refusal for either factor wrong; for an
+	 * admin the code also sets the session's 2FA marker), or password → pending setup cancelled.
+	 */
 	twoFactorDisable: async (event): Result => {
 		noStore(event);
 		const ctx = open(event, 'twoFactor');
 		if (!('db' in ctx)) return ctx;
 		const auth = event.locals.auth;
 		if (!auth) return reject(503, { form: 'twoFactor', error: 'unavailable' });
-		const password = field(await event.request.formData(), 'password');
-		const result = await disableTwoFactor(auth, event.request.headers, password);
+		const data = await event.request.formData();
+		const result = await disableTwoFactor(auth, event.request.headers, {
+			db: ctx.db,
+			userId: ctx.user.id,
+			password: field(data, 'password'),
+			code: field(data, 'code', 64)
+		});
 		if (!result.ok) return authFailure('twoFactor', result);
-		return { form: 'twoFactor', ok: true, detail: 'disabled' };
+		redirect(303, twoFactorDone('disabled'));
 	}
 };
+
+// Confirm and disable rotate the session: Better Auth deletes the old row and sends the new cookie
+// on this response (sveltekitCookies → event.cookies, which SvelteKit also puts on redirects).
+// Rendering /conta in the same request would still use the old `locals.session` and list the new
+// session as another one, with a button that signs the user out (issue #20). So both answer 303
+// and the next load reads the new cookie; the success notice rides on the query, like
+// `?email=alterado`.
+function twoFactorDone(detail: 'enabled' | 'disabled'): string {
+	return `/conta?2fa=${detail === 'enabled' ? 'ativada' : 'desativada'}#duas-etapas`;
+}
+
+/** Success notice of the redirect above, as the 2FA form's feedback; null for anything else. */
+function twoFactorNotice(url: URL): FormFeedback | null {
+	const value = url.searchParams.get('2fa');
+	const detail = value === 'ativada' ? 'enabled' : value === 'desativada' ? 'disabled' : null;
+	return detail ? { form: 'twoFactor', ok: true, detail } : null;
+}

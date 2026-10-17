@@ -4,7 +4,8 @@
 	//   ?/twoFactorStart (password) → the action result carries the otpauth URI and the backup
 	//     codes, rendered here once (QR, manual key, codes with copy/download);
 	//   ?/twoFactorConfirm (6-digit code) → 2FA on;
-	//   ?/twoFactorDisable (password) → 2FA off, or a pending setup cancelled.
+	//   ?/twoFactorDisable (password + current code or backup code) → 2FA off; (password alone)
+	//     → a pending setup cancelled. Confirm and disable redirect back with a success notice.
 	// The URI and the codes only live in the action result and, with JavaScript, in this
 	// component's memory until the setup is confirmed or cancelled: never in storage, a cookie or
 	// the URL.
@@ -15,7 +16,7 @@
 	import { qrSvg as serverQrSvg } from '#lib/qr/index.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import Field from '#lib/components/primitives/Field.svelte';
-	import Feedback from './Feedback.svelte';
+	import { feedbackMessage } from './format.ts';
 	import {
 		feedbackFor,
 		noEnhance,
@@ -226,6 +227,29 @@
 					<input {...control} name="password" type="password" autocomplete="current-password" />
 				{/snippet}
 			</Field>
+			{#if status === 'on'}
+				<!-- The second factor too (issue #21): a code from the app or a backup code. Not while
+				     a setup is pending: checking a code there would confirm it. -->
+				<Field
+					id="{uid}-disable-code"
+					label={m.conta_2fa_disable_code_label()}
+					hint={m.conta_2fa_disable_code_hint()}
+					required
+				>
+					{#snippet children(control)}
+						<input
+							{...control}
+							class="input acc-mono"
+							name="code"
+							type="text"
+							autocomplete="one-time-code"
+							autocapitalize="off"
+							spellcheck={false}
+							maxlength={32}
+						/>
+					{/snippet}
+				</Field>
+			{/if}
 			<div class="acc-row">
 				<Button variant={status === 'on' ? 'danger' : 'ghost'} type="submit">
 					{status === 'on' ? m.conta_2fa_disable_submit() : m.conta_2fa_cancel_submit()}
@@ -234,10 +258,37 @@
 		</form>
 	{/if}
 
-	<Feedback feedback={mine} />
+	<!-- The live regions of Feedback.svelte (always mounted, so changes are announced), plus the
+	     disable refusal's own wording: one message for a wrong password or a wrong code, so the
+	     answer never says which factor failed. -->
+	<div class="feedback" role="status" aria-live="polite">
+		{#if mine?.ok}<p class="ok">{feedbackMessage(mine)}</p>{/if}
+	</div>
+	<div class="feedback" role="alert">
+		{#if mine && !mine.ok}
+			<p class="error">
+				{mine.error === 'wrong-password-or-code'
+					? m.conta_2fa_error_disable()
+					: feedbackMessage(mine)}
+			</p>
+		{/if}
+	</div>
 </div>
 
 <style>
+	.feedback p {
+		margin: 0;
+		font: 13px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
+	}
+
+	.feedback .ok {
+		color: #9fdcb8;
+	}
+
+	.feedback .error {
+		color: #ffb4a8;
+	}
+
 	.tf,
 	.setup {
 		display: grid;
