@@ -321,7 +321,7 @@
 	"biblioteca_listen_current": "A · curva atual",
 	"biblioteca_listen_note": "Níveis igualados por levelDb. MP3 da barra de áudio ou ruído rosa; volume só no navegador. Ouvir não grava no cabo.",
 	"biblioteca_listen_tape": "B · esta fita",
-	"biblioteca_live_note": "Áudio real da prévia, após o volume do navegador. Não é leitura do cabo.",
+	"biblioteca_live_note": "Áudio real da prévia, antes do volume do navegador. Nível mede a fonte antes da curva; Preamp, a saída do lado A/B escolhido na ficha. Salto continua calculado. Não é leitura do cabo.",
 	"biblioteca_local": "Minha biblioteca local",
 	"biblioteca_local_error": "Não foi possível salvar ou carregar a biblioteca local. Os presets oficiais continuam disponíveis.",
 	"biblioteca_local_license": "Curva local · licença não atribuída",

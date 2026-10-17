@@ -3,6 +3,7 @@
 	import { encodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, ABSide, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
+	import { tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
@@ -23,7 +24,8 @@
 		verdict,
 		audioState,
 		onClose,
-		onStatus
+		onStatus,
+		onOutputMeter
 	}: {
 		tape: Tape;
 		current: CurveData;
@@ -34,11 +36,15 @@
 		audioState: AudioEngineState;
 		onClose: () => void;
 		onStatus: (message: string) => void;
+		/** Real VU frames of the selected A/B chain output (post-curve, post-trim, pre-volume). */
+		onOutputMeter?: (update: MeterUpdate) => void;
 	} = $props();
 	/** Session tag of this sheet's comparison (Transport, navbar). */
 	const BIBLIOTECA_SESSION = 'biblioteca';
 	const id = $props.id();
 	let preview: ABPreview | null = null;
+	/** The preview this sheet is audibly running; its selected chain feeds the Preamp dial. */
+	let audible = $state.raw<ABPreview | null>(null);
 	let side = $state<ABSide>('B');
 	let listening = $state(false);
 	let busy = $state(false);
@@ -49,6 +55,14 @@
 	let license = $state<'' | 'CC0-1.0' | 'CC-BY-4.0'>('');
 	let author = $state('');
 	const code = $derived(encodeS1(tape));
+	const meterReference = $derived(app?.state.meterRef.value ?? -18);
+	// A boolean, so the 5 Hz position updates of the engine state never rebuild the tap.
+	const metering = $derived(
+		listening && audioState.playing && audioState.session === BIBLIOTECA_SESSION
+	);
+	const outputNode = $derived(
+		metering && audible ? (side === 'A' ? audible.a.output : audible.b.output) : null
+	);
 	const share = $derived.by(() => {
 		try {
 			const url = presetUrl(origin, code);
@@ -105,6 +119,7 @@
 			preview.dispose();
 			preview = null;
 		}
+		audible = null;
 		listening = false;
 		busy = false;
 	}
@@ -115,6 +130,33 @@
 		comparedTape = tape;
 	});
 	onDestroy(stop);
+	// Preamp dial: the selected chain only, never the shared meter bus or the other side.
+	$effect(() => {
+		const node = outputNode;
+		if (node === null) return;
+		const reference = meterReference;
+		let cancelled = false;
+		let meter: MeterTap | null = null;
+		let unsubscribe: (() => void) | undefined;
+		void tap(node, { reference, kinds: ['vu'] })
+			.then((source) => {
+				if (cancelled) {
+					source.disconnect();
+					return;
+				}
+				meter = source;
+				unsubscribe = source.subscribe((update) => onOutputMeter?.(update));
+			})
+			.catch((error: unknown) => {
+				if (!cancelled) console.error('Biblioteca output meter failed', error);
+			});
+		return () => {
+			cancelled = true;
+			unsubscribe?.();
+			meter?.disconnect();
+			onOutputMeter?.({ mode: 'data', frame: null });
+		};
+	});
 
 	async function listen(selected: ABSide) {
 		if (!app || busy) return;
@@ -140,6 +182,7 @@
 				return;
 			}
 			startedBy = engine;
+			audible = preview;
 			listening = true;
 		} catch (error) {
 			stop();

@@ -5,7 +5,7 @@
 	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import { IDLE_STATE, type AudioEngineState } from '#lib/audio/engine.ts';
-	import { tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
+	import { tap, type MeterTap, type MeterUpdate, type TapOptions } from '#lib/audio/meters.ts';
 	// Direct chart imports (FUX.B): the charts barrel would bring every chart into the page.
 	import MiniCurve from '#lib/charts/MiniCurve.svelte';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
@@ -60,6 +60,10 @@
 	let verdict = $state.raw<GateResult | null>(null);
 	let audioState = $state.raw<AudioEngineState>({ ...IDLE_STATE });
 	let meterUpdate = $state.raw<MeterUpdate>({ mode: 'data', frame: null });
+	/** VU of the source before any curve (Nível). */
+	let sourceUpdate = $state.raw<MeterUpdate>({ mode: 'data', frame: null });
+	/** VU of the sheet's selected A/B chain output (Preamp); DATA without a sheet audition. */
+	let outputUpdate = $state.raw<MeterUpdate>({ mode: 'data', frame: null });
 	const audioReady = $derived(audioState.ready);
 	const engine = $derived(app?.audio);
 	const reference = $derived(app?.state.meterRef.value ?? -18);
@@ -118,26 +122,23 @@
 			audioState = state;
 		});
 	});
-	$effect(() => {
-		if (!engine || !audioReady) return;
+	/** One pre-volume tap; its teardown disconnects it and leaves the dial in DATA. */
+	function listenTo(
+		node: AudioNode,
+		options: TapOptions,
+		onUpdate: (update: MeterUpdate) => void
+	): () => void {
 		let cancelled = false;
 		let meter: MeterTap | null = null;
 		let unsubscribe: (() => void) | undefined;
-		// Pre-volume meter bus: the reading reflects the signal, never the monitor volume.
-		void tap(engine.getMeterBus(), {
-			reference,
-			kinds: ['vu', 'ppm', 'loudness', 'correlation'],
-			ppmType: 'I'
-		})
+		void tap(node, options)
 			.then((source) => {
 				if (cancelled) {
 					source.disconnect();
 					return;
 				}
 				meter = source;
-				unsubscribe = source.subscribe((update) => {
-					meterUpdate = update;
-				});
+				unsubscribe = source.subscribe(onUpdate);
 			})
 			.catch((error: unknown) => {
 				if (!cancelled) {
@@ -149,7 +150,28 @@
 			cancelled = true;
 			unsubscribe?.();
 			meter?.disconnect();
-			meterUpdate = { mode: 'data', frame: null };
+			onUpdate({ mode: 'data', frame: null });
+		};
+	}
+	$effect(() => {
+		if (!engine || !audioReady) return;
+		// Pre-volume taps: readings reflect the signal, never the monitor volume.
+		const teardowns = [
+			// What is playing (post-curve sum): correlation and peak.
+			listenTo(
+				engine.getMeterBus(),
+				{ reference, kinds: ['vu', 'ppm', 'loudness', 'correlation'], ppmType: 'I' },
+				(update) => {
+					meterUpdate = update;
+				}
+			),
+			// The source before any curve (the bus every chain hangs off): level.
+			listenTo(engine.getSourceBus(), { reference, kinds: ['vu'] }, (update) => {
+				sourceUpdate = update;
+			})
+		];
+		return () => {
+			for (const teardown of teardowns) teardown();
 		};
 	});
 	$effect(() => {
@@ -238,6 +260,8 @@
 		reference={comparison}
 		{verdict}
 		update={meterUpdate}
+		source={sourceUpdate}
+		output={outputUpdate}
 		{locale}
 	/>
 	<section class="archive" aria-labelledby="{id}-vault">
@@ -514,6 +538,9 @@
 				}}
 				onStatus={(message) => {
 					notice = message;
+				}}
+				onOutputMeter={(update) => {
+					outputUpdate = update;
 				}}
 			/>{/key}
 	{:catch}

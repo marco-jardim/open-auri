@@ -7,6 +7,8 @@ function messages(locale: string): Record<string, string> {
 	const values: Record<string, string> = JSON.parse(
 		readFileSync(existsSync(staging) ? staging : merged, 'utf8')
 	);
+	const vu = new URL(`../../../../messages/_staging/BIBVU.${locale}.json`, import.meta.url);
+	if (existsSync(vu)) Object.assign(values, JSON.parse(readFileSync(vu, 'utf8')));
 	return Object.fromEntries(
 		Object.entries(values).filter(([key]) => key.startsWith('biblioteca_'))
 	);
@@ -31,4 +33,11 @@ test('both locales supply all Biblioteca copy and obey the publication copy rule
 			expect(pt[key[1]], `${file}: ${key[1]}`).toBeDefined();
 		}
 	}
+});
+
+test('the bridge explains pre-volume metering and the calculated jump in both locales', () => {
+	expect(messages('pt-BR').biblioteca_live_note).toContain('antes do volume');
+	expect(messages('pt-BR').biblioteca_live_note).toContain('Salto continua calculado');
+	expect(messages('en-US').biblioteca_live_note).toContain('before browser volume');
+	expect(messages('en-US').biblioteca_live_note).toContain('Jump stays calculated');
 });

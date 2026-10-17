@@ -321,7 +321,7 @@
 	"biblioteca_listen_current": "A · current curve",
 	"biblioteca_listen_note": "Levels matched with levelDb. The audio bar's MP3 or pink noise; browser-only volume. Listening never writes to the cable.",
 	"biblioteca_listen_tape": "B · this tape",
-	"biblioteca_live_note": "Real preview audio, after browser volume. Not cable read-back.",
+	"biblioteca_live_note": "Real preview audio, before browser volume. Level reads the source before the curve; Preamp, the output of the A/B side selected in the sheet. Jump stays calculated. Not cable read-back.",
 	"biblioteca_local": "My local library",
 	"biblioteca_local_error": "Could not save or load the local library. Official presets remain available.",
 	"biblioteca_local_license": "Local curve · no license assigned",

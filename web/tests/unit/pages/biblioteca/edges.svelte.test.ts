@@ -202,7 +202,7 @@ test('a data dial has no needle without data and clamps only its drawing, not th
 	expect(screen.container.querySelector('.needle')?.getAttribute('transform')).toBe(
 		'rotate(50 100 112)'
 	);
-	await expect.element(page.getByRole('img')).toHaveAccessibleName('Output: 6.0 dB');
+	await expect.element(page.getByRole('meter')).toHaveAccessibleName('Output: 6.0 dB');
 	await screen.rerender({ value: -30 });
 	expect(screen.container.querySelector('.needle')?.getAttribute('transform')).toBe(
 		'rotate(-50 100 112)'

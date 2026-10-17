@@ -1,16 +1,11 @@
 <!--
-	Biblioteca console (spec §1.4b, §3.6). Two honest modes, labelled by the Chip primitive:
-	AO VIVO only while the engine delivers real meter frames (VU L/R, correlation, PPM, LUFS);
-	otherwise DADOS: static dials of calculated electrical figures (level, preamp, correlator,
-	output peak, jump). The DATA needles never move on their own: no ballistics, no animation.
+	Biblioteca console (spec §1.4b, §3.6). Two honest modes, labelled by the Chip primitive.
+	The same five dials (same faces) stay mounted in both modes. Each dial is AO VIVO only while
+	its own tap delivers real worklet readings; otherwise it keeps its calculated DADOS value.
+	No dial ever mirrors another one's tap.
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
-	import VuMeter from '#lib/components/meters/VuMeter.svelte';
-	import PpmBar from '#lib/components/meters/PpmBar.svelte';
-	import CorrelationMeter from '#lib/components/meters/CorrelationMeter.svelte';
-	import LoudnessReadout from '#lib/components/meters/LoudnessReadout.svelte';
 	import { Chip } from '#lib/components/primitives/index.ts';
 	import type { MeterUpdate } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';
@@ -23,12 +18,15 @@
 		type GateResult
 	} from './archive.ts';
 
+	const IDLE: MeterUpdate = { mode: 'data', frame: null };
 	let {
 		curve,
 		current,
 		reference,
 		verdict,
 		update,
+		source = IDLE,
+		output = IDLE,
 		locale
 	}: {
 		curve: CurveData;
@@ -37,7 +35,12 @@
 		/** Comparison reference chosen in the page (defaults to the editor curve). */
 		reference?: CurveData;
 		verdict: GateResult | null;
+		/** Pre-volume meter bus (what is playing, post-curve): correlation and peak. */
 		update: MeterUpdate;
+		/** Pre-volume source bus, before any curve: level. */
+		source?: MeterUpdate;
+		/** Selected A/B chain output of the track sheet (post-curve, post-trim): preamp. */
+		output?: MeterUpdate;
 		locale: Locale;
 	} = $props();
 	const data = $derived(dataReadings(curve, current, verdict));
@@ -45,8 +48,27 @@
 		reference && reference !== current ? dataReadings(curve, reference, verdict) : data
 	);
 	const correlation = $derived(correlationIndex(diff.rmsDb));
-	const live = $derived(update.mode === 'live' && update.frame !== null);
-	const frame = $derived(live ? update.frame : null);
+	const frame = $derived(update.mode === 'live' ? update.frame : null);
+	const sourceFrame = $derived(source.mode === 'live' ? source.frame : null);
+	const outputFrame = $derived(output.mode === 'live' ? output.frame : null);
+	function finite(value: number | undefined): number | null {
+		return typeof value === 'number' && Number.isFinite(value) ? value : null;
+	}
+	function stereoMax(left: number | undefined, right: number | undefined): number | null {
+		const l = finite(left);
+		const r = finite(right);
+		return l === null ? r : r === null ? l : Math.max(l, r);
+	}
+	// Each dial reads its own tap. Salto would need both A and B measured at once; only the
+	// selected side is tapped, so it stays calculated DADOS.
+	const level = $derived(stereoMax(sourceFrame?.vuL, sourceFrame?.vuR));
+	const preamp = $derived(stereoMax(outputFrame?.vuL, outputFrame?.vuR));
+	const liveCorrelation = $derived(finite(frame?.correlation));
+	// The page requests PPM I, not truePeak: never use the unrequested truePeakDb field.
+	const peak = $derived(stereoMax(frame?.ppmL, frame?.ppmR));
+	const live = $derived(
+		level !== null || preamp !== null || liveCorrelation !== null || peak !== null
+	);
 </script>
 
 <section class="console" aria-label={m.biblioteca_console()} data-mode={live ? 'live' : 'data'}>
@@ -55,50 +77,51 @@
 		<Chip mode={live ? 'live' : 'data'} aria-live="polite" />
 		<span class="enamel">{m.biblioteca_enamel()}</span>
 	</div>
-	{#if live}
-		<div class="live-meters">
-			<div class="vu-shell"><VuMeter mode="live" live={frame?.vuL} label="VU L" /></div>
-			<div class="vu-shell"><VuMeter mode="live" live={frame?.vuR} label="VU R" /></div>
-			<div class="correlation">
-				<CorrelationMeter
-					mode="live"
-					live={frame?.correlation}
-					label={m.biblioteca_correlation()}
-				/>
-			</div>
-			<div class="digital">
-				<PpmBar
-					mode="live"
-					live={frame ? Math.max(frame.ppmL, frame.ppmR) : null}
-					label="PPM I · L/R max"
-				/>
-			</div>
-			<div class="digital">
-				<LoudnessReadout mode="live" live={frame} label="LUFS-M / LUFS-S" />
-			</div>
-		</div>
-	{:else}
-		<div class="data-meters">
-			<DataDial label={m.biblioteca_level()} value={data.levelDb} min={-30} max={3} {locale} />
-			<DataDial label={m.biblioteca_preamp()} value={data.preampDb} min={-30} max={3} {locale} />
-			<DataDial
-				label={m.biblioteca_correlator()}
-				value={correlation}
-				min={-1}
-				max={1}
-				unit=""
-				digits={2}
-				signed
-				detail={m.biblioteca_correlator_detail({
-					rms: number(diff.rmsDb, locale, 2),
-					max: number(diff.maxDb, locale, 2)
-				})}
-				{locale}
-			/>
-			<DataDial label={m.biblioteca_peak()} value={data.peakDb} min={-30} max={3} {locale} />
-			<DataDial label={m.biblioteca_jump()} value={data.jumpDb} min={-12} max={12} {locale} />
-		</div>
-	{/if}
+	<div class="data-meters">
+		<DataDial
+			label={m.biblioteca_level()}
+			value={data.levelDb}
+			live={level}
+			liveUnit="VU"
+			min={-30}
+			max={3}
+			{locale}
+		/>
+		<DataDial
+			label={m.biblioteca_preamp()}
+			value={data.preampDb}
+			live={preamp}
+			liveUnit="VU"
+			min={-30}
+			max={3}
+			{locale}
+		/>
+		<DataDial
+			label={m.biblioteca_correlator()}
+			value={correlation}
+			live={liveCorrelation}
+			min={-1}
+			max={1}
+			unit=""
+			digits={2}
+			signed
+			detail={m.biblioteca_correlator_detail({
+				rms: number(diff.rmsDb, locale, 2),
+				max: number(diff.maxDb, locale, 2)
+			})}
+			{locale}
+		/>
+		<DataDial
+			label={m.biblioteca_peak()}
+			value={data.peakDb}
+			live={peak}
+			liveUnit="dBFS"
+			min={-30}
+			max={3}
+			{locale}
+		/>
+		<DataDial label={m.biblioteca_jump()} value={data.jumpDb} min={-12} max={12} {locale} />
+	</div>
 	<div class="meter-note">
 		<span>{curve.name}</span>
 		<span>{live ? m.biblioteca_live_note() : m.biblioteca_data_note()}</span>
@@ -155,35 +178,11 @@
 		font-family: var(--type, 'Courier Prime', monospace);
 		font-size: var(--fs-caption, 12px);
 	}
-	.data-meters,
-	.live-meters {
+	.data-meters {
 		display: grid;
 		grid-template-columns: 1fr 1fr 0.88fr 1fr 1fr;
 		gap: 15px;
-		align-items: center;
-	}
-	.vu-shell {
-		background: radial-gradient(ellipse at 25% 5%, #fff6ca, #e1cfa0 70%, #bdab7e);
-		border: 8px solid #242720;
-		border-radius: 14px;
-		--oa-meter-ink: #302c23;
-	}
-	.vu-shell :global(.oa-vu) {
-		display: flex;
-		width: 100%;
-	}
-	.correlation,
-	.digital {
-		padding: 12px;
-		background: #252e22;
-		color: #eee8cf;
-		border-radius: 4px;
-		overflow-wrap: anywhere;
-	}
-	.digital :global(.oa-ppm),
-	.digital :global(.oa-loudness-list) {
-		display: flex;
-		flex-wrap: wrap;
+		align-items: start;
 	}
 	.meter-note {
 		display: flex;
@@ -228,12 +227,10 @@
 			padding: 14px 10px;
 			border-inline-width: 11px;
 		}
-		.data-meters,
-		.live-meters {
+		.data-meters {
 			grid-template-columns: 1fr 1fr;
 		}
-		.data-meters :global(.dial:nth-child(3)),
-		.correlation {
+		.data-meters :global(.dial:nth-child(3)) {
 			grid-column: 1 / -1;
 			grid-row: 2;
 			max-width: 220px;

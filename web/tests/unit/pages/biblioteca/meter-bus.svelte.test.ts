@@ -21,7 +21,7 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 
-test('the archive meters tap the pre-volume meter bus, never the post-volume output', async () => {
+test('the archive meters tap the pre-volume meter and source buses, never the post-volume output', async () => {
 	fakeTap.mockImplementation(async () => ({
 		disconnect: vi.fn(),
 		setReference: vi.fn(),
@@ -39,10 +39,15 @@ test('the archive meters tap the pre-volume meter bus, never the post-volume out
 	// The context exists (as after any Play); no audio is started here.
 	app.audio.getContext();
 	await render(Biblioteca, { app, origin: 'https://example.test' });
-	await expect.poll(() => fakeTap.mock.calls.length).toBeGreaterThan(0);
-	const [node, options] = fakeTap.mock.calls.at(-1) ?? [];
-	expect(node).toBe(app.audio.getMeterBus());
-	expect(node).not.toBe(app.audio.getAnalyserTap());
-	expect(options).toMatchObject({ reference: -14 });
+	await expect.poll(() => fakeTap.mock.calls.length).toBeGreaterThanOrEqual(2);
+	const calls = new Map(fakeTap.mock.calls.map(([node, options]) => [node, options]));
+	// What is playing (post-curve sum, pre-volume): correlation, peak.
+	expect(calls.get(app.audio.getMeterBus())).toMatchObject({
+		reference: -14,
+		kinds: ['vu', 'ppm', 'loudness', 'correlation']
+	});
+	// Nível: the source before any curve, a tap of its own (never a copy of another dial).
+	expect(calls.get(app.audio.getSourceBus())).toMatchObject({ reference: -14, kinds: ['vu'] });
+	expect(calls.has(app.audio.getAnalyserTap())).toBe(false);
 	expect(app.audio.state().playing).toBe(false);
 });

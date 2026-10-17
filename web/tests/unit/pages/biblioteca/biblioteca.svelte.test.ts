@@ -1,3 +1,4 @@
+import '../../primitives/design-system.ts';
 import axe from 'axe-core';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -10,6 +11,7 @@ import Biblioteca from '#lib/components/pages/biblioteca/Biblioteca.svelte';
 import TrackSheet from '#lib/components/pages/biblioteca/TrackSheet.svelte';
 import MeterBridge from '#lib/components/pages/biblioteca/MeterBridge.svelte';
 import { sheetSvg, sheetPng } from '#lib/components/pages/biblioteca/sheet-export.ts';
+import type { MeterFrame } from '#lib/audio/meters.ts';
 
 // Before integration, layer this task's staging keys over generated shared copy. After the
 // merge deletes staging, the same tests consume the merged catalogs and generated functions.
@@ -20,6 +22,7 @@ vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
 		[
 			'../../../../messages/_staging/T2.11.*.json',
 			'../../../../messages/_staging/FUX.P1.*.json',
+			'../../../../messages/_staging/BIBVU.*.json',
 			'../../../../messages/pt-BR.json',
 			'../../../../messages/en-US.json'
 		],
@@ -33,7 +36,8 @@ vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
 					([path]) =>
 						path.endsWith(`/${locale}.json`) ||
 						path.endsWith(`/T2.11.${locale}.json`) ||
-						path.endsWith(`/FUX.P1.${locale}.json`)
+						path.endsWith(`/FUX.P1.${locale}.json`) ||
+						path.endsWith(`/BIBVU.${locale}.json`)
 				)
 				// Main catalogs first, staging on top.
 				.sort(([a], [b]) => Number(a.includes('_staging')) - Number(b.includes('_staging')))
@@ -207,12 +211,20 @@ test('every unavailable sheet control states its reason instead of a bare disabl
 	await accessible(screen.container);
 });
 
-test('the bridge uses real frame fields in LIVE and returns to calculated DATA, not simulated audio', async () => {
-	// Copy follows the Paraglide locale; the `locale` prop only formats numbers (the page passes
-	// getLocale() for both), so the test sets both to en-US.
-	await setLocale('en-US', { reload: false });
-	const curve = neutralCurve();
-	const frame = {
+/** Needle transform of a Biblioteca dial: the DataDial expression, so floats match exactly. */
+function needleAt(value: number, min = -30, max = 3): string {
+	return `rotate(${-50 + 100 * Math.max(0, Math.min(1, (value - min) / (max - min)))} 100 112)`;
+}
+
+/** Everything drawn on a dial face except the needle: arc, ticks, scale ends and unit. */
+function faceOf(dial: Element): string[] {
+	return [...dial.querySelectorAll('svg > :not(.needle)')].map((node) => node.outerHTML);
+}
+
+const IDLE_UPDATE = { mode: 'data', frame: null } as const;
+
+function meterFrame(overrides: Partial<MeterFrame> = {}): MeterFrame {
+	return {
 		vuL: -1,
 		vuR: -2,
 		ppmL: -15,
@@ -221,26 +233,95 @@ test('the bridge uses real frame fields in LIVE and returns to calculated DATA, 
 		lufsM: -18,
 		lufsS: -19,
 		correlation: 0.7,
-		active: true
+		active: true,
+		...overrides
 	};
+}
+
+test('every dial reads its own real tap in LIVE on an unchanged face, then returns to DATA', async () => {
+	// Copy follows the Paraglide locale; the `locale` prop only formats numbers (the page passes
+	// getLocale() for both), so the test sets both to en-US.
+	await setLocale('en-US', { reload: false });
+	const curve = neutralCurve();
+	// Three distinct taps: meter bus (what plays), source bus (before the curve), chain output.
+	const bus = meterFrame();
+	const source = meterFrame({ vuL: -6, vuR: -7 });
+	const output = meterFrame({ vuL: -2, vuR: -3 });
 	const screen = await render(MeterBridge, {
 		curve,
 		current: curve,
 		verdict: null,
 		locale: 'en-US',
-		update: { mode: 'live', frame }
+		update: IDLE_UPDATE,
+		source: IDLE_UPDATE,
+		output: IDLE_UPDATE
+	});
+	const dials = [...screen.container.querySelectorAll('.dial')];
+	expect(dials).toHaveLength(5);
+	const labels = dials.map((dial) => dial.querySelector('.label')?.textContent);
+	const geometry = () =>
+		dials.map((dial) => dial.querySelector('.face')?.getBoundingClientRect().toJSON());
+	const idleGeometry = geometry();
+	const idleFaces = dials.map(faceOf);
+	const dataReadouts = dials.map((dial) => dial.querySelector('output')?.textContent);
+	const readouts = () => dials.map((dial) => dial.querySelector('output')?.textContent);
+	const needle = (index: number) =>
+		dials[index].querySelector('.needle')?.getAttribute('transform');
+	expect(dials.every((dial) => dial.getAttribute('data-mode') === 'data')).toBe(true);
+	await screen.rerender({
+		update: { mode: 'live', frame: bus },
+		source: { mode: 'live', frame: source },
+		output: { mode: 'live', frame: output }
 	});
 	expect(screen.container.querySelector('.console')?.getAttribute('data-mode')).toBe('live');
 	expect(screen.container.querySelector('.chip')?.getAttribute('data-mode')).toBe('live');
-	expect(screen.container.querySelector('[aria-label="VU L"]')?.getAttribute('aria-valuenow')).toBe(
-		'-1'
-	);
-	expect(screen.container.querySelector('[aria-label="VU R"]')?.getAttribute('aria-valuenow')).toBe(
-		'-2'
-	);
-	expect(screen.container.querySelector('[data-testid="lufs-m"]')?.textContent).toContain('18');
+	expect([...screen.container.querySelectorAll('.dial')]).toEqual(dials);
+	expect(dials.map((dial) => dial.querySelector('.label')?.textContent)).toEqual(labels);
+	expect(geometry()).toEqual(idleGeometry);
+	// Same scale, ticks and unit on every face in both states.
+	expect(dials.map(faceOf)).toEqual(idleFaces);
+	expect(dials.map((dial) => dial.getAttribute('data-mode'))).toEqual([
+		'live',
+		'live',
+		'live',
+		'live',
+		'data'
+	]);
+	expect(dials.map((dial) => dial.querySelector('.chip')?.textContent?.trim())).toEqual([
+		'LIVE',
+		'LIVE',
+		'LIVE',
+		'LIVE',
+		'DATA'
+	]);
+	await expect
+		.poll(readouts)
+		.toEqual(['−6.0 VU', '−2.0 VU', '+0.70', '−15.0 dBFS', dataReadouts[4]]);
+	// Preamp has a source of its own: with different taps it never reads like Nível.
+	expect(readouts()[1]).not.toBe(readouts()[0]);
+	expect(needle(0)).toBe(needleAt(-6));
+	expect(needle(1)).toBe(needleAt(-2));
+	expect(needle(1)).not.toBe(needle(0));
+	// The meter bus VU (−1) feeds neither Nível nor Preamp.
+	expect([needle(0), needle(1)]).not.toContain(needleAt(-1));
+	expect(needle(2)).toBe(needleAt(0.7, -1, 1));
+	expect(needle(3)).toBe(needleAt(-15));
+	expect(screen.container.querySelector('.live-meters')).toBeNull();
+	await screen.rerender({
+		update: { mode: 'live', frame: meterFrame({ correlation: -0.5, ppmR: -9 }) },
+		source: { mode: 'live', frame: meterFrame({ vuL: -12, vuR: -9 }) },
+		output: { mode: 'live', frame: meterFrame({ vuL: -4, vuR: -5 }) }
+	});
+	await expect.poll(() => needle(0)).toBe(needleAt(-9));
+	await expect.poll(() => needle(1)).toBe(needleAt(-4));
+	await expect.poll(() => needle(2)).toBe(needleAt(-0.5, -1, 1));
+	await expect.poll(() => needle(3)).toBe(needleAt(-9));
+	const live = dials[0].querySelector('.needle');
+	if (!live) throw new Error('Missing live needle');
+	expect(getComputedStyle(live).transitionDuration).toBe('0s');
+	expect(dials.map(faceOf)).toEqual(idleFaces);
 	await accessible(screen.container);
-	await screen.rerender({ update: { mode: 'data', frame: null } });
+	await screen.rerender({ update: IDLE_UPDATE, source: IDLE_UPDATE, output: IDLE_UPDATE });
 	expect(screen.container.querySelector('.console')?.getAttribute('data-mode')).toBe('data');
 	expect(screen.container.querySelector('.chip')?.getAttribute('data-mode')).toBe('data');
 	expect(screen.container.querySelectorAll('.dial')).toHaveLength(5);
@@ -250,9 +331,55 @@ test('the bridge uses real frame fields in LIVE and returns to calculated DATA, 
 	expect(screen.container.querySelector('.data-meters')?.textContent).toContain('+1.00');
 	expect(screen.container.querySelector('.meter-note')?.textContent).toContain('RMS difference');
 	expect(screen.container.querySelector('.console')?.textContent).not.toMatch(/S4\s*·/);
-	expect(screen.container.querySelector('[aria-label="VU L"]')).toBeNull();
+	expect([...screen.container.querySelectorAll('.dial')]).toEqual(dials);
+	expect(dials.every((dial) => dial.getAttribute('data-mode') === 'data')).toBe(true);
+	expect(readouts()).toEqual(dataReadouts);
+	expect(dials.map(faceOf)).toEqual(idleFaces);
 	// A live mode without a frame is never AO VIVO.
-	await screen.rerender({ update: { mode: 'live', frame: null } });
+	await screen.rerender({
+		update: { mode: 'live', frame: null },
+		source: { mode: 'live', frame: null },
+		output: { mode: 'live', frame: null }
+	});
+	expect(screen.container.querySelector('.console')?.getAttribute('data-mode')).toBe('data');
+	expect(dials.every((dial) => dial.getAttribute('data-mode') === 'data')).toBe(true);
+});
+
+test('a dial without its own real field stays DATA and never borrows another tap', async () => {
+	await setLocale('en-US', { reload: false });
+	const curve = neutralCurve();
+	const bus = meterFrame({ ppmL: -12, ppmR: -13 });
+	// Deliberately incomplete frames: a missing field must not become a zero reading.
+	Reflect.deleteProperty(bus, 'correlation');
+	const source = meterFrame({ vuL: -4, vuR: Number.NaN });
+	// No sheet audition (raw preview): there is no chain output tap.
+	const screen = await render(MeterBridge, {
+		curve,
+		current: curve,
+		verdict: null,
+		locale: 'en-US',
+		update: { mode: 'live', frame: bus },
+		source: { mode: 'live', frame: source }
+	});
+	const dials = [...screen.container.querySelectorAll('.dial')];
+	const modes = () => dials.map((dial) => dial.getAttribute('data-mode'));
+	const readout = (index: number) => dials[index].querySelector('output')?.textContent;
+	expect(modes()).toEqual(['live', 'data', 'data', 'live', 'data']);
+	await expect.poll(() => readout(0)).toBe('−4.0 VU');
+	// Preamp keeps its calculated dB value; it does not mirror Nível's VU nor the bus VU.
+	expect(readout(1)).toMatch(/ dB$/);
+	expect(dials[1].querySelector('.chip')?.textContent?.trim()).toBe('DATA');
+	// An output tap that is not live (paused audition) leaves Preamp in DATA too.
+	await screen.rerender({ output: { mode: 'data', frame: null } });
+	expect(modes()).toEqual(['live', 'data', 'data', 'live', 'data']);
+	Reflect.deleteProperty(source, 'vuL');
+	Reflect.deleteProperty(bus, 'ppmL');
+	Reflect.deleteProperty(bus, 'ppmR');
+	await screen.rerender({
+		update: { mode: 'live', frame: { ...bus } },
+		source: { mode: 'live', frame: { ...source } }
+	});
+	expect(modes()).toEqual(['data', 'data', 'data', 'data', 'data']);
 	expect(screen.container.querySelector('.console')?.getAttribute('data-mode')).toBe('data');
 });
 
