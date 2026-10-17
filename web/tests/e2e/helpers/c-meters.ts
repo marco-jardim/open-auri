@@ -50,7 +50,7 @@ export async function meterModuleUrl(page: Page): Promise<string> {
 		.poll(() => page.evaluate(() => window.__cAudio.workletUrls.length))
 		.toBeGreaterThan(0);
 	// Seeing the URL alone does not prove addModule succeeded or that frames reached the UI.
-	await expect(page.locator('.ps-out .oa-vu')).toHaveAttribute('data-mode', 'live');
+	await expect(page.locator('.ps-out .meter')).toHaveAttribute('data-mode', 'live');
 	const url = await page.evaluate(() => window.__cAudio.workletUrls[0]);
 	if (!url) throw new Error('The page did not load its meter worklet');
 	await page.locator('.preview-row button.bat').click();

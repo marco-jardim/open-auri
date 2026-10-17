@@ -162,7 +162,7 @@ offline('a silent offline signal produces no worklet meter updates', async ({ pa
 test('idle meters show DADOS with zero DOM mutations over 2 s', async ({ page }) => {
 	const meters = page.locator('main [data-mode]');
 	await expect(page.locator('.bank')).toBeVisible();
-	await expect(page.locator('.ps-out .oa-vu')).toHaveAttribute('role', 'meter');
+	await expect(page.locator('.ps-out .meter')).toHaveAttribute('role', 'meter');
 	expect(await meters.count()).toBeGreaterThan(10);
 	await expect(page.locator('main [data-mode]:not([data-mode="data"])')).toHaveCount(0);
 	for (const label of await page.locator('main .oa-meter-mode').all()) {
@@ -239,11 +239,11 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 test('stopping audio returns meters to DADOS and leaves the DOM at rest', async ({ page }) => {
 	await loadSineFile(page);
 	await startPreview(page);
-	await expect(page.locator('.ps-out .oa-vu')).toHaveAttribute('data-mode', 'live');
+	await expect(page.locator('.ps-out .meter')).toHaveAttribute('data-mode', 'live');
 	await page.locator('.preview-row button.bat').click();
 	await expect(page.locator('.preview-row button.bat')).toHaveAttribute('aria-pressed', 'false');
 	await expect(page.locator('main [data-mode]:not([data-mode="data"])')).toHaveCount(0);
 	// The throttled numeric readout may settle once after mode changes; do not include that in rest.
-	await expect(page.locator('.ps-out .oa-vu')).toHaveAttribute('aria-valuenow', '-0.5');
+	await expect(page.locator('.ps-out .meter')).toHaveAttribute('aria-valuenow', '-0.5');
 	expect((await idleMeterMutations(page)).count).toBe(0);
 });
