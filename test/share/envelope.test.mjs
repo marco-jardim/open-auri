@@ -717,6 +717,16 @@ test('schemes, obfuscated dots and general domains are refused across all free-t
     'p.ex.com',
     'p.ex.-com',
     '1.http://host',
+    // Issue #13: whatever is glued before a scheme or hxxp cannot hide it.
+    '1http://localhost',
+    'xhttps://a.b',
+    '_http://host',
+    '9ftp://host',
+    'abc1git+ssh://host',
+    'çhttp://host',
+    '例http://host',
+    '1hxxp host',
+    '_hxxps host',
     ...domains,
     ...dotted,
   ]) {
@@ -827,6 +837,40 @@ test('64 KiB adversarial dotted tokens, marks and emoji tags normalize in under 
     assert.equal(normalizeText(input).length > 0, true);
     const elapsed = performance.now() - start;
     assert.ok(elapsed < 200, `${elapsed.toFixed(1)} ms for 64 KiB adversarial input`);
+  }
+});
+
+test('#13: 64 KiB adversarial glued scheme candidates normalize in under 200 ms', () => {
+  // Without a leading boundary every letter after a digit, `_` or `:` may start
+  // a candidate; each must still consume its run once, never retry it.
+  normalizeText('1a:/ _a a+');
+  for (const input of [
+    `${'1a'.repeat(32767)}:!`,
+    `${'a:/'.repeat(21845)}a`,
+    '_a'.repeat(32768),
+    `${'9'.repeat(65535)}!`,
+    `${'a+'.repeat(32767)}:/`,
+  ]) {
+    assert.equal(input.length, 65536);
+    const start = performance.now();
+    assert.equal(normalizeText(input).length > 0, true);
+    const elapsed = performance.now() - start;
+    assert.ok(elapsed < 200, `${elapsed.toFixed(1)} ms for 64 KiB adversarial input`);
+  }
+});
+
+test('#13: four-part dotted versions read as IPv4 and are refused (accepted false positive)', () => {
+  // Pinned decision: shared text must not carry links (plan §0.12), so a
+  // version such as "firmware 1.2.3.4" stays refused as env:url.
+  for (const text of ['firmware 1.2.3.4', 'v. 10.0.0.1', 'firmware 1.2.3.4 beta']) {
+    for (const key of ['name', 'description', 'author']) {
+      expectIssue(withField(key, text), 'env:url', `/${key}`);
+    }
+    expectIssue(withRecipe({ params: { note: text } }), 'env:url', '/recipe/params/note');
+  }
+  // Fewer than four parts is not an address and stays allowed.
+  for (const text of ['firmware 1.2.3', 'versão 2.1.3']) {
+    assert.equal(validateEnvelope(withField('description', text)).ok, true, text);
   }
 });
 

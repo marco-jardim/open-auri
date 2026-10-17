@@ -74,8 +74,17 @@ const EMOJI_SEQUENCE =
 const URL_DOTS = /[\u3002\uff0e\uff61\u2024\ufe52]/gu;
 // Consume scheme candidates BEFORE checking their suffix: a failed suffix must
 // not retry every dotted suffix of a long token (quadratic backtracking).
-const SCHEME_CANDIDATE = /\b[a-z][a-z0-9+.-]*/giu;
-const URL_PREFIX = /\bhxxps?\b|www\./iu;
+// No leading boundary (`\b` is ASCII-only and a lookbehind on letters or digits
+// would still skip `1http`): a candidate starts at the first ASCII letter of a
+// run of scheme characters and consumes the whole run, so whatever is glued
+// before a scheme (`1http://`, `_http://`, `xhttps://`, `çhttp://`) cannot hide
+// it, and each character is still scanned once (non-overlapping matches).
+const SCHEME_CANDIDATE = /[a-z][a-z0-9+.-]*/giu;
+// Same reason: nothing glued before `hxxp` exempts it (`1hxxp`, `_hxxp`).
+const URL_PREFIX = /hxxps?\b|www\./iu;
+// Accepted false positive: dotted four-part versions in prose ("firmware
+// 1.2.3.4") read as an IPv4 address and are refused (env:url). Shared text must
+// not carry links (plan §0.12), so the detector stays on the safe side.
 const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/u;
 const DOMAIN =
   /(?:^|[^\p{L}\p{N}])([\p{L}\p{N}-]{1,63}\.(?:xn--[a-z0-9-]{1,59}|\p{L}{2,24}))(?=$|[^\p{L}\p{N}])/giu;
