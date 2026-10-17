@@ -31,8 +31,14 @@ test('keyboard: focus opens at once, Escape closes, blur closes', async () => {
 	await userEvent.keyboard('{Escape}');
 	await expect.element(tooltip).not.toBeVisible();
 	await expect.element(page.getByRole('button', { name: 'Q' })).toHaveFocus();
-	await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+	// Re-focus Q from "After", never from before it: Q is the first focusable element in the
+	// test frame, so Shift+Tab from Q leaves the frame and the next Tab lands wherever the
+	// runner's top page puts it, which may not be Q (it timed out in headless Chromium on CI).
 	await userEvent.tab();
+	await expect.element(page.getByRole('button', { name: 'After' })).toHaveFocus();
+	await expect.element(tooltip).not.toBeVisible();
+	await userEvent.tab({ shift: true });
+	await expect.element(page.getByRole('button', { name: 'Q' })).toHaveFocus();
 	await expect.element(tooltip).toBeVisible();
 	await userEvent.tab();
 	await expect.element(page.getByRole('button', { name: 'After' })).toHaveFocus();
