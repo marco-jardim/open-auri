@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { NEUTRO } from 'open-auri/catalog';
 import { setLocale } from '#lib/paraglide/runtime.js';
@@ -52,15 +52,30 @@ function outcome(status: Written['status']): Written {
 	};
 }
 
+/** FUX.P6: unavailable `Button`s are aria-disabled and state why (never native disabled). */
+async function expectUnavailable(button: Locator, reason: string) {
+	await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(button).toHaveAccessibleDescription(reason);
+}
+
+async function expectAvailable(button: Locator) {
+	await expect.element(button).not.toHaveAttribute('aria-disabled');
+}
+
 for (const locale of ['pt-BR', 'en-US'] as const) {
 	test(`rack is safe before an app exists and cover can close without requesting a write in ${locale}`, async () => {
 		await setLocale(locale, { reload: false });
-		const screen = await render(CaboPage, { app: null });
+		const screen = await render(CaboPage, { app: null, tourAutoOpen: false });
+		await expectUnavailable(
+			page.getByRole('button', { name: m.cabo_lift(), exact: true }),
+			m.cabo_fux_loading()
+		);
 		await expect
-			.element(page.getByRole('button', { name: m.cabo_lift(), exact: true }))
+			.element(page.getByRole('combobox', { name: m.cabo_presets(), exact: true }))
 			.toBeDisabled();
-		await expect.element(page.getByRole('combobox')).toBeDisabled();
-		await expect.element(page.getByText(m.cabo_journal_empty(), { exact: true })).toBeVisible();
+		// The empty journal teaches (spec §4.4) and shows three EXAMPLE boxes.
+		await expect.element(page.getByText(m.empty_journal_body(), { exact: true })).toBeVisible();
+		expect(screen.container.querySelectorAll('[data-example]')).toHaveLength(3);
 		const fake = fakeAppOptions();
 		app = createClientApp(fake.options);
 		const request = vi.spyOn(app, 'requestWrite');
@@ -70,9 +85,10 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 			.element(page.getByRole('button', { name: m.cabo_close_cover(), exact: true }))
 			.toHaveAttribute('aria-expanded', 'true');
 		await page.getByRole('button', { name: m.cabo_close_cover(), exact: true }).click();
-		await expect
-			.element(page.getByRole('button', { name: m.cabo_review_write(), exact: true }))
-			.toBeDisabled();
+		await expectUnavailable(
+			page.getByRole('button', { name: m.cabo_review_write(), exact: true }),
+			m.cabo_fux_review_closed()
+		);
 		expect(request).not.toHaveBeenCalled();
 		expect(fake.device.sent).toHaveLength(0);
 	});
@@ -82,7 +98,8 @@ for (const status of ['ok', 'simulated', 'interrupted'] as const) {
 	test(`transport replays ${status} acceptance, not an unconditional commit`, async () => {
 		const screen = await render(TransportTape, { curve: NEUTRO, outcome: outcome(status) });
 		await expect.element(page.getByRole('status')).toHaveAttribute('data-status', status);
-		await page.getByRole('button', { name: m.cabo_commit(), exact: true }).click();
+		const inspector = page.getByRole('combobox', { name: m.cabo_fux_inspect(), exact: true });
+		await inspector.selectOptions('9');
 		await expect
 			.element(
 				page.getByText(status === 'interrupted' ? m.cabo_not_sent() : m.cabo_accepted(), {
@@ -90,9 +107,9 @@ for (const status of ['ok', 'simulated', 'interrupted'] as const) {
 				})
 			)
 			.toBeVisible();
-		await page.getByRole('button', { name: m.cabo_report({ index: '0' }), exact: true }).click();
+		await inspector.selectOptions('0');
 		await expect.element(page.getByText(m.cabo_accepted(), { exact: true })).toBeVisible();
-		await page.getByRole('button', { name: m.cabo_report({ index: '8' }), exact: true }).click();
+		await inspector.selectOptions('8');
 		await expect
 			.element(
 				page.getByText(status === 'interrupted' ? m.cabo_not_sent() : m.cabo_accepted(), {
@@ -103,9 +120,10 @@ for (const status of ['ok', 'simulated', 'interrupted'] as const) {
 		await page.getByRole('button', { name: m.cabo_replay(), exact: true }).click();
 		expect(screen.container.querySelector('.timing')?.textContent).toContain('350');
 		await screen.rerender({ outcome: { status: 'refused', reason: 'gesture' } });
-		await expect
-			.element(page.getByRole('button', { name: m.cabo_replay(), exact: true }))
-			.toBeDisabled();
+		await expectUnavailable(
+			page.getByRole('button', { name: m.cabo_replay(), exact: true }),
+			m.cabo_fux_replay_none()
+		);
 	});
 }
 
@@ -145,31 +163,32 @@ test('transport rehearsal can be stopped, and journal without a loader remains r
 		cancel: clock.cancel
 	});
 	const stop = page.getByRole('button', { name: m.cabo_stop(), exact: true });
-	await expect.element(stop).toBeDisabled();
+	await expectUnavailable(stop, m.cabo_fux_stop_idle());
 	await page.getByRole('button', { name: m.cabo_rehearse(), exact: true }).click();
 	// Time is frozen: the rehearsal stays running until stopped, whatever the machine speed.
-	await expect.element(stop).toBeEnabled();
+	await expectAvailable(stop);
 	expect(clock.pending).toBe(1);
 	clock.step(16);
-	await expect.element(stop).toBeEnabled();
+	await expectAvailable(stop);
 	expect(clock.pending).toBe(1);
 	await stop.click();
-	await expect.element(stop).toBeDisabled();
+	await expectUnavailable(stop, m.cabo_fux_stop_idle());
 	expect(clock.pending).toBe(0);
 	// A late step after Stop schedules nothing (the frame was cancelled).
 	clock.step(10_000);
 	expect(clock.pending).toBe(0);
-	await expect.element(stop).toBeDisabled();
+	await expectUnavailable(stop, m.cabo_fux_stop_idle());
 	// Without Stop, the rehearsal ends by itself once the clock passes the tape duration.
 	await page.getByRole('button', { name: m.cabo_rehearse(), exact: true }).click();
-	await expect.element(stop).toBeEnabled();
+	await expectAvailable(stop);
 	clock.step(10_000);
-	await expect.element(stop).toBeDisabled();
+	await expectUnavailable(stop, m.cabo_fux_stop_idle());
 	expect(clock.pending).toBe(0);
 	await cleanup();
 	const screen = await render(Journal, { entries: [{ ...entry(), preampDb: 1 }] });
-	await expect
-		.element(page.getByRole('button', { name: m.cabo_load(), exact: true }))
-		.toBeDisabled();
+	await expectUnavailable(
+		page.getByRole('button', { name: m.cabo_load(), exact: true }),
+		m.cabo_fux_load_wait()
+	);
 	expect(screen.container.querySelector('.mini')).toBeNull();
 });

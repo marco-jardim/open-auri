@@ -6,20 +6,27 @@
 		title: string;
 		model: string;
 		silver?: boolean;
+		/** Optional fragment id of the unit (in-page links such as the empty journal's). */
+		anchor?: string;
+		/** Optional slot after the title (an explainer). */
+		aside?: Snippet;
 		children: Snippet;
 	}
-	let { number, title, model, silver = false, children }: Props = $props();
+	let { number, title, model, silver = false, anchor, aside, children }: Props = $props();
 	const id = $props.id();
 </script>
 
-<section class="unit" class:silver aria-labelledby={id}>
+<section class="unit" class:silver aria-labelledby={id} id={anchor}>
 	{#each ['tl', 'tr', 'bl', 'br'] as corner (corner)}
 		<span class="screw {corner}" aria-hidden="true"></span>
 	{/each}
 	<span class="handle left" aria-hidden="true"></span>
 	<span class="handle right" aria-hidden="true"></span>
 	<header>
-		<h2 {id}><span>{number}</span>{title}</h2>
+		<div class="title">
+			<h2 {id}><span>{number}</span>{title}</h2>
+			{#if aside}{@render aside()}{/if}
+		</div>
 		<p>{model}</p>
 	</header>
 	{@render children()}
@@ -65,13 +72,23 @@
 	.silver header {
 		border-color: #0003;
 	}
+	/* The explainer trigger is drawn for dark surfaces: on brushed aluminium it needs dark ink. */
+	.silver :global(.trigger) {
+		color: #24282a;
+	}
+	.silver :global(.trigger > span) {
+		border-color: rgba(0, 0, 0, 0.55);
+	}
+	.title {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
 	h2 {
 		display: flex;
 		gap: 12px;
 		margin: 0;
-		font:
-			600 17px/1.2 'Barlow Condensed',
-			sans-serif;
+		font: 600 var(--fs-lede, 17px) / 1.2 var(--cond, 'Barlow Condensed', sans-serif);
 		letter-spacing: 0.18em;
 		text-transform: uppercase;
 	}
@@ -81,9 +98,7 @@
 	}
 	header p {
 		margin: 0;
-		font:
-			600 11px/1.4 'Barlow Condensed',
-			sans-serif;
+		font: 600 var(--label-min, 11px) / 1.4 var(--cond, 'Barlow Condensed', sans-serif);
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		text-align: right;

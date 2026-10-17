@@ -1,6 +1,7 @@
 import { commitReport, encodePayload, REPORT_COUNT, reportsFromPayload } from 'open-auri/dsp';
 import { REPORT_GAP_MS, SETTLE_MS } from 'open-auri/transport';
 import { localDateKey } from 'open-auri/policy';
+import { PRESETS_BY_ID } from 'open-auri/catalog';
 import type { Curve } from '#lib/charts/response.ts';
 import type { CableState, FlashState, WriteOutcome } from '#lib/cable/types.ts';
 
@@ -45,6 +46,74 @@ export function encoderData(curve: Curve) {
 	}
 }
 
+/** Nodes of the WebHID state diagram (U1), in drawing order. */
+export const DIAGRAM_NODES = [
+	'unsupported',
+	'disconnected',
+	'connecting',
+	'connected',
+	'writing',
+	'written',
+	'interrupted'
+] as const;
+export type DiagramNode = (typeof DIAGRAM_NODES)[number];
+
+/**
+ * The lit node of the diagram: the rack state itself, except that the simulated rack without a
+ * cable is the "no cable" node (the mode is shown by the switch, not by a second node).
+ */
+export function diagramNode(state: RackState): DiagramNode {
+	return state === 'simulated' ? 'disconnected' : state;
+}
+
+/** Whether the last attempt reached its commit (lights the "written" node as a trace). */
+export function lastWritten(cable: CableState | null): boolean {
+	const outcome = cable?.lastOutcome ?? null;
+	return (
+		outcome !== null &&
+		(outcome.status === 'ok' || outcome.status === 'simulated') &&
+		outcome.result.committed
+	);
+}
+
+/**
+ * Live progress of a write, if the service reports it (`cable:progress` on `service.events`,
+ * detail `{ reportsSent, committed }`). Until the service dispatches it, nothing is invented:
+ * the tape shows the real result when the write ends.
+ */
+export const CABLE_PROGRESS_EVENT = 'cable:progress';
+export interface TapeProgress {
+	/** Data reports the cable accepted so far, 0..9. */
+	reportsSent: number;
+	committed: boolean;
+}
+
+export function parseProgress(detail: unknown): TapeProgress | null {
+	if (typeof detail !== 'object' || detail === null) return null;
+	const { reportsSent, committed } = detail as Record<string, unknown>;
+	if (
+		typeof reportsSent !== 'number' ||
+		!Number.isInteger(reportsSent) ||
+		reportsSent < 0 ||
+		reportsSent > REPORT_COUNT ||
+		typeof committed !== 'boolean'
+	) {
+		return null;
+	}
+	return { reportsSent, committed };
+}
+
+/** Reports a nominal timeline has passed at `elapsedMs` (0 before it starts). */
+export function reportsPassed(atMs: readonly number[], elapsedMs: number): number {
+	if (!(elapsedMs > 0)) return 0;
+	return atMs.filter((at) => elapsedMs >= at).length;
+}
+
+/** Letter of a connected cable in the rack list (A, B, C…). */
+export function cableLetter(index: number): string {
+	return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+
 /** Nominal positions are protocol delays, never invented per-report measurements. */
 export function tapeTimeline(curve: Curve, outcome: WriteOutcome | null = null) {
 	// An interrupted simulation has no journal snapshot. Do not attribute current editor
@@ -84,6 +153,42 @@ export function flashCounters(state: FlashState, now: number) {
 		day: state.day.date === localDateKey(now) ? state.day.count : 0,
 		total: state.total
 	};
+}
+
+export interface ExampleBox {
+	id: string;
+	name: string;
+	bands: Curve['bands'];
+	preampDb: number;
+	/** CRC computed from the preset's own payload bytes, never typed in. */
+	crc: number;
+}
+
+/**
+ * Three official presets shown as EXAMPLE tape boxes in the empty journal (spec §4.4). They are
+ * illustrations of what a box looks like: not journal entries, never written, not loadable.
+ */
+export function exampleBoxes(): ExampleBox[] {
+	const presets = Object.values(PRESETS_BY_ID);
+	const wanted = ['natural', 'neutro', 'padrao'];
+	const chosen = [
+		...wanted.flatMap((id) => (PRESETS_BY_ID[id] === undefined ? [] : [PRESETS_BY_ID[id]])),
+		...presets.filter((preset) => !wanted.includes(preset.id))
+	].slice(0, 3);
+	return chosen.flatMap((preset) => {
+		const encoded = encoderData(preset);
+		return encoded.ok
+			? [
+					{
+						id: preset.id,
+						name: preset.label,
+						bands: preset.bands,
+						preampDb: preset.preampDb,
+						crc: encoded.crc
+					}
+				]
+			: [];
+	});
 }
 
 /** Do not truncate significant digits when a mechanical counter fills up. */

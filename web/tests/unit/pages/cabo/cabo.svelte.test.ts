@@ -48,7 +48,7 @@ for (const copy of [
 	test(`complete rack and four reserved features, accessible at desktop and mobile in ${copy.locale}`, async () => {
 		await setLocale(copy.locale, { reload: false });
 		active = createClientApp(fakeAppOptions().options);
-		const screen = await render(CaboPage, { app: active });
+		const screen = await render(CaboPage, { app: active, tourAutoOpen: false });
 		await expect
 			.element(page.getByRole('heading', { name: copy.title, exact: true }))
 			.toBeVisible();
@@ -91,9 +91,12 @@ test('HID picker only on a click; only final confirmation in the shared checklis
 	await page.getByRole('button', { name: 'Revisar e gravar' }).click();
 	expect(requestWrite).toHaveBeenCalledOnce();
 	await expect.element(page.getByRole('dialog')).toBeVisible();
-	await expect
-		.element(page.getByRole('dialog').getByRole('button', { name: 'Gravar no cabo', exact: true }))
-		.toBeDisabled();
+	const lever = page
+		.getByRole('dialog')
+		.getByRole('button', { name: 'Gravar no cabo', exact: true });
+	// GRAVAR is a lever Button: unavailable means aria-disabled and the stated reason.
+	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(lever).toHaveAccessibleDescription(m.cable_fux_lock_levers());
 	expect(write).not.toHaveBeenCalled();
 	expect(gesture).not.toHaveBeenCalled();
 	expect(fake.device.sent).toHaveLength(0);
@@ -174,8 +177,10 @@ test('preset selection, rehearsal and journal loading never request a write or c
 		status: 'simulated',
 		device: 'simulated cable'
 	});
-	await render(CaboPage, { app: active });
-	await page.getByRole('combobox').selectOptions(PADRAO_AURI.id);
+	await render(CaboPage, { app: active, tourAutoOpen: false });
+	await page
+		.getByRole('combobox', { name: m.cabo_presets(), exact: true })
+		.selectOptions(PADRAO_AURI.id);
 	expect(active.state.curve.current.bands).toEqual(PADRAO_AURI.bands);
 	const byteWindows = page.getByRole('textbox').elements();
 	expect(byteWindows).toHaveLength(4);
@@ -236,8 +241,13 @@ test('rehearsal is labeled, has ten inspectable reports and offers ×10 without 
 	await page.getByRole('checkbox', { name: 'Câmera lenta ×10' }).click();
 	await page.getByRole('button', { name: 'Ensaiar (não grava)' }).click();
 	await expect.element(page.getByRole('status')).toHaveTextContent('ENSAIO · nada foi gravado');
-	expect(screen.container.querySelectorAll('.reports button')).toHaveLength(10);
-	await page.getByRole('button', { name: 'Commit', exact: true }).click();
-	expect(screen.container.querySelector('pre')?.textContent).toMatch(/^01 65 00 01 FF/);
+	// The nine "Report N" buttons became one byte inspector with its purpose stated.
+	const inspector = page.getByRole('combobox', { name: m.cabo_fux_inspect(), exact: true });
+	expect(screen.container.querySelectorAll('select option')).toHaveLength(10);
+	await expect.element(page.getByText(m.cabo_fux_inspect_why(), { exact: true })).toBeVisible();
+	await inspector.selectOptions('9');
+	await expect
+		.poll(() => screen.container.querySelector('pre')?.textContent)
+		.toMatch(/^01 65 00 01 FF/);
 	expect(screen.container.querySelectorAll('.accepted')).toHaveLength(0);
 });

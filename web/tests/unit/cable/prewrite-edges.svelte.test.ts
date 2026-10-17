@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import { NEUTRO } from 'open-auri/catalog';
@@ -24,6 +24,16 @@ async function confirm() {
 	await page.getByRole('checkbox', { name: m.cable_confirm_connection() }).click();
 }
 
+/** FUX.P6: GRAVAR is a `Button` lever: locked means aria-disabled plus the reason it states. */
+async function expectLocked(button: Locator, reason: string) {
+	await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(button).toHaveAccessibleDescription(reason);
+}
+
+async function expectArmed(button: Locator) {
+	await expect.element(button).not.toHaveAttribute('aria-disabled');
+}
+
 test('refusal preserves confirmations, success clears them, and closing/reopening starts fresh', async () => {
 	const device = new FakeHIDDevice();
 	const fake = cableUi({ device, devices: [device], deviceLabels: ['Test cable'] });
@@ -44,9 +54,9 @@ test('refusal preserves confirmations, success clears them, and closing/reopenin
 	expect(page.getByRole('dialog').elements()).toHaveLength(0);
 	await screen.rerender({ open: true });
 	const button = page.getByRole('button', { name: m.cable_write_simulated(), exact: true });
-	await expect.element(button).toBeDisabled();
+	await expectLocked(button, m.cable_fux_lock_levers());
 	await confirm();
-	await expect.element(button).toBeEnabled();
+	await expectArmed(button);
 	expect(write).not.toHaveBeenCalled();
 	await button.click();
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_refused_gesture());
@@ -60,7 +70,7 @@ test('refusal preserves confirmations, success clears them, and closing/reopenin
 	await expect
 		.element(page.getByRole('checkbox', { name: m.cable_confirm_volume() }))
 		.not.toBeChecked();
-	await expect.element(button).toBeDisabled();
+	await expectLocked(button, m.cable_fux_lock_levers());
 	expect(onresult).toHaveBeenCalledTimes(2);
 	expect(write.mock.calls[0][0]).toMatchObject({
 		bands: NEUTRO.bands,
@@ -104,7 +114,7 @@ test('the target cable is shown next to the write button; without one the user m
 	expect(screen.container.querySelector('[data-target-device]')).toBeNull();
 	expect(page.getByText(m.cable_refused_no_device(), { exact: true }).elements()).toHaveLength(0);
 	await confirm();
-	await expect.element(button).toBeDisabled();
+	await expectLocked(button, m.cable_fux_lock_target());
 	const select = page.getByRole('dialog').getByRole('combobox', { name: m.cable_select_device() });
 	expect((select.element() as HTMLSelectElement).value).toBe('');
 	await select.selectOptions('1');
@@ -123,9 +133,9 @@ test('the target cable is shown next to the write button; without one the user m
 	await expect
 		.element(page.getByRole('checkbox', { name: m.cable_confirm_volume() }))
 		.not.toBeChecked();
-	await expect.element(button).toBeDisabled();
+	await expectLocked(button, m.cable_fux_lock_levers());
 	await confirm();
-	await expect.element(button).toBeEnabled();
+	await expectArmed(button);
 	expect(write).not.toHaveBeenCalled();
 	// One cable: the label is shown and no selector is needed.
 	fake.publish({ devices: [right], deviceLabels: ['Right cable'] });
@@ -155,7 +165,7 @@ test('unplugging the target clears the confirmations and never shows another cab
 	});
 	const button = page.getByRole('button', { name: m.cable_write_simulated(), exact: true });
 	await confirm();
-	await expect.element(button).toBeEnabled();
+	await expectArmed(button);
 	// The service leaves no target after an unplug; the ticked boxes were for "Left cable".
 	fake.publish({
 		devices: [right],
@@ -171,12 +181,12 @@ test('unplugging the target clears the confirmations and never shows another cab
 	await expect
 		.element(page.getByRole('checkbox', { name: m.cable_confirm_connection() }))
 		.not.toBeChecked();
-	await expect.element(button).toBeDisabled();
+	await expectLocked(button, m.cable_fux_lock_target());
 	// A state update that keeps the same target keeps the confirmations.
 	fake.publish({ device: right, deviceLabel: 'Right cable' });
 	await confirm();
 	fake.publish({ writing: false });
-	await expect.element(button).toBeEnabled();
+	await expectArmed(button);
 	expect(write).not.toHaveBeenCalled();
 });
 
@@ -288,12 +298,14 @@ test('diagnostics show failed/unknown lamps, loudness, experimental consent and 
 	await expect.element(page.getByText(m.cable_spacing_ready())).toBeVisible();
 	deltaDb = null;
 	fake.publish({ writing: true, mode: 'real' });
-	await expect
-		.element(page.getByRole('button', { name: m.cable_close(), exact: true }))
-		.toBeDisabled();
-	await expect
-		.element(page.getByRole('button', { name: m.cable_write(), exact: true }))
-		.toBeDisabled();
+	await expectLocked(
+		page.getByRole('button', { name: m.cable_close(), exact: true }),
+		m.cable_fux_close_locked()
+	);
+	await expectLocked(
+		page.getByRole('button', { name: m.cable_write(), exact: true }),
+		m.cable_fux_lock_writing()
+	);
 	expect(page.getByText(m.cable_loudness_jump({ delta: '+3,0' })).elements()).toHaveLength(0);
 	const dialog = screen.container.querySelector('dialog')!;
 	const blocked = new Event('cancel', { cancelable: true });

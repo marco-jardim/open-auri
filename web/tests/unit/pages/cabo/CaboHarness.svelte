@@ -7,7 +7,8 @@
 	const selected = $derived(app.pendingWrite ?? app.state.curve.current);
 </script>
 
-<CaboPage {app} />
+<!-- The tour is covered by its own test; here it would add a second dialog. -->
+<CaboPage {app} tourAutoOpen={false} />
 <PreWriteChecklist
 	service={app.cable}
 	open={app.pendingWrite !== null}

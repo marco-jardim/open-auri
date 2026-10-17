@@ -20,6 +20,23 @@ import {
 test.use({ locale: 'pt-BR', reducedMotion: 'reduce' });
 test.setTimeout(60_000);
 
+// FUX.P6: the Cabo tour opens on a first desktop visit; these specs exercise the rack, not
+// the tour, so it is marked as dismissed before any page script runs.
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => {
+		const stored = localStorage.getItem('oa.tour.v1');
+		const tours: Record<string, string> = stored ? JSON.parse(stored) : {};
+		tours.cabo ??= 'dispensado';
+		tours.curva ??= 'dispensado';
+		localStorage.setItem('oa.tour.v1', JSON.stringify(tours));
+	});
+});
+
+/** FUX.P6: the literal warning is always visible; its lamp says whether it is raised. */
+function loudness(dialog: Locator): Locator {
+	return dialog.locator('[data-loudness]');
+}
+
 interface ReferenceFixture {
 	constants: { hidReportId: number; commitCommand: number[] };
 	presets: { padrao: { reports: number[][] } };
@@ -139,6 +156,7 @@ test('padrao: mandatory checklist, exact bytes, and USB timing (±8 ms)', async 
 	await expect(dialog.locator('[data-lamp]')).toHaveCount(8);
 	await expect(dialog.locator('[data-lamp]:not([data-state="ok"])')).toHaveCount(0);
 	await expect(dialog.getByText(LOUDNESS_WARNING, { exact: true })).toBeVisible();
+	await expect(loudness(dialog)).toHaveAttribute('data-loudness', 'warn');
 	await expect(dialog.getByText(/^O estado do cabo é desconhecido:/)).toBeVisible();
 	const write = writeButton(dialog);
 	const volume = dialog.getByRole('checkbox', { name: 'Abaixei o volume', exact: true });
@@ -217,19 +235,23 @@ test('loudness: first write and +3 dB, but not repeats or +2.9 dB', async ({ pag
 	await connectCable(page);
 	let dialog = await openChecklist(page);
 	await expect(dialog.getByText(LOUDNESS_WARNING, { exact: true })).toBeVisible();
+	await expect(loudness(dialog)).toHaveAttribute('data-loudness', 'warn');
 	await writeConfirmed(dialog);
 	await closeChecklist(dialog);
 
+	// The literal text stays on screen (spec §4.3); the warning is raised only by the policy.
 	dialog = await openChecklist(page);
-	await expect(dialog.getByText(LOUDNESS_WARNING, { exact: true })).toHaveCount(0);
+	await expect(dialog.getByText(LOUDNESS_WARNING, { exact: true })).toBeVisible();
+	await expect(loudness(dialog)).toHaveAttribute('data-loudness', 'calm');
 	await closeChecklist(dialog);
 	await editPreampThroughFile(page, -3.6);
 	dialog = await openChecklist(page);
-	await expect(dialog.getByText(LOUDNESS_WARNING, { exact: true })).toHaveCount(0);
+	await expect(loudness(dialog)).toHaveAttribute('data-loudness', 'calm');
 	await closeChecklist(dialog);
 	await editPreampThroughFile(page, -3.5);
 	dialog = await openChecklist(page);
 	await expect(dialog.getByText(LOUDNESS_WARNING, { exact: true })).toBeVisible();
+	await expect(loudness(dialog)).toHaveAttribute('data-loudness', 'warn');
 	await expect(
 		dialog.getByText('Diferença estimada de +3,0 dB em relação à última curva gravada.', {
 			exact: true

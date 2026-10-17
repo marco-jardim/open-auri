@@ -4,11 +4,18 @@ import { encodePayload, PREAMBLE, reportsFromPayload } from 'open-auri/dsp';
 import { localDateKey } from 'open-auri/policy';
 import type { CableState, FlashState, Written } from '#lib/cable/types.ts';
 import {
+	cableLetter,
 	counterDigits,
+	DIAGRAM_NODES,
+	diagramNode,
 	encoderData,
+	exampleBoxes,
 	flashCounters,
+	lastWritten,
+	parseProgress,
 	rackState,
 	RACK_STATES,
+	reportsPassed,
 	tapeTimeline
 } from '#lib/components/pages/cabo/model.ts';
 
@@ -179,6 +186,75 @@ describe('transport tape', () => {
 		expect(
 			tapeTimeline(NEUTRO, { ...outcome('interrupted'), simulated: true, entry: null }).status
 		).toBe('dry-run');
+	});
+});
+
+describe('FUX.P6 projections', () => {
+	test('the state diagram lights exactly the rack state; simulated without a cable is "no cable"', () => {
+		expect(RACK_STATES.map(diagramNode)).toEqual([
+			'unsupported',
+			'disconnected',
+			'disconnected',
+			'connecting',
+			'connected',
+			'writing',
+			'interrupted'
+		]);
+		for (const state of RACK_STATES) expect(DIAGRAM_NODES).toContain(diagramNode(state));
+		expect(lastWritten(null)).toBe(false);
+		expect(lastWritten({ ...disconnected, lastOutcome: outcome() })).toBe(true);
+		expect(lastWritten({ ...disconnected, lastOutcome: outcome('simulated') })).toBe(true);
+		expect(lastWritten({ ...disconnected, lastOutcome: outcome('interrupted') })).toBe(false);
+		expect(
+			lastWritten({ ...disconnected, lastOutcome: { status: 'refused', reason: 'gesture' } })
+		).toBe(false);
+	});
+
+	test('live progress is accepted only in the protocol range, never invented', () => {
+		expect(parseProgress({ reportsSent: 0, committed: false })).toEqual({
+			reportsSent: 0,
+			committed: false
+		});
+		expect(parseProgress({ reportsSent: 9, committed: true })).toEqual({
+			reportsSent: 9,
+			committed: true
+		});
+		for (const bad of [
+			null,
+			3,
+			{ reportsSent: 10, committed: false },
+			{ reportsSent: -1, committed: false },
+			{ reportsSent: 2.5, committed: false },
+			{ reportsSent: 2, committed: 'yes' },
+			{ committed: true }
+		]) {
+			expect(parseProgress(bad)).toBeNull();
+		}
+	});
+
+	test('nominal report count follows the clock and starts at zero', () => {
+		const atMs = tapeTimeline(NEUTRO).reports.map((report) => report.atMs);
+		expect(reportsPassed(atMs, 0)).toBe(0);
+		expect(reportsPassed(atMs, 1)).toBe(1);
+		expect(reportsPassed(atMs, 16)).toBe(2);
+		expect(reportsPassed(atMs, 10_000)).toBe(9);
+		expect(reportsPassed(atMs, Number.NaN)).toBe(0);
+	});
+
+	test('example boxes are three presets with CRCs computed from their own bytes', () => {
+		const boxes = exampleBoxes();
+		expect(boxes).toHaveLength(3);
+		for (const box of boxes) {
+			const payload = encodePayload(box.bands, box.preampDb);
+			expect(box.crc).toBe(payload[218] | (payload[219] << 8));
+		}
+		const neutral = boxes.find((box) => box.id === 'neutro');
+		if (neutral) expect(neutral.crc).toBe(0x4fff);
+	});
+
+	test('cable letters', () => {
+		expect([0, 1, 2].map(cableLetter)).toEqual(['A', 'B', 'C']);
+		expect(cableLetter(26)).toBe('27');
 	});
 });
 

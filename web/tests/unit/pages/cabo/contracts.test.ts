@@ -41,13 +41,31 @@ test('only the shared app checklist can authorize page writes; connection remain
 		.join('\n');
 	expect(page).toContain('app?.requestWrite()');
 	expect(page).toContain('onclick={() => app?.cable.connect()}');
-	expect(page).toContain('<MultiCableQueue');
-	expect(page).toContain('canWrite={false}');
+	// FUX.P6: the rack only lists cables (U7); queue selection and confirmation live only in
+	// the shared checklist, so the page renders no queue component at all.
+	expect(all).not.toContain('<MultiCableQueue');
+	expect(all).not.toMatch(/\bwriteQueue\b|\bconfirmations=\{\{/);
+	// The WebHID picker call is shown as code text (U1), never called from the page.
+	expect(page).toContain('<span class="fn">requestDevice</span');
 	expect(all).not.toMatch(/\.(?:write|writeQueue|createGesture|sendReport|requestDevice)\s*\(/);
 	expect(all).not.toMatch(/\b(?:writeCurve|writeMany|createCableService|createClientApp)\s*\(/);
 	expect(page.match(/<EmBreve\s/g)).toHaveLength(4);
 	expect(all).not.toContain('{@html');
 	expect(all).not.toMatch(/double.?d|duplo.?d|(?:logo|brand|symbol)[^\n]*Dolby/i);
+});
+
+test('tour targets, explainers and the progress contract are wired on the page', () => {
+	const page = source('CaboPage.svelte');
+	const targets = ['cabo-connect', 'cabo-bytes', 'cabo-checklist', 'cabo-tape', 'cabo-journal'];
+	for (const target of targets) expect(page).toContain(`data-tour="${target}"`);
+	for (const term of ['checklist', 'crc', 'q27', 'q23', 'gate', 'flash']) {
+		expect(page).toContain(`<Explainer term="${term}" />`);
+	}
+	expect(page).toContain('<Tour page="cabo"');
+	expect(page).toContain('<TourTrigger page="cabo" />');
+	// Live tape progress is only read from the service's events, never produced here.
+	expect(source('model.ts')).toContain("CABLE_PROGRESS_EVENT = 'cable:progress'");
+	expect(page).not.toMatch(/dispatchEvent\s*\(/);
 });
 
 test('route uses only the layout-owned app context', () => {

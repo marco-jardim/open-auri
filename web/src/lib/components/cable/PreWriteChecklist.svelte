@@ -1,3 +1,12 @@
+<!--
+	The global pre-write checklist (plan §3.1 N2/N3, T2.7; materialised in FUX.P6 as the
+	mock's calibration unit). Opened only by `app.requestWrite()`; its GRAVAR lever is the
+	only control that calls `service.write()`, and only with a gesture minted in that click.
+
+	Presentation changed in FUX.P6, logic did not: the gate verdict, the checklist result,
+	the confirmations (one per lever), their reset rules, the 2 s spacing and the dialog's
+	close guard are exactly as before. The props contract is unchanged.
+-->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { gateForWrite } from 'open-auri/safety';
@@ -7,21 +16,22 @@
 		Band,
 		CableDevice,
 		CableState,
+		ChecklistItemId,
 		ChecklistResult,
 		Confirmations,
 		GateResult,
 		QueueOutcome,
 		WriteOutcome
 	} from '#lib/cable/types.ts';
+	import { Button, Lamp } from '#lib/components/primitives/index.ts';
+	import Explainer from '#lib/components/comprehension/Explainer.svelte';
 	import MultiCableQueue from './MultiCableQueue.svelte';
-	import {
-		describeOutcome,
-		describeReason,
-		formatCrc,
-		formatNumber,
-		lampLabel,
-		lampState
-	} from './i18n.ts';
+	import LevelGauge from './LevelGauge.svelte';
+	import CriteriaList from './CriteriaList.svelte';
+	import LoudnessPanel from './LoudnessPanel.svelte';
+	import ConfirmLever from './ConfirmLever.svelte';
+	import { criteriaValues } from './criteria.ts';
+	import { describeOutcome, formatCrc, formatNumber } from './i18n.ts';
 
 	interface Props {
 		service: CableService;
@@ -88,6 +98,8 @@
 			gate
 		);
 	});
+	/** Display values of the criteria, from the same verdict (presentation only). */
+	const values = $derived(criteriaValues(gate));
 
 	$effect(() => {
 		if (checklist === null) return;
@@ -121,6 +133,28 @@
 			? null
 			: (cable.deviceLabel ?? cable.deviceLabels[cable.devices.indexOf(cable.device)] ?? null)
 	);
+
+	/**
+	 * Why GRAVAR is locked, or null when it may act. Null exactly when the previous rule
+	 * allowed the button (`checklist.canWrite && !cable.writing && cable.device !== null`):
+	 * the specific reasons only name the first unmet item, and the last line is a catch-all.
+	 */
+	const writeReason = $derived.by<string | null>(() => {
+		if (checklist === null) return m.cable_fux_lock_other();
+		const unmet = (item: ChecklistItemId) =>
+			checklist.items.some((entry) => entry.id === item && entry.required && !entry.satisfied);
+		if (cable.writing) return m.cable_fux_lock_writing();
+		if (cable.device === null) {
+			return cable.devices.length === 0 ? m.cable_fux_lock_no_cable() : m.cable_fux_lock_target();
+		}
+		if (unmet('gate')) return m.cable_fux_lock_gate();
+		if (unmet('volume') || unmet('connection')) return m.cable_fux_lock_levers();
+		if (unmet('experimental')) return m.cable_fux_lock_experimental();
+		if (unmet('spacing')) return m.cable_fux_lock_spacing();
+		if (!checklist.canWrite) return m.cable_fux_lock_other();
+		return null;
+	});
+	const armed = $derived(writeReason === null);
 
 	/** Selecting a target never writes: the write button still needs its own click. */
 	function onSelectTarget(event: Event) {
@@ -173,172 +207,178 @@
 		});
 		finish(outcome);
 	}
-
-	const lampColor = (state: string) =>
-		state === 'ok' ? 'bg-green-600' : state === 'fail' ? 'bg-red-600' : 'bg-gray-400';
 </script>
 
 <dialog
 	bind:this={dialog}
 	aria-labelledby={`${id}-title`}
 	closedby={cable.writing ? 'none' : 'closerequest'}
-	class="m-auto max-h-[90vh] w-full max-w-xl overflow-y-auto rounded border border-current bg-[Canvas] p-4 text-[CanvasText] backdrop:bg-black/60"
+	class="checklist"
 	oncancel={onCancel}
 	onclose={onDialogClose}
 >
 	{#if checklist !== null}
-		<div class="flex flex-col gap-4">
-			<header class="flex items-baseline justify-between gap-4">
-				<h2 id={`${id}-title`} class="text-lg font-semibold">{m.cable_checklist_title()}</h2>
-				{#if cable.mode === 'simulated'}
-					<span class="rounded border border-current px-1.5 font-mono text-xs uppercase">
-						{m.cable_simulated_badge()}
-					</span>
-				{/if}
+		<div class="unit">
+			{#each ['tl', 'tr', 'bl', 'br'] as corner (corner)}
+				<span class="screw {corner}" aria-hidden="true"></span>
+			{/each}
+			<header class="head">
+				<div class="title-row">
+					<h2 id={`${id}-title`} class="title">{m.cable_checklist_title()}</h2>
+					<Explainer term="checklist" />
+				</div>
+				<div class="model">
+					<span>{m.cable_fux_model()}</span>
+					{#if cable.mode === 'simulated'}
+						<span class="badge">{m.cable_simulated_badge()}</span>
+					{/if}
+				</div>
 			</header>
 
-			<section aria-labelledby={`${id}-gate`}>
-				<h3 id={`${id}-gate`} class="font-semibold">{m.cable_checklist_gate_heading()}</h3>
-				<ul class="mt-1 flex flex-col gap-1">
-					{#each checklist.lamps as lamp (lamp.id)}
-						<li class="flex flex-col" data-lamp={lamp.id} data-state={lamp.state}>
-							<span class="flex items-center gap-2">
-								<span
-									class={`inline-block h-3 w-3 shrink-0 rounded-full ${lampColor(lamp.state)}`}
-									aria-hidden="true"
-								></span>
-								<span>{lampLabel[lamp.labelKey]()}</span>
-								<span class="ml-auto font-mono text-xs">{lampState[lamp.state]()}</span>
-							</span>
-							{#if lamp.reasons.length > 0}
-								<ul class="ml-5 list-disc pl-4 text-sm">
-									{#each lamp.reasons as reason, index (index)}
-										<li>{describeReason(reason)}</li>
-									{/each}
-								</ul>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-				{#if checklist.crc !== null}
-					<p class="mt-1 font-mono text-xs">{m.cable_crc({ crc: formatCrc(checklist.crc) })}</p>
-				{/if}
-			</section>
-
-			{#if checklist.loudness.warn}
-				<section aria-labelledby={`${id}-loudness`} class="rounded border-2 border-current p-2">
-					<h3 id={`${id}-loudness`} class="font-semibold">{m.cable_loudness_heading()}</h3>
-					<p>{m.cable_loudness_warning()}</p>
-					{#if checklist.loudness.reasons.includes('jump') && checklist.loudness.deltaDb !== null}
-						<p class="text-sm">
-							{m.cable_loudness_jump({ delta: formatNumber(checklist.loudness.deltaDb, 1, true) })}
+			<div class="cal">
+				<div class="col-vu">
+					<LevelGauge levelDb={checklist.newLevelDb} compact />
+					{#if checklist.crc !== null}
+						<p class="crc">
+							<span>{m.cable_crc({ crc: formatCrc(checklist.crc) })}</span>
+							<Explainer term="crc" />
 						</p>
 					{/if}
-					{#if checklist.loudness.reasons.includes('unknown-state')}
-						<p class="text-sm">{m.cable_loudness_unknown()}</p>
+				</div>
+
+				<section class="col-gate" aria-labelledby={`${id}-gate`}>
+					<div class="sub-head">
+						<h3 id={`${id}-gate`} class="engrave">{m.cable_checklist_gate_heading()}</h3>
+						<Explainer term="gate" />
+					</div>
+					<CriteriaList lamps={checklist.lamps} {values} label={m.cable_fux_criteria_label()} />
+					<p class="gate-note">
+						<span>{m.cable_fux_gate_note()}</span>
+						<Explainer term="q27" />
+						<Explainer term="q23" />
+					</p>
+				</section>
+
+				<div class="col-act">
+					<LoudnessPanel loudness={checklist.loudness} newLevelDb={checklist.newLevelDb} />
+
+					{#if checklist.experimentalRequired}
+						<section aria-labelledby={`${id}-experimental`} class="experimental">
+							<h3 id={`${id}-experimental`} class="engrave">
+								{m.cable_experimental_heading()}
+							</h3>
+							<p>{m.cable_experimental_text()}</p>
+						</section>
 					{/if}
-				</section>
-			{/if}
 
-			{#if checklist.experimentalRequired}
-				<section aria-labelledby={`${id}-experimental`} class="rounded border border-current p-2">
-					<h3 id={`${id}-experimental`} class="font-semibold">
-						{m.cable_experimental_heading()}
-					</h3>
-					<p>{m.cable_experimental_text()}</p>
-				</section>
-			{/if}
+					<div class="guards">
+						<fieldset class="levers" disabled={cable.writing}>
+							<legend class="engrave">{m.cable_confirmations_heading()}</legend>
+							<ConfirmLever
+								bind:checked={confirmations.volumeLowered}
+								label={m.cable_confirm_volume()}
+								confirmation="volume"
+							/>
+							<ConfirmLever
+								bind:checked={confirmations.keepConnected}
+								label={m.cable_confirm_connection()}
+								confirmation="connection"
+							/>
+							{#if checklist.experimentalRequired}
+								<ConfirmLever
+									bind:checked={confirmations.experimental}
+									label={m.cable_confirm_experimental()}
+									confirmation="experimental"
+								/>
+							{/if}
+						</fieldset>
+						<div class="write-cell">
+							<span class="engrave" aria-hidden="true">{m.cable_fux_write_legend()}</span>
+							<Button
+								variant="lever"
+								size="lg"
+								class="write-lever"
+								data-armed={armed}
+								disabledReason={writeReason}
+								onclick={onWrite}
+							>
+								<span class="big-guard" aria-hidden="true"><span class="big-bat"></span></span>
+								<span class="write-name"
+									>{cable.mode === 'simulated' ? m.cable_write_simulated() : m.cable_write()}</span
+								>
+							</Button>
+							<span class="arm">
+								<Lamp on={armed} tone="ok" />
+								<span>{m.cable_fux_armed()}</span>
+							</span>
+						</div>
+					</div>
+					<p class="lever-hint">
+						{cable.writing ? m.cable_fux_levers_locked() : m.cable_fux_lever_hint()}
+					</p>
+				</div>
+			</div>
 
-			<fieldset class="flex flex-col gap-1" disabled={cable.writing}>
-				<legend class="font-semibold">{m.cable_confirmations_heading()}</legend>
-				<label class="flex items-center gap-2">
-					<input
-						type="checkbox"
-						class="focus-visible:outline-2 focus-visible:outline-offset-2"
-						bind:checked={confirmations.volumeLowered}
-					/>
-					<span>{m.cable_confirm_volume()}</span>
-				</label>
-				<label class="flex items-center gap-2">
-					<input
-						type="checkbox"
-						class="focus-visible:outline-2 focus-visible:outline-offset-2"
-						bind:checked={confirmations.keepConnected}
-					/>
-					<span>{m.cable_confirm_connection()}</span>
-				</label>
-				{#if checklist.experimentalRequired}
-					<label class="flex items-center gap-2">
-						<input
-							type="checkbox"
-							class="focus-visible:outline-2 focus-visible:outline-offset-2"
-							bind:checked={confirmations.experimental}
-						/>
-						<span>{m.cable_confirm_experimental()}</span>
-					</label>
-				{/if}
-			</fieldset>
-
-			<section aria-labelledby={`${id}-counters`} class="flex flex-col gap-1">
-				<h3 id={`${id}-counters`} class="font-semibold">{m.cable_counters_heading()}</h3>
-				<dl class="grid grid-cols-3 gap-2 text-center">
+			<section aria-labelledby={`${id}-counters`} class="counters">
+				<div class="sub-head">
+					<h3 id={`${id}-counters`} class="engrave">{m.cable_counters_heading()}</h3>
+					<Explainer term="flash" />
+				</div>
+				<dl class="drums">
 					<div>
-						<dt class="text-xs">{m.cable_counter_session()}</dt>
-						<dd class="font-mono">{checklist.counters.session}</dd>
+						<dt>{m.cable_counter_session()}</dt>
+						<dd>{checklist.counters.session}</dd>
 					</div>
 					<div>
-						<dt class="text-xs">{m.cable_counter_day()}</dt>
-						<dd class="font-mono">{checklist.counters.day}</dd>
+						<dt>{m.cable_counter_day()}</dt>
+						<dd>{checklist.counters.day}</dd>
 					</div>
 					<div>
-						<dt class="text-xs">{m.cable_counter_total()}</dt>
-						<dd class="font-mono">{checklist.counters.total}</dd>
+						<dt>{m.cable_counter_total()}</dt>
+						<dd>{checklist.counters.total}</dd>
 					</div>
 				</dl>
-				<p class="text-sm" aria-live="polite">
+				<p class="spacing" aria-live="polite">
 					{checklist.spacing.ok
 						? m.cable_spacing_ready()
 						: m.cable_spacing_wait({ seconds: formatNumber(checklist.spacing.waitMs / 1000, 1) })}
 				</p>
 				{#if checklist.dailyNotice.show}
-					<p class="text-sm" role="note">{m.cable_flash_notice()}</p>
+					<p class="notice" role="note">{m.cable_flash_notice()}</p>
 				{/if}
 			</section>
 
 			{#if cable.devices.length > 1}
-				<MultiCableQueue
-					{service}
-					{bands}
-					{preampDb}
-					{experimental}
-					{name}
-					confirmations={{ ...confirmations }}
-					canWrite={checklist.canWrite}
-					onresult={finish}
-				/>
+				<div class="queue">
+					<MultiCableQueue
+						{service}
+						{bands}
+						{preampDb}
+						{experimental}
+						{name}
+						confirmations={{ ...confirmations }}
+						canWrite={checklist.canWrite}
+						onresult={finish}
+					/>
+				</div>
 			{/if}
 
-			<section aria-labelledby={`${id}-target`} class="flex flex-col gap-1">
-				<h3 id={`${id}-target`} class="font-semibold">{m.cable_target_heading()}</h3>
+			<section aria-labelledby={`${id}-target`} class="target">
+				<h3 id={`${id}-target`} class="engrave">{m.cable_target_heading()}</h3>
 				{#if cable.devices.length === 0}
-					<p class="text-sm">{m.cable_refused_no_device()}</p>
+					<p>{m.cable_refused_no_device()}</p>
 				{:else}
 					{#if targetLabel !== null}
-						<p class="font-mono text-sm" data-target-device>
+						<p class="lcd" data-target-device>
 							{m.cable_target_device({ device: targetLabel })}
 						</p>
 					{:else}
-						<p class="text-sm" role="note">{m.cable_target_required()}</p>
+						<p role="note">{m.cable_target_required()}</p>
 					{/if}
 					{#if cable.devices.length > 1 || targetIndex === ''}
-						<label class="flex flex-col gap-1 text-sm">
+						<label class="select">
 							<span>{m.cable_select_device()}</span>
-							<select
-								class="rounded border border-current bg-transparent px-2 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
-								disabled={cable.writing}
-								value={targetIndex}
-								onchange={onSelectTarget}
-							>
+							<select disabled={cable.writing} value={targetIndex} onchange={onSelectTarget}>
 								{#if targetIndex === ''}
 									<option value="" disabled>{m.cable_target_choose()}</option>
 								{/if}
@@ -352,30 +392,382 @@
 			</section>
 
 			{#if !checklist.canWrite}
-				<p class="text-sm">{m.cable_write_blocked()}</p>
+				<p class="blocked">{m.cable_write_blocked()}</p>
 			{/if}
 			{#if message !== null}
-				<p role="status" class="text-sm">{message}</p>
+				<p role="status" class="message">{message}</p>
 			{/if}
 
-			<footer class="flex flex-wrap justify-end gap-2">
-				<button
-					type="button"
-					class="rounded border border-current px-3 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
-					disabled={cable.writing}
+			<footer class="foot">
+				<Button
+					variant="plate"
+					disabledReason={cable.writing ? m.cable_fux_close_locked() : null}
 					onclick={() => onclose()}
 				>
 					{m.cable_close()}
-				</button>
-				<button
-					type="button"
-					class="rounded border-2 border-current px-3 py-1 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
-					disabled={!checklist.canWrite || cable.writing || cable.device === null}
-					onclick={onWrite}
-				>
-					{cable.mode === 'simulated' ? m.cable_write_simulated() : m.cable_write()}
-				</button>
+				</Button>
 			</footer>
 		</div>
 	{/if}
 </dialog>
+
+<style>
+	.checklist {
+		margin: auto;
+		width: min(1120px, calc(100vw - 24px));
+		max-height: 92vh;
+		overflow-y: auto;
+		padding: 0;
+		border: 0;
+		border-radius: 6px;
+		background: #040505;
+		color: #24282a;
+		font: 400 var(--fs-ui, 14px) / 1.5 var(--face-body, 'Geist', sans-serif);
+		box-shadow:
+			0 0 0 1px #000,
+			0 0 0 7px #161819,
+			0 30px 80px #000d;
+	}
+	.checklist::backdrop {
+		background: #000000c4;
+	}
+	.unit {
+		position: relative;
+		container-type: inline-size;
+		padding: 22px clamp(18px, 5vw, 64px) 22px;
+		background:
+			linear-gradient(165deg, #ffffff5c, #ffffff00 38%, #00000014),
+			repeating-linear-gradient(90deg, #ffffff0e 0 1px, #0000000a 1px 2px, #ffffff00 2px 5px),
+			linear-gradient(180deg, #ced1cd, #b5b8b4 55%, #a6a9a5);
+		box-shadow:
+			inset 0 1px 0 #ffffffa8,
+			inset 0 -2px 0 #0000004d;
+	}
+	/* The explainer trigger is drawn for dark surfaces: on brushed aluminium it needs dark ink. */
+	.unit :global(.trigger) {
+		color: #24282a;
+	}
+	.unit :global(.trigger > span) {
+		border-color: rgba(0, 0, 0, 0.55);
+	}
+	.screw {
+		position: absolute;
+		width: 13px;
+		height: 13px;
+		border-radius: 50%;
+		background: radial-gradient(circle at 35% 30%, #f4f5f3, #9da19d 45%, #4b4f4c);
+		box-shadow:
+			0 1px 2px #000a,
+			inset 0 0 0 1px #00000040;
+	}
+	.screw::after {
+		content: '';
+		position: absolute;
+		inset: 5.5px 2px;
+		background: #3a3d3b;
+		transform: rotate(30deg);
+	}
+	.tl {
+		left: 12px;
+		top: 11px;
+	}
+	.tr {
+		right: 12px;
+		top: 11px;
+	}
+	.bl {
+		left: 12px;
+		bottom: 11px;
+	}
+	.br {
+		right: 12px;
+		bottom: 11px;
+	}
+	.head {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 8px 16px;
+		margin-bottom: 16px;
+		padding-bottom: 9px;
+		border-bottom: 1px solid #00000029;
+	}
+	.title-row,
+	.sub-head {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.title {
+		margin: 0;
+		font: 600 var(--fs-lede, 17px) / 1.1 var(--cond, 'Barlow Condensed', sans-serif);
+		letter-spacing: 0.22em;
+		text-transform: uppercase;
+		color: #24282a;
+		text-shadow: 0 1px 0 #ffffff8c;
+	}
+	.model {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 10px;
+		font: 600 var(--fs-caption, 12px) var(--cond, 'Barlow Condensed', sans-serif);
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+	}
+	.badge {
+		padding: 3px 6px;
+		border: 1px solid currentColor;
+		border-radius: 2px;
+		color: #0f3d3a;
+	}
+	.engrave {
+		margin: 0;
+		font: 600 var(--fs-small, 13px) / 1.2 var(--cond, 'Barlow Condensed', sans-serif);
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: #24282a;
+		text-shadow: 0 1px 0 #ffffff8c;
+	}
+	.cal {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+		gap: 24px;
+		align-items: start;
+	}
+	.col-vu,
+	.col-gate,
+	.col-act {
+		display: grid;
+		gap: 10px;
+		min-width: 0;
+	}
+	.crc,
+	.gate-note {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 8px;
+		margin: 0;
+		font: 400 var(--fs-caption, 12px) / 1.45 var(--face-data, 'JetBrains Mono', monospace);
+		color: #2f3335;
+	}
+	.gate-note {
+		font-family: var(--face-body, 'Geist', sans-serif);
+	}
+	.experimental {
+		display: grid;
+		gap: 6px;
+		padding: 10px 12px;
+		border-radius: 4px;
+		background: #0000000d;
+		box-shadow:
+			inset 3px 0 0 #1b7f76,
+			inset 0 1px 3px #0003,
+			0 1px 0 #ffffff80;
+	}
+	.experimental p {
+		margin: 0;
+		font-weight: 600;
+		color: #123b38;
+	}
+	.guards {
+		display: grid;
+		grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr);
+		gap: 14px;
+		align-items: start;
+	}
+	.levers {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 14px 10px;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		min-width: 0;
+	}
+	.levers legend {
+		grid-column: 1 / -1;
+		padding: 0;
+		margin-bottom: 8px;
+	}
+	.write-cell {
+		display: grid;
+		justify-items: center;
+		gap: 8px;
+		text-align: center;
+	}
+	.write-cell :global(.write-lever) {
+		height: auto;
+		min-height: 132px;
+		width: 100%;
+		max-width: 132px;
+		flex-direction: column;
+		gap: 8px;
+		padding: 10px 8px;
+		white-space: normal;
+		line-height: 1.2;
+	}
+	.write-cell :global(.write-lever[aria-disabled='true']) {
+		--btn-bg: linear-gradient(180deg, #8c908c, #6f736f);
+		--btn-fg: #1c1f20;
+		--btn-border: #0000008c;
+	}
+	.big-guard {
+		position: relative;
+		display: block;
+		width: 46px;
+		height: 66px;
+		border-radius: 8px;
+		background: linear-gradient(180deg, #2a2d2f, #121314);
+		box-shadow:
+			inset 0 2px 5px #000,
+			0 1px 0 #ffffffb0;
+	}
+	.big-bat {
+		position: absolute;
+		left: 19px;
+		top: 16px;
+		width: 9px;
+		height: 32px;
+		border-radius: 5px;
+		background: linear-gradient(90deg, #7c807d, #f4f5f3 45%, #8b8f8c);
+		box-shadow: 2px 2px 3px #0008;
+		transform-origin: 4.5px 4px;
+		transform: rotate(150deg);
+		transition: transform var(--dur-slow, 0.36s) var(--ease-mech, cubic-bezier(0.3, 1.4, 0.5, 1));
+	}
+	.write-cell :global(.write-lever[data-armed='true'] .big-bat) {
+		transform: rotate(0deg);
+	}
+	.write-name {
+		font-size: var(--fs-small, 13px);
+	}
+	.arm {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font: 600 var(--fs-caption, 12px) var(--cond, 'Barlow Condensed', sans-serif);
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+	}
+	.lever-hint {
+		margin: 0;
+		font-size: var(--fs-caption, 12px);
+		color: #2f3335;
+	}
+	.counters,
+	.target,
+	.queue {
+		display: grid;
+		gap: 8px;
+		margin-top: 18px;
+		padding-top: 14px;
+		border-top: 1px solid #00000022;
+	}
+	.drums {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px;
+		margin: 0;
+		text-align: center;
+	}
+	.drums div {
+		display: grid;
+		gap: 4px;
+	}
+	.drums dt {
+		font: 600 var(--fs-caption, 12px) var(--cond, 'Barlow Condensed', sans-serif);
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+	}
+	.drums dd {
+		justify-self: center;
+		min-width: 4ch;
+		margin: 0;
+		padding: 4px 10px;
+		border-radius: 3px;
+		background: #0b0c0c;
+		color: #f2f2ec;
+		font: 500 var(--fs-readout, 14px) var(--face-data, 'JetBrains Mono', monospace);
+		font-variant-numeric: tabular-nums slashed-zero;
+		box-shadow:
+			inset 0 2px 5px #000,
+			0 1px 0 #ffffffaa;
+	}
+	.spacing,
+	.notice,
+	.blocked,
+	.message,
+	.target p {
+		margin: 0;
+		font-size: var(--fs-small, 13px);
+	}
+	.notice {
+		padding: 8px 10px;
+		border-radius: 3px;
+		background: linear-gradient(180deg, #1f2122, #111213);
+		color: #e8ece7;
+	}
+	.lcd {
+		justify-self: start;
+		padding: 4px 8px;
+		border-radius: 2px;
+		background: #0b1312;
+		color: #8fe9df;
+		font: 400 var(--fs-caption, 12px) var(--face-data, 'JetBrains Mono', monospace);
+	}
+	.select {
+		display: grid;
+		gap: 4px;
+		font-size: var(--fs-small, 13px);
+	}
+	.select select {
+		max-width: 320px;
+		min-height: 36px;
+		padding: 6px 10px;
+		border: 1px solid #000;
+		border-radius: 3px;
+		background: #0d0f0f;
+		color: #e8ece8;
+		font: inherit;
+	}
+	.blocked {
+		margin-top: 14px;
+		font-weight: 600;
+	}
+	.message {
+		margin-top: 10px;
+		padding: 8px 10px;
+		border-radius: 3px;
+		background: #0b1312;
+		color: #a6f6ed;
+		font-family: var(--face-data, 'JetBrains Mono', monospace);
+	}
+	.foot {
+		display: flex;
+		justify-content: flex-end;
+		gap: 10px;
+		margin-top: 16px;
+	}
+	@container (max-width: 940px) {
+		.cal {
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		}
+		.col-act {
+			grid-column: 1 / -1;
+		}
+	}
+	@container (max-width: 600px) {
+		.cal,
+		.guards {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.big-bat {
+			transition: none;
+		}
+	}
+</style>

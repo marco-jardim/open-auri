@@ -4,17 +4,27 @@
 	import { formatCrc, formatNumber } from '#lib/components/cable/i18n.ts';
 	import type { JournalEntry, JournalStatus } from '#lib/cable/types.ts';
 	import { MiniCurve } from '#lib/charts/index.ts';
-	import { encoderData } from './model.ts';
+	import { Button, EmptyState } from '#lib/components/primitives/index.ts';
+	import Explainer from '#lib/components/comprehension/Explainer.svelte';
+	import { encoderData, exampleBoxes } from './model.ts';
 
 	let {
 		entries,
-		onload
-	}: { entries: readonly JournalEntry[]; onload?: (entry: JournalEntry) => void } = $props();
+		onload,
+		checklistHref = '#cabo-calibracao'
+	}: {
+		entries: readonly JournalEntry[];
+		onload?: (entry: JournalEntry) => void;
+		/** In-page link to the calibration unit (the empty state's action). */
+		checklistHref?: string;
+	} = $props();
 	const status: Record<JournalStatus, () => string> = {
 		ok: () => m.cabo_status_ok(),
 		interrupted: () => m.cabo_status_interrupted(),
 		simulated: () => m.cabo_status_simulated()
 	};
+	/** Spec §4.4: three non-interactive EXAMPLE boxes; never entries, never loadable. */
+	const examples = exampleBoxes();
 
 	function exportJournal() {
 		const url = URL.createObjectURL(
@@ -31,7 +41,51 @@
 <p class="note">{m.cabo_journal_note()}</p>
 <div class="tray">
 	{#if entries.length === 0}
-		<p class="note">{m.cabo_journal_empty()}</p>
+		<EmptyState title={m.empty_journal_title()} why={m.empty_journal_body()} class="journal-empty">
+			{#snippet illustration()}
+				<svg viewBox="0 0 96 64" width="96" height="64" fill="none" stroke="currentColor">
+					<rect x="6" y="10" width="84" height="46" rx="3" stroke-width="1.5" />
+					<circle cx="30" cy="33" r="10" stroke-width="1.5" />
+					<circle cx="66" cy="33" r="10" stroke-width="1.5" />
+					<path d="M30 43h36" stroke-width="1.5" />
+					<path d="M14 18h68" stroke-width="1" stroke-dasharray="3 4" opacity=".6" />
+				</svg>
+			{/snippet}
+			{#snippet action()}
+				<a class="action" href={checklistHref}>{m.empty_journal_action()}</a>
+			{/snippet}
+			{#snippet explain()}
+				<Explainer term="checklist" />
+			{/snippet}
+		</EmptyState>
+		<ul class="cards examples" aria-label={m.cabo_fux_examples_label()}>
+			{#each examples as example, index (example.id)}
+				<li class="card example" data-example={example.id} style:--tilt={`${index - 1}deg`}>
+					<div class="card-head">
+						<span class="tag">{m.empty_example()}</span>
+					</div>
+					<p class="card-name">{example.name}</p>
+					<div class="mini">
+						<MiniCurve
+							curve={{ bands: example.bands, preampDb: example.preampDb }}
+							label={m.cabo_response()}
+							description={m.cabo_response_description()}
+							color="#1b5e58"
+						/>
+					</div>
+					<dl>
+						<div>
+							<dt>CRC</dt>
+							<dd>{formatCrc(example.crc)}</dd>
+						</div>
+						<div>
+							<dt>Preamp</dt>
+							<dd>{formatNumber(example.preampDb)} dB</dd>
+						</div>
+					</dl>
+				</li>
+			{/each}
+		</ul>
 	{:else}
 		<ol class="cards">
 			{#each entries.toReversed() as entry, index (index)}
@@ -68,39 +122,57 @@
 							<dd>{formatNumber(entry.preampDb)} dB</dd>
 						</div>
 					</dl>
-					<button type="button" disabled={!onload} onclick={() => onload?.(entry)}
-						>{m.cabo_load()}</button
+					<Button
+						size="sm"
+						class="load"
+						disabledReason={onload ? null : m.cabo_fux_load_wait()}
+						onclick={() => onload?.(entry)}>{m.cabo_load()}</Button
 					>
 				</li>
 			{/each}
 		</ol>
 	{/if}
 </div>
-<button class="export" type="button" disabled={entries.length === 0} onclick={exportJournal}
-	>{m.cabo_export()}</button
->
+<div class="foot">
+	<Button
+		size="sm"
+		disabledReason={entries.length === 0 ? m.cabo_fux_export_empty() : null}
+		onclick={exportJournal}>{m.cabo_export()}</Button
+	>
+</div>
 
 <style>
 	.note {
-		font-size: 12.5px;
+		font-size: var(--fs-small, 13px);
 		line-height: 1.55;
 		color: #b6bdb7;
 	}
 	.tray {
+		display: grid;
+		gap: 18px;
 		padding: 16px;
 		border-radius: 5px;
 		background: linear-gradient(#0b0c0d, #16181a);
 		box-shadow: inset 0 3px 8px #000;
 	}
+	.tray :global(.journal-empty) {
+		color: #ece7dd;
+	}
+	.action {
+		color: #8fe9df;
+		font: 500 var(--fs-ui, 14px) var(--face-body, 'Geist', sans-serif);
+		text-underline-offset: 4px;
+	}
 	.cards {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
 		gap: 18px;
 		list-style: none;
 		padding: 0;
 		margin: 0;
 	}
 	.card {
+		position: relative;
 		min-width: 0;
 		padding: 12px 14px;
 		color: #2b2a26;
@@ -112,35 +184,44 @@
 			0 2px #b8ab8b,
 			0 7px 12px #000a;
 	}
-	header {
+	.example {
+		transform: rotate(var(--tilt, 0deg));
+	}
+	header,
+	.card-head {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
 		justify-content: space-between;
-		font: 10px/1.4 var(--mono, monospace);
+		font: 400 var(--label-min, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+	}
+	.card-head {
+		justify-content: flex-end;
 	}
 	.tag {
 		padding: 2px 5px;
-		border: 1px solid #6a5d45;
-		font:
-			600 11px 'Barlow Condensed',
-			sans-serif;
+		border: 1.5px solid #6a5d45;
+		color: #5c503a;
+		font: 700 var(--label-min, 11px) var(--cond, 'Barlow Condensed', sans-serif);
+		letter-spacing: 0.14em;
 		text-transform: uppercase;
+	}
+	.example .tag {
+		transform: rotate(-5deg);
 	}
 	[data-status='interrupted'] .tag {
 		color: #901e23;
 		border-color: #901e23;
 	}
-	h3 {
+	h3,
+	.card-name {
 		overflow-wrap: anywhere;
 		margin: 12px 0 4px;
-		font:
-			700 24px/1.1 'Barlow Condensed',
-			sans-serif;
+		font: 700 24px/1.1 var(--cond, 'Barlow Condensed', sans-serif);
 	}
 	.device {
 		overflow-wrap: anywhere;
-		font: 11px/1.5 var(--mono, monospace);
+		font: 400 var(--label-min, 11px) / 1.5 var(--face-data, 'JetBrains Mono', monospace);
 	}
 	.mini {
 		max-height: 70px;
@@ -150,7 +231,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px 20px;
-		font: 11px var(--mono, monospace);
+		font: 400 var(--label-min, 11px) var(--face-data, 'JetBrains Mono', monospace);
 	}
 	dl div {
 		display: flex;
@@ -159,25 +240,7 @@
 	dd {
 		margin: 0;
 	}
-	button {
-		min-height: 36px;
-		border: 1px solid currentColor;
-		border-radius: 3px;
-		background: transparent;
-		color: inherit;
-		padding: 6px 10px;
-		font:
-			600 12px 'Barlow Condensed',
-			sans-serif;
-	}
-	.export {
+	.foot {
 		margin-top: 14px;
-	}
-	button:disabled {
-		opacity: 0.5;
-	}
-	:focus-visible {
-		outline: 2px solid currentColor;
-		outline-offset: 3px;
 	}
 </style>
