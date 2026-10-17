@@ -9,16 +9,20 @@
 			"routes": [
 				"/offline",
 				"/privacidade",
-				"/termos",
-				"/verificar-email",
-				"/esqueci-senha",
-				"/redefinir-senha"
+				"/termos"
 			]
 		},
 		{
 			"id": "auth",
 			"targetBytes": 100000,
-			"routes": ["/entrar", "/criar-conta", "/conta/**"]
+			"routes": [
+				"/entrar",
+				"/criar-conta",
+				"/verificar-email",
+				"/esqueci-senha",
+				"/redefinir-senha",
+				"/conta/**"
+			]
 		},
 		{
 			"id": "docs",
