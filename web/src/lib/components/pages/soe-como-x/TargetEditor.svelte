@@ -4,7 +4,9 @@
 	import { dbScale, logScale, linePath, numberLabel } from '#lib/charts/scales.ts';
 	import { GRID } from 'open-auri/dsp';
 	import { targetFromPoints } from 'open-auri/solver';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { INITIAL_POINTS, type TargetPoint } from './model.ts';
+	let svg = $state<SVGSVGElement>();
 	let {
 		points,
 		onchange
@@ -75,9 +77,24 @@
 	}
 </script>
 
+<div class="tools">
+	<Button
+		size="sm"
+		variant="plate"
+		onclick={() => svg?.querySelector<SVGCircleElement>('circle')?.focus()}
+		><span aria-hidden="true">↗</span> {m.soe_fux_draw_start()}</Button
+	>
+	<Button
+		size="sm"
+		variant="plate"
+		onclick={() => onchange(INITIAL_POINTS.map((point) => ({ ...point })))}
+	>
+		{m.soe_reset()}
+	</Button>
+</div>
 <div bind:clientWidth={width} style={`--target-label-size:${labelSize}px`}>
-	<svg viewBox="0 0 500 245" role="group" aria-label={m.soe_draw()}>
-		<title>{m.soe_draw()}</title>
+	<svg bind:this={svg} viewBox="0 0 500 245" role="group" aria-label={m.soe_fux_draw()}>
+		<title>{m.soe_fux_draw()}</title>
 		{#each [20, 100, 1000, 10000, 20000] as hz (hz)}
 			<line x1={x(hz)} x2={x(hz)} y1="15" y2="210" />
 		{/each}
@@ -114,11 +131,14 @@
 	</svg>
 </div>
 <p>{m.soe_draw_hint()}</p>
-<button type="button" onclick={() => onchange(INITIAL_POINTS.map((point) => ({ ...point })))}>
-	{m.soe_reset()}
-</button>
 
 <style>
+	.tools {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-2, 8px);
+		margin-top: var(--space-3, 12px);
+	}
 	svg {
 		box-sizing: border-box;
 		width: 100%;
@@ -151,16 +171,5 @@
 		color: #d4dec8;
 		font-size: 11px;
 		line-height: 1.6;
-	}
-	button {
-		color: #e3e9d8;
-		padding: 8px;
-		background: #20281a;
-		border: 1px solid #79826c;
-		border-radius: 3px;
-	}
-	button:focus-visible {
-		outline: 2px solid #ff99c4;
-		outline-offset: 3px;
 	}
 </style>

@@ -73,7 +73,9 @@ for (const source of ['feed', 'library']) {
 			.getByRole('combobox', { name: m.curve_social_choose(), exact: true })
 			.selectOptions(lineage.id);
 		await page.getByRole('button', { name: m.curve_social_add() }).click();
-		await expect.element(page.getByRole('button', { name: m.soe_solve() })).toBeEnabled();
+		await expect
+			.element(page.getByRole('button', { name: m.soe_solve() }))
+			.not.toHaveAttribute('aria-disabled');
 		expect(await originOf(s1)).toMatchObject({ lineageId: lineage.id, versionId: lineage.head.id });
 		await page.getByRole('button', { name: m.soe_solve() }).click();
 		await page.getByRole('button', { name: m.curve_social_publish() }).click();

@@ -118,7 +118,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 		const curve = neutralCurve();
 		const screen = await render(Preview, { audio: null, current: null, candidate: curve });
-		await expect.element(page.getByRole('button', { name: m.soe_listen() })).toBeDisabled();
+		await expect
+			.element(page.getByRole('button', { name: m.soe_listen() }))
+			.toHaveAttribute('aria-disabled', 'true');
 		await page.getByRole('button', { name: m.soe_current() }).click();
 		await expect
 			.element(page.getByRole('button', { name: m.soe_current() }))
@@ -130,7 +132,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await screen.rerender({ audio: engine, current: curve });
 		await page.getByRole('button', { name: m.soe_listen() }).click();
 		await expect.element(page.getByRole('alert')).toHaveTextContent(m.soe_audio_error());
-		await expect.element(page.getByRole('button', { name: m.soe_listen() })).toBeEnabled();
+		await expect
+			.element(page.getByRole('button', { name: m.soe_listen() }))
+			.not.toHaveAttribute('aria-disabled');
 		expect(screen.container.querySelector('[role="meter"]')).toBeNull();
 		const created = createAB.mock.results[0];
 		if (created.type !== 'return') throw new Error('Missing preview snapshot');

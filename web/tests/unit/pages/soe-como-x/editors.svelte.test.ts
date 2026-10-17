@@ -32,10 +32,11 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 		const onimport = vi.fn();
 		await render(CsvImport, { id: 'csv', label: 'CSV trace', onimport });
-		await page.getByText(m.soe_paste(), { exact: true }).click();
+		await page.getByRole('button', { name: m.soe_fux_paste() }).click();
 		const submit = page.getByRole('button', { name: m.soe_import(), exact: true });
 		await page.getByRole('textbox', { name: 'CSV trace' }).fill('   ');
-		await expect.element(submit).toBeDisabled();
+		// Primitive Button: unavailable is aria-disabled with a reason, never `disabled`.
+		await expect.element(submit).toHaveAttribute('aria-disabled', 'true');
 		await page.getByRole('textbox', { name: 'CSV trace' }).fill('frequency,raw\n20,nope');
 		await submit.click();
 		await expect.element(page.getByRole('alert')).toHaveTextContent(m.soe_import_error());
@@ -74,14 +75,16 @@ test('CSV files handle cancellation, size limits and read failures without impor
 test('only the latest CSV read may import; pending reads are disabled and ignored on unmount', async () => {
 	const onimport = vi.fn();
 	await render(CsvImport, { id: 'csv', label: 'CSV trace', onimport });
-	await page.getByText(m.soe_paste(), { exact: true }).click();
+	await page.getByRole('button', { name: m.soe_fux_paste() }).click();
 	await page.getByRole('textbox', { name: 'CSV trace' }).fill(CSV);
 	let finish: ((text: string) => void) | undefined;
 	const slow = new File([CSV], 'slow.csv');
 	vi.spyOn(slow, 'text').mockImplementation(() => new Promise((resolve) => (finish = resolve)));
 	await choose(slow);
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.soe_loading());
-	await expect.element(page.getByRole('button', { name: m.soe_import() })).toBeDisabled();
+	await expect
+		.element(page.getByRole('button', { name: m.soe_import() }))
+		.toHaveAttribute('aria-busy', 'true');
 	await choose(new File([CSV], 'latest.csv'));
 	await expect.poll(() => onimport.mock.calls.length).toBe(1);
 	finish?.(CSV);

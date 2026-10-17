@@ -3,7 +3,7 @@ import { getPreset } from 'open-auri/catalog';
 import { normalize, parseMeasurement, toGrid } from 'open-auri/io';
 import { targetFromPoints, type solvePeq } from 'open-auri/solver';
 import type { AutoEqEntry, createAutoEqClient } from '#lib/data/autoeq.ts';
-import type { SolveParameters } from '#lib/workers/solver-handler.ts';
+import type { SolveParameters, SolverOptions } from '#lib/workers/solver-handler.ts';
 import type { CurveData } from '#lib/state/model.ts';
 
 export type AutoEqClient = Pick<
@@ -140,6 +140,10 @@ export function stationTransition(state: StationState, event: StationEvent): Sta
 }
 
 export function buildSolverRequest(state: StationState): SolveParameters {
+	return { options: solverOptions(state) };
+}
+
+function solverOptions(state: StationState): SolverOptions {
 	if (!state.measurement || !state.target) throw new Error('solver:missing-input');
 	const { speed, iso, d5Weight } = state.controls;
 	if (
@@ -153,26 +157,132 @@ export function buildSolverRequest(state: StationState): SolveParameters {
 		throw new RangeError('solver:controls');
 	}
 	return {
-		options: {
-			grid: GRID,
-			measurement: [...state.measurement.values],
-			target: [...state.target.values],
-			speed,
-			weights: iso ? 'iso226' : 'flat',
-			phon: 60,
-			d5Weight,
-			maxBands: 10,
-			allowExperimental: false,
-			layer: 'ajustar',
-			levelMatch: true,
-			maxIterations: 400,
-			maxTimeMs: 1200
-		}
+		grid: GRID,
+		measurement: [...state.measurement.values],
+		target: [...state.target.values],
+		speed,
+		weights: iso ? 'iso226' : 'flat',
+		phon: 60,
+		d5Weight,
+		maxBands: 10,
+		allowExperimental: false,
+		layer: 'ajustar',
+		levelMatch: true,
+		maxIterations: MAX_ITERATIONS,
+		maxTimeMs: 1200
+	};
+}
+
+export const MAX_ITERATIONS = 400;
+/**
+ * Iteration budgets of the progress passes that run before the full solve. Each pass is a
+ * real, deterministic solve cut at that many LM trials (the worker has no progress messages),
+ * so "ITER n / N" and the deviation map always show numbers the solver actually produced.
+ * The final answer always comes from the full request, never from a progress pass.
+ */
+export const PROGRESS_BUDGETS: readonly number[] = [20, 60, 140];
+
+/** Measurement with the fitted EQ, aligned at 1 kHz like every trace on the page. */
+export function predictedValues(
+	measurement: readonly number[],
+	fit: Pick<FitResult, 'bands' | 'preampDb'>
+): number[] {
+	const response = curveResponseDb(fit, GRID);
+	return normalize(
+		measurement.map((value, i) => value + response[i]),
+		GRID
+	);
+}
+
+/**
+ * Level-matched deviation (prediction − target) on the audible grid (20 Hz to 20 kHz) and its
+ * largest absolute value. The mean is removed because the target never sets playback volume.
+ */
+export function deviation(
+	predicted: readonly number[],
+	target: readonly number[]
+): { values: number[]; maxErrorDb: number } {
+	const indices = GRID.flatMap((hz, i) => (hz >= 20 && hz <= 20000 ? [i] : []));
+	if (!indices.length) return { values: [], maxErrorDb: 0 };
+	const raw = indices.map((i) => predicted[i] - target[i]);
+	const mean = raw.reduce((sum, value) => sum + value, 0) / raw.length;
+	const values = raw.map((value) => value - mean);
+	return { values, maxErrorDb: Math.max(...values.map(Math.abs)) };
+}
+
+export interface SolveProgress {
+	/** LM trials the solver reported for this pass. */
+	iterations: number;
+	maxIterations: number;
+	rmsDb: number;
+	maxErrorDb: number;
+	predicted: number[];
+	/** Level-matched deviation on the audible grid, one value per grid point. */
+	row: number[];
+}
+
+export function progressFrom(
+	result: FitResult,
+	measurement: readonly number[],
+	target: readonly number[],
+	maxIterations: number
+): SolveProgress {
+	const predicted = predictedValues(measurement, result);
+	const { values, maxErrorDb } = deviation(predicted, target);
+	return {
+		iterations: result.iterations,
+		maxIterations,
+		rmsDb: result.rmsDb,
+		maxErrorDb,
+		predicted,
+		row: values
 	};
 }
 
 export interface SolverPort {
 	solve(input: SolveParameters): Promise<{ result: FitResult }>;
+}
+
+/**
+ * Real progress: short solves at PROGRESS_BUDGETS, each reported through `onprogress`, then
+ * the full request. `onprogress` returns false when the page moved on (edit, cancel, unmount);
+ * the remaining passes are skipped. A pass that stops for any reason other than the iteration
+ * cap ends the previews (more budget would not change its path) and goes to the full solve.
+ */
+export async function solveStationWithProgress(
+	state: StationState,
+	worker: SolverPort,
+	onprogress: (progress: SolveProgress) => boolean
+): Promise<StationEvent> {
+	try {
+		const full = solverOptions(state);
+		const measurement = full.measurement ?? [];
+		const maxIterations = full.maxIterations ?? MAX_ITERATIONS;
+		const maxTimeMs = full.maxTimeMs ?? 1200;
+		for (const budget of PROGRESS_BUDGETS) {
+			if (budget >= maxIterations) break;
+			const pass = await worker.solve({
+				options: {
+					...full,
+					maxIterations: budget,
+					maxTimeMs: Math.max(100, Math.round((maxTimeMs * budget) / maxIterations))
+				}
+			});
+			const next = progressFrom(pass.result, measurement, full.target, maxIterations);
+			if (!onprogress(next)) {
+				return { type: 'error', revision: state.revision, error: 'solver:superseded' };
+			}
+			if (pass.result.stopReason !== 'iterations') break;
+		}
+		const response = await worker.solve({ options: full });
+		return { type: 'result', revision: state.revision, result: response.result };
+	} catch (cause) {
+		return {
+			type: 'error',
+			revision: state.revision,
+			error: cause instanceof Error ? cause.message : 'solver:failed'
+		};
+	}
 }
 export async function solveStation(state: StationState, worker: SolverPort): Promise<StationEvent> {
 	try {

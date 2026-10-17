@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import { getLocale } from '#lib/paraglide/runtime.js';
+	import { numberLabel } from '#lib/charts/scales.ts';
 	import type { AudioEngine, ABPreview, ABSide } from '#lib/audio/engine.ts';
 	import {
 		tap,
@@ -11,6 +13,8 @@
 		type VuReference
 	} from '#lib/audio/meters.ts';
 	import { VuMeter, MeterModeLabel, SpectrumOverlay } from '#lib/components/meters/index.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { CurveData } from '#lib/state/model.ts';
 	let {
 		audio,
@@ -32,6 +36,8 @@
 	let analyser = $state.raw<AnalyserNode | null>(null);
 	let a = $state.raw<MeterUpdate>({ mode: 'data', frame: null });
 	let b = $state.raw<MeterUpdate>({ mode: 'data', frame: null });
+	/** Real trims the engine applied so A and B play at the same levelDb (null until created). */
+	let trims = $state.raw<readonly [number, number] | null>(null);
 	let preview: ABPreview | null = null;
 	// Reactive so the reference effect also reaches taps attached after it last ran.
 	let taps = $state.raw<MeterTap[]>([]);
@@ -65,6 +71,7 @@
 		active = false;
 		playing = false;
 		pending = false;
+		trims = null;
 		a = { mode: 'data', frame: null };
 		b = { mode: 'data', frame: null };
 	}
@@ -105,6 +112,7 @@
 		const token = ++generation;
 		try {
 			preview = engine.createAB(current, candidate, { initial: selected, experimental: true });
+			trims = preview.trims;
 			active = true;
 			const aNode = engine.getChainOutput(preview.a.id);
 			const bNode = engine.getChainOutput(preview.b.id);
@@ -151,9 +159,15 @@
 			if (token === generation) pending = false;
 		}
 	}
+	const listenReason = $derived(
+		!audio ? m.soe_fux_audio_loading() : !current ? m.soe_fux_editor_loading() : null
+	);
 	const modeA = $derived(playing ? a.mode : 'data');
 	const modeB = $derived(playing ? b.mode : 'data');
 	const mode = $derived(selected === 'A' ? modeA : modeB);
+	function db(value: number) {
+		return numberLabel(value, getLocale(), 1);
+	}
 </script>
 
 {#snippet vu(mode: MeterMode, reading: number | null, label: string)}
@@ -176,27 +190,39 @@
 {/snippet}
 
 <section class="preview" aria-label={m.soe_preview()}>
-	<h3>{m.soe_preview()}</h3>
+	<div class="head">
+		<h3>{m.soe_preview()}</h3>
+		<Explainer term="ab-nivel" />
+	</div>
 	<div class="buttons">
-		<button
-			type="button"
-			disabled={!audio || !current || pending}
+		<Button
+			size="sm"
+			variant="primary"
+			disabledReason={listenReason}
+			loading={pending}
 			onclick={listen}
-			aria-pressed={playing}>{active ? m.soe_stop_preview() : m.soe_listen()}</button
+			aria-pressed={playing}>{active ? m.soe_stop_preview() : m.soe_listen()}</Button
 		>
-		<button
-			type="button"
+		<Button
+			size="sm"
+			variant="key"
+			lit={selected === 'A'}
 			aria-pressed={selected === 'A'}
 			aria-label={m.soe_current()}
-			onclick={() => select('A')}>A</button
+			onclick={() => select('A')}>A</Button
 		>
-		<button
-			type="button"
+		<Button
+			size="sm"
+			variant="key"
+			lit={selected === 'B'}
 			aria-pressed={selected === 'B'}
 			aria-label={m.soe_candidate()}
-			onclick={() => select('B')}>B</button
+			onclick={() => select('B')}>B</Button
 		>
 	</div>
+	{#if trims}
+		<p class="level" role="status">{m.soe_fux_level({ a: db(trims[0]), b: db(trims[1]) })}</p>
+	{/if}
 	<div class="meters">
 		<div>
 			{@render vu(modeA, a.frame?.vuL ?? null, 'A / VU')}
@@ -218,50 +244,47 @@
 
 <style>
 	.preview {
-		margin-top: 18px;
-		padding-top: 12px;
-		border-top: 1px solid #6d775e;
+		/* Its own dark hardware surface, so the light token text keeps its contrast standalone
+		   (muted-hi #a39d92 on #2c3227 is 4.9:1; text-2 #cfc9be is 8.0:1). */
+		margin-top: var(--space-4, 16px);
+		padding: var(--space-3, 12px);
 		background: #2c3227;
-		color: #e1e8d5;
-		--oa-meter-ink: #e1e8d5;
+		border: 1px solid var(--rule-control, rgba(236, 231, 221, 0.4));
+		border-radius: var(--rad-md, 6px);
+		color: var(--text, #ece7dd);
+		--oa-meter-ink: var(--text, #ece7dd);
 		--oa-meter-over: #ff9d9d;
-		--oa-meter-data: #d4dec8;
-		--oa-meter-live: #ff99c4;
-		--oa-meter-spectrum: #ff99c4;
+		--oa-meter-data: var(--muted-hi, #a39d92);
+		--oa-meter-live: var(--accent-hi, #ff78af);
+		--oa-meter-spectrum: var(--accent-hi, #ff78af);
+	}
+	.head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2, 8px);
+		margin-bottom: var(--space-2, 8px);
 	}
 	h3 {
-		font: 12px var(--font-mono, monospace);
-		margin: 0 0 10px;
+		margin: 0;
+		font: 500 var(--fs-eyebrow, 11px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 	.buttons {
 		display: flex;
-		gap: 6px;
+		gap: var(--space-2, 8px);
 		flex-wrap: wrap;
 	}
-	button {
-		border: 1px solid #859175;
-		border-radius: 3px;
-		padding: 8px;
-		background: #20281a;
-		color: #e3e9d8;
-		cursor: pointer;
-	}
-	button[aria-pressed='true'] {
-		color: #ffb2d2;
-		border-color: #ff99c4;
-	}
-	button:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
-	button:focus-visible {
-		outline: 2px solid #ff99c4;
-		outline-offset: 3px;
+	.level {
+		font-family: var(--face-data, 'JetBrains Mono', monospace);
+		font-variant-numeric: tabular-nums slashed-zero;
+		color: var(--accent-hi, #ff78af);
 	}
 	.meters {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		margin-top: 12px;
+		margin-top: var(--space-3, 12px);
 	}
 	.meters > div {
 		min-width: 0;
@@ -275,16 +298,15 @@
 		justify-content: center;
 		gap: 4px;
 		margin: 8px 3px;
-		border: 1px solid #536248;
-		border-radius: 8px;
-		background: #192115;
-		color: #b3bfa7;
-		font: 11px var(--font-mono, monospace);
+		border: 1px solid var(--rule-control, rgba(236, 231, 221, 0.4));
+		border-radius: var(--rad-md, 8px);
+		background: var(--well, #11150f);
+		color: var(--muted-hi, #a39d92);
+		font: var(--label-min, 11px) var(--face-data, 'JetBrains Mono', monospace);
 	}
 	p {
-		font-size: 11px;
-		line-height: 1.6;
-		color: #d4dec8;
+		font: var(--fs-caption, 12px) / 1.6 var(--face-body, 'Geist', system-ui, sans-serif);
+		color: var(--text-2, #cfc9be);
 	}
 	[role='alert'] {
 		color: #ffc3c5;
