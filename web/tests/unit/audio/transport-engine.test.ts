@@ -6,6 +6,7 @@ import {
 	DEFAULT_VOLUME_DB,
 	FADE_IN_S,
 	IDLE_STATE,
+	PENDING_START_TIMEOUT_MS,
 	POSITION_TICK_MS,
 	SEEK_FADE_S,
 	createAudioEngine,
@@ -251,6 +252,8 @@ describe('seek and restart', () => {
 		await engine.start('raw');
 		const context = onlyContext();
 		const master = masterOf(context);
+		// Well after the start's fade-in (the fake clock only moves by hand).
+		context.currentTime += FADE_IN_S + 1;
 		element.currentTime = 10;
 		const listener = vi.fn();
 		engine.onChange(listener);
@@ -271,6 +274,43 @@ describe('seek and restart', () => {
 		expect(back?.time).toBeCloseTo(context.currentTime + SEEK_FADE_S, 12);
 		expect(listener).toHaveBeenCalledWith(expect.objectContaining({ position: 120 }));
 		expect(engine.state()).toMatchObject({ playing: true, position: 120 });
+	});
+
+	it('a seek during the start fade-in comes back over what remains of it, never faster', async () => {
+		vi.useFakeTimers();
+		const { engine, fake } = setup();
+		await withFile(engine, fake, 200);
+		await engine.start('raw');
+		const context = onlyContext();
+		const master = masterOf(context);
+		const started = context.currentTime;
+		const preview = dbToGain(DEFAULT_VOLUME_DB);
+		// 50 ms into the 200 ms fade-in.
+		context.currentTime = started + 0.05;
+		expect(engine.seek(60)).toBe(true);
+		expect(master.gain.events.at(-1)).toMatchObject({ type: 'linear', value: 0 });
+		context.currentTime = started + 0.05 + SEEK_FADE_S;
+		await vi.advanceTimersByTimeAsync(SEEK_FADE_S * 1000);
+		const back = master.gain.events.at(-1);
+		expect(back?.type).toBe('linear');
+		expect(back?.value).toBeCloseTo(preview, 12);
+		// Full volume when the start fade-in would have reached it, not 30 ms after the jump.
+		expect(back?.time).toBeCloseTo(started + FADE_IN_S, 12);
+		expect((back?.time ?? 0) - context.currentTime).toBeGreaterThan(SEEK_FADE_S);
+		// A volume change late in the fade-in follows the same pace.
+		context.currentTime = started + 0.15;
+		engine.setVolume(-10);
+		const volume = master.gain.events.at(-1);
+		expect(volume?.value).toBeCloseTo(dbToGain(-10), 12);
+		expect(volume?.time).toBeCloseTo(started + FADE_IN_S, 12);
+		// Once the fade-in is over, a seek is the plain 30 ms fade again.
+		context.currentTime = started + 5;
+		engine.seek(10);
+		await vi.advanceTimersByTimeAsync(SEEK_FADE_S * 1000);
+		expect(master.gain.events.at(-1)?.time).toBeCloseTo(context.currentTime + SEEK_FADE_S, 12);
+		for (const event of master.gain.events) {
+			expect(event.value).toBeLessThanOrEqual(preview + 1e-12);
+		}
 	});
 
 	it('rapid seeks apply only the last target and fade back in once', async () => {
@@ -552,6 +592,87 @@ describe('random start', () => {
 		expect(element.currentTime).toBe(40);
 	});
 
+	it('keeps the master silent until a deferred random start lands, then fades in', async () => {
+		vi.useFakeTimers();
+		const { engine, fake } = setup({ random: () => 0.5 });
+		await engine.loadFile(audioFile());
+		const element = fake.elements[0];
+		if (!element) throw new Error('no element');
+		await engine.start('raw', { startAt: 'random', session: 'teste-cego' });
+		const context = onlyContext();
+		const master = masterOf(context);
+		const preview = dbToGain(DEFAULT_VOLUME_DB);
+		// The element plays from the gesture (never later on its own), but nothing is heard.
+		expect(element.playCalls).toBe(1);
+		expect(master.gain.value).toBe(0);
+		expect(master.gain.events.some((event) => event.value > 0)).toBe(false);
+		// A length that is not finite yet keeps waiting, still silent.
+		element.fireDurationChange(Number.POSITIVE_INFINITY);
+		expect(element.currentTime).toBe(0);
+		expect(master.gain.value).toBe(0);
+		// A volume change while it waits does not unmute either.
+		engine.setVolume(-12);
+		expect(master.gain.value).toBe(0);
+		await vi.advanceTimersByTimeAsync(SEEK_FADE_S * 1000);
+		expect(master.gain.value).toBe(0);
+		// The length arrives: jump first, then the full 200 ms fade-in from silence.
+		element.fireDurationChange(80);
+		expect(element.currentTime).toBe(40);
+		const [silence, fadeIn] = master.gain.events.slice(-2);
+		expect(silence).toMatchObject({ type: 'set', value: 0, time: context.currentTime });
+		expect(fadeIn?.type).toBe('linear');
+		expect(fadeIn?.value).toBeCloseTo(dbToGain(-12), 12);
+		expect(fadeIn?.time).toBeCloseTo(context.currentTime + FADE_IN_S, 12);
+		expect(engine.state()).toMatchObject({ playing: true, position: 40, duration: 80 });
+		for (const event of master.gain.events) {
+			expect(event.value).toBeLessThanOrEqual(preview + 1e-12);
+		}
+	});
+
+	it('starts at 0 and says so when the length stays unknown for 1.5 s', async () => {
+		vi.useFakeTimers();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const { engine, fake } = setup({ random: () => 0.5 });
+		await engine.loadFile(audioFile());
+		const element = fake.elements[0];
+		if (!element) throw new Error('no element');
+		await engine.start('raw', { startAt: 'random' });
+		const context = onlyContext();
+		const master = masterOf(context);
+		element.fireDurationChange(Number.POSITIVE_INFINITY);
+		// Played silently while it waited.
+		element.currentTime = 1.4;
+		await vi.advanceTimersByTimeAsync(PENDING_START_TIMEOUT_MS - 10);
+		expect(master.gain.value).toBe(0);
+		expect(warn).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(warn).toHaveBeenCalledOnce();
+		expect(element.currentTime).toBe(0);
+		const fadeIn = master.gain.events.at(-1);
+		expect(fadeIn?.type).toBe('linear');
+		expect(fadeIn?.value).toBeCloseTo(dbToGain(DEFAULT_VOLUME_DB), 12);
+		expect(fadeIn?.time).toBeCloseTo(context.currentTime + FADE_IN_S, 12);
+		// A length found later no longer moves the playing file.
+		element.currentTime = 3;
+		element.fireDurationChange(80);
+		await vi.advanceTimersByTimeAsync(SEEK_FADE_S * 1000);
+		expect(element.currentTime).toBe(3);
+		warn.mockRestore();
+	});
+
+	it('the beginning needs no length: it plays at once with the normal fade-in', async () => {
+		const { engine, fake } = setup();
+		await engine.loadFile(audioFile());
+		const element = fake.elements[0];
+		if (!element) throw new Error('no element');
+		await engine.start('raw', { startAt: 'beginning' });
+		const context = onlyContext();
+		const fadeIn = masterOf(context).gain.events.at(-1);
+		expect(fadeIn?.type).toBe('linear');
+		expect(fadeIn?.time).toBeCloseTo(context.currentTime + FADE_IN_S, 12);
+		expect(element.currentTime).toBe(0);
+	});
+
 	it('uses the seek fade when the preview is already audible', async () => {
 		vi.useFakeTimers();
 		const { engine, fake } = setup({ random: () => 0 });
@@ -576,6 +697,33 @@ describe('random start', () => {
 		await vi.advanceTimersByTimeAsync(SEEK_FADE_S * 1000);
 		expect(next.currentTime).toBe(40);
 		expect(engine.state()).toMatchObject({ position: 40, playing: true });
+	});
+
+	it('a file loaded during a random-start session is silent until its random point', async () => {
+		vi.useFakeTimers();
+		const { engine, fake } = setup({ random: () => 0.5 });
+		await withFile(engine, fake, 200);
+		await engine.start('raw', { startAt: 'random', session: 'comparar' });
+		const context = onlyContext();
+		const master = masterOf(context);
+		expect(master.gain.value).toBeGreaterThan(0);
+		await engine.loadFile(audioFile('next.mp3'));
+		const next = fake.elements.at(-1);
+		if (!next) throw new Error('no element');
+		// The new element plays from its start: the master is already at 0.
+		expect(master.gain.value).toBe(0);
+		await vi.advanceTimersByTimeAsync(SEEK_FADE_S * 1000);
+		expect(master.gain.value).toBe(0);
+		next.fireMetadata(80);
+		expect(next.currentTime).toBe(40);
+		expect(master.gain.events.at(-1)?.time).toBeCloseTo(context.currentTime + FADE_IN_S, 12);
+		expect(master.gain.value).toBeCloseTo(dbToGain(DEFAULT_VOLUME_DB), 12);
+		// Removing a file whose start still waits brings the master back on the noise.
+		await engine.loadFile(audioFile('third.mp3'));
+		expect(master.gain.value).toBe(0);
+		await engine.removeFile();
+		expect(engine.state()).toMatchObject({ source: 'noise', playing: true });
+		expect(master.gain.value).toBeCloseTo(dbToGain(DEFAULT_VOLUME_DB), 12);
 	});
 
 	it('honours the beginning and an explicit second, and pink noise ignores it', async () => {

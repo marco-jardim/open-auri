@@ -96,8 +96,6 @@ describe('nickname blocklist', () => {
 				'nazista',
 				'moderadora',
 				'4dm1n',
-				'ádmín',
-				'аdmіn',
 				'a_d_m_i_n',
 				'admiiin',
 				'admin123',
@@ -110,10 +108,64 @@ describe('nickname blocklist', () => {
 			]) {
 				expect(await changeNickname(env.DB, user.id, blocked, T0)).toEqual(takenResult);
 			}
+			// Format first (FUX.Q N3): a malformed look-alike of a blocked name is just invalid,
+			// exactly like any malformed string, so the format answer never probes the list.
+			const malformed = await changeNickname(env.DB, user.id, 'bad name', T0);
+			expect(malformed).toEqual({ ok: false, error: 'invalid' });
+			for (const lookAlike of ['ádmín', 'аdmіn', 'sapatão']) {
+				expect(await changeNickname(env.DB, user.id, lookAlike, T0)).toEqual(malformed);
+			}
 			expect(await userRow(user.id)).toEqual(before);
 			expect(
 				await count('SELECT count(*) AS n FROM username_holds WHERE user_id = ?', user.id)
 			).toBe(0);
+		}
+	});
+
+	it('answers a blocked name where a taken one is answered: after the change cooldown', async () => {
+		const taken = nick('occupied');
+		await seedUser({ username: taken });
+		const user = await seedUser({ username: nick('original') });
+		const renamed = nick('renamed');
+		expect(await changeNickname(env.DB, user.id, renamed, T0)).toMatchObject({
+			ok: true,
+			kind: 'change'
+		});
+		const later = T0 + DAY;
+		// Inside the 30-day window a taken name is "too soon", not "taken"…
+		const takenResult = await changeNickname(env.DB, user.id, taken, later);
+		expect(takenResult).toEqual({
+			ok: false,
+			error: 'too-soon',
+			retryAt: T0 + NICKNAME_CHANGE_INTERVAL_MS
+		});
+		// …and so is every blocked or reserved one: the answer does not reveal the list.
+		for (const blocked of ['admin', 'n1gg3r', 'moderadora', 'sennheiser', 'spotify', 'lg123']) {
+			expect(await changeNickname(env.DB, user.id, blocked, later)).toEqual(takenResult);
+		}
+		// After the window both read "taken" again.
+		const after = T0 + NICKNAME_CHANGE_INTERVAL_MS + DAY;
+		expect(await changeNickname(env.DB, user.id, taken, after)).toEqual({
+			ok: false,
+			error: 'taken'
+		});
+		expect(await changeNickname(env.DB, user.id, 'admin', after)).toEqual({
+			ok: false,
+			error: 'taken'
+		});
+		expect((await userRow(user.id))?.username).toBe(renamed);
+	});
+
+	it('accepts common words and short handles that only folding made look blocked', async () => {
+		// Each word stays a whole token of its own; the suffix only keeps nicknames unique.
+		const suffix = () => `x${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+		for (const chosen of ['final', 'chord', 'tidal', 'ig.music'].map((w) => `${w}.${suffix()}`)) {
+			const user = await seedUser();
+			expect(await changeNickname(env.DB, user.id, chosen, T0)).toMatchObject({
+				ok: true,
+				username: chosen,
+				kind: 'first'
+			});
 		}
 	});
 

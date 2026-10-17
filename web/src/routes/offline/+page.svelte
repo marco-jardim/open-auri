@@ -12,10 +12,23 @@
 	import Lamp from '#lib/components/primitives/Lamp.svelte';
 	import Panel from '#lib/components/primitives/Panel.svelte';
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
+	import { isWriteInProgress, onWriteProgress } from '#lib/cable/write-flag.ts';
 
 	// Prerendered without a navigator: the page is served when the network is gone, so it
 	// starts offline and hydration reads the real flag.
 	let online = $state(false);
+
+	// A reload mid-write would cut the cable write (see web/src/lib/pwa/README.md): while the
+	// shared flag is up, "Tentar de novo" says why and refuses to reload.
+	let writing = $state(false);
+
+	$effect(() => {
+		const sync = () => {
+			writing = isWriteInProgress();
+		};
+		sync();
+		return onWriteProgress(sync);
+	});
 
 	$effect(() => {
 		const sync = () => {
@@ -50,12 +63,17 @@
 	]);
 
 	function retry() {
+		// Read the flag itself, not only the rendered state: never reload while a write runs.
+		if (isWriteInProgress()) {
+			writing = true;
+			return;
+		}
 		window.location.reload();
 	}
 </script>
 
 <svelte:head>
-	<title>{m.pwa_offline_title()} · Open Auri</title>
+	<title>{m.pwa_offline_title()} · open-auri</title>
 	<meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -90,7 +108,12 @@
 	</Panel>
 
 	<div class="offline__actions">
-		<Button variant="primary" size="lg" onclick={retry}>{m.fux_p11_offline_retry()}</Button>
+		<Button
+			variant="primary"
+			size="lg"
+			disabledReason={writing ? m.cabo_fux_busy_writing() : null}
+			onclick={retry}>{m.fux_p11_offline_retry()}</Button
+		>
 		<a class="offline__link" href={resolve('/')}>{m.pwa_offline_editor()}</a>
 	</div>
 </main>

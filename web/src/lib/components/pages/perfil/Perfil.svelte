@@ -9,7 +9,7 @@
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Transport } from '#lib/components/audio/index.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
-	import type { ABPreview, AudioEngine } from '#lib/audio/engine.ts';
+	import type { ABPreview, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
 	import { neutralCurve } from '#lib/state/model.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
@@ -60,6 +60,7 @@
 	const PERFIL_SESSION = 'perfil';
 	let preview: ABPreview | null = null;
 	let startedBy: AudioEngine | null = null;
+	let unsubscribe: (() => void) | null = null;
 	let playingId = $state<string | null>(null);
 	let side = $state<'A' | 'B' | null>(null);
 	let busy = $state(false);
@@ -74,9 +75,26 @@
 		return state.session === PERFIL_SESSION && (state.playing || state.paused);
 	}
 
-	/** Ends the comparison (teardown, "Parar", unmount): `stop()` only on our own session. */
+	/**
+	 * Follows the engine (as Comunidade's listener does): a pause or resume of this session from
+	 * the Transport or the navbar keeps the comparison; a stop, raw playback or another page's
+	 * session means it is no longer ours, so the record's "Parar" goes and the chains are disposed.
+	 */
+	function follow(state: AudioEngineState) {
+		const ours = state.session === PERFIL_SESSION;
+		if (ours && state.playing && state.mode === 'chains') return;
+		if (ours && state.paused) return;
+		stop();
+	}
+
+	/**
+	 * Ends the comparison (teardown, "Parar", unmount, the engine moved on): `stop()` only on our
+	 * own session.
+	 */
 	function stop() {
 		attempt++;
+		unsubscribe?.();
+		unsubscribe = null;
 		const engine = startedBy;
 		startedBy = null;
 		if (engine && owned(engine)) engine.stop();
@@ -137,6 +155,9 @@
 				return;
 			}
 			startedBy = engine;
+			unsubscribe = engine.onChange(follow);
+			// Another page may have taken the engine between the start and this subscription.
+			if (!owned(engine)) stop();
 		} catch (error) {
 			stop();
 			notice = m.perfil_audio_error();

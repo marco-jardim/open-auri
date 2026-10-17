@@ -11,7 +11,7 @@
 	import { onDestroy } from 'svelte';
 	import { decodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
-	import type { ABPreview, AudioEngine } from '#lib/audio/engine.ts';
+	import type { ABPreview, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
@@ -83,6 +83,7 @@
 	let busy = $state(false);
 	let preview: ABPreview | null = null;
 	let startedBy: AudioEngine | null = null;
+	let unsubscribe: (() => void) | null = null;
 	let attempt = 0;
 	/** Session tag of this page's comparison (Transport, navbar). */
 	const SHARED_CURVE_SESSION = 'shared-curve';
@@ -93,9 +94,26 @@
 		return state.session === SHARED_CURVE_SESSION && (state.playing || state.paused);
 	}
 
-	/** Ends the comparison ("Parar", unmount); the Transport's pause keeps it instead. */
+	/**
+	 * Follows the engine (as Comunidade's listener does): a pause or resume of this session from
+	 * the Transport or the navbar keeps the comparison; a stop, raw playback or another page's
+	 * session means it is no longer ours, so "Parar" goes and the A/B chains are disposed.
+	 */
+	function follow(state: AudioEngineState) {
+		const ours = state.session === SHARED_CURVE_SESSION;
+		if (ours && state.playing && state.mode === 'chains') return;
+		if (ours && state.paused) return;
+		stopListening();
+	}
+
+	/**
+	 * Ends the comparison ("Parar", unmount, the engine moved on); the Transport's pause keeps
+	 * it instead. Stops the engine only while the session is still this page's.
+	 */
 	function stopListening() {
 		attempt++;
+		unsubscribe?.();
+		unsubscribe = null;
 		const engine = startedBy;
 		startedBy = null;
 		if (engine && owned(engine)) engine.stop();
@@ -144,6 +162,9 @@
 			}
 			startedBy = engine;
 			listening = true;
+			unsubscribe = engine.onChange(follow);
+			// Another page may have taken the engine between the start and this subscription.
+			if (!owned(engine)) stopListening();
 		} catch (error) {
 			stopListening();
 			notice = m.shared_curve_audio_error();

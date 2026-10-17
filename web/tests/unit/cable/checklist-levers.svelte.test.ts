@@ -1,7 +1,7 @@
 // FUX.P6: the materialised checklist. Each lever is bound to exactly one confirmation, GRAVAR
 // stays the only gesture, the salto is shown and the literal loudness warning never leaves.
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { NEUTRO } from 'open-auri/catalog';
 import { FakeHIDDevice } from 'open-auri/transport';
@@ -101,6 +101,68 @@ test('each lever is bound to exactly one confirmation and only GRAVAR writes, wi
 	await expect.element(volume).not.toBeChecked();
 	await expect.element(connection).not.toBeChecked();
 	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
+});
+
+test('FUX.Q N7: the locked GRAVAR lever never writes on click, Enter or Space', async () => {
+	const fake = connected();
+	const write = vi.fn<typeof fake.service.write>().mockResolvedValue(writtenOutcome('simulated'));
+	fake.service.write = write;
+	const shelf: Band = { kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 };
+	await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		bands: [shelf, ...NEUTRO.bands.slice(1)],
+		preampDb: -1,
+		experimental: true,
+		onclose: vi.fn()
+	});
+	const lever = page.getByRole('button', { name: m.cable_write_simulated(), exact: true });
+	const node = () => lever.element() as HTMLButtonElement;
+	/**
+	 * Every way a user (or a script) can activate the button. The pointer click is forced: an
+	 * aria-disabled button fails the runner's "enabled" actionability check, but a real user
+	 * can still press it.
+	 */
+	async function tryEverything(): Promise<void> {
+		await userEvent.click(node(), { force: true });
+		node().click();
+		node().focus();
+		await userEvent.keyboard('{Enter}');
+		await userEvent.keyboard(' ');
+		const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+		node().dispatchEvent(enter);
+	}
+	/** Throws a lever without the pointer (the lever's open reason tooltip may cover others). */
+	const throwLever = (name: string) =>
+		(page.getByRole('checkbox', { name, exact: true }).element() as HTMLElement).click();
+
+	// No lever thrown: locked by the levers, focusable, and it says why.
+	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(lever).toHaveAccessibleDescription(m.cable_fux_lock_levers());
+	await tryEverything();
+	expect(document.activeElement).toBe(node());
+
+	// One lever thrown: still locked.
+	throwLever(m.cable_confirm_volume());
+	await expect
+		.element(page.getByRole('checkbox', { name: m.cable_confirm_volume(), exact: true }))
+		.toBeChecked();
+	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
+	await tryEverything();
+
+	// Both levers, but the experimental confirmation is missing: still locked, its own reason.
+	throwLever(m.cable_confirm_connection());
+	await expect
+		.element(page.getByRole('checkbox', { name: m.cable_confirm_connection(), exact: true }))
+		.toBeChecked();
+	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(lever).toHaveAccessibleDescription(m.cable_fux_lock_experimental());
+	await tryEverything();
+
+	// Give any queued async write a chance to surface before asserting it never came.
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	expect(write).not.toHaveBeenCalled();
+	expect(fake.createGesture).not.toHaveBeenCalled();
 });
 
 test('the experimental lever appears only when required and is bound to its own confirmation', async () => {

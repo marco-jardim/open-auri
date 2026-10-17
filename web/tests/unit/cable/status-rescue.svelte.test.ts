@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import { FakeHIDDevice } from 'open-auri/transport';
@@ -17,6 +17,21 @@ afterEach(async () => {
 	await cleanup();
 });
 
+/**
+ * Unavailable says why (T8): aria-disabled, never the native attribute, the reason announced;
+ * and it still never acts, clicked or pressed with Enter.
+ */
+async function expectRefused(control: Locator, reason: string) {
+	await expect.element(control).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(control).not.toHaveAttribute('disabled');
+	await expect.element(control).toHaveAccessibleDescription(reason);
+	const element = control.element();
+	if (!(element instanceof HTMLElement)) throw new Error('Missing control');
+	element.click();
+	element.focus();
+	await userEvent.keyboard('{Enter}');
+}
+
 test('status reflects connection, mode and errors without connecting automatically', async () => {
 	const fake = cableUi();
 	await render(CableStatus, { service: fake.service });
@@ -28,9 +43,12 @@ test('status reflects connection, mode and errors without connecting automatical
 
 	fake.publish({ connection: 'connecting', mode: 'real' });
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_status_connecting());
-	await expect
-		.element(page.getByRole('button', { name: m.cable_connect(), exact: true }))
-		.toBeDisabled();
+	// Waiting for the picker: a second request is refused, by click and by Enter.
+	await expectRefused(
+		page.getByRole('button', { name: m.cable_connect(), exact: true }),
+		m.cabo_fux_connecting()
+	);
+	expect(fake.connect).toHaveBeenCalledOnce();
 	expect(page.getByText(m.cable_simulated_hint()).elements()).toHaveLength(0);
 	await expect.element(page.getByText(m.cable_mode_real(), { exact: true })).toBeVisible();
 
@@ -45,7 +63,17 @@ test('status reflects connection, mode and errors without connecting automatical
 
 	fake.publish({ writing: true });
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_status_writing());
-	for (const button of page.getByRole('button').elements()) expect(button).toBeDisabled();
+	// Mid-write nothing may connect, add or disconnect a cable: refused by click and by Enter.
+	await expectRefused(
+		page.getByRole('button', { name: m.cable_add(), exact: true }),
+		m.cabo_fux_busy_writing()
+	);
+	await expectRefused(
+		page.getByRole('button', { name: m.cable_disconnect(), exact: true }),
+		m.cabo_fux_busy_writing()
+	);
+	expect(fake.connect).toHaveBeenCalledTimes(2);
+	expect(fake.disconnect).toHaveBeenCalledOnce();
 	fake.publish({ writing: false, deviceLabel: null });
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_status_disconnected());
 
@@ -92,8 +120,16 @@ test('device selection handles no primary, a selected primary and an invalid cha
 	expect(fake.selectDevice).toHaveBeenCalledOnce();
 	missing.remove();
 	fake.publish({ device: second, writing: true });
-	await expect.element(page.getByRole('combobox')).toBeDisabled();
+	// Mid-write the target never changes: locked but focusable, saying why, and a click, Enter,
+	// arrow key or a change that still lands is refused (the real target is shown again).
+	const combobox = page.getByRole('combobox');
+	await expectRefused(combobox, m.cabo_fux_busy_writing());
+	await userEvent.keyboard('{ArrowUp}');
 	expect(select.value).toBe('1');
+	select.value = '0';
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	expect(select.value).toBe('1');
+	expect(fake.selectDevice).toHaveBeenCalledOnce();
 	// A target that is not among the devices is never shown as one of them.
 	fake.publish({ device: new FakeHIDDevice(), writing: false });
 	await tick();
@@ -147,7 +183,12 @@ test('rescue is opt-in, shows zero sent reports, and hides missing journal metad
 	await page.getByRole('button', { name: m.cable_rescue_action() }).click();
 	expect(onrescue).toHaveBeenCalledExactlyOnceWith(expect.any(MouseEvent));
 	fake.publish({ writing: true, rescue: { at: 1, reportsSent: null, deviceLabel: null } });
-	await expect.element(page.getByRole('button', { name: m.cable_rescue_action() })).toBeDisabled();
+	// A rescue never opens a second write mid-write: refused by click and by Enter.
+	await expectRefused(
+		page.getByRole('button', { name: m.cable_rescue_action() }),
+		m.cabo_fux_busy_writing()
+	);
+	expect(onrescue).toHaveBeenCalledOnce();
 	expect(page.getByText(m.cable_rescue_reports({ count: '0' })).elements()).toHaveLength(0);
 	expect(
 		page.getByText(m.cable_rescue_device({ device: 'Interrupted cable' })).elements()
@@ -166,5 +207,7 @@ test('an interruption restored from the journal on load is a polite region, not 
 	await expect.element(page.getByRole('region', { name: m.cable_rescue_title() })).toBeVisible();
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_rescue_body());
 	expect(page.getByRole('alert').elements()).toHaveLength(0);
-	await expect.element(page.getByRole('button', { name: m.cable_rescue_action() })).toBeEnabled();
+	await expect
+		.element(page.getByRole('button', { name: m.cable_rescue_action() }))
+		.not.toHaveAttribute('aria-disabled');
 });

@@ -338,6 +338,48 @@ test('the Transport renders; its pause keeps the comparison and a listen key con
 	expect(audio.start).toHaveBeenCalledOnce();
 });
 
+test('another session taking the engine ends the comparison: "Parar" goes and the A/B is disposed', async () => {
+	const { app, audio } = fakeApp();
+	await render(Perfil, { data: view({ lineages: { items: [card()], nextCursor: null } }), app });
+	await page.getByRole('button', { name: m.perfil_listen_b() }).click();
+	await expect.element(page.getByRole('button', { name: m.perfil_stop() })).toBeVisible();
+	const chains = audio.createAB.mock.results[0]?.value;
+	if (!chains) throw new Error('Missing A/B preview');
+
+	// A pause from the Transport or the navbar keeps the comparison (same session).
+	audio.pause();
+	await expect.element(page.getByRole('button', { name: m.perfil_stop() })).toBeVisible();
+	expect(chains.dispose).not.toHaveBeenCalled();
+
+	// Another page starts its own session: no longer this page's to show or to stop.
+	await audio.start('raw', { session: 'audio-panel' });
+	await expect.element(page.getByRole('button', { name: m.perfil_stop() })).not.toBeInTheDocument();
+	await expect
+		.element(page.getByRole('button', { name: m.perfil_listen_b() }))
+		.toHaveAttribute('aria-pressed', 'false');
+	expect(chains.dispose).toHaveBeenCalledOnce();
+	// The other session keeps playing: this page never stops what it did not start.
+	expect(audio.stop).not.toHaveBeenCalled();
+	expect(audio.state()).toMatchObject({ playing: true, session: 'audio-panel' });
+
+	// Released for good: later engine changes do not touch this page again.
+	audio.stop();
+	expect(chains.dispose).toHaveBeenCalledOnce();
+});
+
+test('a stop from elsewhere (navbar) also releases the comparison and its chains', async () => {
+	const { app, audio } = fakeApp();
+	await render(Perfil, { data: view({ lineages: { items: [card()], nextCursor: null } }), app });
+	await page.getByRole('button', { name: m.perfil_listen_a() }).click();
+	await expect.element(page.getByRole('button', { name: m.perfil_stop() })).toBeVisible();
+	const chains = audio.createAB.mock.results[0]?.value;
+	if (!chains) throw new Error('Missing A/B preview');
+	audio.stop();
+	await expect.element(page.getByRole('button', { name: m.perfil_stop() })).not.toBeInTheDocument();
+	expect(chains.dispose).toHaveBeenCalledOnce();
+	expect(audio.stop).toHaveBeenCalledOnce();
+});
+
 test('filter with no match offers to clear it', async () => {
 	await render(Perfil, {
 		data: view({ lineages: { items: [card({ name: 'Zeta' })], nextCursor: null } })

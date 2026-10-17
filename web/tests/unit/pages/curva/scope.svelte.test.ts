@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import type { ComponentProps } from 'svelte';
 import { NEUTRO } from 'open-auri/catalog';
@@ -161,7 +161,12 @@ test('pass-filter pointer drags never propose a gain', async () => {
 test('preview controls expose playback, A/B, errors and disablement', async () => {
 	const { screen, onpreview, onside } = await setup();
 	const reference = page.getByRole('radio', { name: m.curva_ab_a({ name: 'Reference' }) });
-	await expect.element(reference).toBeDisabled();
+	// No session: unavailable but focusable, saying why (T8); a press does nothing.
+	await expect.element(reference).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(reference).not.toHaveAttribute('disabled');
+	await expect.element(reference).toHaveAccessibleDescription(m.curva_v2_ab_unavailable());
+	(reference.element() as HTMLElement).click();
+	expect(onside).not.toHaveBeenCalled();
 	await page.getByRole('button', { name: m.curva_preview(), exact: true }).click();
 	expect(onpreview).toHaveBeenCalledOnce();
 	await screen.rerender({
@@ -193,6 +198,45 @@ test('preview controls expose playback, A/B, errors and disablement', async () =
 	if (leverElement instanceof HTMLElement) leverElement.click();
 	expect(onpreview).toHaveBeenCalledTimes(2);
 	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+});
+
+test('paused, A/B still switches and the lever says "Continuar"; stopped, A/B says why', async () => {
+	const { screen, onpreview, onside } = await setup({ playing: false, paused: true, side: 'B' });
+	// The paused preview keeps its chains (CurvaPreview.select works while paused).
+	const lever = page.getByRole('button', { name: m.transport_toggle_resume(), exact: true });
+	await expect.element(lever).toBeVisible();
+	await expect.element(lever).toHaveAttribute('aria-pressed', 'false');
+	const reference = page.getByRole('radio', { name: m.curva_ab_a({ name: 'Reference' }) });
+	const editor = page.getByRole('radio', { name: m.curva_ab_b() });
+	await expect.element(reference).not.toHaveAttribute('aria-disabled');
+	await expect.element(reference).not.toHaveAttribute('aria-describedby');
+	await expect.element(page.getByText(m.curva_v2_ab_unavailable())).not.toBeInTheDocument();
+	await reference.click();
+	(editor.element() as HTMLElement).focus();
+	await userEvent.keyboard('{Enter}');
+	expect(onside.mock.calls).toEqual([['A'], ['B']]);
+	await lever.click();
+	expect(onpreview).toHaveBeenCalledOnce();
+
+	// Playing keeps the stop label (e2e offline.spec.ts selects "Parar prévia").
+	await screen.rerender({ playing: true, paused: false });
+	await expect
+		.element(page.getByRole('button', { name: m.curva_preview_stop(), exact: true }))
+		.toBeVisible();
+
+	// No session at all: nothing to switch. aria-disabled with the reason; click and Enter do nothing.
+	await screen.rerender({ playing: false, paused: false });
+	await expect
+		.element(page.getByRole('button', { name: m.curva_preview(), exact: true }))
+		.toBeVisible();
+	for (const tab of [reference, editor]) {
+		await expect.element(tab).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(tab).toHaveAccessibleDescription(m.curva_v2_ab_unavailable());
+		(tab.element() as HTMLElement).click();
+		(tab.element() as HTMLElement).focus();
+		await userEvent.keyboard('{Enter}');
+	}
+	expect(onside).toHaveBeenCalledTimes(2);
 });
 
 test('the compact Transport renders and starts through the lever, resuming only Curva', async () => {

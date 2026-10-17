@@ -1,0 +1,12 @@
+/* State captures check the page's own UI, not the chrome or the decorative layers:
+   - the decorative art (FUX.ART) arrives after idle and carries scroll-driven parallax;
+   - on mobile the fixed bar and a focused skip link are painted into tall element captures
+     at whatever viewport offset Playwright scrolled to, so they move between two shots.
+   All three are covered elsewhere (art unit tests, bar tests, full-page visual references). */
+.art-layer,
+[data-chrome='bar'],
+.skip-link,
+a[href='#main-content'] {
+	/* opacity, not visibility: a child with its own visibility would still paint. */
+	opacity: 0 !important;
+}

@@ -321,6 +321,52 @@ test('rejects malformed targets and arguments', () => {
   }
 });
 
+test('targets can tighten the 250 kB ceiling but never raise it', () => {
+  const valid = { version: 1, defaultBytes: INITIAL_JS_BUDGET, classes: [] };
+  const cls = (extra) => ({ id: 'a', targetBytes: INITIAL_JS_BUDGET, routes: ['/a'], ...extra });
+  // Exactly at the ceiling is allowed, for the default, a target and a goal.
+  assert.deepEqual(
+    parseBudgetTargets({ ...valid, classes: [cls({ goalBytes: INITIAL_JS_BUDGET })] }),
+    {
+      defaultBytes: INITIAL_JS_BUDGET,
+      classes: [
+        { id: 'a', targetBytes: INITIAL_JS_BUDGET, goalBytes: INITIAL_JS_BUDGET, routes: ['/a'] },
+      ],
+    },
+  );
+  const above = INITIAL_JS_BUDGET + 1;
+  for (const [bad, field] of [
+    [{ ...valid, defaultBytes: above }, /Invalid default budget: above the 250 kB ceiling/],
+    [{ ...valid, defaultBytes: 1_000_000 }, /Invalid default budget/],
+    [{ ...valid, classes: [cls({ targetBytes: above })] }, /Invalid target of a: above/],
+    // Both above: the target is refused first.
+    [
+      { ...valid, classes: [cls({ targetBytes: above, goalBytes: above })] },
+      /Invalid target of a/,
+    ],
+    [{ ...valid, classes: [cls({ goalBytes: above })] }, /Invalid goal of a: above/],
+  ]) {
+    assert.throws(() => parseBudgetTargets(bad), field);
+  }
+});
+
+test('the CLI refuses a targets file that raises the ceiling', (t) => {
+  const repo = fixture(t);
+  const loose = join(repo.root, 'loose.json');
+  writeFileSync(
+    loose,
+    JSON.stringify({
+      version: 1,
+      defaultBytes: 250_000,
+      classes: [{ id: 'docs', targetBytes: 400_000, routes: ['/docs'] }],
+    }),
+  );
+  const result = repo.run(['--output', repo.output, '--targets', loose]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Invalid target of docs: above the 250 kB ceiling/);
+  assert.doesNotMatch(result.stdout, /PASS/);
+});
+
 test('fails closed for missing builds, manifests, chunks and static dependencies', async (t) => {
   const absent = fixture(t);
   rmSync(join(absent.client, '.vite', 'manifest.json'));

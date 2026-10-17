@@ -1,6 +1,7 @@
 // Public nickname rules (plan §3.7): 3 to 24 characters of [a-z0-9._-] after NFKC + lowercase,
 // starting and ending with a letter or digit, no two separators in a row; unique after the
-// confusable skeleton; reserved and blocked names share the generic "taken" refusal.
+// confusable skeleton; reserved and blocked names share the generic "taken" refusal, answered
+// where a taken name is; malformed strings are "invalid" before any list lookup.
 //
 // Skeleton: a reduced, ASCII-only take on UTS #39 confusable skeletons. Because the accepted
 // alphabet is already ASCII after NFKC, only ASCII look-alikes matter: `0`→`o`; `1`, `i` and `l`
@@ -113,20 +114,34 @@ const BLOCKED_SUBSTRINGS = Object.values(USERNAME_BLOCKLIST)
 	.flatMap(({ substrings }): readonly string[] => substrings)
 	.map((skeleton) => new RegExp(repetitionPattern(skeleton)));
 
+/**
+ * Ordinary words and handles that only the confusable folding turns into a blocked token
+ * (FUX.Q N3): `ig` folds to `lg`, the words `final`, `chord` and `tidal` are also brand names.
+ * Compared with the whole token as typed (normalized, lowercase, never folded), so a leet or
+ * look-alike form of the brand (`t1dal`, `f1nal`) is still refused, and neither the substring
+ * list nor a longer token is affected.
+ */
+export const COMMON_WORD_TOKENS: ReadonlySet<string> = new Set(['ig', 'final', 'chord', 'tidal']);
+
+function blockedToken(token: string): boolean {
+	const unnumberedToken = token.replace(/^\d+|\d+$/g, '');
+	const skeleton = COMMON_WORD_TOKENS.has(token) ? null : blocklistSkeleton(token);
+	const unnumbered = COMMON_WORD_TOKENS.has(unnumberedToken)
+		? null
+		: blocklistSkeleton(unnumberedToken);
+	return BLOCKED_TOKENS.some(
+		({ pattern, numbered }) =>
+			(skeleton !== null && pattern.test(skeleton)) ||
+			(numbered && unnumbered !== null && pattern.test(unnumbered))
+	);
+}
+
 export function isReservedUsername(value: string): boolean {
 	const normalized = normalizeUsername(value);
 	const compact = normalized.replace(/[._-]/g, '');
 	// Preserve boundaries for short/ambiguous terms; also catch a_d_m_i_n and numeric badges.
 	for (const token of new Set([compact, ...normalized.split(/[._-]+/)])) {
-		const skeleton = blocklistSkeleton(token);
-		const unnumbered = blocklistSkeleton(token.replace(/^\d+|\d+$/g, ''));
-		if (
-			BLOCKED_TOKENS.some(
-				({ pattern, numbered }) => pattern.test(skeleton) || (numbered && pattern.test(unnumbered))
-			)
-		) {
-			return true;
-		}
+		if (blockedToken(token)) return true;
 	}
 	const skeleton = blocklistSkeleton(compact);
 	return BLOCKED_SUBSTRINGS.some((pattern) => pattern.test(skeleton));
@@ -134,12 +149,15 @@ export function isReservedUsername(value: string): boolean {
 
 export type UsernameProblem = 'invalid' | 'reserved';
 
-/** `null` when the nickname may be taken (uniqueness is checked against the database elsewhere). */
+/**
+ * `null` when the nickname may be taken (uniqueness is checked against the database elsewhere).
+ * Format first (FUX.Q N3): a string that is not a well-formed nickname is `'invalid'` whether or
+ * not it resembles a blocked name, so the format answer never depends on the list. Callers then
+ * answer `'reserved'` exactly where, and like, a taken nickname (after the guard or cooldown).
+ */
 export function checkUsername(value: string): UsernameProblem | null {
 	const normalized = normalizeUsername(value);
-	if (normalized.length < USERNAME_MIN || normalized.length > USERNAME_MAX) return 'invalid';
-	// Check before the alphabet so accented/confusable blocked names get the same generic error.
-	if (isReservedUsername(normalized)) return 'reserved';
 	if (!isValidUsername(normalized)) return 'invalid';
+	if (isReservedUsername(normalized)) return 'reserved';
 	return null;
 }

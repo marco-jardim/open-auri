@@ -49,6 +49,7 @@
 	let range = $state(12);
 	/** B side: 'editor' or the lineage id of another selected strip. */
 	let bChoice = $state('editor');
+	let bSelect = $state<HTMLSelectElement | undefined>();
 
 	const target = $derived(selected[0] ?? null);
 	const others = $derived(selected.slice(1).filter((channel) => channel.curve !== null));
@@ -244,13 +245,39 @@
 		</span>
 		<label class="ab-b">
 			<span>{m.comunidade_ab_b_source()}</span>
-			<select class="desk-select" bind:value={bChoice} disabled={scopeListening}>
+			<!-- The pair is fixed while it plays: locked but focusable and saying why (T8). The
+			     pointer and keys cannot open or move it, and any change that still lands is refused. -->
+			<select
+				class="desk-select"
+				bind:this={bSelect}
+				bind:value={
+					() => bChoice,
+					(next) => {
+						if (scopeListening) {
+							if (bSelect) bSelect.value = bChoice;
+							return;
+						}
+						bChoice = next;
+					}
+				}
+				aria-disabled={scopeListening ? 'true' : undefined}
+				aria-describedby={scopeListening ? `${id}-b-why` : undefined}
+				onmousedown={(event) => {
+					if (scopeListening) event.preventDefault();
+				}}
+				onkeydown={(event) => {
+					if (scopeListening && event.key !== 'Tab') event.preventDefault();
+				}}
+			>
 				<option value="editor">{m.comunidade_scope_your_curve()}</option>
 				{#each others as channel (channel.lineageId)}
 					<option value={channel.lineageId}>{channel.name}</option>
 				{/each}
 			</select>
 		</label>
+		{#if scopeListening}
+			<small class="ab-b-why" id="{id}-b-why">{m.fuxq1_scope_b_listening()}</small>
+		{/if}
 		<span class="ab-read" aria-live="polite">
 			{#if trims}
 				{m.comunidade_ab_matched({
@@ -470,6 +497,13 @@
 		align-items: center;
 		gap: 6px;
 		font: var(--fs-caption) var(--face-body);
+		color: #d6d2c8;
+	}
+	.ab-b select[aria-disabled='true'] {
+		cursor: not-allowed;
+	}
+	.ab-b-why {
+		font: var(--fs-caption) / var(--lh-small) var(--face-body);
 		color: #d6d2c8;
 	}
 	.ab-read {

@@ -1,8 +1,10 @@
 import axe from 'axe-core';
 import { afterEach, expect, test, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
+import { withWriteFlag } from '#lib/cable/write-flag.ts';
 import OfflinePage from '../../../../src/routes/offline/+page.svelte';
 import ErrorPage from '../../../../src/routes/+error.svelte';
 import offlineSource from '../../../../src/routes/offline/+page.svelte?raw';
@@ -95,7 +97,9 @@ test('the offline page imports only light modules, never the app barrel', () => 
 		'#lib/components/primitives/Panel.svelte',
 		// Decorative art (FUX.ART) arrives after idle through LazyArt (a dynamic import, so it is
 		// not in the static closure); signal-art.svelte.test.ts holds SignalArt's script light.
-		'#lib/components/art/LazyArt.svelte'
+		'#lib/components/art/LazyArt.svelte',
+		// The shared write flag has no transport imports (write-flag.ts keeps it cheap).
+		'#lib/cable/write-flag.ts'
 	]);
 	expect(offlineSource).not.toMatch(/from\s+'#lib\/app\//);
 });
@@ -106,7 +110,8 @@ test('offline explains what still works and offers to try again', async () => {
 	await expect
 		.element(screen.getByRole('heading', { level: 1, name: m.pwa_offline_title(), exact: true }))
 		.toHaveTextContent('Você está sem conexão');
-	await expect.poll(() => document.title).toBe('Você está sem conexão · Open Auri');
+	// Same suffix as every other page (+error.svelte, page meta).
+	await expect.poll(() => document.title).toBe('Você está sem conexão · open-auri');
 	await expect
 		.element(screen.getByText(m.pwa_offline_description(), { exact: true }))
 		.toBeVisible();
@@ -129,6 +134,68 @@ test('offline explains what still works and offers to try again', async () => {
 	await expect
 		.element(screen.getByRole('link', { name: m.pwa_offline_editor(), exact: true }))
 		.toHaveAttribute('href', '/');
+});
+
+test('"Tentar de novo" says why and never reloads while a cable write sends bytes', async () => {
+	stubNetwork();
+	// A reload would unload this document: the sentinel records it and the run breaks.
+	let unloading = false;
+	const sentinel = () => {
+		unloading = true;
+	};
+	window.addEventListener('beforeunload', sentinel);
+	let finish!: () => void;
+	const writing = withWriteFlag(
+		() =>
+			new Promise<void>((resolve) => {
+				finish = resolve;
+			})
+	);
+	try {
+		const screen = await render(OfflinePage);
+		const retry = screen.getByRole('button', { name: m.fux_p11_offline_retry(), exact: true });
+		await expect.element(retry).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(retry).not.toHaveAttribute('disabled');
+		await expect.element(retry).toHaveAccessibleDescription(m.cabo_fux_busy_writing());
+
+		(retry.element() as HTMLElement).click();
+		(retry.element() as HTMLElement).focus();
+		await userEvent.keyboard('{Enter}');
+		await new Promise((settle) => setTimeout(settle, 50));
+		expect(unloading).toBe(false);
+		await expect.element(retry).toHaveAttribute('aria-disabled', 'true');
+
+		finish();
+		await writing;
+		await expect.element(retry).not.toHaveAttribute('aria-disabled');
+		await expect.element(retry).not.toHaveAttribute('aria-describedby');
+	} finally {
+		finish();
+		await writing;
+		window.removeEventListener('beforeunload', sentinel);
+	}
+});
+
+test('a write flag set outside the event (PWA contract) still blocks the reload', async () => {
+	stubNetwork();
+	const scope = globalThis as typeof globalThis & { __oaWriteInProgress?: boolean };
+	let unloading = false;
+	const sentinel = () => {
+		unloading = true;
+	};
+	window.addEventListener('beforeunload', sentinel);
+	scope.__oaWriteInProgress = true;
+	try {
+		const screen = await render(OfflinePage);
+		const retry = screen.getByRole('button', { name: m.fux_p11_offline_retry(), exact: true });
+		await expect.element(retry).toHaveAttribute('aria-disabled', 'true');
+		(retry.element() as HTMLElement).click();
+		await new Promise((settle) => setTimeout(settle, 50));
+		expect(unloading).toBe(false);
+	} finally {
+		scope.__oaWriteInProgress = false;
+		window.removeEventListener('beforeunload', sentinel);
+	}
 });
 
 test('the offline signal follows the browser network flag, as real state', async () => {

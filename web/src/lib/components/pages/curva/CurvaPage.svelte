@@ -797,6 +797,7 @@
 				spectrumMode={preview?.vu.mode ?? 'data'}
 				analyser={preview?.analyser ?? null}
 				playing={preview?.playing ?? false}
+				paused={preview?.paused ?? false}
 				side={preview?.side ?? 'B'}
 				{referenceName}
 				{previewError}

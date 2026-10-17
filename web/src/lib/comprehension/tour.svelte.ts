@@ -20,19 +20,42 @@ const pages: readonly TourPage[] = [
 	'biblioteca'
 ];
 
-function parseHistory(raw: string | null): TourHistory {
-	if (raw === null) return {};
-	const value: unknown = JSON.parse(raw);
+interface ParsedHistory {
+	history: TourHistory;
+	/** Something stored was unreadable or invalid and was dropped. */
+	corrupt: boolean;
+}
+
+/**
+ * Reads the stored history. Only the parts that cannot be trusted are dropped: a page with an
+ * invalid status loses that entry, the valid entries of the other pages stay (FUX.Q N8).
+ */
+function parseHistory(raw: string | null): ParsedHistory {
+	if (raw === null) return { history: {}, corrupt: false };
+	let value: unknown;
+	try {
+		value = JSON.parse(raw);
+	} catch (error) {
+		// JSON.parse only throws SyntaxError; anything else is not a storage problem.
+		if (!(error instanceof SyntaxError)) throw error;
+		console.warn('tour: stored history is not JSON, starting without it', error);
+		return { history: {}, corrupt: true };
+	}
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-		throw new Error('Invalid tour history');
+		console.warn('tour: stored history is not an object, starting without it');
+		return { history: {}, corrupt: true };
 	}
 	const history: TourHistory = {};
+	const dropped: TourPage[] = [];
 	for (const page of pages) {
 		const status: unknown = Object.getOwnPropertyDescriptor(value, page)?.value;
 		if (status === 'visto' || status === 'dispensado') history[page] = status;
-		else if (status !== undefined) throw new Error('Invalid tour status');
+		else if (status !== undefined) dropped.push(page);
 	}
-	return history;
+	if (dropped.length > 0) {
+		console.warn('tour: dropped invalid stored statuses, kept the other pages', dropped);
+	}
+	return { history, corrupt: dropped.length > 0 };
 }
 
 /** Lazy browser access: importing during SSR never reads storage or mutates shared state. */
@@ -55,16 +78,16 @@ export function createTour(
 		let raw: string | null;
 		try {
 			raw = environment.storage()?.getItem(TOUR_STORAGE_KEY) ?? null;
-		} catch {
+		} catch (error) {
+			// Storage disabled or denied (SecurityError and the like): the session keeps an
+			// in-memory history.
+			console.warn('tour: could not read the stored history', error);
 			storageError = 'read';
 			return;
 		}
-		try {
-			history = parseHistory(raw);
-		} catch {
-			storageError = 'corrupt';
-			history = {};
-		}
+		const parsed = parseHistory(raw);
+		history = parsed.history;
+		if (parsed.corrupt) storageError = 'corrupt';
 	}
 
 	function persist(remove = false) {
@@ -72,8 +95,9 @@ export function createTour(
 			const storage = environment.storage();
 			if (remove) storage?.removeItem(TOUR_STORAGE_KEY);
 			else storage?.setItem(TOUR_STORAGE_KEY, JSON.stringify(history));
-		} catch {
-			// Keep this session usable when storage is disabled or full.
+		} catch (error) {
+			// Keep this session usable when storage is disabled or full (QuotaExceededError).
+			console.warn('tour: could not store the history, keeping it for this session', error);
 			storageError = 'write';
 		}
 	}

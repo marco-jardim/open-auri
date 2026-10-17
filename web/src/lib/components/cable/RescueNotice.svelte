@@ -3,6 +3,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import type { CableService } from '#lib/cable/service.ts';
 	import type { CableState } from '#lib/cable/types.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 
 	interface Props {
 		service: CableService;
@@ -19,6 +20,11 @@
 	$effect(() => service.subscribe((next) => (cable = next)));
 
 	const titleId = $props.id();
+	/**
+	 * Never open a second write while one sends bytes. The Button says why (T8), stays focusable
+	 * and blocks click, Enter and Space, so `onrescue` is never called meanwhile.
+	 */
+	const rescueReason = $derived(cable.writing ? m.cabo_fux_busy_writing() : null);
 </script>
 
 {#if cable.rescue !== null}
@@ -38,14 +44,9 @@
 		{/if}
 		<p class="text-sm opacity-80">{m.cable_rescue_note()}</p>
 		<div class="flex flex-wrap gap-2">
-			<button
-				type="button"
-				class="rounded border-2 border-current px-3 py-1 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
-				disabled={cable.writing}
-				onclick={onrescue}
-			>
+			<Button variant="primary" disabledReason={rescueReason} onclick={onrescue}>
 				{m.cable_rescue_action()}
-			</button>
+			</Button>
 			<button
 				type="button"
 				class="rounded border border-current px-3 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"

@@ -6,14 +6,26 @@ const APP_CONTEXT = Symbol('open-auri app');
 
 export type AppRuntimeStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+/** Undoes what `prepare` wired (the social outbox bridge); called when the app is disposed. */
+export type AppPrepareCleanup = () => void;
+
 export interface AppMountOptions {
 	/**
 	 * Awaited after the app exists and before it is published as `client`: wiring that must be
 	 * in place before any write can start (the layout attaches the social outbox bridge here, so
-	 * no real `cable:written` event is ever missed). A rejection disposes the app and fails the
-	 * mount; the next `mount()` tries again.
+	 * no real `cable:written` event is ever missed while it is available). It may return a
+	 * cleanup, run when that app is disposed (also when it is disposed before being published).
+	 * A rejection disposes the app and fails the mount (the next `mount()` tries again), unless
+	 * `optional` is set.
 	 */
-	prepare?: (client: ClientApp) => Promise<void> | void;
+	prepare?: (client: ClientApp) => Promise<AppPrepareCleanup | void> | AppPrepareCleanup | void;
+	/**
+	 * FUX.Q N6: the wiring is not required for the app to work (social sync). A rejection is
+	 * logged, reported to `onprepareerror`, and the app is published anyway, so the cable
+	 * status and the rescue notice still render; the caller marks what it could not wire.
+	 */
+	optional?: boolean;
+	onprepareerror?: (error: unknown) => void;
 }
 
 /**
@@ -27,25 +39,47 @@ export function createAppContext() {
 	let mounting: Promise<ClientApp | null> | undefined;
 	// Bumped by dispose(): a mount still loading when the layout goes away publishes nothing.
 	let generation = 0;
+	/** Cleanup returned by the published app's `prepare`. */
+	let prepared: AppPrepareCleanup | undefined;
+
+	function runCleanup(cleanup: AppPrepareCleanup | undefined): void {
+		if (!cleanup) return;
+		try {
+			cleanup();
+		} catch (error) {
+			console.error('App wiring could not be undone', error);
+		}
+	}
 
 	async function create(
 		options: ClientAppOptions,
-		{ prepare }: AppMountOptions,
+		{ prepare, optional = false, onprepareerror }: AppMountOptions,
 		ticket: number
 	): Promise<ClientApp | null> {
 		const { createClientApp } = await loadAppRuntime();
 		if (ticket !== generation) return null;
 		const created = createClientApp(options);
+		let cleanup: AppPrepareCleanup | undefined;
 		try {
-			await prepare?.(created);
+			const result = await prepare?.(created);
+			if (typeof result === 'function') cleanup = result;
 		} catch (error) {
-			created.dispose();
-			throw error;
+			if (!optional) {
+				created.dispose();
+				throw error;
+			}
+			// Non-blocking wiring: the app works without it (writes included); the caller marks
+			// it unavailable and may wire it later.
+			console.warn('App wiring failed; publishing the app without it', error);
+			onprepareerror?.(error);
 		}
 		if (ticket !== generation) {
+			// Disposed while prepare ran: undo its wiring too (the outbox bridge would leak).
+			runCleanup(cleanup);
 			created.dispose();
 			return null;
 		}
+		prepared = cleanup;
 		client = created;
 		return created;
 	}
@@ -92,6 +126,9 @@ export function createAppContext() {
 			generation += 1;
 			mounting = undefined;
 			status = 'idle';
+			const cleanup = prepared;
+			prepared = undefined;
+			runCleanup(cleanup);
 			client?.dispose();
 			client = null;
 		}

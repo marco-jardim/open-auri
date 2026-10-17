@@ -6,6 +6,7 @@ import {
 } from '#lib/server/auth/username-blocklist.ts';
 import {
 	checkUsername,
+	COMMON_WORD_TOKENS,
 	isReservedUsername,
 	isValidUsername,
 	normalizeUsername,
@@ -105,6 +106,11 @@ describe('nickname blocklist', () => {
 			expect(entry).toMatch(/^[a-z]+$/);
 			expect(usernameSkeleton(entry)).toBe(entry);
 			expect(reserved.has(entry)).toBe(false);
+			// A brand spelled like an ordinary word (chord) is accepted as that word.
+			if (COMMON_WORD_TOKENS.has(entry)) {
+				expect(checkUsername(entry)).toBeNull();
+				continue;
+			}
 			expect(isReservedUsername(entry)).toBe(true);
 			if (entry.length >= USERNAME_MIN) expect(checkUsername(entry)).toBe('reserved');
 		}
@@ -122,7 +128,8 @@ describe('nickname blocklist', () => {
 			headphoneBrands: ['sennheiser', 'moondrop', '7hz', '64audio'],
 			dacBrands: ['fiio', 'schiit', 'ifi', 'astellkern'],
 			cableBrands: ['audioquest', 'tripowin'],
-			audioPlatforms: ['spotify', 'tidal'],
+			// The plain word tidal is accepted (FUX.Q N3); the brand's leet form is not.
+			audioPlatforms: ['spotify', 't1dal', 'qobuz'],
 			generalBrands: ['microsoft', 'apple']
 		};
 		for (const names of Object.values(examples)) {
@@ -137,14 +144,39 @@ describe('nickname blocklist', () => {
 		}
 	});
 
-	it('refuses leet, accents, compatibility forms and Cyrillic/Greek look-alikes generically', () => {
+	it('format first: accented and Cyrillic/Greek look-alikes are invalid, never a list answer', () => {
+		// Malformed strings never reach the list (FUX.Q N3): the answer is the one of any
+		// malformed nickname. The moderation fold still recognizes them as blocked.
 		for (const name of [
-			'4dm1n',
 			'ádmín',
 			'a\u0301dmi\u0301n',
 			'аdmіn',
 			'аԁmіո',
 			'αdmιn',
+			'sapatão',
+			'аudіоtесhnіса'
+		]) {
+			expect(checkUsername(name)).toBe('invalid');
+			expect(checkUsername(name)).toBe(checkUsername('bad name'));
+			expect(isReservedUsername(name)).toBe(true);
+		}
+	});
+
+	it('does not over-block common words and handles that only the folding made look blocked', () => {
+		expect([...COMMON_WORD_TOKENS].sort()).toEqual(['chord', 'final', 'ig', 'tidal']);
+		const accepted = ['ig.music', 'final', 'chord', 'tidal', 'Final.Mix', 'chord-lover', 'ig_2024'];
+		for (const name of accepted) expect(checkUsername(name)).toBeNull();
+		// The brands themselves, their leet forms and the real tokens stay refused.
+		const refused = ['lg', 'lg123', '1g.music', 'f1nal', 't1dal', 'ch0rd', 'flnal', 'tldal'];
+		for (const name of refused) {
+			expect(isReservedUsername(name)).toBe(true);
+			if (name.length >= USERNAME_MIN) expect(checkUsername(name)).toBe('reserved');
+		}
+	});
+
+	it('refuses leet, compatibility forms and ASCII look-alikes generically', () => {
+		for (const name of [
+			'4dm1n',
 			'Ａｄｍｉｎ',
 			'm0d3r4d0r',
 			'rnoderator',
@@ -154,11 +186,9 @@ describe('nickname blocklist', () => {
 			'cr1ou10',
 			'f4gg0t',
 			'7r4nny',
-			'sapatão',
 			'b1tch',
 			'r37ardad0',
 			's3nnh3153r',
-			'аudіоtесhnіса',
 			's0ny',
 			'f110',
 			'4ud10qu357',

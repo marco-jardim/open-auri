@@ -305,8 +305,16 @@ const VOLUME_STORAGE_KEY = 'oa.audio.volume';
 export const FADE_IN_S = 0.2;
 export const CROSSFADE_S = 0.03;
 export const FADE_OUT_S = 0.03;
-/** Fade-out and fade-in of a seek while playing (on the master, around the jump). */
+/**
+ * Fade-out and fade-in of a seek while playing (on the master, around the jump). During a start
+ * fade-in the way back up takes what remains of FADE_IN_S instead, never less.
+ */
 export const SEEK_FADE_S = 0.03;
+/**
+ * Longest wait for a finite file length before a deferred start (random point, explicit second)
+ * gives up and starts at 0. The master stays silent while it waits.
+ */
+export const PENDING_START_TIMEOUT_MS = 1500;
 /** Position updates to listeners while playing (5 Hz; independent of the motion preference). */
 export const POSITION_TICK_MS = 200;
 const RESUME_TIMEOUT_MS = 2000;
@@ -665,8 +673,15 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 	/** Target of a seek waiting for its fade-out (reported as the position meanwhile). */
 	let seekTarget: number | null = null;
 	let seekGeneration = 0;
-	/** A start position waiting for the file's metadata. */
+	/**
+	 * A start position waiting for the file's length. While it waits the master is held silent
+	 * (FUX.Q N2): the beginning of the file never plays before the jump.
+	 */
 	let pendingStart: StartAt | null = null;
+	/** Bumped whenever the pending start is set or cleared: a stale wait timeout does nothing. */
+	let pendingGeneration = 0;
+	/** Context time at which the current start fade-in reaches the preview volume. */
+	let fadeInEndsAt = Number.NEGATIVE_INFINITY;
 	let ticker: ReturnType<typeof setInterval> | null = null;
 	let lastPosition = 0;
 
@@ -874,7 +889,8 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		}
 	}
 
-	function detachFile(): void {
+	/** Detaches the file; true when a pending start was holding the master silent. */
+	function detachFile(): boolean {
 		if (element) {
 			const old = element;
 			element = null;
@@ -896,11 +912,14 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		duration = NaN;
 		// A seek fade in flight still brings the master back (its jump is skipped).
 		seekTarget = null;
+		const held = pendingStart !== null;
 		pendingStart = null;
+		pendingGeneration++;
+		return held;
 	}
 
 	function attach(record: StoredAudio | null): void {
-		detachFile();
+		const held = detachFile();
 		if (record) {
 			file = { name: record.name, type: record.type, size: record.size, addedAt: record.addedAt };
 			objectUrl = env.createObjectURL(record.blob);
@@ -909,10 +928,10 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 				if (element !== el) return;
 				duration = el.duration;
 				const total = knownDuration(duration);
+				// `durationchange` to Infinity (streams, some VBR headers) keeps waiting.
 				if (pendingStart !== null && total !== null) {
-					const startAt = pendingStart;
-					pendingStart = null;
-					moveTo(el, resolveStart(startAt, total, env.random), mode !== 'off');
+					settleStart(el, resolveStart(pendingStart, total, env.random));
+					return;
 				}
 				emit();
 			};
@@ -933,9 +952,12 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			el.loop = true;
 			el.src = objectUrl;
 			element = el;
-			// A random-start session (blind test, comparison) starts a new file at a random point too.
-			if (session?.startAt === 'random') pendingStart = 'random';
+			// A random-start session (blind test, comparison) starts a new file at a random point
+			// too, silent until it is there (the old source was cut already: no fade needed).
+			if (session?.startAt === 'random') deferStart('random', 0);
 		}
+		// The file whose start was pending is gone (removed, no random session): unmute.
+		if (held && pendingStart === null) fadeInMaster();
 		routeSource();
 		emit();
 	}
@@ -970,31 +992,98 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			seekTarget = null;
 			// The file may have been replaced meanwhile: then only the master comes back.
 			if (element === target) setElementTime(target, seconds);
-			if (mode !== 'off' && ctx && graph) {
-				ramp(graph.master.gain, dbToGain(volumeDb), ctx.currentTime, SEEK_FADE_S);
+			// A start waiting for a new file's length keeps the master silent until it settles.
+			if (mode !== 'off' && pendingStart === null && ctx && graph) {
+				const now = ctx.currentTime;
+				ramp(graph.master.gain, dbToGain(volumeDb), now, riseSeconds(now, SEEK_FADE_S));
 			}
 			emit();
 		}, SEEK_FADE_S * 1000);
 	}
 
-	/** Applies a start request to the file; deferred until its length is known. */
-	function applyStart(startAt: StartAt, fade: boolean): void {
-		const target = element;
-		if (!target) return;
-		const total = fileDuration();
-		if (total === null) {
-			pendingStart = startAt;
-			return;
-		}
+	/**
+	 * Seconds a ramp back up to the preview volume takes from `now`: at least `minimum`, and
+	 * never less than what remains of a start fade-in in progress (FUX.Q N2), so a seek or a
+	 * volume change during the first FADE_IN_S never reaches the preview volume sooner than the
+	 * start itself would have.
+	 */
+	function riseSeconds(now: number, minimum: number): number {
+		return Math.max(minimum, fadeInEndsAt - now);
+	}
+
+	/** The master from silence to the preview volume over FADE_IN_S, while playing. */
+	function fadeInMaster(): void {
+		if (mode === 'off' || !ctx || !graph) return;
+		const volume = graph.master.gain;
+		const t = ctx.currentTime;
+		volume.cancelScheduledValues(t);
+		volume.setValueAtTime(0, t);
+		volume.linearRampToValueAtTime(dbToGain(volumeDb), t + FADE_IN_S);
+		fadeInEndsAt = t + FADE_IN_S;
+	}
+
+	/**
+	 * Defers a start until the file's length is known: the master goes silent now (over `fadeS`
+	 * when the preview is audible) and fades in only once the position is applied. A length still
+	 * unknown or infinite after PENDING_START_TIMEOUT_MS starts the file at 0 instead.
+	 */
+	function deferStart(startAt: StartAt, fadeS: number): void {
+		pendingStart = startAt;
+		const generation = ++pendingGeneration;
+		// A seek fade in flight must not bring the master back over the hold.
+		seekGeneration++;
+		seekTarget = null;
+		if (mode !== 'off' && ctx && graph) ramp(graph.master.gain, 0, ctx.currentTime, fadeS);
+		later(() => {
+			if (generation !== pendingGeneration || pendingStart === null) return;
+			console.warn(
+				`audio engine: the file length is still unknown after ${PENDING_START_TIMEOUT_MS} ms; starting at 0`
+			);
+			settleStart(element, 0);
+		}, PENDING_START_TIMEOUT_MS);
+	}
+
+	/** Applies the pending start at `seconds` (the master is silent: a direct jump), then fades in. */
+	function settleStart(target: HTMLAudioElement | null, seconds: number): void {
 		pendingStart = null;
-		moveTo(target, resolveStart(startAt, total, env.random), fade);
+		pendingGeneration++;
+		if (target) moveTo(target, seconds, false);
+		fadeInMaster();
+		emit();
+	}
+
+	/**
+	 * Applies a start request to the file. The beginning needs no length; any other start waits
+	 * for it (deferStart), with the master silent meanwhile. True when it settled an earlier
+	 * pending start (the master's fade-in has then begun).
+	 */
+	function applyStart(startAt: StartAt, fade: boolean): boolean {
+		const target = element;
+		if (!target) return false;
+		const total = fileDuration();
+		if (total === null && startAt !== 'beginning') {
+			// Already held silent by an earlier pending start: nothing audible to fade out.
+			deferStart(startAt, fade && pendingStart === null ? SEEK_FADE_S : 0);
+			return false;
+		}
+		const seconds = total === null ? 0 : resolveStart(startAt, total, env.random);
+		if (pendingStart !== null) {
+			// An earlier deferred start holds the master silent: this one settles it.
+			settleStart(target, seconds);
+			return true;
+		}
+		moveTo(target, seconds, fade);
+		return false;
 	}
 
 	function seek(seconds: number): boolean {
 		const target = element;
 		const total = fileDuration();
 		if (!target || total === null || Number.isNaN(seconds)) return false;
-		pendingStart = null;
+		if (pendingStart !== null) {
+			settleStart(target, clampSeek(seconds, total));
+			return true;
+		}
 		moveTo(target, clampSeek(seconds, total), mode !== 'off');
 		emit();
 		return true;
@@ -1031,13 +1120,17 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			const volume = nodes.master.gain;
 			volume.cancelScheduledValues(t);
 			volume.setValueAtTime(0, t);
-			volume.linearRampToValueAtTime(dbToGain(volumeDb), t + FADE_IN_S);
 		}
+		let settled = false;
 		if (element) {
 			element.loop = true;
 			// Silent master (fading in from 0): jump at once; already audible: seek with the fade.
-			if (startAt !== undefined) applyStart(startAt, wasPlaying);
+			// A length not known yet defers the jump and keeps the master silent until it lands.
+			if (startAt !== undefined) settled = applyStart(startAt, wasPlaying);
 		}
+		// From silence: the 200 ms fade-in, unless a start position still waits (or settling an
+		// earlier one already started it).
+		if (!wasPlaying && pendingStart === null && !settled) fadeInMaster();
 		startTicker();
 		emit();
 		if (element) {
@@ -1045,6 +1138,8 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			if (problem) {
 				mode = 'off';
 				session = null;
+				pendingStart = null;
+				pendingGeneration++;
 				stopTicker();
 				nodes.master.gain.cancelScheduledValues(context.currentTime);
 				nodes.master.gain.setValueAtTime(0, context.currentTime);
@@ -1141,9 +1236,11 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		} catch (storageError) {
 			console.warn('audio engine: could not store preview volume', storageError);
 		}
-		// During a seek fade the master is silent on purpose; the fade-in uses the new volume.
-		if (ctx && graph && mode !== 'off' && seekTarget === null) {
-			ramp(graph.master.gain, dbToGain(volumeDb), ctx.currentTime, CROSSFADE_S);
+		// During a seek fade, or while a start position waits, the master is silent on purpose;
+		// the fade-in uses the new volume. During a start fade-in the change follows its pace.
+		if (ctx && graph && mode !== 'off' && seekTarget === null && pendingStart === null) {
+			const now = ctx.currentTime;
+			ramp(graph.master.gain, dbToGain(volumeDb), now, riseSeconds(now, CROSSFADE_S));
 		}
 		emit();
 	}

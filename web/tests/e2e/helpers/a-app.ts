@@ -36,9 +36,10 @@ export async function settleRendering(page: Page): Promise<void> {
 	const pathname = new URL(page.url()).pathname;
 	if (pathname === '/biblioteca') {
 		// This readout starts at ∅ and becomes numeric when the finite gate calculation completes.
+		// The dial is role="img" while empty and role="meter" once it has a reading.
 		await expect(
-			page.getByRole('img', { name: /^(Pico de saída|Output peak):/ })
-		).toHaveAccessibleName(/: [−+]?\d+[,.]\d+ dB$/);
+			page.locator('[aria-label^="Pico de saída:"], [aria-label^="Output peak:"]').first()
+		).toHaveAttribute('aria-label', /: [−+]?\d+[,.]\d+ dB/);
 	} else if (pathname === '/soe-como-x') {
 		// Wait for the initial AutoEq request to finish, including its unavailable-data UI.
 		await expect(

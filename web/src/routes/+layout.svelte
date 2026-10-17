@@ -99,8 +99,16 @@
 	}
 
 	// Social wiring (F4, FUX.2 L3): the bridge is attached in `prepare`, before the app is
-	// published, so a real cable write can never happen without it. SocialSync itself renders on
-	// idle, or at once with a session or queued items.
+	// published, so while social is available a real cable write never happens without it.
+	// SocialSync itself renders on idle, or at once with a session or queued items.
+	//
+	// FUX.Q N6: social is an optional prepare. When its chunk cannot load (offline without the
+	// chunk cached, a deploy that replaced it), the app is published anyway and the outbox is
+	// marked unavailable (`data-social="unavailable"`): cable status, rescue notice and writes
+	// keep working. Writes and the rescue are never blocked or delayed by social; each request
+	// only retries the wiring in the background, and the bridge records the writes that come
+	// after it attached. The trade-off is deliberate: a missed "installed" activity in the social
+	// feed is acceptable, a device left half-written that cannot be rescued is not.
 	interface SocialWiring {
 		runtime: SocialRuntime;
 		session: SocialSession;
@@ -111,15 +119,25 @@
 	let social = $state.raw<SocialWiring | null>(null);
 	let syncReady = $state(false);
 	let cancelSyncIdle: (() => void) | undefined;
+	/** The social chunk failed to load: the outbox bridge is not attached (writes still work). */
+	let socialUnavailable = $state(false);
+	let socialRetry: Promise<void> | null = null;
+	/** Set by the layout's teardown: wiring that arrives later is undone at once. */
+	let destroyed = false;
 
-	async function attachSocial(client: ClientApp): Promise<void> {
+	/**
+	 * Wires the social session, API and outbox bridge for `client`. Returns the cleanup the app
+	 * context runs when that app is disposed (also when it is disposed before being published),
+	 * so a bridge started for an app that went away never leaks. Safe to call more than once.
+	 */
+	async function attachSocial(client: ClientApp): Promise<() => void> {
 		const runtime = await loadSocialRuntime();
 		const session = runtime.createSocialSession(
 			accountSession.known ? { initial: accountSession.current } : {}
 		);
 		const api = runtime.createSocialApi();
 		const outbox = runtime.createSocialOutbox({ store: client.state.outbox, session });
-		const stop = runtime.startOutboxBridge({
+		const stopBridge = runtime.startOutboxBridge({
 			app: client,
 			outbox,
 			session,
@@ -127,10 +145,22 @@
 				if (result.ok) void outbox.flush(api);
 			}
 		});
+		let stopped = false;
+		const stop = () => {
+			if (stopped) return;
+			stopped = true;
+			stopBridge();
+			if (social?.stop === stop) social = null;
+		};
+		if (destroyed) {
+			stop();
+			return stop;
+		}
 		social = { runtime, session, api, outbox, stop };
+		socialUnavailable = false;
 		if (accountSession.current) {
 			syncReady = true;
-			return;
+			return stop;
 		}
 		outbox.pending().then(
 			(items) => {
@@ -138,13 +168,54 @@
 			},
 			(error: unknown) => console.warn('Social outbox could not be read', error)
 		);
+		cancelSyncIdle?.();
 		cancelSyncIdle = whenIdle(() => (syncReady = true));
+		return stop;
+	}
+
+	/** The optional social prepare failed (the context logged it): mark the outbox unavailable. */
+	function socialFailed(): void {
+		socialUnavailable = true;
+	}
+
+	/**
+	 * Background retry of the social wiring after a failure, on a write or rescue request and on
+	 * bar intent. Never awaited by a write: see the FUX.Q N6 note above.
+	 */
+	function retrySocial(): void {
+		const client = context.client;
+		if (!socialUnavailable || social || socialRetry || !client || destroyed) return;
+		socialRetry = attachSocial(client)
+			.then(
+				(stop) => {
+					// The app was replaced or the layout went away meanwhile: nobody owns it.
+					if (destroyed || context.client !== client) stop();
+				},
+				(error: unknown) =>
+					console.warn('Social runtime still unavailable; the outbox stays unavailable', error)
+			)
+			.finally(() => {
+				socialRetry = null;
+			});
+	}
+
+	/** "Gravar no cabo": straight to the checklist; social only retries alongside. */
+	function requestWrite(): void {
+		retrySocial();
+		app?.requestWrite();
+	}
+
+	/** The rescue never waits for anything but the cable service (FUX.Q N6). */
+	function requestRescue(): void {
+		retrySocial();
+		app?.requestRescue();
 	}
 
 	function startRuntime(): void {
 		if (!browser || context.client || context.status === 'loading') return;
 		loadSocialRuntime().catch((error: unknown) => console.warn('Social prefetch failed', error));
-		context.mount({ toasts }, { prepare: attachSocial }).then(
+		const mountOptions = { prepare: attachSocial, optional: true, onprepareerror: socialFailed };
+		context.mount({ toasts }, mountOptions).then(
 			(client) => {
 				if (!client) return;
 				client.start().catch((error: unknown) => {
@@ -177,7 +248,9 @@
 			if (!(target instanceof Element)) return;
 			if (!target.closest('.bar-tools, .bar-status, [data-runtime-intent]')) return;
 			startRuntime();
-			if (context.client) checklist.request();
+			if (!context.client) return;
+			checklist.request();
+			retrySocial();
 		};
 		const types = ['pointerover', 'pointerdown', 'focusin'] as const;
 		for (const type of types) node.addEventListener(type, intent, { passive: true });
@@ -215,10 +288,13 @@
 			updatePrompt.request();
 		});
 		return () => {
+			destroyed = true;
 			cancelIdle();
 			cancelSyncIdle?.();
 			social?.stop();
 			social = null;
+			// Also runs the cleanup of the published app's prepare (idempotent stop), or of a
+			// prepare still running when it lands.
 			context.dispose();
 		};
 	});
@@ -411,6 +487,7 @@
 	class="app-root"
 	data-page={meta.page}
 	data-runtime={context.status}
+	data-social={socialUnavailable ? 'unavailable' : undefined}
 	style:--accent={meta.accent}
 >
 	<a class="skip-link" href="#main-content">{m.layout_skip()}</a>
@@ -428,7 +505,7 @@
 			writeDisabledReason={app ? undefined : m.fux2_cable_runtime_loading()}
 			onNeutro={app ? () => loadEditor('neutral') : undefined}
 			onPadraoAuri={app ? () => loadEditor('auri') : undefined}
-			onWrite={app ? () => app?.requestWrite() : undefined}
+			onWrite={app ? requestWrite : undefined}
 			onHelp={openHelp}
 			playbackEngine={app?.audio}
 			onPlaybackError={playbackFailed}
@@ -529,7 +606,7 @@
 		<div class="rescue-wrap" data-chrome="rescue">
 			{#if rescueNotice.current && app.cableState.rescue !== null}
 				{@const RescueNotice = rescueNotice.current}
-				<RescueNotice service={app.cable} onrescue={() => app?.requestRescue()} />
+				<RescueNotice service={app.cable} onrescue={requestRescue} />
 			{/if}
 		</div>
 	{/if}

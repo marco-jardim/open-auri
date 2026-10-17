@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { NEUTRO } from 'open-auri/catalog';
 import { PREVIEW_MIN_MS } from '#lib/social/index.ts';
@@ -11,7 +11,9 @@ import {
 	createListener,
 	type ListenRequest
 } from '#lib/components/pages/comunidade/listener.svelte.ts';
+import { channelOf, type FeedItem } from '#lib/components/pages/comunidade/model.ts';
 import { fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
+import { feedItem } from './fixtures.ts';
 
 const engines: AudioEngine[] = [];
 const curve = { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb };
@@ -107,6 +109,52 @@ test('a pause keeps the pair, side and trims, and silence never counts as listen
 	expect(listener.active).toBeNull();
 	expect(stop).not.toHaveBeenCalled();
 	expect(audio.state().mode).toBe('raw');
+});
+
+test('while the scope plays, the B source says why and a click, Enter or change never moves it', async () => {
+	const audio = engine();
+	const listener = createListener({ engine: () => audio });
+	const target = channelOf(
+		feedItem({ id: 'lin-target00001', name: 'Alvo' }) as unknown as FeedItem
+	);
+	const other = channelOf(
+		feedItem({ id: 'lin-other000002', name: 'Outra' }) as unknown as FeedItem
+	);
+	await render(MasterScope, {
+		selected: [target, other],
+		editor: curve,
+		listener,
+		locale: 'pt-BR',
+		canListen: true,
+		onnotice: vi.fn(),
+		onuse: vi.fn(),
+		oninstall: vi.fn(),
+		onopen: vi.fn()
+	});
+	const source = page.getByRole('combobox', { name: m.comunidade_ab_b_source() });
+	const select = source.element() as HTMLSelectElement;
+	await expect.element(source).not.toHaveAttribute('aria-disabled');
+	expect(select.value).toBe('editor');
+
+	await listener.play({ ...request, owner: 'scope' });
+	await expect.element(source).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(source).not.toHaveAttribute('disabled');
+	await expect.element(source).toHaveAccessibleDescription(m.fuxq1_scope_b_listening());
+	select.click();
+	select.focus();
+	await userEvent.keyboard('{Enter}');
+	await userEvent.keyboard('{ArrowDown}');
+	expect(select.value).toBe('editor');
+	// A change that still lands (script, assistive tech) is refused and the view snaps back.
+	select.value = other.lineageId;
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	await expect.poll(() => select.value).toBe('editor');
+
+	listener.stop();
+	await expect.element(source).not.toHaveAttribute('aria-disabled');
+	await expect.element(source).not.toHaveAttribute('aria-describedby');
+	await userEvent.selectOptions(select, other.lineageId);
+	await expect.poll(() => select.value).toBe(other.lineageId);
 });
 
 test('the master scope renders the compact Transport; its pause keeps the session', async () => {

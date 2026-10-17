@@ -172,7 +172,9 @@ describe('browser-only preview volume persistence', () => {
 		expect(engine.state()).toMatchObject({ volumeDb: -18, playing: true, error: null });
 		const master = asFake(chain.volume, FakeGainNode);
 		expect(master.gain.value).toBeCloseTo(dbToGain(-18), 12);
-		expect(master.gain.events.at(-1)?.time).toBeCloseTo(onlyContext().currentTime + 0.03, 12);
+		// A volume change right after start rides the rest of the 200 ms start fade-in (QA N2),
+		// never faster than the 30 ms minimum.
+		expect(master.gain.events.at(-1)?.time).toBeCloseTo(onlyContext().currentTime + 0.2, 12);
 		expect(warn).toHaveBeenCalledWith('audio engine: could not restore preview volume', failure);
 		expect(warn).toHaveBeenCalledWith('audio engine: could not store preview volume', failure);
 	});

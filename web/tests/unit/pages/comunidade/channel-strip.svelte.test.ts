@@ -1,7 +1,7 @@
 // T4.13: channel LEDs exist only while the channel plays and are fed by the meter tap of the
 // channel chain (real data); an idle strip draws no LED at all.
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import type { PreviewChain } from '#lib/audio/engine.ts';
 import type { MeterListener, MeterTap, MeterUpdate } from '#lib/audio/meters.ts';
@@ -126,8 +126,16 @@ test('FUX.P4: unavailable keys say why (aria-disabled, still focusable, inert)',
 });
 
 test('FUX.P4: while a preview starts, SOLO says to wait', async () => {
-	await render(ChannelStrip, props({ disabled: true }));
+	// Comunidade passes `disabled={listener.busy}`: a prop, never the native attribute.
+	const onlisten = vi.fn();
+	await render(ChannelStrip, props({ disabled: true, onlisten }));
 	const solo = listenButton().element();
 	expect(solo.getAttribute('aria-disabled')).toBe('true');
+	expect(solo.hasAttribute('disabled')).toBe(false);
 	expect(reasonOf(solo)).toBe(m.comunidade_v2_reason_busy());
+	if (!(solo instanceof HTMLElement)) throw new Error('Missing SOLO key');
+	solo.click();
+	solo.focus();
+	await userEvent.keyboard('{Enter}');
+	expect(onlisten).not.toHaveBeenCalled();
 });

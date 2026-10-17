@@ -84,18 +84,38 @@
 		panel.request();
 	}
 
+	/**
+	 * A press asked for the panel and its chunk is still on the way. A touch press warms the chunk
+	 * only on pointerdown, a few ms before the click: the first tap must still open the panel once
+	 * the chunk arrived (FUX.Q M1), and a press elsewhere (or Escape) meanwhile cancels the request.
+	 */
+	let wantOpen = false;
+	let opening: Promise<void> | null = null;
+
+	async function openWhenLoaded(): Promise<void> {
+		wantOpen = true;
+		try {
+			await panel.load();
+		} catch (error) {
+			wantOpen = false;
+			console.error('Audio panel could not load', error);
+			return;
+		}
+		if (!wantOpen) return;
+		wantOpen = false;
+		await setOpen(true);
+	}
+
 	async function toggle(): Promise<void> {
 		if (open) {
 			await setOpen(false);
 			return;
 		}
-		try {
-			await panel.load();
-		} catch (error) {
-			console.error('Audio panel could not load', error);
-			return;
-		}
-		await setOpen(true);
+		// Another press while the chunk loads joins the same opening (it never toggles it shut).
+		opening ??= openWhenLoaded().finally(() => {
+			opening = null;
+		});
+		await opening;
 	}
 
 	// The panel is positioned `fixed` from the button, so the bar (or the row it sits in) never
@@ -134,22 +154,39 @@
 	}
 
 	function onWindowClick(event: MouseEvent): void {
-		if (open && root && event.target instanceof Node && !root.contains(event.target)) {
-			open = false;
-		}
+		// The dispatch path, not `root.contains(target)`: a target the press re-rendered away
+		// (detached before the event reached the window) is still inside when it was.
+		if (!root || event.composedPath().includes(root)) return;
+		wantOpen = false;
+		if (open) open = false;
 	}
 
-	function onWindowKeydown(event: KeyboardEvent): void {
-		if (event.key === 'Escape' && open) {
-			event.stopPropagation();
-			void setOpen(false, true);
+	/**
+	 * Escape closes the open panel and is consumed there (FUX.Q N5): `preventDefault` tells the
+	 * page tour (which checks `defaultPrevented`) and the layout's shortcuts that the key was
+	 * used. Listened on the document in the bubble phase so it runs before any window listener
+	 * (the tour's included, whatever their registration order), and after a tooltip inside the
+	 * panel, whose capture listener consumes the first Escape itself.
+	 */
+	function onEscape(event: KeyboardEvent): void {
+		if (event.key !== 'Escape' || event.defaultPrevented) return;
+		if (!open) {
+			// Nothing shown yet: drop a pending open, leave the key to whoever owns it.
+			wantOpen = false;
+			return;
 		}
+		event.preventDefault();
+		event.stopPropagation();
+		void setOpen(false, true);
 	}
 </script>
 
+<!-- The window listener only sees keys dispatched at the window itself (never through the
+     document); the document one has already consumed every other Escape. -->
+<svelte:document onkeydown={onEscape} />
 <svelte:window
 	onclick={onWindowClick}
-	onkeydown={onWindowKeydown}
+	onkeydown={onEscape}
 	onresize={onWindowResize}
 	onscroll={onWindowResize}
 />

@@ -86,6 +86,8 @@
 	let scrub = $state<number | null>(null);
 	let pointerId: number | null = null;
 	let busy = $state(false);
+	/** The unavailable seek bar's reason tooltip (hover, focus, or a press on the bar). */
+	let seekTipOpen = $state(false);
 
 	const total = $derived(s?.duration ?? null);
 	const noise = $derived(s?.source === 'noise');
@@ -101,6 +103,10 @@
 		if (noise) return m.transport_reason_noise();
 		if (total === null) return m.transport_reason_loading();
 		return null;
+	});
+	// A reason that went away (the length arrived) leaves no open tooltip to reappear later.
+	$effect(() => {
+		if (!seekReason) seekTipOpen = false;
 	});
 
 	type PlayAction = 'pause' | 'resume' | 'start';
@@ -169,7 +175,14 @@
 	}
 
 	function onPointerDown(event: PointerEvent & { currentTarget: HTMLDivElement }): void {
-		if (seekReason || total === null || event.button !== 0) return;
+		if (event.button !== 0) return;
+		if (seekReason) {
+			// Touch and mouse users get the reason too, not only hover and keyboard users
+			// (same rule as Button's unavailable press).
+			seekTipOpen = true;
+			return;
+		}
+		if (total === null) return;
 		const node = event.currentTarget;
 		node.focus();
 		pointerId = event.pointerId;
@@ -275,7 +288,7 @@
 		</span>
 	</div>
 	{#if seekReason}
-		<Tooltip id={seekReasonId} text={seekReason} anchor={slider} />
+		<Tooltip id={seekReasonId} text={seekReason} anchor={slider} bind:open={seekTipOpen} />
 	{/if}
 
 	{#if !noise}

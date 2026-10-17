@@ -196,6 +196,48 @@ test('pink noise: the seek bar reads "ruído rosa · contínuo", stays focusable
 	await expect.element(play).not.toHaveAttribute('aria-disabled');
 });
 
+test('a tap or click on the unavailable seek bar opens its reason, without seeking', async () => {
+	const fake = fakeEngine({ ...FILE_STATE, duration: null, position: 0 });
+	await render(Transport, { engine: fake.engine });
+	const seek = page.getByRole('slider', { name: m.transport_seek() });
+	await expect.element(seek).toHaveAttribute('aria-disabled', 'true');
+	const node = seek.element() as HTMLElement;
+	const tipId = node.getAttribute('aria-describedby');
+	const tip = tipId ? document.getElementById(tipId) : null;
+	expect(tip?.textContent?.trim()).toBe(m.transport_reason_loading());
+	// No hover and no focus (a synthetic press moves neither): only the press can open it.
+	expect(tip?.matches(':popover-open')).toBe(false);
+	// A secondary button press is not a request for the reason.
+	node.dispatchEvent(
+		new PointerEvent('pointerdown', {
+			pointerId: 4,
+			button: 2,
+			pointerType: 'touch',
+			bubbles: true
+		})
+	);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(tip?.matches(':popover-open')).toBe(false);
+	node.dispatchEvent(
+		new PointerEvent('pointerdown', {
+			pointerId: 5,
+			button: 0,
+			pointerType: 'touch',
+			bubbles: true
+		})
+	);
+	node.dispatchEvent(
+		new PointerEvent('pointerup', { pointerId: 5, button: 0, pointerType: 'touch', bubbles: true })
+	);
+	await expect.poll(() => tip?.matches(':popover-open')).toBe(true);
+	expect(fake.mocks.seek).not.toHaveBeenCalled();
+	await expect.element(seek).not.toHaveAttribute('data-scrubbing');
+	// Once the length is known the bar works and the reason tooltip is gone.
+	fake.publish({ duration: 225 });
+	await expect.element(seek).not.toHaveAttribute('aria-disabled');
+	expect(document.getElementById(tipId ?? '')).toBeNull();
+});
+
 test('a file whose length is not read yet keeps the bar unavailable with its own reason', async () => {
 	const fake = fakeEngine({ ...FILE_STATE, duration: null, position: 0 });
 	await render(Transport, { engine: fake.engine });

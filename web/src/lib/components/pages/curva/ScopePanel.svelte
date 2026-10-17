@@ -93,6 +93,11 @@
 		spectrumMode: MeterMode;
 		analyser: AnalyserNode | null;
 		playing: boolean;
+		/**
+		 * This page's preview is paused (resumable, `CurvaPreview.paused`): its chains are kept, so
+		 * A/B still switches and the lever continues it.
+		 */
+		paused?: boolean;
 		side: ABSide;
 		referenceName: string;
 		previewError?: string | null;
@@ -133,6 +138,7 @@
 		spectrumMode,
 		analyser,
 		playing,
+		paused = false,
 		side,
 		referenceName,
 		previewError = null,
@@ -478,6 +484,17 @@
 		if (event.key === 'Enter' || event.key === ' ') onpreviewwarm?.();
 	}
 	const previewNote = $derived(previewDisabled && previewReason ? previewReason : previewCaption);
+	// A/B needs this page's chains, which exist while playing and while paused (`select()` works
+	// on a paused preview); with no session there is nothing to switch, and the tabs say why.
+	const abReady = $derived(playing || paused);
+	const leverLabel = $derived(
+		playing ? m.curva_preview_stop() : paused ? m.transport_toggle_resume() : m.curva_preview()
+	);
+	function chooseSide(next: ABSide): void {
+		// aria-disabled keeps the tab focusable: a click, Enter or Space must still do nothing.
+		if (!abReady) return;
+		onside(next);
+	}
 
 	/** The layout provides the app context; isolated renders (tests) pass `engine` instead. */
 	function optionalAppContext(): AppContext | null {
@@ -899,7 +916,7 @@
 		>
 			<span class="well" aria-hidden="true"><span class="lever"></span></span>
 			<span class="bl">
-				<span>{playing ? m.curva_preview_stop() : m.curva_preview()}</span>
+				<span>{leverLabel}</span>
 				<small id="{legendId}-prev" aria-hidden="true">{previewNote}</small>
 			</span>
 		</button>
@@ -907,7 +924,7 @@
 			class="ab"
 			role="radiogroup"
 			aria-label={m.curva_ab_label()}
-			aria-describedby={playing ? undefined : `${legendId}-ab`}
+			aria-describedby={abReady ? undefined : `${legendId}-ab`}
 		>
 			<span class="well" data-pos={side} aria-hidden="true"><span class="lever"></span></span>
 			<span class="ab-body">
@@ -918,21 +935,23 @@
 						role="radio"
 						class="tab"
 						aria-checked={side === 'A'}
-						disabled={!playing}
-						onclick={() => onside('A')}>{m.curva_ab_a({ name: referenceName })}</button
+						aria-disabled={abReady ? undefined : 'true'}
+						aria-describedby={abReady ? undefined : `${legendId}-ab`}
+						onclick={() => chooseSide('A')}>{m.curva_ab_a({ name: referenceName })}</button
 					>
 					<button
 						type="button"
 						role="radio"
 						class="tab"
 						aria-checked={side === 'B'}
-						disabled={!playing}
-						onclick={() => onside('B')}>{m.curva_ab_b()}</button
+						aria-disabled={abReady ? undefined : 'true'}
+						aria-describedby={abReady ? undefined : `${legendId}-ab`}
+						onclick={() => chooseSide('B')}>{m.curva_ab_b()}</button
 					>
 				</span>
 			</span>
 		</div>
-		{#if !playing}
+		{#if !abReady}
 			<small class="ab-why" id="{legendId}-ab">{m.curva_v2_ab_unavailable()}</small>
 		{/if}
 		<div class="transport">
@@ -1544,10 +1563,10 @@
 			transform var(--dur-instant) var(--ease-mech),
 			border-color var(--dur-fast) var(--ease-out);
 	}
-	.tab:hover:not(:disabled) {
+	.tab:hover:not([aria-disabled='true']) {
 		border-color: var(--rule-control);
 	}
-	.tab:active:not(:disabled) {
+	.tab:active:not([aria-disabled='true']) {
 		transform: translateY(1px);
 		box-shadow: var(--well);
 	}
@@ -1557,7 +1576,7 @@
 		box-shadow: var(--well);
 		transform: translateY(1px);
 	}
-	.tab:disabled {
+	.tab[aria-disabled='true'] {
 		color: var(--muted-hi);
 		cursor: not-allowed;
 	}

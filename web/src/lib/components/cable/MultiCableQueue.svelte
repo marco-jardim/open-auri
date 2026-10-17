@@ -9,6 +9,7 @@
 		Confirmations,
 		QueueOutcome
 	} from '#lib/cable/types.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { describeOutcome, queueStatus } from './i18n.ts';
 
 	interface Props {
@@ -63,7 +64,21 @@
 	const selected = $derived(cable.devices.filter((device) => !excluded.includes(device)));
 	const labelOf = (device: CableDevice) => cable.deviceLabels[cable.devices.indexOf(device)] ?? '';
 
+	/**
+	 * Why the queue cannot be reviewed or confirmed now (T8: unavailable always says why). The
+	 * Button keeps it focusable and blocks click, Enter and Space; the handlers check it again.
+	 */
+	function queueReason(count: number): string | null {
+		if (cable.writing) return m.cabo_fux_busy_writing();
+		if (!canWrite) return m.cable_write_blocked();
+		if (count < 2) return m.fuxq1_queue_select_two();
+		return null;
+	}
+	const reviewReason = $derived(queueReason(selected.length));
+	const confirmReason = $derived(reviewed === null ? null : queueReason(reviewed.length));
+
 	function startReview() {
+		if (reviewReason !== null) return;
 		reviewedFrom = cable.devices.slice();
 		reviewed = selected.slice();
 		message = null;
@@ -84,7 +99,7 @@
 	// One gesture (this click) authorizes the whole, explicitly reviewed queue: exactly that list.
 	async function confirmQueue(event: MouseEvent) {
 		const devices = reviewed;
-		if (devices === null) return;
+		if (devices === null || confirmReason !== null) return;
 		const gesture = service.createGesture(event);
 		endReview();
 		const outcome = await service.writeQueue({
@@ -122,14 +137,9 @@
 				</label>
 			{/each}
 		</fieldset>
-		<button
-			type="button"
-			class="self-start rounded border border-current px-3 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
-			disabled={!canWrite || cable.writing || selected.length < 2}
-			onclick={startReview}
-		>
+		<Button class="self-start" disabledReason={reviewReason} onclick={startReview}>
 			{m.cable_queue_review()}
-		</button>
+		</Button>
 	{:else}
 		<h4 class="text-sm font-semibold">{m.cable_queue_confirm_heading()}</h4>
 		<ol class="list-decimal pl-6">
@@ -138,14 +148,9 @@
 			{/each}
 		</ol>
 		<div class="flex flex-wrap gap-2">
-			<button
-				type="button"
-				class="rounded border-2 border-current px-3 py-1 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
-				disabled={!canWrite || cable.writing || reviewed.length < 2}
-				onclick={confirmQueue}
-			>
+			<Button variant="primary" disabledReason={confirmReason} onclick={confirmQueue}>
 				{m.cable_queue_confirm({ count: String(reviewed.length) })}
-			</button>
+			</Button>
 			<button
 				type="button"
 				class="rounded border border-current px-3 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"

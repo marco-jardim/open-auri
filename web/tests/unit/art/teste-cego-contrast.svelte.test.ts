@@ -6,6 +6,10 @@
 // - no rendered text box intersects a raised motif box;
 // - axe's color-contrast finds no violation, and every axe result (passes and incomplete) is the
 //   same with both art layers removed: the art neither lowers a pair nor hides text from axe.
+// - axe only reports text over mask or background images as incomplete, so the title, which sits
+//   over the scene part, is also measured from real pixels: screenshots of the h1's box with its
+//   own paint removed, with and without the art, must keep the h1 colour at AA (4.5:1). Raising
+//   the art's opacity to 1 must break that, so the measurement cannot pass without seeing the art.
 import axe from 'axe-core';
 import { afterEach, expect, test } from 'vitest';
 import { page } from 'vitest/browser';
@@ -62,6 +66,74 @@ function textBoxes(root: Element): Array<{ text: string; box: DOMRect }> {
 
 const overlaps = (a: DOMRect, b: DOMRect) =>
 	a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+// ---- Pixel contrast of the title over the scene (WCAG 2.x relative luminance) ------------------
+
+const CONTRAST_AA = 4.5;
+/**
+ * The lightest 1 % of the h1's box is left out: anti-aliased edges and a 3 to 6 px light mote
+ * passing by. Anything with an area (the curtain ripple, the polar grid, a lobe) is measured.
+ */
+const TAIL = 0.01;
+
+function channel(value: number): number {
+	const c = value / 255;
+	return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function luminance(r: number, g: number, b: number): number {
+	return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+function ratio(a: number, b: number): number {
+	return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+function context2d(width: number, height: number): OffscreenCanvasRenderingContext2D {
+	const context = new OffscreenCanvas(width, height).getContext('2d');
+	if (!context) throw new Error('No 2D canvas');
+	return context;
+}
+
+/** Luminance of any CSS colour, resolved by the browser (rgb, hex, color-mix, oklch...). */
+function colorLuminance(color: string): number {
+	const context = context2d(1, 1);
+	context.fillStyle = color;
+	context.fillRect(0, 0, 1, 1);
+	const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
+	return luminance(r, g, b);
+}
+
+function base64Of(shot: unknown): string {
+	if (typeof shot === 'string') return shot;
+	if (shot && typeof shot === 'object' && 'base64' in shot && typeof shot.base64 === 'string') {
+		return shot.base64;
+	}
+	throw new Error('The screenshot returned no base64 image');
+}
+
+/** Everything painted in `element`'s box right now, as RGBA bytes (a real screenshot). */
+async function paintedPixels(element: HTMLElement): Promise<Uint8ClampedArray> {
+	await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+	const shot: unknown = await page.screenshot({ element, base64: true, save: false });
+	const blob = await (await fetch(`data:image/png;base64,${base64Of(shot)}`)).blob();
+	const bitmap = await createImageBitmap(blob);
+	const context = context2d(bitmap.width, bitmap.height);
+	context.drawImage(bitmap, 0, 0);
+	bitmap.close();
+	return context.getImageData(0, 0, context.canvas.width, context.canvas.height).data;
+}
+
+/** Contrast of a text luminance against the backdrop pixels, at the worst tail (TAIL left out). */
+function worstContrast(text: number, pixels: Uint8ClampedArray): number {
+	const ratios: number[] = [];
+	for (let i = 0; i + 2 < pixels.length; i += 4) {
+		ratios.push(ratio(text, luminance(pixels[i] ?? 0, pixels[i + 1] ?? 0, pixels[i + 2] ?? 0)));
+	}
+	expect(ratios.length, 'the screenshot of the title is empty').toBeGreaterThan(100);
+	ratios.sort((a, b) => a - b);
+	return ratios[Math.floor(ratios.length * TAIL)] ?? 0;
+}
 
 for (const viewport of [
 	{ width: 1440, height: 900 },
@@ -127,5 +199,59 @@ for (const viewport of [
 		expect(withoutArt.violations).toEqual([]);
 		expect(withArt.passes).toEqual(withoutArt.passes);
 		expect(withArt.incomplete).toEqual(withoutArt.incomplete);
+	}, 30000);
+
+	test(`the art behind the title keeps it at AA in real pixels, at ${viewport.width} px`, async () => {
+		await page.viewport(viewport.width, viewport.height);
+		const screen = await render(BlindTest, { reducedMotion: true });
+		const heading = page.getByRole('heading', { level: 1 });
+		await expect.element(heading).toBeVisible();
+		const title = heading.element();
+		if (!(title instanceof HTMLElement)) throw new Error('Missing the title');
+		const root = screen.container.querySelector<HTMLElement>('.blind-test');
+		const pageLayer = root?.querySelector<HTMLElement>(':scope > .art-layer');
+		const sceneLayer = root?.querySelector<HTMLElement>('.room .frame > .art-layer');
+		if (!pageLayer || !sceneLayer) throw new Error('Missing an art layer');
+		const layers = [pageLayer, sceneLayer];
+		for (const layer of layers) await expect.poll(() => layer.dataset.art).toBe('running');
+
+		// The measurement is over the art: some of its paint boxes lie under the h1's box.
+		const box = title.getBoundingClientRect();
+		const underTitle = layers
+			.flatMap((layer) => [...layer.querySelectorAll('*')])
+			.map((node) => node.getBoundingClientRect())
+			.filter((rect) => rect.width > 0 && rect.height > 0 && overlaps(rect, box));
+		expect(underTitle.length).toBeGreaterThan(0);
+
+		// One frozen frame for every screenshot, so the art is the only difference between them.
+		for (const animation of document.getAnimations()) animation.pause();
+		const text = colorLuminance(getComputedStyle(title).color);
+		// The backdrop only: the title's glyphs and their shadow are removed, its box stays.
+		title.style.color = 'transparent';
+		title.style.textShadow = 'none';
+		const raise = document.createElement('style');
+		try {
+			const withArt = worstContrast(text, await paintedPixels(title));
+			for (const layer of layers) layer.style.display = 'none';
+			const withoutArt = worstContrast(text, await paintedPixels(title));
+			for (const layer of layers) layer.style.display = '';
+			// Above the safe cap (every art paint fully opaque) the same measurement must fail.
+			raise.textContent =
+				'.art-layer, .art-layer *, .art-layer *::before, .art-layer *::after { opacity: 1 !important; }';
+			document.head.append(raise);
+			const raised = worstContrast(text, await paintedPixels(title));
+
+			expect(withoutArt, 'the scene alone behind the title').toBeGreaterThanOrEqual(CONTRAST_AA);
+			expect(withArt, 'the scene with the art behind the title').toBeGreaterThanOrEqual(
+				CONTRAST_AA
+			);
+			expect(raised, 'raising the art opacity must be caught').toBeLessThan(CONTRAST_AA);
+			expect(raised).toBeLessThan(withArt);
+		} finally {
+			raise.remove();
+			for (const layer of layers) layer.style.display = '';
+			title.style.color = '';
+			title.style.textShadow = '';
+		}
 	}, 30000);
 }

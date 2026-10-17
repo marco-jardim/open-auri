@@ -17,6 +17,18 @@ function byteCount(value, label) {
 }
 
 /**
+ * A byte count from the targets document: never above the spec ceiling (§5.7, 250 kB gzip). A
+ * class may be stricter than the ceiling, never looser, so the JSON cannot raise it.
+ */
+function targetByteCount(value, label) {
+	const bytes = byteCount(value, label);
+	if (bytes > INITIAL_JS_BUDGET) {
+		throw new Error(`Invalid ${label}: above the ${INITIAL_JS_BUDGET / 1000} kB ceiling`);
+	}
+	return bytes;
+}
+
+/**
  * Validates the targets document: a default ceiling plus route classes. A route pattern is an
  * exact SvelteKit route id, or `<prefix>/**` for the prefix and everything below it. A route
  * may belong to one class only; routes outside every class keep the default ceiling.
@@ -26,7 +38,7 @@ function byteCount(value, label) {
 export function parseBudgetTargets(value) {
 	const document = object(value, 'budget targets');
 	if (document.version !== 1) throw new Error('Invalid budget targets version');
-	const defaultBytes = byteCount(document.defaultBytes, 'default budget');
+	const defaultBytes = targetByteCount(document.defaultBytes, 'default budget');
 	if (!Array.isArray(document.classes)) throw new Error('Invalid budget classes');
 	const seenIds = new Set();
 	const seenRoutes = new Set();
@@ -43,9 +55,11 @@ export function parseBudgetTargets(value) {
 			}
 			seenRoutes.add(route);
 		}
-		const targetBytes = byteCount(item.targetBytes, `target of ${item.id}`);
+		const targetBytes = targetByteCount(item.targetBytes, `target of ${item.id}`);
 		const goalBytes =
-			item.goalBytes === undefined ? undefined : byteCount(item.goalBytes, `goal of ${item.id}`);
+			item.goalBytes === undefined
+				? undefined
+				: targetByteCount(item.goalBytes, `goal of ${item.id}`);
 		if (goalBytes !== undefined && goalBytes > targetBytes) {
 			throw new Error(`Goal above target in ${item.id}`);
 		}

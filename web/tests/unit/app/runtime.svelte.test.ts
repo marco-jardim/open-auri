@@ -204,6 +204,74 @@ describe('async app context (client stays null before the mount)', () => {
 		expect(disposals[0]).toHaveBeenCalledOnce();
 		expect(app.client).toBeNull();
 	});
+
+	test('FUX.Q N6: an optional prepare that fails is logged and the app is published anyway', async () => {
+		const app = context();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const failure = new TypeError('Failed to fetch dynamically imported module');
+		const disposals: ReturnType<typeof vi.fn>[] = [];
+		const onprepareerror = vi.fn();
+		const prepare = vi.fn((client: ClientApp) => {
+			const original = client.dispose;
+			const spy = vi.fn(() => original());
+			client.dispose = spy;
+			disposals.push(spy);
+			return Promise.reject(failure);
+		});
+		const client = await app.mount(fakeAppOptions().options, {
+			prepare,
+			optional: true,
+			onprepareerror
+		});
+		// Published: the cable status, the rescue notice and writes keep their app.
+		expect(client).not.toBeNull();
+		expect(app.client).toBe(client);
+		expect(app.status).toBe('ready');
+		expect(client?.cable).toBeDefined();
+		expect(disposals[0]).not.toHaveBeenCalled();
+		expect(onprepareerror).toHaveBeenCalledExactlyOnceWith(failure);
+		expect(warn).toHaveBeenCalledWith(expect.any(String), failure);
+		app.dispose();
+		expect(disposals[0]).toHaveBeenCalledOnce();
+	});
+
+	test('FUX.Q N6: the cleanup of a prepare runs on dispose, once', async () => {
+		const app = context();
+		const stop = vi.fn();
+		const client = await app.mount(fakeAppOptions().options, {
+			prepare: async () => stop,
+			optional: true
+		});
+		expect(client).not.toBeNull();
+		expect(stop).not.toHaveBeenCalled();
+		app.dispose();
+		expect(stop).toHaveBeenCalledOnce();
+		app.dispose();
+		expect(stop).toHaveBeenCalledOnce();
+	});
+
+	test('FUX.Q N6: an app disposed after its prepare resolved also stops what prepare started', async () => {
+		const app = context();
+		const releases: (() => void)[] = [];
+		const stop = vi.fn();
+		const disposals: ReturnType<typeof vi.fn>[] = [];
+		const prepare = vi.fn((client: ClientApp) => {
+			const original = client.dispose;
+			const spy = vi.fn(() => original());
+			client.dispose = spy;
+			disposals.push(spy);
+			// The outbox bridge starts inside prepare; the layout goes away before it returns.
+			return new Promise<() => void>((resolve) => releases.push(() => resolve(stop)));
+		});
+		const pending = app.mount(fakeAppOptions().options, { prepare, optional: true });
+		await expect.poll(() => releases.length).toBe(1);
+		app.dispose();
+		releases[0]?.();
+		await expect(pending).resolves.toBeNull();
+		expect(stop).toHaveBeenCalledOnce();
+		expect(disposals[0]).toHaveBeenCalledOnce();
+		expect(app.client).toBeNull();
+	});
 });
 
 describe('lazy islands', () => {

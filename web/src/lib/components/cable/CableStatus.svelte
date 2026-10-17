@@ -3,12 +3,14 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import type { CableService } from '#lib/cable/service.ts';
 	import type { CableState } from '#lib/cable/types.ts';
+	import Button from '#lib/components/primitives/Button.svelte';
 
 	interface Props {
 		service: CableService;
 	}
 
 	let { service }: Props = $props();
+	const uid = $props.id();
 
 	let cable = $state.raw<CableState>(untrack(() => service.getState()));
 	$effect(() => service.subscribe((next) => (cable = next)));
@@ -35,12 +37,21 @@
 					: null
 	);
 
+	// Unavailable always says why (T8). Each control stays focusable (aria-disabled) and its
+	// handler checks the same state again, so a click, Enter or a late change never acts.
+	const busyReason = $derived(cable.writing ? m.cabo_fux_busy_writing() : null);
+	const connectReason = $derived(
+		busyReason ?? (cable.connection === 'connecting' ? m.cabo_fux_connecting() : null)
+	);
+
 	// Called directly from the click handler: the browser requires a user gesture for the picker.
 	function onConnect() {
+		if (connectReason !== null) return;
 		void service.connect();
 	}
 
 	function onDisconnect() {
+		if (busyReason !== null) return;
 		void service.disconnect();
 	}
 
@@ -55,7 +66,13 @@
 	);
 
 	function onSelect(event: Event) {
-		const value = (event.currentTarget as HTMLSelectElement).value;
+		const select = event.currentTarget as HTMLSelectElement;
+		// The target never changes mid-write: refuse, and show the real target again.
+		if (busyReason !== null) {
+			select.value = targetIndex;
+			return;
+		}
+		const value = select.value;
 		if (value === '') return;
 		const device = cable.devices[Number(value)];
 		if (device !== undefined) service.selectDevice(device);
@@ -82,8 +99,15 @@
 			<span>{m.cable_select_device()}</span>
 			<select
 				class="rounded border border-current bg-transparent px-2 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
-				disabled={cable.writing}
+				aria-disabled={busyReason ? 'true' : undefined}
+				aria-describedby={busyReason ? `${uid}-target-why` : undefined}
 				value={targetIndex}
+				onmousedown={(event) => {
+					if (busyReason) event.preventDefault();
+				}}
+				onkeydown={(event) => {
+					if (busyReason && event.key !== 'Tab') event.preventDefault();
+				}}
 				onchange={onSelect}
 			>
 				{#if targetIndex === ''}
@@ -94,26 +118,19 @@
 				{/each}
 			</select>
 		</label>
+		{#if busyReason}
+			<p class="text-sm" id="{uid}-target-why">{busyReason}</p>
+		{/if}
 	{/if}
 
 	<div class="flex flex-wrap gap-2">
-		<button
-			type="button"
-			class="rounded border border-current px-3 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
-			disabled={cable.writing || cable.connection === 'connecting'}
-			onclick={onConnect}
-		>
+		<Button disabledReason={connectReason} onclick={onConnect}>
 			{cable.connection === 'connected' ? m.cable_add() : m.cable_connect()}
-		</button>
+		</Button>
 		{#if cable.connection === 'connected'}
-			<button
-				type="button"
-				class="rounded border border-current px-3 py-1 focus-visible:outline-2 focus-visible:outline-offset-2"
-				disabled={cable.writing}
-				onclick={onDisconnect}
-			>
+			<Button disabledReason={busyReason} onclick={onDisconnect}>
 				{m.cable_disconnect()}
-			</button>
+			</Button>
 		{/if}
 	</div>
 

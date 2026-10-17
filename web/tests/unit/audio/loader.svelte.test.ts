@@ -130,6 +130,71 @@ test('opens and closes the idle popover without starting audio, and unsubscribes
 	expect(fake.engine.dispose).not.toHaveBeenCalled();
 });
 
+test('Escape that closes the panel is consumed: a page tour listening on the window first stays open', async () => {
+	const fake = audioUi();
+	// Same rule as Tour.svelte: dismiss on an Escape nobody consumed. Registered before the
+	// loader, like a page tour mounted ahead of the layout's runtime chrome.
+	const tourDismissed = vi.fn();
+	const tourKeydown = (event: KeyboardEvent) => {
+		if (event.key === 'Escape' && !event.defaultPrevented) tourDismissed();
+	};
+	window.addEventListener('keydown', tourKeydown);
+	try {
+		const screen = await render(AudioLoader, { engine: fake.engine });
+		const trigger = page.getByRole('button', {
+			name: m.audio_button_aria({ name: m.audio_none() })
+		});
+		await trigger.click();
+		const panel = page.getByRole('dialog', { name: m.audio_title(), exact: true });
+		await expect.element(panel).toBeVisible();
+		const dialog = screen.container.querySelector<HTMLDivElement>('[role="dialog"]')!;
+		await expect.poll(() => document.activeElement).toBe(dialog);
+		const first = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+		dialog.dispatchEvent(first);
+		await tick();
+		expect(first.defaultPrevented).toBe(true);
+		expect(dialog.hidden).toBe(true);
+		expect(tourDismissed).not.toHaveBeenCalled();
+		await expect.poll(() => document.activeElement).toBe(trigger.element());
+		// With the panel closed, Escape is the tour's again.
+		const second = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+		(trigger.element() as HTMLElement).dispatchEvent(second);
+		expect(second.defaultPrevented).toBe(false);
+		expect(tourDismissed).toHaveBeenCalledOnce();
+	} finally {
+		window.removeEventListener('keydown', tourKeydown);
+	}
+});
+
+test('a first tap opens the panel once its chunk arrived; a press elsewhere meanwhile cancels it', async () => {
+	const fake = audioUi();
+	const screen = await render(AudioLoader, { engine: fake.engine });
+	const trigger = page.getByRole('button', { name: m.audio_button_aria({ name: m.audio_none() }) });
+	const button = trigger.element() as HTMLElement;
+	// A touch tap: no hover warmed the chunk, the click comes while the import is in flight.
+	button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+	button.click();
+	expect(screen.container.querySelector('[role="dialog"]')).toBeNull();
+	// A second tap while it still loads joins the same opening instead of cancelling it.
+	button.click();
+	const panel = page.getByRole('dialog', { name: m.audio_title(), exact: true });
+	await expect.element(panel).toBeVisible();
+	await expect.element(trigger).toHaveAttribute('aria-expanded', 'true');
+	expect(fake.engine.start).not.toHaveBeenCalled();
+	await cleanup();
+
+	const other = audioUi();
+	const again = await render(AudioLoader, { engine: other.engine });
+	const next = again.container.querySelector<HTMLButtonElement>('.oa-audio-btn')!;
+	next.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+	next.click();
+	document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+	await expect.poll(() => again.container.querySelector('[role="dialog"]')).not.toBeNull();
+	await tick();
+	expect(again.container.querySelector<HTMLDivElement>('[role="dialog"]')!.hidden).toBe(true);
+	expect(next.getAttribute('aria-expanded')).toBe('false');
+});
+
 test('file picking resets the input, ignores cancellation and reports both typed and unknown load failures', async () => {
 	const fake = audioUi();
 	const screen = await render(AudioLoader, { engine: fake.engine });

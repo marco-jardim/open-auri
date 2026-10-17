@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { createTour, TOUR_STORAGE_KEY } from '#lib/comprehension/tour.svelte.ts';
 
 function memory(initial: string | null = null) {
@@ -74,6 +74,44 @@ describe('local-only tour history', () => {
 			expect(storage.getItem(TOUR_STORAGE_KEY)).toBe('{"curva":"dispensado"}');
 		});
 	}
+
+	test('a partially corrupt history keeps the valid pages and says why it dropped one', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const storage = memory('{"curva":"visto","cabo":"yes","comparar":"dispensado","biblioteca":7}');
+		const controller = createTour({ storage: () => storage, isDesktop: () => true });
+		expect(controller.shouldAutoOpen('curva')).toBe(false);
+		expect(controller.shouldAutoOpen('comparar')).toBe(false);
+		expect(controller.shouldAutoOpen('cabo')).toBe(true);
+		expect(controller.shouldAutoOpen('biblioteca')).toBe(true);
+		expect(controller.history).toEqual({ curva: 'visto', comparar: 'dispensado' });
+		expect(controller.storageError).toBe('corrupt');
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('tour:'), ['cabo', 'biblioteca']);
+		controller.markSeen('cabo');
+		expect(JSON.parse(storage.getItem(TOUR_STORAGE_KEY) ?? '{}')).toEqual({
+			curva: 'visto',
+			cabo: 'visto',
+			comparar: 'dispensado'
+		});
+		warn.mockRestore();
+	});
+
+	test('storage failures are reported with context, never swallowed', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const denied = new Error('denied read');
+		const storage = memory();
+		storage.getItem = () => {
+			throw denied;
+		};
+		const quota = new Error('quota');
+		storage.setItem = () => {
+			throw quota;
+		};
+		const controller = createTour({ storage: () => storage, isDesktop: () => true });
+		controller.markSeen('curva');
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not read'), denied);
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not store'), quota);
+		warn.mockRestore();
+	});
 
 	test('unknown keys are not copied into state or written back', () => {
 		const storage = memory('{"future":"visto","__proto__":{"curva":"visto"}}');

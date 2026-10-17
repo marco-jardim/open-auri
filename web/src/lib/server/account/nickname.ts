@@ -107,10 +107,12 @@ export async function changeNickname(
 	}
 	if (typeof input !== 'string') return { ok: false, error: 'invalid' };
 
+	// Format first: a malformed nickname is "invalid" whether or not it is on the list.
 	const problem = checkUsername(input);
 	if (problem === 'invalid') return { ok: false, error: 'invalid' };
-	// Reserved names look taken (no probing of the list), as in the sign-up hook.
-	if (problem === 'reserved') return { ok: false, error: 'taken' };
+	// Reserved and blocked names are answered where a taken one is (after the cooldown, after
+	// the same lookup), so they read exactly like taken ones: no probing of the list (FUX.Q N3).
+	const blocked = problem === 'reserved';
 
 	const username = normalizeUsername(input);
 	const display = displayNickname(input);
@@ -123,6 +125,9 @@ export async function changeNickname(
 		if (current === username && (row.displayUsername ?? current) === display) {
 			return { ok: false, error: 'unchanged' };
 		}
+		// The account's own skeleton, so nothing about the list is learned here; a nickname
+		// kept from before it was blocked still gets no new form.
+		if (blocked) return { ok: false, error: 'taken' };
 		// Same skeleton: nobody else can hold it, no hold to create, no clock to restart.
 		// Compare-and-set on the skeleton read above: a concurrent real change must not be
 		// overwritten by a cosmetic form of the previous nickname.
@@ -151,7 +156,7 @@ export async function changeNickname(
 	const owner = await first<{ id: string }>(
 		sql(db, 'SELECT "id" FROM "user" WHERE "usernameSkeleton" = ? AND "id" <> ?', skeleton, userId)
 	);
-	if (owner) return { ok: false, error: 'taken' };
+	if (blocked || owner) return { ok: false, error: 'taken' };
 	if (await isNicknameHeld(db, username, now, userId)) return { ok: false, error: 'taken' };
 
 	// Compare-and-set: the user row changes only if the clock and skeleton are still the ones read

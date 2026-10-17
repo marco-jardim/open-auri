@@ -218,8 +218,6 @@ describe('nickname rules', () => {
 			'nazista',
 			'moderadora',
 			'4dm1n',
-			'ádmín',
-			'аdmіn',
 			'a_d_m_i_n',
 			'admiiin',
 			'admin123',
@@ -237,11 +235,33 @@ describe('nickname rules', () => {
 			const row = await env.DB.prepare('SELECT id FROM "user" WHERE email = ?').bind(email).first();
 			expect(row).toBeNull();
 		}
+		// Format first (FUX.Q N3): a malformed look-alike of a blocked name gets the answer of
+		// any malformed nickname, never one that depends on the list.
+		const malformed = await h.client().signUp(uniqueEmail('malformed'), { username: 'bad name' });
+		expect(malformed.status).toBe(400);
+		expect(await errorCode(malformed.clone())).toBe('INVALID_USERNAME');
+		const invalid = await malformed.json();
+		for (const username of ['ádmín', 'аdmіn', 'sapatão']) {
+			const response = await h.client().signUp(uniqueEmail('lookalike'), { username });
+			expect(response.status).toBe(malformed.status);
+			expect(await response.json()).toEqual(invalid);
+		}
 	});
 
 	it('accepts legitimate nicknames containing short blocked tokens as substrings', async () => {
 		const h = harness();
-		for (const base of ['modesto', 'computador', 'assassin', 'tidalwave']) {
+		// final, chord, tidal and ig.music: common words and handles that folding made look
+		// like brands (FUX.Q N3).
+		for (const base of [
+			'modesto',
+			'computador',
+			'assassin',
+			'tidalwave',
+			'final',
+			'chord',
+			'tidal',
+			'ig.music'
+		]) {
 			const username = uniqueUsername(base);
 			const email = uniqueEmail('legitimate');
 			const response = await h.client().signUp(email, { username });

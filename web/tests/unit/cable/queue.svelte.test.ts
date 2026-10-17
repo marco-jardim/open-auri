@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import { FakeHIDDevice } from 'open-auri/transport';
@@ -26,6 +26,21 @@ afterEach(async () => {
 	await cleanup();
 });
 
+/**
+ * Unavailable says why (T8): aria-disabled, never the native attribute, the reason announced;
+ * and it still never acts, clicked or pressed with Enter.
+ */
+async function expectRefused(control: Locator, reason: string) {
+	await expect.element(control).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(control).not.toHaveAttribute('disabled');
+	await expect.element(control).toHaveAccessibleDescription(reason);
+	const element = control.element();
+	if (!(element instanceof HTMLElement)) throw new Error('Missing control');
+	element.click();
+	element.focus();
+	await userEvent.keyboard('{Enter}');
+}
+
 test('queue requires two connected and selected cables, a passing checklist and no active write', async () => {
 	const fake = cableUi();
 	const screen = await render(MultiCableQueue, { ...input, service: fake.service });
@@ -34,18 +49,22 @@ test('queue requires two connected and selected cables, a passing checklist and 
 	const devices = [new FakeHIDDevice(), new FakeHIDDevice()];
 	fake.publish({ devices, deviceLabels: ['One', 'Two'] });
 	const review = page.getByRole('button', { name: m.cable_queue_review() });
-	await expect.element(review).toBeEnabled();
+	await expect.element(review).not.toHaveAttribute('aria-disabled');
 	await screen.rerender({ canWrite: false });
-	await expect.element(review).toBeDisabled();
+	await expectRefused(review, m.cable_write_blocked());
 	await screen.rerender({ canWrite: true });
 	fake.publish({ writing: true });
-	await expect.element(review).toBeDisabled();
+	await expectRefused(review, m.cabo_fux_busy_writing());
 	await expect.element(page.getByRole('checkbox', { name: 'One' })).toBeDisabled();
 	fake.publish({ writing: false });
 	await page.getByRole('checkbox', { name: 'Two' }).click();
-	await expect.element(review).toBeDisabled();
+	await expectRefused(review, m.fuxq1_queue_select_two());
+	// None of the refused presses opened the review.
+	expect(
+		page.getByRole('heading', { name: m.cable_queue_confirm_heading() }).elements()
+	).toHaveLength(0);
 	await page.getByRole('checkbox', { name: 'Two' }).click();
-	await expect.element(review).toBeEnabled();
+	await expect.element(review).not.toHaveAttribute('aria-disabled');
 	expect(fake.createGesture).not.toHaveBeenCalled();
 	expect(fake.writeQueue).not.toHaveBeenCalled();
 });
@@ -83,11 +102,15 @@ test('review/back preserves selection; only confirmation submits the reviewed qu
 	await page.getByRole('button', { name: m.cable_queue_review() }).click();
 	const confirm = page.getByRole('button', { name: m.cable_queue_confirm({ count: '2' }) });
 	await screen.rerender({ canWrite: false });
-	await expect.element(confirm).toBeDisabled();
+	await expectRefused(confirm, m.cable_write_blocked());
 	await screen.rerender({ canWrite: true });
 	fake.publish({ writing: true });
-	await expect.element(confirm).toBeDisabled();
+	await expectRefused(confirm, m.cabo_fux_busy_writing());
 	await expect.element(page.getByRole('button', { name: m.cable_queue_back() })).toBeDisabled();
+	// The write path never moved: no gesture, no queue write, still in review.
+	expect(fake.createGesture).not.toHaveBeenCalled();
+	expect(fake.writeQueue).not.toHaveBeenCalled();
+	await expect.element(confirm).toBeVisible();
 	fake.publish({ writing: false });
 	await confirm.click();
 	expect(fake.createGesture).toHaveBeenCalledOnce();

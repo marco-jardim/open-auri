@@ -274,9 +274,27 @@
 		onclick={() => play(outcome)}>{m.cabo_replay()}</Button
 	>
 	<label class="slow">
-		<input type="checkbox" bind:checked={slow} disabled={running} />
+		<!-- Locked while the tape runs (its speed is fixed at the start), but still focusable and
+		     saying why (T8): aria-disabled, and a click or Space never toggles it. -->
+		<input
+			type="checkbox"
+			bind:checked={
+				() => slow,
+				(next) => {
+					if (!running) slow = next;
+				}
+			}
+			aria-disabled={running ? 'true' : undefined}
+			aria-describedby={running ? `${id}-slow-why` : undefined}
+			onclick={(event) => {
+				if (running) event.preventDefault();
+			}}
+		/>
 		{m.cabo_slow()}
 	</label>
+	{#if running}
+		<small class="slow-why" id="{id}-slow-why">{m.fuxq1_tape_slow_running()}</small>
+	{/if}
 	<Button variant="ghost" disabledReason={running ? null : m.cabo_fux_stop_idle()} onclick={stop}
 		>{m.cabo_stop()}</Button
 	>
@@ -449,6 +467,14 @@
 	}
 	.slow input {
 		accent-color: #4fd1c5;
+	}
+	.slow input[aria-disabled='true'] {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+	.slow-why {
+		font-size: var(--fs-caption, 12px);
+		color: #b6bdb7;
 	}
 	.readout {
 		margin-left: auto;

@@ -384,6 +384,7 @@ export function createBeforeHook(deps: AuthHookDeps) {
 		}
 
 		let signUpNickname: string | undefined;
+		let signUpNicknameBlocked = false;
 		if (path === '/sign-up/email') {
 			const username = typeof body.username === 'string' ? body.username : undefined;
 			const display = typeof body.displayUsername === 'string' ? body.displayUsername : undefined;
@@ -394,13 +395,16 @@ export function createBeforeHook(deps: AuthHookDeps) {
 				throw fail(400, 'DISPLAY_USERNAME_MISMATCH', 'Display nickname must match the nickname');
 			}
 			if (username !== undefined) {
+				// Format first: anything that is not a well-formed nickname is "invalid", blocked
+				// or not, so the format answer never reveals the list (FUX.Q N3).
 				const problem = checkUsername(username);
 				if (problem === 'invalid') throw fail(400, 'INVALID_USERNAME', 'Invalid nickname');
-				// A reserved nickname looks taken: no list probing.
-				if (problem === 'reserved') throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
 				// Taken/held is answered only after the guard (Turnstile, limits): otherwise token-less
-				// sign-ups would be an unthrottled nickname-existence oracle (Q3 round 3).
+				// sign-ups would be an unthrottled nickname-existence oracle (Q3 round 3). A reserved
+				// or blocked nickname is answered there too, as taken, so it is indistinguishable
+				// from a taken one (before the guard it would be an unthrottled list probe).
 				signUpNickname = username;
+				signUpNicknameBlocked = problem === 'reserved';
 			}
 		}
 
@@ -443,8 +447,13 @@ export function createBeforeHook(deps: AuthHookDeps) {
 					usernameSkeleton(signUpNickname)
 				)
 			);
-			// A nickname on its 90-day hold answers exactly like a taken one.
-			if (row || (await isNicknameHeld(db, signUpNickname, now().getTime()))) {
+			// A reserved or blocked nickname, and one on its 90-day hold, answer exactly like a
+			// taken one (same place, after the same lookup).
+			if (
+				signUpNicknameBlocked ||
+				row ||
+				(await isNicknameHeld(db, signUpNickname, now().getTime()))
+			) {
 				throw fail(400, USERNAME_TAKEN, 'Nickname is already taken');
 			}
 		}

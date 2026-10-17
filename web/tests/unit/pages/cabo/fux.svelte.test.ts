@@ -1,7 +1,7 @@
 // FUX.P6 Cabo: the state diagram follows the service, the reels follow real report progress,
 // the empty journal teaches with EXAMPLE boxes and U7 lists the cables with their state.
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { NEUTRO } from 'open-auri/catalog';
 import { FakeHIDDevice } from 'open-auri/transport';
@@ -163,6 +163,35 @@ test('a rehearsal turns the reels report by report on its own clock and never cl
 	await expect.poll(turns).toBe('9');
 	expect(screen.container.querySelectorAll('.accepted')).toHaveLength(0);
 	expect(screen.container.querySelectorAll('.seg.passed')).toHaveLength(9);
+});
+
+test('while the tape runs, the speed switch says why and a click or Enter never toggles it', async () => {
+	await setLocale('pt-BR', { reload: false });
+	const clock = manualFrames();
+	await render(TransportTape, {
+		curve: NEUTRO,
+		now: clock.now,
+		frame: clock.frame,
+		cancel: clock.cancel
+	});
+	const slow = page.getByRole('checkbox', { name: m.cabo_slow(), exact: true });
+	await expect.element(slow).not.toHaveAttribute('aria-disabled');
+	await page.getByRole('button', { name: m.cabo_rehearse(), exact: true }).click();
+	await expect.element(slow).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(slow).not.toHaveAttribute('disabled');
+	await expect.element(slow).toHaveAccessibleDescription(m.fuxq1_tape_slow_running());
+	const input = slow.element() as HTMLInputElement;
+	input.click();
+	input.focus();
+	await userEvent.keyboard('{Enter}');
+	expect(input.checked).toBe(false);
+	await expect.element(slow).not.toBeChecked();
+
+	clock.step(10_000);
+	await expect.element(slow).not.toHaveAttribute('aria-disabled');
+	await expect.element(slow).not.toHaveAttribute('aria-describedby');
+	await slow.click();
+	await expect.element(slow).toBeChecked();
 });
 
 test('the real result never lights a report the cable did not accept', async () => {
