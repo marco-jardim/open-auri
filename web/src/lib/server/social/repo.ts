@@ -150,6 +150,21 @@ export function linkableLineageSql(lineageAlias: string): string {
 	);
 }
 
+/**
+ * Every rule of publicLineageSql (`listing`) or linkableLineageSql except the head gate verdict.
+ * Only for the gate-cache helpers (re-gate decisions, #27); never to serve a lineage.
+ */
+function openExceptHeadGateSql(lineageAlias: string, listing: boolean): string {
+	const a = alias(lineageAlias);
+	const visibility = listing
+		? `${a}.visibility = 'public'`
+		: `${a}.visibility IN ('public', 'unlisted')`;
+	return (
+		`(${visibility} AND ${a}.status = 'active' AND ${a}.moderation = 'visible' ` +
+		`AND ${ownerNotBannedSql(a)})`
+	);
+}
+
 /** The viewer owns the row (lineage or pack), or is an explicit admin. */
 export function ownerOrAdminSql(rowAlias: string, viewer: Viewer): SqlFragment {
 	const a = alias(rowAlias);
@@ -592,6 +607,111 @@ export async function listCurvesWithStaleGate(
 		)
 	);
 	return rows.map(toCurve);
+}
+
+/**
+ * Stale curves for the re-gate job: cached under another gate version by a GATE_IMPL ordinal not
+ * greater than `gateImpl` (rows of a newer implementation are current for a newer isolate), in
+ * priority order: (0) accepted heads of linkable lineages (served by link and in lists: a head
+ * the current gate rejects must stop being served first), (1) rejected heads of lineages publicly
+ * listable apart from that verdict (a relaxed gate brings them back to the lists; by-id reads
+ * re-gate them on their own, #27), (2) everything else. Oldest first within a tier. At most 1000.
+ */
+export async function listStaleCurvesForRegate(
+	db: D1Database,
+	gateVer: string,
+	limit: number,
+	gateImpl: number
+): Promise<CurveRecord[]> {
+	const headOf = (rule: (lineageAlias: string) => string, l: string, v: string): string =>
+		`EXISTS (SELECT 1 FROM lineages ${alias(l)} JOIN versions ${alias(v)} ` +
+		`ON ${v}.id = ${l}.head_version WHERE ${v}.curve_id = c.id AND ${rule(l)})`;
+	const rows = await all<CurveCols>(
+		sql(
+			db,
+			`SELECT ${CURVE_COLUMNS} FROM curves c ` +
+				`WHERE c.gate_ver <> ? AND ${gateImplSql('c.gate_ver')} <= ? ORDER BY CASE ` +
+				`WHEN c.gate_ok = 1 AND ${headOf(linkableLineageSql, 'pl', 'pv')} THEN 0 ` +
+				`WHEN c.gate_ok = 0 AND ${headOf((l) => openExceptHeadGateSql(l, true), 'rl', 'rv')} ` +
+				'THEN 1 ELSE 2 END, c.created_at, c.id LIMIT ?',
+			gateVer,
+			gateImpl,
+			Math.min(Math.max(Math.trunc(limit), 1), 1000)
+		)
+	);
+	return rows.map(toCurve);
+}
+
+/** Cached gate verdict of one curve, without its content (see getHeadGateState). */
+export interface GateState {
+	curveId: string;
+	gateVer: string;
+	gateOk: boolean;
+}
+
+/** Gate states of a version's own curve and of its lineage's head (see getVersionGateState). */
+export interface VersionGateState {
+	curve: GateState;
+	head: GateState;
+}
+
+/**
+ * Cached gate state (gate_ver, gate_ok) of the head curve of `lineageId`, read WHATEVER its
+ * gate_ok, when the lineage is linkable apart from the head verdict (public or unlisted, active,
+ * not moderated, owner not banned); null otherwise (unknown, private, retracted, moderated,
+ * banned owner). The readable rows hide a head cached as rejected, so the by-id reads use this,
+ * and only this, to decide whether such a head is re-gated (#27). It carries no content and must
+ * never be used to serve one.
+ */
+export async function getHeadGateState(
+	db: D1Database,
+	lineageId: string
+): Promise<GateState | null> {
+	if (!isSocialId(lineageId)) return null;
+	const row = await first<{ curve_id: string; gate_ver: string; gate_ok: number }>(
+		sql(
+			db,
+			'SELECT c.id AS curve_id, c.gate_ver AS gate_ver, c.gate_ok AS gate_ok FROM lineages l ' +
+				'JOIN versions v ON v.id = l.head_version JOIN curves c ON c.id = v.curve_id ' +
+				`WHERE l.id = ? AND ${openExceptHeadGateSql('l', false)}`,
+			lineageId
+		)
+	);
+	return row ? { curveId: row.curve_id, gateVer: row.gate_ver, gateOk: row.gate_ok === 1 } : null;
+}
+
+/**
+ * Same as getHeadGateState for a version id: the cached gate states of the version's own curve
+ * and of its lineage's head, under the same lineage rule (null otherwise). Re-gate decisions only.
+ */
+export async function getVersionGateState(
+	db: D1Database,
+	versionId: string
+): Promise<VersionGateState | null> {
+	if (!isSocialId(versionId)) return null;
+	const row = await first<{
+		c_id: string;
+		c_ver: string;
+		c_ok: number;
+		h_id: string;
+		h_ver: string;
+		h_ok: number;
+	}>(
+		sql(
+			db,
+			'SELECT c.id AS c_id, c.gate_ver AS c_ver, c.gate_ok AS c_ok, hc.id AS h_id, ' +
+				'hc.gate_ver AS h_ver, hc.gate_ok AS h_ok FROM versions v ' +
+				'JOIN lineages l ON l.id = v.lineage_id JOIN curves c ON c.id = v.curve_id ' +
+				'JOIN versions hv ON hv.id = l.head_version JOIN curves hc ON hc.id = hv.curve_id ' +
+				`WHERE v.id = ? AND ${openExceptHeadGateSql('l', false)}`,
+			versionId
+		)
+	);
+	if (!row) return null;
+	return {
+		curve: { curveId: row.c_id, gateVer: row.c_ver, gateOk: row.c_ok === 1 },
+		head: { curveId: row.h_id, gateVer: row.h_ver, gateOk: row.h_ok === 1 }
+	};
 }
 
 // ---- Lineages and versions: writes ----------------------------------------------------------

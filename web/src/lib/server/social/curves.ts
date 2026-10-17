@@ -10,7 +10,10 @@
 // any version on a rejected curve; the visibility predicates hide lineages whose head fails.
 // Lazy re-gate: every by-id read or action (curve read, history, fork, append, retract, restore,
 // visibility) re-gates a head (or requested version) whose cached verdict is not current before
-// answering, then reads it again, so a head that now fails is no longer linkable.
+// answering, then reads it again, so a head that now fails is no longer linkable. A head (or
+// version) the readable rows hide because it is cached as rejected under a stale gate version is
+// re-gated the same way (#27), so it is served once the current gate accepts it; a still-rejected
+// one answers exactly like a missing id.
 // Two daily quotas per user: successful publications (versions created) and attempts that reach
 // the gate (accepted or rejected), which bounds the gate CPU a user can spend.
 import type { D1Database } from '@cloudflare/workers-types';
@@ -24,7 +27,13 @@ import {
 	type MetricsDataset,
 	type PublicationPath
 } from '#lib/server/observability/metrics.ts';
-import { checkCurve, isGateCurrent, regateCurve } from '#lib/server/social/gate.ts';
+import {
+	checkCurve,
+	isGateCurrent,
+	regateCurve,
+	regateRejectedHead,
+	regateRejectedVersion
+} from '#lib/server/social/gate.ts';
 import { isLinkableTombstone } from '#lib/server/social/queries/curves.ts';
 import {
 	appendVersion,
@@ -378,7 +387,10 @@ function announce(info: PublishedInfo, deps: CurveDeps): PublishedInfo {
 /**
  * The lineage as `viewer` may read it, with a current gate verdict on its head: a head cached
  * under a stale gate version is re-gated and the lineage read again, so a head that now fails is
- * not linkable (null for anyone but the owner or an admin). Invalid ids give null.
+ * not linkable (null for anyone but the owner or an admin). A head the readable rows hide because
+ * it is cached as REJECTED under a stale gate version is re-gated too (#27, regateRejectedHead:
+ * linkable lineages only), so it is served once the current gate accepts it; one gate run at
+ * most either way. Invalid ids give null.
  */
 async function readLineage(
 	db: D1Database,
@@ -389,12 +401,20 @@ async function readLineage(
 ): Promise<LineageSummary | null> {
 	if (!isSocialId(lineageId)) return null;
 	const summary = await getLineageForViewer(db, lineageId, viewer);
-	if (!summary || (await isGateCurrent(summary.curve.gateVer))) return summary;
+	if (!summary) {
+		if (!(await regateRejectedHead(db, lineageId, now, gateOptions(deps)))) return null;
+		return getLineageForViewer(db, lineageId, viewer);
+	}
+	if (await isGateCurrent(summary.curve.gateVer)) return summary;
 	await regateCurve(db, summary.curve, now, gateOptions(deps));
 	return getLineageForViewer(db, lineageId, viewer);
 }
 
-/** Same lazy re-gate as readLineage, for one version (its own curve) of a readable lineage. */
+/**
+ * Same lazy re-gate as readLineage, for one version (its own curve) of a readable lineage: a
+ * version hidden because its own curve is cached as rejected under a stale gate version is
+ * re-gated first (#27; the head was already handled by readLineage). One gate run at most.
+ */
 async function readVersion(
 	db: D1Database,
 	versionId: string,
@@ -404,7 +424,12 @@ async function readVersion(
 ): Promise<VersionView | null> {
 	if (!isSocialId(versionId)) return null;
 	const view = await getVersionForViewer(db, versionId, viewer);
-	if (!view || (await isGateCurrent(view.curve.gateVer))) return view;
+	if (!view) {
+		const options = gateOptions(deps);
+		if (!(await regateRejectedVersion(db, versionId, now, options, { head: false }))) return null;
+		return getVersionForViewer(db, versionId, viewer);
+	}
+	if (await isGateCurrent(view.curve.gateVer)) return view;
 	await regateCurve(db, view.curve, now, gateOptions(deps));
 	return getVersionForViewer(db, versionId, viewer);
 }

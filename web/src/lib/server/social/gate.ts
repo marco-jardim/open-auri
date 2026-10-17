@@ -11,8 +11,14 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { gateForWrite, levelDb, THRESHOLDS } from 'open-auri/safety';
 import { canonKey, curveId, decodeS1, S1Error } from 'open-auri/share';
-import { getCurve, saveCurveGate } from '#lib/server/social/repo.ts';
-import { listStaleCurvesByPriority } from '#lib/server/social/queries/curves.ts';
+import {
+	getCurve,
+	getHeadGateState,
+	getVersionGateState,
+	listStaleCurvesForRegate,
+	saveCurveGate,
+	type GateState
+} from '#lib/server/social/repo.ts';
 import type { CurveInput, CurveRecord } from '#lib/server/social/types.ts';
 
 /**
@@ -39,7 +45,10 @@ export interface GateDeps {
 }
 
 export interface RegateDeps extends GateDeps {
-	/** Stale curves to re-gate, in priority order (default: linkable heads first, then oldest). */
+	/**
+	 * Stale curves to re-gate, in priority order (default: accepted linkable heads, then rejected
+	 * heads of publicly listable lineages, then the rest; oldest first within each).
+	 */
 	list: (db: D1Database, gateVer: string, limit: number) => Promise<CurveRecord[]>;
 	/** Wall-clock budget (ms): no new curve is started once it is spent. */
 	budgetMs: number;
@@ -185,6 +194,65 @@ export async function regateCurve(
 	);
 }
 
+/**
+ * One curve of a by-id read hidden by its cached verdict (#27): re-gates it (one gate run, through
+ * regateCurve) when that verdict is a rejection under a stale gate version. True when the gate
+ * ran (the caller reads again through the visibility predicates), false when nothing ran. The
+ * record loaded for the re-gate is never returned.
+ */
+async function regateStaleRejection(
+	db: D1Database,
+	state: GateState,
+	now: number,
+	deps: Partial<GateDeps>
+): Promise<boolean> {
+	if (state.gateOk || (await isGateCurrent(state.gateVer))) return false;
+	const record = await getCurve(db, state.curveId);
+	if (!record) return false;
+	await regateCurve(db, record, now, deps);
+	return true;
+}
+
+/**
+ * By-id reads of a lineage (#27): the readable rows hide a head cached as rejected, so a stale
+ * rejection is never re-gated there and the curve would stay 404 after the gate is relaxed. When
+ * the lineage is linkable apart from that verdict (getHeadGateState) and its head is cached as
+ * rejected under a stale gate version, re-gates the head (at most one gate run) and returns true
+ * so the caller reads the lineage again; false otherwise (nothing ran). Private, retracted,
+ * moderated and banned-owner lineages are never re-gated here.
+ */
+export async function regateRejectedHead(
+	db: D1Database,
+	lineageId: string,
+	now = Date.now(),
+	deps: Partial<GateDeps> = {}
+): Promise<boolean> {
+	const state = await getHeadGateState(db, lineageId);
+	return state ? regateStaleRejection(db, state, now, deps) : false;
+}
+
+/**
+ * Same as regateRejectedHead for a version id: its own curve and, with `head`, its lineage's head
+ * when cached as rejected under a stale gate version (at most one gate run per curve). True when
+ * the gate ran.
+ */
+export async function regateRejectedVersion(
+	db: D1Database,
+	versionId: string,
+	now = Date.now(),
+	deps: Partial<GateDeps> = {},
+	{ head = true }: { head?: boolean } = {}
+): Promise<boolean> {
+	const state = await getVersionGateState(db, versionId);
+	if (!state) return false;
+	const own = await regateStaleRejection(db, state.curve, now, deps);
+	const top =
+		head && state.head.curveId !== state.curve.curveId
+			? await regateStaleRejection(db, state.head, now, deps)
+			: false;
+	return own || top;
+}
+
 function sameVerdict(before: CurveRecord, after: CurveRecord): boolean {
 	return (
 		before.gateOk === after.gateOk &&
@@ -198,7 +266,7 @@ function listStaleForThisImpl(
 	gateVer: string,
 	limit: number
 ): Promise<CurveRecord[]> {
-	return listStaleCurvesByPriority(db, gateVer, limit, GATE_IMPL);
+	return listStaleCurvesForRegate(db, gateVer, limit, GATE_IMPL);
 }
 
 export interface RegateResult {
@@ -214,8 +282,10 @@ export interface RegateResult {
 }
 
 /**
- * Job step: re-gates up to `limit` curves cached under another gate version, heads of linkable
- * lineages first (they are what anyone with a link can open), then oldest first. Stops starting
+ * Job step: re-gates up to `limit` curves cached under another gate version, accepted heads of
+ * linkable lineages first (they are what anyone with a link can open), then rejected heads of
+ * publicly listable lineages (a relaxed gate brings them back to the lists, #27), then the rest,
+ * oldest first within each (listStaleCurvesForRegate in repo.ts). Stops starting
  * new curves once `budgetMs` of wall time has passed (the clock advances at each D1 write in
  * workerd, so the CPU of the last gate run is counted at its write). Rows of a newer GATE_IMPL are
  * never picked (they are current for a newer isolate).

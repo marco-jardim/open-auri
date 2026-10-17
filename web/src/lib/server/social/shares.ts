@@ -17,7 +17,12 @@ import { ApiError } from '#lib/server/api/errors.ts';
 import { apiRateLimit, type ApiLimitEnv, type ApiRateRule } from '#lib/server/api/limits.ts';
 import type { gateForWrite } from 'open-auri/safety';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
-import { isGateCurrent, regateCurve } from '#lib/server/social/gate.ts';
+import {
+	isGateCurrent,
+	regateCurve,
+	regateRejectedHead,
+	regateRejectedVersion
+} from '#lib/server/social/gate.ts';
 import { isLineageOwner, isRetractedLinkable } from '#lib/server/social/queries/shares.ts';
 import {
 	createShare,
@@ -45,8 +50,11 @@ function regateOptions(deps: PublicReadDeps): { gate?: typeof gateForWrite } {
 /**
  * The lineage as `viewer` may read it by id, with a current gate verdict on its head (FX4.9): a
  * head cached under a stale gate version is re-gated and the lineage read again, so a head the
- * current gate rejects is not linkable (null for anyone but the owner or an admin). Same rule as
- * `readLineage` in curves.ts. The id must already be valid (`isSocialId`).
+ * current gate rejects is not linkable (null for anyone but the owner or an admin). A head hidden
+ * because it is cached as REJECTED under a stale gate version is re-gated too (#27,
+ * regateRejectedHead: linkable lineages only), so it is served once the current gate accepts it.
+ * One gate run at most. Same rule as `readLineage` in curves.ts. The id must already be valid
+ * (`isSocialId`).
  */
 export async function readCurrentLineage(
 	db: D1Database,
@@ -54,16 +62,23 @@ export async function readCurrentLineage(
 	viewer: Viewer,
 	deps: PublicReadDeps = {}
 ): Promise<LineageSummary | null> {
+	const now = deps.now ?? Date.now();
 	const summary = await getLineageForViewer(db, lineageId, viewer);
-	if (!summary || (await isGateCurrent(summary.curve.gateVer))) return summary;
-	await regateCurve(db, summary.curve, deps.now ?? Date.now(), regateOptions(deps));
+	if (!summary) {
+		if (!(await regateRejectedHead(db, lineageId, now, regateOptions(deps)))) return null;
+		return getLineageForViewer(db, lineageId, viewer);
+	}
+	if (await isGateCurrent(summary.curve.gateVer)) return summary;
+	await regateCurve(db, summary.curve, now, regateOptions(deps));
 	return getLineageForViewer(db, lineageId, viewer);
 }
 
 /**
  * A version as `viewer` may read it by id, with current gate verdicts (FX4.9): its own curve and,
  * for an older version, the head curve of its lineage (the head decides linkability) are re-gated
- * when stale, then the version is read again. Null when it is not readable afterwards.
+ * when stale, then the version is read again. A version hidden because its own curve or its head
+ * is cached as rejected under a stale gate version is re-gated first (#27). At most one gate run
+ * per curve (two per read). Null when it is not readable afterwards.
  */
 export async function readCurrentVersion(
 	db: D1Database,
@@ -71,9 +86,14 @@ export async function readCurrentVersion(
 	viewer: Viewer,
 	deps: PublicReadDeps = {}
 ): Promise<VersionView | null> {
-	const view = await getVersionForViewer(db, versionId, viewer);
-	if (!view) return null;
 	const now = deps.now ?? Date.now();
+	let view = await getVersionForViewer(db, versionId, viewer);
+	if (!view) {
+		if (!(await regateRejectedVersion(db, versionId, now, regateOptions(deps)))) return null;
+		// Re-gated curves are current now; a head still stale (accepted) is handled below.
+		view = await getVersionForViewer(db, versionId, viewer);
+		if (!view) return null;
+	}
 	let regated = false;
 	if (!(await isGateCurrent(view.curve.gateVer))) {
 		await regateCurve(db, view.curve, now, regateOptions(deps));
