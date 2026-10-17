@@ -1,17 +1,18 @@
 <script lang="ts">
-	// /u/[apelido] (T4.11): public profile as a signed collection on a mixing console. Library
+	// /u/[apelido]: public profile as a signed record collection. Library
 	// off → nickname, bio and counts only. Library on → creations (filter, license, sort, A/B
 	// preview against the curve in the editor, through the shared audio engine) and public packs;
 	// favorites only when the activity is public too. User text is rendered as text only.
-	import { onDestroy } from 'svelte';
-	import '@fontsource/courier-prime/400.css';
-	import '@fontsource/courier-prime/700.css';
+	import { onDestroy, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { Button, EmptyState, Panel, Skeleton } from '#lib/components/primitives/index.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, AudioEngine } from '#lib/audio/engine.ts';
 	import { neutralCurve } from '#lib/state/model.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
-	import ChannelStrip from './ChannelStrip.svelte';
+	import ProfileRecord from './ProfileRecord.svelte';
 	import {
 		LICENSE_OPTIONS,
 		formatDate,
@@ -27,26 +28,23 @@
 		type ProfileView
 	} from './model.ts';
 
-	let { data, app = null }: { data: ProfileView; app?: ClientApp | null } = $props();
+	let {
+		data,
+		app = null,
+		loading: profileLoading = false
+	}: { data: ProfileView; app?: ClientApp | null; loading?: boolean } = $props();
 	const id = $props.id();
 	const locale = $derived(getLocale());
 	const profile = $derived(data.profile);
 	const libraryOpen = $derived(profile.library === 'public');
+	const activityOpen = $derived(libraryOpen && profile.activity === 'public');
 
-	let creations = $state.raw<LineageCard[]>([]);
-	let creationsCursor = $state<string | null>(null);
-	let packs = $state.raw<PackCard[]>([]);
-	let packsCursor = $state<string | null>(null);
-	let favorites = $state.raw<FavoriteCard[]>([]);
-	let favoritesCursor = $state<string | null>(null);
-	$effect.pre(() => {
-		creations = data.lineages?.items ?? [];
-		creationsCursor = data.lineages?.nextCursor ?? null;
-		packs = data.packs?.items ?? [];
-		packsCursor = data.packs?.nextCursor ?? null;
-		favorites = data.favorites?.items ?? [];
-		favoritesCursor = data.favorites?.nextCursor ?? null;
-	});
+	let creations = $state.raw<LineageCard[]>(untrack(() => data.lineages?.items ?? []));
+	let creationsCursor = $state<string | null>(untrack(() => data.lineages?.nextCursor ?? null));
+	let packs = $state.raw<PackCard[]>(untrack(() => data.packs?.items ?? []));
+	let packsCursor = $state<string | null>(untrack(() => data.packs?.nextCursor ?? null));
+	let favorites = $state.raw<FavoriteCard[]>(untrack(() => data.favorites?.items ?? []));
+	let favoritesCursor = $state<string | null>(untrack(() => data.favorites?.nextCursor ?? null));
 
 	let query = $state('');
 	let license = $state<License | 'all'>('all');
@@ -76,6 +74,18 @@
 		busy = false;
 	}
 	onDestroy(stop);
+
+	$effect.pre(() => {
+		creations = libraryOpen ? (data.lineages?.items ?? []) : [];
+		creationsCursor = libraryOpen ? (data.lineages?.nextCursor ?? null) : null;
+		packs = libraryOpen ? (data.packs?.items ?? []) : [];
+		packsCursor = libraryOpen ? (data.packs?.nextCursor ?? null) : null;
+		favorites = activityOpen ? (data.favorites?.items ?? []) : [];
+		favoritesCursor = activityOpen ? (data.favorites?.nextCursor ?? null) : null;
+		untrack(stop);
+		loading = false;
+		notice = '';
+	});
 
 	async function listen(item: LineageCard, chosen: 'A' | 'B') {
 		if (!app || busy) return;
@@ -125,28 +135,32 @@
 	}
 
 	async function more(list: 'lineages' | 'packs' | 'favorites') {
-		if (loading) return;
+		if (loading || !libraryOpen || (list === 'favorites' && !activityOpen)) return;
+		const requestedView = data;
 		loading = true;
 		notice = '';
 		try {
 			if (list === 'lineages' && creationsCursor) {
 				const page = await fetchPage<LineageCard>(list, creationsCursor);
+				if (data !== requestedView || !libraryOpen) return;
 				creations = mergePage(creations, page.items, (item) => item.id);
 				creationsCursor = page.nextCursor;
 			} else if (list === 'packs' && packsCursor) {
 				const page = await fetchPage<PackCard>(list, packsCursor);
+				if (data !== requestedView || !libraryOpen) return;
 				packs = mergePage(packs, page.items, (item) => item.id);
 				packsCursor = page.nextCursor;
 			} else if (list === 'favorites' && favoritesCursor) {
 				const page = await fetchPage<FavoriteCard>(list, favoritesCursor);
+				if (data !== requestedView || !activityOpen) return;
 				favorites = mergePage(favorites, page.items, (item) => item.lineage.id);
 				favoritesCursor = page.nextCursor;
 			}
 		} catch (error) {
-			notice = m.perfil_load_error();
+			if (data === requestedView) notice = m.perfil_load_error();
 			console.error('Perfil page failed', error instanceof Error ? error.message : 'unknown');
 		} finally {
-			loading = false;
+			if (data === requestedView) loading = false;
 		}
 	}
 </script>
@@ -158,196 +172,247 @@
 	/>{#if !libraryOpen}<meta name="robots" content="noindex" />{/if}</svelte:head
 >
 
-<div class="room">
-	<section class="hero" aria-labelledby="{id}-title">
-		<div class="caps">{m.perfil_eyebrow()}</div>
-		<h1 id="{id}-title">{profile.displayUsername}</h1>
-		<p class="handle">@{profile.username}</p>
-		{#if profile.bio}<p class="bio">{profile.bio}</p>{/if}
-		<dl class="counts">
-			<div>
-				<dt>{m.perfil_count_lineages()}</dt>
-				<dd>{profile.counts.lineages}</dd>
+<div class="room" data-page="biblioteca">
+	{#if profileLoading}
+		<section
+			class="profile-loading"
+			aria-label={m.fux_p9_loading()}
+			aria-busy="true"
+			data-testid="profile-loading"
+		>
+			<div class="hero skeleton-header">
+				<Skeleton width="12ch" height="var(--fs-eyebrow)" />
+				<Skeleton width="min(18ch, 100%)" height="var(--fs-display-l)" />
+				<Skeleton width="12ch" height="var(--fs-body)" />
+				<Skeleton width="min(48ch, 100%)" height="calc(var(--fs-body) * 3)" />
 			</div>
-			<div>
-				<dt>{m.perfil_count_packs()}</dt>
-				<dd>{profile.counts.packs}</dd>
+			<div class="strips skeleton-grid">
+				{#each [0, 1, 2, 3] as slot (slot)}
+					<div class="skeleton-record" aria-hidden="true">
+						<div class="skeleton-disc"><Skeleton width="100%" height="100%" radius="50%" /></div>
+						<Skeleton width="75%" height="var(--fs-title)" />
+						<Skeleton width="100%" height="calc(var(--fs-body) * 5)" />
+						<Skeleton width="100%" height="var(--hit)" />
+					</div>
+				{/each}
 			</div>
-		</dl>
-	</section>
-
-	{#if !libraryOpen}
-		<p class="closed" data-testid="library-private">{m.perfil_library_private()}</p>
+		</section>
 	{:else}
-		<section class="console" aria-labelledby="{id}-creations">
-			<div class="section-head">
-				<h2 id="{id}-creations">{m.perfil_creations()}</h2>
-				<span class="caps" aria-live="polite">{m.perfil_shown({ count: shown.length })}</span>
-			</div>
-			{#if creations.length > 0}
-				<div class="controls">
-					<label
-						>{m.perfil_filter()}<input
-							type="search"
-							bind:value={query}
-							placeholder={m.perfil_filter_placeholder()}
-						/></label
-					>
-					<label
-						>{m.perfil_license()}<select bind:value={license}
-							><option value="all">{m.perfil_license_all()}</option
-							>{#each LICENSE_OPTIONS as option (option)}<option value={option}>{option}</option
-								>{/each}</select
-						></label
-					>
-					<label
-						>{m.perfil_sort()}<select bind:value={sort}
-							><option value="recent">{m.perfil_sort_recent()}</option><option value="name"
-								>{m.perfil_sort_name()}</option
-							><option value="level">{m.perfil_sort_level()}</option></select
-						></label
-					>
+		<section class="hero" aria-labelledby="{id}-title">
+			<div class="caps">{m.perfil_eyebrow()}</div>
+			<h1 class="h-display-l" id="{id}-title">{profile.displayUsername}</h1>
+			<svg class="signature" viewBox="0 0 240 30" aria-hidden="true" fill="none">
+				<path d="M4 21C43 4 86 6 139 11S208 18 234 5M76 21C125 15 174 17 218 23" />
+			</svg>
+			<p class="handle">@{profile.username}</p>
+			{#if profile.bio}<p class="bio">{profile.bio}</p>{/if}
+			<dl class="counts">
+				<div>
+					<dt>{m.perfil_count_lineages()}</dt>
+					<dd>{profile.counts.lineages}</dd>
 				</div>
-				<p class="ab-note">{m.perfil_ab_note()}</p>
-			{/if}
-			{#if creations.length === 0}
-				<p class="empty" data-testid="creations-empty">{m.perfil_creations_empty()}</p>
-			{:else if shown.length === 0}
-				<div class="empty">
-					<p data-testid="creations-no-match">{m.perfil_no_match()}</p>
-					<button
-						type="button"
-						onclick={() => {
-							query = '';
-							license = 'all';
-						}}>{m.perfil_clear()}</button
-					>
+				<div>
+					<dt>{m.perfil_count_packs()}</dt>
+					<dd>{profile.counts.packs}</dd>
 				</div>
-			{:else}
-				<div class="strips">
-					{#each shown as item, index (item.id)}
-						<ChannelStrip
-							{item}
-							{index}
-							{locale}
-							side={playingId === item.id ? side : null}
-							{busy}
-							canPreview={app !== null}
-							onListen={listen}
-							onStop={stop}
-						/>
-					{/each}
-				</div>
-			{/if}
-			{#if creationsCursor}
-				<button type="button" class="more" disabled={loading} onclick={() => more('lineages')}
-					>{m.perfil_load_more()}</button
-				>
-			{/if}
+			</dl>
 		</section>
 
-		<section class="packs" aria-labelledby="{id}-packs">
-			<h2 id="{id}-packs">{m.perfil_packs()}</h2>
-			{#if packs.length === 0}
-				<p class="empty" data-testid="packs-empty">{m.perfil_packs_empty()}</p>
-			{:else}
-				<ul>
-					{#each packs as pack (pack.id)}
-						<li>
-							<strong>{pack.name}</strong>
-							{#if pack.description}<span class="pack-description">{pack.description}</span>{/if}
-							<small>{formatDate(pack.updatedAt, locale)}</small>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-			{#if packsCursor}
-				<button type="button" class="more" disabled={loading} onclick={() => more('packs')}
-					>{m.perfil_load_more()}</button
-				>
-			{/if}
-		</section>
+		{#if !libraryOpen}
+			<Panel><p class="closed" data-testid="library-private">{m.perfil_library_private()}</p></Panel
+			>
+		{:else}
+			<Panel class="collection" aria-labelledby="{id}-creations">
+				<div class="section-head">
+					<h2 id="{id}-creations">{m.perfil_creations()}</h2>
+					<span class="caps" aria-live="polite">{m.perfil_shown({ count: shown.length })}</span>
+				</div>
+				<p class="collection-note">{m.fux_p9_collection_note()}</p>
+				{#if creations.length > 0}
+					<div class="controls">
+						<label
+							>{m.perfil_filter()}<input
+								type="search"
+								bind:value={query}
+								placeholder={m.perfil_filter_placeholder()}
+							/></label
+						>
+						<label
+							>{m.perfil_license()}<select bind:value={license}
+								><option value="all">{m.perfil_license_all()}</option
+								>{#each LICENSE_OPTIONS as option (option)}<option value={option}>{option}</option
+									>{/each}</select
+							></label
+						>
+						<label
+							>{m.perfil_sort()}<select bind:value={sort}
+								><option value="recent">{m.perfil_sort_recent()}</option><option value="name"
+									>{m.perfil_sort_name()}</option
+								><option value="level">{m.perfil_sort_level()}</option></select
+							></label
+						>
+					</div>
+					<p class="ab-note">{m.fux_p9_ab_note()} <Explainer term="ab-nivel" /></p>
+				{/if}
+				{#if creations.length === 0}
+					<div data-testid="creations-empty">
+						<EmptyState
+							title={m.fux_p9_empty_title()}
+							why={m.fux_p9_empty_why()}
+							explainHref="/docs"
+						>
+							{#snippet illustration()}
+								<svg viewBox="0 0 128 96" width="128" height="96" fill="none" stroke="currentColor">
+									<rect x="3" y="3" width="122" height="90" rx="6" stroke-dasharray="3 5" />
+									<circle cx="64" cy="48" r="34" /><circle cx="64" cy="48" r="28" />
+									<circle cx="64" cy="48" r="14" /><circle cx="64" cy="48" r="3" />
+								</svg>
+							{/snippet}
+							{#snippet action()}
+								<Button variant="primary" onclick={() => goto('/comunidade')}>
+									{m.fux_p9_explore()}
+								</Button>
+							{/snippet}
+						</EmptyState>
+					</div>
+				{:else if shown.length === 0}
+					<div class="empty">
+						<p data-testid="creations-no-match">{m.perfil_no_match()}</p>
+						<Button
+							onclick={() => {
+								query = '';
+								license = 'all';
+							}}>{m.perfil_clear()}</Button
+						>
+					</div>
+				{:else}
+					<div class="strips">
+						{#each shown as item, index (item.id)}
+							<ProfileRecord
+								{item}
+								{index}
+								{locale}
+								side={playingId === item.id ? side : null}
+								{busy}
+								canPreview={app !== null}
+								onListen={listen}
+								onStop={stop}
+							/>
+						{/each}
+					</div>
+				{/if}
+				{#if creationsCursor}
+					<Button class="more" {loading} onclick={() => more('lineages')}
+						>{m.perfil_load_more()}</Button
+					>
+				{/if}
+			</Panel>
 
-		{#if data.favorites !== null}
-			<section class="favorites" aria-labelledby="{id}-favorites">
-				<h2 id="{id}-favorites">{m.perfil_favorites()}</h2>
-				{#if favorites.length === 0}
-					<p class="empty" data-testid="favorites-empty">{m.perfil_favorites_empty()}</p>
+			<Panel class="packs" aria-labelledby="{id}-packs">
+				<h2 id="{id}-packs">{m.perfil_packs()}</h2>
+				{#if packs.length === 0}
+					<p class="empty" data-testid="packs-empty">{m.perfil_packs_empty()}</p>
 				{:else}
 					<ul>
-						{#each favorites as favorite (favorite.lineage.id)}
+						{#each packs as pack (pack.id)}
 							<li>
-								<strong lang={favorite.lineage.lang}>{favorite.lineage.name}</strong>
-								{#if favorite.lineage.author}<span
-										>{m.perfil_by()} {favorite.lineage.author.displayUsername}</span
-									>{/if}
-								<small>{formatDate(favorite.at, locale)}</small>
+								<strong>{pack.name}</strong>
+								{#if pack.description}<span class="pack-description">{pack.description}</span>{/if}
+								<small>{formatDate(pack.updatedAt, locale)}</small>
 							</li>
 						{/each}
 					</ul>
 				{/if}
-				{#if favoritesCursor}
-					<button type="button" class="more" disabled={loading} onclick={() => more('favorites')}
-						>{m.perfil_load_more()}</button
+				{#if packsCursor}
+					<Button class="more" {loading} onclick={() => more('packs')}
+						>{m.perfil_load_more()}</Button
 					>
 				{/if}
-			</section>
-		{/if}
-	{/if}
+			</Panel>
 
-	<aside class="homage" aria-labelledby="{id}-homage">
-		<div class="caps">{m.perfil_homage_eyebrow()}</div>
-		<h2 id="{id}-homage">Chris Lord-Alge (1963–)</h2>
-		<p>{m.perfil_homage_curiosity()}</p>
-		<p class="sources">
-			{m.perfil_homage_sources()}:
-			<a href="https://en.wikipedia.org/wiki/Chris_Lord-Alge" rel="noopener noreferrer external"
-				>Wikipedia</a
-			>
-			·
-			<a
-				href="https://solidstatelogic.com/media/chris-lord-alges-mix-la-installs-solid-state-logic-origin-for-its-intimate-and-artist-focused-studio-d"
-				rel="noopener noreferrer external">Solid State Logic</a
-			>
-		</p>
-	</aside>
-	<div class="notice" role="status">{notice}</div>
+			{#if activityOpen && data.favorites !== null}
+				<Panel class="favorites" aria-labelledby="{id}-favorites">
+					<h2 id="{id}-favorites">{m.perfil_favorites()}</h2>
+					{#if favorites.length === 0}
+						<p class="empty" data-testid="favorites-empty">{m.perfil_favorites_empty()}</p>
+					{:else}
+						<ul>
+							{#each favorites as favorite (favorite.lineage.id)}
+								<li>
+									<strong lang={favorite.lineage.lang}>{favorite.lineage.name}</strong>
+									{#if favorite.lineage.author}<span
+											>{m.perfil_by()} {favorite.lineage.author.displayUsername}</span
+										>{/if}
+									<small>{formatDate(favorite.at, locale)}</small>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					{#if favoritesCursor}
+						<Button class="more" {loading} onclick={() => more('favorites')}
+							>{m.perfil_load_more()}</Button
+						>
+					{/if}
+				</Panel>
+			{/if}
+		{/if}
+
+		<aside class="homage" aria-labelledby="{id}-homage">
+			<div class="caps">{m.perfil_homage_eyebrow()}</div>
+			<h2 id="{id}-homage">Chris Lord-Alge (1963–)</h2>
+			<p>{m.perfil_homage_curiosity()}</p>
+			<p class="sources">
+				{m.perfil_homage_sources()}:
+				<a href="https://en.wikipedia.org/wiki/Chris_Lord-Alge" rel="noopener noreferrer external"
+					>Wikipedia</a
+				>
+				·
+				<a
+					href="https://solidstatelogic.com/media/chris-lord-alges-mix-la-installs-solid-state-logic-origin-for-its-intimate-and-artist-focused-studio-d"
+					rel="noopener noreferrer external">Solid State Logic</a
+				>
+			</p>
+		</aside>
+		<div class="notice" role="status">{notice}</div>
+	{/if}
 </div>
 
 <style>
 	.room {
-		padding: 0 28px 48px;
-		color: #ece7dd;
-		background:
-			linear-gradient(180deg, #0008, transparent 240px),
-			repeating-linear-gradient(90deg, #1c1d20 0 2px, #232428 2px 64px), #1f2023;
-		font:
-			14px/1.5 'Geist',
-			Arial,
-			sans-serif;
+		--face-engrave: var(--cond);
+		display: grid;
+		gap: var(--space-5);
+		padding: 0 var(--gutter) var(--space-7);
+		color: var(--text);
+		background: linear-gradient(180deg, var(--ink-2), transparent 28rem), var(--ink);
+		font: var(--fs-body) / var(--lh-body) var(--face-body);
 	}
 	.caps {
-		font:
-			700 11px/1.2 'Courier Prime',
-			monospace;
-		letter-spacing: 0.16em;
+		font: 500 var(--fs-eyebrow) / var(--lh-caps) var(--face-data);
+		letter-spacing: var(--tracking-eyebrow);
 		text-transform: uppercase;
-		color: #d9a441;
+		color: var(--accent-text);
 	}
 	.hero {
-		max-width: 920px;
-		padding: 48px 0 24px;
+		position: relative;
+		padding: var(--space-7) 0 var(--space-5);
 	}
 	h1 {
-		margin: 8px 0 0;
+		margin: var(--space-3) 0 0;
 		overflow-wrap: anywhere;
-		font:
-			700 clamp(32px, 6vw, 56px) / 1.05 'Courier Prime',
-			monospace;
+	}
+	.signature {
+		display: block;
+		width: min(15rem, 65%);
+		height: var(--space-6);
+		color: var(--accent);
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linecap: round;
 	}
 	.handle {
-		margin: 4px 0 0;
-		color: #b9b2a3;
+		margin: var(--space-1) 0 0;
+		color: var(--text-2);
 	}
 	.bio {
 		max-width: 64ch;
@@ -357,130 +422,137 @@
 	.counts {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 12px;
-		margin: 16px 0 0;
+		gap: var(--space-5);
+		margin: var(--space-5) 0 0;
 	}
 	.counts div {
-		padding: 8px 12px;
-		border: 1px solid #0008;
-		border-radius: 3px;
-		background: #111214;
+		display: flex;
+		flex-direction: column-reverse;
+		gap: var(--space-1);
 	}
 	.counts dt {
-		font-size: 12px;
-		color: #8f897c;
+		font-size: var(--fs-small);
+		color: var(--muted);
 	}
 	.counts dd {
 		margin: 0;
-		color: #9fe08a;
-		font:
-			700 22px/1.1 'Courier Prime',
-			monospace;
+		color: var(--text);
+		font: 500 var(--fs-readout-l) / var(--lh-readout) var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
 	}
 	.closed,
 	.empty {
 		max-width: 64ch;
-		color: #cfc8b8;
+		color: var(--text-2);
 	}
 	.section-head {
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 12px;
+		gap: var(--space-3);
+		flex-wrap: wrap;
 	}
 	h2 {
-		margin: 32px 0 12px;
-		font:
-			700 22px/1.2 'Courier Prime',
-			monospace;
+		margin: 0 0 var(--space-3);
+		font: 400 var(--fs-title) / var(--lh-title) var(--face-display);
+		letter-spacing: var(--tracking-title);
 	}
 	.controls {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 12px;
-		margin-bottom: 8px;
+		gap: var(--space-3);
+		margin-bottom: var(--space-3);
 	}
 	.controls label {
 		display: grid;
-		gap: 4px;
-		font-size: 12px;
-		color: #b9b2a3;
+		gap: var(--space-1);
+		min-width: 0;
+		font-size: var(--fs-ui);
+		color: var(--text-2);
+		flex: 1 1 12rem;
 	}
 	.controls input,
 	.controls select {
-		min-height: 32px;
-		padding: 4px 8px;
-		border: 1px solid #000;
-		border-radius: 3px;
-		color: #ece7dd;
-		background: #111214;
+		width: 100%;
+		min-height: var(--hit);
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-md);
+		color: var(--text);
+		background: var(--ink);
+		font: inherit;
 	}
+	.collection-note,
 	.ab-note {
-		margin: 0 0 12px;
-		font-size: 12px;
-		color: #8f897c;
+		max-width: 72ch;
+		margin: 0 0 var(--space-5);
+		font-size: var(--fs-small);
+		color: var(--text-2);
 	}
 	.strips {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-		gap: 10px;
-		padding: 12px;
-		border-radius: 6px;
-		background: linear-gradient(#141518, #0d0e10);
-		box-shadow: inset 0 2px 10px #000c;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+		gap: var(--space-5);
+		padding: var(--space-5) 0;
 	}
 	ul {
 		display: grid;
-		gap: 8px;
+		gap: var(--space-2);
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
 	li {
 		display: grid;
-		gap: 2px;
-		padding: 10px 12px;
-		border-left: 3px solid #d9a441;
-		background: #ffffff0a;
+		gap: var(--space-1);
+		padding: var(--space-3) var(--space-4);
+		border-left: 2px solid var(--accent);
+		background: var(--ink-2);
 		overflow-wrap: anywhere;
 	}
 	.pack-description {
 		white-space: pre-line;
-		color: #cfc8b8;
+		color: var(--text-2);
 	}
 	small {
-		color: #8f897c;
+		color: var(--muted-hi);
 	}
-	.more,
-	.empty button {
-		margin-top: 12px;
-		min-height: 32px;
-		padding: 4px 12px;
-		border: 1px solid #000;
-		border-radius: 3px;
-		color: #1d1a14;
-		background: linear-gradient(#e9e3d5, #c9c1ae);
-		cursor: pointer;
+	.room :global(.more) {
+		margin-top: var(--space-4);
 	}
 	.homage {
-		max-width: 720px;
-		margin-top: 48px;
-		padding: 16px 20px;
-		border: 1px solid #d9a44155;
-		border-radius: 4px;
-		background: #00000040;
+		max-width: 72ch;
+		margin-top: var(--space-6);
+		padding: var(--space-5) 0;
+		border-top: 1px solid var(--rule);
 	}
 	.homage h2 {
-		margin-top: 6px;
+		margin-top: var(--space-2);
+		font-size: var(--fs-honoree);
 	}
 	.sources a {
-		color: #ffcf7a;
+		color: var(--accent-text);
 	}
 	.notice:empty {
 		display: none;
 	}
 	.notice {
-		margin-top: 16px;
-		color: #ffcf7a;
+		margin-top: var(--space-4);
+		color: var(--accent-text);
+	}
+	.skeleton-header,
+	.skeleton-record {
+		display: grid;
+		gap: var(--space-4);
+	}
+	.skeleton-grid {
+		padding: var(--panel-pad);
+	}
+	.skeleton-record {
+		padding: var(--space-4);
+	}
+	.skeleton-disc {
+		width: 100%;
+		aspect-ratio: 1;
 	}
 </style>
