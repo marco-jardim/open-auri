@@ -1,11 +1,19 @@
 <script lang="ts">
-	import { getAppContext } from '#lib/app/index.ts';
+	// Context only: the barrel's createClientApp would put the whole runtime in Docs' initial JS.
+	import { getAppContext } from '#lib/app/context.svelte.ts';
 	import { PUBLIC_GITHUB_URL } from '#lib/config/public.ts';
 	import DocsPage from '#lib/components/pages/docs/DocsPage.svelte';
 	import { docsUi } from '#lib/components/pages/docs/ui.ts';
+	import { afterNavigate } from '$app/navigation';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+	let docsPage: ReturnType<typeof DocsPage> | undefined = $state();
+	// After the router's own hash scroll (also same-page navigations that fire no hashchange),
+	// DocsPage re-places the target under the chrome and holds it while layout settles.
+	afterNavigate(({ to }) => {
+		if (to?.url.hash) docsPage?.revealHash();
+	});
 	const context = getAppContext();
 	const app = $derived(context.client);
 	// The locale prose comes from the load (one dynamic chunk per locale, L7).
@@ -31,6 +39,7 @@
 	/></svelte:head
 >
 <DocsPage
+	bind:this={docsPage}
 	{content}
 	{ui}
 	githubUrl={PUBLIC_GITHUB_URL}

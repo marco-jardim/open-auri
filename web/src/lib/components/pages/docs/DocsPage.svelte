@@ -2,7 +2,8 @@
 	import { onMount, tick } from 'svelte';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { OFFICIAL_PRESETS } from 'open-auri/catalog';
-	import { PolarDiagram } from '#lib/charts/index.ts';
+	// Direct chart imports (FUX.B): the charts barrel would bring every chart into the page.
+	import PolarDiagram from '#lib/charts/PolarDiagram.svelte';
 	import ConfirmDialog from '#lib/components/chrome/ConfirmDialog.svelte';
 	// Only `creditSources` (no prose) from the index; the locale prose arrives as `content` (L7).
 	import { creditSources } from '#lib/content/docs/credits.ts';
@@ -68,9 +69,141 @@
 		clearTimeout(copyTimer);
 		copyTimer = window.setTimeout(() => (copyNote = ''), 2600);
 	}
+	/**
+	 * Bottom edge of the chrome bar in the viewport. `[data-chrome="bar"]` is only a wrapper: its
+	 * in-flow child is the spacer, which scrolls away with the page (its bottom goes negative),
+	 * while the bar itself is `position: fixed`. So measure the wrapper's fixed or sticky boxes,
+	 * and fall back to the wrapper (an in-flow bar) clamped at 0. A negative value here used to
+	 * reach `rootMargin` as `--Npx`, and IntersectionObserver throws on that.
+	 */
+	function chromeBottom(): number {
+		const wrapper = document.querySelector('[data-chrome="bar"]');
+		if (!wrapper) return 56;
+		let bottom = 0;
+		for (const element of [wrapper, ...wrapper.children]) {
+			const position = getComputedStyle(element).position;
+			if (position === 'fixed' || position === 'sticky') {
+				bottom = Math.max(bottom, element.getBoundingClientRect().bottom);
+			}
+		}
+		return bottom > 0 ? bottom : Math.max(0, wrapper.getBoundingClientRect().bottom);
+	}
 	function backToTop() {
+		stopSettling?.();
 		window.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'instant' : 'smooth' });
 		titleHeading.focus({ preventScroll: true });
+	}
+
+	/*
+	 * Deep links (`/docs#g-camadas` from an explainer's "Ver no glossário"). The router scrolls to
+	 * the hash right after the first render, but the page keeps moving afterwards: EB Garamond
+	 * replaces its fallback, the two-column glossary rebalances (terms change column) and the
+	 * charts render. The target then drifts out of view. So the page places the target under
+	 * the chrome itself and holds it there until layout is quiet, unless the reader steers.
+	 */
+	const SETTLE_QUIET_MS = 700;
+	const SETTLE_CAP_MS = 5000;
+	/** Any of these means the reader is steering: re-alignment stops at once. */
+	const READER_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+	let paper: HTMLElement | undefined;
+	let hashTargetId = $state('');
+	let stopSettling: (() => void) | undefined;
+
+	const chromeOffset = () => chromeBottom() + 24;
+
+	function hashTarget(): HTMLElement | null {
+		const fragment = window.location.hash.slice(1);
+		if (!fragment) return null;
+		let id = fragment;
+		try {
+			id = decodeURIComponent(fragment);
+		} catch (cause) {
+			if (!(cause instanceof URIError)) throw cause;
+		}
+		const target = document.getElementById(id);
+		return target && paper?.contains(target) ? target : null;
+	}
+	function place(target: HTMLElement, behavior: ScrollBehavior) {
+		const top = window.scrollY + target.getBoundingClientRect().top - chromeOffset();
+		window.scrollTo({ top: Math.max(0, Math.round(top)), behavior });
+	}
+	/**
+	 * Brings the target of `location.hash` under the chrome, then re-aligns it (instantly) on
+	 * every layout change until fonts are loaded and layout has been quiet for a moment, with a
+	 * hard cap. Exported for the route's `afterNavigate` (same-page navigations without
+	 * `hashchange`).
+	 */
+	export function revealHash(smooth = false) {
+		stopSettling?.();
+		const target = hashTarget();
+		hashTargetId = target?.id ?? '';
+		if (!target) return;
+		const behavior: ScrollBehavior = smooth && !prefersReducedMotion.current ? 'smooth' : 'instant';
+		let stopped = false;
+		let frame = 0;
+		let quiet = 0;
+		let retry = 0;
+		let fontsReady = !('fonts' in document);
+		// A smooth scroll is not corrected mid-flight (until scrollend, or a fallback).
+		let busyUntil = behavior === 'smooth' ? performance.now() + 900 : 0;
+		const resizes = new ResizeObserver(() => schedule());
+		const cap = window.setTimeout(() => stop(), SETTLE_CAP_MS);
+		function stop() {
+			if (stopped) return;
+			stopped = true;
+			resizes.disconnect();
+			cancelAnimationFrame(frame);
+			clearTimeout(quiet);
+			clearTimeout(retry);
+			clearTimeout(cap);
+			window.removeEventListener('scrollend', smoothDone);
+			if ('fonts' in document) document.fonts.removeEventListener('loadingdone', schedule);
+			for (const type of READER_INPUT) window.removeEventListener(type, stop, true);
+			if (stopSettling === stop) stopSettling = undefined;
+		}
+		function smoothDone() {
+			busyUntil = 0;
+		}
+		function schedule() {
+			if (!stopped && !frame) frame = requestAnimationFrame(realign);
+		}
+		function realign() {
+			frame = 0;
+			if (stopped) return;
+			if (!target?.isConnected) {
+				stop();
+				return;
+			}
+			const wait = busyUntil - performance.now();
+			if (wait > 0) {
+				clearTimeout(retry);
+				retry = window.setTimeout(schedule, wait);
+				return;
+			}
+			if (Math.abs(target.getBoundingClientRect().top - chromeOffset()) > 2) {
+				place(target, 'instant');
+			}
+			clearTimeout(quiet);
+			if (fontsReady) quiet = window.setTimeout(stop, SETTLE_QUIET_MS);
+		}
+		place(target, behavior);
+		stopSettling = stop;
+		if (paper) resizes.observe(paper);
+		window.addEventListener('scrollend', smoothDone, { once: true });
+		for (const type of READER_INPUT) {
+			window.addEventListener(type, stop, { capture: true, passive: true });
+		}
+		if ('fonts' in document) {
+			document.fonts.addEventListener('loadingdone', schedule);
+			// One frame first: the page's font loads start at its first layout, after this call.
+			requestAnimationFrame(() => {
+				void document.fonts.ready.then(() => {
+					fontsReady = true;
+					schedule();
+				});
+			});
+		}
+		schedule();
 	}
 	let searchOpen = $state(false);
 	let confirmOpen = $state(false);
@@ -112,6 +245,7 @@
 		await tick();
 		const section = document.getElementById(id);
 		if (!section) return;
+		stopSettling?.();
 		section.scrollIntoView({
 			block: 'start',
 			behavior: prefersReducedMotion.current ? 'instant' : 'auto'
@@ -141,7 +275,8 @@
 		 * every scroll frame. The band is rebuilt only when the chrome or the viewport changes.
 		 */
 		const observeBand = () => {
-			const top = Math.round(offset);
+			// Never negative: `rootMargin: '--Npx …'` is a SyntaxError that took the page down.
+			const top = Math.max(0, Math.round(offset));
 			const height = Math.max(48, Math.round(window.innerHeight * 0.35));
 			const bottom = Math.max(0, window.innerHeight - top - height);
 			const key = `${top}:${bottom}:${sections.length}`;
@@ -157,8 +292,7 @@
 		};
 		const update = () => {
 			frame = 0;
-			barBottom =
-				document.querySelector('[data-chrome="bar"]')?.getBoundingClientRect().bottom ?? 56;
+			barBottom = chromeBottom();
 			offset = barBottom + 24;
 			const padding =
 				Number.parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
@@ -185,18 +319,24 @@
 			dirty = true;
 			schedule();
 		};
+		// In-page glossary links change the hash natively; follow them with the same offset.
+		const onHashChange = () => revealHash(true);
 		window.addEventListener('scroll', schedule, { passive: true });
 		window.addEventListener('resize', relayout);
+		window.addEventListener('hashchange', onHashChange);
 		const observer = new ResizeObserver(relayout);
 		observer.observe(article);
 		update();
+		revealHash();
 		return () => {
 			window.removeEventListener('scroll', schedule);
 			window.removeEventListener('resize', relayout);
+			window.removeEventListener('hashchange', onHashChange);
 			observer.disconnect();
 			sectionObserver?.disconnect();
 			cancelAnimationFrame(frame);
 			clearTimeout(copyTimer);
+			stopSettling?.();
 		};
 	});
 	async function clear(confirmed: boolean) {
@@ -219,6 +359,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <main
+	bind:this={paper}
 	class="paper"
 	data-surface="paper"
 	lang={content.locale}
@@ -270,8 +411,10 @@
 			</div>
 			<header class="title-block">
 				<p class="reprint">{content.reprint}</p>
+				<!-- The explicit space keeps "0xCB e seus limites" as words in the text and the
+				     accessible name: <br> breaks the line but contributes no whitespace. -->
 				<h1 bind:this={titleHeading} id="docs-top" tabindex="-1">
-					{content.titleLead}<br /><em>{content.titleEmphasis}</em>
+					{content.titleLead} <br /><em>{content.titleEmphasis}</em>
 				</h1>
 				<p class="subtitle">{content.subtitle}</p>
 				<p class="byline">{content.introduction}</p>
@@ -318,7 +461,8 @@
 					>
 						<div class="chapter-head">
 							<h2 id="heading-{section.id}">
-								<span class="section-number">{String(index + 1).padStart(2, '0')}</span><a
+								<span class="section-number">{String(index + 1).padStart(2, '0')}</span>
+								<a
 									href="#{section.id}"
 									onclick={(event) => {
 										event.preventDefault();
@@ -397,6 +541,7 @@
 							<dl class="glossary-terms">
 								{#each glossaryTerms as entry (entry.term)}<div
 										class="term"
+										class:is-target={hashTargetId === entry.id}
 										id={entry.id}
 										data-glossary-term={entry.term}
 									>
@@ -781,6 +926,7 @@
 	.chapter-head:hover .anchor-copy,
 	.term:hover .anchor-copy,
 	.term:target .anchor-copy,
+	.term.is-target .anchor-copy,
 	.anchor-copy:focus-visible {
 		opacity: 1;
 	}
@@ -817,7 +963,10 @@
 		padding: 6px 0 6px 12px;
 		border-left: 2px solid transparent;
 	}
-	.term:target {
+	/* `:target` covers full loads; `.is-target` covers client-side arrivals (`pushState` does
+	   not update `:target`) and follows later hash changes. */
+	.term:target,
+	.term.is-target {
 		border-left-color: #8c2f2f;
 		background: #8c2f2f0d;
 	}
@@ -904,7 +1053,8 @@
 	.section-number {
 		font: 11px var(--font-mono, monospace);
 		color: #8c2f2f;
-		margin-right: 14px;
+		/* With the word space that follows it (accessible name "02 Title"), about 14px as before. */
+		margin-right: 6px;
 		vertical-align: middle;
 	}
 	.columns {

@@ -95,6 +95,59 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 	}, 30000);
 }
 
+// Regression (e2e on /docs#g-*: the page turned into the 500 page after hydration). The
+// layout's `[data-chrome="bar"]` is a wrapper whose in-flow spacer scrolls away while the bar
+// inside is `position: fixed`; measuring the wrapper gave a negative offset when the page was
+// already scrolled at mount (a deep link), and `rootMargin: '--Npx'` made IntersectionObserver
+// throw inside onMount.
+test('a deep link mounted while scrolled measures the fixed bar, never a negative offset', async () => {
+	const wrapper = document.createElement('div');
+	wrapper.dataset.chrome = 'bar';
+	const bar = document.createElement('header');
+	bar.style.cssText = 'position: fixed; inset: 0 0 auto; height: 56px;';
+	const spacer = document.createElement('div');
+	spacer.style.height = '56px';
+	wrapper.append(bar, spacer);
+	const tall = document.createElement('div');
+	tall.style.height = '6000px';
+	document.body.prepend(wrapper);
+	document.body.append(tall);
+	try {
+		window.scrollTo({ top: 3000, behavior: 'instant' });
+		expect(wrapper.getBoundingClientRect().bottom).toBeLessThan(0);
+		const screen = await renderDocs();
+		const progress = screen.container.querySelector<HTMLElement>('.reading-progress')!;
+		await vi.waitFor(() => expect(progress.style.top).toBe('56px'));
+		// A later relayout while scrolled rebuilds the reading band with the same, valid offset.
+		window.dispatchEvent(new Event('resize'));
+		await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		expect(progress.style.top).toBe('56px');
+		expect(
+			screen.container.querySelector('main')?.style.getPropertyValue('--docs-scroll-offset')
+		).toMatch(/^\d+(?:\.\d+)?px$/);
+	} finally {
+		wrapper.remove();
+		tall.remove();
+	}
+});
+
+test('the title and chapter headings keep word spaces next to inline markup', async () => {
+	await setLocale('pt-BR', { reload: false });
+	const content = docsContent('pt-BR');
+	const screen = await renderDocs();
+	// <br> breaks the line but adds no whitespace: "0xCBe" was the bug.
+	expect(screen.container.querySelector('h1')?.textContent?.trim()).toBe(
+		'O protocolo 0xCB e seus limites'
+	);
+	await expect
+		.element(page.getByRole('heading', { level: 1 }))
+		.toHaveAccessibleName(`${content.titleLead} ${content.titleEmphasis}`);
+	const first = content.sections[0];
+	await expect
+		.element(page.getByRole('heading', { level: 2, name: `01 ${first.title}`, exact: true }))
+		.toBeInTheDocument();
+});
+
 test('pt-BR checklist warning is the exact literal text', async () => {
 	await setLocale('pt-BR', { reload: false });
 	const screen = await renderDocs();
