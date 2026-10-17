@@ -319,6 +319,15 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 
 - 2026-10-17 · Retorno do operador sobre a UI: a página Curva regrediu em relação ao mock v2 (edição sem limites visíveis, mensagens do gate opacas com "estágio ?", VU de saída parado, sem animação nem botões do mock) e, de modo geral, todas as páginas pedem mais impacto, didática para leigos, revisão de tipografia, cores e tamanhos, e uma estratégia de carregamento (pré-aquecimento e carregamento sob demanda). Decisão: correção imediata da Curva (FX-UX, heavy) e nova fase **FUX** (polimento de UI/UX) guiada por `docs/plans/fux-spec.md` (auditoria do architect), antes do QG rodada 2 e do aceite global. Achado de carga inicial: ~127 kB gzip de JS compartilhado mesmo em páginas estáticas (`/offline`).
 
+- **2026-10-17 · FUX, decisões do operador e do orquestrador:**
+  - Metas de JS por classe revisadas após medição (FUX.B): instrumento leve 150 (meta-alvo 140), instrumento pesado 170 (160), Curva em classe própria 180 (170); formulários de e-mail e senha passam à classe auth (100). Base de toda rota de instrumento ≈ 118 kB (framework e layout ≈ 76, runtime estático ≈ 38, gatilhos do tour ≈ 4).
+  - Volume da prévia: padrão −6 dB (era −12) e persistido em `oa.audio.volume`; auditoria confirmou que não há atenuação dupla (volume único no master, matching só abaixa, preamp aplicado uma vez).
+  - Barra superior compacta (FUX.NAV, `3a61850`): uma linha de 40 px no desktop (52 px no celular), navegação que dobra em "Mais", menus carregados na primeira interação; ocupação medida 47,2 % (1440×900) e 24,0 % (390×844) do original; sem rolagem horizontal de 320 a 2560 px.
+  - Dropdowns: opções com cores explícitas (escuro e papel) e e2e de contraste (`select-contrast.spec.ts`).
+  - Glossário do Docs: link profundo derrubava a página (rootMargin negativo do IntersectionObserver após hidratação); corrigido em `34ced6d`.
+  - Pedidos novos em andamento: barra de seek, voltar ao início, loop sempre, início aleatório entre 25 % e 75 % nos comparativos e play/pause na barra (SEEK.1 a SEEK.3); arte temática e animações por página (FUX.ART, `docs/plans/fux-art-brief.md`, que flexibiliza o loop decorativo da spec §2.5).
+  - Container local de avaliação reconstruído em segundo plano a cada commit (`_qa/preview-rebuild.ps1`, só a partir de commits).
+  - Pendências para o QA: publicação "Não listada" como padrão (proposta, aguarda PO); pack de referência com 4 curvas (cartão mostra o número real); "Mais" e a folha mobile não abrem sem JavaScript.
 ## Bloqueios e perguntas ao humano
 
 Nenhum.
