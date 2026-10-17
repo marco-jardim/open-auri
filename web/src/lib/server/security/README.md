@@ -27,7 +27,8 @@ Related modules elsewhere in the repo:
 - **Verification links (Q3 round 2).** GET `/verify-email` is a guarded path too: no Turnstile (a link click), 30 per 10 min per IP hash, after the RL_AUTH burst guard; failures are closed (503) like the other routes.
 - **D1, not KV, counts the exact auth limits.** KV has no atomic increment and is eventually consistent. RL_AUTH is set to 20/60 s in wrangler, so it cannot express 3/10 s or windows over 60 s; it stays as a coarse guard.
 - **Access-log messages are encrypted before they enter the queue.** Neither the queue nor the dead-letter queue ever holds a clear IP. The key is derived with HKDF from the ACCESS_LOG_KEY keyring (`kid:secret[,…]`): the first key encrypts and every key decrypts. The object header carries the key id, and the object key is bound as AAD.
-- **Kit owns the document CSP.** The headers code never replaces Kit's policy. It adds `X-Frame-Options: DENY` and a separate `frame-ancestors 'none'` policy. Non-HTML responses get `default-src 'none'`, and JavaScript responses get no CSP. Nonce-only CSP is T5.4.
+- **Kit owns the document CSP.** The headers code never replaces Kit's policy. It adds `X-Frame-Options: DENY` and a separate `frame-ancestors 'none'` policy. Non-HTML responses get `default-src 'none'`, and JavaScript responses get no CSP.
+- **Strict CSP (T5.4).** No `'unsafe-inline'` for scripts or `<style>` elements; `style-src-attr 'unsafe-inline'` is the one exception (style attributes in markup). `web/_headers` adds `STATIC_DOCUMENT_CSP`, the hash-independent directives of the `vite.config.ts` policy, for prerendered pages; a unit test keeps the two in sync. Reasons and threat model: `docs/seguranca.md`.
 
 ## What T3.5 wires (hooks.server.ts and auth.ts)
 

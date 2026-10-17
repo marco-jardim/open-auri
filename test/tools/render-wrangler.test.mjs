@@ -310,6 +310,19 @@ const OBSERVABILITY = {
   logs: { enabled: true, invocation_logs: false },
 };
 
+/** Analytics Engine datasets of the METRICS binding (T5.2); web and jobs share them. */
+const METRICS_DATASET = 'open_auri_metrics';
+const METRICS_STAGING = 'open_auri_metrics_staging';
+
+/**
+ * Production custom domain of the web Worker (T5.4b): top level and env.production only. The
+ * domain is public (it is the product); its workers.dev host answers 301 to it.
+ */
+const PRODUCTION_ROUTES = [{ pattern: 'open-auri.com', custom_domain: true }];
+
+/** Bindings the Workers runtime may omit (local dev and tests); declared optional in `Env`. */
+const OPTIONAL_BINDINGS = new Set(['METRICS']);
+
 test('web template declares every binding at the top level and in each environment', (t) => {
   const { source, keys, config } = renderReal(t, 'web/wrangler.template.jsonc');
   assertTemplateHygiene(source, keys);
@@ -349,6 +362,9 @@ test('web template declares every binding at the top level and in each environme
       { name: 'RL_API', namespace_id: `${n}2`, simple: { limit: 120, period: 60 } },
       { name: 'RL_WRITE', namespace_id: `${n}3`, simple: { limit: 30, period: 60 } },
     ]);
+    assert.deepEqual(target.analytics_engine_datasets, [
+      { binding: 'METRICS', dataset: label === 'staging' ? METRICS_STAGING : METRICS_DATASET },
+    ]);
     assert.deepEqual(Object.keys(target.vars).sort(), [
       'ACCESS_LOG_ENABLED',
       'ADMIN_2FA_REQUIRED',
@@ -360,6 +376,11 @@ test('web template declares every binding at the top level and in each environme
     ]);
     assert.equal(target.vars.GITHUB_URL, 'fixture:PUBLIC_GITHUB_URL');
     assert.equal(target.vars.EMAIL_TRANSPORT, 'fixture:EMAIL_TRANSPORT');
+    // env.production serves the custom domain (T5.4b); the top level (wrangler dev, tests) and
+    // staging have no route.
+    assert.equal(target.workers_dev, true, label);
+    if (label === 'production') assert.deepEqual(target.routes, PRODUCTION_ROUTES, label);
+    else assert.equal(target.routes, undefined, label);
   }
   assert.equal(config.vars.PUBLIC_ORIGIN, 'fixture:PUBLIC_ORIGIN');
   assert.equal(
@@ -392,6 +413,7 @@ function exposedNames(target, topLevel) {
     ...(target.r2_buckets ?? []).map((entry) => entry.binding),
     ...(target.queues?.producers ?? []).map((entry) => entry.binding),
     ...(target.ratelimits ?? []).map((entry) => entry.name),
+    ...(target.analytics_engine_datasets ?? []).map((entry) => entry.binding),
     ...Object.keys(target.vars ?? {}),
   ]
     .filter(Boolean)
@@ -415,7 +437,10 @@ test('hand-written web Env matches the template bindings, vars and the secret li
   })) {
     assert.deepEqual(declaredRuntime, exposedNames(target, config), `Env vs ${label}`);
   }
-  for (const name of declaredRuntime) assert.equal(env.get(name), false, `${name} is required`);
+  for (const name of declaredRuntime) {
+    const optional = OPTIONAL_BINDINGS.has(name);
+    assert.equal(env.get(name), optional, `${name} is ${optional ? 'optional' : 'required'}`);
+  }
   for (const [name, optional] of secrets) {
     assert.equal(env.get(name), optional, `secret ${name} declared with matching optionality`);
   }
@@ -455,6 +480,9 @@ test('jobs template consumes the access-log queue with a DLQ and runs the daily,
       ],
     });
     assert.equal(target.vars.ACCESS_LOG_QUEUE_NAME, `fixture:ACCESS_LOG_QUEUE${s}`);
+    assert.deepEqual(target.analytics_engine_datasets, [
+      { binding: 'METRICS', dataset: label === 'staging' ? METRICS_STAGING : METRICS_DATASET },
+    ]);
   }
   for (const spec of SECRETS) assert.ok(!keys.includes(spec.source), spec.source);
 });

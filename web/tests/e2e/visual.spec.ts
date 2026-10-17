@@ -4,6 +4,10 @@ import { openApp, settleRendering } from './helpers/a-app';
 import { routes } from './helpers/a-routes';
 import { dynamicRegions } from './helpers/a-visual';
 
+// The capture injects tests/e2e/helpers/visual.css as a <style>; the strict CSP (T5.4) blocks
+// injected styles. CSP itself is covered by csp.spec.ts, which runs without this bypass.
+test.use({ bypassCSP: true });
+
 // Both configured projects run every case: desktop 1440 px and mobile 390 px.
 const visualCss = fileURLToPath(new URL('./helpers/visual.css', import.meta.url));
 // Comunidade (Phase 4) is added here only: the shared route list (helpers/a-routes.ts) also drives

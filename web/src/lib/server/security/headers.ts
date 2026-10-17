@@ -9,23 +9,69 @@
 // This module never replaces that policy. `frame-ancestors` is ignored inside <meta>, so it is
 // enforced by (a) X-Frame-Options: DENY, (b) an extra, separate `frame-ancestors 'none'` policy
 // appended when the response's CSP lacks one (multiple policies are all enforced, so this only
-// tightens), and (c) the same extra policy in web/_headers for prerendered pages. Non-HTML
-// responses get a locked-down `default-src 'none'` policy. Nonce-only CSP is T5.4.
+// tightens), and (c) the static policy of web/_headers for prerendered pages. Non-HTML
+// responses get a locked-down `default-src 'none'` policy.
+//
+// T5.4: the document policy has no 'unsafe-inline' for scripts or <style> elements (Kit adds
+// nonces or hashes); only style="" attributes are allowed, through `style-src-attr`. Prerendered
+// pages carry that policy in a <meta>, which the browser applies only from where it is parsed
+// and which cannot hold `frame-ancestors`. So web/_headers adds, from the first byte, a second
+// policy with every document directive that does not depend on per-page hashes
+// ({@link STATIC_DOCUMENT_CSP}). It has no `default-src`, `script-src` or `style-src*`: those
+// would block the hashed inline scripts (all enforced policies must allow a resource). The same
+// header reaches /_app scripts, where it is the policy of dedicated workers: they only compute,
+// so `connect-src 'self'` and the rest fit them too.
 
 export const HSTS = 'max-age=63072000; includeSubDomains';
 export const FRAME_ANCESTORS_POLICY = "frame-ancestors 'none'";
 export const NON_HTML_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
 
 /**
+ * Document directives repeated in web/_headers, in SvelteKit's notation (keywords unquoted). Must
+ * match the `csp.directives` of vite.config.ts (unit test). `frame-ancestors` comes first so the
+ * header still starts with {@link FRAME_ANCESTORS_POLICY}.
+ */
+export const STATIC_DOCUMENT_CSP_DIRECTIVES: ReadonlyArray<readonly [string, readonly string[]]> = [
+	['frame-ancestors', ['none']],
+	['object-src', ['none']],
+	['base-uri', ['self']],
+	['form-action', ['self']],
+	['img-src', ['self', 'data:', 'blob:']],
+	['font-src', ['self']],
+	['connect-src', ['self']],
+	['media-src', ['self', 'blob:']],
+	['worker-src', ['self']],
+	['frame-src', ['https://challenges.cloudflare.com']],
+	['manifest-src', ['self']]
+];
+
+const CSP_KEYWORDS = new Set(['none', 'self', 'unsafe-inline', 'strict-dynamic', 'unsafe-eval']);
+
+/** Renders Kit-style source lists as a CSP string (keywords quoted, like Kit does). */
+export function renderCsp(directives: ReadonlyArray<readonly [string, readonly string[]]>): string {
+	return directives
+		.map(([name, sources]) =>
+			[name, ...sources.map((source) => (CSP_KEYWORDS.has(source) ? `'${source}'` : source))].join(
+				' '
+			)
+		)
+		.join('; ');
+}
+
+/** The extra CSP of web/_headers (prerendered pages and /_app files). */
+export const STATIC_DOCUMENT_CSP = renderCsp(STATIC_DOCUMENT_CSP_DIRECTIVES);
+
+/**
  * `hid=(self)` for the cable (WebHID). Audio previews use Web Audio started by a user gesture, so
  * `autoplay=(self)` keeps same-origin playback working and blocks frames; the clipboard is used by
  * share/export buttons. Every other powerful feature is off, including inside the Turnstile frame.
+ * The app never calls getUserMedia (audio comes from files the user picks), so the microphone and
+ * the camera stay off.
  */
 export const PERMISSIONS_POLICY = [
 	'hid=(self)',
 	'autoplay=(self)',
 	'clipboard-write=(self)',
-	'fullscreen=(self)',
 	'accelerometer=()',
 	'ambient-light-sensor=()',
 	'bluetooth=()',
@@ -33,15 +79,22 @@ export const PERMISSIONS_POLICY = [
 	'camera=()',
 	'display-capture=()',
 	'encrypted-media=()',
+	'fullscreen=()',
 	'geolocation=()',
 	'gyroscope=()',
+	'idle-detection=()',
+	'local-fonts=()',
 	'magnetometer=()',
 	'microphone=()',
 	'midi=()',
+	'otp-credentials=()',
 	'payment=()',
+	'publickey-credentials-create=()',
+	'publickey-credentials-get=()',
 	'screen-wake-lock=()',
 	'serial=()',
 	'usb=()',
+	'window-management=()',
 	'xr-spatial-tracking=()'
 ].join(', ');
 
@@ -125,6 +178,6 @@ export function renderStaticHeadersFile(): string {
 		'/*'
 	];
 	for (const [name, value] of Object.entries(headers)) lines.push(`  ${name}: ${value}`);
-	lines.push(`  content-security-policy: ${FRAME_ANCESTORS_POLICY}`);
+	lines.push(`  content-security-policy: ${STATIC_DOCUMENT_CSP}`);
 	return `${lines.join('\n')}\n`;
 }

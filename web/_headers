@@ -3,9 +3,9 @@
 /*
   x-content-type-options: nosniff
   referrer-policy: strict-origin-when-cross-origin
-  permissions-policy: hid=(self), autoplay=(self), clipboard-write=(self), fullscreen=(self), accelerometer=(), ambient-light-sensor=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), screen-wake-lock=(), serial=(), usb=(), xr-spatial-tracking=()
+  permissions-policy: hid=(self), autoplay=(self), clipboard-write=(self), accelerometer=(), ambient-light-sensor=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), otp-credentials=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=(), window-management=(), xr-spatial-tracking=()
   cross-origin-opener-policy: same-origin
   cross-origin-resource-policy: same-origin
   x-frame-options: DENY
   strict-transport-security: max-age=63072000; includeSubDomains
-  content-security-policy: frame-ancestors 'none'
+  content-security-policy: frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; frame-src https://challenges.cloudflare.com; manifest-src 'self'

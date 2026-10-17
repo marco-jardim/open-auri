@@ -16,6 +16,13 @@
 // logs are off and query strings are redacted: invocation logs record full request URLs, and
 // e-mailed links carry tokens in the query (/api/auth/verify-email?token=<JWT with the address>,
 // /api/auth/delete-user/callback?token=, /redefinir-senha?token=). Same in every environment.
+// Metrics (T5.2): Analytics Engine dataset METRICS (open_auri_metrics, staging
+// open_auri_metrics_staging; created on first write); schema in docs/operacao/observabilidade.md.
+// Custom domain (T5.4b): env.production serves open-auri.com through a Workers custom domain (only
+// there: a top-level route would make `wrangler dev`, the e2e servers and the Vitest pool rewrite
+// the request host to the custom domain); its workers.dev hostname stays on and the Worker answers there with a
+// 301 to PUBLIC_ORIGIN (src/lib/server/security/canonical-host.ts). Staging has no route and
+// keeps its workers.dev origin.
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "${WORKER_NAME_WEB}",
@@ -52,6 +59,7 @@
 		{ "name": "RL_API", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
 		{ "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
 	],
+	"analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "open_auri_metrics" }],
 	"vars": {
 		"PUBLIC_ORIGIN": "${PUBLIC_ORIGIN}",
 		"GITHUB_URL": "${PUBLIC_GITHUB_URL}",
@@ -66,6 +74,7 @@
 			"name": "${WORKER_NAME_WEB}",
 			"workers_dev": true,
 			"preview_urls": true,
+			"routes": [{ "pattern": "open-auri.com", "custom_domain": true }],
 			"observability": {
 				"enabled": true,
 				"redact_query_string": true,
@@ -89,6 +98,7 @@
 				{ "name": "RL_API", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
 				{ "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
 			],
+			"analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "open_auri_metrics" }],
 			"vars": {
 				"PUBLIC_ORIGIN": "${PUBLIC_ORIGIN}",
 				"GITHUB_URL": "${PUBLIC_GITHUB_URL}",
@@ -125,6 +135,9 @@
 				{ "name": "RL_AUTH", "namespace_id": "2001", "simple": { "limit": 20, "period": 60 } },
 				{ "name": "RL_API", "namespace_id": "2002", "simple": { "limit": 120, "period": 60 } },
 				{ "name": "RL_WRITE", "namespace_id": "2003", "simple": { "limit": 30, "period": 60 } }
+			],
+			"analytics_engine_datasets": [
+				{ "binding": "METRICS", "dataset": "open_auri_metrics_staging" }
 			],
 			"vars": {
 				"PUBLIC_ORIGIN": "https://${WORKER_NAME_WEB}-staging.${CLOUDFLARE_WORKERS_SUBDOMAIN}.workers.dev",

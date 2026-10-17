@@ -1,5 +1,11 @@
-// Server hooks, composed in this order (each wraps the ones after it; the order lives in
-// #lib/server/auth/compose.ts, unit-tested):
+// Server hooks, composed in this order (each wraps the ones after it):
+//   a. platform shim: rebuilds `event.platform` (see below).
+//   b. canonical host (T5.4b, security/canonical-host.ts): when PUBLIC_ORIGIN is a custom domain,
+//      `*.workers.dev` requests get 301 (GET/HEAD) or 421 (other methods) before anything else;
+//      staging (PUBLIC_ORIGIN on workers.dev) and local dev pass through.
+//   c. request log (T5.2, observability/request-log.ts): one JSON line per request, wrapping all
+//      the steps below so its latency covers them (the read-only 503 included).
+// Then the steps whose order lives in #lib/server/auth/compose.ts (unit-tested):
 //   0. read-only switch (T3.8): while on, writes outside the allowlist (and Better Auth's two
 //      state-changing GET links) get 503 `READ_ONLY` first; that response still gets the
 //      security headers and the access-log record (steps 3 and 4, through `finish`).
@@ -26,7 +32,9 @@ import { isReadOnly } from '#lib/server/admin/read-only.ts';
 import { createAuth, toAuthLocals } from '#lib/server/auth.ts';
 import { createReadOnlyHandle, orderedHandles } from '#lib/server/auth/compose.ts';
 import { getServerEnv } from '#lib/server/env.ts';
+import { createRequestLogHandle } from '#lib/server/observability/request-log.ts';
 import { captureAccess } from '#lib/server/security/access-log.ts';
+import { createCanonicalHostHandle } from '#lib/server/security/canonical-host.ts';
 import { applySecurityHeaders } from '#lib/server/security/headers.ts';
 
 const platformShim: Handle = ({ event, resolve }) => {
@@ -118,7 +126,13 @@ const readOnly = createReadOnlyHandle({
 	finish: (event, response) => withSecurityHeaders(event, recordAccess(event, response))
 });
 
+const canonicalHost = createCanonicalHostHandle({ building });
+
+const requestLog = createRequestLogHandle({ building });
+
 export const handle: Handle = sequence(
 	platformShim,
+	canonicalHost,
+	requestLog,
 	...orderedHandles({ readOnly, paraglide, auth, securityHeaders, accessLog })
 );

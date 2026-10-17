@@ -30,22 +30,31 @@ export default defineConfig({
 				}
 			},
 			env: { dir: '..' },
+			// Document CSP (T5.4; reasons in docs/seguranca.md). 'auto': nonces on SSR responses,
+			// sha256 hashes in a <meta> on prerendered pages. No 'unsafe-inline' for scripts or
+			// <style> elements; style="" attributes (app.html wrapper, Svelte style:/style= and the
+			// route announcer, all rendered as markup) are the one documented exception, via
+			// style-src-attr. Every directive except script-src, style-src and style-src-attr is
+			// repeated in the web/_headers policy (STATIC_DOCUMENT_CSP_DIRECTIVES in
+			// src/lib/server/security/headers.ts; a unit test keeps both in sync).
 			csp: {
 				mode: 'auto',
 				directives: {
-					'default-src': ['self'],
+					'default-src': ['none'],
 					'script-src': ['self', 'https://challenges.cloudflare.com'],
-					'frame-src': ['https://challenges.cloudflare.com'],
-					'frame-ancestors': ['none'],
-					'style-src': ['self', 'unsafe-inline'],
+					'style-src': ['self'],
+					'style-src-attr': ['unsafe-inline'],
 					'img-src': ['self', 'data:', 'blob:'],
 					'font-src': ['self'],
 					'connect-src': ['self'],
 					'media-src': ['self', 'blob:'],
-					'worker-src': ['self', 'blob:'],
+					'worker-src': ['self'],
+					'frame-src': ['https://challenges.cloudflare.com'],
+					'manifest-src': ['self'],
 					'object-src': ['none'],
 					'base-uri': ['self'],
-					'form-action': ['self']
+					'form-action': ['self'],
+					'frame-ancestors': ['none']
 				}
 			}
 		}),
