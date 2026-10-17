@@ -34,6 +34,19 @@ está marcado como hipótese ou pendência — não como fato.
 | [`probing.md`](probing.md) | Plano técnico: sondagem do firmware, testes cegos, otimizações de qualidade. |
 | [`open-questions.md`](open-questions.md) | O que está confirmado, o que é hipótese, o que falta — e a errata. |
 
+## Produto web e operação
+
+| Documento | Conteúdo |
+|---|---|
+| [`../README.md`](../README.md) | O que é o open-auri, segurança, desenvolvimento local, testes e licença. |
+| [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Fluxo de contribuição, commits, testes, i18n, regras de texto e de dados. |
+| [`api.md`](api.md) | Contrato da API v1, códigos de erro, cache e visibilidade. |
+| [`social.md`](social.md) | Modelo social: publicação, versões, compartilhamentos, rankings e moderação. |
+| [`deploy.md`](deploy.md) | CI/CD e deploy de staging e produção. |
+| [`seguranca.md`](seguranca.md) | Cabeçalhos, CSP, modelo de ameaças e revisão de dependências. |
+| [`operacao.md`](operacao.md) | Índice da operação: observabilidade, backups, capacidade e runbooks. |
+| [`lgpd.md`](lgpd.md) | Registro das operações de tratamento (LGPD, art. 37). |
+
 ## Índice do núcleo
 
 A entrada [`src/index.mjs`](../src/index.mjs), importada como `open-auri`, oferece os
