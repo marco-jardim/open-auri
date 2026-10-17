@@ -14,9 +14,13 @@
 // - writes are never retried;
 // - after any interruption (disconnect, abort, I/O failure) the commit is never
 //   sent, so the chip keeps its previous preset in flash;
-// - the per-device lock is taken before any caller code runs (band getters,
-//   Proxies, the extra gate, the clock, the hid), so a write started from
-//   inside another write's gating on the same device is refused
+// - the per-device lock is taken before the bands are read. Only the reads of
+//   the options (their getters, and `navigator.hid` when no `hid` is given),
+//   the type check of `gate` and `signal.throwIfAborted()` run before it; a
+//   write started from there takes the lock first, and this one is refused
+//   while it is in progress. All other caller code (band getters, Proxies, the
+//   extra gate, the clock, the hid, the device) runs under the lock, so a write
+//   started from inside another write's gating on the same device is refused
 //   (ConcurrentWriteError) and sends nothing;
 // - an abort is honoured up to the last moment: after gating, before the first
 //   I/O and right before the commit;
@@ -82,7 +86,8 @@ import { gateForWrite } from '../safety/gate.mjs';
  * @property {'ok' | 'interrupted'} status
  * @property {number} crc Payload CRC-16 (payload bytes 218..219, little-endian).
  * @property {number} startedAt `clock.now()` when the I/O started.
- * @property {number} finishedAt `clock.now()` when the write ended.
+ * @property {number} finishedAt `clock.now()` when the write ended (`startedAt` if that
+ *   call threw).
  * @property {number} reportsSent Data reports (0..9) the device accepted; the commit is not
  *   counted.
  * @property {boolean} committed Whether the commit report was confirmed as accepted.
@@ -138,7 +143,8 @@ export class DeviceDisconnectedError extends Error {
  * A previous write had to abandon a pending open()/sendReport() on this device
  * (it hung, then the write was aborted or the device disconnected). The pending
  * operation may still complete at any time, so the device is refused, before
- * any I/O, until the page obtains it again with {@link requestCable}.
+ * any I/O, until that operation settles (either way) or until the page obtains
+ * it again with {@link requestCable}, whichever comes first.
  */
 export class DeviceUnusableError extends Error {
   constructor() {
@@ -196,7 +202,8 @@ function isPoisoned(device) {
 }
 
 /**
- * Takes the device's write lock, synchronously and before any caller code runs.
+ * Takes the device's write lock, synchronously; writeCurve calls it before the
+ * bands are read (see writeCurve for what runs before it).
  * Throws ConcurrentWriteError (busy) or DeviceUnusableError (abandoned I/O);
  * returns the release function, which only frees the lock this call took.
  * @param {object} device
@@ -259,7 +266,8 @@ function approve(bands, preampDb, experimental, extraGate) {
       throw new TypeError('the safety gate must return {ok, reasons}');
     }
     if (extra.ok !== true) {
-      throw new GateRejectedError(Array.isArray(extra.reasons) ? extra.reasons : []);
+      const reasons = extra.reasons; // read once: a getter cannot change it between checks
+      throw new GateRejectedError(Array.isArray(reasons) ? reasons : []);
     }
   }
   // The snapshot is frozen plain data: encoding it again must give the same bytes.
@@ -302,9 +310,11 @@ export async function requestCable(hid = navigatorHid()) {
  * are built from the exact payload it approved. `options.gate`, if given, must
  * also approve (it receives the frozen snapshot).
  *
- * The device's lock is taken before the gates (or any other caller code) run
- * and is released only by this call, so a nested write to the same device
- * started from a band getter, a Proxy trap or the extra gate is refused.
+ * The device's lock is taken before the bands are read and the gates run; only
+ * the reads of `options` (getters included, and `navigator.hid` when `hid` is
+ * not given), the type check of `gate` and `signal.throwIfAborted()` come
+ * first. The lock is released only by this call, so a nested write to the same
+ * device started from a band getter, a Proxy trap or the extra gate is refused.
  *
  * Throws, before any I/O, when a gate rejects (GateRejectedError), when
  * `options.gate` is not a function or returns a non-object (TypeError), when
@@ -428,10 +438,6 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
       stop.abort(new DeviceDisconnectedError());
     }
   };
-  signal?.addEventListener('abort', onAbort, { once: true });
-  hid?.addEventListener('disconnect', onDisconnect);
-  // A listener added to an already aborted signal never fires.
-  if (signal?.aborted) stop.abort(signal.reason);
 
   // `device.opened` may be a caller getter: read it first, then check the stop
   // signal last, immediately before the I/O that follows.
@@ -441,40 +447,62 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
   };
   /** @param {() => Promise<void>} operation */
   const io = (operation) => guardIo(device, operation, stop.signal);
+  // The injected clock is caller code: if now() throws at the end, the result
+  // keeps its status and uses startedAt, so a committed write stays 'ok'.
+  const endedAt = () => {
+    try {
+      return clock.now();
+    } catch {
+      return startedAt;
+    }
+  };
   /** @param {'ok' | 'interrupted'} status */
   const result = (status) => ({
     status,
     crc,
     startedAt,
-    finishedAt: clock.now(),
+    finishedAt: endedAt(),
     reportsSent,
     committed,
   });
 
+  // Listeners are added inside the try, so if the hid's addEventListener throws
+  // the abort listener already added is removed too.
   try {
-    if (!device.opened) {
-      stop.signal.throwIfAborted();
-      await io(() => device.open());
-    }
-    for (const report of reports) {
+    signal?.addEventListener('abort', onAbort, { once: true });
+    hid?.addEventListener('disconnect', onDisconnect);
+    // A listener added to an already aborted signal never fires.
+    if (signal?.aborted) stop.abort(signal.reason);
+
+    try {
+      if (!device.opened) {
+        stop.signal.throwIfAborted();
+        await io(() => device.open());
+      }
+      for (const report of reports) {
+        ensureLive();
+        await io(() => device.sendReport(HID_REPORT_ID, report));
+        reportsSent += 1;
+        await clock.sleep(REPORT_GAP_MS, stop.signal);
+      }
+      await clock.sleep(SETTLE_MS, stop.signal);
       ensureLive();
-      await io(() => device.sendReport(HID_REPORT_ID, report));
-      reportsSent += 1;
-      await clock.sleep(REPORT_GAP_MS, stop.signal);
+      await io(() => device.sendReport(HID_REPORT_ID, commitReport()));
+      committed = true;
+    } catch (error) {
+      // Programming errors surface only while the device holds none of this curve;
+      // once a report was accepted the caller must learn how far the write got.
+      if (error instanceof TypeError && reportsSent === 0) throw error;
+      return { ...result('interrupted'), error };
     }
-    await clock.sleep(SETTLE_MS, stop.signal);
-    ensureLive();
-    await io(() => device.sendReport(HID_REPORT_ID, commitReport()));
-    committed = true;
+    // Outside the catch: once the commit is accepted, nothing can make it 'interrupted'.
     return result('ok');
-  } catch (error) {
-    // Programming errors surface only while the device holds none of this curve;
-    // once a report was accepted the caller must learn how far the write got.
-    if (error instanceof TypeError && reportsSent === 0) throw error;
-    return { ...result('interrupted'), error };
   } finally {
-    signal?.removeEventListener('abort', onAbort);
-    hid?.removeEventListener('disconnect', onDisconnect);
+    try {
+      signal?.removeEventListener('abort', onAbort);
+    } finally {
+      hid?.removeEventListener('disconnect', onDisconnect);
+    }
   }
 }
 

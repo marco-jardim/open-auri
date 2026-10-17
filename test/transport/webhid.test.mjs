@@ -703,7 +703,7 @@ test('writes to different devices may run concurrently', async () => {
   assert.deepEqual(bytesOf(a), bytesOf(b));
 });
 
-// --- B1: the lock is taken before any caller code runs ---------------------------
+// --- B1: the lock is taken before the bands or the gates are read ----------------
 
 /** Settles to {value} or {error} without ever being an unhandled rejection. */
 const outcome = (promise) =>
@@ -1006,6 +1006,98 @@ test('B3: an abandoned operation settling after requestCable changes nothing', a
   assert.equal((await again).status, 'ok');
 });
 
+// --- QA F1 minors: #9, #11, #12 ----------------------------------------------------
+
+test('#9: a clock that throws after the commit keeps the write ok and committed', async () => {
+  for (const persistent of [false, true]) {
+    const label = persistent ? 'persistent' : 'one-shot';
+    const { clock, device, hid } = setup();
+    let throws = 0;
+    const fragileClock = {
+      now: () => {
+        if (commits(device) > 0 && (persistent || throws === 0)) {
+          throws += 1;
+          throw new Error('clock broke');
+        }
+        return clock.now();
+      },
+      sleep: clock.sleep,
+    };
+    const result = await writeCurve(device, NEUTRAL_BANDS, PRE, { clock: fragileClock, hid });
+    assert.equal(throws, 1, label);
+    assert.equal(result.status, 'ok', label);
+    assert.equal(result.committed, true, label);
+    assert.equal(result.reportsSent, 9, label);
+    assert.equal(result.error, undefined, label);
+    assert.equal(result.finishedAt, result.startedAt, label); // the fallback
+    assert.equal(device.sent.length, 10, label);
+    assert.equal(commits(device), 1, label);
+  }
+});
+
+test('#11: if hid.addEventListener throws, the abort listener is removed', async () => {
+  const { clock, device } = setup();
+  const failure = new Error('hid broke');
+  const hid = {
+    addEventListener() {
+      throw failure;
+    },
+    removeEventListener: () => undefined,
+  };
+  const controller = new AbortController();
+  const { signal } = controller;
+  const added = [];
+  const removed = [];
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  signal.addEventListener = (type, listener, options) => {
+    added.push({ type, listener });
+    add(type, listener, options);
+  };
+  signal.removeEventListener = (type, listener, options) => {
+    removed.push({ type, listener });
+    remove(type, listener, options);
+  };
+  await assert.rejects(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid, signal }), failure);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].type, 'abort');
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0].type, 'abort');
+  assert.equal(removed[0].listener, added[0].listener);
+  assert.equal(device.attempts, 0);
+  assert.equal(device.opened, false);
+  // The lock was released: the next write goes through.
+  const fine = new FakeHID({ devices: [device] });
+  assert.equal((await writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid: fine })).status, 'ok');
+});
+
+test('#12: the extra gate verdict reasons are read once', async () => {
+  const { clock, device, hid } = setup();
+  const runs = [
+    (gate) => writeCurve(device, NEUTRAL_BANDS, PRE, { gate, clock, hid }),
+    (gate) => writeMany([device], NEUTRAL_BANDS, PRE, { gate, clock, hid }),
+  ];
+  for (const run of runs) {
+    let reads = 0;
+    const gate = () => ({
+      ok: false,
+      // A second read sees a non-array, which used to end in a TypeError.
+      get reasons() {
+        reads += 1;
+        return reads === 1 ? ['house rule'] : 'changed';
+      },
+    });
+    await assert.rejects(run(gate), (error) => {
+      assert.ok(error instanceof GateRejectedError);
+      assert.deepEqual(error.reasons, ['house rule']);
+      return true;
+    });
+    assert.equal(reads, 1);
+  }
+  assert.equal(device.attempts, 0);
+  assert.equal(device.opened, false);
+});
+
 // --- writeMany ---------------------------------------------------------------
 
 function manyDevices(count, faultsByIndex = {}, { autoAdvance = true } = {}) {
@@ -1202,6 +1294,72 @@ test('N4: writeMany refuses a Set (or any non-array) before reading or sending',
     devices,
   );
   assert.ok(results[1].startedAt - results[0].finishedAt >= WRITE_SPACING_MS);
+});
+
+// #17: the cable service logs each queued cable on writeMany's spacing sleep
+// (ms === WRITE_SPACING_MS); that relies on the spacing sleep coming only
+// after an 'ok' result, never after a non-ok one.
+test('#17: writeMany sleeps WRITE_SPACING_MS only after an ok result', async () => {
+  const bug = new TypeError('bug');
+  // An ok write sleeps 10 times (9 report gaps, then the settle); an
+  // interrupted one sleeps once per report accepted.
+  const cases = [
+    { faults: {}, statuses: ['ok', 'ok', 'ok', 'ok'], sleeps: 4 * 10 + 3 },
+    {
+      faults: { 1: { throwAtReport: 2 } },
+      statuses: ['ok', 'interrupted', 'skipped', 'skipped'],
+      sleeps: 10 + 1 + 2,
+    },
+    {
+      faults: { 0: { disconnectAtReport: 4 } },
+      statuses: ['interrupted', 'skipped', 'skipped', 'skipped'],
+      sleeps: 4,
+    },
+    {
+      faults: { 2: { throwAtReport: 0, throwError: bug } },
+      statuses: ['ok', 'ok', 'failed', 'skipped'],
+      sleeps: 2 * 10 + 2,
+    },
+  ];
+  for (const { faults, statuses, sleeps } of cases) {
+    const label = statuses.join(',');
+    const { clock, devices, hid } = manyDevices(4, faults);
+    const log = [];
+    const countingClock = {
+      now: () => clock.now(),
+      sleep: (ms, signal) => {
+        const last = devices.findLastIndex((device) => device.attempts > 0);
+        log.push({ ms, last, committed: last >= 0 && commits(devices[last]) === 1 });
+        return clock.sleep(ms, signal);
+      },
+    };
+    const results = await writeMany(devices, NEUTRAL_BANDS, PRE, { clock: countingClock, hid });
+    assert.deepEqual(
+      results.map(({ status }) => status),
+      statuses,
+      label,
+    );
+    assert.equal(log.length, sleeps, label);
+    const known = [REPORT_GAP_MS, SETTLE_MS, WRITE_SPACING_MS];
+    assert.ok(
+      log.every(({ ms }) => known.includes(ms)),
+      label,
+    );
+    // Exactly one spacing sleep after each 'ok' that has a successor, each one
+    // right after that device committed; none after a non-ok result.
+    const spacing = log.filter(({ ms }) => ms === WRITE_SPACING_MS);
+    const oks = statuses.slice(0, -1).filter((status) => status === 'ok').length;
+    assert.equal(spacing.length, oks, label);
+    assert.deepEqual(
+      spacing.map(({ last }) => last),
+      Array.from({ length: oks }, (_, index) => index),
+      label,
+    );
+    assert.ok(
+      spacing.every(({ committed }) => committed),
+      label,
+    );
+  }
 });
 
 test('writeMany with no devices returns an empty list', async () => {
