@@ -3,7 +3,12 @@
 // stack. Loading, failure and result run offline (mocked index route, pasted CSV, preset
 // target). "No result" needs the real AutoEq index: CI without it sets OA_NO_AUTOEQ=1.
 import { expect, test, type Page } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 import { waitForApp } from './helpers/a-app';
+
+const noArt = fileURLToPath(new URL('./helpers/no-art.css', import.meta.url));
+// The strict CSP blocks the style Playwright injects for stylePath; CSP is covered by csp.spec.ts.
+test.use({ bypassCSP: true });
 
 const NO_AUTOEQ = process.env.OA_NO_AUTOEQ === '1';
 const INDEX = '**/data/autoeq/index.json';
@@ -33,6 +38,7 @@ function shot(page: Page) {
 	// Meters, canvases and attribution vary or animate: masked like visual.spec.ts.
 	return {
 		animations: 'disabled' as const,
+		stylePath: noArt,
 		mask: [page.locator('canvas'), page.locator('[data-mode="live"]')]
 	};
 }
@@ -92,20 +98,54 @@ test.describe('Soe como X states', () => {
 		await page.locator('#soe-target-kind').selectOption('preset');
 		await page.locator('.correction .solve').click();
 		await expect(page.locator('.gate-pass')).toBeVisible({ timeout: 20_000 });
-		await expect(page.locator('.monitor-head .iter')).toContainText('ITER');
+		const workstation = page.locator('.workstation');
+		await expect(workstation).toHaveAttribute('data-phase', 'result');
+		// The final row of the deviation map is the full solve: the readout shows that pass.
+		const finalPass = page.locator('.map-iterations li').last();
+		await expect(page.locator('.monitor-head .iter')).toContainText(
+			`ITER ${(await finalPass.textContent())?.trim()} /`
+		);
 		await expect(page.locator('.map svg[role="img"] rect').first()).toBeVisible();
-		// No audio was started: meters are DATA, never live.
+		// No audio was started: meters are DATA, never live (and the idle spectrum draws nothing).
 		await expect(page.locator('[data-tour="soe-ab"] [data-mode="live"]')).toHaveCount(0);
-		// The workstation is taller than the mobile viewport, so the capture also shows the fixed
-		// chrome over it; whichever control happens to hold focus (RESOLVER, or the skip link, which
-		// only shows when focused) is not part of this state. Same focus on every run: none.
+		await expect(workstation.locator('[data-mode="live"]')).toHaveCount(0);
+		// Late chunks settle the result station: the chrome's audio engine and the editor curve
+		// (they enable "Ouvir prévia" and "Usar esta curva"), and SocialPublish's sign-in link.
+		await expect(page.locator('[data-tour="soe-ab"] .buttons button').first()).not.toHaveAttribute(
+			'aria-disabled',
+			'true'
+		);
+		await expect(page.locator('[data-tour="soe-editor"] button').first()).not.toHaveAttribute(
+			'aria-disabled',
+			'true'
+		);
+		await expect(workstation.locator('a[href^="/entrar"]')).toBeVisible();
+		// Whichever control happens to hold focus (RESOLVER, or the skip link, which only shows
+		// when focused) is not part of this state. Same focus on every run: none.
 		await page.evaluate(() => {
 			if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 		});
-		// Sub-pixel anti-aliasing on the solver's curves varies by 19 to 30 px between runs (it
-		// fails even right after --update-snapshots); nothing animates once the gate passed.
-		await expect(page.locator('.workstation')).toHaveScreenshot('soe-result.png', {
-			...shot(page),
+		// The workstation is taller than the viewport (always on mobile, often on desktop), and a
+		// taller capture is shot beyond it at whatever scroll offset Playwright reached: the
+		// viewport-fixed layers (Playwright's mask overlays, like the bar in no-art.css) landed
+		// elsewhere on each shot and the rounded clip changed by 1 px (3844/3845). That, not the
+		// page, was "two consecutive stable screenshots" failing. A viewport that holds the whole
+		// workstation keeps the capture from scrolling, and nothing is masked: in this state
+		// nothing in it is live (asserted above).
+		const viewport = page.viewportSize();
+		const bottom = await workstation.evaluate(
+			(element) => element.getBoundingClientRect().bottom + window.scrollY
+		);
+		if (viewport) {
+			await page.setViewportSize({
+				width: viewport.width,
+				height: Math.max(viewport.height, Math.ceil(bottom) + 32)
+			});
+		}
+		await page.evaluate(() => window.scrollTo(0, 0));
+		await expect(workstation).toHaveScreenshot('soe-result.png', {
+			animations: 'disabled',
+			stylePath: noArt,
 			maxDiffPixels: 40
 		});
 	});

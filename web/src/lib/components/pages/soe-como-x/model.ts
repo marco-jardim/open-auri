@@ -247,7 +247,8 @@ export interface SolverPort {
  * Real progress: short solves at PROGRESS_BUDGETS, each reported through `onprogress`, then
  * the full request. `onprogress` returns false when the page moved on (edit, cancel, unmount);
  * the remaining passes are skipped. A pass that stops for any reason other than the iteration
- * cap ends the previews (more budget would not change its path) and goes to the full solve.
+ * cap ends the previews (more budget would not change its path; a time stop means the full
+ * request's own guard ran out) and goes to the full solve.
  */
 export async function solveStationWithProgress(
 	state: StationState,
@@ -258,16 +259,13 @@ export async function solveStationWithProgress(
 		const full = solverOptions(state);
 		const measurement = full.measurement ?? [];
 		const maxIterations = full.maxIterations ?? MAX_ITERATIONS;
-		const maxTimeMs = full.maxTimeMs ?? 1200;
 		for (const budget of PROGRESS_BUDGETS) {
 			if (budget >= maxIterations) break;
-			const pass = await worker.solve({
-				options: {
-					...full,
-					maxIterations: budget,
-					maxTimeMs: Math.max(100, Math.round((maxTimeMs * budget) / maxIterations))
-				}
-			});
+			// Only the trial budget cuts a pass; it keeps the full request's time guard. A
+			// proportional slice of it (100 ms for 20 trials) ran out on a busy machine, so the
+			// map showed a pass cut by the clock ("ITER 14") and skipped the others: which passes
+			// appeared depended on the machine's load, not on the solver.
+			const pass = await worker.solve({ options: { ...full, maxIterations: budget } });
 			const next = progressFrom(pass.result, measurement, full.target, maxIterations);
 			if (!onprogress(next)) {
 				return { type: 'error', revision: state.revision, error: 'solver:superseded' };
