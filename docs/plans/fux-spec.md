@@ -86,6 +86,43 @@ Capturas: `comparar.png`, `comparar-top.png` × `comparar-*`. Verificar: pistas 
 
 Captura: `soe-como-x.png` × `soe-como-x-*`. Verificar: busca (inicial, carregando índice AutoEq, sem resultado); escolha do alvo; progresso do solver; A/B com VU e espectro; "levar ao editor"; explicação do solver; mobile. Transversais: T1 a T5, T8.
 
+### 1.4b Achados do FUX.0 (Biblioteca, Comparar, Soe como X, mobile)
+
+As capturas default e reduced-motion usam `animations: 'disabled'` (`web/tests/e2e/visual.spec.ts:73-104`): igualdade visual não prova nada sobre movimento. Cada P verifica em execução carretéis, tampas, agulhas e progresso, com e sem redução de movimento.
+
+**Biblioteca** (`biblioteca.png`, `biblioteca-mobile*.png`, `biblioteca-audio-popover.png` × `biblioteca-{desktop,mobile}-{default,reduced}-motion-*`):
+- Console de VU: mock tem NÍVEL, PREAMP, CORRELATOR (+0,73, "RMS · máx."), PICO DE SAÍDA e SALTO; atual tem "S4 · DIFERENÇA RMS" (T15) no lugar do correlator. VU L/R, correlação, PPM e LUFS existem só no ramo de reprodução (`MeterBridge.svelte:28`, `:42-70`): o P1 captura DADOS → AO VIVO com áudio determinístico, desktop e mobile.
+- Estante: material (papel, fita, sombra) e etiqueta tipo Courier presentes; faltam "MASTER n / 11", eixo ±15 com 20/1k/20k na mini curva, rodapé "licença" e "RMS" (atual mostra "PRE −x dB" e "10 + BIQUAD"), cartão "Os 11 masters · Vol. 01" (atual: painel largo "S9 · VOL. 01 · Pack de referência Auri", T15).
+- Seletor "Sua curva: Natural" do mock virou texto "Curva atual: Neutro".
+- Vazio: só "Salve a curva atual para abrir sua primeira caixa local", sem caixas de exemplo (T12, §4.4).
+- Aviso de conta entra entre o console e a estante, também no mobile; mover para depois da estante ou para cartão discreto.
+- Sem captura atual da ficha aberta, de `/c/[id]` nem do popover de áudio: o P1 cria as três (mock `biblioteca.html:198`, `:897-904`; exportar SVG/PNG e copiar link ficam na caixa aberta).
+- Transversais: T1, T3, T4, T5, T15 visíveis; T11 pelo manifest.
+
+**Comparar** (`comparar.png`, `comparar-top.png` × `comparar-*`):
+- Transporte: mock tem carretéis grandes, REBOBINAR, PAUSAR, lâmpada âmbar sobre as cabeças com legendas EXTRA/APAGAR/GRAVAR/REPROD., contador mecânico; atual tem cabeças sem legenda sob "+ k × Δ", sem lâmpada central nem contador (T14).
+- Pistas: atual é cartão plano com filete colorido; mock é fita. ARM/SOLO/MUTE têm lâmpadas (`TrackLane.svelte:113-125`), pequenas demais.
+- Nível igualado: o readout por pista é nível previsto (`TrackLane.svelte:103-110`), não quanto a pista desceu. O P2 mostra os dois, separados.
+- VU por pista mascarado: o P2 captura pista armada tocando e desarmada, sem máscara.
+- Sobreposição: atual ±20 dB com grade fraca, sem linha de limite nem marca de pico; mock ±15 com grade e legenda.
+- Patch bay: mock desenha cabos entre os nós; atual só radios com RMS.
+- Som sobre som: falta tabela PEQ de 10 linhas e "Dentro do envelope observado"; botões apagados têm motivo no painel ("Calcule a camada…"), mas não ligado a cada controle.
+- Exportar antes e depois: botões SVG e PNG existem; prévia do PNG com menos informação (sem RMS e faixas rotuladas).
+- Mobile: 2 colunas de pistas, conforme `comparar.html:167`; "?" cobre conteúdo. O P2 captura o mock a 390 px.
+- Transversais: T1, T3, T5, T8 (parcial), T14 visíveis; T4 só nos botões mono (ARM/SOLO/MUTE usam Oswald); T11 pelo manifest.
+
+**Soe como X** (`soe-como-x.png` × `soe-como-x-*`):
+- Hero sísmico: mock tem traço sísmico escuro; atual é faixa creme lisa (T14).
+- Medição: controle nativo "Choose File / No file chosen" em inglês, cortado no mobile; mock tem área de importação temática e "Colar texto".
+- Alvo: só o modo AutoEq aparece capturado; desenho, preset, CSV e comunidade existem (`Workstation.svelte:384-406`). O P3 captura cada modo.
+- Correção: knob sem arco, RESOLVER apagado sem dizer que faltam medição e alvo (`Workstation.svelte:529-533`, T8), sem números de RMS e erro.
+- Resultado: moldura vazia "Ø / 10"; o P3 captura carregando índice, sem resultado, falha com tentar de novo, solver em andamento ("ITER n / 20" com mapa do desvio), resultado, A/B com VU e espectro, aplicar e "Abrir na Curva" (`:551`, `:591-602`).
+- Explicação do solver: os dois têm "O solver aproxima. O gate decide."; o atual cita "Inicialização e perda baseadas no AutoEq (MIT)", o mock "Ajuste greedy PK + LS em dez seções": o P3 junta as duas em linguagem de leigo com Explainer.
+- Mobile: medição e alvo em duas colunas estreitas, rótulos quebrando; empilhar em uma coluna.
+- Transversais: T1, T3, T4 (RESOLVER mono), T5, T8, T12 visíveis. T15: "FIELD 04", "04 / C1 · C2 · C4" são códigos; "GATE v2", Q27, 96 kHz são informação técnica e podem ficar atrás de "detalhes técnicos".
+
+**Chrome mobile (FUX.1):** `biblioteca-mobile-top.png` mostra Áudio, Neutro, Padrão Auri e Gravar no cabo acessíveis acima da navegação; no atual a barra é uma faixa única com rolagem horizontal e as ações ficam fora da área visível (`CableBar.svelte:122-132`, `:148-153`, `:218-222`).
+
 ### 1.5 Comunidade (Bob Clearmountain)
 
 Evidência: `comunidade-desktop-default-*` (comparação fina com `comunidade.png`, `comunidade-mixer-detail.png` no FUX.0).
