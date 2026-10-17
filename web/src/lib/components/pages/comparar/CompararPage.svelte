@@ -12,6 +12,7 @@
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
 	import { frequencyLabel, numberLabel } from '#lib/charts/scales.ts';
 	import { Button } from '#lib/components/primitives/index.ts';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { Explainer, Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import { copy } from './copy.ts';
@@ -62,12 +63,20 @@
 	let attempt = 0;
 	/** The engine this page put in chain mode (only its own Play does that). */
 	let startedBy: ClientApp['audio'] | null = null;
+	/** Session tag of this page's audition (Transport, navbar). */
+	const COMPARAR_SESSION = 'comparar';
 
-	/** Stops the engine only if this page started it and it is still in chain mode. */
+	/** The engine plays or holds paused this page's session (not raw, not another page's). */
+	function owned(engine: ClientApp['audio']): boolean {
+		const state = engine.state();
+		return state.session === COMPARAR_SESSION && (state.playing || state.paused);
+	}
+
+	/** Ends the session only if this page started it and it is still this page's (teardown). */
 	function release() {
 		const engine = startedBy;
 		startedBy = null;
-		if (engine && engine.state().mode === 'chains') engine.stop();
+		if (engine && owned(engine)) engine.stop();
 	}
 	const loadTokens = new SvelteMap<number, number>();
 	const loadGates = new SvelteMap<number, ReturnType<typeof createGateWorker>>();
@@ -80,7 +89,14 @@
 		a && b ? comparisonSvg(a.curve, b.curve, matched, threshold, includeDelta, locale, t) : ''
 	);
 	// This page's own audition: chain mode left on by another page does not count.
-	const playing = $derived(active && audioState.playing && audioState.mode === 'chains');
+	const playing = $derived(
+		active &&
+			audioState.playing &&
+			audioState.mode === 'chains' &&
+			audioState.session === COMPARAR_SESSION
+	);
+	/** This page's audition is paused (Play key, Transport or navbar): chains and trims kept. */
+	const paused = $derived(active && audioState.paused && audioState.session === COMPARAR_SESSION);
 	const playReason = $derived(!app ? t.reasonEngine : armed.length === 0 ? t.reasonArm : null);
 	/** Real writes counted by the cable service in this browser (never simulated ones). */
 	const writes = $derived(app ? app.state.flash.state.total : null);
@@ -207,14 +223,23 @@
 		if (!app || !chains || !a || !b) return;
 		const engine = app.audio;
 		const manager = chains;
-		const token = ++attempt;
 		if (playing) {
-			manager.setAudible(false);
-			active = false;
-			startedBy = null;
-			engine.stop();
+			// A pause, not a stop: position, lanes, A/B and trims stay for the resume (SEEK.2).
+			engine.pause();
 			return;
 		}
+		if (paused && startedBy === engine) {
+			error = '';
+			try {
+				// Keeps the musical moment: no new random point, no rebuilt chains.
+				if (await engine.resume()) return;
+			} catch (cause) {
+				console.error('Comparison preview failed', cause);
+				error = t.audioFailed;
+				return;
+			}
+		}
+		const token = ++attempt;
 		error = '';
 		active = true;
 		try {
@@ -225,13 +250,14 @@
 			manager.setAudible(true);
 			// Both calls run in the click before yielding, preserving browser user activation.
 			const ready = manager.sync(tracks);
-			const started = engine.start('chains');
+			// A comparison starts at a random point of the file (SEEK.2); the file loops.
+			const started = engine.start('chains', { startAt: 'random', session: COMPARAR_SESSION });
 			startedBy = engine;
 			await Promise.all([ready, started]);
 			if (token !== attempt && (disposed || manager !== chains)) {
 				// Unmounted (or the app changed) while starting: the engine only reached chain mode
 				// after the cleanup ran, so stop it here; nothing of this page may keep playing.
-				if (engine.state().mode === 'chains') engine.stop();
+				if (owned(engine)) engine.stop();
 				if (startedBy === engine) startedBy = null;
 			}
 		} catch (cause) {
@@ -241,7 +267,7 @@
 			manager.setAudible(false);
 			active = false;
 			startedBy = null;
-			engine.stop();
+			if (owned(engine)) engine.stop();
 		}
 	}
 
@@ -313,6 +339,19 @@
 					<span>{t.counter}</span>
 				</span>
 			</div>
+		</div>
+		<!-- Seek, back to start and play/pause of this page's session, right under the deck (out
+		     of its frame, whose screenshots must not hold a running clock); with nothing paused,
+		     its play is the Play key's own start (lanes, A/B, level match). -->
+		<div class="deck-seek">
+			<Transport
+				engine={app?.audio ?? null}
+				state={app ? audioState : null}
+				variant="compact"
+				session={COMPARAR_SESSION}
+				onplay={play}
+				playDisabledReason={playReason}
+			/>
 		</div>
 		{#if !audioState.exact}<p class="notice">{t.rateNote}</p>{/if}
 		{#if error}<p class="notice error" role="alert">{error}</p>{/if}
@@ -619,6 +658,10 @@
 </div>
 
 <style>
+	.deck-seek {
+		min-width: 0;
+		margin-top: 8px;
+	}
 	/* FUX.ART: the cabinet is the page's opaque body, so the art layer is its first child and
 	   lies on the hammertone under the plates and panels (an art layer under the cabinet would
 	   only show in the 22px page margin). */

@@ -108,7 +108,9 @@ test('editor and library are snapshots; failed playback reports an error and sto
 	const stop = vi.spyOn(app.audio, 'stop');
 	await page.getByRole('button', { name: t.play, exact: true }).click();
 	await expect.element(page.getByRole('alert')).toHaveTextContent(t.audioFailed);
-	expect(stop).toHaveBeenCalled();
+	// The refused start opened no session: nothing plays and no other session is ended.
+	expect(app.audio.state()).toMatchObject({ playing: false, session: null });
+	expect(stop).not.toHaveBeenCalled();
 });
 
 test('custom experimental lane delegates source/toggles and never selects a disarmed track', async () => {

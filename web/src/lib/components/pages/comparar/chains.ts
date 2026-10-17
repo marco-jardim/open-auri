@@ -42,11 +42,19 @@ export function createTrackChains(
 	let audible = false;
 	let sequence = 0;
 
-	function remove(id: number, record: RecordEntry) {
-		records.delete(id);
+	/**
+	 * Releases a record already taken out of `records` (its meter and chain). The lane's meter is
+	 * cleared at once; a replacement's tap only reports later (asynchronously), never stale.
+	 */
+	function release(id: number, record: RecordEntry) {
 		onMeter(id, null);
 		record.meter?.disconnect();
 		record.chain.dispose();
+	}
+
+	function remove(id: number, record: RecordEntry) {
+		records.delete(id);
+		release(id, record);
 	}
 
 	function gains() {
@@ -75,9 +83,13 @@ export function createTrackChains(
 		async sync(next: readonly Track[]) {
 			if (disposed) return;
 			tracks = next;
+			const stale: [number, RecordEntry][] = [];
 			for (const [id, record] of records) {
 				const track = next.find((item) => item.id === id && item.armed);
-				if (!track || JSON.stringify(track.curve) !== record.signature) remove(id, record);
+				if (!track || JSON.stringify(track.curve) !== record.signature) {
+					records.delete(id);
+					stale.push([id, record]);
+				}
 			}
 			const pending: Promise<void>[] = [];
 			for (const track of next.filter((item) => item.armed)) {
@@ -112,6 +124,9 @@ export function createTrackChains(
 					});
 				pending.push(entry.loading);
 			}
+			// Stale chains go only once their replacements exist: a paused session (SEEK.2) ends
+			// when its last chain is disposed, so an edit while paused must never empty the set.
+			for (const [id, record] of stale) release(id, record);
 			gains();
 			await Promise.all(pending);
 		},

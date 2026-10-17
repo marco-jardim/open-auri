@@ -25,6 +25,7 @@
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import Lamp from '#lib/components/primitives/Lamp.svelte';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { SocialApi } from '#lib/social/index.ts';
 	import ListeningRoom from './ListeningRoom.svelte';
@@ -121,7 +122,26 @@
 		m.cego_cable(),
 		m.cego_share()
 	]);
-	const playing = $derived(active && audioState.playing && audioState.mode === 'chains');
+	/** Session tag of the blind test (Transport, navbar). */
+	const BLIND_SESSION = 'teste-cego';
+	const playing = $derived(
+		active &&
+			audioState.playing &&
+			audioState.mode === 'chains' &&
+			audioState.session === BLIND_SESSION
+	);
+	/** This round is paused (Play, Transport or navbar): position, chains and trims kept. */
+	const paused = $derived(active && audioState.paused && audioState.session === BLIND_SESSION);
+	/**
+	 * This round's session has started: a play continues it. Each round (trial) starts once, at
+	 * its own random point of the file; a swap between candidates never restarts it.
+	 */
+	let roundStarted = false;
+	/** The engine plays or holds paused the blind test's session (not raw, not another page's). */
+	function owned(engine: AudioEngine): boolean {
+		const state = engine.state();
+		return state.session === BLIND_SESSION && (state.playing || state.paused);
+	}
 	const rateLabel = $derived(
 		new Intl.NumberFormat(getLocale(), {
 			maximumFractionDigits: 3
@@ -196,6 +216,11 @@
 			audioState = value;
 		});
 	});
+	// Audible (not shuffling) at a position means it was heard, however playback got there: the
+	// Play key, or the Transport and navbar resuming the round.
+	$effect(() => {
+		if (playing && !moving) heard[position] = true;
+	});
 
 	function number(value: number, digits = 1) {
 		return new Intl.NumberFormat(getLocale(), {
@@ -211,8 +236,10 @@
 	}
 	function releasePreview() {
 		clearTimer();
+		roundStarted = false;
 		if (preview) {
-			audio?.stop();
+			// Teardown: the blind session ends (only ours; raw or another page's audio stays).
+			if (audio && owned(audio)) audio.stop();
 			preview.dispose();
 			preview = null;
 		}
@@ -292,6 +319,8 @@
 	}
 	function prepareRound() {
 		if (!session) return;
+		// A new trial: its first play starts at a new random point of the file.
+		roundStarted = false;
 		position = 0;
 		ratings = session.order.map(() => null);
 		heard = session.order.map(() => false);
@@ -338,7 +367,8 @@
 	async function play() {
 		if (!active || moving || !audio || !session || !preview) return;
 		if (playing) {
-			audio.stop();
+			// A pause, not a stop: the round keeps its position, chains and trims.
+			audio.pause();
 			return;
 		}
 		const playingSession = session;
@@ -347,27 +377,43 @@
 		const index = position;
 		try {
 			preview.select(session.order[position]!);
-			await engine.start('chains');
+			if (paused && roundStarted) {
+				// The same trial continues where it was paused: no new random point.
+				if (await engine.resume()) {
+					if (engine.state().mode === 'chains') heard[index] = true;
+					message = '';
+					return;
+				}
+			}
+			// Every trial starts at a random point in [25 %, 75 %] of the file; the file loops.
+			await engine.start('chains', { startAt: 'random', session: BLIND_SESSION });
 			if (!active || session !== playingSession || preview !== playingPreview) {
-				engine.stop();
+				if (owned(engine)) engine.stop();
 				return;
 			}
+			roundStarted = true;
 			if (engine.state().mode === 'chains') heard[index] = true;
 			message = '';
 		} catch {
 			message = m.cego_audio_error();
 		}
 	}
+	/** Transport play with nothing of this round paused: the Play key's own start. */
+	async function transportPlay() {
+		if (!playing) await play();
+	}
 	function selectPosition(index: number) {
 		if (!active || moving || !session || index >= session.order.length) return;
-		transition(
-			() => {
-				position = index;
-				if (session) preview?.select(session.order[index]!);
-				if (playing) heard[index] = true;
-			},
-			labSwitch && position !== index
-		);
+		const always = labSwitch && position !== index;
+		// A blind swap keeps the musical moment: never a restart, and the shuffle's muted seconds
+		// are given back, so every candidate is compared on the same passage.
+		const at = playing && always && !reduced && audio ? audio.state().position : null;
+		transition(() => {
+			position = index;
+			if (at !== null && playing) audio?.seek(at);
+			if (session) preview?.select(session.order[index]!);
+			if (playing) heard[index] = true;
+		}, always);
 	}
 	function setRating(index: number, raw: string) {
 		const value = raw === '' ? null : Number(raw);
@@ -386,7 +432,9 @@
 			message = m.cego_random_error();
 			return;
 		}
-		audio?.stop();
+		// The trial is over: its session ends; the next one starts at its own random point.
+		roundStarted = false;
+		if (audio && owned(audio)) audio.stop();
 		message = '';
 		if (reveal || session.completed.length === session.planned) {
 			const stage = bracketStage(session, spread);
@@ -534,6 +582,18 @@
 						<span class="track" aria-hidden="true"><span class="lever"></span></span>
 						<span class="tl">{m.cego_switch()}<small>{m.cego_switch_note()}</small></span>
 					</button>
+				</div>
+				<!-- Seek, back to start and play/pause of this round's session: time only, never which
+				     candidate plays. With nothing paused, play is the Play key's own start. -->
+				<div class="rack-seek">
+					<Transport
+						engine={audio}
+						state={audio ? audioState : null}
+						variant="compact"
+						session={BLIND_SESSION}
+						onplay={transportPlay}
+						playDisabledReason={playReason}
+					/>
 				</div>
 				<div class="lamp-row">
 					<Lamp on={preview !== null} />
@@ -1124,6 +1184,10 @@
 		align-items: center;
 		gap: 14px;
 		margin-bottom: 16px;
+	}
+	.rack-seek {
+		min-width: 0;
+		margin-top: var(--space-2);
 	}
 	.rack-row :global(.btn.cego-play) {
 		flex: 0 0 auto;

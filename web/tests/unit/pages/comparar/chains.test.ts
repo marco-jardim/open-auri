@@ -99,6 +99,26 @@ describe('parallel comparison chains', () => {
 		expect(manager.audible()).toBe(false);
 	});
 
+	test('an edit while paused builds the replacement first, so the paused session survives', async () => {
+		const { engine, manager, handles } = setup();
+		const one = initialTracks().map((track) => ({ ...track, armed: track.id === 1 }));
+		await manager.sync(one);
+		await engine.start('chains', { startAt: 'random', session: 'comparar' });
+		engine.pause();
+		expect(engine.state()).toMatchObject({ paused: true, session: 'comparar' });
+		const edited = one.map((track) =>
+			track.id === 1
+				? { ...track, curve: { ...track.curve, preampDb: track.curve.preampDb - 1 } }
+				: track
+		);
+		await manager.sync(edited);
+		// The only chain was replaced, never removed first: the session is still resumable.
+		expect(handles[0].disconnect).toHaveBeenCalledOnce();
+		expect(engine.state()).toMatchObject({ paused: true, session: 'comparar' });
+		manager.dispose();
+		expect(engine.state()).toMatchObject({ paused: false, session: null });
+	});
+
 	test('disarming or replacing a curve disposes only the affected chain and tap', async () => {
 		const { engine, manager, handles } = setup();
 		const build = vi.spyOn(engine, 'buildChain');

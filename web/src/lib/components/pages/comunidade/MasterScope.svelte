@@ -8,8 +8,9 @@
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
-	import type { Listener } from './listener.svelte.ts';
+	import { COMUNIDADE_SESSION, type Listener } from './listener.svelte.ts';
 	import {
 		SCOPE_BOX,
 		avatarHue,
@@ -116,6 +117,13 @@
 
 	function choose(side: 'A' | 'B') {
 		if (scopeListening) listener.select(side);
+	}
+
+	/** Transport play with nothing of the page paused: the scope's A/B (a stale one goes). */
+	async function transportPlay() {
+		if (listener.busy) return;
+		if (scopeListening) listener.stop();
+		await toggleListen();
 	}
 </script>
 
@@ -253,6 +261,17 @@
 				{m.comunidade_ab_note()}
 			{/if}
 		</span>
+	</div>
+	<!-- The page's preview, whichever panel started it: pause keeps the pair, side and trims;
+	     with nothing paused, play is the scope's own A/B start. -->
+	<div class="scope-transport">
+		<Transport
+			engine={listener.engine}
+			variant="compact"
+			session={COMUNIDADE_SESSION}
+			onplay={transportPlay}
+			playDisabledReason={playReason}
+		/>
 	</div>
 	{#if target}
 		<div class="scope-actions">
@@ -458,6 +477,10 @@
 		color: #ece7dd;
 		flex: 1;
 		min-width: 220px;
+	}
+	.scope-transport {
+		min-width: 0;
+		margin-top: var(--space-2);
 	}
 	.scope-actions {
 		display: flex;

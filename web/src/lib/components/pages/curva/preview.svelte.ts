@@ -56,6 +56,8 @@ export class CurvaPreview {
 	#ab: ABPreview | null = null;
 	#outputs: { A: MeterTap | null; B: MeterTap | null } = { A: null, B: null };
 	#stageTaps: MeterTap[] = [];
+	/** Band index of each stage tap (the editor's non-OFF sections, in written order). */
+	#stageBands: number[] = [];
 	#generation = 0;
 	/** Start attempts; `stop`/`dispose` bump it so a start still awaiting knows it lost. */
 	#attempt = 0;
@@ -103,6 +105,8 @@ export class CurvaPreview {
 			this.starting = false;
 			this.paused = false;
 			this.playing = true;
+			// A resume plays again: the meters held in DATA while paused read the taps again.
+			if (resuming) this.#attachMeters();
 			this.exact = this.#engine.state().exact;
 			// An edit during the start must be heard, not the curve captured at the click.
 			const latest = this.#latest;
@@ -148,6 +152,7 @@ export class CurvaPreview {
 		if (!this.playing || !this.#owns) return;
 		this.playing = false;
 		this.paused = true;
+		this.#detachMeters();
 		this.#engine.pause();
 	}
 
@@ -186,7 +191,8 @@ export class CurvaPreview {
 	select(side: ABSide): void {
 		this.side = side;
 		this.#ab?.select(side);
-		this.vu.connect(this.#outputs[side]);
+		// Paused: no real frames, so the meters stay in DATA until the resume.
+		if (!this.paused) this.vu.connect(this.#outputs[side]);
 	}
 
 	/** Conservative proof of audible editor output; no context is created while idle. */
@@ -229,22 +235,27 @@ export class CurvaPreview {
 				if (this.#owns && this.paused && !this.starting) {
 					this.paused = false;
 					this.playing = true;
+					this.#attachMeters();
 				}
 				return;
 			}
 			if (ours && state.paused) {
-				// Paused from the Transport or the navbar: the session, chains and taps stay.
+				// Paused from the Transport or the navbar: the session, chains and taps stay; the
+				// meters show DATA (no real frames) until the resume.
 				if (this.playing) {
 					this.playing = false;
 					this.paused = true;
+					this.#detachMeters();
 				}
 				return;
 			}
 			if (this.playing || this.paused) {
-				// Stopped by the chrome, replaced or switched to raw: no longer this preview's to stop.
+				// Stopped by the chrome, replaced or switched to raw: no longer this preview's to stop,
+				// and its meters no longer get real frames.
 				this.#owns = false;
 				this.playing = false;
 				this.paused = false;
+				this.#detachMeters();
 			}
 		});
 	}
@@ -281,24 +292,40 @@ export class CurvaPreview {
 			}
 			this.#outputs = { A: a, B: b };
 			this.#stageTaps = stages;
-			this.vu.connect(this.#outputs[this.side]);
 			// Stage nodes exist only for non-OFF sections, in written order.
-			const active = editor.bands.flatMap((band, index) => (band.kind === 'OFF' ? [] : [index]));
-			active.forEach((bandIndex, k) => this.stages[bandIndex]?.connect(stages[k] ?? null));
+			this.#stageBands = editor.bands.flatMap((band, index) =>
+				band.kind === 'OFF' ? [] : [index]
+			);
+			// Taps of chains rebuilt while paused wait for the resume (no real frames meanwhile).
+			if (!this.paused) this.#attachMeters();
 		} catch (cause) {
 			// Meters stay in DATA mode (labelled) when the worklet cannot load; audio keeps playing.
 			console.warn('Curva meters unavailable', cause);
 		}
 	}
 
-	#disconnectMeters(): void {
+	/** Meters read the current taps: VU of the selected side, one LED per active section. */
+	#attachMeters(): void {
+		this.vu.connect(this.#outputs[this.side]);
+		this.#stageBands.forEach((bandIndex, k) =>
+			this.stages[bandIndex]?.connect(this.#stageTaps[k] ?? null)
+		);
+	}
+
+	/** Meters back to DATA, keeping the taps for a resume (pause). */
+	#detachMeters(): void {
 		this.vu.disconnect();
 		for (const meter of this.stages) meter.disconnect();
+	}
+
+	#disconnectMeters(): void {
+		this.#detachMeters();
 		for (const handle of [this.#outputs.A, this.#outputs.B, ...this.#stageTaps]) {
 			handle?.disconnect();
 		}
 		this.#outputs = { A: null, B: null };
 		this.#stageTaps = [];
+		this.#stageBands = [];
 	}
 
 	#teardown(): void {

@@ -383,9 +383,13 @@ test('the lever pauses: the session, chains and A/B stay, and a press continues 
 	});
 	expect(engine.state()).toMatchObject({ playing: true, session: CURVA_SESSION });
 	preview.select('A');
+	await vi.waitFor(() => expect(preview.vu.mode).toBe('live'));
 	const session = preview.session;
 
 	preview.stop();
+	// Paused: no real frames, so every meter reads DATA (the taps are kept for the resume).
+	expect(preview.vu.mode).toBe('data');
+	expect(preview.stages.every((stage) => stage.mode === 'data')).toBe(true);
 	expect(pause).toHaveBeenCalledOnce();
 	expect(engineStop).not.toHaveBeenCalled();
 	expect(engine.state()).toMatchObject({ playing: false, paused: true, session: CURVA_SESSION });
@@ -407,6 +411,7 @@ test('the lever pauses: the session, chains and A/B stay, and a press continues 
 	expect(preview.session).toBe(session);
 	expect(preview).toMatchObject({ playing: true, paused: false });
 	expect(engine.state()).toMatchObject({ playing: true, mode: 'chains', session: CURVA_SESSION });
+	await vi.waitFor(() => expect(preview.vu.mode).toBe('live'));
 
 	preview.dispose();
 	expect(engineStop).toHaveBeenCalledOnce();

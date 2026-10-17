@@ -92,9 +92,10 @@ test('unmount while the engine is still starting leaves nothing playing', async 
 	const audio = engine;
 	const realStart = audio.start.bind(audio);
 	let release: (() => void) | undefined;
-	vi.spyOn(audio, 'start').mockImplementationOnce(async (mode) => {
+	vi.spyOn(audio, 'start').mockImplementationOnce(async (mode, options) => {
 		await new Promise<void>((resolve) => (release = resolve));
-		await realStart(mode);
+		// The session tag is what tells the late start apart from another page's audio.
+		await realStart(mode, options);
 	});
 	const curve = neutralCurve();
 	await render(Preview, { audio, current: curve, candidate: curve });
@@ -104,6 +105,46 @@ test('unmount while the engine is still starting leaves nothing playing', async 
 	release?.();
 	await expect.poll(() => audio.state().playing).toBe(false);
 	expect(audio.state().mode).toBe('off');
+}, 20000);
+
+test('the Transport renders; a comparison starts at a random point and pause keeps it', async () => {
+	engine = createAudioEngine({ indexedDB: null, hasUserActivation: () => true });
+	const audio = engine;
+	const start = vi.spyOn(audio, 'start');
+	const pause = vi.spyOn(audio, 'pause');
+	const stop = vi.spyOn(audio, 'stop');
+	const createAB = vi.spyOn(audio, 'createAB');
+	const curve = neutralCurve();
+	await render(Preview, { audio, current: curve, candidate: curve });
+	const transport = page.getByRole('group', { name: m.transport_group() });
+	await expect.element(transport).toBeVisible();
+	await expect
+		.element(transport.getByRole('slider', { name: m.transport_seek() }))
+		.toBeInTheDocument();
+	// Nothing paused: Transport play is the page's own A/B start (level-matched by createAB).
+	await transport.getByRole('button', { name: m.transport_play(), exact: true }).click();
+	await expect.poll(() => audio.state().playing).toBe(true);
+	expect(createAB).toHaveBeenCalledOnce();
+	expect(start).toHaveBeenCalledExactlyOnceWith('chains', {
+		startAt: 'random',
+		session: 'soe-como-x'
+	});
+	await transport.getByRole('button', { name: m.transport_pause(), exact: true }).click();
+	expect(pause).toHaveBeenCalledOnce();
+	expect(stop).not.toHaveBeenCalled();
+	expect(audio.state()).toMatchObject({ playing: false, paused: true, session: 'soe-como-x' });
+	// Paused: meters fall back to DATA (no live reading without real frames).
+	await expect
+		.element(page.getByRole('img', { name: `B / VU: ${m.meter_no_data()}`, exact: true }))
+		.toBeVisible();
+	await transport.getByRole('button', { name: m.transport_resume(), exact: true }).click();
+	await expect.poll(() => audio.state().playing).toBe(true);
+	expect(start).toHaveBeenCalledOnce();
+	expect(createAB).toHaveBeenCalledOnce();
+	// Unmount ends the session it started.
+	await cleanup();
+	expect(stop).toHaveBeenCalledOnce();
+	expect(audio.state()).toMatchObject({ playing: false, paused: false, session: null });
 }, 20000);
 
 async function accessible(container: HTMLElement) {

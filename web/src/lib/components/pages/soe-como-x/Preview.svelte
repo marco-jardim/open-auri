@@ -3,7 +3,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { numberLabel } from '#lib/charts/scales.ts';
-	import type { AudioEngine, ABPreview, ABSide } from '#lib/audio/engine.ts';
+	import type { AudioEngine, AudioEngineState, ABPreview, ABSide } from '#lib/audio/engine.ts';
 	import {
 		tap,
 		createSpectrumAnalyser,
@@ -17,6 +17,7 @@
 	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
 	import SpectrumOverlay from '#lib/components/meters/SpectrumOverlay.svelte';
 	import { Button } from '#lib/components/primitives/index.ts';
+	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { CurveData } from '#lib/state/model.ts';
 	let {
@@ -49,11 +50,19 @@
 	let generation = 0;
 	/** The engine this preview put in chain mode; it stops it when the audition ends. */
 	let startedBy: AudioEngine | null = null;
+	/** Session tag of this audition (Transport, navbar). */
+	const SOE_SESSION = 'soe-como-x';
 
+	/** A state of this audition's session, playing or paused (not raw, not another page's). */
+	function ours(state: AudioEngineState): boolean {
+		return state.session === SOE_SESSION && (state.playing || state.paused);
+	}
+
+	/** Ends the session only if this preview started it and it is still this preview's. */
 	function release() {
 		const engine = startedBy;
 		startedBy = null;
-		if (engine && engine.state().mode === 'chains') engine.stop();
+		if (engine && ours(engine.state())) engine.stop();
 	}
 
 	function dispose() {
@@ -104,7 +113,8 @@
 	async function listen() {
 		if (!audio || !current || pending) return;
 		if (preview) {
-			if (audio.state().mode === 'chains') audio.stop();
+			// "Parar prévia" ends the audition; the Transport's pause keeps it.
+			if (ours(audio.state())) audio.stop();
 			startedBy = null;
 			dispose();
 			return;
@@ -123,17 +133,20 @@
 			exact = engine.state().exact;
 			stops.push(
 				engine.onChange((state) => {
-					playing = state.playing && state.mode === 'chains';
+					// Meters read live only while this audition plays (a pause shows DATA).
+					playing = state.playing && state.mode === 'chains' && state.session === SOE_SESSION;
 					exact = state.exact;
-					// Stopped or switched to raw elsewhere (chrome): no longer ours to stop.
-					if (state.mode !== 'chains' && startedBy === engine) startedBy = null;
+					// Stopped, replaced or switched to raw elsewhere: no longer ours to stop. A
+					// pause (Transport, navbar) keeps the session, so it stays ours.
+					if (!ours(state) && startedBy === engine) startedBy = null;
 				})
 			);
-			// Called before the first await, while the click still has user activation.
-			await engine.start('chains');
+			// Called before the first await, while the click still has user activation. A
+			// comparison starts at a random point of the file (SEEK.2); the file loops.
+			await engine.start('chains', { startAt: 'random', session: SOE_SESSION });
 			if (token !== generation) {
 				// Disposed (unmount, new snapshot) while starting: nothing of ours may keep playing.
-				if (engine.state().mode === 'chains') engine.stop();
+				if (ours(engine.state())) engine.stop();
 				return;
 			}
 			startedBy = engine;
@@ -161,6 +174,12 @@
 		} finally {
 			if (token === generation) pending = false;
 		}
+	}
+	/** Transport play with nothing of this audition paused: a fresh one (a stale one goes). */
+	async function transportPlay() {
+		if (pending) return;
+		if (preview) dispose();
+		await listen();
 	}
 	const listenReason = $derived(
 		!audio ? m.soe_fux_audio_loading() : !current ? m.soe_fux_editor_loading() : null
@@ -223,6 +242,14 @@
 			onclick={() => select('B')}>B</Button
 		>
 	</div>
+	<!-- Pause keeps the audition (side, trims, taps, position); "Parar prévia" ends it. -->
+	<Transport
+		engine={audio}
+		variant="compact"
+		session={SOE_SESSION}
+		onplay={transportPlay}
+		playDisabledReason={listenReason}
+	/>
 	{#if trims}
 		<p class="level" role="status">{m.soe_fux_level({ a: db(trims[0]), b: db(trims[1]) })}</p>
 	{/if}

@@ -3,10 +3,15 @@
 // lineage is audible, so a channel's LEDs light only while that channel really plays, and it counts
 // audible time per lineage for the `previewed` activity (≥ 10 s, PREVIEW_MIN_MS). Nothing here
 // writes to a cable.
+// Transport (SEEK.2): every preview starts at a random point in [25 %, 75 %] of the file
+// (`startAt: 'random'`), tagged `COMUNIDADE_SESSION`; the file loops. A pause (Transport, navbar)
+// keeps the pair, the side and the trims and stops counting audible time; a resume counts again.
+// Only `stop` (a panel's own stop, a new preview, unmount) ends the session with `engine.stop()`.
 import type {
 	ABPreview,
 	ABSide,
 	AudioEngine,
+	AudioEngineState,
 	PreviewChain,
 	PreviewCurve
 } from '#lib/audio/engine.ts';
@@ -43,6 +48,9 @@ interface Active {
 	side: ABSide;
 }
 
+/** Session tag of the Comunidade preview, whichever panel owns it (Transport, navbar). */
+export const COMUNIDADE_SESSION = 'comunidade';
+
 export function createListener(options: ListenerOptions) {
 	const now = options.now ?? (() => Date.now());
 	const setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
@@ -55,6 +63,8 @@ export function createListener(options: ListenerOptions) {
 	let active = $state.raw<Active | null>(null);
 	let preview = $state.raw<ABPreview | null>(null);
 	let busy = $state(false);
+	/** The running preview is paused (resumable): nothing counts as audible meanwhile. */
+	let paused = $state(false);
 	let engine: AudioEngine | null = null;
 	let unsubscribe: (() => void) | null = null;
 	let attempt = 0;
@@ -101,6 +111,13 @@ export function createListener(options: ListenerOptions) {
 		}, remaining);
 	}
 
+	/** The engine plays or holds paused this page's session (not raw, not another page's). */
+	function owned(target: AudioEngine): boolean {
+		const state = target.state();
+		return state.session === COMUNIDADE_SESSION && (state.playing || state.paused);
+	}
+
+	/** Ends the session (when still ours) and releases the pair. */
 	function release() {
 		closeSegment();
 		attempt++;
@@ -108,11 +125,35 @@ export function createListener(options: ListenerOptions) {
 		unsubscribe = null;
 		const used = engine;
 		engine = null;
-		if (used && used.state().mode === 'chains') used.stop();
+		if (used && owned(used)) used.stop();
 		preview?.dispose();
 		preview = null;
 		active = null;
+		paused = false;
 		busy = false;
+	}
+
+	/** Follows the engine: pause/resume of this session, else a stop or another session. */
+	function follow(state: AudioEngineState) {
+		const ours = state.session === COMUNIDADE_SESSION;
+		if (ours && state.playing && state.mode === 'chains') {
+			// Resumed (Transport, navbar): audible time counts again from now.
+			if (paused) {
+				paused = false;
+				openSegment();
+			}
+			return;
+		}
+		if (ours && state.paused) {
+			// Paused: the pair, side and trims stay; silence never counts as listening.
+			if (!paused) {
+				paused = true;
+				closeSegment();
+			}
+			return;
+		}
+		// Stopped, replaced or switched to raw elsewhere: no longer ours.
+		release();
 	}
 
 	async function play(request: ListenRequest): Promise<void> {
@@ -127,22 +168,22 @@ export function createListener(options: ListenerOptions) {
 				experimental: true,
 				initial: request.initial
 			});
-			await target.start('chains');
+			// A comparison (and every blind round) starts at a random point of the file.
+			await target.start('chains', { startAt: 'random', session: COMUNIDADE_SESSION });
 			if (token !== attempt) {
+				if (owned(target)) target.stop();
 				created.dispose();
-				if (target.state().mode === 'chains') target.stop();
 				return;
 			}
 			engine = target;
 			preview = created;
 			active = { request, side: request.initial };
-			unsubscribe = target.onChange((state) => {
-				if (state.mode !== 'chains' || !state.playing) release();
-			});
+			paused = false;
+			unsubscribe = target.onChange(follow);
 			openSegment();
 		} catch (error) {
+			if (owned(target)) target.stop();
 			created?.dispose();
-			if (target.state().mode === 'chains') target.stop();
 			throw error;
 		} finally {
 			if (token === attempt) busy = false;
@@ -157,9 +198,28 @@ export function createListener(options: ListenerOptions) {
 		openSegment();
 	}
 
+	/** Pauses the running preview (`engine.pause()`), keeping it resumable. */
+	function pause() {
+		if (engine && active && !paused) engine.pause();
+	}
+
+	/** Continues the paused preview where it was (no new random point, same side). */
+	async function resume(): Promise<boolean> {
+		if (!engine || !active || !paused) return false;
+		return engine.resume();
+	}
+
 	return {
 		get busy() {
 			return busy;
+		},
+		/** The running preview is paused (Transport, navbar). */
+		get paused() {
+			return paused;
+		},
+		/** The page's engine, for the Transport (null while the audio runtime loads). */
+		get engine(): AudioEngine | null {
+			return options.engine();
 		},
 		get active(): Readonly<Active> | null {
 			return active;
@@ -174,18 +234,23 @@ export function createListener(options: ListenerOptions) {
 		get owner(): string | null {
 			return active?.request.owner ?? null;
 		},
-		/** True while `lineageId` is the audible side of a non-blind preview. */
+		/** True while `lineageId` is the audible side of a non-blind preview (not while paused). */
 		isPlaying(lineageId: string): boolean {
-			return !!active && !active.request.blind && audibleLineage() === lineageId;
+			return !!active && !paused && !active.request.blind && audibleLineage() === lineageId;
 		},
-		/** The chain of `lineageId` while it is audible (its real output feeds the LEDs). */
+		/**
+		 * The chain of `lineageId` while it is audible (its real output feeds the LEDs); null while
+		 * paused, so no LED lights without real frames.
+		 */
 		chainOf(lineageId: string): PreviewChain | null {
-			if (!active || !preview || active.request.blind) return null;
+			if (!active || !preview || paused || active.request.blind) return null;
 			if (audibleLineage() !== lineageId) return null;
 			return active.side === 'A' ? preview.a : preview.b;
 		},
 		play,
 		select,
+		pause,
+		resume,
 		stop: release,
 		/** Audible ms so far per lineage (closed segments only), for tests and diagnostics. */
 		audibleMs(lineageId: string): number {
