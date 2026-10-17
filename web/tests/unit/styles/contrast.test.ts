@@ -373,8 +373,41 @@ describe('page text on page surfaces (FUX integration queue)', () => {
 		expect(contrast(fg, bg)).toBeGreaterThanOrEqual(TEXT);
 	});
 
-	// Below 4.5:1 with this file's formula; routed to the page owner, never relaxed here.
-	it.todo('soe-como-x: --accent-hi (#ff78af) on #45483e reads as text (3.80:1 today)');
-	it.todo('soe-como-x: --muted-hi (#a39d92) on #45483e reads as text (3.47:1 today)');
-	it.todo('soe-como-x: --muted-hi (#a39d92) on #363a30 reads as text (4.32:1 today)');
+	// Soe como X station panels (FUX.P3): the olive gradient #45483e to #363a30 is lighter than the
+	// hardware tokens assume, so `.station` remaps --accent-hi and --muted-hi to panel-safe
+	// variants declared on `.soe-page`. Values are read from the component, not copied.
+	describe('soe-como-x station panels', () => {
+		const WORKSTATION = read('../../../src/lib/components/pages/soe-como-x/Workstation.svelte');
+		const panelStops: [string, Rgba][] = [
+			['#45483e', hex('#45483e')],
+			['#363a30', hex('#363a30')]
+		];
+		const panelAccent = parseColor(declared(WORKSTATION, '--soe-panel-accent', '.soe-page {'));
+
+		it('the stations remap the hi tokens to the panel-safe variants', () => {
+			expect(WORKSTATION).toContain('linear-gradient(120deg, #45483e, #363a30)');
+			expect(declared(WORKSTATION, '--accent-hi', '.station {')).toBe('var(--soe-panel-accent)');
+			expect(declared(WORKSTATION, '--muted-hi', '.station {')).toBe('var(--soe-panel-muted)');
+			expect(declared(WORKSTATION, '--soe-panel-muted', '.soe-page {')).toBe(
+				'var(--text-2, #cfc9be)'
+			);
+		});
+
+		it.each(panelStops)('panel accent on %s reads as text (>= 4.5:1)', (_name, surface) => {
+			expect(contrast(panelAccent, surface)).toBeGreaterThanOrEqual(TEXT);
+		});
+
+		it.each(panelStops)(
+			'panel secondary text (--text-2) on %s reads as text (>= 4.5:1)',
+			(_name, surface) => {
+				expect(contrast(text2, surface)).toBeGreaterThanOrEqual(TEXT);
+			}
+		);
+
+		it('the page tokens alone would fail there, which is why the remap exists', () => {
+			expect(contrast(soeAccentHi, hex('#45483e'))).toBeLessThan(TEXT);
+			expect(contrast(mutedHi, hex('#45483e'))).toBeLessThan(TEXT);
+			expect(contrast(mutedHi, hex('#363a30'))).toBeLessThan(TEXT);
+		});
+	});
 });

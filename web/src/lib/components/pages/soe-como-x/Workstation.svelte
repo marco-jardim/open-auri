@@ -948,6 +948,12 @@
 <style>
 	.soe-page {
 		--soe-panel: linear-gradient(120deg, #45483e, #363a30);
+		/* Text on the olive station panels (#45483e to #363a30, the mock's material). The page's
+		   --accent-hi #ff78af (3.80:1) and --muted-hi #a39d92 (3.47:1) are too dark there, so the
+		   stations use lighter variants, as the mock does (#ff99c4, #c6c9b7). Asserted in
+		   tests/unit/styles/contrast.test.ts. */
+		--soe-panel-accent: #ffa3c8; /* 5.03:1 on #45483e, 6.28:1 on #363a30 */
+		--soe-panel-muted: var(--text-2, #cfc9be); /* 5.67:1 on #45483e, 7.07:1 on #363a30 */
 		max-width: 1600px;
 		padding: var(--space-7, 36px) var(--space-5, 24px) 0;
 		margin: auto;
@@ -1101,6 +1107,10 @@
 		align-items: stretch;
 	}
 	.station {
+		/* Every accent and secondary text inside a station (CsvImport, Preview, primitives
+		   included) inherits the panel-safe variants. */
+		--accent-hi: var(--soe-panel-accent);
+		--muted-hi: var(--soe-panel-muted);
 		position: relative;
 		min-width: 0;
 		padding: var(--space-3, 13px) var(--space-3, 13px) var(--space-4, 15px);
