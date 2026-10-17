@@ -1,8 +1,8 @@
 // Versioned template: only dollar-brace placeholders, values come from the repository .env (or CI
 // process.env) through tools/render-wrangler.mjs, which writes the ignored wrangler.jsonc.
 //
-// Jobs Worker: no HTTP surface (workers_dev off), three UTC crons (daily 00:05, hourly, every 15
-// minutes; jobs per cron in src/jobs/registry.ts, kept in sync by test/registry.test.ts) and the
+// Jobs Worker: no HTTP surface (workers_dev off), four UTC crons (daily 00:05, hourly, every 15
+// minutes, weekly Monday 03:00; jobs per cron in src/jobs/registry.ts, kept in sync by test/registry.test.ts) and the
 // consumer of the access-log queue (failed batches retry, then land in the dead-letter queue). Same D1/KV/R2 resources as the
 // web Worker; D1 migrations live in web/migrations and are applied from web/ only. The top level is
 // production; `env.production` mirrors it with the same name so that `--env production` commands
@@ -29,7 +29,7 @@
     "redact_query_string": true,
     "logs": { "enabled": true, "invocation_logs": false }
   },
-  "triggers": { "crons": ["5 0 * * *", "0 * * * *", "*/15 * * * *"] },
+  "triggers": { "crons": ["5 0 * * *", "0 * * * *", "*/15 * * * *", "0 3 * * 1"] },
   "d1_databases": [
     {
       "binding": "DB",
@@ -66,7 +66,7 @@
         "redact_query_string": true,
         "logs": { "enabled": true, "invocation_logs": false }
       },
-      "triggers": { "crons": ["5 0 * * *", "0 * * * *", "*/15 * * * *"] },
+      "triggers": { "crons": ["5 0 * * *", "0 * * * *", "*/15 * * * *", "0 3 * * 1"] },
       "d1_databases": [
         {
           "binding": "DB",
@@ -103,7 +103,7 @@
         "redact_query_string": true,
         "logs": { "enabled": true, "invocation_logs": false }
       },
-      "triggers": { "crons": ["5 0 * * *", "0 * * * *", "*/15 * * * *"] },
+      "triggers": { "crons": ["5 0 * * *", "0 * * * *", "*/15 * * * *", "0 3 * * 1"] },
       "d1_databases": [
         {
           "binding": "DB",

@@ -1,5 +1,6 @@
 // Typed job registry of the jobs Worker. Jobs are added by T3.3 (salt rotation, access-log
-// consumer and retention) and T4.12 (rankings, S6 aggregation, trade expiry, re-gate). An event
+// consumer and retention), T4.12 (rankings, S6 aggregation, trade expiry, re-gate) and T5.7
+// (retention cleanup, D1 backup, public dump; T5.3). An event
 // with no registered job fails loudly: a cron that silently does nothing, or a queue batch that is
 // acknowledged without being processed, would lose work.
 //
@@ -16,7 +17,10 @@ import {
 import { runRankingsJob } from '../../../../web/src/lib/server/social/rankings.ts';
 import { accessLogConsumerJob } from './access-log-consumer.ts';
 import { accessLogRetentionJob } from './access-log-retention.ts';
+import { backupJob } from './backup.ts';
+import { cleanupJob } from './cleanup.ts';
 import { ogSweepJob } from './og-sweep.ts';
+import { publicDumpJob } from './public-dump.ts';
 import { createRankingsJob } from './rankings.ts';
 import { rateLimitGcJob } from './rate-limit-gc.ts';
 import { regateJob } from './regate.ts';
@@ -32,6 +36,8 @@ export const CRONS = {
   hourly: '0 * * * *',
   /** Minutes 0, 15, 30 and 45 of every hour. */
   quarterHour: '*/15 * * * *',
+  /** 03:00 UTC every Monday. */
+  weekly: '0 3 * * 1',
 } as const;
 export type CronExpression = (typeof CRONS)[keyof typeof CRONS];
 
@@ -74,11 +80,15 @@ export class JobFailedError extends Error {
 /**
  * - Daily (00:05 UTC): salt rotation first (tomorrow's salt must exist before midnight), then the
  *   rate-limit and access-log retention sweeps, the S6 aggregation (bounded window, pair cap and
- *   estimator budget) and the OG image sweep.
+ *   estimator budget), the OG image sweep and the retention cleanup (T5.3, bounded per run; what
+ *   is left goes the next day).
  * - Hourly: the re-gate of curves cached under an older gate version FIRST (the most CPU-heavy
  *   step, ~150 ms per curve, time-budgeted in regate.ts and only non-zero after a threshold
  *   change; on its own cron so no daily job can starve it, and the next hour continues where it
- *   stopped), then S7 trade expiry and re-pairing.
+ *   stopped), then S7 trade expiry and re-pairing, then the D1 backup again so an unfinished
+ *   weekly backup resumes (idempotent per ISO week: once the manifest exists, a run is one KV
+ *   read).
+ * - Weekly (Monday 03:00 UTC): the D1 backup to R2, then the public dump.
  * - Every 15 minutes: the re-gate again (FX4.9: shortens the window in which lists still show a
  *   head the current gate rejects; idempotent, so its overlap with the hourly run at minute 0
  *   only re-reads an empty stale set or redoes the same verdicts), THEN rankings
@@ -94,9 +104,11 @@ export const registry: JobRegistry = {
       accessLogRetentionJob,
       s6AggregateJob,
       ogSweepJob,
+      cleanupJob,
     ],
-    [CRONS.hourly]: [regateJob, tradesExpireJob],
+    [CRONS.hourly]: [regateJob, tradesExpireJob, backupJob],
     [CRONS.quarterHour]: [regateJob, createRankingsJob(runRankingsJob)],
+    [CRONS.weekly]: [backupJob, publicDumpJob],
   },
   queues: {
     'access-log': accessLogConsumerJob,

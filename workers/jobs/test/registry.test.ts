@@ -58,17 +58,23 @@ describe('job registry', () => {
       'access-log-retention',
       's6-aggregate',
       'og-sweep',
+      'cleanup',
     ]);
-    // The re-gate has its own hourly tick and runs first in it: no daily job can starve it.
-    expect(scheduledNames(CRONS.hourly)).toEqual(['regate', 'trades-expire']);
+    // The re-gate has its own hourly tick and runs first in it: no daily job can starve it. The
+    // backup comes last so an unfinished weekly backup resumes every hour.
+    expect(scheduledNames(CRONS.hourly)).toEqual(['regate', 'trades-expire', 'backup']);
     expect(scheduledNames(CRONS.daily)).not.toContain('regate');
     // FX4.9: the re-gate also runs every 15 minutes, before rankings (shorter list drain window).
     expect(scheduledNames(CRONS.quarterHour)).toEqual(['regate', 'rankings']);
     expect(registry.scheduled[CRONS.quarterHour]?.[0]).toBe(registry.scheduled[CRONS.hourly]?.[0]);
+    // Weekly (Monday 03:00 UTC): the D1 backup, then the public dump.
+    expect(scheduledNames(CRONS.weekly)).toEqual(['backup', 'public-dump']);
+    expect(registry.scheduled[CRONS.weekly]?.[0]).toBe(registry.scheduled[CRONS.hourly]?.[2]);
     expect(CRONS).toEqual({
       daily: '5 0 * * *',
       hourly: '0 * * * *',
       quarterHour: '*/15 * * * *',
+      weekly: '0 3 * * 1',
     });
     expect(CRONS.quarterHour).toBe(RANKINGS_CRON);
     expect(registry.queues['access-log']?.name).toBe('access-log-consumer');
@@ -96,6 +102,8 @@ describe('job registry', () => {
     const crons = templateCrons();
     expect(Object.keys(crons)).toEqual(['top', 'production', 'staging']);
     for (const list of Object.values(crons)) {
+      expect(list).toHaveLength(4);
+      expect(list).toContain('0 3 * * 1');
       expect(new Set(list).size).toBe(list.length);
       expect([...list].sort()).toEqual(registered);
     }
@@ -125,6 +133,7 @@ describe('job registry', () => {
         'job.access_log_retention',
         'job.s6_aggregate',
         'job.og-sweep',
+        'job.cleanup',
       ]),
     );
     expect(events).not.toContain('job.regate');

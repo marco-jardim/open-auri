@@ -77,15 +77,15 @@ Decisões:
 
 Limites por execução: até 500 linhas por comando (90 lotes do S6 e 50 lápides por comando), até 10 comandos por passo e 20 s no total. O que sobra sai no dia seguinte. O log tem só contagens por passo.
 
-## 4. Agendamento recomendado
+## 4. Agendamento
 
-Os jobs não estão registrados ainda (T5.7). Recomendação:
+Registrados na T5.7 em `workers\jobs\src\jobs\registry.ts` (ordem dentro de cada cron = ordem de execução):
 
 | Job | Export | Cron (UTC) |
 |---|---|---|
-| Backup | `backupJob` | `0 3 * * 1` (segunda, 03:00) e também no cron de hora em hora `0 * * * *`, para continuar um backup que não terminou; depois de completo, cada execução é uma leitura de KV |
-| Dump público | `publicDumpJob` | `0 3 * * 1` |
-| Limpeza | `cleanupJob` | `5 0 * * *` (cron diário existente) |
+| Backup | `backupJob` | `0 3 * * 1` (segunda, 03:00, antes do dump) e também no cron de hora em hora `0 * * * *` (depois do re-gate e da expiração de trocas), para continuar um backup que não terminou; depois de completo, cada execução é uma leitura de KV |
+| Dump público | `publicDumpJob` | `0 3 * * 1` (depois do backup) |
+| Limpeza | `cleanupJob` | `5 0 * * *` (cron diário, depois dos outros jobs diários) |
 
 Um cron novo exige a lista `triggers.crons` do `workers\jobs\wrangler.template.jsonc` (nos três ambientes) e `CRONS` no `registry.ts`.
 
@@ -150,7 +150,7 @@ Guarde o bookmark impresso fora do repositório.
    npx wrangler dev --env staging --remote --test-scheduled
    ```
 
-   e, em outro terminal, dispare `http://localhost:8787/__scheduled?cron=0+3+*+*+1` (backup e dump) e `http://localhost:8787/__scheduled?cron=5+0+*+*+*` (limpeza), depois de registrados na T5.7.
+   e, em outro terminal, dispare `http://localhost:8787/__scheduled?cron=0+3+*+*+1` (backup e dump) e `http://localhost:8787/__scheduled?cron=5+0+*+*+*` (limpeza e os outros jobs diários).
 2. Confirme no R2 de staging: `backups/<semana>/manifest.json`, nenhum arquivo `access_log*` ou `rate_limit*` na semana, `public/dump/latest.json.gz`.
 3. Siga a seção 6, passo 3, com um banco descartável (`<NOVO_BANCO>` só para o teste), confira as contagens e apague o banco descartável e o diretório local.
 4. Teste o Time Travel em staging: anote um bookmark, faça uma alteração inofensiva, restaure pelo bookmark e confira.
