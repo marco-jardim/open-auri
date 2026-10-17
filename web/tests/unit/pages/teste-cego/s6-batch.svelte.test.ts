@@ -23,6 +23,10 @@ import {
 	type ReceiptStorage
 } from '#lib/components/pages/teste-cego/s6.ts';
 import S6Send from '#lib/components/pages/teste-cego/S6Send.svelte';
+import { m } from '#lib/paraglide/messages.js';
+
+/** Unavailable buttons say why: the reason is part of the accessible description. */
+const why = (text: string) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 function memory(): ReceiptStorage & { map: Map<string, string> } {
 	const map = new Map<string, string>();
@@ -115,10 +119,14 @@ describe('S6Send', () => {
 		expect(body.consentVersion).toBe(S6_CONSENT_VERSION);
 		expect(body.receipt).toMatch(S6_RECEIPT_PATTERN);
 		const send = page.getByRole('button', { name: 'Enviar preferências', exact: true });
-		await expect.element(send).toBeDisabled();
+		await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(send).toHaveAccessibleDescription(why(m.cegos6_ready_note()));
 		await page.getByRole('checkbox').nth(0).click();
 		await page.getByRole('checkbox').nth(1).click();
-		await expect.element(send).toBeDisabled();
+		await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+		// Consent given, but this host has no Turnstile: the reason says the check is missing.
+		await expect.element(send).toHaveAccessibleDescription(why(m.cego_fuxb_reason_no_check()));
+		(send.element() as HTMLElement).click();
 		expect(api.postS6Batch).not.toHaveBeenCalled();
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
@@ -142,9 +150,9 @@ describe('S6Send', () => {
 		expect(readReceipts(storage).map((r) => r.receipt)).toEqual([sent.receipt]);
 		// A fresh receipt for the next batch; the single-use token is gone.
 		await expect.poll(() => JSON.parse(preview!.value).receipt).not.toBe(sent.receipt);
-		await expect
-			.element(page.getByRole('button', { name: 'Enviar preferências', exact: true }))
-			.toBeDisabled();
+		const again = page.getByRole('button', { name: 'Enviar preferências', exact: true });
+		await expect.element(again).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(again).toHaveAccessibleDescription(why(m.cegos6_ready_note()));
 	});
 
 	test('a refused batch forgets its receipt', async () => {
@@ -160,8 +168,8 @@ describe('S6Send', () => {
 		await page.getByRole('checkbox').nth(0).click();
 		await page.getByRole('checkbox').nth(1).click();
 		const send = page.getByRole('button', { name: 'Enviar preferências', exact: true });
-		await expect.element(send).toBeEnabled();
-		await send.click();
+		await expect.element(send).not.toHaveAttribute('aria-disabled');
+		(send.element() as HTMLElement).click();
 		await vi.waitFor(() => expect(api.postS6Batch).toHaveBeenCalledOnce());
 		await vi.waitFor(() => expect(readReceipts(storage)).toEqual([]));
 	});
@@ -172,8 +180,27 @@ describe('S6Send', () => {
 		addReceipt(storage, { receipt, day: '2026-10-16', pairs: 2 });
 		const api = { postS6Batch: vi.fn(), deleteS6Batch: vi.fn(async () => undefined) };
 		await render(S6Send, { session: null, api, storage });
-		await page.getByRole('button', { name: new RegExp(receipt.slice(0, 8)) }).click();
+		const remove = page.getByRole('button', { name: new RegExp(receipt.slice(0, 8)) });
+		await expect.element(remove).not.toHaveAttribute('aria-disabled');
+		(remove.element() as HTMLElement).click();
 		await vi.waitFor(() => expect(api.deleteS6Batch).toHaveBeenCalledWith(receipt));
 		await vi.waitFor(() => expect(readReceipts(storage)).toEqual([]));
+	});
+
+	test('without a social client, send and withdraw stay unavailable and say why', async () => {
+		const storage = memory();
+		const receipt = newReceipt();
+		addReceipt(storage, { receipt, day: '2026-10-16', pairs: 2 });
+		const fetchSpy = vi.spyOn(globalThis, 'fetch');
+		await render(S6Send, { session: finished(), api: null, storage, token: 'tok-3' });
+		const send = page.getByRole('button', { name: 'Enviar preferências', exact: true });
+		await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(send).toHaveAccessibleDescription(why(m.cegos6_unavailable()));
+		const remove = page.getByRole('button', { name: new RegExp(receipt.slice(0, 8)) });
+		await expect.element(remove).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(remove).toHaveAccessibleDescription(why(m.cegos6_unavailable()));
+		(remove.element() as HTMLElement).click();
+		expect(readReceipts(storage).map((r) => r.receipt)).toEqual([receipt]);
+		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 });

@@ -4,6 +4,7 @@
 	import BlindTest from '#lib/components/pages/teste-cego/BlindTest.svelte';
 	import type { Candidate } from '#lib/components/pages/teste-cego/experiment.ts';
 	import { createSocialApi } from '#lib/social/index.ts';
+	import { Tour } from '#lib/components/comprehension/index.ts';
 
 	const context = getAppContext();
 	const app = $derived(context.client);
@@ -30,3 +31,6 @@
 	{api}
 	siteKey={PUBLIC_TURNSTILE_SITE_KEY}
 />
+<!-- Steps: cego-prepare (tablist), cego-listen (console), cego-result (stage). The trigger lives
+     in the stage header (ListeningRoom); the page-level tour renders the steps. -->
+<Tour page="teste-cego" />

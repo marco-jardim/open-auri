@@ -5,6 +5,10 @@ import { cleanup, render } from 'vitest-browser-svelte';
 import { createAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import BlindTest from '#lib/components/pages/teste-cego/BlindTest.svelte';
+import { m } from '#lib/paraglide/messages.js';
+
+/** Unavailable controls say why: the reason is part of the accessible description. */
+const why = (text: string) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 const engines: AudioEngine[] = [];
 function sharedEngine() {
@@ -122,10 +126,13 @@ for (const copy of [
 		expect(screen.container.textContent).toContain('13');
 		await page.getByRole('tab', { name: new RegExp(copy.share) }).click();
 		const send = page.getByRole('button', { name: copy.send, exact: true });
-		await expect.element(send).toBeDisabled();
+		await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(send).toHaveAccessibleDescription(why(m.cegos6_unavailable()));
 		await page.getByRole('checkbox').nth(0).click();
 		await page.getByRole('checkbox').nth(1).click();
-		await expect.element(send).toBeDisabled();
+		await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+		// Playwright refuses to click aria-disabled elements; dispatch the click to prove it is inert.
+		(send.element() as HTMLElement).click();
 		expect(fetchSpy).not.toHaveBeenCalled();
 		await accessible(screen.container);
 	}, 30000);
@@ -144,19 +151,28 @@ test('normal motion blocks interaction for the three-second shuffle; tab arrows 
 	await page.getByRole('checkbox', { name: /^Auri\b/ }).click();
 	await page.getByRole('checkbox', { name: /^Natural\b/ }).click();
 	await page.getByRole('button', { name: 'Start', exact: true }).click();
+	// Unavailable controls keep focus and say why (Button disabledReason).
+	const panelPlay = page.getByRole('tabpanel').getByRole('button', { name: 'Play', exact: true });
+	await expect.element(panelPlay).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(panelPlay).toHaveAttribute('aria-describedby');
 	await expect
-		.element(page.getByRole('tabpanel').getByRole('button', { name: 'Play', exact: true }))
-		.toBeDisabled();
-	await expect.element(page.getByRole('tab', { name: /Candidates/ })).toBeDisabled();
+		.element(page.getByRole('button', { name: 'Position 1', exact: true }).first())
+		.toHaveAttribute('aria-disabled', 'true');
+	const lockedTab = page.getByRole('tab', { name: /Candidates/ });
+	await expect.element(lockedTab).toBeDisabled();
+	await expect
+		.element(lockedTab)
+		.toHaveAccessibleDescription(why(m.cego_fuxb_reason_tabs_locked()));
+	await expect
+		.element(page.getByText(m.cego_fuxb_reason_tabs_locked(), { exact: true }))
+		.toBeVisible();
 	expect(audio.state().playing).toBe(false);
 	await expect
 		.poll(() => screen.container.querySelector('.room')?.classList.contains('moving'), {
 			timeout: 5000
 		})
 		.toBe(false);
-	await expect
-		.element(page.getByRole('tabpanel').getByRole('button', { name: 'Play', exact: true }))
-		.toBeEnabled();
+	await expect.element(panelPlay).not.toHaveAttribute('aria-disabled');
 	await page.getByRole('button', { name: 'Cancel test', exact: true }).click();
 	expect(audio.state().playing).toBe(false);
 	await accessible(screen.container);

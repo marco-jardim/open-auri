@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
 	import Turnstile from '#lib/components/security/Turnstile.svelte';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { isSocialApiError, type SocialApi } from '#lib/social/index.ts';
 	import type { Session } from './experiment.ts';
 	import {
@@ -44,12 +45,36 @@
 	let receipt = $state(newReceipt());
 	let attempt = $state(0);
 	let busy = $state(false);
+	/** What is running: 'send' or the receipt being withdrawn (its button shows `loading`). */
+	let pending = $state<string | null>(null);
 	let message = $state('');
 	let receipts = $state.raw<S6Receipt[]>([]);
 	const consented = $derived(consentData && consentWithdraw);
 	const batch = $derived(buildBatch(receipt, pairs));
 	const payload = $derived(JSON.stringify(batch, null, 2));
 	const canSend = $derived(consented && api !== null && token !== '' && pairs.length > 0 && !busy);
+	// Unavailable always says why (spec §2.6). The button of the running operation shows
+	// `loading` instead of a reason: a withdrawn row is removed while its button may still hold
+	// focus, and a reason tooltip on a removed, focused button would close during the update.
+	const sendReason = $derived(
+		api === null
+			? m.cegos6_unavailable()
+			: pairs.length === 0
+				? m.cegos6_no_pairs()
+				: !consented
+					? m.cegos6_ready_note()
+					: token === ''
+						? siteKey
+							? m.cegos6_ready_note()
+							: m.cego_fuxb_reason_no_check()
+						: busy && pending !== 'send'
+							? m.cego_fuxb_reason_busy()
+							: null
+	);
+	function withdrawReason(record: S6Receipt) {
+		if (api === null) return m.cegos6_unavailable();
+		return busy && pending !== record.receipt ? m.cego_fuxb_reason_busy() : null;
+	}
 
 	$effect(() => {
 		receipts = store ? readReceipts(store) : [];
@@ -76,6 +101,7 @@
 		const body = batch;
 		const used = token;
 		busy = true;
+		pending = 'send';
 		message = m.cegos6_sending();
 		// Stored first: if the answer is lost after the server kept the batch, it can still be withdrawn.
 		const record = { receipt: body.receipt, day: s6Day(), pairs: body.pairs.length };
@@ -102,6 +128,7 @@
 			}
 		} finally {
 			busy = false;
+			pending = null;
 			token = '';
 			attempt += 1;
 		}
@@ -110,6 +137,7 @@
 	async function withdraw(record: S6Receipt) {
 		if (api === null || busy) return;
 		busy = true;
+		pending = record.receipt;
 		try {
 			await api.deleteS6Batch(record.receipt);
 			if (store) receipts = removeReceipt(store, record.receipt);
@@ -121,6 +149,7 @@
 			message = m.cegos6_delete_failed();
 		} finally {
 			busy = false;
+			pending = null;
 		}
 	}
 </script>
@@ -142,13 +171,14 @@
 				<Turnstile {siteKey} action={S6_TURNSTILE_ACTION} bind:token label={m.cegos6_turnstile()} />
 			{/key}
 		{/if}
-		<button
-			class="accent"
-			type="button"
-			disabled={!canSend}
-			aria-describedby="{uid}-send-note"
-			onclick={send}>{m.cego_send()}</button
-		>
+		<div class="send-row">
+			<Button
+				variant="primary"
+				disabledReason={sendReason}
+				loading={pending === 'send'}
+				onclick={send}>{m.cego_send()}</Button
+			>
+		</div>
 		<p id="{uid}-send-note" class="note">
 			{api === null
 				? m.cegos6_unavailable()
@@ -174,11 +204,12 @@
 				<li>
 					<span class="mono">{record.receipt.slice(0, 8)}…</span>
 					<span>{m.cegos6_receipt_item({ day: record.day, count: record.pairs })}</span>
-					<button
-						type="button"
-						disabled={api === null || busy}
+					<Button
+						size="sm"
+						disabledReason={withdrawReason(record)}
+						loading={pending === record.receipt}
 						aria-label={m.cegos6_delete_label({ id: record.receipt.slice(0, 8) })}
-						onclick={() => withdraw(record)}>{m.cegos6_delete()}</button
+						onclick={() => withdraw(record)}>{m.cegos6_delete()}</Button
 					>
 				</li>
 			{/each}
@@ -213,24 +244,7 @@
 		color: #e8d3a6;
 		font-size: 13px;
 	}
-	button {
-		font: inherit;
-		border: 1px solid #ece7dd24;
-		border-radius: 6px;
-		background: transparent;
-		color: inherit;
-		padding: 7px 12px;
-		cursor: pointer;
-	}
-	button:disabled {
-		opacity: 0.45;
-		cursor: not-allowed;
-	}
-	.accent {
-		background: #ffd27a;
-		color: #1d1606;
-		border-color: #ffd27a;
-		font-weight: 600;
+	.send-row {
 		margin-top: 10px;
 	}
 	h3 {

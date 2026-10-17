@@ -9,7 +9,10 @@
 		type AudioEngineState,
 		type PreviewCurve
 	} from '#lib/audio/engine.ts';
+	import { warmAudio } from '#lib/audio/warm.ts';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
+	import { Button, Lamp } from '#lib/components/primitives/index.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { SocialApi } from '#lib/social/index.ts';
 	import ListeningRoom from './ListeningRoom.svelte';
 	import CandidateMeter from './CandidateMeter.svelte';
@@ -88,6 +91,8 @@
 	let labSwitch = $state(false);
 	let message = $state('');
 	let announcement = $state('');
+	let fileInput: HTMLInputElement | undefined = $state();
+	let loadingFile = $state(false);
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	const reduced = $derived(reducedMotion ?? prefersReducedMotion.current);
 	const labels = $derived([
@@ -120,6 +125,52 @@
 	);
 	const chartX = (value: number) => 200 + ((value - chartMin) / (chartMax - chartMin)) * 330;
 
+	// Console readouts and lamps (spec §1.6): real state only, never a simulated value.
+	const pad = (value: number) => String(value).padStart(2, '0');
+	const roundNumber = $derived(
+		session ? Math.min(session.completed.length + (active ? 1 : 0), session.planned) : 0
+	);
+	const roundLcd = $derived(session ? `${pad(roundNumber)}/${pad(session.planned)}` : '−−/−−');
+	// The DSP rate is the AudioContext's own rate; before a context exists there is no rate yet.
+	const rateLcd = $derived(audioState.ready ? `${rateLabel} kHz` : '−− kHz');
+	const playReason = $derived(
+		!active ? m.cego_fux_reason_play_idle() : moving ? m.cego_fux_reason_moving() : null
+	);
+	const movingReason = $derived(moving ? m.cego_fux_reason_moving() : null);
+	const levelText = $derived(
+		preview
+			? m.cego_fux_level_active()
+			: chosen.length >= 2
+				? m.cego_fux_level_ready()
+				: m.cego_fux_level_none()
+	);
+	const lockText = $derived(
+		moving
+			? m.cego_shuffling()
+			: active
+				? m.cego_position({ number: position + 1 })
+				: m.cego_closed()
+	);
+	/** Spec §5.4: warm the shared engine on the press itself, before the click starts playback. */
+	function warm(event: KeyboardEvent | PointerEvent) {
+		if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
+		if (playReason || !audio) return;
+		warmAudio(audio).catch((error: unknown) => {
+			console.warn(JSON.stringify({ event: 'cego.warm', error: (error as Error).name }));
+		});
+	}
+	/** Native rating fields stay disabled; this names the visible text that says why. */
+	function ratingWhy(index: number) {
+		if (moving) return `${uid}-rating-moving`;
+		return heard[index] ? undefined : `${uid}-rating-note`;
+	}
+	function positionReason(index: number) {
+		if (!active) return m.cego_fux_reason_idle();
+		if (moving) return m.cego_fux_reason_moving();
+		if (index >= (session?.order.length ?? 0)) return m.cego_fux_reason_no_position();
+		return null;
+	}
+
 	$effect(() => {
 		const engine = audio;
 		audioState = engine?.state() ?? IDLE_STATE;
@@ -151,6 +202,23 @@
 	}
 	onDestroy(releasePreview);
 
+	/** Direct source picker: the same shared engine as ♪ Áudio; the file never leaves the browser. */
+	async function pickFile(event: Event & { currentTarget: HTMLInputElement }) {
+		const input = event.currentTarget;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file || !audio) return;
+		loadingFile = true;
+		try {
+			await audio.loadFile(file);
+			message = '';
+		} catch (error) {
+			console.warn(JSON.stringify({ event: 'cego.file', error: (error as Error).name }));
+			message = m.cego_audio_error();
+		} finally {
+			loadingFile = false;
+		}
+	}
 	function changeTab(index: number) {
 		if (active && index !== 2) return;
 		tab = index;
@@ -371,56 +439,95 @@
 		names={revealedNames}
 		count={session?.candidates.length ?? 3}
 		disabled={!active}
+		reducedMotion={reduced}
 		onselect={selectPosition}
 	/>
 	<div class="sr" role="status" aria-live="polite">{announcement}</div>
 	<section class="desk" aria-label={m.cego_console()}>
 		<div class="desk-grid">
-			<aside class="rack" aria-label={m.cego_console()}>
+			<aside class="rack" aria-label={m.cego_console()} data-tour="cego-listen">
 				<p class="engrave">{m.cego_console()}</p>
 				<div class="seg-row">
-					<div class="seg">
-						{session
-							? m.cego_round({
-									number: Math.min(session.completed.length + (active ? 1 : 0), session.planned),
-									total: session.planned
-								})
-							: m.cego_rounds()}
-					</div>
+					<p class="seg">
+						<small>{m.cego_fux_round_lcd()}</small><span
+							class="seg-value"
+							class:dim={!session}
+							aria-hidden="true">{roundLcd}</span
+						><span class="sr"
+							>{session
+								? m.cego_round({ number: roundNumber, total: session.planned })
+								: m.cego_fux_round_none()}</span
+						>
+					</p>
+					<p class="seg">
+						<small>{m.cego_fux_rate_lcd()}</small><span
+							class="seg-value"
+							class:dim={!audioState.ready}
+							aria-hidden="true">{rateLcd}</span
+						><span class="sr"
+							>{audioState.ready
+								? m.cego_fux_rate_value({ rate: rateLabel })
+								: m.cego_fux_rate_pending()}</span
+						>
+					</p>
 				</div>
-				<div class="seg rate">{m.cego_rate({ rate: rateLabel })}</div>
+				<p class="engrave">{m.cego_fux_selector()}</p>
 				<div class="keys">
 					{#each [0, 1, 2] as index (index)}
-						<button
-							class="key"
-							type="button"
+						<Button
+							variant="key"
+							size="lg"
+							class="cego-key"
+							lit={active && position === index}
 							aria-label={m.cego_position({ number: index + 1 })}
 							aria-pressed={active && position === index}
-							disabled={!active || moving || index >= (session?.order.length ?? 0)}
-							onclick={() => selectPosition(index)}>{index + 1}</button
+							disabledReason={positionReason(index)}
+							onclick={() => selectPosition(index)}>{index + 1}</Button
 						>
 					{/each}
 				</div>
-				<button
-					class="transport"
-					type="button"
-					aria-pressed={playing}
-					disabled={!active || moving}
-					onclick={play}>{playing ? 'Ⅱ' : '▶'} {playing ? m.cego_pause() : m.cego_play()}</button
-				>
-				<label class="switch"
-					><input type="checkbox" bind:checked={labSwitch} /><span
-						>{m.cego_switch()}<small>{m.cego_switch_note()}</small></span
-					></label
-				>
-				<p class="matched">
-					<span class="lamp" class:on={preview !== null}></span>{m.cego_matched()}
-				</p>
-				<p class="note">{m.cego_shortcuts()}</p>
+				<div class="rack-row">
+					<Button
+						variant="plate"
+						size="lg"
+						class="cego-play"
+						aria-label={playing ? m.cego_pause() : m.cego_play()}
+						aria-pressed={playing}
+						disabledReason={playReason}
+						onpointerdown={warm}
+						onkeydown={warm}
+						onclick={play}
+					>
+						<svg viewBox="0 0 20 20" aria-hidden="true"
+							>{#if playing}<path
+									d="M5 3h3.5v14H5zM11.5 3H15v14h-3.5z"
+									fill="currentColor"
+								/>{:else}<path d="M6 3 L17 10 L6 17 Z" fill="currentColor" />{/if}</svg
+						>
+					</Button>
+					<button
+						type="button"
+						role="switch"
+						class="toggle"
+						aria-checked={labSwitch}
+						onclick={() => (labSwitch = !labSwitch)}
+					>
+						<span class="track" aria-hidden="true"><span class="lever"></span></span>
+						<span class="tl">{m.cego_switch()}<small>{m.cego_switch_note()}</small></span>
+					</button>
+				</div>
+				<div class="lamp-row">
+					<Lamp on={preview !== null} />
+					<span>{m.cego_matched()}<small class="lamp-state">{levelText}</small></span>
+				</div>
+				<div class="lamp-row">
+					<Lamp on={active && !moving} />
+					<span>{m.cego_fux_lock()}<small class="lamp-state">{lockText}</small></span>
+				</div>
 			</aside>
 			<div class="tablet">
 				<div class="screen">
-					<div class="steps" role="tablist" aria-label={m.cego_steps()}>
+					<div class="steps" role="tablist" aria-label={m.cego_steps()} data-tour="cego-prepare">
 						{#each labels as label, index (index)}
 							<button
 								type="button"
@@ -430,11 +537,15 @@
 								aria-selected={tab === index}
 								tabindex={tab === index ? 0 : -1}
 								disabled={active && index !== 2}
+								aria-describedby={active && index !== 2 ? `${uid}-tabs-locked` : undefined}
 								onkeydown={(event) => tabKey(event, index)}
 								onclick={() => changeTab(index)}><span>0{index + 1}</span>{label}</button
 							>
 						{/each}
 					</div>
+					{#if active}<p id="{uid}-tabs-locked" class="locked">
+							{m.cego_fuxb_reason_tabs_locked()}
+						</p>{/if}
 					{#each labels.keys() as panelIndex (panelIndex)}
 						<div
 							class="panel"
@@ -447,15 +558,44 @@
 							{#if tab === panelIndex}
 								{#if tab === 0}
 									<h2>{m.cego_setup()}</h2>
-									<p class="lede">{m.cego_setup_lede()}</p>
-									<div class="grid2">
+									<p class="lede">{m.cego_fux_setup_lede()}</p>
+									<div class="grid3">
 										<div class="card">
-											<h3>{m.cego_source()}</h3>
-											<strong>{audioState.file?.name ?? m.cego_noise()}</strong>
-											<p class="note">{m.cego_source_note()}</p>
+											<h3>
+												<span class="eyebrow">{m.cego_fux_source_eyebrow()}</span
+												>{m.cego_fux_source_title()}
+											</h3>
+											<div class="source" role="status">
+												<Lamp on={audio !== null} />
+												<span
+													><b>{audioState.file?.name ?? m.cego_noise()}</b><small
+														>{audioState.file
+															? m.cego_fux_source_file()
+															: m.cego_fux_source_noise()}</small
+													></span
+												>
+											</div>
+											<input
+												bind:this={fileInput}
+												type="file"
+												accept="audio/*"
+												hidden
+												onchange={pickFile}
+											/>
+											<div class="actions tight">
+												<Button
+													loading={loadingFile}
+													disabledReason={audio ? null : m.cego_fux_reason_no_audio()}
+													onclick={() => fileInput?.click()}>{m.cego_fux_pick_file()}</Button
+												>
+											</div>
+											<p class="note">{m.cego_fux_source_note()}</p>
 										</div>
 										<fieldset class="card">
-											<legend>{m.cego_output()}</legend>
+											<legend
+												><span class="eyebrow">{m.cego_fux_output_eyebrow()}</span
+												>{m.cego_fux_output_title()}</legend
+											>
 											<label class="opt"
 												><input
 													type="radio"
@@ -475,27 +615,63 @@
 												/><span><b>{m.cego_other()}</b><small>{m.cego_other_note()}</small></span
 												></label
 											>
+											{#if !output}<p class="hint">{m.cego_fux_output_hint()}</p>{/if}
 										</fieldset>
+										<div class="card">
+											<div class="card-head">
+												<h3>
+													<span class="eyebrow">{m.cego_fux_level_eyebrow()}</span
+													>{m.cego_fux_level_title()}
+												</h3>
+												<Explainer term="ab-nivel" />
+											</div>
+											<p class="lamp-row">
+												<Lamp on={chosen.length >= 2} /><span
+													>{chosen.length >= 2
+														? m.cego_fux_level_status({ count: chosen.length })
+														: m.cego_fux_level_pick()}</span
+												>
+											</p>
+											<table class="lv" aria-label={m.cego_fux_level_table()}>
+												<thead
+													><tr
+														><th scope="col">{m.cego_fux_col_candidate()}</th><th
+															scope="col"
+															class="num">{m.cego_fux_col_level()}</th
+														><th scope="col" class="num">{m.cego_fux_col_adjust()}</th></tr
+													></thead
+												>
+												<tbody>
+													{#each chosen as c, index (c.id)}<tr
+															><th scope="row">{c.name}</th><td class="num">{number(c.level)} dB</td
+															><td class="num">{number(trims[index] ?? 0)} dB</td></tr
+														>{:else}<tr
+															><td colspan="3" class="empty-row">{m.cego_fux_level_empty()}</td></tr
+														>{/each}
+												</tbody>
+											</table>
+											<p class="note">{m.cego_level_note()}</p>
+										</div>
 									</div>
-									<div class="card">
-										<h3>{m.cego_matched()}</h3>
-										<p class="note">{m.cego_level_note()}</p>
+									<div class="card engine">
+										<div class="card-head">
+											<h3>
+												<span class="eyebrow">{m.cego_fux_engine_eyebrow()}</span
+												>{m.cego_fux_engine_title()}
+											</h3>
+											<Explainer term="q27" />
+										</div>
 										<p class="note">{m.cego_engine_note()}</p>
-										{#each chosen as c, index (c.id)}<p class="level">
-												{c.name}: {number(c.level)} dB · {number(trims[index] ?? 0)} dB
-											</p>{/each}
 									</div>
 									<div class="actions">
-										<button class="accent" type="button" onclick={() => changeTab(1)}
-											>{m.cego_pick()}</button
-										>
+										<Button variant="primary" onclick={() => changeTab(1)}>{m.cego_pick()}</Button>
 									</div>
 								{:else if tab === 1}
 									<h2>{m.cego_candidates()}</h2>
 									<p class="lede">{m.cego_candidates_lede()}</p>
 									<h3>{m.cego_official()} · {m.cego_current()}</h3>
 									<div class="candidates">
-										{#each allCandidates as c (c.id)}
+										{#each allCandidates as c, index (c.id)}
 											<label
 												class="candidate"
 												class:checked={selected.includes(c.id)}
@@ -507,6 +683,11 @@
 														checked={selected.includes(c.id)}
 														disabled={!c.accepted ||
 															(!selected.includes(c.id) && selected.length >= 3)}
+														aria-describedby={!c.accepted
+															? `${uid}-why-${index}`
+															: !selected.includes(c.id) && selected.length >= 3
+																? `${uid}-limit`
+																: undefined}
 														onchange={() => toggleCandidate(c.id)}
 													/><strong>{c.name}</strong></span
 												>
@@ -519,12 +700,15 @@
 														? number(c.level)
 														: '−'} dB</small
 												>
-												{#if !c.accepted}<small class="warn"
+												{#if !c.accepted}<small class="warn" id="{uid}-why-{index}"
 														>{m.cego_rejected({ reasons: c.reasons.join(', ') })}</small
 													>{/if}
 											</label>
 										{/each}
 									</div>
+									{#if selected.length >= 3}<p class="note" id="{uid}-limit">
+											{m.cego_fuxb_reason_limit()}
+										</p>{/if}
 									<p class="note">{m.cego_gate_note()}</p>
 									<CommunityCandidates
 										{api}
@@ -550,7 +734,7 @@
 												step="0.5"
 												bind:value={spread}
 											/>
-											<button type="button" onclick={generate}>{m.cego_generate()}</button>
+											<Button onclick={generate}>{m.cego_generate()}</Button>
 											<p class="note">{m.cego_variation_note()}</p>
 										</div>
 										<div class="card">
@@ -564,9 +748,7 @@
 												bind:value={rounds}
 											/>
 											<p>{m.cego_selection({ count: selected.length })}</p>
-											<button class="accent" type="button" onclick={() => start()}
-												>{m.cego_start()}</button
-											>
+											<Button variant="primary" onclick={() => start()}>{m.cego_start()}</Button>
 										</div>
 									</div>
 								{:else if tab === 2}
@@ -578,21 +760,25 @@
 											})}
 										</h2>
 										<p class="lede">{m.cego_listen_lede()}</p>
-										<button type="button" disabled={moving} onclick={play}
-											>{playing ? m.cego_pause() : m.cego_play()}</button
+										<Button
+											aria-pressed={playing}
+											disabledReason={movingReason}
+											onpointerdown={warm}
+											onkeydown={warm}
+											onclick={play}>{playing ? m.cego_pause() : m.cego_play()}</Button
 										>
 										<div class="bignums">
 											{#each session.order as id, index (id)}
 												<div>
-													<button
-														type="button"
+													<Button
 														class="bignum"
 														aria-pressed={position === index}
-														disabled={moving}
+														disabledReason={movingReason}
 														onclick={() => selectPosition(index)}
-														><span>{index + 1}</span>{m.cego_position({
+														><span class="bignum-n" aria-hidden="true">{index + 1}</span
+														>{m.cego_position({
 															number: index + 1
-														})}</button
+														})}</Button
 													>
 													<CandidateMeter
 														chain={preview?.chains[
@@ -605,7 +791,10 @@
 											{/each}
 										</div>
 										<div class="card">
-											<h3>{m.cego_rating_note()}</h3>
+											<h3 id="{uid}-rating-note">{m.cego_rating_note()}</h3>
+											{#if moving}<p class="note" id="{uid}-rating-moving">
+													{m.cego_fux_reason_moving()}
+												</p>{/if}
 											{#each session.order as id, index (id)}
 												<div class="rating">
 													<label for="{uid}-rating-{index}"
@@ -618,6 +807,7 @@
 														step="0.5"
 														value={ratings[index] ?? 5}
 														disabled={moving || !heard[index]}
+														aria-describedby={ratingWhy(index)}
 														aria-label={m.cego_rating({ number: index + 1 })}
 														aria-valuetext={ratings[index] === null
 															? m.cego_unrated()
@@ -633,6 +823,7 @@
 														placeholder={m.cego_unrated()}
 														value={ratings[index] ?? ''}
 														disabled={moving || !heard[index]}
+														aria-describedby={ratingWhy(index)}
 														oninput={(event) => setRating(index, event.currentTarget.value)}
 													/>
 												</div>
@@ -642,14 +833,13 @@
 												bind:value={notes}></textarea>
 										</div>
 										<div class="actions">
-											<button
-												class="accent"
-												type="button"
-												disabled={moving}
-												onclick={() => finishRound()}>{m.cego_next()}</button
-											><button type="button" disabled={moving} onclick={() => finishRound(true)}
-												>{m.cego_finish()}</button
-											><button type="button" onclick={reset}>{m.cego_cancel()}</button>
+											<Button
+												variant="primary"
+												disabledReason={movingReason}
+												onclick={() => finishRound()}>{m.cego_next()}</Button
+											><Button disabledReason={movingReason} onclick={() => finishRound(true)}
+												>{m.cego_finish()}</Button
+											><Button variant="ghost" onclick={reset}>{m.cego_cancel()}</Button>
 										</div>
 									{:else}<h2>{m.cego_listen()}</h2>
 										<p class="empty">{m.cego_empty_listen()}</p>{/if}
@@ -753,11 +943,12 @@
 										</div>
 										<div class="actions">
 											<a class="button accent" href="/" onclick={openWinner}>{m.cego_open()}</a
-											><button
-												type="button"
-												disabled={nextSpread(last) === null}
-												onclick={continueTournament}>{m.cego_continue()}</button
-											><button type="button" onclick={reset}>{m.cego_new()}</button>
+											><Button
+												disabledReason={nextSpread(last) === null
+													? m.cego_fux_reason_no_stage()
+													: null}
+												onclick={continueTournament}>{m.cego_continue()}</Button
+											><Button variant="ghost" onclick={reset}>{m.cego_new()}</Button>
 										</div>
 									{:else}<p class="empty">{m.cego_empty_results()}</p>{/if}
 								{:else if tab === 4}
@@ -776,7 +967,10 @@
 										<p class="note">{m.cego_cost_note()}</p>
 									</div>
 								{:else}
-									<h2>{m.cego_share_title()}</h2>
+									<div class="card-head">
+										<h2>{m.cego_share_title()}</h2>
+										<Explainer term="s6" />
+									</div>
 									<p class="lede">{m.cego_share_note()}</p>
 									<S6Send session={!active ? session : null} {api} {siteKey} />
 								{/if}
@@ -797,7 +991,7 @@
 		--muted: #b5ad9f;
 		--rule: #ece7dd24;
 		color: #ece7dd;
-		font: 15px/1.5 var(--sans, 'Geist', system-ui, sans-serif);
+		font: var(--fs-body) / 1.5 var(--face-body);
 	}
 	.blind-test :global(*) {
 		box-sizing: border-box;
@@ -808,6 +1002,7 @@
 		height: 1px;
 		overflow: hidden;
 		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 	.desk {
 		position: relative;
@@ -828,7 +1023,7 @@
 	}
 	.rack {
 		padding: 22px 20px 18px;
-		border-radius: 12px;
+		border-radius: var(--rad-2xl);
 		background:
 			repeating-linear-gradient(90deg, #ffffff05 0 1px, #0000 1px 3px),
 			linear-gradient(170deg, #3a3631, #24211d 40%, #171512);
@@ -838,30 +1033,137 @@
 			0 3px 6px #0008;
 	}
 	.engrave {
-		font: 10px var(--mono, monospace);
+		font: 400 var(--fs-eyebrow) var(--face-data);
 		letter-spacing: 0.2em;
-		color: #b5ad9f;
+		color: var(--muted);
 		text-transform: uppercase;
 		margin: 0 0 8px;
 	}
-	.seg {
-		flex: 1;
-		background: #0b0907;
-		border-radius: 6px;
-		padding: 10px;
-		font: 17px var(--mono, monospace);
-		color: var(--accent);
-		box-shadow: inset 0 2px 6px #000e;
+	/* LCD readouts: the label is always the smaller line (spec §1.6). */
+	.seg-row {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
 		margin-bottom: 16px;
 	}
-	.rate {
-		font-size: 12px;
+	.seg {
+		position: relative;
+		margin: 0;
+		min-width: 0;
+		padding: 8px 10px;
+		border-radius: var(--rad-md);
+		background: #0b0907;
+		box-shadow: var(--well);
+		color: var(--accent);
+		white-space: nowrap;
+	}
+	.seg small {
+		display: block;
+		font: 400 var(--fs-eyebrow) / 1.4 var(--face-data);
+		letter-spacing: 0.18em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+	.seg-value {
+		display: block;
+		font: 400 var(--fs-readout-l) / 1.2 var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
+		letter-spacing: 0.06em;
+		text-shadow: 0 0 8px rgb(255 210 122 / 0.6);
+		overflow: hidden;
+		text-overflow: clip;
+	}
+	.seg-value.dim {
+		color: #9a8a66;
+		text-shadow: none;
 	}
 	.keys {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 12px;
-		margin-bottom: 20px;
+		margin-bottom: 18px;
+	}
+	.keys :global(.btn.cego-key) {
+		width: 100%;
+		height: auto;
+		aspect-ratio: 1;
+		font-size: var(--fs-title);
+	}
+	.rack-row {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		margin-bottom: 16px;
+	}
+	.rack-row :global(.btn.cego-play) {
+		flex: 0 0 auto;
+		width: 64px;
+		height: 64px;
+		padding: 0;
+		border-radius: var(--rad-pill);
+	}
+	.rack-row :global(.btn.cego-play svg) {
+		width: 22px;
+		height: 22px;
+	}
+	.toggle {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-height: var(--hit);
+		padding: 4px;
+		border: 0;
+		border-radius: var(--rad-md);
+		background: none;
+		color: var(--text);
+		text-align: left;
+		font: 500 var(--fs-small) / 1.25 var(--face-body);
+		cursor: pointer;
+	}
+	.toggle:hover {
+		border-color: transparent;
+	}
+	.track {
+		position: relative;
+		flex: 0 0 auto;
+		width: 46px;
+		height: 24px;
+		border-radius: var(--rad-pill);
+		background: #0d0c0a;
+		box-shadow: var(--well);
+	}
+	.lever {
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 20px;
+		height: 20px;
+		border-radius: 50%;
+		background: radial-gradient(circle at 35% 30%, #e6dccb, #8f8577 60%, #4b453d);
+		box-shadow: 0 2px 3px rgb(0 0 0 / 0.7);
+		transition: left var(--dur-fast) var(--ease-mech);
+	}
+	.toggle[aria-checked='true'] .track {
+		background: #2b220f;
+	}
+	.toggle[aria-checked='true'] .lever {
+		left: 24px;
+	}
+	.tl small {
+		margin-top: 2px;
+		color: var(--muted);
+		font-weight: 400;
+	}
+	.lamp-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 0 0 10px;
+		font-size: var(--fs-small);
+	}
+	.lamp-state {
+		font: 400 var(--fs-caption) var(--face-data);
+		color: var(--muted);
 	}
 	button,
 	.button {
@@ -886,55 +1188,10 @@
 		outline: 2px solid #ffd27a;
 		outline-offset: 3px;
 	}
-	button.key {
-		aspect-ratio: 1;
-		border: 0;
-		font: 30px var(--mono, monospace);
-		background: linear-gradient(#34302b, #1d1a17);
-		box-shadow:
-			inset 0 1px #ffffff22,
-			0 5px #0b0a09,
-			0 10px 16px #0009;
-	}
-	.key[aria-pressed='true'] {
-		color: var(--accent);
-		transform: translateY(3px);
-		box-shadow:
-			0 2px #0b0a09,
-			0 0 22px -4px #ffd27a77;
-	}
-	.transport {
-		background: #14110e;
-		min-height: 44px;
-	}
-	.switch {
-		display: flex;
-		gap: 10px;
-		align-items: center;
-		margin: 18px 0;
-		font-size: 12px;
-	}
 	small {
 		display: block;
-		font-size: 11px;
+		font-size: var(--label-min);
 		color: var(--muted);
-	}
-	.matched {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		font-size: 13px;
-	}
-	.lamp {
-		display: inline-block;
-		width: 14px;
-		height: 14px;
-		border-radius: 50%;
-		background: #17130e;
-	}
-	.lamp.on {
-		background: var(--accent);
-		box-shadow: 0 0 10px #ffd27a55;
 	}
 	.tablet {
 		border-radius: 28px;
@@ -946,7 +1203,7 @@
 		min-width: 0;
 	}
 	.screen {
-		border-radius: 16px;
+		border-radius: var(--rad-2xl);
 		overflow: hidden;
 		background: radial-gradient(120% 80% at 20% 0%, #1a1916, #121110 60%);
 		min-height: 520px;
@@ -963,13 +1220,13 @@
 		border-bottom: 2px solid transparent;
 		border-radius: 0;
 		padding: 12px 10px;
-		font-size: 12px;
+		font-size: var(--fs-small);
 		color: var(--muted);
 		overflow-wrap: anywhere;
 	}
 	.steps span {
 		display: block;
-		font: 10px var(--mono, monospace);
+		font: 400 var(--fs-eyebrow) var(--face-data);
 		letter-spacing: 0.14em;
 		margin-bottom: 3px;
 	}
@@ -980,6 +1237,14 @@
 	.steps [aria-selected='true'] span {
 		color: var(--accent);
 	}
+	.locked {
+		margin: 0;
+		padding: 8px 12px;
+		border-bottom: 1px solid var(--rule);
+		background: #0003;
+		color: var(--text-2);
+		font-size: var(--fs-caption);
+	}
 	.panel {
 		padding: 22px 24px 26px;
 	}
@@ -987,32 +1252,75 @@
 		display: none;
 	}
 	h2 {
-		font: 400 30px/1.1 var(--serif, 'Instrument Serif', Georgia, serif);
+		font: 400 var(--fs-display-m) / 1.1 var(--face-display);
 		margin: 0 0 8px;
 	}
 	h3,
 	legend {
-		font-size: 13px;
+		font-size: var(--fs-small);
 		font-weight: 600;
 		margin: 0 0 10px;
+	}
+	.eyebrow {
+		display: block;
+		margin-bottom: 2px;
+		font: 500 var(--fs-eyebrow) var(--face-data);
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+	.card-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 8px;
 	}
 	.lede {
 		color: #c4bbaa;
 		margin: 0 0 18px;
+		font-size: var(--fs-lede);
 	}
-	.grid2 {
+	.grid2,
+	.grid3 {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 14px;
 		margin-top: 18px;
 	}
+	.grid3 {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		margin-top: 0;
+	}
 	.card {
 		border: 1px solid var(--rule);
-		border-radius: 12px;
+		border-radius: var(--rad-2xl);
 		padding: 16px;
 		background: #ffffff04;
 		margin: 0 0 14px;
 		min-width: 0;
+	}
+	.grid3 .card {
+		margin: 0;
+	}
+	.engine {
+		margin-top: 14px;
+	}
+	.source {
+		display: flex;
+		gap: 10px;
+		align-items: flex-start;
+		padding: 10px;
+		border: 1px solid rgb(255 210 122 / 0.35);
+		border-radius: var(--rad-lg);
+		background: rgb(255 210 122 / 0.05);
+		font-size: var(--fs-small);
+	}
+	.source :global(.lamp) {
+		flex: 0 0 auto;
+		margin-top: 3px;
+	}
+	.source small {
+		margin-top: 2px;
 	}
 	.opt {
 		display: flex;
@@ -1020,7 +1328,7 @@
 		align-items: flex-start;
 		padding: 10px 0;
 		cursor: pointer;
-		font-size: 13px;
+		font-size: var(--fs-small);
 	}
 	.opt input {
 		flex: 0 0 auto;
@@ -1030,14 +1338,19 @@
 		margin-top: 4px;
 	}
 	.note {
-		font-size: 12px;
+		font-size: var(--fs-caption);
 		color: var(--muted);
 		margin: 10px 0 0;
+	}
+	.hint {
+		font-size: var(--fs-small);
+		color: var(--text-2);
+		margin: 8px 0 0;
 	}
 	.warn,
 	.message {
 		color: #e8d3a6;
-		font-size: 13px;
+		font-size: var(--fs-small);
 	}
 	.message {
 		min-height: 1.5em;
@@ -1046,8 +1359,16 @@
 	.actions {
 		display: flex;
 		flex-wrap: wrap;
+		align-items: center;
 		gap: 10px;
 		margin-top: 18px;
+	}
+	.actions.tight {
+		margin-top: 10px;
+	}
+	.actions.tight :global(.btn) {
+		max-width: 100%;
+		white-space: normal;
 	}
 	.accent {
 		background: var(--accent);
@@ -1055,10 +1376,31 @@
 		border-color: var(--accent);
 		font-weight: 600;
 	}
-	.level,
 	.mono {
-		font-family: var(--mono, monospace);
-		font-size: 11px;
+		font-family: var(--face-data);
+		font-size: var(--label-min);
+	}
+	table.lv {
+		margin-top: 4px;
+		font-size: var(--fs-small);
+	}
+	table.lv th {
+		font-weight: 500;
+	}
+	table.lv thead th {
+		color: var(--muted);
+		font-size: var(--label-min);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+	.num {
+		text-align: right;
+		font-family: var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
+	}
+	td.empty-row {
+		font-family: var(--face-body);
+		color: var(--muted);
 	}
 	.candidates {
 		display: grid;
@@ -1084,11 +1426,11 @@
 		display: flex;
 		gap: 8px;
 		align-items: center;
-		font-size: 14px;
+		font-size: var(--fs-ui);
 	}
 	.description {
 		display: block;
-		font-size: 12px;
+		font-size: var(--fs-caption);
 		color: #c5bcab;
 		margin: 6px 0 4px;
 	}
@@ -1122,7 +1464,7 @@
 		resize: vertical;
 	}
 	label {
-		font-size: 13px;
+		font-size: var(--fs-small);
 	}
 	.rating {
 		display: grid;
@@ -1132,7 +1474,7 @@
 		margin: 12px 0;
 	}
 	.rating input[type='number'] {
-		font: 12px var(--mono, monospace);
+		font: var(--fs-caption) var(--face-data);
 	}
 	.bignums {
 		display: grid;
@@ -1140,18 +1482,23 @@
 		gap: 12px;
 		margin: 18px 0;
 	}
-	.bignum {
+	.bignums :global(.btn.bignum) {
 		width: 100%;
-		border-radius: 14px;
-		background: linear-gradient(#1f1d1a, #141311);
-		font: 10px var(--mono, monospace);
+		height: auto;
 		padding: 16px 8px;
+		border-radius: 14px;
+		font-size: var(--fs-caption);
 	}
-	.bignum span {
+	.bignums :global(.btn.bignum .btn__label) {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+	}
+	.bignum-n {
 		display: block;
-		font: 64px/1 var(--serif, 'Instrument Serif', Georgia, serif);
+		font: 400 var(--fs-display-l) / 1 var(--face-display);
 	}
-	.bignum[aria-pressed='true'] {
+	.bignums :global(.btn.bignum[aria-pressed='true']) {
 		border-color: var(--accent);
 		color: var(--accent);
 		background: #292214;
@@ -1159,13 +1506,13 @@
 	.empty {
 		padding: 26px;
 		border: 1px dashed var(--rule);
-		border-radius: 12px;
+		border-radius: var(--rad-2xl);
 		color: var(--muted);
 	}
 	.chart {
 		width: 100%;
 		height: auto;
-		font: 12px var(--mono, monospace);
+		font: var(--fs-caption) var(--face-data);
 	}
 	.table-wrap {
 		overflow-x: auto;
@@ -1173,7 +1520,7 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 12px;
+		font-size: var(--fs-caption);
 		text-align: left;
 	}
 	th,
@@ -1182,11 +1529,11 @@
 		border-bottom: 1px solid var(--rule);
 	}
 	td {
-		font-family: var(--mono, monospace);
+		font-family: var(--face-data);
 	}
 	a {
 		color: #d9c79f;
-		font-size: 12px;
+		font-size: var(--fs-caption);
 	}
 	.bracket {
 		list-style: none;
@@ -1200,21 +1547,23 @@
 		padding: 12px;
 		background: #ffd27a09;
 		flex: 1 1 180px;
-		font-size: 12px;
+		font-size: var(--fs-caption);
 	}
 	.bracket ul {
 		padding-left: 16px;
 	}
 	.cost {
-		font: 36px var(--serif, 'Instrument Serif', Georgia, serif);
+		font: var(--fs-display-m) var(--face-display);
 		color: var(--accent);
+	}
+	@media (max-width: 1100px) {
+		.grid3 {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 	@media (max-width: 980px) {
 		.desk-grid {
 			grid-template-columns: 1fr;
-		}
-		.rack {
-			max-width: none;
 		}
 		.keys {
 			max-width: 300px;
@@ -1224,7 +1573,8 @@
 		.steps {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
 		}
-		.grid2 {
+		.grid2,
+		.grid3 {
 			grid-template-columns: 1fr;
 		}
 		.panel {
@@ -1244,17 +1594,16 @@
 		.bignums {
 			gap: 6px;
 		}
-		.bignum {
+		.bignums :global(.btn.bignum) {
 			padding: 10px 3px;
-			font-size: 9px;
 		}
-		.bignum span {
-			font-size: 48px;
+		.bignum-n {
+			font-size: var(--fs-display-m);
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.key[aria-pressed='true'] {
-			transform: none;
+		.lever {
+			transition: none;
 		}
 	}
 </style>

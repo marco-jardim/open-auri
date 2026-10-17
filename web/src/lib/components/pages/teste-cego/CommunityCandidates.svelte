@@ -2,6 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { decodeS1 } from 'open-auri/share';
 	import { m } from '#lib/paraglide/messages.js';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { isSocialApiError, rememberOrigin, type SocialApi } from '#lib/social/index.ts';
 	import { candidate, type Candidate } from './experiment.ts';
 
@@ -27,12 +28,26 @@
 	let cursor = $state<string | null>(null);
 	let loaded = $state(false);
 	let busy = $state(false);
+	/** The running operation ('load', 'more' or `add:<id>`): its button shows `loading`. */
+	let pending = $state<string | null>(null);
 	let message = $state('');
 	let generation = 0;
 	let abort: AbortController | undefined;
 	const filtered = $derived(
 		rows.filter((row) => row.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
 	);
+	// Unavailable always says why (spec §2.6); behaviour is the same as the old `disabled`.
+	// "Load more" can disappear while focused (last page), so it never carries a reason tooltip
+	// for a running operation: it shows `loading` instead.
+	const testRunning = $derived(disabled ? m.cego_fuxb_reason_test_running() : null);
+	const loadReason = $derived(
+		testRunning ?? (busy && pending !== 'load' ? m.cego_fuxb_reason_busy() : null)
+	);
+	function addReason(row: Row) {
+		if (testRunning) return testRunning;
+		if (added.includes(`community:${row.versionId}`)) return m.cego_fuxb_reason_added();
+		return busy && pending !== `add:${row.id}` ? m.cego_fuxb_reason_busy() : null;
+	}
 
 	function failure(cause: unknown): string {
 		if (isSocialApiError(cause)) {
@@ -49,6 +64,7 @@
 		cursor = null;
 		loaded = false;
 		busy = false;
+		pending = null;
 		message = '';
 	}
 	onDestroy(reset);
@@ -59,6 +75,7 @@
 		abort?.abort();
 		abort = new AbortController();
 		busy = true;
+		pending = more ? 'more' : 'load';
 		message = '';
 		try {
 			const opts = { signal: abort.signal };
@@ -80,7 +97,10 @@
 				message = failure(cause);
 			}
 		} finally {
-			if (token === generation) busy = false;
+			if (token === generation) {
+				busy = false;
+				pending = null;
+			}
 		}
 	}
 
@@ -89,6 +109,7 @@
 		const token = ++generation;
 		abort = new AbortController();
 		busy = true;
+		pending = `add:${row.id}`;
 		message = '';
 		try {
 			const result = await api.getCurve(
@@ -113,7 +134,10 @@
 		} catch (cause) {
 			if (token === generation) message = failure(cause);
 		} finally {
-			if (token === generation) busy = false;
+			if (token === generation) {
+				busy = false;
+				pending = null;
+			}
 		}
 	}
 </script>
@@ -125,30 +149,42 @@
 		<div class="controls">
 			<label
 				>{m.cegocom_source()}
-				<select bind:value={source} onchange={reset} {disabled}>
+				<select
+					bind:value={source}
+					onchange={reset}
+					{disabled}
+					aria-describedby={disabled ? `${uid}-locked` : undefined}
+				>
 					<option value="feed">{m.cegocom_feed()}</option>
 					<option value="rankings">{m.cegocom_rankings()}</option>
 				</select></label
 			>
 			<label
 				>{m.cegocom_search()}
-				<input type="search" bind:value={query} {disabled} /></label
+				<input
+					type="search"
+					bind:value={query}
+					{disabled}
+					aria-describedby={disabled ? `${uid}-locked` : undefined}
+				/></label
 			>
-			<button type="button" disabled={disabled || busy} onclick={() => load()}
-				>{m.cegocom_load()}</button
+			<Button disabledReason={loadReason} loading={pending === 'load'} onclick={() => load()}
+				>{m.cegocom_load()}</Button
 			>
 		</div>
+		{#if disabled}<p id="{uid}-locked" class="note">{m.cego_fuxb_reason_test_running()}</p>{/if}
 		{#if loaded}
 			{#if filtered.length > 0}
 				<ul class="rows">
 					{#each filtered as row (row.id)}
 						<li>
 							<span>{row.name}</span>
-							<button
-								type="button"
-								disabled={disabled || busy || added.includes(`community:${row.versionId}`)}
+							<Button
+								size="sm"
+								disabledReason={addReason(row)}
+								loading={pending === `add:${row.id}`}
 								aria-label={m.cegocom_add_label({ name: row.name })}
-								onclick={() => add(row)}>{m.cegocom_add()}</button
+								onclick={() => add(row)}>{m.cegocom_add()}</Button
 							>
 						</li>
 					{/each}
@@ -157,9 +193,11 @@
 				<p class="note">{m.cegocom_empty()}</p>
 			{/if}
 			{#if cursor}
-				<button type="button" disabled={disabled || busy} onclick={() => load(true)}
-					>{m.cegocom_more()}</button
-				>
+				<div class="more">
+					<Button disabledReason={testRunning} loading={busy} onclick={() => load(true)}
+						>{m.cegocom_more()}</Button
+					>
+				</div>
 			{/if}
 		{/if}
 		<p class="message" role="status">{message}</p>
@@ -211,18 +249,13 @@
 		border-radius: 8px;
 		padding: 6px 8px;
 	}
-	button {
-		font: inherit;
-		border: 1px solid #ece7dd24;
-		border-radius: 6px;
-		background: transparent;
-		color: inherit;
-		padding: 7px 12px;
-		cursor: pointer;
-	}
-	button:disabled {
-		opacity: 0.45;
+	select:disabled,
+	input:disabled {
+		opacity: 0.6;
 		cursor: not-allowed;
+	}
+	.more {
+		margin-top: 10px;
 	}
 	.rows {
 		list-style: none;

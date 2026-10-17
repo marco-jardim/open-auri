@@ -149,7 +149,7 @@ test('two heard rounds compute confidence intervals, refuse invalid ratings and 
 	expect(location.href).toBe(address);
 	await expect
 		.element(page.getByRole('button', { name: m.cego_continue(), exact: true }))
-		.toBeEnabled();
+		.not.toHaveAttribute('aria-disabled');
 	await page.getByRole('button', { name: m.cego_continue(), exact: true }).click();
 	await expect.element(panel.getByRole('spinbutton').nth(2)).toBeDisabled();
 	await panel.getByRole('button', { name: m.cego_cancel(), exact: true }).click();
@@ -163,12 +163,25 @@ test('listening room hides identities until reveal and delegates only enabled fl
 	const onselect = vi.fn();
 	const screen = await render(ListeningRoom, { names: ['Hidden identity'], count: 2, onselect });
 	expect(screen.container.textContent).not.toContain('Hidden identity');
-	await expect.element(page.getByRole('button').first()).toBeDisabled();
+	const plate = page.getByRole('button', { name: m.cego_position({ number: 1 }), exact: true });
+	await expect.element(plate).toHaveAttribute('aria-disabled', 'true');
+	// Playwright refuses to click aria-disabled elements; dispatch the click to prove it is inert.
+	(plate.element() as HTMLElement).click();
+	expect(onselect).not.toHaveBeenCalled();
 	await screen.rerender({ disabled: false, moving: true });
-	await expect.element(page.getByRole('button').first()).toBeDisabled();
+	await expect.element(plate).toHaveAttribute('aria-disabled', 'true');
+	// Playwright refuses to click aria-disabled elements; dispatch the click to prove it is inert.
+	(plate.element() as HTMLElement).click();
+	expect(onselect).not.toHaveBeenCalled();
 	await screen.rerender({ moving: false, revealed: true, selected: 1 });
 	expect(screen.container.textContent).toContain('Hidden identity');
 	await page.getByRole('button', { name: m.cego_position({ number: 2 }), exact: true }).click();
 	expect(onselect).toHaveBeenCalledWith(1);
 	await expect.element(page.getByRole('button').nth(1)).toHaveAttribute('aria-pressed', 'true');
+	// With two candidates the third plate stays on the floor, unavailable, and says why.
+	const third = page.getByRole('button', { name: m.cego_position({ number: 3 }), exact: true });
+	await expect.element(third).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(third).toHaveAccessibleDescription(m.cego_fux_reason_no_position());
+	(third.element() as HTMLElement).click();
+	expect(onselect).toHaveBeenCalledTimes(1);
 });
