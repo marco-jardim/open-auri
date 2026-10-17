@@ -195,6 +195,27 @@ test('a first tap opens the panel once its chunk arrived; a press elsewhere mean
 	expect(next.getAttribute('aria-expanded')).toBe('false');
 });
 
+test('a new tap after an outside click opens the panel while its chunk is still loading', async () => {
+	const fake = audioUi();
+	const screen = await render(AudioLoader, { engine: fake.engine });
+	const trigger = page.getByRole('button', { name: m.audio_button_aria({ name: m.audio_none() }) });
+	const button = screen.container.querySelector<HTMLButtonElement>('.oa-audio-btn')!;
+	// Keep all three presses in the same turn: the import cannot resolve between them.
+	button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+	button.click();
+	expect(screen.container.querySelector('[role="dialog"]')).toBeNull();
+	document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+	button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+	button.click();
+	expect(screen.container.querySelector('[role="dialog"]')).toBeNull();
+
+	await expect
+		.element(page.getByRole('dialog', { name: m.audio_title(), exact: true }))
+		.toBeVisible();
+	await expect.element(trigger).toHaveAttribute('aria-expanded', 'true');
+	expect(fake.engine.start).not.toHaveBeenCalled();
+});
+
 test('file picking resets the input, ignores cancellation and reports both typed and unknown load failures', async () => {
 	const fake = audioUi();
 	const screen = await render(AudioLoader, { engine: fake.engine });

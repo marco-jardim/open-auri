@@ -1172,6 +1172,8 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 	function halt(keep: boolean): void {
 		mode = 'off';
 		if (!keep || (session?.mode === 'chains' && chains.size === 0)) session = null;
+		pendingStart = null;
+		pendingGeneration++;
 		stopTicker();
 		const generation = ++stopGeneration;
 		if (ctx && graph) {

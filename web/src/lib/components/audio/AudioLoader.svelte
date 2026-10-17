@@ -112,6 +112,7 @@
 			return;
 		}
 		// Another press while the chunk loads joins the same opening (it never toggles it shut).
+		wantOpen = true;
 		opening ??= openWhenLoaded().finally(() => {
 			opening = null;
 		});

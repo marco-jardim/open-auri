@@ -629,6 +629,68 @@ describe('random start', () => {
 		}
 	});
 
+	it.each(['stop', 'pause'] as const)(
+		'%s cancels a deferred start before late metadata arrives',
+		async (halt) => {
+			vi.useFakeTimers();
+			const random = vi.fn(() => 0.5);
+			const { engine, fake } = setup({ random });
+			await engine.loadFile(audioFile());
+			const element = fake.elements[0];
+			if (!element) throw new Error('no element');
+			await engine.start('raw', { startAt: 'random', session: 'teste-cego' });
+			const master = masterOf(onlyContext());
+			expect(master.gain.value).toBe(0);
+
+			engine[halt]();
+			await vi.advanceTimersByTimeAsync(100);
+			const events = master.gain.events.length;
+			element.fireMetadata(80);
+			element.fireDurationChange(90);
+			await vi.advanceTimersByTimeAsync(PENDING_START_TIMEOUT_MS);
+
+			expect(random).not.toHaveBeenCalled();
+			expect(element.currentTime).toBe(0);
+			expect(element.paused).toBe(true);
+			expect(element.playCalls).toBe(1);
+			expect(master.gain.value).toBe(0);
+			expect(master.gain.events).toHaveLength(events);
+			expect(engine.state()).toMatchObject({
+				mode: 'off',
+				playing: false,
+				paused: halt === 'pause',
+				session: halt === 'pause' ? 'teste-cego' : null,
+				position: 0
+			});
+		}
+	);
+
+	it('a stopped deferred start cannot time out or leak into a new session without startAt', async () => {
+		vi.useFakeTimers();
+		const random = vi.fn(() => 0.5);
+		const { engine, fake } = setup({ random });
+		await engine.loadFile(audioFile());
+		const element = fake.elements[0];
+		if (!element) throw new Error('no element');
+		await engine.start('raw', { startAt: 'random', session: 'teste-cego' });
+		engine.stop();
+		await vi.advanceTimersByTimeAsync(100);
+
+		await engine.start('raw', { session: 'audio-panel' });
+		const master = masterOf(onlyContext());
+		expect(master.gain.value).toBeCloseTo(dbToGain(DEFAULT_VOLUME_DB), 12);
+		const events = master.gain.events.length;
+		element.currentTime = 7;
+		await vi.advanceTimersByTimeAsync(PENDING_START_TIMEOUT_MS);
+		expect(element.currentTime).toBe(7);
+		expect(master.gain.events).toHaveLength(events);
+		element.fireMetadata(80);
+		expect(random).not.toHaveBeenCalled();
+		expect(element.currentTime).toBe(7);
+		expect(element.playCalls).toBe(2);
+		expect(engine.state()).toMatchObject({ playing: true, position: 7, session: 'audio-panel' });
+	});
+
 	it('starts at 0 and says so when the length stays unknown for 1.5 s', async () => {
 		vi.useFakeTimers();
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
