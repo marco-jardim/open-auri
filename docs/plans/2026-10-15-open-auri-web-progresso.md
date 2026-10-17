@@ -184,6 +184,9 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 | T5.3 | commitada | 421e115 | backup semanal (sem registros de acesso), dump público, limpeza diária; migração 0011 permite apagar auditoria com mais de 5 anos; `tools/restore-backup.mjs` |
 | T5.4 | commitada | 91ac6f8 | CSP estrita (`default-src 'none'`, sem `unsafe-inline` em script/style; exceção só `style-src-attr`); `Permissions-Policy` mínima; redirecionamento 301 workers.dev → domínio próprio só em produção; rota de domínio próprio só em `env.production` (no topo quebrava o e2e); `visual.spec` com `bypassCSP` (estilo injetado pelo Playwright) |
 | T5.5 | commitada | 83dbe3f | README, CONTRIBUTING, runbooks (inclui ativação do .com com o bloqueio de DNS) |
+| T5.7 | concluída | 2949294 | jobs registrados; staging no ar (smoke ok); webhook do Resend criado (segredo só no `.env` e nos Workers) |
+| T5.T | commitada | 55ff9e5, 2c8ee63 | staging 38 ok + 1 pulado (cadastro aberto); jobs idempotentes, dump sem PII, restauração ida e volta; achados corrigidos em f87e4e9 (prévia S6 vazia, webhook liberado no somente leitura) |
+| T5.8 | concluída | — | produção em https://open-auri.com (smoke ok, cabeçalhos ok); domínio de envio verificado e e-mail de teste entregue; Turnstile com o domínio próprio; cadastro aberto; bookmarks do Time Travel registrados na saída do deploy; pendente do operador: criar a conta de `ADMIN_EMAIL` e rodar `tools/grant-admin.mjs` |
 | T5.6 | commitada | 9ec9abb | `autocannon` 8; recusa origem de produção; execução em staging pendente |
 
 ## Pre-flights
