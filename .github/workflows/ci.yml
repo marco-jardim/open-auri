@@ -131,9 +131,9 @@ jobs:
       - name: Install Chromium (Vitest browser project)
         run: npx playwright install --with-deps chromium
       - name: Web unit and component tests
-        run: npm run -w web test:unit
+        run: npm run -w web test:coverage
       - name: Web integration tests
-        run: npm run -w web test:int
+        run: npm run -w web test:int:coverage
       - name: Jobs tests
         run: npm run -w workers/jobs test
 

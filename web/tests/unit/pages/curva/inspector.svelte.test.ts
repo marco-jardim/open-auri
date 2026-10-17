@@ -55,7 +55,7 @@ test('inspector renders both tables, the real readouts against their limits and 
 			limit: m.curva_insp_limit({ value: formatNumber(THRESHOLDS.poleRadius, 'pt-BR', 6) })
 		},
 		{
-			value: m.curva_insp_peak({ value: formatSignedDb(analysis.fullPeak.db, 'pt-BR', 2) }),
+			value: m.curva_insp_peak({ value: formatSignedDb(analysis.fullPeak.db, 'pt-BR', 1) }),
 			limit: m.curva_insp_limit({ value: formatSignedDb(THRESHOLDS.sectionPeakDb, 'pt-BR', 1) })
 		}
 	];
@@ -68,7 +68,7 @@ test('inspector renders both tables, the real readouts against their limits and 
 		);
 	}
 	expect(expected[1]?.value).toBe(
-		`Pico da seção ${formatSignedDb(analysis.fullPeak.db, 'pt-BR', 2)}`
+		`Pico da seção ${formatSignedDb(analysis.fullPeak.db, 'pt-BR', 1)}`
 	);
 	expect(expected[1]?.limit).toBe('limite +9,2 dB');
 	expect(root.querySelector('.pz-help-title')?.textContent?.trim()).toBe(

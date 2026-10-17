@@ -32,7 +32,7 @@
 	const poleLimit = THRESHOLDS.poleRadius;
 	const peakLimit = THRESHOLDS.sectionPeakDb;
 	const poleValue = $derived(analysis ? formatNumber(analysis.poleRadius, locale, 6) : '');
-	const peakValue = $derived(analysis ? formatSignedDb(analysis.fullPeak.db, locale, 2) : '');
+	const peakValue = $derived(analysis ? formatSignedDb(analysis.fullPeak.db, locale, 1) : '');
 </script>
 
 <section class="mod-panel" aria-labelledby={headingId}>
