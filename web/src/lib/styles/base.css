@@ -38,6 +38,21 @@
 		color: inherit;
 	}
 
+	/*
+	 * Native dropdown lists are painted by the OS from the option's own colours: with an
+	 * inherited light text and no option background they come out light on white. Every
+	 * list gets an explicit, readable pair; paper surfaces switch to ink on paper.
+	 */
+	option,
+	optgroup {
+		background-color: var(--option-bg, var(--ink-2));
+		color: var(--option-ink, var(--text));
+	}
+
+	option:disabled {
+		color: var(--option-ink-disabled, var(--muted));
+	}
+
 	button,
 	a,
 	input,
@@ -204,6 +219,13 @@
 	}
 
 	/* Paper surfaces (Docs body, track sheets) read as light */
+	[data-surface='paper'],
+	.panel--paper {
+		--option-bg: var(--paper);
+		--option-ink: var(--paper-ink);
+		--option-ink-disabled: var(--paper-muted);
+	}
+
 	[data-surface='paper'] {
 		color-scheme: light;
 		background: var(--paper);
