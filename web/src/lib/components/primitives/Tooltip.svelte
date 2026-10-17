@@ -133,7 +133,9 @@
 		};
 		const blur = () => {
 			pressed = false;
-			hide();
+			// Deferred: a focused trigger removed during a Svelte update fires focusout mid-flush,
+			// and writing state there would be an unsafe mutation.
+			queueMicrotask(hide);
 		};
 		node.addEventListener('pointerenter', enter);
 		node.addEventListener('pointerleave', leave);
