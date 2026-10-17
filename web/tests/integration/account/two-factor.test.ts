@@ -486,18 +486,38 @@ describe('two-step verification from /conta', () => {
 		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
 	});
 
+	it('over HTTP the password alone cannot turn 2FA off (404); /conta still can', async () => {
+		const h = harness();
+		const { id, client } = await account(h, 'tf-disable-http');
+		const { totpURI } = await enableOverHttp(client);
+
+		// A stolen cookie plus the password: the endpoint is closed over HTTP (issue #21).
+		const response = await client.post('/two-factor/disable', { password: PASSWORD });
+		expect(response.status).toBe(404);
+		expect(await readTwoFactorStatus(env.DB, id)).toBe('on');
+		expect(await enabledFlag(id)).toBe(1);
+
+		// /conta wants the code too, then calls the same endpoint server-side (no request).
+		const headers = () => client.headers({ origin: h.origin });
+		expect(await disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD))).toEqual(REFUSED);
+		const code = await totp(totpURI);
+		expect(
+			await as(client, () => disableTwoFactor(h.auth, headers(), disableInput(id, PASSWORD, code)))
+		).toEqual({ ok: true });
+		expect(await readTwoFactorStatus(env.DB, id)).toBe('off');
+	});
+
 	it('without a session every step is refused as unauthenticated', async () => {
 		const h = harness();
 		const headers = new Headers({ origin: h.origin, 'cf-connecting-ip': '10.9.9.9' });
-		expect(await startEnrolment(h.auth, headers, PASSWORD)).toMatchObject({
-			ok: false,
-			code: 'unauthenticated',
-			status: 401
-		});
-		expect(await confirmEnrolment(h.auth, headers, '123456')).toMatchObject({ ok: false });
+		const unauthenticated = { ok: false, code: 'unauthenticated', status: 401 };
+		expect(await startEnrolment(h.auth, headers, PASSWORD)).toEqual(unauthenticated);
+		// verify-totp without a session looks for the sign-in challenge cookie: 401 without it.
+		expect(await confirmEnrolment(h.auth, headers, '123456')).toEqual(unauthenticated);
+		// No D1 row → not 'pending', so the code goes to verify-totp first: the same 401.
 		expect(
 			await disableTwoFactor(h.auth, headers, disableInput('no-such-user', PASSWORD, '123456'))
-		).toMatchObject({ ok: false });
+		).toEqual(unauthenticated);
 	});
 
 	it('nothing secret reaches the logs', async () => {

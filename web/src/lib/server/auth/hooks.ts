@@ -63,7 +63,7 @@ export const TURNSTILE_HEADER = 'x-turnstile-token';
  * Better Auth endpoints closed over HTTP because the app does not use them (Q3-7). Server-side
  * `auth.api.*` calls still reach them (tests, future server code). Kept open on purpose:
  * sign-in/up/out, get-session, verification and reset, change-email/password, delete-user (+
- * callback), the 2FA verification and enable/disable endpoints, and `/revoke-session(s)` /
+ * callback), the 2FA verification and enable endpoints, and `/revoke-session(s)` /
  * `/revoke-other-sessions` (they only remove the caller's own sessions, like /conta does).
  */
 export const CLOSED_AUTH_PATHS = [
@@ -82,6 +82,10 @@ export const CLOSED_AUTH_PATHS = [
 	// Secrets of an enabled 2FA: shown once at enable time; nothing re-reads or regenerates them.
 	'/two-factor/get-totp-uri',
 	'/two-factor/generate-backup-codes',
+	// Over HTTP it checks only the password (plus the 2FA marker for an admin): a stolen cookie
+	// and the password would turn 2FA off. /conta turns it off server-side (account/two-factor.ts:
+	// a current code or backup code first, then this endpoint through `auth.api`), issue #21.
+	'/two-factor/disable',
 	// No OTP delivery is configured.
 	'/two-factor/send-otp',
 	'/two-factor/verify-otp',

@@ -12,7 +12,15 @@ import {
 	uniqueEmail,
 	type Client
 } from '../auth/harness.ts';
-import { harness, persona, personas, PERSONAS, userRow, type PersonaName } from './helpers.ts';
+import {
+	count,
+	harness,
+	persona,
+	personas,
+	PERSONAS,
+	userRow,
+	type PersonaName
+} from './helpers.ts';
 
 const network = setupNetwork();
 
@@ -31,7 +39,9 @@ const SIGNED_IN: readonly PersonaName[] = PERSONAS.filter((name) => name !== 'an
 
 /** Session-bound endpoints: method, path and a body that would otherwise be valid. */
 // FX3.1 (Q3-7): `/list-sessions` and `/update-user` left this list: the app does not use them and
-// they now answer 404 over HTTP for everyone (covered in auth/hardening.test.ts).
+// they now answer 404 over HTTP for everyone (covered in auth/hardening.test.ts). Issue #21:
+// `/two-factor/disable` left it too (404 for every persona, asserted below); /conta turns 2FA off
+// server-side with the password and a code.
 const SESSION_ENDPOINTS: readonly { method: 'GET' | 'POST'; path: string; body?: unknown }[] = [
 	{
 		method: 'POST',
@@ -43,8 +53,7 @@ const SESSION_ENDPOINTS: readonly { method: 'GET' | 'POST'; path: string; body?:
 	{ method: 'POST', path: '/revoke-session', body: { token: 'not-a-token' } },
 	{ method: 'POST', path: '/revoke-sessions' },
 	{ method: 'POST', path: '/revoke-other-sessions' },
-	{ method: 'POST', path: '/two-factor/enable', body: { password: PASSWORD } },
-	{ method: 'POST', path: '/two-factor/disable', body: { password: PASSWORD } }
+	{ method: 'POST', path: '/two-factor/enable', body: { password: PASSWORD } }
 ];
 
 async function call(client: Client, method: 'GET' | 'POST', path: string, body?: unknown) {
@@ -100,6 +109,21 @@ describe('/api/auth/* × personas', () => {
 			expect(promote.status, name).toBe(404);
 		}
 		expect(await localsRole(all.verified.client)).toBe('user');
+	});
+
+	it('/two-factor/disable is 404 over HTTP for everyone; 2FA stays on (issue #21)', async () => {
+		const h = harness(network);
+		const all = await personas(h);
+		for (const name of PERSONAS) {
+			const response = await all[name].client.post('/two-factor/disable', { password: PASSWORD });
+			expect(response.status, name).toBe(404);
+		}
+		expect(
+			await count(
+				'SELECT count(*) AS n FROM "user" WHERE id = ? AND "twoFactorEnabled" = 1',
+				all.admin2fa.id
+			)
+		).toBe(1);
 	});
 
 	it('unverified: sign-in is refused until the link is opened (403)', async () => {

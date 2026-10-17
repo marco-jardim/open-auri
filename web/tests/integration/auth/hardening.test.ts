@@ -435,7 +435,7 @@ describe('Q3-5: freshness of sensitive endpoints over HTTP', () => {
 		expect(h.mails(email, 'confirm-email-change')).toHaveLength(1);
 	});
 
-	it('an admin with 2FA needs the 2FA marker to disable it', async () => {
+	it('an admin with 2FA needs the 2FA marker to disable it (server-side; closed over HTTP)', async () => {
 		const h = harness();
 		const email = uniqueEmail('hard-admin2fa');
 		const id = await createVerifiedUser(h, email);
@@ -445,9 +445,28 @@ describe('Q3-5: freshness of sensitive endpoints over HTTP', () => {
 		await env.DB.prepare('UPDATE "session" SET "twoFactorVerifiedAt" = NULL WHERE "userId" = ?')
 			.bind(id)
 			.run();
+		expect((await client.post('/two-factor/disable', { password: PASSWORD })).status).toBe(404);
+		// /conta's server-side call (account/two-factor.ts) still meets the marker rule.
+		await expect(
+			h.auth.api.disableTwoFactor({
+				headers: client.headers({ origin: h.origin }),
+				body: { password: PASSWORD }
+			})
+		).rejects.toMatchObject({ statusCode: 403, body: { code: 'TWO_FACTOR_REQUIRED' } });
+		const row = await env.DB.prepare('SELECT "twoFactorEnabled" AS on2fa FROM "user" WHERE id = ?')
+			.bind(id)
+			.first<{ on2fa: number }>();
+		expect(row?.on2fa).toBe(1);
+	});
+
+	it('a user with 2FA on cannot turn it off over HTTP with the password alone (404)', async () => {
+		const h = harness();
+		const email = uniqueEmail('hard-user2fa');
+		const id = await createVerifiedUser(h, email);
+		const client = await signedIn(h, email);
+		await enableTotp(h, client);
 		const response = await client.post('/two-factor/disable', { password: PASSWORD });
-		expect(response.status).toBe(403);
-		expect(await errorCode(response)).toBe('TWO_FACTOR_REQUIRED');
+		expect(response.status).toBe(404);
 		const row = await env.DB.prepare('SELECT "twoFactorEnabled" AS on2fa FROM "user" WHERE id = ?')
 			.bind(id)
 			.first<{ on2fa: number }>();

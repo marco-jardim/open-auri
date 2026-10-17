@@ -17,8 +17,13 @@
 //
 // Turning 2FA off (issue #21) also needs the second factor: a current TOTP code or an unused
 // backup code, checked first with the same endpoints as the sign-in 2FA step (so the same per-user
-// limits apply), then the password through `/two-factor/disable`. A wrong code and a wrong password
-// get one answer ('wrong-password-or-code'), so a refusal never says which factor failed.
+// limits apply), then the password through `/two-factor/disable` (closed over HTTP, auth/hooks.ts
+// CLOSED_AUTH_PATHS; reached here server-side). A wrong code and a wrong password get the same
+// result code ('wrong-password-or-code'); only that result is shared. Timing differs (a wrong
+// code returns before the password is checked), each factor counts in its own per-user bucket (a
+// 429 can tell them apart), and a backup code is spent even when the password is then wrong.
+// The code alone can be tried on `/two-factor/verify-totp` directly anyway (open over HTTP for the
+// sign-in step, with the same per-user limits).
 //
 // The URI and the backup codes are secrets: they go back to the caller once and are never stored,
 // logged or put in a cookie or URL by this module.
@@ -208,9 +213,12 @@ export interface DisableTwoFactorInput {
  * checked first (`/two-factor/verify-totp` or `/verify-backup-code`, as in the sign-in 2FA step;
  * for an admin it also sets the session's 2FA marker), then the password (`/two-factor/disable`).
  * A missing or malformed field is refused before Better Auth (no attempt counted); a wrong code or
- * a wrong password gets 'wrong-password-or-code'. A backup code that passed is spent even when the
- * password is then wrong: Better Auth has no password check without side effects that the auth
- * hooks limit, and the password is only known to be right once 2FA is off.
+ * a wrong password gets the same result code, 'wrong-password-or-code'. That result is all they
+ * share: the timing and the per-user rate-limit bucket (second factor vs password) still differ,
+ * and `/two-factor/verify-totp` can be called directly to try a code on its own. A backup code that
+ * passed is spent even when the password is then wrong: Better Auth has no password check without
+ * side effects that the auth hooks limit, and the password is only known to be right once 2FA is
+ * off.
  *
  * A pending setup (2FA not on yet) is cancelled with the password alone, and any code is ignored
  * there: checking it would confirm the setup instead.

@@ -26,6 +26,7 @@ import {
 	type FlowContext
 } from '#lib/components/auth/actions.server.ts';
 import { AUTH_TURNSTILE_ACTIONS, TURNSTILE_FIELD } from '#lib/components/auth/fields.ts';
+import { MAX_NEXT_LENGTH } from '#lib/components/auth/next.ts';
 
 const ORIGIN = 'https://open-auri.example';
 
@@ -403,6 +404,27 @@ describe('signUpFlow', () => {
 	test('verification callback is relative and keeps next', () => {
 		expect(verificationCallback(null)).toBe('/verificar-email?verificado=1');
 		expect(verificationCallback('//evil.example')).toBe('/verificar-email?verificado=1');
+		expect(verificationCallback('/biblioteca?aba=lidos')).toBe(
+			'/verificar-email?verificado=1&next=%2Fbiblioteca%3Faba%3Dlidos'
+		);
+	});
+
+	test('verification callback drops a valid next whose encoded form would pass the cap', () => {
+		const landing = '/verificar-email?verificado=1';
+		// `${landing}&next=%2F` comes first; `a` is not encoded, so `room` of them reach the cap.
+		const room = MAX_NEXT_LENGTH - `${landing}&next=%2F`.length;
+		const fits = `/${'a'.repeat(room)}`;
+		const over = `/${'a'.repeat(room + 1)}`;
+		const nearCap = `/${'a'.repeat(MAX_NEXT_LENGTH - 12)}`;
+		for (const next of [fits, over, nearCap]) {
+			// Each one is a valid `next` on its own: only the callback length decides.
+			expect(next.length).toBeLessThanOrEqual(MAX_NEXT_LENGTH);
+			expect(verificationCallback(next).length).toBeLessThanOrEqual(MAX_NEXT_LENGTH);
+		}
+		expect(verificationCallback(fits)).toBe(`${landing}&next=%2F${'a'.repeat(room)}`);
+		expect(verificationCallback(fits)).toHaveLength(MAX_NEXT_LENGTH);
+		expect(verificationCallback(over)).toBe(landing);
+		expect(verificationCallback(nearCap)).toBe(landing);
 	});
 });
 

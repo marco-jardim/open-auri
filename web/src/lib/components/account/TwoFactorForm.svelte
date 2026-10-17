@@ -16,7 +16,7 @@
 	import { qrSvg as serverQrSvg } from '#lib/qr/index.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import Field from '#lib/components/primitives/Field.svelte';
-	import { feedbackMessage } from './format.ts';
+	import Feedback from './Feedback.svelte';
 	import {
 		feedbackFor,
 		noEnhance,
@@ -258,37 +258,11 @@
 		</form>
 	{/if}
 
-	<!-- The live regions of Feedback.svelte (always mounted, so changes are announced), plus the
-	     disable refusal's own wording: one message for a wrong password or a wrong code, so the
-	     answer never says which factor failed. -->
-	<div class="feedback" role="status" aria-live="polite">
-		{#if mine?.ok}<p class="ok">{feedbackMessage(mine)}</p>{/if}
-	</div>
-	<div class="feedback" role="alert">
-		{#if mine && !mine.ok}
-			<p class="error">
-				{mine.error === 'wrong-password-or-code'
-					? m.conta_2fa_error_disable()
-					: feedbackMessage(mine)}
-			</p>
-		{/if}
-	</div>
+	<!-- A wrong password or code on disable has one wording (format.ts: 'wrong-password-or-code'). -->
+	<Feedback feedback={mine} />
 </div>
 
 <style>
-	.feedback p {
-		margin: 0;
-		font: 13px/1.5 var(--ui, 'Geist', system-ui, sans-serif);
-	}
-
-	.feedback .ok {
-		color: #9fdcb8;
-	}
-
-	.feedback .error {
-		color: #ffb4a8;
-	}
-
 	.tf,
 	.setup {
 		display: grid;

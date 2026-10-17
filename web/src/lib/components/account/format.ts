@@ -90,6 +90,9 @@ function errorMessage(feedback: FormFeedback): string {
 			return m.conta_policy_error();
 		case 'invalid-code':
 			return m.conta_2fa_error_code();
+		// Disabling 2FA: one wording for a wrong password or a wrong code (the factor is not named).
+		case 'wrong-password-or-code':
+			return m.conta_2fa_error_disable();
 		case 'two-factor-required':
 		case 'TWO_FACTOR_REQUIRED':
 			return m.conta_2fa_error_marker();
