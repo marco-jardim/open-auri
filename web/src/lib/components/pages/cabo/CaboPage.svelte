@@ -33,6 +33,7 @@
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { hexBytes } from '#lib/charts/protocol.ts';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { formatCrc, formatNumber } from '#lib/components/cable/i18n.ts';
 	import { criteriaValues } from '#lib/components/cable/criteria.ts';
 	import LevelGauge from '#lib/components/cable/LevelGauge.svelte';
@@ -186,6 +187,7 @@
 <Tour page="cabo" autoOpen={tourAutoOpen} />
 
 <div class="room">
+	<LazyArt load={() => import('#lib/components/art/CaboArt.svelte')} />
 	<div class="intro">
 		<div>
 			<h1>{m.cabo_title()}</h1>
@@ -466,6 +468,8 @@
 <style>
 	.room {
 		--cabo-accent: #4fd1c5;
+		position: relative;
+		isolation: isolate;
 		padding: 26px 22px 56px;
 		color: #ece7dd;
 		background: radial-gradient(ellipse at 15% 0, #22302e, #0d0f0f 55%, #060707);

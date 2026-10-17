@@ -92,7 +92,10 @@ test('the offline page imports only light modules, never the app barrel', () => 
 		'#lib/paraglide/messages.js',
 		'#lib/components/primitives/Button.svelte',
 		'#lib/components/primitives/Lamp.svelte',
-		'#lib/components/primitives/Panel.svelte'
+		'#lib/components/primitives/Panel.svelte',
+		// Decorative art (FUX.ART) arrives after idle through LazyArt (a dynamic import, so it is
+		// not in the static closure); signal-art.svelte.test.ts holds SignalArt's script light.
+		'#lib/components/art/LazyArt.svelte'
 	]);
 	expect(offlineSource).not.toMatch(/from\s+'#lib\/app\//);
 });

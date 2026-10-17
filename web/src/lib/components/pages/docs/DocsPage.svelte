@@ -18,6 +18,7 @@
 	import { keyboardScroll } from './keyboard-scroll.ts';
 	import { glossaryEntries } from './glossary-entries.ts';
 	import { traceOnce } from './trace.ts';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 
 	type NotifyTone = 'success' | 'error';
 	let {
@@ -365,6 +366,7 @@
 	lang={content.locale}
 	style:--docs-scroll-offset={`${scrollMargin}px`}
 >
+	<LazyArt load={() => import('#lib/components/art/DocsArt.svelte')} />
 	<div
 		class="reading-progress"
 		aria-hidden="true"
@@ -630,6 +632,9 @@
 <style>
 	.paper {
 		--paper-rule: #ad9c81;
+		/* Holds the art layer (DocsArt) under the text, above the paper itself. */
+		position: relative;
+		isolation: isolate;
 		background:
 			radial-gradient(ellipse at 50% 25%, transparent 30%, #a8884922),
 			repeating-linear-gradient(3deg, #78552804 0 1px, transparent 1px 4px), #efe6d2;

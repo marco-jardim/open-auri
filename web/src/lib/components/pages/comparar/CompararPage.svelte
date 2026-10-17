@@ -12,6 +12,7 @@
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
 	import { frequencyLabel, numberLabel } from '#lib/charts/scales.ts';
 	import { Button } from '#lib/components/primitives/index.ts';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { Explainer, Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import { copy } from './copy.ts';
 	import {
@@ -268,6 +269,7 @@
 
 <div class="comparar">
 	<div class="cabinet">
+		<LazyArt load={() => import('#lib/components/art/ComparArt.svelte')} />
 		{#each ['tl', 'tr', 'bl', 'br'] as corner (corner)}
 			<span class="screw {corner}" aria-hidden="true"></span>
 		{/each}
@@ -617,6 +619,14 @@
 </div>
 
 <style>
+	/* FUX.ART: the cabinet is the page's opaque body, so the art layer is its first child and
+	   lies on the hammertone under the plates and panels (an art layer under the cabinet would
+	   only show in the 22px page margin). */
+	.comparar,
+	.cabinet {
+		position: relative;
+		isolation: isolate;
+	}
 	.intro {
 		position: relative;
 	}

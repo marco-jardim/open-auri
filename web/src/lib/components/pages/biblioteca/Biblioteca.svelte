@@ -9,6 +9,7 @@
 	// Direct chart imports (FUX.B): the charts barrel would bring every chart into the page.
 	import MiniCurve from '#lib/charts/MiniCurve.svelte';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { neutralCurve } from '#lib/state/model.ts';
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
@@ -217,6 +218,7 @@
 >
 
 <div class="room">
+	<LazyArt load={() => import('#lib/components/art/BibliotecaArt.svelte')} />
 	<div class="window" aria-hidden="true"></div>
 	<section class="hero" aria-labelledby="{id}-title">
 		<div class="tape-path" aria-hidden="true"></div>

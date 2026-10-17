@@ -11,6 +11,7 @@
 	import Button from '#lib/components/primitives/Button.svelte';
 	import Lamp from '#lib/components/primitives/Lamp.svelte';
 	import Panel from '#lib/components/primitives/Panel.svelte';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 
 	// Prerendered without a navigator: the page is served when the network is gone, so it
 	// starts offline and hydration reads the real flag.
@@ -59,6 +60,7 @@
 </svelte:head>
 
 <main class="offline" aria-labelledby="offline-title">
+	<LazyArt load={() => import('#lib/components/art/SignalArt.svelte')} />
 	<header class="offline__head">
 		<p class="eyebrow offline__signal" role="status" data-online={online}>
 			<Lamp on={online} tone={online ? 'ok' : 'warn'} />
@@ -95,6 +97,9 @@
 
 <style>
 	.offline {
+		/* Holds the cut-tape art (SignalArt) in the top padding. */
+		position: relative;
+		isolation: isolate;
 		display: grid;
 		gap: var(--space-7);
 		width: 100%;

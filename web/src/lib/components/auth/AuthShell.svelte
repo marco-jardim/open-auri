@@ -6,7 +6,8 @@
 	  EQ      = the human check (Turnstile)      Saída = the submit switch
 	Each stage lamp lights only from real validation state: the browser's constraint validation
 	of the field, the confirmation matching, a Turnstile token present. The Saída lamp lights when
-	every stage on the strip is lit. Nothing animates on a timer; no lamp pretends to measure.
+	every stage on the strip is lit. No lamp or knob animates on a timer and no lamp pretends to
+	measure; the only timed motion is the decorative line art behind the strip (AuthArt).
 	Homage to Rupert Neve lives in the footer text only; nothing imitates a maker's badge or logo.
 -->
 <script module lang="ts">
@@ -76,6 +77,7 @@
 
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 
 	interface Props {
 		/** Two-digit channel number printed on the cap (decorative). */
@@ -93,6 +95,7 @@
 </script>
 
 <main class="auth-page" aria-labelledby="{uid}-title">
+	<LazyArt load={() => import('#lib/components/art/AuthArt.svelte')} />
 	<section class="strip">
 		<div class="cap" aria-hidden="true">
 			<span class="screw"></span>
@@ -134,6 +137,9 @@
 		/* Width of the stage column (knob, engraved name, lamp) left of the fields. */
 		--stage-gutter: 52px;
 
+		/* Holds the background line art (AuthArt) under the strip. */
+		position: relative;
+		isolation: isolate;
 		display: flex;
 		justify-content: center;
 		padding: var(--space-7, 48px) var(--gutter, 24px) var(--space-6, 32px);

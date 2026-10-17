@@ -13,6 +13,7 @@
 	import type { CurveData } from '#lib/state/model.ts';
 	import { Button, EmptyState, Skeleton } from '#lib/components/primitives/index.ts';
 	import { Explainer, Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import Attribution from './Attribution.svelte';
 	import CsvImport from './CsvImport.svelte';
 	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
@@ -405,6 +406,7 @@
 </script>
 
 <div class="soe-page">
+	<LazyArt load={() => import('#lib/components/art/SoeArt.svelte')} />
 	<section class="hero" aria-labelledby="soe-title">
 		<svg class="seismic" viewBox="0 0 1200 230" preserveAspectRatio="none" aria-hidden="true">
 			{#each SEISMIC as d, i (i)}<path {d} />{/each}
@@ -960,6 +962,8 @@
 		   tests/unit/styles/contrast.test.ts. */
 		--soe-panel-accent: #ffa3c8; /* 5.03:1 on #45483e, 6.28:1 on #363a30 */
 		--soe-panel-muted: var(--text-2, #cfc9be); /* 5.67:1 on #45483e, 7.07:1 on #363a30 */
+		position: relative;
+		isolation: isolate;
 		max-width: 1600px;
 		padding: var(--space-7, 36px) var(--space-5, 24px) 0;
 		margin: auto;

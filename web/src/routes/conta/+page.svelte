@@ -16,6 +16,7 @@
 		type FormFeedback
 	} from '#lib/components/account/index.ts';
 	import PolicyBanner from '#lib/components/legal/PolicyBanner.svelte';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { PageProps } from './$types';
 
@@ -71,6 +72,10 @@
 </svelte:head>
 
 <div class="account">
+	<LazyArt
+		load={() => import('#lib/components/art/AuthArt.svelte')}
+		props={{ variant: 'account' }}
+	/>
 	<PolicyBanner
 		version={data.policy.version}
 		seenVersion={data.policy.seenVersion}
@@ -191,6 +196,9 @@
 
 <style>
 	.account {
+		/* Holds the background line art (AuthArt) under the sections. */
+		position: relative;
+		isolation: isolate;
 		display: grid;
 		gap: var(--space-5, 24px);
 		width: min(100%, 860px);

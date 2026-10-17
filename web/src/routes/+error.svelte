@@ -7,6 +7,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { m } from '#lib/paraglide/messages.js';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 
 	const notFound = $derived(page.status === 404);
 </script>
@@ -16,6 +17,7 @@
 </svelte:head>
 
 <main class="error-page" aria-labelledby="error-title">
+	<LazyArt load={() => import('#lib/components/art/SignalArt.svelte')} />
 	<div class="error-page__well">
 		<p class="eyebrow error-page__label" id="error-status-label">{m.fux_p11_error_code_label()}</p>
 		<p class="readout error-page__status" aria-describedby="error-status-label">{page.status}</p>
@@ -37,6 +39,9 @@
 
 <style>
 	.error-page {
+		/* Holds the interrupted-signal art (SignalArt) in the top padding. */
+		position: relative;
+		isolation: isolate;
 		display: grid;
 		justify-items: start;
 		gap: var(--space-5);

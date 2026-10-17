@@ -13,6 +13,7 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import ProfileRecord from './ProfileRecord.svelte';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import {
 		LICENSE_OPTIONS,
 		formatDate,
@@ -173,6 +174,7 @@
 >
 
 <div class="room" data-page="biblioteca">
+	<LazyArt load={() => import('#lib/components/art/PerfilArt.svelte')} />
 	{#if profileLoading}
 		<section
 			class="profile-loading"
@@ -380,6 +382,9 @@
 <style>
 	.room {
 		--face-engrave: var(--cond);
+		/* Holds the art layer (PerfilArt) under the content. */
+		position: relative;
+		isolation: isolate;
 		display: grid;
 		gap: var(--space-5);
 		padding: 0 var(--gutter) var(--space-7);

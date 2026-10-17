@@ -20,8 +20,9 @@
 	import type { ClientApp } from '#lib/app/index.ts';
 	import { warmGateWorker } from '#lib/app/warm.ts';
 	import { warmAudio } from '#lib/audio/warm.ts';
+	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
-	import { Skeleton } from '#lib/components/primitives/index.ts';
+	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
 	import { createGateWorker } from '#lib/workers/index.ts';
 	import { curveSignature } from '#lib/state/model.ts';
 	import { m } from '#lib/paraglide/messages.js';
@@ -751,6 +752,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <main class="curva" data-layer={layer} aria-labelledby={titleId}>
+	<LazyArt load={() => import('#lib/components/art/CurvaArt.svelte')} />
 	<section class="nameplate">
 		<div class="np-title">
 			<p class="np-eyebrow"><b>01 /</b> {m.curva_eyebrow()}</p>
@@ -956,6 +958,9 @@
 			linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 30%),
 			linear-gradient(#2e2d2b, #1f1e1c);
 		--curva-wood: linear-gradient(90deg, #26140a, #5b351c 30%, #4b2b16 62%, #22120a);
+		/* FUX.ART: the art layer (first child) sits under the content inside this context. */
+		position: relative;
+		isolation: isolate;
 		display: grid;
 		/* minmax(0, …): wide content (cabinet rack, bank strips) scrolls inside its box instead of
 		   widening the page and pushing the nameplate controls off-screen. */
