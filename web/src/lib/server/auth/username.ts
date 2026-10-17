@@ -120,6 +120,10 @@ const BLOCKED_SUBSTRINGS = Object.values(USERNAME_BLOCKLIST)
  * Compared with the whole token as typed (normalized, lowercase, never folded), so a leet or
  * look-alike form of the brand (`t1dal`, `f1nal`) is still refused, and neither the substring
  * list nor a longer token is affected.
+ *
+ * Intentional, pending PO confirmation (#35): the exact, unfolded brand tokens `final`, `chord`
+ * and `tidal` are accepted as nicknames on purpose (common words win over the brand). The set is
+ * pinned by tests/unit/server/auth/username.test.ts:166; do not change it without the PO.
  */
 export const COMMON_WORD_TOKENS: ReadonlySet<string> = new Set(['ig', 'final', 'chord', 'tidal']);
 

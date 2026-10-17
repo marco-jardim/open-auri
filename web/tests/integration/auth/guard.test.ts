@@ -93,6 +93,25 @@ describe('Turnstile (x-turnstile-token header)', () => {
 		const row = await env.DB.prepare('SELECT id FROM "user" WHERE email = ?').bind(email).first();
 		expect(row).toBeNull();
 	});
+
+	it('refuses a blocked nickname without a token as TURNSTILE_REQUIRED (#35)', async () => {
+		// The guard runs before the nickname rule, so a token-less probe cannot read the list.
+		const h = harness();
+		for (const username of ['admin', 'sennheiser', 'n1gg3r']) {
+			const email = uniqueEmail('ts-blocked');
+			const response = await h
+				.client()
+				.post(
+					'/sign-up/email',
+					{ name: 'Test Person', email, password: PASSWORD, username },
+					{ turnstile: null }
+				);
+			expect(response.status, username).toBe(400);
+			expect(await errorCode(response), username).toBe('TURNSTILE_REQUIRED');
+			const row = await env.DB.prepare('SELECT id FROM "user" WHERE email = ?').bind(email).first();
+			expect(row).toBeNull();
+		}
+	});
 });
 
 describe('origin', () => {
