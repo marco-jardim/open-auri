@@ -15,13 +15,49 @@ export interface MemoryLocks extends WriteLockManager {
 	query(): Promise<{ held: WriteLock[] }>;
 }
 
-/** Waiters per shared `held` set, woken whenever a lock of that set is released. */
-const waiters = new WeakMap<Set<string>, (() => void)[]>();
+interface Waiter {
+	readonly name: string;
+	/** Called once the lock is already marked as held for this waiter. */
+	readonly grant: () => void;
+}
 
+/**
+ * Waiting requests per shared `held` set, oldest first (one queue for every name, like the
+ * per-origin lock manager). Woken whenever a lock of that set is released.
+ */
+const waiters = new WeakMap<Set<string>, Waiter[]>();
+
+function queueOf(held: Set<string>): Waiter[] {
+	let queue = waiters.get(held);
+	if (!queue) {
+		queue = [];
+		waiters.set(held, queue);
+	}
+	return queue;
+}
+
+/**
+ * Like the real API: a name is grantable only when nobody holds it and nobody waits for it.
+ * Through this fake a queued name is always held (`wake` hands it over synchronously), so the
+ * queue check only matters for waiting requests after a test edited `held` directly.
+ */
+function grantable(held: Set<string>, name: string): boolean {
+	return !held.has(name) && !queueOf(held).some((waiter) => waiter.name === name);
+}
+
+/**
+ * Grants every free name to its OLDEST waiter only (FIFO, one holder per name), marking the lock
+ * held synchronously, before the waiter resumes: nothing (an `ifAvailable` request included)
+ * can slip in between the release and the next grant.
+ */
 function wake(held: Set<string>) {
-	const queue = waiters.get(held) ?? [];
-	waiters.set(held, []);
-	for (const waiter of queue) waiter();
+	const queue = queueOf(held);
+	for (const waiter of [...queue]) {
+		if (held.has(waiter.name)) continue;
+		queue.splice(queue.indexOf(waiter), 1);
+		held.add(waiter.name);
+		waiter.grant();
+	}
 }
 
 /** Releases `name` as if the tab holding it died (its pending callback never settles). */
@@ -38,6 +74,7 @@ export function memoryLocks(held: Set<string> = new Set()): MemoryLocks {
 	const requests: { name: string; granted: boolean }[] = [];
 	const waits: { name: string; granted: boolean }[] = [];
 	async function run<T>(name: string, callback: (lock: WriteLock | null) => Promise<T>) {
+		// Idempotent: a woken waiter was already marked as held by `wake`.
 		held.add(name);
 		try {
 			return await callback({ name });
@@ -56,7 +93,8 @@ export function memoryLocks(held: Set<string> = new Set()): MemoryLocks {
 			callback: (lock: WriteLock | null) => Promise<T>
 		): Promise<T> {
 			if (options.ifAvailable === true) {
-				// Writes: never wait, report null instead.
+				// Writes: never wait, report null instead. Only the holder is checked, so a test that
+				// clears `held` directly frees the lock for writes at once, as it always did.
 				const granted = !held.has(name);
 				requests.push({ name, granted });
 				if (!granted) return callback(null);
@@ -67,27 +105,34 @@ export function memoryLocks(held: Set<string> = new Set()): MemoryLocks {
 			waits.push(record);
 			const { signal } = options;
 			if (signal?.aborted) throw abortError(signal);
+			// A test may have freed a name by editing `held` directly: older waiters go first.
+			wake(held);
 			await new Promise<void>((resolve, reject) => {
-				const onAbort = () => {
-					const queue = waiters.get(held) ?? [];
-					waiters.set(
-						held,
-						queue.filter((waiter) => waiter !== attempt)
-					);
-					reject(abortError(signal as AbortSignal));
-				};
-				const attempt = () => {
-					if (held.has(name)) {
-						waiters.set(held, [...(waiters.get(held) ?? []), attempt]);
-						return;
+				let onAbort: (() => void) | undefined;
+				const waiter: Waiter = {
+					name,
+					grant: () => {
+						if (onAbort) signal?.removeEventListener('abort', onAbort);
+						record.granted = true;
+						resolve();
 					}
-					signal?.removeEventListener('abort', onAbort);
-					resolve();
 				};
-				signal?.addEventListener('abort', onAbort, { once: true });
-				attempt();
+				if (grantable(held, name)) {
+					held.add(name);
+					waiter.grant();
+					return;
+				}
+				if (signal) {
+					onAbort = () => {
+						const queue = queueOf(held);
+						const index = queue.indexOf(waiter);
+						if (index >= 0) queue.splice(index, 1);
+						reject(abortError(signal));
+					};
+					signal.addEventListener('abort', onAbort, { once: true });
+				}
+				queueOf(held).push(waiter);
 			});
-			record.granted = true;
 			return run(name, callback);
 		},
 		query() {
