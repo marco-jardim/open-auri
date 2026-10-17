@@ -6,6 +6,8 @@
 <script lang="ts">
 	import { FREQUENCY_TICKS, dbTicks, frequencyLabel } from '#lib/charts/index.ts';
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { Listener } from './listener.svelte.ts';
 	import {
@@ -55,6 +57,20 @@
 	const reading = $derived(target?.curve && editor ? s4(target.curve, editor) : null);
 	const scopeListening = $derived(listener.owner === 'scope');
 	const trims = $derived(scopeListening ? listener.trims : null);
+	/** Why "Ouvir A/B" cannot act now (T8: unavailable always says why). */
+	const playReason = $derived(
+		scopeListening
+			? null
+			: !target
+				? m.comunidade_v2_reason_ab_select()
+				: !target.curve
+					? m.comunidade_channel_invalid()
+					: !canListen
+						? m.comunidade_audio_unavailable()
+						: listener.busy
+							? m.comunidade_v2_reason_busy()
+							: null
+	);
 
 	$effect(() => {
 		if (bChoice !== 'editor' && !others.some((channel) => channel.lineageId === bChoice)) {
@@ -103,7 +119,7 @@
 	}
 </script>
 
-<div class="scope-panel">
+<div class="scope-panel" data-tour="comunidade-scope">
 	<div class="panel-head">
 		<h2 id="{id}-title">{m.comunidade_scope_title()}</h2>
 		<span class="solo-lamp" class:on={scopeListening} aria-hidden="true">SOLO</span>
@@ -178,7 +194,7 @@
 		</div>
 		<label class="kctl">
 			<span class="k-lbl">{m.comunidade_scope_scale()}</span>
-			<select bind:value={range}>
+			<select class="desk-select" bind:value={range}>
 				<option value={6}>±6 dB</option>
 				<option value={12}>±12 dB</option>
 				<option value={18}>±18 dB</option>
@@ -189,33 +205,38 @@
 		{/if}
 	</div>
 	<div class="ab-row" role="group" aria-labelledby="{id}-ab">
-		<span class="ab-title" id="{id}-ab">{m.comunidade_ab_title()}</span>
-		<button
-			type="button"
-			class="btn ab-play"
+		<span class="ab-head">
+			<span class="ab-title" id="{id}-ab">{m.comunidade_ab_title()}</span>
+			<Explainer term="ab-nivel" />
+		</span>
+		<Button
+			variant={scopeListening ? 'plate' : 'primary'}
+			class="ab-play"
 			aria-pressed={scopeListening}
-			disabled={!target?.curve || listener.busy}
-			onclick={toggleListen}>{scopeListening ? m.comunidade_stop() : m.comunidade_listen()}</button
+			disabledReason={playReason}
+			onclick={toggleListen}>{scopeListening ? m.comunidade_stop() : m.comunidade_listen()}</Button
 		>
-		<span class="push-group">
-			<button
-				type="button"
-				class="push"
+		<span class="ab-keys">
+			<Button
+				variant="key"
+				size="sm"
 				aria-pressed={scopeListening && listener.side === 'A'}
-				disabled={!scopeListening}
-				onclick={() => choose('A')}>{m.comunidade_ab_a()}</button
+				lit={scopeListening && listener.side === 'A'}
+				disabledReason={scopeListening ? null : m.comunidade_v2_reason_ab_side()}
+				onclick={() => choose('A')}>{m.comunidade_ab_a()}</Button
 			>
-			<button
-				type="button"
-				class="push"
+			<Button
+				variant="key"
+				size="sm"
 				aria-pressed={scopeListening && listener.side === 'B'}
-				disabled={!scopeListening}
-				onclick={() => choose('B')}>{m.comunidade_ab_b()}</button
+				lit={scopeListening && listener.side === 'B'}
+				disabledReason={scopeListening ? null : m.comunidade_v2_reason_ab_side()}
+				onclick={() => choose('B')}>{m.comunidade_ab_b()}</Button
 			>
 		</span>
 		<label class="ab-b">
 			<span>{m.comunidade_ab_b_source()}</span>
-			<select bind:value={bChoice} disabled={scopeListening}>
+			<select class="desk-select" bind:value={bChoice} disabled={scopeListening}>
 				<option value="editor">{m.comunidade_scope_your_curve()}</option>
 				{#each others as channel (channel.lineageId)}
 					<option value={channel.lineageId}>{channel.name}</option>
@@ -235,15 +256,14 @@
 	</div>
 	{#if target}
 		<div class="scope-actions">
-			<a class="btn" href="/#p={target.s1}" data-sveltekit-reload onclick={() => onopen(target)}
-				>{m.comunidade_open_curva()}</a
+			<a
+				class="btn btn--ghost btn--md"
+				href="/#p={target.s1}"
+				data-sveltekit-reload
+				onclick={() => onopen(target)}>{m.comunidade_open_curva()}</a
 			>
-			<button type="button" class="btn" onclick={() => onuse(target)}
-				>{m.comunidade_use_curve()}</button
-			>
-			<button type="button" class="btn primary" onclick={() => oninstall(target)}
-				>{m.comunidade_install()}</button
-			>
+			<Button onclick={() => onuse(target)}>{m.comunidade_use_curve()}</Button>
+			<Button variant="primary" onclick={() => oninstall(target)}>{m.comunidade_install()}</Button>
 		</div>
 		<p class="note">{m.comunidade_install_note()}</p>
 	{/if}
@@ -258,12 +278,13 @@
 		margin-bottom: 10px;
 	}
 	.panel-head h2 {
-		font: italic 30px/1 var(--serif);
+		font: italic 400 var(--fs-title) / var(--lh-title) var(--face-display);
+		letter-spacing: var(--tracking-title);
 		margin: 0;
 	}
 	.solo-lamp {
-		font: 700 11px var(--mono);
-		letter-spacing: 0.12em;
+		font: 500 var(--label-min) var(--face-data);
+		letter-spacing: var(--tracking-caps);
 		padding: 4px 9px;
 		border-radius: 3px;
 		background: #2b2516;
@@ -311,7 +332,8 @@
 	}
 	.gt {
 		fill: #b5d8c6;
-		font: 12px var(--mono);
+		font: 400 var(--fs-caption) var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
 	}
 	.tr-cur {
 		fill: none;
@@ -333,7 +355,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px 20px;
-		font: 12px var(--mono);
+		font: var(--fs-caption) / var(--lh-small) var(--face-body);
 		color: #ece7dd;
 		margin: 12px 2px;
 		padding: 0;
@@ -372,13 +394,13 @@
 	}
 	.seg-box span,
 	.k-lbl {
-		font: 600 11px var(--mono);
-		letter-spacing: 0.06em;
+		font: 500 var(--fs-eyebrow) / var(--lh-caps) var(--face-data);
+		letter-spacing: var(--tracking-data);
 		color: #e4e0d6;
 	}
 	.seg {
-		font: 500 24px var(--mono);
-		font-variant-numeric: tabular-nums;
+		font: 500 var(--fs-readout-l) / var(--lh-readout) var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
 		color: var(--amber);
 		background: #110b04;
 		padding: 3px 10px;
@@ -394,17 +416,9 @@
 		flex-direction: column;
 		gap: 3px;
 	}
-	select {
-		background: #0a0a0b;
-		color: #ffdca6;
-		border: 1px solid #000;
-		padding: 4px 6px;
-		font: 12px var(--mono);
-		border-radius: 2px;
-	}
 	.cursor-read {
 		margin: 0;
-		font: 12px/1.6 var(--mono);
+		font: var(--fs-caption) / var(--lh-small) var(--face-body);
 		color: #ece7dd;
 	}
 	.ab-row {
@@ -418,20 +432,29 @@
 		border: 1px solid #000;
 		border-radius: 4px;
 	}
+	.ab-head {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
 	.ab-title {
-		font: 600 11px var(--mono);
-		letter-spacing: 0.08em;
+		font: 500 var(--fs-eyebrow) / var(--lh-caps) var(--face-data);
+		letter-spacing: var(--tracking-caps);
 		color: #e4e0d6;
+	}
+	.ab-keys {
+		display: inline-flex;
+		gap: var(--space-1);
 	}
 	.ab-b {
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		font: 11px var(--mono);
+		font: var(--fs-caption) var(--face-body);
 		color: #d6d2c8;
 	}
 	.ab-read {
-		font: 12px/1.5 var(--mono);
+		font: var(--fs-caption) / var(--lh-small) var(--face-body);
 		color: #ece7dd;
 		flex: 1;
 		min-width: 220px;
@@ -439,12 +462,6 @@
 	.scope-actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 8px;
-	}
-	.note {
-		font-size: 11px;
-		line-height: 1.6;
-		color: #a99f90;
-		margin: 8px 0 0;
+		gap: var(--space-2);
 	}
 </style>

@@ -6,6 +6,7 @@
 	silently. Versions are append-only: nothing is rewritten.
 -->
 <script lang="ts">
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import {
@@ -35,6 +36,9 @@
 	} from './model.ts';
 
 	type Version = LineageVersions['versions'][number];
+
+	/** Skeleton lines of the version log while it loads (spec §5.5). */
+	const SKELETON_ROWS = [1, 2, 3, 4] as const;
 
 	let {
 		api,
@@ -140,6 +144,10 @@
 	const restorable = $derived(
 		versions.find((version) => version.id === fromId && !version.isHead) ?? null
 	);
+	/** Why "Restaurar" cannot act right now; null when it can (T8). */
+	const restoreReason = $derived(
+		!canWrite ? m.comunidade_verify_prompt() : !online ? m.comunidade_offline() : null
+	);
 
 	function label(version: Version): string {
 		return `${version.id.slice(0, 7)} · ${version.name}`;
@@ -209,7 +217,12 @@
 				{#if !online}
 					<p class="scr-line">{m.comunidade_offline()}</p>
 				{:else if loading && !data}
-					<p class="scr-line" role="status">{m.comunidade_loading()}</p>
+					<div class="skel-rows" role="status" aria-busy="true" data-testid="recall-loading">
+						<span class="sr-only">{m.comunidade_loading()}</span>
+						{#each SKELETON_ROWS as row (row)}
+							<span class="skeleton skel-row" aria-hidden="true"></span>
+						{/each}
+					</div>
 				{:else if loadError}
 					<p class="scr-line bad" role="alert">{loadError}</p>
 				{/if}
@@ -255,7 +268,9 @@
 							<tbody>
 								{#each rows as row (row.index)}
 									<tr class:changed={row.changed}>
-										<th scope="row">S{row.index + 1}</th>
+										<th scope="row"
+											>{m.comunidade_v2_recall_filter({ n: String(row.index + 1) })}</th
+										>
 										<td>{bandText(row.a)}</td>
 										<td>{bandText(row.b)}{row.changed ? ' *' : ''}</td>
 									</tr>
@@ -279,20 +294,20 @@
 						</div>
 					{/if}
 					{#if restorable}
-						<button
-							type="button"
+						<Button
 							class="restore"
-							disabled={!canWrite || restoring || !online}
+							disabledReason={restoreReason}
+							loading={restoring}
 							onclick={() => restore(restorable)}
-							>{m.comunidade_recall_restore({ version: restorable.id.slice(0, 7) })}</button
+							>{m.comunidade_recall_restore({ version: restorable.id.slice(0, 7) })}</Button
 						>
 						<p class="scr-note">{m.comunidade_recall_restore_note()}</p>
 					{/if}
 					{#if headMoved}
 						<div class="conflict" role="alert" data-testid="recall-conflict">
 							<p>{m.comunidade_recall_head_moved()}</p>
-							<button type="button" onclick={() => load(lineageId)}
-								>{m.comunidade_recall_reload()}</button
+							<Button class="restore" onclick={() => load(lineageId)}
+								>{m.comunidade_recall_reload()}</Button
 							>
 						</div>
 					{:else if message}
@@ -324,12 +339,13 @@
 		margin-bottom: 10px;
 	}
 	.panel-head h2 {
-		font: italic 30px/1 var(--serif);
+		font: italic 400 var(--fs-title) / var(--lh-title) var(--face-display);
+		letter-spacing: var(--tracking-title);
 		margin: 0;
 	}
 	.plate {
-		font: 500 11px var(--mono);
-		letter-spacing: 0.1em;
+		font: 500 var(--fs-eyebrow) var(--face-data);
+		letter-spacing: var(--tracking-caps);
 		color: #d6d2c8;
 		padding: 4px 9px;
 		border: 1px solid #000;
@@ -363,7 +379,7 @@
 		align-items: center;
 		gap: 10px;
 		flex-wrap: wrap;
-		font-size: 20px;
+		font-size: var(--fs-readout-l);
 		border-bottom: 1px dashed #ffb54755;
 		padding-bottom: 6px;
 		margin-bottom: 8px;
@@ -371,18 +387,19 @@
 	select {
 		background: #0a0805;
 		color: var(--amber);
-		border: 1px solid #ffb54755;
-		font: 16px var(--crt);
+		border: 1px solid #ffb54788;
+		font: var(--fs-lede) var(--crt);
 		max-width: 100%;
+		min-height: 28px;
 	}
 	.scr-line,
 	.scr-note {
 		margin: 6px 0;
-		font-size: 17px;
+		font-size: var(--fs-lede);
 		line-height: 1.2;
 	}
 	.scr-note {
-		font-size: 15px;
+		font-size: var(--fs-body);
 		color: #d39a46;
 	}
 	.bad {
@@ -399,7 +416,7 @@
 		display: grid;
 		grid-template-columns: 70px 130px 1fr auto;
 		gap: 8px;
-		font: 17px/1.15 var(--crt);
+		font: var(--fs-lede) / 1.15 var(--crt);
 		padding: 3px 4px;
 	}
 	.commit.head {
@@ -418,7 +435,7 @@
 		flex-wrap: wrap;
 		gap: 10px;
 		margin: 8px 0;
-		font-size: 17px;
+		font-size: var(--fs-lede);
 	}
 	.pick label {
 		display: flex;
@@ -428,12 +445,12 @@
 	.bands {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 16px;
+		font-size: var(--fs-body);
 	}
 	.bands caption {
 		text-align: left;
 		color: #ffd08a;
-		font-size: 17px;
+		font-size: var(--fs-lede);
 	}
 	.bands th,
 	.bands td {
@@ -467,19 +484,29 @@
 	}
 	.delta-read {
 		margin: 0;
-		font-size: 16px;
+		font-size: var(--fs-body);
 		line-height: 1.2;
 	}
-	.restore,
-	.conflict button {
+	/* The Button primitive dressed for the amber CRT (behaviour and reasons from the primitive). */
+	.recall-panel :global(.restore) {
 		margin-top: 10px;
-		min-height: 34px;
+		min-height: var(--hit);
 		padding: 6px 12px;
 		border: 1px solid var(--amber);
+		border-radius: var(--rad-xs);
 		background: #1a1208;
 		color: var(--amber);
-		font: 17px var(--crt);
-		border-radius: 2px;
+		font: var(--fs-lede) / 1 var(--crt);
+		letter-spacing: 0;
+	}
+	.skel-rows {
+		display: grid;
+		gap: 6px;
+		margin-top: var(--space-2);
+	}
+	/* One commit line of the log (VT323 at the lede size). */
+	.skel-row {
+		height: 20px;
 	}
 	.conflict {
 		margin-top: 10px;
@@ -487,7 +514,7 @@
 		border-left: 3px solid var(--danger);
 		background: #e5484d1a;
 		color: #ffb3b5;
-		font-size: 17px;
+		font-size: var(--fs-lede);
 	}
 	.conflict p {
 		margin: 0;
@@ -496,15 +523,15 @@
 		margin: 6px 0 0;
 		padding-left: 18px;
 		color: #ff9fa2;
-		font-size: 16px;
+		font-size: var(--fs-body);
 	}
 	.monitor-foot {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
 		margin-top: 9px;
-		font: 600 11px var(--mono);
-		letter-spacing: 0.08em;
+		font: 500 var(--label-min) var(--face-data);
+		letter-spacing: var(--tracking-caps);
 		color: #3a3427;
 	}
 	.vent {

@@ -8,8 +8,13 @@
 //   - "NO AR / Publicar": a GATE_REJECTED answer (the server's error shape, injected once: the
 //     editor itself only admits gate-approved curves) lists the reasons and leaves the lamp off;
 //     the real server's approval of the same curve lights it; axe clean signed in.
+//   - FUX.P4: ONE account card for visitors (open sign-up on the test server); the technical sheet
+//     is collapsed until asked; the Turnstile widget mounts only after the three consents (L6);
+//     the header legend opens the guided tour.
 // Seeded curves are published by fresh accounts per run (the local D1 persists between runs).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+// Every context starts with all page tours dismissed (`oa.tour.v1`), so no tour auto-opens over the
+// controls under test; the tour test opens it on purpose.
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import {
 	apiSignIn,
 	createVerifiedAccount,
@@ -38,6 +43,27 @@ test.describe.configure({ mode: 'parallel', timeout: 180_000 });
 
 const LOCALES: readonly Locale[] = ['pt-BR', 'en-US'];
 
+/** Every page tour dismissed (the `oa.tour.v1` contract): nothing auto-opens over the controls. */
+const TOURS_DISMISSED = JSON.stringify({
+	curva: 'dispensado',
+	comunidade: 'dispensado',
+	cabo: 'dispensado',
+	'soe-como-x': 'dispensado',
+	comparar: 'dispensado',
+	'teste-cego': 'dispensado',
+	biblioteca: 'dispensado'
+});
+
+/** A `newContext` whose pages start with every guided tour dismissed. */
+async function quietContext(browser: Browser, locale: Locale): Promise<BrowserContext> {
+	const context = await newContext(browser, locale);
+	await context.addInitScript((value) => {
+		// Only real documents have a storage of the app's origin (not about:blank).
+		if (location.protocol.startsWith('http')) localStorage.setItem('oa.tour.v1', value);
+	}, TOURS_DISMISSED);
+	return context;
+}
+
 /** The project's viewport (contexts made by `newContext` start at the browser default). */
 async function projectViewport(page: Page): Promise<void> {
 	const viewport = test.info().project.use.viewport;
@@ -46,7 +72,7 @@ async function projectViewport(page: Page): Promise<void> {
 
 /** One public curve published from the Curva page by a fresh pt-BR account. */
 async function seedPublicCurve(browser: Browser): Promise<string> {
-	const context = await newContext(browser, 'pt-BR');
+	const context = await quietContext(browser, 'pt-BR');
 	try {
 		const email = await createVerifiedAccount(context.request);
 		await apiSignIn(context, email);
@@ -106,7 +132,7 @@ for (const locale of LOCALES) {
 	test(`anonymous: browse, listen, sign-in prompts, a11y (${locale})`, async ({ browser }) => {
 		const name = await seedPublicCurve(browser);
 		const copy = catalog(locale);
-		const context = await newContext(browser, locale);
+		const context = await quietContext(browser, locale);
 		const page = await context.newPage();
 		await projectViewport(page);
 		await openCommunity(page, copy, locale);
@@ -129,18 +155,29 @@ for (const locale of LOCALES) {
 		await stop.click();
 		await expect(solo).toHaveAttribute('aria-pressed', 'false');
 
-		// Social actions ask for an account; the link comes back here. Publishing is off.
-		const prompts = page.getByTestId('login-prompt');
-		await expect(prompts.first()).toBeVisible();
-		await expect(prompts.first()).toContainText(text(copy, 'comunidade_login_prompt'));
-		const signIn = prompts
-			.first()
-			.getByRole('link', { name: text(copy, 'comunidade_login_link'), exact: true });
+		// ONE account card (T9) says what needs an account; its link comes back here. Publishing is
+		// off and says why (aria-disabled + reason: Playwright reads it as disabled).
+		const card = page.getByTestId('login-prompt');
+		await expect(card).toHaveCount(1);
+		await expect(card).toBeVisible();
+		await expect(card).toContainText(text(copy, 'empty_guest_title'));
+		await expect(card).toContainText(text(copy, 'empty_guest_open'));
+		const signIn = card.getByRole('link', {
+			name: text(copy, 'comunidade_login_link'),
+			exact: true
+		});
 		await expect(signIn).toHaveAttribute('href', /^\/entrar\?next=%2Fcomunidade/);
-		await expect(
-			page.getByRole('button', { name: text(copy, 'comunidade_onair_publish'), exact: true })
-		).toBeDisabled();
+		const publish = page.getByRole('button', {
+			name: text(copy, 'comunidade_onair_publish'),
+			exact: true
+		});
+		await expect(publish).toBeDisabled();
+		await expect(publish).toHaveAttribute('aria-disabled', 'true');
 		await expect(page.getByTestId('onair-lamp')).toHaveAttribute('data-lit', 'false');
+
+		// Nothing of the security check before the visitor asks (L6, T10).
+		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveCount(0);
+		await expect(page.getByText(text(copy, 'security_turnstile_error'))).toHaveCount(0);
 
 		await expectNoSeriousAxe(page);
 		await context.close();
@@ -150,7 +187,7 @@ for (const locale of LOCALES) {
 		browser
 	}) => {
 		const copy = catalog(locale);
-		const context = await newContext(browser, locale);
+		const context = await quietContext(browser, locale);
 		const page = await context.newPage();
 		await projectViewport(page);
 		const firstFeed = page.waitForRequest((request) => request.url().includes('/api/v1/feed'));
@@ -226,7 +263,7 @@ for (const locale of LOCALES) {
 		browser
 	}) => {
 		const copy = catalog(locale);
-		const context = await newContext(browser, locale);
+		const context = await quietContext(browser, locale);
 		const email = await createVerifiedAccount(context.request);
 		await apiSignIn(context, email);
 		const page = await context.newPage();
@@ -269,6 +306,12 @@ for (const locale of LOCALES) {
 		await name.fill(curveName);
 		await expect(lamp).toHaveAttribute('data-lit', 'false');
 		await expect(onAir.getByTestId('onair-s1')).not.toBeEmpty();
+		// The technical sheet is collapsed until asked (progressive disclosure, spec §4.1).
+		const sheet = onAir.getByTestId('ficha-tecnica');
+		await expect(sheet).not.toHaveAttribute('open');
+		await expect(onAir.getByTestId('onair-s5')).toBeHidden();
+		await sheet.getByText(text(copy, 'comunidade_v2_tech_details'), { exact: true }).click();
+		await expect(onAir.getByTestId('onair-s5')).toBeVisible();
 		await expect(onAir.getByTestId('onair-s5')).toContainText('open-auri/preset@1');
 		await expect(publish).toBeEnabled();
 		await publish.click();
@@ -300,10 +343,57 @@ for (const locale of LOCALES) {
 
 		// The public page of the new curve answers for anyone.
 		const href = (await pageLink.getAttribute('href')) ?? '';
-		const anonymous = await newContext(browser, locale);
+		const anonymous = await quietContext(browser, locale);
 		const response = await anonymous.request.get(href);
 		expect(response.status()).toBe(200);
 		await anonymous.close();
+		await context.close();
+	});
+
+	test(`anonymous preference: the security check appears only after the three consents (${locale})`, async ({
+		browser
+	}) => {
+		const copy = catalog(locale);
+		const context = await quietContext(browser, locale);
+		const page = await context.newPage();
+		await projectViewport(page);
+		await openCommunity(page, copy, locale);
+		const panel = page.getByTestId('s6-panel');
+		const check = panel.getByTestId('s6-check');
+		await expect(check).toContainText(text(copy, 'comunidade_v2_turnstile_after_consent'));
+		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveCount(0);
+		for (const key of [
+			'comunidade_s6_consent_pairs',
+			'comunidade_s6_consent_anonymous',
+			'comunidade_s6_consent_research'
+		]) {
+			await panel.getByRole('checkbox', { name: text(copy, key), exact: true }).check();
+		}
+		// The (stubbed) widget mounts now, and only now; still no error shown.
+		await expect(panel.locator('input[name="cf-turnstile-response"]')).toHaveCount(1, {
+			timeout: 15_000
+		});
+		await expect(page.getByText(text(copy, 'security_turnstile_error'))).toHaveCount(0);
+		await context.close();
+	});
+
+	test(`the header legend opens the guided tour at the matching step (${locale})`, async ({
+		browser
+	}) => {
+		const copy = catalog(locale);
+		const context = await quietContext(browser, locale);
+		const page = await context.newPage();
+		await projectViewport(page);
+		await openCommunity(page, copy, locale);
+		// Dismissed in storage: nothing opened on its own.
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await page.getByTestId('legend-onair').click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible();
+		await expect(dialog).toContainText(text(copy, 'tour_comunidade_publish_title'));
+		await page.keyboard.press('Escape');
+		await expect(dialog).toHaveCount(0);
+		await expectNoSeriousAxe(page);
 		await context.close();
 	});
 }

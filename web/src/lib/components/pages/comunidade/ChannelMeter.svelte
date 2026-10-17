@@ -98,12 +98,12 @@
 		height: 5px;
 	}
 	.channel-meter :global(.oa-meter-mode) {
-		font-size: 9px;
+		font-size: var(--label-min);
 		padding: 1px 4px;
 	}
 	.meter-error {
 		margin: 0;
-		font: 10px/1.3 var(--mono, monospace);
+		font: 400 var(--label-min) / 1.3 var(--face-data);
 		color: #d6bf95;
 		text-align: center;
 	}

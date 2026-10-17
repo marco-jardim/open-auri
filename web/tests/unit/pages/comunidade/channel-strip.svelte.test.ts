@@ -94,3 +94,40 @@ test('SOLO and SEL report the channel to the page', async () => {
 	expect(onlisten).toHaveBeenCalledWith(channel);
 	expect(onselect).toHaveBeenCalledWith(channel);
 });
+
+/** The text of everything an element's aria-describedby points to (the Button's reason). */
+function reasonOf(element: Element): string {
+	const ids = element.getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+	return ids
+		.map((value) => document.getElementById(value)?.textContent?.trim() ?? '')
+		.join(' ')
+		.trim();
+}
+
+test('FUX.P4: unavailable keys say why (aria-disabled, still focusable, inert)', async () => {
+	const broken = { ...channel, curve: null };
+	const onlisten = vi.fn();
+	const onselect = vi.fn();
+	await render(ChannelStrip, props({ channel: broken, onlisten, onselect }));
+	const solo = page
+		.getByRole('button', { name: m.comunidade_channel_listen({ name: channel.name }) })
+		.element();
+	const sel = page
+		.getByRole('button', { name: m.comunidade_channel_select({ name: channel.name }) })
+		.element();
+	for (const key of [solo, sel]) {
+		expect(key.getAttribute('aria-disabled')).toBe('true');
+		expect(key.hasAttribute('disabled')).toBe(false);
+		expect(reasonOf(key)).toBe(m.comunidade_channel_invalid());
+		if (key instanceof HTMLElement) key.click();
+	}
+	expect(onlisten).not.toHaveBeenCalled();
+	expect(onselect).not.toHaveBeenCalled();
+});
+
+test('FUX.P4: while a preview starts, SOLO says to wait', async () => {
+	await render(ChannelStrip, props({ disabled: true }));
+	const solo = listenButton().element();
+	expect(solo.getAttribute('aria-disabled')).toBe('true');
+	expect(reasonOf(solo)).toBe(m.comunidade_v2_reason_busy());
+});

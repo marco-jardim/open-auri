@@ -1,5 +1,7 @@
-// T4.13: "NO AR / Publicar". The lamp lights only after the server approved the publication; a
-// GATE_REJECTED answer keeps it dark and lists the reasons with the checklist's gate messages.
+// T4.13 + FUX.P4: "NO AR / Publicar". The lamp lights only after the server approved the
+// publication; a GATE_REJECTED answer keeps it dark and lists the reasons with the checklist's gate
+// messages. The technical sheet stays collapsed; unavailable publishing says why; the visibility
+// default is unchanged.
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -41,6 +43,15 @@ function setup(route: Route, session = VERIFIED) {
 }
 
 const lamp = () => page.getByTestId('onair-lamp');
+
+/** The text of everything an element's aria-describedby points to (the Button's reason). */
+function reasonOf(element: Element): string {
+	const ids = element.getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+	return ids
+		.map((value) => document.getElementById(value)?.textContent?.trim() ?? '')
+		.join(' ')
+		.trim();
+}
 
 test('the lamp lights only after the server approved the publication', async () => {
 	const { props, fetch, onpublished } = setup((url, init) => {
@@ -92,13 +103,53 @@ test('other failures never light the lamp either', async () => {
 	await expect.element(lamp()).toHaveAttribute('data-lit', 'false');
 });
 
-test('without an account the form asks to sign in and cannot publish', async () => {
+test('without an account publishing is unavailable and says why (no prompt of its own)', async () => {
 	const { props, fetch } = setup(() => undefined, ANONYMOUS);
 	await render(OnAir, props);
-	await expect.element(page.getByTestId('login-prompt')).toBeVisible();
-	await expect
-		.element(page.getByRole('button', { name: m.comunidade_onair_publish() }))
-		.toBeDisabled();
+	// The page's single account card explains accounts (T9); this panel repeats no notice.
+	expect(document.querySelector('[data-testid="login-prompt"]')).toBeNull();
+	const publish = page.getByRole('button', { name: m.comunidade_onair_publish(), exact: true });
+	await expect.element(publish).toHaveAttribute('aria-disabled', 'true');
+	expect(reasonOf(publish.element())).toBe(m.comunidade_v2_reason_account());
+	// Still focusable (aria-disabled, not disabled) and inert on click (a direct DOM click: the
+	// test runner's click waits for an enabled element, which this one is not on purpose).
+	const button = publish.element();
+	expect(button.hasAttribute('disabled')).toBe(false);
+	if (button instanceof HTMLElement) button.click();
+	await expect.poll(() => reasonOf(button)).toBe(m.comunidade_v2_reason_account());
 	expect(fetch).not.toHaveBeenCalled();
 	await expect.element(lamp()).toHaveAttribute('data-lit', 'false');
+});
+
+test('the technical sheet is collapsed behind "Ver detalhes técnicos" and opens on demand', async () => {
+	const { props } = setup(() => undefined);
+	await render(OnAir, props);
+	const sheet = page.getByTestId('ficha-tecnica');
+	await expect.element(sheet).not.toHaveAttribute('open');
+	await expect
+		.element(sheet.getByText(m.comunidade_v2_tech_details(), { exact: true }))
+		.toBeVisible();
+	await expect.element(page.getByTestId('onair-s5')).not.toBeVisible();
+	await sheet.getByText(m.comunidade_v2_tech_details(), { exact: true }).click();
+	await expect.element(sheet).toHaveAttribute('open');
+	await expect.element(page.getByTestId('onair-s5')).toMatchTextContent('open-auri/preset@1');
+	// The code of the curve stays in view.
+	await expect.element(page.getByTestId('onair-s1')).toBeVisible();
+});
+
+test('the visibility default is unchanged ("Pública")', async () => {
+	const { props } = setup(() => undefined);
+	await render(OnAir, props);
+	await expect
+		.element(page.getByRole('radio', { name: m.comunidade_visibility_public() }))
+		.toBeChecked();
+});
+
+test('the gate and the technical terms carry their explainers', async () => {
+	const { props } = setup(() => undefined);
+	await render(OnAir, props);
+	await expect.element(page.getByTestId('onair-s1')).toBeVisible();
+	const explainers = document.querySelectorAll('#publicar button[aria-haspopup="dialog"]');
+	expect(explainers.length).toBeGreaterThanOrEqual(3);
+	expect(document.querySelector('#publicar')?.getAttribute('data-tour')).toBe('comunidade-publish');
 });

@@ -1,5 +1,7 @@
-// T4.13: S6 needs all three explicit consents and sends exactly the previewed JSON, keeping the
-// receipt locally; reports need a Turnstile token (and an account).
+// T4.13 + FUX.P4: the anonymous preference needs all three explicit consents and sends exactly the
+// previewed JSON, keeping the receipt locally; the Turnstile check is imported and mounted only
+// after the consent (L6, T10). Reports need a Turnstile token and an account; their check mounts only
+// when the form is shown. Unavailable actions say why (aria-disabled + reason).
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -19,6 +21,7 @@ import { ANONYMOUS, VERIFIED, apiWith, fakeFetch, feedItem, headerOf, json } fro
 afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
+	Reflect.deleteProperty(window, 'turnstile');
 });
 
 function memoryStorage(): ReceiptStorage & { data: Map<string, string> } {
@@ -32,19 +35,51 @@ function memoryStorage(): ReceiptStorage & { data: Map<string, string> } {
 	};
 }
 
+/** The text of everything an element's aria-describedby points to (the Button's reason). */
+function reasonOf(element: Element): string {
+	const ids = element.getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+	return ids
+		.map((value) => document.getElementById(value)?.textContent?.trim() ?? '')
+		.join(' ')
+		.trim();
+}
+
+/** Visible notes with exactly this text (the reason tooltip may hold the same words). */
+function notesWith(text: string): Element[] {
+	return Array.from(document.querySelectorAll('p.note')).filter(
+		(node) => node.textContent?.trim() === text
+	);
+}
+
+/**
+ * A stand-in for Cloudflare's `window.turnstile`: the widget module finds it and never injects the
+ * third-party script, so the test makes no network request.
+ */
+function stubTurnstile() {
+	const renderWidget = vi.fn<(container: HTMLElement, options: { action: string }) => string>(
+		() => 'widget-1'
+	);
+	Reflect.set(window, 'turnstile', { render: renderWidget, reset: vi.fn(), remove: vi.fn() });
+	return renderWidget;
+}
+
 const PAIRS = [{ a: 'aaaaaaaaaaaa', b: 'bbbbbbbbbbbb', choice: 'a' as const, levelMatched: true }];
 
-function s6Props(fetch: ReturnType<typeof fakeFetch>, storage: ReceiptStorage) {
+function s6Props(
+	fetch: ReturnType<typeof fakeFetch>,
+	storage: ReceiptStorage,
+	overrides: { siteKey?: string; token?: string } = {}
+) {
 	return {
 		api: apiWith(fetch),
 		channels: [],
 		listener: createListener({ engine: () => null }),
 		canListen: false,
-		siteKey: '',
+		siteKey: overrides.siteKey ?? '',
 		online: true,
 		storage,
 		pairs: PAIRS,
-		token: 'turnstile-token',
+		token: overrides.token ?? 'turnstile-token',
 		onnotice: vi.fn()
 	};
 }
@@ -53,11 +88,14 @@ test('S6: nothing can be sent before the three explicit consents', async () => {
 	const fetch = fakeFetch(() => json({ ok: true }));
 	await render(S6Panel, s6Props(fetch, memoryStorage()));
 	const send = page.getByRole('button', { name: m.comunidade_s6_send({ count: '1' }) });
-	await expect.element(send).toBeDisabled();
-	await expect.element(page.getByText(m.comunidade_s6_consent_required())).toBeVisible();
+	await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+	expect(reasonOf(send.element())).toBe(m.comunidade_s6_consent_required());
+	expect(notesWith(m.comunidade_s6_consent_required())).toHaveLength(1);
 	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_pairs() }).click();
 	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_anonymous() }).click();
-	await expect.element(send).toBeDisabled();
+	await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+	const button = send.element();
+	if (button instanceof HTMLElement) button.click();
 	expect(fetch).not.toHaveBeenCalled();
 });
 
@@ -78,7 +116,9 @@ test('S6: with consent it sends exactly the previewed payload and keeps the rece
 	const preview: unknown = JSON.parse(
 		document.querySelector('[data-testid="s6-payload"]')?.textContent ?? ''
 	);
-	await page.getByRole('button', { name: m.comunidade_s6_send({ count: '1' }) }).click();
+	const send = page.getByRole('button', { name: m.comunidade_s6_send({ count: '1' }) });
+	await expect.element(send).not.toHaveAttribute('aria-disabled');
+	await send.click();
 	await expect.element(page.getByText(m.comunidade_s6_sent())).toBeVisible();
 	const [url, init] = fetch.mock.calls[0] ?? [];
 	expect(url).toBe('/api/v1/s6/batches');
@@ -92,6 +132,41 @@ test('S6: with consent it sends exactly the previewed payload and keeps the rece
 	expect(receipts[0]?.receipt).toBe(Reflect.get(Object(preview), 'receipt'));
 });
 
+test('S6: the Turnstile check is mounted only after the three consents, with no error before', async () => {
+	const renderWidget = stubTurnstile();
+	const fetch = fakeFetch(() => undefined);
+	await render(S6Panel, s6Props(fetch, memoryStorage(), { siteKey: 'site-key', token: '' }));
+	const check = page.getByTestId('s6-check');
+	await expect.element(check).toHaveTextContent(m.comunidade_v2_turnstile_after_consent());
+	expect(document.querySelector('input[name="cf-turnstile-response"]')).toBeNull();
+	expect(document.querySelector('[role="alert"]')).toBeNull();
+	expect(renderWidget).not.toHaveBeenCalled();
+
+	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_pairs() }).click();
+	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_anonymous() }).click();
+	expect(renderWidget).not.toHaveBeenCalled();
+	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_research() }).click();
+
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(1);
+	expect(renderWidget.mock.calls[0]?.[1]).toMatchObject({ action: 's6-submit' });
+	expect(document.querySelector('input[name="cf-turnstile-response"]')).not.toBeNull();
+	// The third-party script itself was never injected (the stub answered).
+	expect(document.getElementById('cf-turnstile-api')).toBeNull();
+	// Without a token the send action says what is missing.
+	const send = page.getByRole('button', { name: m.comunidade_s6_send({ count: '1' }) });
+	expect(reasonOf(send.element())).toBe(m.comunidade_report_needs_check());
+});
+
+test('S6: without a site key the check says it is unavailable, only after the consent', async () => {
+	const fetch = fakeFetch(() => undefined);
+	await render(S6Panel, s6Props(fetch, memoryStorage(), { token: '' }));
+	expect(notesWith(m.comunidade_turnstile_unavailable())).toHaveLength(0);
+	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_pairs() }).click();
+	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_anonymous() }).click();
+	await page.getByRole('checkbox', { name: m.comunidade_s6_consent_research() }).click();
+	await expect.poll(() => notesWith(m.comunidade_turnstile_unavailable()).length).toBe(1);
+});
+
 const channel = channelOf(feedItem() as unknown as FeedItem);
 
 test('report: without a Turnstile token the report cannot be sent', async () => {
@@ -103,10 +178,10 @@ test('report: without a Turnstile token the report cannot be sent', async () => 
 		siteKey: '',
 		online: true
 	});
-	await expect
-		.element(page.getByRole('button', { name: m.comunidade_report_send() }))
-		.toBeDisabled();
-	await expect.element(page.getByText(m.comunidade_report_needs_check())).toBeVisible();
+	const send = page.getByRole('button', { name: m.comunidade_report_send() });
+	await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+	expect(reasonOf(send.element())).toBe(m.comunidade_report_needs_check());
+	expect(notesWith(m.comunidade_report_needs_check())).toHaveLength(1);
 	expect(fetch).not.toHaveBeenCalled();
 });
 
@@ -132,17 +207,50 @@ test('report: with a token it posts the reason and sends the token header', asyn
 		reason: 'dangerous',
 		note: null
 	});
+	// Sent once for this curve: the action now says so.
+	const send = page.getByRole('button', { name: m.comunidade_report_send() });
+	await expect.poll(() => reasonOf(send.element())).toBe(m.comunidade_v2_reason_report_sent());
 });
 
-test('report: anonymous visitors get the sign-in prompt instead of the form', async () => {
+test('report: the Turnstile check mounts with the form, never before', async () => {
+	const renderWidget = stubTurnstile();
+	const fetch = fakeFetch(() => undefined);
+	await render(ReportPanel, {
+		api: apiWith(fetch),
+		session: VERIFIED,
+		channel: null,
+		siteKey: 'site-key',
+		online: true
+	});
+	await expect.element(page.getByText(m.comunidade_select_first())).toBeVisible();
+	expect(renderWidget).not.toHaveBeenCalled();
+	cleanup();
+	await render(ReportPanel, {
+		api: apiWith(fetch),
+		session: VERIFIED,
+		channel,
+		siteKey: 'site-key',
+		online: true
+	});
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(1);
+	expect(renderWidget.mock.calls[0]?.[1]).toMatchObject({ action: 'report' });
+});
+
+test('report: visitors get no form and no check, and the action says why', async () => {
+	const renderWidget = stubTurnstile();
 	const fetch = fakeFetch(() => undefined);
 	await render(ReportPanel, {
 		api: apiWith(fetch),
 		session: ANONYMOUS,
 		channel,
-		siteKey: '',
+		siteKey: 'site-key',
 		online: true
 	});
-	await expect.element(page.getByTestId('login-prompt')).toBeVisible();
-	expect(page.getByRole('button', { name: m.comunidade_report_send() }).elements()).toHaveLength(0);
+	const send = page.getByRole('button', { name: m.comunidade_report_send() });
+	await expect.element(send).toHaveAttribute('aria-disabled', 'true');
+	expect(reasonOf(send.element())).toBe(m.comunidade_v2_reason_account());
+	expect(page.getByRole('textbox').elements()).toHaveLength(0);
+	expect(document.querySelector('[data-testid="login-prompt"]')).toBeNull();
+	expect(renderWidget).not.toHaveBeenCalled();
+	expect(fetch).not.toHaveBeenCalled();
 });

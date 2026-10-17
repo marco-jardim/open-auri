@@ -1,16 +1,19 @@
 <!--
-	Sharing desk (S10/S8) for the scope target: the server's OG image (before/after response, S10),
-	a printable identity card with the S8 avatar, the S1 code and a QR of a tracked share link
-	(`POST /api/v1/shares`, sign-in required). The QR comes from `#lib/qr` (uqr) as an <img>; no
-	text is ever injected as markup.
+	Sharing desk for the scope target: the server's OG image (before/after response), a printable
+	identity card with the curve avatar, the curve code and a QR of a tracked share link
+	(`POST /api/v1/shares`, a verified account required). No text is ever injected as markup.
+
+	Loading (spec §5.3 L6): the page mounts this panel only when its drawer opens, and the QR module
+	(`#lib/qr`, uqr) is imported here on mount, so it never sits in the route's static closure.
 -->
 <script lang="ts">
-	import { qrSvg } from '#lib/qr/index.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { CreatedShare, SocialApi } from '#lib/social/index.ts';
 	import CurveAvatar from './CurveAvatar.svelte';
-	import LoginPrompt from './LoginPrompt.svelte';
 	import { absoluteUrl, errorText, licenseShort, type Channel, type SessionView } from './model.ts';
+
+	type QrModule = typeof import('#lib/qr/index.ts');
 
 	let {
 		api,
@@ -19,16 +22,46 @@
 		online
 	}: { api: SocialApi; session: SessionView; channel: Channel | null; online: boolean } = $props();
 
-	const id = $props.id();
 	let share = $state.raw<{ lineageId: string; created: CreatedShare } | null>(null);
 	let busy = $state(false);
 	let message = $state('');
+	let qrModule = $state.raw<QrModule | null>(null);
+
+	$effect(() => {
+		let live = true;
+		import('#lib/qr/index.ts')
+			.then((module) => {
+				if (live) qrModule = module;
+			})
+			.catch((error: unknown) => {
+				console.warn(
+					JSON.stringify({
+						event: 'comunidade.qr_import_failed',
+						error: error instanceof Error ? error.name : 'unknown'
+					})
+				);
+			});
+		return () => {
+			live = false;
+		};
+	});
 
 	const current = $derived(
 		share && channel && share.lineageId === channel.lineageId ? share : null
 	);
 	const url = $derived(current ? absoluteUrl(current.created.url) : '');
-	const qr = $derived(url ? `data:image/svg+xml,${encodeURIComponent(qrSvg(url))}` : '');
+	const qr = $derived(
+		url && qrModule ? `data:image/svg+xml,${encodeURIComponent(qrModule.qrSvg(url))}` : ''
+	);
+	const createReason = $derived(
+		!session.verified
+			? session.signedIn
+				? m.comunidade_verify_prompt()
+				: m.comunidade_v2_reason_account()
+			: !online
+				? m.comunidade_offline()
+				: null
+	);
 
 	async function create() {
 		if (!channel || !session.verified || busy) return;
@@ -65,17 +98,13 @@
 	}
 </script>
 
-<section class="share panel" aria-labelledby="{id}-title">
-	<div class="sec-head">
-		<h2 id="{id}-title">{m.comunidade_share_title()}</h2>
-		<p>{m.comunidade_share_lede()}</p>
-	</div>
+<div class="share" data-testid="share-panel">
 	{#if !channel}
 		<p class="note">{m.comunidade_select_first()}</p>
 	{:else}
 		<div class="share-grid">
 			<div>
-				<div class="s10-frame">
+				<div class="og-frame">
 					<img
 						src={api.ogImageUrl(channel.versionId)}
 						alt={m.comunidade_share_og_alt({ name: channel.name })}
@@ -85,7 +114,7 @@
 					/>
 				</div>
 				<div class="row-btns">
-					<a class="btn" href={api.ogImageUrl(channel.versionId)} download
+					<a class="btn btn--plate btn--md" href={api.ogImageUrl(channel.versionId)} download
 						>{m.comunidade_share_download_png()}</a
 					>
 				</div>
@@ -110,7 +139,7 @@
 						<p class="pc-code">{channel.s1}</p>
 						<p class="pc-meta">{licenseShort(channel.license)} · open-auri</p>
 					</div>
-					<div class="qr-wrap">
+					<div class="qr-wrap" data-testid="share-qr">
 						{#if qr}
 							<img src={qr} alt={m.comunidade_share_qr_alt()} width="92" height="92" />
 						{:else}
@@ -118,56 +147,53 @@
 						{/if}
 					</div>
 				</div>
-				{#if session.verified}
-					<div class="row-btns">
-						<button type="button" class="btn primary" disabled={busy || !online} onclick={create}
-							>{m.comunidade_share_create()}</button
-						>
-						{#if url}
-							<button type="button" class="btn" onclick={copy}>{m.comunidade_share_copy()}</button>
-						{/if}
-					</div>
-					{#if url}<p class="share-url" data-testid="share-url">{url}</p>{/if}
-				{:else}
-					<LoginPrompt signedIn={session.signedIn} />
-				{/if}
+				<div class="row-btns">
+					<Button variant="primary" disabledReason={createReason} loading={busy} onclick={create}
+						>{m.comunidade_share_create()}</Button
+					>
+					{#if url}
+						<Button onclick={copy}>{m.comunidade_share_copy()}</Button>
+					{/if}
+				</div>
+				{#if url}<p class="share-url" data-testid="share-url">{url}</p>{/if}
 				<p class="note" role="status">{message}</p>
 			</div>
 		</div>
 	{/if}
-</section>
+</div>
 
 <style>
 	.share {
-		background: linear-gradient(180deg, #2c2f33, #1e2023);
+		padding-top: var(--space-3);
 	}
 	.share-grid {
 		display: grid;
 		grid-template-columns: 1.35fr 1fr;
-		gap: 20px;
+		gap: var(--space-5);
 		align-items: start;
 	}
-	.s10-frame {
+	.og-frame {
 		border: 10px solid #15161a;
-		border-radius: 6px;
+		border-radius: var(--rad-lg);
 		background: #0d0e10;
 	}
-	.s10-frame img {
+	.og-frame img {
 		display: block;
 		width: 100%;
 		height: auto;
 	}
 	.print-card {
+		box-sizing: border-box;
 		width: 100%;
 		max-width: 470px;
 		display: grid;
 		grid-template-columns: 110px 1fr 96px;
-		gap: 12px;
+		gap: var(--space-3);
 		align-items: center;
 		padding: 14px;
 		background: linear-gradient(135deg, #fbf9f3, #ebe6d9);
 		color: #1b1b1b;
-		border-radius: 10px;
+		border-radius: var(--rad-xl);
 		box-shadow: 0 14px 26px #000b;
 		--avatar-bg: #14161a;
 	}
@@ -175,29 +201,30 @@
 		margin: 0;
 	}
 	.pc-name {
-		font: italic 24px/1 var(--serif);
+		font: italic 400 var(--fs-title) / 1 var(--face-display);
 		overflow-wrap: anywhere;
 	}
 	.pc-h {
-		font: 12px var(--marker);
+		margin-top: var(--space-1) !important;
 		color: var(--marker-ink);
-		margin-top: 4px !important;
+		font: var(--fs-caption) var(--marker);
 	}
+	/* Printed card: the code is set small on purpose (it is also in the QR and the link). */
 	.pc-code {
-		font: 8.5px/1.45 var(--mono);
-		margin-top: 8px !important;
+		margin-top: var(--space-2) !important;
 		color: #333;
+		font: 400 var(--label-min) / 1.45 var(--face-data);
 		word-break: break-all;
 	}
 	.pc-meta {
-		font: 8px var(--mono);
-		color: #555;
 		margin-top: 6px !important;
+		color: #555;
+		font: 400 var(--label-min) var(--face-data);
 	}
 	.qr-wrap {
-		text-align: center;
-		font: 8px var(--mono);
 		color: #555;
+		font: var(--label-min) / 1.3 var(--face-body);
+		text-align: center;
 	}
 	.qr-wrap img {
 		display: block;
@@ -205,10 +232,10 @@
 		height: 92px;
 	}
 	.share-url {
-		font: 11px var(--mono);
-		color: #cfcbc1;
+		margin: var(--space-2) 0 0;
+		color: var(--text-2);
+		font: 400 var(--fs-caption) var(--face-data);
 		word-break: break-all;
-		margin: 8px 0 0;
 	}
 	@media (max-width: 1000px) {
 		.share-grid {

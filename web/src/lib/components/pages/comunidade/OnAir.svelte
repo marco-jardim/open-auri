@@ -2,14 +2,20 @@
 	"NO AR / Publicar": publishes the current editor curve (S1 + validated S5 envelope) through
 	`POST /api/v1/curves`. The server re-runs the gate: the ON AIR lamp lights ONLY after the server
 	answered with the published lineage, never from a local check. A gate refusal lists the reasons
-	with the same messages as the cable checklist. Sign-in and a verified e-mail are required.
+	with the same messages as the cable checklist. Sign-in and a verified e-mail are required; the
+	page's single account card says so once, here the action only says why it is unavailable.
+
+	Progressive disclosure (spec §4.1): the technical sheet (the S5 JSON the server validates) stays
+	closed behind "Ver detalhes técnicos"; envelope problems that block publishing stay visible.
+	The visibility default is unchanged ("Pública"): changing it needs the product owner (§4.1).
 -->
 <script lang="ts">
 	import { ResponseChart } from '#lib/charts/index.ts';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { isSocialApiError, type PublishedInfo, type SocialApi } from '#lib/social/index.ts';
-	import LoginPrompt from './LoginPrompt.svelte';
 	import {
 		DESCRIPTION_MAX,
 		NAME_MAX,
@@ -69,6 +75,18 @@
 	);
 	/** Lit only for a server-approved publication of exactly the curve on screen. */
 	const lit = $derived(published !== null && published.s1 === s1);
+	/** Why "Publicar" cannot act right now; null when it can (T8). */
+	const publishReason = $derived(
+		!session.verified
+			? session.signedIn
+				? m.comunidade_verify_prompt()
+				: m.comunidade_v2_reason_account()
+			: !online
+				? m.comunidade_offline()
+				: !check
+					? m.comunidade_v2_reason_no_curve()
+					: null
+	);
 
 	async function publish() {
 		if (!session.verified || publishing || !check) return;
@@ -105,9 +123,15 @@
 	}
 </script>
 
-<section class="onair panel" id="publicar" aria-labelledby="{id}-title">
+<section
+	class="onair"
+	id="publicar"
+	tabindex="-1"
+	aria-labelledby="{id}-title"
+	data-tour="comunidade-publish"
+>
 	<div class="onair-head">
-		<div>
+		<div class="tally-col">
 			<div class="tally" class:lit data-testid="onair-lamp" data-lit={lit}>
 				<div class="tally-glass">{m.comunidade_onair_lamp()}</div>
 			</div>
@@ -115,14 +139,16 @@
 				{lit ? m.comunidade_onair_lit() : m.comunidade_onair_off()}
 			</p>
 		</div>
-		<div>
-			<h2 id="{id}-title">{m.comunidade_onair_title()}</h2>
-			<p>{m.comunidade_onair_lede()}</p>
+		<div class="onair-copy">
+			<p class="eyebrow">{m.comunidade_v2_publish_eyebrow()}</p>
+			<h2 id="{id}-title" class="onair-title">{m.comunidade_onair_title()}</h2>
+			<p class="onair-lede">{m.comunidade_onair_lede()}</p>
+			<p class="gate-line">
+				<span>{m.comunidade_v2_gate_line()}</span>
+				<Explainer term="gate" />
+			</p>
 		</div>
 	</div>
-	{#if !session.verified}
-		<LoginPrompt signedIn={session.signedIn} />
-	{/if}
 	<div class="onair-grid">
 		<div class="producer">
 			<label>
@@ -165,14 +191,19 @@
 					{m.comunidade_visibility_private()}</label
 				>
 			</fieldset>
-			<button
-				type="button"
-				class="btn primary big"
-				disabled={!session.verified || !online || publishing || !check}
+			<Button
+				variant="primary"
+				size="lg"
+				class="publish"
+				disabledReason={publishReason}
 				onclick={publish}
-				>{publishing ? m.comunidade_onair_sending() : m.comunidade_onair_publish()}</button
+				>{publishing ? m.comunidade_onair_sending() : m.comunidade_onair_publish()}</Button
 			>
-			{#if !online}<p class="note">{m.comunidade_offline()}</p>{/if}
+			{#if session.verified && check && !check.ok}
+				<ul class="issues" data-testid="envelope-issues">
+					{#each check.codes as code (code)}<li>{envelopeIssueText(code)}</li>{/each}
+				</ul>
+			{/if}
 			{#if message}
 				<div class="result" class:refusal={rejected || codes.length > 0} role="alert">
 					<p>{message}</p>
@@ -208,51 +239,83 @@
 						/>
 					</div>
 				{:else}
-					<p class="code-box">{m.comunidade_audio_unavailable()}</p>
+					<p class="code-box note">{m.comunidade_audio_unavailable()}</p>
 				{/if}
 			</div>
 			<div class="out">
-				<div class="out-head"><span>{m.comunidade_onair_s1()}</span></div>
+				<div class="out-head">
+					<span>{m.comunidade_onair_s1()}</span>
+					<Explainer term="s1" />
+				</div>
 				<div class="code-box">
 					{#if s1}<p class="code" data-testid="onair-s1">{s1}</p>
 					{:else}<p class="note">{m.comunidade_onair_no_s1()}</p>{/if}
 				</div>
 			</div>
-			<div class="out">
-				<div class="out-head"><span>{m.comunidade_onair_s5()}</span></div>
-				{#if check?.ok}
-					<pre data-testid="onair-s5">{check.json}</pre>
-				{:else if check}
-					<ul class="code-box issues">
-						{#each check.codes as code (code)}<li>{envelopeIssueText(code)}</li>{/each}
-					</ul>
-				{/if}
-			</div>
+			{#if check?.ok}
+				<div class="ficha">
+					<div class="ficha-head">
+						<span class="fld-lbl">{m.comunidade_v2_tech_sheet()}</span>
+						<Explainer term="s5" />
+					</div>
+					<details class="disclosure tech" data-testid="ficha-tecnica">
+						<summary>{m.comunidade_v2_tech_details()}</summary>
+						<div class="out">
+							<div class="out-head"><span>{m.comunidade_onair_s5()}</span></div>
+							<pre data-testid="onair-s5">{check.json}</pre>
+						</div>
+					</details>
+				</div>
+			{/if}
 		</div>
 	</div>
 </section>
 
 <style>
 	.onair {
-		background: linear-gradient(180deg, #2a2622, #1b1916);
+		margin-top: var(--space-5);
+		padding: var(--panel-pad);
+		border: 1px solid #000;
+		border-radius: var(--rad-xl);
+		background:
+			radial-gradient(70% 50% at 8% 0, #ff9b2e14, transparent 60%),
+			linear-gradient(180deg, #2a2622, #1b1916);
+		box-shadow:
+			0 30px 60px #000c,
+			inset 0 1px 0 #ffffff1c;
 	}
 	.onair-head {
 		display: flex;
-		gap: 22px;
+		gap: var(--space-5);
 		align-items: center;
-		margin-bottom: 18px;
+		margin-bottom: var(--space-4);
 		flex-wrap: wrap;
 	}
-	.onair-head h2 {
-		font: italic 40px/1 var(--serif);
-		margin: 0;
+	.onair-copy {
+		display: grid;
+		gap: var(--space-2);
+		flex: 1;
+		min-width: 260px;
 	}
-	.onair-head p {
-		color: #cfc9bd;
-		font-size: 13px;
-		line-height: 1.7;
-		max-width: 760px;
-		margin: 6px 0 0;
+	.eyebrow {
+		color: var(--muted-hi);
+	}
+	.onair-title {
+		font: italic 400 var(--fs-display-m) / var(--lh-display-m) var(--face-display);
+		letter-spacing: var(--tracking-display-m);
+	}
+	.onair-lede {
+		max-width: 76ch;
+		color: var(--text-2);
+		font-size: var(--fs-small);
+		line-height: var(--lh-body);
+	}
+	.gate-line {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		color: var(--text-2);
+		font-size: var(--fs-caption);
 	}
 	.tally {
 		width: 190px;
@@ -269,14 +332,20 @@
 		display: grid;
 		place-items: center;
 		height: 100%;
-		border-radius: 4px;
-		font: 700 25px var(--sans);
+		border-radius: var(--rad-md);
+		/* Lens lettering in the body face (Geist is variable: no synthetic bold). */
+		font: 600 var(--fs-readout-l) / 1 var(--face-body);
 		letter-spacing: 0.24em;
-		/* Unlit but legible (≥ 4.5:1 on the dark glass). */
+		/* Unlit but legible (>= 4.5:1 on the dark glass). */
 		color: #a8916f;
 		background: linear-gradient(#2a2017, #1b140e);
 		box-shadow: inset 0 2px 6px #000;
+		transition:
+			background var(--dur-slow) var(--ease-out),
+			color var(--dur-slow) var(--ease-out),
+			box-shadow var(--dur-slow) var(--ease-out);
 	}
+	/* Lights only with the server's approval (state, not decoration). */
 	.tally.lit .tally-glass {
 		color: #fff6e0;
 		background: radial-gradient(circle at 50% 45%, #ffe3a6, #ff9b2e 62%, #c25d12);
@@ -285,57 +354,65 @@
 			inset 0 0 12px #fff6;
 	}
 	.tally-cap {
-		font: 11px var(--mono);
-		color: #cfc5b5;
-		margin: 6px 0 0;
-		text-align: center;
 		max-width: 190px;
+		margin: 6px 0 0;
+		color: #cfc5b5;
+		font: var(--fs-caption) / var(--lh-small) var(--face-body);
+		text-align: center;
 	}
 	.onair-grid {
 		display: grid;
-		grid-template-columns: 330px 1fr;
-		gap: 20px;
-		margin-top: 14px;
+		grid-template-columns: 340px 1fr;
+		gap: var(--space-5);
+		margin-top: var(--space-3);
 	}
 	.producer {
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
-		padding: 14px;
+		gap: var(--space-3);
+		padding: var(--space-4);
 		background: linear-gradient(160deg, #34302b, #24211d);
 		border: 1px solid #000;
-		border-radius: 4px;
+		border-radius: var(--rad-md);
 	}
 	.producer label:not(.radio) {
 		display: flex;
 		flex-direction: column;
 	}
 	fieldset {
-		border: 1px solid #ffffff1c;
-		border-radius: 4px;
-		padding: 8px 10px;
-		margin: 0;
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px 14px;
+		margin: 0;
+		padding: var(--space-2) 10px;
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-md);
 	}
 	.radio {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 12.5px;
+		min-height: 24px;
+		font-size: var(--fs-small);
 	}
 	.radio input {
 		accent-color: var(--accent);
 	}
-	.big {
-		min-height: 40px;
+	.producer :global(.publish) {
+		width: 100%;
+	}
+	.issues {
+		margin: 0;
+		padding-left: 18px;
+		color: #ffb3b5;
+		font-size: var(--fs-caption);
+		line-height: var(--lh-small);
 	}
 	.result {
-		padding: 8px 10px;
+		padding: var(--space-2) 10px;
 		border-left: 3px solid var(--accent);
 		background: #3ddc9714;
-		font-size: 12px;
+		font-size: var(--fs-caption);
 	}
 	.result.refusal {
 		border-left-color: var(--danger);
@@ -354,28 +431,37 @@
 		display: inline-flex;
 		align-items: center;
 		min-height: 24px;
-		margin-top: 4px;
-		color: var(--accent);
+		margin-top: var(--space-1);
+		color: var(--accent-text);
 	}
 	.outputs {
 		display: grid;
-		gap: 12px;
+		gap: var(--space-3);
 		align-content: start;
 	}
 	.chart {
-		padding: 8px;
+		padding: var(--space-2);
 	}
 	.code {
-		font: 500 14px/1.6 var(--mono);
+		margin: 0;
 		color: #ffdca6;
+		font: 500 var(--fs-readout) / var(--lh-body) var(--face-data);
 		word-break: break-all;
+	}
+	.ficha {
+		display: grid;
+		gap: var(--space-1);
+	}
+	.ficha-head {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.ficha-head .fld-lbl {
 		margin: 0;
 	}
-	.issues {
-		margin: 0;
-		padding-left: 28px;
-		color: #ffb3b5;
-		font-size: 12px;
+	.tech .out {
+		margin-top: var(--space-2);
 	}
 	@media (max-width: 1000px) {
 		.onair-grid {

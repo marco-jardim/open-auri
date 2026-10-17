@@ -1,18 +1,21 @@
 <!--
-	"Comunidade prefere": the published Bradley–Terry scores of the anonymous S6 pairs
+	"Comunidade prefere": the published Bradley–Terry scores of the anonymous preference pairs
 	(`GET /api/v1/s6/preferences`, computed daily on the server). Curves are matched to the console by
-	curve id; unknown ids show the id itself. Offline shows a notice, never an empty list.
+	curve id; unknown ids show the id itself. While loading, skeleton rows keep the list's geometry
+	(spec §5.5); offline shows a notice, never an empty list.
 -->
 <script lang="ts">
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
+	import { Panel } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { S6Preferences, SocialApi } from '#lib/social/index.ts';
 	import { errorText, isUnreachable, type Channel } from './model.ts';
 
+	const SKELETON_ROWS = [1, 2, 3, 4, 5] as const;
+
 	let { api, channels, online }: { api: SocialApi; channels: Channel[]; online: boolean } =
 		$props();
 
-	const id = $props.id();
 	let data = $state.raw<S6Preferences | null>(null);
 	let status = $state<'loading' | 'ready' | 'empty' | 'offline' | 'error'>('loading');
 	let message = $state('');
@@ -45,13 +48,21 @@
 	const top = $derived((data?.items ?? []).slice(0, 10));
 </script>
 
-<section class="panel prefers" aria-labelledby="{id}-title">
-	<div class="sec-head">
-		<h2 id="{id}-title">{m.comunidade_prefers_title()}</h2>
-		<p>{m.comunidade_prefers_lede()}</p>
-	</div>
+<Panel
+	variant="hardware"
+	class="desk-panel"
+	title={m.comunidade_prefers_title()}
+	data-testid="prefers-panel"
+	style="--panel-material: linear-gradient(180deg, #23292a, #181c1d)"
+>
+	<p class="panel-lede">{m.comunidade_prefers_lede()}</p>
 	{#if status === 'loading'}
-		<p class="note" role="status">{m.comunidade_loading()}</p>
+		<div class="skel-rows" role="status" aria-busy="true" data-testid="prefers-loading">
+			<span class="sr-only">{m.comunidade_loading()}</span>
+			{#each SKELETON_ROWS as row (row)}
+				<span class="skeleton skel-row" aria-hidden="true"></span>
+			{/each}
+		</div>
 	{:else if status === 'offline'}
 		<p class="note" role="status">{m.comunidade_offline()}</p>
 	{:else if status === 'error'}
@@ -74,18 +85,23 @@
 			<p class="note">{m.comunidade_prefers_pairs({ count: String(data.pairs) })}</p>
 		{/if}
 	{/if}
-</section>
+</Panel>
 
 <style>
-	.prefers {
-		background: linear-gradient(180deg, #23292a, #181c1d);
-	}
-	.ranking {
-		margin: 0;
-		padding-left: 22px;
+	.skel-rows {
 		display: grid;
 		gap: 6px;
-		font: 12px var(--mono);
+	}
+	/* Same height as one ranking row (caption line height). */
+	.skel-row {
+		height: 18px;
+	}
+	.ranking {
+		display: grid;
+		gap: 6px;
+		margin: 0;
+		padding-left: 22px;
+		font: var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
 	.ranking li {
 		display: grid;
@@ -97,8 +113,10 @@
 	}
 	.score {
 		color: var(--amber);
+		font-family: var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
 	}
 	.count {
-		color: #a99f90;
+		color: var(--muted-hi);
 	}
 </style>

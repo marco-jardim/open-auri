@@ -95,6 +95,27 @@ test('lists the versions and diffs the bands of two versions', async () => {
 	await expect.element(page.getByText('HEAD', { exact: true })).toBeVisible();
 	await expect.element(page.getByText(m.comunidade_recall_diff_caption())).toBeVisible();
 	await expect.poll(() => document.querySelectorAll('tr.changed').length).toBe(1);
+	// Rows are named in natural language ("Filtro n"), never with a plan code (T15).
+	await expect
+		.element(
+			page.getByRole('rowheader', { name: m.comunidade_v2_recall_filter({ n: '1' }), exact: true })
+		)
+		.toBeVisible();
+	const rowHeaders = Array.from(document.querySelectorAll('th[scope="row"]'));
+	expect(rowHeaders.length).toBeGreaterThan(0);
+	for (const header of rowHeaders) {
+		expect(header.textContent ?? '').not.toMatch(/^S\d+$/);
+	}
+});
+
+test('restore is unavailable with a reason for an unverified owner', async () => {
+	const { props, fetch } = setup(() => apiError('INTERNAL', 500));
+	await render(TotalRecall, { ...props, canWrite: false });
+	await expect.element(restoreButton()).toHaveAttribute('aria-disabled', 'true');
+	const ids = restoreButton().element().getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+	const reason = ids.map((value) => document.getElementById(value)?.textContent?.trim()).join(' ');
+	expect(reason).toBe(m.comunidade_verify_prompt());
+	expect(fetch.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
 });
 
 test('restore appends a new version on the head that was seen', async () => {

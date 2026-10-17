@@ -79,9 +79,15 @@ test('a new pack defaults to private in both the form and the create request', a
 	});
 });
 
-test('signed-out visitors do not load own packs or favorites', async () => {
+test('signed-out visitors do not load own packs or favorites; the action says why', async () => {
 	const fetch = fakeFetch(() => undefined);
 	await render(PacksPanel, { api: apiWith(fetch), session: ANONYMOUS, online: true });
-	await expect.element(page.getByTestId('login-prompt')).toBeVisible();
+	const create = page.getByRole('button', { name: m.comunidade_packs_create() });
+	await expect.element(create).toHaveAttribute('aria-disabled', 'true');
+	const ids = create.element().getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+	const reason = ids.map((value) => document.getElementById(value)?.textContent?.trim()).join(' ');
+	expect(reason).toBe(m.comunidade_v2_reason_account());
+	// The page's single account card explains accounts (T9): no prompt of its own here.
+	expect(document.querySelector('[data-testid="login-prompt"]')).toBeNull();
 	expect(fetch).not.toHaveBeenCalled();
 });

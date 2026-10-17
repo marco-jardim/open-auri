@@ -1,15 +1,17 @@
 <!--
-	S7 · blind trade (signed in, verified). Join the queue with one of your gate-approved
-	publications, listen to the partner's curve blind (level matched against your editor curve; no
-	name, no LEDs), score it 1 to 5; the partner is revealed once both scored. Waiting entries can be
-	cancelled; unmatched entries expire after 72 h on the server.
+	Blind trade (signed in, verified). Join the queue with one of your gate-approved publications,
+	listen to the partner's curve blind (level matched against your editor curve; no name, no LEDs),
+	score it 1 to 5; the partner is revealed once both scored. Waiting entries can be cancelled;
+	unmatched entries expire after 72 h on the server. Without a verified account the page's single
+	account card explains why; here the action only says it is unavailable and why (T8, T9).
 -->
 <script lang="ts">
+	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Button, Panel } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { LibraryItem, SocialApi, TradeDto } from '#lib/social/index.ts';
 	import type { Listener } from './listener.svelte.ts';
-	import LoginPrompt from './LoginPrompt.svelte';
 	import {
 		decodeCurve,
 		errorText,
@@ -50,6 +52,17 @@
 		owned.filter(
 			(item) => item.curve.gateOk && item.status === 'active' && item.visibility !== 'private'
 		)
+	);
+	const joinReason = $derived(
+		!session.verified
+			? session.signedIn
+				? m.comunidade_verify_prompt()
+				: m.comunidade_v2_reason_account()
+			: !online
+				? m.comunidade_offline()
+				: busy
+					? m.comunidade_v2_reason_wait()
+					: null
 	);
 
 	$effect(() => {
@@ -170,13 +183,19 @@
 	}
 </script>
 
-<section class="panel s7" aria-labelledby="{id}-title">
-	<div class="sec-head">
-		<h2 id="{id}-title">{m.comunidade_s7_title()}</h2>
-		<p>{m.comunidade_s7_lede()}</p>
-	</div>
+<Panel
+	variant="hardware"
+	class="desk-panel"
+	title={m.comunidade_s7_title()}
+	data-testid="s7-panel"
+	style="--panel-material: linear-gradient(180deg, #2a2d31, #1d1f22)"
+>
+	{#snippet explain()}<Explainer term="s7" />{/snippet}
+	<p class="panel-lede">{m.comunidade_s7_lede()}</p>
 	{#if !session.verified}
-		<LoginPrompt signedIn={session.signedIn} />
+		<div class="join">
+			<Button variant="primary" disabledReason={joinReason}>{m.comunidade_s7_join()}</Button>
+		</div>
 	{:else}
 		<div class="join">
 			{#if approved.length === 0}
@@ -184,21 +203,21 @@
 			{:else}
 				<label>
 					<span class="fld-lbl">{m.comunidade_s7_curve()}</span>
-					<select bind:value={choice}>
+					<select class="desk-select" bind:value={choice}>
 						{#each approved as item (item.id)}
 							<option value={item.id}>{item.head.name}</option>
 						{/each}
 					</select>
 				</label>
-				<button type="button" class="btn primary" disabled={busy || !online} onclick={join}
-					>{m.comunidade_s7_join()}</button
+				<Button variant="primary" disabledReason={joinReason} onclick={join}
+					>{m.comunidade_s7_join()}</Button
 				>
 			{/if}
 		</div>
 		{#if trades.length === 0}
 			<p class="note">{m.comunidade_s7_none()}</p>
 		{:else}
-			<ul class="trades">
+			<ul class="trades" aria-label={m.comunidade_s7_title()}>
 				{#each trades as trade (trade.id)}
 					<li>
 						<div class="trade-head">
@@ -207,29 +226,28 @@
 						</div>
 						{#if trade.status === 'matched' && trade.partner}
 							<div class="row-btns">
-								<button
-									type="button"
-									class="btn"
-									aria-pressed={listeningTo === trade.id}
-									onclick={() => listen(trade)}
+								<Button aria-pressed={listeningTo === trade.id} onclick={() => listen(trade)}
 									>{listeningTo === trade.id
 										? m.comunidade_stop()
-										: m.comunidade_s7_listen_blind()}</button
+										: m.comunidade_s7_listen_blind()}</Button
 								>
 								{#if trade.score === null}
-									<label class="score">
+									<label class="score" for="{id}-score-{trade.id}">
 										<span>{m.comunidade_s7_score()}</span>
-										<select bind:value={scores[trade.id]}>
-											{#each [1, 2, 3, 4, 5] as value (value)}
-												<option {value}>{value}</option>
-											{/each}
-										</select>
 									</label>
-									<button
-										type="button"
-										class="btn primary"
-										disabled={busy}
-										onclick={() => score(trade)}>{m.comunidade_s7_send_score()}</button
+									<select
+										id="{id}-score-{trade.id}"
+										class="desk-select"
+										bind:value={scores[trade.id]}
+									>
+										{#each [1, 2, 3, 4, 5] as value (value)}
+											<option {value}>{value}</option>
+										{/each}
+									</select>
+									<Button
+										variant="primary"
+										disabledReason={busy ? m.comunidade_v2_reason_wait() : null}
+										onclick={() => score(trade)}>{m.comunidade_s7_send_score()}</Button
 									>
 								{:else}
 									<span class="note">{m.comunidade_s7_waiting_partner()}</span>
@@ -254,9 +272,14 @@
 								})}
 							</p>
 						{:else if trade.status === 'waiting'}
-							<button type="button" class="btn" disabled={busy} onclick={() => cancel(trade)}
-								>{m.comunidade_s7_cancel()}</button
-							>
+							<div class="row-btns">
+								<Button
+									size="sm"
+									variant="ghost"
+									disabledReason={busy ? m.comunidade_v2_reason_wait() : null}
+									onclick={() => cancel(trade)}>{m.comunidade_s7_cancel()}</Button
+								>
+							</div>
 						{/if}
 					</li>
 				{/each}
@@ -264,62 +287,62 @@
 		{/if}
 		<p class="note" role="status">{message}</p>
 	{/if}
-</section>
+</Panel>
 
 <style>
-	.s7 {
-		background: linear-gradient(180deg, #2a2d31, #1d1f22);
-	}
 	.join {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: flex-end;
 		gap: 10px;
-		margin-bottom: 12px;
+		margin-bottom: var(--space-3);
 	}
-	select {
-		background: #0f0e0c;
-		color: #ece7dd;
-		border: 1px solid #000;
-		padding: 6px 8px;
-		font: 12px var(--mono);
+	.join label {
+		display: flex;
+		flex-direction: column;
 	}
 	.trades {
-		list-style: none;
+		display: grid;
+		gap: var(--space-2);
 		margin: 0;
 		padding: 0;
-		display: grid;
-		gap: 8px;
+		list-style: none;
 	}
 	.trades li {
 		padding: 10px;
-		border: 1px solid #ffffff14;
-		border-radius: 4px;
+		border: 1px solid var(--rule);
+		border-radius: var(--rad-md);
 		background: #ffffff06;
 	}
 	.trade-head {
 		display: flex;
 		justify-content: space-between;
 		gap: 10px;
-		font: 11px var(--mono);
+		font: var(--fs-caption) var(--face-body);
 	}
 	.status {
-		color: var(--accent);
+		color: var(--accent-text);
+		font-weight: 600;
+		letter-spacing: var(--tracking-caps);
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+	}
+	.date {
+		color: var(--muted-hi);
+		font-family: var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
 	}
 	.score {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		font: 11px var(--mono);
+		font: var(--fs-caption) var(--face-body);
 	}
 	.reveal {
-		margin: 8px 0 0;
-		font-size: 12.5px;
+		margin: var(--space-2) 0 0;
+		font-size: var(--fs-small);
 		overflow-wrap: anywhere;
 	}
 	.reveal a {
-		color: var(--accent);
+		color: var(--accent-text);
 	}
 </style>

@@ -1,12 +1,17 @@
 <!--
-	S6 · preference (opt-in, anonymous). A blind, level-matched round between two selected strips
-	(names hidden until the vote) produces A/B pairs that stay in this browser. Nothing leaves before
-	the three explicit consents (LGPD art. 11), the Turnstile check and a click; the preview shows the
+	Anonymous preference (opt-in). A blind, level-matched round between two selected strips (names
+	hidden until the vote) produces A/B pairs that stay in this browser. Nothing leaves before the
+	three explicit consents (LGPD art. 11), the Turnstile check and a click; the preview shows the
 	EXACT JSON body that will be sent (no account, no IP in the batch). The receipt is a local secret:
 	it is kept here and is the only way to withdraw the batch later.
+
+	Silent consent (spec §4.1, L6, T10): the Turnstile module is imported and the widget mounted only
+	after the three consents, so no third party is contacted and no check error can appear before the
+	visitor asks to send.
 -->
 <script lang="ts">
-	import Turnstile from '#lib/components/security/Turnstile.svelte';
+	import { Explainer } from '#lib/components/comprehension/index.ts';
+	import { Button, Panel } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { S6PairInput, SocialApi } from '#lib/social/index.ts';
@@ -23,6 +28,8 @@
 		type ReceiptStorage,
 		type StoredReceipt
 	} from './model.ts';
+
+	type TurnstileComponent = typeof import('#lib/components/security/Turnstile.svelte').default;
 
 	let {
 		api,
@@ -53,7 +60,6 @@
 		onnotice: (message: string) => void;
 	} = $props();
 
-	const id = $props.id();
 	let consentPairs = $state(false);
 	let consentAnonymous = $state(false);
 	let consentResearch = $state(false);
@@ -80,7 +86,53 @@
 	const canSend = $derived(
 		consented && pairs.length > 0 && token !== '' && receipt !== '' && online && !sending
 	);
+	/** Why "Enviar" cannot act right now; null when it can (T8). */
+	const sendReason = $derived(
+		!consented
+			? m.comunidade_s6_consent_required()
+			: pairs.length === 0
+				? m.comunidade_v2_reason_no_pairs()
+				: !online
+					? m.comunidade_offline()
+					: token === '' || receipt === ''
+						? m.comunidade_report_needs_check()
+						: null
+	);
 	const roundPlaying = $derived(listener.owner === 's6');
+	const startReason = $derived(
+		!canListen
+			? m.comunidade_audio_unavailable()
+			: listener.busy
+				? m.comunidade_v2_reason_busy()
+				: null
+	);
+
+	// ---- Turnstile, on demand -----------------------------------------------------------------------
+
+	let Turnstile = $state.raw<TurnstileComponent | null>(null);
+	let turnstileFailed = $state(false);
+
+	$effect(() => {
+		if (!consented || !siteKey || Turnstile || turnstileFailed) return;
+		let live = true;
+		import('#lib/components/security/Turnstile.svelte')
+			.then((module) => {
+				if (live) Turnstile = module.default;
+			})
+			.catch((error: unknown) => {
+				if (!live) return;
+				turnstileFailed = true;
+				console.warn(
+					JSON.stringify({
+						event: 'comunidade.turnstile_import_failed',
+						error: error instanceof Error ? error.name : 'unknown'
+					})
+				);
+			});
+		return () => {
+			live = false;
+		};
+	});
 
 	async function startRound() {
 		const [first, second] = candidates;
@@ -155,11 +207,22 @@
 	}
 </script>
 
-<section class="talkback panel" aria-labelledby="{id}-title">
-	<div class="sec-head">
-		<h2 id="{id}-title">{m.comunidade_s6_title()}</h2>
-		<p>{m.comunidade_s6_lede()}</p>
-	</div>
+<svelte:head>
+	{#if consented && siteKey}
+		<!-- W7: the third party is warmed up only after the consent. -->
+		<link rel="preconnect" href="https://challenges.cloudflare.com" />
+	{/if}
+</svelte:head>
+
+<Panel
+	variant="hardware"
+	class="desk-panel"
+	title={m.comunidade_s6_title()}
+	data-testid="s6-panel"
+	style="--panel-material: linear-gradient(180deg, #262a2e, #1a1c1f)"
+>
+	{#snippet explain()}<Explainer term="s6" />{/snippet}
+	<p class="panel-lede">{m.comunidade_s6_lede()}</p>
 	<div class="tb-grid">
 		<div>
 			<div class="round">
@@ -167,36 +230,34 @@
 				{#if candidates.length < 2}
 					<p class="note">{m.comunidade_s6_need_two()}</p>
 				{:else if !round}
-					<button type="button" class="btn" disabled={listener.busy} onclick={startRound}
-						>{m.comunidade_s6_round_start()}</button
-					>
-				{:else}
-					<div class="push-group" role="group" aria-label={m.comunidade_s6_round_title()}>
-						<button
-							type="button"
-							class="push"
-							aria-pressed={listener.side === 'A'}
-							disabled={!roundPlaying}
-							onclick={() => listener.select('A')}>X</button
+					<div>
+						<Button disabledReason={startReason} onclick={startRound}
+							>{m.comunidade_s6_round_start()}</Button
 						>
-						<button
-							type="button"
-							class="push"
+					</div>
+				{:else}
+					<div class="xy" role="group" aria-label={m.comunidade_s6_round_title()}>
+						<Button
+							variant="key"
+							size="sm"
+							aria-pressed={listener.side === 'A'}
+							lit={roundPlaying && listener.side === 'A'}
+							disabledReason={roundPlaying ? null : m.comunidade_v2_reason_round()}
+							onclick={() => listener.select('A')}>X</Button
+						>
+						<Button
+							variant="key"
+							size="sm"
 							aria-pressed={listener.side === 'B'}
-							disabled={!roundPlaying}
-							onclick={() => listener.select('B')}>Y</button
+							lit={roundPlaying && listener.side === 'B'}
+							disabledReason={roundPlaying ? null : m.comunidade_v2_reason_round()}
+							onclick={() => listener.select('B')}>Y</Button
 						>
 					</div>
 					<div class="row-btns">
-						<button type="button" class="btn" onclick={() => vote('a')}
-							>{m.comunidade_s6_prefer_x()}</button
-						>
-						<button type="button" class="btn" onclick={() => vote('b')}
-							>{m.comunidade_s6_prefer_y()}</button
-						>
-						<button type="button" class="btn" onclick={() => vote('tie')}
-							>{m.comunidade_s6_tie()}</button
-						>
+						<Button onclick={() => vote('a')}>{m.comunidade_s6_prefer_x()}</Button>
+						<Button onclick={() => vote('b')}>{m.comunidade_s6_prefer_y()}</Button>
+						<Button variant="ghost" onclick={() => vote('tie')}>{m.comunidade_s6_tie()}</Button>
 					</div>
 				{/if}
 			</div>
@@ -214,14 +275,23 @@
 					<input type="checkbox" bind:checked={consentResearch} />
 					<span>{m.comunidade_s6_consent_research()}</span>
 				</label>
-				{#if siteKey}
-					<Turnstile {siteKey} action={TURNSTILE_S6_ACTION} bind:token />
-				{:else}
-					<p class="note">{m.comunidade_turnstile_unavailable()}</p>
-				{/if}
+				<div class="check" data-testid="s6-check">
+					{#if !consented}
+						<p class="note">{m.comunidade_v2_turnstile_after_consent()}</p>
+					{:else if !siteKey || turnstileFailed}
+						<p class="note">{m.comunidade_turnstile_unavailable()}</p>
+					{:else if Turnstile}
+						<Turnstile {siteKey} action={TURNSTILE_S6_ACTION} bind:token />
+					{:else}
+						<div class="turnstile-wait" role="status" aria-busy="true">
+							<span class="skeleton" aria-hidden="true"></span>
+							<span>{m.comunidade_v2_turnstile_preparing()}</span>
+						</div>
+					{/if}
+				</div>
 				<div class="row-btns">
-					<button type="button" class="btn primary" disabled={!canSend} onclick={send}
-						>{m.comunidade_s6_send({ count: String(pairs.length) })}</button
+					<Button variant="primary" disabledReason={sendReason} loading={sending} onclick={send}
+						>{m.comunidade_s6_send({ count: String(pairs.length) })}</Button
 					>
 				</div>
 				{#if !consented && pairs.length > 0}
@@ -266,8 +336,10 @@
 									count: String(item.pairs)
 								})}</span
 							>
-							<button type="button" class="btn" disabled={!online} onclick={() => withdraw(item)}
-								>{m.comunidade_s6_withdraw()}</button
+							<Button
+								size="sm"
+								disabledReason={online ? null : m.comunidade_offline()}
+								onclick={() => withdraw(item)}>{m.comunidade_s6_withdraw()}</Button
 							>
 						</li>
 					{/each}
@@ -275,61 +347,75 @@
 			{/if}
 		</div>
 	</div>
-</section>
+</Panel>
 
 <style>
-	.talkback {
-		background: linear-gradient(180deg, #262a2e, #1a1c1f);
-	}
 	.tb-grid {
 		display: grid;
 		grid-template-columns: 1fr 1.1fr;
-		gap: 20px;
+		gap: var(--space-5);
 	}
 	.round {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
-		margin-bottom: 14px;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
+	}
+	.xy {
+		display: inline-flex;
+		gap: var(--space-1);
+	}
+	.consent {
+		margin: 0;
+		padding: var(--space-3);
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-md);
+	}
+	.consent legend {
+		color: var(--text);
+		font: 500 var(--fs-small) / var(--lh-ui) var(--face-body);
 	}
 	.consent label {
 		display: flex;
 		gap: 10px;
 		align-items: flex-start;
-		font-size: 12.5px;
-		line-height: 1.55;
-		color: #e1dcd1;
 		margin-bottom: 10px;
+		color: var(--text-2);
+		font-size: var(--fs-small);
+		line-height: var(--lh-body);
 	}
 	.consent input[type='checkbox'] {
-		accent-color: var(--accent);
-		margin-top: 4px;
-		width: 15px;
-		height: 15px;
 		flex: 0 0 auto;
+		width: 16px;
+		height: 16px;
+		margin-top: 3px;
+		accent-color: var(--accent);
+	}
+	.check {
+		min-height: 65px;
 	}
 	.pairs-table {
 		width: 100%;
-		border-collapse: collapse;
-		font: 11px var(--mono);
 		margin-bottom: 10px;
+		border-collapse: collapse;
+		font: 400 var(--fs-caption) var(--face-data);
 	}
 	.pairs-table th,
 	.pairs-table td {
-		padding: 6px 8px;
-		border-bottom: 1px solid #ffffff12;
+		padding: 6px var(--space-2);
+		border-bottom: 1px solid var(--rule);
 		text-align: left;
 	}
 	.receipts-title {
-		margin-top: 12px;
+		margin-top: var(--space-3);
 	}
 	.receipts {
-		list-style: none;
-		margin: 0;
-		padding: 0;
 		display: grid;
 		gap: 6px;
-		font: 11px var(--mono);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font: var(--fs-caption) var(--face-body);
 	}
 	.receipts li {
 		display: flex;

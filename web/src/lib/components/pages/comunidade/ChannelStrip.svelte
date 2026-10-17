@@ -8,6 +8,7 @@
 	import type { PreviewChain } from '#lib/audio/engine.ts';
 	import type { MeterTap, TapOptions } from '#lib/audio/meters.ts';
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import ChannelMeter from './ChannelMeter.svelte';
 	import CurveAvatar from './CurveAvatar.svelte';
@@ -41,6 +42,14 @@
 		channel.author ? `@${channel.author.displayUsername}` : m.comunidade_author_removed()
 	);
 	const tilt = $derived(`${((number * 37) % 7) * 0.25 - 0.8}deg`);
+	/** Why SOLO cannot act right now (always said, never a silent grey key: T8). */
+	const soloReason = $derived(
+		!channel.curve
+			? m.comunidade_channel_invalid()
+			: disabled
+				? m.comunidade_v2_reason_busy()
+				: null
+	);
 </script>
 
 <li
@@ -89,23 +98,23 @@
 			<p class="invalid">{m.comunidade_channel_invalid()}</p>
 		{/if}
 		<div class="btns">
-			<button
-				type="button"
+			<Button
+				size="sm"
 				class="sq solo"
 				aria-pressed={playing}
 				aria-label={playing
 					? m.comunidade_channel_stop({ name: channel.name })
 					: m.comunidade_channel_listen({ name: channel.name })}
-				disabled={disabled || !channel.curve}
-				onclick={() => onlisten(channel)}>{m.comunidade_solo()}</button
+				disabledReason={soloReason}
+				onclick={() => onlisten(channel)}>{m.comunidade_solo()}</Button
 			>
-			<button
-				type="button"
+			<Button
+				size="sm"
 				class="sq sel"
 				aria-pressed={selected}
 				aria-label={m.comunidade_channel_select({ name: channel.name })}
-				disabled={!channel.curve}
-				onclick={() => onselect(channel)}>{m.comunidade_sel()}</button
+				disabledReason={channel.curve ? null : m.comunidade_channel_invalid()}
+				onclick={() => onselect(channel)}>{m.comunidade_sel()}</Button
 			>
 		</div>
 		{#if channel.score !== null}
@@ -162,7 +171,7 @@
 		box-shadow: 0 0 0 1px #000;
 	}
 	.chno {
-		font: 500 12px var(--mono);
+		font: 500 var(--fs-caption) var(--face-data);
 		color: #e4e0d6;
 		margin-top: 6px;
 		letter-spacing: 0.06em;
@@ -189,7 +198,7 @@
 			inset -1px 0 0 #00000080;
 	}
 	.ex-tag {
-		font: 600 11px var(--mono);
+		font: 500 var(--label-min) var(--face-data);
 		letter-spacing: 0.06em;
 		color: #d6d2c8;
 		text-transform: uppercase;
@@ -207,12 +216,12 @@
 		gap: 4px;
 	}
 	.k-lbl {
-		font: 600 10px var(--mono);
+		font: 500 var(--label-min) var(--face-data);
 		color: #e4e0d6;
 	}
 	.k-val {
-		font: 11px var(--mono);
-		font-variant-numeric: tabular-nums;
+		font: 400 var(--label-min) var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
 		color: #ffd79a;
 	}
 	.knob {
@@ -249,7 +258,7 @@
 	}
 	.invalid {
 		margin: 0;
-		font: 10px/1.4 var(--mono);
+		font: 400 var(--label-min) / var(--lh-small) var(--face-data);
 		color: #ffb3b5;
 		text-align: center;
 	}
@@ -257,20 +266,25 @@
 		display: flex;
 		gap: 4px;
 	}
-	.sq {
+	/* SOLO and SEL are the Button primitive dressed as console keys (behaviour, focus ring and the
+	   unavailable reason come from the primitive). */
+	.btns :global(.sq) {
 		width: 44px;
+		min-width: 44px;
 		height: 30px;
-		border-radius: 3px;
+		min-height: 30px;
+		padding: 0;
+		border-radius: var(--rad-sm);
 		border: 1px solid #000;
 		background: linear-gradient(#4a4d51, #2d2f33);
 		color: #f0ece3;
-		font: 700 11px var(--mono);
+		font: 600 var(--label-min) / 1 var(--face-body);
+		letter-spacing: var(--tracking-caps);
 		box-shadow:
 			0 3px 0 #111,
 			inset 0 1px 0 #ffffff26;
-		padding: 0;
 	}
-	.sq.solo[aria-pressed='true'] {
+	.btns :global(.sq.solo[aria-pressed='true']) {
 		background: radial-gradient(circle at 50% 40%, #fff3c4, #ffc248 60%, #c98a1c);
 		color: #2a1d05;
 		box-shadow:
@@ -278,7 +292,7 @@
 			0 1px 0 #111;
 		transform: translateY(2px);
 	}
-	.sq.sel[aria-pressed='true'] {
+	.btns :global(.sq.sel[aria-pressed='true']) {
 		background: radial-gradient(circle at 50% 40%, #d8fff0, var(--accent) 60%, #1f9a68);
 		color: #062016;
 		box-shadow:
@@ -287,8 +301,8 @@
 		transform: translateY(2px);
 	}
 	.readout {
-		font: 12px var(--mono);
-		font-variant-numeric: tabular-nums;
+		font: 400 var(--fs-caption) var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
 		background: #0a0a0b;
 		color: #ffdca6;
 		border: 1px solid #000;
@@ -335,7 +349,7 @@
 	}
 	.m1 {
 		display: block;
-		font-size: 11px;
+		font-size: var(--label-min);
 		overflow-wrap: anywhere;
 		color: #23255f;
 	}
@@ -344,12 +358,12 @@
 	}
 	.m2 {
 		display: block;
-		font-size: 14px;
+		font-size: var(--fs-ui);
 		color: #141414 !important;
 		overflow-wrap: anywhere;
 	}
 	.lic {
-		font: 700 9px var(--mono);
+		font: 500 var(--label-min) var(--face-data);
 		padding: 1px 4px;
 		border-radius: 2px;
 		border: 1px solid #000;
@@ -363,7 +377,7 @@
 		color: #e7eefc;
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.sq {
+		.btns :global(.sq) {
 			transition: none;
 		}
 	}

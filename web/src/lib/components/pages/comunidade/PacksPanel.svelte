@@ -1,11 +1,13 @@
 <!--
-	Packs (VCA): create a pack from your favorites and list your packs. Signed in and verified only;
-	names and descriptions are user text, shown only through interpolation.
+	Packs (VCA): create a pack from your favorites and list your packs. Signed in and verified only
+	(the page's single account card explains it; here the action says why it is unavailable). Names
+	and descriptions are user text, shown only through interpolation. The page mounts this panel
+	only when its drawer opens, so nothing is requested before that.
 -->
 <script lang="ts">
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { LibraryItem, SocialApi } from '#lib/social/index.ts';
-	import LoginPrompt from './LoginPrompt.svelte';
 	import {
 		DESCRIPTION_MAX,
 		NAME_MAX,
@@ -32,6 +34,19 @@
 	let visibility = $state<Visibility>('private');
 	let busy = $state(false);
 	let message = $state('');
+
+	/** Why "Criar pack" cannot act right now; null when it can (T8). */
+	const createReason = $derived(
+		!session.verified
+			? session.signedIn
+				? m.comunidade_verify_prompt()
+				: m.comunidade_v2_reason_account()
+			: !online
+				? m.comunidade_offline()
+				: name.trim() === '' || chosen.length === 0
+					? m.comunidade_v2_reason_pack_name()
+					: null
+	);
 
 	$effect(() => {
 		if (!session.verified || !online) return;
@@ -74,13 +89,11 @@
 	}
 </script>
 
-<section class="panel packs" aria-labelledby="{id}-title">
-	<div class="sec-head">
-		<h2 id="{id}-title">{m.comunidade_packs_title()}</h2>
-		<p>{m.comunidade_packs_lede()}</p>
-	</div>
+<div class="packs" data-testid="packs-panel">
 	{#if !session.verified}
-		<LoginPrompt signedIn={session.signedIn} />
+		<div class="row-btns">
+			<Button variant="primary" disabledReason={createReason}>{m.comunidade_packs_create()}</Button>
+		</div>
 	{:else}
 		<div class="packs-grid">
 			<div class="producer">
@@ -92,14 +105,14 @@
 					<span class="fld-lbl">{m.comunidade_onair_description()}</span>
 					<textarea maxlength={DESCRIPTION_MAX} bind:value={description}></textarea>
 				</label>
-				<label>
+				<label for="{id}-visibility">
 					<span class="fld-lbl">{m.comunidade_onair_visibility()}</span>
-					<select bind:value={visibility}>
-						<option value="public">{m.comunidade_visibility_public()}</option>
-						<option value="unlisted">{m.comunidade_visibility_unlisted()}</option>
-						<option value="private">{m.comunidade_visibility_private()}</option>
-					</select>
 				</label>
+				<select id="{id}-visibility" class="desk-select" bind:value={visibility}>
+					<option value="public">{m.comunidade_visibility_public()}</option>
+					<option value="unlisted">{m.comunidade_visibility_unlisted()}</option>
+					<option value="private">{m.comunidade_visibility_private()}</option>
+				</select>
 				<fieldset>
 					<legend class="fld-lbl">{m.comunidade_packs_from_favorites()}</legend>
 					{#if favorites.length === 0}
@@ -113,12 +126,11 @@
 						{/each}
 					{/if}
 				</fieldset>
-				<button
-					type="button"
-					class="btn primary"
-					disabled={busy || !online || name.trim() === '' || chosen.length === 0}
-					onclick={create}>{m.comunidade_packs_create()}</button
-				>
+				<div>
+					<Button variant="primary" disabledReason={createReason} loading={busy} onclick={create}
+						>{m.comunidade_packs_create()}</Button
+					>
+				</div>
 				<p class="note" role="status">{message}</p>
 			</div>
 			<div>
@@ -139,16 +151,16 @@
 			</div>
 		</div>
 	{/if}
-</section>
+</div>
 
 <style>
 	.packs {
-		background: linear-gradient(180deg, #2f2b27, #1f1c19);
+		padding-top: var(--space-3);
 	}
 	.packs-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 20px;
+		gap: var(--space-5);
 	}
 	.producer {
 		display: flex;
@@ -160,58 +172,52 @@
 		flex-direction: column;
 	}
 	fieldset {
-		border: 1px solid #ffffff1c;
-		border-radius: 4px;
-		padding: 8px 10px;
-		margin: 0;
 		max-height: 220px;
 		overflow: auto;
+		margin: 0;
+		padding: var(--space-2) 10px;
+		border: 1px solid var(--rule-control);
+		border-radius: var(--rad-md);
 	}
 	.check {
 		display: flex;
-		gap: 8px;
 		align-items: center;
-		font-size: 12.5px;
+		gap: var(--space-2);
+		min-height: 24px;
+		font-size: var(--fs-small);
 		overflow-wrap: anywhere;
 	}
 	.check input {
 		accent-color: var(--accent);
 	}
-	select {
-		background: #0f0e0c;
-		color: #ece7dd;
-		border: 1px solid #000;
-		padding: 6px 8px;
-		font: 12px var(--mono);
-	}
 	.pack-list {
-		list-style: none;
+		display: grid;
+		gap: var(--space-2);
 		margin: 6px 0 0;
 		padding: 0;
-		display: grid;
-		gap: 8px;
+		list-style: none;
 	}
 	.pack-list li {
 		display: grid;
 		grid-template-columns: auto 1fr;
-		gap: 2px 8px;
+		gap: 2px var(--space-2);
 		align-items: center;
 	}
 	.vca-plate {
-		font: 700 11px var(--mono);
-		color: #1b1206;
-		background: linear-gradient(#e9d9b4, #c8b48a);
 		padding: 2px 6px;
-		border-radius: 2px;
+		border-radius: var(--rad-xs);
+		background: linear-gradient(#e9d9b4, #c8b48a);
+		color: #1b1206;
+		font: 500 var(--label-min) var(--face-data);
 	}
 	.pack-name {
-		font: 14px var(--marker);
+		font: var(--fs-ui) var(--marker);
 		overflow-wrap: anywhere;
 	}
 	.pack-desc {
 		grid-column: 2;
-		font-size: 12px;
-		color: #bdb7ab;
+		color: var(--muted-hi);
+		font-size: var(--fs-caption);
 		overflow-wrap: anywhere;
 	}
 	@media (max-width: 1000px) {

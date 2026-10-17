@@ -2,13 +2,17 @@
 	Report the scope target (signed in, verified). Reason + optional private note (only admins read
 	it) + the Turnstile check (`x-turnstile-token`, action "report"): sending is impossible without a
 	token, and the token is single use.
+
+	Silent consent (spec §4.1, L6, T10): the page mounts this panel only when the visitor opens the
+	"Denunciar" drawer, and the Turnstile module is imported only when the form is really shown (a
+	verified account and a selected channel). Before that no third party is contacted and no check
+	error can appear.
 -->
 <script lang="ts">
-	import Turnstile from '#lib/components/security/Turnstile.svelte';
+	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi } from '#lib/social/index.ts';
 	import type { ReportReason } from '#lib/server/social/types.ts';
-	import LoginPrompt from './LoginPrompt.svelte';
 	import {
 		NOTE_MAX,
 		REPORT_REASONS,
@@ -17,6 +21,8 @@
 		type Channel,
 		type SessionView
 	} from './model.ts';
+
+	type TurnstileComponent = typeof import('#lib/components/security/Turnstile.svelte').default;
 
 	let {
 		api,
@@ -49,6 +55,23 @@
 			!busy &&
 			sentFor !== channel.lineageId
 	);
+	/** Why "Enviar denúncia" cannot act right now; null when it can (T8). */
+	const sendReason = $derived(
+		!channel
+			? m.comunidade_select_first()
+			: !session.verified
+				? session.signedIn
+					? m.comunidade_verify_prompt()
+					: m.comunidade_v2_reason_account()
+				: !online
+					? m.comunidade_offline()
+					: sentFor === channel.lineageId
+						? m.comunidade_v2_reason_report_sent()
+						: token === ''
+							? m.comunidade_report_needs_check()
+							: null
+	);
+	const formShown = $derived(!!channel && session.verified);
 
 	const reasonText: Record<ReportReason, () => string> = {
 		dangerous: () => m.comunidade_report_reason_dangerous(),
@@ -58,6 +81,33 @@
 		impersonation: () => m.comunidade_report_reason_impersonation(),
 		other: () => m.comunidade_report_reason_other()
 	};
+
+	// ---- Turnstile, on demand -----------------------------------------------------------------------
+
+	let Turnstile = $state.raw<TurnstileComponent | null>(null);
+	let turnstileFailed = $state(false);
+
+	$effect(() => {
+		if (!formShown || !siteKey || Turnstile || turnstileFailed) return;
+		let live = true;
+		import('#lib/components/security/Turnstile.svelte')
+			.then((module) => {
+				if (live) Turnstile = module.default;
+			})
+			.catch((error: unknown) => {
+				if (!live) return;
+				turnstileFailed = true;
+				console.warn(
+					JSON.stringify({
+						event: 'comunidade.turnstile_import_failed',
+						error: error instanceof Error ? error.name : 'unknown'
+					})
+				);
+			});
+		return () => {
+			live = false;
+		};
+	});
 
 	async function send() {
 		if (!canSend || !channel) return;
@@ -85,37 +135,48 @@
 	}
 </script>
 
-<section class="panel report" aria-labelledby="{id}-title">
-	<div class="sec-head">
-		<h2 id="{id}-title">{m.comunidade_report_title()}</h2>
-		<p>{m.comunidade_report_lede()}</p>
-	</div>
+<svelte:head>
+	{#if formShown && siteKey}
+		<link rel="preconnect" href="https://challenges.cloudflare.com" />
+	{/if}
+</svelte:head>
+
+<div class="report" data-testid="report-panel">
 	{#if !channel}
 		<p class="note">{m.comunidade_select_first()}</p>
 	{:else if !session.verified}
-		<LoginPrompt signedIn={session.signedIn} />
+		<div class="row-btns">
+			<Button variant="danger" disabledReason={sendReason}>{m.comunidade_report_send()}</Button>
+		</div>
 	{:else}
 		<p class="target">{m.comunidade_report_target({ name: channel.name })}</p>
-		<label>
+		<label for="{id}-reason">
 			<span class="fld-lbl">{m.comunidade_report_reason()}</span>
-			<select bind:value={reason}>
-				{#each REPORT_REASONS as value (value)}
-					<option {value}>{reasonText[value]()}</option>
-				{/each}
-			</select>
 		</label>
+		<select id="{id}-reason" class="desk-select" bind:value={reason}>
+			{#each REPORT_REASONS as value (value)}
+				<option {value}>{reasonText[value]()}</option>
+			{/each}
+		</select>
 		<label>
 			<span class="fld-lbl">{m.comunidade_report_note()}</span>
 			<textarea maxlength={NOTE_MAX} bind:value={note}></textarea>
 		</label>
-		{#if siteKey}
-			<Turnstile {siteKey} action={TURNSTILE_REPORT_ACTION} bind:token />
-		{:else}
-			<p class="note">{m.comunidade_turnstile_unavailable()}</p>
-		{/if}
+		<div class="check" data-testid="report-check">
+			{#if !siteKey || turnstileFailed}
+				<p class="note">{m.comunidade_turnstile_unavailable()}</p>
+			{:else if Turnstile}
+				<Turnstile {siteKey} action={TURNSTILE_REPORT_ACTION} bind:token />
+			{:else}
+				<div class="turnstile-wait" role="status" aria-busy="true">
+					<span class="skeleton" aria-hidden="true"></span>
+					<span>{m.comunidade_v2_turnstile_preparing()}</span>
+				</div>
+			{/if}
+		</div>
 		<div class="row-btns">
-			<button type="button" class="btn primary" disabled={!canSend} onclick={send}
-				>{m.comunidade_report_send()}</button
+			<Button variant="danger" disabledReason={sendReason} loading={busy} onclick={send}
+				>{m.comunidade_report_send()}</Button
 			>
 		</div>
 		{#if token === '' && sentFor !== channel.lineageId}
@@ -123,30 +184,28 @@
 		{/if}
 	{/if}
 	<p class="note" role="status">{message}</p>
-</section>
+</div>
 
 <style>
 	.report {
-		background: linear-gradient(180deg, #2b2324, #1c1718);
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
+		padding-top: var(--space-3);
 	}
 	.report label {
 		display: flex;
 		flex-direction: column;
 	}
+	.report select {
+		max-width: 320px;
+	}
 	.target {
 		margin: 0;
-		font-size: 13px;
+		font-size: var(--fs-small);
 		overflow-wrap: anywhere;
 	}
-	select {
-		background: #0f0e0c;
-		color: #ece7dd;
-		border: 1px solid #000;
-		padding: 6px 8px;
-		font: 12px var(--mono);
-		max-width: 320px;
+	.check {
+		min-height: 65px;
 	}
 </style>
