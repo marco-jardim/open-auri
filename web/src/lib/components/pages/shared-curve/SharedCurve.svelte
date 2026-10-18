@@ -164,7 +164,10 @@
 			// A comparison starts at a random point of the file (SEEK.2); the file loops.
 			await engine.start('chains', { startAt: 'random', session: SHARED_CURVE_SESSION });
 			if (token !== attempt) {
-				if (owned(engine)) engine.stop();
+				// A late start of an ended attempt (stop, install, unmount) is an orphan: it goes.
+				// A newer attempt that is starting (busy) or playing (listening) shares the session
+				// tag, so the playback is its own: the stale attempt leaves it alone.
+				if (!busy && !listening && owned(engine)) engine.stop();
 				return;
 			}
 			startedBy = engine;

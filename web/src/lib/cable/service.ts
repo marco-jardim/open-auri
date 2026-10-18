@@ -335,6 +335,11 @@ export function createCableService(deps: CableServiceDeps) {
 	const tabId = deps.tabId ?? randomTabId();
 	/** The marker this instance persisted for the write in progress (real mode only). */
 	let ownMarker: InflightMarker | null = null;
+	/**
+	 * The marker could not follow the X9 queue between two cables (`betweenCables`): the next
+	 * cable is refused before any I/O. Cleared when the write ends (`unmark`).
+	 */
+	let markerAdrift = false;
 	/** Raw markers this instance already turned into a journal entry (never block twice on one). */
 	const recoveredMarkers = new Set<string>();
 	let recheck: ReturnType<typeof setTimeout> | null = null;
@@ -685,6 +690,7 @@ export function createCableService(deps: CableServiceDeps) {
 
 	/** Removes this instance's marker (never another tab's). Runs in `finally` of every write. */
 	function unmark() {
+		markerAdrift = false;
 		if (ownMarker === null) return;
 		ownMarker = null;
 		if (inflight === null) return;
@@ -701,13 +707,17 @@ export function createCableService(deps: CableServiceDeps) {
 	 * still leaves both recorded. If the marker cannot be pointed at this device, the stored
 	 * one would misdescribe the write (a `between` marker is recovered as "nothing was being
 	 * written"): it is removed if possible and this throws, so the transport refuses the
-	 * sequence before any I/O. Pre-I/O refusals are not counted.
+	 * sequence before any I/O. Pre-I/O refusals are not counted. A marker that could not follow
+	 * the queue from the previous cable (`betweenCables`) refuses the sequence the same way.
 	 */
 	function sequenceStarting(label: string) {
 		const at = nowMs();
 		if (mode === 'simulated') {
 			simulatedFlash = recordWrite(simulatedFlash, at);
 			return;
+		}
+		if (markerAdrift) {
+			throw new Error('cable in-flight marker could not follow the queue; nothing was sent');
 		}
 		const device = truncate(label, 64);
 		if (
@@ -732,12 +742,22 @@ export function createCableService(deps: CableServiceDeps) {
 	 * X9 queue: the cable `label` committed and is journaled; the next one has not started. The
 	 * marker stops naming a cable being written, so a tab closed during the 2 s spacing leaves
 	 * nothing to recover as interrupted (it still marks a write in progress for other tabs).
+	 * If that update fails, the stored marker would still name the committed cable as being
+	 * written, so it is removed instead (the write lock still keeps other tabs out). The next
+	 * cable is then refused before any I/O when the marker could not be removed either (it
+	 * misdescribes the queue), or without Web Locks (the marker was the only cross-tab guard,
+	 * and the spacing went unguarded). Never throws: it runs inside writeMany's spacing.
 	 */
 	function betweenCables(label: string) {
 		if (ownMarker === null || inflight === null) return;
 		ownMarker = { ...ownMarker, at: nowMs(), device: truncate(label, 64), between: true };
-		if (!inflight.write(JSON.stringify(ownMarker))) {
-			console.warn('cable in-flight marker could not be updated');
+		if (inflight.write(JSON.stringify(ownMarker))) return;
+		console.warn('cable in-flight marker could not be updated');
+		if (!inflight.write(null)) {
+			console.warn('cable in-flight marker could not be removed');
+			markerAdrift = true;
+		} else if (locks === null) {
+			markerAdrift = true;
 		}
 	}
 

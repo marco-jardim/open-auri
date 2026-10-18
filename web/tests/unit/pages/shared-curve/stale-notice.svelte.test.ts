@@ -1,6 +1,7 @@
 // The audio-error notice of a failed playback attempt goes when a new attempt begins and stays
 // gone once a retry (the page's "Ouvir" or the Transport's play) succeeds; a late failure of an
-// earlier attempt never ends or flags the attempt that replaced it.
+// earlier attempt never ends or flags the attempt that replaced it, and a late success never stops
+// it.
 import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
@@ -161,6 +162,40 @@ test('a late failure of an earlier attempt neither stops nor flags the attempt t
 	await tick();
 	await expect.element(stop).toHaveAttribute('aria-pressed', 'true');
 	expect(noticeText()).toBe('');
+	expect(audio.stop).not.toHaveBeenCalled();
+	expect(audio.createAB.mock.results[1]?.value.dispose).not.toHaveBeenCalled();
+	expect(audio.state()).toMatchObject({ playing: true, session: 'shared-curve' });
+});
+
+test('a late success of an earlier attempt does not stop the attempt that replaced it', async () => {
+	const { app, audio, requestWrite } = fakeApp();
+	let finish: (() => void) | undefined;
+	audio.start.mockImplementationOnce(async () => {
+		await new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		// The late start plays under the same session tag as the attempt that replaced it.
+		audio.set({ mode: 'chains', playing: true, paused: false, session: 'shared-curve' });
+	});
+	await render(SharedCurve, { curve: DATA, meta: META, signedIn: false, app });
+	const listen = page.getByRole('button', { name: m.shared_curve_listen() });
+	await listen.click();
+	await expect.poll(() => finish).toBeDefined();
+
+	// "Instalar" ends the pending attempt; a new one then starts and plays.
+	await page.getByRole('button', { name: m.shared_curve_install() }).click();
+	expect(requestWrite).toHaveBeenCalledOnce();
+	await expect.element(listen).not.toHaveAttribute('aria-busy', 'true');
+	await listen.click();
+	const stop = page.getByRole('button', { name: m.shared_curve_stop() });
+	await expect.element(stop).toHaveAttribute('aria-pressed', 'true');
+	expect(audio.start).toHaveBeenCalledTimes(2);
+
+	// The first attempt's start succeeds only now.
+	finish?.();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	await tick();
+	await expect.element(stop).toHaveAttribute('aria-pressed', 'true');
 	expect(audio.stop).not.toHaveBeenCalled();
 	expect(audio.createAB.mock.results[1]?.value.dispose).not.toHaveBeenCalled();
 	expect(audio.state()).toMatchObject({ playing: true, session: 'shared-curve' });

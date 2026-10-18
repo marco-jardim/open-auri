@@ -890,6 +890,133 @@ describe('a marker that cannot follow the queue to the next cable refuses it (#1
 	});
 });
 
+describe('a between-cables marker that cannot be stored never names a committed cable (#5)', () => {
+	/** Fails the marker writes `fails` picks; every other write goes through. */
+	function failing(inflight: MemoryInflight, fails: (value: string | null) => boolean) {
+		const write = inflight.write.bind(inflight);
+		inflight.write = (value) => (fails(value) ? false : write(value));
+	}
+	const betweenMarker = (value: string | null) => stored(value)?.between === true;
+
+	test('the marker is removed: a tab closed during the spacing records no interruption', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		failing(inflight, betweenMarker);
+		const gap = gappedClock();
+		const writer = await tab({
+			wrapClock: gap.wrap,
+			tabId: 'writer',
+			locks: memoryLocks(held),
+			inflight
+		});
+		const second = new FakeHIDDevice({ clock: writer.clock });
+		writer.hid.addDevice(second);
+		void writer.service.writeQueue({
+			...request(writer.service),
+			devices: [writer.device, second]
+		});
+		await gap.inGap;
+		expect(writer.journal.entries.map((entry) => entry.status)).toEqual(['ok']);
+		// The marker that still named the committed cable as being written was removed.
+		expect(inflight.value).toBeNull();
+		expect(inflight.writes.at(-1)).toBeNull();
+		// The writer tab dies in the gap: the browser releases its locks.
+		killHolder(held, CABLE_WRITE_LOCK);
+		killHolder(held, cableAliveLock('writer'));
+		const reloaded = await tab({
+			tabId: 'reloaded',
+			locks: memoryLocks(held),
+			inflight,
+			connect: false
+		});
+		expect(reloaded.journal.entries).toEqual([]);
+		expect(reloaded.service.getState().rescue).toBeNull();
+		expect(second.sent).toEqual([]);
+	});
+
+	test('with the write lock still held, the next cable goes and is marked while written', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const gap = gappedClock();
+		const h = await tab({ wrapClock: gap.wrap, tabId: 'queue-tab' });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		failing(h.inflight, betweenMarker);
+		const markers: (InflightMarker | null)[] = [];
+		const send = second.sendReport.bind(second);
+		vi.spyOn(second, 'sendReport').mockImplementation((reportId, data) => {
+			markers.push(stored(h.inflight.value));
+			return send(reportId, data);
+		});
+		const running = h.service.writeQueue({ ...request(h.service), devices: [h.device, second] });
+		await gap.inGap;
+		expect(h.inflight.value).toBeNull();
+		gap.release();
+		const outcome = await running;
+		expect(outcome.status).toBe('done');
+		if (outcome.status !== 'done') return;
+		expect(outcome.items.map((item) => item.status)).toEqual(['ok', 'ok']);
+		expect(second.sent).toHaveLength(10);
+		expect(markers).toHaveLength(10);
+		for (const seen of markers) {
+			expect(seen).toMatchObject({ tabId: 'queue-tab', device: 'USB DSP Audio #2' });
+			expect(seen?.between).toBeUndefined();
+		}
+		expect(h.inflight.value).toBeNull();
+	});
+
+	test('when the marker can be neither updated nor removed, the next cable is refused before any byte', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const gap = gappedClock();
+		const h = await tab({ wrapClock: gap.wrap, tabId: 'queue-tab' });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		// Only the next cable's own marker could still be stored: the refusal must not rely on it.
+		failing(h.inflight, (value) => value === null || betweenMarker(value));
+		const before = h.inflight.writes.length;
+		const running = h.service.writeQueue({ ...request(h.service), devices: [h.device, second] });
+		await gap.inGap;
+		gap.release();
+		const outcome = await running;
+		expect(outcome.status).toBe('done');
+		if (outcome.status !== 'done') return;
+		expect(outcome.items.map((item) => item.status)).toEqual(['ok', 'failed']);
+		expect(outcome.items[1]?.error).toBeInstanceOf(Error);
+		expect(second.attempts).toBe(0);
+		expect(second.sent).toEqual([]);
+		expect(h.flash.records).toEqual([T0]);
+		expect(h.journal.entries.map((entry) => [entry.status, entry.device])).toEqual([
+			['ok', 'USB DSP Audio']
+		]);
+		// Only the first cable's marker was ever stored: nothing was marked for the second one.
+		expect(h.inflight.writes.slice(before).map(stored)).toEqual([
+			expect.objectContaining({ tabId: 'queue-tab', device: 'USB DSP Audio' })
+		]);
+		expect(h.service.getState()).toMatchObject({ writing: false });
+	});
+
+	test('without Web Locks the removed marker left the spacing unguarded: the next cable is refused', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const gap = gappedClock();
+		const h = await tab({ wrapClock: gap.wrap, tabId: 'queue-tab', locks: null });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		failing(h.inflight, betweenMarker);
+		const running = h.service.writeQueue({ ...request(h.service), devices: [h.device, second] });
+		await gap.inGap;
+		expect(h.inflight.value).toBeNull();
+		gap.release();
+		const outcome = await running;
+		expect(outcome.status).toBe('done');
+		if (outcome.status !== 'done') return;
+		expect(outcome.items.map((item) => item.status)).toEqual(['ok', 'failed']);
+		expect(second.attempts).toBe(0);
+		expect(second.sent).toEqual([]);
+		expect(h.flash.records).toEqual([T0]);
+		expect(h.inflight.value).toBeNull();
+	});
+});
+
 describe('other tabs surface an interruption by waiting for the writer tab (R2-07, #15)', () => {
 	/**
 	 * Another tab writing: it holds the write lock and its liveness lock, and its marker was
