@@ -78,14 +78,14 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect.element(page.getByText(m.cego_fux_output_hint(), { exact: true })).toBeVisible();
 		await page.getByRole('radio').last().click();
 		expect(screen.container.textContent).not.toContain(m.cego_fux_output_hint());
-		// Stage: idle pill, three plates that say why they are unavailable, shortcuts restored.
+		// Stage: idle pill, three bays that say why they are unavailable, shortcuts restored.
 		const room = screen.container.querySelector('.room');
 		expect(room?.getAttribute('data-tour')).toBe('cego-result');
 		expect(room?.querySelector('.cue')?.textContent).toContain(m.cego_fux_waiting());
-		const plates = room?.querySelectorAll('.btn.cego-plate') ?? [];
-		expect(plates).toHaveLength(3);
-		for (const plate of plates) expect(plate.getAttribute('aria-disabled')).toBe('true');
-		expect(room?.querySelectorAll('.mote')).toHaveLength(0);
+		const bays = room?.querySelectorAll('.btn.cego-bay') ?? [];
+		expect(bays).toHaveLength(3);
+		for (const bay of bays) expect(bay.getAttribute('aria-disabled')).toBe('true');
+		expect(room?.querySelectorAll('.ripple')).toHaveLength(0);
 		const help = page.getByRole('button', { name: m.cego_fux_shortcuts_aria(), exact: true });
 		await expect.element(help).toHaveAttribute('aria-expanded', 'false');
 		await help.click();
@@ -157,22 +157,22 @@ test('real state drives the console: file source, level table, round LCD, DSP ra
 	expect(audio.state().playing).toBe(false);
 }, 30000);
 
-test('dust is decorative: finite drift in the hero, absent with reduced motion; plates swap only while moving', async () => {
+test('the cabinets slide on their rails only while the test swaps, never with reduced motion', async () => {
 	const onselect = vi.fn();
 	const screen = await render(ListeningRoom, { onselect, reducedMotion: false });
-	const motes = screen.container.querySelectorAll('.mote');
-	expect(motes.length).toBeGreaterThan(0);
-	expect(screen.container.querySelector('.dust')?.getAttribute('aria-hidden')).toBe('true');
-	const iterations = getComputedStyle(motes[0]!).animationIterationCount;
-	expect(iterations).not.toBe('infinite');
-	const plate = screen.container.querySelector('.btn.cego-plate');
-	if (!(plate instanceof HTMLElement)) throw new Error('Missing plate');
-	expect(getComputedStyle(plate).animationName).toBe('none');
+	const cab = screen.container.querySelector('.cab');
+	if (!(cab instanceof HTMLElement)) throw new Error('Missing cabinet');
+	expect(getComputedStyle(cab).animationName).toBe('none');
 	await screen.rerender({ moving: true, disabled: false });
 	expect(screen.container.querySelector('.room')?.classList.contains('moving')).toBe(true);
+	if (matchMedia('(prefers-reduced-motion: no-preference)').matches) {
+		expect(getComputedStyle(cab).animationName).not.toBe('none');
+		expect(getComputedStyle(cab).animationDuration).toBe('3s');
+		expect(getComputedStyle(cab).animationIterationCount).toBe('1');
+	}
 	expect(screen.container.querySelector('.cue')?.textContent).toContain(m.cego_shuffling());
 	expect(screen.container.querySelector('.cue')?.textContent).not.toContain(m.cego_fux_waiting());
 	await screen.rerender({ moving: false, reducedMotion: true });
-	expect(screen.container.querySelectorAll('.mote')).toHaveLength(0);
+	expect(getComputedStyle(cab).animationName).toBe('none');
 	expect(screen.container.querySelector('.lamp')?.getAttribute('data-on')).toBe('true');
 });

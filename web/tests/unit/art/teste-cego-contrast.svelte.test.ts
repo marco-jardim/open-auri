@@ -1,15 +1,15 @@
 // FUX.ART.3: no text of the Teste cego page may sit under its art. The scene part lives inside
-// ListeningRoom's frame, between the drawing and the plates, so the plates, the title, the cue
-// and the help paint above it; the page part paints under the room and the desk, and only its
-// motif boxes rise above the wood, inside the desk padding and the side gutters. Measured on the
-// real page (BlindTest with both parts, on screen and running) at three widths:
+// the stage's aperture, over the curtain and under the lamps, the bays and the call to action,
+// so every text of the stage paints above it; the title stands beside or above the stage, clear
+// of it; the page part takes the desk's grid area, and only its motif boxes rise above the wood,
+// inside the desk padding and the side gutters. Measured on the real page (BlindTest with both
+// parts, on screen and running) at three widths:
 // - no rendered text box intersects a raised motif box;
 // - axe's color-contrast finds no violation, and every axe result (passes and incomplete) is the
 //   same with both art layers removed: the art neither lowers a pair nor hides text from axe.
-// - axe only reports text over mask or background images as incomplete, so the title, which sits
-//   over the scene part, is also measured from real pixels: screenshots of the h1's box with its
-//   own paint removed, with and without the art, must keep the h1 colour at AA (4.5:1). Raising
-//   the art's opacity to 1 must break that, so the measurement cannot pass without seeing the art.
+// - the title is measured from real pixels too: screenshots of the h1's box with its own paint
+//   removed keep the h1 colour at AA (4.5:1), with the art, without it, and even with every art
+//   paint raised to full opacity, because no art lies under the title any more.
 import axe from 'axe-core';
 import { afterEach, expect, test } from 'vitest';
 import { page } from 'vitest/browser';
@@ -148,9 +148,12 @@ for (const viewport of [
 
 		const root = screen.container.querySelector<HTMLElement>('.blind-test');
 		const pageLayer = root?.querySelector<HTMLElement>(':scope > .art-layer');
-		const frame = root?.querySelector<HTMLElement>('.room .frame');
-		const sceneLayer = frame?.querySelector<HTMLElement>(':scope > .art-layer');
-		if (!root || !pageLayer || !frame || !sceneLayer) throw new Error('Missing an art layer');
+		const stage = root?.querySelector<HTMLElement>('.room .stage');
+		const aperture = stage?.querySelector<HTMLElement>('.aperture');
+		const sceneLayer = aperture?.querySelector<HTMLElement>(':scope > .art-layer');
+		if (!root || !pageLayer || !stage || !aperture || !sceneLayer) {
+			throw new Error('Missing an art layer');
+		}
 		const layers = [pageLayer, sceneLayer];
 		for (const layer of layers) {
 			const style = getComputedStyle(layer);
@@ -161,16 +164,16 @@ for (const viewport of [
 			await expect.poll(() => layer.dataset.art).toBe('running');
 		}
 
-		// The scene part sits right above the drawing and right under the plates; the title, the
-		// cue and the help are outside the frame, painted after it.
-		expect(sceneLayer.previousElementSibling?.tagName.toLowerCase()).toBe('svg');
-		expect(sceneLayer.nextElementSibling?.classList.contains('plates')).toBe(true);
-		expect(frame.contains(heading.element())).toBe(false);
-		// The scene part spans the title's area, so the title is measured over the art.
+		// The scene part sits right above the curtain's valance and right under the lamps, so the
+		// bays, the plates and the call to action paint after it; the title is not in the stage.
+		expect(sceneLayer.previousElementSibling?.classList.contains('valance')).toBe(true);
+		expect(sceneLayer.nextElementSibling?.classList.contains('lamps')).toBe(true);
+		expect(stage.contains(heading.element())).toBe(false);
+		// The title is not displaced by the stage nor painted over it: their boxes never meet.
 		const title = heading.element().getBoundingClientRect();
-		const scene = sceneLayer.getBoundingClientRect();
-		expect(scene.top).toBeLessThanOrEqual(title.top);
-		expect(scene.bottom).toBeGreaterThanOrEqual(title.bottom);
+		const box = stage.getBoundingClientRect();
+		expect(overlaps(title, box)).toBe(false);
+		expect(overlaps(title, sceneLayer.getBoundingClientRect())).toBe(false);
 
 		// Only the page part's motif boxes rise above the content; none of them covers text.
 		const raised = [...pageLayer.querySelectorAll('.art-motif')]
@@ -201,7 +204,7 @@ for (const viewport of [
 		expect(withArt.incomplete).toEqual(withoutArt.incomplete);
 	}, 30000);
 
-	test(`the art behind the title keeps it at AA in real pixels, at ${viewport.width} px`, async () => {
+	test(`the title stands clear of the art and stays at AA in real pixels, at ${viewport.width} px`, async () => {
 		await page.viewport(viewport.width, viewport.height);
 		const screen = await render(BlindTest, { reducedMotion: true });
 		const heading = page.getByRole('heading', { level: 1 });
@@ -210,18 +213,18 @@ for (const viewport of [
 		if (!(title instanceof HTMLElement)) throw new Error('Missing the title');
 		const root = screen.container.querySelector<HTMLElement>('.blind-test');
 		const pageLayer = root?.querySelector<HTMLElement>(':scope > .art-layer');
-		const sceneLayer = root?.querySelector<HTMLElement>('.room .frame > .art-layer');
+		const sceneLayer = root?.querySelector<HTMLElement>('.room .stage .aperture > .art-layer');
 		if (!pageLayer || !sceneLayer) throw new Error('Missing an art layer');
 		const layers = [pageLayer, sceneLayer];
 		for (const layer of layers) await expect.poll(() => layer.dataset.art).toBe('running');
 
-		// The measurement is over the art: some of its paint boxes lie under the h1's box.
+		// No art paints under the title any more: none of its boxes meets the h1's box.
 		const box = title.getBoundingClientRect();
 		const underTitle = layers
-			.flatMap((layer) => [...layer.querySelectorAll('*')])
+			.flatMap((layer) => [layer, ...layer.querySelectorAll('*')])
 			.map((node) => node.getBoundingClientRect())
 			.filter((rect) => rect.width > 0 && rect.height > 0 && overlaps(rect, box));
-		expect(underTitle.length).toBeGreaterThan(0);
+		expect(underTitle).toHaveLength(0);
 
 		// One frozen frame for every screenshot, so the art is the only difference between them.
 		for (const animation of document.getAnimations()) animation.pause();
@@ -235,18 +238,15 @@ for (const viewport of [
 			for (const layer of layers) layer.style.display = 'none';
 			const withoutArt = worstContrast(text, await paintedPixels(title));
 			for (const layer of layers) layer.style.display = '';
-			// Above the safe cap (every art paint fully opaque) the same measurement must fail.
+			// Even with every art paint fully opaque the title keeps AA: it never sits on the art.
 			raise.textContent =
 				'.art-layer, .art-layer *, .art-layer *::before, .art-layer *::after { opacity: 1 !important; }';
 			document.head.append(raise);
 			const raised = worstContrast(text, await paintedPixels(title));
 
-			expect(withoutArt, 'the scene alone behind the title').toBeGreaterThanOrEqual(CONTRAST_AA);
-			expect(withArt, 'the scene with the art behind the title').toBeGreaterThanOrEqual(
-				CONTRAST_AA
-			);
-			expect(raised, 'raising the art opacity must be caught').toBeLessThan(CONTRAST_AA);
-			expect(raised).toBeLessThan(withArt);
+			expect(withoutArt, 'the room alone behind the title').toBeGreaterThanOrEqual(CONTRAST_AA);
+			expect(withArt, 'the room with the art behind the title').toBeGreaterThanOrEqual(CONTRAST_AA);
+			expect(raised, 'the art is not under the title').toBeGreaterThanOrEqual(CONTRAST_AA);
 		} finally {
 			raise.remove();
 			for (const layer of layers) layer.style.display = '';

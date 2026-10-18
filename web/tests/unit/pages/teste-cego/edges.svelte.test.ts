@@ -175,10 +175,11 @@ test('listening room hides identities until reveal and delegates only enabled fl
 	expect(onselect).not.toHaveBeenCalled();
 	await screen.rerender({ moving: false, revealed: true, selected: 1 });
 	expect(screen.container.textContent).toContain('Hidden identity');
-	await page.getByRole('button', { name: m.cego_position({ number: 2 }), exact: true }).click();
+	const second = page.getByRole('button', { name: m.cego_position({ number: 2 }), exact: true });
+	await second.click();
 	expect(onselect).toHaveBeenCalledWith(1);
-	await expect.element(page.getByRole('button').nth(1)).toHaveAttribute('aria-pressed', 'true');
-	// With two candidates the third plate stays on the floor, unavailable, and says why.
+	await expect.element(second).toHaveAttribute('aria-pressed', 'true');
+	// With two candidates the third bay stays on stage, unavailable, and says why.
 	const third = page.getByRole('button', { name: m.cego_position({ number: 3 }), exact: true });
 	await expect.element(third).toHaveAttribute('aria-disabled', 'true');
 	await expect.element(third).toHaveAccessibleDescription(m.cego_fux_reason_no_position());

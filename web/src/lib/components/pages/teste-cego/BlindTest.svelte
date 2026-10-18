@@ -20,6 +20,7 @@
 		type AudioEngineState,
 		type PreviewCurve
 	} from '#lib/audio/engine.ts';
+	import { tap, type MeterSource } from '#lib/audio/meters.ts';
 	import { warmAudio } from '#lib/audio/warm.ts';
 	import TesteCegoArt from '#lib/components/art/TesteCegoArt.svelte';
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
@@ -148,13 +149,50 @@
 		}).format(audioState.rate / 1000)
 	);
 	const trims = $derived(audio?.matchGains(chosen.map((c) => c.level)) ?? []);
-	const revealedNames = $derived(
-		!active && last && session
-			? (session.completed.at(-1)?.order ?? []).map(
-					(id) => session?.candidates.find((c) => c.id === id)?.name ?? ''
-				)
-			: []
+	/** The last round's order, position by position, once the result is revealed (else empty). */
+	const revealedOrder = $derived(
+		!active && last && session ? (session.completed.at(-1)?.order ?? []) : []
 	);
+	const revealedCandidates = $derived(
+		revealedOrder.map((id) => session?.candidates.find((c) => c.id === id) ?? null)
+	);
+	const revealedNames = $derived(revealedCandidates.map((c) => c?.name ?? ''));
+	const revealedScores = $derived(
+		revealedOrder.map((id) => {
+			const mean = last?.results.find((r) => r.candidate.id === id)?.mean ?? null;
+			return mean === null ? null : number(mean, 1);
+		})
+	);
+	const revealedTop = $derived(last && !last.tied ? revealedOrder.indexOf(last.winner.id) : -1);
+	/**
+	 * Live level for the stage: the pre-volume meter bus (what this round plays, nothing else),
+	 * tapped only while the round plays. Paused, stopped or between rounds there is no source and
+	 * the stage rests in DATA.
+	 */
+	let stageMeter = $state.raw<MeterSource | null>(null);
+	$effect(() => {
+		const engine = audio;
+		if (!engine || !playing) return;
+		let disposed = false;
+		let release = () => {};
+		void tap(engine.getMeterBus(), { kinds: ['ppm'] })
+			.then((meter) => {
+				if (disposed) {
+					meter.disconnect();
+					return;
+				}
+				stageMeter = meter;
+				release = () => meter.disconnect();
+			})
+			.catch((error: unknown) => {
+				console.warn(JSON.stringify({ event: 'cego.stage-meter', error: (error as Error).name }));
+			});
+		return () => {
+			disposed = true;
+			stageMeter = null;
+			release();
+		};
+	});
 	const chartMin = $derived(
 		Math.min(0, ...(last?.results.map((r) => r.ci?.[0] ?? r.mean ?? 0) ?? []))
 	);
@@ -268,6 +306,11 @@
 		if (active && index !== 2) return;
 		tab = index;
 		message = '';
+	}
+	/** The stage's call to action while nothing is loaded: the candidates step, focused. */
+	function pickCandidates() {
+		changeTab(1);
+		document.getElementById(`${uid}-tab-1`)?.focus();
 	}
 	function tabKey(event: KeyboardEvent, index: number) {
 		let target: number;
@@ -504,10 +547,16 @@
 		{moving}
 		selected={active ? position : -1}
 		names={revealedNames}
+		curves={revealedCandidates}
+		scores={revealedScores}
+		top={revealedTop}
+		tied={!active && (last?.tied ?? false)}
 		count={session?.candidates.length ?? 3}
 		disabled={!active}
 		reducedMotion={reduced}
+		meter={stageMeter}
 		onselect={selectPosition}
+		onpick={pickCandidates}
 	/>
 	<div class="sr" role="status" aria-live="polite">{announcement}</div>
 	<section class="desk" aria-label={m.cego_console()}>
@@ -1077,9 +1126,13 @@
 		--accent: #ffd27a;
 		--muted: #b5ad9f;
 		--rule: #ece7dd24;
-		/* FUX.ART.3: the art layer (TesteCegoArt) is positioned inside this stacking context. */
+		/* FUX.ART.3: the art layer (TesteCegoArt) is positioned inside this stacking context; the
+		   grid gives it the desk's own area, whatever the height of the room above. */
 		position: relative;
 		isolation: isolate;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-areas: 'room' 'desk';
 		color: #ece7dd;
 		font: var(--fs-body) / 1.5 var(--face-body);
 	}
@@ -1096,6 +1149,7 @@
 	}
 	.desk {
 		position: relative;
+		grid-area: desk;
 		padding: 34px clamp(12px, 3vw, 40px) 46px;
 		background:
 			repeating-linear-gradient(2deg, #0000 0 3px, #e9b67a08 4px, #0000 6px 10px),

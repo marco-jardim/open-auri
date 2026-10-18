@@ -1,10 +1,11 @@
-// FUX.ART.3: the Teste cego art (scene part: curtain ripple, polar lobes, light motes; page part:
-// diffusers and loudspeakers behind fabric around the desk) is decoration only: hidden from
-// assistive technology, out of the way of the pointer and the keyboard, still until it is seen
-// in a visible tab, and still for good under reduced motion. The lobes are drawn once and then
-// hold still: nothing measures. Neither part makes a layer over text: the scene part has no
-// z-index (ListeningRoom places it under the plates and the title) and the page part's root
-// makes no stacking context; only its motif boxes rise (z-index 1).
+// FUX.ART.3: the Teste cego art (scene part: polar lobes, light motes; page part: diffusers and
+// loudspeakers behind fabric around the desk) is decoration only: hidden from assistive
+// technology, out of the way of the pointer and the keyboard, still until it is seen in a visible
+// tab, and still for good under reduced motion. The lobes are drawn once and then hold still:
+// nothing measures. The light on the curtain is not art: the stage drives it from real meter
+// frames. Neither part makes a layer over text: the scene part has no z-index (Stage places it
+// under the lamps, the bays and every text) and the page part's root makes no stacking context;
+// only its motif boxes rise (z-index 1).
 import { flushSync } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -182,20 +183,19 @@ test('page part: only the motif boxes rise above the desk, and its root makes no
 
 test('starts paused and runs only while it is on screen in a visible tab', async () => {
 	const layer = await mount();
-	const ripple = layer.querySelector('.art-ripple');
 	const lobe = layer.querySelector('.art-lobes path');
 	const mote = layer.querySelector('.art-motes i');
-	if (!ripple || !lobe || !mote) throw new Error('Missing ripple, lobe or mote');
+	if (!lobe || !mote) throw new Error('Missing lobe or mote');
+	// No decorative curtain ripple: the stage's curtain light follows real level only.
+	expect(layer.querySelector('.art-ripple')).toBeNull();
 	expect(layer.dataset.art).toBe('paused');
 	expect(layer.hasAttribute('data-art-seen')).toBe(false);
-	expect(getComputedStyle(ripple, '::before').animationPlayState).toBe('paused');
 	expect(getComputedStyle(lobe).animationPlayState).toBe('paused');
 	expect(getComputedStyle(mote).animationPlayState).toBe('paused');
 
 	observer().emit(true);
 	expect(layer.dataset.art).toBe('running');
 	expect(layer.hasAttribute('data-art-seen')).toBe(true);
-	expect(getComputedStyle(ripple, '::before').animationPlayState).toBe('running');
 	expect(getComputedStyle(lobe).animationPlayState).toBe('running');
 	expect(getComputedStyle(mote).animationPlayState).toBe('running');
 
@@ -207,7 +207,7 @@ test('starts paused and runs only while it is on screen in a visible tab', async
 
 	observer().emit(false);
 	expect(layer.dataset.art).toBe('paused');
-	expect(getComputedStyle(ripple, '::after').animationPlayState).toBe('paused');
+	expect(getComputedStyle(mote).animationPlayState).toBe('paused');
 	expect(layer.hasAttribute('data-art-seen')).toBe(true);
 });
 
@@ -224,13 +224,8 @@ test('lobes expand once from the stage and stay; the ambient loops are slow', as
 		expect(style.animationIterationCount).toBe('1');
 		expect(style.animationFillMode).toBe('both');
 	}
-	const ripple = layer.querySelector('.art-ripple');
-	if (!ripple) throw new Error('Missing ripple');
-	const loops = [
-		getComputedStyle(ripple, '::before'),
-		getComputedStyle(ripple, '::after'),
-		...[...layer.querySelectorAll('.art-motes i')].map((mote) => getComputedStyle(mote))
-	];
+	const loops = [...layer.querySelectorAll('.art-motes i')].map((mote) => getComputedStyle(mote));
+	expect(loops.length).toBeGreaterThan(0);
 	for (const style of loops) {
 		if (style.animationName === 'none') continue;
 		expect(parseFloat(style.animationDuration)).toBeGreaterThanOrEqual(6);
@@ -244,12 +239,12 @@ test('animations exist only without a reduced-motion preference and reduce switc
 		PSEUDOS.some((pseudo) => nodes.some((node) => matches(node, parts(rule, pseudo))));
 	const rules = documentRules();
 
-	// The curtain ripple (both pseudo-elements), the lobes and the motes.
+	// The lobes and the motes.
 	const animated = rules.filter(({ rule }) => {
 		const animation = declaredAnimation(rule);
 		return animation !== '' && !/^none\b/.test(animation) && touches(rule);
 	});
-	expect(animated.length).toBeGreaterThanOrEqual(4);
+	expect(animated.length).toBeGreaterThanOrEqual(2);
 	for (const { media } of animated) {
 		expect(media.some((query) => query.includes('prefers-reduced-motion: no-preference'))).toBe(
 			true

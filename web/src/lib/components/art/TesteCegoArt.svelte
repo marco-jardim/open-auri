@@ -2,20 +2,21 @@
 	Teste cego art (FUX.ART.3; homage to Floyd Toole and Sean Olive: loudspeakers heard behind an
 	acoustically transparent screen in a treated listening room, and the off-axis polar
 	measurements that predicted which one listeners would prefer). It complements the curtain,
-	light cone and wood of ListeningRoom and BlindTest without redrawing them. Two parts:
+	lamps and wood of Stage and BlindTest without redrawing them. Two parts:
 
-	- `place="scene"`, rendered by ListeningRoom inside its frame (the 1600 × 600 scene box),
-	  right after the scene's SVG and before the plates: light rippling slowly across the curtain
-	  folds, a polar grid with dispersion lobes (wide at low frequencies, narrow at high) that
-	  expand once from the centre loudspeaker and then stay as a watermark, and a few light motes
-	  drifting in the cone. It paints above the drawing and under the plates, the title, the cue
-	  and the help, so no text is ever under it.
+	- `place="scene"`, rendered by Stage inside its aperture, over the curtain and right before
+	  the lamps and the bays: a polar grid with dispersion lobes (wide at low frequencies, narrow
+	  at high) that expand once from the centre loudspeaker and then stay as a watermark, and a few
+	  light motes drifting in the lamp light. The light on the curtain is not art: it belongs to
+	  the stage and follows the real meter level. This part paints under the lamps, the bays, the
+	  plates, the call to action and the stage head, so no text is ever under it.
 	- `place="page"` (default), the first child of BlindTest's root: quadratic-residue diffusers
 	  along the desk's top and bottom padding and up its side padding, and a loudspeaker behind
-	  grille cloth plus a dispersion watermark in the side gutters of wide screens. Its root makes
-	  no stacking context, so it paints under the room and the desk; only the motif boxes rise
-	  above the wood (z-index 1), and only inside the desk padding and the gutters, which hold no
-	  text (the geometry mirrors BlindTest's `.desk` padding and 1360 px grid).
+	  grille cloth plus a dispersion watermark in the side gutters of wide screens. The layer is
+	  placed in BlindTest's `desk` grid area, so it covers exactly the desk whatever the room's
+	  height. Its root makes no stacking context, so it paints under the desk; only the motif
+	  boxes rise above the wood (z-index 1), and only inside the desk padding and the gutters,
+	  which hold no text (the geometry mirrors BlindTest's `.desk` padding and 1360 px grid).
 
 	Contract: art/README.md, with that documented deviation (the room and the desk are opaque, so
 	a layer under them would never be seen). Nothing measures anything: the lobes are drawn once
@@ -29,7 +30,6 @@
 
 {#if place === 'scene'}
 	<div class="art-layer art-scene" aria-hidden="true" data-art="paused" {@attach artVisibility}>
-		<span class="art-ripple"></span>
 		<span class="art-polar"></span>
 		<svg class="art-lobes" viewBox="-170 -4 340 174" fill="none">
 			<path style="--i:0" pathLength="1" d="M0 0a150 80 0 1 0 0 160a150 80 0 1 0 0-160" />
@@ -52,7 +52,6 @@
 	</div>
 {:else}
 	<div class="art-layer art-page" aria-hidden="true" data-art="paused" {@attach artVisibility}>
-		<div class="art-spacer"></div>
 		<div class="art-desk">
 			<span class="art-motif art-frieze art-frieze-top"></span>
 			<span class="art-motif art-frieze art-frieze-bottom"></span>
@@ -72,45 +71,11 @@
 		pointer-events: none;
 	}
 
-	/* ---- Scene part: percentages of ListeningRoom's 1600 × 600 frame. ---- */
+	/* ---- Scene part: percentages of Stage's aperture. ---- */
 	.art-scene {
 		contain: strict;
 	}
-	/* Light rippling on the curtain (y 40 to 468): two fold rhythms drifting against each other.
-	   It goes away with the curtain when the result is revealed. */
-	.art-ripple {
-		position: absolute;
-		inset: 6.667% 0 22%;
-		overflow: hidden;
-		mask-image: linear-gradient(transparent, black 20%, black 72%, transparent);
-	}
-	:global(.revealed) .art-ripple {
-		opacity: 0;
-	}
-	.art-ripple::before,
-	.art-ripple::after {
-		content: '';
-		position: absolute;
-		inset: 0 -64px;
-		background: var(--accent);
-		mask-image: repeating-linear-gradient(
-			90deg,
-			transparent 0 18px,
-			black 44px,
-			transparent 70px 96px
-		);
-		opacity: 0.05;
-	}
-	.art-ripple::after {
-		mask-image: repeating-linear-gradient(
-			90deg,
-			transparent 0 34px,
-			black 58px,
-			transparent 82px 140px
-		);
-		opacity: 0.035;
-	}
-	/* Polar grid and lobes share one box whose top centre is the centre loudspeaker (800, 250);
+	/* Polar grid and lobes share one box whose top centre is the centre loudspeaker's tweeter;
 	   both fade out radially. */
 	.art-polar,
 	.art-lobes {
@@ -140,7 +105,7 @@
 		transform-box: view-box;
 		transform-origin: 0 0;
 	}
-	/* Light motes in the cone (the room's own dust stays as it is). */
+	/* Light motes in the lamp light. */
 	.art-motes i {
 		position: absolute;
 		width: var(--s, 4px);
@@ -151,21 +116,16 @@
 		opacity: 0.3;
 	}
 
-	/* ---- Page part: under the room and the desk; motif boxes only where there is no text. ---- */
+	/* ---- Page part: under the desk; motif boxes only where there is no text. ---- */
+	/* BlindTest's root is a grid: this absolutely positioned layer takes the desk's own area. */
 	.art-page {
-		display: flex;
-		flex-direction: column;
-	}
-	/* Same height as ListeningRoom's `.room`: the desk starts right below it. */
-	.art-spacer {
-		flex: none;
-		height: clamp(400px, 64vh, 660px);
+		grid-area: desk;
 	}
 	.art-desk {
 		/* BlindTest `.desk`: 4 px top border, padding 34 px / clamp(12px, 3vw, 40px) / 46 px. */
 		--pad: clamp(12px, 3vw, 40px);
-		position: relative;
-		flex: 1 1 auto;
+		position: absolute;
+		inset: 0;
 	}
 	.art-motif {
 		position: absolute;
@@ -232,18 +192,10 @@
 		mask-image: url('/art/teste-cego/speaker.svg');
 	}
 
-	/* Motion (fux-art-brief §2): the lobes expand once when first seen; the ripple and the motes
-	   are slow loops (≥ 12 s); everything holds still off-screen or with the tab hidden. Every
-	   var() in a shorthand has a fallback, so a missing token never turns the animation off. */
+	/* Motion (fux-art-brief §2): the lobes expand once when first seen; the motes are a slow loop
+	   (≥ 12 s); everything holds still off-screen or with the tab hidden. Every var() in a
+	   shorthand has a fallback, so a missing token never turns the animation off. */
 	@media (prefers-reduced-motion: no-preference) {
-		.art-ripple::before {
-			animation: curtain-ripple 13s var(--ease-in-out, cubic-bezier(0.65, 0, 0.35, 1)) infinite
-				alternate;
-		}
-		.art-ripple::after {
-			animation: curtain-ripple 19s var(--ease-in-out, cubic-bezier(0.65, 0, 0.35, 1)) -6s infinite
-				alternate-reverse;
-		}
 		.art-lobes path {
 			animation: lobe-expand 2.4s var(--ease-out, cubic-bezier(0.2, 0.8, 0.2, 1))
 				calc(var(--i, 0) * 280ms + 300ms) both paused;
@@ -261,11 +213,6 @@
 	.art-layer:global([data-art='paused']) *::before,
 	.art-layer:global([data-art='paused']) *::after {
 		animation-play-state: paused !important;
-	}
-	@keyframes curtain-ripple {
-		to {
-			transform: translateX(48px) scaleX(1.04);
-		}
 	}
 	@keyframes lobe-expand {
 		from {
@@ -289,7 +236,7 @@
 		}
 	}
 
-	/* Final frame: lobes drawn, curtain still, a few steady glints in the cone. */
+	/* Final frame: lobes drawn, a few steady glints in the lamp light. */
 	@media (prefers-reduced-motion: reduce) {
 		.art-layer,
 		.art-layer *,
@@ -310,13 +257,8 @@
 			display: block;
 		}
 	}
-	/* Mobile: the room keeps a 16:11 frame; half the motes. */
+	/* Mobile: the stage is compact; half the motes. */
 	@media (max-width: 760px) {
-		.art-spacer {
-			height: auto;
-			aspect-ratio: 16 / 11;
-			min-height: 250px;
-		}
 		.art-motes i:nth-child(n + 6) {
 			display: none;
 		}

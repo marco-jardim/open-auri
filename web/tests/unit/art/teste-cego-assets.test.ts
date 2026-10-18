@@ -4,8 +4,9 @@
 // stroke-dashoffset or filter, points at files that exist and carries no logic besides the part
 // switch and the shared attachment. No text may sit under the art: the page part makes no
 // stacking context and only its motif boxes rise, inside geometry that mirrors BlindTest's desk
-// padding; the scene part sits inside ListeningRoom's frame between the drawing and the plates.
-// BlindTest inserts the page part once, as the first child of its isolated root.
+// padding, in the desk's own grid area; the scene part sits inside Stage's aperture between the
+// curtain and the lamps, under the bays. BlindTest inserts the page part once, as the first child
+// of its isolated root.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
@@ -15,6 +16,7 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf
 const COMPONENT = read('../../../src/lib/components/art/TesteCegoArt.svelte');
 const PAGE = read('../../../src/lib/components/pages/teste-cego/BlindTest.svelte');
 const ROOM = read('../../../src/lib/components/pages/teste-cego/ListeningRoom.svelte');
+const STAGE = read('../../../src/lib/components/pages/teste-cego/Stage.svelte');
 /** The component's <style> block without comments: CSS checks never read prose. */
 const STYLE = (COMPONENT.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '').replace(
 	/\/\*[\s\S]*?\*\//g,
@@ -62,9 +64,10 @@ test('keyframes animate only transform, opacity, stroke-dashoffset or filter; no
 	);
 	expect(transitions.length).toBeGreaterThan(0);
 	for (const value of transitions) expect(value).toMatch(/^none\b/);
-	// The lobes play once; only the curtain ripple and the motes loop.
+	// The lobes play once; only the motes loop. The curtain light is the stage's, from real level.
 	expect(STYLE).toMatch(/animation: lobe-expand (?![^;]*infinite)[^;]*both paused;/);
-	expect(STYLE.match(/\binfinite\b/g)).toHaveLength(3);
+	expect(STYLE.match(/\binfinite\b/g)).toHaveLength(1);
+	expect(COMPONENT).not.toContain('art-ripple');
 });
 
 test('two static parts and no other logic: the page part and the scene part', () => {
@@ -98,14 +101,20 @@ test('no text under the art: only the motif boxes rise, inside the desk padding 
 	// The one z-index of the component belongs to the motif boxes.
 	expect(rule('.art-motif')).toMatch(/z-index: 1;/);
 	expect(STYLE.match(/z-index/g)).toHaveLength(1);
-	// Their geometry mirrors BlindTest's desk (4 px border, padding 34 / clamp / 46, 1360 px grid)
-	// and ListeningRoom's height, so they stay in the padding and the gutters.
+	// Their geometry mirrors BlindTest's desk (4 px border, padding 34 / clamp / 46, 1360 px grid),
+	// and the layer takes the desk's own grid area, so whatever the room's height they stay in the
+	// padding and the gutters.
 	expect(PAGE).toMatch(/\.desk \{[^}]*padding: 34px clamp\(12px, 3vw, 40px\) 46px;/);
 	expect(PAGE).toMatch(/\.desk \{[^}]*border-top: 4px solid/);
+	expect(PAGE).toMatch(/\.desk \{[^}]*grid-area: desk;/);
+	expect(PAGE).toMatch(
+		/\.blind-test \{[^}]*display: grid;[^}]*grid-template-areas: 'room' 'desk';/
+	);
 	expect(PAGE).toMatch(/\.desk-grid \{[^}]*max-width: 1360px;/);
+	expect(rule('.art-page')).toContain('grid-area: desk;');
 	expect(rule('.art-desk')).toContain('--pad: clamp(12px, 3vw, 40px);');
-	expect(ROOM).toMatch(/\.room \{[^}]*height: clamp\(400px, 64vh, 660px\);/);
-	expect(rule('.art-spacer')).toContain('height: clamp(400px, 64vh, 660px);');
+	expect(rule('.art-desk')).toMatch(/position: absolute;\s*inset: 0;/);
+	expect(COMPONENT).not.toContain('art-spacer');
 	expect(rule('.art-frieze-top')).toMatch(/top: 8px;/);
 	expect(rule('.art-frieze')).toMatch(/height: 26px;/);
 	expect(rule('.art-frieze-bottom')).toMatch(/bottom: 10px;/);
@@ -114,12 +123,17 @@ test('no text under the art: only the motif boxes rise, inside the desk padding 
 	);
 });
 
-test('ListeningRoom renders the scene part once, between the scene drawing and the plates', () => {
-	expect(ROOM).toContain("import TesteCegoArt from '#lib/components/art/TesteCegoArt.svelte';");
-	expect(ROOM.match(/<TesteCegoArt\b/g)).toHaveLength(1);
-	expect(ROOM).toMatch(
-		/<\/svg>\s*(?:<!--[\s\S]*?-->\s*)?<TesteCegoArt place="scene" \/>\s*<div class="plates">/
+test('Stage renders the scene part once, over the curtain and under the lamps and the bays', () => {
+	expect(ROOM).not.toMatch(/<TesteCegoArt\b/);
+	expect(STAGE).toContain("import TesteCegoArt from '#lib/components/art/TesteCegoArt.svelte';");
+	expect(STAGE.match(/<TesteCegoArt\b/g)).toHaveLength(1);
+	expect(STAGE).toMatch(
+		/<div class="valance"><\/div>\s*(?:<!--[\s\S]*?-->\s*)?<TesteCegoArt place="scene" \/>\s*<div class="lamps"/
 	);
+	const art = STAGE.indexOf('<TesteCegoArt');
+	expect(STAGE.indexOf('<div class="scrim">')).toBeLessThan(art);
+	expect(STAGE.indexOf('<div class="bays"')).toBeGreaterThan(art);
+	expect(STAGE.indexOf('<div class="cta">')).toBeGreaterThan(art);
 });
 
 test('BlindTest inserts the art once, as the first child of its isolated root', () => {
