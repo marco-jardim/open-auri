@@ -20,6 +20,10 @@ test('regression: LP 20968 Hz Q 2 edge peak is seen by drag and full; above the 
     ...Array.from({ length: 8 }, () => ({ kind: 'OFF' })),
   ];
   const options = { experimental: true };
+  // Contract change (rule above 20 kHz): an LP above 20 kHz with Q > 0.71 is
+  // refused at every preamp (`d7:boost-above-20k`, waived by the YOLO profile
+  // only). The edge peak is still checked: the scan's own reasons follow it.
+  const ultrasonic = { code: 'd7:boost-above-20k', stage: 2, value: 20968, limit: 20000 };
   const probe = gateForWrite(bands, -6, options);
   assert.ok(probe.metrics.outputAudible.frequencyHz < 20000, 'edge interval peak must be refined');
   const relativePeak = probe.metrics.outputAudible.db - probe.metrics.quantizedPreampDb;
@@ -29,8 +33,9 @@ test('regression: LP 20968 Hz Q 2 edge peak is seen by drag and full; above the 
   const preampDb = 20 * Math.log10((highestWord + 1) / 2 ** 23);
   const fullAtCap = gateForWrite(bands, acceptedDb, options);
   const dragAtCap = gate(bands, acceptedDb, { ...options, grid: 'drag' });
-  assert.equal(fullAtCap.ok, true, JSON.stringify(fullAtCap.reasons));
-  assert.equal(dragAtCap.ok, true, JSON.stringify(dragAtCap.reasons));
+  // At the cap, the rule above 20 kHz is the only reason left.
+  assert.deepEqual(fullAtCap.reasons, [ultrasonic]);
+  assert.deepEqual(dragAtCap.reasons, [ultrasonic]);
   assert.ok(
     Math.abs(dragAtCap.metrics.outputAudible.db - fullAtCap.metrics.outputAudible.db) < 1e-9,
   );
@@ -41,7 +46,7 @@ test('regression: LP 20968 Hz Q 2 edge peak is seen by drag and full; above the 
     assert.equal(verdict.ok, false);
     assert.deepEqual(
       verdict.reasons.map(({ code }) => code),
-      ['e:output-audible'],
+      ['d7:boost-above-20k', 'e:output-audible'],
     );
   }
   const clock = createFakeClock();

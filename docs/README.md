@@ -70,9 +70,21 @@ import { autoPreamp } from 'open-auri/safety';
 
 - [`gate.mjs`](../src/safety/gate.mjs): análise de estabilidade, headroom e pré-amp
   dentro do envelope observado para gravação, sem constituir prova de segurança.
-  Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS` e
-  `CODEC_PREAMP_FLOOR_DB` para seleção e consulta dos perfis do gate.
-- [`policy.mjs`](../src/safety/policy.mjs): limites de edição, grade, interpolação e busca de fronteira.
+  Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS`,
+  `CODEC_PREAMP_FLOOR_DB` e `YOLO_STORAGE_PREAMP_FLOOR_DB` para seleção e consulta
+  dos perfis do gate. Acima de 20 kHz só passam seções que não amplificam
+  (`d7:boost-above-20k`, dispensável no perfil YOLO, que então aplica as checagens
+  estendidas de 20 Hz a 48 kHz, `d:prefix-peak-extended` e `e:output-extended`).
+  `autoPreamp(bands, {profile: 'yolo', storable: true})` não desce abaixo de −25,5 dB.
+- [`classify.mjs`](../src/safety/classify.mjs): `classifyCurve`, a classe de uma curva
+  para armazenar e publicar (`standard`, `yolo` ou `rejected`, com os códigos dispensados
+  ou os que bloqueiam), e `classifierVersionInput`, o JSON estável de `THRESHOLDS`,
+  `YOLO_THRESHOLDS` e dos códigos dispensáveis na classificação, para a versão do
+  classificador. O núcleo interno fica em `classify-core.mjs`, fora do índice.
+- [`policy.mjs`](../src/safety/policy.mjs): limites de edição, grade, interpolação e busca de fronteira,
+  além de `AUDIBLE_MAX_HZ`, `ULTRA_MAX_HZ`, `ULTRA_CUT_Q_MAX`, `isUltrasonic` e `freqMaxFor`
+  (frequência máxima por camada: 20 kHz em Ouvir e Ajustar; em Engenharia, 32 kHz para
+  seções que não amplificam e, no Modo YOLO, para todas).
 - [`thresholds.mjs`](../src/safety/thresholds.mjs): limiares de segurança e sua proveniência.
 
 Os aliases `levelDb`, `MEAN_FREQUENCIES` e `sectionDb` vêm de `dsp/level.mjs`;

@@ -30,6 +30,7 @@ const PRINT_WIDTH = 100;
  *     maxQuantizedPole: {radius: number},
  *     peaks: {
  *       audible: {quantizedInternalPeak: DbPoint, quantizedOutputPeak: DbPoint},
+ *       extended: {quantizedInternalPeak: DbPoint, quantizedOutputPeak: DbPoint},
  *       full: {quantizedInternalPeak: DbPoint, quantizedOutputPeak: DbPoint},
  *     },
  *   },
@@ -48,7 +49,11 @@ const PRINT_WIDTH = 100;
  *   dbNumericalTolerance: number,
  *   radiusNumericalTolerance: number,
  * }} ThresholdValues
- * @typedef {{internalFullDb: number}} YoloThresholdValues
+ * @typedef {{
+ *   internalFullDb: number,
+ *   internalExtendedDb: number,
+ *   outputExtendedDb: number,
+ * }} YoloThresholdValues
  */
 
 /**
@@ -92,11 +97,21 @@ export function computeThresholds(envelope) {
  * DC–48 kHz in the 11 presets, as design/analysis/envelope.mjs computes it
  * (`aggregate.peaks.full.quantizedInternalPeak`): the `d:prefix-peak-full` limit
  * that bounds out-of-band energy once `c:section-peak` is waived.
+ * `internalExtendedDb` and `outputExtendedDb` are the largest quantized prefix
+ * and output peaks with preamp over 20 Hz–48 kHz
+ * (`aggregate.peaks.extended.quantizedInternalPeak` and `quantizedOutputPeak`):
+ * the `d:prefix-peak-extended` and `e:output-extended` limits, checked once
+ * `d7:boost-above-20k` is waived.
  * @param {Envelope} envelope
  * @returns {YoloThresholdValues}
  */
 export function computeYoloThresholds(envelope) {
-  return { internalFullDb: envelope.aggregate.peaks.full.quantizedInternalPeak.db };
+  const { extended, full } = envelope.aggregate.peaks;
+  return {
+    internalFullDb: full.quantizedInternalPeak.db,
+    internalExtendedDb: extended.quantizedInternalPeak.db,
+    outputExtendedDb: extended.quantizedOutputPeak.db,
+  };
 }
 
 /**
@@ -195,6 +210,10 @@ export const PROVENANCE = Object.freeze({
  * @typedef {object} YoloThresholds
  * @property {number} internalFullDb Largest prefix peak with preamp, DC–48 kHz (dB): the
  *   \`d:prefix-peak-full\` limit.
+ * @property {number} internalExtendedDb Largest prefix peak with preamp, 20 Hz–48 kHz (dB):
+ *   the \`d:prefix-peak-extended\` limit.
+ * @property {number} outputExtendedDb Largest output peak with preamp, 20 Hz–48 kHz (dB): the
+ *   \`e:output-extended\` limit.
  */
 
 /** @type {Readonly<YoloThresholds>} */

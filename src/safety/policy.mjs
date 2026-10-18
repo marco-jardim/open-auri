@@ -85,6 +85,10 @@ export const SOFT_RANGES = Object.freeze({
 /**
  * Absolute control ranges (any layer) and the D7 boost rules: a boost (gain > 0)
  * on PK/LS/HS needs Q <= `boostQMax`, and no PK may boost above `pkBoostMaxHz`.
+ *
+ * `freqHz` stays [20, 20000]: the solver, the Ouvir and Ajustar layers and
+ * `clampToAbs` rely on it. Engenharia and Modo YOLO may go higher, up to
+ * `ULTRA_MAX_HZ`, through `freqMaxFor` only.
  * @type {Readonly<AbsRanges>}
  */
 export const ABS_RANGES = Object.freeze({
@@ -94,6 +98,94 @@ export const ABS_RANGES = Object.freeze({
   boostQMax: 4,
   pkBoostMaxHz: 16000,
 });
+
+/** Top of the audible band (Hz): the highest frequency of Ouvir and Ajustar. */
+export const AUDIBLE_MAX_HZ = 20000;
+
+/**
+ * Highest frequency of a section above the audible band (Hz): Engenharia, for
+ * sections that never amplify, and Modo YOLO, for every kind (`freqMaxFor`).
+ */
+export const ULTRA_MAX_HZ = 32000;
+
+/**
+ * Highest Q of an LS/HS cut and of an LP/HP placed above `AUDIBLE_MAX_HZ`
+ * outside Modo YOLO: up to it the section has no resonant bump above 0 dB.
+ */
+export const ULTRA_CUT_Q_MAX = 0.71;
+
+/** Filter kinds that are sections (OFF is identity, anything else is not a filter). */
+const SECTION_KINDS = Object.freeze(['PK', 'LS', 'HS', 'LP', 'HP']);
+
+/**
+ * Non-numbers count as NaN (they fail every comparison) and are never converted,
+ * so no caller code (valueOf, Symbol coercion) runs.
+ * @param {unknown} value
+ * @returns {number}
+ */
+const numeric = (value) => (typeof value === 'number' ? value : NaN);
+
+/**
+ * Whether `band` is a filter section (PK, LS, HS, LP or HP) above the audible
+ * band: `freqHz` > `AUDIBLE_MAX_HZ`. NaN-safe like the gate's D7 checks: a
+ * section whose `freqHz` is not a number at most `AUDIBLE_MAX_HZ` (NaN, a
+ * non-number, missing) counts as above. OFF, unknown kinds and non-objects
+ * never do. Each field is read once and never coerced.
+ * @param {unknown} band
+ * @returns {boolean}
+ */
+export function isUltrasonic(band) {
+  if (band === null || typeof band !== 'object') return false;
+  const { kind, freqHz } = /** @type {Record<string, unknown>} */ (band);
+  if (!SECTION_KINDS.includes(/** @type {string} */ (kind))) return false;
+  return !(numeric(freqHz) <= AUDIBLE_MAX_HZ);
+}
+
+/**
+ * Whether `band` is a section that never amplifies, wherever it sits: a PK with
+ * gain <= 0 (any Q), an LS or HS with gain <= 0 and Q <= `ULTRA_CUT_Q_MAX`, an
+ * LP or HP with Q <= `ULTRA_CUT_Q_MAX`. NaN-safe: a missing, non-number or NaN
+ * gain or Q never qualifies. OFF, unknown kinds and non-objects do not either.
+ * @param {unknown} band
+ * @returns {boolean}
+ */
+function isNonAmplifying(band) {
+  if (band === null || typeof band !== 'object') return false;
+  const { kind, gainDb, qFactor } = /** @type {Record<string, unknown>} */ (band);
+  switch (kind) {
+    case 'PK':
+      return numeric(gainDb) <= 0;
+    case 'LS':
+    case 'HS':
+      return numeric(gainDb) <= 0 && numeric(qFactor) <= ULTRA_CUT_Q_MAX;
+    case 'LP':
+    case 'HP':
+      return numeric(qFactor) <= ULTRA_CUT_Q_MAX;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Highest frequency (Hz) `band` may take in `layer`:
+ * - Ouvir and Ajustar (and any other layer): `AUDIBLE_MAX_HZ`;
+ * - Engenharia: `ULTRA_MAX_HZ` for a section that never amplifies (PK with
+ *   gain <= 0, any Q; LS/HS with gain <= 0 and Q <= `ULTRA_CUT_Q_MAX`; LP/HP
+ *   with Q <= `ULTRA_CUT_Q_MAX`), else `AUDIBLE_MAX_HZ`;
+ * - Engenharia with `yolo: true` (Modo YOLO exists only there):
+ *   `ULTRA_MAX_HZ` for every kind.
+ * UI policy like the other ranges: above `AUDIBLE_MAX_HZ` the gate refuses
+ * whatever Engenharia would not allow (`d7:boost-above-20k`, waived by its YOLO
+ * profile only). Only `yolo === true` counts.
+ * @param {unknown} band
+ * @param {{layer?: string, yolo?: boolean}} [options]
+ * @returns {number}
+ */
+export function freqMaxFor(band, { layer, yolo } = {}) {
+  if (layer !== 'engenharia') return AUDIBLE_MAX_HZ;
+  if (yolo === true) return ULTRA_MAX_HZ;
+  return isNonAmplifying(band) ? ULTRA_MAX_HZ : AUDIBLE_MAX_HZ;
+}
 
 /** Kinds that exist only behind the `experimental` flag (engineering layer). */
 export const EXPERIMENTAL_KINDS = Object.freeze(['HS', 'LP', 'HP']);

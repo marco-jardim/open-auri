@@ -27,6 +27,10 @@ export const PROVENANCE: Readonly<Provenance>;
  * @typedef {object} YoloThresholds
  * @property {number} internalFullDb Largest prefix peak with preamp, DC–48 kHz (dB): the
  *   `d:prefix-peak-full` limit.
+ * @property {number} internalExtendedDb Largest prefix peak with preamp, 20 Hz–48 kHz (dB):
+ *   the `d:prefix-peak-extended` limit.
+ * @property {number} outputExtendedDb Largest output peak with preamp, 20 Hz–48 kHz (dB): the
+ *   `e:output-extended` limit.
  */
 /** @type {Readonly<YoloThresholds>} */
 export const YOLO_THRESHOLDS: Readonly<YoloThresholds>;
@@ -100,4 +104,14 @@ export type YoloThresholds = {
      * `d:prefix-peak-full` limit.
      */
     internalFullDb: number;
+    /**
+     * Largest prefix peak with preamp, 20 Hz–48 kHz (dB):
+     * the `d:prefix-peak-extended` limit.
+     */
+    internalExtendedDb: number;
+    /**
+     * Largest output peak with preamp, 20 Hz–48 kHz (dB): the
+     * `e:output-extended` limit.
+     */
+    outputExtendedDb: number;
 };

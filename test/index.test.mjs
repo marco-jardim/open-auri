@@ -20,7 +20,7 @@ const areas = {
   },
   safety: {
     api: safety,
-    members: ['gate', 'policy', 'thresholds'],
+    members: ['gate', 'policy', 'thresholds', 'classify'],
     // gate forwards these bindings; the area index exports them from thresholds only.
     duplicates: {
       THRESHOLDS: 'thresholds',

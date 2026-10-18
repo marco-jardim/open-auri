@@ -26,17 +26,29 @@
 //   0. `f:codec` alone when the bands cannot even be copied (not an array, not
 //      10 elements, a hole, a non-object element, a throwing getter/trap);
 //   1. `k:kind-not-allowed`, per stage in stage order;
-//   2. `d7:pk-boost-above-16k` then `d7:boost-q`, per stage in stage order;
+//   2. `d7:pk-boost-above-16k`, `d7:boost-q` then `d7:boost-above-20k`, per
+//      stage in stage order;
 //   3. `f:codec` (if the codec refuses the curve, evaluation stops here);
 //   4. `g:preamp`;
 //   5. per stage, in stage order: `a:<position>` in wire order (b0, b2, -a1,
 //      b1, -a2), then `b:pole-radius`, then `c:section-peak`;
 //   6. `d:prefix-peak`, `d:prefix-peak-full` (YOLO profile only),
-//      `e:output-audible`, `e:output-full`.
+//      `d:prefix-peak-extended` (YOLO, extended checks only),
+//      `e:output-audible`, `e:output-extended` (YOLO, extended checks only),
+//      `e:output-full`.
 // Every comparison is written so that NaN fails (`!(x <= limit)`).
 //
 // UI control ranges are NOT enforced here (that is src/safety/policy.mjs),
-// except the D7 boost rules and the filter kinds, which are part of the contract.
+// except the D7 boost rules, the filter kinds and the rule above 20 kHz, which
+// are part of the contract.
+//
+// Above 20 kHz (`isUltrasonic`, policy.mjs) only the sections Engenharia allows
+// there (`freqMaxFor`) pass: a PK with gain <= 0 (any Q), an LS or HS with
+// gain <= 0 and Q <= 0.71, an LP or HP with Q <= 0.71. Any other section above
+// 20 kHz (a NaN or non-number frequency counts as above) is
+// `d7:boost-above-20k` (value: its frequency, limit: 20000), in every layer. A
+// curve at or below 20 kHz never gets it, so its standard verdict is the one it
+// had before this rule.
 //
 // Profiles (`options.profile`). The standard profile (the default, and what the
 // server always uses) blocks on every reason above. The YOLO profile, selected
@@ -49,10 +61,18 @@
 //     `d:prefix-peak`, `e:output-audible`, `e:output-full`, plus the YOLO-only
 //     `d:prefix-peak-full` (every prefix, preamp included, over DC–48 kHz, at
 //     most the presets' largest: it bounds the out-of-band energy that
-//     `c:section-peak` bounded);
-//   - class 2, waived (YOLO_WAIVABLE): `k:kind-not-allowed`, `d7:*`,
-//     `g:preamp`, `a:b0`, `a:b2`, `a:b1` (feedforward words) and
-//     `c:section-peak`.
+//     `c:section-peak` bounded) and the YOLO-only extended checks below;
+//   - class 2, waived (YOLO_WAIVABLE): `k:kind-not-allowed`, `d7:*`
+//     (`d7:boost-above-20k` included), `g:preamp`, `a:b0`, `a:b2`, `a:b1`
+//     (feedforward words) and `c:section-peak`.
+// Extended checks (YOLO only, class 1): when the curve has a section that
+// raises `d7:boost-above-20k` (the YOLO profile waives it), every prefix,
+// preamp included, must stay at most the presets' largest prefix peak over
+// 20 Hz–48 kHz (`d:prefix-peak-extended`, YOLO_THRESHOLDS.internalExtendedDb),
+// and the output at most their largest output peak there (`e:output-extended`,
+// YOLO_THRESHOLDS.outputExtendedDb). Both come from envelope.json
+// (`aggregate.peaks.extended`). Without such a section they are not computed,
+// so YOLO verdicts of every other curve are unchanged.
 // The classification is an allowlist of waivable codes: any other code blocks.
 // In YOLO, waived reasons leave `reasons` for `waived` (codes) and
 // `waivedReasons` (objects), the result carries `profile: 'yolo'`, and `ok`
@@ -78,7 +98,13 @@ import {
   sectionDb,
   sectionDbFromTerms,
 } from '../dsp/level.mjs';
-import { ABS_RANGES, isKindAllowed } from './policy.mjs';
+import {
+  ABS_RANGES,
+  AUDIBLE_MAX_HZ as ULTRASONIC_ABOVE_HZ,
+  freqMaxFor,
+  isKindAllowed,
+  isUltrasonic,
+} from './policy.mjs';
 import { THRESHOLDS, YOLO_THRESHOLDS } from './thresholds.mjs';
 
 export { levelDb, MEAN_FREQUENCIES, sectionDb } from '../dsp/level.mjs';
@@ -91,8 +117,9 @@ export { THRESHOLDS, PROVENANCE, YOLO_THRESHOLDS } from './thresholds.mjs';
  * @typedef {'drag' | 'full'} Grid
  * @typedef {'standard' | 'yolo'} GateProfile
  * @typedef {'a:b0' | 'a:b2' | 'a:-a1' | 'a:b1' | 'a:-a2' | 'b:pole-radius' | 'c:section-peak'
- *   | 'd:prefix-peak' | 'd:prefix-peak-full' | 'e:output-audible' | 'e:output-full' | 'f:codec'
- *   | 'g:preamp' | 'k:kind-not-allowed' | 'd7:pk-boost-above-16k' | 'd7:boost-q'} ReasonCode
+ *   | 'd:prefix-peak' | 'd:prefix-peak-full' | 'd:prefix-peak-extended' | 'e:output-audible'
+ *   | 'e:output-extended' | 'e:output-full' | 'f:codec' | 'g:preamp' | 'k:kind-not-allowed'
+ *   | 'd7:pk-boost-above-16k' | 'd7:boost-q' | 'd7:boost-above-20k'} ReasonCode
  * @typedef {{code: ReasonCode, stage?: number, value?: unknown, limit?: number}} Reason
  * @typedef {{db: number, frequencyHz: number}} Peak
  * @typedef {{stage: number, db: number, frequencyHz: number | null}} PrefixPeak
@@ -119,9 +146,13 @@ export { THRESHOLDS, PROVENANCE, YOLO_THRESHOLDS } from './thresholds.mjs';
  *   outputFull?: Peak,
  *   prefixFull?: PrefixPeak[],
  *   internalFull?: PrefixPeak,
+ *   prefixExtended?: PrefixPeak[],
+ *   internalExtended?: PrefixPeak,
+ *   outputExtended?: PrefixPeak,
  * }} GateMetrics
  * `prefixFull` and `internalFull` (DC–48 kHz prefix peaks) exist in the YOLO
- * profile only.
+ * profile only; `prefixExtended`, `internalExtended` and `outputExtended`
+ * (20 Hz–48 kHz) only in YOLO results that ran the extended checks.
  * @typedef {{
  *   ok: boolean,
  *   reasons: Reason[],
@@ -147,6 +178,7 @@ export const YOLO_WAIVABLE = Object.freeze([
   'k:kind-not-allowed',
   'd7:pk-boost-above-16k',
   'd7:boost-q',
+  'd7:boost-above-20k',
   'g:preamp',
   'a:b0',
   'a:b2',
@@ -157,7 +189,8 @@ export const YOLO_WAIVABLE = Object.freeze([
 /**
  * Reason codes that block in every profile (class 1), in reason order. Listed
  * for callers and tests; the gate itself blocks on anything not in
- * {@link YOLO_WAIVABLE}.
+ * {@link YOLO_WAIVABLE}. `d:prefix-peak-full`, `d:prefix-peak-extended` and
+ * `e:output-extended` are computed in the YOLO profile only.
  * @type {readonly ReasonCode[]}
  */
 export const HARD_REASONS = Object.freeze([
@@ -167,7 +200,9 @@ export const HARD_REASONS = Object.freeze([
   'b:pole-radius',
   'd:prefix-peak',
   'd:prefix-peak-full',
+  'd:prefix-peak-extended',
   'e:output-audible',
+  'e:output-extended',
   'e:output-full',
 ]);
 
@@ -197,14 +232,27 @@ export function isWaivable(code) {
  * @returns {GateProfile}
  */
 export function gateProfile(options) {
-  if (options === null || typeof options !== 'object') return 'standard';
+  return ownDataValue(options, 'profile') === 'yolo' ? 'yolo' : 'standard';
+}
+
+/**
+ * The value of the own data property `key` of `options`, or `undefined` when
+ * there is none (an accessor, whose getter is never called, an inherited
+ * property, an `options` that is not an object or whose trap throws). One
+ * `Object.getOwnPropertyDescriptor` call; the value is never coerced.
+ * @param {unknown} options
+ * @param {string} key
+ * @returns {unknown}
+ */
+function ownDataValue(options, key) {
+  if (options === null || typeof options !== 'object') return undefined;
   try {
-    const descriptor = Object.getOwnPropertyDescriptor(options, 'profile');
-    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) return 'standard';
-    return descriptor.value === 'yolo' ? 'yolo' : 'standard';
+    const descriptor = Object.getOwnPropertyDescriptor(options, key);
+    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) return undefined;
+    return descriptor.value;
   } catch {
     // A throwing trap: nothing it threw is inspected.
-    return 'standard';
+    return undefined;
   }
 }
 
@@ -253,9 +301,13 @@ function verdict(reasons, metrics, profile) {
  */
 export const GRID_INTERVALS = Object.freeze({ drag: 2048, full: 16384 });
 
+// Scan domains, as design/analysis/envelope.mjs defines them: audible
+// 20 Hz–20 kHz, extended 20 Hz–48 kHz, full DC–48 kHz.
 const AUDIBLE_MIN_HZ = 20;
 const AUDIBLE_MAX_HZ = 20000;
 const FULL_MAX_HZ = SAMPLE_RATE / 2;
+const EXTENDED_MIN_HZ = AUDIBLE_MIN_HZ;
+const EXTENDED_MAX_HZ = FULL_MAX_HZ;
 
 /**
  * Pole radius of `1 + a1 z^-1 + a2 z^-2`.
@@ -290,6 +342,51 @@ function powerPolynomial(p0, p1, p2) {
  * @returns {{full: Peak, audible: Peak}}
  */
 export function sectionPeaks(s) {
+  const stationaryHz = stationaryFrequencies(s);
+  return {
+    full: peakAmong(s, [0, FULL_MAX_HZ, ...stationaryHz]),
+    audible: peakAmong(s, [
+      AUDIBLE_MIN_HZ,
+      AUDIBLE_MAX_HZ,
+      ...stationaryHz.filter((f) => f >= AUDIBLE_MIN_HZ && f <= AUDIBLE_MAX_HZ),
+    ]),
+  };
+}
+
+/**
+ * Exact (analytic) peak of one section over the extended domain, 20 Hz–48 kHz
+ * (the YOLO-only extended checks).
+ * @param {Section} s
+ * @returns {Peak}
+ */
+function sectionExtendedPeak(s) {
+  const stationaryHz = stationaryFrequencies(s);
+  return peakAmong(s, [
+    EXTENDED_MIN_HZ,
+    EXTENDED_MAX_HZ,
+    ...stationaryHz.filter((f) => f >= EXTENDED_MIN_HZ && f <= EXTENDED_MAX_HZ),
+  ]);
+}
+
+/**
+ * The highest `sectionDb` among `frequencies` (the first one on ties).
+ * @param {Section} s
+ * @param {number[]} frequencies
+ * @returns {Peak}
+ */
+function peakAmong(s, frequencies) {
+  return frequencies
+    .map((f) => ({ db: sectionDb(s, f), frequencyHz: f }))
+    .reduce((best, p) => (p.db > best.db ? p : best));
+}
+
+/**
+ * Frequencies (Hz, inside DC–48 kHz) where the magnitude of one section is
+ * stationary: the real roots of the ratio's derivative in t = sin²(w/2).
+ * @param {Section} s
+ * @returns {number[]}
+ */
+function stationaryFrequencies(s) {
   const n = powerPolynomial(s.b0, s.b1, s.b2);
   const d = powerPolynomial(1, s.a1, s.a2);
   const a = n[2] * d[1] - n[1] * d[2];
@@ -307,22 +404,23 @@ export function sectionPeaks(s) {
       else roots.push(-b / (2 * a));
     }
   }
-  const stationaryHz = roots
+  return roots
     .filter((t) => t > 0 && t < 1)
     .map((t) => (Math.asin(Math.sqrt(t)) * SAMPLE_RATE) / Math.PI);
-  /** @param {number[]} frequencies */
-  const maximum = (frequencies) =>
-    frequencies
-      .map((f) => ({ db: sectionDb(s, f), frequencyHz: f }))
-      .reduce((best, p) => (p.db > best.db ? p : best));
-  return {
-    full: maximum([0, FULL_MAX_HZ, ...stationaryHz]),
-    audible: maximum([
-      AUDIBLE_MIN_HZ,
-      AUDIBLE_MAX_HZ,
-      ...stationaryHz.filter((f) => f >= AUDIBLE_MIN_HZ && f <= AUDIBLE_MAX_HZ),
-    ]),
-  };
+}
+
+/**
+ * Analytic peak of one section over a scan domain: DC–48 kHz, 20 Hz–20 kHz or
+ * 20 Hz–48 kHz.
+ * @param {Section} s
+ * @param {number} minHz
+ * @param {number} maxHz
+ * @returns {Peak}
+ */
+function singleSectionPeak(s, minHz, maxHz) {
+  if (minHz === 0) return sectionPeaks(s).full;
+  if (maxHz === AUDIBLE_MAX_HZ) return sectionPeaks(s).audible;
+  return sectionExtendedPeak(s);
 }
 
 /**
@@ -485,6 +583,7 @@ class CascadeScan {
    */
   constructor(intervals, minHz, maxHz, scan) {
     this.minHz = minHz;
+    this.maxHz = maxHz;
     this.grid = scan ? scanGrid(intervals, minHz, maxHz) : null;
     this.values = new Float64Array(this.grid ? this.grid.fs.length : 0);
     /** @type {Section[]} */
@@ -506,10 +605,7 @@ class CascadeScan {
   peak() {
     const sections = this.sections;
     if (!sections.length) return { db: 0, frequencyHz: this.minHz };
-    if (sections.length === 1) {
-      const p = sectionPeaks(sections[0]);
-      return this.minHz === 0 ? p.full : p.audible;
-    }
+    if (sections.length === 1) return singleSectionPeak(sections[0], this.minHz, this.maxHz);
     /** @param {number} f */
     const fn = (f) => sections.reduce((db, section) => db + sectionDb(section, f), 0);
     const fs = /** @type {ScanGrid} */ (this.grid).fs;
@@ -538,7 +634,8 @@ class CascadeScan {
 }
 
 /**
- * Policy reasons (kinds and D7) for each band of a snapshot, in stage order.
+ * Policy reasons (kinds, D7 and the rule above 20 kHz) for each band of a
+ * snapshot, in stage order.
  * @param {readonly Readonly<Band>[]} bands Output of `snapshotBands` (plain, frozen).
  * @param {boolean} experimental
  * @returns {Reason[]}
@@ -574,8 +671,7 @@ function policyReasons(bands, experimental) {
     if (!isKindAllowed(kind, layer)) {
       kinds.push({ code: 'k:kind-not-allowed', stage, value: shown(kind) });
     }
-    if (kind !== 'PK' && kind !== 'LS' && kind !== 'HS') continue;
-    if (!(numeric(band.gainDb) <= 0)) {
+    if ((kind === 'PK' || kind === 'LS' || kind === 'HS') && !(numeric(band.gainDb) <= 0)) {
       if (kind === 'PK' && !(numeric(band.freqHz) <= ABS_RANGES.pkBoostMaxHz)) {
         d7.push({
           code: 'd7:pk-boost-above-16k',
@@ -588,6 +684,16 @@ function policyReasons(bands, experimental) {
         const value = shown(band.qFactor);
         d7.push({ code: 'd7:boost-q', stage, value, limit: ABS_RANGES.boostQMax });
       }
+    }
+    // Above 20 kHz only what Engenharia allows there: sections that never amplify
+    // (policy.mjs). A NaN or non-number frequency counts as above (isUltrasonic).
+    if (isUltrasonic(band) && !(freqMaxFor(band, { layer: 'engenharia' }) > ULTRASONIC_ABOVE_HZ)) {
+      d7.push({
+        code: 'd7:boost-above-20k',
+        stage,
+        value: shown(band.freqHz),
+        limit: ULTRASONIC_ABOVE_HZ,
+      });
     }
   }
   return [...kinds, ...d7];
@@ -729,6 +835,9 @@ export function gate(bands, preampDb, options = {}) {
     return verdict([{ code: 'f:codec', value }], metrics, profile);
   }
   const reasons = policyReasons(snapshot, experimental === true);
+  // The YOLO-only extended checks run only for a curve with a section that
+  // breaks the rule above 20 kHz (the reason YOLO waives).
+  const extended = yolo && reasons.some((r) => r.code === 'd7:boost-above-20k');
   /** @type {number[]} */
   let payload;
   try {
@@ -814,6 +923,31 @@ export function gate(bands, preampDb, options = {}) {
     metrics.prefixFull = prefixFull;
     metrics.internalFull = internalFull;
   }
+  /** @type {PrefixPeak[] | null} */
+  let prefixExtended = null;
+  if (extended) {
+    // YOLO with a section above 20 kHz only (d:prefix-peak-extended,
+    // e:output-extended): every prefix over 20 Hz–48 kHz.
+    const extendedScan = new CascadeScan(intervals, EXTENDED_MIN_HZ, EXTENDED_MAX_HZ, scan);
+    prefixExtended = [{ stage: 0, db: preamp, frequencyHz: null }];
+    /** @type {Peak | null} */
+    let extendedPeak = null;
+    for (const [i, item] of sections.entries()) {
+      if (!isIdentitySection(item.section)) {
+        extendedScan.add(item.section);
+        extendedPeak = null;
+      }
+      if (extendedPeak === null) extendedPeak = extendedScan.peak();
+      prefixExtended.push({
+        stage: i + 1,
+        db: extendedPeak.db + preamp,
+        frequencyHz: extendedPeak.frequencyHz,
+      });
+    }
+    metrics.prefixExtended = prefixExtended;
+    metrics.internalExtended = prefixExtended.reduce((a, b) => (b.db > a.db ? b : a));
+    metrics.outputExtended = prefixExtended[prefixExtended.length - 1];
+  }
 
   const tolerance = THRESHOLDS.dbNumericalTolerance;
   if (!(internalAudible.db <= THRESHOLDS.internalAudibleDb + tolerance)) {
@@ -838,12 +972,31 @@ export function gate(bands, preampDb, options = {}) {
       });
     }
   }
+  if (prefixExtended && metrics.internalExtended) {
+    const internalExtended = metrics.internalExtended;
+    const limit = YOLO_THRESHOLDS.internalExtendedDb;
+    if (!(internalExtended.db <= limit + tolerance)) {
+      const first = prefixExtended.find((p) => !(p.db <= limit + tolerance));
+      reasons.push({
+        code: 'd:prefix-peak-extended',
+        stage: first ? first.stage : internalExtended.stage,
+        value: internalExtended.db,
+        limit,
+      });
+    }
+  }
   if (!(outputAudible.db <= THRESHOLDS.outputAudibleDb + tolerance)) {
     reasons.push({
       code: 'e:output-audible',
       value: outputAudible.db,
       limit: THRESHOLDS.outputAudibleDb,
     });
+  }
+  if (metrics.outputExtended) {
+    const limit = YOLO_THRESHOLDS.outputExtendedDb;
+    if (!(metrics.outputExtended.db <= limit + tolerance)) {
+      reasons.push({ code: 'e:output-extended', value: metrics.outputExtended.db, limit });
+    }
   }
   if (!(outputFull.db <= THRESHOLDS.outputFullDb + tolerance)) {
     reasons.push({ code: 'e:output-full', value: outputFull.db, limit: THRESHOLDS.outputFullDb });
@@ -878,30 +1031,52 @@ export const CODEC_PREAMP_FLOOR_DB =
   Math.ceil(20 * Math.log10(0.5 / 2 ** 23) * PREAMP_STEPS_PER_DB) / PREAMP_STEPS_PER_DB;
 
 /**
+ * Lowest preamp of a curve that is stored, published or classified, in every
+ * profile, YOLO included: −25.5 dB (`THRESHOLDS.preampMinDb`), the floor S1 and
+ * S5 encode and the editor keeps in YOLO. The YOLO gate itself waives
+ * `g:preamp` down to {@link CODEC_PREAMP_FLOOR_DB}; `autoPreamp` stops here
+ * with `storable: true`, and `classifyCurve` refuses a curve below it.
+ */
+export const YOLO_STORAGE_PREAMP_FLOOR_DB = THRESHOLDS.preampMinDb;
+
+/**
  * Highest preamp on the 0.1 dB UI grid within [preampMinDb, preampMaxDb] for
  * which `gateForWrite` accepts the curve, or `null` when none does (including
  * curves failing checks a preamp cannot fix: kinds, D7, codec, a, b, c).
  *
  * In the YOLO profile (`options.profile`, read like {@link gateProfile}) the
- * lower bound is {@link CODEC_PREAMP_FLOOR_DB} instead, `d:prefix-peak-full` is
- * fixable too, and only class-1 reasons count (class 2 is waived).
+ * lower bound is {@link CODEC_PREAMP_FLOOR_DB} instead, `d:prefix-peak-full`,
+ * `d:prefix-peak-extended` and `e:output-extended` are fixable too, and only
+ * class-1 reasons count (class 2 is waived).
+ *
+ * `storable: true` (an own data property holding exactly `true`, read like
+ * `profile`: a getter is never called) asks for a preamp a stored curve may
+ * keep: in YOLO the lower bound is then {@link YOLO_STORAGE_PREAMP_FLOOR_DB}
+ * (−25.5 dB, S1's floor), so a curve that needs more attenuation gets `null`.
+ * Use it for every curve that is saved, shared or published. It changes
+ * nothing in the standard profile, whose floor is already −25.5 dB.
  *
  * A candidate is derived analytically from the metrics at the top preamp,
  * rounded down to the grid, then verified with the gate and stepped down by
  * 0.1 dB while refused (the verdict is monotone in the preamp). The bands are
  * read once: every later verification runs on the first verdict's snapshot.
  * @param {readonly Band[]} bands
- * @param {{experimental?: boolean, profile?: GateProfile}} [options]
+ * @param {{experimental?: boolean, profile?: GateProfile, storable?: boolean}} [options]
  * @returns {number | null}
  */
 export function autoPreamp(bands, options = {}) {
   const profile = gateProfile(options);
+  const storable = ownDataValue(options, 'storable') === true;
   const { experimental = false } = options ?? {};
   const yolo = profile === 'yolo';
   const top = gateForWrite(bands, THRESHOLDS.preampMaxDb, { experimental, profile });
   if (top.ok) return THRESHOLDS.preampMaxDb;
   const fixable = new Set(['d:prefix-peak', 'e:output-audible', 'e:output-full']);
-  if (yolo) fixable.add('d:prefix-peak-full');
+  if (yolo) {
+    fixable.add('d:prefix-peak-full');
+    fixable.add('d:prefix-peak-extended');
+    fixable.add('e:output-extended');
+  }
   if (!top.reasons.every((r) => fixable.has(r.code))) return null;
   const m = /** @type {Required<GateMetrics>} */ (top.metrics);
   const snapshot = m.bands;
@@ -916,7 +1091,17 @@ export function autoPreamp(bands, options = {}) {
     const internalFullPeak = Math.max(0, ...m.prefixFull.slice(1).map((p) => relative(p.db)));
     cap = Math.min(cap, YOLO_THRESHOLDS.internalFullDb - internalFullPeak);
   }
-  const floorDb = yolo ? CODEC_PREAMP_FLOOR_DB : THRESHOLDS.preampMinDb;
+  if (yolo && m.prefixExtended) {
+    // The extended checks ran (a section above 20 kHz that YOLO allows).
+    const extendedPeaks = m.prefixExtended.slice(1).map((p) => relative(p.db));
+    cap = Math.min(
+      cap,
+      YOLO_THRESHOLDS.internalExtendedDb - Math.max(0, ...extendedPeaks),
+      YOLO_THRESHOLDS.outputExtendedDb - relative(m.outputExtended.db),
+    );
+  }
+  const yoloFloorDb = storable ? YOLO_STORAGE_PREAMP_FLOOR_DB : CODEC_PREAMP_FLOOR_DB;
+  const floorDb = yolo ? yoloFloorDb : THRESHOLDS.preampMinDb;
   const minStep = Math.round(floorDb * PREAMP_STEPS_PER_DB);
   const maxStep = Math.round(THRESHOLDS.preampMaxDb * PREAMP_STEPS_PER_DB);
   // Slightly optimistic start (Q23 rounding and the dB tolerance can admit a

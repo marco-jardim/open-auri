@@ -15,7 +15,7 @@ import {
 import { curveResponseDb } from '../../src/dsp/distance.mjs';
 import { GRID, logGrid } from '../../src/dsp/grid.mjs';
 import { gateForWrite } from '../../src/safety/gate.mjs';
-import { SOFT_RANGES } from '../../src/safety/policy.mjs';
+import { ABS_RANGES, AUDIBLE_MAX_HZ, isUltrasonic, SOFT_RANGES } from '../../src/safety/policy.mjs';
 
 const fixture = JSON.parse(
   await readFile(new URL('../fixtures/eq0xcb.reference.json', import.meta.url), 'utf8'),
@@ -265,6 +265,48 @@ test('HS only with allowExperimental and the engenharia layer', () => {
     const result = solvePeq({ target, maxTimeMs: 300, ...options });
     assertValid(result);
     assert.ok(result.bands.every((b) => b.kind !== 'HS'));
+  }
+});
+
+test('the solver never places a section above 20 kHz, in any layer or range mode', () => {
+  // Its boxes come from ABS_RANGES/SOFT_RANGES, never from the 32 kHz Engenharia ceiling.
+  assert.equal(ABS_RANGES.freqHz.max, AUDIBLE_MAX_HZ);
+  for (const kind of ['PK', 'LS', 'HS']) {
+    for (const soft of [false, true]) {
+      for (const gainDb of [-12, -0.1, 0, 0.1, 6]) {
+        for (const qFactor of [0.5, 0.71, 1, 3, 8]) {
+          const box = parameterBox(kind, soft, qFactor, gainDb);
+          assert.ok(box.fMax <= AUDIBLE_MAX_HZ, `${kind} ${soft} ${gainDb} ${qFactor}`);
+        }
+      }
+    }
+  }
+  // Targets with their features at the top of the band, where a cut above 20 kHz would help.
+  const targets = [
+    GRID.map((f) => (f > 12000 ? -9 : 0)),
+    bell(19000, -8, 0.3),
+    bell(20000, 6, 0.4),
+    targetFromPoints([
+      { freqHz: 20, gainDb: 0 },
+      { freqHz: 8000, gainDb: 0 },
+      { freqHz: 16000, gainDb: -6 },
+      { freqHz: 20000, gainDb: -12 },
+    ]),
+  ];
+  for (const target of targets) {
+    for (const options of [
+      {},
+      { ranges: 'soft' },
+      { allowExperimental: true, layer: 'engenharia' },
+      { allowExperimental: true, layer: 'engenharia', ranges: 'soft' },
+    ]) {
+      const result = solvePeq({ target, maxTimeMs: 150, ...options });
+      assertValid(result, options.allowExperimental === true);
+      for (const band of active(result.bands)) {
+        assert.ok(band.freqHz <= AUDIBLE_MAX_HZ, JSON.stringify(band));
+        assert.equal(isUltrasonic(band), false, JSON.stringify(band));
+      }
+    }
   }
 });
 
