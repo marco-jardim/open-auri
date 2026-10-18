@@ -66,7 +66,8 @@ export function archiveTapes(local: readonly LibraryItem[]): Tape[] {
 			id: `local:${item.id}`,
 			group: 'local' as const,
 			order: index,
-			description: '',
+			// The user's own text (S5 rules, `library.update`): never translated, '' when unset.
+			description: item.description ?? '',
 			descriptionEn: null,
 			tags: automaticTags(item)
 		}))

@@ -439,7 +439,10 @@
 									><span>20</span><span>1k</span><span>20k</span></span
 								></span
 							>
-							{#if tape.description}<span
+							{#if tape.description && tape.group === 'local'}<span
+									class="tape-description own-description">{tape.description}</span
+								><small>{m.biblioteca_edit_local_description()}</small>
+							{:else if tape.description}<span
 									class="tape-description"
 									lang={locale === 'en-US' && !tape.descriptionEn ? 'pt-BR' : locale}
 									>{locale === 'en-US' && tape.descriptionEn
@@ -541,6 +544,10 @@
 				}}
 				onOutputMeter={(update) => {
 					outputUpdate = update;
+				}}
+				onEdited={() => {
+					// The store already holds the edit: reopen the same box from the fresh shelf.
+					selected = tapes.find((candidate) => candidate.id === tape.id) ?? selected;
 				}}
 			/>{/key}
 	{:catch}
@@ -983,6 +990,11 @@
 	}
 	.tape small {
 		font-size: 10px;
+	}
+	/* A local curve's own description keeps its line breaks (at most five, S5). */
+	.own-description {
+		white-space: pre-line;
+		overflow-wrap: anywhere;
 	}
 	.tape-tags {
 		font-size: 12px;

@@ -1,5 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { canonKey, encodeS1 } from 'open-auri/share';
+import { canonKey, encodeS1, EnvelopeError, normalizeText } from 'open-auri/share';
 import { checkedCurve, isTimestamp, nextTimestamp } from './model.ts';
 import type { Clock, CurveData } from './model.ts';
 import { createStorage, isRecord, type ClientStorage } from './storage.ts';
@@ -8,6 +8,11 @@ import { storageStatus } from './status.svelte.ts';
 export interface LibraryItem extends CurveData {
 	readonly id: string;
 	readonly s1: string;
+	/**
+	 * S5 description, at most 280 code points. Loaded items always carry it ('' when never set);
+	 * records written before it existed have no such field and load as ''.
+	 */
+	readonly description?: string;
 	readonly favorite: boolean;
 	readonly createdAt: number;
 	readonly updatedAt: number;
@@ -16,6 +21,57 @@ export interface LibraryInput extends CurveData {
 	id?: string;
 	favorite?: boolean;
 	updatedAt?: number;
+}
+
+// S5 envelope bounds in code points (core `validateEnvelope`, src/share/envelope.mjs:403-404; the
+// core does not export them). The text rules themselves are the core's `normalizeText`.
+export const LIBRARY_NAME_MAX = 48;
+export const LIBRARY_DESCRIPTION_MAX = 280;
+
+export type LibraryTextField = 'name' | 'description';
+/** Core envelope issue code (`env:length`, `env:url`, `env:url-like`, `env:pattern`, ...). */
+export type LibraryTextCode = EnvelopeError['errors'][number]['code'];
+export interface LibraryTextIssue {
+	readonly field: LibraryTextField;
+	readonly code: LibraryTextCode;
+}
+export interface LibraryTextPatch {
+	name?: string;
+	description?: string;
+}
+export type LibraryUpdateCode = 'invalid-text' | 'not-found';
+
+/** Rejection of `update`: text refused by the S5 rules (with its issues) or an unknown id. */
+export class LibraryUpdateError extends Error {
+	readonly code: LibraryUpdateCode;
+	readonly issues: readonly LibraryTextIssue[];
+	constructor(code: LibraryUpdateCode, issues: readonly LibraryTextIssue[] = []) {
+		const detail = issues.map((issue) => `${issue.field} ${issue.code}`).join(', ');
+		super(code === 'not-found' ? 'Library item not found' : `Invalid library text: ${detail}`);
+		this.name = 'LibraryUpdateError';
+		this.code = code;
+		this.issues = Object.freeze([...issues]);
+	}
+}
+
+/** S5 text rules: core normalisation (NFKC, no controls or links, description ≤ 5 lines), bounds. */
+function checkedText(
+	field: LibraryTextField,
+	value: unknown
+): { value: string; issues: LibraryTextIssue[] } {
+	const issue = (code: LibraryTextCode) => ({ field, code });
+	if (typeof value !== 'string') return { value: '', issues: [issue('env:type')] };
+	let text: string;
+	try {
+		text = normalizeText(value, { multiline: field === 'description', path: `/${field}` });
+	} catch (cause) {
+		if (!(cause instanceof EnvelopeError)) throw cause;
+		const codes = new Set(cause.errors.map((error) => error.code));
+		return { value: '', issues: [...codes].map(issue) };
+	}
+	const length = [...text].length;
+	const [min, max] = field === 'name' ? [1, LIBRARY_NAME_MAX] : [0, LIBRARY_DESCRIPTION_MAX];
+	return { value: text, issues: length < min || length > max ? [issue('env:length')] : [] };
 }
 
 function checkedItem(value: unknown): LibraryItem {
@@ -31,6 +87,11 @@ function checkedItem(value: unknown): LibraryItem {
 	) {
 		throw new TypeError('Invalid library item structure');
 	}
+	// Records saved before descriptions existed have none: no migration, they load as ''.
+	const description = value.description ?? '';
+	if (typeof description !== 'string' || [...description].length > LIBRARY_DESCRIPTION_MAX) {
+		throw new TypeError('Invalid library item description');
+	}
 	const curve = checkedCurve({ ...value, schema: 1 });
 	if (encodeS1(curve) !== value.s1) throw new TypeError('Library S1 does not match its curve');
 	return Object.freeze({
@@ -40,6 +101,7 @@ function checkedItem(value: unknown): LibraryItem {
 		preampDb: curve.preampDb,
 		bands: curve.bands,
 		s1: value.s1,
+		description,
 		favorite: value.favorite,
 		createdAt: value.createdAt,
 		updatedAt: value.updatedAt
@@ -160,6 +222,8 @@ export function createLibraryStore(
 						...curve,
 						id: duplicate?.id ?? previous?.id ?? requestedId ?? id(),
 						s1: encodeS1(curve),
+						// Re-saving overwrites the name; the description belongs to the kept record.
+						description: (duplicate ?? previous)?.description ?? '',
 						favorite: favorite ?? Boolean(previous?.favorite || duplicate?.favorite),
 						createdAt: duplicate?.createdAt ?? previous?.createdAt ?? at,
 						updatedAt: at
@@ -184,6 +248,51 @@ export function createLibraryStore(
 					return { put: [{ ...item, favorite, updatedAt: nextTimestamp(now, item.updatedAt) }] };
 				});
 				return found;
+			});
+		},
+		/**
+		 * Renames and/or describes an item with the S5 text rules (name 1–48 code points;
+		 * description 0–280 and at most five lines; no links or controls), stored normalised.
+		 * Rejects with a LibraryUpdateError: `invalid-text` (with its issues, nothing written) or
+		 * `not-found`. Resolves with the stored item; an unchanged text keeps its updatedAt.
+		 */
+		update(itemId: string, patch: LibraryTextPatch): Promise<LibraryItem> {
+			// Validate and snapshot before yielding, as save does. Refused text is the user's input,
+			// not a storage failure: it is not reported to the storage status.
+			const issues: LibraryTextIssue[] = [];
+			const text: { name?: string; description?: string } = {};
+			for (const field of ['name', 'description'] as const) {
+				if (patch[field] === undefined) continue;
+				const checked = checkedText(field, patch[field]);
+				issues.push(...checked.issues);
+				text[field] = checked.value;
+			}
+			if (issues.length) return Promise.reject(new LibraryUpdateError('invalid-text', issues));
+			// The queued operation never rejects (a rejected task would block the queue): the
+			// not-found rejection is raised after it.
+			return enqueue(async () => {
+				const outcome: { item?: LibraryItem } = {};
+				await change((values) => {
+					const item = values.find((value) => value.id === itemId);
+					if (!item) return {};
+					const name = text.name ?? item.name;
+					const description = text.description ?? item.description ?? '';
+					if (name === item.name && description === (item.description ?? '')) {
+						outcome.item = item;
+						return {};
+					}
+					outcome.item = checkedItem({
+						...item,
+						name,
+						description,
+						updatedAt: nextTimestamp(now, item.updatedAt)
+					});
+					return { put: [outcome.item] };
+				});
+				return outcome.item ?? null;
+			}).then((item) => {
+				if (!item) throw new LibraryUpdateError('not-found');
+				return item;
 			});
 		},
 		remove(itemId: string) {

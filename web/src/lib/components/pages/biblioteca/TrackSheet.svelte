@@ -1,10 +1,18 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import { encodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { ABPreview, ABSide, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
 	import { LIVE_WINDOW_MS, tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';
+	import {
+		LIBRARY_DESCRIPTION_MAX,
+		LIBRARY_NAME_MAX,
+		LibraryUpdateError,
+		type LibraryTextField,
+		type LibraryTextIssue,
+		type LibraryTextPatch
+	} from '#lib/state/library.svelte.ts';
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
 	import { modalDialog } from '#lib/components/chrome/modal.ts';
 	import { Button } from '#lib/components/primitives/index.ts';
@@ -25,7 +33,8 @@
 		audioState,
 		onClose,
 		onStatus,
-		onOutputMeter
+		onOutputMeter,
+		onEdited
 	}: {
 		tape: Tape;
 		current: CurveData;
@@ -38,6 +47,8 @@
 		onStatus: (message: string) => void;
 		/** Real VU frames of the selected A/B chain output (post-curve, post-trim, pre-volume). */
 		onOutputMeter?: (update: MeterUpdate) => void;
+		/** The local item's name or description was saved: the library already holds it. */
+		onEdited?: () => void;
 	} = $props();
 	/** Session tag of this sheet's comparison (Transport, navbar). */
 	const BIBLIOTECA_SESSION = 'biblioteca';
@@ -96,6 +107,129 @@
 					? null
 					: m.biblioteca_gate_refused()
 	);
+
+	// ---- Name and description of a personal local curve (LIBEDIT) ----------------------------
+	/** Library id of an editable tape: local shelf only, never an official preset or a
+	 * community curve kept locally (its text is its author's). */
+	const editableId = $derived(
+		tape.group === 'local' && tape.id.startsWith('local:') && !tape.source.startsWith('community:')
+			? tape.id.slice('local:'.length)
+			: null
+	);
+	let editing = $state(false);
+	let savingEdit = $state(false);
+	let draftName = $state('');
+	let draftDescription = $state('');
+	let editIssues = $state.raw<readonly LibraryTextIssue[]>([]);
+	let editFailure = $state('');
+	let editButton = $state<HTMLButtonElement>();
+	let nameField = $state<HTMLInputElement>();
+	let descriptionField = $state<HTMLTextAreaElement>();
+	const nameIssues = $derived(issueMessages('name'));
+	const descriptionIssues = $derived(issueMessages('description'));
+	const editReason = $derived(app ? null : m.biblioteca_reason_loading());
+
+	/** Localised envelope issue (core `env:*` code), once per message, for one field. */
+	function issueMessages(field: LibraryTextField): string[] {
+		const text = (issue: LibraryTextIssue) => {
+			switch (issue.code) {
+				case 'env:url':
+					return m.biblioteca_edit_url();
+				case 'env:url-like':
+					return m.biblioteca_edit_url_like();
+				case 'env:length':
+					return field === 'name'
+						? m.biblioteca_edit_name_length()
+						: m.biblioteca_edit_description_length();
+				case 'env:pattern':
+					return m.biblioteca_edit_control();
+				default:
+					return m.biblioteca_edit_invalid();
+			}
+		};
+		return [...new Set(editIssues.filter((issue) => issue.field === field).map(text))];
+	}
+	function describedBy(...ids: (string | false)[]): string {
+		return ids.filter(Boolean).join(' ');
+	}
+	function clearIssues(field: LibraryTextField) {
+		editIssues = editIssues.filter((issue) => issue.field !== field);
+		editFailure = '';
+	}
+	async function startEdit() {
+		if (!app || !editableId) return;
+		draftName = tape.name;
+		draftDescription = tape.description;
+		editIssues = [];
+		editFailure = '';
+		editing = true;
+		await tick();
+		nameField?.focus();
+	}
+	/** Leaves the form (drafts are discarded) and gives focus back to its opener. */
+	async function endEdit() {
+		editing = false;
+		editIssues = [];
+		editFailure = '';
+		await tick();
+		editButton?.focus();
+	}
+	function cancelEdit() {
+		if (!savingEdit) void endEdit();
+	}
+	async function submitEdit(event: SubmitEvent) {
+		event.preventDefault();
+		const library = app?.state.library;
+		if (!library || !editableId || savingEdit) return;
+		// Only what the user changed: an untouched legacy name is never re-validated.
+		const patch: LibraryTextPatch = {};
+		if (draftName !== tape.name) patch.name = draftName;
+		if (draftDescription !== tape.description) patch.description = draftDescription;
+		savingEdit = true;
+		editIssues = [];
+		editFailure = '';
+		try {
+			await library.update(editableId, patch);
+			savingEdit = false;
+			onEdited?.();
+			onStatus(m.biblioteca_edit_saved());
+			await endEdit();
+		} catch (error) {
+			if (error instanceof LibraryUpdateError && error.code === 'invalid-text') {
+				editIssues = error.issues;
+				const nameRefused = error.issues.some((issue) => issue.field === 'name');
+				await tick();
+				(nameRefused ? nameField : descriptionField)?.focus();
+			} else if (error instanceof LibraryUpdateError) {
+				editFailure = m.biblioteca_edit_missing();
+			} else {
+				editFailure = m.biblioteca_edit_error();
+				console.error('Biblioteca local edit failed', error);
+			}
+		} finally {
+			savingEdit = false;
+		}
+	}
+	/** Form keys: Esc cancels the edit (not the sheet), Ctrl/⌘+Enter saves from the textarea. */
+	function editKeys(form: HTMLFormElement) {
+		function onKeydown(event: KeyboardEvent) {
+			if (event.key === 'Escape') {
+				// A canceled keydown sends the dialog no close request: only the form closes.
+				event.preventDefault();
+				event.stopPropagation();
+				cancelEdit();
+			} else if (
+				event.key === 'Enter' &&
+				(event.ctrlKey || event.metaKey) &&
+				event.target instanceof HTMLTextAreaElement
+			) {
+				event.preventDefault();
+				form.requestSubmit();
+			}
+		}
+		form.addEventListener('keydown', onKeydown);
+		return { destroy: () => form.removeEventListener('keydown', onKeydown) };
+	}
 
 	/** The engine this sheet put in chain mode; only that audition is stopped by the sheet. */
 	let startedBy: AudioEngine | null = null;
@@ -311,7 +445,11 @@
 			<div>
 				<h2 id="{id}-title">{tape.name}</h2>
 				<p class="byline">{tape.id} / {m.biblioteca_preamp()} {number(tape.preampDb, locale)} dB</p>
-				{#if description}<p
+				{#if description && tape.group === 'local'}
+					<!-- The user's own text: untranslated, in whatever language they wrote it. -->
+					<p class="description own-description">{description}</p>
+					<small>{m.biblioteca_edit_local_description()}</small>
+				{:else if description}<p
 						class="description"
 						lang={locale === 'en-US' && !tape.descriptionEn ? 'pt-BR' : locale}
 					>
@@ -322,6 +460,77 @@
 							? m.biblioteca_original_description()
 							: m.biblioteca_description()}</small
 					>{/if}
+				{#if editableId !== null}
+					{#if editing}
+						<form
+							class="edit-form"
+							aria-labelledby="{id}-edit-title"
+							novalidate
+							onsubmit={submitEdit}
+							use:editKeys
+						>
+							<h3 id="{id}-edit-title">{m.biblioteca_edit_open()}</h3>
+							<label for="{id}-edit-name">{m.biblioteca_edit_name()}</label>
+							<input
+								id="{id}-edit-name"
+								bind:this={nameField}
+								bind:value={draftName}
+								maxlength={LIBRARY_NAME_MAX}
+								autocomplete="off"
+								aria-required="true"
+								aria-invalid={nameIssues.length > 0}
+								aria-describedby={describedBy(
+									nameIssues.length > 0 && `${id}-edit-name-issue`,
+									`${id}-edit-hint`
+								)}
+								oninput={() => clearIssues('name')}
+							/>
+							{#if nameIssues.length}<p id="{id}-edit-name-issue" class="edit-issue" role="alert">
+									{nameIssues.join(' ')}
+								</p>{/if}
+							<label for="{id}-edit-description">{m.biblioteca_edit_description()}</label>
+							<textarea
+								id="{id}-edit-description"
+								bind:this={descriptionField}
+								bind:value={draftDescription}
+								maxlength={LIBRARY_DESCRIPTION_MAX}
+								rows="5"
+								aria-invalid={descriptionIssues.length > 0}
+								aria-describedby={describedBy(
+									descriptionIssues.length > 0 && `${id}-edit-description-issue`,
+									`${id}-edit-hint`
+								)}
+								oninput={() => clearIssues('description')}></textarea>
+							{#if descriptionIssues.length}<p
+									id="{id}-edit-description-issue"
+									class="edit-issue"
+									role="alert"
+								>
+									{descriptionIssues.join(' ')}
+								</p>{/if}
+							<p id="{id}-edit-hint" class="edit-hint">{m.biblioteca_edit_hint()}</p>
+							{#if editFailure}<p class="edit-issue" role="alert">{editFailure}</p>{/if}
+							<div class="actions">
+								<Button type="submit" variant="primary" loading={savingEdit}
+									>{m.biblioteca_edit_save()}</Button
+								><Button
+									variant="ghost"
+									disabledReason={savingEdit ? m.biblioteca_edit_saving() : null}
+									onclick={cancelEdit}>{m.biblioteca_edit_cancel()}</Button
+								>
+							</div>
+						</form>
+					{:else}
+						<div class="edit-open">
+							<Button
+								size="sm"
+								bind:element={editButton}
+								disabledReason={editReason}
+								onclick={startEdit}>{m.biblioteca_edit_open()}</Button
+							>
+						</div>
+					{/if}
+				{/if}
 				{#if tape.source === 'preset:padrao'}<p class="credit">{m.biblioteca_credit()}</p>{/if}
 				<p class="gate-line">
 					{verdict === null
@@ -586,6 +795,51 @@
 	}
 	.gate-note {
 		margin-top: 0;
+	}
+	/* The user's own description keeps its line breaks (at most five, S5). */
+	.own-description {
+		white-space: pre-line;
+		overflow-wrap: anywhere;
+	}
+	.edit-open {
+		margin: 10px 0 4px;
+	}
+	.edit-form {
+		display: grid;
+		max-width: 560px;
+		margin: 12px 0 8px;
+		padding: 14px;
+		color: #ece7dd;
+		background: #1c211a;
+		border: 1px solid #a69f7144;
+	}
+	.edit-form h3 {
+		margin: 0;
+	}
+	.edit-form label {
+		margin-top: 10px;
+	}
+	.edit-form input,
+	.edit-form textarea {
+		box-sizing: border-box;
+		width: 100%;
+		margin-top: 4px;
+		border: 1px solid #a9a68e77;
+		font: 400 var(--fs-small, 13px) / 1.5 var(--face-body, 'Geist', sans-serif);
+	}
+	.edit-hint,
+	.edit-issue {
+		margin: 6px 0 0;
+		font-size: var(--fs-caption, 12px);
+	}
+	.edit-hint {
+		color: #e2dcc3;
+	}
+	.edit-issue {
+		color: #ffe1a3;
+	}
+	.edit-form .actions {
+		margin-top: 12px;
 	}
 	.listen {
 		margin-bottom: 22px;

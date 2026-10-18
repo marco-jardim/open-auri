@@ -26,6 +26,8 @@ export interface LocalLibraryItem {
 	id: string;
 	name: string;
 	s1: string;
+	/** S5 description ('' or absent when never set). */
+	description?: string;
 	updatedAt: number;
 }
 
@@ -134,6 +136,8 @@ export function toMergeItem(item: LocalLibraryItem, locale: string): LibraryMerg
 		localId: item.id,
 		s1: item.s1,
 		name: item.name,
+		// Only a real description is sent; the server applies its own text rules to it.
+		...(item.description ? { description: item.description } : {}),
 		lang: locale === 'en-US' ? 'en-US' : 'pt-BR'
 	};
 }
