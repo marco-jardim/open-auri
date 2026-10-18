@@ -2,9 +2,10 @@
 
 ## Estado
 
+- 2026-10-18: **v1.0.0 lançada e em produção** (https://open-auri.com). F1 a F5 e FUX concluídas; QG PASS na rodada 2. Falta só a FH (validação em hardware), que espera a chegada do cabo (issue #6). Ver "Resumo final (v1.0.0)" no fim deste arquivo.
 - 2026-10-16: **F4 concluída** (Q4 PASS em 3 rodadas). Próximo: PF5 e F5.
 
-Fase atual: F4 · Etapa: PF4 · F3 concluída (Q3 PASS, push 34f01f5)
+Fase atual: FH (aguarda o cabo) · Etapa: v1.0.0 lançada (tag `v1.0.0`) · F1 a F5 e FUX concluídas
 
 ## Locks ativos
 
@@ -265,6 +266,12 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
 | Q4 | 1 | FAIL (corrigido em 5701f13) | 7 major: M1 ids internos no feed/rankings; M2 outbox não ligada a quem agiu; M3 apelido gravado na OG e PNGs órfãos; M4 cache do gate confiável demais (gate_ver só dos limites, regate lento, regressão por skew); M5 S7 entrega curva moderada/retirada/privada; M6 funil e audiência revelam atividade privada; M7 inundação S6 derruba os jobs diários. 8 minor, 3 nit → FX4.1–FX4.8 |
 | Q4 | 2 | FAIL (corrigido em 5405850 + docs) | 1 major (R2-1: leituras por id /c, OG e S7 serviam veredito do gate desatualizado) + 7 minor (ator da outbox no servidor, purga por falha de sonda, PacksPanel, regressão da mescla, deriva do pi.md, origens entre contas, contagens do funil) + nits → FX4.9–FX4.12. Verificação: unidade 1 672, integração 968 (95,9/90,8/97,8/97,8), jobs 42, raiz 663, e2e 305/305 |
 | Q4 | 3 (verificação) | **PASS** | nenhum major ou pior; minors → issues #25–#31 (qa-minor) |
+| QG | 1 | FAIL (corrigido) | 3 major: Access citado como em uso sem existir, dump público sem rota, avisos de licença incompletos; minors → FXG.1 `a48c1ad` (textos legais), FXG.2 `2520f25` (rota do dump público), FXG.3 `c4919e3` (lista de licenças gerada dos bundles), FXG.4 `4452f24` (operação e deploy), todos corrigidos |
+| QG | 2 | **PASS** | M1 corrigido em `3a55af0` (CI: capturas comparadas só no Windows, checagens de comportamento seguem no Linux; spec de estado da Comparar espera o tour carregado sob demanda) |
+| FUX.Q | 1 | FAIL (corrigido) | achados corrigidos em `1893ebf` (contagem do espaçamento não redesenha durante a gravação USB, o que restaura o tempo dos relatórios), `5e8f4c0` (painel de áudio no celular abre no primeiro toque, início adiado silencioso, apelido sem oráculo da lista de bloqueio, falha social não esconde o resgate do cabo, controles desativados dizem por quê, dono do motor no Perfil e em /c, teto de 250 kB) e `d7c5428` (prévia do solver da Soe como X sem depender da carga da máquina) |
+| FUX.Q | 2 | FAIL (corrigido) | captura do painel de áudio e major B da Biblioteca (só VUs, decisão do PO no plano §3.6) → `08ad7a0` |
+| Issues | 1 | FAIL (corrigido) | 1 major: desativar o 2FA era alcançável por HTTP (cookie roubado e senha pulavam o código) → `c5ac828`; 14 minors e nits → `097a443` (núcleo), `6c1dd98` (app), `11fa0ee` (deploy, #33) |
+| Pós-FUX | 1 | FAIL (corrigido) | 1 major: "Salvar" acrescentava versão a uma linhagem que já não era privada → `296ee55` (lê a linhagem logo antes e cria nova cópia privada com aviso); minors → `dcba7d5` (cabo e curva compartilhada), `a74030e` (Teste cego), `b7d58e9` (Biblioteca), `dfd4035` (Comunidade) |
 
 ## Achados do Q2 rodada 1 (a corrigir: FX2.k)
 
@@ -330,6 +337,57 @@ Verificação central da W2.2: `check:web` 0 erros; `test:web:unit` 23 arquivos,
   - **Biblioteca: só VUs, decisão do PO em 2026-10-17** ("quero tudo VU reagindo em tempo real"): a ponte mantém os mesmos cinco mostradores parado e ao vivo, L/R viram o maior dos dois e a loudness momentânea deixa de ser exibida nesta página; plano §3.6 atualizado (fecha o major B do FUX.Q rodada 2).
   - Container local de avaliação reconstruído em segundo plano a cada commit (`_qa/preview-rebuild.ps1`, só a partir de commits).
   - Pendências para o QA: publicação "Não listada" como padrão (proposta, aguarda PO); pack de referência com 4 curvas (cartão mostra o número real); "Mais" e a folha mobile não abrem sem JavaScript.
+
+- **2026-10-18 · Lançamento v1.0.0, decisões do operador e do orquestrador:**
+  - Simple Analytics só em produção: a tag do script (`scripts.simpleanalyticscdn.com`, beacon em `queue.simpleanalyticscdn.com`, ambos liberados na CSP) só é injetada lá; local, staging e CI ficam sem script. O rodapé ganhou o link para o painel público de estatísticas. Versão da política `2026-10-18` (`POLICY_VERSION`, política pt-BR e en-US e `docs/lgpd.md`).
+  - Teste cego como palco ao vivo (`89ec604`): cortina translúcida sobre três caixas iguais que acendem com o nível real da prévia, embaralhamento de 3 s, compartimentos clicáveis e revelação com a cortina subindo no resultado. Os faders de nota ficam no palco. A saída vem pré-selecionada a partir do estado do cabo. Sem "Cabo em Neutro" automático quando a última gravação real não foi Neutro: a escolha passa a ser manual (`a74030e`).
+  - Editar nome e descrição: na biblioteca local é um `update` do registro; na conta é uma nova versão (versões só por acréscimo), que passa pelo gate como qualquer publicação.
+  - `run_worker_first` só nas rotas de página, também no staging (`11fa0ee`), mais o wrapper de host canônico (#33). O build do deploy (`tools/deploy.mjs`) agora embrulha o Worker como o `npm run build` (`47cc6fc`, `0a5302d`), então a produção recebe de fato o wrapper. Resultado: o workers.dev de produção responde 301 nas páginas (#33 fechada).
+  - Portão de cobertura no CI (`1d78dac`, fecha #36): unidade web com limite de 85 % (statements, branches, functions e lines); o servidor é medido por `test:int:coverage`.
+  - Desempenho do arraste da Curva: cache da resposta por seção, e efeitos de pintura desligados durante o arraste (`6f2c8bc`: sem brilhos com blur e sem sombras, varredura e arte decorativa pausadas, rótulos sem ler o cookie de idioma a cada quadro; em repouso nada muda). Medição local: média de 16,7 ms em ×1 e 17,6 ms com a CPU 4× mais lenta.
+
+## Resumo final (v1.0.0, 2026-10-18)
+
+Resumo pedido pelo plano (§0.13 e §9).
+
+### O que foi entregue
+
+- **Núcleo (F1):** codec 0xCB, gate v2 (envelope observado), S1, envelope de preset, importação de medições, exportação Equalizer APO, distância e ISO 226, catálogo de presets, transporte WebHID com mutex por dispositivo, política de gravação e diário, medidores (BS.1770, VU, PPM) e solver PEQ.
+- **Aplicação web local-first (F2):** Curva, Comparar, Teste cego, Soe como X (dados AutoEq embutidos), Biblioteca, Cabo e Docs, com áudio a 96 kHz, medidores em AudioWorklet, offline e pt-BR e en-US.
+- **Backend, autenticação e conta (F3):** Better Auth com scrypt próprio, conta e LGPD (exportação, exclusão, troca de e-mail), 2FA obrigatório no admin, registros de acesso cifrados (Marco Civil), rate limit com HMAC do IP.
+- **Social (F4):** publicação, versões e forks, favoritos, atividade com privacidade, rankings, feed, imagens OG, S6 anônimo, S7 troca às cegas, Comunidade e moderação.
+- **Produção e operação (F5):** CI, deploy pela máquina do operador, logs sem PII, métricas, backup semanal, dump público, CSP estrita, runbooks; produção em https://open-auri.com e staging no workers.dev.
+- **FUX:** polimento de UI e UX em todas as páginas (barra compacta, arte e animações por tema, camada didática, carregamento sob demanda), seek e loop nos comparativos, menu do usuário e lista de bloqueio de apelidos.
+- **Fechamento:** QG em 2 rodadas (PASS), lote de issues `qa-minor`, lote pós-FUX, Simple Analytics, Teste cego como palco, edição de nome e descrição, #33, portão de cobertura, desempenho do arraste, `SECURITY.md` e CodeQL (PR #37, `b9426a2`), tag `v1.0.0`.
+
+### Evidências de aceite (verificação central desta sessão)
+
+- Raiz: `npm test` 722/722; lint e typecheck limpos.
+- Web, unidade e componente: 2 845/2 845 antes do último lote; depois dele, todas as áreas tocadas verdes.
+- Cobertura da unidade web em `89ec604`: statements 96,68 %, branches 88,78 %, functions 97,39 %, lines 97,53 % (limites de 85 %).
+- Cobertura da integração: 1 075 testes; linhas 96,2 %, branches 91 %, funções 98,4 %.
+- CI verde em `0a5302d` (lint, tipos e varreduras; testes; build e orçamentos; E2E Chrome). CodeQL verde (JS/TS e Actions). PR #37 (`SECURITY.md` e CodeQL) mesclado como `b9426a2`.
+- E2E em staging: 38 ok e 1 pulado (o caso de cadastro fechado, porque o staging está com cadastro aberto).
+- Deploy de produção: smoke ok (`/`, `/docs`, `/api/v1/feed`, OG); páginas de produção respondem 200; o workers.dev de produção responde 301 nas páginas (#33 fechada).
+- Orçamentos: todas as rotas com até 250 kB gzip (`/teste-cego` 157 kB).
+- Desempenho local do arraste: média de 16,7 ms em ×1 e 17,6 ms com a CPU 4× mais lenta.
+- Issues fechadas nesta sessão: #8 a #31, #33, #35 e #36.
+
+### Decisões do PO (2026-10-18, todas respondidas)
+
+1. Apelidos: as marcas `final`, `chord` e `tidal` continuam recusadas só quando o apelido é exatamente igual à marca (mantido).
+2. Desativar o 2FA: a senha é conferida antes do código, então uma senha errada nunca consome um código de backup (`/verify-password` antes do código; teste de integração).
+3. Política: subir a versão volta a mostrar o aviso (mantido; versão `2026-10-18`).
+4. Faders do Teste cego: a nota dada não pode ser apagada e Enter registra 5 (mantido).
+5. Da FUX: "Não listada" é o padrão de publicação na Curva, na Comunidade e no Comparar (`a34146b`); o pack de referência da Biblioteca traz os 11 presets oficiais (`c7fa290`).
+6. Simple Analytics: site cadastrado e painel público, funcionando (confirmado pelo operador).
+7. Painel admin: o aviso "Cloudflare Access: não configurado" é esperado; o Access é uma camada opcional (`ACCESS_AUD` e `ACCESS_TEAM_DOMAIN`). Ligar ou não fica a critério do operador.
+
+### O que falta
+
+- **FH:** validação em hardware quando o cabo chegar (issue #6).
+- Issue #7 (acompanhamento do plano) segue aberta; a #5 é fechada com o lançamento.
+
 ## Bloqueios e perguntas ao humano
 
-Nenhum.
+Nenhum bloqueio. Perguntas ao PO: ver "Resumo final (v1.0.0)", "Perguntas em aberto para o PO".
