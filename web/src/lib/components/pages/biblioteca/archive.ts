@@ -1,4 +1,4 @@
-import { OFFICIAL_PRESETS, presetsByGroup } from 'open-auri/catalog';
+import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 import { curveResponseDb, distance, logGrid, levelDb } from 'open-auri/dsp';
 import { encodeS1, serializeEnvelope } from 'open-auri/share';
 import type { CurveData } from '#lib/state/model.ts';
@@ -196,13 +196,13 @@ export function envelopeView(
 		: { json: JSON.stringify(envelope, null, 2), exportable: false };
 }
 
-/** S9 contains only the reference shelf, in catalog order, with per-curve rights status. */
+/** S9 contains all 11 official presets, in catalog order, with per-curve rights status. */
 export function referencePack(): string {
 	return JSON.stringify(
 		{
 			format: 'open-auri/pack@1',
 			name: 'Pack de referência Auri',
-			presets: presetsByGroup('referencia').map((preset) => ({
+			presets: OFFICIAL_PRESETS.map((preset) => ({
 				id: preset.id,
 				name: preset.label,
 				source: 'https://equalizador.kuba.audio',

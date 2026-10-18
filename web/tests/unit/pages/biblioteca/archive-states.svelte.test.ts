@@ -2,6 +2,7 @@ import { tick } from 'svelte';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
+import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 import { gateForWrite } from 'open-auri/safety';
 import { encodeS1 } from 'open-auri/share';
 import type { ClientApp } from '#lib/app/client.svelte.ts';
@@ -261,14 +262,18 @@ test('English uses translated descriptions or explicitly marks the original Port
 		.toBeVisible();
 });
 
-test('pack export downloads the reference JSON rather than the filtered cards', async () => {
+test('pack export downloads all 11 official presets rather than the filtered cards', async () => {
 	await render(Biblioteca, { origin: 'https://example.test' });
 	await page.getByRole('button', { name: m.biblioteca_pack_export(), exact: true }).click();
 	await expect.poll(() => vi.mocked(downloadBlob).mock.calls.length).toBe(1);
 	const [blob, name] = vi.mocked(downloadBlob).mock.calls[0];
 	expect(name).toBe('open-auri-reference-pack.json');
 	expect(blob.type).toBe('application/json');
-	expect(JSON.parse(await blob.text())).toBeTypeOf('object');
+	const pack: { presets: { name: string }[] } = JSON.parse(await blob.text());
+	expect(pack.presets).toHaveLength(11);
+	expect(pack.presets.map((preset) => preset.name)).toEqual(
+		OFFICIAL_PRESETS.map((preset) => preset.label)
+	);
 	expect(blob.size).toBeGreaterThan(100);
 });
 

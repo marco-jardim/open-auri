@@ -1,5 +1,6 @@
 import '../../primitives/design-system.ts';
 import axe from 'axe-core';
+import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -62,6 +63,7 @@ vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
 afterEach(async () => {
 	await cleanup();
 	await setLocale('pt-BR', { reload: false });
+	await page.viewport(1440, 900);
 });
 
 async function accessible(container: HTMLElement) {
@@ -83,7 +85,7 @@ for (const copy of [
 		close: 'Fechar ficha',
 		data: 'DADOS',
 		yourCurve: 'Sua curva: ',
-		pack: 'Os 4 masters · Vol. 01',
+		pack: 'Os 11 masters · Vol. 01',
 		license: 'licença: a confirmar',
 		correlator: 'Correlator'
 	},
@@ -95,7 +97,7 @@ for (const copy of [
 		close: 'Close sheet',
 		data: 'DATA',
 		yourCurve: 'Your curve: ',
-		pack: 'The 4 masters · Vol. 01',
+		pack: 'The 11 masters · Vol. 01',
 		license: 'license: pending',
 		correlator: 'Correlator'
 	}
@@ -160,6 +162,37 @@ for (const copy of [
 		expect(screen.container.querySelector('dialog')).toBeNull();
 		await expect.element(open).toHaveFocus();
 	}, 15000);
+}
+
+test('the pack lists exactly the 11 catalog presets by name, in catalog order', async () => {
+	const screen = await render(Biblioteca, { origin: 'https://example.test' });
+	const names = screen.container.querySelector('.pack-box .tape-tags')?.textContent?.split(' · ');
+	expect(names).toHaveLength(11);
+	expect(names).toEqual(OFFICIAL_PRESETS.map((preset) => preset.label));
+	expect(screen.container.querySelector('.pack-box .tape-sub')?.textContent).toContain('11 / 11');
+});
+
+for (const width of [320, 1440]) {
+	test(`the 11-preset pack wraps inside its shelf without page overflow at ${width}px`, async () => {
+		await page.viewport(width, 900);
+		const screen = await render(Biblioteca, { origin: 'https://example.test' });
+		const pack = screen.container.querySelector<HTMLElement>('.pack-box');
+		const names = pack?.querySelector<HTMLElement>('.tape-tags');
+		const shelf = pack?.parentElement;
+		if (!pack || !names || !shelf) throw new Error('Missing pack shelf');
+		pack.scrollIntoView();
+		await document.fonts.ready;
+		expect(names.textContent?.split(' · ')).toEqual(OFFICIAL_PRESETS.map((preset) => preset.label));
+		expect(names.scrollWidth).toBeLessThanOrEqual(names.clientWidth);
+		expect(pack.scrollWidth).toBeLessThanOrEqual(pack.clientWidth);
+		const box = pack.getBoundingClientRect();
+		const shelfBox = shelf.getBoundingClientRect();
+		expect(box.left).toBeGreaterThanOrEqual(shelfBox.left);
+		expect(box.right).toBeLessThanOrEqual(shelfBox.right);
+		expect(box.left).toBeGreaterThanOrEqual(0);
+		expect(box.right).toBeLessThanOrEqual(width);
+		expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+	});
 }
 
 test('untrusted local names stay text in the sheet and card, never HTML', async () => {

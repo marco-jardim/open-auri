@@ -167,19 +167,24 @@ describe('Biblioteca archive', () => {
 		);
 	});
 
-	test('S9 contains exactly the reference group, retains its S1 values and does not invent a license', () => {
+	test('S9 contains all 11 official presets in catalog order, retains its S1 values and does not invent a license', () => {
 		const pack: {
 			format: string;
-			presets: { id: string; code: string; license: null; licenseStatus: string }[];
+			presets: { id: string; name: string; code: string; license: null; licenseStatus: string }[];
 		} = JSON.parse(referencePack());
 		expect(pack.format).toBe('open-auri/pack@1');
+		expect(pack.presets).toHaveLength(11);
 		expect(pack.presets.map((preset) => preset.id)).toEqual(
-			presetsByGroup('referencia').map((preset) => preset.id)
+			OFFICIAL_PRESETS.map((preset) => preset.id)
+		);
+		expect(pack.presets.map((preset) => preset.name)).toEqual(
+			OFFICIAL_PRESETS.map((preset) => preset.label)
 		);
 		pack.presets.forEach((preset, index) => {
 			expect(preset.license).toBeNull();
 			expect(preset.licenseStatus).toBe('a confirmar');
-			expect(decodeS1(preset.code).bands).toEqual(presetsByGroup('referencia')[index].bands);
+			expect(decodeS1(preset.code).bands).toEqual(OFFICIAL_PRESETS[index].bands);
+			expect(decodeS1(preset.code).preampDb).toBe(OFFICIAL_PRESETS[index].preampDb);
 		});
 	});
 

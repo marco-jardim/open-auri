@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Courier Prime (--type) comes from the global fonts.css (spec §5.6): no page font imports.
-	import { presetsByGroup } from 'open-auri/catalog';
+	import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 	import { Button, EmptyState, Skeleton } from '#lib/components/primitives/index.ts';
 	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
@@ -100,7 +100,7 @@
 		)
 	);
 	const rmsByTape = $derived(new Map(visible.map((tape) => [tape.id, rmsTo(tape, comparison)])));
-	const pack = presetsByGroup('referencia');
+	const pack = OFFICIAL_PRESETS;
 	const packOpen = $derived(query.trim() === '' && tag === 'all');
 	/** FUX.2: the runtime may still be loading (client null) or IndexedDB still restoring. */
 	const libraryLoading = $derived(!app || app.state.library.loading);
@@ -1149,6 +1149,7 @@
 			0 18px 0 -5px #241910;
 	}
 	.pack-box {
+		overflow-wrap: anywhere;
 		background:
 			repeating-linear-gradient(0deg, #0000 0 3px, #9b805408 4px),
 			linear-gradient(130deg, #e2d5b2, #bfae86 90%);
