@@ -100,7 +100,7 @@
 	let draftName = $state('');
 	let description = $state('');
 	let license = $state<'CC0-1.0' | 'CC-BY-4.0'>('CC0-1.0');
-	let visibility = $state<'public' | 'unlisted' | 'private'>('public');
+	let visibility = $state<'public' | 'unlisted' | 'private'>('unlisted');
 	let issues = $state.raw<TextIssue[]>([]);
 	const saving = $derived(mode === 'save');
 	const nameIssues = $derived(issues.filter((issue) => issue.field === 'name'));
@@ -333,7 +333,7 @@
 		draftName = copy && copy.editorName === name ? copy.name : name;
 		description = copy?.description ?? '';
 		license = copy?.license ?? 'CC0-1.0';
-		visibility = next === 'save' ? 'private' : 'public';
+		visibility = next === 'save' ? 'private' : 'unlisted';
 		message = '';
 		gateMessages = [];
 		issues = [];

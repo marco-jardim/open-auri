@@ -1,7 +1,7 @@
 // T4.13 + FUX.P4: "NO AR / Publicar". The lamp lights only after the server approved the
 // publication; a GATE_REJECTED answer keeps it dark and lists the reasons with the checklist's gate
 // messages. The technical sheet stays collapsed; unavailable publishing says why; the visibility
-// default is unchanged.
+// default is unlisted.
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -69,7 +69,7 @@ test('the lamp lights only after the server approved the publication', async () 
 	const [, init] = fetch.mock.calls[0] ?? [];
 	const body: unknown = JSON.parse(String(init?.body));
 	expect(body).toMatchObject({
-		visibility: 'public',
+		visibility: 'unlisted',
 		envelope: { format: 'open-auri/preset@1', name: 'Minha curva', license: 'CC-BY-4.0' }
 	});
 	expect(onpublished).toHaveBeenCalledTimes(1);
@@ -137,13 +137,26 @@ test('the technical sheet is collapsed behind "Ver detalhes técnicos" and opens
 	await expect.element(page.getByTestId('onair-s1')).toBeVisible();
 });
 
-test('the visibility default is unchanged ("Pública")', async () => {
-	const { props } = setup(() => undefined);
-	await render(OnAir, props);
-	await expect
-		.element(page.getByRole('radio', { name: m.comunidade_visibility_public() }))
-		.toBeChecked();
-});
+test.each(['unlisted', 'public', 'private'])(
+	'publishing starts unlisted and submits the chosen visibility (%s)',
+	async (chosen) => {
+		const { props, fetch } = setup(() =>
+			json({ lineageId: 'lin-new', versionId: 'ver-new', curveId: 'cnew' }, 201)
+		);
+		await render(OnAir, props);
+		await expect
+			.element(page.getByRole('radio', { name: m.comunidade_visibility_unlisted() }))
+			.toBeChecked();
+		if (chosen !== 'unlisted') {
+			const name =
+				chosen === 'public' ? m.comunidade_visibility_public() : m.comunidade_visibility_private();
+			await page.getByRole('radio', { name }).click();
+		}
+		await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+		await expect.element(lamp()).toHaveAttribute('data-lit', 'true');
+		expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({ visibility: chosen });
+	}
+);
 
 test('the gate and the technical terms carry their explainers', async () => {
 	const { props } = setup(() => undefined);

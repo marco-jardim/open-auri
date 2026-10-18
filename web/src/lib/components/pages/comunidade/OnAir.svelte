@@ -7,7 +7,7 @@
 
 	Progressive disclosure (spec §4.1): the technical sheet (the S5 JSON the server validates) stays
 	closed behind "Ver detalhes técnicos"; envelope problems that block publishing stay visible.
-	The visibility default is unchanged ("Pública"): changing it needs the product owner (§4.1).
+	Publication defaults to "Não listada"; the author can choose public or private visibility.
 -->
 <script lang="ts">
 	import ResponseChart from '#lib/charts/ResponseChart.svelte';
@@ -56,7 +56,7 @@
 	let name = $state('');
 	let description = $state('');
 	let license = $state<License>('CC-BY-4.0');
-	let visibility = $state<Visibility>('public');
+	let visibility = $state<Visibility>('unlisted');
 	let publishing = $state(false);
 	let published = $state.raw<{ info: PublishedInfo; s1: string } | null>(null);
 	let message = $state('');

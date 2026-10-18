@@ -112,6 +112,27 @@ test('signed-out library prompts login and an unavailable API preserves local to
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.curve_social_offline());
 });
 
+test.each(['unlisted', 'public', 'private'])(
+	'publish opens unlisted and submits the chosen visibility (%s)',
+	async (chosen) => {
+		const { social, fetcher, curve } = fixture();
+		await render(SocialPublish, { social, curve, path: '/comparar' });
+		await page.getByRole('button', { name: m.curve_social_publish() }).click();
+		const visibility = page.getByRole('combobox', { name: m.curve_social_visibility() });
+		await expect.element(visibility).toHaveValue('unlisted');
+		if (chosen !== 'unlisted') await visibility.selectOptions(chosen);
+		await page.getByRole('button', { name: m.curve_social_submit() }).click();
+		await expect
+			.element(page.getByRole('status'))
+			.toHaveTextContent(
+				chosen === 'private' ? m.curve_social_saved() : m.curve_social_published()
+			);
+		expect(JSON.parse(String(fetcher.mock.calls[0]?.[1].body))).toMatchObject({
+			visibility: chosen
+		});
+	}
+);
+
 test('save is private; publishing exposes server gate feedback in localized messages', async () => {
 	await setLocale('en-US', { reload: false });
 	const { social, fetcher, curve } = fixture();

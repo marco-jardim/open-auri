@@ -46,7 +46,7 @@
 			};
 			name = curve.name;
 			description = '';
-			visibility = publish ? 'public' : 'private';
+			visibility = publish ? 'unlisted' : 'private';
 			message = '';
 			reasons = [];
 			dialog.showModal();

@@ -412,6 +412,10 @@ export async function publishOnCurva(
 	});
 	await expect(dialog).toBeVisible();
 	await dialog.getByRole('textbox', { name: text(copy, 'curva_social_name') }).fill(name);
+	const visibility = dialog.getByRole('combobox', { name: text(copy, 'curva_social_visibility') });
+	await expect(visibility).toHaveValue('unlisted');
+	// These fixtures must appear in feeds and rankings: choose public explicitly.
+	await visibility.selectOption('public');
 	await dialog
 		.getByRole('button', { name: text(copy, 'curva_social_publish'), exact: true })
 		.click();

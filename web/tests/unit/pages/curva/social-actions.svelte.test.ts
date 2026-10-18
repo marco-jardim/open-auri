@@ -83,6 +83,30 @@ test('account save asks for the text, is private and never edits or writes the c
 	expect(app.pendingWrite).toBeNull();
 });
 
+test.each(['unlisted', 'public', 'private'])(
+	'publish opens unlisted and submits the chosen visibility (%s)',
+	async (chosen) => {
+		const { fetcher } = await setup(async (url) =>
+			url.includes('/me/library')
+				? json({ items: [], nextCursor: null })
+				: json({ lineageId: 'published', versionId: 'v1', curveId: 'hash' }, 201)
+		);
+		await page.getByRole('button', { name: m.curva_social_publish(), exact: true }).click();
+		const dialog = page.getByRole('dialog');
+		const visibility = dialog.getByRole('combobox', { name: m.curva_social_visibility() });
+		await expect.element(visibility).toHaveValue('unlisted');
+		if (chosen !== 'unlisted') await visibility.selectOptions(chosen);
+		await dialog.getByRole('button', { name: m.curva_social_publish(), exact: true }).click();
+		await expect
+			.element(page.getByRole('status').first())
+			.toMatchTextContent(
+				chosen === 'private' ? m.curva_social_saved() : m.curva_social_published()
+			);
+		const request = fetcher.mock.calls.find(([url]) => url === '/api/v1/curves');
+		expect(JSON.parse(String(request?.[1].body))).toMatchObject({ visibility: chosen });
+	}
+);
+
 test('publish displays server gate reasons and remembers only an approved 201', async () => {
 	let approved = false;
 	await setup(async (url) => {

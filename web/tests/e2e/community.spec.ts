@@ -295,6 +295,9 @@ for (const locale of LOCALES) {
 		});
 		const onAir = page.locator('#publicar');
 		const lamp = onAir.getByTestId('onair-lamp');
+		await expect(
+			onAir.getByRole('radio', { name: text(copy, 'comunidade_visibility_unlisted'), exact: true })
+		).toBeChecked();
 		const publish = onAir.getByRole('button', {
 			name: text(copy, 'comunidade_onair_publish'),
 			exact: true
@@ -326,7 +329,14 @@ for (const locale of LOCALES) {
 
 		// The real server approves the same curve: the lamp lights after its answer, with the link.
 		await expect(publish).toBeEnabled();
-		await publish.click();
+		const [request] = await Promise.all([
+			page.waitForRequest(
+				(candidate) =>
+					candidate.method() === 'POST' && new URL(candidate.url()).pathname === '/api/v1/curves'
+			),
+			publish.click()
+		]);
+		expect(request.postDataJSON()).toMatchObject({ visibility: 'unlisted' });
 		await expect(onAir.getByRole('alert')).toContainText(text(copy, 'comunidade_onair_published'), {
 			timeout: 15_000
 		});
@@ -337,11 +347,15 @@ for (const locale of LOCALES) {
 			exact: true
 		});
 		await expect(pageLink).toHaveAttribute('href', /^\/c\/[^/?#]+$/);
-		// The "new" feed is reloaded and carries the new channel.
-		await channel(page, copy, curveName);
+		// An unlisted publication is accessible by link, but not listed in the feed.
+		await expect(
+			page
+				.getByRole('list', { name: text(copy, 'comunidade_console_title'), exact: true })
+				.getByRole('link', { name: curveName, exact: true })
+		).toHaveCount(0);
 		await expectNoSeriousAxe(page);
 
-		// The public page of the new curve answers for anyone.
+		// The unlisted page of the new curve answers for anyone with its link.
 		const href = (await pageLink.getAttribute('href')) ?? '';
 		const anonymous = await quietContext(browser, locale);
 		const response = await anonymous.request.get(href);
