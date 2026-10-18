@@ -408,6 +408,54 @@ test('an advisory refusal colours the handle and the chip; the bubble follows th
 	expect(handle.classList.contains('outside')).toBe(false);
 });
 
+test('while a point moves the screen drops its blurred effects; at rest they all come back', async () => {
+	const { screen } = await setup({ reducedMotion: false });
+	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
+	const part = (selector: string) => {
+		const element = screen.container.querySelector(selector);
+		if (!element) throw new Error(`Missing ${selector}`);
+		return element;
+	};
+	const glass = part('.screen');
+	const eq = part('path.tr-eq');
+	const ring = part('.handle.sel .ring');
+	const sweep = part('rect.sweep');
+	const filter = (element: Element) => getComputedStyle(element).filter;
+	const expectAtRest = () => {
+		expect(glass.hasAttribute('data-dragging')).toBe(false);
+		// Phosphor glow on the EQ trace and the selected handle's shadow, the sweep running.
+		expect(filter(eq)).toMatch(/^url\(/);
+		expect(filter(ring)).toContain('drop-shadow');
+		expect(getComputedStyle(sweep).animationPlayState).toBe('running');
+	};
+	expectAtRest();
+	const box = part('svg.handles').getBoundingClientRect();
+	const pointer = (type: string) =>
+		handle.dispatchEvent(
+			new PointerEvent(type, {
+				bubbles: true,
+				cancelable: true,
+				pointerId: 5,
+				clientX: box.left + box.width / 2,
+				clientY: box.top + box.height / 2
+			})
+		);
+	pointer('pointerdown');
+	pointer('pointermove');
+	await vi.waitFor(() => expect(glass.hasAttribute('data-dragging')).toBe(true));
+	const lit = part('rect.safe.lit');
+	expect(filter(eq)).toBe('none');
+	expect(filter(ring)).toBe('none');
+	expect(filter(lit)).toBe('none');
+	expect(getComputedStyle(sweep).animationPlayState).toBe('paused');
+	// The readouts are unchanged: the bubble still follows the handle.
+	expect(screen.container.querySelector('.bubble')).not.toBeNull();
+	pointer('pointerup');
+	await vi.waitFor(() => expect(glass.hasAttribute('data-dragging')).toBe(false));
+	expectAtRest();
+});
+
 test('the wheel over an editable handle steps Q and commits after a pause; locked ones ignore it', async () => {
 	const { ondrag, oncommit } = await setup({ layer: 'ajustar' });
 	const wheel = (name: RegExp, deltaY: number, init: WheelEventInit = {}) =>

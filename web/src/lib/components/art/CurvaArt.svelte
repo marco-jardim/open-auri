@@ -11,7 +11,8 @@
 	- A slow lamp glow behind the deepest open module (the rack, the filter bank or the cabinet).
 	Where the sections sit is read from the page root (its in-flow children) on every resize.
 	Heavy shapes are static files in /art/curva/. Paused off-screen and on hidden tabs
-	(artVisibility, per motif); nothing moves under prefers-reduced-motion (final frame shown).
+	(artVisibility, per motif) and while a scope handle moves; nothing moves under
+	prefers-reduced-motion (final frame shown).
 	Rules: docs/plans/fux-art-brief.md · contract: ./README.md.
 -->
 <script lang="ts">
@@ -159,8 +160,10 @@
 		z-index: -1;
 		pointer-events: none;
 		overflow: hidden;
-		/* Paint containment as well: nothing drawn here may ever add to the page's scroll area. */
-		contain: paint;
+		/* Strict containment (its box comes from the insets, never from the art): nothing drawn
+		   here may ever add to the page's scroll area, and the art's own layout and paint stay
+		   inside it, apart from the scope that repaints above it while a handle moves. */
+		contain: strict;
 	}
 
 	/* Lamp: a warm halo bleeding out around the deepest open module (only its edges show). */
@@ -407,6 +410,12 @@
 		}
 	}
 	:global([data-art='paused']) * {
+		animation-play-state: paused !important;
+	}
+	/* While a scope handle moves (ScopePanel's `data-dragging`), the decorative motion holds:
+	   the frame budget goes to the drag. It resumes where it was on release. */
+	:global(.curva:has([data-dragging])) .art-layer * {
+		/* Same strength as the off-screen pause above: some motifs set their own play state. */
 		animation-play-state: paused !important;
 	}
 	@media (prefers-reduced-motion: reduce) {

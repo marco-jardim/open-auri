@@ -32,6 +32,7 @@
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { CURVA_SESSION } from './preview.svelte.ts';
 	import { m } from '#lib/paraglide/messages.js';
+	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { formatHz, formatQ, formatSignedDb } from './format.ts';
 	import { isLockedKind, type Layer } from './layers.ts';
 	import { hasGain, type Band, type Curve } from './model.ts';
@@ -161,6 +162,10 @@
 	const editable = $derived(layer !== 'ouvir');
 	const reduced = $derived(reducedMotion ?? prefersReducedMotion.current);
 	const legendId = $props.id();
+	// Readouts redrawn on every drag frame (handle label, bubble, peak) name their locale: without
+	// it each message asks Paraglide's getLocale(), which reads document.cookie (cookie strategy)
+	// on every call. A language switch reloads the page, so the locale at mount stays current.
+	const messages = { locale: getLocale() };
 	let overlay: SVGSVGElement | undefined = $state();
 	let screenWidth = $state(0);
 	interface ActiveDrag {
@@ -248,6 +253,13 @@
 		y: number;
 	} | null>(null);
 
+	/**
+	 * A point is moving (pointer, wheel, advisory drag or a parked point): the screen repaints on
+	 * every frame, so its blurred effects give way to plain strokes until release (CSS
+	 * `[data-dragging]`). At rest the screen is drawn exactly as before.
+	 */
+	const dragging = $derived(moving || parkedActive !== null);
+
 	// --- selection: safe box and hard zones -------------------------------------------------------
 
 	const selectedBand = $derived.by(() => {
@@ -326,15 +338,18 @@
 	function handleLabel(band: Band, index: number): string {
 		if (band.kind === 'OFF') return '';
 		if (isLockedKind(band.kind, layer)) {
-			return m.curva_handle_locked({ index: String(index + 1), kind: band.kind });
+			return m.curva_handle_locked({ index: String(index + 1), kind: band.kind }, messages);
 		}
-		return m.curva_handle_hint({
-			index: String(index + 1),
-			kind: band.kind,
-			freq: formatHz(band.freqHz, locale),
-			gain: hasGain(band) ? formatSignedDb(band.gainDb, locale) : '',
-			q: formatQ(band.qFactor, locale)
-		});
+		return m.curva_handle_hint(
+			{
+				index: String(index + 1),
+				kind: band.kind,
+				freq: formatHz(band.freqHz, locale),
+				gain: hasGain(band) ? formatSignedDb(band.gainDb, locale) : '',
+				q: formatQ(band.qFactor, locale)
+			},
+			messages
+		);
 	}
 
 	function readout(band: Band): string {
@@ -342,8 +357,8 @@
 		const freq = formatHz(band.freqHz, locale);
 		const q = formatQ(band.qFactor, locale);
 		return hasGain(band)
-			? m.curva_bubble({ freq, gain: formatSignedDb(band.gainDb, locale), q })
-			: m.curva_bubble_nogain({ freq, q });
+			? m.curva_bubble({ freq, gain: formatSignedDb(band.gainDb, locale), q }, messages)
+			: m.curva_bubble_nogain({ freq, q }, messages);
 	}
 
 	/** Readout bubble next to the handle being moved (pointer, wheel or advisory drag). */
@@ -537,6 +552,7 @@
 		<div
 			class="screen"
 			class:reduced
+			data-dragging={dragging ? '' : undefined}
 			bind:clientWidth={screenWidth}
 			style={`--gfs:${labelSize.toFixed(1)}px`}
 		>
@@ -723,7 +739,7 @@
 							class:out={!insideBox}
 							class:lit={grabbed}
 							x={boxRect.x + 6}
-							y={boxRect.y + 14}>{m.curva_safe_box()}</text
+							y={boxRect.y + 14}>{m.curva_safe_box({}, messages)}</text
 						>
 					{/if}
 					{#each zones as zone (zone.kind)}
@@ -732,11 +748,11 @@
 								class="hard-t"
 								x={xOf(zone.fMin) - 4}
 								y={yOf(Math.min(zone.gMax, DB_MAX)) + 14}
-								text-anchor="end">{m.curva_d7_zone()}</text
+								text-anchor="end">{m.curva_d7_zone({}, messages)}</text
 							>
 						{:else}
 							<text class="hard-t" x={PLOT.left + 8} y={yOf(DB_MAX) + 14}
-								>{m.curva_hard_limit()}</text
+								>{m.curva_hard_limit({}, messages)}</text
 							>
 						{/if}
 					{/each}
@@ -749,7 +765,7 @@
 								PLOT.right - 70
 							)}
 							y={PLOT.bottom - 10}
-							text-anchor="middle">{m.curva_hot_output()}</text
+							text-anchor="middle">{m.curva_hot_output({}, messages)}</text
 						>
 					{:else if internalLabel}
 						<text
@@ -760,7 +776,7 @@
 								PLOT.right - 70
 							)}
 							y={PLOT.bottom - 10}
-							text-anchor="middle">{m.curva_hot_internal()}</text
+							text-anchor="middle">{m.curva_hot_internal({}, messages)}</text
 						>
 					{:else if nearOutput.length > 0}
 						<text
@@ -771,7 +787,7 @@
 								PLOT.right - 60
 							)}
 							y={PLOT.bottom - 10}
-							text-anchor="middle">{m.curva_near_limit()}</text
+							text-anchor="middle">{m.curva_near_limit({}, messages)}</text
 						>
 					{/if}
 				</g>
@@ -890,10 +906,13 @@
 			/>{/if}
 		{#if peak}
 			<span class="pk"
-				>{m.curva_peak_at({
-					db: formatSignedDb(peak.db, locale, 2),
-					freq: formatHz(Math.round(peak.hz), locale)
-				})}</span
+				>{m.curva_peak_at(
+					{
+						db: formatSignedDb(peak.db, locale, 2),
+						freq: formatHz(Math.round(peak.hz), locale)
+					},
+					messages
+				)}</span
 			>
 		{/if}
 	</div>
@@ -1618,6 +1637,21 @@
 		margin: 0;
 		color: var(--text-2);
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
+	}
+	/* While a point moves the screen repaints on every frame (in software on machines without a
+	   GPU): the blurred effects over large areas (phosphor glow of the EQ trace, the lit safe
+	   box's halo, the handle shadows) give way to plain strokes, and the sweep holds still. The
+	   outside state keeps its red ring, drawn thicker instead of glowing. Restored on release. */
+	.screen[data-dragging] .tr-eq,
+	.screen[data-dragging] .safe.lit,
+	.screen[data-dragging] .handle .ring {
+		filter: none;
+	}
+	.screen[data-dragging] .handle.outside .ring {
+		stroke-width: 2.8;
+	}
+	.screen[data-dragging] .sweep {
+		animation-play-state: paused;
 	}
 	.reduced .sweep,
 	.reduced .tr-after,

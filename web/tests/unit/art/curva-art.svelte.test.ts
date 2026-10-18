@@ -72,6 +72,25 @@ test('starts paused, runs once seen, pauses off screen and on a hidden tab', asy
 	for (const element of moving) expect(getComputedStyle(element).animationPlayState).toBe('paused');
 });
 
+test('holds its motion while a scope handle moves and resumes on release', async () => {
+	const { layer } = await mount();
+	reveal();
+	const moving = animated(layer);
+	expect(moving.length).toBeGreaterThan(0);
+	const playState = () => moving.map((element) => getComputedStyle(element).animationPlayState);
+	// The Curva page root, with the scope screen ScopePanel marks while a point moves.
+	const host = layer.parentElement;
+	if (!host) throw new Error('Missing the host');
+	host.classList.add('curva');
+	const scope = document.createElement('div');
+	host.append(scope);
+	expect(new Set(playState())).toEqual(new Set(['running']));
+	scope.setAttribute('data-dragging', '');
+	expect(new Set(playState())).toEqual(new Set(['paused']));
+	scope.removeAttribute('data-dragging');
+	expect(new Set(playState())).toEqual(new Set(['running']));
+});
+
 test('places a rail in every gap, cables below the rack and the lamp on the deepest module', async () => {
 	const { screen, layer } = await mount();
 	const sections = () => [...screen.container.querySelectorAll<HTMLElement>('section')];
