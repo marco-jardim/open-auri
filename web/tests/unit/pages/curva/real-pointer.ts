@@ -1,3 +1,5 @@
+import { tick } from 'svelte';
+
 /**
  * KindDial pauses its pending countdown while a mouse is over the dial or its legend
  * (`pointerenter`/`pointerleave` with a mouse pointer). The browser runner shares one real
@@ -29,4 +31,16 @@ export function blockRealPointerHover(): () => void {
 	return () => {
 		for (const type of BOUNDARY_EVENTS) window.removeEventListener(type, stop, true);
 	};
+}
+
+/** A dispatched click alone does not perform the browser's pointerdown → focus default action. */
+export async function pointerClick(element: HTMLElement, pointerType = 'mouse'): Promise<void> {
+	const pointer = { bubbles: true, cancelable: true, pointerType, pointerId: 1, isPrimary: true };
+	element.dispatchEvent(new PointerEvent('pointerdown', { ...pointer, button: 0, buttons: 1 }));
+	if (pointerType === 'mouse') element.focus();
+	element.dispatchEvent(new PointerEvent('pointerup', { ...pointer, button: 0, buttons: 0 }));
+	// Touch compatibility mouse events (and their focus default action) follow pointerup.
+	if (pointerType !== 'mouse') element.focus();
+	element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+	await tick();
 }

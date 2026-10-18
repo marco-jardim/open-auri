@@ -84,6 +84,19 @@ describe('checkedCurve and checkedLabels (lenient core normalizeLabels)', () => 
 		expect(sameLabels(named.labels, ten(['Grave']))).toBe(true);
 		expect(sameLabels(named.labels, null)).toBe(false);
 	});
+
+	it('sameLabels: absent, null and an all-null list are the same (no labels)', () => {
+		for (const none of [null, undefined, ten([]), [], [null, null]]) {
+			expect(sameLabels(none, null), JSON.stringify(none)).toBe(true);
+			expect(sameLabels(undefined, none), JSON.stringify(none)).toBe(true);
+			expect(sameLabels(ten([]), none), JSON.stringify(none)).toBe(true);
+			expect(sameLabels(none, ten(['Grave'])), JSON.stringify(none)).toBe(false);
+			expect(sameLabels(ten(['Grave']), none), JSON.stringify(none)).toBe(false);
+		}
+		// Named lists are still compared entry by entry.
+		expect(sameLabels(ten(['Grave']), ten([null, 'Grave']))).toBe(false);
+		expect(sameLabels(ten(['Grave', 'Ar']), ten(['Grave', 'Ar']))).toBe(true);
+	});
 });
 
 describe('curve store labels', () => {

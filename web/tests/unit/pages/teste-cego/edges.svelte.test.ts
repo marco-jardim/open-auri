@@ -4,7 +4,7 @@ import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import BlindTest from '#lib/components/pages/teste-cego/BlindTest.svelte';
 import ListeningRoom from '#lib/components/pages/teste-cego/ListeningRoom.svelte';
-import { createAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
+import { createAudioEngine, type AudioEngine, type PreviewChain } from '#lib/audio/engine.ts';
 import { neutralCurve } from '#lib/state/model.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
@@ -83,11 +83,41 @@ test('blind setup reports random-source and preview construction failures withou
 	await page.getByRole('button', { name: m.cego_start(), exact: true }).click();
 	await expect.element(page.getByText(m.cego_random_error(), { exact: true })).toBeVisible();
 	random.mockRestore();
-	vi.spyOn(audio, 'createAB').mockImplementation(() => {
+	// The preview's construction: the first candidate's chain is built, the second one is refused.
+	const realBuild = audio.buildChain;
+	const built: PreviewChain[] = [];
+	const build = vi
+		.spyOn(audio, 'buildChain')
+		.mockImplementationOnce((...args) => {
+			const chain = realBuild(...args);
+			built.push(chain);
+			return chain;
+		})
+		.mockImplementation(() => {
+			throw new Error('audio graph refused');
+		});
+	await page.getByRole('button', { name: m.cego_start(), exact: true }).click();
+	await expect.element(page.getByText(m.cego_audio_error(), { exact: true })).toBeVisible();
+	expect(build).toHaveBeenCalledTimes(2);
+	expect(start).not.toHaveBeenCalled();
+	// The chain built before the refusal is released, never left in the graph.
+	expect(built).toHaveLength(1);
+	expect(audio.getChainOutput(built[0]?.id ?? '')).toBeNull();
+});
+
+test('a refused preview protection is reported like any construction failure', async () => {
+	audio = createAudioEngine({ indexedDB: null });
+	const start = vi.spyOn(audio, 'start');
+	const build = vi.spyOn(audio, 'buildChain');
+	await render(BlindTest, { audio, reducedMotion: true });
+	await pair();
+	vi.spyOn(audio, 'sharedProtection').mockImplementation(() => {
 		throw new Error('audio graph refused');
 	});
 	await page.getByRole('button', { name: m.cego_start(), exact: true }).click();
 	await expect.element(page.getByText(m.cego_audio_error(), { exact: true })).toBeVisible();
+	// Nothing was built, and nothing starts.
+	expect(build).not.toHaveBeenCalled();
 	expect(start).not.toHaveBeenCalled();
 });
 

@@ -75,7 +75,9 @@ for (const copy of [
 		await page.viewport(copy.locale === 'pt-BR' ? 1440 : 390, 1000);
 		const audio = sharedEngine();
 		const start = vi.spyOn(audio, 'start');
-		const createAB = vi.spyOn(audio, 'createAB');
+		// The preview is built on Começar: one shared protection, then one chain per candidate.
+		const sharedProtection = vi.spyOn(audio, 'sharedProtection');
+		const buildChain = vi.spyOn(audio, 'buildChain');
 		const fetchSpy = vi.spyOn(globalThis, 'fetch');
 		const screen = await render(BlindTest, { audio, reducedMotion: true });
 		await accessible(screen.container);
@@ -88,9 +90,19 @@ for (const copy of [
 		await page.getByRole('checkbox', { name: /^Auri\b/ }).click();
 		await page.getByRole('checkbox', { name: /^Natural\b/ }).click();
 		expect(start).not.toHaveBeenCalled();
-		expect(createAB).not.toHaveBeenCalled();
+		expect(sharedProtection).not.toHaveBeenCalled();
+		expect(buildChain).not.toHaveBeenCalled();
 		await page.getByRole('button', { name: copy.start, exact: true }).click();
-		expect(createAB).toHaveBeenCalledOnce();
+		expect(sharedProtection).toHaveBeenCalledOnce();
+		expect(buildChain).toHaveBeenCalledTimes(2);
+		// Equal gain staging: both chains get the one protection judged for the pair (none for two
+		// official presets), so it never tells them apart.
+		const protect = sharedProtection.mock.results[0]?.value;
+		expect(protect).toBeUndefined();
+		expect(buildChain.mock.calls.map(([, , options]) => options?.protect)).toEqual([
+			protect,
+			protect
+		]);
 		expect(start).not.toHaveBeenCalled();
 		await expect.element(page.getByText(new RegExp(`^${copy.instant}`))).toBeVisible();
 		// Neither the candidates panel nor any accessible label reveals identities during listening.

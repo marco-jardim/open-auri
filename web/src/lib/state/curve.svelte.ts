@@ -1,5 +1,5 @@
 import { getPreset } from 'open-auri/catalog';
-import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
+import { gateAccepts as sharedGateAccepts } from '../gate-verdicts.ts';
 import { createStorage, type ClientStorage } from './storage.ts';
 import { LABEL_COUNT } from 'open-auri/share';
 import { checkedCurve, curveSignature, neutralCurve, nextTimestamp, sameLabels } from './model.ts';
@@ -22,7 +22,14 @@ export interface CurveStoreOptions {
 	profile?: () => YoloProfile;
 }
 
-/** Gate verdicts of stored curves by profile. Stored curves are frozen: each is judged once. */
+/**
+ * The verdicts of each stored curve by profile, read from the client's shared verdict cache
+ * (`gate-verdicts.ts`, the one the audio engine and the Curva preview use, so a curve is judged
+ * once for all of them). Stored curves are frozen, so this only remembers which shared verdict
+ * each one got: the undo history (up to `UNDO_LIMIT` curves each way, scanned at every
+ * `canUndo`/`canRedo` read) holds more curves than the shared cache keeps, and scanning it in
+ * order through the cache alone would evict and judge every entry again at every read.
+ */
 const judged = new WeakMap<CurrentCurve, Partial<Record<YoloProfile, boolean>>>();
 
 /**
@@ -34,12 +41,7 @@ export function gateAccepts(curve: CurrentCurve, profile: YoloProfile): boolean 
 	const known = judged.get(curve) ?? {};
 	const cached = known[profile];
 	if (cached !== undefined) return cached;
-	const experimental = curve.bands.some((band) => isExperimentalKind(band.kind));
-	const ok = gateForWrite(
-		curve.bands,
-		curve.preampDb,
-		profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
-	).ok;
+	const ok = sharedGateAccepts(curve.bands, curve.preampDb, { profile });
 	judged.set(curve, { ...known, [profile]: ok });
 	return ok;
 }
@@ -56,7 +58,9 @@ export function gateAccepts(curve: CurrentCurve, profile: YoloProfile): boolean 
  *   on here; a curve failing the YOLO hard reasons (codec-only) never. A refused curve from
  *   another tab leaves this tab's curve and history as they are; refused undo or redo steps are
  *   skipped (and dropped when an earlier step is adopted), so Desfazer goes to the newest curve
- *   this tab may use now, and `canUndo`/`canRedo` say whether there is one;
+ *   this tab may use now, and `canUndo`/`canRedo` say whether there is one. An undo or redo step
+ *   with the current curve's bands and preamp (labels or name only) is always adopted: it
+ *   changes nothing that is heard or written;
  * - `oa.current` on load: YOLO is always off after a load, yet the YOLO curve a tab left there
  *   comes back to the editor (protected preview, no export: see curva/yolo.ts). Only a curve
  *   failing even the YOLO hard reasons (a codec-only curve from an older build or edited by
@@ -75,11 +79,17 @@ export function createCurveStore(options: CurveStoreOptions = {}) {
 	function restorable(curve: CurrentCurve | null): CurrentCurve | null {
 		return curve && (gateAccepts(curve, 'standard') || gateAccepts(curve, 'yolo')) ? curve : null;
 	}
-	/** Index of the newest entry of `stack` this tab may adopt now, or -1. */
+	/**
+	 * Index of the newest entry of `stack` this tab may adopt now, or -1. An entry with the bands
+	 * and preamp of the current curve is a labels-only (or name-only) step: adopting it changes
+	 * nothing that is heard or written, so it is always adoptable. Without this, renaming the
+	 * filters of a YOLO-only curve restored with YOLO off could never be undone.
+	 */
 	function newestAdoptable(stack: readonly CurrentCurve[]): number {
+		const current = curveSignature(value);
 		for (let index = stack.length - 1; index >= 0; index--) {
 			const entry = stack[index];
-			if (entry && adoptable(entry)) return index;
+			if (entry && (curveSignature(entry) === current || adoptable(entry))) return index;
 		}
 		return -1;
 	}
@@ -244,8 +254,9 @@ export function createCurveStore(options: CurveStoreOptions = {}) {
 		},
 		/**
 		 * Back to the newest earlier curve this tab may adopt now (C1): steps it may not (a YOLO-only
-		 * curve once YOLO is off here) are skipped and dropped. Nothing changes, and false, when
-		 * there is none.
+		 * curve once YOLO is off here) are skipped and dropped. A step with the current bands and
+		 * preamp (a rename) is always taken: it changes nothing heard. Nothing changes, and false,
+		 * when there is none.
 		 */
 		undo() {
 			const index = newestAdoptable(past);

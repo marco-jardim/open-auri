@@ -5,6 +5,11 @@ import { CABLE_INFLIGHT_KEY, NEUTRAL_CURVE } from '../../../src/lib/cable/index.
 import { createClientApp, createAppContext, type ClientApp } from '../../../src/lib/app/index.ts';
 import { get } from 'svelte/store';
 import { createToastStore } from '../../../src/lib/components/chrome/toast.ts';
+import {
+	createYoloState,
+	yolo as moduleYolo,
+	YOLO_PHRASE
+} from '../../../src/lib/state/yolo.svelte.ts';
 import { MemoryStorage, fakeAppOptions } from './fakes.ts';
 
 const apps: ClientApp[] = [];
@@ -79,6 +84,34 @@ describe('browser app wiring with fake persistence and HID', () => {
 		expect(write).not.toHaveBeenCalled();
 		expect(gesture).not.toHaveBeenCalled();
 		expect(device.attempts).toBe(0);
+	});
+
+	test('the curve store adopts undo steps under the injected Modo YOLO, not the module one', () => {
+		const fake = fakeAppOptions();
+		const yolo = createYoloState();
+		const app = createClientApp({ ...fake.options, yolo });
+		apps.push(app);
+		const curve = app.state.curve;
+		// Refused by the standard gate, accepted by the YOLO one: HP 30 Hz.
+		const yoloOnly = {
+			name: 'Subsônica',
+			source: 'custom' as const,
+			preampDb: -0.5,
+			bands: [{ kind: 'HP' as const, freqHz: 30, qFactor: 0.71 }, ...NEUTRO.bands.slice(1)]
+		};
+		expect(curve.set(yoloOnly)).toBe(true);
+		expect(app.loadAuriDefault()).toBe(true);
+		expect(yolo.enable(YOLO_PHRASE, 'engenharia')).toBe(true);
+		expect(moduleYolo.enabled).toBe(false);
+		// This app's YOLO is on: the YOLO-only step comes back.
+		expect(curve.undo()).toBe(true);
+		expect(curve.current.bands).toEqual(yoloOnly.bands);
+		expect(curve.redo()).toBe(true);
+		expect(curve.current.bands).toEqual(PADRAO_AURI.bands);
+		// Off again: it is skipped (and dropped), Neutro is next.
+		yolo.disable();
+		expect(curve.undo()).toBe(true);
+		expect(curve.current.bands).toEqual(NEUTRO.bands);
 	});
 
 	test('rescue selects Neutro for the checklist, leaving the editor and cable alone', () => {

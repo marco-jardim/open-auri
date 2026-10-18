@@ -36,6 +36,8 @@ function curve(name: string, preampDb: number, active: Band[]): CurveData {
 const STANDARD = curve('Corte', -1, [{ kind: 'PK', freqHz: 1000, gainDb: -6, qFactor: 1 }]);
 /** Fails the standard gate on class-2 reasons only: the YOLO gate accepts it ("subsônica"). */
 const YOLO_ONLY = curve('Subsônica', -0.5, [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }]);
+/** Another YOLO-only curve (other bands and preamp than YOLO_ONLY). */
+const YOLO_ONLY_2 = curve('Subsônica 2', -1, [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }]);
 /** Only the codec accepts it (the free preview): +11,5 dB out, far over every output limit. */
 const CODEC_ONLY = curve('Alto', -0.5, [{ kind: 'PK', freqHz: 1000, gainDb: 12, qFactor: 1 }]);
 
@@ -58,6 +60,8 @@ it('the fixtures are what they claim: standard, YOLO-only, codec-only', () => {
 	expect(judge(STANDARD, 'standard')).toBe(true);
 	expect(judge(YOLO_ONLY, 'standard')).toBe(false);
 	expect(judge(YOLO_ONLY, 'yolo')).toBe(true);
+	expect(judge(YOLO_ONLY_2, 'standard')).toBe(false);
+	expect(judge(YOLO_ONLY_2, 'yolo')).toBe(true);
 	expect(judge(CODEC_ONLY, 'yolo')).toBe(false);
 	expect(codecAccepts(CODEC_ONLY.bands, CODEC_ONLY.preampDb)).toBe(true);
 });
@@ -160,7 +164,8 @@ describe('undo and redo', () => {
 		store.set(STANDARD);
 		store.set(YOLO_ONLY);
 		store.set(CODEC_ONLY);
-		store.set({ ...YOLO_ONLY, name: 'Subsônica 2' });
+		// Other bands and preamp than the YOLO-only step below it: no labels-only step here.
+		store.set(YOLO_ONLY_2);
 		profile = 'standard';
 		expect(store.canUndo).toBe(true);
 		expect(store.undo()).toBe(true);
@@ -171,6 +176,52 @@ describe('undo and redo', () => {
 		expect(store.current).toMatchObject(same(NEUTRO));
 		expect(store.canUndo).toBe(false);
 		expect(store.undo()).toBe(false);
+	});
+
+	it('renames of a YOLO-only curve restored with YOLO off can be undone and redone', () => {
+		const ten = (entries: (string | null)[]) =>
+			Array.from({ length: 10 }, (_, index) => entries[index] ?? null);
+		const local = new MemoryStorage();
+		local.setItem(
+			CURRENT_STORAGE_KEY,
+			JSON.stringify({ ...YOLO_ONLY, schema: 1, labels: null, updatedAt: 500 })
+		);
+		const store = own(createCurveStore({ storage: adapter(local), profile: () => 'standard' }));
+		expect(store.current).toMatchObject(same(YOLO_ONLY));
+		expect(store.canUndo).toBe(false);
+		expect(store.setLabels(['Sub'])).toBe(true);
+		expect(store.setLabels(['Sub', 'Grave'])).toBe(true);
+		// Labels-only steps: the same bands and preamp, nothing heard changes.
+		expect(store.canUndo).toBe(true);
+		expect(store.undo()).toBe(true);
+		expect(store.current.labels).toEqual(ten(['Sub']));
+		expect(store.undo()).toBe(true);
+		expect(store.current.labels).toBeNull();
+		expect(store.current).toMatchObject(same(YOLO_ONLY));
+		expect(store.canUndo).toBe(false);
+		expect(store.canRedo).toBe(true);
+		expect(store.redo()).toBe(true);
+		expect(store.redo()).toBe(true);
+		expect(store.current.labels).toEqual(ten(['Sub', 'Grave']));
+		expect(store.canRedo).toBe(false);
+	});
+
+	it('a labels-only step never lets another refused curve back', () => {
+		let profile: YoloProfile = 'yolo';
+		const store = own(createCurveStore({ storage: adapter(), profile: () => profile }));
+		store.set(YOLO_ONLY);
+		store.set(YOLO_ONLY_2);
+		profile = 'standard';
+		expect(store.setLabels(['Sub'])).toBe(true);
+		// The rename is undone…
+		expect(store.undo()).toBe(true);
+		expect(store.current).toMatchObject(same(YOLO_ONLY_2));
+		expect(store.current.labels).toBeNull();
+		// …but the other YOLO-only curve below it stays refused with YOLO off; Neutro is next.
+		expect(store.undo()).toBe(true);
+		expect(store.current).toMatchObject(same(NEUTRO));
+		expect(store.canUndo).toBe(false);
+		expect(store.canRedo).toBe(false);
 	});
 });
 

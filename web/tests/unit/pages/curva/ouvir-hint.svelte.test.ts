@@ -1,5 +1,5 @@
 import axe from 'axe-core';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { m } from '#lib/paraglide/messages.js';
@@ -11,10 +11,21 @@ import '../../primitives/design-system.ts';
 const OFF: Band = { kind: 'OFF' };
 /** Neutro: every section OFF, so the scope parks its ten points and shows a hint. */
 const neutral: Curve = { bands: Array.from({ length: 10 }, () => OFF), preampDb: 0 };
+let viewport: { width: number; height: number };
+let rootFontSize: string;
+let rootFontPriority: string;
+
+beforeEach(() => {
+	viewport = { width: innerWidth, height: innerHeight };
+	rootFontSize = document.documentElement.style.getPropertyValue('font-size');
+	rootFontPriority = document.documentElement.style.getPropertyPriority('font-size');
+});
 
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
+	document.documentElement.style.setProperty('font-size', rootFontSize, rootFontPriority);
+	await page.viewport(viewport.width, viewport.height);
 });
 
 async function setup(layer: Layer) {
@@ -101,6 +112,51 @@ test('the Ouvir hint is never cut: over a wide plot, below a phone-sized one', a
 	const below = () => hint.getBoundingClientRect().top - glass.getBoundingClientRect().bottom;
 	await expect.poll(below).toBeGreaterThanOrEqual(0);
 	await expect.element(page.getByText(m.curva_ouvir_hint_title(), { exact: true })).toBeVisible();
+});
+
+test('narrowing through the 720px layout change never puts the hint back over the plot', async () => {
+	const { screen } = await setup('ouvir');
+	const glass = screen.container.querySelector('.screen');
+	const hint = page.getByTestId('ouvir-hint').element();
+	if (!glass) throw new Error('expected the scope screen');
+	for (const width of [736, 735, 721, 720, 719, 390]) {
+		await page.viewport(width, 900);
+		// Model the page's gutters/rails: the phone layout gives the scope more width at 720px.
+		screen.container.style.width = `calc(100vw - ${width <= 720 ? 90 : 150}px)`;
+		await expect
+			.poll(() => hint.getBoundingClientRect().top - glass.getBoundingClientRect().bottom)
+			.toBeGreaterThanOrEqual(0);
+	}
+});
+
+test.each([1101, 1200, 1440])('the %dpx desktop overlay keeps its original offsets', async (width) => {
+	await page.viewport(width, 900);
+	const { screen } = await setup('ouvir');
+	// Leave room for the desktop rack's output column, rails and panel padding.
+	screen.container.style.width = 'calc(100vw - 350px)';
+	const glass = screen.container.querySelector('.screen');
+	const hint = page.getByTestId('ouvir-hint').element();
+	if (!glass) throw new Error('expected the scope screen');
+	await expect.poll(() => getComputedStyle(hint).position).toBe('absolute');
+	const plot = glass.getBoundingClientRect();
+	const over = hint.getBoundingClientRect();
+	expect(over.top).toBeGreaterThanOrEqual(plot.top);
+	expect(plot.right - over.right).toBeCloseTo(plot.width * 0.05, 0);
+	expect(plot.bottom - over.bottom).toBeCloseTo(plot.width * 0.07878, 0);
+});
+
+test('a larger root font moves the hint below a plot that normally supports the overlay', async () => {
+	await page.viewport(900, 900);
+	const { screen } = await setup('ouvir');
+	const glass = screen.container.querySelector('.screen');
+	const hint = page.getByTestId('ouvir-hint').element();
+	if (!glass) throw new Error('expected the scope screen');
+	await expect.poll(() => getComputedStyle(hint).position).toBe('absolute');
+	const fontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+	document.documentElement.style.fontSize = `${fontSize * 2}px`;
+	await expect
+		.poll(() => hint.getBoundingClientRect().top - glass.getBoundingClientRect().bottom)
+		.toBeGreaterThanOrEqual(0);
 });
 
 test.each(['ouvir', 'ajustar', 'engenharia'] as const)(

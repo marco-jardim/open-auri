@@ -119,7 +119,7 @@
 	let requested: BandKind | null = null;
 	let requestId = 0;
 	let pendingTimer: ReturnType<typeof setTimeout> | undefined;
-	let focused = false;
+	let keyboardFocused = false;
 	let hovered = false;
 	let legendHovered = false;
 
@@ -154,7 +154,7 @@
 	/** Five seconds after the last interaction, never while the operator is reading the dial. */
 	function resumePendingTimer(): void {
 		cancelPendingTimer();
-		if (pending && !focused && !hovered && !legendHovered) {
+		if (pending && !keyboardFocused && !hovered && !legendHovered) {
 			pendingTimer = setTimeout(() => cancelPending(true), PENDING_MS);
 		}
 	}
@@ -165,7 +165,12 @@
 		void layer;
 		void reason;
 		void resetKey;
-		untrack(cancelPending);
+		untrack(() => {
+			// A bank focus-exit reset must not erase the dial's just-announced revert.
+			if (pending || requested !== null) {
+				cancelPending(!!focusBoundary && !focusBoundary.contains(document.activeElement));
+			}
+		});
 	});
 
 	async function propose(next: BandKind, direction: 1 | -1 | null = null): Promise<void> {
@@ -229,8 +234,25 @@
 		}
 	}
 
+	/** The keys the switch answers; a modifier alone (Shift before a Shift+click) is not one. */
+	const STEP_KEYS: ReadonlySet<string> = new Set([
+		'Enter',
+		' ',
+		'ArrowRight',
+		'ArrowUp',
+		'ArrowLeft',
+		'ArrowDown',
+		'Home'
+	]);
+
 	function handleKey(event: KeyboardEvent): void {
-		if (event.altKey || event.ctrlKey || event.metaKey) return;
+		if (event.altKey || event.ctrlKey || event.metaKey || !STEP_KEYS.has(event.key)) return;
+		// Keyboard use can follow a pointer focus without another focusin.
+		if (document.activeElement === trigger && !keyboardFocused) {
+			keyboardFocused = true;
+			cancelPendingTimer();
+			showTip();
+		}
 		switch (event.key) {
 			case 'Enter':
 			case ' ':
@@ -273,7 +295,7 @@
 	let tipPos = $state<{ top: number; left: number } | null>(null);
 	let openTimer: ReturnType<typeof setTimeout> | undefined;
 	let closeTimer: ReturnType<typeof setTimeout> | undefined;
-	/** A focus that follows a press is a pointer focus: hover already handles it. */
+	/** A press can focus after pointerup on touch: keep this flag until click or cancellation. */
 	let pressed = false;
 
 	function clearTimers(): void {
@@ -296,7 +318,8 @@
 		if (tipOpen || openTimer !== undefined) return;
 		openTimer = setTimeout(() => {
 			openTimer = undefined;
-			tipOpen = true;
+			// A dial that left the document meanwhile has nothing left to open.
+			if (trigger?.isConnected) tipOpen = true;
 		}, HOVER_DELAY);
 	}
 	function scheduleClose(): void {
@@ -310,7 +333,7 @@
 	}
 	/** Above the switch (below without room), so the legend never covers the dial's clicks. */
 	function place(): void {
-		if (!trigger || !tip) return;
+		if (!trigger?.isConnected || !tip?.isConnected) return;
 		const rect = trigger.getBoundingClientRect();
 		const box = tip.getBoundingClientRect();
 		const above = rect.top - GAP - box.height;
@@ -321,11 +344,24 @@
 	}
 
 	$effect(() => {
+		// A legend element that changes or goes away takes its pending open and close with it.
+		void tip;
+		return clearTimers;
+	});
+
+	$effect(() => {
 		const element = tip;
 		// Refusals can make an already-open legend taller; keep it clear of the next click.
 		void shown;
 		void pendingText;
 		if (!element) return;
+		// Its subtree can leave the document before the dial is destroyed (a parent removed first,
+		// as a test cleanup does), and a focus-exit reset still re-runs this effect then: a
+		// detached popover can be neither shown nor hidden (InvalidStateError).
+		if (!element.isConnected) {
+			tipPos = null;
+			return;
+		}
 		if (!tipOpen) {
 			if (element.matches(':popover-open')) element.hidePopover();
 			tipPos = null;
@@ -333,7 +369,9 @@
 		}
 		if (!element.matches(':popover-open')) element.showPopover();
 		place();
-		const reposition = () => place();
+		const reposition = () => {
+			if (element.isConnected) place();
+		};
 		window.addEventListener('scroll', reposition, true);
 		window.addEventListener('resize', reposition);
 		return () => {
@@ -342,17 +380,64 @@
 		};
 	});
 
-	// Local bubbling listener: Escape in a sibling rename field belongs to that field, not a dial.
+	/** While a native modal is open, Escape is its close request (the page behind it is inert). */
+	const MODAL = 'dialog:modal';
+	/** Targets that answer Escape themselves: dialogs, menus, other popovers, text entry. */
+	const ESCAPE_OWNERS = [
+		'dialog[open]',
+		'[aria-modal="true"]',
+		'[role="dialog"]',
+		'[role="alertdialog"]',
+		'[role="menu"]',
+		'[role="menubar"]',
+		'[role="listbox"]',
+		'[role="combobox"]',
+		':popover-open',
+		'textarea',
+		'select',
+		'[contenteditable]:not([contenteditable="false"])',
+		'input:not([type="button"], [type="checkbox"], [type="color"], [type="file"], [type="image"], [type="radio"], [type="range"], [type="reset"], [type="submit"])'
+	].join(', ');
+
+	/**
+	 * Escape closes this dial's legend and cancels its pending kind, in two places:
+	 * - on the dial and its legend themselves (local, so the dial a key comes from answers it
+	 *   before any other dial's document listener);
+	 * - elsewhere in the document, bubble phase, only while this legend is open (hover or focus)
+	 *   and only for an Escape no other component owns: not one already handled (prevented, or
+	 *   stopped as the rename field does), not one from inside a dialog, menu, popover or text
+	 *   field, and none while a modal dialog that does not hold this dial is open.
+	 */
 	function escapeKey(element: HTMLElement) {
-		const onEscape = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape' || (!pending && requested === null && !tipOpen)) return;
+		const dismiss = (event: KeyboardEvent): void => {
+			if (!pending && requested === null && !tipOpen) return;
 			event.preventDefault();
 			event.stopPropagation();
 			cancelPending(true);
 			hideTip();
 		};
-		element.addEventListener('keydown', onEscape);
-		return () => element.removeEventListener('keydown', onEscape);
+		const isEscape = (event: KeyboardEvent) =>
+			event.key === 'Escape' && !event.defaultPrevented && !event.isComposing;
+		const onLocal = (event: KeyboardEvent) => {
+			if (isEscape(event)) dismiss(event);
+		};
+		const onDocument = (event: KeyboardEvent) => {
+			if (!isEscape(event) || !tipOpen) return;
+			const target = event.target instanceof Node ? event.target : null;
+			// Answered, or declined with nothing to close, by the local listener.
+			if (target && element.contains(target)) return;
+			const from = target instanceof Element ? target : (target?.parentElement ?? null);
+			if (from?.closest(ESCAPE_OWNERS)) return;
+			const modal = document.querySelector(MODAL);
+			if (modal && !modal.contains(element)) return;
+			dismiss(event);
+		};
+		element.addEventListener('keydown', onLocal);
+		document.addEventListener('keydown', onDocument);
+		return () => {
+			element.removeEventListener('keydown', onLocal);
+			document.removeEventListener('keydown', onDocument);
+		};
 	}
 
 	onDestroy(() => {
@@ -375,38 +460,48 @@
 		aria-invalid={pending ? 'true' : undefined}
 		aria-disabled={reason ? 'true' : undefined}
 		aria-describedby={tipId}
-		onclick={(event) => step(event.shiftKey ? -1 : 1)}
+		onclick={(event) => {
+			pressed = false;
+			step(event.shiftKey ? -1 : 1);
+		}}
 		onkeydown={handleKey}
 		onpointerenter={(event) => {
-			if (event.pointerType !== 'touch') {
+			if (event.pointerType === 'mouse') {
 				hovered = true;
 				cancelPendingTimer();
 				scheduleOpen();
 			}
 		}}
 		onpointerleave={(event) => {
-			if (event.pointerType !== 'touch') {
+			if (event.pointerType === 'mouse') {
 				hovered = false;
 				resumePendingTimer();
 				scheduleClose();
 			}
 		}}
-		onpointerdown={() => (pressed = true)}
-		onpointerup={() => (pressed = false)}
+		onpointerdown={() => {
+			pressed = true;
+			keyboardFocused = false;
+			resumePendingTimer();
+		}}
 		onpointercancel={() => (pressed = false)}
 		onfocusin={() => {
-			focused = true;
-			cancelPendingTimer();
-			if (!pressed) showTip();
+			keyboardFocused = !pressed;
+			if (keyboardFocused) {
+				cancelPendingTimer();
+				showTip();
+			} else {
+				resumePendingTimer();
+			}
 		}}
 		onfocusout={(event) => {
-			focused = false;
+			keyboardFocused = false;
 			pressed = false;
 			if (
 				focusBoundary &&
 				(!(event.relatedTarget instanceof Node) || !focusBoundary.contains(event.relatedTarget))
 			) {
-				cancelPending();
+				cancelPending(true);
 			} else {
 				resumePendingTimer();
 			}
@@ -450,13 +545,14 @@
 		style:left={tipPos ? `${tipPos.left}px` : null}
 		style:visibility={tipPos ? null : 'hidden'}
 		onpointerenter={(event) => {
-			if (event.pointerType === 'touch') return;
+			if (event.pointerType !== 'mouse') return;
 			legendHovered = true;
 			cancelPendingTimer();
 			clearTimeout(closeTimer);
 			closeTimer = undefined;
 		}}
-		onpointerleave={() => {
+		onpointerleave={(event) => {
+			if (event.pointerType !== 'mouse') return;
 			legendHovered = false;
 			resumePendingTimer();
 			scheduleClose();

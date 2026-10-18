@@ -6,6 +6,7 @@ import { createMeterRefStore } from './meterRef.svelte.ts';
 import { createLibraryStore } from './library.svelte.ts';
 import { createOutboxStore } from './outbox.svelte.ts';
 import type { Clock } from './model.ts';
+import type { YoloProfile } from './yolo.svelte.ts';
 
 export { createStorage } from './storage.ts';
 export { createCurveStore } from './curve.svelte.ts';
@@ -20,10 +21,17 @@ export type { LibraryInput, LibraryItem } from './library.svelte.ts';
 export type { PendingEvent, JsonValue } from './outbox.svelte.ts';
 export type { MeterReference } from './meterRef.svelte.ts';
 
-/** Own once in a client layout/context; no process-wide SSR singleton or duplicate locale state. */
-export function createClientState(options: StorageOptions & { now?: Clock } = {}) {
-	const storage = createStorage(options);
-	const curve = createCurveStore({ storage, now: options.now });
+/**
+ * Own once in a client layout/context; no process-wide SSR singleton or duplicate locale state.
+ * `profile`: the editor's gate profile, read by the curve store at every adoption (the app's own
+ * Modo YOLO); the module-level `yolo` when omitted.
+ */
+export function createClientState(
+	options: StorageOptions & { now?: Clock; profile?: () => YoloProfile } = {}
+) {
+	const { profile, ...storageOptions } = options;
+	const storage = createStorage(storageOptions);
+	const curve = createCurveStore({ storage, now: options.now, ...(profile ? { profile } : {}) });
 	const journal = createJournalStore({ storage });
 	const flash = createFlashStore({ storage, now: options.now });
 	const meterRef = createMeterRefStore({ storage });

@@ -7,7 +7,7 @@ import type { BandKind } from '#lib/components/pages/curva/model.ts';
 import type { Layer } from '#lib/components/pages/curva/layers.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
-import { blockRealPointerHover } from './real-pointer.ts';
+import { blockRealPointerHover, pointerClick } from './real-pointer.ts';
 
 const refusal = 'The full-curve gate refused this candidate.';
 /** Hover is driven by dispatched events only: the runner's real mouse must not pause a dial. */
@@ -132,6 +132,31 @@ async function advance(ms: number) {
 	await tick();
 }
 
+test.each(['mouse', 'touch', 'pen'])(
+	'%s click focus does not pause the five-second revert',
+	async (pointerType) => {
+		const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+		dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType }));
+		await pointerClick(dial, pointerType);
+		if (pointerType === 'mouse') {
+			// The mouse leaves, but click focus remains on the dial.
+			dial.dispatchEvent(new PointerEvent('pointerleave', { pointerType }));
+		}
+		expect(document.activeElement).toBe(dial);
+		const legend = screen.container.querySelector('[role="tooltip"]');
+		expect(legend?.matches(':popover-open')).toBe(false);
+		await advance(4999);
+		expect(value()).toBe('LS ✕');
+		await advance(1);
+		expect(value()).toBe('PK');
+		expect(document.activeElement).toBe(dial);
+		expect(screen.container.querySelector('[role="status"]')?.textContent).toBe(
+			m.curva_kinddial_reverted({ kind: 'PK' })
+		);
+		expect(onkind).not.toHaveBeenCalled();
+	}
+);
+
 test('keyboard focus pauses pending until five seconds after blur', async () => {
 	const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
 	const legend = screen.container.querySelector('[role="tooltip"]');
@@ -155,6 +180,48 @@ test('keyboard focus pauses pending until five seconds after blur', async () => 
 	expect(value()).toBe('PK');
 	expect(onkind).not.toHaveBeenCalled();
 });
+
+test('keyboard use after pointer focus pauses pending without another focusin', async () => {
+	const { dial, value } = await setup('PK', 'ajustar', ['LS', 'OFF']);
+	await pointerClick(dial, 'touch');
+	await advance(4000);
+	await key(dial, 'ArrowRight');
+	expect(value()).toBe('OFF ✕');
+	await advance(30000);
+	expect(value()).toBe('OFF ✕');
+	dial.blur();
+	await tick();
+	await advance(5000);
+	expect(value()).toBe('PK');
+});
+
+test('Shift held for a Shift+click after pointer focus is not keyboard use', async () => {
+	const { screen, dial, value } = await setup('PK', 'ajustar', ['LS']);
+	await pointerClick(dial);
+	await key(dial, 'Shift');
+	const legend = screen.container.querySelector('[role="tooltip"]');
+	expect(legend?.matches(':popover-open')).toBe(false);
+	await advance(5000);
+	expect(value()).toBe('PK');
+});
+
+test.each(['touch', 'pen'])(
+	'%s pointerenter on the dial or legend never pauses pending or opens the legend',
+	async (pointerType) => {
+		const { screen, dial, value } = await setup('PK', 'ajustar', ['LS']);
+		const legend = screen.container.querySelector('[role="tooltip"]');
+		if (!legend) throw new Error('Missing dial legend');
+		dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType }));
+		await click(dial);
+		await advance(4000);
+		legend.dispatchEvent(new PointerEvent('pointerenter', { pointerType }));
+		await advance(999);
+		expect(value()).toBe('LS ✕');
+		expect(legend.matches(':popover-open')).toBe(false);
+		await advance(1);
+		expect(value()).toBe('PK');
+	}
+);
 
 test.each(['before', 'after'] as const)(
 	'hover %s refusal pauses pending; leaving starts five new idle seconds',
@@ -269,6 +336,125 @@ test('Escape cancels pending even when the tooltip is closed', async () => {
 	await vi.advanceTimersByTimeAsync(5000);
 	expect(value()).toBe('PK');
 	expect(onkind).not.toHaveBeenCalled();
+});
+
+test.each(['hover', 'keyboard focus'])(
+	'Escape on body dismisses a legend opened by %s and cancels only that dial',
+	async (openedBy) => {
+		const first = await setup('PK', 'ajustar', ['LS']);
+		const second = await setup('PK', 'ajustar', ['LS']);
+		await click(first.dial);
+		await click(second.dial);
+		if (openedBy === 'hover') {
+			first.dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+			await advance(400);
+		} else {
+			first.dial.focus();
+			await tick();
+		}
+		const legend = first.screen.container.querySelector('[role="tooltip"]');
+		expect(legend?.matches(':popover-open')).toBe(true);
+		await key(document.body, 'Escape');
+		expect(legend?.matches(':popover-open')).toBe(false);
+		expect(first.value()).toBe('PK');
+		expect(second.value()).toBe('LS ✕');
+		expect(first.onkind).not.toHaveBeenCalled();
+		expect(second.onkind).not.toHaveBeenCalled();
+	}
+);
+
+test('Escape elsewhere leaves a pending dial with a closed legend alone', async () => {
+	const { dial, value } = await setup('PK', 'ajustar', ['LS']);
+	await click(dial);
+	await key(document.body, 'Escape');
+	expect(value()).toBe('LS ✕');
+});
+
+/** A pending dial whose legend a mouse opened (400 ms hover), so Escape elsewhere may close it. */
+async function pendingWithHoverLegend() {
+	const result = await setup('PK', 'ajustar', ['LS']);
+	await click(result.dial);
+	result.dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+	await advance(400);
+	const legend = result.screen.container.querySelector<HTMLElement>('[role="tooltip"]');
+	if (!legend) throw new Error('Missing dial legend');
+	expect(legend.matches(':popover-open')).toBe(true);
+	expect(result.value()).toBe('LS ✕');
+	return { ...result, legend };
+}
+
+test('Escape inside an open modal dialog elsewhere neither cancels the dial nor closes its legend', async () => {
+	const { value, legend, onkind } = await pendingWithHoverLegend();
+	const dialog = document.createElement('dialog');
+	const inside = document.createElement('button');
+	inside.textContent = 'Close';
+	dialog.append(inside);
+	document.body.append(dialog);
+	try {
+		dialog.showModal();
+		await key(inside, 'Escape');
+		expect(value()).toBe('LS ✕');
+		expect(legend.matches(':popover-open')).toBe(true);
+		// The modal owns Escape even from outside its subtree: the page behind it is inert.
+		await key(document.body, 'Escape');
+		expect(value()).toBe('LS ✕');
+		expect(legend.matches(':popover-open')).toBe(true);
+	} finally {
+		dialog.close();
+		dialog.remove();
+	}
+	// With the dialog gone, the same key is the open legend's again.
+	await key(document.body, 'Escape');
+	expect(legend.matches(':popover-open')).toBe(false);
+	expect(value()).toBe('PK');
+	expect(onkind).not.toHaveBeenCalled();
+});
+
+test.each(['already prevented', 'text field'] as const)(
+	'an Escape elsewhere that is %s leaves the dial and its open legend alone',
+	async (source) => {
+		const { value, legend } = await pendingWithHoverLegend();
+		const other = document.createElement(source === 'text field' ? 'input' : 'button');
+		if (source === 'already prevented') {
+			other.addEventListener('keydown', (event) => event.preventDefault());
+		}
+		document.body.append(other);
+		try {
+			await key(other, 'Escape');
+			expect(value()).toBe('LS ✕');
+			expect(legend.matches(':popover-open')).toBe(true);
+		} finally {
+			other.remove();
+		}
+	}
+);
+
+test('a legend detached with its subtree is never shown or hidden by a later change', async () => {
+	const { screen, value, legend } = await pendingWithHoverLegend();
+	const show = vi.spyOn(legend, 'showPopover');
+	const hide = vi.spyOn(legend, 'hidePopover');
+	// The parent leaves before the dial is destroyed (as a test cleanup does): removal hides it.
+	screen.container.remove();
+	expect(legend.isConnected).toBe(false);
+	expect(legend.matches(':popover-open')).toBe(false);
+	// A reset re-runs the legend's effect while it is still meant to be open (InvalidStateError).
+	await screen.rerender({ resetKey: {} });
+	await advance(0);
+	expect(value()).toBe('PK');
+	expect(show).not.toHaveBeenCalled();
+	expect(hide).not.toHaveBeenCalled();
+});
+
+test('a hover timer that fires after the dial left the document opens nothing', async () => {
+	const { screen, dial } = await setup('PK', 'ajustar', ['LS']);
+	const legend = screen.container.querySelector<HTMLElement>('[role="tooltip"]');
+	if (!legend) throw new Error('Missing dial legend');
+	const show = vi.spyOn(legend, 'showPopover');
+	dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+	screen.container.remove();
+	await advance(400);
+	expect(show).not.toHaveBeenCalled();
+	expect(legend.matches(':popover-open')).toBe(false);
 });
 
 test('Escape inside the legend cancels only its own dial', async () => {

@@ -18,9 +18,12 @@ import { createYoloState, YOLO_PHRASE } from '#lib/state/yolo.svelte.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { codecAccepts, handleGateRequest } from '#lib/workers/gate-handler.ts';
 import CurvaPage from '#lib/components/pages/curva/CurvaPage.svelte';
+import CurvaInContext from './CurvaInContext.svelte';
 import type { GateClient } from '#lib/components/pages/curva/drag.ts';
 import { payloadCrc } from '#lib/components/pages/curva/format.ts';
 import { verdictFor, type Band, type Curve } from '#lib/components/pages/curva/model.ts';
+import { defaultOrder } from '#lib/components/pages/curva/edit.ts';
+import { curveSignature } from '#lib/state/model.ts';
 import { fakeAppOptions } from '../../app/fakes.ts';
 
 const CUT: Band = { kind: 'PK', freqHz: 1000, gainDb: -6, qFactor: 1 };
@@ -28,6 +31,50 @@ const pad = (bands: Band[]): Band[] => [...bands, ...NEUTRO.bands.slice(bands.le
 const STORED: Curve = { bands: pad([CUT]), preampDb: -1 };
 /** Shift+↑ on the handle adds 10 dB: +4 dB at −1 dB preamp, about +3 dB out. */
 const LOUD: Curve = { bands: pad([{ ...CUT, gainDb: 4 }]), preampDb: -1 };
+/** A boost before the cut: not the default order (cuts first), so "Ordem padrão" moves both. */
+const ORDERED: Curve = {
+	bands: pad([{ kind: 'PK', freqHz: 200, gainDb: 2, qFactor: 1 }, CUT]),
+	preampDb: -3
+};
+const DEFAULT_ORDER: Curve = { bands: defaultOrder(ORDERED.bands), preampDb: ORDERED.preampDb };
+const NEUTRAL: Curve = { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb };
+/** Ten label entries; missing ones are null. */
+const ten = (entries: (string | null)[]) =>
+	Array.from({ length: 10 }, (_, index) => entries[index] ?? null);
+
+/** The names the filter bank shows, slot by slot (the first `count`). */
+function bankNames(count = 2): string[] {
+	return Array.from(
+		document.querySelectorAll('li.module .mod-name'),
+		(node) => node.textContent?.trim() ?? ''
+	).slice(0, count);
+}
+
+/** The filter bank's own "Ordem padrão" button (the nearest one around its modules). */
+function bankOrderButton(): HTMLElement {
+	let scope = document.querySelector('li.module')?.parentElement ?? null;
+	while (scope) {
+		const button = Array.from(scope.querySelectorAll('button')).find(
+			(candidate) => candidate.textContent?.trim() === m.curva_order_reset()
+		);
+		if (button) return button;
+		scope = scope.parentElement;
+	}
+	throw new Error('No default-order button around the bank');
+}
+
+/** Renames bank slot `index` through its field, as a person does (Enter). */
+async function renameSlot(index: number, name: string) {
+	const button = document.querySelector(`[data-rename="${index}"]`);
+	if (!(button instanceof HTMLElement)) throw new Error(`No rename button for slot ${index}`);
+	await userEvent.click(button);
+	await expect.poll(() => document.querySelector('li.module input.mod-input')).not.toBeNull();
+	const field = document.querySelector('li.module input.mod-input');
+	if (!(field instanceof HTMLInputElement)) throw new Error('No rename field');
+	await userEvent.fill(field, name);
+	await userEvent.keyboard('{Enter}');
+	await tick();
+}
 
 let apps: ClientApp[] = [];
 afterEach(async () => {
@@ -43,9 +90,21 @@ function crc(curve: Curve): string {
 	return payloadCrc(payload);
 }
 
-/** Holds each commit answer until `release` (a slow gate worker). */
+/**
+ * Holds each commit answer until `release` (a slow gate worker). Once `open`, the later answers
+ * of the same release (a snap's bisection) are not held.
+ */
 interface Hold {
 	release: (() => void) | null;
+	open?: boolean;
+}
+
+/** Lets every held and later answer through, then waits for the page to settle. */
+async function releaseAll(hold: Hold) {
+	hold.open = true;
+	hold.release?.();
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	await tick();
 }
 
 function gateClient(hold?: Hold): GateClient {
@@ -59,7 +118,7 @@ function gateClient(hold?: Hold): GateClient {
 		async commit(input) {
 			const response = handleGateRequest({ ...input, type: 'commit', id: ++id });
 			if (response.type !== 'commit') throw new Error('unexpected');
-			if (hold) {
+			if (hold && !hold.open) {
 				await new Promise<void>((resolve) => {
 					hold.release = resolve;
 				});
@@ -69,24 +128,44 @@ function gateClient(hold?: Hold): GateClient {
 	};
 }
 
-async function setup(hold?: Hold) {
+interface SetupOptions {
+	/** The stored curve the editor starts on (STORED by default). */
+	stored?: Curve;
+	labels?: (string | null)[];
+	/** "Prévia sem limites" on (default) or YOLO alone. */
+	freePreview?: boolean;
+	/**
+	 * Under the app context, as in production: the bank and the scope then show and rename the
+	 * stored labels (without it they keep local names). Off by default, as the tests above ran.
+	 */
+	context?: boolean;
+}
+
+async function setup(hold?: Hold, options: SetupOptions = {}) {
 	const fake = fakeAppOptions();
 	const yolo = createYoloState();
 	const app = createClientApp({ ...fake.options, yolo });
 	apps.push(app);
 	await app.state.ready;
-	app.state.curve.set({ name: 'Editor', source: 'custom', ...STORED });
-	await render(CurvaPage, {
+	app.state.curve.set({
+		name: 'Editor',
+		source: 'custom',
+		...(options.stored ?? STORED),
+		labels: options.labels ? ten(options.labels) : null
+	});
+	const props = {
 		app,
-		layer: 'engenharia',
+		layer: 'engenharia' as const,
 		hash: '',
 		pageUrl: new URL('https://example.test/'),
 		onlayer: vi.fn(),
 		gateClient: gateClient(hold),
 		clearLinkHash: vi.fn()
-	});
+	};
+	if (options.context) await render(CurvaInContext, props);
+	else await render(CurvaPage, props);
 	expect(yolo.enable(YOLO_PHRASE, 'engenharia')).toBe(true);
-	yolo.setFreePreview(true);
+	yolo.setFreePreview(options.freePreview ?? true);
 	await tick();
 	return {
 		app,
@@ -163,6 +242,97 @@ test('turning YOLO off (the bar, or leaving Engenharia) discards the draft', asy
 	expect(app.state.curve.current).toBe(stored);
 	expect(app.state.curve.undoCount).toBe(undoCount);
 	expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(persisted);
+});
+
+test('the reorder fixtures: both orders pass, and the default order differs', () => {
+	expect(verdictFor(ORDERED).ok).toBe(true);
+	expect(verdictFor(DEFAULT_ORDER, 'yolo').ok).toBe(true);
+	expect(DEFAULT_ORDER.bands.slice(0, 2)).toEqual([ORDERED.bands[1], ORDERED.bands[0]]);
+	expect(crc(DEFAULT_ORDER)).not.toBe(crc(ORDERED));
+});
+
+test('a free-preview reorder moves the names with their filters; a rename lands on the stored slot', async () => {
+	const { app, yolo, stored, undoCount } = await setup(undefined, {
+		stored: ORDERED,
+		labels: ['Kick', 'Vocal'],
+		context: true
+	});
+	expect(stored.labels).toEqual(ten(['Kick', 'Vocal']));
+	// No draft yet: the bank shows the stored labels.
+	await expect.poll(() => bankNames()).toEqual(['Kick', 'Vocal']);
+	await userEvent.click(bankOrderButton());
+	// The draft has the cut first, and its name went with it; the store is untouched.
+	await expect.element(editorState()).toMatchTextContent(crc(DEFAULT_ORDER));
+	await expect.poll(() => bankNames()).toEqual(['Vocal', 'Kick']);
+	expect(app.state.curve.current).toBe(stored);
+	// The draft's Desfazer and Refazer move the names back and forth with the filters.
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	await expect.element(editorState()).toMatchTextContent(crc(ORDERED));
+	await expect.poll(() => bankNames()).toEqual(['Kick', 'Vocal']);
+	await page.getByRole('button', { name: m.curva_redo(), exact: true }).click();
+	await expect.element(editorState()).toMatchTextContent(crc(DEFAULT_ORDER));
+	await expect.poll(() => bankNames()).toEqual(['Vocal', 'Kick']);
+
+	// Draft slot 0 holds the cut, stored slot 1: the new name is written there.
+	await renameSlot(0, 'Lead');
+	await expect.poll(() => app.state.curve.current.labels).toEqual(ten(['Kick', 'Lead']));
+	// Labels only: the stored bands, preamp and order are the same, and the draft stays live.
+	expect(curveSignature(app.state.curve.current)).toBe(curveSignature(stored));
+	expect(app.state.curve.undoCount).toBe(undoCount + 1);
+	await expect.element(editorState()).toMatchTextContent(crc(DEFAULT_ORDER));
+	await expect.poll(() => bankNames()).toEqual(['Lead', 'Kick']);
+
+	// The draft ends: the stored order, and the new name still on the cut.
+	yolo.setFreePreview(false);
+	await tick();
+	await expect.element(editorState()).toMatchTextContent(crc(ORDERED));
+	await expect.poll(() => bankNames()).toEqual(['Kick', 'Lead']);
+});
+
+test('a commit answer is dropped when the stored curve changed while the gate answered', async () => {
+	const hold: Hold = { release: null };
+	const { app, local } = await setup(hold);
+	await loudEdit();
+	await vi.waitFor(() => expect(hold.release).not.toBeNull());
+	// Another curve is stored meanwhile (Neutro, as another tab or a preset would).
+	expect(app.loadNeutral()).toBe(true);
+	await tick();
+	const neutral = app.state.curve.current;
+	const persisted = local.getItem(CURRENT_STORAGE_KEY);
+	await releaseAll(hold);
+	// The answer was about the old curve: no draft over Neutro, nothing stored.
+	await expect.element(editorState()).toMatchTextContent(crc(NEUTRAL));
+	expect(app.state.curve.current).toBe(neutral);
+	expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(persisted);
+});
+
+test('a commit answer is dropped when the gate profile changed while the gate answered', async () => {
+	const hold: Hold = { release: null };
+	const { app, yolo, local, stored, persisted, undoCount } = await setup(hold, {
+		freePreview: false
+	});
+	// Modo YOLO alone: the release is judged in the YOLO profile and would be stored.
+	await loudEdit();
+	await vi.waitFor(() => expect(hold.release).not.toBeNull());
+	yolo.disable();
+	await tick();
+	await releaseAll(hold);
+	// Judged in a profile that no longer applies: dropped, the stored curve stays.
+	await expect.element(editorState()).toMatchTextContent(crc(STORED));
+	expect(app.state.curve.current).toBe(stored);
+	expect(app.state.curve.undoCount).toBe(undoCount);
+	expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(persisted);
+});
+
+test('the same release with no change while the gate answers is stored (YOLO alone)', async () => {
+	const hold: Hold = { release: null };
+	const { app, stored, undoCount } = await setup(hold, { freePreview: false });
+	await loudEdit();
+	await vi.waitFor(() => expect(hold.release).not.toBeNull());
+	await releaseAll(hold);
+	// Control for the test above: nothing changed, so the gate's answer is applied.
+	await expect.poll(() => app.state.curve.current).not.toBe(stored);
+	expect(app.state.curve.undoCount).toBe(undoCount + 1);
 });
 
 test('a codec-only answer that arrives after the free preview ended is dropped', async () => {

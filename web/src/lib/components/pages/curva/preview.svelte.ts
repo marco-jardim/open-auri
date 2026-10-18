@@ -18,7 +18,8 @@
  *   cable write as the reference, the free preview's draft). The engine adds it on its own to
  *   anything louder than the standard gate allows.
  */
-import { AudioEngineError, standardGateAccepts } from '#lib/audio/engine.ts';
+import { AudioEngineError } from '#lib/audio/engine.ts';
+import { gateAccepts } from '#lib/gate-verdicts.ts';
 import type { ABPreview, ABSide, AudioEngine } from '#lib/audio/engine.ts';
 import {
 	getReference,
@@ -38,14 +39,15 @@ export const CURVA_SESSION = 'curva';
 
 /**
  * Whether an A/B of these curves must play protected (C1): Modo YOLO on, or either curve refused
- * by the standard gate (the engine's own check, `standardGateAccepts`, which it also applies by
- * itself; asking explicitly keeps this page's intent visible).
+ * by the standard gate (the engine also checks it by itself, `standardGateAccepts`; asking
+ * explicitly keeps this page's intent visible). The verdicts come from the client's shared cache
+ * (`gate-verdicts.ts`), the same entries the curve store and the engine's `createAB` read.
  */
 export function needsProtection(reference: Curve, editor: Curve, yolo: boolean): boolean {
 	return (
 		yolo ||
-		!standardGateAccepts(reference.bands, reference.preampDb) ||
-		!standardGateAccepts(editor.bands, editor.preampDb)
+		!gateAccepts(reference.bands, reference.preampDb, { profile: 'standard' }) ||
+		!gateAccepts(editor.bands, editor.preampDb, { profile: 'standard' })
 	);
 }
 

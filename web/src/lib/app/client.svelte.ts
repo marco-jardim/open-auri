@@ -45,10 +45,16 @@ export interface WriteRequestOptions {
 /** Explicit factory: the layout calls this only on mount, never during SSR. */
 export function createClientApp(options: ClientAppOptions = {}) {
 	const now = options.now ?? Date.now;
-	const state = createClientState({ ...options.storage, now });
+	const yoloState = options.yolo ?? yolo;
+	// The curve store adopts other tabs' curves and undo steps under this app's Modo YOLO (an
+	// injected `yolo` included), never the module singleton's.
+	const state = createClientState({
+		...options.storage,
+		now,
+		profile: () => yoloState.profile
+	});
 	const audio = options.audio ?? getAudioEngine();
 	const toasts = options.toasts ?? createToastStore();
-	const yoloState = options.yolo ?? yolo;
 	let pending = $state.raw<CurrentCurve | null>(null);
 	/** Gate profile of the open checklist (`'yolo'` only when asked for while YOLO was on). */
 	let pendingProfile = $state<WriteProfile>('standard');

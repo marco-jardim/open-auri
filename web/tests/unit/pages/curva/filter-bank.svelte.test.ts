@@ -16,7 +16,7 @@ import {
 } from '#lib/components/pages/curva/model.ts';
 import { firstReasonText } from '#lib/components/pages/curva/reasons.ts';
 import { m } from '#lib/paraglide/messages.js';
-import { blockRealPointerHover } from './real-pointer.ts';
+import { blockRealPointerHover, pointerClick } from './real-pointer.ts';
 
 const cut: Band = { kind: 'PK', freqHz: 1000, gainDb: -6, qFactor: 1 };
 const refusal = 'The candidate exceeds the full-curve limit.';
@@ -157,6 +157,40 @@ test('focus may move inside the bank; leaving it from another control cancels pe
 	field.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
 	await tick();
 	expect(value()).toBe('PK');
+	expect(module.querySelector('[role="status"]')?.textContent).toBe(
+		m.curva_kinddial_reverted({ kind: 'PK' })
+	);
+	expect(onkind).not.toHaveBeenCalled();
+});
+
+test('pointer focus in the bank still reverts and announces after five seconds', async () => {
+	const { module, dial, value, onkind } = await setup();
+	await pointerClick(dial, 'touch');
+	expect(document.activeElement).toBe(dial);
+	await vi.advanceTimersByTimeAsync(4999);
+	expect(value()).toBe('LS ✕');
+	await vi.advanceTimersByTimeAsync(1);
+	await tick();
+	expect(value()).toBe('PK');
+	expect(module.querySelector('[role="status"]')?.textContent).toBe(
+		m.curva_kinddial_reverted({ kind: 'PK' })
+	);
+	expect(document.activeElement).toBe(dial);
+	expect(onkind).not.toHaveBeenCalled();
+});
+
+test('leaving the bank directly from the dial announces the revert', async () => {
+	const { module, dial, value, onkind } = await setup();
+	dial.focus();
+	await tick();
+	await click(dial);
+	expect(value()).toBe('LS ✕');
+	dial.blur();
+	await tick();
+	expect(value()).toBe('PK');
+	expect(module.querySelector('[role="status"]')?.textContent).toBe(
+		m.curva_kinddial_reverted({ kind: 'PK' })
+	);
 	expect(onkind).not.toHaveBeenCalled();
 });
 
@@ -174,8 +208,13 @@ test.each(['layer', 'profile', 'Escape'] as const)('%s cancels bank pending', as
 });
 
 test('Escape in the rename field cancels rename without cancelling a pending dial', async () => {
-	const { module, dial, value, onkind } = await setup();
+	const { screen, module, dial, value, onkind } = await setup();
 	await click(dial);
+	dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+	await vi.advanceTimersByTimeAsync(400);
+	await tick();
+	const legend = module.querySelector('[role="tooltip"]');
+	expect(legend?.matches(':popover-open')).toBe(true);
 	const before = module.querySelector('.mod-name')?.textContent;
 	const rename = module.querySelector<HTMLButtonElement>('[data-rename="0"]');
 	if (!rename) throw new Error('Missing rename button');
@@ -190,7 +229,17 @@ test('Escape in the rename field cancels rename without cancelling a pending dia
 	expect(module.querySelector('input.mod-input')).toBeNull();
 	expect(module.querySelector('.mod-name')?.textContent).toBe(before);
 	expect(value()).toBe('LS ✕');
+	expect(legend?.matches(':popover-open')).toBe(true);
 	expect(onkind).not.toHaveBeenCalled();
+	// As cleanup does, the container leaves before the bank is unmounted: the restored rename
+	// button's blur on removal resets the dials, and the detached legend is never shown again.
+	await tick();
+	expect(document.activeElement).toBe(module.querySelector('[data-rename="0"]'));
+	screen.container.remove();
+	await tick();
+	await vi.advanceTimersByTimeAsync(400);
+	expect(legend?.isConnected).toBe(false);
+	expect(legend?.matches(':popover-open')).toBe(false);
 });
 
 test('Enter in the rename field keeps a pending dial; leaving the bank still cancels it', async () => {

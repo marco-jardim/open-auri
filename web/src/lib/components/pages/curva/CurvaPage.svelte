@@ -98,6 +98,7 @@
 	} from './model.ts';
 	import { parkedBand } from './parked.ts';
 	import { CurvaPreview } from './preview.svelte.ts';
+	import { provideBandLabelView } from './band-labels.svelte.ts';
 	import YoloToggle from '#lib/components/yolo/YoloToggle.svelte';
 	import { withProfile } from './drag.ts';
 	import { canBringBack, editorProfile, yoloWriteBlock } from './yolo.ts';
@@ -181,12 +182,24 @@
 	 * `curve.set`, `oa.current`, the undo history or another tab, and is never written. Leaving the
 	 * free preview (or YOLO, or the page) discards it, and so does any change of the stored curve
 	 * (a preset, Neutro, an experiment, another tab). Its own Desfazer/Refazer steps live with it.
+	 *
+	 * Filter labels follow the draft's reorders: `order` maps each draft slot to the stored slot
+	 * its filter came from, and the draft shows the stored labels permuted by it
+	 * (`draftLabels`, through `provideBandLabelView` to the bank and the scope). A rename during
+	 * the draft is written to the stored curve (labels are presentation only, never the gate, C1)
+	 * at the stored slot `order` names, so the name stays on the filter it was given to, in the
+	 * draft and once the draft ends. Each step keeps its own order, so Desfazer/Refazer move the
+	 * names back with their filters.
 	 */
-	interface FreeDraft {
-		readonly base: string;
+	interface DraftStep {
 		readonly curve: Curve;
-		readonly past: readonly Curve[];
-		readonly future: readonly Curve[];
+		/** Entry i: the stored curve's slot of the filter at draft slot i. */
+		readonly order: readonly number[];
+	}
+	interface FreeDraft extends DraftStep {
+		readonly base: string;
+		readonly past: readonly DraftStep[];
+		readonly future: readonly DraftStep[];
 	}
 	const FREE_DRAFT_STEPS = 100;
 	let freeDraft = $state.raw<FreeDraft | null>(null);
@@ -195,6 +208,20 @@
 		freePreview && freeDraft !== null && freeDraft.base === storedSignature ? freeDraft : null
 	);
 	const curve = $derived<Curve>(liveDraft?.curve ?? storedCurve);
+	/** The stored labels, in the live draft's slot order; null without a live draft or labels. */
+	const draftLabels = $derived(
+		liveDraft === null ? null : permuteLabels(stored?.labels ?? null, liveDraft.order)
+	);
+	/** The editor's labels by slot: the draft's while it is live, else the stored curve's. */
+	const editorLabels = $derived(liveDraft === null ? (stored?.labels ?? null) : draftLabels);
+	provideBandLabelView(() => {
+		const live = liveDraft;
+		if (live === null) return null;
+		return {
+			labels: draftLabels ?? [],
+			storedSlot: (index: number) => live.order[index] ?? index
+		};
+	});
 	const signature = $derived(curveSignature(curve));
 	$effect(() => {
 		const live = liveDraft;
@@ -298,11 +325,13 @@
 
 	/**
 	 * Edits keep the current filter labels (a kind change keeps the slot's label); reorders pass
-	 * them permuted; an import brings its own (or none).
+	 * their permutation (`order`, entry i: the editor slot whose filter lands at i) and the labels
+	 * follow it; an import brings its own (or none).
 	 *
 	 * During "Prévia sem limites" an edit goes to the memory-only draft instead (C1, `freeDraft`):
-	 * nothing reaches the store. Loads that name their own source (an experiment, an import, a
-	 * link) still replace the stored curve, like a preset, and so end the draft.
+	 * nothing reaches the store, and a reorder permutes the draft's labels (its `order`). Loads
+	 * that name their own source (an experiment, an import, a link) still replace the stored
+	 * curve, like a preset, and so end the draft.
 	 */
 	function apply(
 		next: Curve,
@@ -310,27 +339,55 @@
 			name?: string;
 			source?: 'custom' | 'import';
 			labels?: readonly (string | null)[] | null;
+			order?: readonly number[];
 		} = {}
 	): boolean {
 		if (!app) return false;
-		if (freePreview && meta.source === undefined) return applyFree(next);
+		if (freePreview && meta.source === undefined) return applyFree(next, meta.order);
 		const current = app.state.curve.current;
+		const labels =
+			meta.labels !== undefined
+				? meta.labels
+				: meta.source
+					? null
+					: meta.order
+						? permuteLabels(current.labels, meta.order)
+						: current.labels;
 		return app.state.curve.set({
 			name: meta.name ?? current.name,
 			source: meta.source ?? 'custom',
 			preampDb: next.preampDb,
 			bands: next.bands,
-			labels: meta.labels !== undefined ? meta.labels : meta.source ? null : current.labels
+			labels
 		});
 	}
-	/** One free-preview edit: a new draft step (memory only). Labels stay the stored curve's. */
-	function applyFree(next: Curve): boolean {
-		const current = curve;
-		if (curveSignature(next) === curveSignature(current)) return true;
+	/** The editor curve as a draft step: the live draft's, or the stored curve in its own order. */
+	function currentStep(): DraftStep {
+		return (
+			liveDraft ?? {
+				curve: storedCurve,
+				order: Array.from({ length: storedCurve.bands.length }, (_, index) => index)
+			}
+		);
+	}
+	/**
+	 * One free-preview edit: a new draft step (memory only). A reorder (`permutation`, over the
+	 * draft's slots) moves the draft's labels with their filters.
+	 */
+	function applyFree(next: Curve, permutation?: readonly number[]): boolean {
+		const current = currentStep();
+		const order = permutation
+			? permutation.map((index) => current.order[index] ?? index)
+			: current.order;
+		const moved = order.some((slot, index) => slot !== current.order[index]);
+		if (!moved && curveSignature(next) === curveSignature(current.curve)) return true;
 		freeDraft = {
 			base: storedSignature,
 			curve: { bands: next.bands.slice(), preampDb: next.preampDb },
-			past: [...(liveDraft?.past ?? []), current].slice(-FREE_DRAFT_STEPS),
+			order,
+			past: [...(liveDraft?.past ?? []), { curve: current.curve, order: current.order }].slice(
+				-FREE_DRAFT_STEPS
+			),
 			future: []
 		};
 		return true;
@@ -342,9 +399,10 @@
 		if (live && previous) {
 			freeDraft = {
 				...live,
-				curve: previous,
+				curve: previous.curve,
+				order: previous.order,
 				past: live.past.slice(0, -1),
-				future: [...live.future, live.curve]
+				future: [...live.future, { curve: live.curve, order: live.order }]
 			};
 			return;
 		}
@@ -358,8 +416,9 @@
 			if (next) {
 				freeDraft = {
 					...live,
-					curve: next,
-					past: [...live.past, live.curve],
+					curve: next.curve,
+					order: next.order,
+					past: [...live.past, { curve: live.curve, order: live.order }],
 					future: live.future.slice(0, -1)
 				};
 			}
@@ -592,11 +651,22 @@
 		cancelFrames();
 		const start = curve;
 		const released = draft;
+		// What the answer is about: the stored curve under the edit and the gate profile it is
+		// judged in. Either may change while the gate answers (another tab, a preset, YOLO turned
+		// off and the curve before it restored): then the answer is stale and is dropped.
+		const startStored = storedSignature;
+		const startProfile = writeProfile;
 		dragView = null;
 		dragReason = null;
 		try {
 			const result = await releaseBand(gate, start, index, target, experimental, startAccepted);
 			if (token !== dragToken) return;
+			if (storedSignature !== startStored || writeProfile !== startProfile) {
+				// C1: never applied over another curve, nor in a profile it was not judged in.
+				draft = null;
+				report(null, 'info');
+				return;
+			}
 			if (result.previewOnly && !freePreview) {
 				// C1: only the codec accepted it and the free preview ended while the gate was
 				// answering. Such a curve is never stored: the editor keeps its curve.
@@ -800,8 +870,8 @@
 		const bands = defaultOrder(curve.bands);
 		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
 		if (result.ok) {
-			const labels = permuteLabels(app?.state.curve.labels, defaultPermutation(curve.bands));
-			apply({ bands, preampDb: curve.preampDb }, { labels });
+			// The labels follow their filters (in the free preview: the draft's labels).
+			apply({ bands, preampDb: curve.preampDb }, { order: defaultPermutation(curve.bands) });
 			bankMessage = null;
 		} else {
 			bankMessage = m.curva_reorder_refused({
@@ -821,9 +891,9 @@
 		if (!app) return;
 		const result = reorderSections(curve, from, to, writeProfile);
 		if (result.ok) {
+			// The labels follow their filters (in the free preview: the draft's labels).
 			const order = movePermutation(curve.bands.length, from, to);
-			const labels = permuteLabels(app.state.curve.labels, order);
-			apply({ bands: result.bands, preampDb: curve.preampDb }, { labels });
+			apply({ bands: result.bands, preampDb: curve.preampDb }, { order });
 			selected = to;
 			refused = null;
 			cabMessage = m.curva_reorder_ok();
@@ -1304,7 +1374,7 @@
 					{curve}
 					name={curveName}
 					source={stored?.source ?? `preset:${NEUTRO.id}`}
-					labels={stored?.labels ?? null}
+					labels={editorLabels}
 					{layer}
 					{locale}
 					{pageUrl}

@@ -81,13 +81,18 @@ export function checkedLabels(value: unknown): CurveLabels | null {
 	return labels ? Object.freeze(labels) : null;
 }
 
-/** Labels compared by value (null and an all-null list are the same: no labels). */
+/** No labels: absent, null, or a list whose every entry is null (every filter keeps its name). */
+function noLabels(labels: CurveLabels | null | undefined): boolean {
+	return labels === null || labels === undefined || labels.every((label) => label === null);
+}
+
+/** Labels compared by value (absent, null and an all-null list are the same: no labels). */
 export function sameLabels(
 	a: CurveLabels | null | undefined,
 	b: CurveLabels | null | undefined
 ): boolean {
-	const left = a ?? null;
-	const right = b ?? null;
+	const left = noLabels(a) ? null : (a ?? null);
+	const right = noLabels(b) ? null : (b ?? null);
 	if (left === null || right === null) return left === right;
 	return left.length === right.length && left.every((label, index) => label === right[index]);
 }

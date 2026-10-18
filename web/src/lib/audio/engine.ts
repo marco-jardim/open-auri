@@ -58,7 +58,8 @@ import {
 	preampWord,
 	snapshotBands
 } from 'open-auri/dsp';
-import { gateForWrite, isExperimentalKind, THRESHOLDS } from 'open-auri/safety';
+import { isExperimentalKind, THRESHOLDS } from 'open-auri/safety';
+import { gateAccepts } from '../gate-verdicts.ts';
 import { createPinkNoiseBuffer, createPinkNoiseSource } from './pink-noise.ts';
 import { clampSeek, knownDuration, resolveStart, type StartAt } from './transport.ts';
 
@@ -171,34 +172,22 @@ export const YOLO_PREVIEW_PEAK_DBFS = -1;
  */
 export const PREVIEW_PEAK_LIMIT_DB = THRESHOLDS.outputFullDb + 0.01;
 
-/** Standard-gate verdicts of recent preview curves, by `[preampDb, bands]` (oldest first). */
-const standardVerdicts = new Map<string, boolean>();
-const STANDARD_VERDICTS_KEPT = 64;
 const OFF_BAND: Band = Object.freeze({ kind: 'OFF' as const });
 
 /**
  * Whether the standard write gate (full grid, experimental kinds with their flag) accepts this
  * curve, whatever Modo YOLO says. A preview of a curve it refuses always plays protected (C1),
- * in every page: the engine checks it in `buildChain` and `createAB`. A band list shorter than
- * the cable's ten is judged padded with OFF sections (identity), which is how its chain sounds.
- * Call with validated bands (`snapshotBands`); results are cached.
+ * in every page: the engine checks it in `buildChain`, `createAB` and `sharedProtection`. A band
+ * list shorter than the cable's ten is judged padded with OFF sections (identity), which is how
+ * its chain sounds. Raw or snapshot bands: the verdicts come from the client's shared cache
+ * (`gate-verdicts.ts`, keyed on the canonical snapshot), the one the curve store also uses.
  */
 export function standardGateAccepts(bands: readonly Band[], preampDb: number): boolean {
-	const key = JSON.stringify([preampDb, bands]);
-	const known = standardVerdicts.get(key);
-	if (known !== undefined) return known;
 	const padded: readonly Band[] =
 		bands.length < BAND_COUNT
 			? [...bands, ...Array.from({ length: BAND_COUNT - bands.length }, () => OFF_BAND)]
 			: bands;
-	const experimental = bands.some((band) => isExperimentalKind(band.kind));
-	const ok = gateForWrite(padded, preampDb, { experimental }).ok;
-	if (standardVerdicts.size >= STANDARD_VERDICTS_KEPT) {
-		const oldest = standardVerdicts.keys().next();
-		if (!oldest.done) standardVerdicts.delete(oldest.value);
-	}
-	standardVerdicts.set(key, ok);
-	return ok;
+	return gateAccepts(padded, preampDb, { profile: 'standard' });
 }
 
 /** |H| of a cascade at `w` rad/sample, preamp (linear) included. */
@@ -287,6 +276,12 @@ export interface PreviewCurve {
 	preampDb: number;
 }
 
+/** A curve of a set heard against each other, with the level trim its chain plays at. */
+export interface SharedCurve extends PreviewCurve {
+	/** dB (`matchGains`, ≤ 0); 0 when omitted. */
+	trimDb?: number;
+}
+
 export type ABSide = 'A' | 'B';
 
 export interface ABPreview {
@@ -361,6 +356,20 @@ export interface AudioEngine {
 		curveB: PreviewCurve,
 		options?: { experimental?: boolean; initial?: ABSide; protect?: 'yolo' }
 	): ABPreview;
+	/**
+	 * One preview protection for every chain of a set heard against each other (Comparar's armed
+	 * tracks, Teste cego's candidates), as `createAB` gives its pair (C1): when `protect: 'yolo'`
+	 * asks for it, or when any curve of the set is refused by the standard gate
+	 * (`standardGateAccepts`) or louder than `PREVIEW_PEAK_LIMIT_DB`, the same gain for all of
+	 * them, which brings the loudest float peak (plus its `trimDb`) to `YOLO_PREVIEW_PEAK_DBFS`.
+	 * Undefined when none needs it. Pass it as `buildChain`'s `protect` to every chain of the set:
+	 * the same gain staging (normalize gain and limiter) on each keeps the level match, and no
+	 * chain stands out. Creates the AudioContext (its rate decides the peaks).
+	 */
+	sharedProtection(
+		curves: readonly SharedCurve[],
+		options?: { protect?: 'yolo' }
+	): ChainOptions['protect'];
 	/**
 	 * Analyser fed by the meter bus (post-chain, pre-volume), for spectrum displays. The preview
 	 * volume never changes what it shows.
@@ -1546,6 +1555,26 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		return chain;
 	}
 
+	function sharedProtection(
+		curves: readonly SharedCurve[],
+		sharedOptions: { protect?: 'yolo' } = {}
+	): ChainOptions['protect'] {
+		const rate = ensure().context.sampleRate;
+		let needed = sharedOptions.protect === 'yolo';
+		let loudest = -Infinity;
+		for (const curve of curves) {
+			const peak = chainPeakDb(curve.bands, curve.preampDb, rate);
+			loudest = Math.max(loudest, peak + (curve.trimDb ?? 0));
+			if (
+				!needed &&
+				(!(peak <= PREVIEW_PEAK_LIMIT_DB) || !standardGateAccepts(curve.bands, curve.preampDb))
+			) {
+				needed = true;
+			}
+		}
+		return needed ? { gainDb: protectionGainDb(loudest) } : undefined;
+	}
+
 	function createAB(
 		curveA: PreviewCurve,
 		curveB: PreviewCurve,
@@ -1561,19 +1590,13 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		// standard gate or louder than it allows, so no page can forget it. One protection gain
 		// for both sides keeps the level match; the louder side's float peak (after its trim)
 		// lands at YOLO_PREVIEW_PEAK_DBFS.
-		const rate = ensure().context.sampleRate;
-		const peakA = chainPeakDb(curveA.bands, curveA.preampDb, rate);
-		const peakB = chainPeakDb(curveB.bands, curveB.preampDb, rate);
-		let protect: ChainOptions['protect'];
-		if (
-			abOptions.protect === 'yolo' ||
-			!(peakA <= PREVIEW_PEAK_LIMIT_DB) ||
-			!(peakB <= PREVIEW_PEAK_LIMIT_DB) ||
-			!standardGateAccepts(snapshotBands(curveA.bands), curveA.preampDb) ||
-			!standardGateAccepts(snapshotBands(curveB.bands), curveB.preampDb)
-		) {
-			protect = { gainDb: protectionGainDb(Math.max(peakA + trimA, peakB + trimB)) };
-		}
+		const protect = sharedProtection(
+			[
+				{ ...curveA, trimDb: trimA },
+				{ ...curveB, trimDb: trimB }
+			],
+			abOptions.protect === 'yolo' ? { protect: 'yolo' } : {}
+		);
 		const a = buildChain(curveA.bands, curveA.preampDb, {
 			experimental,
 			gainDb: trimA,
@@ -1689,6 +1712,7 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		buildChain,
 		matchGains,
 		createAB,
+		sharedProtection,
 		getAnalyserTap,
 		getMeterBus,
 		getChainOutput: (id) => chains.get(id)?.chain.output ?? null,

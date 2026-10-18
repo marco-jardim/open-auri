@@ -1920,11 +1920,12 @@
 			max-width: 70%;
 		}
 	}
-	/* A narrow screen (a phone: about 300 px) is shorter than the Ouvir hint over it (title, four
-	   or five lines and a 44 px button): the title and the first lines were cut off at the
-	   screen's top edge. Below about 520 px of screen it no longer fits, so it follows the screen,
-	   whole; the screen keeps its size, so the live layer and the points stay on the plot. */
-	@container scope-bezel (max-width: 560px) {
+	/* Below 40rem of plot width (640px at the default root font), the Ouvir hint follows the
+	   screen: its title, wrapped body and button need more height than the overlay has. This
+	   also covers the wider phone plot just below the 720px layout change, so narrowing the
+	   viewport never puts it back over the plot. A larger root font moves it below sooner;
+	   desktop plots keep the overlay's original offsets. The plot itself never changes size. */
+	@container scope-bezel (max-width: 40rem) {
 		.ouvir-hint {
 			position: static;
 			max-width: none;
