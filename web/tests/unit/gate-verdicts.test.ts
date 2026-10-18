@@ -46,7 +46,12 @@ describe('one entry per canonical curve', () => {
 		]);
 		const first = gateVerdict(raw, -1);
 		expect(gateVerdict(snapshotBands(raw), -1)).toBe(first);
-		expect(gateVerdict(raw.map((band) => ({ ...band })), -1)).toBe(first);
+		expect(
+			gateVerdict(
+				raw.map((band) => ({ ...band })),
+				-1
+			)
+		).toBe(first);
 		expect(runs()).toBe(1);
 		// Experimental by default (LP): the flag the write gate would get.
 		expect(first.ok).toBe(gateForWrite(raw, -1, { experimental: true }).ok);

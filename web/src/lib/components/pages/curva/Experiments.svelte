@@ -263,7 +263,12 @@
 									<span class="sr-only">{m.curva_xp_yolo_marker()}</span>
 								{/if}
 							</span>
-							<svg class="xp-mini" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+							<svg
+								class="xp-mini"
+								viewBox="0 0 100 20"
+								preserveAspectRatio="none"
+								aria-hidden="true"
+							>
 								<line x1="0" y1="10" x2="100" y2="10" />
 								<path d={minis.get(experiment.id) ?? ''} vector-effect="non-scaling-stroke" />
 							</svg>

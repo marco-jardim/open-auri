@@ -52,13 +52,7 @@
 	const typed = $derived(normalizeYoloPhrase(phrase));
 	const matches = $derived(isYoloPhrase(phrase));
 	const phraseState = $derived(
-		typed === ''
-			? 'empty'
-			: matches
-				? 'ok'
-				: YOLO_PHRASE.startsWith(typed)
-					? 'partial'
-					: 'mismatch'
+		typed === '' ? 'empty' : matches ? 'ok' : YOLO_PHRASE.startsWith(typed) ? 'partial' : 'mismatch'
 	);
 	const phraseStatus = $derived(
 		phraseState === 'ok'

@@ -175,3 +175,92 @@ it('chainPeakDb finds a resonance far narrower than its frequency grid', () => {
 	const narrow: Band[] = pad([{ kind: 'PK', freqHz: 1234.5, gainDb: 12, qFactor: 300 }]);
 	expect(chainPeakDb(narrow, -0.5, 96000)).toBeGreaterThan(11.3);
 });
+
+describe('gain below 10 Hz and at Nyquist (free preview, codec only)', () => {
+	/**
+	 * The review's case: +12,2 dB at DC with the preamp, near 0 dB from 10 Hz up. Checked at the
+	 * fallback rates, where the section is designed in float: at 96 kHz a 1 Hz corner is below
+	 * what the Q27 words resolve, and the response there is the quantization's.
+	 */
+	const SUBSONIC_SHELF: PreviewCurve = {
+		bands: pad([{ kind: 'LS', freqHz: 1, gainDb: 12.7, qFactor: 0.7 }]),
+		preampDb: -0.5
+	};
+	/** About +11,5 dB at 5 Hz, which the Q27 words hold at 96 kHz; about +3,5 dB at 10 Hz. */
+	const SUBSONIC_PEAK: PreviewCurve = {
+		bands: pad([{ kind: 'PK', freqHz: 5, gainDb: 12, qFactor: 1 }]),
+		preampDb: -0.5
+	};
+	/** Gains up to Nyquist (experimental HS): its peak is at ω = π. */
+	const AIR_SHELF: PreviewCurve = {
+		bands: pad([{ kind: 'HS', freqHz: 40000, gainDb: 12, qFactor: 0.71 }]),
+		preampDb: -0.5
+	};
+	/** |H| (dB) of a built chain at `w` rad/sample: its preamp node, then its exact sections. */
+	function chainDbAt(chain: PreviewChain, w: number): number {
+		const [c1, c2, s1, s2] = [Math.cos(w), Math.cos(2 * w), Math.sin(w), Math.sin(2 * w)];
+		let gain = as(chain.preamp, FakeGainNode).gain.value;
+		for (const { feedforward: b, feedback: a } of chain.coefficients) {
+			const top = Math.hypot(b[0] + b[1] * c1 + b[2] * c2, b[1] * s1 + b[2] * s2);
+			const bottom = Math.hypot(a[0] + a[1] * c1 + a[2] * c2, a[1] * s1 + a[2] * s2);
+			gain *= top / bottom;
+		}
+		return 20 * Math.log10(gain);
+	}
+	/** Brute-force peak (dB) of a built chain from DC to 10 Hz, every 5 mHz. */
+	function peakBelow10Hz(chain: PreviewChain): number {
+		let peak = -Infinity;
+		for (let i = 0; i <= 2000; i++) {
+			peak = Math.max(peak, chainDbAt(chain, (2 * Math.PI * (i / 200)) / chain.rate));
+		}
+		return peak;
+	}
+
+	it.each([
+		['a 1 Hz low shelf', 48000, SUBSONIC_SHELF, 11.5],
+		['a 1 Hz low shelf', 44100, SUBSONIC_SHELF, 11.5],
+		['a 5 Hz peak', 96000, SUBSONIC_PEAK, 10],
+		['a 5 Hz peak', 48000, SUBSONIC_PEAK, 10]
+	] as const)('%s at %i Hz is normalized to -1 dBFS', (_, rate, curve, atLeast) => {
+		audioConfig.supportedRates = [rate];
+		audioConfig.deviceRate = rate;
+		const chain = makeEngine().buildChain(curve.bands, curve.preampDb);
+		expect(chain.rate).toBe(rate);
+		const low = peakBelow10Hz(chain);
+		expect(low).toBeGreaterThan(atLeast);
+		// What a grid starting at 10 Hz saw: far less than the real peak.
+		expect(chainDbAt(chain, (2 * Math.PI * 10) / rate)).toBeLessThan(low - 5);
+		const peak = chainPeakDb(curve.bands, curve.preampDb, rate);
+		expect(peak).toBeGreaterThanOrEqual(low - 1e-6);
+		// Normalized to -1 dBFS where it really peaks.
+		const found = protection(chain);
+		expect(found).not.toBeNull();
+		expect(low + 20 * Math.log10(found?.gain ?? 1)).toBeLessThanOrEqual(
+			YOLO_PREVIEW_PEAK_DBFS + 1e-6
+		);
+	});
+
+	it.each([48000, 44100])('the 1 Hz low shelf peaks at DC itself at %i Hz', (rate) => {
+		audioConfig.supportedRates = [rate];
+		audioConfig.deviceRate = rate;
+		const chain = makeEngine().buildChain(SUBSONIC_SHELF.bands, SUBSONIC_SHELF.preampDb);
+		const dcDb = chainDbAt(chain, 0);
+		expect(dcDb).toBeCloseTo(12.2, 1);
+		const peak = chainPeakDb(SUBSONIC_SHELF.bands, SUBSONIC_SHELF.preampDb, rate);
+		expect(peak).toBeGreaterThanOrEqual(dcDb - 1e-9);
+	});
+
+	it('chainPeakDb probes Nyquist exactly', () => {
+		const chain = makeEngine().buildChain(AIR_SHELF.bands, AIR_SHELF.preampDb, {
+			experimental: true
+		});
+		const nyquistDb = chainDbAt(chain, Math.PI);
+		const peak = chainPeakDb(AIR_SHELF.bands, AIR_SHELF.preampDb, chain.rate);
+		expect(peak).toBeGreaterThanOrEqual(nyquistDb - 1e-9);
+		const found = protection(chain);
+		expect(found).not.toBeNull();
+		expect(nyquistDb + 20 * Math.log10(found?.gain ?? 1)).toBeLessThanOrEqual(
+			YOLO_PREVIEW_PEAK_DBFS + 1e-9
+		);
+	});
+});

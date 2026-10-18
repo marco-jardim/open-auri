@@ -213,25 +213,78 @@ function poleAngle(feedback: IIRCoefficients['feedback']): number | null {
 	return cosine > -1 && cosine < 1 ? Math.acos(cosine) : null;
 }
 
-/** Peak (dB) of a cascade: a log grid from 10 Hz to just below Nyquist, plus every pole angle. */
+/** Lowest frequency (Hz) of the peak search's log grid; DC itself is probed exactly below it. */
+const PEAK_GRID_FLOOR_HZ = 0.001;
+/** Intervals of the peak search's log grid, `PEAK_GRID_FLOOR_HZ` to Nyquist. */
+const PEAK_GRID_INTERVALS = 2048;
+
+/** Golden-section search for the largest `fn` (dB) in [a, b] (rad/sample). */
+function refinePeakDb(fn: (w: number) => number, a: number, b: number): number {
+	const r = (Math.sqrt(5) - 1) / 2;
+	let lo = a;
+	let hi = b;
+	let c = hi - r * (hi - lo);
+	let d = lo + r * (hi - lo);
+	let fc = fn(c);
+	let fd = fn(d);
+	for (let i = 0; i < 80 && hi - lo > 1e-13; i++) {
+		if (fc > fd) {
+			hi = d;
+			d = c;
+			fd = fc;
+			c = hi - r * (hi - lo);
+			fc = fn(c);
+		} else {
+			lo = c;
+			c = d;
+			fc = fd;
+			d = lo + r * (hi - lo);
+			fd = fn(d);
+		}
+	}
+	// NaN propagates (Math.max), so a broken response always reads as unbounded.
+	return Math.max(fc, fd);
+}
+
+/**
+ * Peak (dB) of a cascade, preamp included, at the context rate `rate`: DC (ω = 0) and Nyquist
+ * (ω = π) exactly, a log grid from `PEAK_GRID_FLOOR_HZ` to Nyquist, and each section's pole angle
+ * (where it resonates); then every local maximum of those probes, and both end intervals, are
+ * refined by golden-section search. A refinement only ever raises the estimate. A NaN or infinite
+ * response yields NaN or +Infinity, which the callers treat as unbounded (full protection).
+ */
 function cascadePeakDb(
 	coefficients: readonly IIRCoefficients[],
 	preamp: number,
 	rate: number
 ): number {
-	const points = 1024;
-	const lo = (2 * Math.PI * 10) / rate;
-	const hi = (2 * Math.PI * (rate / 2 - 1)) / rate;
-	let peak = -Infinity;
-	const probe = (w: number) => {
-		peak = Math.max(peak, 20 * Math.log10(cascadeGain(coefficients, preamp, w)));
-	};
-	for (let i = 0; i <= points; i++) probe(lo * Math.pow(hi / lo, i / points));
+	const db = (w: number) => 20 * Math.log10(cascadeGain(coefficients, preamp, w));
+	const nyquist = Math.PI;
+	const lo = (2 * Math.PI * PEAK_GRID_FLOOR_HZ) / rate;
+	const angles: number[] = [0];
+	for (let i = 0; i <= PEAK_GRID_INTERVALS; i++) {
+		angles.push(lo * Math.pow(nyquist / lo, i / PEAK_GRID_INTERVALS));
+	}
+	angles[angles.length - 1] = nyquist;
 	// A narrow resonance falls between grid points: probe each section where it resonates too.
 	for (const { feedback } of coefficients) {
 		const w = poleAngle(feedback);
-		if (w !== null && w >= lo && w <= hi) probe(w);
+		if (w !== null) angles.push(w);
 	}
+	angles.sort((x, y) => x - y);
+	const values = angles.map(db);
+	let peak = -Infinity;
+	for (const value of values) peak = Math.max(peak, value);
+	const last = angles.length - 1;
+	for (let i = 1; i < last; i++) {
+		const here = values[i] ?? NaN;
+		if (here > (values[i - 1] ?? NaN) && here >= (values[i + 1] ?? NaN)) {
+			peak = Math.max(peak, refinePeakDb(db, angles[i - 1] ?? 0, angles[i + 1] ?? nyquist));
+		}
+	}
+	// A peak inside the first or the last interval has no bracketing interior point.
+	peak = Math.max(peak, refinePeakDb(db, angles[0] ?? 0, angles[1] ?? nyquist));
+	peak = Math.max(peak, refinePeakDb(db, angles[last - 1] ?? 0, angles[last] ?? nyquist));
 	return peak;
 }
 
@@ -241,9 +294,10 @@ function protectionGainDb(peakDb: number): number {
 }
 
 /**
- * Peak of a chain's float transfer function (preamp included), in dB, over a log grid from
- * 10 Hz to just below Nyquist plus each section's resonance. Presentation-side estimate for the
- * preview protection only.
+ * Peak of a chain's float transfer function (preamp included), in dB, at the context rate `rate`:
+ * DC and Nyquist exactly, a log grid from `PEAK_GRID_FLOOR_HZ` to Nyquist and each section's
+ * resonance, each local maximum refined (`cascadePeakDb`). A shelf whose gain sits below 10 Hz
+ * is measured at DC, where it peaks. Presentation-side estimate for the preview protection only.
  */
 export function chainPeakDb(bands: readonly Band[], preampDb: number, rate: number): number {
 	return cascadePeakDb(chainCoefficients(bands, rate), preampGain(preampDb), rate);

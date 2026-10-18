@@ -170,14 +170,17 @@
 	function loadEntry(entry: JournalEntry) {
 		// Loading a journal card is editor-only, including interrupted and simulated entries, but
 		// gated: a YOLO entry needs YOLO on in this tab (and the YOLO gate), any other entry the
-		// standard gate.
+		// standard gate; none loads below the editor's −25,5 dB preamp floor.
 		if (!app) return;
 		const decision = loadDecision(entry, app.yolo.enabled);
 		if (!decision.load) {
-			app.toasts.push(
-				decision.reason === 'yolo-off' ? m.yolo_load_refused() : m.yolo_load_gate_refused(),
-				{ tone: 'error' }
-			);
+			const message =
+				decision.reason === 'preamp-floor'
+					? m.yolo_load_preamp_floor()
+					: decision.reason === 'yolo-off'
+						? m.yolo_load_refused()
+						: m.yolo_load_gate_refused();
+			app.toasts.push(message, { tone: 'error' });
 			return;
 		}
 		app.state.curve.set({

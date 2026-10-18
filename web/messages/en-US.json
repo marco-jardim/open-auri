@@ -2530,6 +2530,7 @@
 	"yolo_journal_entry": "YOLO write (waived: {criteria})",
 	"yolo_lamp_waived": "waived (YOLO)",
 	"yolo_load_gate_refused": "This write does not pass the current gate and was not loaded into the editor.",
+	"yolo_load_preamp_floor": "This write has its preamp below −25.5 dB, the editor's minimum, and was not loaded into the editor.",
 	"yolo_load_refused": "This YOLO write only opens with YOLO mode on in this tab, in the Engineering layer.",
 	"yolo_load_yolo": "YOLO write loaded into the editor in YOLO mode.",
 	"yolo_lock_session": "Turn on YOLO mode in this tab, with the typed phrase, to write this curve.",

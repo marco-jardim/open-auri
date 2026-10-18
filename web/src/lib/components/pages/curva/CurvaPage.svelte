@@ -31,7 +31,7 @@
 	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
 	import { createGateWorker } from '#lib/workers/index.ts';
-	import { curveSignature } from '#lib/state/model.ts';
+	import { curveSignature, type CurveData } from '#lib/state/model.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { whenIdle } from '#lib/app/runtime.ts';
@@ -229,6 +229,19 @@
 			if (live === null && freeDraft !== null) freeDraft = null;
 		});
 	});
+	/**
+	 * Bumped each time the free preview starts or ends (not reactive): a commit begun before a
+	 * free-preview exit is stale even if the free preview is on again when the gate answers.
+	 */
+	let freePreviewEpoch = 0;
+	let wasFreePreview = false;
+	$effect(() => {
+		const on = freePreview;
+		if (on !== wasFreePreview) {
+			wasFreePreview = on;
+			freePreviewEpoch++;
+		}
+	});
 	/** Why YOLO itself disables writing (the free preview), or null. */
 	const yoloWriteReason = $derived(
 		yoloWriteBlock(yoloOn, freePreview) ? m.yolo_reason_free_preview() : null
@@ -253,8 +266,12 @@
 	$effect(() => {
 		app?.yolo.syncLayer(layer);
 	});
-	/** The editor curve when YOLO was turned on: restored if YOLO ends on a curve the standard gate refuses. */
-	let beforeYolo: { curve: Curve; labels: readonly (string | null)[] | null } | null = null;
+	/**
+	 * The editor curve when YOLO was turned on, whole (name, source, labels, bands and preamp):
+	 * restored, all of it, if YOLO ends on a curve the standard gate refuses, even when a YOLO-only
+	 * experiment or import renamed it or gave it another source meanwhile.
+	 */
+	let beforeYolo: CurveData | null = null;
 	let wasYolo = false;
 	$effect(() => {
 		const on = yoloOn;
@@ -262,14 +279,17 @@
 			if (on && !wasYolo && app) {
 				const current = app.state.curve.current;
 				beforeYolo = {
-					curve: { bands: current.bands.slice(), preampDb: current.preampDb },
+					name: current.name,
+					source: current.source,
+					preampDb: current.preampDb,
+					bands: current.bands,
 					labels: current.labels ?? null
 				};
 			} else if (!on && wasYolo && app && beforeYolo !== null) {
 				// "Desligar" (or leaving Engenharia) on a YOLO-only curve: the editor goes back to
-				// the curve it had before; a curve the standard gate accepts stays as it is.
-				if (!canBringBack(app.state.curve.current)) {
-					apply(beforeYolo.curve, { labels: beforeYolo.labels });
+				// the curve it had before, metadata included; a curve the standard gate accepts
+				// stays as it is.
+				if (!canBringBack(app.state.curve.current) && app.state.curve.set(beforeYolo)) {
 					notify(m.yolo_restored());
 				}
 				beforeYolo = null;
@@ -651,18 +671,30 @@
 		cancelFrames();
 		const start = curve;
 		const released = draft;
-		// What the answer is about: the stored curve under the edit and the gate profile it is
-		// judged in. Either may change while the gate answers (another tab, a preset, YOLO turned
-		// off and the curve before it restored): then the answer is stale and is dropped.
+		// What the answer is about: the stored curve under the edit, the gate profile it is judged
+		// in, and where it lands (the free preview's memory-only draft, and which step of it). Any
+		// of them may change while the gate answers (another tab, a preset, YOLO turned off and
+		// the curve before it restored, the free preview turned off or on, a draft Desfazer,
+		// Refazer, reorder or other edit): then the answer is stale and is dropped (C1, #38).
 		const startStored = storedSignature;
 		const startProfile = writeProfile;
+		const startFree = freePreview;
+		const startFreeEpoch = freePreviewEpoch;
+		const startDraft = liveDraft;
 		dragView = null;
 		dragReason = null;
 		try {
 			const result = await releaseBand(gate, start, index, target, experimental, startAccepted);
 			if (token !== dragToken) return;
-			if (storedSignature !== startStored || writeProfile !== startProfile) {
-				// C1: never applied over another curve, nor in a profile it was not judged in.
+			if (
+				storedSignature !== startStored ||
+				writeProfile !== startProfile ||
+				freePreview !== startFree ||
+				freePreviewEpoch !== startFreeEpoch ||
+				liveDraft !== startDraft
+			) {
+				// C1: never applied over another curve or draft step, in a profile it was not
+				// judged in, nor into the store once the free preview it began in has ended.
 				draft = null;
 				report(null, 'info');
 				return;
@@ -1160,12 +1192,7 @@
 		<LayerSelector {layer} {onlayer}>
 			<!-- Modo YOLO sits with the layer choice: unavailable (with its reason) off Engenharia. -->
 			{#if app}
-				<YoloToggle
-					yolo={app.yolo}
-					{layer}
-					onbringback={bringBack}
-					writeReason={yoloWriteReason}
-				/>
+				<YoloToggle yolo={app.yolo} {layer} onbringback={bringBack} writeReason={yoloWriteReason} />
 			{/if}
 		</LayerSelector>
 		<div class="np-help"><TourTrigger page="curva" /></div>

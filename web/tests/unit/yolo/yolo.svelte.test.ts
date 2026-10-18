@@ -117,7 +117,9 @@ test('the bar names what is waived, opens the warning and turns YOLO off in one 
 	// The visible label is split in two spans; the accessible name keeps the space.
 	await bar.getByRole('button', { name: 'Desligar YOLO', exact: true }).click();
 	expect(yolo.enabled).toBe(false);
-	await expect.element(page.getByRole('region', { name: 'Modo YOLO ligado' })).not.toBeInTheDocument();
+	await expect
+		.element(page.getByRole('region', { name: 'Modo YOLO ligado' }))
+		.not.toBeInTheDocument();
 });
 
 test('the curve notice titles each variant and carries the full disclaimer', async () => {
@@ -143,6 +145,8 @@ test('the compact curve notice is a badge and one line, with no heading', async 
 	await render(YoloCurveNotice, { variant: 'public', compact: true });
 	const note = page.getByRole('note', { name: 'Aviso de curva YOLO' });
 	await expect.element(note).toMatchTextContent('YOLO');
-	await expect.element(note).toMatchTextContent('Além dos limites padrão. Gravar exige o Modo YOLO.');
+	await expect
+		.element(note)
+		.toMatchTextContent('Além dos limites padrão. Gravar exige o Modo YOLO.');
 	await expect.element(note.getByRole('heading')).not.toBeInTheDocument();
 });

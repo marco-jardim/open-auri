@@ -33,7 +33,9 @@ test('layers are cumulative and reflected in ?camada=, including a reload', asyn
 	await layers.getByRole('radio', { name: 'Ajustar', exact: true }).click();
 	await expect(main).toHaveAttribute('data-layer', 'ajustar');
 	await expect(page).toHaveURL(/camada=ajustar/);
-	await expect(filterBank(page).getByRole('spinbutton', { name: 'Tipo', exact: true })).toHaveCount(10);
+	await expect(filterBank(page).getByRole('spinbutton', { name: 'Tipo', exact: true })).toHaveCount(
+		10
+	);
 	await expect(page.getByRole('region', { name: 'Presets', exact: true })).toBeVisible();
 	await expect(page.getByRole('region', { name: 'Gabinete modular', exact: true })).toHaveCount(0);
 
@@ -185,9 +187,9 @@ test('Neutro parks ten points with a hint; one becomes a gated filter, nothing i
 	await expect(
 		page.getByText('Arraste um ponto para criar um filtro, ou carregue um preset', { exact: true })
 	).toBeVisible();
-	await expect(page.getByRole('slider', { name: /^Ponto [A-J], .*estacionado em 0 dB/ })).toHaveCount(
-		10
-	);
+	await expect(
+		page.getByRole('slider', { name: /^Ponto [A-J], .*estacionado em 0 dB/ })
+	).toHaveCount(10);
 	const bank = filterBank(page);
 	await expect(bank.getByText('Envelope observado', { exact: true })).toBeVisible();
 	await expect(bank.locator('.gaterow li')).toHaveCount(7);
@@ -221,9 +223,9 @@ test('the bank wraps without horizontal scrolling and shares its badges with the
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	const name = (await modules.first().locator('.mod-name').textContent())?.trim();
 	expect(name).toBeTruthy();
-	expect(await page.getByRole('slider', { name: /^Filtro A,/ }).getAttribute('aria-label')).toContain(
-		`Filtro A, ${name}: PK`
-	);
+	expect(
+		await page.getByRole('slider', { name: /^Filtro A,/ }).getAttribute('aria-label')
+	).toContain(`Filtro A, ${name}: PK`);
 	// Processing order is secondary metadata, not the band's identity or its main heading.
 	await expect(modules.first().locator('.mod-stage')).toHaveAttribute(
 		'title',

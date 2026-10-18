@@ -107,9 +107,13 @@ describe('already migrated database (0004-0006 applied after 0010)', () => {
 	it('applies cleanly and the repository and deletion part work', async () => {
 		const db = env.SOCIAL_ORDER_DB;
 		const fresh = userTables(await names(db, 'table')).length === 0;
+		// The state production was in before 0004-0006 arrived: every other migration up to 0010.
+		// Later migrations (0012 alters versions) only ever ran after the social tables existed.
 		await applyD1Migrations(
 			db,
-			env.TEST_MIGRATIONS.filter((migration) => !isSocial(migration.name))
+			env.TEST_MIGRATIONS.filter(
+				(migration) => !isSocial(migration.name) && Number(migration.name.slice(0, 4)) <= 10
+			)
 		);
 		const before = await names(db, 'table');
 		expect(before).toContain('username_holds');

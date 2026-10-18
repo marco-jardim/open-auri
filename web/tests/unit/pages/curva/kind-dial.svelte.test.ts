@@ -65,32 +65,35 @@ test.each([
 	}
 );
 
-test.each(['pt-BR', 'en-US'] as const)('red, marked and announced refusal in %s', async (locale) => {
-	await setLocale(locale, { reload: false });
-	const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
-	await click(dial);
-	expect(value()).toBe('LS ✕');
-	expect(dial.getAttribute('aria-invalid')).toBe('true');
-	expect(dial.getAttribute('aria-valuenow')).toBe('1');
-	expect(dial.getAttribute('aria-valuetext')).toBe(`${m.curva_kinddial_ls_name()} (LS)`);
-	const live = screen.container.querySelector('[role="status"]');
-	expect(live?.getAttribute('aria-live')).toBe('polite');
-	expect(live?.textContent).toBe(m.curva_kinddial_pending({ kind: 'LS', reason: refusal }));
-	const valueElement = screen.container.querySelector('.value.invalid');
-	if (!valueElement) throw new Error('Missing invalid acronym');
-	const probe = document.createElement('span');
-	probe.style.color = 'var(--danger)';
-	screen.container.append(probe);
-	expect(getComputedStyle(valueElement).fill).toBe(getComputedStyle(probe).color);
-	expect(screen.container.querySelector('.cap')?.getAttribute('style')).toContain('0deg');
-	dial.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-	await tick();
-	const tooltip = screen.container.querySelector('[role="tooltip"]');
-	expect(tooltip?.matches(':popover-open')).toBe(true);
-	expect(tooltip?.textContent).toContain(refusal);
-	expect(tooltip?.textContent).toContain(m.curva_bn_kind_foot());
-	expect(onkind).not.toHaveBeenCalled();
-});
+test.each(['pt-BR', 'en-US'] as const)(
+	'red, marked and announced refusal in %s',
+	async (locale) => {
+		await setLocale(locale, { reload: false });
+		const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+		await click(dial);
+		expect(value()).toBe('LS ✕');
+		expect(dial.getAttribute('aria-invalid')).toBe('true');
+		expect(dial.getAttribute('aria-valuenow')).toBe('1');
+		expect(dial.getAttribute('aria-valuetext')).toBe(`${m.curva_kinddial_ls_name()} (LS)`);
+		const live = screen.container.querySelector('[role="status"]');
+		expect(live?.getAttribute('aria-live')).toBe('polite');
+		expect(live?.textContent).toBe(m.curva_kinddial_pending({ kind: 'LS', reason: refusal }));
+		const valueElement = screen.container.querySelector('.value.invalid');
+		if (!valueElement) throw new Error('Missing invalid acronym');
+		const probe = document.createElement('span');
+		probe.style.color = 'var(--danger)';
+		screen.container.append(probe);
+		expect(getComputedStyle(valueElement).fill).toBe(getComputedStyle(probe).color);
+		expect(screen.container.querySelector('.cap')?.getAttribute('style')).toContain('0deg');
+		dial.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+		await tick();
+		const tooltip = screen.container.querySelector('[role="tooltip"]');
+		expect(tooltip?.matches(':popover-open')).toBe(true);
+		expect(tooltip?.textContent).toContain(refusal);
+		expect(tooltip?.textContent).toContain(m.curva_bn_kind_foot());
+		expect(onkind).not.toHaveBeenCalled();
+	}
+);
 
 test('a click within five seconds advances from pending and applies a valid kind immediately', async () => {
 	const { screen, dial, value, onkind, canApply } = await setup('PK', 'ajustar', ['LS']);

@@ -763,7 +763,11 @@
 			{/if}
 		</div>
 		<div class="actions">
-			<Button variant="primary" type="submit" loading={busy} disabledReason={busy ? null : exitReason}
+			<Button
+				variant="primary"
+				type="submit"
+				loading={busy}
+				disabledReason={busy ? null : exitReason}
 				>{busy
 					? m.curva_social_busy()
 					: saving

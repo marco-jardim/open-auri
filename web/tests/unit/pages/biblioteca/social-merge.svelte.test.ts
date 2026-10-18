@@ -366,21 +366,19 @@ test('labels-only conflicts are listed per item and counted once per curve', asy
 		{ id: 'grave', name: 'Grave', s1: 's1-grave', labels: ['Sub', null], updatedAt: 10 },
 		{ id: 'ambos', name: 'Ambos', s1: 's1-ambos', labels: ['Ar'], updatedAt: 10 }
 	];
-	const mergeLibrary = vi.fn(
-		async (batch: LibraryMergeItem[]): Promise<MergeReport> => ({
-			created: [],
-			duplicates: [],
-			rejected: [],
-			conflicts: batch.flatMap((entry) =>
-				entry.localId === 'grave'
-					? [{ localId: 'grave', lineageId: 'lin-grave', field: 'labels' as const }]
-					: [
-							{ localId: entry.localId, lineageId: 'lin-ambos', field: 'name' as const },
-							{ localId: entry.localId, lineageId: 'lin-ambos', field: 'labels' as const }
-						]
-			)
-		})
-	);
+	const mergeLibrary = vi.fn(async (batch: LibraryMergeItem[]): Promise<MergeReport> => ({
+		created: [],
+		duplicates: [],
+		rejected: [],
+		conflicts: batch.flatMap((entry) =>
+			entry.localId === 'grave'
+				? [{ localId: 'grave', lineageId: 'lin-grave', field: 'labels' as const }]
+				: [
+						{ localId: entry.localId, lineageId: 'lin-ambos', field: 'name' as const },
+						{ localId: entry.localId, lineageId: 'lin-ambos', field: 'labels' as const }
+					]
+		)
+	}));
 	render(MergeBanner, {
 		items,
 		account: 'ana',

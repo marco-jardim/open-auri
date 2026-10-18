@@ -109,7 +109,8 @@ for (const copy of locales) {
 		if (!line) throw new Error('Missing sales line');
 		const visible = line.cloneNode(true);
 		if (!(visible instanceof HTMLElement)) throw new Error('Unexpected sales line');
-		for (const hidden of visible.querySelectorAll('[aria-hidden="true"], .sr-only')) hidden.remove();
+		for (const hidden of visible.querySelectorAll('[aria-hidden="true"], .sr-only'))
+			hidden.remove();
 		expect(visible.textContent?.trim()).toBe(copy.sales);
 		expect(visible.querySelector('a')?.textContent).toBe('kuba.audio');
 		expect(line.textContent).not.toMatch(/[—?]/);
