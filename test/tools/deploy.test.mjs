@@ -347,8 +347,8 @@ test('runDeploy executes the plan in order and prints the bookmark, never values
     assert.equal(env.CLOUDFLARE_ACCOUNT_ID, ACCOUNT);
     assert.equal(env.PATH, 'fixture-path');
   }
-  // check-sensitive and the tests never see the project's .env keys.
-  assert.equal(nodeEnvs.length, 2);
+  // check-sensitive, the tests and the worker wrap never see the project's .env keys.
+  assert.equal(nodeEnvs.length, 3);
   for (const env of nodeEnvs) assert.deepEqual(env, { PATH: 'fixture-path' });
   assert.equal(envs.find((env) => env.PUBLIC_ORIGIN)?.PUBLIC_ORIGIN, origin);
   assert.ok(lines.some((line) => line.includes(BOOKMARK)));
