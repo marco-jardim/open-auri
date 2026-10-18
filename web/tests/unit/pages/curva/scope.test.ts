@@ -15,6 +15,7 @@ import {
 	pathOf,
 	PLOT,
 	pointerTarget,
+	responsePath,
 	SCOPE_GRID,
 	segmentPath,
 	softBox,
@@ -96,6 +97,63 @@ describe('scope traces come from core responses', () => {
 		expect(gateStage).toBe(2);
 		const spans = spansAbove(t.internal, INTERNAL_LIMIT_DB);
 		expect(spans.some((s) => s.fromHz < 1000 && s.toHz > 1000)).toBe(true);
+	});
+
+	test('section responses are remembered per exact band (a drag frame evaluates one)', () => {
+		const core = (band: Band) => curveResponseDb({ bands: [band], preampDb: 0 }, SCOPE_GRID);
+		const pk: Band = { kind: 'PK', freqHz: 1234, gainDb: 3.3, qFactor: 1.7 };
+		const first = bandResponse({ ...pk });
+		// A different object with the same parameters reuses the same frozen response.
+		expect(bandResponse({ ...pk })).toBe(first);
+		expect(Object.isFrozen(first)).toBe(true);
+		expect(first).toEqual(core(pk));
+		// Any parameter change is a different response, exactly core's.
+		const moved: Band = { kind: 'PK', freqHz: 1234, gainDb: 3.4, qFactor: 1.7 };
+		expect(bandResponse(moved)).not.toBe(first);
+		expect(bandResponse(moved)).toEqual(core(moved));
+		// −0 and 0 are kept apart; an LP with a gain of 0 is keyed apart from one without.
+		const flat: Band = { kind: 'PK', freqHz: 1234, gainDb: 0, qFactor: 1.7 };
+		const negative: Band = { kind: 'PK', freqHz: 1234, gainDb: -0, qFactor: 1.7 };
+		expect(bandResponse(negative)).not.toBe(bandResponse(flat));
+		expect(bandResponse(negative)).toEqual(core(negative));
+		const lp: Band = { kind: 'LP', freqHz: 12000, qFactor: 0.7 };
+		expect(bandResponse(lp)).toEqual(core(lp));
+		expect(bandResponse({ kind: 'LP', freqHz: 12000, gainDb: 0, qFactor: 0.7 })).toEqual(
+			bandResponse(lp)
+		);
+	});
+
+	test('bands core refuses stay without a trace, cached or not', () => {
+		const bad: Band = { kind: 'PK', freqHz: 1000, gainDb: Number.NaN, qFactor: 1 };
+		expect(bandResponse(bad)).toBeNull();
+		expect(bandResponse({ ...bad })).toBeNull();
+		// A field that is not a number is never cached, and core still refuses it.
+		const typed = JSON.parse('{"kind":"PK","freqHz":"1000","gainDb":1,"qFactor":1}') as Band;
+		expect(bandResponse(typed)).toBeNull();
+		expect(bandResponse({ kind: 'PK', freqHz: 1000, gainDb: 1, qFactor: 1 })).not.toBeNull();
+	});
+
+	test('an unfrozen grid is evaluated afresh every time, with the same values', () => {
+		const pk: Band = { kind: 'PK', freqHz: 500, gainDb: -2, qFactor: 0.9 };
+		const grid = [...SCOPE_GRID];
+		const a = bandResponse(pk, grid);
+		const b = bandResponse(pk, grid);
+		expect(a).not.toBe(b);
+		expect(a).toEqual(b);
+		expect(a).toEqual(bandResponse(pk));
+	});
+
+	test('paths: the remembered section path and the SCOPE_GRID shortcut draw the same text', () => {
+		const t = traces(curve);
+		const band = t.bands[1];
+		if (!band) throw new Error('band 2 has a trace');
+		expect(responsePath(band)).toBe(pathOf(band));
+		expect(responsePath(band)).toBe(responsePath(band));
+		expect(responsePath(t.eq)).toBe(pathOf(t.eq));
+		// SCOPE_GRID's precomputed x text equals computing it on a copy of the grid.
+		const copy = [...SCOPE_GRID];
+		expect(pathOf(t.output)).toBe(pathOf(t.output, copy));
+		expect(segmentPath(t.output, 500, 2000)).toBe(segmentPath(t.output, 500, 2000, copy));
 	});
 
 	test('spansAbove finds each run over the threshold, with its peak', () => {

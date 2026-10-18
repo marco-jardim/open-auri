@@ -56,6 +56,7 @@
 		keyTarget,
 		pathOf,
 		pointerTarget,
+		responsePath,
 		segmentPath,
 		softBox,
 		spansAbove,
@@ -162,9 +163,14 @@
 	const legendId = $props.id();
 	let overlay: SVGSVGElement | undefined = $state();
 	let screenWidth = $state(0);
-	let active = $state<{ index: number; pointer: number; target: DragTarget; start: Band } | null>(
-		null
-	);
+	interface ActiveDrag {
+		index: number;
+		pointer: number;
+		target: DragTarget;
+		start: Band;
+	}
+	// Raw: replaced whole on every pointer move (never mutated), so no deep proxy per move.
+	let active = $state.raw<ActiveDrag | null>(null);
 	let wheelState = $state<{ index: number; q: number } | null>(null);
 
 	// Labels and handles keep a legible, touch-friendly size whatever the scope width.
@@ -179,7 +185,11 @@
 	const live = $derived(traces(curve));
 	const eqPath = $derived(pathOf(live.eq));
 	const outPath = $derived(pathOf(live.output));
-	const bandPaths = $derived(live.bands.map((response) => (response ? pathOf(response) : '')));
+	// Section responses are cached per exact band (scope.ts): while one handle moves, only its own
+	// thin trace is rebuilt; the others reuse their remembered path.
+	const bandPaths = $derived(
+		live.bands.map((response) => (response ? responsePath(response) : ''))
+	);
 	const refPath = $derived(reference ? pathOf(traces(reference).output) : '');
 	const overOutput = $derived(spansAbove(live.output, OUTPUT_LIMIT_DB));
 	const nearOutput = $derived(

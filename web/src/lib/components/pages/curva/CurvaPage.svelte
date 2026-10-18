@@ -281,7 +281,11 @@
 				(result) => {
 					// A newer position is queued: this answer is already stale.
 					if (generation !== advisoryGeneration || advisoryNext) return;
-					dragView = { index, status: result.refused ? 'outside' : 'inside' };
+					const status = result.refused ? 'outside' : 'inside';
+					// The same answer again leaves the view alone: the scope does not re-render for it.
+					if (dragView?.index !== index || dragView.status !== status) {
+						dragView = { index, status };
+					}
 					if (result.refused) {
 						const reason = explain(result.reasons, candidate);
 						dragReason = reason;

@@ -1,10 +1,27 @@
+// Building an Intl.NumberFormat costs far more than formatting with one, and the scope formats
+// several readouts on every frame of a drag: formatters are reused per locale and options (a
+// formatter is immutable, so the text is the same). A locale Intl refuses still throws each time.
+const FORMATTER_LIMIT = 32;
+const formatters = new Map<string, Intl.NumberFormat>();
+
+function formatter(
+	locale: string,
+	options: { minimumFractionDigits?: number; maximumFractionDigits: number }
+): Intl.NumberFormat {
+	const key = `${locale}|${options.minimumFractionDigits ?? ''}|${options.maximumFractionDigits}`;
+	let found = formatters.get(key);
+	if (!found) {
+		found = new Intl.NumberFormat(locale, options);
+		if (formatters.size >= FORMATTER_LIMIT) formatters.clear();
+		formatters.set(key, found);
+	}
+	return found;
+}
+
 /** Locale-aware numbers: pt-BR decimal comma, en-US point, always a real minus sign "−". */
 export function formatNumber(value: number, locale: string, digits = 1): string {
 	if (!Number.isFinite(value)) return '?';
-	return new Intl.NumberFormat(locale, {
-		minimumFractionDigits: digits,
-		maximumFractionDigits: digits
-	})
+	return formatter(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits })
 		.format(Object.is(value, -0) ? 0 : value)
 		.replaceAll('-', '−');
 }
@@ -23,7 +40,7 @@ export function formatHz(value: number, locale: string): string {
 export function formatHzCompact(value: number, locale: string): string {
 	if (!Number.isFinite(value)) return '';
 	if (value >= 1000) {
-		const text = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value / 1000);
+		const text = formatter(locale, { maximumFractionDigits: 1 }).format(value / 1000);
 		return `${text} kHz`;
 	}
 	return `${Math.round(value)} Hz`;

@@ -29,6 +29,7 @@ import {
 } from '#lib/components/pages/curva/model.ts';
 import {
 	formatHz,
+	formatHzCompact,
 	formatNumber,
 	formatQ,
 	formatSignedDb,
@@ -210,5 +211,21 @@ describe('model accessors and locale boundaries', () => {
 		expect(hexBytes([0, 15, 255])).toBe('00 0F FF');
 		expect(payloadCrc([])).toBe('0x0000');
 		expect(payloadCrc([255])).toBe('0xFF00');
+	});
+
+	test('reused formatters keep locales and digits apart; a bad locale still throws', () => {
+		const rounds = [1, 2, 3].map(() => [
+			formatNumber(1.5, 'pt-BR', 1),
+			formatNumber(1.5, 'en-US', 1),
+			formatNumber(1.5, 'pt-BR', 2),
+			formatNumber(-1.5, 'pt-BR', 0),
+			formatHzCompact(2250, 'pt-BR'),
+			formatHzCompact(2250, 'en-US')
+		]);
+		for (const round of rounds) {
+			expect(round).toEqual(['1,5', '1.5', '1,50', '−2', '2,3 kHz', '2.3 kHz']);
+		}
+		expect(() => formatNumber(1, 'not a locale!')).toThrow(RangeError);
+		expect(() => formatNumber(1, 'not a locale!')).toThrow(RangeError);
 	});
 });

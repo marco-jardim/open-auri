@@ -50,11 +50,11 @@ export const MINOR_FREQS: readonly number[] = [10, 100, 1000, 10000].flatMap((de
 		.filter((f) => f > F_MIN && f < F_MAX && !(MAJOR_FREQS as readonly number[]).includes(f))
 );
 
-/** One section's response in dB on `grid`, or null for OFF and bands core cannot evaluate. */
-export function bandResponse(band: Band, grid: readonly number[] = SCOPE_GRID): number[] | null {
-	if (band.kind === 'OFF') return null;
+type Section = Exclude<Band, { kind: 'OFF' }>;
+
+function evaluateSection(band: Section, grid: readonly number[]): readonly number[] | null {
 	try {
-		return curveResponseDb({ bands: [band], preampDb: 0 }, grid);
+		return Object.freeze(curveResponseDb({ bands: [band], preampDb: 0 }, grid));
 	} catch (error) {
 		// Core validates the band (range/type errors); such a band simply has no trace.
 		if (error instanceof RangeError || error instanceof TypeError) return null;
@@ -62,9 +62,63 @@ export function bandResponse(band: Band, grid: readonly number[] = SCOPE_GRID): 
 	}
 }
 
+// While a handle moves, the scope redraws every frame but only one section changes: the other
+// sections' core responses are remembered (per frozen grid, keyed by their exact parameters), so
+// a frame evaluates one section instead of ten. The cached arrays are frozen and never shared
+// mutable; a section whose fields are not plain numbers is always evaluated afresh.
+const RESPONSE_CACHE_LIMIT = 128;
+const responseCaches = new WeakMap<readonly number[], Map<string, readonly number[] | null>>();
+
+/** Exact text of a number (`String` round-trips every double; −0 kept apart from 0). */
+const numberKey = (value: number): string => (Object.is(value, -0) ? '-0' : String(value));
+
+/** Exact key of a section's parameters, or null when one is not a plain number (not cached). */
+function sectionKey(band: Section): string | null {
+	const fields: { kind: unknown; freqHz: unknown; gainDb?: unknown; qFactor: unknown } = band;
+	const { kind, freqHz, gainDb, qFactor } = fields;
+	if (typeof kind !== 'string' || typeof freqHz !== 'number' || typeof qFactor !== 'number') {
+		return null;
+	}
+	if (gainDb !== undefined && typeof gainDb !== 'number') return null;
+	const gain = gainDb === undefined ? '' : numberKey(gainDb);
+	return `${kind}|${numberKey(freqHz)}|${gain}|${numberKey(qFactor)}`;
+}
+
+/**
+ * One section's response in dB on `grid` (frozen), or null for OFF and bands core cannot
+ * evaluate. On a frozen grid the result is remembered for the section's exact parameters.
+ */
+export function bandResponse(
+	band: Band,
+	grid: readonly number[] = SCOPE_GRID
+): readonly number[] | null {
+	if (band.kind === 'OFF') return null;
+	const key = Object.isFrozen(grid) ? sectionKey(band) : null;
+	if (key === null) return evaluateSection(band, grid);
+	let cache = responseCaches.get(grid);
+	if (!cache) {
+		cache = new Map();
+		responseCaches.set(grid, cache);
+	}
+	const hit = cache.get(key);
+	if (hit !== undefined) {
+		// Most recently used last: the bound below drops the oldest entry.
+		cache.delete(key);
+		cache.set(key, hit);
+		return hit;
+	}
+	const response = evaluateSection(band, grid);
+	cache.set(key, response);
+	if (cache.size > RESPONSE_CACHE_LIMIT) {
+		const oldest = cache.keys().next();
+		if (!oldest.done) cache.delete(oldest.value);
+	}
+	return response;
+}
+
 export interface Traces {
 	/** Per section (wire order); null for OFF or unevaluable sections. */
-	bands: (number[] | null)[];
+	bands: (readonly number[] | null)[];
 	/** Sum of the sections (no preamp). */
 	eq: number[];
 	/** Sum of the sections plus the preamp: what reaches the output. */
@@ -94,6 +148,13 @@ export function traces(curve: Curve, grid: readonly number[] = SCOPE_GRID): Trac
 	return { bands, eq, output, internal, internalStage };
 }
 
+/** `xOf(f).toFixed(1)` of every SCOPE_GRID frequency: the same text on every redraw. */
+const SCOPE_X: readonly string[] = Object.freeze(SCOPE_GRID.map((f) => xOf(f).toFixed(1)));
+
+/** The x text of `grid[i]` (precomputed on SCOPE_GRID). */
+const xText = (grid: readonly number[], i: number, f: number): string =>
+	(grid === SCOPE_GRID ? SCOPE_X[i] : undefined) ?? xOf(f).toFixed(1);
+
 /** SVG path of a response on `grid` (values clamped far outside the plot; the clip crops). */
 export function pathOf(values: readonly number[], grid: readonly number[] = SCOPE_GRID): string {
 	let d = '';
@@ -101,7 +162,23 @@ export function pathOf(values: readonly number[], grid: readonly number[] = SCOP
 		const f = grid[i];
 		const v = values[i];
 		if (f === undefined || v === undefined || !Number.isFinite(v)) continue;
-		d += `${d ? 'L' : 'M'}${xOf(f).toFixed(1)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
+		d += `${d ? 'L' : 'M'}${xText(grid, i, f)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
+	}
+	return d;
+}
+
+const pathCache = new WeakMap<readonly number[], string>();
+
+/**
+ * `pathOf` on SCOPE_GRID, remembered per frozen response array (the cached section responses):
+ * while one handle moves, the other sections' thin traces are not rebuilt on every frame.
+ */
+export function responsePath(values: readonly number[]): string {
+	if (!Object.isFrozen(values)) return pathOf(values);
+	let d = pathCache.get(values);
+	if (d === undefined) {
+		d = pathOf(values);
+		pathCache.set(values, d);
 	}
 	return d;
 }
@@ -154,7 +231,7 @@ export function segmentPath(
 		const f = grid[i];
 		const v = values[i];
 		if (f === undefined || v === undefined || f < from || f > to || !Number.isFinite(v)) continue;
-		d += `${d ? 'L' : 'M'}${xOf(f).toFixed(1)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
+		d += `${d ? 'L' : 'M'}${xText(grid, i, f)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
 	}
 	return d;
 }
