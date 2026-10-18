@@ -148,37 +148,59 @@ export function traces(curve: Curve, grid: readonly number[] = SCOPE_GRID): Trac
 	return { bands, eq, output, internal, internalStage };
 }
 
-/** `xOf(f).toFixed(1)` of every SCOPE_GRID frequency: the same text on every redraw. */
-const SCOPE_X: readonly string[] = Object.freeze(SCOPE_GRID.map((f) => xOf(f).toFixed(1)));
+/**
+ * Grid of the traces while a point moves: every other SCOPE_GRID frequency (97 points, both ends
+ * kept), so each drag frame builds, parses and paints half the path points. On release the scope
+ * draws on SCOPE_GRID again, so every resting trace is the full-resolution one.
+ */
+export const DRAG_GRID: readonly number[] = Object.freeze(SCOPE_GRID.filter((_, i) => i % 2 === 0));
 
-/** The x text of `grid[i]` (precomputed on SCOPE_GRID). */
-const xText = (grid: readonly number[], i: number, f: number): string =>
-	(grid === SCOPE_GRID ? SCOPE_X[i] : undefined) ?? xOf(f).toFixed(1);
+/** `xOf(f).toFixed(1)` of every frequency of a frozen grid: the same text on every redraw. */
+const xTexts = new WeakMap<readonly number[], readonly string[]>();
+
+function xTextsOf(grid: readonly number[]): readonly string[] | null {
+	if (!Object.isFrozen(grid)) return null;
+	let texts = xTexts.get(grid);
+	if (!texts) {
+		texts = Object.freeze(grid.map((f) => xOf(f).toFixed(1)));
+		xTexts.set(grid, texts);
+	}
+	return texts;
+}
 
 /** SVG path of a response on `grid` (values clamped far outside the plot; the clip crops). */
 export function pathOf(values: readonly number[], grid: readonly number[] = SCOPE_GRID): string {
+	const xs = xTextsOf(grid);
 	let d = '';
 	for (let i = 0; i < values.length; i++) {
 		const f = grid[i];
 		const v = values[i];
 		if (f === undefined || v === undefined || !Number.isFinite(v)) continue;
-		d += `${d ? 'L' : 'M'}${xText(grid, i, f)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
+		d += `${d ? 'L' : 'M'}${xs?.[i] ?? xOf(f).toFixed(1)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
 	}
 	return d;
 }
 
-const pathCache = new WeakMap<readonly number[], string>();
+const pathCaches = new WeakMap<readonly number[], WeakMap<readonly number[], string>>();
 
 /**
- * `pathOf` on SCOPE_GRID, remembered per frozen response array (the cached section responses):
- * while one handle moves, the other sections' thin traces are not rebuilt on every frame.
+ * `pathOf`, remembered per frozen response array and frozen grid (the cached section
+ * responses): while one handle moves, the other sections' thin traces are not rebuilt.
  */
-export function responsePath(values: readonly number[]): string {
-	if (!Object.isFrozen(values)) return pathOf(values);
-	let d = pathCache.get(values);
+export function responsePath(
+	values: readonly number[],
+	grid: readonly number[] = SCOPE_GRID
+): string {
+	if (!Object.isFrozen(values) || !Object.isFrozen(grid)) return pathOf(values, grid);
+	let cache = pathCaches.get(grid);
+	if (!cache) {
+		cache = new WeakMap();
+		pathCaches.set(grid, cache);
+	}
+	let d = cache.get(values);
 	if (d === undefined) {
-		d = pathOf(values);
-		pathCache.set(values, d);
+		d = pathOf(values, grid);
+		cache.set(values, d);
 	}
 	return d;
 }
@@ -226,12 +248,13 @@ export function segmentPath(
 	to: number,
 	grid: readonly number[] = SCOPE_GRID
 ): string {
+	const xs = xTextsOf(grid);
 	let d = '';
 	for (let i = 0; i < values.length; i++) {
 		const f = grid[i];
 		const v = values[i];
 		if (f === undefined || v === undefined || f < from || f > to || !Number.isFinite(v)) continue;
-		d += `${d ? 'L' : 'M'}${xText(grid, i, f)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
+		d += `${d ? 'L' : 'M'}${xs?.[i] ?? xOf(f).toFixed(1)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
 	}
 	return d;
 }

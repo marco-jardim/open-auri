@@ -7,7 +7,13 @@ import { m } from '#lib/paraglide/messages.js';
 import ScopePanel from '#lib/components/pages/curva/ScopePanel.svelte';
 import { formatSignedDb } from '#lib/components/pages/curva/format.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
-import { OUTPUT_LIMIT_DB, PLOT, yOf } from '#lib/components/pages/curva/scope.ts';
+import {
+	DRAG_GRID,
+	OUTPUT_LIMIT_DB,
+	PLOT,
+	SCOPE_GRID,
+	yOf
+} from '#lib/components/pages/curva/scope.ts';
 import { CURVA_SESSION } from '#lib/components/pages/curva/preview.svelte.ts';
 import { createAudioEngine } from '#lib/audio/engine.ts';
 import { fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
@@ -417,17 +423,30 @@ test('while a point moves the screen drops its blurred effects; at rest they all
 		if (!element) throw new Error(`Missing ${selector}`);
 		return element;
 	};
+	const section = part('section.ps-scope');
 	const glass = part('.screen');
+	const plot = part('svg.scope');
+	const live = part('svg.scope-live');
 	const eq = part('path.tr-eq');
 	const ring = part('.handle.sel .ring');
 	const sweep = part('rect.sweep');
 	const filter = (element: Element) => getComputedStyle(element).filter;
+	const points = (path: Element) => (path.getAttribute('d') ?? '').split('L').length;
+	// The live layer lies exactly over the static plot, and draws on top of it.
+	expect(live.getBoundingClientRect().toJSON()).toEqual(plot.getBoundingClientRect().toJSON());
+	expect(plot.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	const resting = { eq: eq.getAttribute('d'), points: points(eq) };
+	expect(resting.points).toBe(SCOPE_GRID.length);
 	const expectAtRest = () => {
-		expect(glass.hasAttribute('data-dragging')).toBe(false);
-		// Phosphor glow on the EQ trace and the selected handle's shadow, the sweep running.
+		expect(section.hasAttribute('data-dragging')).toBe(false);
+		// Phosphor glow on the EQ trace and the selected handle's shadow, the sweep running, the
+		// glass over the screen, everything in one layer, every trace at full resolution.
 		expect(filter(eq)).toMatch(/^url\(/);
 		expect(filter(ring)).toContain('drop-shadow');
 		expect(getComputedStyle(sweep).animationPlayState).toBe('running');
+		expect(getComputedStyle(glass, '::after').visibility).toBe('visible');
+		expect(getComputedStyle(live).willChange).toBe('auto');
+		expect(eq.getAttribute('d')).toBe(resting.eq);
 	};
 	expectAtRest();
 	const box = part('svg.handles').getBoundingClientRect();
@@ -443,16 +462,21 @@ test('while a point moves the screen drops its blurred effects; at rest they all
 		);
 	pointer('pointerdown');
 	pointer('pointermove');
-	await vi.waitFor(() => expect(glass.hasAttribute('data-dragging')).toBe(true));
+	await vi.waitFor(() => expect(section.hasAttribute('data-dragging')).toBe(true));
 	const lit = part('rect.safe.lit');
 	expect(filter(eq)).toBe('none');
 	expect(filter(ring)).toBe('none');
 	expect(filter(lit)).toBe('none');
 	expect(getComputedStyle(sweep).animationPlayState).toBe('paused');
+	expect(getComputedStyle(glass, '::after').visibility).toBe('hidden');
+	expect(getComputedStyle(live).contain).toBe('strict');
+	// The moving traces use half the points (DRAG_GRID).
+	await vi.waitFor(() => expect(points(eq)).toBe(DRAG_GRID.length));
 	// The readouts are unchanged: the bubble still follows the handle.
 	expect(screen.container.querySelector('.bubble')).not.toBeNull();
 	pointer('pointerup');
-	await vi.waitFor(() => expect(glass.hasAttribute('data-dragging')).toBe(false));
+	await vi.waitFor(() => expect(section.hasAttribute('data-dragging')).toBe(false));
+	// On release the resting state is exactly the one before the drag.
 	expectAtRest();
 });
 

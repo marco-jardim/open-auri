@@ -42,6 +42,7 @@
 	import {
 		DB_MAX,
 		DB_MIN,
+		DRAG_GRID,
 		INTERNAL_LIMIT_DB,
 		MAJOR_FREQS,
 		MINOR_FREQS,
@@ -171,12 +172,32 @@
 	interface ActiveDrag {
 		index: number;
 		pointer: number;
-		target: DragTarget;
 		start: Band;
 	}
-	// Raw: replaced whole on every pointer move (never mutated), so no deep proxy per move.
+	// Set on press and cleared on release only: a pointer move writes no reactive state here (the
+	// page draws the draft once per frame), so a move alone re-renders nothing in this panel.
 	let active = $state.raw<ActiveDrag | null>(null);
+	/** Newest target of the active pointer drag; read only on release, so not reactive. */
+	let activeTarget: DragTarget = {};
 	let wheelState = $state<{ index: number; q: number } | null>(null);
+	let parkedActive = $state<{
+		index: number;
+		pointer: number;
+		target: DragTarget;
+		x: number;
+		y: number;
+	} | null>(null);
+
+	const moving = $derived(drag !== null || active !== null || wheelState !== null);
+	/**
+	 * A point is moving (pointer, wheel, advisory drag or a parked point): the scope repaints on
+	 * every frame, so it draws the cheap way until release (CSS `[data-dragging]`: no blurred
+	 * effects, no glass, the live traces on their own layer; traces on DRAG_GRID). At rest the
+	 * scope is drawn exactly as before.
+	 */
+	const dragging = $derived(moving || parkedActive !== null);
+	/** Full resolution at rest; half the points while a point moves (the resting state is exact). */
+	const grid = $derived(dragging ? DRAG_GRID : SCOPE_GRID);
 
 	// Labels and handles keep a legible, touch-friendly size whatever the scope width.
 	const unit = $derived(screenWidth > 0 ? VIEW_WIDTH / screenWidth : 1);
@@ -187,20 +208,20 @@
 
 	// --- traces (core responses) ------------------------------------------------------------------
 
-	const live = $derived(traces(curve));
-	const eqPath = $derived(pathOf(live.eq));
-	const outPath = $derived(pathOf(live.output));
+	const live = $derived(traces(curve, grid));
+	const eqPath = $derived(pathOf(live.eq, grid));
+	const outPath = $derived(pathOf(live.output, grid));
 	// Section responses are cached per exact band (scope.ts): while one handle moves, only its own
 	// thin trace is rebuilt; the others reuse their remembered path.
 	const bandPaths = $derived(
-		live.bands.map((response) => (response ? responsePath(response) : ''))
+		live.bands.map((response) => (response ? responsePath(response, grid) : ''))
 	);
 	const refPath = $derived(reference ? pathOf(traces(reference).output) : '');
-	const overOutput = $derived(spansAbove(live.output, OUTPUT_LIMIT_DB));
+	const overOutput = $derived(spansAbove(live.output, OUTPUT_LIMIT_DB, grid));
 	const nearOutput = $derived(
-		overOutput.length > 0 ? [] : spansAbove(live.output, OUTPUT_LIMIT_DB - NEAR_MARGIN_DB)
+		overOutput.length > 0 ? [] : spansAbove(live.output, OUTPUT_LIMIT_DB - NEAR_MARGIN_DB, grid)
 	);
-	const overInternal = $derived(spansAbove(live.internal, INTERNAL_LIMIT_DB));
+	const overInternal = $derived(spansAbove(live.internal, INTERNAL_LIMIT_DB, grid));
 	const widest = <T extends { fromHz: number; toHz: number }>(spans: readonly T[]): T | null =>
 		spans.reduce<T | null>(
 			(best, s) => (!best || s.toHz / s.fromHz > best.toHz / best.fromHz ? s : best),
@@ -209,19 +230,19 @@
 	const hotLabel = $derived(widest(overOutput));
 	const internalLabel = $derived(overOutput.length > 0 ? null : widest(overInternal));
 
-	const moving = $derived(drag !== null || active !== null || wheelState !== null);
 	/** Gate metrics when the drawn curve is the committed one; else the drawn preview's maximum. */
 	const peak = $derived.by(() => {
 		const audible = verdict?.metrics.outputAudible;
 		if (!moving && audible && curve === committed) {
 			return { db: audible.db, hz: audible.frequencyHz ?? SCOPE_GRID[0] ?? 20 };
 		}
+		const points = grid;
 		let db = -Infinity;
-		let hz = SCOPE_GRID[0] ?? 20;
+		let hz = points[0] ?? 20;
 		live.output.forEach((value, i) => {
 			if (value > db) {
 				db = value;
-				hz = SCOPE_GRID[i] ?? hz;
+				hz = points[i] ?? hz;
 			}
 		});
 		return Number.isFinite(db) ? { db, hz } : null;
@@ -245,20 +266,6 @@
 
 	const parked = $derived(isEmptyCurve(curve.bands));
 	let parkedFocus = $state<number | null>(null);
-	let parkedActive = $state<{
-		index: number;
-		pointer: number;
-		target: DragTarget;
-		x: number;
-		y: number;
-	} | null>(null);
-
-	/**
-	 * A point is moving (pointer, wheel, advisory drag or a parked point): the screen repaints on
-	 * every frame, so its blurred effects give way to plain strokes until release (CSS
-	 * `[data-dragging]`). At rest the screen is drawn exactly as before.
-	 */
-	const dragging = $derived(moving || parkedActive !== null);
 
 	// --- selection: safe box and hard zones -------------------------------------------------------
 
@@ -400,7 +407,8 @@
 			event.currentTarget.setPointerCapture(event.pointerId);
 		}
 		selected = index;
-		active = { index, pointer: event.pointerId, target: {}, start: band };
+		activeTarget = {};
+		active = { index, pointer: event.pointerId, start: band };
 	}
 	function onpointermove(event: PointerEvent) {
 		if (!active || active.pointer !== event.pointerId) return;
@@ -411,12 +419,14 @@
 		// Shift keeps the frequency, Alt keeps the gain (mock).
 		if (event.shiftKey && start.kind !== 'OFF') target = { ...target, freqHz: start.freqHz };
 		if (event.altKey && hasGain(start)) target = { ...target, gainDb: start.gainDb };
-		active = { ...active, target };
+		activeTarget = target;
 		ondrag(active.index, target);
 	}
 	function onpointerup(event: PointerEvent) {
 		if (!active || active.pointer !== event.pointerId) return;
-		const { index, target } = active;
+		const { index } = active;
+		const target = activeTarget;
+		activeTarget = {};
 		active = null;
 		if (Object.keys(target).length > 0) oncommit(index, target);
 	}
@@ -538,7 +548,7 @@
 	}
 </script>
 
-<section class="psec ps-scope" aria-labelledby={legendId}>
+<section class="psec ps-scope" aria-labelledby={legendId} data-dragging={dragging ? '' : undefined}>
 	<div class="bezel" data-tour="curva-chart">
 		<span class="screw s1" aria-hidden="true"></span>
 		<span class="screw s2" aria-hidden="true"></span>
@@ -552,7 +562,6 @@
 		<div
 			class="screen"
 			class:reduced
-			data-dragging={dragging ? '' : undefined}
 			bind:clientWidth={screenWidth}
 			style={`--gfs:${labelSize.toFixed(1)}px`}
 		>
@@ -565,10 +574,6 @@
 				<title>{m.curva_scope_label()}</title>
 				<desc>{m.curva_scope_desc()}</desc>
 				<defs>
-					<filter id="{legendId}-phos" x="-10%" y="-30%" width="120%" height="160%">
-						<feGaussianBlur stdDeviation="2.2" result="b" />
-						<feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-					</filter>
 					<clipPath id="{legendId}-clip">
 						<rect
 							x={PLOT.left}
@@ -687,6 +692,28 @@
 						/>
 					{/each}
 					{#if refPath}<path class="tr-ref" d={refPath} />{/if}
+				</g>
+			</svg>
+			<!-- The live part of the plot, stacked right above it in the same order (so at rest the
+			     screen looks exactly the same): the traces that move with a handle and the labels
+			     drawn over them. While a point moves it gets its own layer (CSS [data-dragging]),
+			     so the static plot underneath is never repainted. -->
+			<svg class="scope-live" viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} aria-hidden="true">
+				<defs>
+					<filter id="{legendId}-phos" x="-10%" y="-30%" width="120%" height="160%">
+						<feGaussianBlur stdDeviation="2.2" result="b" />
+						<feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+					</filter>
+					<clipPath id="{legendId}-clip-live">
+						<rect
+							x={PLOT.left}
+							y={PLOT.top}
+							width={PLOT.right - PLOT.left}
+							height={PLOT.bottom - PLOT.top}
+						/>
+					</clipPath>
+				</defs>
+				<g clip-path="url(#{legendId}-clip-live)" aria-hidden="true">
 					{#if editable}
 						{#each bandPaths as d, index (index)}
 							{#if d}
@@ -715,7 +742,7 @@
 						/>
 					{/key}
 					{#each overOutput as s (s.fromHz)}
-						<path class="tr-hot" d={segmentPath(live.output, s.fromHz, s.toHz)} />
+						<path class="tr-hot" d={segmentPath(live.output, s.fromHz, s.toHz, grid)} />
 					{/each}
 					{#if peak && peak.db > DB_MIN && peak.db < DB_MAX}
 						<circle class="peakmk" cx={xOf(clamp(peak.hz, 20, 20000))} cy={yOf(peak.db)} r="3.5" />
@@ -1071,7 +1098,17 @@
 		height: auto;
 		user-select: none;
 	}
-	.scope text {
+	/* Exactly over the static plot (same box and viewBox as the handles); never a hit target. */
+	.scope-live {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		user-select: none;
+	}
+	.scope text,
+	.scope-live text {
 		font-family: var(--face-data);
 		font-size: var(--gfs, 11px);
 	}
@@ -1638,20 +1675,36 @@
 		color: var(--text-2);
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
-	/* While a point moves the screen repaints on every frame (in software on machines without a
-	   GPU): the blurred effects over large areas (phosphor glow of the EQ trace, the lit safe
-	   box's halo, the handle shadows) give way to plain strokes, and the sweep holds still. The
-	   outside state keeps its red ring, drawn thicker instead of glowing. Restored on release. */
-	.screen[data-dragging] .tr-eq,
-	.screen[data-dragging] .safe.lit,
-	.screen[data-dragging] .handle .ring {
+	/* While a point moves the scope repaints on every frame (in software on machines without a
+	   GPU). Everything below is restored on release, so at rest nothing changes:
+	   - the blurred effects over large areas (phosphor glow of the EQ trace, the lit safe box's
+	     halo, the handle shadows) give way to plain strokes; the outside state keeps its red
+	     ring, drawn thicker instead of glowing; the sweep holds still;
+	   - the glass (reflection and scanlines over the whole screen) steps aside;
+	   - what changes every frame gets its own layer and layout boundary (the live traces, the
+	     handles, the peak readout), so the static plot, the screen and the rest of the page
+	     are neither repainted nor laid out again for a move. */
+	.ps-scope[data-dragging] .tr-eq,
+	.ps-scope[data-dragging] .safe.lit,
+	.ps-scope[data-dragging] .handle .ring {
 		filter: none;
 	}
-	.screen[data-dragging] .handle.outside .ring {
+	.ps-scope[data-dragging] .handle.outside .ring {
 		stroke-width: 2.8;
 	}
-	.screen[data-dragging] .sweep {
+	.ps-scope[data-dragging] .sweep {
 		animation-play-state: paused;
+	}
+	.ps-scope[data-dragging] .screen::after {
+		visibility: hidden;
+	}
+	.ps-scope[data-dragging] .scope-live {
+		contain: strict;
+	}
+	.ps-scope[data-dragging] .handles {
+		contain: strict;
+	}
+	.ps-scope[data-dragging] .scope-legend .pk {
 	}
 	.reduced .sweep,
 	.reduced .tr-after,

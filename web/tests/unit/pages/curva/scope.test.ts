@@ -5,6 +5,7 @@ import type { Band, Curve } from '#lib/components/pages/curva/model.ts';
 import {
 	bandResponse,
 	dbOf,
+	DRAG_GRID,
 	freqOf,
 	hardZones,
 	INTERNAL_LIMIT_DB,
@@ -154,6 +155,25 @@ describe('scope traces come from core responses', () => {
 		const copy = [...SCOPE_GRID];
 		expect(pathOf(t.output)).toBe(pathOf(t.output, copy));
 		expect(segmentPath(t.output, 500, 2000)).toBe(segmentPath(t.output, 500, 2000, copy));
+	});
+
+	test('the drag grid keeps every other point and both ends; its traces are still core', () => {
+		expect(Object.isFrozen(DRAG_GRID)).toBe(true);
+		expect(DRAG_GRID).toHaveLength((SCOPE_GRID.length + 1) / 2);
+		expect(DRAG_GRID[0]).toBe(SCOPE_GRID[0]);
+		expect(DRAG_GRID[DRAG_GRID.length - 1]).toBe(SCOPE_GRID[SCOPE_GRID.length - 1]);
+		DRAG_GRID.forEach((f, i) => expect(f).toBe(SCOPE_GRID[i * 2]));
+		const coarse = traces(curve, DRAG_GRID);
+		const eq = curveResponseDb({ bands: curve.bands, preampDb: 0 }, DRAG_GRID);
+		coarse.eq.forEach((value, i) => expect(value).toBeCloseTo(eq[i] ?? NaN, 9));
+		const band = coarse.bands[1];
+		const full = traces(curve).bands[1];
+		if (!band || !full) throw new Error('band 2 has a trace');
+		// Paths are remembered per grid: the coarse and the full trace never mix.
+		expect(responsePath(band, DRAG_GRID)).toBe(pathOf(band, DRAG_GRID));
+		expect(responsePath(full)).toBe(pathOf(full));
+		expect(responsePath(band, DRAG_GRID)).not.toBe(responsePath(full));
+		expect(pathOf(coarse.eq, DRAG_GRID)).toBe(pathOf(coarse.eq, [...DRAG_GRID]));
 	});
 
 	test('spansAbove finds each run over the threshold, with its peak', () => {
