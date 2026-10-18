@@ -3,6 +3,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
+import { tick } from 'svelte';
 import { NEUTRO } from 'open-auri/catalog';
 import { encodeS1 } from 'open-auri/share';
 import {
@@ -14,42 +15,6 @@ import {
 import MinhaBiblioteca from '#lib/components/pages/biblioteca/MinhaBiblioteca.svelte';
 import type { KeyValueStorage } from '#lib/components/pages/biblioteca/social.ts';
 import { m } from '#lib/paraglide/messages.js';
-
-// Layer this task's staging copy over the generated catalogs (same pattern as the T4.14 tests).
-vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
-	const original = await importOriginal<typeof import('#lib/paraglide/messages.js')>();
-	const { getLocale } = await import('#lib/paraglide/runtime.js');
-	const catalogs = import.meta.glob<Record<string, string>>(
-		[
-			'../../../../messages/_staging/CVEDIT.*.json',
-			'../../../../messages/pt-BR.json',
-			'../../../../messages/en-US.json'
-		],
-		{ eager: true, import: 'default' }
-	);
-	const catalog = (locale: string): Record<string, string> =>
-		Object.assign(
-			{},
-			...Object.entries(catalogs)
-				.filter(([path]) => path.endsWith(`${locale}.json`))
-				.map(([, values]) => values)
-		);
-	const pt = catalog('pt-BR');
-	const en = catalog('en-US');
-	const task = Object.fromEntries(
-		Object.keys(pt)
-			.filter((key) => key.startsWith('cvedit_'))
-			.map((key) => [
-				key,
-				(values: Record<string, string | number> = {}) =>
-					((getLocale() === 'en-US' ? en : pt)[key] ?? '').replace(
-						/\{(\w+)\}/g,
-						(_, name: string) => String(values[name] ?? '')
-					)
-			])
-	);
-	return { ...original, m: { ...original.m, ...task } };
-});
 
 afterEach(async () => {
 	await cleanup();
@@ -99,13 +64,22 @@ function mine(over: Partial<LibraryItem['head']> = {}): LibraryItem {
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((yes) => {
+		resolve = yes;
+	});
+	return { promise, resolve };
+}
+
 interface Call {
 	method: string;
 	path: string;
+	shelf: string | null;
 	body: unknown;
 }
 /** `count`: how many earlier calls the same route already answered. */
-type Route = (url: URL, body: unknown, count: number) => Response;
+type Route = (url: URL, body: unknown, count: number) => Response | Promise<Response>;
 
 function server(created: () => LibraryItem[], routes: Record<string, Route> = {}) {
 	const calls: Call[] = [];
@@ -123,7 +97,7 @@ function server(created: () => LibraryItem[], routes: Record<string, Route> = {}
 		const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
 		const key = `${method} ${url.pathname}`;
 		const count = calls.filter((call) => `${call.method} ${call.path}` === key).length;
-		calls.push({ method, path: url.pathname, body });
+		calls.push({ method, path: url.pathname, shelf: url.searchParams.get('shelf'), body });
 		const route = all[key];
 		return route ? route(url, body, count) : json({ error: { code: 'NOT_FOUND' } }, 404);
 	};
@@ -146,17 +120,18 @@ function memoryStorage(): KeyValueStorage {
 
 async function setup(api: ReturnType<typeof createSocialApi>) {
 	const remember = vi.fn<typeof rememberOrigin>(async () => {});
+	const session = createSocialSession({
+		initial: { id: 'u-ana', username: 'Ana', emailVerified: true }
+	});
 	const screen = await render(MinhaBiblioteca, {
-		session: createSocialSession({
-			initial: { id: 'u-ana', username: 'Ana', emailVerified: true }
-		}),
+		session,
 		api,
 		origin: 'https://example.test',
 		locale: 'pt-BR',
 		storage: memoryStorage(),
 		remember
 	});
-	return { remember, screen };
+	return { remember, screen, session };
 }
 
 const editButton = (name: string) =>
@@ -182,6 +157,9 @@ test('the edit form is prefilled from the head and focused; Esc cancels; unchang
 		.element(descriptionBox('Grave quente'))
 		.toHaveAccessibleDescription(m.cvedit_description_hint());
 	await expect.element(form('Grave quente')).toMatchTextContent(m.cvedit_edit_version());
+	await expect
+		.element(form('Grave quente').getByText(m.biblioteca_edit_gate_refused_hint()))
+		.not.toBeInTheDocument();
 	await userEvent.keyboard('{Escape}');
 	await expect.element(form('Grave quente')).not.toBeInTheDocument();
 	await expect.element(editButton('Grave quente')).toHaveFocus();
@@ -208,6 +186,9 @@ test('saving appends a version with the head curve and the new text; the row sho
 		.element(page.getByText(m.cvedit_edit_done({ name: 'Grave mais quente' })))
 		.toBeVisible();
 	await expect.element(page.getByText('Para fones fechados.', { exact: false })).toBeVisible();
+	await expect
+		.element(page.getByText('Para fones fechados.', { exact: false }))
+		.toHaveStyle({ whiteSpace: 'pre-line' });
 	expect(versions('lin1')).toHaveLength(1);
 	expect(versions('lin1')[0]?.body).toEqual({
 		parentVersionId: 'lin1v',
@@ -284,6 +265,12 @@ test('HEAD_MOVED explains, reloads the rows and the next save uses the current h
 	await setup(api);
 	await editButton('Grave quente').click();
 	await nameBox('Grave quente').fill('Meu nome');
+	const createdLoads = () =>
+		calls.filter(
+			(call) =>
+				call.method === 'GET' && call.path === '/api/v1/me/library' && call.shelf === 'created'
+		).length;
+	const beforeSave = createdLoads();
 	await saveButton('Grave quente').click();
 	// The rows reload with the current head: the open form now carries its name in its title,
 	// and keeps both the explanation and the typed text.
@@ -291,10 +278,7 @@ test('HEAD_MOVED explains, reloads the rows and the next save uses the current h
 	await expect
 		.element(form('Grave de outra aba').getByRole('status'))
 		.toMatchTextContent(m.cvedit_head_moved_reload());
-	const createdLoads = calls.filter(
-		(call) => call.method === 'GET' && call.path === '/api/v1/me/library'
-	);
-	expect(createdLoads.length).toBeGreaterThanOrEqual(6);
+	expect(createdLoads()).toBe(beforeSave + 1);
 	await expect.element(nameBox('Grave de outra aba')).toHaveValue('Meu nome');
 	await saveButton('Grave de outra aba').click();
 	await expect.element(page.getByText('Meu nome', { exact: true })).toBeVisible();
@@ -325,6 +309,121 @@ test('gate rejection and rate limits show the existing messages and keep the for
 	await expect.element(page.getByText('Grave quente', { exact: true })).toBeVisible();
 	expect(page.getByText('Outro nome', { exact: true }).query()).toBeNull();
 	expect(versions('lin1')).toHaveLength(2);
+});
+
+for (const code of ['CONFLICT', 'NOT_FOUND'] as const) {
+	test(`${code} closes the editor, keeps the page notice and focuses the refreshed row or shelf heading`, async () => {
+		let failed = false;
+		const refreshed = deferred<Response>();
+		const { api, versions } = server(() => [mine()], {
+			'GET /api/v1/me/library': (url) => {
+				const shelf = url.searchParams.get('shelf');
+				if (shelf === 'created' && failed) return refreshed.promise;
+				return json({ shelf, items: shelf === 'created' ? [mine()] : [], nextCursor: null });
+			},
+			'POST /api/v1/lineages/lin1/versions': () => {
+				failed = true;
+				return json({ error: { code } }, code === 'CONFLICT' ? 409 : 404);
+			}
+		});
+		const { screen } = await setup(api);
+		await editButton('Grave quente').click();
+		await nameBox('Grave quente').fill('Outro nome');
+		await saveButton('Grave quente').click();
+		const message =
+			code === 'CONFLICT' ? m.cvedit_edit_unavailable() : m.biblioteca_social_error_missing();
+		const notice = screen.container.querySelector<HTMLElement>('.notice');
+		await expect.element(notice).toHaveTextContent(message);
+		await expect.element(form('Grave quente')).not.toBeInTheDocument();
+		// The row remains mounted during the reload, even though the editor has already closed.
+		await expect.element(screen.container.querySelector<HTMLElement>('.rows .row')).toHaveFocus();
+		refreshed.resolve(
+			json({
+				shelf: 'created',
+				items: code === 'CONFLICT' ? [{ ...mine(), status: 'retracted' }] : [],
+				nextCursor: null
+			})
+		);
+		if (code === 'CONFLICT') {
+			await expect
+				.element(page.getByText(m.biblioteca_social_retracted(), { exact: true }))
+				.toBeVisible();
+			await expect.element(screen.container.querySelector<HTMLElement>('.rows .row')).toHaveFocus();
+		} else {
+			await expect.element(page.getByText(m.biblioteca_social_empty_created())).toBeVisible();
+			await expect
+				.element(page.getByRole('heading', { name: m.biblioteca_social_shelf_created(), level: 3 }))
+				.toHaveFocus();
+		}
+		await expect.element(notice).toHaveTextContent(message);
+		expect(editButton('Grave quente').query()).toBeNull();
+		expect(versions('lin1')).toHaveLength(1);
+	});
+}
+
+for (const outcome of ['success', 'conflict', 'missing'] as const) {
+	test(`a late version ${outcome} after an account switch cannot change the new account's rows, origins or notice`, async () => {
+		let switched = false;
+		const pending = deferred<Response>();
+		const { api, versions } = server(() => [mine()], {
+			'GET /api/v1/me/library': (url) => {
+				const shelf = url.searchParams.get('shelf');
+				const items =
+					shelf === 'created'
+						? [switched ? item('lin2', 'Curva do Bruno') : mine()]
+						: shelf === 'favorites' && switched
+							? [{ ...mine(), own: false }]
+							: [];
+				return json({ shelf, items, nextCursor: null });
+			},
+			'POST /api/v1/lineages/lin1/versions': () => pending.promise
+		});
+		const append = vi.spyOn(api, 'appendVersion');
+		const { remember, screen, session } = await setup(api);
+		await editButton('Grave quente').click();
+		await nameBox('Grave quente').fill('Nome da Ana');
+		await saveButton('Grave quente').click();
+		await expect
+			.element(form('Grave quente').getByRole('button', { name: m.cvedit_saving() }))
+			.toBeDisabled();
+		expect(versions('lin1')).toHaveLength(1);
+		expect(append).toHaveBeenCalledTimes(1);
+
+		switched = true;
+		session.set({ id: 'u-bruno', username: 'Bruno', emailVerified: true });
+		await expect.element(page.getByText('Curva do Bruno', { exact: true })).toBeVisible();
+		await page
+			.getByRole('tab', { name: new RegExp(`^${m.biblioteca_social_shelf_favorites()}`) })
+			.click();
+		await expect.element(page.getByText('Grave quente', { exact: true })).toBeVisible();
+		remember.mockClear();
+		pending.resolve(
+			outcome === 'success'
+				? json({ lineageId: 'lin1', versionId: 'lin1v2', curveId: 'lin1c' }, 201)
+				: json(
+						{ error: { code: outcome === 'conflict' ? 'CONFLICT' : 'NOT_FOUND' } },
+						outcome === 'conflict' ? 409 : 404
+					)
+		);
+		// Drain the response parsing and Svelte updates before making negative assertions.
+		await Promise.allSettled([append.mock.results[0]?.value]);
+		await tick();
+		await expect.element(page.getByText('Grave quente', { exact: true })).toBeVisible();
+		expect(page.getByText('Nome da Ana', { exact: true }).query()).toBeNull();
+		expect(remember).not.toHaveBeenCalled();
+		expect(screen.container.querySelector('.notice')?.textContent).toBe('');
+	});
+}
+
+test('a gate-refused curve still offers editing but warns before another gate attempt', async () => {
+	const base = mine();
+	const { api, versions } = server(() => [{ ...base, curve: { ...base.curve, gateOk: false } }]);
+	await setup(api);
+	await editButton('Grave quente').click();
+	await expect
+		.element(form('Grave quente').getByText(m.biblioteca_edit_gate_refused_hint()))
+		.toBeVisible();
+	expect(versions('lin1')).toHaveLength(0);
 });
 
 test('retracted, moderated and other authors’ rows are never offered the edit', async () => {

@@ -12,35 +12,6 @@ import Biblioteca from '#lib/components/pages/biblioteca/Biblioteca.svelte';
 import TrackSheet from '#lib/components/pages/biblioteca/TrackSheet.svelte';
 import { archiveTapes, type Tape } from '#lib/components/pages/biblioteca/archive.ts';
 
-// Before integration, layer this task's staging keys over the generated copy. After the merge
-// deletes staging, the same tests consume the merged catalogs.
-vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
-	const original = await importOriginal<typeof import('#lib/paraglide/messages.js')>();
-	const { getLocale } = await import('#lib/paraglide/runtime.js');
-	const catalogs = import.meta.glob<Record<string, string>>(
-		[
-			'../../../../messages/_staging/LIBEDIT.*.json',
-			'../../../../messages/pt-BR.json',
-			'../../../../messages/en-US.json'
-		],
-		{ eager: true, import: 'default' }
-	);
-	const catalog = (locale: string) =>
-		Object.assign(
-			{},
-			...Object.entries(catalogs)
-				.filter(([path]) => path.endsWith(`${locale}.json`))
-				.map(([, values]) => values)
-		) as Record<string, string>;
-	const pt = catalog('pt-BR');
-	const en = catalog('en-US');
-	const task = Object.fromEntries(
-		Object.keys(pt)
-			.filter((key) => key.startsWith('biblioteca_edit_'))
-			.map((key) => [key, () => (getLocale() === 'en-US' ? en : pt)[key]])
-	);
-	return { ...original, m: { ...original.m, ...task } };
-});
 // The gate verdict does not matter here: keep it pending rather than spawning a worker.
 vi.mock('#lib/workers/gate-client.ts', () => ({
 	createGateWorker: () => ({

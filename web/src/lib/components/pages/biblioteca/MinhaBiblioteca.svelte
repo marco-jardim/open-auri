@@ -108,6 +108,7 @@
 	let editIssues = $state.raw<TextIssue[]>([]);
 	let editMessage = $state('');
 	let editGate = $state.raw<string[]>([]);
+	let editRecovery: string | null = null;
 	let editNameField = $state<HTMLInputElement | null>(null);
 	let editDescriptionField = $state<HTMLTextAreaElement | null>(null);
 	const editNameIssues = $derived(editIssues.filter((issue) => issue.field === 'name'));
@@ -192,6 +193,12 @@
 		} catch (error) {
 			if (signal.aborted || owner !== account || isAbort(error)) return;
 			setShelf(shelf, { ...shelves[shelf], status: 'error', error: errorKind(error) });
+		} finally {
+			if (shelf === 'created' && !signal.aborted && owner === account && editRecovery !== null) {
+				const lineageId = editRecovery;
+				editRecovery = null;
+				await focusEditRow(lineageId, owner, signal);
+			}
 		}
 	}
 
@@ -229,6 +236,10 @@
 		if (rowsOf !== null && rowsOf !== key) {
 			shelves = { created: empty(), favorites: empty(), installed: empty() };
 			packs = empty();
+			editing = null;
+			editRecovery = null;
+			busy = null;
+			notice = '';
 		}
 		rowsOf = key;
 	});
@@ -384,6 +395,25 @@
 		};
 	}
 
+	async function focusEditRow(lineageId: string, owner: string, signal?: AbortSignal) {
+		await tick();
+		if (signal?.aborted || owner !== account) return;
+		(
+			document.getElementById(`${id}-row-${lineageId}`) ??
+			document.getElementById(`${id}-shelf-title`)
+		)?.focus();
+	}
+
+	function unavailableEdit(message: string) {
+		editRecovery = editing;
+		editing = null;
+		resetEditFeedback();
+		notice = message;
+		reload += 1;
+		// Keep focus out of the removed form while loading, then restore it against the fresh rows.
+		if (editRecovery !== null) void focusEditRow(editRecovery, account);
+	}
+
 	function editFailed(error: unknown) {
 		if (isSocialApiError(error) && !error.unreachable) {
 			if (error.code === 'HEAD_MOVED') {
@@ -393,8 +423,7 @@
 				return;
 			}
 			if (error.code === 'CONFLICT') {
-				editMessage = m.cvedit_edit_unavailable();
-				reload += 1;
+				unavailableEdit(m.cvedit_edit_unavailable());
 				return;
 			}
 			if (error.code === 'GATE_REJECTED') {
@@ -408,8 +437,8 @@
 			}
 		}
 		const kind = errorKind(error);
-		editMessage = errorText(kind);
-		if (kind === 'missing') reload += 1;
+		if (kind === 'missing') unavailableEdit(errorText(kind));
+		else editMessage = errorText(kind);
 	}
 
 	async function saveEdit(item: LibraryItem) {
@@ -441,6 +470,7 @@
 			notice = m.cvedit_edit_unchanged();
 			return;
 		}
+		const owner = account;
 		busy = item.id;
 		notice = '';
 		try {
@@ -448,6 +478,7 @@
 				parentVersionId: item.head.id,
 				envelope: checked.envelope
 			});
+			if (owner !== account) return;
 			renamed(item.id, {
 				...item.head,
 				id: result.versionId,
@@ -460,9 +491,9 @@
 			closeEdit(item.id);
 			notice = m.cvedit_edit_done({ name: checked.name });
 		} catch (error) {
-			if (!isAbort(error)) editFailed(error);
+			if (owner === account && !isAbort(error)) editFailed(error);
 		} finally {
-			busy = null;
+			if (owner === account) busy = null;
 		}
 	}
 
@@ -537,6 +568,9 @@
 			{/each}
 		</div>
 		<div class="panel" role="tabpanel" id="{id}-panel" aria-labelledby="{id}-tab-{tab}">
+			<h3 class="shelf-title" id="{id}-shelf-title" tabindex="-1">
+				{tabs.find((entry) => entry.key === tab)?.label}
+			</h3>
 			{#if tab === 'created'}
 				<label class="filter"
 					>{m.biblioteca_social_filter_visibility()}
@@ -582,7 +616,7 @@
 				{@const shelf = shelfTab}
 				<ul class="rows">
 					{#each shelves[shelf].items as item (item.id)}
-						<li class="row">
+						<li class="row" id="{id}-row-{item.id}" tabindex="-1">
 							<div class="row-head">
 								<strong>{item.head.name}</strong>
 								{#if shelf === 'created'}<span class="badge vis-{item.visibility}"
@@ -722,6 +756,9 @@
 										</p>
 									{/if}
 									<p class="hint">{m.cvedit_edit_version()}</p>
+									{#if item.curve.gateOk === false}
+										<p class="hint">{m.biblioteca_edit_gate_refused_hint()}</p>
+									{/if}
 									<div class="edit-status" role="status" aria-live="polite">
 										{editMessage}
 										{#if editOtherIssues.length}
@@ -882,6 +919,18 @@
 		display: block;
 		color: #cdbb98;
 		overflow-wrap: anywhere;
+		white-space: pre-line;
+	}
+	.shelf-title {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+		border: 0;
 	}
 	.row-actions {
 		display: flex;
@@ -953,7 +1002,7 @@
 		outline: 3px solid #f6bd55;
 		outline-offset: 2px;
 	}
-	:where(button, a, select):focus-visible {
+	:where(button, a, select, .row):focus-visible {
 		outline: 3px solid #f6bd55;
 		outline-offset: 4px;
 	}
