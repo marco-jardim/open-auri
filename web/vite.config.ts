@@ -37,16 +37,23 @@ export default defineConfig({
 			// style-src-attr. Every directive except script-src, style-src and style-src-attr is
 			// repeated in the web/_headers policy (STATIC_DOCUMENT_CSP_DIRECTIVES in
 			// src/lib/server/security/headers.ts; a unit test keeps both in sync).
+			// Simple Analytics (src/lib/server/analytics.ts, tag on the production origin only):
+			// latest.js from scripts.simpleanalyticscdn.com, beacons to queue.simpleanalyticscdn.com.
+			// The policy is the same in every environment; elsewhere the hosts are simply unused.
 			csp: {
 				mode: 'auto',
 				directives: {
 					'default-src': ['none'],
-					'script-src': ['self', 'https://challenges.cloudflare.com'],
+					'script-src': [
+						'self',
+						'https://challenges.cloudflare.com',
+						'https://scripts.simpleanalyticscdn.com'
+					],
 					'style-src': ['self'],
 					'style-src-attr': ['unsafe-inline'],
-					'img-src': ['self', 'data:', 'blob:'],
+					'img-src': ['self', 'data:', 'blob:', 'https://queue.simpleanalyticscdn.com'],
 					'font-src': ['self'],
-					'connect-src': ['self'],
+					'connect-src': ['self', 'https://queue.simpleanalyticscdn.com'],
 					'media-src': ['self', 'blob:'],
 					'worker-src': ['self'],
 					'frame-src': ['https://challenges.cloudflare.com'],

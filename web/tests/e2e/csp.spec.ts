@@ -159,6 +159,44 @@ test.describe('content security policy', () => {
 		});
 	}
 
+	// Simple Analytics loads on the production origin only (src/lib/server/analytics.ts): the local
+	// preview never renders its tag nor contacts its hosts, yet its policy already allows them.
+	test('the local preview has no Simple Analytics tag and the policy allows its hosts', async ({
+		page
+	}) => {
+		const analytics: string[] = [];
+		page.on('request', (request) => {
+			if (/simpleanalytics/i.test(new URL(request.url()).hostname)) analytics.push(request.url());
+		});
+		const consoleReports = await prepare(page);
+		// '/' and '/docs' are prerendered (meta + web/_headers policy); '/entrar' is SSR (header).
+		for (const path of ['/', '/docs', '/entrar']) {
+			const response = await page.goto(path);
+			expect(response?.status(), path).toBe(200);
+			const html = (await response?.text()) ?? '';
+			expect(html, `${path}: placeholder must never leak`).not.toContain('%analytics%');
+			expect(html, path).not.toContain('simpleanalyticscdn.com');
+			expect(html, path).not.toContain('privacy-first analytics');
+			await expect(page.locator('script[src*="simpleanalyticscdn.com"]')).toHaveCount(0);
+			await settle(page);
+			await expectNoViolations(page, path, consoleReports);
+
+			const enforced = await policies(page, response?.headers()['content-security-policy']);
+			const documentPolicy = enforced.find((policy) => directive(policy, 'script-src')) ?? '';
+			expect(directive(documentPolicy, 'script-src'), path).toContain(
+				'https://scripts.simpleanalyticscdn.com'
+			);
+			for (const name of ['connect-src', 'img-src']) {
+				const carrying = enforced.map((policy) => directive(policy, name)).filter(Boolean);
+				expect(carrying.length, `${path} ${name}`).toBeGreaterThan(0);
+				for (const value of carrying) {
+					expect(value, `${path} ${name}`).toContain('https://queue.simpleanalyticscdn.com');
+				}
+			}
+		}
+		expect(analytics).toEqual([]);
+	});
+
 	test('the policy really blocks injected inline scripts and <style> elements', async ({
 		page
 	}) => {

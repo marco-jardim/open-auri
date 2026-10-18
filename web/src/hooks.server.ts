@@ -5,6 +5,9 @@
 //      staging (PUBLIC_ORIGIN on workers.dev) and local dev pass through.
 //   c. request log (T5.2, observability/request-log.ts): one JSON line per request, wrapping all
 //      the steps below so its latency covers them (the read-only 503 included).
+//   d. analytics (#lib/server/analytics.ts): fills %analytics% at the end of app.html's <body>
+//      with the Simple Analytics tag on the production origin only, empty everywhere else. Runs
+//      while prerendering too (the build's PUBLIC_ORIGIN decides for prerendered pages).
 // Then the steps whose order lives in #lib/server/auth/compose.ts (unit-tested):
 //   0. read-only switch (T3.8): while on, writes outside the allowlist (and Better Auth's two
 //      state-changing GET links) get 503 `READ_ONLY` first; that response still gets the
@@ -25,10 +28,12 @@ import { getRequestEvent } from '$app/server';
 import { sequence, type Handle, type HandleServerError } from '@sveltejs/kit/hooks';
 import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { env as workerEnv, waitUntil as workerWaitUntil } from 'cloudflare:workers';
+import { PUBLIC_ORIGIN } from '#lib/config/public.ts';
 import { getTextDirection } from '#lib/paraglide/runtime.js';
 import { paraglideMiddleware } from '#lib/paraglide/server.js';
 import { accountDeletionHook } from '#lib/server/account/deletion.ts';
 import { isReadOnly } from '#lib/server/admin/read-only.ts';
+import { createAnalyticsHandle } from '#lib/server/analytics.ts';
 import { createAuth, toAuthLocals } from '#lib/server/auth.ts';
 import { createReadOnlyHandle, orderedHandles } from '#lib/server/auth/compose.ts';
 import { getServerEnv } from '#lib/server/env.ts';
@@ -131,10 +136,13 @@ const canonicalHost = createCanonicalHostHandle({ building });
 
 const requestLog = createRequestLogHandle({ building });
 
+const analytics = createAnalyticsHandle({ building, buildOrigin: PUBLIC_ORIGIN });
+
 export const handle: Handle = sequence(
 	platformShim,
 	canonicalHost,
 	requestLog,
+	analytics,
 	...orderedHandles({ readOnly, paraglide, auth, securityHeaders, accessLog })
 );
 

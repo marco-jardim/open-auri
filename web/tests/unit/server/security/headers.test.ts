@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { ANALYTICS_BEACON_HOST, ANALYTICS_SCRIPT_HOST } from '#lib/server/analytics.ts';
 import {
 	FRAME_ANCESTORS_POLICY,
 	HSTS,
@@ -47,7 +48,11 @@ describe('document CSP (T5.4, vite.config.ts)', () => {
 		}
 		expect(directives.get('style-src-attr')).toEqual(['unsafe-inline']);
 		expect(directives.get('style-src')).toEqual(['self']);
-		expect(directives.get('script-src')).toEqual(['self', 'https://challenges.cloudflare.com']);
+		expect(directives.get('script-src')).toEqual([
+			'self',
+			'https://challenges.cloudflare.com',
+			'https://scripts.simpleanalyticscdn.com'
+		]);
 	});
 
 	it('defaults to none, denies plugins, framing and foreign bases, and keeps workers same-origin', () => {
@@ -56,8 +61,28 @@ describe('document CSP (T5.4, vite.config.ts)', () => {
 		expect(directives.get('frame-ancestors')).toEqual(['none']);
 		expect(directives.get('base-uri')).toEqual(['self']);
 		expect(directives.get('worker-src')).toEqual(['self']);
-		expect(directives.get('connect-src')).toEqual(['self']);
+		expect(directives.get('connect-src')).toEqual(['self', 'https://queue.simpleanalyticscdn.com']);
 		expect(directives.get('frame-src')).toEqual(['https://challenges.cloudflare.com']);
+	});
+
+	it('allows Simple Analytics: its script host for scripts, its beacon host for beacons only', () => {
+		expect(ANALYTICS_SCRIPT_HOST).toBe('https://scripts.simpleanalyticscdn.com');
+		expect(ANALYTICS_BEACON_HOST).toBe('https://queue.simpleanalyticscdn.com');
+		expect(directives.get('script-src')).toContain(ANALYTICS_SCRIPT_HOST);
+		expect(directives.get('connect-src')).toContain(ANALYTICS_BEACON_HOST);
+		expect(directives.get('img-src')).toEqual(['self', 'data:', 'blob:', ANALYTICS_BEACON_HOST]);
+		// No other directive names the provider (no frames, workers, styles or fonts from it).
+		for (const [name, sources] of directives) {
+			if (name !== 'script-src') expect(sources, name).not.toContain(ANALYTICS_SCRIPT_HOST);
+			if (name !== 'connect-src' && name !== 'img-src') {
+				expect(sources, name).not.toContain(ANALYTICS_BEACON_HOST);
+			}
+		}
+		// Every enforced policy must allow the beacons: web/_headers repeats both directives.
+		expect(STATIC_DOCUMENT_CSP).toContain(`img-src 'self' data: blob: ${ANALYTICS_BEACON_HOST};`);
+		expect(STATIC_DOCUMENT_CSP).toContain(`connect-src 'self' ${ANALYTICS_BEACON_HOST};`);
+		expect(STATIC_DOCUMENT_CSP).not.toContain(ANALYTICS_SCRIPT_HOST);
+		expect(STATIC_DOCUMENT_CSP).not.toContain('unsafe-inline');
 	});
 
 	it('repeats every hash-independent directive in the web/_headers policy', () => {

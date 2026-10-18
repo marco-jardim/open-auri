@@ -11,7 +11,7 @@ Do not put real values in this file: the repository is public.
 
 # open-auri Privacy Policy
 
-**Version:** 2026-10-17 · **Effective date:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Address:** {{PUBLIC_ORIGIN}}/privacidade
+**Version:** 2026-10-18 · **Effective date:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Address:** {{PUBLIC_ORIGIN}}/privacidade
 
 This is an English translation provided for convenience. The authoritative version is the Brazilian Portuguese text (`politica-de-privacidade.md`). **If the two versions differ, the pt-BR version prevails.**
 
@@ -22,7 +22,7 @@ This is an English translation provided for convenience. The authoritative versi
 > - Publicly, you appear only by your nickname. The public library and the public activity profile are optional and off by default.
 > - Brazilian law (the Marco Civil da Internet) requires us to keep access records: IP address, date and time and, if you are signed in, your account. We keep them for 6 months, encrypted, and hand them over to third parties only under a court order. We use the IP for nothing else: no profiling, no analytics, no marketing.
 > - Outside those records, your IP is not stored: rate limiting uses a hash of the IP with a daily salt, deleted within 48 hours.
-> - We use no analytics or advertising cookies. We do not sell data. We send no marketing email.
+> - We use no analytics or advertising cookies. On the production site, we count page views with Simple Analytics, without cookies and without personal data. The dashboard of those counts is public (section 13). We do not sell data. We send no marketing email.
 > - You can export your data, delete your activity and close your account directly in the app, or write to **{{PUBLIC_LGPD_CONTACT_EMAIL}}**.
 
 ---
@@ -43,17 +43,17 @@ We are a small-size processing agent under ANPD Resolution CD/ANPD No. 2/2022. E
 
 Without an account, open-auri runs entirely in your browser. The data below is stored on your own device (localStorage, sessionStorage and IndexedDB) and **is not sent to us**:
 
-| What | Why |
-|---|---|
-| Language (`oa.lang` and the `oa_lang` cookie) | Show the app in your chosen language |
-| Current curve (`oa.current`) | Pick up where you left off |
-| Write journal (`oa.journal`, up to 500 entries) | Record what was written to the cable, including interrupted writes |
-| Write counters (`oa.flash.*`) | Limit the number of writes per day and per session, to protect the cable's memory |
-| Meter reference (`oa.meter.ref`) | Remember your reference setting |
-| Policy version already seen (`oa.policy.seen`) | Show the policy change notice only when the policy changes |
-| Local library (IndexedDB `library`) | Keep curves and favorites without an account |
-| Offline outbox (IndexedDB `outbox`) | Hold social actions made offline until the connection returns (account only) |
-| Audio file you load (IndexedDB `audio`) | Play the preview with the curve applied |
+| What                                            | Why                                                                               |
+| ----------------------------------------------- | --------------------------------------------------------------------------------- |
+| Language (`oa.lang` and the `oa_lang` cookie)   | Show the app in your chosen language                                              |
+| Current curve (`oa.current`)                    | Pick up where you left off                                                        |
+| Write journal (`oa.journal`, up to 500 entries) | Record what was written to the cable, including interrupted writes                |
+| Write counters (`oa.flash.*`)                   | Limit the number of writes per day and per session, to protect the cable's memory |
+| Meter reference (`oa.meter.ref`)                | Remember your reference setting                                                   |
+| Policy version already seen (`oa.policy.seen`)  | Show the policy change notice only when the policy changes                        |
+| Local library (IndexedDB `library`)             | Keep curves and favorites without an account                                      |
+| Offline outbox (IndexedDB `outbox`)             | Hold social actions made offline until the connection returns (account only)      |
+| Audio file you load (IndexedDB `audio`)         | Play the preview with the curve applied                                           |
 
 **The audio file (MP3 or other) is never uploaded to our servers.** All sound processing and metering happens on your device.
 
@@ -69,16 +69,16 @@ An account is needed only to publish, favorite, sync your library and use the so
 
 Account creation may be temporarily unavailable while the domain used for transactional emails has not been verified. The site works normally without an account.
 
-| Data | Why |
-|---|---|
-| Email | Sign in, verify the account, recover the password and receive security notices. Your email is never shown publicly |
-| Password hash | Check your password without storing it. We never store the password itself |
-| Public nickname ("apelido", unique) | Identify you publicly. It is the only name shown: it appears in rankings, the feed, curve credits, shares and at `{{PUBLIC_ORIGIN}}/u/[nickname]`. It has 3 to 24 characters, can be changed every 30 days, and the old nickname stays reserved for 90 days, redirecting to the new one |
-| Bio (optional, up to 280 characters) | Present your profile, if you want |
-| Session records | Keep you signed in and let you see and end sessions. We store the browser and operating system (reduced from the user-agent) and the creation, last-activity and expiry times. The session does not store your IP: the authentication system runs with IP tracking turned off |
-| Email verification and password-reset tokens | Confirm the email is yours and let you change the password safely |
-| Account preferences | Language, activity visibility (private or public, private by default) and public library (on or off, off by default) |
-| Policy acknowledgements (version and date) | Record that you saw the current version of this policy and of the terms, so the change notice is not repeated |
+| Data                                         | Why                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Email                                        | Sign in, verify the account, recover the password and receive security notices. Your email is never shown publicly                                                                                                                                                                      |
+| Password hash                                | Check your password without storing it. We never store the password itself                                                                                                                                                                                                              |
+| Public nickname ("apelido", unique)          | Identify you publicly. It is the only name shown: it appears in rankings, the feed, curve credits, shares and at `{{PUBLIC_ORIGIN}}/u/[nickname]`. It has 3 to 24 characters, can be changed every 30 days, and the old nickname stays reserved for 90 days, redirecting to the new one |
+| Bio (optional, up to 280 characters)         | Present your profile, if you want                                                                                                                                                                                                                                                       |
+| Session records                              | Keep you signed in and let you see and end sessions. We store the browser and operating system (reduced from the user-agent) and the creation, last-activity and expiry times. The session does not store your IP: the authentication system runs with IP tracking turned off           |
+| Email verification and password-reset tokens | Confirm the email is yours and let you change the password safely                                                                                                                                                                                                                       |
+| Account preferences                          | Language, activity visibility (private or public, private by default) and public library (on or off, off by default)                                                                                                                                                                    |
+| Policy acknowledgements (version and date)   | Record that you saw the current version of this policy and of the terms, so the change notice is not repeated                                                                                                                                                                           |
 
 When you sign in, the app merges the browser's local library into your account library without duplicating curves. From then on those curves are also stored on the server.
 
@@ -209,48 +209,52 @@ We send only transactional emails, through Resend (processor), which receives yo
 
 We use **only essential cookies**:
 
-| Cookie | Why | Duration |
-|---|---|---|
-| Session cookie (`Secure`, `HttpOnly`, `SameSite=Lax`) | Keep you signed in | Until you sign out, revoke or the session expires |
-| `oa_lang` | Remember the language | Until you delete it |
+| Cookie                                                | Why                   | Duration                                          |
+| ----------------------------------------------------- | --------------------- | ------------------------------------------------- |
+| Session cookie (`Secure`, `HttpOnly`, `SameSite=Lax`) | Keep you signed in    | Until you sign out, revoke or the session expires |
+| `oa_lang`                                             | Remember the language | Until you delete it                               |
 
 We use no analytics, advertising or third-party tracking cookies. That is why we show no consent banner: this policy is how we inform you. Cloudflare may use strictly necessary security mechanisms under its own policy.
+
+**Page-view counts (Simple Analytics).** On the production site (`open-auri.com`), pages load the Simple Analytics script, a privacy-first analytics service that counts page views. According to the provider, it uses no cookies, collects no personal data and does no browser fingerprinting. The script is loaded directly from Simple Analytics and sends the count to its servers. Test and development environments do not load the script. The counts are public: the "Public statistics" link, in the footer of every page, opens the [open-auri dashboard on Simple Analytics](https://dashboard.simpleanalytics.com/open-auri.com). What the service records is described in the [Simple Analytics documentation](https://docs.simpleanalytics.com/what-we-collect), and the service's own rules are in the [Simple Analytics privacy policy](https://simpleanalytics.com/privacy-policy).
 
 Browser local storage is described in section 2. The app also keeps a copy of itself (service worker) to work offline. That copy contains no personal data.
 
 ## 14. Who processes data for us and international transfer
 
-| Processor | What it does |
-|---|---|
+| Processor            | What it does                                                                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Cloudflare, Inc.** | Hosting and processing (Workers, D1 database, R2 storage, KV and queues), encrypted access records, rate limiting, Turnstile, platform logs and, if enabled, an optional access-control layer for administration (Cloudflare Access) |
-| **Resend** | Sending transactional emails and bounce and complaint notices |
+| **Resend**           | Sending transactional emails and bounce and complaint notices                                                                                                                                                                        |
 
 These providers process data in the United States and other countries where they operate. This **international transfer** (LGPD, art. 33) relies on the standard contractual clauses approved by Resolution CD/ANPD No. 19/2024 and on the providers' data processing agreements (DPAs).
+
+Simple Analytics, which counts page views on the production site (section 13), is not in this table because, according to the provider, it collects no personal data.
 
 We do not sell or rent data. We only share data with these processors, for the purposes in this policy, or with authorities when the law or a court order requires it.
 
 ## 15. How long we keep data
 
-| Data | Period |
-|---|---|
-| Data in the browser (section 2) | Until you delete it. The journal keeps the latest 500 entries |
-| Account: email, password hash, nickname, bio, preferences and policy acknowledgements | Until the account is closed |
-| Old nickname, after a change | Reserved for 90 days, redirecting to the new one; then released |
-| Sessions | Until they expire, you sign out or revoke them |
-| Verification and password-reset tokens | Until used or expired |
-| Curves, versions, forks, packs and shares | Until you delete or withdraw them, or until the account is closed (see section 17) |
-| Activity and favorites | Until you delete them or close the account |
-| Blind trades (S7) | Unpaired: expire after 72 hours. Completed: until the account is closed. Per-curve averages identify no one |
-| Anonymous blind test (S6) | Until you withdraw consent with the receipt, for at most 24 months: after that, the batch and its pairs are deleted automatically. Aggregated results are anonymous, stay published and come to reflect the batches of the last 24 months |
-| Reports | While your account exists. On closure, the link to you is deleted |
-| Requests sent to {{PUBLIC_LGPD_CONTACT_EMAIL}} and our replies | 5 years after the reply, to prove we handled the request |
-| Audit log of moderation and of accesses to the access records | 5 years. This matches the 5-year limitation period for damages claims under the Brazilian Consumer Protection Code (art. 27) and allows us to defend moderation decisions in any proceedings |
-| Access records (IP, port, date and time with time zone, account, request type) | 6 months, then deleted automatically (Marco Civil da Internet, art. 15), unless an authority requests longer retention (art. 15, §2) |
-| IP hash for rate limiting | Up to 48 hours. The daily salt is deleted on rotation |
-| Email hash in the suppression list | Up to 12 months after the last bounce or complaint |
-| Cloudflare platform logs | According to the retention set by Cloudflare |
-| Backups | Up to 12 weeks. Deleted data may remain in backups for up to 12 weeks, unused, until overwritten |
-| Weekly public dump | Published only at `{{PUBLIC_ORIGIN}}/dados/dump/latest.json.gz` and as dated editions at `{{PUBLIC_ORIGIN}}/dados/dump/YYYY-MM-DD.json.gz`. The storage holding the files is not public. Each new dump reflects deletions and anonymizations. Contains only public data: public curves, versions, licences, the credited nickname and aggregate numbers. It contains no email, individual activity, hashes, IP addresses or other account data |
+| Data                                                                                  | Period                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Data in the browser (section 2)                                                       | Until you delete it. The journal keeps the latest 500 entries                                                                                                                                                                                                                                                                                                                                                                                  |
+| Account: email, password hash, nickname, bio, preferences and policy acknowledgements | Until the account is closed                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Old nickname, after a change                                                          | Reserved for 90 days, redirecting to the new one; then released                                                                                                                                                                                                                                                                                                                                                                                |
+| Sessions                                                                              | Until they expire, you sign out or revoke them                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Verification and password-reset tokens                                                | Until used or expired                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Curves, versions, forks, packs and shares                                             | Until you delete or withdraw them, or until the account is closed (see section 17)                                                                                                                                                                                                                                                                                                                                                             |
+| Activity and favorites                                                                | Until you delete them or close the account                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Blind trades (S7)                                                                     | Unpaired: expire after 72 hours. Completed: until the account is closed. Per-curve averages identify no one                                                                                                                                                                                                                                                                                                                                    |
+| Anonymous blind test (S6)                                                             | Until you withdraw consent with the receipt, for at most 24 months: after that, the batch and its pairs are deleted automatically. Aggregated results are anonymous, stay published and come to reflect the batches of the last 24 months                                                                                                                                                                                                      |
+| Reports                                                                               | While your account exists. On closure, the link to you is deleted                                                                                                                                                                                                                                                                                                                                                                              |
+| Requests sent to {{PUBLIC_LGPD_CONTACT_EMAIL}} and our replies                        | 5 years after the reply, to prove we handled the request                                                                                                                                                                                                                                                                                                                                                                                       |
+| Audit log of moderation and of accesses to the access records                         | 5 years. This matches the 5-year limitation period for damages claims under the Brazilian Consumer Protection Code (art. 27) and allows us to defend moderation decisions in any proceedings                                                                                                                                                                                                                                                   |
+| Access records (IP, port, date and time with time zone, account, request type)        | 6 months, then deleted automatically (Marco Civil da Internet, art. 15), unless an authority requests longer retention (art. 15, §2)                                                                                                                                                                                                                                                                                                           |
+| IP hash for rate limiting                                                             | Up to 48 hours. The daily salt is deleted on rotation                                                                                                                                                                                                                                                                                                                                                                                          |
+| Email hash in the suppression list                                                    | Up to 12 months after the last bounce or complaint                                                                                                                                                                                                                                                                                                                                                                                             |
+| Cloudflare platform logs                                                              | According to the retention set by Cloudflare                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Backups                                                                               | Up to 12 weeks. Deleted data may remain in backups for up to 12 weeks, unused, until overwritten                                                                                                                                                                                                                                                                                                                                               |
+| Weekly public dump                                                                    | Published only at `{{PUBLIC_ORIGIN}}/dados/dump/latest.json.gz` and as dated editions at `{{PUBLIC_ORIGIN}}/dados/dump/YYYY-MM-DD.json.gz`. The storage holding the files is not public. Each new dump reflects deletions and anonymizations. Contains only public data: public curves, versions, licences, the credited nickname and aggregate numbers. It contains no email, individual activity, hashes, IP addresses or other account data |
 
 ## 16. Your rights and how to exercise them
 

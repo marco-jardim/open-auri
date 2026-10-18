@@ -7,6 +7,8 @@
 	}
 
 	export const DEFAULT_GITHUB_URL = 'https://github.com/marco-jardim/open-auri';
+	/** Public Simple Analytics dashboard of the production site (#lib/server/analytics.ts). */
+	export const PUBLIC_STATS_URL = 'https://dashboard.simpleanalytics.com/open-auri.com';
 </script>
 
 <script lang="ts">
@@ -43,6 +45,9 @@
 			<a href="/docs#aviso-legal">{m.chrome_legal_link()}</a>
 			<a href={githubUrl}>{m.chrome_github_link()}</a>
 			<span>{m.chrome_license()}</span>
+			<a href={PUBLIC_STATS_URL} target="_blank" rel="noopener"
+				>{m.chrome_stats_link()} <span aria-hidden="true">↗</span></a
+			>
 		</div>
 	</section>
 </footer>

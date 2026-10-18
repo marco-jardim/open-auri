@@ -11,7 +11,7 @@ Não coloque valores reais neste arquivo: o repositório é público.
 
 # Política de Privacidade do open-auri
 
-**Versão:** 2026-10-17 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
+**Versão:** 2026-10-18 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
 
 Esta é a versão oficial da política. A tradução em inglês (`privacy-policy.en-US.md`) serve apenas como apoio. Em caso de diferença, vale este texto em português.
 
@@ -22,7 +22,7 @@ Esta é a versão oficial da política. A tradução em inglês (`privacy-policy
 > - Publicamente, você aparece só pelo apelido. A biblioteca pública e o perfil de atividade público são opcionais e vêm desligados.
 > - A lei brasileira (Marco Civil da Internet) nos obriga a guardar registros de acesso: IP, data e hora e, se você estiver conectado, sua conta. Guardamos por 6 meses, cifrados, e só entregamos a terceiros com ordem judicial. Não usamos o IP para mais nada: sem perfil, sem análise, sem marketing.
 > - Fora desses registros, seu IP não fica guardado: o limite de taxa usa um hash do IP com sal diário, apagado em até 48 horas.
-> - Não usamos cookies de análise nem de publicidade. Não vendemos dados. Não mandamos e-mail de marketing.
+> - Não usamos cookies de análise nem de publicidade. No site de produção, contamos as visitas às páginas com o Simple Analytics, sem cookies e sem dados pessoais. O painel dessas contagens é público (seção 13). Não vendemos dados. Não mandamos e-mail de marketing.
 > - Você pode exportar seus dados, apagar sua atividade e encerrar a conta direto no app, ou escrever para **{{PUBLIC_LGPD_CONTACT_EMAIL}}**.
 
 ---
@@ -43,17 +43,17 @@ Somos um agente de tratamento de pequeno porte, nos termos da Resolução CD/ANP
 
 Sem conta, o open-auri funciona inteiramente no seu navegador. Os dados abaixo ficam guardados no próprio aparelho (localStorage, sessionStorage e IndexedDB) e **não são enviados para nós**:
 
-| O que | Para quê |
-|---|---|
-| Idioma (`oa.lang` e cookie `oa_lang`) | Mostrar o app no idioma escolhido |
-| Curva atual (`oa.current`) | Continuar de onde você parou |
-| Diário de gravações (`oa.journal`, até 500 entradas) | Registrar o que foi gravado no cabo, inclusive gravações interrompidas |
-| Contadores de gravação (`oa.flash.*`) | Limitar o número de gravações por dia e por sessão, para proteger a memória do cabo |
-| Referência do medidor (`oa.meter.ref`) | Lembrar sua escolha de referência |
-| Versão da política já vista (`oa.policy.seen`) | Mostrar o aviso de mudança da política só quando ela muda |
-| Biblioteca local (IndexedDB `library`) | Guardar curvas e favoritos sem conta |
-| Fila offline (IndexedDB `outbox`) | Guardar ações sociais feitas sem internet até a conexão voltar (só com conta) |
-| Arquivo de áudio que você carrega (IndexedDB `audio`) | Tocar a prévia com a curva aplicada |
+| O que                                                 | Para quê                                                                            |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Idioma (`oa.lang` e cookie `oa_lang`)                 | Mostrar o app no idioma escolhido                                                   |
+| Curva atual (`oa.current`)                            | Continuar de onde você parou                                                        |
+| Diário de gravações (`oa.journal`, até 500 entradas)  | Registrar o que foi gravado no cabo, inclusive gravações interrompidas              |
+| Contadores de gravação (`oa.flash.*`)                 | Limitar o número de gravações por dia e por sessão, para proteger a memória do cabo |
+| Referência do medidor (`oa.meter.ref`)                | Lembrar sua escolha de referência                                                   |
+| Versão da política já vista (`oa.policy.seen`)        | Mostrar o aviso de mudança da política só quando ela muda                           |
+| Biblioteca local (IndexedDB `library`)                | Guardar curvas e favoritos sem conta                                                |
+| Fila offline (IndexedDB `outbox`)                     | Guardar ações sociais feitas sem internet até a conexão voltar (só com conta)       |
+| Arquivo de áudio que você carrega (IndexedDB `audio`) | Tocar a prévia com a curva aplicada                                                 |
 
 **O arquivo de áudio (MP3 ou outro) nunca é enviado para nossos servidores.** Todo o processamento de som e medição acontece no seu aparelho.
 
@@ -69,16 +69,16 @@ A conta é necessária só para publicar, favoritar, sincronizar a biblioteca e 
 
 A criação de conta pode ficar temporariamente indisponível enquanto o domínio usado para os e-mails transacionais não estiver verificado. O site funciona normalmente sem conta.
 
-| Dado | Para quê |
-|---|---|
-| E-mail | Entrar, verificar a conta, recuperar a senha e receber avisos de segurança. O e-mail nunca é exibido publicamente |
-| Hash da senha | Conferir sua senha sem guardá-la. Nunca guardamos a senha em si |
-| Apelido público (único) | Identificar você publicamente. É o único nome exibido: aparece nos rankings, no feed, nos créditos das curvas, nos compartilhamentos e no endereço `{{PUBLIC_ORIGIN}}/u/[apelido]`. Tem de 3 a 24 caracteres, pode ser trocado a cada 30 dias e o apelido antigo fica reservado por 90 dias, redirecionando para o novo |
-| Bio (opcional, até 280 caracteres) | Apresentar seu perfil, se você quiser |
-| Registros de sessão | Manter você conectado e permitir que veja e encerre sessões. Guardamos o navegador e o sistema (reduzidos a partir do user-agent) e as datas de criação, última atividade e expiração. A sessão não guarda seu IP: o sistema de autenticação roda com o rastreio de IP desligado |
-| Tokens de verificação de e-mail e de redefinição de senha | Confirmar que o e-mail é seu e permitir trocar a senha com segurança |
-| Preferências da conta | Idioma, visibilidade da atividade (privada ou pública, padrão privada) e biblioteca pública (ligada ou desligada, padrão desligada) |
-| Aceites da política (versão e data) | Registrar que você viu a versão atual desta política e dos termos, para não repetir o aviso de mudança |
+| Dado                                                      | Para quê                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E-mail                                                    | Entrar, verificar a conta, recuperar a senha e receber avisos de segurança. O e-mail nunca é exibido publicamente                                                                                                                                                                                                       |
+| Hash da senha                                             | Conferir sua senha sem guardá-la. Nunca guardamos a senha em si                                                                                                                                                                                                                                                         |
+| Apelido público (único)                                   | Identificar você publicamente. É o único nome exibido: aparece nos rankings, no feed, nos créditos das curvas, nos compartilhamentos e no endereço `{{PUBLIC_ORIGIN}}/u/[apelido]`. Tem de 3 a 24 caracteres, pode ser trocado a cada 30 dias e o apelido antigo fica reservado por 90 dias, redirecionando para o novo |
+| Bio (opcional, até 280 caracteres)                        | Apresentar seu perfil, se você quiser                                                                                                                                                                                                                                                                                   |
+| Registros de sessão                                       | Manter você conectado e permitir que veja e encerre sessões. Guardamos o navegador e o sistema (reduzidos a partir do user-agent) e as datas de criação, última atividade e expiração. A sessão não guarda seu IP: o sistema de autenticação roda com o rastreio de IP desligado                                        |
+| Tokens de verificação de e-mail e de redefinição de senha | Confirmar que o e-mail é seu e permitir trocar a senha com segurança                                                                                                                                                                                                                                                    |
+| Preferências da conta                                     | Idioma, visibilidade da atividade (privada ou pública, padrão privada) e biblioteca pública (ligada ou desligada, padrão desligada)                                                                                                                                                                                     |
+| Aceites da política (versão e data)                       | Registrar que você viu a versão atual desta política e dos termos, para não repetir o aviso de mudança                                                                                                                                                                                                                  |
 
 Ao entrar na conta, o app mescla a biblioteca local do navegador com a biblioteca da conta, sem duplicar curvas. A partir daí, essas curvas ficam guardadas também no servidor.
 
@@ -209,48 +209,52 @@ Enviamos só e-mails transacionais, pela Resend (operadora), que recebe seu ende
 
 Usamos **só cookies essenciais**:
 
-| Cookie | Para quê | Duração |
-|---|---|---|
+| Cookie                                                  | Para quê              | Duração                               |
+| ------------------------------------------------------- | --------------------- | ------------------------------------- |
 | Cookie de sessão (`Secure`, `HttpOnly`, `SameSite=Lax`) | Manter você conectado | Até sair, revogar ou expirar a sessão |
-| `oa_lang` | Lembrar o idioma | Até você apagar |
+| `oa_lang`                                               | Lembrar o idioma      | Até você apagar                       |
 
 Não usamos cookies de análise, de publicidade nem de terceiros para rastreamento. Por isso não mostramos banner de consentimento: esta política é a forma de informar você. A Cloudflare pode usar mecanismos estritamente necessários de segurança, conforme a política dela.
+
+**Contagem de visitas (Simple Analytics).** No site de produção (`open-auri.com`), as páginas carregam o script do Simple Analytics, um serviço de estatísticas focado em privacidade, que conta as visitas às páginas. Segundo o fornecedor, ele não usa cookies, não coleta dados pessoais e não usa impressão digital do navegador (fingerprinting). O script é carregado direto do Simple Analytics e envia a contagem para os servidores dele. Ambientes de teste e de desenvolvimento não carregam o script. As contagens são públicas: o link "Estatísticas públicas", no rodapé de todas as páginas, abre o [painel do open-auri no Simple Analytics](https://dashboard.simpleanalytics.com/open-auri.com). O que o serviço registra está na [documentação do Simple Analytics](https://docs.simpleanalytics.com/what-we-collect), e as regras do próprio serviço estão na [política de privacidade do Simple Analytics](https://simpleanalytics.com/privacy-policy).
 
 O armazenamento local do navegador está descrito na seção 2. O app também guarda uma cópia de si mesmo (service worker) para funcionar offline. Essa cópia não contém dados pessoais.
 
 ## 14. Quem trata dados para nós e transferência internacional
 
-| Operador | O que faz |
-|---|---|
+| Operador             | O que faz                                                                                                                                                                                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Cloudflare, Inc.** | Hospedagem e processamento (Workers, banco D1, armazenamento R2, KV e filas), registros de acesso cifrados, limite de taxa, Turnstile, registros da plataforma e, se for ativada, uma camada opcional de controle de acesso à administração (Cloudflare Access) |
-| **Resend** | Envio dos e-mails transacionais e avisos de bounce e reclamação |
+| **Resend**           | Envio dos e-mails transacionais e avisos de bounce e reclamação                                                                                                                                                                                                 |
 
 Esses fornecedores processam dados nos Estados Unidos e em outros países onde operam. Essa **transferência internacional** (LGPD, art. 33) se apoia nas cláusulas-padrão contratuais aprovadas pela Resolução CD/ANPD nº 19/2024 e nos acordos de tratamento de dados (DPAs) dos fornecedores.
+
+O Simple Analytics, que conta as visitas no site de produção (seção 13), não está nesta tabela porque, segundo o fornecedor, não coleta dados pessoais.
 
 Não vendemos nem alugamos dados. Só compartilhamos dados com esses operadores, para as finalidades desta política, ou com autoridades quando a lei ou uma ordem judicial exigir.
 
 ## 15. Por quanto tempo guardamos
 
-| Dado | Prazo |
-|---|---|
-| Dados no navegador (seção 2) | Até você apagar. O diário guarda as últimas 500 entradas |
-| Conta: e-mail, hash da senha, apelido, bio, preferências e aceites da política | Até o encerramento da conta |
-| Apelido antigo, depois de uma troca | Reservado por 90 dias, redirecionando para o novo; depois fica livre |
-| Sessões | Até expirar, você sair ou revogar |
-| Tokens de verificação e de redefinição de senha | Até serem usados ou expirarem |
-| Curvas, versões, forks, packs e compartilhamentos | Até você apagar ou retirar, ou até o encerramento da conta (veja a seção 17) |
-| Atividade e favoritos | Até você apagar ou encerrar a conta |
-| Trocas às cegas (S7) | Não pareadas: expiram em 72 horas. Concluídas: até o encerramento da conta. As médias por curva não identificam ninguém |
-| Teste cego anônimo (S6) | Até você retirar o consentimento com o recibo, por no máximo 24 meses: depois disso, o lote e seus pares são apagados automaticamente. Resultados agregados são anônimos, continuam publicados e passam a refletir os lotes dos últimos 24 meses |
-| Denúncias | Enquanto sua conta existir. No encerramento, o vínculo com você é apagado |
-| Pedidos enviados a {{PUBLIC_LGPD_CONTACT_EMAIL}} e nossas respostas | 5 anos após a resposta, para comprovar que atendemos o pedido |
-| Registro de auditoria da moderação e dos acessos aos registros de acesso | 5 anos. Esse prazo acompanha o prazo de 5 anos para ações de reparação do Código de Defesa do Consumidor (art. 27) e permite defender decisões de moderação em eventuais processos |
-| Registros de acesso (IP, porta, data e hora com fuso, conta, tipo de requisição) | 6 meses, depois apagados automaticamente (Marco Civil da Internet, art. 15), salvo pedido de autoridade para guarda maior (art. 15, §2º) |
-| Hash do IP para limite de taxa | Até 48 horas. O sal diário é apagado na rotação |
-| Hash do e-mail na lista de supressão | Até 12 meses após o último bounce ou reclamação |
-| Registros da plataforma Cloudflare | Conforme a retenção definida pela Cloudflare |
-| Cópias de segurança (backups) | Até 12 semanas. Dados apagados podem permanecer nos backups por até 12 semanas, sem uso, até serem sobrescritos |
-| Dump público semanal | Publicado só pelo endereço `{{PUBLIC_ORIGIN}}/dados/dump/latest.json.gz` e pelas edições datadas em `{{PUBLIC_ORIGIN}}/dados/dump/AAAA-MM-DD.json.gz`. O armazenamento onde os arquivos ficam não é público. Cada novo dump reflete exclusões e anonimizações. Contém só dados públicos: curvas públicas, versões, licenças, o apelido creditado e números agregados. Não contém e-mail, atividade individual, hashes, IPs nem outros dados de conta |
+| Dado                                                                             | Prazo                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dados no navegador (seção 2)                                                     | Até você apagar. O diário guarda as últimas 500 entradas                                                                                                                                                                                                                                                                                                                                                                                             |
+| Conta: e-mail, hash da senha, apelido, bio, preferências e aceites da política   | Até o encerramento da conta                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Apelido antigo, depois de uma troca                                              | Reservado por 90 dias, redirecionando para o novo; depois fica livre                                                                                                                                                                                                                                                                                                                                                                                 |
+| Sessões                                                                          | Até expirar, você sair ou revogar                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Tokens de verificação e de redefinição de senha                                  | Até serem usados ou expirarem                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Curvas, versões, forks, packs e compartilhamentos                                | Até você apagar ou retirar, ou até o encerramento da conta (veja a seção 17)                                                                                                                                                                                                                                                                                                                                                                         |
+| Atividade e favoritos                                                            | Até você apagar ou encerrar a conta                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Trocas às cegas (S7)                                                             | Não pareadas: expiram em 72 horas. Concluídas: até o encerramento da conta. As médias por curva não identificam ninguém                                                                                                                                                                                                                                                                                                                              |
+| Teste cego anônimo (S6)                                                          | Até você retirar o consentimento com o recibo, por no máximo 24 meses: depois disso, o lote e seus pares são apagados automaticamente. Resultados agregados são anônimos, continuam publicados e passam a refletir os lotes dos últimos 24 meses                                                                                                                                                                                                     |
+| Denúncias                                                                        | Enquanto sua conta existir. No encerramento, o vínculo com você é apagado                                                                                                                                                                                                                                                                                                                                                                            |
+| Pedidos enviados a {{PUBLIC_LGPD_CONTACT_EMAIL}} e nossas respostas              | 5 anos após a resposta, para comprovar que atendemos o pedido                                                                                                                                                                                                                                                                                                                                                                                        |
+| Registro de auditoria da moderação e dos acessos aos registros de acesso         | 5 anos. Esse prazo acompanha o prazo de 5 anos para ações de reparação do Código de Defesa do Consumidor (art. 27) e permite defender decisões de moderação em eventuais processos                                                                                                                                                                                                                                                                   |
+| Registros de acesso (IP, porta, data e hora com fuso, conta, tipo de requisição) | 6 meses, depois apagados automaticamente (Marco Civil da Internet, art. 15), salvo pedido de autoridade para guarda maior (art. 15, §2º)                                                                                                                                                                                                                                                                                                             |
+| Hash do IP para limite de taxa                                                   | Até 48 horas. O sal diário é apagado na rotação                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Hash do e-mail na lista de supressão                                             | Até 12 meses após o último bounce ou reclamação                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Registros da plataforma Cloudflare                                               | Conforme a retenção definida pela Cloudflare                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Cópias de segurança (backups)                                                    | Até 12 semanas. Dados apagados podem permanecer nos backups por até 12 semanas, sem uso, até serem sobrescritos                                                                                                                                                                                                                                                                                                                                      |
+| Dump público semanal                                                             | Publicado só pelo endereço `{{PUBLIC_ORIGIN}}/dados/dump/latest.json.gz` e pelas edições datadas em `{{PUBLIC_ORIGIN}}/dados/dump/AAAA-MM-DD.json.gz`. O armazenamento onde os arquivos ficam não é público. Cada novo dump reflete exclusões e anonimizações. Contém só dados públicos: curvas públicas, versões, licenças, o apelido creditado e números agregados. Não contém e-mail, atividade individual, hashes, IPs nem outros dados de conta |
 
 ## 16. Seus direitos e como exercer
 

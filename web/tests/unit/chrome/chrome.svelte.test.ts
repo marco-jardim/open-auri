@@ -27,6 +27,7 @@ const locales = [
 		legal: 'Aviso legal completo',
 		github: 'Código-fonte no GitHub',
 		license: 'Licença AGPL-3.0',
+		stats: 'Estatísticas públicas',
 		notice:
 			'open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.',
 		soon: 'Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.'
@@ -39,6 +40,7 @@ const locales = [
 		legal: 'Full legal notice',
 		github: 'Source code on GitHub',
 		license: 'AGPL-3.0 license',
+		stats: 'Public statistics',
 		notice:
 			'open-auri is not official or endorsed by Kuba, TTGK, Savitech or any manufacturer. Everything here was obtained by studying the protocol for interoperability purposes. Use at your own risk: we are not responsible for damage to the cable, headphones or your hearing.',
 		soon: 'Available as soon as the headphones reach the test bench. Until then, we do not write anything that Kuba’s original page does not write.'
@@ -95,6 +97,25 @@ for (const copy of locales) {
 		expect(github.getBoundingClientRect().top).toBeGreaterThanOrEqual(
 			legal.getBoundingClientRect().bottom
 		);
+	});
+
+	test(`links the public statistics dashboard in ${copy.locale}`, async () => {
+		await setLocale(copy.locale, { reload: false });
+		await render(Footer, { honoree });
+		const stats = page.getByRole('link', { name: copy.stats, exact: true });
+		await expect.element(stats).toBeVisible();
+		await expect
+			.element(stats)
+			.toHaveAttribute('href', 'https://dashboard.simpleanalytics.com/open-auri.com');
+		await expect.element(stats).toHaveAttribute('target', '_blank');
+		expect(stats.element().getAttribute('rel')?.split(/\s+/)).toContain('noopener');
+		// External marker, hidden from the accessible name like the other ↗ links.
+		const marker = stats.element().querySelector('[aria-hidden="true"]');
+		expect(marker?.textContent).toBe('↗');
+		// Last in the list: legal → GitHub → license stay adjacent.
+		const license = page.getByText(copy.license, { exact: true }).element();
+		expect(license.nextElementSibling).toBe(stats.element());
+		expect(stats.element().nextElementSibling).toBeNull();
 	});
 }
 

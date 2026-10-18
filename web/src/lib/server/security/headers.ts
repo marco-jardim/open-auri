@@ -21,6 +21,10 @@
 // would block the hashed inline scripts (all enforced policies must allow a resource). The same
 // header reaches /_app scripts, where it is the policy of dedicated workers: they only compute,
 // so `connect-src 'self'` and the rest fit them too.
+//
+// Simple Analytics (../analytics.ts): its beacon host is in `img-src` and `connect-src` here as
+// in vite.config.ts, since every enforced policy must allow the beacons; its script host is in
+// Kit's `script-src` only (this policy has none).
 
 export const HSTS = 'max-age=63072000; includeSubDomains';
 export const FRAME_ANCESTORS_POLICY = "frame-ancestors 'none'";
@@ -36,9 +40,9 @@ export const STATIC_DOCUMENT_CSP_DIRECTIVES: ReadonlyArray<readonly [string, rea
 	['object-src', ['none']],
 	['base-uri', ['self']],
 	['form-action', ['self']],
-	['img-src', ['self', 'data:', 'blob:']],
+	['img-src', ['self', 'data:', 'blob:', 'https://queue.simpleanalyticscdn.com']],
 	['font-src', ['self']],
-	['connect-src', ['self']],
+	['connect-src', ['self', 'https://queue.simpleanalyticscdn.com']],
 	['media-src', ['self', 'blob:']],
 	['worker-src', ['self']],
 	['frame-src', ['https://challenges.cloudflare.com']],

@@ -4,16 +4,16 @@ Modelo de ameaças, mitigações e verificações da aplicação web (`web/`) e 
 
 ## 1. Ativos
 
-| Ativo                                  | Onde vive                                       | Por que importa                                              |
-| -------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------ |
-| Contas (e-mail, senha com hash, TOTP)  | D1 (Better Auth)                                | Tomada de conta, vazamento de dados pessoais (LGPD)          |
-| Sessões e cookies                      | D1 + cookie `HttpOnly`, `Secure`, `SameSite`    | Sequestro de sessão                                          |
-| Curvas, pacotes e perfis públicos      | D1, imagens OG geradas sob demanda              | Integridade do conteúdo social, moderação                    |
-| Registro de acesso (Marco Civil)       | Fila e R2 (`access-log/`), cifrado              | IP e horário de acesso: dado pessoal com dever de guarda     |
-| Sais diários e pimenta de IP           | KV `CONFIG` (`salt:*`) e segredo do Worker      | Permitiriam reverter os hashes de IP dos limites             |
-| Segredos do Worker                     | `wrangler secret` (nunca no repositório)        | Chaves de auth, Turnstile, Resend, chaveiro do access log    |
-| Dispositivo de áudio do usuário (cabo) | Navegador, via WebHID                           | Escrita indevida no hardware                                 |
-| Chave do modo somente leitura          | KV `CONFIG`, `mode:read-only`                   | Interruptor de emergência                                    |
+| Ativo                                  | Onde vive                                    | Por que importa                                           |
+| -------------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| Contas (e-mail, senha com hash, TOTP)  | D1 (Better Auth)                             | Tomada de conta, vazamento de dados pessoais (LGPD)       |
+| Sessões e cookies                      | D1 + cookie `HttpOnly`, `Secure`, `SameSite` | Sequestro de sessão                                       |
+| Curvas, pacotes e perfis públicos      | D1, imagens OG geradas sob demanda           | Integridade do conteúdo social, moderação                 |
+| Registro de acesso (Marco Civil)       | Fila e R2 (`access-log/`), cifrado           | IP e horário de acesso: dado pessoal com dever de guarda  |
+| Sais diários e pimenta de IP           | KV `CONFIG` (`salt:*`) e segredo do Worker   | Permitiriam reverter os hashes de IP dos limites          |
+| Segredos do Worker                     | `wrangler secret` (nunca no repositório)     | Chaves de auth, Turnstile, Resend, chaveiro do access log |
+| Dispositivo de áudio do usuário (cabo) | Navegador, via WebHID                        | Escrita indevida no hardware                              |
+| Chave do modo somente leitura          | KV `CONFIG`, `mode:read-only`                | Interruptor de emergência                                 |
 
 ## 2. Atores
 
@@ -37,40 +37,40 @@ Modelo de ameaças, mitigações e verificações da aplicação web (`web/`) e 
 
 S = falsificação, T = adulteração, R = repúdio, I = divulgação, D = negação de serviço, E = elevação de privilégio.
 
-| Superfície | Ameaça | STRIDE | Mitigação | Referência |
-| --- | --- | --- | --- | --- |
-| Cabo (WebHID) | Página enquadrada ou script de terceiros envia relatórios HID | T, E | `hid=(self)` (frames nunca recebem a permissão), `frame-ancestors 'none'` + `X-Frame-Options: DENY`, CSP sem script inline nem origem externa além do Turnstile; o navegador exige gesto e escolha do dispositivo | `web/src/lib/server/security/headers.ts`, `web/vite.config.ts` (bloco `csp`) |
-| Cabo (WebHID) | Valores fora da faixa gravados no aparelho | T | Validação e limites no código do cabo antes de cada escrita | `web/src/lib/components/pages/cabo/` |
-| Auth | Força bruta e preenchimento de credenciais | S, D | Limites em D1 por IP com hash, por identificador e por usuário; Turnstile antes de contar regras de terceiros (sem bloqueio de conta por terceiros) | `web/src/lib/server/security/auth-guard.ts`, `ratelimit.ts`, `README.md` da pasta |
-| Auth | Enumeração de contas | I | Mesma resposta para endereço existente e inexistente; chaves de limite pelo texto digitado | `web/src/lib/server/security/README.md` (decisões Q3) |
-| Auth | Sequestro de sessão por XSS | S, E | CSP estrita com nonce ou hash (§6), cookies `HttpOnly`, texto de usuário nunca renderizado como HTML | `web/vite.config.ts`, `web/src/lib/server/account/profile.ts` |
-| Auth | CSRF em formulários e API | T | Verificação de origem do SvelteKit, `form-action 'self'`, `SameSite` nos cookies | `web/vite.config.ts` |
-| API social | Conteúdo hostil (HTML, JS, URLs) em nomes e descrições | T, E | Texto guardado e devolvido como dado (JSON), nunca como marcação; URLs recusadas; apelidos com confusíveis recusados | `web/tests/integration/phase4/protections.test.ts` |
-| API social | Abuso de escrita e spam | D | Cotas diárias por usuário, limites por rota, moderação no /admin | `web/src/lib/server/social/` |
-| OG | Geração de imagem cara usada como amplificador | D | Rotas OG só leem (passam no modo somente leitura); cache; WASM do resvg roda no Worker (CSP do navegador não se aplica) | `web/tests/integration/phase4/protections.test.ts` |
-| OG | Leitura entre origens de imagens | I | Só OG usa `Cross-Origin-Resource-Policy: cross-origin`; todo o resto é `same-origin` | `headers.ts` (`crossOriginResourcePolicy`) |
-| Jobs | Mensagem da fila lida ou adulterada | I, T | Registro cifrado antes de entrar na fila (HKDF, chave por `kid`, AAD com a chave do objeto); a DLQ nunca tem IP em claro | `web/src/lib/server/security/access-log.ts`, `workers/jobs/src/jobs/access-log-crypto.js` |
-| Jobs | Hashes de IP revertidos com o tempo | I | Sal diário rotacionado; sais com mais de um dia apagados | `workers/jobs/src/jobs/` (`rotate-salt`) |
-| Admin | Ação administrativa sem autoria | R, E | Toda ação passa por `audited` (auditoria antes do efeito); segundo fator obrigatório | `web/src/lib/server/admin/audit.ts`, `read-only.ts` |
-| Admin | Página do admin enquadrada | T | `frame-ancestors 'none'` em toda resposta HTML | `headers.ts` |
-| Logs | Dado pessoal em log | I | Logs só com códigos e contagens; IP só no access log cifrado | `web/src/lib/server/security/README.md` |
-| Logs | Segredo ou dado do `.env` versionado | I | `tools/check-sensitive.mjs` antes de cada commit (§9) | `tools/check-sensitive.mjs` |
-| Todas | Incidente em andamento (abuso, falha de dados) | D, T | Modo somente leitura (§7) | `web/src/lib/server/admin/read-only.ts` |
+| Superfície    | Ameaça                                                        | STRIDE | Mitigação                                                                                                                                                                                                                                                | Referência                                                                                |
+| ------------- | ------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Cabo (WebHID) | Página enquadrada ou script de terceiros envia relatórios HID | T, E   | `hid=(self)` (frames nunca recebem a permissão), `frame-ancestors 'none'` + `X-Frame-Options: DENY`, CSP sem script inline nem origem externa além do Turnstile e do Simple Analytics (só em produção); o navegador exige gesto e escolha do dispositivo | `web/src/lib/server/security/headers.ts`, `web/vite.config.ts` (bloco `csp`)              |
+| Cabo (WebHID) | Valores fora da faixa gravados no aparelho                    | T      | Validação e limites no código do cabo antes de cada escrita                                                                                                                                                                                              | `web/src/lib/components/pages/cabo/`                                                      |
+| Auth          | Força bruta e preenchimento de credenciais                    | S, D   | Limites em D1 por IP com hash, por identificador e por usuário; Turnstile antes de contar regras de terceiros (sem bloqueio de conta por terceiros)                                                                                                      | `web/src/lib/server/security/auth-guard.ts`, `ratelimit.ts`, `README.md` da pasta         |
+| Auth          | Enumeração de contas                                          | I      | Mesma resposta para endereço existente e inexistente; chaves de limite pelo texto digitado                                                                                                                                                               | `web/src/lib/server/security/README.md` (decisões Q3)                                     |
+| Auth          | Sequestro de sessão por XSS                                   | S, E   | CSP estrita com nonce ou hash (§6), cookies `HttpOnly`, texto de usuário nunca renderizado como HTML                                                                                                                                                     | `web/vite.config.ts`, `web/src/lib/server/account/profile.ts`                             |
+| Auth          | CSRF em formulários e API                                     | T      | Verificação de origem do SvelteKit, `form-action 'self'`, `SameSite` nos cookies                                                                                                                                                                         | `web/vite.config.ts`                                                                      |
+| API social    | Conteúdo hostil (HTML, JS, URLs) em nomes e descrições        | T, E   | Texto guardado e devolvido como dado (JSON), nunca como marcação; URLs recusadas; apelidos com confusíveis recusados                                                                                                                                     | `web/tests/integration/phase4/protections.test.ts`                                        |
+| API social    | Abuso de escrita e spam                                       | D      | Cotas diárias por usuário, limites por rota, moderação no /admin                                                                                                                                                                                         | `web/src/lib/server/social/`                                                              |
+| OG            | Geração de imagem cara usada como amplificador                | D      | Rotas OG só leem (passam no modo somente leitura); cache; WASM do resvg roda no Worker (CSP do navegador não se aplica)                                                                                                                                  | `web/tests/integration/phase4/protections.test.ts`                                        |
+| OG            | Leitura entre origens de imagens                              | I      | Só OG usa `Cross-Origin-Resource-Policy: cross-origin`; todo o resto é `same-origin`                                                                                                                                                                     | `headers.ts` (`crossOriginResourcePolicy`)                                                |
+| Jobs          | Mensagem da fila lida ou adulterada                           | I, T   | Registro cifrado antes de entrar na fila (HKDF, chave por `kid`, AAD com a chave do objeto); a DLQ nunca tem IP em claro                                                                                                                                 | `web/src/lib/server/security/access-log.ts`, `workers/jobs/src/jobs/access-log-crypto.js` |
+| Jobs          | Hashes de IP revertidos com o tempo                           | I      | Sal diário rotacionado; sais com mais de um dia apagados                                                                                                                                                                                                 | `workers/jobs/src/jobs/` (`rotate-salt`)                                                  |
+| Admin         | Ação administrativa sem autoria                               | R, E   | Toda ação passa por `audited` (auditoria antes do efeito); segundo fator obrigatório                                                                                                                                                                     | `web/src/lib/server/admin/audit.ts`, `read-only.ts`                                       |
+| Admin         | Página do admin enquadrada                                    | T      | `frame-ancestors 'none'` em toda resposta HTML                                                                                                                                                                                                           | `headers.ts`                                                                              |
+| Logs          | Dado pessoal em log                                           | I      | Logs só com códigos e contagens; IP só no access log cifrado                                                                                                                                                                                             | `web/src/lib/server/security/README.md`                                                   |
+| Logs          | Segredo ou dado do `.env` versionado                          | I      | `tools/check-sensitive.mjs` antes de cada commit (§9)                                                                                                                                                                                                    | `tools/check-sensitive.mjs`                                                               |
+| Todas         | Incidente em andamento (abuso, falha de dados)                | D, T   | Modo somente leitura (§7)                                                                                                                                                                                                                                | `web/src/lib/server/admin/read-only.ts`                                                   |
 
 ## 5. Cabeçalhos
 
 Aplicados a toda resposta do Worker por `applySecurityHeaders` (`web/src/hooks.server.ts`) e a todo arquivo servido direto pelo Workers Static Assets por `web/_headers`, gerado de `renderStaticHeadersFile()` (um teste unitário compara os dois).
 
-| Cabeçalho | Valor | Motivo |
-| --- | --- | --- |
-| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` | Dois anos; só enviado quando a origem é https |
-| `Content-Security-Policy` | §6 | XSS e enquadramento |
-| `X-Frame-Options` | `DENY` | Enquadramento em navegadores sem `frame-ancestors` |
-| `Permissions-Policy` | `hid=(self)`, `autoplay=(self)`, `clipboard-write=(self)`; todo o resto `()` | Só o que a aplicação usa, só para a própria origem. Câmera e microfone desligados: o áudio vem de arquivos escolhidos pelo usuário, nunca de `getUserMedia`. `fullscreen` desligado: nenhuma tela o usa |
-| `Cross-Origin-Opener-Policy` | `same-origin` | Isola a janela de popups de outras origens |
-| `Cross-Origin-Resource-Policy` | `same-origin` (OG: `cross-origin`) | Impede leitura das respostas por outras origens |
-| `X-Content-Type-Options` | `nosniff` | Sem adivinhação de tipo |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` | Caminhos e parâmetros não vazam para terceiros |
+| Cabeçalho                      | Valor                                                                        | Motivo                                                                                                                                                                                                  |
+| ------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Strict-Transport-Security`    | `max-age=63072000; includeSubDomains`                                        | Dois anos; só enviado quando a origem é https                                                                                                                                                           |
+| `Content-Security-Policy`      | §6                                                                           | XSS e enquadramento                                                                                                                                                                                     |
+| `X-Frame-Options`              | `DENY`                                                                       | Enquadramento em navegadores sem `frame-ancestors`                                                                                                                                                      |
+| `Permissions-Policy`           | `hid=(self)`, `autoplay=(self)`, `clipboard-write=(self)`; todo o resto `()` | Só o que a aplicação usa, só para a própria origem. Câmera e microfone desligados: o áudio vem de arquivos escolhidos pelo usuário, nunca de `getUserMedia`. `fullscreen` desligado: nenhuma tela o usa |
+| `Cross-Origin-Opener-Policy`   | `same-origin`                                                                | Isola a janela de popups de outras origens                                                                                                                                                              |
+| `Cross-Origin-Resource-Policy` | `same-origin` (OG: `cross-origin`)                                           | Impede leitura das respostas por outras origens                                                                                                                                                         |
+| `X-Content-Type-Options`       | `nosniff`                                                                    | Sem adivinhação de tipo                                                                                                                                                                                 |
+| `Referrer-Policy`              | `strict-origin-when-cross-origin`                                            | Caminhos e parâmetros não vazam para terceiros                                                                                                                                                          |
 
 Respostas que não são HTML recebem `default-src 'none'; frame-ancestors 'none'; base-uri 'none'`. Scripts JavaScript não recebem CSP do Worker (um worker dedicado usa a CSP da própria resposta).
 
@@ -80,12 +80,13 @@ Definida no bloco `csp` de `web/vite.config.ts`, modo `auto`: respostas SSR rece
 
 ```
 default-src 'none'
-script-src 'self' https://challenges.cloudflare.com   (+ nonce ou hashes do Kit)
+script-src 'self' https://challenges.cloudflare.com https://scripts.simpleanalyticscdn.com
+                                                       (+ nonce ou hashes do Kit)
 style-src 'self'                                       (+ nonce ou hashes do Kit)
 style-src-attr 'unsafe-inline'
-img-src 'self' data: blob:
+img-src 'self' data: blob: https://queue.simpleanalyticscdn.com
 font-src 'self'
-connect-src 'self'
+connect-src 'self' https://queue.simpleanalyticscdn.com
 media-src 'self' blob:
 worker-src 'self'
 frame-src https://challenges.cloudflare.com
@@ -104,6 +105,7 @@ Decisões:
 - **Workers e AudioWorklet.** `solver.worker.ts` e `gate.worker.ts` são criados com `new Worker(new URL(..., import.meta.url))` e o processador dos medidores vem de `meter-processor.js?worker&url` para `audioWorklet.addModule` (`web/src/lib/audio/meters.ts`): todos são arquivos da própria origem. `worker-src 'self'` (o `blob:` anterior saiu: nenhum worker é criado de blob). O módulo do AudioWorklet é regido por `script-src`, que já tem `'self'`.
 - **`blob:` e `data:` só onde há uso.** `img-src data:` para os QR codes em SVG (`TwoFactorForm`, `SharePanel`, `TrackSheet`), a exportação em `CompararPage` e o ruído de `comparar.css`; `img-src blob:` para a rasterização da ficha (`sheet-export.ts`); `media-src blob:` para tocar arquivos locais (`web/src/lib/audio/engine.ts`).
 - **Turnstile.** `script-src` e `frame-src` com `https://challenges.cloudflare.com`, como pede a documentação da Cloudflare. O script é carregado por `Turnstile.svelte` com um elemento `<script src>` (lista de hosts; o nonce não é necessário porque não usamos `'strict-dynamic'`).
+- **Simple Analytics (contagem de visitas, só em produção).** `script-src` com `https://scripts.simpleanalyticscdn.com` (o `latest.js` oficial) e `img-src` e `connect-src` com `https://queue.simpleanalyticscdn.com` (os envios de cada visita). A política é a mesma em todos os ambientes; fora de produção os hosts ficam sem uso. O `app.html` termina o `<body>` com o marcador `%analytics%`, que o hook `analytics` (`web/src/lib/server/analytics.ts`, via `transformPageChunk`) troca pelo trecho do fornecedor (`<script async src>` externo, sem script inline nem nonce, permitido pela lista de hosts) ou por nada. A regra: o `PUBLIC_ORIGIN` do build tem de ser `https://open-auri.com` (só o `tools/deploy.mjs --env production` monta assim) e, no SSR, a requisição também tem de vir dessa origem. Vale para as páginas pré-renderizadas, porque o hook roda no prerender. Localhost, os servidores do Playwright (4173/4174), staging e CI ficam sem a tag. O service worker só trata requisições da própria origem e nunca guarda o script nem os envios.
 - **Páginas pré-renderizadas.** A `<meta>` vale só a partir do ponto em que é lida e não aceita `frame-ancestors`. Por isso `web/_headers` envia uma segunda política (`STATIC_DOCUMENT_CSP` em `headers.ts`) com todas as diretivas que não dependem de hash: `frame-ancestors`, `object-src`, `base-uri`, `form-action`, `img-src`, `font-src`, `connect-src`, `media-src`, `worker-src`, `frame-src`, `manifest-src`. Ela não tem `default-src`, `script-src` nem `style-src*`, que bloqueariam os scripts inline com hash (todas as políticas aplicadas precisam permitir um recurso). Um teste unitário compara essa lista com o bloco do `vite.config.ts`. O mesmo cabeçalho chega aos arquivos de `/_app`, onde vira a política dos workers dedicados: eles só calculam, então cabe.
 - **Fora, por ora:**
   - `upgrade-insecure-requests`: a aplicação só referencia a própria origem por caminho relativo e o HSTS já força https em produção; a diretiva quebraria o preview local em `http://localhost`.
@@ -141,29 +143,29 @@ Pacotes que entram no bundle do Worker ou do cliente incluem dependências de pr
 
 Principais dependências de produção e runtimes distribuídos (a tabela não substitui a lista gerada):
 
-| Pacote | Origem | Licença | Compatível com AGPL-3.0 |
-| --- | --- | --- | --- |
-| `@cf-wasm/resvg` | direta (web) | MPL-2.0 | Sim (MPL-2.0 §3.3, licenças secundárias GNU) |
-| `@resvg/resvg-wasm` 2.6.2 e 2.4.1 (alias `-legacy`) | via `@cf-wasm/resvg` | MPL-2.0 | Sim |
-| `better-auth` e `@better-auth/*`, `@better-fetch/fetch`, `better-call` | direta (web) e transitivas | MIT | Sim |
-| `zod` | direta (web) | MIT | Sim |
-| `uqr` | direta (web) | MIT | Sim |
-| `svelte`, `@sveltejs/kit`, runtime de `@inlang/paraglide-js` | diretas (web, `devDependencies`) | MIT | Sim |
-| Demais transitivas de produção (`jose`, `kysely`, `@noble/*`, `nanostores`, `defu`, `rou3` e outras) | transitivas | MIT, ISC, Apache-2.0 ou BSD | Sim |
+| Pacote                                                                                               | Origem                           | Licença                     | Compatível com AGPL-3.0                      |
+| ---------------------------------------------------------------------------------------------------- | -------------------------------- | --------------------------- | -------------------------------------------- |
+| `@cf-wasm/resvg`                                                                                     | direta (web)                     | MPL-2.0                     | Sim (MPL-2.0 §3.3, licenças secundárias GNU) |
+| `@resvg/resvg-wasm` 2.6.2 e 2.4.1 (alias `-legacy`)                                                  | via `@cf-wasm/resvg`             | MPL-2.0                     | Sim                                          |
+| `better-auth` e `@better-auth/*`, `@better-fetch/fetch`, `better-call`                               | direta (web) e transitivas       | MIT                         | Sim                                          |
+| `zod`                                                                                                | direta (web)                     | MIT                         | Sim                                          |
+| `uqr`                                                                                                | direta (web)                     | MIT                         | Sim                                          |
+| `svelte`, `@sveltejs/kit`, runtime de `@inlang/paraglide-js`                                         | diretas (web, `devDependencies`) | MIT                         | Sim                                          |
+| Demais transitivas de produção (`jose`, `kysely`, `@noble/*`, `nanostores`, `defu`, `rou3` e outras) | transitivas                      | MIT, ISC, Apache-2.0 ou BSD | Sim                                          |
 
 `workers/jobs` não tem dependência de produção (só ferramentas de desenvolvimento). A raiz também não.
 
 Outras licenças encontradas em pacotes marcados como de desenvolvimento no lockfile estão abaixo. Essa marca não prova ausência no bundle; a conferência de distribuição deve usar os sourcemaps e também os assets copiados.
 
-| Licença | Pacotes | Marca no lockfile |
-| --- | --- | --- |
-| MPL-2.0 | `axe-core`, `@axe-core/playwright`, `lightningcss` e binários por plataforma | `dev` / `devOptional` |
-| LGPL-3.0-or-later e `Apache-2.0 AND LGPL-3.0-or-later` | `@img/sharp-libvips-*`, `@img/sharp-*` (opcionais do wrangler) | `dev` |
-| CC-BY-4.0 | dados do `caniuse-lite` | `dev` |
-| BlueOak-1.0.0 | `minimatch` | `dev` |
-| 0BSD | `tslib` | `dev`, opcional |
-| `(MIT OR CC0-1.0)` | `type-fest` | `devOptional` |
-| `MIT OR Apache-2.0` | `wrangler`, `@cloudflare/*` | `dev` |
+| Licença                                                | Pacotes                                                                      | Marca no lockfile     |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------------- |
+| MPL-2.0                                                | `axe-core`, `@axe-core/playwright`, `lightningcss` e binários por plataforma | `dev` / `devOptional` |
+| LGPL-3.0-or-later e `Apache-2.0 AND LGPL-3.0-or-later` | `@img/sharp-libvips-*`, `@img/sharp-*` (opcionais do wrangler)               | `dev`                 |
+| CC-BY-4.0                                              | dados do `caniuse-lite`                                                      | `dev`                 |
+| BlueOak-1.0.0                                          | `minimatch`                                                                  | `dev`                 |
+| 0BSD                                                   | `tslib`                                                                      | `dev`, opcional       |
+| `(MIT OR CC0-1.0)`                                     | `type-fest`                                                                  | `devOptional`         |
+| `MIT OR Apache-2.0`                                    | `wrangler`, `@cloudflare/*`                                                  | `dev`                 |
 
 Nenhuma licença incompatível com AGPL-3.0 identificada nessa revisão. As fontes `@fontsource*` ficam em `devDependencies`, mas seus arquivos são copiados para o build e servidos ao navegador, com OFL-1.1 ou Apache-2.0 conforme a família (avisos em `web/static/fonts/`). Os TTF usados nas imagens Open Graph também são distribuídos, sob OFL-1.1, com avisos e links ao texto em `web/static/og-font/LICENSE-OFL.txt`. A OFL-1.1 permite redistribuir fontes junto de software sob qualquer licença, desde que a própria fonte continue sob OFL e o aviso a acompanhe.
 

@@ -8,4 +8,4 @@
   cross-origin-resource-policy: same-origin
   x-frame-options: DENY
   strict-transport-security: max-age=63072000; includeSubDomains
-  content-security-policy: frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; frame-src https://challenges.cloudflare.com; manifest-src 'self'
+  content-security-policy: frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: blob: https://queue.simpleanalyticscdn.com; font-src 'self'; connect-src 'self' https://queue.simpleanalyticscdn.com; media-src 'self' blob:; worker-src 'self'; frame-src https://challenges.cloudflare.com; manifest-src 'self'

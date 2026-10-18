@@ -119,6 +119,24 @@ describe('request routing', () => {
 			'network-only'
 		);
 	});
+
+	test('never intercepts, caches or precaches the Simple Analytics script and beacons', () => {
+		const script = 'https://scripts.simpleanalyticscdn.com/latest.js';
+		const beacons = [
+			'https://queue.simpleanalyticscdn.com/simple.gif?type=pageview',
+			'https://queue.simpleanalyticscdn.com/events'
+		];
+		// Even if the URL somehow reached the precache list, cross-origin stays network-only.
+		const listed = new Set([...shell, script]);
+		for (const url of [script, ...beacons]) {
+			expect(requestStrategy(new Request(url), scope, listed), url).toBe('network-only');
+			expect(requestStrategy(new Request(url, { method: 'POST' }), scope, listed), url).toBe(
+				'network-only'
+			);
+		}
+		const entries = [script, ...beacons].map((path) => ({ path }));
+		expect(precacheUrls(entries, scope)).toEqual([]);
+	});
 });
 
 describe('public-only cache admission', () => {
