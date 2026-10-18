@@ -301,24 +301,33 @@
 				<dd class="code">{shared.s1}</dd>
 			</div>
 		</dl>
-		<div class="actions">
-			<Button loading={busy} aria-pressed={listening} onclick={listen}
-				>{listening ? m.shared_curve_stop() : m.shared_curve_listen()}</Button
-			>
-			<a class="button" href={curvaHref} data-sveltekit-reload>{m.shared_curve_open()}</a>
-			<Button loading={favoriting} aria-pressed={favorited} onclick={favorite}
-				>{favorited ? m.shared_curve_favorited() : m.shared_curve_favorite()}</Button
-			>
-			<Button variant="primary" onclick={install}>{m.shared_curve_install()}</Button>
+		<!--
+			Control deck: the plate/primary buttons and the Transport are drawn for dark surfaces
+			(light text, translucent faces, --rule-control borders), so they sit on a dark panel,
+			as on the Biblioteca sheet's listen panel, never on the light paper itself.
+		-->
+		<div class="deck">
+			<div class="actions">
+				<Button loading={busy} aria-pressed={listening} onclick={listen}
+					>{listening ? m.shared_curve_stop() : m.shared_curve_listen()}</Button
+				>
+				<a class="btn btn--plate btn--md" href={curvaHref} data-sveltekit-reload
+					>{m.shared_curve_open()}</a
+				>
+				<Button loading={favoriting} aria-pressed={favorited} onclick={favorite}
+					>{favorited ? m.shared_curve_favorited() : m.shared_curve_favorite()}</Button
+				>
+				<Button variant="primary" onclick={install}>{m.shared_curve_install()}</Button>
+			</div>
+			<!-- Pause keeps the comparison (trims, position); "Parar" ends it. -->
+			<Transport
+				engine={app?.audio ?? null}
+				variant="compact"
+				session={SHARED_CURVE_SESSION}
+				onplay={transportPlay}
+				playDisabledReason={app && curve ? null : m.shared_curve_audio_unavailable()}
+			/>
 		</div>
-		<!-- Pause keeps the comparison (trims, position); "Parar" ends it. -->
-		<Transport
-			engine={app?.audio ?? null}
-			variant="compact"
-			session={SHARED_CURVE_SESSION}
-			onplay={transportPlay}
-			playDisabledReason={app && curve ? null : m.shared_curve_audio_unavailable()}
-		/>
 		<p class="install-note">{m.shared_curve_install_note()}</p>
 		{#if loginPrompt}<div class="login" role="alert">
 				<p>{m.shared_curve_login_prompt()}</p>
@@ -518,27 +527,28 @@
 	.code {
 		overflow-wrap: anywhere;
 	}
+	/*
+		Dark deck under the controls (same panel as the Biblioteca sheet's listen section): the
+		plate border (--rule-control) reads 3.3:1 on it, the Biblioteca primary 7:1. A column
+		with a gap: the actions row and the Transport (which wraps its seek bar under its own
+		buttons when narrow) stack in normal flow and never overlap at any width.
+	*/
+	.deck {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		margin: 14px 18px 0;
+		padding: 14px;
+		border: 1px solid #a69f7144;
+		border-radius: 2px;
+		background: #1c211a;
+		color: #ece7dd;
+	}
 	.actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 10px;
-		padding: 14px 18px 0;
-	}
-	.actions .button {
-		box-sizing: border-box;
-		display: inline-flex;
 		align-items: center;
-		min-height: 36px;
-		padding: 8px 14px;
-		border: 1px solid #171c15;
-		border-radius: var(--rad-sm, 4px);
-		background: linear-gradient(#454b3e, #282e24);
-		box-shadow:
-			0 3px #1b2118,
-			inset 0 1px #a8ad8d33;
-		color: #f3efd9;
-		font: 500 var(--fs-ui, 14px) / 1.2 var(--face-body, 'Geist', sans-serif);
-		text-decoration: none;
+		gap: 10px;
 	}
 	.login {
 		display: flex;
@@ -579,9 +589,12 @@
 		.facts {
 			grid-template-columns: 1fr;
 		}
-		.actions .button {
-			flex: 1 1 100%;
-			justify-content: center;
+		.deck {
+			padding: 12px;
+		}
+		/* Touch: 44 px targets that share the rows (the labels still never wrap). */
+		.actions > :global(.btn) {
+			flex: 1 1 auto;
 			min-height: 44px;
 		}
 	}
