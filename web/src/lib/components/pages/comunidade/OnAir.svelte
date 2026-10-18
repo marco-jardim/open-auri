@@ -27,6 +27,7 @@
 		gateReasonText,
 		gateReasonsOf,
 		type DecodedCurve,
+		type EnvelopeCheck,
 		type Lang,
 		type License,
 		type SessionView,
@@ -71,14 +72,17 @@
 	}
 
 	$effect(() => {
-		if (!nameTouched && name === '' && editorName) name = editorName.slice(0, S5_NAME_MAX);
+		if (!nameTouched && name === '' && editorName)
+			name = Array.from(editorName).slice(0, S5_NAME_MAX).join('');
 	});
 
 	const lang = $derived<Lang>(getLocale() === 'en-US' ? 'en-US' : 'pt-BR');
 	const s1 = $derived(editor ? encodeCurve(editor) : null);
-	const check = $derived(
-		s1 ? buildEnvelope({ name, description, license, lang, s1, now: now() }) : null
-	);
+	const check = $derived.by<EnvelopeCheck | null>(() => {
+		if (!s1) return null;
+		if (Array.from(name).length > S5_NAME_MAX) return { ok: false, codes: ['env:length'] };
+		return buildEnvelope({ name, description, license, lang, s1, now: now() });
+	});
 	/** Lit only for a server-approved publication of exactly the curve on screen. */
 	const lit = $derived(published !== null && published.s1 === s1);
 	/** Why "Publicar" cannot act right now; null when it can (T8). */
@@ -161,7 +165,7 @@
 				<span class="fld-lbl">{m.comunidade_onair_name()}</span>
 				<input
 					class="tape-input"
-					maxlength={S5_NAME_MAX}
+					maxlength={S5_NAME_MAX * 2}
 					autocomplete="off"
 					bind:value={() => name, setName}
 					disabled={!session.verified}

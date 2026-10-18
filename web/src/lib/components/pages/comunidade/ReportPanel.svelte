@@ -126,8 +126,10 @@
 				token
 			);
 			sentFor = targetId;
-			note = '';
-			message = m.comunidade_report_sent();
+			if (channel?.lineageId === targetId) {
+				note = '';
+				message = m.comunidade_report_sent();
+			}
 		} catch (error) {
 			message = errorText(error);
 		} finally {

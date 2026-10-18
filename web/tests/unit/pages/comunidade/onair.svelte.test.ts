@@ -218,7 +218,7 @@ test('the publish fields stay within the S5 limits, so a long editor name prefil
 	await render(OnAir, { ...props, editorName: 'N'.repeat(100) });
 	const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
 	await expect.element(name).toHaveValue('N'.repeat(48));
-	await expect.element(name).toHaveAttribute('maxlength', '48');
+	await expect.element(name).toHaveAttribute('maxlength', '96');
 	await expect
 		.element(page.getByRole('textbox', { name: m.comunidade_onair_description() }))
 		.toHaveAttribute('maxlength', '280');
@@ -227,6 +227,41 @@ test('the publish fields stay within the S5 limits, so a long editor name prefil
 		.element(page.getByRole('button', { name: m.comunidade_onair_publish(), exact: true }))
 		.not.toHaveAttribute('aria-disabled');
 });
+
+test('editor names truncate by code point and all 48 emoji can be published', async () => {
+	const { props, fetch } = setup(() =>
+		json({ lineageId: 'lin-new', versionId: 'ver-new', curveId: 'cnew' }, 201)
+	);
+	await render(OnAir, { ...props, editorName: `${'N'.repeat(47)}😀extra` });
+	const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
+	await expect.element(name).toHaveValue(`${'N'.repeat(47)}😀`);
+	const emojiName = '😀'.repeat(48);
+	await name.fill(emojiName);
+	await expect.element(name).toHaveValue(emojiName);
+	expect(page.getByTestId('envelope-issues').elements()).toHaveLength(0);
+	await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+	await expect.element(lamp()).toHaveAttribute('data-lit', 'true');
+	expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({
+		envelope: { name: emojiName }
+	});
+});
+
+test.each(['N'.repeat(49), `${'😀'.repeat(47)}NN`])(
+	'a name exceeding 48 code points is refused locally: %s',
+	async (value) => {
+		const { props, fetch } = setup(() => undefined);
+		await render(OnAir, props);
+		const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
+		await name.fill(value);
+		await expect.element(name).toHaveValue(value);
+		await expect
+			.element(page.getByTestId('envelope-issues'))
+			.toMatchTextContent(m.comunidade_env_length());
+		await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+		await expect.element(page.getByRole('alert')).toMatchTextContent(m.comunidade_env_invalid());
+		expect(fetch).not.toHaveBeenCalled();
+	}
+);
 
 test('chosen license, visibility and maximum description reach the server; edited audio extinguishes the lamp', async () => {
 	const { props, fetch, onpublished } = setup(() =>

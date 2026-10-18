@@ -5,7 +5,16 @@ import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import TotalRecall from '#lib/components/pages/comunidade/TotalRecall.svelte';
 import { m } from '#lib/paraglide/messages.js';
-import { S1_BOOST, S1_NEUTRAL, apiError, apiWith, fakeFetch, headerOf, json } from './fixtures.ts';
+import {
+	S1_BOOST,
+	S1_NEUTRAL,
+	apiError,
+	apiWith,
+	deferred,
+	fakeFetch,
+	headerOf,
+	json
+} from './fixtures.ts';
 
 afterEach(() => {
 	cleanup();
@@ -276,6 +285,49 @@ test('preferred lineage is honored only when owned, and changing it ignores a st
 	expect(document.querySelectorAll('.commit')).toHaveLength(0);
 	expect(page.getByRole('table').elements()).toHaveLength(0);
 });
+
+test.each(['success', 'failure'])(
+	'a stale lineage request settling with %s never clears the current loading state',
+	async (outcome) => {
+		const { props } = setup(() => apiError('INTERNAL', 500));
+		const original = await props.api.getLineage(LINEAGE.id);
+		let resolve: (value: typeof original) => void = () => undefined;
+		let reject: (error: Error) => void = () => undefined;
+		const old = new Promise<typeof original>((done, fail) => {
+			resolve = done;
+			reject = fail;
+		});
+		const current = deferred<typeof original>();
+		const get = vi
+			.spyOn(props.api, 'getLineage')
+			.mockImplementation((id) => (id === LINEAGE.id ? old : current.promise));
+		const screen = await render(TotalRecall, {
+			...props,
+			owned: [...props.owned, { id: 'lin-second', name: 'Segunda criação' }]
+		});
+		await expect.poll(() => get.mock.calls.length).toBe(1);
+		await screen.rerender({ preferred: 'lin-second' });
+		await expect.poll(() => get.mock.calls.length).toBe(2);
+		await expect.element(page.getByTestId('recall-loading')).toHaveAttribute('aria-busy', 'true');
+		if (outcome === 'success') resolve(original);
+		else reject(new Error('stale failure'));
+		await old.catch(() => undefined);
+		// Let the stale finally and the render flush finish before checking the pending request.
+		await new Promise((done) => setTimeout(done, 0));
+		await expect.element(page.getByTestId('recall-loading')).toHaveAttribute('aria-busy', 'true');
+		expect(page.getByRole('alert').elements()).toHaveLength(0);
+		expect(document.querySelectorAll('.commit')).toHaveLength(0);
+		current.resolve({
+			...original,
+			lineage: { ...original.lineage, id: 'lin-second' },
+			versions: []
+		});
+		await expect.element(page.getByTestId('recall-loading')).not.toBeInTheDocument();
+		await expect
+			.element(page.getByRole('combobox', { name: m.comunidade_recall_to() }))
+			.toBeVisible();
+	}
+);
 
 test('a stale failed lineage request never clears the lineage now selected', async () => {
 	const { props } = setup(() => apiError('INTERNAL', 500));

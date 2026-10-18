@@ -135,7 +135,8 @@ test('a report marks the submitted channel, even when the selection changes in f
 	await expect.element(send()).toHaveAttribute('aria-busy', 'true');
 	await screen.rerender({ channel: { ...channel, lineageId: 'lin-second', name: 'Outra curva' } });
 	resolve({ reported: true });
-	await expect.element(page.getByRole('status')).toHaveTextContent(m.comunidade_report_sent());
+	await expect.element(send()).not.toHaveAttribute('aria-busy');
+	await expect.element(page.getByRole('status')).toHaveTextContent('');
 	expect(props.api.report).toHaveBeenCalledWith(
 		expect.objectContaining({ targetId: channel.lineageId }),
 		'token'
@@ -147,6 +148,34 @@ test('a report marks the submitted channel, even when the selection changes in f
 	// The submitted channel is the one marked as reported.
 	await screen.rerender({ channel });
 	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_v2_reason_report_sent());
+});
+
+test('a report completing for the previous channel preserves the new note without showing success', async () => {
+	const { props } = setup();
+	let resolve: (value: { reported: true }) => void = () => undefined;
+	vi.spyOn(props.api, 'report').mockReturnValueOnce(
+		new Promise((done) => {
+			resolve = done;
+		})
+	);
+	const screen = await render(ReportPanel, props);
+	const note = page.getByRole('textbox', { name: m.comunidade_report_note() });
+	await note.fill('Evidence for the original channel');
+	await send().click();
+	await expect.element(send()).toHaveAttribute('aria-busy', 'true');
+	await screen.rerender({ channel: { ...channel, lineageId: 'lin-second', name: 'Outra curva' } });
+	await note.fill('Evidence for the new channel');
+	resolve({ reported: true });
+	await expect.element(send()).not.toHaveAttribute('aria-busy');
+	await expect.element(note).toHaveValue('Evidence for the new channel');
+	await expect.element(page.getByRole('status')).toHaveTextContent('');
+	expect(props.api.report).toHaveBeenCalledWith(
+		expect.objectContaining({
+			targetId: channel.lineageId,
+			note: 'Evidence for the original channel'
+		}),
+		'token'
+	);
 });
 
 test('lazy widget callback enables sending and expiry disables it again without a network script', async () => {

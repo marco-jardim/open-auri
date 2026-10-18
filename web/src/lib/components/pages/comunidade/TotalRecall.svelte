@@ -101,7 +101,7 @@
 			data = null;
 			loadError = errorText(error);
 		} finally {
-			loading = false;
+			if (target === lineageId) loading = false;
 		}
 	}
 
