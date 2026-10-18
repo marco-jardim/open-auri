@@ -153,3 +153,140 @@ test('the gate and the technical terms carry their explainers', async () => {
 	expect(explainers.length).toBeGreaterThanOrEqual(3);
 	expect(document.querySelector('#publicar')?.getAttribute('data-tour')).toBe('comunidade-publish');
 });
+
+test('unverified, offline and missing-curve publishing have distinct reasons', async () => {
+	const { props, fetch } = setup(() => undefined);
+	const screen = await render(OnAir, { ...props, session: { ...VERIFIED, verified: false } });
+	const publish = page.getByRole('button', { name: m.comunidade_onair_publish(), exact: true });
+	await expect.element(publish).toHaveAccessibleDescription(m.comunidade_verify_prompt());
+	await screen.rerender({ session: VERIFIED, online: false });
+	await expect.element(publish).toHaveAccessibleDescription(m.comunidade_offline());
+	(publish.element() as HTMLElement).click();
+	await screen.rerender({ online: true, editor: null });
+	await expect.element(publish).toHaveAccessibleDescription(m.comunidade_v2_reason_no_curve());
+	await expect.element(page.getByText(m.comunidade_onair_no_s1())).toBeVisible();
+	expect(fetch).not.toHaveBeenCalled();
+});
+
+test('empty and URL names block locally and never reach the server', async () => {
+	const { props, fetch } = setup(() => undefined);
+	// No editor name: nothing is prefilled and the name stays empty.
+	await render(OnAir, { ...props, editorName: '' });
+	const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
+	await expect.element(name).toHaveValue('');
+	await expect
+		.element(page.getByTestId('envelope-issues'))
+		.toMatchTextContent(m.comunidade_env_length());
+	await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+	await expect.element(page.getByRole('alert')).toMatchTextContent(m.comunidade_env_invalid());
+	await expect.element(lamp()).toHaveAttribute('data-lit', 'false');
+	await name.fill('https://example.test');
+	await expect
+		.element(page.getByTestId('envelope-issues'))
+		.toMatchTextContent(m.comunidade_env_url());
+	expect(fetch).not.toHaveBeenCalled();
+});
+
+test('a name the user typed is never replaced when the editor name changes', async () => {
+	const { props } = setup(() => undefined);
+	const screen = await render(OnAir, props);
+	const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
+	await expect.element(name).toHaveValue('Minha curva');
+	await name.fill('Meu nome');
+	await screen.rerender({ editorName: 'Outro nome' });
+	await expect.element(name).toHaveValue('Meu nome');
+});
+
+// PRODUCT BUG (OnAir.svelte:67-69 with :161): `nameTouched` is a plain flag set by the delegated
+// `oninput` handler, which runs AFTER bind:value has written `name = ''`. For a real (trusted)
+// input event the microtask checkpoint between the two listeners flushes the prefill effect
+// first, which still sees `!nameTouched && name === ''` and writes the editor name back. Clearing
+// the field as the first edit therefore refills it. Remove `.fails` once the product is fixed.
+test.fails('a name the user clears stays empty, even when the editor name changes', async () => {
+	const { props } = setup(() => undefined);
+	const screen = await render(OnAir, props);
+	const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
+	await expect.element(name).toHaveValue('Minha curva');
+	await name.fill('');
+	await expect.element(name).toHaveValue('');
+	await screen.rerender({ editorName: 'Outro nome' });
+	await expect.element(name).toHaveValue('');
+});
+
+// PRODUCT BUG (model.ts:79-80 used by OnAir.svelte:68, :158 and :167): NAME_MAX = 80 and
+// DESCRIPTION_MAX = 1000, but the S5 envelope accepts 48 and 280 code points
+// (src/share/envelope.mjs:403-404). A long editor name is prefilled at 80 characters, so the
+// default name can never be published, and both fields accept text the gate always refuses.
+// Remove `.fails` once the product is fixed.
+test.fails(
+	'the publish fields stay within the S5 limits, so a long editor name prefills publishable',
+	async () => {
+		const { props } = setup(() => undefined);
+		await render(OnAir, { ...props, editorName: 'N'.repeat(100) });
+		const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
+		await expect.element(name).toHaveValue('N'.repeat(48));
+		await expect.element(name).toHaveAttribute('maxlength', '48');
+		await expect
+			.element(page.getByRole('textbox', { name: m.comunidade_onair_description() }))
+			.toHaveAttribute('maxlength', '280');
+		expect(document.querySelector('[data-testid="envelope-issues"]')).toBeNull();
+		await expect
+			.element(page.getByRole('button', { name: m.comunidade_onair_publish(), exact: true }))
+			.not.toHaveAttribute('aria-disabled');
+	}
+);
+
+test('chosen license, visibility and maximum description reach the server; edited audio extinguishes the lamp', async () => {
+	const { props, fetch, onpublished } = setup(() =>
+		json({ lineageId: 'lin-new', versionId: 'ver-new', curveId: 'cnew' }, 201)
+	);
+	const screen = await render(OnAir, props);
+	await page.getByRole('radio', { name: 'CC0 1.0' }).click();
+	await page.getByRole('radio', { name: m.comunidade_visibility_private() }).click();
+	// 280 code points is the S5 maximum (src/share/envelope.mjs:404); 1000 is always refused.
+	await page.getByRole('textbox', { name: m.comunidade_onair_description() }).fill('D'.repeat(280));
+	expect(document.querySelector('[data-testid="envelope-issues"]')).toBeNull();
+	await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+	await expect.element(lamp()).toHaveAttribute('data-lit', 'true');
+	expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({
+		visibility: 'private',
+		envelope: { license: 'CC0-1.0', description: 'D'.repeat(280) }
+	});
+	await expect
+		.element(page.getByRole('link', { name: m.comunidade_onair_open() }))
+		.toHaveAttribute('href', '/c/lin-new');
+	expect(onpublished).toHaveBeenCalledWith(
+		expect.objectContaining({ lineageId: 'lin-new' }),
+		expect.any(String)
+	);
+	await screen.rerender({ editor: { ...EDITOR, preampDb: -3 } });
+	await expect.element(lamp()).toHaveAttribute('data-lit', 'false');
+	expect(page.getByRole('link', { name: m.comunidade_onair_open() }).elements()).toHaveLength(0);
+});
+
+test('while publishing, another click never submits twice', async () => {
+	let resolve: (response: Response) => void = () => undefined;
+	const pending = new Promise<Response>((done) => {
+		resolve = done;
+	});
+	const { props, fetch } = setup(() => pending);
+	await render(OnAir, props);
+	await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+	await page.getByRole('button', { name: m.comunidade_onair_sending() }).click();
+	expect(fetch).toHaveBeenCalledOnce();
+	resolve(json({ lineageId: 'lin-new', versionId: 'ver-new', curveId: 'cnew' }, 201));
+	await expect.element(lamp()).toHaveAttribute('data-lit', 'true');
+});
+
+test('server curve issues are localized and a non-API exception stays generic', async () => {
+	const { props } = setup(() =>
+		apiError('INVALID_CURVE', 422, { codes: ['env:length', 's1:unknown'] })
+	);
+	await render(OnAir, props);
+	await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+	await expect.element(page.getByRole('alert')).toMatchTextContent(m.comunidade_env_length());
+	await expect.element(lamp()).toHaveAttribute('data-lit', 'false');
+	vi.spyOn(props.api, 'publishCurve').mockRejectedValueOnce(new Error('private internal failure'));
+	await page.getByRole('button', { name: m.comunidade_onair_publish() }).click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(m.comunidade_error_generic());
+});

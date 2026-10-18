@@ -111,3 +111,39 @@ export function apiWith(fetch: SocialFetch, online = true) {
 export function headerOf(init: RequestInit | undefined, name: string): string | null {
 	return new Headers(init?.headers).get(name);
 }
+
+/** The text of everything an element's aria-describedby points to (the Button's reason). */
+export function reasonOf(element: Element): string {
+	const ids = element.getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+	return ids
+		.map((value) => document.getElementById(value)?.textContent?.trim() ?? '')
+		.join(' ')
+		.trim();
+}
+
+/** Visible notes with exactly this text (the reason tooltip may hold the same words). */
+export function notesWith(text: string): Element[] {
+	return Array.from(document.querySelectorAll('p.note')).filter(
+		(node) => node.textContent?.trim() === text
+	);
+}
+
+/** The panel's live status line (`<p class="note" role="status">`), or null when not rendered. */
+export function statusOf(testId: string): string | null {
+	const node = document.querySelector(`[data-testid="${testId}"] p.note[role="status"]`);
+	return node ? (node.textContent?.trim() ?? '') : null;
+}
+
+/** A promise the test settles by hand (a request still running). */
+export function deferred<T>() {
+	let resolve: (value: T) => void = () => undefined;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
+/** Activates a control the way a script would, past the browser's actionability checks. */
+export function domClick(element: Element) {
+	if (element instanceof HTMLElement) element.click();
+}
