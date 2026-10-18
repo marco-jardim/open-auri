@@ -1,0 +1,10 @@
+name: open-auri CodeQL config
+
+# Generated or vendored code that is not ours to fix.
+paths-ignore:
+  - web/src/lib/paraglide
+  - '**/.svelte-kit'
+  - '**/node_modules'
+  - '**/.wrangler'
+  - web/static/data
+  - web/static/third-party-licenses.txt
