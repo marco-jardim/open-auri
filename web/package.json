@@ -49,6 +49,8 @@
 		"@fontsource/special-elite": "^5.3.0",
 		"@fontsource/vt323": "^5.3.0",
 		"@inlang/paraglide-js": "^2.18.2",
+		"@inlang/plugin-m-function-matcher": "^2.0.0",
+		"@inlang/plugin-message-format": "^4.0.0",
 		"@msw/cloudflare": "^0.2.0",
 		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-cloudflare": "^8.0.0",
