@@ -16,9 +16,18 @@
 // one answers exactly like a missing id.
 // Two daily quotas per user: successful publications (versions created) and attempts that reach
 // the gate (accepted or rejected), which bounds the gate CPU a user can spend.
+//
+// YOLO (docs/social.md "Classes de curva"): the class is derived on the server (`checkPublishable`),
+// never declared by the client. A YOLO curve may always be saved privately. A write that leaves a
+// YOLO head visible to others (unlisted or public: publish, append, fork, visibility change,
+// restore) needs, in this order: the kill switch on (`YOLO_PUBLICATION`, default off: 403
+// YOLO_PUBLICATION_OFF), an account at least 72 h old (403 FORBIDDEN, `details.reason:
+// 'account-age'`), `acknowledge: 'yolo'` in the body (409 YOLO_ACK_REQUIRED with
+// `details.waived`) and a free slot of YOLO_ACKS_DAILY_MAX per sliding day (429 QUOTA_EXCEEDED);
+// the acknowledgement row is then written in the same batch as the write.
 import type { D1Database } from '@cloudflare/workers-types';
-import type { gateForWrite } from 'open-auri/safety';
-import { decodeS1, S1Error, validateEnvelope } from 'open-auri/share';
+import type { classifyCurve, gateForWrite } from 'open-auri/safety';
+import { decodeS1, envelopeFormat, S1Error, validateEnvelope } from 'open-auri/share';
 import { z } from 'zod';
 import { ApiError, CACHE_PUBLIC_60, cached, json } from '#lib/server/api/index.ts';
 import { rateLimitKey, slidingWindowLimit } from '#lib/server/security/ratelimit.ts';
@@ -28,14 +37,17 @@ import {
 	type PublicationPath
 } from '#lib/server/observability/metrics.ts';
 import {
-	checkCurve,
+	checkPublishable,
+	hardCodes,
 	isGateCurrent,
 	regateCurve,
 	regateRejectedHead,
 	regateRejectedVersion
 } from '#lib/server/social/gate.ts';
+import { MIN_REPORTER_AGE_MS } from '#lib/server/social/moderation.ts';
 import { isLinkableTombstone } from '#lib/server/social/queries/curves.ts';
 import {
+	accountCreatedBy,
 	appendVersion,
 	countsForLineages,
 	countVersionsSince,
@@ -86,6 +98,20 @@ export const DAILY_GATE_ATTEMPT_QUOTA = 60;
 
 const GATE_ATTEMPT_GROUP = 'curves.gate';
 
+/**
+ * YOLO acknowledgements (writes that open a YOLO head to others) per user over a sliding day (D1
+ * sliding window of the security kit, group `curves.yolo.ack`).
+ */
+export const YOLO_ACKS_DAILY_MAX = 5;
+
+const YOLO_ACK_GROUP = 'curves.yolo.ack';
+
+/** Minimum account age to open a YOLO lineage to others: the reporter age of moderation (72 h). */
+export const YOLO_MIN_ACCOUNT_AGE_MS = MIN_REPORTER_AGE_MS;
+
+/** Kill switch of YOLO publication (`YOLO_PUBLICATION`): `off` (default) = private only. */
+export type YoloPublication = 'on' | 'off';
+
 /** Request body cap of the curve writes (the normalized envelope itself is at most 8 KiB). */
 export const CURVE_BODY_MAX_BYTES = 32 * 1024;
 
@@ -93,20 +119,34 @@ export const CURVE_BODY_MAX_BYTES = 32 * 1024;
 const EnvelopeShape = z.record(z.string(), z.unknown());
 const Visibility = z.enum(LINEAGE_VISIBILITIES);
 const IdShape = z.string().min(1).max(64);
+/** The owner's acknowledgement that a YOLO curve is shown to others (see the file header). */
+const Acknowledge = z.literal('yolo').optional();
 
-export const PublishBodySchema = z.object({ envelope: EnvelopeShape, visibility: Visibility });
-export const AppendBodySchema = z.object({ parentVersionId: IdShape, envelope: EnvelopeShape });
+export const PublishBodySchema = z.object({
+	envelope: EnvelopeShape,
+	visibility: Visibility,
+	acknowledge: Acknowledge
+});
+export const AppendBodySchema = z.object({
+	parentVersionId: IdShape,
+	envelope: EnvelopeShape,
+	acknowledge: Acknowledge
+});
 /** Fork: `versionId` defaults to the head, `visibility` to private, `envelope` to a copy. */
 export const ForkBodySchema = z.object({
 	versionId: IdShape.optional(),
 	visibility: Visibility.optional(),
-	envelope: EnvelopeShape.optional()
+	envelope: EnvelopeShape.optional(),
+	acknowledge: Acknowledge
 });
-export const VisibilityBodySchema = z.object({ visibility: Visibility });
+export const VisibilityBodySchema = z.object({ visibility: Visibility, acknowledge: Acknowledge });
+/** Restore: an optional body, only for the YOLO acknowledgement. */
+export const RestoreBodySchema = z.object({ acknowledge: Acknowledge });
 
 export type PublishBody = z.infer<typeof PublishBodySchema>;
 export type AppendBody = z.infer<typeof AppendBodySchema>;
 export type ForkBody = z.infer<typeof ForkBodySchema>;
+export type Acknowledgement = 'yolo' | undefined;
 
 // ---- Types ----------------------------------------------------------------------------------
 
@@ -114,13 +154,22 @@ export interface PublishedInfo {
 	lineageId: string;
 	versionId: string;
 	curveId: string;
+	/**
+	 * The new head is a YOLO curve (class derived on the server). Always sent; optional in the type
+	 * only so client fixtures written before 0013 keep compiling.
+	 */
+	yolo?: boolean;
 }
 
 export interface CurveDeps {
 	/** Called after every successful publish, version or fork (OG warm-up hook, T4.7). */
 	onPublished?: (info: PublishedInfo) => void;
-	/** Gate injection for tests (default: the core's gateForWrite through checkCurve). */
+	/** Gate injection for tests (default: the core's gateForWrite through checkPublishable). */
 	gate?: typeof gateForWrite;
+	/** Classifier injection for tests (default: the core's classifyCurve). */
+	classify?: typeof classifyCurve;
+	/** Kill switch of YOLO publication (ServerEnv `yoloPublication`); absent = 'off'. */
+	yoloPublication?: YoloPublication;
 	now?: number;
 	/** Analytics Engine dataset (T5.2): gate rejections of the publication path, by reason. */
 	metrics?: MetricsDataset | null;
@@ -188,7 +237,12 @@ export interface PublishedCurve {
 		id: string;
 		s1: string;
 		levelDb: number | null;
+		/** `ok` = standard (unchanged meaning); a YOLO curve has `ok: false` and `yolo: true`. */
 		gate: { ok: boolean; reasons: string[]; version: string };
+		/** YOLO class, derived on the server (always sent; optional for older client fixtures). */
+		yolo?: boolean;
+		/** Codes the YOLO profile waived ([] unless `yolo`; always sent). */
+		waived?: string[];
 	};
 	counts: PublicCounts;
 }
@@ -206,7 +260,14 @@ export type ReadResult<T> = { kind: 'ok'; value: T } | { kind: 'gone' } | { kind
 type EnvelopeResult = ReturnType<typeof validateEnvelope>;
 type Envelope = Extract<EnvelopeResult, { ok: true }>['value'];
 
-interface Prepared {
+/** Class of a curve that may be stored, as the YOLO rules need it. */
+interface StoredClass {
+	yolo: boolean;
+	/** Codes the YOLO profile waived ([] for a standard curve). */
+	waived: string[];
+}
+
+interface Prepared extends StoredClass {
 	curve: CurveInput;
 	version: VersionInput;
 }
@@ -230,8 +291,12 @@ function invalidCurve(codes: readonly string[]): ApiError {
 	return new ApiError(422, 'INVALID_CURVE', { codes: [...new Set(codes)] });
 }
 
-function gateRejected(reasons: readonly string[]): ApiError {
-	return new ApiError(422, 'GATE_REJECTED', { reasons: [...reasons] });
+/**
+ * 422 GATE_REJECTED: `details.reasons` (cached codes, unchanged) and `details.hard`, the codes that
+ * block in every profile (no YOLO waiver lifts them).
+ */
+function gateRejected(reasons: readonly string[], hard: readonly string[] = hardCodes(reasons)) {
+	return new ApiError(422, 'GATE_REJECTED', { reasons: [...reasons], hard: [...hard] });
 }
 
 /** Repository error code → API error. */
@@ -240,7 +305,7 @@ export function repoError(code: SocialErrorCode): ApiError {
 		case 'head-moved':
 			return new ApiError(409, 'HEAD_MOVED');
 		case 'gate-rejected':
-			return gateRejected([]);
+			return gateRejected([], []);
 		case 'not-found':
 			return new ApiError(404, 'NOT_FOUND');
 		case 'retracted':
@@ -261,8 +326,72 @@ function clockOf(deps: CurveDeps): number {
 	return deps.now ?? Date.now();
 }
 
-function gateOptions(deps: CurveDeps): { gate?: typeof gateForWrite } {
-	return deps.gate ? { gate: deps.gate } : {};
+function gateOptions(deps: CurveDeps): {
+	gate?: typeof gateForWrite;
+	classify?: typeof classifyCurve;
+} {
+	return {
+		...(deps.gate ? { gate: deps.gate } : {}),
+		...(deps.classify ? { classify: deps.classify } : {})
+	};
+}
+
+/**
+ * Counts one YOLO acknowledgement; 429 QUOTA_EXCEEDED once the user made YOLO_ACKS_DAILY_MAX of
+ * them over the sliding day. Fails closed (503) when D1 is unavailable.
+ */
+async function countYoloAck(db: D1Database, userId: string, now: number): Promise<void> {
+	const outcome = await slidingWindowLimit(
+		db,
+		[
+			{
+				key: rateLimitKey.user(YOLO_ACK_GROUP, userId),
+				limit: YOLO_ACKS_DAILY_MAX,
+				windowSeconds: DAY_MS / 1000
+			}
+		],
+		new Date(now)
+	);
+	if (outcome.ok) return;
+	if (outcome.reason === 'unavailable') throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE');
+	throw new ApiError(
+		429,
+		'QUOTA_EXCEEDED',
+		{ limit: YOLO_ACKS_DAILY_MAX, group: YOLO_ACK_GROUP },
+		{ headers: { 'retry-after': String(outcome.retryAfter) } }
+	);
+}
+
+/**
+ * The YOLO rules of a write whose resulting head (`head`) will have `visibility`: nothing for a
+ * standard head or a private lineage (false: no acknowledgement to write). A YOLO head shown to
+ * others needs the kill switch on (403 YOLO_PUBLICATION_OFF), an account at least
+ * YOLO_MIN_ACCOUNT_AGE_MS old (403 FORBIDDEN, `reason: 'account-age'`), `acknowledge: 'yolo'`
+ * (409 YOLO_ACK_REQUIRED with `details.waived`) and a free YOLO_ACKS_DAILY_MAX slot (429); then
+ * true: the caller writes the acknowledgement in the same batch.
+ */
+async function yoloOpening(
+	db: D1Database,
+	userId: string,
+	head: StoredClass,
+	visibility: LineageVisibility,
+	acknowledge: Acknowledgement,
+	now: number,
+	deps: CurveDeps
+): Promise<boolean> {
+	if (!head.yolo || visibility === 'private') return false;
+	if ((deps.yoloPublication ?? 'off') !== 'on') throw new ApiError(403, 'YOLO_PUBLICATION_OFF');
+	if (!(await accountCreatedBy(db, userId, now - YOLO_MIN_ACCOUNT_AGE_MS))) {
+		throw new ApiError(403, 'FORBIDDEN', {
+			reason: 'account-age',
+			minAgeHours: YOLO_MIN_ACCOUNT_AGE_MS / 3_600_000
+		});
+	}
+	if (acknowledge !== 'yolo') {
+		throw new ApiError(409, 'YOLO_ACK_REQUIRED', { waived: [...head.waived] });
+	}
+	await countYoloAck(db, userId, now);
+	return true;
 }
 
 /** 429 QUOTA_EXCEEDED once the user created DAILY_PUBLICATION_QUOTA versions this UTC day. */
@@ -318,6 +447,7 @@ function curveInputOf(curve: CurveRecord): CurveInput {
 		canonKey: curve.canonKey,
 		gateVer: curve.gateVer,
 		gateOk: curve.gateOk,
+		gateYolo: curve.gateYolo,
 		gateReasons: curve.gateReasons,
 		levelDb: curve.levelDb
 	};
@@ -341,8 +471,9 @@ function versionInputOf(envelope: Envelope): VersionInput {
 /**
  * The publication path shared by publish, new version and fork: core validation (422
  * INVALID_CURVE with `details.codes`), text that normalizes to nothing refused, then the gate
- * attempt quota and the gate through checkCurve (422 GATE_REJECTED with `details.reasons`;
- * nothing is published).
+ * attempt quota and the server classification through checkPublishable (422 GATE_REJECTED with
+ * `details.reasons` and `details.hard` for a curve that passes neither profile; nothing is
+ * published). A YOLO curve is returned with its waived codes: the caller applies the YOLO rules.
  */
 async function prepare(
 	db: D1Database,
@@ -360,25 +491,36 @@ async function prepare(
 		throw invalidCurve(['env:length']);
 	}
 	await countGateAttempt(db, userId, now);
-	const verdict = await checkCurve(db, envelope.code, now, gateOptions(deps));
+	const verdict = await checkPublishable(db, envelope.code, now, gateOptions(deps));
 	if (!verdict.ok) {
 		if (verdict.code === 'invalid-curve') throw invalidCurve(verdict.codes);
 		recordGateRejection(deps.metrics, verdict.reasons, path);
-		throw gateRejected(verdict.reasons);
+		throw gateRejected(verdict.reasons, verdict.hard);
 	}
-	return { curve: curveInputOf(verdict.curve), version: versionInputOf(envelope) };
+	return {
+		curve: curveInputOf(verdict.curve),
+		version: versionInputOf(envelope),
+		yolo: verdict.class === 'yolo',
+		waived: verdict.waived
+	};
 }
 
-/** Re-gates the head curve (refreshes a stale cache); 422 GATE_REJECTED when it now fails. */
-async function assertHeadPasses(
+/**
+ * Re-classifies the head curve (refreshes a stale cache) and returns its class; 422 GATE_REJECTED
+ * when it now passes neither profile.
+ */
+async function headClassOf(
 	db: D1Database,
 	lineage: LineageSummary,
 	now: number,
 	deps: CurveDeps
-): Promise<void> {
-	const verdict = await checkCurve(db, lineage.curve.s1, now, gateOptions(deps));
-	if (verdict.ok) return;
-	throw gateRejected(verdict.code === 'gate-rejected' ? verdict.reasons : verdict.codes);
+): Promise<StoredClass & { curveId: string }> {
+	const verdict = await checkPublishable(db, lineage.curve.s1, now, gateOptions(deps));
+	if (verdict.ok) {
+		return { yolo: verdict.class === 'yolo', waived: verdict.waived, curveId: verdict.curve.id };
+	}
+	if (verdict.code === 'gate-rejected') throw gateRejected(verdict.reasons, verdict.hard);
+	throw gateRejected(verdict.codes);
 }
 
 function announce(info: PublishedInfo, deps: CurveDeps): PublishedInfo {
@@ -467,8 +609,9 @@ function parseRecipe(text: string | null): unknown {
 }
 
 /**
- * S5 envelope of a stored version (fork without an explicit envelope): `open-auri/preset@2`
- * with the version's labels when it has any (a fork copies them), `@1` otherwise.
+ * S5 envelope of a stored version (fork without an explicit envelope), in the lowest format that
+ * carries it (core `envelopeFormat`): `open-auri/preset@2` with the version's labels when it has
+ * any (a fork copies them) or when the curve is S1 v2 (a band above 20 kHz), `@1` otherwise.
  */
 function envelopeOf(
 	version: VersionRecord,
@@ -484,7 +627,7 @@ function envelopeOf(
 	}
 	const labels = version.labels?.some((label) => label !== null) ? version.labels : null;
 	const envelope: Record<string, unknown> = {
-		format: labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
+		format: envelopeFormat({ bands: decoded.bands, labels }),
 		name: version.name,
 		description: version.description,
 		source: 'custom',
@@ -553,16 +696,18 @@ export async function publishCurve(
 	const now = clockOf(deps);
 	await assertQuota(db, userId, now);
 	const prepared = await prepare(db, userId, body.envelope, now, deps, 'publish');
+	const ack = await yoloOpening(db, userId, prepared, body.visibility, body.acknowledge, now, deps);
 	const result = await publishLineage(db, {
 		lineageId: newId(),
 		ownerUserId: userId,
 		visibility: body.visibility,
 		curve: prepared.curve,
 		version: prepared.version,
+		yoloAck: ack,
 		now
 	});
 	if (!result.ok) throw repoError(result.code);
-	return announce({ ...result.value, curveId: prepared.curve.id }, deps);
+	return announce({ ...result.value, curveId: prepared.curve.id, yolo: prepared.yolo }, deps);
 }
 
 /**
@@ -582,17 +727,32 @@ export async function appendCurveVersion(
 	if (body.parentVersionId !== lineage.headVersion) throw new ApiError(409, 'HEAD_MOVED');
 	await assertQuota(db, userId, now);
 	const prepared = await prepare(db, userId, body.envelope, now, deps, 'version');
+	const ack = await yoloOpening(
+		db,
+		userId,
+		prepared,
+		lineage.visibility,
+		body.acknowledge,
+		now,
+		deps
+	);
 	const result = await appendVersion(db, {
 		lineageId: lineage.id,
 		ownerUserId: userId,
 		expectedHead: body.parentVersionId,
 		curve: prepared.curve,
 		version: prepared.version,
+		yoloAck: ack,
 		now
 	});
 	if (!result.ok) throw repoError(result.code);
 	return announce(
-		{ lineageId: lineage.id, versionId: result.value.versionId, curveId: prepared.curve.id },
+		{
+			lineageId: lineage.id,
+			versionId: result.value.versionId,
+			curveId: prepared.curve.id,
+			yolo: prepared.yolo
+		},
 		deps
 	);
 }
@@ -618,7 +778,7 @@ export async function forkCurve(
 	}
 	if (source.status !== 'active') throw new ApiError(410, 'GONE');
 	if (source.moderation !== 'visible') throw new ApiError(404, 'NOT_FOUND');
-	await assertHeadPasses(db, source, now, deps);
+	await headClassOf(db, source, now, deps);
 	const versionId = body.versionId ?? source.headVersion;
 	const view = versionId !== null ? await readVersion(db, versionId, viewer, now, deps) : null;
 	if (!view || view.version.lineageId !== source.id) throw new ApiError(404, 'NOT_FOUND');
@@ -627,16 +787,19 @@ export async function forkCurve(
 	const prepared = await prepare(db, userId, raw, now, deps, 'fork');
 	const byLicense = view.version.license === 'CC-BY-4.0';
 	if (byLicense && prepared.version.license !== 'CC-BY-4.0') throw invalidCurve(['env:enum']);
+	const visibility = body.visibility ?? 'private';
+	const ack = await yoloOpening(db, userId, prepared, visibility, body.acknowledge, now, deps);
 	const result = await forkLineage(db, view.version.id, {
 		lineageId: newId(),
 		ownerUserId: userId,
-		visibility: body.visibility ?? 'private',
+		visibility,
 		curve: prepared.curve,
 		version: prepared.version,
+		yoloAck: ack,
 		now
 	});
 	if (!result.ok) throw repoError(result.code);
-	const info = announce({ ...result.value, curveId: prepared.curve.id }, deps);
+	const info = announce({ ...result.value, curveId: prepared.curve.id, yolo: prepared.yolo }, deps);
 	return {
 		...info,
 		forkedFrom: { lineageId: source.id, versionId: view.version.id },
@@ -673,18 +836,31 @@ export async function retractCurve(
 
 /**
  * `POST /api/v1/lineages/[id]/restore`: undoes the owner's tombstone. Never touches moderation (a
- * hidden lineage stays hidden); a non-private lineage whose head now fails the gate is refused.
+ * hidden lineage stays hidden); a non-private lineage whose head now passes neither profile is
+ * refused, and one whose head is YOLO follows the YOLO rules (`acknowledge`).
  */
 export async function restoreCurve(
 	db: D1Database,
 	userId: string,
 	lineageId: string,
-	deps: CurveDeps = {}
+	deps: CurveDeps = {},
+	acknowledge?: Acknowledgement
 ): Promise<LineageState> {
 	const now = clockOf(deps);
 	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
-	if (lineage.visibility !== 'private') await assertHeadPasses(db, lineage, now, deps);
-	const result = await restoreLineage(db, lineage.id, userId, now);
+	let ackCurveId: string | null = null;
+	if (lineage.visibility !== 'private') {
+		const head = await headClassOf(db, lineage, now, deps);
+		const ack = await yoloOpening(db, userId, head, lineage.visibility, acknowledge, now, deps);
+		if (ack) ackCurveId = head.curveId;
+	}
+	const result = await restoreLineage(
+		db,
+		lineage.id,
+		userId,
+		now,
+		ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }
+	);
 	if (!result.ok) throw repoError(result.code);
 	return {
 		lineageId: lineage.id,
@@ -696,19 +872,34 @@ export async function restoreCurve(
 
 /**
  * `PUT /api/v1/lineages/[id]/visibility`: owner only. Opening a lineage (unlisted or public)
- * re-gates its head first; moderation and status are unchanged.
+ * re-classifies its head first (a YOLO head follows the YOLO rules: `acknowledge`); moderation and
+ * status are unchanged.
  */
 export async function changeVisibility(
 	db: D1Database,
 	userId: string,
 	lineageId: string,
 	visibility: LineageVisibility,
-	deps: CurveDeps = {}
+	deps: CurveDeps = {},
+	acknowledge?: Acknowledgement
 ): Promise<LineageState> {
 	const now = clockOf(deps);
 	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
-	if (visibility !== 'private') await assertHeadPasses(db, lineage, now, deps);
-	const result = await setLineageVisibility(db, lineage.id, userId, visibility, now);
+	let ackCurveId: string | null = null;
+	if (visibility !== 'private') {
+		const head = await headClassOf(db, lineage, now, deps);
+		if (await yoloOpening(db, userId, head, visibility, acknowledge, now, deps)) {
+			ackCurveId = head.curveId;
+		}
+	}
+	const result = await setLineageVisibility(
+		db,
+		lineage.id,
+		userId,
+		visibility,
+		now,
+		ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }
+	);
 	if (!result.ok) throw repoError(result.code);
 	return {
 		lineageId: lineage.id,
@@ -763,7 +954,9 @@ export async function loadPublishedCurve(
 				id: curve.id,
 				s1: curve.s1,
 				levelDb: curve.levelDb,
-				gate: { ok: curve.gateOk, reasons: [...curve.gateReasons], version: curve.gateVer }
+				gate: { ok: curve.gateOk, reasons: [...curve.gateReasons], version: curve.gateVer },
+				yolo: curve.gateYolo,
+				waived: curve.gateYolo ? [...curve.gateReasons] : []
 			},
 			counts
 		}

@@ -135,12 +135,18 @@ export interface PageRequest {
 
 // ---- Curves, lineages, versions -------------------------------------------------------------
 
+/**
+ * Cached class of a curve (migration 0013): `gateOk` = standard, `gateYolo` = YOLO (never both),
+ * neither = rejected. `gateReasons`: [] for standard, the waived codes for YOLO, the standard codes
+ * plus the YOLO-only blocking codes for rejected.
+ */
 export interface CurveRecord {
 	id: string;
 	s1: string;
 	canonKey: string;
 	gateVer: string;
 	gateOk: boolean;
+	gateYolo: boolean;
 	gateReasons: string[];
 	levelDb: number | null;
 	createdAt: number;
@@ -153,6 +159,8 @@ export interface CurveInput {
 	canonKey: string;
 	gateVer: string;
 	gateOk: boolean;
+	/** YOLO class (absent = false); never true together with `gateOk`. */
+	gateYolo?: boolean;
 	gateReasons: readonly string[];
 	levelDb: number | null;
 }
@@ -220,6 +228,11 @@ export interface PublishInput {
 	curve: CurveInput;
 	version: VersionInput;
 	forkedFromVersion?: string | null;
+	/**
+	 * Writes the owner's YOLO acknowledgement of (lineage, curve) in the same batch (only for a
+	 * YOLO curve; the service decides when it is required).
+	 */
+	yoloAck?: boolean;
 	now: number;
 }
 
@@ -230,6 +243,8 @@ export interface AppendVersionInput {
 	expectedHead: string;
 	curve: CurveInput;
 	version: VersionInput;
+	/** Same as PublishInput.yoloAck; written only when the version is inserted. */
+	yoloAck?: boolean;
 	now: number;
 }
 

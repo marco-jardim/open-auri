@@ -36,13 +36,16 @@ const ALL_CODES = [
 	'c:section-peak',
 	'd:prefix-peak',
 	'd:prefix-peak-full',
+	'd:prefix-peak-extended',
 	'e:output-audible',
+	'e:output-extended',
 	'e:output-full',
 	'f:codec',
 	'g:preamp',
 	'k:kind-not-allowed',
 	'd7:pk-boost-above-16k',
-	'd7:boost-q'
+	'd7:boost-q',
+	'd7:boost-above-20k'
 ] as const;
 
 function flash(overrides: Partial<FlashState> = {}): FlashState {

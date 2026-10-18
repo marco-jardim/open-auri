@@ -40,6 +40,8 @@ export interface Env {
 	RESEND_FROM: string;
 	/** `resend` (default) | `capture` (local e2e only; refused by getServerEnv elsewhere). */
 	EMAIL_TRANSPORT: string;
+	/** Kill switch of YOLO publication: `off` (template default) | `on`. */
+	YOLO_PUBLICATION: string;
 	// Secrets (wrangler secret / .dev.vars; tools/render-wrangler.mjs SECRETS)
 	BETTER_AUTH_SECRET: string;
 	RESEND_API_KEY: string;

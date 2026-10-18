@@ -161,7 +161,7 @@ describe('POST /api/v1/curves: publication', () => {
 		);
 		const reasons = (error.details as { reasons: string[] }).reasons;
 		expect(reasons.length).toBeGreaterThan(0);
-		expect(reasons).toContain('k:kind-not-allowed');
+		expect(reasons).toContain('e:output-audible');
 		expect(await count('SELECT count(*) AS n FROM versions WHERE curve_id = ?', id)).toBe(0);
 		expect(
 			await count('SELECT count(*) AS n FROM lineages WHERE owner_user_id = ?', owner.user.id)

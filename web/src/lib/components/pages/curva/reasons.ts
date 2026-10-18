@@ -21,13 +21,16 @@ export const REASON_MESSAGE_KEYS = {
 	'c:section-peak': 'curva_why_section_peak',
 	'd:prefix-peak': 'curva_why_prefix_peak',
 	'd:prefix-peak-full': 'curva_why_prefix_peak_full',
+	'd:prefix-peak-extended': 'curva_why_prefix_peak_extended',
 	'e:output-audible': 'curva_why_output_audible',
+	'e:output-extended': 'curva_why_output_extended',
 	'e:output-full': 'curva_why_output_full',
 	'f:codec': 'curva_why_codec',
 	'g:preamp': 'curva_why_preamp',
 	'k:kind-not-allowed': 'curva_why_kind',
 	'd7:pk-boost-above-16k': 'curva_why_d7_high',
-	'd7:boost-q': 'curva_why_d7_q'
+	'd7:boost-q': 'curva_why_d7_q',
+	'd7:boost-above-20k': 'curva_why_d7_above_20k'
 } as const satisfies Record<ReasonCode, string>;
 
 export const REASON_CODES = Object.keys(REASON_MESSAGE_KEYS) as ReasonCode[];
@@ -87,8 +90,12 @@ export function reasonText(reason: Reason, context: ReasonContext = {}): string 
 			return m.curva_why_prefix_peak({ where: where() });
 		case 'd:prefix-peak-full':
 			return m.curva_why_prefix_peak_full({ where: where() });
+		case 'd:prefix-peak-extended':
+			return m.curva_why_prefix_peak_extended({ where: where() });
 		case 'e:output-audible':
 			return m.curva_why_output_audible();
+		case 'e:output-extended':
+			return m.curva_why_output_extended();
 		case 'e:output-full':
 			return m.curva_why_output_full();
 		case 'f:codec':
@@ -101,6 +108,8 @@ export function reasonText(reason: Reason, context: ReasonContext = {}): string 
 			return m.curva_why_d7_high({ where: where() });
 		case 'd7:boost-q':
 			return m.curva_why_d7_q({ where: where() });
+		case 'd7:boost-above-20k':
+			return m.curva_why_d7_above_20k({ where: where() });
 		default:
 			return m.curva_reason_unknown();
 	}

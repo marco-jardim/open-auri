@@ -90,7 +90,9 @@ test('pending is dial-only: bank, curve and all commit/preview callbacks stay un
 	expect(onkind).not.toHaveBeenCalled();
 	expect(onmove).not.toHaveBeenCalled();
 	expect(ondrag).not.toHaveBeenCalled();
-	expect(screen.container.querySelector('.bank-foot')?.textContent).toContain(m.curva_bn_kind_foot());
+	expect(screen.container.querySelector('.bank-foot')?.textContent).toContain(
+		m.curva_bn_kind_foot()
+	);
 	await vi.advanceTimersByTimeAsync(5000);
 	await tick();
 	expect(value()).toBe('PK');

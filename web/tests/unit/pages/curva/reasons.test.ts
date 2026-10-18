@@ -49,9 +49,11 @@ const LOCATED = new Set<ReasonCode>([
 	'c:section-peak',
 	'd:prefix-peak',
 	'd:prefix-peak-full',
+	'd:prefix-peak-extended',
 	'k:kind-not-allowed',
 	'd7:pk-boost-above-16k',
-	'd7:boost-q'
+	'd7:boost-q',
+	'd7:boost-above-20k'
 ]);
 const COEFFICIENT: Partial<Record<ReasonCode, string>> = {
 	'a:b0': 'b0',

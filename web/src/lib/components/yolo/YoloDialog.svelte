@@ -102,7 +102,9 @@
 	</header>
 	<div class="yd-grid">
 		<section class="yd-sec" data-tone="changes" aria-labelledby="{id}-changes">
-			<h3 id="{id}-changes"><span class="yd-num" aria-hidden="true">01</span>{m.yolo_section_changes()}</h3>
+			<h3 id="{id}-changes">
+				<span class="yd-num" aria-hidden="true">01</span>{m.yolo_section_changes()}
+			</h3>
 			<p>{m.yolo_changes_lede()}</p>
 			{@render list(changes, '+')}
 		</section>
@@ -114,11 +116,15 @@
 			{@render list(protectedLocks, '✓')}
 		</section>
 		<section class="yd-sec" data-tone="risks" aria-labelledby="{id}-risks">
-			<h3 id="{id}-risks"><span class="yd-num" aria-hidden="true">03</span>{m.yolo_section_risks()}</h3>
+			<h3 id="{id}-risks">
+				<span class="yd-num" aria-hidden="true">03</span>{m.yolo_section_risks()}
+			</h3>
 			{@render list(risks, '!')}
 		</section>
 		<section class="yd-sec" data-tone="ends" aria-labelledby="{id}-ends">
-			<h3 id="{id}-ends"><span class="yd-num" aria-hidden="true">04</span>{m.yolo_section_ends()}</h3>
+			<h3 id="{id}-ends">
+				<span class="yd-num" aria-hidden="true">04</span>{m.yolo_section_ends()}
+			</h3>
 			{@render list(ends, '○')}
 		</section>
 	</div>

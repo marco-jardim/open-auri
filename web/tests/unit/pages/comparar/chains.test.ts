@@ -228,9 +228,9 @@ describe('parallel comparison chains', () => {
 		const build = vi.spyOn(engine, 'buildChain');
 		const tracks = withYoloOnly(initialTracks());
 		const armed = tracks.filter((track) => track.armed);
-		expect(armed.map((track) => standardGateAccepts(track.curve.bands, track.curve.preampDb))).toEqual(
-			[true, false, true, true]
-		);
+		expect(
+			armed.map((track) => standardGateAccepts(track.curve.bands, track.curve.preampDb))
+		).toEqual([true, false, true, true]);
 		await manager.sync(tracks);
 		const chains = build.mock.results.map((result): PreviewChain => result.value);
 		expect(chains).toHaveLength(4);
@@ -274,7 +274,9 @@ describe('parallel comparison chains', () => {
 		const tracks = withYoloOnly(initialTracks());
 		await manager.sync(tracks);
 		expect(build).toHaveBeenCalledTimes(4);
-		await manager.sync(tracks.map((track) => (track.id === 2 ? { ...track, armed: false } : track)));
+		await manager.sync(
+			tracks.map((track) => (track.id === 2 ? { ...track, armed: false } : track))
+		);
 		// The protection changed: lanes 1, 3 and 4 are rebuilt without it.
 		expect(build).toHaveBeenCalledTimes(7);
 		const rebuilt = build.mock.results.slice(4).map((result): PreviewChain => result.value);

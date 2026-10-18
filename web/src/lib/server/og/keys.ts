@@ -9,8 +9,12 @@
 
 export const OG_PREFIX = 'og/';
 
-/** Card layout version stored in `customMetadata.card`. "2" = no author on the card (FX4.3). */
-export const OG_CARD_VERSION = '2';
+/**
+ * Card layout version stored in `customMetadata.card`. "2" = no author on the card (FX4.3); "3" =
+ * the YOLO chip (migration 0013), with `customMetadata.yolo` ("1" or "0") recording whether the
+ * stored card has it.
+ */
+export const OG_CARD_VERSION = '3';
 
 const KEY_PATTERN = /^og\/([A-Za-z0-9_]{1,128})-([A-Za-z0-9_-]{1,128})\.png$/;
 
@@ -28,7 +32,20 @@ export function parseOgKey(key: string): { curveId: string; versionId: string } 
 	return { curveId, versionId };
 }
 
-/** Whether a stored object was written with the current card layout. */
-export function isCurrentCard(customMetadata: Record<string, string> | undefined): boolean {
-	return customMetadata?.card === OG_CARD_VERSION;
+/** `customMetadata.yolo` of a card: "1" with the YOLO chip, "0" without. */
+export function yoloFlag(yolo: boolean): string {
+	return yolo ? '1' : '0';
+}
+
+/**
+ * Whether a stored object was written with the current card layout and, when `yolo` is given,
+ * with the same YOLO chip (a curve re-classified since keeps its key, so the flag tells the store
+ * to render it again). The sweep passes no `yolo`: it only drops old layouts.
+ */
+export function isCurrentCard(
+	customMetadata: Record<string, string> | undefined,
+	yolo?: boolean
+): boolean {
+	if (customMetadata?.card !== OG_CARD_VERSION) return false;
+	return yolo === undefined || customMetadata.yolo === yoloFlag(yolo);
 }

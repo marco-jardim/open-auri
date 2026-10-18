@@ -81,7 +81,9 @@
 		"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
 		"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
 		"RESEND_FROM": "${RESEND_FROM}",
-		"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}"
+		"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}",
+		// Kill switch of YOLO publication (docs/social.md): "off" = YOLO curves are private only.
+		"YOLO_PUBLICATION": "off"
 	},
 	"env": {
 		"production": {
@@ -139,7 +141,8 @@
 				"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
 				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
 				"RESEND_FROM": "${RESEND_FROM}",
-				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}"
+				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}",
+				"YOLO_PUBLICATION": "off"
 			}
 		},
 		"staging": {
@@ -198,7 +201,8 @@
 				"SIGNUP_ENABLED": "${SIGNUP_ENABLED}",
 				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
 				"RESEND_FROM": "${RESEND_FROM}",
-				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}"
+				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}",
+				"YOLO_PUBLICATION": "off"
 			}
 		}
 	}

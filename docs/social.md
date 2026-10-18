@@ -356,6 +356,32 @@ Esboço conceitual da receita (o esquema normativo é
 }
 ```
 
+### Classes de curva e publicação YOLO (migração 0013)
+
+O servidor classifica cada curva publicada, versionada, bifurcada ou mesclada (`classifyCurve` do
+núcleo, em `web/src/lib/server/social/gate.ts`); a classe nunca vem do cliente:
+
+- **padrão**: o gate padrão aceita. `experimental` é derivado da própria curva (tem HS, LP ou HP),
+  como no editor, então HS/LP/HP dentro dos limites são curvas padrão também no servidor;
+- **YOLO**: o gate padrão recusa só por motivos dispensáveis e o perfil YOLO aceita; o cache guarda
+  os códigos dispensados (`waived`);
+- **reprovada**: nem um nem outro; nada é gravado (422 `GATE_REJECTED` com `details.hard`).
+
+Uma curva YOLO sempre pode ser salva como **privada**. Para mostrá-la a terceiros (não listada ou
+pública), a escrita precisa do interruptor `YOLO_PUBLICATION` = `on` (variável do Worker em
+`web/wrangler.template.jsonc`, **padrão `off`**: 403 `YOLO_PUBLICATION_OFF`), de uma conta com 72 h
+ou mais e do reconhecimento explícito `acknowledge: "yolo"` (409 `YOLO_ACK_REQUIRED` com os códigos
+dispensados), no máximo 5 por 24 h. O reconhecimento fica em `lineage_yolo_acks` (linhagem, curva):
+sem ele, um head YOLO não abre nem por link.
+
+Separação: feed, rankings, perfis, packs de terceiros, S6, S7 e o dump público só mostram heads
+**padrão**. Curvas YOLO públicas só aparecem em `GET /api/v1/feed?yolo=only` (ordem `new`). O dump
+público semanal deixa YOLO de fora por enquanto (head e versões precisam de `gate_ok = 1`). A
+imagem OG de uma curva YOLO leva o selo "YOLO" (layout de cartão `3`), a URL da imagem leva `?y=1`
+e a página `/c/:id` sai com `noindex`. Moderação: uma linhagem com head YOLO é ocultada
+automaticamente com 2 denunciantes elegíveis (3 nas demais), a fila do admin mostra o selo e os
+códigos dispensados, e a curadoria recusa heads YOLO.
+
 ---
 
 ## S6: preferência crowdsourced ✅ ativo

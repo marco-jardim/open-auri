@@ -1,6 +1,7 @@
 // Moderation service (T4.8, plan §3.7): reports filed by verified users, automatic hiding when
 // AUTO_HIDE_THRESHOLD distinct eligible accounts (verified, not banned, at least
-// MIN_REPORTER_AGE_MS old) report a lineage or pack, and the admin decisions of /admin/moderacao
+// MIN_REPORTER_AGE_MS old; YOLO_AUTO_HIDE_THRESHOLD for a lineage whose head is YOLO) report a
+// lineage or pack, and the admin decisions of /admin/moderacao
 // (hide, restore, remove, dismiss, ban the author, curation). Every change is audited
 // (admin/audit.ts): admin decisions audit-first through `audited`, the automatic hiding with
 // actor_kind 'system'. Audit details hold ids, counts and the admin-written reason only; report
@@ -18,6 +19,7 @@ import {
 import { recordReport, type MetricsDataset } from '#lib/server/observability/metrics.ts';
 import {
 	countEligibleReporters,
+	getHeadClass,
 	insertReport,
 	listReportQueue,
 	resolveReports,
@@ -44,6 +46,8 @@ import {
 
 /** Distinct eligible reporters that hide a lineage or pack automatically. */
 export const AUTO_HIDE_THRESHOLD = 3;
+/** Same, for a lineage whose head is a YOLO curve (migration 0013): hidden sooner. */
+export const YOLO_AUTO_HIDE_THRESHOLD = 2;
 /** Minimum account age of a reporter that counts towards the automatic hiding. */
 export const MIN_REPORTER_AGE_MS = 3 * DAY_MS;
 
@@ -136,7 +140,10 @@ export async function maybeAutoHide(
 		minAccountAgeMs: MIN_REPORTER_AGE_MS,
 		now
 	});
-	if (reporters < AUTO_HIDE_THRESHOLD) return false;
+	if (reporters < YOLO_AUTO_HIDE_THRESHOLD) return false;
+	const yolo = kind === 'lineage' && (await getHeadClass(db, id))?.yolo === true;
+	const threshold = yolo ? YOLO_AUTO_HIDE_THRESHOLD : AUTO_HIDE_THRESHOLD;
+	if (reporters < threshold) return false;
 	const current = await findTarget(db, kind, id, { userId: null, admin: true });
 	if (!current || current.moderation !== 'visible') return false;
 	return audited(
@@ -147,7 +154,7 @@ export async function maybeAutoHide(
 			action: MODERATION_ACTIONS.autoHide,
 			targetKind: kind,
 			targetId: id,
-			detail: { reporters, threshold: AUTO_HIDE_THRESHOLD }
+			detail: yolo ? { reporters, threshold, yolo: true } : { reporters, threshold }
 		},
 		() => setModeration(db, kind, id, 'auto_hidden', now, 'visible'),
 		auditOptions
@@ -333,6 +340,10 @@ export async function decide(deps: DecisionDeps, input: DecisionInput): Promise<
 			case 'uncurate': {
 				if (target.kind !== 'lineage') return { ok: false, code: 'UNSUPPORTED' };
 				const curated = input.decision === 'curate';
+				// A YOLO head is never an editorial pick (setCurated refuses it too).
+				if (curated && (await getHeadClass(deps.db, target.id))?.yolo === true) {
+					return { ok: false, code: 'UNSUPPORTED' };
+				}
 				await audited(
 					deps.db,
 					{

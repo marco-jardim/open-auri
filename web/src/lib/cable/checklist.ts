@@ -47,13 +47,16 @@ export const REASON_MESSAGE_KEYS: Readonly<Record<ReasonCode, ReasonMessageKey>>
 	'c:section-peak': 'cable_reason_c_section_peak',
 	'd:prefix-peak': 'cable_reason_d_prefix_peak',
 	'd:prefix-peak-full': 'cable_reason_d_prefix_peak_full',
+	'd:prefix-peak-extended': 'cable_reason_d_prefix_peak_extended',
 	'e:output-audible': 'cable_reason_e_output_audible',
+	'e:output-extended': 'cable_reason_e_output_extended',
 	'e:output-full': 'cable_reason_e_output_full',
 	'f:codec': 'cable_reason_f_codec',
 	'g:preamp': 'cable_reason_g_preamp',
 	'k:kind-not-allowed': 'cable_reason_k_kind_not_allowed',
 	'd7:pk-boost-above-16k': 'cable_reason_d7_pk_boost_above_16k',
-	'd7:boost-q': 'cable_reason_d7_boost_q'
+	'd7:boost-q': 'cable_reason_d7_boost_q',
+	'd7:boost-above-20k': 'cable_reason_d7_boost_above_20k'
 });
 
 /** Gate lamps a–g plus `k` (kinds and D7 editing limits, part of the gate contract). */

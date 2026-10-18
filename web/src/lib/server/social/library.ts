@@ -1,7 +1,10 @@
 // Personal library (T4.3): the three shelves of the signed-in user (created, favorites,
 // installed), idempotent favorite/unfavorite with optional share attribution, and the merge of the
 // anonymous browser library into the account. Data access goes through repo.ts and
-// queries/library.ts; curves are validated and gated only through gate.ts (`checkCurve`).
+// queries/library.ts; curves are validated and classified only through gate.ts
+// (`checkPublishable`). Merged lineages are private, so a YOLO curve merges without an
+// acknowledgement; a classification that ran the YOLO profile counts twice toward
+// MERGE_GATE_RUNS_MAX.
 import type { D1Database } from '@cloudflare/workers-types';
 import {
 	canonKey,
@@ -15,7 +18,7 @@ import {
 import { gateForWrite } from 'open-auri/safety';
 import { ApiError } from '#lib/server/api/errors.ts';
 import { rateLimitKey, slidingWindowLimit } from '#lib/server/security/ratelimit.ts';
-import { checkCurve, type GateDeps } from '#lib/server/social/gate.ts';
+import { checkPublishable, type GateDeps } from '#lib/server/social/gate.ts';
 import { hasPublicActivity } from '#lib/server/social/queries/activity.ts';
 import {
 	countOwnLineagesSince,
@@ -92,7 +95,18 @@ export interface LibraryItem {
 		labels: VersionLabels | null;
 		createdAt: number;
 	};
-	curve: { id: string; s1: string; levelDb: number | null; gateOk: boolean };
+	/**
+	 * `gateOk` = standard (unchanged meaning). `yolo` and `waived` (the codes the YOLO profile
+	 * waived) are always sent; optional in the type only for client fixtures written before 0013.
+	 */
+	curve: {
+		id: string;
+		s1: string;
+		levelDb: number | null;
+		gateOk: boolean;
+		yolo?: boolean;
+		waived?: string[];
+	};
 	/** Shelf time: creation (created), favorited (favorites) or last install (installed). */
 	at: number;
 }
@@ -121,7 +135,14 @@ export function toLibraryItem(lineage: LineageSummary, at: number, userId: strin
 			labels: head.labels,
 			createdAt: head.createdAt
 		},
-		curve: { id: curve.id, s1: curve.s1, levelDb: curve.levelDb, gateOk: curve.gateOk },
+		curve: {
+			id: curve.id,
+			s1: curve.s1,
+			levelDb: curve.levelDb,
+			gateOk: curve.gateOk,
+			yolo: curve.gateYolo,
+			waived: curve.gateYolo ? [...curve.gateReasons] : []
+		},
 		at
 	};
 }
@@ -235,7 +256,9 @@ export const MERGE_BATCH_MAX = 100;
 export const MERGE_DAILY_MAX = 500;
 /**
  * Uncached gate runs per merge request (~150 ms of CPU each): items past it are reported as
- * QUOTA_EXCEEDED and the client retries them in a later request (their verdicts get cached).
+ * QUOTA_EXCEEDED and the client retries them in a later request (their verdicts get cached). A
+ * classification that ran the YOLO profile counts 2 (its second run is counted after it ends, so
+ * a request may end one run above the cap).
  */
 export const MERGE_GATE_RUNS_MAX = 20;
 /**
@@ -270,7 +293,11 @@ export type MergeRejectCode =
 export type MergeConflictField = 'name' | 'labels';
 
 export interface MergeReport {
-	created: { localId: string; lineageId: string }[];
+	/**
+	 * New private lineages; `yolo` = the curve is YOLO (always sent; optional in the type only for
+	 * client fixtures written before 0013).
+	 */
+	created: { localId: string; lineageId: string; yolo?: boolean }[];
 	duplicates: { localId: string; lineageId: string }[];
 	rejected: { localId: string; code: MergeRejectCode; reasons?: string[] }[];
 	/** One entry per differing field ('name' first, then 'labels'); an item may have both. */
@@ -466,10 +493,12 @@ export async function mergeLocalLibrary(
 	let gateOpen = true;
 	let gateRuns = 0;
 	const baseGate = options.deps?.gate ?? gateForWrite;
-	const countedGate: typeof gateForWrite = (bands, preampDb) => {
+	// Counts the standard run of each uncached classification (and forwards its options: the
+	// `experimental` flag derived from the curve); a YOLO run is added after the check below.
+	const countedGate: typeof gateForWrite = (bands, preampDb, gateOptions) => {
 		if (gateRuns >= MERGE_GATE_RUNS_MAX) throw new GateBudgetSpent();
 		gateRuns++;
-		return baseGate(bands, preampDb);
+		return baseGate(bands, preampDb, gateOptions);
 	};
 
 	const existing = (item: MergeItem, outcome: Outcome): void => {
@@ -499,7 +528,7 @@ export async function mergeLocalLibrary(
 	for (const [index, item] of items.entries()) {
 		const identity = identities[index] ?? null;
 		if (identity === null) {
-			const check = await checkCurve(db, item.s1, now, options.deps);
+			const check = await checkPublishable(db, item.s1, now, options.deps);
 			const reasons = check.ok ? [] : check.code === 'invalid-curve' ? check.codes : check.reasons;
 			report.rejected.push({ localId: item.localId, code: 'INVALID_CURVE', reasons });
 			continue;
@@ -532,15 +561,17 @@ export async function mergeLocalLibrary(
 			continue;
 		}
 
-		let check: Awaited<ReturnType<typeof checkCurve>>;
+		let check: Awaited<ReturnType<typeof checkPublishable>>;
 		try {
-			check = await checkCurve(db, item.s1, now, { ...options.deps, gate: countedGate });
+			check = await checkPublishable(db, item.s1, now, { ...options.deps, gate: countedGate });
 		} catch (error) {
 			if (!(error instanceof GateBudgetSpent)) throw error;
 			gateOpen = false;
 			report.rejected.push({ localId: item.localId, code: 'QUOTA_EXCEEDED' });
 			continue;
 		}
+		// The YOLO profile's run (gateRuns 2): the standard one was counted by countedGate.
+		if (check.gateRuns > 1) gateRuns += check.gateRuns - 1;
 		if (!check.ok) {
 			const outcome: Outcome =
 				check.code === 'invalid-curve'
@@ -577,7 +608,11 @@ export async function mergeLocalLibrary(
 				labels: labels.value
 			};
 			remember(identity, outcome);
-			report.created.push({ localId: item.localId, lineageId: ids.lineageId });
+			report.created.push({
+				localId: item.localId,
+				lineageId: ids.lineageId,
+				yolo: check.class === 'yolo'
+			});
 			continue;
 		}
 		if (published.code === 'duplicate') {

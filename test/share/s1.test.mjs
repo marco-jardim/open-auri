@@ -641,7 +641,10 @@ test('decode refuses unknown versions (0 and 3) and variants, for v1 and v2 code
       expectCode(() => decodeS1(other.slice(0, 20)), 's1:version');
     }
     for (const variant of [1, 2, 3]) {
-      expectCode(() => decodeS1(mutate(s1, (bytes) => setBits(bytes, 2, 2, variant))), 's1:variant');
+      expectCode(
+        () => decodeS1(mutate(s1, (bytes) => setBits(bytes, 2, 2, variant))),
+        's1:variant',
+      );
     }
   }
   // Version 2 is known: its length is judged next.
@@ -676,9 +679,7 @@ test('decode refuses a v2 code without a band above 20 kHz (s1:noncanonical)', a
 test('S1 v2 decode refuses frequencies above 32000 Hz (s1:range) and invalid kinds', () => {
   for (const index of [0, 5, 6, 9]) {
     for (const value of [32001, 32767]) {
-      const bad = mutate(PADRAO_V2_S1, (bytes) =>
-        setBits(bytes, bandOffset(index) + 3, 15, value),
-      );
+      const bad = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(index) + 3, 15, value));
       expectCode(() => decodeS1(bad), 's1:range');
     }
     const zero = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(index) + 3, 15, 0));

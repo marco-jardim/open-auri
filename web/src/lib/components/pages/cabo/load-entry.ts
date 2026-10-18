@@ -9,8 +9,7 @@ import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
 import type { JournalEntry } from '#lib/cable/types.ts';
 
 export type LoadDecision =
-	| { load: true; profile: 'standard' | 'yolo' }
-	| { load: false; reason: 'yolo-off' | 'gate' };
+	{ load: true; profile: 'standard' | 'yolo' } | { load: false; reason: 'yolo-off' | 'gate' };
 
 export function loadDecision(
 	entry: Pick<JournalEntry, 'bands' | 'preampDb' | 'profile'>,

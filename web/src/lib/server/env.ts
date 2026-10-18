@@ -23,6 +23,12 @@ export interface ServerEnv {
 	 * `capture` is refused unless PUBLIC_ORIGIN is http(s)://localhost or 127.0.0.1.
 	 */
 	emailTransport: EmailTransport;
+	/**
+	 * Kill switch of YOLO publication (`YOLO_PUBLICATION`): `off` (default, also when the variable
+	 * is missing) = YOLO curves can only be saved privately; `on` = they may be opened to others
+	 * with the owner's acknowledgement (social/curves.ts).
+	 */
+	yoloPublication: YoloPublication;
 	flags: { accessLogEnabled: boolean; signupEnabled: boolean; admin2faRequired: boolean };
 	secrets: {
 		betterAuthSecret: string;
@@ -37,6 +43,9 @@ export interface ServerEnv {
 
 export const EMAIL_TRANSPORTS = ['resend', 'capture'] as const;
 export type EmailTransport = (typeof EMAIL_TRANSPORTS)[number];
+
+export const YOLO_PUBLICATION_MODES = ['off', 'on'] as const;
+export type YoloPublication = (typeof YOLO_PUBLICATION_MODES)[number];
 
 /** True when `origin` is a loopback origin (the only place the capture transport may run). */
 export function isLocalOrigin(origin: string): boolean {
@@ -111,6 +120,8 @@ const schema = z.object({
 	RESEND_FROM: z.string('expected a string').min(3, 'empty'),
 	// Missing (configs rendered before the variable existed) means the production transport.
 	EMAIL_TRANSPORT: z.enum(EMAIL_TRANSPORTS, 'expected "resend" or "capture"').default('resend'),
+	// Missing means off: YOLO publication is opt-in per deployment.
+	YOLO_PUBLICATION: z.enum(YOLO_PUBLICATION_MODES, 'expected "off" or "on"').default('off'),
 	ACCESS_LOG_ENABLED: flag,
 	SIGNUP_ENABLED: flag,
 	ADMIN_2FA_REQUIRED: flag,
@@ -160,6 +171,7 @@ export function getServerEnv(platform: { readonly env?: unknown } | undefined): 
 		githubUrl: data.GITHUB_URL,
 		resendFrom: data.RESEND_FROM,
 		emailTransport: data.EMAIL_TRANSPORT,
+		yoloPublication: data.YOLO_PUBLICATION,
 		flags: {
 			accessLogEnabled: data.ACCESS_LOG_ENABLED,
 			signupEnabled: data.SIGNUP_ENABLED,

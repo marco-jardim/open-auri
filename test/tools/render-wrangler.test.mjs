@@ -404,7 +404,10 @@ test('web template declares every binding at the top level and in each environme
       'PUBLIC_ORIGIN',
       'RESEND_FROM',
       'SIGNUP_ENABLED',
+      'YOLO_PUBLICATION',
     ]);
+    // YOLO publication stays off unless the template is changed on purpose.
+    assert.equal(target.vars.YOLO_PUBLICATION, 'off');
     assert.equal(target.vars.GITHUB_URL, 'fixture:PUBLIC_GITHUB_URL');
     assert.equal(target.vars.EMAIL_TRANSPORT, 'fixture:EMAIL_TRANSPORT');
     // env.production serves the custom domain (T5.4b); the top level (wrangler dev, tests) and

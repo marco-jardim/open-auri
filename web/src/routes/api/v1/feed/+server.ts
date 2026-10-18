@@ -1,6 +1,8 @@
-// GET /api/v1/feed?sort=new|favorites|installs&window=7d|30d|all&cursor=&limit= (T4.6).
+// GET /api/v1/feed?sort=new|favorites|installs&window=7d|30d|all&cursor=&limit=&yolo=only (T4.6).
 // Public: `new` lists the newest publicly listable lineages, the ranked sorts read the materialized
-// rankings of `window`. Private and unlisted lineages never appear. 60 s public cache, ETag/304.
+// rankings of `window`. Private and unlisted lineages never appear, nor YOLO heads; `yolo=only`
+// (with `sort=new` only, 400 otherwise) lists the public YOLO lineages instead. 60 s public cache,
+// ETag/304.
 import { CACHE_PUBLIC_60, cached, defineApi, type ApiEvent } from '#lib/server/api/index.ts';
 import { parseFeedQuery, rankingsApiError, readFeed } from '#lib/server/social/rankings.ts';
 import type { RequestHandler } from './$types';

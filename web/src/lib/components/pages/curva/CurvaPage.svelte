@@ -1160,12 +1160,7 @@
 		<LayerSelector {layer} {onlayer}>
 			<!-- Modo YOLO sits with the layer choice: unavailable (with its reason) off Engenharia. -->
 			{#if app}
-				<YoloToggle
-					yolo={app.yolo}
-					{layer}
-					onbringback={bringBack}
-					writeReason={yoloWriteReason}
-				/>
+				<YoloToggle yolo={app.yolo} {layer} onbringback={bringBack} writeReason={yoloWriteReason} />
 			{/if}
 		</LayerSelector>
 		<div class="np-help"><TourTrigger page="curva" /></div>

@@ -126,8 +126,30 @@ export function ownerNotBannedSql(rowAlias: string): string {
 	);
 }
 
-/** The head version of the lineage references a curve that passed the gate. */
-export function headGateOkSql(lineageAlias: string): string {
+/**
+ * The owner acknowledged that the curve `curveExpr` (an internal column expression) is shown as
+ * YOLO in the lineage `lineageExpr` (migration 0013, `lineage_yolo_acks`).
+ */
+function yoloAckedSql(lineageExpr: string, curveExpr: string, ackAlias: string): string {
+	const k = alias(ackAlias);
+	return (
+		`EXISTS (SELECT 1 FROM lineage_yolo_acks ${k} ` +
+		`WHERE ${k}.lineage_id = ${lineageExpr} AND ${k}.curve_id = ${curveExpr})`
+	);
+}
+
+/** A YOLO curve (`curveAlias`) acknowledged in the lineage `lineageAlias`. */
+function yoloAckedCurveSql(lineageAlias: string, curveAlias: string): string {
+	const l = alias(lineageAlias);
+	const c = alias(curveAlias);
+	return `(${c}.gate_yolo = 1 AND ${yoloAckedSql(`${l}.id`, `${c}.id`, `${c}_ya`)})`;
+}
+
+/**
+ * The head version of the lineage references a STANDARD curve (`gate_ok = 1`). Lists (feed,
+ * rankings, profiles, packs, S6, S7, the public dump) use this one: they never show YOLO heads.
+ */
+export function headStandardSql(lineageAlias: string): string {
 	const a = alias(lineageAlias);
 	return (
 		`EXISTS (SELECT 1 FROM versions ${a}_hv JOIN curves ${a}_hc ON ${a}_hc.id = ${a}_hv.curve_id ` +
@@ -135,21 +157,70 @@ export function headGateOkSql(lineageAlias: string): string {
 	);
 }
 
-/** Publicly LISTABLE lineage: the only lineages any list (feed, ranking, profile, pack) shows. */
+/**
+ * The head version of the lineage references a PUBLISHABLE curve: standard (`gate_ok = 1`), or
+ * YOLO (`gate_yolo = 1`) with the owner's acknowledgement of this lineage and curve. What may be
+ * opened by id (linkableLineageSql); never a list.
+ */
+export function headPublishableSql(lineageAlias: string): string {
+	const a = alias(lineageAlias);
+	return (
+		`EXISTS (SELECT 1 FROM versions ${a}_pv JOIN curves ${a}_pc ON ${a}_pc.id = ${a}_pv.curve_id ` +
+		`WHERE ${a}_pv.id = ${a}.head_version AND (${a}_pc.gate_ok = 1 OR ${yoloAckedCurveSql(a, `${a}_pc`)}))`
+	);
+}
+
+/** The head is a YOLO curve the owner acknowledged in this lineage (the `yolo=only` feed). */
+function headYoloAckedSql(lineageAlias: string): string {
+	const a = alias(lineageAlias);
+	return (
+		`EXISTS (SELECT 1 FROM versions ${a}_yv JOIN curves ${a}_yc ON ${a}_yc.id = ${a}_yv.curve_id ` +
+		`WHERE ${a}_yv.id = ${a}.head_version AND ${yoloAckedCurveSql(a, `${a}_yc`)})`
+	);
+}
+
+/** The head is a YOLO curve, acknowledged or not (curation refusal, auto-hide threshold). */
+export function headYoloSql(lineageAlias: string): string {
+	const a = alias(lineageAlias);
+	return (
+		`EXISTS (SELECT 1 FROM versions ${a}_qv JOIN curves ${a}_qc ON ${a}_qc.id = ${a}_qv.curve_id ` +
+		`WHERE ${a}_qv.id = ${a}.head_version AND ${a}_qc.gate_yolo = 1)`
+	);
+}
+
+/**
+ * Publicly LISTABLE lineage: the only lineages any list (feed, ranking, profile, pack) shows. The
+ * head must be standard: YOLO lineages are never listed here (only `publicYoloLineageSql`).
+ */
 export function publicLineageSql(lineageAlias: string): string {
 	const a = alias(lineageAlias);
 	return (
 		`(${a}.visibility = 'public' AND ${a}.status = 'active' AND ${a}.moderation = 'visible' ` +
-		`AND ${headGateOkSql(a)} AND ${ownerNotBannedSql(a)})`
+		`AND ${headStandardSql(a)} AND ${ownerNotBannedSql(a)})`
 	);
 }
 
-/** Readable by anyone who has the id: public or unlisted, with the other public rules. */
+/**
+ * The public YOLO lineages of `GET /api/v1/feed?yolo=only`: the rules of publicLineageSql with an
+ * acknowledged YOLO head instead of a standard one. Never mixed into the other lists.
+ */
+export function publicYoloLineageSql(lineageAlias: string): string {
+	const a = alias(lineageAlias);
+	return (
+		`(${a}.visibility = 'public' AND ${a}.status = 'active' AND ${a}.moderation = 'visible' ` +
+		`AND ${headYoloAckedSql(a)} AND ${ownerNotBannedSql(a)})`
+	);
+}
+
+/**
+ * Readable by anyone who has the id: public or unlisted, with the other public rules and a
+ * publishable head (standard, or YOLO acknowledged by the owner).
+ */
 export function linkableLineageSql(lineageAlias: string): string {
 	const a = alias(lineageAlias);
 	return (
 		`(${a}.visibility IN ('public', 'unlisted') AND ${a}.status = 'active' ` +
-		`AND ${a}.moderation = 'visible' AND ${headGateOkSql(a)} AND ${ownerNotBannedSql(a)})`
+		`AND ${a}.moderation = 'visible' AND ${headPublishableSql(a)} AND ${ownerNotBannedSql(a)})`
 	);
 }
 
@@ -206,7 +277,10 @@ export interface VisibilityFacts {
 	visibility: LineageVisibility;
 	status: LineageStatus;
 	moderation: ModerationState;
+	/** The head is publishable: standard, or YOLO acknowledged by the owner in this lineage. */
 	headGateOk: boolean;
+	/** The head is YOLO (absent = false): openable by id when acknowledged, never listed. */
+	headYolo?: boolean;
 	ownerBanned: boolean;
 }
 
@@ -216,6 +290,7 @@ export function canViewLineage(facts: VisibilityFacts, viewer: Viewer, listing =
 		facts.status === 'active' &&
 		facts.moderation === 'visible' &&
 		facts.headGateOk &&
+		!(listing && facts.headYolo === true) &&
 		!facts.ownerBanned &&
 		(listing ? facts.visibility === 'public' : facts.visibility !== 'private');
 	if (listing) return open;
@@ -347,6 +422,7 @@ interface CurveCols {
 	c_canon: string;
 	c_gate_ver: string;
 	c_gate_ok: number;
+	c_gate_yolo: number;
 	c_gate_reasons: string;
 	c_level: number | null;
 	c_created: number;
@@ -370,8 +446,8 @@ const VERSION_COLUMNS =
 	'v.recipe AS v_recipe, v.lang AS v_lang, v.labels AS v_labels, v.created_at AS v_created';
 const CURVE_COLUMNS =
 	'c.id AS c_id, c.s1 AS c_s1, c.canon_key AS c_canon, c.gate_ver AS c_gate_ver, ' +
-	'c.gate_ok AS c_gate_ok, c.gate_reasons AS c_gate_reasons, c.level_db AS c_level, ' +
-	'c.created_at AS c_created';
+	'c.gate_ok AS c_gate_ok, c.gate_yolo AS c_gate_yolo, c.gate_reasons AS c_gate_reasons, ' +
+	'c.level_db AS c_level, c.created_at AS c_created';
 const SUMMARY_COLUMNS = `${LINEAGE_COLUMNS}, ${VERSION_COLUMNS}, ${CURVE_COLUMNS}, u."username" AS u_username, u."displayUsername" AS u_display`;
 /** Joins from `lineages l` to its head version, head curve and author. */
 const SUMMARY_JOINS =
@@ -454,6 +530,7 @@ function toCurve(row: CurveCols): CurveRecord {
 		canonKey: row.c_canon,
 		gateVer: row.c_gate_ver,
 		gateOk: row.c_gate_ok === 1,
+		gateYolo: row.c_gate_yolo === 1,
 		gateReasons: parseReasons(row.c_gate_reasons),
 		levelDb: row.c_level,
 		createdAt: row.c_created
@@ -507,6 +584,8 @@ function validCurve(curve: CurveInput): boolean {
 		curve.gateVer.length >= 1 &&
 		curve.gateVer.length <= 64 &&
 		typeof curve.gateOk === 'boolean' &&
+		(curve.gateYolo === undefined || typeof curve.gateYolo === 'boolean') &&
+		!(curve.gateOk && curve.gateYolo === true) &&
 		Array.isArray(curve.gateReasons) &&
 		curve.gateReasons.every((reason) => typeof reason === 'string') &&
 		(curve.levelDb === null || Number.isFinite(curve.levelDb))
@@ -602,9 +681,10 @@ export function upsertCurveStatement(
 ): BoundStatement {
 	return sql(
 		db,
-		'INSERT INTO curves (id, s1, canon_key, gate_ver, gate_ok, gate_reasons, level_db, created_at) ' +
-			'VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET gate_ver = excluded.gate_ver, ' +
-			'gate_ok = excluded.gate_ok, gate_reasons = excluded.gate_reasons, level_db = excluded.level_db ' +
+		'INSERT INTO curves (id, s1, canon_key, gate_ver, gate_ok, gate_yolo, gate_reasons, level_db, ' +
+			'created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET ' +
+			'gate_ver = excluded.gate_ver, gate_ok = excluded.gate_ok, gate_yolo = excluded.gate_yolo, ' +
+			'gate_reasons = excluded.gate_reasons, level_db = excluded.level_db ' +
 			'WHERE curves.gate_ver IS NOT excluded.gate_ver ' +
 			`AND ${gateImplSql('curves.gate_ver')} <= ${gateImplSql('excluded.gate_ver')}`,
 		curve.id,
@@ -612,6 +692,7 @@ export function upsertCurveStatement(
 		curve.canonKey,
 		curve.gateVer,
 		curve.gateOk ? 1 : 0,
+		curve.gateYolo === true ? 1 : 0,
 		JSON.stringify(curve.gateReasons),
 		curve.levelDb,
 		now
@@ -657,10 +738,11 @@ export async function listCurvesWithStaleGate(
 /**
  * Stale curves for the re-gate job: cached under another gate version by a GATE_IMPL ordinal not
  * greater than `gateImpl` (rows of a newer implementation are current for a newer isolate), in
- * priority order: (0) accepted heads of linkable lineages (served by link and in lists: a head
- * the current gate rejects must stop being served first), (1) rejected heads of lineages publicly
- * listable apart from that verdict (a relaxed gate brings them back to the lists; by-id reads
- * re-gate them on their own, #27), (2) everything else. Oldest first within a tier. At most 1000.
+ * priority order: (0) standard or YOLO heads of linkable lineages (served by link and in lists: a
+ * head the current gate rejects must stop being served first), (1) heads that are not standard of
+ * lineages publicly listable apart from that verdict (a relaxed gate brings them back to the lists;
+ * by-id reads re-gate them on their own, #27), (2) everything else. Oldest first within a tier. At
+ * most 1000.
  */
 export async function listStaleCurvesForRegate(
 	db: D1Database,
@@ -676,7 +758,7 @@ export async function listStaleCurvesForRegate(
 			db,
 			`SELECT ${CURVE_COLUMNS} FROM curves c ` +
 				`WHERE c.gate_ver <> ? AND ${gateImplSql('c.gate_ver')} <= ? ORDER BY CASE ` +
-				`WHEN c.gate_ok = 1 AND ${headOf(linkableLineageSql, 'pl', 'pv')} THEN 0 ` +
+				`WHEN (c.gate_ok = 1 OR c.gate_yolo = 1) AND ${headOf(linkableLineageSql, 'pl', 'pv')} THEN 0 ` +
 				`WHEN c.gate_ok = 0 AND ${headOf((l) => openExceptHeadGateSql(l, true), 'rl', 'rv')} ` +
 				'THEN 1 ELSE 2 END, c.created_at, c.id LIMIT ?',
 			gateVer,
@@ -785,10 +867,41 @@ function insertVersionStatement(
 	);
 }
 
+/** A curve the publication path may store: standard or YOLO (never a rejected one). */
+function isStorable(curve: CurveInput): boolean {
+	return curve.gateOk || curve.gateYolo === true;
+}
+
+/**
+ * The owner's YOLO acknowledgement of (`lineageId`, `curveId`), written only when the lineage is
+ * the owner's and the curve is its head (so a failed append or a lost race writes nothing). A
+ * repeated acknowledgement refreshes `acked_at`.
+ */
+function yoloAckStatement(
+	db: D1Database,
+	lineageId: string,
+	ownerUserId: string,
+	curveId: string,
+	now: number
+): BoundStatement {
+	return sql(
+		db,
+		'INSERT INTO lineage_yolo_acks (lineage_id, curve_id, acked_at) SELECT l.id, c.id, ? ' +
+			'FROM lineages l JOIN versions v ON v.id = l.head_version JOIN curves c ON c.id = v.curve_id ' +
+			'WHERE l.id = ? AND l.owner_user_id = ? AND c.id = ? AND c.gate_yolo = 1 ' +
+			'ON CONFLICT (lineage_id, curve_id) DO UPDATE SET acked_at = excluded.acked_at',
+		now,
+		lineageId,
+		ownerUserId,
+		curveId
+	);
+}
+
 /**
  * Publishes a new lineage with its root version (and caches the curve) in one batch. A curve
- * rejected by the gate is cached and refused with 'gate-rejected'; the database trigger refuses it
- * too. `forkedFromVersion` is set by forkLineage only.
+ * rejected by the gate (neither standard nor YOLO) is cached and refused with 'gate-rejected'; the
+ * database trigger refuses it too. With `yoloAck`, a YOLO curve's acknowledgement is written in the
+ * same batch. `forkedFromVersion` is set by forkLineage only.
  */
 export async function publishLineage(
 	db: D1Database,
@@ -803,10 +916,14 @@ export async function publishLineage(
 	) {
 		return { ok: false, code: 'invalid-input' };
 	}
-	if (!input.curve.gateOk) {
+	if (!isStorable(input.curve)) {
 		await run(upsertCurveStatement(db, input.curve, input.now));
 		return { ok: false, code: 'gate-rejected' };
 	}
+	const ack =
+		input.yoloAck === true && input.curve.gateYolo === true
+			? [yoloAckStatement(db, input.lineageId, input.ownerUserId, input.curve.id, input.now)]
+			: [];
 	const done = await guarded(db, [
 		upsertCurveStatement(db, input.curve, input.now),
 		sql(
@@ -822,7 +939,8 @@ export async function publishLineage(
 			input.now
 		),
 		insertVersionStatement(db, input.lineageId, input.curve.id, input.version, input.now),
-		sql(db, 'UPDATE lineages SET head_version = ? WHERE id = ?', input.version.id, input.lineageId)
+		sql(db, 'UPDATE lineages SET head_version = ? WHERE id = ?', input.version.id, input.lineageId),
+		...ack
 	]);
 	if (!done.ok) return done;
 	return { ok: true, value: { lineageId: input.lineageId, versionId: input.version.id } };
@@ -856,11 +974,16 @@ export async function appendVersion(
 	) {
 		return { ok: false, code: 'invalid-input' };
 	}
-	if (!input.curve.gateOk) {
+	if (!isStorable(input.curve)) {
 		await run(upsertCurveStatement(db, input.curve, input.now));
 		return { ok: false, code: 'gate-rejected' };
 	}
 	const { version } = input;
+	// After the head moved to the new version only: a lost race writes no acknowledgement.
+	const ack =
+		input.yoloAck === true && input.curve.gateYolo === true
+			? [yoloAckStatement(db, input.lineageId, input.ownerUserId, input.curve.id, input.now)]
+			: [];
 	const done = await guarded(db, [
 		upsertCurveStatement(db, input.curve, input.now),
 		sql(
@@ -891,7 +1014,8 @@ export async function appendVersion(
 			input.expectedHead,
 			version.id,
 			input.lineageId
-		)
+		),
+		...ack
 	]);
 	if (!done.ok) return done;
 	if (changes(done.results[2]) === 1) return { ok: true, value: { versionId: version.id } };
@@ -912,14 +1036,35 @@ export async function appendVersion(
 	return { ok: false, code: 'head-moved' };
 }
 
+/**
+ * Runs an owner-scoped lineage update; with `ack`, the owner's YOLO acknowledgement of the head
+ * curve `ack.curveId` is written in the same batch (yoloAckStatement: only while it is the head).
+ */
 async function updateOwnedLineage(
 	db: D1Database,
-	statement: BoundStatement
+	statement: BoundStatement,
+	ack?: { lineageId: string; ownerUserId: string; curveId: string; now: number }
 ): Promise<RepoResult<{ changed: true }>> {
-	const meta = await run(statement);
-	return meta.changes > 0
+	if (!ack) {
+		const meta = await run(statement);
+		return meta.changes > 0
+			? { ok: true, value: { changed: true } }
+			: { ok: false, code: 'not-found' };
+	}
+	const done = await guarded(db, [
+		statement,
+		yoloAckStatement(db, ack.lineageId, ack.ownerUserId, ack.curveId, ack.now)
+	]);
+	if (!done.ok) return done;
+	return changes(done.results[0]) > 0
 		? { ok: true, value: { changed: true } }
 		: { ok: false, code: 'not-found' };
+}
+
+/** Options of the owner writes that may leave a YOLO head visible to others. */
+export interface YoloAckOption {
+	/** Head curve to acknowledge as YOLO in the same batch (the service checked it is the head). */
+	yoloAckCurveId?: string;
 }
 
 /** Owner tombstone. Idempotent; 'not-found' when the lineage is not the owner's. */
@@ -941,12 +1086,24 @@ export async function retractLineage(
 	);
 }
 
+function ackOf(
+	lineageId: string,
+	ownerUserId: string,
+	now: number,
+	options: YoloAckOption
+): { lineageId: string; ownerUserId: string; curveId: string; now: number } | undefined {
+	return options.yoloAckCurveId === undefined
+		? undefined
+		: { lineageId, ownerUserId, curveId: options.yoloAckCurveId, now };
+}
+
 /** Undoes the owner's tombstone (never a moderation action). */
 export async function restoreLineage(
 	db: D1Database,
 	lineageId: string,
 	ownerUserId: string,
-	now: number
+	now: number,
+	options: YoloAckOption = {}
 ): Promise<RepoResult<{ changed: true }>> {
 	return updateOwnedLineage(
 		db,
@@ -956,7 +1113,8 @@ export async function restoreLineage(
 			now,
 			lineageId,
 			ownerUserId
-		)
+		),
+		ackOf(lineageId, ownerUserId, now, options)
 	);
 }
 
@@ -965,7 +1123,8 @@ export async function setLineageVisibility(
 	lineageId: string,
 	ownerUserId: string,
 	visibility: LineageVisibility,
-	now: number
+	now: number,
+	options: YoloAckOption = {}
 ): Promise<RepoResult<{ changed: true }>> {
 	if (!isOneOf(LINEAGE_VISIBILITIES, visibility)) return { ok: false, code: 'invalid-input' };
 	return updateOwnedLineage(
@@ -977,7 +1136,8 @@ export async function setLineageVisibility(
 			now,
 			lineageId,
 			ownerUserId
-		)
+		),
+		ackOf(lineageId, ownerUserId, now, options)
 	);
 }
 
@@ -1017,6 +1177,48 @@ export async function setModeration(
 	return (await run(statement)).changes > 0;
 }
 
+/**
+ * Whether the account `userId` was created at or before `cutoff` (epoch ms), read like the
+ * reporter age of countEligibleReporters. False for an unknown account.
+ */
+export async function accountCreatedBy(
+	db: D1Database,
+	userId: string,
+	cutoff: number
+): Promise<boolean> {
+	const row = await first<{ id: string }>(
+		sql(
+			db,
+			`SELECT u."id" AS id FROM "user" u WHERE u."id" = ? AND ${epochMsSql('u."createdAt"')} <= ?`,
+			userId,
+			cutoff
+		)
+	);
+	return Boolean(row);
+}
+
+/** Cached class of the head curve of `lineageId` (any state), or null when it has no head. */
+export async function getHeadClass(
+	db: D1Database,
+	lineageId: string
+): Promise<{ yolo: boolean; waived: string[] } | null> {
+	const row = await first<{ gate_yolo: number; gate_reasons: string }>(
+		sql(
+			db,
+			'SELECT c.gate_yolo AS gate_yolo, c.gate_reasons AS gate_reasons FROM lineages l ' +
+				'JOIN versions v ON v.id = l.head_version JOIN curves c ON c.id = v.curve_id WHERE l.id = ?',
+			lineageId
+		)
+	);
+	if (!row) return null;
+	const yolo = row.gate_yolo === 1;
+	return { yolo, waived: yolo ? parseReasons(row.gate_reasons) : [] };
+}
+
+/**
+ * Editorial pick of a lineage. Curating refuses a lineage whose head is YOLO (false, nothing
+ * changes); removing the pick always applies.
+ */
 export async function setCurated(
 	db: D1Database,
 	lineageId: string,
@@ -1026,10 +1228,12 @@ export async function setCurated(
 	const meta = await run(
 		sql(
 			db,
-			'UPDATE lineages SET curated = ?, updated_at = ? WHERE id = ?',
+			'UPDATE lineages SET curated = ?, updated_at = ? WHERE id = ? ' +
+				`AND (? = 0 OR NOT ${headYoloSql('lineages')})`,
 			curated ? 1 : 0,
 			now,
-			lineageId
+			lineageId,
+			curated ? 1 : 0
 		)
 	);
 	return meta.changes > 0;
@@ -1080,7 +1284,8 @@ export interface VersionView {
 
 /**
  * A version (any, not only the head) if its lineage is readable by `viewer`; for anyone but the
- * owner or an admin its own curve must also have passed the gate.
+ * owner or an admin its own curve must also be publishable (standard, or YOLO acknowledged by the
+ * owner in this lineage).
  */
 export async function getVersionForViewer(
 	db: D1Database,
@@ -1094,7 +1299,8 @@ export async function getVersionForViewer(
 			db,
 			`SELECT ${LINEAGE_COLUMNS}, ${VERSION_COLUMNS}, ${CURVE_COLUMNS} FROM versions v ` +
 				'JOIN lineages l ON l.id = v.lineage_id JOIN curves c ON c.id = v.curve_id ' +
-				`WHERE v.id = ? AND ${readable.text} AND (c.gate_ok = 1 OR ${own.text})`,
+				`WHERE v.id = ? AND ${readable.text} ` +
+				`AND (c.gate_ok = 1 OR ${yoloAckedCurveSql('l', 'c')} OR ${own.text})`,
 			versionId,
 			...readable.params,
 			...own.params
@@ -1127,18 +1333,23 @@ export async function listVersions(
 	return toPage(rows, size, toVersion, (row) => [row.v_created, row.v_id]);
 }
 
-/** Public feed, newest first (sort 'new'; the ranked sorts read listRankings). */
+/**
+ * Public feed, newest first (sort 'new'; the ranked sorts read listRankings). Standard heads only;
+ * with `yolo: 'only'`, the public lineages with an acknowledged YOLO head instead
+ * (publicYoloLineageSql): the two never mix.
+ */
 export async function listPublicFeed(
 	db: D1Database,
-	page: PageRequest = {}
+	page: PageRequest & { yolo?: 'only' } = {}
 ): Promise<Page<LineageSummary>> {
 	const size = clampPageSize(page.limit);
 	const keyset = before2('l.created_at', 'l.id', decodeCursor(page.cursor, ['number', 'string']));
+	const listable = page.yolo === 'only' ? publicYoloLineageSql('l') : publicLineageSql('l');
 	const rows = await all<SummaryRow>(
 		sql(
 			db,
 			`SELECT ${SUMMARY_COLUMNS} FROM lineages l ${SUMMARY_JOINS} ` +
-				`WHERE ${publicLineageSql('l')} AND ${keyset.text} ` +
+				`WHERE ${listable} AND ${keyset.text} ` +
 				'ORDER BY l.created_at DESC, l.id DESC LIMIT ?',
 			...keyset.params,
 			size + 1

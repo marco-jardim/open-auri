@@ -129,21 +129,24 @@ test('narrowing through the 720px layout change never puts the hint back over th
 	}
 });
 
-test.each([1101, 1200, 1440])('the %dpx desktop overlay keeps its original offsets', async (width) => {
-	await page.viewport(width, 900);
-	const { screen } = await setup('ouvir');
-	// Leave room for the desktop rack's output column, rails and panel padding.
-	screen.container.style.width = 'calc(100vw - 350px)';
-	const glass = screen.container.querySelector('.screen');
-	const hint = page.getByTestId('ouvir-hint').element();
-	if (!glass) throw new Error('expected the scope screen');
-	await expect.poll(() => getComputedStyle(hint).position).toBe('absolute');
-	const plot = glass.getBoundingClientRect();
-	const over = hint.getBoundingClientRect();
-	expect(over.top).toBeGreaterThanOrEqual(plot.top);
-	expect(plot.right - over.right).toBeCloseTo(plot.width * 0.05, 0);
-	expect(plot.bottom - over.bottom).toBeCloseTo(plot.width * 0.07878, 0);
-});
+test.each([1101, 1200, 1440])(
+	'the %dpx desktop overlay keeps its original offsets',
+	async (width) => {
+		await page.viewport(width, 900);
+		const { screen } = await setup('ouvir');
+		// Leave room for the desktop rack's output column, rails and panel padding.
+		screen.container.style.width = 'calc(100vw - 350px)';
+		const glass = screen.container.querySelector('.screen');
+		const hint = page.getByTestId('ouvir-hint').element();
+		if (!glass) throw new Error('expected the scope screen');
+		await expect.poll(() => getComputedStyle(hint).position).toBe('absolute');
+		const plot = glass.getBoundingClientRect();
+		const over = hint.getBoundingClientRect();
+		expect(over.top).toBeGreaterThanOrEqual(plot.top);
+		expect(plot.right - over.right).toBeCloseTo(plot.width * 0.05, 0);
+		expect(plot.bottom - over.bottom).toBeCloseTo(plot.width * 0.07878, 0);
+	}
+);
 
 test('a larger root font moves the hint below a plot that normally supports the overlay', async () => {
 	await page.viewport(900, 900);

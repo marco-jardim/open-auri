@@ -264,8 +264,18 @@ export async function recordShareOpenLimited(
 	return recordShareOpen(env.db, shareId, now);
 }
 
+/**
+ * `/c/[id]` data as the server builds it: the page's SharedCurveData plus the YOLO class of the
+ * shown curve (derived on the server). A superset until the client type is widened.
+ */
+export interface SharedCurvePayload extends SharedCurveData {
+	yolo: boolean;
+	/** Codes the YOLO profile waived ([] unless `yolo`). */
+	waived: string[];
+}
+
 export type SharedCurveResult =
-	{ kind: 'ok'; curve: SharedCurveData } | { kind: 'not-found' } | { kind: 'gone' };
+	{ kind: 'ok'; curve: SharedCurvePayload } | { kind: 'not-found' } | { kind: 'gone' };
 
 /**
  * Data of `/c/[id]` for `viewer`, read through the repository visibility (linkable, or the
@@ -317,17 +327,27 @@ export async function loadSharedCurve(
 			// Filter labels of the shown version (page only; never the OG image or meta tags).
 			labels: version.labels,
 			visibility: lineage.visibility,
-			shareId: ownShare ? ownShare.id : null
+			shareId: ownShare ? ownShare.id : null,
+			yolo: curve.gateYolo,
+			waived: curve.gateYolo ? [...curve.gateReasons] : []
 		}
 	};
 }
 
-/** Absolute URLs of the meta tags; `origin` is PUBLIC_ORIGIN (never the request host). */
-export function sharedCurveMeta(origin: string, curve: SharedCurveData): SharedCurveMeta {
+/**
+ * Absolute URLs of the meta tags; `origin` is PUBLIC_ORIGIN (never the request host). A YOLO curve
+ * is never indexable (`noindex`) and its image URL carries `?y=1`, so caches keyed by URL keep the
+ * card with the YOLO chip apart from a standard one.
+ */
+export function sharedCurveMeta(
+	origin: string,
+	curve: SharedCurveData & { yolo?: boolean }
+): SharedCurveMeta {
 	const base = origin.replace(/\/+$/, '');
+	const yolo = curve.yolo === true;
 	return {
 		canonical: `${base}/c/${encodeURIComponent(curve.lineageId)}`,
-		image: `${base}/og/${encodeURIComponent(curve.versionId)}.png`,
-		indexable: curve.visibility === 'public'
+		image: `${base}/og/${encodeURIComponent(curve.versionId)}.png${yolo ? '?y=1' : ''}`,
+		indexable: curve.visibility === 'public' && !yolo
 	};
 }

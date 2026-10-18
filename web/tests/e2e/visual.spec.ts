@@ -123,9 +123,9 @@ for (const motion of [
 					);
 					if (route.name !== 'curva') {
 						const bank = filterBank(page);
-						await expect(
-							bank.getByRole('spinbutton', { name: 'Tipo', exact: true })
-						).toHaveCount(10);
+						await expect(bank.getByRole('spinbutton', { name: 'Tipo', exact: true })).toHaveCount(
+							10
+						);
 						await expect(bank.locator('.mod-badge')).toHaveText('ABCDEFGHIJ'.split(''));
 					}
 				}

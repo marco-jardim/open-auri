@@ -28,10 +28,7 @@ test('a YOLO journal entry still uses the YOLO gate when enabled', () => {
 
 test('standard fallback also validates experimental kinds with the correct gate option', () => {
 	const entry: Pick<JournalEntry, 'bands' | 'preampDb' | 'profile'> = {
-		bands: [
-			{ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 },
-			...NEUTRO.bands.slice(1)
-		],
+		bands: [{ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 }, ...NEUTRO.bands.slice(1)],
 		preampDb: -3,
 		profile: 'yolo'
 	};

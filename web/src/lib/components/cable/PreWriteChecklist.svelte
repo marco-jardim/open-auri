@@ -98,11 +98,7 @@
 	// The gate runs only while the dialog is open; write() always re-gates on its own.
 	const gate = $derived<GateResult | null>(
 		open
-			? gateForWrite(
-					bands,
-					preampDb,
-					yolo ? { experimental, profile: 'yolo' } : { experimental }
-				)
+			? gateForWrite(bands, preampDb, yolo ? { experimental, profile: 'yolo' } : { experimental })
 			: null
 	);
 	const checklist = $derived.by<ChecklistResult | null>(() => {

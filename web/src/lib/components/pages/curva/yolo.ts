@@ -63,8 +63,7 @@ export function canBringBack(curve: Curve): boolean {
  * curve that passes only under YOLO (class 2 waived) is refused with YOLO off as well.
  */
 export type ExitRefusal =
-	| { readonly kind: 'yolo' }
-	| { readonly kind: 'gate'; readonly reasons: readonly Reason[] };
+	{ readonly kind: 'yolo' } | { readonly kind: 'gate'; readonly reasons: readonly Reason[] };
 
 export function exitRefusal(curve: Curve, yoloEnabled = false): ExitRefusal | null {
 	if (yoloEnabled) return { kind: 'yolo' };

@@ -114,8 +114,12 @@ export interface FeedLineageCard {
 		lang: Lang;
 		createdAt: number;
 	};
-	/** Head curve (only gate-approved curves are publicly listable). */
-	curve: { id: string; s1: string; levelDb: number | null };
+	/**
+	 * Head curve (only standard curves are listed, except in the `yolo=only` feed, where every
+	 * head is an acknowledged YOLO curve). `yolo` is always sent; optional in the type only for
+	 * client fixtures written before 0013.
+	 */
+	curve: { id: string; s1: string; levelDb: number | null; yolo?: boolean };
 }
 
 /** One ranked lineage of GET /api/v1/rankings. */
@@ -146,7 +150,7 @@ export function feedLineageCard(summary: LineageSummary): FeedLineageCard {
 			lang: head.lang,
 			createdAt: head.createdAt
 		},
-		curve: { id: curve.id, s1: curve.s1, levelDb: curve.levelDb }
+		curve: { id: curve.id, s1: curve.s1, levelDb: curve.levelDb, yolo: curve.gateYolo }
 	};
 }
 
@@ -216,12 +220,16 @@ export interface FeedRequest {
 	window?: RankingWindow;
 	cursor?: string | null;
 	limit?: number;
+	/** `only`: the public YOLO lineages instead (sort `new` only; never mixed with the others). */
+	yolo?: 'only';
 }
 
 /**
  * Public feed: `new` = newest publicly listable lineages (keyset on creation time and id);
  * `favorites` / `installs` = the materialized ranking of `window`. Private and unlisted lineages
- * never appear (both paths use the repository's public-listing predicate).
+ * never appear (both paths use the repository's public-listing predicate), nor YOLO heads. With
+ * `yolo: 'only'`, the newest public lineages with an acknowledged YOLO head instead (`new` only:
+ * YOLO is never ranked).
  */
 export async function readFeed(db: D1Database, request: FeedRequest): Promise<FeedPage> {
 	const { sort } = request;
@@ -229,8 +237,12 @@ export async function readFeed(db: D1Database, request: FeedRequest): Promise<Fe
 		cursor: request.cursor ?? null,
 		...(request.limit === undefined ? {} : { limit: request.limit })
 	};
+	if (request.yolo === 'only' && sort !== 'new') throw new SocialRepoError('invalid-input');
 	if (sort === 'new') {
-		const list = await listPublicFeed(db, page);
+		const list = await listPublicFeed(
+			db,
+			request.yolo === 'only' ? { ...page, yolo: 'only' } : page
+		);
 		return {
 			sort,
 			window: null,
@@ -303,15 +315,25 @@ export function parseRankingsQuery(url: URL): {
 	};
 }
 
-/** `?sort=&window=&cursor=&limit=` of GET /api/v1/feed (400 INVALID_BODY when malformed). */
+const YOLO_FILTERS = ['only'] as const;
+
+/**
+ * `?sort=&window=&cursor=&limit=&yolo=` of GET /api/v1/feed (400 INVALID_BODY when malformed).
+ * `yolo=only` lists the public YOLO lineages and only with `sort=new` (a ranked sort is 400).
+ */
 export function parseFeedQuery(url: URL): FeedRequest {
 	const params = url.searchParams;
 	const page = pageParams(params);
+	const sort = enumParam(params, 'sort', FEED_SORTS, DEFAULT_SORT);
+	const raw = params.get('yolo');
+	const yolo = raw === null || raw === '' ? null : enumParam(params, 'yolo', YOLO_FILTERS, 'only');
+	if (yolo === 'only' && sort !== 'new') throw invalidQuery('sort');
 	return {
-		sort: enumParam(params, 'sort', FEED_SORTS, DEFAULT_SORT),
+		sort,
 		window: enumParam(params, 'window', RANKING_WINDOWS, DEFAULT_WINDOW),
 		cursor: page.cursor ?? null,
-		...(page.limit === undefined ? {} : { limit: page.limit })
+		...(page.limit === undefined ? {} : { limit: page.limit }),
+		...(yolo === 'only' ? { yolo } : {})
 	};
 }
 

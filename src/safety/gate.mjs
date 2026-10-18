@@ -908,7 +908,11 @@ export function gate(bands, preampDb, options = {}) {
         fullPeak = null;
       }
       if (fullPeak === null) fullPeak = fullScan.peak();
-      prefixFull.push({ stage: i + 1, db: fullPeak.db + preamp, frequencyHz: fullPeak.frequencyHz });
+      prefixFull.push({
+        stage: i + 1,
+        db: fullPeak.db + preamp,
+        frequencyHz: fullPeak.frequencyHz,
+      });
     }
   } else {
     for (const s of active) fullScan.add(s);

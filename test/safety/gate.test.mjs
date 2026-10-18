@@ -1279,7 +1279,12 @@ test('YOLO: every class-1 code still blocks; every class-2 code moves to waived'
 
   /** [label, bands, preampDb, codes the standard profile must report] */
   const cases = [
-    ['k', curveOf({ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 }), -1, ['k:kind-not-allowed']],
+    [
+      'k',
+      curveOf({ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 }),
+      -1,
+      ['k:kind-not-allowed'],
+    ],
     ['d7 above 16k', curveOf(PK(18000, 3, 1)), -6, ['d7:pk-boost-above-16k']],
     ['d7 boost Q', curveOf(PK(1000, 3, 6)), -6, ['d7:boost-q']],
     [
@@ -1305,7 +1310,12 @@ test('YOLO: every class-1 code still blocks; every class-2 code moves to waived'
     ],
     ['f preamp above 0', curveOf(), 0.5, ['f:codec']],
     ['f frequency', curveOf(PK(48000, -3, 1)), -1, ['f:codec']],
-    ['f unknown kind', curveOf({ kind: 'XX', freqHz: 1000, gainDb: -3, qFactor: 1 }), -1, ['f:codec']],
+    [
+      'f unknown kind',
+      curveOf({ kind: 'XX', freqHz: 1000, gainDb: -3, qFactor: 1 }),
+      -1,
+      ['f:codec'],
+    ],
     ['f NaN gain', curveOf(PK(1000, NaN, 1)), -1, ['f:codec']],
     ['d', curveOf(PK(1000, 6, 1), PK(1000, -6, 1)), -0.5, ['d:prefix-peak']],
     ['e', curveOf(PK(1000, 6, 1)), -0.5, ['d:prefix-peak', 'e:output-audible', 'e:output-full']],
@@ -1327,16 +1337,26 @@ test('YOLO: every class-1 code still blocks; every class-2 code moves to waived'
       label,
     );
     // Class 2: moved, never dropped.
-    assert.deepEqual(yolo.waivedReasons, standard.reasons.filter((r) => isWaivable(r.code)), label);
+    assert.deepEqual(
+      yolo.waivedReasons,
+      standard.reasons.filter((r) => isWaivable(r.code)),
+      label,
+    );
     assert.deepEqual(yolo.waived, [...new Set(yolo.waivedReasons.map((r) => r.code))], label);
-    assert.ok(yolo.reasons.every((r) => !isWaivable(r.code)), label);
+    assert.ok(
+      yolo.reasons.every((r) => !isWaivable(r.code)),
+      label,
+    );
     assert.equal(yolo.ok, yolo.reasons.length === 0, label);
     const hard = standardCodes.filter((code) => !isWaivable(code));
     if (hard.length) assert.equal(yolo.ok, false, label);
     for (const code of hard) assert.ok(codes(yolo).includes(code), `${label}: ${code} blocks`);
     // Writing needs the full grid: drag in YOLO waives the same class.
     const drag = gate(bands, preampDb, { profile: 'yolo', grid: 'drag' });
-    assert.ok(drag.reasons.every((r) => !isWaivable(r.code)), label);
+    assert.ok(
+      drag.reasons.every((r) => !isWaivable(r.code)),
+      label,
+    );
     standardCodes.forEach((code) => seenStandard.add(code));
     codes(yolo).forEach((code) => seenYolo.add(code));
     yolo.waived.forEach((code) => seenWaived.add(code));
@@ -1377,7 +1397,10 @@ test('YOLO: classification holds on arbitrary curves (property)', () => {
           yolo.reasons.filter((r) => !YOLO_ONLY.has(r.code)),
           standard.reasons.filter((r) => !isWaivable(r.code)),
         );
-        assert.deepEqual(yolo.waivedReasons, standard.reasons.filter((r) => isWaivable(r.code)));
+        assert.deepEqual(
+          yolo.waivedReasons,
+          standard.reasons.filter((r) => isWaivable(r.code)),
+        );
         assert.equal(yolo.ok, yolo.reasons.length === 0);
         // YOLO never passes what standard blocks on class 1.
         if (standard.reasons.some((r) => !isWaivable(r.code))) assert.equal(yolo.ok, false);
@@ -1496,10 +1519,7 @@ test('YOLO: only an own data property equal to "yolo" enables it; getters never 
   const { bands, preampDb } = LIMITES_40;
   for (const [label, options] of fallbacks) {
     assert.equal(gateProfile(options), 'standard', label);
-    for (const result of [
-      gate(bands, preampDb, options),
-      gateForWrite(bands, preampDb, options),
-    ]) {
+    for (const result of [gate(bands, preampDb, options), gateForWrite(bands, preampDb, options)]) {
       assert.equal(result.profile, undefined, label);
       assert.equal(result.ok, false, label);
       assert.deepEqual(codes(result), ['c:section-peak'], label);

@@ -58,7 +58,8 @@ são estáveis: novos podem ser acrescentados, nenhum é renomeado ou reutilizad
 | `BAD_ORIGIN`             | 403    | Escrita sem `Origin` igual à origem pública                                                |
 | `EMAIL_NOT_VERIFIED`     | 403    | Rota `verificado` com e-mail não verificado                                                |
 | `BANNED`                 | 403    | Conta banida                                                                               |
-| `FORBIDDEN`              | 403    | Recusa específica da rota (ex.: denunciar o próprio conteúdo)                              |
+| `FORBIDDEN`              | 403    | Recusa específica da rota (ex.: denunciar o próprio conteúdo; conta nova abrindo YOLO)     |
+| `YOLO_PUBLICATION_OFF`   | 403    | Abrir uma curva YOLO a terceiros com `YOLO_PUBLICATION` desligado (padrão)                 |
 | `REAUTH_REQUIRED`        | 403    | Ação administrativa destrutiva com sessão de mais de 10 minutos                            |
 | `TURNSTILE_FAILED`       | 403    | Token Turnstile ausente, inválido ou de outra ação                                         |
 | `NOT_FOUND`              | 404    | Inexistente, sem permissão de leitura, ou de outra pessoa (mesma resposta nos três casos)  |
@@ -66,11 +67,12 @@ são estáveis: novos podem ser acrescentados, nenhum é renomeado ou reutilizad
 | `HEAD_MOVED`             | 409    | Nova versão cujo pai já não é o head da linhagem                                           |
 | `ALREADY_ACTIVE`         | 409    | Já existe uma troca S7 ativa deste usuário                                                 |
 | `DUPLICATE`              | 409    | Recurso único já existe (segunda denúncia do mesmo alvo, recibo S6 repetido, nota repetida) |
+| `YOLO_ACK_REQUIRED`      | 409    | Escrita que deixa um head YOLO visível sem `acknowledge: "yolo"`; `details.waived`         |
 | `GONE`                   | 410    | Linhagem retirada (lápide) lida por quem não é o dono                                      |
 | `PAYLOAD_TOO_LARGE`      | 413    | Corpo acima do limite da rota                                                              |
 | `UNSUPPORTED_MEDIA_TYPE` | 415    | Corpo sem `content-type: application/json`                                                 |
 | `INVALID_CURVE`          | 422    | S5/S1 que não decodifica ou não valida; `details.codes` com códigos `s1:*` / `env:*`       |
-| `GATE_REJECTED`          | 422    | Curva reprovada no gate v2; `details.reasons` com os códigos de motivo do gate             |
+| `GATE_REJECTED`          | 422    | Curva reprovada (nem padrão nem YOLO); `details.reasons` (códigos) e `details.hard`        |
 | `RATE_LIMITED`           | 429    | Rajada ou cota do kit excedida; `retry-after` em segundos                                  |
 | `QUOTA_EXCEEDED`         | 429    | Cota de domínio excedida (publicações ou tentativas de gate); no merge, recusa por item    |
 | `INTERNAL`               | 500    | Qualquer outro erro                                                                        |
@@ -180,10 +182,15 @@ leitura, pelo `RL_API`.
 ### `GET /api/v1/feed`
 
 Query: `sort` ∈ `new` (padrão) | `favorites` | `installs`; `window` ∈ `7d` (padrão) | `30d` |
-`all` (ignorada em `new`); `cursor`; `limit` (1 a 3 dígitos, limitado a 100).
+`all` (ignorada em `new`); `cursor`; `limit` (1 a 3 dígitos, limitado a 100); `yolo` ∈ `only`.
 
-- `new`: linhagens públicas e listáveis mais novas, consulta ao vivo.
-- `favorites` / `installs`: o ranking materializado da janela.
+- `new`: linhagens públicas e listáveis mais novas, consulta ao vivo. Nunca traz head YOLO.
+- `favorites` / `installs`: o ranking materializado da janela (também sem YOLO).
+- `yolo=only`: só as linhagens públicas cujo head é YOLO reconhecido pelo dono, mais novas
+  primeiro; só com `sort=new` (um sort ranqueado com `yolo=only` é 400 `INVALID_BODY`, `path` =
+  `sort`). As duas listas nunca se misturam.
+
+Cada `FeedLineageCard.curve` traz `yolo` (booleano).
 
 Resposta 200, cache de 60 s com ETag:
 
@@ -251,11 +258,23 @@ do gate e não cria linha em `curves`. Um fork sem envelope explícito copia os 
 origem. Rótulos não entram na imagem OG, nos cartões de lista e feed, no link `#p=` nem na troca às
 cegas antes da revelação.
 
-- 201 `{ lineageId, versionId, curveId }`. Pública ou não listada aquece a imagem OG em segundo
-  plano.
-- 400 `INVALID_BODY`; 422 `INVALID_CURVE` (`details.codes`); 422 `GATE_REJECTED`
-  (`details.reasons`); 429 `QUOTA_EXCEEDED` com `retry-after` até o fim do dia UTC para publicações
-  ou até liberar a janela móvel para tentativas de gate (`details.limit` = 30 ou 60).
+**Classe da curva (migração 0013).** O servidor deriva a classe, nunca o cliente: `standard` (o
+gate padrão aceita; HS, LP e HP são aceitos, com `experimental` derivado da própria curva), `yolo`
+(o padrão recusa só por motivos dispensáveis e o perfil YOLO aceita) ou reprovada (422
+`GATE_REJECTED`, `details.reasons` e `details.hard` com os códigos que bloqueiam em qualquer
+perfil). Uma curva YOLO sempre pode ser salva como privada. Para deixá-la visível a terceiros
+(`unlisted` ou `public`, nesta rota e em versão, fork, visibilidade e restauração), nesta ordem:
+`YOLO_PUBLICATION` = `on` (padrão `off`: 403 `YOLO_PUBLICATION_OFF`); conta com pelo menos 72 h
+(403 `FORBIDDEN`, `details.reason` = `"account-age"`); `"acknowledge": "yolo"` no corpo (409
+`YOLO_ACK_REQUIRED` com `details.waived`, os códigos dispensados); e no máximo 5 reconhecimentos
+por 24 h móveis (429 `QUOTA_EXCEEDED`). O reconhecimento é gravado no mesmo lote da escrita.
+
+- 201 `{ lineageId, versionId, curveId, yolo }`. Pública ou não listada aquece a imagem OG em
+  segundo plano.
+- 400 `INVALID_BODY`; 403 `YOLO_PUBLICATION_OFF` / `FORBIDDEN`; 409 `YOLO_ACK_REQUIRED`; 422
+  `INVALID_CURVE` (`details.codes`); 422 `GATE_REJECTED` (`details.reasons`, `details.hard`); 429
+  `QUOTA_EXCEEDED` com `retry-after` até o fim do dia UTC para publicações ou até liberar a janela
+  móvel para tentativas de gate ou reconhecimentos YOLO (`details.limit` = 30, 60 ou 5).
 
 ### `GET /api/v1/curves/:id?v=<versionId>`
 
@@ -265,8 +284,10 @@ desatualizado, depois relê a visibilidade; reprovação atual impede leitura po
 
 - 200 com a linhagem, a versão pedida (com `labels`: os rótulos de filtro ou `null`; o
   histórico também os traz por versão), a curva, as contagens públicas (`favorites`, `previewed`,
-  `installed`) e o crédito do autor. Sem sessão: cache de 60 s com ETag; com sessão:
-  `private, no-store`.
+  `installed`) e o crédito do autor. `curve.gate.ok` continua significando "padrão";
+  `curve.yolo` e `curve.waived` dizem se a curva é YOLO e o que foi dispensado. Terceiros só leem
+  um head (ou versão) YOLO que o dono reconheceu nessa linhagem. Sem sessão: cache de 60 s com
+  ETag; com sessão: `private, no-store`.
 - 404 `NOT_FOUND` (inexistente, privada de outra pessoa ou moderada); 410 `GONE` (retirada, para
   quem não é o dono).
 
@@ -277,23 +298,26 @@ em `GET /api/v1/curves/:id`.
 
 ### `POST /api/v1/lineages/:id/versions`
 
-Dono, verificado; corpo até 32 KiB: `{ "parentVersionId": "<head atual>", "envelope": { … } }`.
-Usa as mesmas cotas de 30 publicações/dia UTC e 60 tentativas de gate/24 h da publicação.
+Dono, verificado; corpo até 32 KiB: `{ "parentVersionId": "<head atual>", "envelope": { … },
+"acknowledge"?: "yolo" }`. Usa as mesmas cotas de 30 publicações/dia UTC e 60 tentativas de
+gate/24 h da publicação. Uma versão YOLO numa linhagem não privada segue as regras YOLO acima.
 
-- 201 `{ lineageId, versionId, curveId }`.
+- 201 `{ lineageId, versionId, curveId, yolo }`.
 - 404 (não é dono ou não existe); 409 `HEAD_MOVED` (o pai não é mais o head: recarregue e
   reaplique); 409 `CONFLICT` (linhagem retirada); 422 `INVALID_CURVE` / `GATE_REJECTED`; 429
   `QUOTA_EXCEEDED`.
 
 ### `POST /api/v1/lineages/:id/fork`
 
-Verificado; corpo até 32 KiB: `{ "versionId"?: "…", "visibility"?: "private", "envelope"?: { … } }`.
-`{}` copia o head; a visibilidade padrão é privada. A origem precisa ser legível pela sessão. O
+Verificado; corpo até 32 KiB: `{ "versionId"?: "…", "visibility"?: "private", "envelope"?: { … },
+"acknowledge"?: "yolo" }`. `{}` copia o head (no menor formato S5: `@2` com rótulos ou banda acima
+de 20 kHz); a visibilidade padrão é privada; um fork YOLO não privado segue as regras YOLO acima.
+A origem precisa ser legível pela sessão. O
 envelope novo, se enviado, passa pelo mesmo caminho de publicação. A cópia sem envelope também
 é validada e passa pela etapa de gate, com as mesmas cotas de 30 publicações/dia UTC e 60
 tentativas/24 h.
 
-- 201 `{ lineageId, versionId, curveId, forkedFrom: { lineageId, versionId }, attribution }`.
+- 201 `{ lineageId, versionId, curveId, yolo, forkedFrom: { lineageId, versionId }, attribution }`.
   `attribution` traz licença, linhagem, versão, nome e autor quando a origem é CC-BY 4.0 (crédito
   obrigatório); `null` para CC0.
 - 404; 410 `GONE` (origem retirada); 422; 429 `QUOTA_EXCEEDED`.
@@ -306,13 +330,17 @@ das listas e responde 410 a quem não é o dono. 200 com o estado
 
 ### `POST /api/v1/lineages/:id/restore`
 
-Dono, verificado; sem corpo. Desfaz a lápide; a moderação não muda. O head é reavaliado no gate
-antes de voltar a aparecer. 200 com o estado; 404; 422 `GATE_REJECTED`.
+Dono, verificado; sem corpo, ou `{ "acknowledge": "yolo" }` (JSON). Desfaz a lápide; a moderação
+não muda. O head é reavaliado no gate antes de voltar a aparecer; um head YOLO numa linhagem não
+privada segue as regras YOLO. 200 com o estado; 404; 403 `YOLO_PUBLICATION_OFF` / `FORBIDDEN`; 409
+`YOLO_ACK_REQUIRED`; 422 `GATE_REJECTED`; 429 `QUOTA_EXCEEDED`.
 
 ### `PUT /api/v1/lineages/:id/visibility`
 
-Dono, verificado; corpo `{ "visibility": "private" | "unlisted" | "public" }`. Abrir a linhagem
-reavalia o head no gate. 200 com o estado; 404; 409 `CONFLICT`; 422 `GATE_REJECTED`.
+Dono, verificado; corpo `{ "visibility": "private" | "unlisted" | "public", "acknowledge"?: "yolo" }`.
+Abrir a linhagem reavalia o head no gate; um head YOLO segue as regras YOLO. 200 com o estado; 404;
+403 `YOLO_PUBLICATION_OFF` / `FORBIDDEN`; 409 `CONFLICT` / `YOLO_ACK_REQUIRED`; 422
+`GATE_REJECTED`; 429 `QUOTA_EXCEEDED`.
 
 ## Favoritos, atividade e público
 
@@ -398,7 +426,8 @@ Logado. Query: `shelf` ∈ `created` | `favorites` | `installed` (obrigatório);
 (filtra só `created`); `cursor` (até 512 caracteres); `limit` (1 a 100).
 200 `{ shelf, items, nextCursor }`; 400 `INVALID_BODY` com `details.issues`; 400
 `INVALID_CURSOR`. O `head` de cada item traz `labels` (rótulos de filtro da versão head ou
-`null`), para carregar a curva no editor e renomear sem perder os rótulos.
+`null`), para carregar a curva no editor e renomear sem perder os rótulos. `curve` traz `gateOk`
+(padrão), `yolo` e `waived` (códigos dispensados, `[]` fora do YOLO).
 
 ### `GET /api/v1/me/packs`
 
@@ -418,7 +447,10 @@ linhagem. 400 `INVALID_BODY` com `details.issues`; 400 `INVALID_CURSOR`.
 
 ### `POST /api/v1/me/library/merge`
 
-Mescla a biblioteca local (anônima) do navegador na conta, sem duplicar. Verificado; corpo até
+Mescla a biblioteca local (anônima) do navegador na conta, sem duplicar. As linhagens criadas são
+privadas, então uma curva YOLO entra sem reconhecimento (`created[].yolo` = `true`); uma
+classificação que rodou o perfil YOLO conta 2 no limite de execuções do gate por pedido.
+Verificado; corpo até
 1 MiB: `{ "items": [{ "localId", "s1", "name", "description"?, "lang"?, "license"?, "labels"? }] }`,
 de 1 a 100 itens com `localId` distintos. Itens novos passam pela validação e pelo gate; os criados
 viram linhagens privadas. Duplicatas e conflitos de nome são identificados sem criar outra linhagem.

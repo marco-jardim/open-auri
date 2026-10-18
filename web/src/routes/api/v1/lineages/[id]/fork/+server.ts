@@ -1,6 +1,7 @@
 // POST /api/v1/lineages/[id]/fork (T4.2): verified users fork a version they can read into a new
-// lineage (private by default). Body: `{ versionId?, visibility?, envelope? }` (`{}` copies the
-// head). A public or unlisted fork warms its OG image in the background (T4.12, `waitUntil`).
+// lineage (private by default). Body: `{ versionId?, visibility?, envelope?, acknowledge? }` (`{}`
+// copies the head; `acknowledge: 'yolo'` opens a YOLO fork to others). A public or unlisted fork
+// warms its OG image in the background (T4.12, `waitUntil`).
 import { defineApi, json, readJson } from '#lib/server/api/index.ts';
 import { scheduleOgWarm } from '#lib/server/og/warm.ts';
 import {
@@ -25,7 +26,8 @@ export const POST: RequestHandler = defineApi(
 				: { onPublished: (info) => void scheduleOgWarm(event, info) };
 		const forked = await forkCurve(env.db, user.id, event.params.id ?? '', body, {
 			...deps,
-			metrics: env.metrics
+			metrics: env.metrics,
+			yoloPublication: env.yoloPublication
 		});
 		return json(forked, { status: 201 });
 	}

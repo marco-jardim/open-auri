@@ -109,7 +109,9 @@ const API_CODES: Readonly<Record<ApiErrorCode, true>> = {
 	DUPLICATE: true,
 	GONE: true,
 	QUOTA_EXCEEDED: true,
-	CONSENT_REQUIRED: true
+	CONSENT_REQUIRED: true,
+	YOLO_ACK_REQUIRED: true,
+	YOLO_PUBLICATION_OFF: true
 };
 
 /** `NETWORK`: the request never got an answer; `OFFLINE`: same, and the browser reports offline. */

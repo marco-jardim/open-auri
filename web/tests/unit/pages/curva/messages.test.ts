@@ -45,7 +45,7 @@ describe('Curva messages', () => {
 	});
 
 	test('every gate reason code has a plain-language message in both locales', () => {
-		expect(REASON_CODES).toHaveLength(16);
+		expect(REASON_CODES).toHaveLength(19);
 		for (const code of REASON_CODES) {
 			const key = REASON_MESSAGE_KEYS[code];
 			expect(pt[key], key).toBeTruthy();

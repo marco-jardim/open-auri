@@ -51,7 +51,9 @@ describe('Experimentos: curated experimental curves', () => {
 		for (const x of EXPERIMENTS) {
 			expect(x.bands, x.id).toHaveLength(10);
 			expect(x.labels, x.id).toHaveLength(10);
-			expect(Object.isFrozen(x) && Object.isFrozen(x.bands) && Object.isFrozen(x.labels)).toBe(true);
+			expect(Object.isFrozen(x) && Object.isFrozen(x.bands) && Object.isFrozen(x.labels)).toBe(
+				true
+			);
 			expect(getExperiment(x.id)).toBe(x);
 		}
 		expect(getExperiment('nope')).toBeNull();
@@ -79,7 +81,11 @@ describe('Experimentos: curated experimental curves', () => {
 			});
 			expect(normalizeLabels(x.labels), x.id).toEqual(x.labels);
 		}
-		expect(experiment('notch-60').labels.slice(0, 3)).toEqual(['Notch 60', 'Notch 120', 'Notch 180']);
+		expect(experiment('notch-60').labels.slice(0, 3)).toEqual([
+			'Notch 60',
+			'Notch 120',
+			'Notch 180'
+		]);
 		expect(experiment('subsonica').labels[0]).toBe('HP 30');
 	});
 
@@ -100,7 +106,10 @@ describe('Experimentos: curated experimental curves', () => {
 			expect(experimentStatus(x).standard.ok, x.id).toBe(standard.ok);
 			if (requiresYolo(x)) {
 				// Only class-2 (waivable) reasons stop it in the standard profile.
-				expect(codes(standard).every((code) => isWaivable(code)), x.id).toBe(true);
+				expect(
+					codes(standard).every((code) => isWaivable(code)),
+					x.id
+				).toBe(true);
 				expect(yolo.waived?.length ?? 0, x.id).toBeGreaterThan(0);
 			} else {
 				expect(standard.ok, `${x.id}: ${JSON.stringify(standard.reasons)}`).toBe(true);
@@ -251,6 +260,7 @@ describe('Experimentos: curated experimental curves', () => {
 		// Not even YOLO takes it: the output would reach 0 dB.
 		const yolo = decideExperiment(loud, { layer: 'engenharia', yoloOn: true });
 		expect(yolo.ok).toBe(false);
-		if (!yolo.ok && yolo.reason === 'gate') expect(codes(yolo.verdict)).toContain('e:output-audible');
+		if (!yolo.ok && yolo.reason === 'gate')
+			expect(codes(yolo.verdict)).toContain('e:output-audible');
 	});
 });

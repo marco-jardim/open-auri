@@ -94,7 +94,12 @@ test('each lever is bound to exactly one confirmation and only GRAVAR writes, wi
 	expect(write.mock.calls[0][0]).toMatchObject({
 		bands: NEUTRO.bands,
 		preampDb: NEUTRO.preampDb,
-		confirmations: { volumeLowered: true, keepConnected: true, experimental: false, yoloWrite: false },
+		confirmations: {
+			volumeLowered: true,
+			keepConnected: true,
+			experimental: false,
+			yoloWrite: false
+		},
 		gesture: { kind: 'cable-gesture' }
 	});
 	// Every write needs fresh levers.

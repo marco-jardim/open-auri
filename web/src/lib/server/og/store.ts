@@ -12,7 +12,7 @@ import { strongEtag } from '#lib/server/api/cache.ts';
 import type { ServerEnv } from '#lib/server/env.ts';
 import { readCurrentVersion, type PublicReadDeps } from '#lib/server/social/shares.ts';
 import { ANONYMOUS_VIEWER } from '#lib/server/social/types.ts';
-import { isCurrentCard, OG_CARD_VERSION, ogKey } from './keys.ts';
+import { isCurrentCard, OG_CARD_VERSION, ogKey, yoloFlag } from './keys.ts';
 import { loadOgFonts, renderPng, toArrayBuffer, type OgAssets } from './render.ts';
 import { ogSvg } from './svg.ts';
 
@@ -83,9 +83,11 @@ export async function getOrCreateOg(
 	);
 	if (!view) return { ok: false, code: 'not-found' };
 	const key = ogKey(view.curve.id, view.version.id);
+	// A YOLO curve (acknowledged by its owner, or it would not be linkable) gets the YOLO chip.
+	const yolo = view.curve.gateYolo;
 
 	const stored = await env.media.get(key);
-	if (stored && isCurrentCard(stored.customMetadata)) {
+	if (stored && isCurrentCard(stored.customMetadata, yolo)) {
 		const body = await stored.arrayBuffer();
 		const etag = stored.customMetadata?.etag ?? (await strongEtag(body));
 		return { ok: true, key, body, etag, source: 'r2' };
@@ -98,7 +100,8 @@ export async function getOrCreateOg(
 		name: view.version.name,
 		license: view.version.license,
 		s1: view.curve.s1,
-		lang: view.version.lang
+		lang: view.version.lang,
+		yolo
 	});
 	const body = toArrayBuffer(await (deps.render ?? defaultRender(env))(svg));
 	const etag = await strongEtag(body);
@@ -106,7 +109,7 @@ export async function getOrCreateOg(
 		env.media
 			.put(key, body, {
 				httpMetadata: { contentType: OG_CONTENT_TYPE, cacheControl: OG_CACHE_CONTROL },
-				customMetadata: { etag, card: OG_CARD_VERSION }
+				customMetadata: { etag, card: OG_CARD_VERSION, yolo: yoloFlag(yolo) }
 			})
 			.then(
 				() => undefined,

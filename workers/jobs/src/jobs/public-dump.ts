@@ -14,7 +14,12 @@
 // itself in the dump. The `readme` field explains the licenses. A version with filter labels
 // (open-auri/preset@2, migration 0012) carries them as `labels` (ten entries by wire index of its
 // S1, null = automatic name); the field is additive and absent otherwise, so `formatVersion`
-// stays 1.
+// stays 1. Curves are S1 strings as stored (S1 v1 or v2, bands up to 32 kHz); nothing here decodes
+// them.
+//
+// YOLO (migration 0013) stays OUT of the dump for now: `publicLineageSql` needs a STANDARD head
+// (`gate_ok = 1`), and only versions whose own curve is standard are exported, so neither a YOLO
+// lineage nor an older YOLO version of a standard lineage is ever in it.
 //
 // Idempotent: a re-run on the same day overwrites the same two objects. Logs carry counts only.
 import { countedUserSql, publicLineageSql } from '../../../../web/src/lib/server/social/repo.ts';
