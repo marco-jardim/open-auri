@@ -1,7 +1,7 @@
 <!--
 	Filter bank (Ajustar and Engenharia, mock v2 .bank): 10 strips in written order, each with
-	- a rotary kind switch (PK, LS, OFF; HS, LP and HP engraved and locked outside Engenharia). The
-	  native select is the control, laid over the switch, so keyboard and screen readers keep it;
+	- a click-stepped rotary kind switch (PK, LS, OFF; HS, LP and HP engraved and locked outside
+	  Engenharia), with keyboard stepping and a hover/focus legend;
 	- CORTE and REFORÇO lamps (the sign of the band's real gain) and a mini response of the section;
 	- FREQ, GANHO and Q knobs with LCD fields. Typing goes through the same gate-bounded move as the
 	  handles (stop at the boundary, round, revalidate). Dragging a knob (up or down) previews the
@@ -25,7 +25,8 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { criteria, criterionName } from './envelope.ts';
 	import { formatSignedDb } from './format.ts';
-	import { isLockedKind, kindsForLayer, type Layer } from './layers.ts';
+	import KindDial from './KindDial.svelte';
+	import { isLockedKind, type Layer } from './layers.ts';
 	import { miniPath } from './mini.ts';
 	import {
 		bandValue,
@@ -75,7 +76,6 @@
 	}: Props = $props();
 
 	const headingId = $props.id();
-	const options = $derived(['OFF', ...kindsForLayer(layer).filter((kind) => kind !== 'OFF')]);
 	const stageMode = $derived(stages.some((stage) => stage.mode === 'live') ? 'live' : 'data');
 	const rows = $derived(criteria(verdict, locale));
 	// The note's own word "gate" (both locales say it) is the gate explainer; no text is added.
@@ -91,16 +91,6 @@
 		};
 	});
 
-	// Rotary kind switch: where each position sits (degrees from 12 o'clock).
-	const SWITCH: readonly { kind: BandKind; angle: number }[] = [
-		{ kind: 'PK', angle: -60 },
-		{ kind: 'LS', angle: 0 },
-		{ kind: 'OFF', angle: 60 },
-		{ kind: 'HS', angle: 120 },
-		{ kind: 'LP', angle: 180 },
-		{ kind: 'HP', angle: -120 }
-	];
-	const switchAngle = (kind: BandKind) => SWITCH.find((s) => s.kind === kind)?.angle ?? 60;
 	const at = (angle: number, radius: number) => {
 		const a = (angle * Math.PI) / 180;
 		return { x: radius * Math.sin(a), y: -radius * Math.cos(a) };
@@ -187,10 +177,6 @@
 		};
 	}
 
-	function kindName(kind: string): string {
-		if (kind === 'OFF') return m.curva_kind_off();
-		return isExperimentalKind(kind) ? `${kind} · ${m.curva_exp_badge()}` : kind;
-	}
 	function prefixPeak(index: number): number | null {
 		return verdict.metrics.prefixAudible?.find((peak) => peak.stage === index + 1)?.db ?? null;
 	}
@@ -206,9 +192,6 @@
 		if (current !== null) input.valueAsNumber = current;
 		if (!Number.isFinite(value)) return;
 		onmove(index, { [param]: value });
-	}
-	function isKind(value: string): value is BandKind {
-		return ['OFF', 'PK', 'LS', 'HS', 'LP', 'HP'].includes(value);
 	}
 	/** Real sign of the band: a cut (negative gain, LP, HP) or a boost (positive gain). */
 	function sign(band: Band): { cut: boolean; boost: boolean } {
@@ -295,43 +278,12 @@
 							<span class="badge">{m.curva_exp_badge()}</span>
 						{/if}
 					</div>
-					<label class="kind">
-						<span class="sr-only">{m.curva_kind()}</span>
-						<span class="switch" aria-hidden="true">
-							<svg viewBox="-46 -34 92 68">
-								{#each SWITCH as stop (stop.kind)}
-									{@const p = at(stop.angle, 25)}
-									<text
-										class="sw-label"
-										class:on={band.kind === stop.kind}
-										class:dim={stop.kind !== 'OFF' && isLockedKind(stop.kind, layer)}
-										x={p.x}
-										y={p.y + 3}>{stop.kind}</text
-									>
-								{/each}
-								<circle r="12" class="sw-skirt" />
-								<g class="sw-cap" style:--turn={`${switchAngle(band.kind)}deg`}>
-									<line x1="0" y1="-11" x2="0" y2="-3" class="sw-index" />
-								</g>
-							</svg>
-						</span>
-						<select
-							value={band.kind}
-							disabled={locked}
-							onchange={(event) => {
-								const select = event.currentTarget;
-								if (isKind(select.value)) onkind(index, select.value);
-								select.value = curve.bands[index]?.kind ?? 'OFF';
-							}}
-						>
-							{#if locked}
-								<option value={band.kind}>{kindName(band.kind)}</option>
-							{/if}
-							{#each options as kind (kind)}
-								<option value={kind}>{kindName(kind)}</option>
-							{/each}
-						</select>
-					</label>
+					<KindDial
+						kind={band.kind}
+						{layer}
+						disabledReason={locked ? m.curva_exp_hint() : null}
+						onkind={(kind) => onkind(index, kind)}
+					/>
 					<div class="signs">
 						<span class="sign"><Lamp on={lamps.cut} />{m.curva_v2_cut()}</span>
 						<span class="sign"><Lamp on={lamps.boost} />{m.curva_v2_boost()}</span>
@@ -619,61 +571,6 @@
 		font: 500 var(--label-min) / 1.3 var(--face-data);
 		letter-spacing: 0.08em;
 	}
-	.kind {
-		position: relative;
-		display: block;
-		width: 92px;
-		height: 68px;
-	}
-	.switch svg {
-		display: block;
-		width: 92px;
-		height: 68px;
-	}
-	.sw-label {
-		fill: var(--text-2);
-		font: 600 10px var(--face-engrave);
-		letter-spacing: 0.06em;
-		text-anchor: middle;
-	}
-	.sw-label.dim {
-		fill-opacity: 0.45;
-	}
-	.sw-label.on {
-		fill: var(--accent);
-		fill-opacity: 1;
-	}
-	.sw-skirt {
-		fill: #0d0d0d;
-		stroke: #000;
-	}
-	.sw-cap {
-		transform: rotate(var(--turn));
-		transition: transform var(--dur-base) var(--ease-mech);
-	}
-	.sw-index {
-		stroke: var(--text);
-		stroke-width: 2.6;
-		stroke-linecap: round;
-	}
-	/* The native select is the switch's control: invisible, over the whole switch. */
-	.kind select {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-		opacity: 0;
-		cursor: pointer;
-	}
-	.kind select:disabled {
-		cursor: not-allowed;
-	}
-	.kind:has(select:focus-visible) .switch {
-		display: block;
-		border-radius: var(--rad-md);
-		outline: var(--focus-width) solid var(--accent);
-		outline-offset: 1px;
-	}
 	/* CORTE / REFORÇO wrap onto two lines in a narrow strip instead of pushing it wider. */
 	.signs {
 		max-width: 100%;
@@ -906,7 +803,6 @@
 		white-space: nowrap;
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.sw-cap,
 		.kcap {
 			transition: none;
 		}

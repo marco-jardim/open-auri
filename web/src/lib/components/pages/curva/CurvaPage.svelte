@@ -6,8 +6,11 @@
 	- Writing is only ever `app.requestWrite()` / `app.requestRescue()` (layout checklist).
 	- Works without `app` (SSR, before mount): renders Neutro read-only, `aria-busy`, and every
 	  action says it is still loading.
-	- Rack (mock v2): the scope runs across the top beside the output; presets, fine adjust and
-	  rescue sit under it, each engraved with its name under the content.
+	- Rack (mock v2), each panel engraved with its name under the content. Ouvir: the scope runs
+	  across the top beside the output; presets, fine adjust and rescue sit under it. Ajustar and
+	  Engenharia (desktop): the filter bank hangs right under the scope and the side column (output,
+	  presets as a list, fine adjust, rescue) rides along it, sticky. Narrower screens stack the
+	  scope, the bank, then the side panels, in DOM (keyboard) order.
 	- Loading: the account panel (SocialActions) is a dynamic import, fetched when it comes into
 	  view, on idle, or at once for a community link; the gate worker warms on idle after the first
 	  paint; the audio engine warms on the preview lever's pointer or key down.
@@ -817,76 +820,80 @@
 				onpreviewwarm={onPreviewWarm}
 				onside={(side) => preview?.select(side)}
 			/>
-			<OutputPanel
-				{curve}
-				{verdict}
-				{locale}
-				mode={preview?.playing ? preview.vu.mode : 'data'}
-				frame={preview?.playing ? preview.vu.frame : null}
-				side={preview?.side ?? 'B'}
-				onmaxclip={onMaxClip}
-				{maxClipMessage}
-				disabled={!app}
-				disabledReason={loadingReason}
-			/>
-			<PresetTabs
-				activeId={activePreset}
-				{locale}
-				onload={(id) => loaded(app?.state.curve.loadPreset(id))}
-			/>
-			<MacroKnobs
-				values={shownMacros}
-				scopes={macroScopes}
-				{locale}
-				disabled={!app}
-				message={macroMessage}
-				stopped={macroStopped}
-				onchange={onMacro}
-			/>
-			<RescuePanel
-				unsaved={app?.state.curve.unsaved ?? false}
-				canUndo={app?.state.curve.canUndo ?? false}
-				canRedo={app?.state.curve.canRedo ?? false}
-				journalCount={app?.state.journal.entries.length ?? 0}
-				disabled={!app}
-				disabledReason={loadingReason}
-				writeDisabled={app?.cableState.writing ?? true}
-				neutralActive={activePreset === NEUTRO.id}
-				defaultActive={activePreset === PADRAO_AURI.id}
-				onneutral={() => loaded(app?.loadNeutral())}
-				ondefault={() => loaded(app?.loadAuriDefault())}
-				onrescue={() => app?.requestRescue()}
-				onundo={() => app?.state.curve.undo()}
-				onredo={() => app?.state.curve.redo()}
-				onwrite={() => app?.requestWrite()}
-			/>
+			<!-- Ajustar and Engenharia: the bank hangs right under the scope, inside the rack. -->
+			{#if includesLayer(layer, 'ajustar')}
+				<div class="layer-block bank-slot" transition:slide={{ duration: motionMs }}>
+					<Deferred module={filterBank} height="560px">
+						{#snippet children(FilterBank)}
+							<FilterBank
+								{curve}
+								{verdict}
+								{layer}
+								{locale}
+								{selected}
+								stages={preview?.stages ?? idleStages}
+								message={bankMessage}
+								ondrag={onDrag}
+								onmove={onBankMove}
+								onkind={onKind}
+								onorder={onDefaultOrder}
+							/>
+						{/snippet}
+					</Deferred>
+				</div>
+			{/if}
+			<!-- Output, presets, fine adjust and rescue: one sticky column beside the bank (desktop),
+			     rack cells everywhere else (see `.side`). -->
+			<div class="side">
+				<OutputPanel
+					{curve}
+					{verdict}
+					{locale}
+					mode={preview?.playing ? preview.vu.mode : 'data'}
+					frame={preview?.playing ? preview.vu.frame : null}
+					side={preview?.side ?? 'B'}
+					onmaxclip={onMaxClip}
+					{maxClipMessage}
+					disabled={!app}
+					disabledReason={loadingReason}
+				/>
+				<PresetTabs
+					activeId={activePreset}
+					{locale}
+					onload={(id) => loaded(app?.state.curve.loadPreset(id))}
+				/>
+				<MacroKnobs
+					values={shownMacros}
+					scopes={macroScopes}
+					{locale}
+					disabled={!app}
+					message={macroMessage}
+					stopped={macroStopped}
+					onchange={onMacro}
+				/>
+				<RescuePanel
+					unsaved={app?.state.curve.unsaved ?? false}
+					canUndo={app?.state.curve.canUndo ?? false}
+					canRedo={app?.state.curve.canRedo ?? false}
+					journalCount={app?.state.journal.entries.length ?? 0}
+					disabled={!app}
+					disabledReason={loadingReason}
+					writeDisabled={app?.cableState.writing ?? true}
+					neutralActive={activePreset === NEUTRO.id}
+					defaultActive={activePreset === PADRAO_AURI.id}
+					onneutral={() => loaded(app?.loadNeutral())}
+					ondefault={() => loaded(app?.loadAuriDefault())}
+					onrescue={() => app?.requestRescue()}
+					onundo={() => app?.state.curve.undo()}
+					onredo={() => app?.state.curve.redo()}
+					onwrite={() => app?.requestWrite()}
+				/>
+			</div>
 		</div>
 		<div class="cheek r" aria-hidden="true"></div>
 	</div>
 	{#if !app}
 		<p class="visually-hidden" role="status">{m.curva_v2_loading()}</p>
-	{/if}
-
-	{#if includesLayer(layer, 'ajustar')}
-		<div class="layer-block" transition:slide={{ duration: motionMs }}>
-			<Deferred module={filterBank} height="560px">
-				{#snippet children(FilterBank)}
-					<FilterBank
-						{curve}
-						{verdict}
-						{layer}
-						{locale}
-						{selected}
-						stages={preview?.stages ?? idleStages}
-						message={bankMessage}
-						ondrag={onDrag}
-						onmove={onBankMove}
-						onkind={onKind}
-						onorder={onDefaultOrder}
-					/>
-				{/snippet}
-			</Deferred>
-		</div>
 	{/if}
 
 	{#if layer === 'engenharia'}
@@ -976,6 +983,8 @@
 			linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 30%),
 			linear-gradient(#2e2d2b, #1f1e1c);
 		--curva-wood: linear-gradient(90deg, #26140a, #5b351c 30%, #4b2b16 62%, #22120a);
+		/* Width of the side column beside the filter bank (desktop): two fine-adjust knobs across. */
+		--curva-side: clamp(264px, 20vw, 304px);
 		/* FUX.ART: the art layer (first child) sits under the content inside this context. */
 		position: relative;
 		isolation: isolate;
@@ -1060,8 +1069,9 @@
 		border-radius: 0 var(--rad-lg) var(--rad-lg) 0;
 		box-shadow: inset 2px 0 4px rgb(0 0 0 / 0.5);
 	}
-	/* The rack (mock v2, Ajustar geometry for every layer): the scope runs almost the full width
-	   beside the output; presets, fine adjust and rescue sit under it. */
+	/* The rack (mock v2). Without the bank (Ouvir): the scope runs almost the full width beside the
+	   output; presets (a wide strip), fine adjust and rescue sit under it. With the bank, see the
+	   media blocks below. */
 	.rack {
 		display: grid;
 		grid-template-columns: minmax(280px, 1.15fr) minmax(0, 1fr) minmax(0, 0.95fr) 204px;
@@ -1097,6 +1107,68 @@
 	.rack :global(.ps-res) {
 		grid-area: res;
 		box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
+	}
+	/* The side panels' wrapper lends them to the rack grid; only beside the bank on desktop is it
+	   a box of its own. A plain div with no role, so `display: contents` hides nothing. */
+	.side {
+		display: contents;
+	}
+	/* The filter bank, under the scope inside the rack; its edges line up with the scope bezel.
+	   The layouts below place it in their `bank` area; a full row is only the safe fallback. */
+	.bank-slot {
+		grid-column: 1 / -1;
+		align-self: start;
+		container: curva-bank / inline-size;
+		padding: 0 var(--space-4);
+	}
+	/* The bank lays out its header by the viewport (two columns above 1100 px). Beside the side
+	   column it is narrower than that, so the slot's width picks its stacked header instead (the
+	   same geometry the bank uses up to 1100 px). Layout only; nothing inside the modules. */
+	@container curva-bank (max-width: 860px) {
+		.bank-slot :global(.bank-head) {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.bank-slot :global(.gaterow) {
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+		}
+	}
+	/* Desktop with the bank (Ajustar, Engenharia): the scope and the bank fill the main column and
+	   the side panels ride along them in one column, sticky under the bar, so presets and the fine
+	   knobs stay at hand while the bank is in use. Taller than the viewport, the column scrolls
+	   inside (popovers and tooltips sit in the top layer, so nothing is clipped). */
+	@media (min-width: 1101px) {
+		.rack:has(> .bank-slot) {
+			grid-template-columns: minmax(0, 1fr) var(--curva-side);
+			grid-template-rows: auto 1fr;
+			grid-template-areas:
+				'scope side'
+				'bank side';
+		}
+		.bank-slot {
+			grid-area: bank;
+		}
+		.rack:has(> .bank-slot) > .side {
+			grid-area: side;
+			position: sticky;
+			top: calc(var(--bar-h) + var(--space-4));
+			align-self: start;
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-5);
+			max-height: calc(100dvh - var(--bar-h) - 2 * var(--space-4));
+			/* Room for the focus rings and the tour outline inside the scroll box. */
+			padding: var(--space-2);
+			overflow-y: auto;
+			scrollbar-gutter: stable;
+			scrollbar-width: thin;
+			scrollbar-color: var(--rule-control) transparent;
+			box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
+		}
+		.rack:has(> .bank-slot) > .side > :global(.psec) {
+			flex: none;
+			padding: 0 var(--space-3);
+			box-shadow: none;
+		}
 	}
 	/* Engraved section names: centred under the content, on a rule (mock .legend-bar). The rule
 	   sits a fixed distance below the content; `margin-top: auto` aligns the names of a row. */
@@ -1212,16 +1284,33 @@
 			grid-column: 1 / 3;
 		}
 	}
+	/* Tablet: the scope, the bank (Ajustar, Engenharia), then output beside the presets and the fine
+	   knobs beside rescue. Rows read left to right in DOM (keyboard) order. The phone block below
+	   overrides this one (no width gap between the two). */
 	@media (max-width: 1100px) {
 		.rack {
-			grid-template-columns: minmax(0, 1fr) 204px;
+			grid-template-columns: 204px minmax(0, 1fr) 204px;
 			grid-template-areas:
-				'scope scope'
-				'pre out'
-				'mac res';
+				'scope scope scope'
+				'out pre pre'
+				'mac mac res';
 		}
+		.rack:has(> .bank-slot) {
+			grid-template-areas:
+				'scope scope scope'
+				'bank bank bank'
+				'out pre pre'
+				'mac mac res';
+		}
+		.bank-slot {
+			grid-area: bank;
+		}
+		.rack :global(.ps-out),
 		.rack :global(.ps-mac) {
 			box-shadow: none;
+		}
+		.rack :global(.ps-pre) {
+			box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
 		}
 		.below,
 		.lower {
@@ -1248,15 +1337,26 @@
 		.instrument {
 			grid-template-columns: 10px minmax(0, 1fr) 10px;
 		}
-		.rack {
+		/* Phone: one column in DOM order (scope, bank, output, presets, fine adjust, rescue). */
+		.rack,
+		.rack:has(> .bank-slot) {
 			grid-template-columns: minmax(0, 1fr);
-			grid-template-areas: 'scope' 'out' 'pre' 'mac' 'res';
+			grid-template-areas: none;
+		}
+		.rack {
 			padding: var(--space-3) 0;
 		}
 		.rack :global(.psec) {
+			grid-area: auto;
 			padding: 0 var(--space-3);
 		}
-		.rack :global(.psec + .psec) {
+		/* The bank card spans the rack (its own padding lines its content up with the panels'). */
+		.bank-slot {
+			grid-area: auto;
+			padding: 0;
+		}
+		.rack :global(.psec + .psec),
+		.side > :global(.psec:first-child) {
 			padding-top: var(--space-3);
 			border-top: 1px solid var(--rule);
 			box-shadow: none;

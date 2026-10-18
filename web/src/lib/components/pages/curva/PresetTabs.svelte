@@ -4,6 +4,9 @@
 	under the cards says "name · description", then credit, licence, preamp and CRC (catalog data,
 	Kuba's descriptions; licence still to be confirmed). Loading a preset only changes the editor;
 	nothing is written. The lamp lights on the preset the editor holds unedited (real state).
+	Presentation follows the panel's own width (container query): a strip of cards where there is
+	room, a compact list (one row per preset: lamp, name, mini curve) in a narrow column such as the
+	side rack beside the filter bank or a phone. Same buttons, groups and order either way.
 -->
 <script lang="ts">
 	import { presetsByGroup, type OFFICIAL_PRESETS } from 'open-auri/catalog';
@@ -84,6 +87,9 @@
 </section>
 
 <style>
+	.ps-pre {
+		container: curva-presets / inline-size;
+	}
 	.tabs-cap {
 		display: flex;
 		gap: var(--space-2);
@@ -190,6 +196,26 @@
 	.desc small {
 		color: var(--text-2);
 		font: 400 var(--label-min) / var(--lh-small) var(--face-data);
+	}
+	/* Narrow column: a vertical list, one key per row with the mini curve beside the name. */
+	@container curva-presets (max-width: 360px) {
+		.tabs {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 4px;
+		}
+		.tab {
+			grid-template-columns: 10px minmax(0, 1fr) minmax(64px, 42%);
+			grid-template-rows: auto;
+			column-gap: var(--space-2);
+			min-height: var(--hit);
+			padding: 4px 8px;
+		}
+		.tab :global(.tab-lamp) {
+			grid-row: auto;
+		}
+		.tab-mini {
+			height: 18px;
+		}
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.tab {
