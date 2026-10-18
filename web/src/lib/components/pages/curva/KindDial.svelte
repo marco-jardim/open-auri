@@ -4,11 +4,18 @@
 	- the current kind: its acronym, large, then its name and what it does, in one line;
 	- the six kinds in two columns, each with a small drawing of its response (aria-hidden); locked
 	  kinds are dimmed and marked "só em Engenharia", available experimental ones "EXPERIMENTAL";
-	- one footer line: how to step, or why the switch is locked.
+	- one footer line: how to step and continue past a red, refused kind, or why the switch is locked.
 	The legend behaves like the Tooltip primitive (400 ms hover, at once on keyboard focus, Escape,
 	hoverable, top layer, above the switch) and is the switch's description: its text content is
 	the accessible legend. It is drawn here because the primitive only carries plain text.
 -->
+<script module lang="ts">
+	export interface KindCheck {
+		ok: boolean;
+		reason?: string;
+	}
+</script>
+
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import { isExperimentalKind } from 'open-auri/safety';
@@ -21,9 +28,22 @@
 		layer: Layer;
 		/** Unavailable controls stay focusable and explain why, as in Button. */
 		disabledReason?: string | null;
+		/** Real gate preflight, owned by the bank/page. Never changes the curve. */
+		canApply: (kind: BandKind) => KindCheck | Promise<KindCheck>;
+		/** Any external curve/profile change invalidates pending candidates and in-flight checks. */
+		resetKey?: unknown;
+		focusBoundary?: HTMLElement;
 		onkind: (kind: BandKind) => void;
 	}
-	let { kind, layer, disabledReason = null, onkind }: Props = $props();
+	let {
+		kind,
+		layer,
+		disabledReason = null,
+		canApply,
+		resetKey,
+		focusBoundary,
+		onkind
+	}: Props = $props();
 
 	// Keep the bank's engraved positions and their clockwise order, including the wrap at HP.
 	const STOPS: readonly { kind: BandKind; angle: number }[] = [
@@ -57,7 +77,9 @@
 				!isLockedKind(stop.kind, layer)
 		)
 	);
-	const reason = $derived(disabledReason?.trim() || null);
+	const reason = $derived(
+		disabledReason?.trim() || (layer === 'ouvir' ? m.curva_kinddial_readonly() : null)
+	);
 	// The language is fixed for the page's life (a switch reloads), so the copy is read once.
 	const names: Record<BandKind, string> = {
 		PK: m.curva_kinddial_pk_name(),
@@ -83,47 +105,116 @@
 		HP: m.curva_bn_short_hp(),
 		OFF: m.curva_bn_short_off()
 	};
+	const PENDING_MS = 5000;
+	let pending = $state<{ kind: BandKind; reason: string } | null>(null);
+	const shown = $derived(pending?.kind ?? kind);
+	const pendingText = $derived(
+		pending ? m.curva_kinddial_pending({ kind: pending.kind, reason: pending.reason }) : ''
+	);
 	const valueText = $derived(
-		`${names[kind]} (${kind})${isExperimentalKind(kind) ? ` · ${m.curva_exp_badge()}` : ''}`
+		pendingText ||
+			`${names[shown]} (${shown})${isExperimentalKind(shown) ? ` · ${m.curva_exp_badge()}` : ''}`
 	);
 	let rotation = $state(untrack(() => angleFor(kind)));
 	let previousKind = untrack(() => kind);
-	let pending: { from: BandKind; to: BandKind; direction: 1 | -1 | null } | null = null;
+	let turnDirection: 1 | -1 | null = null;
+	let requested: BandKind | null = null;
+	let requestId = 0;
+	let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 
-	// Only a committed prop moves the pointer. Preserve the requested direction across wraps
-	// and skipped stops, without displaying a kind that the existing gate refused.
+	// Only the dial previews a refused kind. All other bank controls still use the applied prop.
 	$effect(() => {
-		const accepted = kind;
+		const next = shown;
 		untrack(() => {
-			if (accepted === previousKind) return;
-			const clockwise = (angleFor(accepted) - angleFor(previousKind) + 360) % 360;
-			const direction =
-				pending?.from === previousKind && pending.to === accepted ? pending.direction : null;
+			if (next === previousKind) return;
+			const clockwise = (angleFor(next) - angleFor(previousKind) + 360) % 360;
 			rotation +=
-				direction === -1
+				turnDirection === -1
 					? clockwise - 360
-					: direction === 1 || clockwise <= 180
+					: turnDirection === 1 || clockwise <= 180
 						? clockwise
 						: clockwise - 360;
-			previousKind = accepted;
-			pending = null;
+			previousKind = next;
+			turnDirection = null;
 		});
 	});
 
-	function propose(next: BandKind, direction: 1 | -1 | null = null): void {
+	function cancelPending(): void {
+		requestId++;
+		clearTimeout(pendingTimer);
+		pendingTimer = undefined;
+		requested = null;
+		pending = null;
+		turnDirection = null;
+	}
+
+	$effect(() => {
+		// Also cancel if another band, undo, a preset, or the gate profile changed.
+		void kind;
+		void layer;
+		void reason;
+		void resetKey;
+		untrack(cancelPending);
+	});
+
+	async function propose(next: BandKind, direction: 1 | -1 | null = null): Promise<void> {
 		if (reason) {
 			showTip();
 			return;
 		}
-		if (next === kind || !enabled.some((stop) => stop.kind === next)) return;
-		pending = { from: kind, to: next, direction };
-		onkind(next);
+		if (!enabled.some((stop) => stop.kind === next)) return;
+		cancelPendingTimer();
+		const id = ++requestId;
+		const applied = kind;
+		const context = resetKey;
+		const currentLayer = layer;
+		requested = next;
+		if (next === applied) {
+			cancelPending();
+			return;
+		}
+		let check: KindCheck;
+		try {
+			check = await canApply(next);
+		} catch {
+			check = { ok: false, reason: m.curva_gate_error() };
+		}
+		// A newer click or external change wins, even if the old gate answers later.
+		if (
+			id !== requestId ||
+			kind !== applied ||
+			resetKey !== context ||
+			layer !== currentLayer ||
+			reason
+		) {
+			return;
+		}
+		requested = null;
+		turnDirection = direction;
+		if (check.ok) {
+			pending = null;
+			onkind(next);
+		} else {
+			pending = { kind: next, reason: check.reason || m.curva_reason_unknown() };
+			pendingTimer = setTimeout(cancelPending, PENDING_MS);
+		}
+	}
+
+	function cancelPendingTimer(): void {
+		clearTimeout(pendingTimer);
+		pendingTimer = undefined;
 	}
 
 	function step(direction: 1 | -1): void {
-		const index = enabled.findIndex((stop) => stop.kind === kind);
-		const next = enabled[(index + direction + enabled.length) % enabled.length];
-		if (next) propose(next.kind, direction);
+		const cursor = requested ?? shown;
+		const index = STOPS.findIndex((stop) => stop.kind === cursor);
+		for (let offset = 1; offset <= STOPS.length; offset++) {
+			const next = STOPS[(index + direction * offset + STOPS.length) % STOPS.length];
+			if (next && enabled.some((stop) => stop.kind === next.kind)) {
+				void propose(next.kind, direction);
+				return;
+			}
+		}
 	}
 
 	function handleKey(event: KeyboardEvent): void {
@@ -151,7 +242,7 @@
 			case 'Home':
 				event.preventDefault();
 				event.stopPropagation();
-				propose('OFF');
+				void propose('OFF');
 				break;
 		}
 	}
@@ -219,6 +310,9 @@
 
 	$effect(() => {
 		const element = tip;
+		// Refusals can make an already-open legend taller; keep it clear of the next click.
+		void shown;
+		void pendingText;
 		if (!element) return;
 		if (!tipOpen) {
 			if (element.matches(':popover-open')) element.hidePopover();
@@ -227,25 +321,31 @@
 		}
 		if (!element.matches(':popover-open')) element.showPopover();
 		place();
-		const onKeydown = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape') return;
-			// Escape dismisses the legend first, without closing a surrounding dialog or menu.
-			event.preventDefault();
-			event.stopPropagation();
-			hideTip();
-		};
 		const reposition = () => place();
-		document.addEventListener('keydown', onKeydown, true);
 		window.addEventListener('scroll', reposition, true);
 		window.addEventListener('resize', reposition);
 		return () => {
-			document.removeEventListener('keydown', onKeydown, true);
 			window.removeEventListener('scroll', reposition, true);
 			window.removeEventListener('resize', reposition);
 		};
 	});
 
-	onDestroy(clearTimers);
+	$effect(() => {
+		const onEscape = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape' || (!pending && requested === null && !tipOpen)) return;
+			event.preventDefault();
+			event.stopPropagation();
+			cancelPending();
+			hideTip();
+		};
+		document.addEventListener('keydown', onEscape, true);
+		return () => document.removeEventListener('keydown', onEscape, true);
+	});
+
+	onDestroy(() => {
+		clearTimers();
+		cancelPending();
+	});
 </script>
 
 <div class="kind-dial">
@@ -257,8 +357,9 @@
 		aria-label={m.curva_kind()}
 		aria-valuemin={0}
 		aria-valuemax={STOPS.length - 1}
-		aria-valuenow={STOPS.findIndex((stop) => stop.kind === kind)}
+		aria-valuenow={STOPS.findIndex((stop) => stop.kind === shown)}
 		aria-valuetext={valueText}
+		aria-invalid={pending ? 'true' : undefined}
 		aria-disabled={reason ? 'true' : undefined}
 		aria-describedby={tipId}
 		onclick={(event) => step(event.shiftKey ? -1 : 1)}
@@ -275,8 +376,11 @@
 		onfocusin={() => {
 			if (!pressed) showTip();
 		}}
-		onfocusout={() => {
+		onfocusout={(event) => {
 			pressed = false;
+			if (!(event.relatedTarget instanceof Node) || !focusBoundary?.contains(event.relatedTarget)) {
+				cancelPending();
+			}
 			// Deferred: a focused switch removed during an update fires focusout mid-flush.
 			queueMicrotask(hideTip);
 		}}
@@ -286,7 +390,8 @@
 				{@const point = at(stop.angle)}
 				<text
 					class="mark"
-					class:on={kind === stop.kind}
+					class:on={shown === stop.kind}
+					class:invalid={pending?.kind === stop.kind}
 					class:dim={isLockedKind(stop.kind, layer)}
 					x={point.x}
 					y={point.y + 3}>{stop.kind}</text
@@ -296,9 +401,12 @@
 			<g class="cap" style:--turn={`${rotation}deg`}>
 				<line x1="0" y1="-11" x2="0" y2="-3" class="index" />
 			</g>
-			<text class="value" x="0" y="19">{kind}</text>
+			<text class="value" class:invalid={pending !== null} x="0" y="19"
+				>{shown}{pending ? ' ✕' : ''}</text
+			>
 		</svg>
 	</div>
+	<p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{pendingText}</p>
 	<div
 		id={tipId}
 		bind:this={tip}
@@ -315,13 +423,14 @@
 		onpointerleave={scheduleClose}
 	>
 		<p class="kd-now">
-			<b class="kd-acr">{kind}</b>
-			<span class="kd-text"><b>{names[kind]}</b>: {plain[kind]}</span>
+			<b class="kd-acr" class:invalid={pending !== null}>{shown}{pending ? ' ✕' : ''}</b>
+			<span class="kd-text"><b>{names[shown]}</b>: {plain[shown]}</span>
 		</p>
+		{#if pending}<p class="kd-refusal">{pendingText}</p>{/if}
 		<ul class="kd-legend">
 			{#each LEGEND as entry (entry)}
 				{@const locked = isLockedKind(entry, layer)}
-				<li class:on={entry === kind} class:dim={locked}>
+				<li class:on={entry === shown} class:dim={locked}>
 					<svg class="kd-glyph" viewBox="0 0 24 12" aria-hidden="true"
 						><path class:flat={entry === 'OFF'} d={GLYPHS[entry]} /></svg
 					>
@@ -389,6 +498,25 @@
 		fill: var(--accent);
 		font: 600 9px var(--face-data);
 		text-anchor: middle;
+	}
+	.mark.invalid,
+	.value.invalid {
+		fill: var(--danger);
+	}
+	.kd-acr.invalid,
+	.kd-refusal {
+		color: var(--danger);
+	}
+	.kd-refusal {
+		margin: 0 0 8px;
+	}
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 	/* The legend: the global .tooltip look, a little wider for its two columns. */
 	.kd-tip {

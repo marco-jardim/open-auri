@@ -34,7 +34,8 @@
 	import { bandNames, LABEL_MAX, normalizeLabel } from './band-names.ts';
 	import { criteria, criterionName } from './envelope.ts';
 	import { formatSignedDb } from './format.ts';
-	import KindDial from './KindDial.svelte';
+	import KindDial, { type KindCheck } from './KindDial.svelte';
+	import { changeKind } from './edit.ts';
 	import { isLockedKind, type Layer } from './layers.ts';
 	import { miniPath } from './mini.ts';
 	import {
@@ -45,7 +46,7 @@
 		type Curve,
 		type DragParam
 	} from './model.ts';
-	import type { GateVerdict } from './reasons.ts';
+	import { firstReasonText, type GateVerdict } from './reasons.ts';
 	import type { DragTarget } from './drag.ts';
 
 	/** A LiveMeter, or an idle stand-in (DATA mode) before the preview exists. */
@@ -68,6 +69,11 @@
 		ondrag?: (index: number, target: DragTarget) => void;
 		onmove: (index: number, target: DragTarget) => void;
 		onkind: (index: number, kind: BandKind) => void;
+		/** Non-mutating preflight from the editor, including its current gate profile. */
+		canApplyKind?: (index: number, kind: BandKind) => KindCheck | Promise<KindCheck>;
+		/** Profile changes cancel pending dials, just like an external curve change. */
+		kindContext?: unknown;
+		kindDisabledReason?: string | null;
 		onorder: () => void;
 	}
 	let {
@@ -81,10 +87,23 @@
 		ondrag,
 		onmove,
 		onkind,
+		canApplyKind,
+		kindContext,
+		kindDisabledReason = null,
 		onorder
 	}: Props = $props();
 
 	const headingId = $props.id();
+	let focusGeneration = $state(0);
+	const dialContext = $derived({ curve, kindContext, focusGeneration });
+	function checkKind(index: number, kind: BandKind): KindCheck | Promise<KindCheck> {
+		if (canApplyKind) return canApplyKind(index, kind);
+		// Standalone banks keep the same full-grid, standard-profile discrete-edit gate.
+		const result = changeKind(curve, index, kind);
+		return result.ok
+			? { ok: true }
+			: { ok: false, reason: firstReasonText(result.reasons, { bands: curve.bands, locale }) };
+	}
 	const stageMode = $derived(stages.some((stage) => stage.mode === 'live') ? 'live' : 'data');
 	const rows = $derived(criteria(verdict, locale));
 	// The note's own word "gate" (both locales say it) is the gate explainer; no text is added.
@@ -278,7 +297,19 @@
 	</span>
 {/snippet}
 
-<section class="bank" aria-labelledby={headingId} bind:this={bankElement}>
+<section
+	class="bank"
+	aria-labelledby={headingId}
+	bind:this={bankElement}
+	onfocusout={(event) => {
+		if (
+			!(event.relatedTarget instanceof Node) ||
+			!event.currentTarget.contains(event.relatedTarget)
+		) {
+			focusGeneration++;
+		}
+	}}
+>
 	<span class="hinge" aria-hidden="true"></span>
 	<header class="bank-head">
 		<div class="bank-title">
@@ -377,7 +408,10 @@
 				<KindDial
 					kind={band.kind}
 					{layer}
-					disabledReason={locked ? m.curva_exp_hint() : null}
+					disabledReason={kindDisabledReason}
+					canApply={(kind) => checkKind(index, kind)}
+					resetKey={dialContext}
+					focusBoundary={bankElement}
 					onkind={(kind) => onkind(index, kind)}
 				/>
 				<div class="signs">
@@ -486,6 +520,7 @@
 		<p>{m.curva_v2_details_note()}</p>
 	</details>
 	<div class="bank-foot">
+		<p class="soon-note">{m.curva_bn_kind_foot()}</p>
 		<button type="button" class="soon-ctl" aria-disabled="true">{m.curva_soon_raw()}</button>
 		<span class="soon-badge">{m.curva_soon()}</span>
 		<p class="soon-note">{m.curva_soon_note()}</p>

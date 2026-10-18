@@ -12,7 +12,8 @@ import CurvaPage from '#lib/components/pages/curva/CurvaPage.svelte';
 import { exportS5, linkHash } from '#lib/components/pages/curva/io.ts';
 import type { GateClient } from '#lib/components/pages/curva/drag.ts';
 import type { Layer } from '#lib/components/pages/curva/layers.ts';
-import type { Band, Curve } from '#lib/components/pages/curva/model.ts';
+import { verdictFor, type Band, type Curve } from '#lib/components/pages/curva/model.ts';
+import { firstReasonText } from '#lib/components/pages/curva/reasons.ts';
 import { fakeAppOptions } from '../../app/fakes.ts';
 
 const neutral: Curve = { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb };
@@ -84,7 +85,7 @@ function changeRange(element: Element, value: number) {
 }
 
 function pointerEditor(container: HTMLElement) {
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
 	const overlay = container.querySelector('svg.handles');
 	if (!overlay) throw new Error('Missing handle overlay');
@@ -100,6 +101,27 @@ function pointerEditor(container: HTMLElement) {
 			})
 		);
 	};
+}
+
+/** The first bank module's kind dial (the bank is a deferred island: wait for it). */
+async function kindDial(): Promise<HTMLElement> {
+	const dial = page.getByRole('spinbutton', { name: m.curva_kind(), exact: true }).first();
+	await expect.element(dial).toBeInTheDocument();
+	const element = dial.element();
+	if (!(element instanceof HTMLElement)) throw new Error('Missing kind dial');
+	return element;
+}
+
+/** One click-step (clockwise) or key on the kind dial. */
+async function turn(key: 'click' | 'ArrowLeft' | 'Home' = 'click') {
+	const dial = await kindDial();
+	dial.dispatchEvent(
+		key === 'click'
+			? new MouseEvent('click', { bubbles: true })
+			: new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+	);
+	await tick();
+	return dial;
 }
 
 function deferred<T>() {
@@ -330,12 +352,13 @@ test('a bounded macro reports why it could not reach the requested boost', async
 
 test('bank kind changes, typed gate-bounded edits and restoring default order are undoable', async () => {
 	const { app } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 });
-	await page.getByRole('combobox').first().selectOptions('LS');
-	expect(app.state.curve.current.bands[0]).toMatchObject({ kind: 'LS' });
-	await page.getByRole('combobox').first().selectOptions('OFF');
-	expect(app.state.curve.current.bands[0]).toEqual({ kind: 'OFF' });
-	await page.getByRole('combobox').first().selectOptions('PK');
-	expect(app.state.curve.current.bands[0]).toMatchObject({ kind: 'PK' });
+	// Ajustar's dial steps clockwise PK → LS → OFF → PK, each stop through the gate.
+	await turn();
+	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ kind: 'LS' }));
+	await turn();
+	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toEqual({ kind: 'OFF' }));
+	await turn();
+	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ kind: 'PK' }));
 	const frequency = page
 		.getByRole('spinbutton', { name: 'Freq (Hz)', exact: true })
 		.first()
@@ -375,7 +398,7 @@ test('worker errors are reported, whereas aborted edits leave the curve untouche
 	const error = new Error('worker unavailable');
 	const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 	commit.mockRejectedValueOnce(error);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
 	await vi.waitFor(() => expect(screen.container.textContent).toContain(m.curva_gate_error()));
 	expect(log).toHaveBeenCalledWith('Gate worker failed', error);
@@ -493,27 +516,56 @@ test('the engineering sequencer stays disabled with the loading or writing reaso
 
 test('removing a compensating cut is gate-refused instead of exposing its boost', async () => {
 	const boost: Band = { ...cut, gainDb: 6 };
-	const { app, screen } = await setup('ajustar', { bands: pad([cut, boost]), preampDb: -1 });
+	const { app } = await setup('ajustar', { bands: pad([cut, boost]), preampDb: -1 });
 	const before = app.state.curve.current;
-	await page.getByRole('combobox').first().selectOptions('OFF');
+	// The same full-curve gate a write uses refuses the cut's removal (its boost would be exposed).
+	const candidate: Curve = { bands: pad([{ kind: 'OFF' }, boost]), preampDb: -1 };
+	const refused = verdictFor(candidate);
+	expect(refused.ok).toBe(false);
+	const reason = firstReasonText(refused.reasons, { bands: candidate.bands, locale: 'pt-BR' });
+	// Home asks the dial for OFF: the refusal is pending-invalid on the dial, never applied.
+	const dial = await turn('Home');
+	await vi.waitFor(() => expect(dial.getAttribute('aria-invalid')).toBe('true'));
+	expect(dial.querySelector('.value')?.textContent).toBe('OFF ✕');
+	const pending = m.curva_kinddial_pending({ kind: 'OFF', reason });
+	expect(dial.getAttribute('aria-valuetext')).toBe(pending);
+	expect(dial.parentElement?.querySelector('[role="status"]')?.textContent).toBe(pending);
 	expect(app.state.curve.current).toEqual(before);
-	expect(screen.container.textContent).toContain('Tipo recusado:');
+	expect(dial.closest('li.module')?.querySelector('.mod-badge')?.getAttribute('data-kind')).toBe(
+		'PK'
+	);
+	expect(app.pendingWrite).toBeNull();
 });
 
-test('Ajustar rejects experimental kinds offered by a stale select', async () => {
-	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 });
-	const select = page.getByRole('combobox').first().element();
-	if (!(select instanceof HTMLSelectElement)) throw new Error('Missing kind selector');
-	const hs = document.createElement('option');
-	hs.value = 'HS';
-	hs.textContent = 'HS';
-	select.append(hs);
-	select.value = 'HS';
-	select.dispatchEvent(new Event('change', { bubbles: true }));
-	await tick();
-	expect(app.state.curve.current.bands[0]).toEqual(cut);
-	expect(screen.container.textContent).toContain(m.curva_exp_hint());
-	expect(select.value).toBe('PK');
+test("Ajustar's dial never offers HS/LP/HP", async () => {
+	const { app } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 });
+	const dial = await kindDial();
+	// The experimental stops are engraved but dimmed, and the legend says they are Engenharia-only.
+	const dimmed = [...dial.querySelectorAll('.mark.dim')].map((mark) => mark.textContent);
+	expect(dimmed).toEqual(['HS', 'LP', 'HP']);
+	const legend = dial.parentElement?.querySelectorAll('[role="tooltip"] li.dim') ?? [];
+	expect([...legend].map((item) => item.querySelector('.kd-k')?.textContent)).toEqual([
+		'HS',
+		'HP',
+		'LP'
+	]);
+	for (const item of legend) expect(item.textContent).toContain(m.curva_bn_locked());
+	// A full turn each way lands only on PK, LS and OFF (clockwise, then backwards).
+	const experimental = new Set(['HS', 'LP', 'HP']);
+	for (const [key, kind] of [
+		['click', 'LS'],
+		['click', 'OFF'],
+		['click', 'PK'],
+		['ArrowLeft', 'OFF'],
+		['ArrowLeft', 'LS'],
+		['ArrowLeft', 'PK']
+	] as const) {
+		const turned = await turn(key);
+		await vi.waitFor(() => expect(app.state.curve.current.bands[0]?.kind).toBe(kind));
+		expect(app.state.curve.current.bands.some((band) => experimental.has(band.kind))).toBe(false);
+		expect(turned.getAttribute('aria-valuetext')).not.toMatch(/\b(HS|LP|HP)\b/);
+	}
+	expect(app.pendingWrite).toBeNull();
 });
 
 test('pointer movement previews a draft and release alone commits it to the editor', async () => {
@@ -522,7 +574,7 @@ test('pointer movement previews a draft and release alone commits it to the edit
 	const commit = vi.spyOn(client, 'commit');
 	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
 	const pointer = pointerEditor(screen.container);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ });
 	pointer('pointerdown');
 	pointer('pointermove');
 	await vi.waitFor(() => expect(handle.element().getAttribute('aria-valuenow')).not.toBe('1000'));
@@ -545,7 +597,7 @@ test('a late advisory response cannot overwrite the newer pointer draft', async 
 	const drag = vi.spyOn(client, 'drag').mockReturnValueOnce(pending.promise);
 	const { app, screen } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
 	const pointer = pointerEditor(screen.container);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ });
 	pointer('pointerdown');
 	pointer('pointermove', 0.35);
 	const first = drag.mock.calls[0]?.[0];
@@ -566,7 +618,7 @@ test('a late commit cannot replace a newer keyboard edit', async () => {
 	const pending = deferred<Awaited<ReturnType<GateClient['commit']>>>();
 	const commit = vi.spyOn(client, 'commit').mockReturnValueOnce(pending.promise);
 	const { app } = await setup('ajustar', { bands: pad([cut]), preampDb: -1 }, '', client);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
 	await vi.waitFor(() => expect(commit).toHaveBeenCalledOnce());
 	const first = commit.mock.calls[0]?.[0];

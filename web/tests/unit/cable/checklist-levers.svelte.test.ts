@@ -58,14 +58,14 @@ test('each lever is bound to exactly one confirmation and only GRAVAR writes, wi
 
 	await expect
 		.poll(latest)
-		.toEqual({ volumeLowered: false, keepConnected: false, experimental: false });
+		.toEqual({ volumeLowered: false, keepConnected: false, experimental: false, yoloWrite: false });
 	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
 	await expect.element(lever).toHaveAccessibleDescription(m.cable_fux_lock_levers());
 
 	await volume.click();
 	await expect
 		.poll(latest)
-		.toEqual({ volumeLowered: true, keepConnected: false, experimental: false });
+		.toEqual({ volumeLowered: true, keepConnected: false, experimental: false, yoloWrite: false });
 	expect(art('volume')).toBe('true');
 	expect(art('connection')).toBe('false');
 	await expect.element(lever).toHaveAttribute('aria-disabled', 'true');
@@ -73,14 +73,14 @@ test('each lever is bound to exactly one confirmation and only GRAVAR writes, wi
 	await connection.click();
 	await expect
 		.poll(latest)
-		.toEqual({ volumeLowered: true, keepConnected: true, experimental: false });
+		.toEqual({ volumeLowered: true, keepConnected: true, experimental: false, yoloWrite: false });
 	await expect.element(lever).not.toHaveAttribute('aria-disabled');
 
 	// Throwing one lever back withdraws only its own confirmation.
 	await volume.click();
 	await expect
 		.poll(latest)
-		.toEqual({ volumeLowered: false, keepConnected: true, experimental: false });
+		.toEqual({ volumeLowered: false, keepConnected: true, experimental: false, yoloWrite: false });
 	await expect.element(lever).toHaveAccessibleDescription(m.cable_fux_lock_levers());
 	await volume.click();
 	await expect.element(lever).not.toHaveAttribute('aria-disabled');
@@ -94,7 +94,7 @@ test('each lever is bound to exactly one confirmation and only GRAVAR writes, wi
 	expect(write.mock.calls[0][0]).toMatchObject({
 		bands: NEUTRO.bands,
 		preampDb: NEUTRO.preampDb,
-		confirmations: { volumeLowered: true, keepConnected: true, experimental: false },
+		confirmations: { volumeLowered: true, keepConnected: true, experimental: false, yoloWrite: false },
 		gesture: { kind: 'cable-gesture' }
 	});
 	// Every write needs fresh levers.
@@ -185,7 +185,7 @@ test('the experimental lever appears only when required and is bound to its own 
 	await extra.click();
 	await expect
 		.poll(() => checklist.mock.calls.at(-1)?.[0].confirmations)
-		.toEqual({ volumeLowered: true, keepConnected: true, experimental: true });
+		.toEqual({ volumeLowered: true, keepConnected: true, experimental: true, yoloWrite: false });
 	await expect.element(lever).not.toHaveAttribute('aria-disabled');
 });
 

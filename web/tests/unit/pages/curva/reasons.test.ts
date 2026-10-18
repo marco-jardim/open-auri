@@ -48,6 +48,7 @@ const LOCATED = new Set<ReasonCode>([
 	'b:pole-radius',
 	'c:section-peak',
 	'd:prefix-peak',
+	'd:prefix-peak-full',
 	'k:kind-not-allowed',
 	'd7:pk-boost-above-16k',
 	'd7:boost-q'

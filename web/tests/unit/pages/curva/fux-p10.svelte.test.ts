@@ -220,13 +220,15 @@ test('bank strips: lamps, envelope strip, technical details and knob drags', asy
 	const text = screen.container.textContent ?? '';
 	expect(text).toContain(m.curva_v2_envelope_title());
 	expect(text).not.toMatch(/GATE v2/i);
-	expect(text).toContain(m.curva_filter({ index: '1' }));
+	expect(text).toContain('Médio −');
+	expect(text).toContain('estágio 1');
 	// Seven criteria, each lit while it passes.
 	expect(screen.container.querySelectorAll('.gaterow li')).toHaveLength(7);
 	expect(screen.container.querySelectorAll('.gaterow .lamp[data-on="true"]')).toHaveLength(7);
 	// Real sign: the cut lamp of filter 1 is lit, its boost lamp is not.
 	const first = screen.container.querySelector('li.module');
 	if (!first) throw new Error('Missing strip');
+	expect(first.textContent).toMatch(/A\s*Médio −\s*estágio 1/);
 	expect(first.classList.contains('sel')).toBe(true);
 	const signs = [...first.querySelectorAll('.sign .lamp')].map((lamp) =>
 		lamp.getAttribute('data-on')
@@ -316,7 +318,7 @@ test('the trace draws in once per preset load, never under reduced motion', asyn
 
 test('the safe box lights while a point is grabbed', async () => {
 	const { screen, ondrag } = await scope({ selected: 0 });
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	capture(handle);
 	expect(screen.container.querySelector('rect.safe.lit')).toBeNull();
 	pointer(handle, 'pointerdown');
@@ -351,7 +353,10 @@ test('at the boundary: a 120 ms detent and the gate reason in the chip', async (
 test('Neutro: ten parked points at 0 dB with the hint; keys or drags create a filter', async () => {
 	const { screen, onpark } = await scope({ curve: neutral, committed: neutral });
 	await expect.element(page.getByText(m.empty_neutral_body(), { exact: true })).toBeVisible();
-	const third = page.getByRole('slider', { name: m.curva_v2_parked({ index: '3' }), exact: true });
+	const third = page.getByRole('slider', {
+		name: m.curva_bn_parked({ badge: 'C', name: m.curva_bn_free() }),
+		exact: true
+	});
 	await expect.element(third).toHaveAttribute('aria-valuetext', '400 Hz, 0,0 dB');
 	expect(screen.container.querySelectorAll('.handle.parked')).toHaveLength(10);
 	// Focus shows the safe box of the filter the point would become.
@@ -457,7 +462,10 @@ test('with a client the rack is live and a parked point becomes a gated filter',
 	await tick();
 	expect(screen.container.querySelector('.instrument')?.getAttribute('aria-busy')).toBe('false');
 	// Point 5 is parked at 1 kHz.
-	const fifth = page.getByRole('slider', { name: m.curva_v2_parked({ index: '5' }), exact: true });
+	const fifth = page.getByRole('slider', {
+		name: m.curva_bn_parked({ badge: 'E', name: m.curva_bn_free() }),
+		exact: true
+	});
 	const element = fifth.element();
 	if (element instanceof SVGElement) element.focus();
 	await userEvent.keyboard('{ArrowDown}');

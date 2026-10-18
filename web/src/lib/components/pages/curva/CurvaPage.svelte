@@ -53,7 +53,7 @@
 		type GateClient
 	} from './drag.ts';
 	import {
-		changeKind,
+		bandOfKind,
 		defaultOrder,
 		defaultPermutation,
 		maxPreamp,
@@ -634,18 +634,33 @@
 
 	// --- bank and cabinet ---------------------------------------------------------------------
 
-	function onKind(index: number, kind: BandKind) {
-		if (kind !== 'OFF' && isLockedKind(kind, layer)) {
-			bankMessage = m.curva_exp_hint();
-			return;
+	/** Non-mutating discrete-edit preflight, shared by the dial and its commit handler. */
+	function kindProposal(index: number, kind: BandKind) {
+		if (!app || layer === 'ouvir') {
+			return { ok: false as const, reason: loadingReason ?? m.curva_kinddial_readonly() };
 		}
-		const result = changeKind(curve, index, kind);
+		if (kind !== 'OFF' && isLockedKind(kind, layer)) {
+			return { ok: false as const, reason: m.curva_exp_hint() };
+		}
+		const previous = curve.bands[index];
+		if (!previous) return { ok: false as const, reason: m.curva_reason_unknown() };
+		const bands = replaceBand(curve.bands, index, bandOfKind(previous, kind));
+		const result = verdictFor({ bands, preampDb: curve.preampDb }, writeProfile);
+		return result.ok
+			? { ok: true as const, bands }
+			: {
+					ok: false as const,
+					reason: firstReasonText(result.reasons, { bands, locale })
+				};
+	}
+	function onKind(index: number, kind: BandKind) {
+		const result = kindProposal(index, kind);
 		if (result.ok) {
 			apply({ bands: result.bands, preampDb: curve.preampDb });
 			bankMessage = null;
 		} else {
 			bankMessage = m.curva_kind_refused({
-				reason: firstReasonText(result.reasons, { bands: curve.bands, locale })
+				reason: result.reason
 			});
 		}
 	}
@@ -1004,6 +1019,9 @@
 								ondrag={onDrag}
 								onmove={onBankMove}
 								onkind={onKind}
+								canApplyKind={kindProposal}
+								kindContext={writeProfile}
+								kindDisabledReason={loadingReason}
 								onorder={onDefaultOrder}
 							/>
 						{/snippet}

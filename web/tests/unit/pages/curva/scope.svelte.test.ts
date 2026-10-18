@@ -9,9 +9,11 @@ import { formatSignedDb } from '#lib/components/pages/curva/format.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
 import {
 	DRAG_GRID,
+	F_MAX,
 	OUTPUT_LIMIT_DB,
 	PLOT,
 	SCOPE_GRID,
+	xOf,
 	yOf
 } from '#lib/components/pages/curva/scope.ts';
 import { CURVA_SESSION } from '#lib/components/pages/curva/preview.svelte.ts';
@@ -83,7 +85,7 @@ test.each([
 	['PageDown', {}, { qFactor: 0.9 }]
 ] as const)('%s with %j edits one parameter', async (name, modifiers, target) => {
 	const { oncommit, ondrag } = await setup();
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	expect(key(handle, name, modifiers)).toBe(false);
 	expect(oncommit).toHaveBeenCalledExactlyOnceWith(0, target);
 	expect(ondrag).not.toHaveBeenCalled();
@@ -91,7 +93,7 @@ test.each([
 
 test('pass filters expose frequency and Q, but ignore gain keys and unrelated keys', async () => {
 	const { oncommit } = await setup();
-	const handle = page.getByRole('slider', { name: /^Filtro 2:/ });
+	const handle = page.getByRole('slider', { name: /^Filtro B,/ });
 	key(handle.element(), 'ArrowUp');
 	key(handle.element(), 'ArrowDown');
 	key(handle.element(), 'Escape');
@@ -105,8 +107,8 @@ test('pass filters expose frequency and Q, but ignore gain keys and unrelated ke
 
 test('locked handles reject keyboard and pointer edits; Ouvir omits all edit handles', async () => {
 	const { screen, oncommit, ondrag } = await setup({ layer: 'ajustar' });
-	for (const index of [2, 3]) {
-		const handle = page.getByRole('slider', { name: new RegExp(`^Filtro ${index}:`) });
+	for (const badge of ['B', 'C']) {
+		const handle = page.getByRole('slider', { name: new RegExp(`^Filtro ${badge},`) });
 		await expect.element(handle).toHaveAttribute('aria-disabled', 'true');
 		key(handle.element(), 'ArrowRight');
 		handle
@@ -123,7 +125,7 @@ test('locked handles reject keyboard and pointer edits; Ouvir omits all edit han
 
 test('pointer drags are advisory until release and clamp to visible limits', async () => {
 	const { screen, ondrag, oncommit } = await setup();
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	// Synthetic pointers have no capture slot. Handlers and geometry are real.
 	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
 	const overlay = screen.container.querySelector('svg.handles');
@@ -154,7 +156,7 @@ test('pointer drags are advisory until release and clamp to visible limits', asy
 
 test('pass-filter pointer drags never propose a gain', async () => {
 	const { ondrag, oncommit } = await setup();
-	const handle = page.getByRole('slider', { name: /^Filtro 2:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro B,/ }).element();
 	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
 	for (const type of ['pointerdown', 'pointermove', 'pointercancel']) {
 		handle.dispatchEvent(
@@ -300,7 +302,7 @@ test('the selected section shows its safe box and hard zones; the output limit i
 	expect(text()).toContain(m.curva_d7_zone());
 	expect(screen.container.querySelector('rect.safe')).not.toBeNull();
 	// Focus selects: the HP has a safe strip but no gain zones.
-	const hp = page.getByRole('slider', { name: /^Filtro 2:/ }).element();
+	const hp = page.getByRole('slider', { name: /^Filtro B,/ }).element();
 	if (hp instanceof SVGElement) hp.focus();
 	await vi.waitFor(() => expect(text()).not.toContain(m.curva_d7_zone()));
 	expect(text()).toContain(m.curva_safe_box());
@@ -330,7 +332,8 @@ test.each([390, 1440, 1920])(
 				);
 				// Only the caption moves: the gate threshold and the plot's line endpoints stay exact.
 				expect(limit.getAttribute('x1')).toBe(String(PLOT.left));
-				expect(limit.getAttribute('x2')).toBe(String(PLOT.right));
+				// The audible limit ends at 20 kHz; the shaded axis continues to 48 kHz.
+				expect(limit.getAttribute('x2')).toBe(String(xOf(F_MAX)));
 				expect(limit.getAttribute('y1')).toBe(String(yOf(OUTPUT_LIMIT_DB)));
 				expect(limit.getAttribute('y2')).toBe(String(yOf(OUTPUT_LIMIT_DB)));
 				await expect
@@ -379,7 +382,7 @@ test('a curve over the output limit is marked where it happens, with its peak', 
 
 test('an advisory refusal colours the handle and the chip; the bubble follows the drag', async () => {
 	const { screen } = await setup();
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
 	const chip = () => screen.container.querySelector('.chip');
 	// Without a verdict or an advisory answer the chip claims nothing.
@@ -416,7 +419,7 @@ test('an advisory refusal colours the handle and the chip; the bubble follows th
 
 test('while a point moves the screen drops its blurred effects; at rest they all come back', async () => {
 	const { screen } = await setup({ reducedMotion: false });
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
 	const part = (selector: string) => {
 		const element = screen.container.querySelector(selector);
@@ -487,13 +490,13 @@ test('the wheel over an editable handle steps Q and commits after a pause; locke
 			.getByRole('slider', { name })
 			.element()
 			.dispatchEvent(new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init }));
-	expect(wheel(/^Filtro 1:/, -100)).toBe(false);
+	expect(wheel(/^Filtro A,/, -100)).toBe(false);
 	expect(ondrag).toHaveBeenLastCalledWith(0, { qFactor: 1.1 });
-	expect(wheel(/^Filtro 1:/, 100, { shiftKey: true })).toBe(false);
+	expect(wheel(/^Filtro A,/, 100, { shiftKey: true })).toBe(false);
 	expect(ondrag).toHaveBeenLastCalledWith(0, { qFactor: 0.1 });
 	await vi.waitFor(() => expect(oncommit).toHaveBeenCalledExactlyOnceWith(0, { qFactor: 0.1 }));
 	ondrag.mockClear();
-	expect(wheel(/^Filtro 3:/, -100)).toBe(true);
+	expect(wheel(/^Filtro C,/, -100)).toBe(true);
 	expect(ondrag).not.toHaveBeenCalled();
 });
 
@@ -506,5 +509,5 @@ test.each([
 	// Real data stays: traces, limit line and handles are drawn either way.
 	expect(screen.container.querySelector('path.tr-eq')).not.toBeNull();
 	expect(screen.container.querySelector('line.lim')).not.toBeNull();
-	expect(page.getByRole('slider', { name: /^Filtro 1:/ }).element()).toBeTruthy();
+	expect(page.getByRole('slider', { name: /^Filtro A,/ }).element()).toBeTruthy();
 });

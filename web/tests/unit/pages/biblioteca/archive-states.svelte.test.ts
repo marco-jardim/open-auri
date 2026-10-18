@@ -10,6 +10,7 @@ import { IDLE_STATE, type AudioEngineState } from '#lib/audio/engine.ts';
 import type { MeterUpdate } from '#lib/audio/meters.ts';
 import { neutralCurve, type CurveData } from '#lib/state/model.ts';
 import type { LibraryItem } from '#lib/state/library.svelte.ts';
+import { createYoloState } from '#lib/state/yolo.svelte.ts';
 import type { CommitInput, CommitResult } from '#lib/workers/gate-handler.ts';
 import {
 	archiveTapes,
@@ -118,6 +119,7 @@ function fakeApp(
 	};
 	const app = {
 		audio,
+		yolo: createYoloState(),
 		state: {
 			library,
 			curve: { current: options.curve === undefined ? neutralCurve() : options.curve },

@@ -30,6 +30,8 @@ const locales = [
 		stats: 'Estatísticas públicas',
 		notice:
 			'open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.',
+		sales: 'O cabo Kuba Auri é vendido em kuba.audio.',
+		salesLink: 'kuba.audio (abre em nova aba)',
 		soon: 'Liberado assim que o fone chegar à bancada de testes. Até lá não gravamos nada que a página original da Kuba não grave.'
 	},
 	{
@@ -43,6 +45,8 @@ const locales = [
 		stats: 'Public statistics',
 		notice:
 			'open-auri is not official or endorsed by Kuba, TTGK, Savitech or any manufacturer. Everything here was obtained by studying the protocol for interoperability purposes. Use at your own risk: we are not responsible for damage to the cable, headphones or your hearing.',
+		sales: 'The Kuba Auri cable is sold at kuba.audio.',
+		salesLink: 'kuba.audio (opens in a new tab)',
 		soon: 'Available as soon as the headphones reach the test bench. Until then, we do not write anything that Kuba’s original page does not write.'
 	}
 ] as const;
@@ -77,9 +81,38 @@ for (const copy of locales) {
 		const write = page.getByRole('button', { name: copy.write });
 		await expect.element(write).toHaveAttribute('aria-disabled', 'true');
 		await expect.element(write).toHaveAccessibleDescription(copy.writeLoading);
-		await expect.element(page.getByText(copy.notice, { exact: true })).toBeVisible();
+		// The disclaimer stays literal; the sales line is its own sentence right after it.
+		const notice = page.getByText(copy.notice, { exact: true });
+		await expect.element(notice).toBeVisible();
+		const sales = page.getByRole('link', { name: copy.salesLink, exact: true });
+		await expect.element(sales).toBeVisible();
+		const salesLine = sales.element().closest('p');
+		expect(notice.element().nextElementSibling).toBe(salesLine);
 		await expect.element(page.getByText(copy.soon, { exact: true })).toBeVisible();
 		await expect.element(page.getByRole('heading', { name: honoree.name })).toBeVisible();
+	});
+
+	test(`links the Kuba Auri sales page in a new tab, saying so, in ${copy.locale}`, async () => {
+		await setLocale(copy.locale, { reload: false });
+		await render(Footer, { honoree });
+		const sales = page.getByRole('link', { name: copy.salesLink, exact: true });
+		await expect.element(sales).toHaveAttribute('href', 'https://kuba.audio/products/auri');
+		await expect.element(sales).toHaveAttribute('target', '_blank');
+		const rel = sales.element().getAttribute('rel')?.split(/\s+/);
+		expect(rel).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
+		// Visible link text is "kuba.audio"; the ↗ marker is hidden, the new-tab hint is spoken.
+		const marker = sales.element().querySelector('[aria-hidden="true"]');
+		expect(marker?.textContent?.trim()).toBe('↗');
+		// Inside running text the link is told apart without colour (axe link-in-text-block).
+		expect(getComputedStyle(sales.element()).textDecorationLine).toBe('underline');
+		const line = sales.element().closest('p');
+		if (!line) throw new Error('Missing sales line');
+		const visible = line.cloneNode(true);
+		if (!(visible instanceof HTMLElement)) throw new Error('Unexpected sales line');
+		for (const hidden of visible.querySelectorAll('[aria-hidden="true"], .sr-only')) hidden.remove();
+		expect(visible.textContent?.trim()).toBe(copy.sales);
+		expect(visible.querySelector('a')?.textContent).toBe('kuba.audio');
+		expect(line.textContent).not.toMatch(/[—?]/);
 	});
 
 	test(`keeps the GitHub link immediately below the legal link in ${copy.locale}`, async () => {

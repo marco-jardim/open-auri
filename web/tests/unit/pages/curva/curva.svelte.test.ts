@@ -11,6 +11,7 @@ import type { GateClient } from '#lib/components/pages/curva/drag.ts';
 import type { Layer } from '#lib/components/pages/curva/layers.ts';
 import type { Band } from '#lib/components/pages/curva/model.ts';
 import { fakeAppOptions } from '../../app/fakes.ts';
+import '../../primitives/design-system.ts';
 
 const OFF: Band = { kind: 'OFF' };
 const pad = (bands: Band[]): Band[] => [
@@ -144,14 +145,14 @@ test('HS/LP/HP are locked with a hint in Ajustar and editable in Engenharia', as
 	const hs: Band = { kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 };
 	await setup('ajustar', pad([hs]), 'HS', -1);
 	await tick();
-	const handle = page.getByRole('slider', { name: /Filtro 1/ });
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ });
 	await expect.element(handle).toHaveAttribute('aria-disabled', 'true');
 	await expect.element(page.getByText(/disponíveis na camada Engenharia/).first()).toBeVisible();
 	await cleanup();
 	await setup('engenharia', pad([hs]), 'HS', -1);
 	await tick();
 	await expect
-		.element(page.getByRole('slider', { name: /Filtro 1/ }))
+		.element(page.getByRole('slider', { name: /^Filtro A,/ }))
 		.toHaveAttribute('aria-disabled', 'false');
 	await expect.element(page.getByText('EXPERIMENTAL').first()).toBeVisible();
 });
@@ -159,7 +160,7 @@ test('HS/LP/HP are locked with a hint in Ajustar and editable in Engenharia', as
 test('keyboard nudges on a handle go through the gate and land in the editor', async () => {
 	const { app } = await setup('ajustar', pad([CUT]), 'Teste', -1);
 	await tick();
-	focus(page.getByRole('slider', { name: /Filtro 1/ }));
+	focus(page.getByRole('slider', { name: /^Filtro A,/ }));
 	await userEvent.keyboard('{ArrowUp}');
 	// Mock step: ↑ adds 1 dB.
 	await vi.waitFor(() => expect(app.state.curve.current.bands[0]).toMatchObject({ gainDb: -5 }));
