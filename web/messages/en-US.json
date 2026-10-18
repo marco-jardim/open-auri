@@ -1,6 +1,6 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-	"admin_access_off": "Cloudflare Access: not configured (recommended in production)",
+	"admin_access_off": "Cloudflare Access: off (optional)",
 	"admin_access_on": "Cloudflare Access: required",
 	"admin_actor_admin": "admin",
 	"admin_actor_operator": "operator",

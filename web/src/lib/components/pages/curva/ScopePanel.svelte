@@ -1704,8 +1704,6 @@
 	.ps-scope[data-dragging] .handles {
 		contain: strict;
 	}
-	.ps-scope[data-dragging] .scope-legend .pk {
-	}
 	.reduced .sweep,
 	.reduced .tr-after,
 	.reduced .draw,

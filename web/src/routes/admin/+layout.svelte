@@ -22,7 +22,8 @@
 				<span aria-hidden="true">●</span>
 				{data.readOnly ? m.admin_status_read_only_on() : m.admin_status_read_only_off()}
 			</li>
-			<li data-state={data.accessConfigured ? 'ok' : 'warn'}>
+			<!-- Access is an optional extra layer: off is a neutral state, not a warning. -->
+			<li data-state={data.accessConfigured ? 'ok' : 'off'}>
 				<span aria-hidden="true">●</span>
 				{data.accessConfigured ? m.admin_access_on() : m.admin_access_off()}
 			</li>
