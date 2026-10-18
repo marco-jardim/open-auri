@@ -37,7 +37,8 @@
   when the sequence ends it only moves `lastWriteAt` to that time (`flash.touchWrite`), so the 2 s
   spacing runs from the end of the write. A marker left by a tab closed mid-write becomes an
   `interrupted` journal entry and the rescue notice on the next start, or at once in any open tab
-  that saw the marker appear (it waits for the writer's lock and then only records). A write that
+  that saw the marker appear (it waits on the writing tab's liveness lock
+  `oa-cable-alive:<tabId>`, never on the write lock, and then only records). A write that
   finds such a marker is refused with `interrupted-elsewhere`. An X9 queue journals (and emits
   `cable:written` for) each cable as it commits; between cables the marker is flagged `between`.
 - **Old-build tabs (accepted risk, #18):** During the PWA service worker update flow, a tab

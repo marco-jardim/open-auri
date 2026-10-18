@@ -75,9 +75,11 @@ export interface WriteLock {
 /**
  * Subset of the Web Locks API (`navigator.locks`) used for cross-tab write exclusion.
  * Writes always call `request` with `{ ifAvailable: true }`: the callback receives `null`
- * when another tab holds the lock, and the lock is held until the callback settles.
- * Only the interruption watcher waits (`{ signal }`, no `ifAvailable`): it is granted the lock
- * once the writing tab released it (or died) and then only records, never writes.
+ * when another tab holds the lock, and the lock is held until the callback settles. A writing
+ * tab also takes its liveness lock `oa-cable-alive:<tabId>` that way and holds it until it is
+ * disposed or dies. Only the interruption watcher waits (`{ signal }`, no `ifAvailable`), and
+ * only on another tab's liveness lock, never on the write lock: it is granted once that tab is
+ * gone and then only records, never writes.
  */
 export interface WriteLockManager {
 	request<T>(

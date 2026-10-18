@@ -10,10 +10,12 @@
  * the in-flight marker only ever refuse or record.
  *
  * Before any I/O a marker (`oa.cable.inflight`) is persisted and, as each device sequence
- * starts, the flash attempt is recorded. A marker left behind by a closed tab becomes an
+ * starts, pointed at that device (or the sequence is refused) and the flash attempt is
+ * recorded. A marker left behind by a closed tab becomes an
  * `interrupted` journal entry (and the rescue notice) on the next load, or in any open tab
- * that saw the marker appear and waited for the writer's lock. An X9 queue journals each
- * cable as it commits and, between cables, leaves a `between` marker that names no write.
+ * that saw the marker appear and waited for the writing tab's liveness lock
+ * (`oa-cable-alive:<tabId>`; only writers ever request the write lock). An X9 queue journals
+ * each cable as it commits and, between cables, leaves a `between` marker that names no write.
  *
  * Create it in the browser only (never during SSR module evaluation).
  */
@@ -72,8 +74,22 @@ import type {
 	Written
 } from './types.ts';
 
-/** Web Locks name held from the in-lock authorization through settle, in every tab. */
+/**
+ * Web Locks name held from the in-lock authorization through settle, in every tab. Only
+ * writers request it, always with `ifAvailable`: this service never waits in its queue.
+ */
 export const CABLE_WRITE_LOCK = 'oa-cable-write';
+/** Prefix of the per-tab liveness lock (`oa-cable-alive:<tabId>`). */
+export const CABLE_ALIVE_LOCK_PREFIX = 'oa-cable-alive:';
+
+/**
+ * Liveness lock of the tab `tabId`: taken inside its first write lock, before its first
+ * marker, and held until that tab is disposed or dies. Other tabs wait on it (never on the
+ * write lock) to learn that the tab named by a marker is gone.
+ */
+export function cableAliveLock(tabId: string): string {
+	return CABLE_ALIVE_LOCK_PREFIX + tabId;
+}
 /** `localStorage` key of the persisted in-flight write marker. */
 export const CABLE_INFLIGHT_KEY = 'oa.cable.inflight';
 /**
@@ -230,19 +246,24 @@ function copyBands(snapshot: readonly Readonly<Band>[]): Band[] {
 
 /**
  * Wraps the HID so the start (`disconnect` listener added) and end (removed) of each
- * device sequence inside `writeMany` are observable. Listeners are forwarded to the
- * real HID unchanged, so disconnect detection is identical.
+ * device sequence inside `writeMany` are observable. `onStart` runs before the listener is
+ * attached: when it throws, the transport refuses that sequence before any I/O, no listener
+ * is left on the real HID and `onEnd` never runs for it. Listeners are forwarded to the real
+ * HID unchanged, so disconnect detection is identical.
  */
 function observedHid(base: HidLike, onStart: () => void, onEnd: () => void): HidLike {
+	/** Disconnect listeners of sequences that started (attached to the real HID). */
+	const started = new Set<(event: Event) => void>();
 	return {
 		requestDevice: (options) => base.requestDevice(options),
 		addEventListener(type, listener) {
-			base.addEventListener(type, listener);
 			if (type === 'disconnect') onStart();
+			base.addEventListener(type, listener);
+			if (type === 'disconnect') started.add(listener);
 		},
 		removeEventListener(type, listener) {
 			base.removeEventListener(type, listener);
-			if (type === 'disconnect') onEnd();
+			if (type === 'disconnect' && started.delete(listener)) onEnd();
 		}
 	};
 }
@@ -534,8 +555,10 @@ export function createCableService(deps: CableServiceDeps) {
 		const held = await lockHeld();
 		if (disposed) return;
 		if (held === true) {
-			// A live writer: wait for it, so its death mid-write surfaces here too.
-			watchWriter();
+			// A live writer: wait for its tab, so its death mid-write surfaces here too. An
+			// unreadable marker names no tab to wait for: the next write (holding the write
+			// lock) or the next load with the lock free recovers it.
+			if (marker !== null) watchWriter();
 			return;
 		}
 		if (held === null && marker !== null) {
@@ -571,35 +594,56 @@ export function createCableService(deps: CableServiceDeps) {
 		return { raw, marker };
 	}
 
-	/** Pending wait for another tab's write lock (at most one); aborted on dispose. */
-	let watching: AbortController | null = null;
+	/**
+	 * Pending wait for the liveness lock of the tab named by the stored marker (at most one);
+	 * aborted when the marker goes away or names another tab, and on dispose.
+	 */
+	let watching: { tabId: string; abort: AbortController } | null = null;
+
+	function unwatch() {
+		watching?.abort.abort(new DOMException('cable writer wait stopped', 'AbortError'));
+		watching = null;
+	}
 
 	/**
-	 * Another tab's marker is present: wait for its write lock (no `ifAvailable`). A writer
-	 * removes its marker before releasing the lock, so a marker still there once the lock is
-	 * granted means the writer died mid-write: it is recorded (journal + rescue notice) here,
-	 * without waiting for a reload. Holding the lock, this only records; it never writes.
+	 * Another tab's marker is present: wait for that tab's liveness lock (no `ifAvailable`),
+	 * never for the write lock, so a waiting tab can neither hold nor delay a write. The writer
+	 * holds its liveness lock from before its first marker until it is disposed or dies, and
+	 * removes its marker before releasing the write lock: its own marker still there once the
+	 * liveness lock is granted, with the write lock free, means it died mid-write. That is
+	 * recorded (journal + rescue notice) here, without waiting for a reload. This only records.
 	 */
 	function watchWriter() {
-		if (disposed || watching !== null || foreignMarker() === null) return;
-		if (locks === null) {
-			// No Web Locks: the age-based recovery (and its recheck timer) is all there is.
+		if (disposed) return;
+		const found = foreignMarker();
+		const writer = found?.marker?.tabId ?? null;
+		if (watching !== null && watching.tabId === writer) return;
+		// The marker is gone or names another tab: the previous wait is moot.
+		unwatch();
+		if (found === null) return;
+		if (locks === null || writer === null) {
+			// No Web Locks, or an unreadable marker naming no tab: the load-time recovery (write
+			// lock free, or the age-based recheck) is all there is.
 			void recover();
 			return;
 		}
 		const abort = new AbortController();
-		watching = abort;
+		const current = { tabId: writer, abort };
+		watching = current;
 		void locks
-			.request(CABLE_WRITE_LOCK, { signal: abort.signal }, async () => {
+			.request(cableAliveLock(writer), { signal: abort.signal }, async () => {
 				if (disposed) return;
-				const found = foreignMarker();
-				if (found !== null) recoverMarker(found.raw, found.marker);
+				// Write lock still held: the writer is alive after all (e.g. a version without a
+				// liveness lock), or the next writer records it under the lock (crossTabGuard).
+				if ((await lockHeld()) === true || disposed) return;
+				const left = foreignMarker();
+				if (left !== null && left.marker?.tabId === writer) recoverMarker(left.raw, left.marker);
 			})
 			.catch((cause: unknown) => {
-				if (!abort.signal.aborted) console.warn('cable write lock wait failed', cause);
+				if (!abort.signal.aborted) console.warn('cable writer liveness wait failed', cause);
 			})
 			.finally(() => {
-				if (watching === abort) watching = null;
+				if (watching === current) watching = null;
 			});
 	}
 
@@ -652,9 +696,12 @@ export function createCableService(deps: CableServiceDeps) {
 	}
 
 	/**
-	 * A device sequence is about to send its first byte (gates passed, device locked): count
-	 * the flash attempt now, so a tab closed mid-write still leaves it recorded, and point the
-	 * marker at this device. Pre-I/O refusals never reach this point and are not counted.
+	 * A device sequence is about to send its first byte (gates passed, device locked): point
+	 * the marker at this device and count the flash attempt now, so a tab closed mid-write
+	 * still leaves both recorded. If the marker cannot be pointed at this device, the stored
+	 * one would misdescribe the write (a `between` marker is recovered as "nothing was being
+	 * written"): it is removed if possible and this throws, so the transport refuses the
+	 * sequence before any I/O. Pre-I/O refusals are not counted.
 	 */
 	function sequenceStarting(label: string) {
 		const at = nowMs();
@@ -662,8 +709,6 @@ export function createCableService(deps: CableServiceDeps) {
 			simulatedFlash = recordWrite(simulatedFlash, at);
 			return;
 		}
-		// Counted per attempt that reaches the cable (conservative for wear and spacing).
-		deps.flash.record(at);
 		const device = truncate(label, 64);
 		if (
 			ownMarker !== null &&
@@ -675,8 +720,12 @@ export function createCableService(deps: CableServiceDeps) {
 			ownMarker = next;
 			if (!inflight.write(JSON.stringify(next))) {
 				console.warn('cable in-flight marker could not be updated');
+				if (!inflight.write(null)) console.warn('cable in-flight marker could not be removed');
+				throw new Error('cable in-flight marker could not be updated; nothing was sent');
 			}
 		}
+		// Counted per attempt that reaches the cable (conservative for wear and spacing).
+		deps.flash.record(at);
 	}
 
 	/**
@@ -711,10 +760,56 @@ export function createCableService(deps: CableServiceDeps) {
 		}
 	}
 
+	/** Whether this tab holds its liveness lock right now. */
+	let aliveHeld = false;
+	/** The pending request for it: settles true once granted, false when it could not be taken. */
+	let alive: Promise<boolean> | null = null;
+	/** Releases the liveness lock (set once it is granted). */
+	let releaseAlive: (() => void) | null = null;
+
 	/**
-	 * Runs `run` holding the cross-tab lock; refuses `busy` when another tab holds it. The
-	 * marker is removed before the lock is released, so "marker present and lock free" always
-	 * means the writing tab is gone.
+	 * Takes this tab's liveness lock (`ifAvailable`, once) and holds it until dispose, so a
+	 * marker naming this tab only ever exists while other tabs can wait on it. Called inside the
+	 * write lock, before the marker. `true` at once when it is held (or not needed: no marker
+	 * is written), otherwise whether it could be taken.
+	 */
+	function holdAlive(): true | Promise<boolean> {
+		if (mode === 'simulated' || inflight === null || locks === null || aliveHeld) return true;
+		if (disposed) return Promise.resolve(false);
+		if (alive === null) {
+			const manager = locks;
+			const pending = new Promise<boolean>((settle) => {
+				void manager
+					.request(cableAliveLock(tabId), { ifAvailable: true }, (lock) => {
+						if (lock === null || disposed) {
+							settle(false);
+							return Promise.resolve();
+						}
+						aliveHeld = true;
+						settle(true);
+						return new Promise<void>((resolve) => {
+							releaseAlive = resolve;
+						});
+					})
+					.catch((cause: unknown) => {
+						console.warn('cable liveness lock failed', cause);
+						settle(false);
+					});
+			});
+			alive = pending;
+			// Not taken: a later write asks again.
+			void pending.then((held) => {
+				if (!held && alive === pending) alive = null;
+			});
+		}
+		// A lock manager that grants at once needs no wait: the marker follows in this task.
+		return aliveHeld ? true : alive;
+	}
+
+	/**
+	 * Runs `run` holding the cross-tab lock; refuses `busy` when another tab holds it, and
+	 * `error` when this tab's liveness lock cannot be held. The marker is removed before the
+	 * lock is released, so "marker present and lock free" always means the writing tab is gone.
 	 */
 	async function exclusive<T extends WriteOutcome | QueueOutcome>(
 		run: () => Promise<T | Refused>
@@ -727,9 +822,12 @@ export function createCableService(deps: CableServiceDeps) {
 			}
 		};
 		if (locks === null) return guarded();
-		return locks.request(CABLE_WRITE_LOCK, { ifAvailable: true }, async (lock) =>
-			lock === null ? refuse('busy') : guarded()
-		);
+		return locks.request(CABLE_WRITE_LOCK, { ifAvailable: true }, async (lock) => {
+			if (lock === null) return refuse('busy');
+			const taken = holdAlive();
+			if (taken !== true && !(await taken)) return refuse('error');
+			return guarded();
+		});
 	}
 
 	hid.addEventListener('connect', onConnect);
@@ -1249,9 +1347,14 @@ export function createCableService(deps: CableServiceDeps) {
 			stopWatching?.();
 			listeners.clear();
 			disposed = true;
-			// Stop waiting for another tab's write lock (the wait only ever records).
-			watching?.abort(new DOMException('cable service disposed', 'AbortError'));
-			watching = null;
+			// Stop waiting for another tab's liveness lock (the wait only ever records).
+			unwatch();
+			// Other tabs may now treat this tab as gone: a write still running holds the write
+			// lock, so they record nothing for it; later real writes are refused (holdAlive).
+			const drop = releaseAlive;
+			releaseAlive = null;
+			aliveHeld = false;
+			drop?.();
 		}
 	};
 }

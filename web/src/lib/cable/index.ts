@@ -1,4 +1,5 @@
 export {
+	CABLE_ALIVE_LOCK_PREFIX,
 	CABLE_INFLIGHT_KEY,
 	CABLE_STATUS_EVENT,
 	CABLE_WRITE_LOCK,
@@ -6,6 +7,7 @@ export {
 	INFLIGHT_STALE_MS,
 	NEUTRAL_CURVE,
 	SIMULATED_LABEL_SUFFIX,
+	cableAliveLock,
 	createCableService,
 	detectCableSupport,
 	isCableDevice,

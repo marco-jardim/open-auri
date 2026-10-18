@@ -10,6 +10,7 @@ import { localDateKey } from 'open-auri/policy';
 import {
 	CABLE_WRITE_LOCK,
 	INFLIGHT_STALE_MS,
+	cableAliveLock,
 	createCableService,
 	parseInflightMarker
 } from '../../../src/lib/cable/service.ts';
@@ -32,7 +33,13 @@ import {
 	setup,
 	type SetupOptions
 } from './harness.ts';
-import { killHolder, memoryInflight, memoryLocks, type MemoryLocks } from './locks-fake.ts';
+import {
+	killHolder,
+	memoryInflight,
+	memoryLocks,
+	type MemoryInflight,
+	type MemoryLocks
+} from './locks-fake.ts';
 
 type Harness = Awaited<ReturnType<typeof setup>>;
 
@@ -148,7 +155,8 @@ describe('cross-tab write lock', () => {
 		expectUntouched(b);
 		expect(stored(inflight.value)?.tabId).toBe('tab-a');
 		expect((await first).status).toBe('ok');
-		expect(held.size).toBe(0);
+		// The write lock is free; A keeps only its liveness lock (until it is disposed or dies).
+		expect([...held]).toEqual([cableAliveLock('tab-a')]);
 		expect(inflight.value).toBeNull();
 		expect((await b.service.write(request(b.service))).status).toBe('ok');
 		expect(b.device.sent).toHaveLength(10);
@@ -774,8 +782,9 @@ describe('X9 queue settles each cable as it ends (R2-03)', () => {
 		await gap.inGap;
 		expect(writer.journal.entries.map((entry) => entry.status)).toEqual(['ok']);
 		expect(writer.written).toHaveLength(1);
-		// The writer tab dies in the gap: the browser releases its lock; the marker stays.
+		// The writer tab dies in the gap: the browser releases its locks; the marker stays.
 		killHolder(held, CABLE_WRITE_LOCK);
+		killHolder(held, cableAliveLock('writer'));
 		const reloaded = await tab({
 			tabId: 'reloaded',
 			locks: memoryLocks(held),
@@ -799,15 +808,113 @@ describe('X9 queue settles each cable as it ends (R2-03)', () => {
 	});
 });
 
-describe('other tabs surface an interruption by waiting for the writer (R2-07)', () => {
-	/** Another tab writing: it holds the write lock and its marker was just stored. */
-	function liveWriter(held: Set<string>, inflight: ReturnType<typeof memoryInflight>) {
-		const writing = marker({ at: T0, tabId: 'writer' });
+describe('a marker that cannot follow the queue to the next cable refuses it (#16)', () => {
+	/** Once `full` is set, every marker write fails except removals (like a full quota). */
+	function quota(inflight: MemoryInflight) {
+		const write = inflight.write.bind(inflight);
+		const state = { full: false };
+		inflight.write = (value) => (state.full && value !== null ? false : write(value));
+		return state;
+	}
+
+	/** The `disconnect` listeners the transport attached to and removed from `h.hid`. */
+	function disconnectListeners(h: Harness) {
+		const added = vi.spyOn(h.hid, 'addEventListener');
+		const removed = vi.spyOn(h.hid, 'removeEventListener');
+		const of = (calls: unknown[][]) =>
+			calls.filter((call) => call[0] === 'disconnect').map((call) => call[1]);
+		return { added: () => of(added.mock.calls), removed: () => of(removed.mock.calls) };
+	}
+
+	test('the next cable is refused before any byte, uncounted, and no between marker is left', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const gap = gappedClock();
+		const h = await tab({ wrapClock: gap.wrap, tabId: 'queue-tab' });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		const storage = quota(h.inflight);
+		const listeners = disconnectListeners(h);
+		const running = h.service.writeQueue({ ...request(h.service), devices: [h.device, second] });
+		await gap.inGap;
+		expect(stored(h.inflight.value)).toMatchObject({ tabId: 'queue-tab', between: true });
+		// The update that would point the marker at the second cable fails.
+		storage.full = true;
+		gap.release();
+		const outcome = await running;
+		expect(outcome.status).toBe('done');
+		if (outcome.status !== 'done') return;
+		expect(outcome.items.map((item) => item.status)).toEqual(['ok', 'failed']);
+		expect(outcome.items[1]?.error).toBeInstanceOf(Error);
+		// No HID report (not even open) reached the second cable, and it was not counted.
+		expect(second.attempts).toBe(0);
+		expect(second.sent).toEqual([]);
+		expect(h.device.sent).toHaveLength(10);
+		expect(h.flash.records).toEqual([T0]);
+		expect(h.flash.touches).toHaveLength(1);
+		expect(h.journal.entries.map((entry) => [entry.status, entry.device])).toEqual([
+			['ok', 'USB DSP Audio']
+		]);
+		expect(h.written).toHaveLength(1);
+		// The `between` marker was removed instead of being left behind a write.
+		expect(h.inflight.value).toBeNull();
+		expect(h.inflight.writes.at(-1)).toBeNull();
+		// The refused start attached no listener; the first cable's was removed.
+		expect(listeners.added()).toHaveLength(1);
+		for (const listener of listeners.added()) expect(listeners.removed()).toContain(listener);
+		expect(h.service.getState()).toMatchObject({ writing: false });
+	});
+
+	test('when the marker cannot be removed either, the next cable is still refused', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const gap = gappedClock();
+		const h = await tab({ wrapClock: gap.wrap, tabId: 'queue-tab' });
+		const second = new FakeHIDDevice({ clock: h.clock });
+		h.hid.addDevice(second);
+		const running = h.service.writeQueue({ ...request(h.service), devices: [h.device, second] });
+		await gap.inGap;
+		h.inflight.failWrites = true;
+		gap.release();
+		const outcome = await running;
+		expect(outcome.status).toBe('done');
+		if (outcome.status !== 'done') return;
+		expect(outcome.items.map((item) => item.status)).toEqual(['ok', 'failed']);
+		expect(second.attempts).toBe(0);
+		expect(second.sent).toEqual([]);
+		expect(h.flash.records).toEqual([T0]);
+		// Nothing is being written, which is exactly what the stored marker still says.
+		expect(stored(h.inflight.value)).toMatchObject({
+			tabId: 'queue-tab',
+			device: 'USB DSP Audio',
+			between: true
+		});
+	});
+});
+
+describe('other tabs surface an interruption by waiting for the writer tab (R2-07, #15)', () => {
+	/**
+	 * Another tab writing: it holds the write lock and its liveness lock, and its marker was
+	 * just stored (a storage event here).
+	 */
+	function liveWriter(
+		held: Set<string>,
+		inflight: ReturnType<typeof memoryInflight>,
+		tabId = 'writer'
+	) {
+		const writing = marker({ at: T0, tabId });
 		held.add(CABLE_WRITE_LOCK);
+		held.add(cableAliveLock(tabId));
 		inflight.value = JSON.stringify(writing);
 		inflight.announce();
 		return writing;
 	}
+
+	/** The writer tab dies: the browser releases every lock it held. */
+	function die(held: Set<string>, tabId = 'writer') {
+		killHolder(held, CABLE_WRITE_LOCK);
+		killHolder(held, cableAliveLock(tabId));
+	}
+
+	const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 	test('the writer dies: the waiting tab records the interruption and raises the notice', async () => {
 		const held = new Set<string>();
@@ -816,13 +923,14 @@ describe('other tabs surface an interruption by waiting for the writer (R2-07)',
 		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
 		const writing = liveWriter(held, inflight);
 		await Promise.resolve();
-		expect(locks.waits).toEqual([{ name: CABLE_WRITE_LOCK, granted: false }]);
+		// It waits on the writer tab's liveness lock, never on the write lock.
+		expect(locks.waits).toEqual([{ name: cableAliveLock('writer'), granted: false }]);
 		expect(h.journal.entries).toEqual([]);
 		expect(h.service.getState().rescue).toBeNull();
 		// A second storage event while waiting does not queue another wait.
 		inflight.announce();
 		expect(locks.waits).toHaveLength(1);
-		killHolder(held, CABLE_WRITE_LOCK);
+		die(held);
 		await vi.waitFor(() => expect(h.journal.entries).toHaveLength(1));
 		expect(h.journal.entries).toMatchObject([interruptedEntry(writing)]);
 		expect(h.service.getState().rescue).toEqual({
@@ -839,15 +947,35 @@ describe('other tabs surface an interruption by waiting for the writer (R2-07)',
 		await vi.waitFor(() => expect(held.size).toBe(0));
 	});
 
-	test('the writer finishes normally: nothing is recorded', async () => {
+	test('the writer finishes normally: the wait is dropped and nothing is recorded', async () => {
 		const held = new Set<string>();
 		const inflight = memoryInflight();
 		const locks = memoryLocks(held);
 		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
 		liveWriter(held, inflight);
-		// A writer removes its marker before it releases the lock.
+		expect(locks.waits).toEqual([{ name: cableAliveLock('writer'), granted: false }]);
+		// A writer removes its marker before it releases the write lock; its tab lives on.
 		inflight.value = null;
+		inflight.announce();
 		killHolder(held, CABLE_WRITE_LOCK);
+		await tick();
+		// That wait was aborted: closing the writer tab later records nothing either.
+		killHolder(held, cableAliveLock('writer'));
+		await tick();
+		expect(locks.waits).toEqual([{ name: cableAliveLock('writer'), granted: false }]);
+		expect(held.size).toBe(0);
+		expect(h.journal.entries).toEqual([]);
+		expect(h.service.getState().rescue).toBeNull();
+	});
+
+	test('granted after a normal finish whose storage event was missed: nothing is recorded', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		const locks = memoryLocks(held);
+		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
+		liveWriter(held, inflight);
+		inflight.value = null;
+		die(held);
 		await vi.waitFor(() => expect(locks.waits[0]?.granted).toBe(true));
 		await vi.waitFor(() => expect(held.size).toBe(0));
 		expect(h.journal.entries).toEqual([]);
@@ -855,14 +983,14 @@ describe('other tabs surface an interruption by waiting for the writer (R2-07)',
 	});
 
 	test('a tab loaded while another writes waits for it as well', async () => {
-		const held = new Set<string>([CABLE_WRITE_LOCK]);
+		const held = new Set<string>([CABLE_WRITE_LOCK, cableAliveLock('writer')]);
 		const live = marker({ at: T0 - 100, tabId: 'writer' });
 		const inflight = memoryInflight(JSON.stringify(live));
 		const locks = memoryLocks(held);
 		const h = await tab({ tabId: 'late', locks, inflight, connect: false });
 		expect(h.journal.entries).toEqual([]);
-		expect(locks.waits).toHaveLength(1);
-		killHolder(held, CABLE_WRITE_LOCK);
+		expect(locks.waits).toEqual([{ name: cableAliveLock('writer'), granted: false }]);
+		die(held);
 		await vi.waitFor(() => expect(h.journal.entries).toMatchObject([interruptedEntry(live)]));
 		expect(h.service.getState().rescue?.fresh).toBe(true);
 	});
@@ -876,15 +1004,123 @@ describe('other tabs surface an interruption by waiting for the writer (R2-07)',
 		inflight.value = JSON.stringify(marker({ tabId: 'watcher' }));
 		inflight.announce();
 		expect(locks.waits).toEqual([]);
+		held.add(cableAliveLock('writer'));
 		inflight.value = JSON.stringify(marker({ tabId: 'writer' }));
 		inflight.announce();
 		await Promise.resolve();
 		expect(locks.waits).toHaveLength(1);
 		h.service.dispose();
-		killHolder(held, CABLE_WRITE_LOCK);
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		die(held);
+		await tick();
 		expect(locks.waits[0]?.granted).toBe(false);
 		expect(h.journal.entries).toEqual([]);
 		expect(h.service.getState().rescue).toBeNull();
+	});
+
+	test('an observer never queues on the write lock: the next writer gets it once the first ends', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		const a = await tab({ tabId: 'tab-a', locks: memoryLocks(held), inflight });
+		const observer = await tab({
+			tabId: 'observer',
+			locks: memoryLocks(held),
+			inflight,
+			connect: false
+		});
+		const b = await tab({ tabId: 'tab-b', locks: memoryLocks(held), inflight });
+		const first = a.service.write(request(a.service));
+		expect(stored(inflight.value)).toMatchObject({ tabId: 'tab-a' });
+		// The other tabs see A's marker (a storage event) and wait for A's tab.
+		inflight.announce();
+		expect(observer.locks?.waits).toEqual([{ name: cableAliveLock('tab-a'), granted: false }]);
+		expect(await b.service.write(request(b.service))).toMatchObject({
+			status: 'refused',
+			reason: 'busy'
+		});
+		expect((await first).status).toBe('ok');
+		// The observer still waits (A's tab lives on); the write lock is free for B at once.
+		expect(held.has(CABLE_WRITE_LOCK)).toBe(false);
+		expect(observer.locks?.waits[0]?.granted).toBe(false);
+		expect((await b.service.write(request(b.service))).status).toBe('ok');
+		expect(b.device.sent).toHaveLength(10);
+		for (const each of [a, observer, b]) {
+			expect(each.locks?.waits.map((wait) => wait.name)).not.toContain(CABLE_WRITE_LOCK);
+		}
+		expect(observer.journal.entries).toEqual([]);
+		expect(observer.service.getState().rescue).toBeNull();
+	});
+
+	test('a writer tab that dies mid-write is recorded by the tab waiting for it', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		// The third report never completes: the tab is closed while the write is in progress.
+		const writer = await tab({
+			tabId: 'tab-a',
+			locks: memoryLocks(held),
+			inflight,
+			deviceOptions: { hangAtReport: 2 }
+		});
+		const observer = await tab({
+			tabId: 'observer',
+			locks: memoryLocks(held),
+			inflight,
+			connect: false
+		});
+		void writer.service.write(request(writer.service));
+		const writing = stored(inflight.value);
+		expect(writing).toMatchObject({ tabId: 'tab-a', device: 'USB DSP Audio', crc: 0x1970 });
+		inflight.announce();
+		expect(observer.locks?.waits).toEqual([{ name: cableAliveLock('tab-a'), granted: false }]);
+		await vi.waitFor(() => expect(writer.device.sent).toHaveLength(2));
+		expect(observer.journal.entries).toEqual([]);
+		die(held, 'tab-a');
+		await vi.waitFor(() => expect(observer.journal.entries).toHaveLength(1));
+		if (writing === null) throw new Error('missing marker');
+		expect(observer.journal.entries).toMatchObject([interruptedEntry(writing)]);
+		expect(observer.service.getState().rescue).toMatchObject({
+			deviceLabel: 'USB DSP Audio',
+			fresh: true
+		});
+		expect(inflight.value).toBeNull();
+		expect(observer.locks?.requests).toEqual([]);
+		expect(observer.device.attempts).toBe(0);
+	});
+
+	test('the wait follows the stored marker to the tab that writes now', async () => {
+		const held = new Set<string>();
+		const inflight = memoryInflight();
+		const locks = memoryLocks(held);
+		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
+		liveWriter(held, inflight, 'tab-a');
+		// A finished and B writes: the next storage event shows B's marker.
+		const writingB = liveWriter(held, inflight, 'tab-b');
+		expect(locks.waits).toEqual([
+			{ name: cableAliveLock('tab-a'), granted: false },
+			{ name: cableAliveLock('tab-b'), granted: false }
+		]);
+		// A's tab closing now records nothing: that wait was dropped.
+		killHolder(held, cableAliveLock('tab-a'));
+		await tick();
+		expect(locks.waits[0]?.granted).toBe(false);
+		expect(h.journal.entries).toEqual([]);
+		die(held, 'tab-b');
+		await vi.waitFor(() => expect(h.journal.entries).toMatchObject([interruptedEntry(writingB)]));
+	});
+
+	test('a writer holding no liveness lock is not taken for dead while it holds the write lock', async () => {
+		const held = new Set<string>([CABLE_WRITE_LOCK]);
+		const inflight = memoryInflight();
+		const locks = memoryLocks(held);
+		const h = await tab({ tabId: 'watcher', locks, inflight, connect: false });
+		// E.g. a tab still running a version without liveness locks.
+		const live = JSON.stringify(marker({ at: T0, tabId: 'old-writer' }));
+		inflight.value = live;
+		inflight.announce();
+		await vi.waitFor(() => expect(locks.waits[0]?.granted).toBe(true));
+		await tick();
+		expect(h.journal.entries).toEqual([]);
+		expect(h.service.getState().rescue).toBeNull();
+		expect(inflight.value).toBe(live);
+		expect(held.has(CABLE_WRITE_LOCK)).toBe(true);
 	});
 });

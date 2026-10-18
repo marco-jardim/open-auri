@@ -1,7 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeHIDDevice } from 'open-auri/transport';
-import { isCableDevice } from '#lib/cable/service.ts';
+import { CABLE_WRITE_LOCK, cableAliveLock, isCableDevice } from '#lib/cable/service.ts';
 import { CONFIRMED, TRUSTED_CLICK, padrao, setup } from './harness.ts';
+import { memoryLocks } from './locks-fake.ts';
 
 const services: { dispose(): void }[] = [];
 
@@ -156,4 +157,33 @@ test('running queue summaries cannot be cleared; completed summaries can be clea
 	expect(h.service.getState().queue?.running).toBe(false);
 	h.service.clearQueue();
 	expect(h.service.getState().queue).toBeNull();
+});
+
+test('the liveness lock is taken before the first marker, kept, and released on dispose (#15)', async () => {
+	const alive = cableAliveLock('tab-x');
+	const locks = memoryLocks(new Set([alive]));
+	const h = await harness({ locks, tabId: 'tab-x' });
+	// Cannot be taken: refused before any marker, flash count or byte; the write lock is free.
+	expect(await h.service.write(request(h))).toMatchObject({ status: 'refused', reason: 'error' });
+	expect(h.device.attempts).toBe(0);
+	expect(h.inflight.writes).toEqual([]);
+	expect(h.flash.records).toEqual([]);
+	expect(locks.held.has(CABLE_WRITE_LOCK)).toBe(false);
+	locks.held.delete(alive);
+	expect((await h.service.write(request(h))).status).toBe('ok');
+	expect(locks.requests.map((entry) => entry.name)).toEqual([
+		CABLE_WRITE_LOCK,
+		alive,
+		CABLE_WRITE_LOCK,
+		alive
+	]);
+	expect([...locks.held]).toEqual([alive]);
+	// Held, so the next write does not ask for it again.
+	h.time.value += 2_500;
+	expect((await h.service.write(request(h))).status).toBe('ok');
+	expect(locks.requests.map((entry) => entry.name).slice(4)).toEqual([CABLE_WRITE_LOCK]);
+	h.service.dispose();
+	await vi.waitFor(() => expect(locks.held.size).toBe(0));
+	// Never waited on anything: only `ifAvailable` requests.
+	expect(locks.waits).toEqual([]);
 });
