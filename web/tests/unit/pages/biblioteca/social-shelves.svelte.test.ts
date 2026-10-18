@@ -5,6 +5,7 @@ import { setLocale } from '#lib/paraglide/runtime.js';
 import {
 	createSocialApi,
 	createSocialSession,
+	SocialApiError,
 	type LibraryItem,
 	type ShareFunnel,
 	type SocialApi,
@@ -14,6 +15,7 @@ import MinhaBiblioteca from '#lib/components/pages/biblioteca/MinhaBiblioteca.sv
 import Biblioteca from '#lib/components/pages/biblioteca/Biblioteca.svelte';
 import CreationInsights from '#lib/components/pages/biblioteca/CreationInsights.svelte';
 import type { KeyValueStorage } from '#lib/components/pages/biblioteca/social.ts';
+import { m } from '#lib/paraglide/messages.js';
 
 // Layer this task's staging copy over the generated catalogs (same pattern as the T2.11 tests).
 vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
@@ -53,6 +55,7 @@ vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
 
 afterEach(async () => {
 	await cleanup();
+	vi.restoreAllMocks();
 	await setLocale('pt-BR', { reload: false });
 });
 
@@ -430,4 +433,363 @@ test('English copy of the shelves', async () => {
 	await expect.element(page.getByRole('tab', { name: /Creations/ })).toBeVisible();
 	await page.getByRole('tab', { name: /Packs/ }).click();
 	await expect.element(page.getByText('You have not created packs yet.')).toBeVisible();
+});
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((yes, no) => {
+		resolve = yes;
+		reject = no;
+	});
+	return { promise, resolve, reject };
+}
+
+function emptyServer(routes: Record<string, Handler> = {}) {
+	return server({
+		'GET /api/v1/me/library': (url) =>
+			json({ shelf: url.searchParams.get('shelf'), items: [], nextCursor: null }),
+		'GET /api/v1/me/packs': () => json({ items: [], nextCursor: null }),
+		...routes
+	});
+}
+
+function mineProps(api: SocialApi) {
+	return {
+		session: signedIn(),
+		api,
+		origin: 'https://example.test',
+		locale: 'pt-BR',
+		storage: memoryStorage(),
+		remember: vi.fn<typeof rememberOrigin>(async () => {})
+	};
+}
+
+test('unknown session waits without requests, then the signed-out invite preserves the return path', async () => {
+	const { api, calls } = emptyServer();
+	const screen = await render(MinhaBiblioteca, {
+		...mineProps(api),
+		session: { signedIn: false, verified: false, nickname: null, account: null, known: false },
+		currentPath: '/biblioteca?tag=bass'
+	});
+	await expect
+		.element(page.getByText(m.biblioteca_social_loading()))
+		.toHaveAttribute('aria-busy', 'true');
+	expect(calls).toEqual([]);
+	await screen.rerender({ session: createSocialSession({ initial: null }) });
+	const link = page.getByRole('link', { name: m.biblioteca_social_signin_link() });
+	await expect.element(link).toBeVisible();
+	expect(new URL((link.element() as HTMLAnchorElement).href).searchParams.get('next')).toBe(
+		'/biblioteca?tag=bass'
+	);
+	expect(calls).toEqual([]);
+});
+
+test('all four empty shelves have their own copy and keyboard tabs wrap in both directions', async () => {
+	const { api } = emptyServer();
+	await render(MinhaBiblioteca, mineProps(api));
+	await expect.element(page.getByText(m.biblioteca_social_empty_created())).toBeVisible();
+	const tabs = page.getByRole('tab');
+	const first = tabs.nth(0);
+	(first.element() as HTMLElement).focus();
+	await userEvent.keyboard('{ArrowLeft}');
+	await expect.element(tabs.nth(3)).toHaveAttribute('aria-selected', 'true');
+	await expect.element(tabs.nth(3)).toHaveFocus();
+	await expect.element(page.getByText(m.biblioteca_social_empty_packs_own())).toBeVisible();
+	await userEvent.keyboard('{ArrowRight}');
+	await expect.element(first).toHaveFocus();
+	await userEvent.keyboard('{ArrowRight}');
+	await expect.element(page.getByText(m.biblioteca_social_empty_favorites())).toBeVisible();
+	await userEvent.keyboard('{ArrowRight}');
+	await expect.element(page.getByText(m.biblioteca_social_empty_installed())).toBeVisible();
+	await userEvent.keyboard('{Home}');
+	await expect.element(tabs.nth(2)).toHaveAttribute('aria-selected', 'true');
+});
+
+for (const target of ['created', 'packs'] as const) {
+	test(`${target}: loading keeps a busy placeholder and pagination appends rows`, async () => {
+		const pending = deferred<Awaited<ReturnType<SocialApi['myLibrary']>>>();
+		const { api } = emptyServer({
+			'GET /api/v1/me/library': (url) =>
+				json({
+					shelf: url.searchParams.get('shelf'),
+					items: [item('second', 'Second')],
+					nextCursor: null
+				}),
+			'GET /api/v1/me/packs': (url) =>
+				json({
+					items: [
+						{
+							id: url.searchParams.has('cursor') ? 'second' : 'first',
+							name: url.searchParams.has('cursor') ? 'Second pack' : 'First pack',
+							description: url.searchParams.has('cursor') ? '' : 'Notes',
+							visibility: 'unlisted',
+							moderation: url.searchParams.has('cursor') ? 'visible' : 'hidden',
+							createdAt: 0,
+							updatedAt: 0
+						}
+					],
+					nextCursor: url.searchParams.has('cursor') ? null : 'pack-next'
+				})
+		});
+		const load = vi.spyOn(api, 'myLibrary');
+		load.mockImplementationOnce(() =>
+			Promise.resolve({ shelf: 'favorites', items: [], nextCursor: null })
+		);
+		load.mockImplementationOnce(() =>
+			Promise.resolve({ shelf: 'installed', items: [], nextCursor: null })
+		);
+		load.mockImplementationOnce(() => pending.promise);
+		const screen = await render(MinhaBiblioteca, mineProps(api));
+		await expect
+			.element(page.getByText(m.biblioteca_social_loading()))
+			.toHaveAttribute('aria-busy', 'true');
+		pending.resolve({
+			shelf: 'created',
+			items: [item('first', 'First')],
+			nextCursor: 'shelf-next'
+		});
+		await expect.element(page.getByText('First', { exact: true })).toBeVisible();
+		if (target === 'packs') {
+			await page.getByRole('tab', { name: /Packs/ }).click();
+			await expect.element(page.getByText('Notes', { exact: true })).toBeVisible();
+			await expect.element(page.getByText(m.biblioteca_social_moderated())).toBeVisible();
+		}
+		await page.getByRole('button', { name: m.biblioteca_social_more(), exact: true }).click();
+		await expect
+			.element(page.getByText(target === 'packs' ? 'Second pack' : 'Second', { exact: true }))
+			.toBeVisible();
+		expect(screen.container.querySelectorAll('.row')).toHaveLength(2);
+		await expect
+			.element(page.getByRole('button', { name: m.biblioteca_social_more(), exact: true }))
+			.not.toBeInTheDocument();
+		if (target === 'created')
+			expect(load.mock.lastCall?.[0]).toEqual({ shelf: 'created', cursor: 'shelf-next' });
+	});
+}
+
+const errorCases = [
+	{ code: 'AUTH_REQUIRED', text: () => m.biblioteca_social_error_auth() },
+	{ code: 'EMAIL_NOT_VERIFIED', text: () => m.biblioteca_social_verify() },
+	{ code: 'GATE_REJECTED', text: () => m.biblioteca_social_error_gate() },
+	{ code: 'RATE_LIMITED', text: () => m.biblioteca_social_error_rate() },
+	{ code: 'NOT_FOUND', text: () => m.biblioteca_social_error_missing() },
+	{ code: 'INTERNAL', text: () => m.biblioteca_social_error_generic() }
+] as const;
+
+for (const target of ['created', 'packs'] as const) {
+	for (const { code, text } of errorCases) {
+		test(`${target}: ${code} is explained and an explicit retry recovers`, async () => {
+			const { api } = emptyServer();
+			if (target === 'created')
+				vi.spyOn(api, 'myLibrary')
+					.mockImplementationOnce(async () => ({ shelf: 'favorites', items: [], nextCursor: null }))
+					.mockImplementationOnce(async () => ({ shelf: 'installed', items: [], nextCursor: null }))
+					.mockRejectedValueOnce(new SocialApiError(400, code));
+			else vi.spyOn(api, 'myPacks').mockRejectedValueOnce(new SocialApiError(400, code));
+			await render(MinhaBiblioteca, mineProps(api));
+			if (target === 'packs') await page.getByRole('tab', { name: /Packs/ }).click();
+			await expect.element(page.getByRole('alert')).toHaveTextContent(text());
+			await page.getByRole('button', { name: m.biblioteca_social_retry() }).click();
+			await expect
+				.element(
+					page.getByText(
+						target === 'packs'
+							? m.biblioteca_social_empty_packs_own()
+							: m.biblioteca_social_empty_created()
+					)
+				)
+				.toBeVisible();
+			await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+		});
+	}
+}
+
+test('offline/online events hide merging and retry shelves once on reconnection', async () => {
+	const { api, calls } = emptyServer();
+	await render(MinhaBiblioteca, mineProps(api));
+	await expect.element(page.getByText(m.biblioteca_social_empty_created())).toBeVisible();
+	window.dispatchEvent(new Event('offline'));
+	await expect.element(page.getByText(m.biblioteca_social_offline())).toBeVisible();
+	window.dispatchEvent(new Event('online'));
+	await expect.element(page.getByText(m.biblioteca_social_offline())).not.toBeInTheDocument();
+	await expect.poll(() => calls.length).toBe(8);
+});
+
+test('unverified owners cannot publish or restore; other authors never receive owner controls', async () => {
+	const { api } = emptyServer({
+		'GET /api/v1/me/library': (url) =>
+			json({
+				shelf: url.searchParams.get('shelf'),
+				items:
+					url.searchParams.get('shelf') === 'created'
+						? [
+								item('own', 'Owned', {
+									status: 'retracted',
+									moderation: 'hidden',
+									curve: { id: 'curve', s1: 's1', levelDb: 0, gateOk: false }
+								}),
+								item('other', 'Other author', { own: false })
+							]
+						: [item('favorite', 'Named favorite', { own: false })],
+				nextCursor: null
+			})
+	});
+	const props = mineProps(api);
+	props.session = createSocialSession({
+		initial: { id: 'u', username: 'Ana', emailVerified: false }
+	});
+	const screen = await render(MinhaBiblioteca, props);
+	await expect
+		.element(
+			page.getByRole('combobox', { name: m.biblioteca_social_change_visibility({ name: 'Owned' }) })
+		)
+		.toBeDisabled();
+	await expect
+		.element(page.getByRole('button', { name: m.biblioteca_social_restore() }))
+		.toBeDisabled();
+	await expect.element(page.getByText(m.biblioteca_social_gate_failed())).toBeVisible();
+	await expect.element(page.getByText(m.biblioteca_social_moderated())).toBeVisible();
+	await expect
+		.element(
+			page.getByRole('combobox', {
+				name: m.biblioteca_social_change_visibility({ name: 'Other author' })
+			})
+		)
+		.not.toBeInTheDocument();
+	expect(screen.container.querySelectorAll('.row-actions a')).toHaveLength(1);
+	await page.getByRole('tab', { name: /Favoritas/ }).click();
+	await expect.element(page.getByText(m.biblioteca_social_by({ name: 'Ana' }))).toBeVisible();
+});
+
+test('restoring patches every shelf and opening insights toggles back closed', async () => {
+	const { api } = emptyServer({
+		'GET /api/v1/me/library': (url) =>
+			json({
+				shelf: url.searchParams.get('shelf'),
+				items: [item('same', 'Same creation', { status: 'retracted' }), item('other', 'Unchanged')],
+				nextCursor: null
+			}),
+		'POST /api/v1/lineages/same/restore': () =>
+			json({ lineageId: 'same', status: 'active', visibility: 'public', moderation: 'visible' }),
+		'GET /api/v1/curves/same/audience': () =>
+			json({
+				audience: {
+					previewed: { total: 0, named: [], privateCount: 0 },
+					installed: { total: 0, named: [], privateCount: 0 },
+					favorited: { total: 0, named: [], privateCount: 0 }
+				}
+			}),
+		'GET /api/v1/me/shares': () => json({ items: [], nextCursor: null })
+	});
+	await render(MinhaBiblioteca, mineProps(api));
+	await page.getByRole('button', { name: m.biblioteca_social_restore() }).click();
+	await expect.element(page.getByText(m.biblioteca_social_restored_done())).toBeVisible();
+	const insights = page.getByRole('button', { name: m.biblioteca_social_insights() }).first();
+	await insights.click();
+	await expect.element(insights).toHaveAttribute('aria-expanded', 'true');
+	await expect
+		.element(
+			page.getByRole('heading', {
+				name: m.biblioteca_social_audience_title({ name: 'Same creation' })
+			})
+		)
+		.toBeVisible();
+	await insights.click();
+	await expect.element(insights).toHaveAttribute('aria-expanded', 'false');
+	await expect
+		.element(
+			page.getByRole('heading', {
+				name: m.biblioteca_social_audience_title({ name: 'Same creation' })
+			})
+		)
+		.not.toBeInTheDocument();
+	for (const tab of [/Favoritas/, /Instaladas/]) {
+		await page.getByRole('tab', { name: tab }).click();
+		await expect
+			.element(
+				page.getByRole('link', { name: m.biblioteca_social_open_label({ name: 'Same creation' }) })
+			)
+			.toHaveAttribute('href', '/c/same');
+		await expect
+			.element(page.getByText(m.biblioteca_social_retracted(), { exact: true }))
+			.not.toBeInTheDocument();
+	}
+});
+
+test('a pending owner action locks other controls and a failed action can be retried', async () => {
+	const { api } = emptyServer({ 'GET /api/v1/me/library': library() });
+	const pending = deferred<Awaited<ReturnType<SocialApi['retractLineage']>>>();
+	const retract = vi
+		.spyOn(api, 'retractLineage')
+		.mockReturnValueOnce(pending.promise)
+		.mockRejectedValueOnce(new SocialApiError(0, 'OFFLINE'));
+	await render(MinhaBiblioteca, mineProps(api));
+	const button = page.getByRole('button', { name: m.biblioteca_social_retract() }).first();
+	await button.click();
+	await expect.element(button).toBeDisabled();
+	await expect
+		.element(
+			page.getByRole('combobox', {
+				name: m.biblioteca_social_change_visibility({ name: 'Rascunho' })
+			})
+		)
+		.toBeDisabled();
+	pending.reject(new SocialApiError(429, 'RATE_LIMITED'));
+	await expect.element(page.getByText(m.biblioteca_social_error_rate())).toBeVisible();
+	await expect.element(button).toBeEnabled();
+	await button.click();
+	await expect.element(page.getByText(m.biblioteca_social_offline())).toBeVisible();
+	expect(retract).toHaveBeenCalledTimes(2);
+});
+
+for (const target of ['created', 'packs'] as const) {
+	test(`${target}: aborting on sign-out is silent and cancels the request signal`, async () => {
+		const { api } = emptyServer();
+		const library = deferred<Awaited<ReturnType<SocialApi['myLibrary']>>>();
+		const packs = deferred<Awaited<ReturnType<SocialApi['myPacks']>>>();
+		const loadLibrary = vi.spyOn(api, 'myLibrary');
+		const loadPacks = vi.spyOn(api, 'myPacks');
+		if (target === 'created') loadLibrary.mockImplementation(() => library.promise);
+		else loadPacks.mockReturnValue(packs.promise);
+		const screen = await render(MinhaBiblioteca, mineProps(api));
+		if (target === 'packs') await page.getByRole('tab', { name: /Packs/ }).click();
+		await expect
+			.element(page.getByText(m.biblioteca_social_loading()))
+			.toHaveAttribute('aria-busy', 'true');
+		const signal =
+			target === 'created'
+				? loadLibrary.mock.lastCall?.[1]?.signal
+				: loadPacks.mock.lastCall?.[1]?.signal;
+		await screen.rerender({ session: createSocialSession({ initial: null }) });
+		expect(signal?.aborted).toBe(true);
+		const abort = new DOMException('Cancelled', 'AbortError');
+		if (target === 'created') library.reject(abort);
+		else packs.reject(abort);
+		await expect
+			.element(page.getByRole('link', { name: m.biblioteca_social_signin_link() }))
+			.toBeVisible();
+		await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+	});
+}
+
+test('merging local items reloads all account shelves only after explicit confirmation', async () => {
+	const { api, calls } = emptyServer({
+		'POST /api/v1/me/library/merge': () =>
+			json({
+				created: [{ localId: 'local', lineageId: 'merged' }],
+				duplicates: [],
+				rejected: [],
+				conflicts: []
+			})
+	});
+	await render(MinhaBiblioteca, {
+		...mineProps(api),
+		localItems: [{ id: 'local', name: 'Local', s1: 's1-local', updatedAt: 1 }]
+	});
+	await expect.element(page.getByText(m.biblioteca_social_empty_created())).toBeVisible();
+	expect(calls).toHaveLength(4);
+	await page.getByRole('button', { name: 'Mesclar biblioteca local', exact: true }).click();
+	await expect.poll(() => calls.filter((call) => call.method === 'GET').length).toBe(8);
+	expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
 });

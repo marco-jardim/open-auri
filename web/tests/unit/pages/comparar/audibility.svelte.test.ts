@@ -194,3 +194,98 @@ test('lane taps receive the app 0 VU reference', async () => {
 		expect(options).toEqual({ kinds: ['vu'], reference: -20 });
 	}
 });
+
+test('a refused resume reports the error without rebuilding; a later false resume starts afresh', async () => {
+	vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	const { client, engine } = await setup();
+	const start = vi.spyOn(engine, 'start');
+	const resume = vi.spyOn(engine, 'resume').mockRejectedValueOnce(new Error('resume refused'));
+	await render(CompararPage, { app: client, locale: 'en-US' });
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.element(page.getByRole('button', { name: t.stop, exact: true })).toBeVisible();
+	await page.getByRole('button', { name: t.stop, exact: true }).click();
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(t.audioFailed);
+	expect(start).toHaveBeenCalledOnce();
+	expect(engine.state().paused).toBe(true);
+	resume.mockResolvedValueOnce(false);
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.poll(() => start.mock.calls.length).toBe(2);
+	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+	await expect.element(page.getByRole('button', { name: t.stop, exact: true })).toBeVisible();
+});
+
+test('muting every visible lane clears selection; Play recovers an armed A and ARM explains an empty deck', async () => {
+	const { client, engine } = await setup();
+	const screen = await render(CompararPage, { app: client, locale: 'en-US' });
+	for (let id = 1; id <= 4; id++)
+		await page.getByRole('switch', { name: `MUTE · ${t.track} ${id}`, exact: true }).click();
+	expect(screen.container.querySelectorAll('.lane-head[aria-pressed="true"]')).toHaveLength(0);
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.poll(() => engine.state().playing).toBe(true);
+	expect(screen.container.querySelector('.lane-head[aria-pressed="true"]')?.textContent).toContain(
+		'1'
+	);
+	await page.getByRole('button', { name: t.stop, exact: true }).click();
+	for (let id = 1; id <= 4; id++)
+		await page.getByRole('switch', { name: `ARM · ${t.track} ${id}`, exact: true }).click();
+	const play = page.getByRole('button', { name: t.play, exact: true });
+	await expect.element(play).toHaveAttribute('aria-disabled', 'true');
+	await expect.element(play).toHaveAccessibleDescription(t.reasonArm);
+	await expect
+		.element(page.getByRole('button', { name: t.exportSvg, exact: true }))
+		.toHaveAccessibleDescription(t.empty);
+});
+
+test('a chain failure after starting stops the owned engine and a retry can play', async () => {
+	vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	const { client, engine } = await setup();
+	const build = vi.spyOn(engine, 'buildChain').mockImplementationOnce(() => {
+		throw new Error('chain failed');
+	});
+	const stop = vi.spyOn(engine, 'stop');
+	await render(CompararPage, { app: client, locale: 'en-US' });
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(t.audioFailed);
+	expect(build).toHaveBeenCalled();
+	expect(stop).toHaveBeenCalledOnce();
+	expect(engine.state().playing).toBe(false);
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.poll(() => engine.state().playing).toBe(true);
+	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+});
+
+test('a late start rejection after unmount is ignored and does not stop another page', async () => {
+	const { client, engine } = await setup();
+	let reject: ((cause: Error) => void) | undefined;
+	vi.spyOn(engine, 'start').mockImplementationOnce(
+		() =>
+			new Promise<void>((_, fail) => {
+				reject = fail;
+			})
+	);
+	const stop = vi.spyOn(engine, 'stop');
+	await render(CompararPage, { app: client, locale: 'en-US' });
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.poll(() => reject).toBeDefined();
+	await cleanup();
+	reject?.(new Error('late denied'));
+	await tick();
+	expect(stop).not.toHaveBeenCalled();
+});
+
+test('an active audition reports a newly armed lane failing to build without restarting the transport', async () => {
+	vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	const { client, engine } = await setup();
+	const start = vi.spyOn(engine, 'start');
+	await render(CompararPage, { app: client, locale: 'en-US' });
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.element(page.getByRole('button', { name: t.stop, exact: true })).toBeVisible();
+	vi.spyOn(engine, 'buildChain').mockImplementationOnce(() => {
+		throw new Error('new lane failed');
+	});
+	await page.getByRole('switch', { name: `ARM · ${t.track} 5`, exact: true }).click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(t.audioFailed);
+	expect(start).toHaveBeenCalledOnce();
+	expect(engine.state()).toMatchObject({ playing: true, session: 'comparar' });
+});

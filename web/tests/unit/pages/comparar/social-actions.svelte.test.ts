@@ -196,3 +196,98 @@ test('invalid URL-like names never send and offline publishing retains the dialo
 	await expect.element(page.getByRole('dialog')).toBeVisible();
 	await expect.element(page.getByRole('status').last()).toHaveTextContent(m.curve_social_offline());
 });
+
+test('source pages append, search case-insensitively and reset when the account shelf changes', async () => {
+	const { social, fetcher } = fixture();
+	fetcher.mockResolvedValueOnce(
+		Response.json({
+			items: [{ lineage: { id: 'first', head: { id: 'v1', name: 'Warm bass' } } }],
+			nextCursor: 'next-page'
+		})
+	);
+	fetcher.mockResolvedValueOnce(
+		Response.json({
+			items: [{ lineage: { id: 'second', head: { id: 'v2', name: 'Clear voice' } } }],
+			nextCursor: null
+		})
+	);
+	await render(SocialSources, { social, path: '/comparar', onload: vi.fn() });
+	await expect.element(page.getByRole('button', { name: m.curve_social_add() })).toBeDisabled();
+	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
+	await page.getByRole('button', { name: m.curve_social_more() }).click();
+	expect(fetcher.mock.calls[1]?.[0]).toContain('cursor=next-page');
+	await expect.element(page.getByRole('option', { name: 'Warm bass' })).toBeInTheDocument();
+	await expect.element(page.getByRole('option', { name: 'Clear voice' })).toBeInTheDocument();
+	await page.getByRole('searchbox').fill('VOICE');
+	await expect.element(page.getByRole('option', { name: 'Warm bass' })).not.toBeInTheDocument();
+	await expect.element(page.getByRole('option', { name: 'Clear voice' })).toBeInTheDocument();
+	await page.getByRole('searchbox').fill('nothing matches');
+	await expect.element(page.getByText(m.curve_social_empty(), { exact: true })).toBeVisible();
+	await page.getByRole('searchbox').fill('');
+	await page
+		.getByRole('combobox', { name: m.curve_social_sources(), exact: true })
+		.selectOptions('library');
+	for (const shelf of ['favorites', 'installed']) {
+		await page
+			.getByRole('combobox', { name: m.curve_social_library(), exact: true })
+			.selectOptions(shelf);
+		await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
+		await expect.element(page.getByRole('option', { name: 'Community tone' })).toBeInTheDocument();
+		expect(fetcher.mock.calls.at(-1)?.[0]).toContain(`shelf=${shelf}`);
+	}
+});
+
+test('source changes discard a late response and unlock controls for the next load', async () => {
+	const { social, fetcher } = fixture();
+	let finish: ((response: Response) => void) | undefined;
+	fetcher.mockImplementationOnce(
+		() =>
+			new Promise<Response>((resolve) => {
+				finish = resolve;
+			})
+	);
+	await render(SocialSources, { social, path: '/comparar', onload: vi.fn() });
+	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.curve_social_loading());
+	await expect
+		.element(page.getByRole('combobox', { name: m.curve_social_choose(), exact: true }))
+		.toBeDisabled();
+	await page
+		.getByRole('combobox', { name: m.curve_social_sources(), exact: true })
+		.selectOptions('rankings');
+	finish?.(
+		Response.json({
+			items: [{ lineage: { id: 'late', head: { id: 'late-v', name: 'Stale tone' } } }],
+			nextCursor: null
+		})
+	);
+	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
+	await expect.element(page.getByRole('option', { name: 'Community tone' })).toBeInTheDocument();
+	await expect.element(page.getByRole('option', { name: 'Stale tone' })).not.toBeInTheDocument();
+});
+
+test('empty pages and curve errors are visible; offline retry reloads public sources', async () => {
+	const { social, fetcher } = fixture();
+	const onload = vi.fn();
+	fetcher.mockResolvedValueOnce(Response.json({ items: [], nextCursor: null }));
+	await render(SocialSources, { social, path: '/comparar', onload });
+	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
+	await expect.element(page.getByText(m.curve_social_empty(), { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
+	await page
+		.getByRole('combobox', { name: m.curve_social_choose(), exact: true })
+		.selectOptions('social-lineage');
+	fetcher.mockResolvedValueOnce(Response.json({ error: { code: 'NOT_FOUND' } }, { status: 404 }));
+	await page.getByRole('button', { name: m.curve_social_add() }).click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.curve_social_failed());
+	expect(onload).not.toHaveBeenCalled();
+	fetcher.mockRejectedValueOnce(new TypeError('offline'));
+	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.curve_social_offline());
+	await expect.element(page.getByRole('button', { name: m.curve_social_add() })).toBeDisabled();
+	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).last().click();
+	await expect.element(page.getByRole('option', { name: 'Community tone' })).toBeInTheDocument();
+	await expect
+		.element(page.getByText(m.curve_social_offline(), { exact: true }))
+		.not.toBeInTheDocument();
+});

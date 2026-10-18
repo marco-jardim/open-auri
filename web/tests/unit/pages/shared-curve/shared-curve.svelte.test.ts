@@ -55,6 +55,7 @@ function fakeAudio() {
 		for (const listener of listeners) listener(current);
 	};
 	return {
+		set,
 		createAB: vi.fn(() => ({ dispose: vi.fn(), select: vi.fn() })),
 		start: vi.fn(async (mode: PlayMode = 'chains', options: StartOptions = {}) => {
 			set({ mode, playing: true, paused: false, session: options.session ?? null });
@@ -302,4 +303,159 @@ test('an S1 that does not decode shows an error and keeps the page', async () =>
 	vi.spyOn(console, 'error').mockImplementation(() => undefined);
 	await render(SharedCurve, { curve: data({ s1: 'not-an-s1' }), meta: META, signedIn: false });
 	await expect.element(page.getByRole('alert')).toHaveTextContent(m.shared_curve_invalid());
+});
+
+test('metadata truncates Unicode by code point and empty descriptions use the fallback', async () => {
+	const screen = await render(SharedCurve, {
+		curve: data({ description: '🎧'.repeat(205), isHead: false }),
+		meta: META,
+		signedIn: false
+	});
+	expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe(
+		`${'🎧'.repeat(199)}…`
+	);
+	await expect
+		.element(page.getByText(m.shared_curve_version_note(), { exact: true }))
+		.toBeVisible();
+	await screen.rerender({ curve: data({ description: '' }) });
+	expect(
+		document.head.querySelector('meta[property="og:description"]')?.getAttribute('content')
+	).toBe(m.shared_curve_description_fallback());
+	expect(screen.container.querySelector('.description')).toBeNull();
+});
+
+test.each([401, 403])(
+	'favorite HTTP %s preserves the editor fallback without claiming success',
+	async (status) => {
+		const fetcher = vi.fn(async () => new Response(null, { status }));
+		await render(SharedCurve, {
+			curve: data({ shareId: null }),
+			meta: META,
+			signedIn: true,
+			fetcher
+		});
+		await page.getByRole('button', { name: m.shared_curve_favorite() }).click();
+		expect(fetcher).toHaveBeenCalledWith(
+			'/api/v1/curves/lin-abcdef123456/favorite',
+			expect.objectContaining({ method: 'PUT', credentials: 'same-origin' })
+		);
+		if (status === 401) {
+			const alert = page.getByRole('alert');
+			await expect
+				.element(alert.getByRole('paragraph'))
+				.toHaveTextContent(m.shared_curve_login_prompt());
+			await expect
+				.element(alert.getByRole('link', { name: m.shared_curve_login(), exact: true }))
+				.toHaveAttribute('href', '/entrar');
+		} else
+			await expect
+				.element(page.getByRole('status'))
+				.toHaveTextContent(m.shared_curve_favorite_error());
+		await expect
+			.element(page.getByRole('button', { name: m.shared_curve_favorite() }))
+			.toHaveAttribute('aria-pressed', 'false');
+		await expect.element(page.getByRole('link', { name: m.shared_curve_open() })).toBeVisible();
+	}
+);
+
+test('favorite is single-flight and an already favorited curve does not send another request', async () => {
+	let finish: ((response: Response) => void) | undefined;
+	const fetcher = vi.fn(
+		() =>
+			new Promise<Response>((resolve) => {
+				finish = resolve;
+			})
+	);
+	await render(SharedCurve, { curve: data(), meta: META, signedIn: true, fetcher });
+	await page.getByRole('button', { name: m.shared_curve_favorite() }).click();
+	await expect
+		.element(page.getByRole('button', { name: m.shared_curve_favorite() }))
+		.toHaveAttribute('aria-busy', 'true');
+	finish?.(new Response(null, { status: 204 }));
+	const saved = page.getByRole('button', { name: m.shared_curve_favorited() });
+	await expect.element(saved).toHaveAttribute('aria-pressed', 'true');
+	await saved.click();
+	expect(fetcher).toHaveBeenCalledOnce();
+});
+
+test('invalid curves refuse playback and install even when an app is ready', async () => {
+	vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	const { app, audio, requestWrite } = fakeApp();
+	await render(SharedCurve, { curve: data({ s1: 'invalid' }), meta: META, signedIn: true, app });
+	const transport = page.getByRole('group', { name: m.transport_group() });
+	await expect
+		.element(transport.getByRole('button', { name: m.transport_play(), exact: true }))
+		.toHaveAttribute('aria-disabled', 'true');
+	await expect
+		.element(transport.getByRole('button', { name: m.transport_play(), exact: true }))
+		.toHaveAccessibleDescription(m.shared_curve_audio_unavailable());
+	await page.getByRole('button', { name: m.shared_curve_listen() }).click();
+	await expect
+		.element(page.getByRole('status'))
+		.toHaveTextContent(m.shared_curve_audio_unavailable());
+	await page.getByRole('button', { name: m.shared_curve_install() }).click();
+	await expect
+		.element(page.getByRole('status'))
+		.toHaveTextContent(m.shared_curve_install_unavailable());
+	expect(audio.createAB).not.toHaveBeenCalled();
+	expect(requestWrite).not.toHaveBeenCalled();
+});
+
+test.each([new Error('audio denied'), 'audio denied'])(
+	'failed audio starts release the preview and show a retryable error (%s)',
+	async (cause) => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const { app, audio } = fakeApp();
+		audio.start.mockRejectedValueOnce(cause);
+		await render(SharedCurve, { curve: data(), meta: META, signedIn: false, app });
+		await page.getByRole('button', { name: m.shared_curve_listen() }).click();
+		await expect.element(page.getByRole('status')).toHaveTextContent(m.shared_curve_audio_error());
+		expect(audio.createAB.mock.results[0]?.value.dispose).toHaveBeenCalledOnce();
+		await page.getByRole('button', { name: m.shared_curve_listen() }).click();
+		await expect.element(page.getByRole('button', { name: m.shared_curve_stop() })).toBeVisible();
+	}
+);
+
+test('unmount during start stops a late owned session and disposes its preview', async () => {
+	const { app, audio } = fakeApp();
+	let finish: (() => void) | undefined;
+	audio.start.mockImplementationOnce(async () => {
+		await new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		audio.set({ mode: 'chains', playing: true, session: 'shared-curve' });
+	});
+	await render(SharedCurve, { curve: data(), meta: META, signedIn: false, app });
+	await page.getByRole('button', { name: m.shared_curve_listen() }).click();
+	await expect.poll(() => finish).toBeDefined();
+	await cleanup();
+	finish?.();
+	await expect.poll(() => audio.stop.mock.calls.length).toBe(1);
+	expect(audio.createAB.mock.results[0]?.value.dispose).toHaveBeenCalledOnce();
+});
+
+test('a foreign session taking over before subscription is not stopped', async () => {
+	const { app, audio } = fakeApp();
+	audio.start.mockImplementationOnce(async () => {
+		audio.set({ mode: 'raw', playing: true, session: 'other-page' });
+	});
+	await render(SharedCurve, { curve: data(), meta: META, signedIn: false, app });
+	await page.getByRole('button', { name: m.shared_curve_listen() }).click();
+	await expect.poll(() => audio.createAB.mock.results[0]?.value.dispose.mock.calls.length).toBe(1);
+	await expect
+		.element(page.getByRole('button', { name: m.shared_curve_listen() }))
+		.toHaveAttribute('aria-pressed', 'false');
+	expect(audio.stop).not.toHaveBeenCalled();
+});
+
+test('install ends a paused audition before opening the write checklist', async () => {
+	const { app, audio, requestWrite } = fakeApp();
+	await render(SharedCurve, { curve: data(), meta: META, signedIn: true, app });
+	await page.getByRole('button', { name: m.shared_curve_listen() }).click();
+	await expect.element(page.getByRole('button', { name: m.shared_curve_stop() })).toBeVisible();
+	audio.pause();
+	await page.getByRole('button', { name: m.shared_curve_install() }).click();
+	expect(audio.stop).toHaveBeenCalledOnce();
+	expect(audio.createAB.mock.results[0]?.value.dispose).toHaveBeenCalledOnce();
+	expect(requestWrite).toHaveBeenCalledOnce();
 });

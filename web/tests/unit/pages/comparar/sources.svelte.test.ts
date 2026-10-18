@@ -9,6 +9,8 @@ import { initialTracks } from '#lib/components/pages/comparar/comparison.ts';
 import { createClientApp, type ClientApp } from '#lib/app/client.svelte.ts';
 import { createAudioEngine } from '#lib/audio/engine.ts';
 import { setLocale } from '#lib/paraglide/runtime.js';
+import type { MeterListener } from '#lib/audio/meters.ts';
+import { numberLabel } from '#lib/charts/scales.ts';
 
 const { commit, dispose } = vi.hoisted(() => ({ commit: vi.fn(), dispose: vi.fn() }));
 vi.mock('#lib/workers/gate-client.ts', () => ({
@@ -154,4 +156,114 @@ test('custom experimental lane delegates source/toggles and never selects a disa
 	await page.getByRole('button', { name: `${t.track} 1` }).click();
 	expect(onSelect).toHaveBeenCalledOnce();
 	await expect.element(page.getByText(t.descriptionOriginal, { exact: true })).toBeVisible();
+});
+
+test('lane trims distinguish unmatched, unpaired and disarmed states and clamp fader travel', async () => {
+	const track = initialTracks()[0];
+	const t = copy('pt-BR');
+	const screen = await render(TrackLane, {
+		track,
+		t,
+		locale: 'pt-BR',
+		selected: true,
+		playing: false,
+		library: [],
+		pairTag: 'A',
+		trimDb: 4,
+		matched: true,
+		tourArm: true,
+		onSource: vi.fn(),
+		onToggle: vi.fn(),
+		onSelect: vi.fn()
+	});
+	const trim = () => screen.container.querySelector('.trim');
+	expect(trim()?.textContent).toBe(`${numberLabel(0, 'pt-BR', 1)} dB`);
+	expect(trim()?.getAttribute('data-trim')).toBe('0');
+	expect(screen.container.querySelector('[data-tour="comparar-arm"]')).not.toBeNull();
+	await screen.rerender({ trimDb: -24, pairTag: 'B' });
+	expect(trim()?.textContent).toBe(`${numberLabel(-24, 'pt-BR', 1)} dB`);
+	expect(
+		screen.container.querySelector<HTMLElement>('.trim-fader')?.style.getPropertyValue('--trim')
+	).toBe('1');
+	await screen.rerender({ matched: false });
+	expect(trim()?.textContent).toBe(t.levelTrimUnmatched);
+	expect(screen.container.querySelector('.trim-fader.is-idle')).not.toBeNull();
+	await screen.rerender({ matched: true, trimDb: null });
+	expect(trim()?.textContent).toBe(`${numberLabel(0, 'pt-BR', 1)} dB`);
+	await screen.rerender({ pairTag: null });
+	expect(trim()?.textContent).toBe(t.levelTrimOff);
+	await screen.rerender({ pairTag: 'A', track: { ...track, armed: false } });
+	expect(trim()?.textContent).toBe(t.levelTrimOff);
+	await expect.element(page.getByRole('button', { name: `${t.track} 1` })).toBeDisabled();
+	await screen.rerender({
+		track: { ...track, curve: { ...track.curve, source: 'preset:padrao' } }
+	});
+	await expect.element(page.getByText(t.descriptionCredit, { exact: true })).toBeVisible();
+});
+
+test('meter readings only become live during this armed lane audition and unsubscribe on replacement', async () => {
+	const track = initialTracks()[0];
+	const t = copy('en-US');
+	const listeners = new Set<MeterListener>();
+	const subscribe = vi.fn((listener: MeterListener) => {
+		listeners.add(listener);
+		return vi.fn(() => {
+			listeners.delete(listener);
+		});
+	});
+	const meter = { subscribe };
+	const emit: MeterListener = (update) => {
+		for (const listener of listeners) listener(update);
+	};
+	const screen = await render(TrackLane, {
+		track,
+		t,
+		locale: 'en-US',
+		selected: false,
+		playing: true,
+		meter,
+		library: [],
+		onSource: vi.fn(),
+		onToggle: vi.fn(),
+		onSelect: vi.fn()
+	});
+	const reading = () => screen.container.querySelector('.lane-read')?.textContent;
+	expect(listeners.size).toBe(1);
+	emit({ mode: 'live', frame: null });
+	await tick();
+	expect(reading()).toContain(t.live);
+	expect(reading()).toContain('dB');
+	emit({
+		mode: 'live',
+		frame: {
+			active: true,
+			vuL: -4,
+			vuR: -1,
+			ppmL: -18,
+			ppmR: -18,
+			truePeakDb: -18,
+			lufsM: -21,
+			lufsS: -21,
+			correlation: 1
+		}
+	});
+	await tick();
+	expect(reading()).toContain(`${numberLabel(-1, 'en-US', 1)} VU`);
+	await screen.rerender({ playing: false });
+	expect(listeners.size).toBe(1);
+	expect(reading()).toContain(t.data);
+	expect(reading()).not.toContain('VU');
+	await screen.rerender({ playing: true, track: { ...track, armed: false } });
+	expect(listeners.size).toBe(1);
+	expect(reading()).toContain(t.data);
+	const subscriptions = subscribe.mock.calls.length;
+	await screen.rerender({ meter: null, track });
+	expect(subscribe).toHaveBeenCalledTimes(subscriptions);
+	expect(listeners.size).toBe(0);
+	// The render harness may refresh props; every subscription still needs exactly one cleanup.
+	for (const result of subscribe.mock.results) {
+		if (result.type !== 'return') throw new Error('Meter subscription failed');
+		expect(result.value).toHaveBeenCalledOnce();
+	}
+	expect(reading()).toContain(t.data);
 });

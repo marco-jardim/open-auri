@@ -1,8 +1,9 @@
 // T4.11: /u/[apelido] components (Chromium): private library (counts only), empty states,
 // favorites only when present, user text rendered as text, A/B preview through the shared audio
 // engine, and the filters, sort and paging helpers of the model.
+import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { encodeS1 } from 'open-auri/share';
 import type { ClientApp } from '#lib/app/client.svelte.ts';
@@ -24,11 +25,13 @@ import {
 	type ProfileView
 } from '#lib/components/pages/perfil/model.ts';
 import { m } from '#lib/paraglide/messages.js';
+import { setLocale } from '#lib/paraglide/runtime.js';
 import { neutralCurve } from '#lib/state/model.ts';
 
-afterEach(() => {
-	cleanup();
+afterEach(async () => {
+	await cleanup();
 	vi.restoreAllMocks();
+	await setLocale('pt-BR', { reload: false });
 });
 
 const S1 = encodeS1(neutralCurve());
@@ -70,7 +73,7 @@ function view(overrides: Partial<ProfileView> = {}): ProfileView {
 }
 
 /** A stateful fake engine: sessions, pause and resume as the SEEK.1 transport reports them. */
-function fakeApp() {
+function fakeApp(currentCurve: ReturnType<typeof neutralCurve> | null = neutralCurve()) {
 	let current: AudioEngineState = { ...IDLE_STATE };
 	const listeners = new Set<(state: AudioEngineState) => void>();
 	const set = (next: Partial<AudioEngineState>) => {
@@ -100,8 +103,8 @@ function fakeApp() {
 			};
 		}
 	};
-	const app = { state: { curve: { current: neutralCurve() } }, audio };
-	return { app: app as unknown as ClientApp, audio };
+	const app = { state: { curve: { current: currentCurve } }, audio };
+	return { app: app as unknown as ClientApp, audio, set };
 }
 
 test('private library: nickname and counts only', async () => {
@@ -433,4 +436,338 @@ test('model: merges pages without repeats and refuses undecodable S1', () => {
 	]);
 	expect(previewCurve('not-an-s1')).toBeNull();
 	expect(previewCurve(S1)).not.toBeNull();
+});
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((yes, no) => {
+		resolve = yes;
+		reject = no;
+	});
+	return { promise, resolve, reject };
+}
+
+for (const list of ['lineages', 'packs', 'favorites'] as const) {
+	test(`${list}: pagination encodes the request, merges duplicates and exhausts the cursor`, async () => {
+		const first = card({ id: 'first', name: 'First creation' });
+		const second = card({ id: 'second', name: 'Second creation', author: null });
+		const firstPack = {
+			id: 'pack1',
+			name: 'First pack',
+			description: '',
+			createdAt: 0,
+			updatedAt: 0
+		};
+		const secondPack = {
+			...firstPack,
+			id: 'pack2',
+			name: 'Second pack',
+			description: 'Pack notes'
+		};
+		const data = view({
+			profile: { ...view().profile, username: 'ana space', activity: 'public' },
+			lineages: { items: [first], nextCursor: list === 'lineages' ? 'next +/&' : null },
+			packs: { items: [firstPack], nextCursor: list === 'packs' ? 'next +/&' : null },
+			favorites: {
+				items: [{ at: 0, lineage: first }],
+				nextCursor: list === 'favorites' ? 'next +/&' : null
+			}
+		});
+		const items =
+			list === 'lineages'
+				? [first, second]
+				: list === 'packs'
+					? [firstPack, secondPack]
+					: [
+							{ at: 0, lineage: first },
+							{ at: 1, lineage: second }
+						];
+		const pending = deferred<Response>();
+		const fetch = vi.spyOn(globalThis, 'fetch').mockReturnValue(pending.promise);
+		const screen = await render(Perfil, { data });
+		const more = page.getByRole('button', { name: m.perfil_load_more(), exact: true });
+		await more.click();
+		await expect.element(more).toHaveAttribute('aria-busy', 'true');
+		(more.element() as HTMLElement).click();
+		expect(fetch).toHaveBeenCalledTimes(1);
+		const [url, init] = fetch.mock.calls[0];
+		const requested = new URL(String(url), 'https://example.test');
+		expect(requested.pathname).toBe('/api/v1/users/ana%20space');
+		expect(Object.fromEntries(requested.searchParams)).toEqual({ list, cursor: 'next +/&' });
+		expect(init?.headers).toEqual({ accept: 'application/json' });
+		pending.resolve(new Response(JSON.stringify({ items, nextCursor: null })));
+		await expect.element(more).not.toBeInTheDocument();
+		const collection = screen.container.querySelector(
+			list === 'lineages' ? '.collection' : `.${list}`
+		);
+		expect(
+			collection?.querySelectorAll(list === 'lineages' ? '[data-testid="profile-record"]' : 'li')
+		).toHaveLength(2);
+		expect(collection?.textContent).toContain(list === 'packs' ? secondPack.name : second.name);
+		if (list === 'packs') expect(collection?.textContent).toContain('Pack notes');
+		if (list === 'favorites') expect(collection?.textContent).toContain('Ana');
+	});
+
+	test(`${list}: a page arriving after a profile change cannot repopulate the old collection`, async () => {
+		const pending = deferred<Response>();
+		vi.spyOn(globalThis, 'fetch').mockReturnValue(pending.promise);
+		const data = view({
+			profile: { ...view().profile, activity: 'public' },
+			[list]: { items: [], nextCursor: 'old' }
+		});
+		const screen = await render(Perfil, { data });
+		await page.getByRole('button', { name: m.perfil_load_more() }).click();
+		await screen.rerender({
+			data: view({ profile: { ...view().profile, username: 'bia', displayUsername: 'Bia' } })
+		});
+		pending.resolve(new Response(JSON.stringify({ items: [], nextCursor: 'stale' })));
+		await pending.promise;
+		await tick();
+		await expect.element(page.getByRole('heading', { level: 1 })).toHaveTextContent('Bia');
+		await expect
+			.element(page.getByRole('button', { name: m.perfil_load_more() }))
+			.not.toBeInTheDocument();
+	});
+}
+
+for (const failure of ['http', 'network', 'unknown'] as const) {
+	test(`pagination ${failure} failure is announced and the same cursor can be retried`, async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const fetch = vi.spyOn(globalThis, 'fetch');
+		if (failure === 'http') fetch.mockResolvedValueOnce(new Response('', { status: 503 }));
+		else fetch.mockRejectedValueOnce(failure === 'network' ? new Error('offline') : 'offline');
+		fetch.mockResolvedValueOnce(
+			new Response(JSON.stringify({ items: [card({ name: 'Recovered' })], nextCursor: null }))
+		);
+		const screen = await render(Perfil, {
+			data: view({ lineages: { items: [], nextCursor: 'retry' } })
+		});
+		const more = page.getByRole('button', { name: m.perfil_load_more() });
+		await more.click();
+		// The failure is announced in the page's `role="status"` live region (Perfil.svelte:428).
+		await expect.element(page.getByRole('status')).toHaveTextContent(m.perfil_load_error());
+		await expect.element(more).not.toHaveAttribute('aria-busy', 'true');
+		await more.click();
+		await expect.element(page.getByRole('heading', { level: 3 })).toHaveTextContent('Recovered');
+		// A new request clears the notice (Perfil.svelte:185). The empty region stays in the DOM
+		// but is `display: none` (`.notice:empty`, Perfil.svelte:591), so it leaves the
+		// accessibility tree rather than announcing an empty string.
+		const notice = screen.container.querySelector<HTMLElement>('.room > .notice[role="status"]');
+		expect(notice).not.toBeNull();
+		await expect.poll(() => notice?.textContent).toBe('');
+		expect(page.getByRole('status').query()).toBeNull();
+		expect(page.getByText(m.perfil_load_error()).query()).toBeNull();
+		expect(fetch.mock.calls[1]?.[0]).toBe(fetch.mock.calls[0]?.[0]);
+	});
+}
+
+test('a rejected old profile request does not announce an error on the new private profile', async () => {
+	vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	const pending = deferred<Response>();
+	vi.spyOn(globalThis, 'fetch').mockReturnValue(pending.promise);
+	const screen = await render(Perfil, { data: view({ packs: { items: [], nextCursor: 'old' } }) });
+	await page.getByRole('button', { name: m.perfil_load_more() }).click();
+	await screen.rerender({
+		data: view({ profile: { ...view().profile, library: 'private' }, lineages: null, packs: null })
+	});
+	pending.reject('late failure');
+	await pending.promise.catch(() => undefined);
+	await tick();
+	await expect.element(page.getByTestId('library-private')).toBeVisible();
+	// The stale rejection is dropped (Perfil.svelte:204 checks `data === requestedView`): the
+	// notice region stays empty, hence `display: none` and outside the accessibility tree.
+	const notice = screen.container.querySelector<HTMLElement>('.room > .notice[role="status"]');
+	expect(notice).not.toBeNull();
+	expect(notice?.textContent).toBe('');
+	expect(page.getByRole('status').query()).toBeNull();
+	expect(page.getByText(m.perfil_load_error()).query()).toBeNull();
+});
+
+for (const locale of ['pt-BR', 'en-US'] as const) {
+	test(`profile controls apply license, name and level ordering in ${locale}`, async () => {
+		await setLocale(locale, { reload: false });
+		await render(Perfil, {
+			data: view({ lineages: { items, nextCursor: null }, packs: null, favorites: null })
+		});
+		const names = () =>
+			[...document.querySelectorAll('[data-testid="profile-record"] h3')].map(
+				(node) => node.textContent
+			);
+		await userEvent.selectOptions(page.getByRole('combobox', { name: m.perfil_sort() }), 'name');
+		await expect.poll(names).toEqual(['Água', 'beta', 'Zeta']);
+		await userEvent.selectOptions(page.getByRole('combobox', { name: m.perfil_sort() }), 'level');
+		await expect.poll(names).toEqual(['Água', 'Zeta', 'beta']);
+		await userEvent.selectOptions(
+			page.getByRole('combobox', { name: m.perfil_license(), exact: true }),
+			'CC0-1.0'
+		);
+		await expect.poll(names).toEqual(['Zeta']);
+		await page.getByRole('searchbox', { name: m.perfil_filter() }).fill('Água');
+		await expect.element(page.getByTestId('creations-no-match')).toBeVisible();
+		await page.getByRole('button', { name: m.perfil_clear(), exact: true }).click();
+		await expect.poll(names).toEqual(['Água', 'Zeta', 'beta']);
+		await expect
+			.element(page.getByRole('combobox', { name: m.perfil_license(), exact: true }))
+			.toHaveValue('all');
+	});
+}
+
+test('switching sides reuses a playing comparison and resumes a paused one', async () => {
+	const { app, audio } = fakeApp(null);
+	await render(Perfil, { data: view({ lineages: { items: [card()], nextCursor: null } }), app });
+	await page.getByRole('button', { name: m.perfil_listen_b() }).click();
+	await page.getByRole('button', { name: m.perfil_listen_a() }).click();
+	const preview = audio.createAB.mock.results[0].value;
+	expect(preview.select).toHaveBeenLastCalledWith('A');
+	expect(audio.resume).not.toHaveBeenCalled();
+	audio.pause();
+	await page.getByRole('button', { name: m.perfil_listen_b() }).click();
+	expect(preview.select).toHaveBeenLastCalledWith('B');
+	expect(audio.resume).toHaveBeenCalledOnce();
+	expect(audio.createAB).toHaveBeenCalledOnce();
+	expect(audio.start).toHaveBeenCalledOnce();
+	expect(audio.createAB.mock.calls[0]).toEqual([
+		neutralCurve(),
+		previewCurve(S1),
+		{ experimental: true, initial: 'B' }
+	]);
+});
+
+for (const reason of [new Error('resume refused'), 'resume refused']) {
+	test(`a failed resume (${typeof reason}) keeps the comparison retryable`, async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const { app, audio } = fakeApp();
+		await render(Perfil, { data: view({ lineages: { items: [card()], nextCursor: null } }), app });
+		await page.getByRole('button', { name: m.perfil_listen_a() }).click();
+		audio.pause();
+		audio.resume.mockRejectedValueOnce(reason);
+		await page.getByRole('button', { name: m.perfil_listen_b() }).click();
+		await expect.element(page.getByRole('status')).toHaveTextContent(m.perfil_audio_error());
+		await expect.element(page.getByRole('button', { name: m.perfil_stop() })).toBeVisible();
+		await page.getByRole('button', { name: m.perfil_listen_a() }).click();
+		expect(audio.resume).toHaveBeenCalledTimes(2);
+		expect(audio.createAB).toHaveBeenCalledOnce();
+	});
+}
+
+for (const reason of [new Error('start refused'), 'start refused']) {
+	test(`a failed start (${typeof reason}) disposes the preview and permits a new attempt`, async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const { app, audio } = fakeApp();
+		audio.start.mockRejectedValueOnce(reason);
+		await render(Perfil, { data: view({ lineages: { items: [card()], nextCursor: null } }), app });
+		await page.getByRole('button', { name: m.perfil_listen_a() }).click();
+		await expect.element(page.getByRole('status')).toHaveTextContent(m.perfil_audio_error());
+		expect(audio.createAB.mock.results[0].value.dispose).toHaveBeenCalledOnce();
+		await expect
+			.element(page.getByRole('button', { name: m.perfil_stop() }))
+			.not.toBeInTheDocument();
+		await page.getByRole('button', { name: m.perfil_listen_b() }).click();
+		await expect.element(page.getByRole('button', { name: m.perfil_stop() })).toBeVisible();
+		expect(audio.start).toHaveBeenCalledTimes(2);
+	});
+}
+
+test('changing profile while audio starts cancels selection and stops only a late owned session', async () => {
+	const { app, audio, set } = fakeApp();
+	const pending = deferred<void>();
+	audio.start.mockImplementationOnce(async () => {
+		await pending.promise;
+		set({ session: 'perfil', mode: 'chains', playing: true });
+	});
+	const screen = await render(Perfil, {
+		data: view({ lineages: { items: [card()], nextCursor: null } }),
+		app
+	});
+	await page.getByRole('button', { name: m.perfil_listen_a() }).click();
+	await expect
+		.element(page.getByRole('button', { name: m.perfil_listen_b() }))
+		.toHaveAttribute('aria-disabled', 'true');
+	await screen.rerender({ data: view() });
+	pending.resolve();
+	await expect.poll(() => audio.stop.mock.calls.length).toBe(1);
+	expect(audio.createAB.mock.results[0].value.dispose).toHaveBeenCalledOnce();
+	await expect.element(page.getByTestId('creations-empty')).toBeVisible();
+});
+
+test('an engine claimed before subscription is left playing without a selected record', async () => {
+	const { app, audio, set } = fakeApp();
+	audio.start.mockImplementationOnce(async () =>
+		set({ session: 'other', mode: 'raw', playing: true })
+	);
+	await render(Perfil, { data: view({ lineages: { items: [card()], nextCursor: null } }), app });
+	await page.getByRole('button', { name: m.perfil_listen_a() }).click();
+	await expect.element(page.getByRole('button', { name: m.perfil_stop() })).not.toBeInTheDocument();
+	expect(audio.stop).not.toHaveBeenCalled();
+	expect(audio.createAB.mock.results[0].value.dispose).toHaveBeenCalledOnce();
+});
+
+test('public profiles with omitted collections use empty shelves but never invent public activity', async () => {
+	await render(Perfil, {
+		data: view({
+			profile: { ...view().profile, activity: 'public' },
+			lineages: null,
+			packs: null,
+			favorites: null
+		})
+	});
+	await expect.element(page.getByTestId('creations-empty')).toBeVisible();
+	await expect.element(page.getByTestId('packs-empty')).toBeVisible();
+	await expect
+		.element(page.getByRole('heading', { name: m.perfil_favorites() }))
+		.not.toBeInTheDocument();
+	await expect
+		.element(page.getByRole('button', { name: m.perfil_load_more() }))
+		.not.toBeInTheDocument();
+});
+
+test('selecting another record releases the previous chains and unmount releases a paused comparison', async () => {
+	const { app, audio } = fakeApp();
+	const screen = await render(Perfil, {
+		data: view({
+			lineages: {
+				items: [card({ id: 'one', name: 'One' }), card({ id: 'two', name: 'Two' })],
+				nextCursor: null
+			}
+		}),
+		app
+	});
+	await page.getByRole('button', { name: m.perfil_listen_a() }).nth(0).click();
+	const previous = audio.createAB.mock.results[0].value;
+	await page.getByRole('button', { name: m.perfil_listen_b() }).nth(1).click();
+	expect(previous.dispose).toHaveBeenCalledOnce();
+	expect(audio.stop).toHaveBeenCalledOnce();
+	expect(audio.createAB).toHaveBeenCalledTimes(2);
+	await expect
+		.element(page.getByRole('button', { name: m.perfil_listen_a() }).nth(0))
+		.toHaveAttribute('aria-pressed', 'false');
+	await expect
+		.element(page.getByRole('button', { name: m.perfil_listen_b() }).nth(1))
+		.toHaveAttribute('aria-pressed', 'true');
+	audio.pause();
+	await screen.unmount();
+	expect(audio.stop).toHaveBeenCalledTimes(2);
+	expect(audio.createAB.mock.results[1].value.dispose).toHaveBeenCalledOnce();
+});
+
+test('a cancelled start which finishes in another session never stops that other session', async () => {
+	const { app, audio, set } = fakeApp();
+	const pending = deferred<void>();
+	audio.start.mockImplementationOnce(async () => {
+		await pending.promise;
+		set({ session: 'other-page', mode: 'raw', playing: true });
+	});
+	const screen = await render(Perfil, {
+		data: view({ lineages: { items: [card()], nextCursor: null } }),
+		app
+	});
+	await page.getByRole('button', { name: m.perfil_listen_b() }).click();
+	await screen.rerender({ data: view() });
+	pending.resolve();
+	await pending.promise;
+	await tick();
+	expect(audio.stop).not.toHaveBeenCalled();
+	expect(audio.state()).toMatchObject({ session: 'other-page', playing: true });
+	expect(audio.createAB.mock.results[0].value.dispose).toHaveBeenCalledOnce();
 });

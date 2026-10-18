@@ -9,6 +9,9 @@ import { copy } from '#lib/components/pages/comparar/copy.ts';
 import { createClientApp, type ClientApp } from '#lib/app/client.svelte.ts';
 import { createAudioEngine } from '#lib/audio/engine.ts';
 import { setLocale } from '#lib/paraglide/runtime.js';
+import { createCurveSocial } from '#lib/components/pages/comparar/social.svelte.ts';
+import { createSocialApi, createSocialSession } from '#lib/social/index.ts';
+import { m } from '#lib/paraglide/messages.js';
 
 vi.mock('#lib/components/pages/comparar/blend.ts', () => ({ solveBlend: vi.fn() }));
 vi.mock('#lib/workers/solver-client.ts', () => ({
@@ -136,4 +139,87 @@ test('a late blend cannot expose a result after the mix changes or the panel unm
 	finish?.(accepted());
 	await tick();
 	expect(screen.container.querySelector('.sect-table')).toBeNull();
+});
+
+test('an accepted offline blend can bounce but account and editor actions explain the missing engine', async () => {
+	const t = copy('en-US');
+	const result: BlendResult = { ok: true, curve: initialTracks()[0].curve, target: [], rmsDb: 0 };
+	vi.mocked(solveBlend).mockResolvedValue(result);
+	const onBounce = vi.fn();
+	const social = createCurveSocial(createSocialApi(), createSocialSession({ initial: null }));
+	const screen = await render(BlendPanel, {
+		tracks: initialTracks(),
+		t,
+		locale: 'en-US',
+		app: null,
+		onBounce,
+		social
+	});
+	for (const name of [t.save, t.write, t.bounce]) {
+		await expect
+			.element(page.getByRole('button', { name, exact: true }))
+			.toHaveAccessibleDescription(t.pending);
+	}
+	await expect
+		.element(page.getByRole('spinbutton', { name: t.preamp, exact: true }))
+		.toBeDisabled();
+	await page.getByRole('checkbox', { name: t.auto, exact: true }).click();
+	await page.getByRole('spinbutton', { name: t.preamp, exact: true }).fill('-8');
+	await page.getByRole('combobox', { name: t.before, exact: true }).selectOptions('3');
+	await page.getByRole('combobox', { name: t.after, exact: true }).selectOptions('4');
+	await page.getByRole('button', { name: t.solve, exact: true }).click();
+	expect(solveBlend).toHaveBeenCalledWith(
+		expect.objectContaining({ preampDb: -8 }),
+		expect.anything(),
+		expect.anything()
+	);
+	await expect.element(page.getByText(t.ready, { exact: true })).toBeVisible();
+	for (const name of [t.save, t.write]) {
+		await expect
+			.element(page.getByRole('button', { name, exact: true }))
+			.toHaveAttribute('aria-disabled', 'true');
+		await expect
+			.element(page.getByRole('button', { name, exact: true }))
+			.toHaveAccessibleDescription(t.reasonEngine);
+	}
+	const open = page.getByRole('link', { name: t.open, exact: true });
+	const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+	open.element().dispatchEvent(click);
+	expect(click.defaultPrevented).toBe(true);
+	await expect
+		.element(page.getByRole('link', { name: m.curve_social_login() }))
+		.toHaveAttribute('href', '/entrar?next=%2Fcomparar');
+	await page.getByRole('combobox', { name: t.bounce, exact: true }).selectOptions('3');
+	await page.getByRole('button', { name: t.bounce, exact: true }).click();
+	expect(onBounce).toHaveBeenCalledWith(3, result.curve);
+	expect(screen.container.querySelectorAll('.sect-table tbody tr')).toHaveLength(10);
+	expect(screen.container.querySelector('.sect-table tbody')?.textContent).toContain('OFF');
+});
+
+test('a stale rejected calculation cannot erase a newer accepted result', async () => {
+	let reject: ((cause: Error) => void) | undefined;
+	vi.mocked(solveBlend)
+		.mockImplementationOnce(
+			() =>
+				new Promise<BlendResult>((_, fail) => {
+					reject = fail;
+				})
+		)
+		.mockResolvedValue(accepted());
+	const t = copy('en-US');
+	const screen = await render(BlendPanel, {
+		tracks: initialTracks(),
+		t,
+		locale: 'en-US',
+		app: null,
+		onBounce: vi.fn()
+	});
+	await page.getByRole('button', { name: t.solve, exact: true }).click();
+	await page.getByRole('combobox', { name: t.base, exact: true }).selectOptions('2');
+	await page.getByRole('button', { name: t.solve, exact: true }).click();
+	await expect.element(page.getByText(t.ready, { exact: true })).toBeVisible();
+	reject?.(new Error('old worker failed'));
+	await tick();
+	expect(screen.container.querySelector('.verdict')?.textContent).toContain(t.ready);
+	expect(screen.container.querySelector('.verdict')?.textContent).not.toContain(t.failed);
 });
