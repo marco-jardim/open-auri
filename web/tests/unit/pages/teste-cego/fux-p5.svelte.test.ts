@@ -75,9 +75,11 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		const engine = screen.container.querySelector('.engine h3');
 		expect(engine?.textContent).toContain(m.cego_fux_engine_eyebrow());
 		expect(engine?.textContent).toContain(m.cego_fux_engine_title());
-		await expect.element(page.getByText(m.cego_fux_output_hint(), { exact: true })).toBeVisible();
+		// The output is declared from the live cable (none here) until it is picked by hand.
+		await expect.element(page.getByRole('radio').last()).toBeChecked();
+		await expect.element(page.getByText(m.cego_tcout_auto_none(), { exact: true })).toBeVisible();
 		await page.getByRole('radio').last().click();
-		expect(screen.container.textContent).not.toContain(m.cego_fux_output_hint());
+		expect(screen.container.textContent).not.toContain(m.cego_tcout_auto_none());
 		// Stage: idle pill, three bays that say why they are unavailable, shortcuts restored.
 		const room = screen.container.querySelector('.room');
 		expect(room?.getAttribute('data-tour')).toBe('cego-result');

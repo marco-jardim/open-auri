@@ -24,8 +24,12 @@
 		disabled = true,
 		reducedMotion = false,
 		meter = null,
+		scoring = false,
+		ratings = [],
+		rateable = [],
 		onselect,
-		onpick
+		onpick,
+		onrate
 	}: {
 		revealed?: boolean;
 		moving?: boolean;
@@ -40,8 +44,13 @@
 		/** Reduced motion: no ripple, no rail move, instant curtain, stepped level. */
 		reducedMotion?: boolean;
 		meter?: MeterSource | null;
+		/** Escuta: the score faders live on the stage, under each bay. */
+		scoring?: boolean;
+		ratings?: readonly (number | null)[];
+		rateable?: readonly boolean[];
 		onselect: (index: number) => void;
 		onpick?: () => void;
+		onrate?: (index: number, value: string) => void;
 	} = $props();
 </script>
 
@@ -75,8 +84,12 @@
 		{disabled}
 		{reducedMotion}
 		{meter}
+		{scoring}
+		{ratings}
+		{rateable}
 		{onselect}
 		{onpick}
+		{onrate}
 	/>
 </section>
 

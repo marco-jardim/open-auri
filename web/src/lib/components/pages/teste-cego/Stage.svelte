@@ -15,11 +15,16 @@
 	  Before that the three bays are identical: nothing on stage tells one candidate from another.
 
 	Reduced motion: no ripple, no rail move, no flip and an instant curtain; the level is a
-	brightness step updated at most at 10 Hz. Each bay is a real button (the same selection as the
-	console keys and the 1, 2, 3 shortcuts) that says why when it is unavailable.
+	brightness step updated at most at 10 Hz. Each bay is a wrapper around two sibling controls:
+	a real button (the same selection as the console keys and the 1, 2, 3 shortcuts) that says why
+	when it is unavailable, and, during Escuta, the position's score fader on the floor (a native
+	range: the test's own rating state, 0 to 10 in steps of 0.5, unlocked once the position was
+	heard). The fader shows only the position number and the score; at the result it becomes a
+	read-only display of the score given.
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { PreviewCurve } from '#lib/audio/engine.ts';
 	import type { MeterSource, MeterUpdate } from '#lib/audio/meters.ts';
 	import TesteCegoArt from '#lib/components/art/TesteCegoArt.svelte';
@@ -41,8 +46,12 @@
 		disabled = true,
 		reducedMotion = false,
 		meter = null,
+		scoring = false,
+		ratings = [],
+		rateable = [],
 		onselect,
-		onpick
+		onpick,
+		onrate
 	}: {
 		/** The result is shown: the curtain is up and the bays carry names, curves and scores. */
 		revealed?: boolean;
@@ -62,9 +71,17 @@
 		reducedMotion?: boolean;
 		/** Live level of what plays (pre-volume); null when nothing of this test plays. */
 		meter?: MeterSource | null;
+		/** Escuta: each bay carries its own score fader on the floor. */
+		scoring?: boolean;
+		/** Each position's rating (0 to 10, null when not rated): live in Escuta, final at the result. */
+		ratings?: readonly (number | null)[];
+		/** Escuta: the positions heard so far, the only ones that can be rated. */
+		rateable?: readonly boolean[];
 		onselect: (index: number) => void;
 		/** Inline call to action while nothing is loaded: open the candidates step. */
 		onpick?: () => void;
+		/** A fader moved: the position and the input's raw value (the test validates it). */
+		onrate?: (index: number, value: string) => void;
 	} = $props();
 	const uid = $props.id();
 	const positions = [0, 1, 2] as const;
@@ -108,6 +125,33 @@
 	const cueSub = $derived(
 		idle ? m.cego_fux_waiting() : revealed && tied ? m.cego_tcwow_tie() : null
 	);
+	// Scores on the floor: live faders in Escuta, the scores given once the result is shown.
+	const faders = $derived(scoring && !revealed);
+	const scored = $derived(faders || (revealed && ratings.some((value) => value !== null)));
+	const scoreFormat = $derived(
+		new Intl.NumberFormat(getLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+	);
+	const formatScore = (value: number) => scoreFormat.format(value).replace(/-/g, '−');
+	/** Why a fader is locked: the short visible word and the full reason for assistive tech. */
+	const scoreLock = (position: number) =>
+		moving
+			? { short: m.cego_tcscore_wait(), long: m.cego_fux_reason_moving() }
+			: rateable[position]
+				? null
+				: { short: m.cego_tcscore_listen(), long: m.cego_tcscore_listen_reason() };
+	/**
+	 * Taking the fader where it rests (a press without a move, or Enter or Space on it) rates that
+	 * value too: an unrated position shows the middle of the scale without having that score.
+	 */
+	function keep(position: number, input: HTMLInputElement) {
+		if (input.disabled || (ratings[position] ?? null) !== null) return;
+		onrate?.(position, input.value);
+	}
+	function faderKey(event: KeyboardEvent & { currentTarget: HTMLInputElement }, position: number) {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		keep(position, event.currentTarget);
+	}
 </script>
 
 <div
@@ -150,7 +194,7 @@
 			<p id="{uid}-help" class="help-panel" hidden={!helpOpen}>{m.cego_shortcuts()}</p>
 		</div>
 	</div>
-	<div class="aperture">
+	<div class="aperture" class:scored>
 		<div class="backstage" role="img" aria-label={m.cego_scene()}>
 			<div class="wall"></div>
 			<div class="rails"></div>
@@ -196,48 +240,97 @@
 				>
 			{/each}
 		</div>
-		<div class="bays" role="group" aria-label={m.cego_tcwow_bays()}>
+		<div class="bays" class:scored role="group" aria-label={m.cego_tcwow_bays()}>
 			{#each positions as position (position)}
 				{@const bayLive = position === active && level !== null}
 				{@const plaque = revealed && Boolean(names[position])}
-				<Button
-					variant="ghost"
-					class="cego-bay"
-					style="grid-column:{position + 1}"
-					aria-pressed={selected === position}
-					disabledReason={bayReason(position)}
-					data-position={position + 1}
-					data-mode={bayLive ? 'live' : 'data'}
-					data-level={bayLive && level !== null ? level.toFixed(2) : undefined}
-					onclick={() => onselect(position)}
-				>
-					<span class="bay-spot" aria-hidden="true"></span>
-					<!-- The name comes from the content, so the revealed plaque text is part of it. -->
-					<span class="sr-only">{m.cego_position({ number: position + 1 })}</span>
-					{#if plaque}
-						<span class="plaque" class:top={top === position} id="{uid}-plaque-{position}">
-							<span class="plaque-name">{names[position]}</span>
-							{#if sparks[position]}<svg
-									class="spark"
-									viewBox="0 0 96 28"
-									preserveAspectRatio="none"
-									aria-hidden="true"
-									><line x1="0" x2="96" y1="14" y2="14" /><path d={sparks[position]} /></svg
-								>{/if}
-							<span class="plaque-score"
-								>{scores[position]
-									? m.cego_tcwow_score({ value: scores[position] ?? '' })
-									: m.cego_tcwow_no_score()}</span
-							>
-							{#if top === position}<span class="plaque-top">{m.cego_tcwow_top()}</span>{/if}
-						</span>
-					{/if}
-					<span class="bay-plate" aria-hidden="true"
-						><svg class="plate-shape" viewBox="0 0 100 30" preserveAspectRatio="none"
-							><polygon points="14,1 86,1 99,29 1,29" /></svg
-						><span class="plate-num">{position + 1}</span></span
+				{@const rating = ratings[position] ?? null}
+				{@const lock = scoreLock(position)}
+				<div class="bay" style="grid-column:{position + 1}">
+					<Button
+						variant="ghost"
+						class="cego-bay"
+						aria-pressed={selected === position}
+						disabledReason={bayReason(position)}
+						data-position={position + 1}
+						data-mode={bayLive ? 'live' : 'data'}
+						data-level={bayLive && level !== null ? level.toFixed(2) : undefined}
+						onclick={() => onselect(position)}
 					>
-				</Button>
+						<span class="bay-spot" aria-hidden="true"></span>
+						<!-- The name comes from the content, so the revealed plaque text is part of it. -->
+						<span class="sr-only">{m.cego_position({ number: position + 1 })}</span>
+						{#if plaque}
+							<span class="plaque" class:top={top === position} id="{uid}-plaque-{position}">
+								<span class="plaque-name">{names[position]}</span>
+								{#if sparks[position]}<svg
+										class="spark"
+										viewBox="0 0 96 28"
+										preserveAspectRatio="none"
+										aria-hidden="true"
+										><line x1="0" x2="96" y1="14" y2="14" /><path d={sparks[position]} /></svg
+									>{/if}
+								<span class="plaque-score"
+									>{scores[position]
+										? m.cego_tcwow_score({ value: scores[position] ?? '' })
+										: m.cego_tcwow_no_score()}</span
+								>
+								{#if top === position}<span class="plaque-top">{m.cego_tcwow_top()}</span>{/if}
+							</span>
+						{/if}
+						<span class="bay-plate" aria-hidden="true"
+							><svg class="plate-shape" viewBox="0 0 100 30" preserveAspectRatio="none"
+								><polygon points="14,1 86,1 99,29 1,29" /></svg
+							><span class="plate-num">{position + 1}</span></span
+						>
+					</Button>
+					<!-- The score is a sibling of the selection button, never inside it. -->
+					{#if scored && position < count}
+						{#if faders}
+							<div class="score" data-rated={rating !== null}>
+								<span class="score-num" aria-hidden="true">{position + 1}</span>
+								<input
+									class="fader"
+									type="range"
+									min="0"
+									max="10"
+									step="0.5"
+									value={rating ?? 5}
+									style:--pct="{(rating ?? 5) * 10}%"
+									disabled={lock !== null}
+									aria-label={m.cego_rating({ number: position + 1 })}
+									aria-valuetext={rating === null ? m.cego_unrated() : formatScore(rating)}
+									aria-describedby={lock ? `${uid}-lock-${position}` : undefined}
+									oninput={(event) => onrate?.(position, event.currentTarget.value)}
+									onpointerup={(event) => keep(position, event.currentTarget)}
+									onkeydown={(event) => faderKey(event, position)}
+								/>
+								{#if lock}
+									<span class="score-lock" id="{uid}-lock-{position}"
+										><span aria-hidden="true">{lock.short}</span><span class="sr-only"
+											>{lock.long}</span
+										></span
+									>
+								{:else}
+									<span class="score-value" aria-hidden="true"
+										>{rating === null ? '−' : formatScore(rating)}</span
+									>
+								{/if}
+							</div>
+						{:else}
+							<p class="score final" data-rated={rating !== null}>
+								<span class="sr-only">{m.cego_rating({ number: position + 1 })}:</span>
+								<span class="score-num" aria-hidden="true">{position + 1}</span>
+								<span class="score-track" aria-hidden="true"
+									><span class="score-fill" style:--pct="{(rating ?? 0) * 10}%"></span></span
+								>
+								<span class="score-value"
+									>{rating === null ? m.cego_unrated() : formatScore(rating)}</span
+								>
+							</p>
+						{/if}
+					{/if}
+				</div>
 			{/each}
 		</div>
 		{#if idle && onpick}
@@ -382,7 +475,10 @@
 	/* ---- The proscenium opening; geometry in container units of its own box. ---- */
 	.aperture {
 		--valance: 13cqh;
-		--floor: 19cqh;
+		--floor-base: 19cqh;
+		--floor: var(--floor-base);
+		/* Floor depth the score faders add (one row; two rows on narrow bays). */
+		--score-h: 44px;
 		--side: 4cqw;
 		--gap: 2.5cqw;
 		position: relative;
@@ -394,6 +490,10 @@
 			inset 0 0 0 1px rgb(0 0 0 / 0.8),
 			0 1px 0 rgb(255 255 255 / 0.05);
 		container-type: size;
+	}
+	/* Scores on the floor: the floor deepens by the faders' row, in front of the curtain. */
+	.aperture.scored {
+		--floor: calc(var(--floor-base) + var(--score-h));
 	}
 	.backstage,
 	.wall {
@@ -441,9 +541,14 @@
 	}
 	.box {
 		position: relative;
-		width: 23cqh;
+		width: auto;
 		height: 46cqh;
+		aspect-ratio: 1 / 2;
 		overflow: visible;
+	}
+	/* A deeper floor leaves less room above it: the cabinet keeps clear of the valance. */
+	.aperture.scored .box {
+		height: min(46cqh, calc(63cqh - var(--score-h)));
 	}
 	.shell {
 		fill: #0a0908;
@@ -667,17 +772,23 @@
 		box-shadow: 0 0 1.4cqh 0.3cqh rgb(255 210 122 / 0.6);
 	}
 
-	/* ---- Bays: one big button per position. ---- */
+	/* ---- Bays: a wrapper per position with the select button and, on the floor, the score. ---- */
 	.bays {
 		position: absolute;
 		inset: var(--valance) var(--side) 0;
 	}
-	.bays :global(.btn.cego-bay) {
+	.bay {
 		position: relative;
-		display: block;
 		grid-row: 1;
-		width: 100%;
-		height: 100%;
+		min-width: 0;
+		container: bay / inline-size;
+	}
+	.bays :global(.btn.cego-bay) {
+		position: absolute;
+		inset: 0;
+		display: block;
+		width: auto;
+		height: auto;
 		min-height: 0;
 		padding: 0;
 		border: 0;
@@ -687,6 +798,10 @@
 		transform: none;
 		color: var(--text-2);
 		white-space: normal;
+	}
+	/* With scores on the floor the button ends where the score row begins: no overlap. */
+	.bays.scored :global(.btn.cego-bay) {
+		bottom: var(--score-h);
 	}
 	.bays :global(.btn.cego-bay .btn__label) {
 		position: absolute;
@@ -705,7 +820,7 @@
 	}
 	.bay-spot {
 		position: absolute;
-		inset: 0 -12% var(--floor);
+		inset: 0 -12% var(--floor-base);
 		background: radial-gradient(48% 42% at 50% 58%, rgb(255 226 166 / 0.16), transparent 72%);
 		opacity: 0;
 		transition: opacity var(--dur-base, 0.2s) var(--ease-out, ease-out);
@@ -750,6 +865,162 @@
 		position: relative;
 		font: 500 clamp(15px, 8.5cqh, 30px) / 1 var(--face-body);
 		font-variant-numeric: tabular-nums;
+	}
+
+	/* ---- Score row on the floor: a console fader per position, then the final score. ---- */
+	.score {
+		position: absolute;
+		inset: auto 0 6px;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 2px 6px;
+		margin: 0;
+		padding: 2px 8px;
+		border: 1px solid rgb(255 210 122 / 0.2);
+		border-radius: var(--rad-md);
+		background: linear-gradient(#17110b, #0a0705);
+		box-shadow:
+			var(--well),
+			0 1px 0 rgb(255 255 255 / 0.04);
+	}
+	.score-num {
+		color: var(--text-2);
+		font: 600 var(--fs-caption) / 1 var(--face-body);
+		font-variant-numeric: tabular-nums;
+	}
+	.score-value {
+		min-width: 3ch;
+		color: var(--muted-hi);
+		font: 500 var(--fs-readout, 14px) / 1.1 var(--face-data);
+		font-variant-numeric: tabular-nums slashed-zero;
+		text-align: right;
+		white-space: nowrap;
+	}
+	.score[data-rated='true'] .score-value {
+		color: var(--accent-text, var(--accent));
+		text-shadow: 0 0 6px rgb(255 210 122 / 0.45);
+	}
+	.score-lock {
+		color: var(--muted-hi);
+		font: 400 var(--label-min) / 1.2 var(--face-body);
+		text-align: right;
+		white-space: nowrap;
+	}
+	/* A native range keeps the name, the 0 to 10 range, the 0.5 step and the arrow, Home, End
+	   and Page keys; only its look is the stage's: a slot with a fader cap. */
+	.fader {
+		--fill: #5a4a30;
+		width: 100%;
+		min-width: 0;
+		height: 28px;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		appearance: none;
+		cursor: pointer;
+	}
+	.score[data-rated='true'] .fader {
+		--fill: var(--accent);
+	}
+	.fader:disabled {
+		cursor: not-allowed;
+	}
+	.fader:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: var(--rad-xs, 3px);
+	}
+	.fader::-webkit-slider-runnable-track {
+		height: 4px;
+		border-radius: 2px;
+		background: linear-gradient(90deg, var(--fill) var(--pct, 50%), #2c251b var(--pct, 50%));
+		box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.8);
+	}
+	.fader::-moz-range-track {
+		height: 4px;
+		border-radius: 2px;
+		background: #2c251b;
+	}
+	.fader::-moz-range-progress {
+		height: 4px;
+		border-radius: 2px;
+		background: var(--fill);
+	}
+	.fader::-webkit-slider-thumb {
+		width: 12px;
+		height: 22px;
+		margin-top: -9px;
+		border: 1px solid rgb(0 0 0 / 0.75);
+		border-radius: 3px;
+		background: linear-gradient(#efe6d4, #9a8f80 48%, #3d3832 50%, #7d7468);
+		box-shadow: 0 2px 3px rgb(0 0 0 / 0.7);
+		appearance: none;
+	}
+	.fader::-moz-range-thumb {
+		width: 12px;
+		height: 22px;
+		border: 1px solid rgb(0 0 0 / 0.75);
+		border-radius: 3px;
+		background: linear-gradient(#efe6d4, #9a8f80 48%, #3d3832 50%, #7d7468);
+		box-shadow: 0 2px 3px rgb(0 0 0 / 0.7);
+	}
+	.fader:disabled::-webkit-slider-thumb {
+		background: #3a342c;
+		box-shadow: none;
+	}
+	.fader:disabled::-moz-range-thumb {
+		background: #3a342c;
+		box-shadow: none;
+	}
+	/* The result: the score given, read-only. */
+	.score.final {
+		min-height: 28px;
+	}
+	.score-track {
+		position: relative;
+		height: 4px;
+		overflow: hidden;
+		border-radius: 2px;
+		background: #2c251b;
+	}
+	.score-fill {
+		position: absolute;
+		inset: 0 auto 0 0;
+		width: var(--pct, 0%);
+		background: var(--accent);
+	}
+	/* Narrow bays: number and value on top, the fader across the whole bay below. */
+	@container bay (max-width: 140px) {
+		.score {
+			grid-template-columns: auto minmax(0, 1fr);
+			padding: 2px 6px;
+		}
+		.score-num {
+			grid-area: 1 / 1;
+		}
+		.score-value {
+			grid-area: 1 / 2;
+			justify-self: end;
+		}
+		/* Locked: the reason takes the whole top line (the number is on the plate above). */
+		.score:has(.score-lock) .score-num {
+			display: none;
+		}
+		.score-lock {
+			grid-area: 1 / 1 / 2 / 3;
+			justify-self: center;
+			text-align: center;
+			white-space: normal;
+		}
+		.fader,
+		.score-track {
+			grid-area: 2 / 1 / 3 / 3;
+		}
+		.score-track {
+			margin-block: 6px 4px;
+		}
 	}
 
 	/* ---- The reveal: names, curves and scores, only once the curtain is up. ---- */
@@ -877,6 +1148,15 @@
 		}
 		.aperture {
 			height: clamp(132px, 29vh, 250px);
+		}
+		/* Escuta and the result: the stage grows a little for the score row, under half the screen. */
+		.aperture.scored {
+			height: clamp(196px, 36vh, 300px);
+		}
+	}
+	@media (max-width: 600px) {
+		.aperture {
+			--score-h: 60px;
 		}
 	}
 	@media (max-width: 480px) {

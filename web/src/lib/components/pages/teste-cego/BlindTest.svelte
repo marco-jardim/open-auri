@@ -11,6 +11,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { whenIdle } from '#lib/app/runtime.ts';
+	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
 	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
@@ -46,6 +47,7 @@
 		type Session
 	} from './experiment.ts';
 	import { createBlindPreview } from './preview.ts';
+	import { autoOutput, cableConnected, lastWriteNotNeutral, type CableView } from './output.ts';
 
 	type BlindSocialApi = Pick<
 		SocialApi,
@@ -58,7 +60,8 @@
 		onopen,
 		reducedMotion,
 		api = null,
-		siteKey = ''
+		siteKey = '',
+		cable
 	}: {
 		audio?: AudioEngine | null;
 		current?: (PreviewCurve & { name: string }) | null;
@@ -68,6 +71,11 @@
 		api?: BlindSocialApi | null;
 		/** Turnstile site key for the S6 submission. */
 		siteKey?: string;
+		/**
+		 * Live cable state and write journal for the output choice. Omitted: the app's own cable
+		 * service and journal (none when BlindTest renders without the app, e.g. in a preview).
+		 */
+		cable?: CableView | null;
 	} = $props();
 	const uid = $props.id();
 	const official = officialCandidates();
@@ -88,7 +96,41 @@
 	let spread = $state(2);
 	let rounds = $state(6);
 	let generation = 0;
-	let output = $state<OutputConfirmation | null>(null);
+	/** No app provider (BlindTest rendered on its own): then there is no cable to read. */
+	function optionalAppContext(): AppContext | null {
+		try {
+			return getAppContext();
+		} catch {
+			return null;
+		}
+	}
+	const appContext = optionalAppContext();
+	/** Read only: the live connection and the journal. This page never talks to the cable. */
+	const cableView = $derived.by((): CableView | null => {
+		if (cable !== undefined) return cable;
+		const client = appContext?.client;
+		return client ? { state: client.cableState, journal: client.state.journal.entries } : null;
+	});
+	/** Chosen by hand in Preparo: from then on the cable state never changes the output. */
+	let pickedOutput = $state<OutputConfirmation | null>(null);
+	/**
+	 * The declared output: the hand-picked one, else the live cable's suggestion (a connected
+	 * cable in Neutro, otherwise another output), following connects and disconnects until then.
+	 */
+	const output = $derived<OutputConfirmation>(pickedOutput ?? autoOutput(cableView));
+	/** The cable cannot be read; the journal says its last write here did not leave Neutro. */
+	const outputWarning = $derived(output === 'neutral' && lastWriteNotNeutral(cableView));
+	/** Why the output is preselected, shown until the listener picks one by hand. */
+	const outputAuto = $derived(
+		cableConnected(cableView) ? m.cego_tcout_auto_cable() : m.cego_tcout_auto_none()
+	);
+	/**
+	 * A hand pick, also of the option already preselected (a click on a checked radio fires no
+	 * `change`): it only declares the output and never touches the cable.
+	 */
+	function pickOutput(value: OutputConfirmation) {
+		pickedOutput = value;
+	}
 	let tab = $state(0);
 	// The social tabs are not on the first tab: warm their chunks once the page is quiet.
 	onMount(() =>
@@ -164,6 +206,12 @@
 		})
 	);
 	const revealedTop = $derived(last && !last.tied ? revealedOrder.indexOf(last.winner.id) : -1);
+	/** The scores given in the last round, position by position: read-only on stage at the result. */
+	const revealedRatings = $derived(
+		!active && last && session ? (session.completed.at(-1)?.ratings ?? []) : []
+	);
+	/** Escuta: how many positions of this round already have a score (stage faders). */
+	const ratedCount = $derived(ratings.filter((value) => value !== null).length);
 	/**
 	 * Live level for the stage: the pre-volume meter bus (what this round plays, nothing else),
 	 * tapped only while the round plays. Paused, stopped or between rounds there is no source and
@@ -234,11 +282,6 @@
 		warmAudio(audio).catch((error: unknown) => {
 			console.warn(JSON.stringify({ event: 'cego.warm', error: (error as Error).name }));
 		});
-	}
-	/** Native rating fields stay disabled; this names the visible text that says why. */
-	function ratingWhy(index: number) {
-		if (moving) return `${uid}-rating-moving`;
-		return heard[index] ? undefined : `${uid}-rating-note`;
 	}
 	function positionReason(index: number) {
 		if (!active) return m.cego_fux_reason_idle();
@@ -374,10 +417,7 @@
 	}
 	function start(candidates = chosen, keepHistory = false) {
 		message = '';
-		if (!output) {
-			message = m.cego_confirmation_required();
-			return;
-		}
+		// The output is always declared: preselected from the cable, or picked by hand.
 		if (candidates.length < 2 || candidates.length > 3 || candidates.some((c) => !c.accepted)) {
 			message = m.cego_candidates_required();
 			return;
@@ -555,8 +595,12 @@
 		disabled={!active}
 		reducedMotion={reduced}
 		meter={stageMeter}
+		scoring={active}
+		ratings={active ? ratings : revealedRatings}
+		rateable={heard}
 		onselect={selectPosition}
 		onpick={pickCandidates}
+		onrate={setRating}
 	/>
 	<div class="sr" role="status" aria-live="polite">{announcement}</div>
 	<section class="desk" aria-label={m.cego_console()}>
@@ -729,9 +773,15 @@
 													type="radio"
 													name="{uid}-output"
 													value="neutral"
-													bind:group={output}
+													checked={output === 'neutral'}
+													aria-describedby={outputWarning ? `${uid}-output-warn` : undefined}
+													onclick={() => pickOutput('neutral')}
+													onchange={() => pickOutput('neutral')}
 												/><span
-													><b>{m.cego_neutral()}</b><small>{m.cego_neutral_note()}</small></span
+													><b>{m.cego_neutral()}</b><small>{m.cego_neutral_note()}</small
+													>{#if outputWarning}<small class="warn" id="{uid}-output-warn"
+															>{m.cego_tcout_not_neutral()}</small
+														>{/if}</span
 												></label
 											>
 											<label class="opt"
@@ -739,11 +789,14 @@
 													type="radio"
 													name="{uid}-output"
 													value="other"
-													bind:group={output}
+													checked={output === 'other'}
+													onclick={() => pickOutput('other')}
+													onchange={() => pickOutput('other')}
 												/><span><b>{m.cego_other()}</b><small>{m.cego_other_note()}</small></span
 												></label
 											>
-											{#if !output}<p class="hint">{m.cego_fux_output_hint()}</p>{/if}
+											<!-- Preselected from the live cable until the listener picks by hand. -->
+											{#if pickedOutput === null}<p class="hint output-auto">{outputAuto}</p>{/if}
 										</fieldset>
 										<div class="card">
 											<div class="card-head">
@@ -923,43 +976,15 @@
 											{/each}
 										</div>
 										<div class="card">
-											<h3 id="{uid}-rating-note">{m.cego_rating_note()}</h3>
-											{#if moving}<p class="note" id="{uid}-rating-moving">
-													{m.cego_fux_reason_moving()}
-												</p>{/if}
-											{#each session.order as id, index (id)}
-												<div class="rating">
-													<label for="{uid}-rating-{index}"
-														>{m.cego_rating({ number: index + 1 })}</label
-													>
-													<input
-														type="range"
-														min="0"
-														max="10"
-														step="0.5"
-														value={ratings[index] ?? 5}
-														disabled={moving || !heard[index]}
-														aria-describedby={ratingWhy(index)}
-														aria-label={m.cego_rating({ number: index + 1 })}
-														aria-valuetext={ratings[index] === null
-															? m.cego_unrated()
-															: number(ratings[index]!)}
-														oninput={(event) => setRating(index, event.currentTarget.value)}
-													/>
-													<input
-														id="{uid}-rating-{index}"
-														type="number"
-														min="0"
-														max="10"
-														step="0.5"
-														placeholder={m.cego_unrated()}
-														value={ratings[index] ?? ''}
-														disabled={moving || !heard[index]}
-														aria-describedby={ratingWhy(index)}
-														oninput={(event) => setRating(index, event.currentTarget.value)}
-													/>
-												</div>
-											{/each}
+											<!-- The score faders live on the stage, under each bay: nobody has to
+											     scroll away from it to rate. -->
+											<p class="hint">{m.cego_tcscore_hint()}</p>
+											<p class="note">
+												{m.cego_tcscore_progress({
+													rated: ratedCount,
+													total: session.order.length
+												})}
+											</p>
 											<label for="{uid}-notes">{m.cego_notes()}</label><textarea
 												id="{uid}-notes"
 												bind:value={notes}></textarea>
@@ -1593,8 +1618,7 @@
 		min-height: 30px;
 	}
 	select,
-	textarea,
-	input[type='number'] {
+	textarea {
 		font: inherit;
 		color: #ece7dd;
 		background: #0c0b09;
@@ -1613,16 +1637,6 @@
 	}
 	label {
 		font-size: var(--fs-small);
-	}
-	.rating {
-		display: grid;
-		grid-template-columns: 1fr minmax(80px, 1fr) 75px;
-		align-items: center;
-		gap: 12px;
-		margin: 12px 0;
-	}
-	.rating input[type='number'] {
-		font: var(--fs-caption) var(--face-data);
 	}
 	.bignums {
 		display: grid;
@@ -1731,13 +1745,6 @@
 		.tablet {
 			padding: 9px;
 			border-radius: 20px;
-		}
-		.rating {
-			grid-template-columns: 1fr 75px;
-			gap: 6px;
-		}
-		.rating label {
-			grid-column: 1/-1;
 		}
 		.bignums {
 			gap: 6px;

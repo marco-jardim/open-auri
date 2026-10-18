@@ -48,7 +48,6 @@ for (const copy of [
 		send: 'Enviar preferências',
 		cable: 'No cabo',
 		soon: 'EM BREVE',
-		required: 'Confirme Cabo em Neutro ou Outra saída no Preparo.',
 		instant: 'Movimento reduzido:',
 		noCI: 'Indisponível com n < 2',
 		next: 'Próxima rodada'
@@ -66,13 +65,12 @@ for (const copy of [
 		send: 'Send preferences',
 		cable: 'On the cable',
 		soon: 'COMING SOON',
-		required: 'Confirm Cable in Neutral or Other output in Setup.',
 		instant: 'Reduced motion:',
 		noCI: 'Unavailable with n < 2',
 		next: 'Next round'
 	}
 ] as const) {
-	test(`complete local flow, required output, real meter, disabled sending and axe in ${copy.locale}`, async () => {
+	test(`complete local flow, declared output, real meter, disabled sending and axe in ${copy.locale}`, async () => {
 		await setLocale(copy.locale, { reload: false });
 		await page.viewport(copy.locale === 'pt-BR' ? 1440 : 390, 1000);
 		const audio = sharedEngine();
@@ -81,16 +79,16 @@ for (const copy of [
 		const fetchSpy = vi.spyOn(globalThis, 'fetch');
 		const screen = await render(BlindTest, { audio, reducedMotion: true });
 		await accessible(screen.container);
+		// No cable here: the output is declared as another output from the start, and says why.
+		await expect
+			.element(page.getByRole('radio', { name: new RegExp(`^${copy.other}`) }))
+			.toBeChecked();
+		await expect.element(page.getByText(m.cego_tcout_auto_none(), { exact: true })).toBeVisible();
 		await page.getByRole('tab', { name: new RegExp(copy.candidates) }).click();
 		await page.getByRole('checkbox', { name: /^Auri\b/ }).click();
 		await page.getByRole('checkbox', { name: /^Natural\b/ }).click();
-		await page.getByRole('button', { name: copy.start, exact: true }).click();
-		await expect.element(page.getByText(copy.required, { exact: true })).toBeVisible();
 		expect(start).not.toHaveBeenCalled();
 		expect(createAB).not.toHaveBeenCalled();
-		await page.getByRole('tab', { name: new RegExp(copy.setup) }).click();
-		await page.getByRole('radio', { name: new RegExp(`^${copy.other}`) }).click();
-		await page.getByRole('tab', { name: new RegExp(copy.candidates) }).click();
 		await page.getByRole('button', { name: copy.start, exact: true }).click();
 		expect(createAB).toHaveBeenCalledOnce();
 		expect(start).not.toHaveBeenCalled();
@@ -100,20 +98,35 @@ for (const copy of [
 		expect(screen.container.textContent).not.toContain('Auri');
 		await accessible(screen.container);
 		const panel = page.getByRole('tabpanel');
-		await expect.element(panel.getByRole('spinbutton').nth(0)).toBeDisabled();
+		// The score faders live on the stage, under each bay; the panel only points there.
+		expect(panel.getByRole('slider').elements()).toHaveLength(0);
+		await expect.element(panel.getByText(m.cego_tcscore_hint(), { exact: true })).toBeVisible();
+		const score = (number: number) =>
+			page.getByRole('slider', { name: m.cego_rating({ number }), exact: true });
+		const press = async (number: number, keys: string) => {
+			const input = score(number).element();
+			if (!(input instanceof HTMLInputElement)) throw new Error('Missing score fader');
+			input.focus();
+			await userEvent.keyboard(keys);
+		};
+		await expect.element(score(1)).toBeDisabled();
 		await panel.getByRole('button', { name: copy.next, exact: true }).click();
-		await expect.element(panel.getByRole('spinbutton').nth(0)).toBeDisabled();
+		await expect.element(score(1)).toBeDisabled();
 		await panel.getByRole('button', { name: copy.play, exact: true }).click();
-		await expect.element(panel.getByRole('spinbutton').nth(0)).toBeEnabled();
+		await expect.element(score(1)).toBeEnabled();
 		await expect
 			.poll(() => screen.container.querySelector('.candidate-meter [data-mode="live"]') !== null)
 			.toBe(true);
 		await expect
 			.poll(() => screen.container.querySelector('.candidate-meter meter[aria-valuetext]') !== null)
 			.toBe(true);
-		await panel.getByRole('spinbutton').nth(0).fill('0');
+		await press(1, '{Home}');
 		await panel.getByRole('button', { name: new RegExp(`${copy.position} 2`) }).click();
-		await panel.getByRole('spinbutton').nth(1).fill('8');
+		await expect.element(score(2)).toBeEnabled();
+		await press(2, '{End}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}');
+		await expect
+			.element(page.getByText(m.cego_tcscore_progress({ rated: 2, total: 2 }), { exact: true }))
+			.toBeVisible();
 		await accessible(screen.container);
 		await panel.getByRole('button', { name: copy.finish, exact: true }).click();
 		await expect.element(page.getByRole('table')).toBeVisible();

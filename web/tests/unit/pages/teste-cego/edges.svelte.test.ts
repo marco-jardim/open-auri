@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import BlindTest from '#lib/components/pages/teste-cego/BlindTest.svelte';
 import ListeningRoom from '#lib/components/pages/teste-cego/ListeningRoom.svelte';
@@ -27,6 +27,18 @@ async function pair() {
 	await candidates();
 	await page.getByRole('checkbox', { name: /^Auri\b/ }).click();
 	await page.getByRole('checkbox', { name: /^Natural\b/ }).click();
+}
+
+/** The score fader of a position, on the stage under its bay. */
+const score = (number: number) =>
+	page.getByRole('slider', { name: m.cego_rating({ number }), exact: true });
+
+/** Keys typed on a fader, as a listener would (arrows, Home, End). */
+async function press(fader: Locator, keys: string) {
+	const input = fader.element();
+	if (!(input instanceof HTMLInputElement)) throw new Error('Missing score fader');
+	input.focus();
+	await userEvent.keyboard(keys);
 }
 
 for (const locale of ['pt-BR', 'en-US'] as const) {
@@ -122,22 +134,26 @@ test('two heard rounds compute confidence intervals, refuse invalid ratings and 
 	for (let round = 0; round < 2; round++) {
 		await panel.getByRole('button', { name: m.cego_next(), exact: true }).click();
 		await expect.element(page.getByText(m.cego_ratings_required(), { exact: true })).toBeVisible();
+		// Not heard yet: the stage fader is locked.
+		await expect.element(score(1)).toBeDisabled();
 		await panel.getByRole('button', { name: m.cego_play(), exact: true }).click();
-		await expect.element(panel.getByRole('spinbutton').nth(0)).toBeEnabled();
+		await expect.element(score(1)).toBeEnabled();
 		if (round === 0) {
-			await panel.getByRole('spinbutton').nth(0).fill('11');
-			await panel.getByRole('spinbutton').nth(0).fill('');
+			// Heard but not rated: the fader rests mid-scale without being a score, so it refuses.
+			await expect.element(score(1)).toHaveAttribute('aria-valuetext', m.cego_unrated());
 			await panel.getByRole('button', { name: m.cego_next(), exact: true }).click();
 			await expect
 				.element(page.getByText(m.cego_ratings_required(), { exact: true }))
 				.toBeVisible();
 		}
-		await panel.getByRole('spinbutton').nth(0).fill('0');
+		await press(score(1), '{Home}');
+		await expect.element(score(1)).toHaveAttribute('aria-valuetext', '0.0');
 		const key = new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true });
 		window.dispatchEvent(key);
 		expect(key.defaultPrevented).toBe(true);
-		await expect.element(panel.getByRole('spinbutton').nth(1)).toBeEnabled();
-		await panel.getByRole('spinbutton').nth(1).fill('10');
+		await expect.element(score(2)).toBeEnabled();
+		await press(score(2), '{End}');
+		await expect.element(score(2)).toHaveAttribute('aria-valuetext', '10.0');
 		await panel.getByRole('button', { name: m.cego_next(), exact: true }).click();
 	}
 	await expect.element(page.getByRole('table')).toBeVisible();
@@ -151,7 +167,7 @@ test('two heard rounds compute confidence intervals, refuse invalid ratings and 
 		.element(page.getByRole('button', { name: m.cego_continue(), exact: true }))
 		.not.toHaveAttribute('aria-disabled');
 	await page.getByRole('button', { name: m.cego_continue(), exact: true }).click();
-	await expect.element(panel.getByRole('spinbutton').nth(2)).toBeDisabled();
+	await expect.element(score(3)).toBeDisabled();
 	await panel.getByRole('button', { name: m.cego_cancel(), exact: true }).click();
 	await expect
 		.element(page.getByRole('button', { name: m.cego_start(), exact: true }))

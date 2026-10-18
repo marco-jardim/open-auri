@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { createAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
 import { setLocale } from '#lib/paraglide/runtime.js';
@@ -65,13 +65,25 @@ test('every trial starts at a random point; a pause keeps the round; a swap keep
 	await expect.poll(() => audio.state().playing).toBe(true);
 	expect(start).toHaveBeenCalledOnce();
 
-	// A blind swap keeps the current position: no start, no restart, still playing.
-	await panel.getByRole('spinbutton').nth(0).fill('4');
+	// A blind swap keeps the current position: no start, no restart, still playing. The scores
+	// are given on the stage faders, under each bay.
+	const score = (number: number) =>
+		page.getByRole('slider', { name: m.cego_rating({ number }), exact: true });
+	const press = async (number: number, keys: string) => {
+		const input = score(number).element();
+		if (!(input instanceof HTMLInputElement)) throw new Error('Missing score fader');
+		input.focus();
+		await userEvent.keyboard(keys);
+	};
+	await press(1, `{Home}${'{ArrowRight}'.repeat(8)}`);
+	await expect.element(score(1)).toHaveAttribute('aria-valuetext', '4.0');
 	await panel.getByRole('button', { name: /Position 2/ }).click();
 	expect(start).toHaveBeenCalledOnce();
 	expect(restart).not.toHaveBeenCalled();
 	expect(audio.state()).toMatchObject({ playing: true, session: 'teste-cego' });
-	await panel.getByRole('spinbutton').nth(1).fill('7');
+	await expect.element(score(2)).toBeEnabled();
+	await press(2, `{End}${'{ArrowLeft}'.repeat(6)}`);
+	await expect.element(score(2)).toHaveAttribute('aria-valuetext', '7.0');
 
 	// The trial ends (its session with it); the next one starts at its own random point.
 	await panel.getByRole('button', { name: 'Next round', exact: true }).click();
