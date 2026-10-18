@@ -69,12 +69,21 @@ async function expectDragWithinBudgets(page: Page, testInfo: TestInfo, rate = 1)
 		body: JSON.stringify({ rate, mean, p95, ...recording }, null, 2),
 		contentType: 'application/json'
 	});
+	const longTasks = recording.tasks.filter(({ duration }) => duration > 50);
+	// PO decision (2026-10-18): the GitHub runner (2 vCPU, software raster) sits right at the frame
+	// budget, so CI only reports the numbers (attachment + annotation). Every local and pre-push
+	// run enforces the budgets.
+	if (process.env.CI) {
+		const within = mean < 20 && p95 < 50 && longTasks.length === 0;
+		testInfo.annotations.push({
+			type: within ? 'perf' : 'perf-over-budget',
+			description: `drag mean ${mean.toFixed(1)} ms, p95 ${p95.toFixed(1)} ms, long tasks ${longTasks.length} (budgets: < 20 ms, < 50 ms, none)`
+		});
+		return;
+	}
 	expect.soft(mean, 'Mean rAF interval during drag must be < 20 ms').toBeLessThan(20);
 	expect.soft(p95, 'p95 rAF interval during drag must be < 50 ms').toBeLessThan(50);
-	expect(
-		recording.tasks.filter(({ duration }) => duration > 50),
-		'No main-thread task during the drag may exceed 50 ms'
-	).toEqual([]);
+	expect(longTasks, 'No main-thread task during the drag may exceed 50 ms').toEqual([]);
 }
 
 // Manifest/JS-size budgets are checked separately by scripts/check-budgets.mjs.
