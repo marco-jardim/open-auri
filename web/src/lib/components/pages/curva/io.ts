@@ -3,6 +3,8 @@
  * `open-auri/share`, `open-auri/dsp`); this module only adds the page rules:
  * - HS/LP/HP travel in `.txt`, S5 and links only in Engenharia (experimental);
  * - every imported curve passes `gateForWrite` before it may reach the editor;
+ * - every export (`.txt`, S5, `.bin`) and `#p=` link carries only a curve the standard gate
+ *   accepts: a YOLO-only curve (restored after a reload, YOLO off) never leaves as a file or link;
  * - imported names are untrusted: normalised by core `normalizeText`, length-capped and always
  *   rendered as text by the components (never as HTML).
  */
@@ -79,6 +81,12 @@ export function safeName(raw: unknown, fallback: string): string {
 	return points.length === 0 ? fallback : points.slice(0, NAME_MAX).join('');
 }
 
+/** The standard gate (`verdictFor`, profile `'standard'`) on a curve about to leave the editor. */
+function refusedByGate(curve: Curve): IoFailure | null {
+	const verdict = verdictFor(curve);
+	return verdict.ok ? null : fail('gate', verdict.reasons);
+}
+
 /** Layer rule and gate for anything coming from outside the editor. */
 export function admit(curve: ImportedCurve, layer: Layer): ImportResult {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
@@ -101,12 +109,16 @@ export function importTxt(text: string, layer: Layer): ImportResult {
 
 export function exportTxt(curve: Curve, layer: Layer): ExportResult<string> {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
+	let value: string;
 	try {
-		return { ok: true, value: serializeEqualizerApo(curve) };
+		value = serializeEqualizerApo(curve);
 	} catch (cause) {
 		if (cause instanceof EqualizerApoError) return fail('format', [], cause.code);
 		throw cause;
 	}
+	const refused = refusedByGate(curve);
+	if (refused) return refused;
+	return { ok: true, value };
 }
 
 function s1Of(curve: Curve): ExportResult<string> {
@@ -131,6 +143,8 @@ export function exportS5(curve: Curve, meta: S5Meta, layer: Layer): ExportResult
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
 	const code = s1Of(curve);
 	if (!code.ok) return code;
+	const refused = refusedByGate(curve);
+	if (refused) return refused;
 	const { format, labels } = s5Labels(meta.labels);
 	try {
 		return {
@@ -190,7 +204,10 @@ export function exportBin(curve: Curve): ExportResult<Uint8Array<ArrayBuffer>> {
 export function linkHash(curve: Curve, layer: Layer): ExportResult<string> {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
 	const code = s1Of(curve);
-	return code.ok ? { ok: true, value: `${LINK_PREFIX}${code.value}` } : code;
+	if (!code.ok) return code;
+	const refused = refusedByGate(curve);
+	if (refused) return refused;
+	return { ok: true, value: `${LINK_PREFIX}${code.value}` };
 }
 
 /** `#p=<S1>` → admitted curve; `null` when the hash carries no curve link. */

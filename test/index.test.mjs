@@ -22,7 +22,11 @@ const areas = {
     api: safety,
     members: ['gate', 'policy', 'thresholds'],
     // gate forwards these bindings; the area index exports them from thresholds only.
-    duplicates: { THRESHOLDS: 'thresholds', PROVENANCE: 'thresholds' },
+    duplicates: {
+      THRESHOLDS: 'thresholds',
+      PROVENANCE: 'thresholds',
+      YOLO_THRESHOLDS: 'thresholds',
+    },
   },
   share: { api: share, members: ['s1', 'envelope'], duplicates: {} },
   io: { api: io, members: ['equalizer-apo', 'measurement'], duplicates: {} },

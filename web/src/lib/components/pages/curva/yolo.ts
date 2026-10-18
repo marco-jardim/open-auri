@@ -7,9 +7,15 @@
  *   account. YOLO curves are never saved, shared or published.
  * - Writing is disabled during the free preview.
  * - "Trazer para o modo normal" only when the curve passes the standard gate.
+ * - Whether or not YOLO is on, a curve leaves for the library, a link, a file, the account or a
+ *   publication only when the **standard** gate accepts it (`exitRefusal`). YOLO lives in memory
+ *   only, so a reload turns it off while the YOLO-only curve it left in `oa.current` comes back
+ *   to the editor: checking whether YOLO is on is not enough.
  */
 import type { EditorProfile } from '#lib/workers/gate-handler.ts';
+import { m } from '#lib/paraglide/messages.js';
 import { verdictFor, type Curve } from './model.ts';
+import { firstReasonText, type Reason } from './reasons.ts';
 
 /** Every export, share and save path of the editor (all disabled in Modo YOLO). */
 export const YOLO_BLOCKED_ACTIONS = Object.freeze([
@@ -48,4 +54,35 @@ export function yoloWriteBlock(enabled: boolean, freePreview: boolean): 'free-pr
 /** "Trazer para o modo normal": allowed only when the curve passes the standard gate. */
 export function canBringBack(curve: Curve): boolean {
 	return verdictFor(curve, 'standard').ok;
+}
+
+/**
+ * Why `curve` may not be saved to the library, shared, exported or published: `'yolo'` while
+ * Modo YOLO is on (nothing leaves), `'gate'` (with the gate's reasons) when the standard gate
+ * refuses it, else null. The standard profile is used whatever the editor's profile is, so a
+ * curve that passes only under YOLO (class 2 waived) is refused with YOLO off as well.
+ */
+export type ExitRefusal =
+	| { readonly kind: 'yolo' }
+	| { readonly kind: 'gate'; readonly reasons: readonly Reason[] };
+
+export function exitRefusal(curve: Curve, yoloEnabled = false): ExitRefusal | null {
+	if (yoloEnabled) return { kind: 'yolo' };
+	const verdict = verdictFor(curve, 'standard');
+	return verdict.ok ? null : { kind: 'gate', reasons: verdict.reasons };
+}
+
+/**
+ * The disabled-button text of an exit refusal: `yolo_reason_no_export` in Modo YOLO, otherwise
+ * the standard gate's first reason (band and frequency from `curve`).
+ */
+export function exitRefusalText(refusal: ExitRefusal, curve: Curve, locale?: string): string {
+	if (refusal.kind === 'yolo') return m.yolo_reason_no_export();
+	return firstReasonText(refusal.reasons, { bands: curve.bands, locale });
+}
+
+/** `exitRefusal` and its text in one call: null when `curve` may leave. */
+export function exitReason(curve: Curve, yoloEnabled = false, locale?: string): string | null {
+	const refusal = exitRefusal(curve, yoloEnabled);
+	return refusal === null ? null : exitRefusalText(refusal, curve, locale);
 }

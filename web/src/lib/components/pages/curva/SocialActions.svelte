@@ -18,6 +18,7 @@
 	import type { Curve } from './model.ts';
 	import type { UrlLike } from './layers.ts';
 	import type { CurvaPreview } from './preview.svelte.ts';
+	import { exitRefusal, exitRefusalText } from './yolo.ts';
 	import {
 		checkEnvelope,
 		currentS1,
@@ -40,6 +41,11 @@
 		api?: SocialApi;
 		session?: SocialSession;
 		clipboard?: (text: string) => Promise<void>;
+		/**
+		 * Why the curve may not be saved to the account, published or shared: the standard gate
+		 * refuses it (a YOLO-only curve restored after a reload). `submit` re-gates the draft too.
+		 */
+		blockedReason?: string | null;
 	}
 	let {
 		app,
@@ -49,6 +55,7 @@
 		pageUrl,
 		preview = null,
 		originHint = null,
+		blockedReason = null,
 		api = curvaSocialApi(),
 		session = createSocialSession({ fetch: fetchSession }),
 		clipboard = (text) => navigator.clipboard.writeText(text)
@@ -85,6 +92,8 @@
 								? m.curva_v2_social_code_reason()
 								: null
 	);
+	/** Save, publish and share: the account reason first, then the standard gate's refusal. */
+	const exitReason = $derived(reason ?? blockedReason);
 	const loginHref = $derived(
 		requireLoginHref(new URL(pageUrl.href).pathname + new URL(pageUrl.href).search)
 	);
@@ -327,7 +336,7 @@
 		void session.refresh();
 	}
 	function openDialog(next: 'publish' | 'save') {
-		if (unavailable) return;
+		if (unavailable || blockedReason !== null) return;
 		mode = next;
 		draftCurve = structuredClone($state.snapshot(curve));
 		draftLabels = app?.state.curve.current.labels ?? null;
@@ -352,6 +361,15 @@
 		if (unavailable) return;
 		const snapshot = draftCurve;
 		if (!snapshot) return;
+		// The exact draft that would be sent passes the standard gate, whatever the editor's profile
+		// was: a YOLO-only curve never reaches the account (the server refuses it as well).
+		const refused = exitRefusal(snapshot);
+		if (refused) {
+			message = exitRefusalText(refused, snapshot, locale);
+			gateMessages = [];
+			issues = [];
+			return;
+		}
 		const copy = draftCopy;
 		const account = session.accountId;
 		const chosen = copy?.license ?? license;
@@ -530,7 +548,7 @@
 	async function share() {
 		const source = origin;
 		const code = s1;
-		if (unavailable || !source || !code) return;
+		if (unavailable || blockedReason !== null || !source || !code) return;
 		busy = true;
 		message = '';
 		try {
@@ -580,10 +598,10 @@
 			size="sm"
 			caps
 			aria-haspopup="dialog"
-			disabledReason={reason}
+			disabledReason={exitReason}
 			onclick={() => openDialog('save')}>{m.curva_social_save()}</Button
 		>
-		<Button size="sm" caps disabledReason={reason} onclick={() => openDialog('publish')}
+		<Button size="sm" caps disabledReason={exitReason} onclick={() => openDialog('publish')}
 			>{m.curva_social_publish()}</Button
 		>
 		{#if origin}
@@ -600,7 +618,7 @@
 				class="btn btn--plate btn--sm btn--caps"
 				href={`/c/${encodeURIComponent(origin.lineageId)}`}>{m.curva_social_open()}</a
 			>
-			<Button size="sm" caps disabledReason={reason} onclick={() => void share()}
+			<Button size="sm" caps disabledReason={exitReason} onclick={() => void share()}
 				>{m.curva_social_share()}</Button
 			>
 		{:else}
@@ -726,7 +744,7 @@
 			{/if}
 		</div>
 		<div class="actions">
-			<Button variant="primary" type="submit" loading={busy} disabledReason={busy ? null : reason}
+			<Button variant="primary" type="submit" loading={busy} disabledReason={busy ? null : exitReason}
 				>{busy
 					? m.curva_social_busy()
 					: saving

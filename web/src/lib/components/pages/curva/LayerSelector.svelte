@@ -6,8 +6,11 @@
 	- Pointer: clicking the knob turns it to the next layer (a shortcut; the radios stay the control).
 	- Motion: the knob swings with the mechanical detent easing (--ease-mech); no motion under
 	  prefers-reduced-motion. The lamp reflects the real current layer.
+	- `children`: controls that belong with the choice of layer (the Modo YOLO switch), under the
+	  description and the key hint.
 -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import Lamp from '#lib/components/primitives/Lamp.svelte';
@@ -16,8 +19,10 @@
 	interface Props {
 		layer: Layer;
 		onlayer: (layer: Layer) => void;
+		/** Layer-bound controls (the Modo YOLO switch), shown under the description. */
+		children?: Snippet;
 	}
-	let { layer, onlayer }: Props = $props();
+	let { layer, onlayer, children }: Props = $props();
 
 	const labels: Record<Layer, () => string> = {
 		ouvir: () => m.curva_layer_ouvir(),
@@ -124,6 +129,9 @@
 			<span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> {m.curva_keys_hint()}</span>
 			<Explainer term="camadas" />
 		</div>
+		{#if children}
+			{@render children()}
+		{/if}
 	</div>
 </div>
 

@@ -594,10 +594,9 @@
 	{/if}
 
 	{#if app && app.yolo.enabled}
-		<!-- Modo YOLO: a persistent red bar on every page of this tab while it is on. -->
-		<div data-chrome="yolo">
-			<YoloBar yolo={app.yolo} />
-		</div>
+		<!-- Modo YOLO: a compact hazard bar on every page of this tab while it is on. A direct child
+		     of the app root, so it stays sticky under the top bar for the whole page. -->
+		<YoloBar yolo={app.yolo} />
 	{/if}
 
 	{#if app}

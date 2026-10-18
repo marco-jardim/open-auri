@@ -19,6 +19,7 @@
 	import ReelHousing from './ReelHousing.svelte';
 	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
 	import { minhaBiblioteca } from './lazy.ts';
+	import { exitReason } from '#lib/components/pages/curva/yolo.ts';
 	import {
 		archiveTapes,
 		selectTapes,
@@ -205,13 +206,24 @@
 		query = '';
 		tag = 'all';
 	}
-	/** Modo YOLO: the editor curve may be YOLO-only, and YOLO curves never go to the library. */
-	const yoloSaveReason = $derived(app?.yolo.enabled ? m.yolo_reason_no_export() : null);
+	/**
+	 * Only a curve the standard gate accepts goes to the library: nothing while Modo YOLO is on,
+	 * and, with YOLO off, never a YOLO-only curve (a reload turns YOLO off but restores the curve it
+	 * left in `oa.current`). The reason is the YOLO message or the gate's first reason.
+	 */
+	const saveReason = $derived(app ? exitReason(current, app.yolo.enabled, locale) : null);
 	async function save() {
-		if (!app || saving || app.yolo.enabled) return;
+		if (!app || saving) return;
+		// Re-gated at the click, on the exact curve that is stored.
+		const curve = current;
+		const refused = exitReason(curve, app.yolo.enabled, locale);
+		if (refused !== null) {
+			notice = refused;
+			return;
+		}
 		saving = true;
 		try {
-			const result = await app.state.library.save(current);
+			const result = await app.state.library.save(curve);
 			notice = result ? m.biblioteca_saved() : m.biblioteca_local_error();
 		} catch (error) {
 			notice = m.biblioteca_local_error();
@@ -345,7 +357,7 @@
 					>{#if group === 'local'}<span class="shelf-action"
 							><Button
 								size="sm"
-								disabledReason={app ? yoloSaveReason : m.biblioteca_reason_loading()}
+								disabledReason={app ? saveReason : m.biblioteca_reason_loading()}
 								loading={saving}
 								onclick={save}>{m.biblioteca_save()}</Button
 							></span
@@ -377,7 +389,7 @@
 									<Button
 										variant="primary"
 										loading={saving}
-										disabledReason={yoloSaveReason}
+										disabledReason={saveReason}
 										onclick={save}>{m.empty_library_action()}</Button
 									>
 								{/snippet}

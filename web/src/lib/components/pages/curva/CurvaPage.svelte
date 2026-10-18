@@ -8,10 +8,11 @@
 	- Works without `app` (SSR, before mount): renders Neutro read-only, `aria-busy`, and every
 	  action says it is still loading.
 	- Rack (mock v2), each panel engraved with its name under the content. Ouvir: the scope runs
-	  across the top beside the output; presets, fine adjust and rescue sit under it. Ajustar and
-	  Engenharia (desktop): the filter bank hangs right under the scope and the side column (output,
-	  presets as a list, fine adjust, rescue) rides along it, sticky. Narrower screens stack the
-	  scope, the bank, then the side panels, in DOM (keyboard) order.
+	  across the top beside the output; presets (Experimentos under them), fine adjust and rescue
+	  sit under it. Ajustar and Engenharia (desktop): the filter bank hangs right under the scope
+	  and the side column (output, presets as a list, Experimentos, fine adjust, rescue) rides along
+	  it, sticky. Narrower screens stack the scope, the bank, then the side panels, in DOM
+	  (keyboard) order.
 	- Loading: the account panel (SocialActions) is a dynamic import, fetched when it comes into
 	  view, on idle, or at once for a community link; the gate worker warms on idle after the first
 	  paint; the audio engine warms on the preview lever's pointer or key down.
@@ -38,6 +39,7 @@
 	import MacroKnobs from './MacroKnobs.svelte';
 	import OutputPanel, { snapPreamp } from './OutputPanel.svelte';
 	import PresetTabs from './PresetTabs.svelte';
+	import Experiments from './Experiments.svelte';
 	import RescuePanel from './RescuePanel.svelte';
 	import ScopePanel from './ScopePanel.svelte';
 	import { currentS1 } from './social.ts';
@@ -172,6 +174,14 @@
 		yoloWriteBlock(yoloOn, freePreview) ? m.yolo_reason_free_preview() : null
 	);
 	const verdict = $derived(verdictFor(curve, yoloOn ? 'yolo' : 'standard'));
+	/**
+	 * Why the editor curve may not leave as a file, a link or an account save/publication although
+	 * YOLO is off: the standard gate refuses it (a YOLO-only curve restored from `oa.current` after a
+	 * reload). With YOLO off `verdict` is the standard verdict (see `exitRefusal` in yolo.ts).
+	 */
+	const exitGateReason = $derived(
+		yoloOn || verdict.ok ? null : firstReasonText(verdict.reasons, { bands: curve.bands, locale })
+	);
 	// YOLO exists only in Engenharia: leaving the layer turns it off.
 	$effect(() => {
 		app?.yolo.syncLayer(layer);
@@ -277,6 +287,16 @@
 		if (!ok) return;
 		announcement = m.curva_loaded();
 		drawKey++;
+	}
+	/**
+	 * An experiment from the Experimentos panel, already judged by the editor's write gate in the
+	 * profile of the moment (`decideExperiment`): one undoable editor change, like a preset, that
+	 * also sets its filter labels. The panel announces the result; the scope traces the new curve.
+	 */
+	function onExperiment(next: Curve, meta: { name: string; labels: readonly (string | null)[] }) {
+		if (!apply(next, { name: meta.name, source: 'custom', labels: meta.labels })) return false;
+		drawKey++;
+		return true;
 	}
 
 	// --- free drags with an advisory gate, gate-decided releases ----------------------------------
@@ -918,21 +938,18 @@
 				<span class="np-dirty">{m.curva_unsaved()}</span>
 			{/if}
 		</div>
-		<LayerSelector {layer} {onlayer} />
+		<LayerSelector {layer} {onlayer}>
+			<!-- Modo YOLO sits with the layer choice: unavailable (with its reason) off Engenharia. -->
+			{#if app}
+				<YoloToggle
+					yolo={app.yolo}
+					{layer}
+					onbringback={bringBack}
+					writeReason={yoloWriteReason}
+				/>
+			{/if}
+		</LayerSelector>
 		<div class="np-help"><TourTrigger page="curva" /></div>
-		{#if app}
-			<div class="np-yolo">
-				<YoloToggle yolo={app.yolo} {layer} />
-				{#if yoloOn}
-					<button type="button" class="yolo-back" onclick={bringBack} data-yolo-bring-back>
-						{m.yolo_bring_back()}
-					</button>
-					{#if yoloWriteReason}
-						<p class="yolo-why" role="status">{yoloWriteReason}</p>
-					{/if}
-				{/if}
-			</div>
-		{/if}
 	</section>
 
 	<div class="instrument" aria-busy={app === null ? 'true' : 'false'}>
@@ -1015,6 +1032,15 @@
 					activeId={activePreset}
 					{locale}
 					onload={(id) => loaded(app?.state.curve.loadPreset(id))}
+				/>
+				<Experiments
+					{layer}
+					{locale}
+					yolo={app?.yolo ?? null}
+					{signature}
+					disabledReason={loadingReason}
+					onapply={onExperiment}
+					{onlayer}
 				/>
 				<MacroKnobs
 					values={shownMacros}
@@ -1103,7 +1129,16 @@
 				<!-- Modo YOLO: no S5, link, library, publish or account save. -->
 				<p class="yolo-why" role="note" data-yolo-locked="social">{m.yolo_reason_no_export()}</p>
 			{:else if Social}
-				<Social {app} {curve} name={curveName} {locale} {pageUrl} {preview} {originHint} />
+				<Social
+					{app}
+					{curve}
+					name={curveName}
+					{locale}
+					{pageUrl}
+					{preview}
+					{originHint}
+					blockedReason={exitGateReason}
+				/>
 			{:else if socialFailed}
 				<p role="alert">{m.layout_error_generic()}</p>
 			{:else}
@@ -1122,6 +1157,7 @@
 					{pageUrl}
 					disabled={!app || yoloOn}
 					disabledReason={loadingReason ?? (yoloOn ? m.yolo_reason_no_export() : null)}
+					exportReason={exitGateReason}
 					onimport={(result) => onImport(result)}
 					{notify}
 				/>
@@ -1134,20 +1170,6 @@
 </main>
 
 <style>
-	.np-yolo {
-		display: grid;
-		gap: 6px;
-		justify-items: start;
-	}
-	.yolo-back {
-		padding: 4px 12px;
-		border: 1px solid #a3262c;
-		border-radius: 3px;
-		background: transparent;
-		color: inherit;
-		font: inherit;
-		cursor: pointer;
-	}
 	.yolo-why {
 		margin: 0;
 		color: #e0656b;
@@ -1255,7 +1277,8 @@
 		grid-template-columns: minmax(280px, 1.15fr) minmax(0, 1fr) minmax(0, 0.95fr) 204px;
 		grid-template-areas:
 			'scope scope scope out'
-			'pre pre mac res';
+			'pre pre mac res'
+			'xp xp mac res';
 		gap: var(--space-5) 0;
 		padding: var(--space-5) var(--space-2) var(--space-4);
 		border-top: 1px solid rgb(255 255 255 / 0.07);
@@ -1277,6 +1300,10 @@
 	}
 	.rack :global(.ps-pre) {
 		grid-area: pre;
+	}
+	/* Experimentos: right under the presets, in every layout (DOM order on a phone). */
+	.rack :global(.ps-xp) {
+		grid-area: xp;
 	}
 	.rack :global(.ps-mac) {
 		grid-area: mac;
@@ -1463,6 +1490,7 @@
 			grid-template-areas:
 				'scope scope scope'
 				'out pre pre'
+				'out xp xp'
 				'mac mac res';
 		}
 		.rack:has(> .bank-slot) {
@@ -1470,6 +1498,7 @@
 				'scope scope scope'
 				'bank bank bank'
 				'out pre pre'
+				'out xp xp'
 				'mac mac res';
 		}
 		.bank-slot {
@@ -1479,7 +1508,8 @@
 		.rack :global(.ps-mac) {
 			box-shadow: none;
 		}
-		.rack :global(.ps-pre) {
+		.rack :global(.ps-pre),
+		.rack :global(.ps-xp) {
 			box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
 		}
 		.below,

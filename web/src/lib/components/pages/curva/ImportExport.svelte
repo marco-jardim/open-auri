@@ -37,6 +37,11 @@
 		disabled?: boolean;
 		/** Why the controls are unavailable while `disabled` (default: the editor is loading). */
 		disabledReason?: string | null;
+		/**
+		 * Why the exports and the link are unavailable while import stays open: the curve fails the
+		 * standard gate (a YOLO-only curve restored after a reload). `io.ts` refuses it as well.
+		 */
+		exportReason?: string | null;
 		onimport: (result: ImportResult) => void;
 		notify: (message: string, tone?: 'info' | 'error') => void;
 		download?: Downloader;
@@ -53,6 +58,7 @@
 		now = Date.now,
 		disabled = false,
 		disabledReason = null,
+		exportReason = null,
 		onimport,
 		notify,
 		download = browserDownload,
@@ -62,6 +68,8 @@
 	const uid = $props.id();
 	const reasonId = `${uid}-reason`;
 	const reason = $derived(disabled ? (disabledReason ?? m.curva_v2_loading_reason()) : null);
+	/** Exports and the link: the controls' reason, else the standard gate's refusal. */
+	const exportBlocked = $derived(reason ?? exportReason);
 	let link = $state('');
 
 	function browserDownload(file: string, blob: Blob) {
@@ -129,9 +137,15 @@
 
 <Panel variant="hardware" class="io" eyebrow={m.curva_v2_io_eyebrow()} title={m.curva_io_heading()}>
 	<div class="exports">
-		<Button size="sm" caps disabledReason={reason} onclick={onTxt}>{m.curva_export_txt()}</Button>
-		<Button size="sm" caps disabledReason={reason} onclick={onJson}>{m.curva_export_json()}</Button>
-		<Button size="sm" caps disabledReason={reason} onclick={onBin}>{m.curva_export_bin()}</Button>
+		<Button size="sm" caps disabledReason={exportBlocked} onclick={onTxt}
+			>{m.curva_export_txt()}</Button
+		>
+		<Button size="sm" caps disabledReason={exportBlocked} onclick={onJson}
+			>{m.curva_export_json()}</Button
+		>
+		<Button size="sm" caps disabledReason={exportBlocked} onclick={onBin}
+			>{m.curva_export_bin()}</Button
+		>
 		<label class="file" class:off={disabled}>
 			<span>{m.curva_import()}</span>
 			<input
@@ -144,13 +158,13 @@
 		</label>
 	</div>
 	<div class="share">
-		<Button size="sm" caps disabledReason={reason} onclick={() => void onShare()}
+		<Button size="sm" caps disabledReason={exportBlocked} onclick={() => void onShare()}
 			>{m.curva_share()}</Button
 		>
 		<Explainer term="s1" />
 	</div>
-	{#if reason}
-		<p class="note" id={reasonId}>{reason}</p>
+	{#if exportBlocked}
+		<p class="note" id={reasonId}>{exportBlocked}</p>
 	{/if}
 	{#if link}
 		<label class="link">
