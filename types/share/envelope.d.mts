@@ -31,6 +31,19 @@ export function normalizeLabels(input: unknown, { lenient }?: {
     lenient?: boolean;
 }): Labels | null;
 /**
+ * The lowest envelope format that carries this curve, the one writers emit:
+ * `open-auri/preset@2` when filter labels are set or a non-OFF band is above
+ * 20000 Hz (an S1 v2 curve), `open-auri/preset@1` otherwise. Labels are set unless
+ * null, undefined or LABEL_COUNT entries that all normalize to null (an envelope
+ * then omits the key). Only picks the format: validate the envelope afterwards.
+ * @param {{bands?: unknown, labels?: unknown}} curve
+ * @returns {EnvelopeFormat}
+ */
+export function envelopeFormat(curve: {
+    bands?: unknown;
+    labels?: unknown;
+}): EnvelopeFormat;
+/**
  * Returns a new object, normalizing free text and defaulting description to ''.
  * Does not repair structural errors or regenerate code. Throws EnvelopeError for
  * forbidden text; use validateEnvelope for collected text AND structural errors.
@@ -42,7 +55,8 @@ export function normalizeEnvelope(obj: unknown): unknown;
  * Validate and normalize without mutating the input. Paths are JSON Pointers
  * ('' means root). All independent field errors are collected. S1 must describe
  * EXACTLY the supplied numbers and wire order, not merely round to the same code.
- * The safety gate is intentionally NOT checked here.
+ * Bands go up to 20000 Hz in `@1` and 32000 Hz in `@2` (env:range); an S1 v2 code
+ * needs `@2` (env:s1). The safety gate is intentionally NOT checked here.
  * @param {unknown} obj
  * @returns {EnvelopeResult}
  */
@@ -102,8 +116,14 @@ export type Recipe = {
  * curveId, canonKey or the safety gate.
  */
 export type Labels = (string | null)[];
+/**
+ * `open-auri/preset@1`: S1 v1, bands up to 20000 Hz, no labels. `open-auri/preset@2`:
+ * `@1` plus optional labels, bands up to 32000 Hz and an S1 v1 or v2 code. Writers
+ * emit the lowest format that fits (envelopeFormat).
+ */
+export type EnvelopeFormat = "open-auri/preset@1" | "open-auri/preset@2";
 export type Envelope = {
-    format: "open-auri/preset@1" | "open-auri/preset@2";
+    format: EnvelopeFormat;
     name: string;
     description: string;
     author?: string | null;

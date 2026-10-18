@@ -22,7 +22,7 @@ receita (S5), agregação anônima (S6) e troca às cegas (S7).
 
 | ID | Ideia | Decisão |
 |---|---|---|
-| **S1** | Formato compacto canônico | ✅ **adotado**: S1 v1, ver [`s1-format.md`](s1-format.md) |
+| **S1** | Formato compacto canônico | ✅ **adotado**: S1 v1 (e v2 para bandas acima de 20 kHz), ver [`s1-format.md`](s1-format.md) |
 | **S2** | Assinatura criptográfica | ❌ **descartada**: proveniência por link basta |
 | **S3** | Curvas versionadas | ✅ **ativo**: linhagens com versões só por acréscimo, forks e lápide |
 | **S4** | Distância entre curvas | ✅ **adotado**: barato, `magnitudeDb()` já existe |
@@ -146,6 +146,11 @@ O desenho inicial (48 B, 64 caracteres, CRC-8) foi substituído. O formato
 congelado é o **S1 v1**, definido em [`s1-format.md`](s1-format.md): 51 B
 (68 caracteres base64url), grade da UI sem perda (ganho de −25,6 a +12,7 dB, Q
 até 20,47) e CRC-16/CCITT-FALSE.
+
+A **S1 v2** ([`s1-format.md`](s1-format.md#s1-v2)) tem o mesmo layout e o mesmo
+tamanho, com a frequência indo até 32 000 Hz. Os escritores só a emitem quando
+alguma banda passa de 20 000 Hz; toda curva que cabe na v1 mantém o código, o
+`curveId` e o `canonKey` v1.
 
 O range observado é **estreito**: é aí que está o ganho, não em algoritmo.
 
@@ -280,9 +285,11 @@ até `gainDb: 0` é recusado como `env:extra`.
 ### Rótulos de filtro (`open-auri/preset@2`)
 
 O formato `open-auri/preset@2` é o `@1` com um campo opcional a mais,
-`labels: (string | null)[]`, e só é emitido quando a curva tem ao menos um
-rótulo; sem rótulos, todo escritor continua emitindo `@1`, byte a byte igual ao
-de antes. Em `@1`, `labels` segue recusado como `env:extra`. O esquema normativo é
+`labels: (string | null)[]`, e com bandas até 32 000 Hz em S1 v2 (ver
+[abaixo](#bandas-acima-de-20-khz-s1-v2-em-open-auripreset2)). Ele só é emitido
+quando a curva tem ao menos um rótulo ou uma banda acima de 20 000 Hz; senão,
+todo escritor continua emitindo `@1`, byte a byte igual ao de antes. Em `@1`,
+`labels` segue recusado como `env:extra`. O esquema normativo é
 [`preset-envelope-2.schema.json`](../schemas/preset-envelope-2.schema.json).
 
 - **Por índice de fio:** exatamente 10 entradas; `labels[i]` nomeia `bands[i]`.
@@ -305,6 +312,27 @@ de antes. Em `@1`, `labels` segue recusado como `env:extra`. O esquema normativo
 Na nuvem, cada versão guarda os rótulos em `versions.labels` (JSON, migração
 `0012_version_labels.sql`). Uma mudança só de rótulos acrescenta uma versão
 nova (conta na cota) e reaproveita o gate da curva, que não muda.
+
+### Bandas acima de 20 kHz (S1 v2 em `open-auri/preset@2`)
+
+O `@2` também carrega as curvas [S1 v2](s1-format.md#s1-v2): não existe `@3`.
+
+| Formato | `freqHz` das bandas | Código `code` | `labels` |
+|---|---|---|---|
+| `open-auri/preset@1` | 1 a **20 000** | só S1 v1 | recusado (`env:extra`) |
+| `open-auri/preset@2` | 1 a **32 000** | S1 v1 ou v2 | opcional |
+
+- **Coerência com o S1:** o `code` é v2 se e somente se alguma banda que não é
+  `OFF` passa de 20 000 Hz, e v1 senão; um `code` que não descreve exatamente as
+  bandas e o pré-amp dá `env:code-mismatch`, e um v2 sem banda acima de 20 kHz
+  dá `env:s1` (`s1:noncanonical`).
+- **`@1` continua igual:** banda acima de 20 000 Hz dá `env:range`, e um código
+  v2 dá `env:s1` ("S1 v2 requires open-auri/preset@2"). O esquema
+  [`preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json) não
+  muda.
+- **O menor formato que cabe:** os escritores emitem `@1` quando não há rótulo
+  nem banda acima de 20 kHz, e `@2` nos outros casos. `envelopeFormat({ bands,
+  labels })`, exportado por `open-auri/share`, faz essa escolha.
 
 Esboço conceitual da receita (o esquema normativo é
 [`preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json)):

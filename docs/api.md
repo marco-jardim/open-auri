@@ -240,7 +240,11 @@ As cotas de 30 publicações/dia UTC e 60 tentativas/24 h são as mesmas para pu
 
 O envelope pode ser `open-auri/preset@2`, com `labels` (rótulos de filtro por índice de fio: 10
 entradas, cada uma `null` ou texto de 1 a 24 pontos de código, com as regras do nome; erros
-`env:labels`, `env:length`, `env:url`, `env:pattern` em `details.codes`). Os rótulos ficam na versão
+`env:labels`, `env:length`, `env:url`, `env:pattern` em `details.codes`). O `@2` também aceita
+bandas de 1 a **32 000 Hz** com um código S1 v2 (v2 se e somente se alguma banda passa de
+20 000 Hz); o `@1` fica em 1 a 20 000 Hz (`env:range`) e recusa código v2 (`env:s1`). Quem
+escreve um envelope emite o menor formato que cabe (`envelopeFormat` do núcleo): `@1` sem rótulos
+nem banda acima de 20 kHz, `@2` nos outros casos. Os rótulos ficam na versão
 (`versions.labels`, migração 0012), nunca na linha `curves`, no `curveId`, no `canonKey` nem no
 gate: uma versão nova que só muda rótulos conta na cota, reaproveita a curva e o parecer cacheado
 do gate e não cria linha em `curves`. Um fork sem envelope explícito copia os rótulos da versão de

@@ -44,22 +44,29 @@ function assertGrid(value, min, max, scale) {
   assert.ok(Math.abs(value * scale - Math.round(value * scale)) < 1e-8);
 }
 
+// S1 v1 bands go up to 20000 Hz, v2 bands up to 32000 Hz (docs/s1-format.md).
+const S1_FREQ_LIMITS = Object.freeze({ 1: 20000, 2: 32000 });
+
 function assertDecodedGrid(curve) {
-  assert.equal(curve.version, 1);
+  assert.ok(curve.version === 1 || curve.version === 2, `version ${curve.version}`);
   assert.equal(curve.variant, 0);
   assert.equal(curve.bands.length, 10);
   assertGrid(curve.preampDb, -25.5, 0, 10);
+  let ultrasonic = false;
   for (const band of curve.bands) {
     assert.ok(['PK', 'LS', 'HS', 'LP', 'HP', 'OFF'].includes(band.kind));
     if (band.kind === 'OFF') {
       assert.deepEqual(band, OFF);
       continue;
     }
-    assertGrid(band.freqHz, 1, 20000, 1);
+    assertGrid(band.freqHz, 1, S1_FREQ_LIMITS[curve.version], 1);
+    if (band.freqHz > S1_FREQ_LIMITS[1]) ultrasonic = true;
     assertGrid(band.qFactor, 0.01, 20.47, 100);
     if (band.kind === 'LP' || band.kind === 'HP') assert.equal(band.gainDb, undefined);
     else assertGrid(band.gainDb, -25.6, 12.7, 10);
   }
+  // Canonical version: v2 if and only if a non-OFF band is above 20000 Hz.
+  assert.equal(curve.version, ultrasonic ? 2 : 1);
 }
 
 // Catch only the parser call, so assertions cannot be mistaken for expected errors.
@@ -75,24 +82,40 @@ function parseOrTypedError(parse, ErrorType, check) {
   return true;
 }
 
-const shareBandArb = fc.oneof(
-  fc.constant(OFF),
-  fc.record({
-    kind: fc.constantFrom('PK', 'LS', 'HS'),
-    freqHz: fc.integer({ min: 1, max: 20000 }),
-    gainDb: fc.integer({ min: -256, max: 127 }).map((value) => value / 10),
-    qFactor: fc.integer({ min: 1, max: 2047 }).map((value) => value / 100),
-  }),
-  fc.record({
-    kind: fc.constantFrom('LP', 'HP'),
-    freqHz: fc.integer({ min: 1, max: 20000 }),
-    qFactor: fc.integer({ min: 1, max: 2047 }).map((value) => value / 100),
-  }),
-);
-const shareCurveArb = fc.record({
-  bands: fc.array(shareBandArb, { minLength: 10, maxLength: 10 }),
-  preampDb: fc.integer({ min: -255, max: 0 }).map((value) => value / 10),
+/** Grid bands with frequencies in [min, max]; OFF too unless `off` is false. */
+const shareBandArbOf = (min, max, off = true) =>
+  fc.oneof(
+    ...(off ? [fc.constant(OFF)] : []),
+    fc.record({
+      kind: fc.constantFrom('PK', 'LS', 'HS'),
+      freqHz: fc.integer({ min, max }),
+      gainDb: fc.integer({ min: -256, max: 127 }).map((value) => value / 10),
+      qFactor: fc.integer({ min: 1, max: 2047 }).map((value) => value / 100),
+    }),
+    fc.record({
+      kind: fc.constantFrom('LP', 'HP'),
+      freqHz: fc.integer({ min, max }),
+      qFactor: fc.integer({ min: 1, max: 2047 }).map((value) => value / 100),
+    }),
+  );
+const sharePreampArb = fc.integer({ min: -255, max: 0 }).map((value) => value / 10);
+const shareCurveV1Arb = fc.record({
+  bands: fc.array(shareBandArbOf(1, 20000), { minLength: 10, maxLength: 10 }),
+  preampDb: sharePreampArb,
 });
+// S1 v2 curves: bands up to 32000 Hz and at least one non-OFF band above 20000 Hz.
+const shareCurveV2Arb = fc
+  .record({
+    bands: fc.array(shareBandArbOf(1, 32000), { minLength: 10, maxLength: 10 }),
+    preampDb: sharePreampArb,
+    at: fc.integer({ min: 0, max: 9 }),
+    ultrasonic: shareBandArbOf(20001, 32000, false),
+  })
+  .map(({ bands, preampDb, at, ultrasonic }) => ({
+    bands: bands.map((band, index) => (index === at ? ultrasonic : band)),
+    preampDb,
+  }));
+const shareCurveArb = fc.oneof(shareCurveV1Arb, shareCurveV2Arb);
 
 test('fuzz: decodeS1 arbitrary strings yields only S1Error or an in-grid curve', () => {
   fc.assert(
@@ -161,6 +184,53 @@ test('fuzz: mutated valid S1, including repaired CRCs, never escapes typed error
   t.diagnostic(`1000 mutations, ${decodedCount} accepted and independently checked on the S1 grid`);
 });
 
+test('fuzz: S1 v2 codes, mutated and resealed, never escape typed errors or the v2 grid', (t) => {
+  let decodedCount = 0;
+  let refusedCount = 0;
+  fc.assert(
+    fc.property(
+      shareCurveV2Arb,
+      fc.constantFrom(0, 1, 2, 3),
+      fc.array(fc.tuple(fc.integer({ min: 4, max: 391 }), fc.boolean()), { maxLength: 6 }),
+      (curve, version, flips) => {
+        const valid = encodeS1(curve);
+        assert.match(valid, /^[ghi]/);
+        const original = decodeS1(valid);
+        assertDecodedGrid(original);
+        assert.equal(original.version, 2);
+        // Rewrite the version field, flip body bits (frequencies above 32000 Hz, a band
+        // brought down to 20 kHz, kinds 6 and 7...), then repair the CRC.
+        const bytes = Buffer.from(valid, 'base64url');
+        bytes[0] = (bytes[0] & 0x3f) | (version << 6);
+        for (const [bit, value] of flips) {
+          const mask = 0x80 >>> (bit & 7);
+          if (value) bytes[bit >>> 3] |= mask;
+          else bytes[bit >>> 3] &= ~mask;
+        }
+        const crc = crc16Ccitt(bytes.subarray(0, 49));
+        bytes[49] = crc >>> 8;
+        bytes[50] = crc & 0xff;
+        const candidate = bytes.toString('base64url');
+        const accepted = parseOrTypedError(
+          () => decodeS1(candidate),
+          S1Error,
+          (decoded) => {
+            assertDecodedGrid(decoded);
+            assert.equal(encodeS1(decoded), candidate);
+          },
+        );
+        if (accepted) decodedCount++;
+        else refusedCount++;
+        if (version === 0 || version === 3) assert.equal(accepted, false);
+      },
+    ),
+    OPTIONS,
+  );
+  assert.ok(decodedCount >= 40, `only ${decodedCount} v2 mutations decoded`);
+  assert.ok(refusedCount >= 300, `only ${refusedCount} v2 mutations refused`);
+  t.diagnostic(`1000 v2 mutations: ${decodedCount} decoded on the grid, ${refusedCount} refused`);
+});
+
 function assertEnvelopeResult(result) {
   assert.equal(typeof result.ok, 'boolean');
   if (result.ok) {
@@ -199,14 +269,29 @@ test('fuzz: parseEnvelope arbitrary strings and arbitrary envelope fields never 
     code: encodeS1(curve),
     ...curve,
   };
+  // An S1 v2 curve (a band above 20 kHz) in open-auri/preset@2.
+  const curveV2 = {
+    bands: [{ kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 }, ...offBands().slice(1)],
+    preampDb: -0.5,
+  };
+  const envelopeV2 = {
+    ...envelope,
+    format: 'open-auri/preset@2',
+    code: encodeS1(curveV2),
+    ...curveV2,
+  };
+  assertEnvelopeResult(parseEnvelope(JSON.stringify(envelopeV2)));
+  assert.equal(parseEnvelope(JSON.stringify(envelopeV2)).ok, true);
+  assert.equal(decodeS1(envelopeV2.code).version, 2);
   fc.assert(
     fc.property(
       textArb,
-      fc.constantFrom(...Object.keys(envelope), 'recipe', 'extra'),
+      fc.constantFrom(envelope, envelopeV2),
+      fc.constantFrom(...Object.keys(envelope), 'labels', 'recipe', 'extra'),
       fc.jsonValue(),
-      (text, key, value) => {
+      (text, base, key, value) => {
         assertEnvelopeResult(parseEnvelope(text));
-        assertEnvelopeResult(parseEnvelope(JSON.stringify({ ...envelope, [key]: value })));
+        assertEnvelopeResult(parseEnvelope(JSON.stringify({ ...base, [key]: value })));
       },
     ),
     OPTIONS,
