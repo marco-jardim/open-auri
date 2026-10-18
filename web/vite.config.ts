@@ -73,6 +73,8 @@ export default defineConfig({
 			include: ['src/lib/**/*.{ts,js,svelte}'],
 			exclude: [
 				'src/lib/paraglide/**',
+				// Server modules run in workerd and are measured by test:int:coverage (plan §9, ≥ 90 %).
+				'src/lib/server/**',
 				// Purely decorative presentation (fixed SVG geometry or layout wrappers, no logic).
 				'src/lib/components/pages/biblioteca/ReelHousing.svelte',
 				'src/lib/components/pages/cabo/RackUnit.svelte',

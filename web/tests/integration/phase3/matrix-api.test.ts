@@ -118,10 +118,12 @@ describe('/api/auth/* × personas', () => {
 			const response = await all[name].client.post('/two-factor/disable', { password: PASSWORD });
 			expect(response.status, name).toBe(404);
 		}
+		const adminId = all.admin2fa.id;
+		if (adminId === null) throw new Error('admin2fa persona has no account id');
 		expect(
 			await count(
 				'SELECT count(*) AS n FROM "user" WHERE id = ? AND "twoFactorEnabled" = 1',
-				all.admin2fa.id
+				adminId
 			)
 		).toBe(1);
 	});
