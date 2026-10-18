@@ -16,18 +16,23 @@ import {
 } from '#lib/components/pages/curva/model.ts';
 import { firstReasonText } from '#lib/components/pages/curva/reasons.ts';
 import { m } from '#lib/paraglide/messages.js';
+import { blockRealPointerHover } from './real-pointer.ts';
 
 const cut: Band = { kind: 'PK', freqHz: 1000, gainDb: -6, qFactor: 1 };
 const refusal = 'The candidate exceeds the full-curve limit.';
 const pad = (bands: Band[]): Band[] => [...bands, ...NEUTRO.bands.slice(bands.length)];
 const initial: Curve = { bands: pad([cut]), preampDb: -3 };
+/** No test here hovers: the runner's real mouse must not pause a dial's countdown. */
+let restorePointer: () => void = () => undefined;
 
 beforeEach(() => {
+	restorePointer = blockRealPointerHover();
 	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 });
 
 afterEach(async () => {
 	await cleanup();
+	restorePointer();
 	vi.useRealTimers();
 });
 

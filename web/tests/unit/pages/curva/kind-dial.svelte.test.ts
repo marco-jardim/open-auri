@@ -7,15 +7,20 @@ import type { BandKind } from '#lib/components/pages/curva/model.ts';
 import type { Layer } from '#lib/components/pages/curva/layers.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
+import { blockRealPointerHover } from './real-pointer.ts';
 
 const refusal = 'The full-curve gate refused this candidate.';
+/** Hover is driven by dispatched events only: the runner's real mouse must not pause a dial. */
+let restorePointer: () => void = () => undefined;
 
 beforeEach(() => {
+	restorePointer = blockRealPointerHover();
 	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 });
 
 afterEach(async () => {
 	await cleanup();
+	restorePointer();
 	vi.useRealTimers();
 	await setLocale('pt-BR', { reload: false });
 });
@@ -121,18 +126,32 @@ test.each(['pt-BR', 'en-US'] as const)(
 	}
 );
 
+/** Fake time only, then a flush, so every timer callback has rendered before the next check. */
+async function advance(ms: number) {
+	await vi.advanceTimersByTimeAsync(ms);
+	await tick();
+}
+
 test('keyboard focus pauses pending until five seconds after blur', async () => {
-	const { dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+	const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+	const legend = screen.container.querySelector('[role="tooltip"]');
+	if (!legend) throw new Error('Missing dial legend');
 	dial.focus();
+	await tick();
+	expect(document.activeElement).toBe(dial);
+	// The focusin reached the dial: keyboard focus opens its legend at once.
+	expect(legend.matches(':popover-open')).toBe(true);
 	await key(dial, 'ArrowRight');
-	await vi.advanceTimersByTimeAsync(30000);
+	await advance(30000);
 	expect(value()).toBe('LS ✕');
 	dial.blur();
 	await tick();
-	await vi.advanceTimersByTimeAsync(4999);
+	expect(document.activeElement).not.toBe(dial);
+	// The focusout reached the dial too: its legend closed.
+	expect(legend.matches(':popover-open')).toBe(false);
+	await advance(4999);
 	expect(value()).toBe('LS ✕');
-	await vi.advanceTimersByTimeAsync(1);
-	await tick();
+	await advance(1);
 	expect(value()).toBe('PK');
 	expect(onkind).not.toHaveBeenCalled();
 });
@@ -141,19 +160,23 @@ test.each(['before', 'after'] as const)(
 	'hover %s refusal pauses pending; leaving starts five new idle seconds',
 	async (when) => {
 		const { dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
-		const enter = () =>
-			dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
-		if (when === 'before') enter();
+		const pointer = async (type: 'pointerenter' | 'pointerleave') => {
+			dial.dispatchEvent(new PointerEvent(type, { pointerType: 'mouse' }));
+			await tick();
+		};
+		// Hover alone pauses here: the dial never has keyboard focus.
+		expect(document.activeElement).not.toBe(dial);
+		if (when === 'before') await pointer('pointerenter');
 		await click(dial);
-		await vi.advanceTimersByTimeAsync(4000);
-		if (when === 'after') enter();
-		await vi.advanceTimersByTimeAsync(30000);
+		await advance(4000);
+		if (when === 'after') await pointer('pointerenter');
+		await advance(30000);
 		expect(value()).toBe('LS ✕');
-		dial.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
-		await vi.advanceTimersByTimeAsync(4999);
+		await pointer('pointerleave');
+		expect(document.activeElement).not.toBe(dial);
+		await advance(4999);
 		expect(value()).toBe('LS ✕');
-		await vi.advanceTimersByTimeAsync(1);
-		await tick();
+		await advance(1);
 		expect(value()).toBe('PK');
 		expect(onkind).not.toHaveBeenCalled();
 	}

@@ -82,6 +82,27 @@ test('the button switches to Ajustar through the layer callback, by pointer and 
 	expect(element.getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
 });
 
+test('the Ouvir hint is never cut: over a wide plot, below a phone-sized one', async () => {
+	await page.viewport(1200, 900);
+	const { screen } = await setup('ouvir');
+	const glass = screen.container.querySelector('.screen');
+	const hint = page.getByTestId('ouvir-hint').element();
+	if (!glass) throw new Error('expected the scope screen');
+	// Outside the clipped screen (overflow: hidden), so no part of it can be cut off.
+	expect(hint.closest('.screen')).toBeNull();
+	// Wide: over the plot, inside the screen's box, as before.
+	const plot = glass.getBoundingClientRect();
+	const over = hint.getBoundingClientRect();
+	expect(over.top).toBeGreaterThanOrEqual(plot.top);
+	expect(over.bottom).toBeLessThanOrEqual(plot.bottom);
+	expect(over.right).toBeLessThanOrEqual(plot.right);
+	// Phone: the plot is shorter than the hint; it follows the screen, title included.
+	await page.viewport(390, 844);
+	const below = () => hint.getBoundingClientRect().top - glass.getBoundingClientRect().bottom;
+	await expect.poll(below).toBeGreaterThanOrEqual(0);
+	await expect.element(page.getByText(m.curva_ouvir_hint_title(), { exact: true })).toBeVisible();
+});
+
 test.each(['ouvir', 'ajustar', 'engenharia'] as const)(
 	'%s hint has no axe violations',
 	async (layer) => {

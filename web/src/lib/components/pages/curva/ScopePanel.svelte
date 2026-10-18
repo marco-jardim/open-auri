@@ -1026,19 +1026,21 @@
 			{/if}
 			{#if parked && editable}
 				<p class="park-hint">{m.empty_neutral_body()}</p>
-			{:else if parked}
-				<!-- Ouvir: nothing drags here, so the hint says what the layer is and how to edit. -->
-				<div class="park-hint ouvir-hint" data-testid="ouvir-hint">
-					<p class="oh-title">{m.curva_ouvir_hint_title()}</p>
-					<p>{m.curva_ouvir_hint_body()}</p>
-					{#if onlayer}
-						<button type="button" class="oh-action" onclick={editInAjustar}
-							>{m.curva_ouvir_hint_action()}</button
-						>
-					{/if}
-				</div>
 			{/if}
 		</div>
+		{#if parked && !editable}
+			<!-- Ouvir: nothing drags here, so the hint says what the layer is and how to edit. It sits
+			     outside the clipped screen: on a phone it is taller than the plot. -->
+			<div class="park-hint ouvir-hint" data-testid="ouvir-hint">
+				<p class="oh-title">{m.curva_ouvir_hint_title()}</p>
+				<p>{m.curva_ouvir_hint_body()}</p>
+				{#if onlayer}
+					<button type="button" class="oh-action" onclick={editInAjustar}
+						>{m.curva_ouvir_hint_action()}</button
+					>
+				{/if}
+			</div>
+		{/if}
 	</div>
 	<div class="scope-legend">
 		<span><i class="sw"></i>{m.curva_scope_eq()}</span>
@@ -1151,8 +1153,11 @@
 
 <style>
 	.bezel {
+		--bezel-pad: 13px;
 		position: relative;
-		padding: 13px;
+		/* Its content box is the screen's width: the Ouvir hint is placed in cqw (see .ouvir-hint). */
+		container: scope-bezel / inline-size;
+		padding: var(--bezel-pad);
 		border-radius: var(--rad-2xl);
 		background: linear-gradient(150deg, #323331, #1a1b1a 45%, #111211);
 		box-shadow:
@@ -1613,8 +1618,14 @@
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 		pointer-events: none;
 	}
-	/* Absolutely placed over the plot like the drag hint: no layout shift when the layer changes. */
+	/* Absolutely placed over the plot like the drag hint: no layout shift when the layer changes.
+	   It is the bezel's child, not the clipped screen's, so it is never cut; the drag hint's 5 %,
+	   17 % and 46 % of the screen are taken from the screen's width (100cqw, VIEW_WIDTH 820) and
+	   height (VIEW_HEIGHT 380, so 17 % of it is 7.878cqw), past the bezel's padding. */
 	.ouvir-hint {
+		right: calc(var(--bezel-pad) + 5cqw);
+		bottom: calc(var(--bezel-pad) + 7.878cqw);
+		max-width: 46cqw;
 		z-index: 1;
 		display: flex;
 		flex-direction: column;
@@ -1902,10 +1913,22 @@
 		.grat :global(.alt) {
 			display: none;
 		}
-		.park-hint {
+		/* The drag hint; the Ouvir hint keeps its screen-based place, or follows the screen. */
+		.park-hint:not(.ouvir-hint) {
 			right: 3%;
 			bottom: 20%;
 			max-width: 70%;
+		}
+	}
+	/* A narrow screen (a phone: about 300 px) is shorter than the Ouvir hint over it (title, four
+	   or five lines and a 44 px button): the title and the first lines were cut off at the
+	   screen's top edge. Below about 520 px of screen it no longer fits, so it follows the screen,
+	   whole; the screen keeps its size, so the live layer and the points stay on the plot. */
+	@container scope-bezel (max-width: 560px) {
+		.ouvir-hint {
+			position: static;
+			max-width: none;
+			margin-top: 8px;
 		}
 	}
 </style>
