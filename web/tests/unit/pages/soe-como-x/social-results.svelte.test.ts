@@ -87,7 +87,8 @@ for (const source of ['feed', 'library']) {
 		const request = fetcher.mock.calls.find(([url]) => url === '/api/v1/curves');
 		const body: unknown = JSON.parse(String(request?.[1].body));
 		expect(body).toMatchObject({
-			visibility: 'public',
+			// Publishing defaults to Não listada (PO decision, 2026-10-18).
+			visibility: 'unlisted',
 			envelope: {
 				recipe: {
 					measurement: { source: measurement.source, name: measurement.name },

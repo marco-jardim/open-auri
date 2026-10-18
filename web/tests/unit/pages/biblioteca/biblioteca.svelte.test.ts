@@ -146,7 +146,8 @@ for (const copy of [
 		const open = page.getByRole('button', { name: /Auri/ });
 		await expect.element(open).toHaveAccessibleName(/MASTER 01 \/ 11.*Auri.*preset:padrao/);
 		await open.click();
-		await expect.element(page.getByRole('dialog')).toBeVisible();
+		// The first-visit tour is a dialog too; the sheet is the one named by the tape.
+		await expect.element(page.getByRole('dialog', { name: /Auri/ })).toBeVisible();
 		await expect
 			.element(page.getByRole('heading', { name: copy.sheet, exact: true }))
 			.toBeVisible();
