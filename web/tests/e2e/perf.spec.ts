@@ -9,7 +9,7 @@ import {
 } from './helpers/a-performance';
 
 /**
- * Frame-paced Ajustar drag of filter 2 (Auri preset), `rate`× CPU-throttled through CDP when
+ * Frame-paced Ajustar drag of filter B (Auri preset), `rate`× CPU-throttled through CDP when
  * above 1, checked against the frame and long-task budgets.
  */
 async function expectDragWithinBudgets(page: Page, testInfo: TestInfo, rate = 1): Promise<void> {
@@ -26,7 +26,7 @@ async function expectDragWithinBudgets(page: Page, testInfo: TestInfo, rate = 1)
 
 	const handle = page
 		.getByRole('group', { name: 'Alças dos filtros', exact: true })
-		.getByRole('slider', { name: /^Filtro 2: PK/ });
+		.getByRole('slider', { name: /^Filtro B,.*\bPK\b/ });
 	await expect(handle).toHaveAttribute('aria-disabled', 'false');
 	await handle.scrollIntoViewIfNeeded();
 	const box = await handle.boundingBox();

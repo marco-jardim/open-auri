@@ -3,11 +3,13 @@
 // (staging, or the merged files once the staging is merged), so the lengths checked are real.
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
+import { LABEL_MAX as CORE_LABEL_MAX } from 'open-auri/share';
 import {
 	LABEL_MAX,
 	REGIONS,
 	badgeOf,
 	bandNames,
+	checkLabel,
 	normalizeLabel,
 	regionOf,
 	shortHz,
@@ -228,14 +230,49 @@ describe('badges and custom labels', () => {
 		expect(bandNames([ls(100, 4)], pt, [''])[0]?.custom).toBe(false);
 	});
 
-	test('labels are trimmed, collapsed and cut to 16 characters; empty means automatic', () => {
-		expect(LABEL_MAX).toBe(16);
+	test('one limit: the core LABEL_MAX, 24 code points; display labels are never cut below it', () => {
+		expect(LABEL_MAX).toBe(CORE_LABEL_MAX);
+		expect(LABEL_MAX).toBe(24);
 		expect(normalizeLabel('  a  b ')).toBe('a b');
-		expect(normalizeLabel('Um nome muito comprido demais')).toBe('Um nome muito co');
-		expect(length(normalizeLabel('ÁÉÍÓÚ ãõ ç àèìòù ÂÊÎ') ?? '')).toBeLessThanOrEqual(16);
-		expect(normalizeLabel('🎛️🎛️🎛️🎛️🎛️🎛️🎛️🎛️🎛️')).not.toMatch(/[\uD800-\uDBFF]$/);
+		// A stored (imported @2) label of 17 to 24 code points is shown whole.
+		expect(normalizeLabel('Corpo do violão quente')).toBe('Corpo do violão quente');
+		expect(normalizeLabel('x'.repeat(24))).toBe('x'.repeat(24));
+		expect(normalizeLabel('Um nome muito comprido demais')).toBe('Um nome muito comprido d');
+		expect(length(normalizeLabel('ÁÉÍÓÚ ãõ ç àèìòù ÂÊÎ ôû') ?? '')).toBeLessThanOrEqual(24);
+		expect(normalizeLabel('🎛️'.repeat(13))).not.toMatch(/[\uD800-\uDBFF]$/);
 		expect(normalizeLabel('   ')).toBeNull();
 		expect(normalizeLabel(null)).toBeNull();
+		const [name] = bandNames([ls(100, 4)], pt, ['Corpo do violão quente']);
+		expect(name?.label).toBe('Corpo do violão quente');
+	});
+
+	test('checkLabel applies the strict S5 label rules and reports envelope codes, never cutting', () => {
+		expect(checkLabel('  Peso   do  bumbo ')).toEqual({ ok: true, label: 'Peso do bumbo' });
+		expect(checkLabel('Ｇｒａｖｅ')).toEqual({ ok: true, label: 'Grave' });
+		expect(checkLabel('')).toEqual({ ok: true, label: null });
+		expect(checkLabel('  \u200b ')).toEqual({ ok: true, label: null });
+		expect(checkLabel(null)).toEqual({ ok: true, label: null });
+		// Exactly 24 code points pass, emoji (two UTF-16 units each) included.
+		expect(checkLabel('x'.repeat(24))).toEqual({ ok: true, label: 'x'.repeat(24) });
+		expect(checkLabel('🎧'.repeat(24))).toEqual({ ok: true, label: '🎧'.repeat(24) });
+		// One more is refused, never cut; NFKC expansion counts (ﬃ is three code points).
+		expect(checkLabel('x'.repeat(25))).toEqual({ ok: false, issues: ['env:length'] });
+		expect(checkLabel('🎧'.repeat(25))).toEqual({ ok: false, issues: ['env:length'] });
+		expect(checkLabel('ﬃ'.repeat(9))).toEqual({ ok: false, issues: ['env:length'] });
+		// Link-like names are refused with their envelope code instead of silently dropped.
+		expect(checkLabel('Sr.João')).toEqual({ ok: false, issues: ['env:url-like'] });
+		expect(checkLabel('grave.Agudo')).toEqual({ ok: false, issues: ['env:url-like'] });
+		expect(checkLabel('evil.com')).toEqual({ ok: false, issues: ['env:url'] });
+		expect(checkLabel('https://x.y')).toEqual({ ok: false, issues: ['env:url'] });
+		expect(checkLabel('Sr. João')).toEqual({ ok: true, label: 'Sr. João' });
+		// Controls and ill-formed text (a lone surrogate) are env:pattern.
+		expect(checkLabel('a\tb')).toEqual({ ok: false, issues: ['env:pattern'] });
+		expect(checkLabel('a\ud83db')).toEqual({ ok: false, issues: ['env:pattern'] });
+		// Every distinct code once, in the envelope's order.
+		expect(checkLabel(`evil.com ${'x'.repeat(24)}`)).toEqual({
+			ok: false,
+			issues: ['env:url', 'env:length']
+		});
 	});
 
 	test('withLabel sets one slot and leaves the input untouched', () => {

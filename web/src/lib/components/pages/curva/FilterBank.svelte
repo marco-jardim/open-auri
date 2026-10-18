@@ -3,8 +3,9 @@
 	grid that never scrolls sideways (5 × 2 when the bank is at least 590 px wide, otherwise as many
 	columns of at least 116 px as fit: 4, 3, 2 or 1). Each strip has
 	- a header: the slot badge (A to J, the same letter as the scope handle), the functional name
-	  (`band-names.ts`) or the user's own one, a rename button (inline field, 16 characters,
-	  Enter saves, Esc cancels) and, on hover or focus, the processing stage ("estágio N");
+	  (`band-names.ts`) or the user's own one, a rename button (inline field, up to LABEL_MAX = 24
+	  code points under the strict label rules, a refused name keeps the field open with the
+	  reason; Enter saves, Esc cancels) and, on hover or focus, the processing stage ("estágio N");
 	- a click-stepped rotary kind switch (PK, LS, OFF; HS, LP and HP engraved and locked outside
 	  Engenharia), with keyboard stepping and a hover/focus legend;
 	- CORTE and REFORÇO lamps (the sign of the band's real gain) and a mini response of the section;
@@ -31,7 +32,7 @@
 	import { Button, Lamp } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { bandWords, useBandLabels } from './band-labels.svelte.ts';
-	import { bandNames, LABEL_MAX, normalizeLabel } from './band-names.ts';
+	import { bandNames, checkLabel, LABEL_MAX, type LabelIssue } from './band-names.ts';
 	import { criteria, criterionName } from './envelope.ts';
 	import { formatSignedDb } from './format.ts';
 	import KindDial, { type KindCheck } from './KindDial.svelte';
@@ -236,24 +237,63 @@
 	let bankElement: HTMLElement | undefined = $state();
 	/** Slot whose name is being edited. */
 	let renaming = $state<number | null>(null);
+	/** Why the open field's name is refused (envelope codes); shown inline, the field stays open. */
+	let renameIssues = $state.raw<readonly LabelIssue[]>([]);
+	const renameIssueText: Record<LabelIssue, () => string> = {
+		'env:url': () => m.curva_bn_rename_url(),
+		'env:url-like': () => m.curva_bn_rename_url_like(),
+		'env:length': () => m.curva_bn_rename_length({ max: LABEL_MAX }),
+		'env:pattern': () => m.curva_bn_rename_pattern()
+	};
 
-	function focusRename(index: number): void {
-		void tick().then(() =>
-			bankElement?.querySelector<HTMLButtonElement>(`[data-rename="${index}"]`)?.focus()
-		);
+	function startRename(index: number): void {
+		renameIssues = [];
+		renaming = index;
 	}
 	/**
-	 * Ends the edit of `index`: `value` null cancels. A name equal to the automatic one (or empty)
-	 * goes back to the automatic name, so it keeps following the band.
+	 * The focused rename field that Enter or Escape is closing. Its removal blurs it with no
+	 * `relatedTarget` before its button exists again; that handoff is not focus leaving the bank.
+	 */
+	let renameHandoff: Element | null = null;
+	function focusRename(index: number): void {
+		void tick().then(() => {
+			bankElement?.querySelector<HTMLButtonElement>(`[data-rename="${index}"]`)?.focus();
+			const handedOff = renameHandoff !== null;
+			renameHandoff = null;
+			// Only a handoff that failed to land back in the bank counts as a real exit.
+			if (handedOff && !bankElement?.contains(document.activeElement)) focusGeneration++;
+		});
+	}
+	/**
+	 * Ends the edit of `index`: `value` null cancels. The name goes through the strict label rules
+	 * (`checkLabel`): a refused one is never stored or cut, the field stays open with the reason. A
+	 * name equal to the automatic one (or empty) goes back to the automatic name, so it keeps
+	 * following the band.
 	 */
 	function endRename(index: number, value: string | null, refocus: boolean): void {
 		if (renaming !== index) return;
-		renaming = null;
 		if (value !== null) {
-			const name = normalizeLabel(value);
-			labelStore.rename(index, name === names[index]?.auto ? null : name);
+			const checked = checkLabel(value);
+			const result = checked.ok
+				? labelStore.rename(index, checked.label === names[index]?.auto ? null : checked.label)
+				: checked;
+			if (!result.ok) {
+				renameIssues = result.issues;
+				return;
+			}
 		}
+		const active = document.activeElement;
+		if (refocus && active instanceof HTMLInputElement && bankElement?.contains(active)) {
+			renameHandoff = active;
+		}
+		renaming = null;
+		renameIssues = [];
 		if (refocus) focusRename(index);
+	}
+	/** Live length in code points (as the envelope counts them); other reasons wait for Enter. */
+	function renameInput(value: string): void {
+		const checked = checkLabel(value);
+		renameIssues = !checked.ok && checked.issues.includes('env:length') ? ['env:length'] : [];
 	}
 	function renameKey(
 		event: KeyboardEvent & { currentTarget: HTMLInputElement },
@@ -302,6 +342,8 @@
 	aria-labelledby={headingId}
 	bind:this={bankElement}
 	onfocusout={(event) => {
+		// The closing rename field: focusRename returns focus to its button, or counts the exit.
+		if (renameHandoff !== null && event.target === renameHandoff) return;
 		if (
 			!(event.relatedTarget instanceof Node) ||
 			!event.currentTarget.contains(event.relatedTarget)
@@ -347,7 +389,7 @@
 	{#if message}
 		<p class="bank-msg" role="status">{message}</p>
 	{/if}
-	<p class="sr-only" id="{headingId}-rename">{m.curva_bn_rename_hint()}</p>
+	<p class="sr-only" id="{headingId}-rename">{m.curva_bn_rename_hint_max({ max: LABEL_MAX })}</p>
 	<ol class="modules">
 		{#each curve.bands as band, index (index)}
 			{@const locked = band.kind !== 'OFF' && isLockedKind(band.kind, layer)}
@@ -363,19 +405,27 @@
 				<div class="mod-head">
 					<span class="mod-badge" data-kind={band.kind}>{badge}</span>
 					{#if renaming === index}
+						{@const invalid = renameIssues.length > 0}
+						<!-- No maxlength: it counts UTF-16 units; the limit is checked in code points. -->
 						<input
 							class="mod-input"
 							type="text"
-							maxlength={LABEL_MAX}
 							value={name?.custom ? name.label : ''}
 							placeholder={name?.auto}
 							aria-label={m.curva_bn_rename_field({ badge })}
-							aria-describedby="{headingId}-rename"
-							title={m.curva_bn_rename_hint()}
+							aria-describedby={invalid
+								? `${headingId}-rename-issue ${headingId}-rename`
+								: `${headingId}-rename`}
+							aria-invalid={invalid ? 'true' : undefined}
+							title={m.curva_bn_rename_hint_max({ max: LABEL_MAX })}
+							oninput={(event) => renameInput(event.currentTarget.value)}
 							onkeydown={(event) => renameKey(event, index)}
 							onblur={(event) => endRename(index, event.currentTarget.value, false)}
 							{@attach selectAll}
 						/>
+						<span class="mod-issue" id="{headingId}-rename-issue" aria-live="polite"
+							>{renameIssues.map((issue) => renameIssueText[issue]()).join(' ')}</span
+						>
 					{:else}
 						<span
 							class="mod-name"
@@ -386,14 +436,15 @@
 					<span class="mod-stage" title={m.curva_bn_stage_title({ index: stage })}
 						>{m.curva_v2_stage({ index: stage })}</span
 					>
-					<!-- Hidden while its field is open: leaving the field (Enter, Esc, blur) ends the edit. -->
+					<!-- Hidden while its field is open: Enter or blur ends the edit with an accepted name
+						 (a refused one keeps the field open with its reason), Esc always cancels. -->
 					{#if renaming !== index}
 						<button
 							type="button"
 							class="mod-rename"
 							data-rename={index}
 							aria-label={m.curva_bn_rename({ badge })}
-							onclick={() => (renaming = index)}
+							onclick={() => startRename(index)}
 						>
 							<svg viewBox="0 0 16 16" aria-hidden="true">
 								<path d="M3 13l.8-3.2L10.6 3l2.4 2.4-6.8 6.8z" />
@@ -709,7 +760,8 @@
 		right: 4px;
 	}
 	/* Header: the badge, the stage (shown on hover or focus) and the rename button on top, the
-	   name on a full row of its own (16 characters fit at 116 px). */
+	   name on a full row of its own (16 characters fit at 116 px; a longer label, up to 24, is
+	   shortened on screen by the ellipsis of .mod-name; it is stored and read out whole). */
 	.mod-head {
 		width: 100%;
 		min-width: 0;
@@ -779,6 +831,18 @@
 	.mod-input:focus-visible {
 		outline: var(--focus-width) solid var(--accent);
 		outline-offset: 1px;
+	}
+	.mod-input[aria-invalid='true'] {
+		border-color: var(--warn);
+	}
+	/* Why the name is refused: under the open field, across the strip, wrapped (never cut). */
+	.mod-issue {
+		grid-column: 1 / -1;
+		max-width: 100%;
+		color: var(--warn);
+		font: 400 var(--label-min) / 1.25 var(--face-body);
+		overflow-wrap: anywhere;
+		text-align: center;
 	}
 	/* Processing order: secondary, so it waits for hover or focus (always on touch screens). */
 	.mod-stage {

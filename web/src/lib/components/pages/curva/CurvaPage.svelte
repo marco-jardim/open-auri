@@ -3,7 +3,9 @@
 	- The layer comes from the route (`?camada=`) as a prop; changes go back through `onlayer`.
 	- Editor state is `app.state.curve` (undo/redo/dirty); every change is gate-approved first
 	  (macros, drags, knobs, typed values, kinds, reorders, imports, links, parked points, the
-	  manual preamp).
+	  manual preamp), in the editor's profile (Modo YOLO: the YOLO gate, preamp −25,5 to 0 dB).
+	  During "Prévia sem limites" edits stay in a memory-only draft (`freeDraft`) and never reach
+	  the store, `oa.current`, the undo history or another tab (C1).
 	- Writing is only ever `app.requestWrite()` / `app.requestRescue()` (layout checklist).
 	- Works without `app` (SSR, before mount): renders Neutro read-only, `aria-busy`, and every
 	  action says it is still loading.
@@ -56,12 +58,15 @@
 		bandOfKind,
 		defaultOrder,
 		defaultPermutation,
+		editorPreampMaxDb,
+		editorVerdict,
 		maxPreamp,
 		movePermutation,
 		moveSection,
 		permuteLabels,
 		reorderSections
 	} from './edit.ts';
+	import { codecAccepts } from '#lib/workers/gate-handler.ts';
 	import { formatSignedDb, payloadCrc } from './format.ts';
 	import { readLinkHash, type ImportResult } from './io.ts';
 	import { ioFailureText } from './io-text.ts';
@@ -161,19 +166,54 @@
 	const titleId = $props.id();
 	const neutral: Curve = { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb };
 
-	const stored = $derived(app?.state.curve.current ?? null);
-	const curve = $derived<Curve>(stored ?? neutral);
-	const signature = $derived(curveSignature(curve));
 	// --- Modo YOLO (this tab only, memory only; see lib/state/yolo.svelte.ts) -------------------
 	const yoloOn = $derived(app?.yolo.enabled ?? false);
 	const freePreview = $derived(app?.yolo.freePreview ?? false);
-	/** Gate profile of a write from this editor. */
+	/** Gate profile of a write from this editor, and of every discrete edit. */
 	const writeProfile = $derived<'standard' | 'yolo'>(yoloOn ? 'yolo' : 'standard');
+
+	const stored = $derived(app?.state.curve.current ?? null);
+	const storedCurve = $derived<Curve>(stored ?? neutral);
+	const storedSignature = $derived(curveSignature(storedCurve));
+	/**
+	 * "Prévia sem limites" (C1): every edit made while it is on lives here only, in this page's
+	 * memory, over the stored curve it started from (`base`, its signature). It never reaches
+	 * `curve.set`, `oa.current`, the undo history or another tab, and is never written. Leaving the
+	 * free preview (or YOLO, or the page) discards it, and so does any change of the stored curve
+	 * (a preset, Neutro, an experiment, another tab). Its own Desfazer/Refazer steps live with it.
+	 */
+	interface FreeDraft {
+		readonly base: string;
+		readonly curve: Curve;
+		readonly past: readonly Curve[];
+		readonly future: readonly Curve[];
+	}
+	const FREE_DRAFT_STEPS = 100;
+	let freeDraft = $state.raw<FreeDraft | null>(null);
+	/** The live draft (free preview on, still over the stored curve), or null. */
+	const liveDraft = $derived(
+		freePreview && freeDraft !== null && freeDraft.base === storedSignature ? freeDraft : null
+	);
+	const curve = $derived<Curve>(liveDraft?.curve ?? storedCurve);
+	const signature = $derived(curveSignature(curve));
+	$effect(() => {
+		const live = liveDraft;
+		untrack(() => {
+			if (live === null && freeDraft !== null) freeDraft = null;
+		});
+	});
 	/** Why YOLO itself disables writing (the free preview), or null. */
 	const yoloWriteReason = $derived(
 		yoloWriteBlock(yoloOn, freePreview) ? m.yolo_reason_free_preview() : null
 	);
-	const verdict = $derived(verdictFor(curve, yoloOn ? 'yolo' : 'standard'));
+	const verdict = $derived(verdictFor(curve, writeProfile));
+	/**
+	 * Whether the editor's own profile accepts the curve as the start of a drag: the gate's verdict,
+	 * except in the free preview, where the codec alone decides (the worker's `accepted`).
+	 */
+	const startAccepted = $derived(
+		freePreview ? codecAccepts(curve.bands, curve.preampDb) : verdict.ok
+	);
 	/**
 	 * Why the editor curve may not leave as a file, a link or an account save/publication although
 	 * YOLO is off: the standard gate refuses it (a YOLO-only curve restored from `oa.current` after a
@@ -259,6 +299,10 @@
 	/**
 	 * Edits keep the current filter labels (a kind change keeps the slot's label); reorders pass
 	 * them permuted; an import brings its own (or none).
+	 *
+	 * During "Prévia sem limites" an edit goes to the memory-only draft instead (C1, `freeDraft`):
+	 * nothing reaches the store. Loads that name their own source (an experiment, an import, a
+	 * link) still replace the stored curve, like a preset, and so end the draft.
 	 */
 	function apply(
 		next: Curve,
@@ -269,6 +313,7 @@
 		} = {}
 	): boolean {
 		if (!app) return false;
+		if (freePreview && meta.source === undefined) return applyFree(next);
 		const current = app.state.curve.current;
 		return app.state.curve.set({
 			name: meta.name ?? current.name,
@@ -278,6 +323,78 @@
 			labels: meta.labels !== undefined ? meta.labels : meta.source ? null : current.labels
 		});
 	}
+	/** One free-preview edit: a new draft step (memory only). Labels stay the stored curve's. */
+	function applyFree(next: Curve): boolean {
+		const current = curve;
+		if (curveSignature(next) === curveSignature(current)) return true;
+		freeDraft = {
+			base: storedSignature,
+			curve: { bands: next.bands.slice(), preampDb: next.preampDb },
+			past: [...(liveDraft?.past ?? []), current].slice(-FREE_DRAFT_STEPS),
+			future: []
+		};
+		return true;
+	}
+	/** Desfazer: the draft's own steps first (free preview), then the editor history. */
+	function onUndo() {
+		const live = liveDraft;
+		const previous = live?.past.at(-1);
+		if (live && previous) {
+			freeDraft = {
+				...live,
+				curve: previous,
+				past: live.past.slice(0, -1),
+				future: [...live.future, live.curve]
+			};
+			return;
+		}
+		app?.state.curve.undo();
+	}
+	/** Refazer: within the draft while it is live; the editor history otherwise. */
+	function onRedo() {
+		const live = liveDraft;
+		if (live) {
+			const next = live.future.at(-1);
+			if (next) {
+				freeDraft = {
+					...live,
+					curve: next,
+					past: [...live.past, live.curve],
+					future: live.future.slice(0, -1)
+				};
+			}
+			return;
+		}
+		app?.state.curve.redo();
+	}
+	// Ctrl/Cmd+Z (the layout's shortcut, a window bubble listener) steps the live draft first: this
+	// capture listener runs before it and claims the event, with the layout's own conditions.
+	$effect(() => {
+		if (liveDraft === null) return;
+		const onDraftKey = (event: KeyboardEvent) => {
+			if (event.defaultPrevented || event.repeat || event.isComposing || event.altKey) return;
+			if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
+			const target = event.target;
+			if (
+				target instanceof Element &&
+				target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+			) {
+				return;
+			}
+			if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+			event.preventDefault();
+			if (event.shiftKey) onRedo();
+			else onUndo();
+		};
+		window.addEventListener('keydown', onDraftKey, true);
+		return () => window.removeEventListener('keydown', onDraftKey, true);
+	});
+	const canUndo = $derived(
+		(liveDraft !== null && liveDraft.past.length > 0) || (app?.state.curve.canUndo ?? false)
+	);
+	const canRedo = $derived(
+		liveDraft !== null ? liveDraft.future.length > 0 : (app?.state.curve.canRedo ?? false)
+	);
 	function notify(message: string, tone: 'info' | 'error' = 'info') {
 		announcement = message;
 		app?.toasts.push(message, { tone });
@@ -374,14 +491,18 @@
 		const start = curve;
 		const candidate = moved(start, index, target);
 		// The worker's bisection needs an accepted start; otherwise judge the candidate directly.
-		const verdictOf = verdict.ok
+		// "Accepted" is the profile's: in the free preview the codec's (`accepted`), not the gate's.
+		const verdictOf = startAccepted
 			? dragBand(gate, start, index, target, experimental).then((result) => ({
 					refused: result.stopped,
 					reasons: result.reasons
 				}))
 			: gate
 					.commit({ bands: candidate.bands.slice(), preampDb: candidate.preampDb, experimental })
-					.then((result) => ({ refused: !result.verdict.ok, reasons: result.verdict.reasons }));
+					.then((result) => ({
+						refused: !(result.accepted ?? result.verdict.ok),
+						reasons: result.verdict.reasons
+					}));
 		verdictOf
 			.then(
 				(result) => {
@@ -474,8 +595,16 @@
 		dragView = null;
 		dragReason = null;
 		try {
-			const result = await releaseBand(gate, start, index, target, experimental, verdict.ok);
+			const result = await releaseBand(gate, start, index, target, experimental, startAccepted);
 			if (token !== dragToken) return;
+			if (result.previewOnly && !freePreview) {
+				// C1: only the codec accepted it and the free preview ended while the gate was
+				// answering. Such a curve is never stored: the editor keeps its curve.
+				draft = null;
+				report(null, 'info');
+				return;
+			}
+			// In the free preview `apply` keeps it in the memory-only draft.
 			if (result.committed) apply(result);
 			if (result.outcome === 'exact') {
 				draft = null;
@@ -508,7 +637,7 @@
 	function onPark(index: number, target: DragTarget) {
 		if (!app) return;
 		const bands = replaceBand(curve.bands, index, parkedBand(index));
-		const check = verdictFor({ bands, preampDb: curve.preampDb });
+		const check = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
 		if (!check.ok) {
 			dragMessage = m.curva_v2_parked_refused({
 				index: String(index + 1),
@@ -549,14 +678,16 @@
 			basePreampDb: base.preampDb,
 			values,
 			index,
-			target: value
+			target: value,
+			profile: writeProfile
 		});
 		const macro = MACROS[index];
 		if (proposal.ok && apply(proposal)) {
 			const pick = (k: number): number => (k === index ? proposal.value : (values[k] ?? 0));
 			macroBase = base;
 			macroValues = [pick(0), pick(1), pick(2), pick(3)];
-			macroSignature = curveSignature(app.state.curve.current);
+			// The editor curve now (the free-preview draft or the stored curve).
+			macroSignature = curveSignature(curve);
 		}
 		macroStopped = proposal.stopped ? index : null;
 		macroMessage =
@@ -576,7 +707,7 @@
 	const maxClipMessage = $derived(maxClip?.signature === signature ? maxClip.text : null);
 	function onMaxClip() {
 		if (!app) return;
-		const result = maxPreamp(curve);
+		const result = maxPreamp(curve, writeProfile);
 		let text: string;
 		if (!result.ok) {
 			text = m.curva_maxclip_none({
@@ -589,7 +720,7 @@
 		} else {
 			return;
 		}
-		maxClip = { text, signature: curveSignature(app.state.curve.current) };
+		maxClip = { text, signature: curveSignature(curve) };
 		announcement = text;
 	}
 
@@ -611,15 +742,16 @@
 	);
 	/**
 	 * A stepped or typed preamp. Same path as the other discrete edits (kinds, order, "Máximo sem
-	 * clipping"): the full write gate judges the bands with the new preamp and only an accepted
-	 * curve goes to the editor (one undo step). A refusal keeps the curve and says why.
+	 * clipping"): the full write gate of the editor's profile judges the bands with the new preamp
+	 * and only an accepted curve goes to the editor (one undo step). In YOLO the range is −25,5 to
+	 * 0 dB (`editorPreampMaxDb`, `editorVerdict`'s floor). A refusal keeps the curve and says why.
 	 */
 	function onPreamp(value: number) {
 		if (!app || preampReason) return;
 		const preampDb = snapPreamp(value);
 		if (preampDb === null || preampDb === curve.preampDb) return;
 		const bands = curve.bands;
-		const check = verdictFor({ bands, preampDb });
+		const check = editorVerdict({ bands, preampDb }, writeProfile);
 		if (!check.ok) {
 			const text = m.curva_preamp_refused({
 				value: formatSignedDb(preampDb, locale),
@@ -645,7 +777,7 @@
 		const previous = curve.bands[index];
 		if (!previous) return { ok: false as const, reason: m.curva_reason_unknown() };
 		const bands = replaceBand(curve.bands, index, bandOfKind(previous, kind));
-		const result = verdictFor({ bands, preampDb: curve.preampDb }, writeProfile);
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
 		return result.ok
 			? { ok: true as const, bands }
 			: {
@@ -666,7 +798,7 @@
 	}
 	function onDefaultOrder() {
 		const bands = defaultOrder(curve.bands);
-		const result = verdictFor({ bands, preampDb: curve.preampDb });
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
 		if (result.ok) {
 			const labels = permuteLabels(app?.state.curve.labels, defaultPermutation(curve.bands));
 			apply({ bands, preampDb: curve.preampDb }, { labels });
@@ -687,7 +819,7 @@
 	let springTimer: ReturnType<typeof setTimeout> | undefined;
 	function onReorder(from: number, to: number) {
 		if (!app) return;
-		const result = reorderSections(curve, from, to);
+		const result = reorderSections(curve, from, to, writeProfile);
 		if (result.ok) {
 			const order = movePermutation(curve.bands.length, from, to);
 			const labels = permuteLabels(app.state.curve.labels, order);
@@ -843,7 +975,9 @@
 		const meterRef = client.state.meterRef;
 		const instance = new CurvaPreview(client.audio, {
 			reference: () => meterRef.value,
-			// Modo YOLO previews get the engine's protection (-1 dBFS peak, limiter).
+			// Modo YOLO previews get the engine's protection (-1 dBFS peak, limiter); so does any
+			// curve the standard gate refuses, YOLO or not (the free-preview draft, a YOLO curve
+			// restored after a reload, a YOLO cable write as the reference).
 			yolo: () => client.yolo.enabled
 		});
 		preview = instance;
@@ -1045,6 +1179,7 @@
 					onpreamp={onPreamp}
 					{preampReason}
 					{preampMessage}
+					preampMaxDb={editorPreampMaxDb(writeProfile)}
 				/>
 				<PresetTabs
 					activeId={activePreset}
@@ -1071,8 +1206,8 @@
 				/>
 				<RescuePanel
 					unsaved={app?.state.curve.unsaved ?? false}
-					canUndo={app?.state.curve.canUndo ?? false}
-					canRedo={app?.state.curve.canRedo ?? false}
+					{canUndo}
+					{canRedo}
 					journalCount={app?.state.journal.entries.length ?? 0}
 					disabled={!app}
 					disabledReason={loadingReason}
@@ -1082,8 +1217,8 @@
 					onneutral={() => loaded(app?.loadNeutral())}
 					ondefault={() => loaded(app?.loadAuriDefault())}
 					onrescue={() => app?.requestRescue()}
-					onundo={() => app?.state.curve.undo()}
-					onredo={() => app?.state.curve.redo()}
+					onundo={onUndo}
+					onredo={onRedo}
 					onwrite={requestEditorWrite}
 				/>
 			</div>
@@ -1174,7 +1309,7 @@
 					{locale}
 					{pageUrl}
 					disabled={!app || yoloOn}
-					disabledReason={loadingReason ?? (yoloOn ? m.yolo_reason_no_export() : null)}
+					disabledReason={loadingReason ?? (yoloOn ? m.yolo_reason_no_import_export() : null)}
 					exportReason={exitGateReason}
 					onimport={(result) => onImport(result)}
 					{notify}

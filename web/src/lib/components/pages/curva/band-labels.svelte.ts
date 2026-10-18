@@ -8,13 +8,18 @@
 import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { getLocale } from '#lib/paraglide/runtime.js';
-import { withLabel, type BandWords } from './band-names.ts';
+import { checkLabel, withLabel, type BandWords, type LabelCheck } from './band-names.ts';
 
 export interface BandLabels {
 	/** Custom name by slot; null (or missing) where the automatic name applies. */
 	readonly labels: readonly (string | null)[];
-	/** Sets slot `index` (normalized, at most 16 characters); empty or null: automatic name. */
-	rename(index: number, name: string | null): void;
+	/**
+	 * Sets slot `index` after the strict S5 `@2` check (`checkLabel`: at most `LABEL_MAX`, 24,
+	 * code points; no links, controls or ill-formed text); empty or null: automatic name. A
+	 * refused name changes nothing and comes back with its envelope codes: it is never cut or
+	 * silently dropped.
+	 */
+	rename(index: number, name: string | null): LabelCheck;
 }
 
 function optionalContext(): AppContext | null {
@@ -35,10 +40,13 @@ export function useBandLabels(): BandLabels {
 			return store()?.labels ?? local;
 		},
 		rename(index, name) {
+			const checked = checkLabel(name);
+			if (!checked.ok) return checked;
 			const target = store();
-			const next = withLabel(target?.labels ?? local, index, name);
+			const next = withLabel(target?.labels ?? local, index, checked.label);
 			if (target) target.setLabels(next);
 			else local = next;
+			return checked;
 		}
 	};
 }

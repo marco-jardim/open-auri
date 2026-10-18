@@ -20,6 +20,7 @@ vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
 	const catalogs = import.meta.glob<Record<string, string>>(
 		[
 			'../../../../messages/_staging/T4.14.*.json',
+			'../../../../messages/_staging/QA1B.*.json',
 			'../../../../messages/pt-BR.json',
 			'../../../../messages/en-US.json'
 		],
@@ -307,7 +308,12 @@ test('the banner never merges by itself; the click merges and shows the full rep
 	expect(batches[0]?.[0]).toEqual({ localId: 'loc0', s1: 's1-0', name: 'Curva 0', lang: 'pt-BR' });
 	await expect.element(page.getByText('Criadas na conta: 2')).toBeVisible();
 	await expect.element(page.getByText('Já estavam na conta: 1')).toBeVisible();
-	await expect.element(page.getByText('Mesmo som já na conta com outro nome: 1')).toBeVisible();
+	await expect
+		.element(page.getByText('Mesmo som já na conta com outro nome ou outros nomes de filtro: 1'))
+		.toBeVisible();
+	await expect
+		.element(page.getByRole('listitem').filter({ hasText: 'Curva 2:' }))
+		.toHaveTextContent('Curva 2: já está na conta com outro nome; nada foi mudado.');
 	await expect.element(page.getByText('Recusadas: 2 (ficam só neste navegador)')).toBeVisible();
 	await expect.element(page.getByText('Motivos do gate: gain.max, slope')).toBeVisible();
 	await expect.element(page.getByText(/limite diário atingido/)).toBeVisible();
@@ -352,6 +358,60 @@ test('"Agora não" is remembered for that account until the local library change
 	});
 	await expect.element(page.getByText(/1 curvas salvas/)).toBeVisible();
 	expect(api.mergeLibrary).not.toHaveBeenCalled();
+});
+
+test('labels-only conflicts are listed per item and counted once per curve', async () => {
+	const storage = memoryStorage();
+	const items: LocalLibraryItem[] = [
+		{ id: 'grave', name: 'Grave', s1: 's1-grave', labels: ['Sub', null], updatedAt: 10 },
+		{ id: 'ambos', name: 'Ambos', s1: 's1-ambos', labels: ['Ar'], updatedAt: 10 }
+	];
+	const mergeLibrary = vi.fn(
+		async (batch: LibraryMergeItem[]): Promise<MergeReport> => ({
+			created: [],
+			duplicates: [],
+			rejected: [],
+			conflicts: batch.flatMap((entry) =>
+				entry.localId === 'grave'
+					? [{ localId: 'grave', lineageId: 'lin-grave', field: 'labels' as const }]
+					: [
+							{ localId: entry.localId, lineageId: 'lin-ambos', field: 'name' as const },
+							{ localId: entry.localId, lineageId: 'lin-ambos', field: 'labels' as const }
+						]
+			)
+		})
+	);
+	render(MergeBanner, {
+		items,
+		account: 'ana',
+		verified: true,
+		api: { mergeLibrary },
+		storage,
+		locale: 'pt-BR'
+	});
+	await page.getByRole('button', { name: 'Mesclar biblioteca local' }).click();
+	await expect.element(page.getByRole('heading', { name: 'Relatório da mescla' })).toBeVisible();
+	// The local labels were sent, so the server could compare them.
+	expect(mergeLibrary.mock.calls[0]?.[0].map((entry) => entry.labels)).toEqual([
+		['Sub', null],
+		['Ar']
+	]);
+	// Two curves, three field entries: counted per curve.
+	await expect
+		.element(page.getByText('Mesmo som já na conta com outro nome ou outros nomes de filtro: 2'))
+		.toBeVisible();
+	await expect
+		.element(page.getByRole('listitem').filter({ hasText: 'Grave:' }))
+		.toHaveTextContent(
+			'Grave: já está na conta com outros nomes de filtro; nada foi mudado na conta e este navegador mantém os seus.'
+		);
+	await expect
+		.element(page.getByRole('listitem').filter({ hasText: 'Ambos:' }))
+		.toHaveTextContent(
+			'Ambos: já está na conta com outro nome e outros nomes de filtro; nada foi mudado na conta e este navegador mantém os seus.'
+		);
+	// Conflicts are handled for good: nothing changes on a retry, so they are not offered again.
+	expect(readMergeFlag(storage, 'ana').handled.sort()).toEqual(['ambos', 'grave']);
 });
 
 test('unverified e-mail: the merge is offered but cannot be sent', async () => {

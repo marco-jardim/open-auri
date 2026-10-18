@@ -77,6 +77,18 @@ export class FakeIIRFilterNode extends FakeNode {
 	}
 }
 
+/** The preview protection's limiter (engine `protect`). */
+export class FakeDynamicsCompressorNode extends FakeNode {
+	readonly threshold = new FakeAudioParam(-24);
+	readonly knee = new FakeAudioParam(30);
+	readonly ratio = new FakeAudioParam(12);
+	readonly attack = new FakeAudioParam(0.003);
+	readonly release = new FakeAudioParam(0.25);
+	constructor(context: FakeAudioContext) {
+		super(context, 'compressor');
+	}
+}
+
 export class FakeMediaElementSourceNode extends FakeNode {
 	readonly mediaElement: FakeAudioElement;
 	constructor(context: FakeAudioContext, element: FakeAudioElement) {
@@ -158,6 +170,8 @@ export class FakeAudioContext extends EventTarget {
 	readonly destination: FakeNode;
 	mediaSources: FakeMediaElementSourceNode[] = [];
 	filters: FakeIIRFilterNode[] = [];
+	/** Limiters of protected previews, in creation order. */
+	compressors: FakeDynamicsCompressorNode[] = [];
 	bufferSources: FakeBufferSourceNode[] = [];
 	closeCalls = 0;
 
@@ -180,6 +194,11 @@ export class FakeAudioContext extends EventTarget {
 	createIIRFilter(feedforward: number[], feedback: number[]): FakeIIRFilterNode {
 		const node = new FakeIIRFilterNode(this, feedforward, feedback);
 		this.filters.push(node);
+		return node;
+	}
+	createDynamicsCompressor(): FakeDynamicsCompressorNode {
+		const node = new FakeDynamicsCompressorNode(this);
+		this.compressors.push(node);
 		return node;
 	}
 	createMediaElementSource(element: FakeAudioElement): FakeMediaElementSourceNode {

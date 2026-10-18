@@ -161,9 +161,56 @@ test.each(['layer', 'profile', 'Escape'] as const)('%s cancels bank pending', as
 	if (change === 'layer') await screen.rerender({ layer: 'ajustar' });
 	if (change === 'profile') await screen.rerender({ kindContext: 'yolo' });
 	if (change === 'Escape') {
-		document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		dial.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		await tick();
 	}
+	expect(value()).toBe('PK');
+	expect(onkind).not.toHaveBeenCalled();
+});
+
+test('Escape in the rename field cancels rename without cancelling a pending dial', async () => {
+	const { module, dial, value, onkind } = await setup();
+	await click(dial);
+	const before = module.querySelector('.mod-name')?.textContent;
+	const rename = module.querySelector<HTMLButtonElement>('[data-rename="0"]');
+	if (!rename) throw new Error('Missing rename button');
+	await click(rename);
+	const field = module.querySelector<HTMLInputElement>('input.mod-input');
+	if (!field) throw new Error('Missing rename field');
+	field.value = 'Discard this';
+	field.dispatchEvent(
+		new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+	);
+	await tick();
+	expect(module.querySelector('input.mod-input')).toBeNull();
+	expect(module.querySelector('.mod-name')?.textContent).toBe(before);
+	expect(value()).toBe('LS ✕');
+	expect(onkind).not.toHaveBeenCalled();
+});
+
+test('Enter in the rename field keeps a pending dial; leaving the bank still cancels it', async () => {
+	const { module, dial, value, onkind } = await setup();
+	await click(dial);
+	const rename = module.querySelector<HTMLButtonElement>('[data-rename="0"]');
+	if (!rename) throw new Error('Missing rename button');
+	await click(rename);
+	const field = module.querySelector<HTMLInputElement>('input.mod-input');
+	if (!field) throw new Error('Missing rename field');
+	expect(document.activeElement).toBe(field);
+	field.value = 'Grave';
+	field.dispatchEvent(
+		new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+	);
+	await tick();
+	await tick();
+	expect(module.querySelector('input.mod-input')).toBeNull();
+	expect(module.querySelector('.mod-name')?.textContent).toBe('Grave');
+	const button = module.querySelector<HTMLButtonElement>('[data-rename="0"]');
+	if (!button) throw new Error('Missing restored rename button');
+	expect(document.activeElement).toBe(button);
+	expect(value()).toBe('LS ✕');
+	button.blur();
+	await tick();
 	expect(value()).toBe('PK');
 	expect(onkind).not.toHaveBeenCalled();
 });
@@ -206,7 +253,7 @@ test('an unavailable editor is disabled, not a gate-invalid pending kind', async
 });
 
 test('without an injected fake the bank asks the actual discrete-edit gate', async () => {
-	const { screen, dial, value, onkind } = await setup();
+	const { screen, module, dial, value, onkind } = await setup();
 	const curve: Curve = {
 		bands: pad([cut, { ...cut, gainDb: 6 }]),
 		preampDb: -0.5
@@ -218,9 +265,10 @@ test('without an injected fake the bank asks the actual discrete-edit gate', asy
 	await screen.rerender({ curve, verdict: verdictFor(curve), canApplyKind: undefined });
 	await click(dial);
 	expect(value()).toBe('LS ✕');
-	expect(dial.getAttribute('aria-valuetext')).toContain(
+	expect(module.querySelector('[role="status"]')?.textContent).toContain(
 		firstReasonText(refused.reasons, { bands: curve.bands, locale: 'pt-BR' })
 	);
+	expect(dial.getAttribute('aria-valuetext')).toBe(`${m.curva_kinddial_ls_name()} (LS)`);
 	expect(onkind).not.toHaveBeenCalled();
 });
 

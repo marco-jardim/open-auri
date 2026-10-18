@@ -1337,6 +1337,65 @@ test('label count, type, length, links and controls are refused with stable code
   }
 });
 
+test('lone surrogates are refused in every prose field and label with env:pattern', () => {
+  const lone = [
+    '\ud800',
+    '\udfff',
+    'a\ud83db',
+    'a\udc4db',
+    '\udc4d\ud83d',
+    `x${'\ud83c'.repeat(3)}`,
+  ];
+  const fields = [
+    ['/name', (text) => withField('name', text)],
+    ['/description', (text) => withField('description', text)],
+    ['/author', (text) => withField('author', text)],
+    ['/recipe/params/note', (text) => withRecipe({ params: { note: text } })],
+  ];
+  for (const text of lone) {
+    for (const [path, build] of fields) expectIssue(build(text), 'env:pattern', path);
+    expectIssue(labelled(tenLabels([null, text])), 'env:pattern', '/labels/1');
+    assert.throws(
+      () => normalizeText(text),
+      (error) =>
+        error instanceof EnvelopeError && error.errors.every((e) => e.code === 'env:pattern'),
+    );
+    assert.throws(() => normalizeText(text, { multiline: true }), EnvelopeError);
+    assert.throws(
+      () => normalizeLabels(tenLabels([text])),
+      (error) =>
+        error instanceof EnvelopeError &&
+        error.errors.some((e) => e.code === 'env:pattern' && e.path === '/labels/0'),
+    );
+    // Lenient labels drop only the ill-formed entry.
+    assert.deepEqual(
+      normalizeLabels(tenLabels([text, 'Grave']), { lenient: true }),
+      tenLabels([null, 'Grave']),
+    );
+    assert.throws(() => serializeEnvelope(withField('name', text)), EnvelopeError);
+  }
+  // Well-formed pairs (emoji, astral letters) still pass, including at the label limit.
+  for (const text of ['🎧', '𝒜b', '\ud83d\udc4d', '🎧'.repeat(LABEL_MAX)]) {
+    assert.equal(normalizeText(text), text.normalize('NFKC'));
+    assert.equal(validateEnvelope(labelled(tenLabels([text]))).ok, true, text);
+  }
+  // Without the native String.prototype.isWellFormed the fallback gives the same answers.
+  const native = Object.getOwnPropertyDescriptor(String.prototype, 'isWellFormed');
+  if (native) delete String.prototype.isWellFormed;
+  try {
+    for (const text of lone) assert.throws(() => normalizeText(text), EnvelopeError);
+    for (const text of ['🎧', 'a\ud83d\udc4db', 'Padrão']) {
+      assert.equal(normalizeText(text), text);
+    }
+  } finally {
+    if (native) Object.defineProperty(String.prototype, 'isWellFormed', native);
+  }
+  // Valid @1 input with astral text keeps its exact bytes (no rewriting of well-formed pairs).
+  const astral = serializeEnvelope(withField('name', 'Padrão 🎧'));
+  assert.equal(JSON.parse(astral).name, 'Padrão 🎧');
+  assert.ok(astral.startsWith('{"format":"open-auri/preset@1","name":"Padrão 🎧",'));
+});
+
 test('labels count toward the 8 KiB serialized cap', () => {
   const params = Object.fromEntries(
     Array.from({ length: 32 }, (_, index) => [`p${index}`, 'a'.repeat(128)]),

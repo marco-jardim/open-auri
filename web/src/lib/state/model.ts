@@ -70,8 +70,11 @@ export function checkedCurve(value: unknown): CurrentCurve {
 
 /**
  * Untrusted labels → frozen ten-entry copy, or null. Old records (no key), a wrong count or
- * anything else malformed give null; one refused entry (link, control, too long) gives null
- * for that entry only. Never throws: labels can never make a curve unreadable.
+ * anything else malformed give null; one refused entry (link, control, ill-formed text, more
+ * than `LABEL_MAX` code points) gives null for that entry only. Never throws: labels can never
+ * make a curve unreadable. Lenient on purpose, for stored and imported data only: a person's
+ * rename is checked strictly before it gets here (Curva `band-labels.svelte.ts`, `checkLabel`),
+ * so a refused name is reported in the field instead of silently becoming the automatic name.
  */
 export function checkedLabels(value: unknown): CurveLabels | null {
 	const labels = normalizeLabels(value, { lenient: true });

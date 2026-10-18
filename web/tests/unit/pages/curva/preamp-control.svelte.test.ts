@@ -6,6 +6,8 @@ import { tick } from 'svelte';
 import { NEUTRO } from 'open-auri/catalog';
 import { autoPreamp, THRESHOLDS } from 'open-auri/safety';
 import { createClientApp, type ClientApp } from '#lib/app/index.ts';
+import { createYoloState, YOLO_PHRASE } from '#lib/state/yolo.svelte.ts';
+import { editorVerdict } from '#lib/components/pages/curva/edit.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { getLocale } from '#lib/paraglide/runtime.js';
 import { handleGateRequest } from '#lib/workers/gate-handler.ts';
@@ -50,8 +52,10 @@ function gateClient(): GateClient {
 	};
 }
 
-async function setup(layer: Layer, curve: Curve) {
-	const app = createClientApp(fakeAppOptions().options);
+async function setup(layer: Layer, curve: Curve, yolo = false) {
+	const state = createYoloState();
+	if (yolo && !state.enable(YOLO_PHRASE, layer)) throw new Error('YOLO needs Engenharia');
+	const app = createClientApp({ ...fakeAppOptions().options, yolo: state });
 	apps.push(app);
 	await app.state.ready;
 	app.state.curve.set({ ...curve, name: 'Editor', source: 'custom' });
@@ -238,4 +242,61 @@ test('undo and redo restore preamp changes', async () => {
 	expect(app.state.curve.current.preampDb).toBe(-1.1);
 	await expect.element(field()).toHaveAttribute('aria-valuetext', formatSignedDb(-1.1, locale));
 	expect(app.pendingWrite).toBeNull();
+});
+
+// M2: a curve the standard gate refuses only on class-2 reasons ("subsônica", HP 30 Hz).
+const subsonic: Curve = {
+	bands: pad([{ kind: 'HP', freqHz: 30, qFactor: 0.71 }]),
+	preampDb: -0.5
+};
+
+test('in YOLO the manual preamp uses the YOLO gate, up to 0 dB, never below −25,5 dB', async () => {
+	expect(verdictFor(subsonic).ok).toBe(false);
+	expect(verdictFor(subsonic, 'yolo').ok).toBe(true);
+	const { app, screen } = await setup('engenharia', subsonic, true);
+	const message = () => screen.container.querySelector('.ps-out .pre-msg')?.textContent ?? null;
+	await expect.element(field()).toHaveAttribute('aria-valuemin', String(PREAMP_MIN_DB));
+	await expect.element(field()).toHaveAttribute('aria-valuemax', '0');
+
+	// The YOLO gate takes what the standard gate refuses: one undoable step.
+	const undoBase = app.state.curve.undoCount;
+	await down().click();
+	expect(app.state.curve.current.preampDb).toBe(-0.6);
+	expect(app.state.curve.undoCount).toBe(undoBase + 1);
+
+	// The clamp is wider (0 dB, not −0,5 dB); the YOLO gate still judges the value.
+	await field().fill('3');
+	key('Enter');
+	const atZero = editorVerdict({ bands: subsonic.bands, preampDb: 0 }, 'yolo');
+	expect(atZero.ok).toBe(false);
+	const refusal = m.curva_preamp_refused({
+		value: formatSignedDb(0, locale),
+		reason: firstReasonText(atZero.reasons, { bands: subsonic.bands, locale })
+	});
+	await vi.waitFor(() => expect(message()).toBe(refusal));
+	expect(app.state.curve.current.preampDb).toBe(-0.6);
+
+	// The floor stays −25,5 dB (S1), not the codec's: a YOLO curve stays storable.
+	await field().fill('-40');
+	key('Enter');
+	expect(app.state.curve.current.preampDb).toBe(PREAMP_MIN_DB);
+	await expect.element(down()).toHaveAttribute('aria-disabled', 'true');
+	expect(app.pendingWrite).toBeNull();
+});
+
+test('with YOLO off the same preamp step is refused by the standard gate', async () => {
+	const { app, screen } = await setup('engenharia', subsonic);
+	const before = app.state.curve.current;
+	const message = () => screen.container.querySelector('.ps-out .pre-msg')?.textContent ?? null;
+	await expect.element(field()).toHaveAttribute('aria-valuemax', String(PREAMP_MAX_DB));
+	await down().click();
+	const refusal = m.curva_preamp_refused({
+		value: formatSignedDb(-0.6, locale),
+		reason: firstReasonText(verdictFor({ bands: subsonic.bands, preampDb: -0.6 }).reasons, {
+			bands: subsonic.bands,
+			locale
+		})
+	});
+	await vi.waitFor(() => expect(message()).toBe(refusal));
+	expect(app.state.curve.current).toEqual(before);
 });

@@ -67,7 +67,7 @@ test.each(['pt-BR', 'en-US'] as const)('red, marked and announced refusal in %s'
 	expect(value()).toBe('LS ✕');
 	expect(dial.getAttribute('aria-invalid')).toBe('true');
 	expect(dial.getAttribute('aria-valuenow')).toBe('1');
-	expect(dial.getAttribute('aria-valuetext')).toContain(refusal);
+	expect(dial.getAttribute('aria-valuetext')).toBe(`${m.curva_kinddial_ls_name()} (LS)`);
 	const live = screen.container.querySelector('[role="status"]');
 	expect(live?.getAttribute('aria-live')).toBe('polite');
 	expect(live?.textContent).toBe(m.curva_kinddial_pending({ kind: 'LS', reason: refusal }));
@@ -102,17 +102,81 @@ test('a click within five seconds advances from pending and applies a valid kind
 	expect(value()).toBe('OFF');
 });
 
-test('five seconds without a click restores the applied kind and pointer', async () => {
-	const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
-	await click(dial);
+test.each(['pt-BR', 'en-US'] as const)(
+	'five idle seconds restore and announce the applied kind in %s',
+	async (locale) => {
+		await setLocale(locale, { reload: false });
+		const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+		await click(dial);
+		await vi.advanceTimersByTimeAsync(4999);
+		expect(value()).toBe('LS ✕');
+		await vi.advanceTimersByTimeAsync(1);
+		await tick();
+		expect(value()).toBe('PK');
+		expect(screen.container.querySelector('.cap')?.getAttribute('style')).toContain('-60deg');
+		expect(screen.container.querySelector('[role="status"]')?.textContent).toBe(
+			locale === 'pt-BR' ? 'Voltou para PK' : 'Back to PK'
+		);
+		expect(onkind).not.toHaveBeenCalled();
+	}
+);
+
+test('keyboard focus pauses pending until five seconds after blur', async () => {
+	const { dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+	dial.focus();
+	await key(dial, 'ArrowRight');
+	await vi.advanceTimersByTimeAsync(30000);
+	expect(value()).toBe('LS ✕');
+	dial.blur();
+	await tick();
 	await vi.advanceTimersByTimeAsync(4999);
 	expect(value()).toBe('LS ✕');
 	await vi.advanceTimersByTimeAsync(1);
 	await tick();
 	expect(value()).toBe('PK');
-	expect(screen.container.querySelector('.cap')?.getAttribute('style')).toContain('-60deg');
-	expect(screen.container.querySelector('[role="status"]')?.textContent).toBe('');
 	expect(onkind).not.toHaveBeenCalled();
+});
+
+test.each(['before', 'after'] as const)(
+	'hover %s refusal pauses pending; leaving starts five new idle seconds',
+	async (when) => {
+		const { dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+		const enter = () =>
+			dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+		if (when === 'before') enter();
+		await click(dial);
+		await vi.advanceTimersByTimeAsync(4000);
+		if (when === 'after') enter();
+		await vi.advanceTimersByTimeAsync(30000);
+		expect(value()).toBe('LS ✕');
+		dial.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+		await vi.advanceTimersByTimeAsync(4999);
+		expect(value()).toBe('LS ✕');
+		await vi.advanceTimersByTimeAsync(1);
+		await tick();
+		expect(value()).toBe('PK');
+		expect(onkind).not.toHaveBeenCalled();
+	}
+);
+
+test('leaving hover does not resume while focused, and the legend also pauses pending', async () => {
+	const { screen, dial, value } = await setup('PK', 'ajustar', ['LS']);
+	dial.focus();
+	dial.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+	await click(dial);
+	dial.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+	await vi.advanceTimersByTimeAsync(10000);
+	expect(value()).toBe('LS ✕');
+	const legend = screen.container.querySelector<HTMLElement>('[role="tooltip"]');
+	if (!legend) throw new Error('Missing dial legend');
+	legend.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+	dial.blur();
+	await vi.advanceTimersByTimeAsync(10000);
+	expect(value()).toBe('LS ✕');
+	legend.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+	await vi.advanceTimersByTimeAsync(5000);
+	await tick();
+	expect(value()).toBe('PK');
 });
 
 test('two invalid candidates restart the timer and revert to the last applied kind', async () => {
@@ -182,6 +246,20 @@ test('Escape cancels pending even when the tooltip is closed', async () => {
 	await vi.advanceTimersByTimeAsync(5000);
 	expect(value()).toBe('PK');
 	expect(onkind).not.toHaveBeenCalled();
+});
+
+test('Escape inside the legend cancels only its own dial', async () => {
+	const first = await setup('PK', 'ajustar', ['LS']);
+	const second = await setup('PK', 'ajustar', ['LS']);
+	await click(first.dial);
+	await click(second.dial);
+	const legend = first.screen.container.querySelector<HTMLElement>('.kd-legend b');
+	if (!legend) throw new Error('Missing legend content');
+	await key(legend, 'Escape');
+	expect(first.value()).toBe('PK');
+	expect(second.value()).toBe('LS ✕');
+	expect(first.onkind).not.toHaveBeenCalled();
+	expect(second.onkind).not.toHaveBeenCalled();
 });
 
 test.each(['layer', 'curve', 'kind', 'disabled'] as const)(

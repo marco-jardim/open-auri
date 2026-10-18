@@ -1,19 +1,88 @@
 import { getPreset } from 'open-auri/catalog';
+import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
 import { createStorage, type ClientStorage } from './storage.ts';
 import { LABEL_COUNT } from 'open-auri/share';
 import { checkedCurve, curveSignature, neutralCurve, nextTimestamp, sameLabels } from './model.ts';
 import type { Clock, CurrentCurve, CurveData, CurveLabels } from './model.ts';
 import { storageStatus } from './status.svelte.ts';
+import { yolo, type YoloProfile } from './yolo.svelte.ts';
 
 export const CURRENT_STORAGE_KEY = 'oa.current';
 export const WRITTEN_STORAGE_KEY = 'oa.curve.written';
 export const UNDO_LIMIT = 100;
 const NO_LABELS: CurveLabels = Object.freeze([]);
 
-export function createCurveStore(options: { storage?: ClientStorage; now?: Clock } = {}) {
+export interface CurveStoreOptions {
+	storage?: ClientStorage;
+	now?: Clock;
+	/**
+	 * Gate profile of this tab's editor, read at every adoption: `'yolo'` while Modo YOLO is on in
+	 * this tab. This tab's own `yolo` by default (memory only, so standard right after a load).
+	 */
+	profile?: () => YoloProfile;
+}
+
+/** Gate verdicts of stored curves by profile. Stored curves are frozen: each is judged once. */
+const judged = new WeakMap<CurrentCurve, Partial<Record<YoloProfile, boolean>>>();
+
+/**
+ * Whether the write gate (full grid) accepts `curve` in `profile`: `'standard'`, every reason
+ * blocks; `'yolo'`, the hard reasons (class 1) block. Experimental kinds pass with their flag, as
+ * in the editor.
+ */
+export function gateAccepts(curve: CurrentCurve, profile: YoloProfile): boolean {
+	const known = judged.get(curve) ?? {};
+	const cached = known[profile];
+	if (cached !== undefined) return cached;
+	const experimental = curve.bands.some((band) => isExperimentalKind(band.kind));
+	const ok = gateForWrite(
+		curve.bands,
+		curve.preampDb,
+		profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
+	).ok;
+	judged.set(curve, { ...known, [profile]: ok });
+	return ok;
+}
+
+/**
+ * The editor curve, its undo history and its persistence (`oa.current`).
+ *
+ * Hearing safety (C1): the editor gates every edit before `set`, and the free preview's
+ * codec-only curves never reach the store (the Curva page keeps them in a memory-only draft).
+ * On top of that, a curve this tab did not just make through its own gated edit is adopted only
+ * when the gate of this tab's profile accepts it:
+ * - another tab's curve (storage event) and an undo or redo step: a curve the standard gate
+ *   accepts is always adopted (every profile edits it); a YOLO-only curve only while Modo YOLO is
+ *   on here; a curve failing the YOLO hard reasons (codec-only) never. A refused curve from
+ *   another tab leaves this tab's curve and history as they are; refused undo or redo steps are
+ *   skipped (and dropped when an earlier step is adopted), so Desfazer goes to the newest curve
+ *   this tab may use now, and `canUndo`/`canRedo` say whether there is one;
+ * - `oa.current` on load: YOLO is always off after a load, yet the YOLO curve a tab left there
+ *   comes back to the editor (protected preview, no export: see curva/yolo.ts). Only a curve
+ *   failing even the YOLO hard reasons (a codec-only curve from an older build or edited by
+ *   hand) is refused: the editor starts on Neutro.
+ */
+export function createCurveStore(options: CurveStoreOptions = {}) {
 	const storage = options.storage ?? createStorage();
 	const status = storageStatus(storage);
 	const now = options.now ?? Date.now;
+	const profile = options.profile ?? (() => yolo.profile);
+	/** Another tab's curve, an undo or a redo step: adopted only under this tab's profile. */
+	function adoptable(curve: CurrentCurve): boolean {
+		return gateAccepts(curve, 'standard') || (profile() === 'yolo' && gateAccepts(curve, 'yolo'));
+	}
+	/** `oa.current` on load: anything but a curve failing the YOLO hard reasons. */
+	function restorable(curve: CurrentCurve | null): CurrentCurve | null {
+		return curve && (gateAccepts(curve, 'standard') || gateAccepts(curve, 'yolo')) ? curve : null;
+	}
+	/** Index of the newest entry of `stack` this tab may adopt now, or -1. */
+	function newestAdoptable(stack: readonly CurrentCurve[]): number {
+		for (let index = stack.length - 1; index >= 0; index--) {
+			const entry = stack[index];
+			if (entry && adoptable(entry)) return index;
+		}
+		return -1;
+	}
 	function parse(raw: string | null, key = CURRENT_STORAGE_KEY): CurrentCurve | null {
 		if (raw === null) return null;
 		try {
@@ -27,7 +96,7 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 		return parse(storage.read('local', WRITTEN_STORAGE_KEY), WRITTEN_STORAGE_KEY);
 	}
 	let value = $state.raw<CurrentCurve>(
-		parse(storage.read('local', CURRENT_STORAGE_KEY)) ?? neutralCurve()
+		restorable(parse(storage.read('local', CURRENT_STORAGE_KEY))) ?? neutralCurve()
 	);
 	let past = $state.raw<CurrentCurve[]>([]);
 	let future = $state.raw<CurrentCurve[]>([]);
@@ -66,11 +135,13 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 			return;
 		}
 		if (incoming && incoming.updatedAt > value.updatedAt) {
+			// C1: a curve this tab may not adopt now keeps this tab's curve and history.
+			if (!adoptable(incoming)) return;
 			value = incoming;
 			past = [];
 			future = [];
 			storage.acceptExternal('local', CURRENT_STORAGE_KEY);
-		} else if (persisted && persisted.updatedAt === value.updatedAt) {
+		} else if (persisted && persisted.updatedAt === value.updatedAt && adoptable(persisted)) {
 			value = persisted;
 		}
 	});
@@ -119,11 +190,13 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 		get lastWritten() {
 			return written;
 		},
+		/** An undo step this tab may adopt now exists (C1: see `undo`). */
 		get canUndo() {
-			return past.length > 0;
+			return newestAdoptable(past) >= 0;
 		},
+		/** A redo step this tab may adopt now exists (C1: see `redo`). */
 		get canRedo() {
-			return future.length > 0;
+			return newestAdoptable(future) >= 0;
 		},
 		get undoCount() {
 			return past.length;
@@ -169,19 +242,27 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 					})
 				: false;
 		},
+		/**
+		 * Back to the newest earlier curve this tab may adopt now (C1): steps it may not (a YOLO-only
+		 * curve once YOLO is off here) are skipped and dropped. Nothing changes, and false, when
+		 * there is none.
+		 */
 		undo() {
-			const previous = past.at(-1);
-			if (!previous) return false;
+			const index = newestAdoptable(past);
+			const previous = past[index];
+			if (index < 0 || !previous) return false;
 			future = [...future, value].slice(-UNDO_LIMIT);
-			past = past.slice(0, -1);
+			past = past.slice(0, index);
 			persist(checkedCurve({ ...previous, updatedAt: timestamp() }));
 			return true;
 		},
+		/** Like `undo`, forwards: refused redo steps are skipped and dropped. */
 		redo() {
-			const next = future.at(-1);
-			if (!next) return false;
+			const index = newestAdoptable(future);
+			const next = future[index];
+			if (index < 0 || !next) return false;
 			past = [...past, value].slice(-UNDO_LIMIT);
-			future = future.slice(0, -1);
+			future = future.slice(0, index);
 			persist(checkedCurve({ ...next, updatedAt: timestamp() }));
 			return true;
 		},

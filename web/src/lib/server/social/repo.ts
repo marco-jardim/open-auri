@@ -526,8 +526,11 @@ function validVersion(version: VersionInput): boolean {
 	);
 }
 
-/** Absent, null or ten valid entries whose JSON fits the 0012 CHECK (length <= 1024). */
-function validLabels(labels: unknown): boolean {
+/**
+ * Absent, null or ten valid entries whose JSON fits the 0012 CHECK (length <= 1024). Exported so
+ * the library merge refuses a list the insert would refuse before it spends any quota.
+ */
+export function validLabels(labels: unknown): boolean {
 	if (labels === undefined || labels === null) return true;
 	if (!isLabelList(labels)) return false;
 	return textLength(JSON.stringify(labels)) <= LABELS_JSON_MAX;
@@ -1220,6 +1223,31 @@ export async function findOwnLineagesByCurves(
 		curveId: row.curve_id,
 		canonKey: row.canon_key
 	}));
+}
+
+/**
+ * Filter labels of the head version of each of the owner's lineages among `lineageIds` (others
+ * are absent; a head without labels, or with unreadable ones, maps to null). Owner-scoped: the
+ * user id must come from the session.
+ */
+export async function ownHeadLabels(
+	db: D1Database,
+	ownerUserId: string,
+	lineageIds: readonly string[]
+): Promise<Map<string, VersionLabels | null>> {
+	const labels = new Map<string, VersionLabels | null>();
+	if (lineageIds.length === 0) return labels;
+	const rows = await all<{ id: string; labels: string | null }>(
+		sql(
+			db,
+			'SELECT l.id AS id, v.labels AS labels FROM lineages l JOIN versions v ON v.id = l.head_version ' +
+				'WHERE l.owner_user_id = ? AND l.id IN (SELECT value FROM json_each(?))',
+			ownerUserId,
+			idList(lineageIds)
+		)
+	);
+	for (const row of rows) labels.set(row.id, parseLabels(row.labels));
+	return labels;
 }
 
 // ---- Favorites ------------------------------------------------------------------------------

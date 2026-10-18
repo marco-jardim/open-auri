@@ -130,6 +130,9 @@ const DOMAIN =
 // Ltda.; English e.g., i.e., a.m., p.m., vs. Never mask a domain component.
 const ABBREVIATION =
   /(^|[^\p{L}\p{N}_.-])(?:p\. ?ex\.|a\.c\.|d\.c\.|s\.a\.|ltda\.|e\.g\.|i\.e\.|a\.m\.|p\.m\.|vs\.)(?=$|[^\p{L}\p{N}_.-])/giu;
+// A high surrogate not followed by a low one, or a low one not preceded by a high one.
+// Code units on purpose (no `u` flag): it is the fallback of String.prototype.isWellFormed.
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 const MAX_BYTES = 8192;
 const MAX_RAW_UNITS = 65536;
 
@@ -151,6 +154,18 @@ function isObject(value) {
 /** @param {string} path @param {EnvelopeErrorCode} code @param {string} message */
 function issue(path, code, message) {
   return { path, code, message };
+}
+
+/**
+ * Well-formed UTF-16: every surrogate is part of a pair (no lone surrogates).
+ * @param {string} text @returns {boolean}
+ */
+function isWellFormed(text) {
+  // Looked up per call: older runtimes lack String.prototype.isWellFormed (ES2024).
+  /** @type {{isWellFormed?: () => boolean}} */
+  const boxed = Object(text);
+  if (typeof boxed.isWellFormed === 'function') return boxed.isWellFormed();
+  return !LONE_SURROGATE.test(text);
 }
 
 /** @param {string} text @returns {string} */
@@ -198,8 +213,9 @@ function urlCode(text) {
  * NFKC, invisible-control removal, whitespace collapse and trim. Description keeps
  * LF line boundaries (at most five lines); all other C0/C1 controls are refused
  * BEFORE whitespace collapse, so tabs/newlines cannot be laundered into a name.
- * Throws EnvelopeError for invalid input, controls, line count or URL-like text.
- * Length bounds belong to the field validator and count Unicode code points.
+ * Text that is not well-formed UTF-16 (a lone surrogate) is refused (env:pattern).
+ * Throws EnvelopeError for invalid input, controls, ill-formed text, line count or
+ * URL-like text. Length bounds belong to the field validator and count Unicode code points.
  * @param {string} text
  * @param {{multiline?: boolean, path?: string}} [options]
  * @returns {string}
@@ -231,6 +247,10 @@ function normalizeFieldText(text, multiline, path, kind) {
         .trim()
     : clean.replace(/\s+/gu, ' ').trim();
   const errors = [];
+  // NFKC and invisible stripping keep lone surrogates: refuse them from the raw text.
+  if (!isWellFormed(text)) {
+    errors.push(issue(path, 'env:pattern', 'Text must be well-formed (no lone surrogates)'));
+  }
   if (hasControl) errors.push(issue(path, 'env:pattern', 'Control characters are forbidden'));
   if (multiline && value.split('\n').length > 5) {
     errors.push(issue(path, 'env:length', 'Description must have at most five lines'));
@@ -296,8 +316,8 @@ function checkLabels(labels, add) {
 
 /**
  * Filter labels by wire index, as `open-auri/preset@2` stores them: each entry goes
- * through the same normalization as `name` (NFKC, invisibles stripped, controls and
- * URL/domain/IP text refused), empty text becomes null, then exactly LABEL_COUNT
+ * through the same normalization as `name` (NFKC, invisibles stripped, controls, lone
+ * surrogates and URL/domain/IP text refused), empty text becomes null, then exactly LABEL_COUNT
  * entries of 1–LABEL_MAX code points or null. Returns null when every entry is null
  * (the key is omitted). Strict by default: throws EnvelopeError with every issue
  * (env:type, env:labels, env:length, env:pattern, env:url, env:url-like; paths

@@ -15,7 +15,11 @@ reactive context. All stores expose `error: StorageFailure | null` and `dispose(
   null, normalized by core `normalizeLabels`, invalid entries become null): persisted in
   `oa.current`, undoable, and a label-only `set` is a real change. Old records load with
   `labels = null`; `loadPreset` and any `set` without labels clear them. `curveSignature` stays
-  labels-free, so labels never make the curve dirty for the cable.
+  labels-free, so labels never make the curve dirty for the cable. Option `profile?` (this tab's
+  Modo YOLO by default): another tab's curve and undo/redo steps are adopted only when the
+  standard gate accepts them, or the YOLO gate while YOLO is on here; refused steps are skipped
+  (`canUndo`/`canRedo` count only adoptable ones). On load, a curve failing even the YOLO hard
+  reasons is refused (Neutro instead).
 - `createJournalStore({storage?})`: properties `entries`, `dropped`; action `append(entry)`.
 - `createFlashStore({storage?, now?})`: property `state`; actions `canWriteNow(at?)`,
   `dailyNotice(at?)`, `recordWrite(at?)`.

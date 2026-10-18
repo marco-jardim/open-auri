@@ -14,9 +14,13 @@
  * - the preamp is never raised: it is the lower of the base preamp and the core `autoPreamp`;
  * - every candidate is judged by the core gate. A refused target is bisected back toward the last
  *   accepted value (core `boundarySearch`), snapped to the 0.1 dB grid toward the start and
- *   revalidated with `gateForWrite`, so a macro can never produce a curve the gate refuses.
+ *   revalidated with `gateForWrite`, so a macro can never produce a curve the gate refuses;
+ * - the gate is the editor's profile (`MacroInput.profile`: `'yolo'` while Modo YOLO is on, as
+ *   for the dial and the drags). In YOLO the preamp still never goes below −25,5 dB
+ *   (`EDITOR_PREAMP_FLOOR_DB`): a value that would need more attenuation is refused.
  */
-import { ABS_RANGES, autoPreamp, boundarySearch, gateForWrite } from 'open-auri/safety';
+import { ABS_RANGES, autoPreamp, boundarySearch } from 'open-auri/safety';
+import { editorVerdict, EDITOR_PREAMP_FLOOR_DB, type EditProfile } from './edit.ts';
 import type { Band, Curve } from './model.ts';
 import { hasExperimental } from './model.ts';
 import type { GateVerdict, Reason } from './reasons.ts';
@@ -124,6 +128,8 @@ export interface MacroInput {
 	values: MacroValues;
 	index: number;
 	target: number;
+	/** The editor's gate profile; standard when omitted, so a missing profile is never laxer. */
+	profile?: EditProfile;
 }
 
 export function clampMacro(value: number): number {
@@ -138,20 +144,24 @@ export function macroCandidate(
 	const pick = (k: number): number => (k === input.index ? value : (input.values[k] ?? 0));
 	const values: MacroValues = [pick(0), pick(1), pick(2), pick(3)];
 	const bands = applyMacros(input.base, values);
-	const auto = autoPreamp(bands, { experimental: hasExperimental(bands) });
+	const experimental = hasExperimental(bands);
+	const auto = autoPreamp(
+		bands,
+		input.profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
+	);
 	if (auto === null) return { bands, preampDb: input.basePreampDb, accepted: false };
-	return { bands, preampDb: Math.min(input.basePreampDb, auto), accepted: true };
+	const preampDb = Math.min(input.basePreampDb, auto);
+	// YOLO's own floor is the codec's; the editor stops at −25,5 dB (S1) in every profile.
+	return { bands, preampDb, accepted: preampDb >= EDITOR_PREAMP_FLOOR_DB };
 }
 
 /** Moves one macro toward `target`, stopping at the gate boundary. Always gate-valid when ok. */
 export function proposeMacro(input: MacroInput): MacroProposal {
 	const start = input.values[input.index] ?? 0;
 	const target = clampMacro(input.target);
-	const experimental = hasExperimental(input.base);
-	const check = (curve: Curve) =>
-		gateForWrite(curve.bands, curve.preampDb, {
-			experimental: experimental || hasExperimental(curve.bands)
-		});
+	// `editorVerdict` sets the experimental flag from the candidate's own kinds (a macro never
+	// adds an experimental kind, so this is the base's flag too), plus the YOLO preamp floor.
+	const check = (curve: Curve) => editorVerdict(curve, input.profile ?? 'standard');
 	const at = (value: number) => macroCandidate(input, value);
 	const unchanged = (reasons: Reason[], stopped: boolean): MacroProposal => ({
 		ok: false,

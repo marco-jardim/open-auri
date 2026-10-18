@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { EnvelopeError, S1Error } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/index.ts';
+	import { sameLabels } from '#lib/state/model.ts';
 	import {
 		createSocialOutbox,
 		createSocialSession,
@@ -127,8 +128,19 @@
 		name: string;
 		description: string;
 		license: 'CC0-1.0' | 'CC-BY-4.0';
+		/**
+		 * Filter labels of that version as sent (normalized, `@2`), or null: a labels-only change
+		 * is a real change and appends a version (migration 0012).
+		 */
+		labels: readonly (string | null)[] | null;
 		/** Editor name at that save: a later rename in the editor wins in the prefill. */
 		editorName: string;
+	}
+	/** The filter labels a checked envelope carries; null for `@1` (no labels). */
+	function envelopeLabels(envelope: Record<string, unknown>): (string | null)[] | null {
+		const labels: unknown = envelope.labels;
+		if (!Array.isArray(labels)) return null;
+		return labels.map((label: unknown) => (typeof label === 'string' ? label : null));
 	}
 	let saved = $state.raw<SavedCopy | null>(null);
 	/**
@@ -394,6 +406,7 @@
 			return;
 		}
 		busy = true;
+		const labels = envelopeLabels(checked.envelope);
 		/** The saved copy this submit still targets; null once a new lineage is created instead. */
 		let target = copy;
 		let notice = '';
@@ -408,7 +421,9 @@
 					return;
 				}
 				const unchanged =
-					checked.name === target.name && checked.description === target.description;
+					checked.name === target.name &&
+					checked.description === target.description &&
+					sameLabels(labels, target.labels);
 				if (state === 'exposed') {
 					// No longer private: leave it untouched and keep the promise with a new private copy.
 					saved = null;
@@ -421,7 +436,8 @@
 				}
 			}
 			if (target) {
-				// Name and description live on the (append-only) version: a new version, same lineage.
+				// Name, description and filter labels live on the (append-only) version: a new
+				// version, same lineage.
 				const result = await api.appendVersion(target.lineageId, {
 					parentVersionId: target.versionId,
 					envelope: checked.envelope
@@ -431,6 +447,7 @@
 					versionId: result.versionId,
 					name: checked.name,
 					description: checked.description,
+					labels,
 					editorName: name
 				};
 				message = m.cvedit_save_updated();
@@ -452,6 +469,7 @@
 						name: checked.name,
 						description: checked.description,
 						license: chosen,
+						labels,
 						editorName: name
 					};
 				}
@@ -520,7 +538,8 @@
 				...copy,
 				versionId: headId,
 				name: head?.name ?? copy.name,
-				description: head?.description ?? copy.description
+				description: head?.description ?? copy.description,
+				labels: head ? head.labels : copy.labels
 			};
 		} catch (reload) {
 			// The copy stays as it was: the next "Salvar" meets HEAD_MOVED again and reloads.

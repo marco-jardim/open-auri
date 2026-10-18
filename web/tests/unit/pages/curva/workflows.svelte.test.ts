@@ -528,7 +528,8 @@ test('removing a compensating cut is gate-refused instead of exposing its boost'
 	await vi.waitFor(() => expect(dial.getAttribute('aria-invalid')).toBe('true'));
 	expect(dial.querySelector('.value')?.textContent).toBe('OFF ✕');
 	const pending = m.curva_kinddial_pending({ kind: 'OFF', reason });
-	expect(dial.getAttribute('aria-valuetext')).toBe(pending);
+	// The live region explains the refusal once; the spinbutton's value names only the kind.
+	expect(dial.getAttribute('aria-valuetext')).toBe(`${m.curva_kinddial_off_name()} (OFF)`);
 	expect(dial.parentElement?.querySelector('[role="status"]')?.textContent).toBe(pending);
 	expect(app.state.curve.current).toEqual(before);
 	expect(dial.closest('li.module')?.querySelector('.mod-badge')?.getAttribute('data-kind')).toBe(

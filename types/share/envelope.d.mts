@@ -2,8 +2,9 @@
  * NFKC, invisible-control removal, whitespace collapse and trim. Description keeps
  * LF line boundaries (at most five lines); all other C0/C1 controls are refused
  * BEFORE whitespace collapse, so tabs/newlines cannot be laundered into a name.
- * Throws EnvelopeError for invalid input, controls, line count or URL-like text.
- * Length bounds belong to the field validator and count Unicode code points.
+ * Text that is not well-formed UTF-16 (a lone surrogate) is refused (env:pattern).
+ * Throws EnvelopeError for invalid input, controls, ill-formed text, line count or
+ * URL-like text. Length bounds belong to the field validator and count Unicode code points.
  * @param {string} text
  * @param {{multiline?: boolean, path?: string}} [options]
  * @returns {string}
@@ -14,8 +15,8 @@ export function normalizeText(text: string, { multiline, path }?: {
 }): string;
 /**
  * Filter labels by wire index, as `open-auri/preset@2` stores them: each entry goes
- * through the same normalization as `name` (NFKC, invisibles stripped, controls and
- * URL/domain/IP text refused), empty text becomes null, then exactly LABEL_COUNT
+ * through the same normalization as `name` (NFKC, invisibles stripped, controls, lone
+ * surrogates and URL/domain/IP text refused), empty text becomes null, then exactly LABEL_COUNT
  * entries of 1–LABEL_MAX code points or null. Returns null when every entry is null
  * (the key is omitted). Strict by default: throws EnvelopeError with every issue
  * (env:type, env:labels, env:length, env:pattern, env:url, env:url-like; paths

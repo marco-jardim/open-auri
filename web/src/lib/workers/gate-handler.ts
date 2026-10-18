@@ -18,7 +18,9 @@ export type DragParam = 'freqHz' | 'gainDb' | 'qFactor';
  *   `d:prefix-peak-full` still snap the handles).
  * - `'codec'`: "Prévia sem limites" (a YOLO sub-mode): drags accept any curve the codec
  *   accepts (`codecAccepts`). For listening only, behind the preview limiter: commits still
- *   return the YOLO verdict, and writing is disabled while this mode is on.
+ *   return the YOLO verdict, and writing is disabled while this mode is on. A curve only the
+ *   codec accepts comes back `previewOnly`: the editor keeps it in a memory-only draft and never
+ *   stores it (`oa.current`, undo, other tabs).
  */
 export type EditorProfile = 'standard' | 'yolo' | 'codec';
 
@@ -65,6 +67,12 @@ export interface CommitResult {
 	 * where the codec alone decides. Editor only: a write always re-gates (service, transport).
 	 */
 	accepted?: boolean;
+	/**
+	 * Free preview only: the codec accepts the curve but the YOLO gate refuses it. Such a curve
+	 * may only be heard, behind the preview protection, from a memory-only draft: never stored,
+	 * never in the undo history, never written.
+	 */
+	previewOnly?: true;
 }
 
 export type GateResponse = DragResult | CommitResult;
@@ -96,8 +104,12 @@ export function handleGateRequest(request: GateRequest): GateResponse {
 	const options = gateOptions(profile, experimental);
 	if (request.type === 'commit') {
 		const verdict = gateForWrite(bands, preampDb, options);
-		const accepted = profile === 'codec' ? codecAccepts(bands, preampDb) : verdict.ok;
-		return { type: 'commit', id, verdict, accepted };
+		if (profile !== 'codec') return { type: 'commit', id, verdict, accepted: verdict.ok };
+		const accepted = codecAccepts(bands, preampDb);
+		// C1: what only the codec accepts is a free-preview draft, never an editor curve.
+		return accepted && !verdict.ok
+			? { type: 'commit', id, verdict, accepted, previewOnly: true }
+			: { type: 'commit', id, verdict, accepted };
 	}
 	const { bandIndex, param, from, to } = request;
 	const original = bands[bandIndex];

@@ -14,7 +14,8 @@
 	- Manual preamp (with `onpreamp`): −/+ steps of 0,1 dB (Shift: 0,5 dB) around an editable LCD
 	  spinbutton (arrows 0,1 dB, Shift+arrows 0,5 dB, Page Up/Down 1 dB, Enter or leaving the field
 	  applies, Escape drops the typed text). Values stay inside the gate's preamp range on the 0,1 dB
-	  grid; the page runs each one through the full gate and only an accepted value reaches the
+	  grid (up to 0 dB in Modo YOLO, `preampMaxDb`; −25,5 dB is the floor in every profile); the
+	  page runs each one through the full gate of its profile and only an accepted value reaches the
 	  editor (undoable). A refusal keeps the last accepted value and its reason is said here.
 	  Unavailable (Ouvir, loading, writing): aria-disabled, still focusable, the reason announced.
 	  Without `onpreamp` the preamp is a plain readout.
@@ -39,9 +40,12 @@
 		return Math.round(value * PREAMP_STEPS_PER_DB) / PREAMP_STEPS_PER_DB + 0;
 	}
 
-	/** `value` inside the gate's preamp range. */
-	export function clampPreamp(value: number): number {
-		return Math.min(PREAMP_MAX_DB, Math.max(PREAMP_MIN_DB, value));
+	/**
+	 * `value` inside the gate's preamp range, or up to `max` (Modo YOLO: 0 dB, where `g:preamp` is
+	 * waived). The floor is −25,5 dB in every profile.
+	 */
+	export function clampPreamp(value: number, max: number = PREAMP_MAX_DB): number {
+		return Math.min(max, Math.max(PREAMP_MIN_DB, value));
 	}
 
 	/** Typed text to dB ("−1,5", "-1.5", "-1,5 dB"), or null when it is not a number. */
@@ -100,6 +104,11 @@
 		preampReason?: string | null;
 		/** The gate's refusal of the last manual preamp, in plain language. */
 		preampMessage?: string | null;
+		/**
+		 * Highest manual preamp offered: the gate's −0,5 dB by default; 0 dB in Modo YOLO
+		 * (`editorPreampMaxDb`). The floor stays −25,5 dB.
+		 */
+		preampMaxDb?: number;
 	}
 	let {
 		curve,
@@ -115,7 +124,8 @@
 		disabledReason = null,
 		onpreamp,
 		preampReason = null,
-		preampMessage = null
+		preampMessage = null,
+		preampMaxDb = PREAMP_MAX_DB
 	}: Props = $props();
 
 	const legendId = $props.id();
@@ -199,8 +209,8 @@
 	);
 	const upReason = $derived(
 		preampBlock ??
-			(curve.preampDb >= PREAMP_MAX_DB
-				? m.curva_preamp_at_max({ value: formatSignedDb(PREAMP_MAX_DB, locale) })
+			(curve.preampDb >= preampMaxDb
+				? m.curva_preamp_at_max({ value: formatSignedDb(preampMaxDb, locale) })
 				: null)
 	);
 	// Field keys, in 0,1 dB steps (Shift on the arrows: 0,5 dB).
@@ -215,7 +225,7 @@
 	function proposePreamp(next: number | null) {
 		preampDraft = null;
 		if (next === null || preampBlock || !onpreamp) return;
-		const snapped = snapPreamp(clampPreamp(next));
+		const snapped = snapPreamp(clampPreamp(next, preampMaxDb));
 		if (snapped !== null && snapped !== curve.preampDb) onpreamp(snapped);
 	}
 	/** Steps from the typed value when there is one, else from the editor's preamp. */
@@ -309,7 +319,7 @@
 								spellcheck="false"
 								aria-label={m.curva_out_preamp()}
 								aria-valuemin={PREAMP_MIN_DB}
-								aria-valuemax={PREAMP_MAX_DB}
+								aria-valuemax={preampMaxDb}
 								aria-valuenow={curve.preampDb}
 								aria-valuetext={formatSignedDb(curve.preampDb, locale)}
 								aria-disabled={preampBlock ? 'true' : undefined}

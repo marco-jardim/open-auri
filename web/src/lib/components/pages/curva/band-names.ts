@@ -12,16 +12,27 @@
  *   ("Corte de graves (HP)", "Corte de agudos (LP)").
  * - OFF: "Livre", never suffixed.
  * - Two or more equal automatic names get " a", " b", " c"… in slot order.
- * - A custom label (trimmed, inner spaces collapsed, at most 16 characters) replaces the
- *   automatic name; it takes no part in the suffixes.
+ * - A custom label (the S5 `@2` label rules of core `normalizeLabels`: at most `LABEL_MAX`, 24,
+ *   code points) replaces the automatic name; it takes no part in the suffixes. A rename is
+ *   checked strictly (`checkLabel`): a refused name is reported, never stored or cut. Narrow
+ *   strips show a long label shortened by an ellipsis (CSS); the stored label is whole.
  * - Badge: the slot letter, A to J. Slot order is the processing order ("estágio N").
  * Automatic names stay within 12 characters (14 with a suffix) in both locales.
  */
+import {
+	EnvelopeError,
+	LABEL_COUNT,
+	LABEL_MAX as CORE_LABEL_MAX,
+	normalizeLabels
+} from 'open-auri/share';
 import { formatNumber } from './format.ts';
 import type { Band, BandKind } from './model.ts';
 
-/** Longest custom label (characters, not UTF-16 units). */
-export const LABEL_MAX = 16;
+/**
+ * Longest custom label, in code points (not UTF-16 units): the core S5 `@2` limit, the one limit
+ * of the rename field, the stored labels, imports and exports.
+ */
+export const LABEL_MAX = CORE_LABEL_MAX;
 /** A gain this close to 0 dB is drawn and named as flat. */
 const FLAT_DB = 0.05;
 
@@ -106,9 +117,42 @@ function baseName(band: Band, words: BandWords): { name: string; detail: string 
 	}
 }
 
+/** Envelope codes a refused label can have (core `normalizeLabels`, strict). */
+export type LabelIssue = 'env:url' | 'env:url-like' | 'env:length' | 'env:pattern';
+export type LabelCheck =
+	| { readonly ok: true; readonly label: string | null }
+	| { readonly ok: false; readonly issues: readonly LabelIssue[] };
+
+function labelIssue(code: string): LabelIssue {
+	return code === 'env:url' || code === 'env:url-like' || code === 'env:length'
+		? code
+		: 'env:pattern';
+}
+
 /**
- * A custom label as stored: inner whitespace collapsed, trimmed, cut to `LABEL_MAX` characters;
- * empty means "back to the automatic name" (null).
+ * One label through the strict S5 `@2` rules (core `normalizeLabels`): NFKC, invisibles stripped,
+ * whitespace collapsed; links (`env:url`), domain-like text (`env:url-like`), controls or text that
+ * is not well-formed (`env:pattern`) and more than `LABEL_MAX` code points (`env:length`) are
+ * refused with their envelope codes, in that order and once each. Empty means the automatic
+ * name (null). Nothing is ever cut.
+ */
+export function checkLabel(raw: string | null | undefined): LabelCheck {
+	const list = Array.from({ length: LABEL_COUNT }, (_, index) =>
+		index === 0 ? (raw ?? '') : null
+	);
+	try {
+		return { ok: true, label: normalizeLabels(list)?.[0] ?? null };
+	} catch (error) {
+		if (!(error instanceof EnvelopeError)) throw error;
+		const issues = [...new Set(error.errors.map((issue) => labelIssue(issue.code)))];
+		return { ok: false, issues: issues.length ? issues : ['env:pattern'] };
+	}
+}
+
+/**
+ * A custom label for display: inner whitespace collapsed, trimmed, at most `LABEL_MAX` code
+ * points (stored labels already are: core `normalizeLabels`); empty means "back to the automatic
+ * name" (null). Renames go through `checkLabel` first, so this never cuts a stored label.
  */
 export function normalizeLabel(raw: string | null | undefined): string | null {
 	const text = Array.from((raw ?? '').replace(/\s+/g, ' ').trim())

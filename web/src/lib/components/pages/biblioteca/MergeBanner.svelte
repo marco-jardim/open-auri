@@ -48,6 +48,27 @@
 	let outcome = $state.raw<MergeOutcome | null>(null);
 	const names = $derived(new Map(items.map((item) => [item.id, item.name])));
 
+	type ConflictField = MergeReport['conflicts'][number]['field'];
+	/** What differs from the account's copy: the name, the filter labels, or both. */
+	function conflictText(fields: readonly ConflictField[]): string {
+		const name = fields.includes('name');
+		const labels = fields.includes('labels');
+		if (name && labels) return m.biblioteca_social_merge_conflict_both();
+		return labels
+			? m.biblioteca_social_merge_conflict_labels()
+			: m.biblioteca_social_merge_conflict_name();
+	}
+	/** One row per item, with every field that differs (the report has one entry per field). */
+	function conflictRows(report: MergeReport): { localId: string; fields: ConflictField[] }[] {
+		const rows: { localId: string; fields: ConflictField[] }[] = [];
+		for (const entry of report.conflicts) {
+			let row = rows.find((candidate) => candidate.localId === entry.localId);
+			if (!row) rows.push((row = { localId: entry.localId, fields: [] }));
+			if (!row.fields.includes(entry.field)) row.fields.push(entry.field);
+		}
+		return rows;
+	}
+
 	const reasonLabels: Record<MergeReport['rejected'][number]['code'], () => string> = {
 		INVALID_CURVE: () => m.biblioteca_social_reject_invalid_curve(),
 		GATE_REJECTED: () => m.biblioteca_social_reject_gate(),
@@ -91,14 +112,25 @@
 
 {#if outcome}
 	{@const report = outcome.report}
+	{@const conflicts = conflictRows(report)}
 	<section class="merge report" aria-labelledby="{id}-report">
 		<h3 id="{id}-report">{m.biblioteca_social_merge_report()}</h3>
 		<ul>
 			<li>{m.biblioteca_social_merge_created({ count: report.created.length })}</li>
 			<li>{m.biblioteca_social_merge_duplicates({ count: report.duplicates.length })}</li>
-			<li>{m.biblioteca_social_merge_conflicts({ count: report.conflicts.length })}</li>
+			<li>{m.biblioteca_social_merge_conflicts_any({ count: conflicts.length })}</li>
 			<li>{m.biblioteca_social_merge_rejected({ count: report.rejected.length })}</li>
 		</ul>
+		{#if conflicts.length > 0}
+			<ul class="conflicts">
+				{#each conflicts as entry (entry.localId)}
+					<li>
+						<strong>{names.get(entry.localId) ?? entry.localId}</strong>:
+						{conflictText(entry.fields)}
+					</li>
+				{/each}
+			</ul>
+		{/if}
 		{#if report.rejected.length > 0}
 			<ul class="rejected">
 				{#each report.rejected as entry (entry.localId)}

@@ -8,7 +8,11 @@ import {
 	type AudioErrorCode
 } from '#lib/audio/engine.ts';
 import { tap, tapStages, type MeterListener, type MeterTap } from '#lib/audio/meters.ts';
-import { CURVA_SESSION, CurvaPreview } from '#lib/components/pages/curva/preview.svelte.ts';
+import {
+	CURVA_SESSION,
+	CurvaPreview,
+	needsProtection
+} from '#lib/components/pages/curva/preview.svelte.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
 import { audioConfig, fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
 
@@ -339,6 +343,47 @@ test('without an edit during the start the chains are not rebuilt', async () => 
 	const { preview, createAB } = setup();
 	await preview.start(neutral, editor);
 	expect(createAB).toHaveBeenCalledTimes(1);
+});
+
+// C1: any curve the standard gate refuses plays protected, whatever Modo YOLO says.
+const pad = (bands: Curve['bands']): Curve['bands'] => [
+	...bands,
+	...NEUTRO.bands.slice(bands.length)
+];
+/** The free preview's draft: only the codec accepts it (+11,5 dB out). */
+const codecOnly: Curve = {
+	bands: pad([{ kind: 'PK', freqHz: 1000, gainDb: 12, qFactor: 1 }]),
+	preampDb: -0.5
+};
+/** A YOLO curve (restored after a reload, or a YOLO cable write as the reference). */
+const yoloOnly: Curve = {
+	bands: pad([{ kind: 'HP', freqHz: 30, qFactor: 0.71 }]),
+	preampDb: -0.5
+};
+
+test.each([
+	['the free-preview draft as the editor', neutral, codecOnly],
+	['a YOLO curve as the editor', neutral, yoloOnly],
+	['a YOLO cable write as the reference', yoloOnly, editor]
+] as const)('YOLO off, %s: the A/B is protected', async (_, reference, edited) => {
+	const { preview, createAB } = setup();
+	expect(needsProtection(reference, edited, false)).toBe(true);
+	await preview.start(reference, edited);
+	expect(createAB).toHaveBeenLastCalledWith(reference, edited, {
+		initial: 'B',
+		experimental: edited === yoloOnly || reference === yoloOnly,
+		protect: 'yolo'
+	});
+	// The engine built the normalizing gain and the limiter on both sides.
+	expect(audioConfig.instances[0]?.compressors).toHaveLength(2);
+	// An edit back to standard curves drops the protection again.
+	preview.update(neutral, editor);
+	expect(createAB).toHaveBeenLastCalledWith(neutral, editor, {
+		initial: 'B',
+		experimental: false
+	});
+	expect(needsProtection(neutral, editor, false)).toBe(false);
+	expect(needsProtection(neutral, editor, true)).toBe(true);
 });
 
 test('output and stage taps receive the app 0 VU reference', async () => {

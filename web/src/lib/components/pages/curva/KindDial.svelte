@@ -111,16 +111,17 @@
 	const pendingText = $derived(
 		pending ? m.curva_kinddial_pending({ kind: pending.kind, reason: pending.reason }) : ''
 	);
-	const valueText = $derived(
-		pendingText ||
-			`${names[shown]} (${shown})${isExperimentalKind(shown) ? ` · ${m.curva_exp_badge()}` : ''}`
-	);
+	const valueText = $derived(`${names[shown]} (${shown})`);
+	let revertedText = $state('');
 	let rotation = $state(untrack(() => angleFor(kind)));
 	let previousKind = untrack(() => kind);
 	let turnDirection: 1 | -1 | null = null;
 	let requested: BandKind | null = null;
 	let requestId = 0;
 	let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+	let focused = false;
+	let hovered = false;
+	let legendHovered = false;
 
 	// Only the dial previews a refused kind. All other bank controls still use the applied prop.
 	$effect(() => {
@@ -139,13 +140,23 @@
 		});
 	});
 
-	function cancelPending(): void {
+	function cancelPending(announce = false): void {
+		const reverting = pending !== null;
 		requestId++;
 		clearTimeout(pendingTimer);
 		pendingTimer = undefined;
 		requested = null;
 		pending = null;
 		turnDirection = null;
+		revertedText = announce && reverting ? m.curva_kinddial_reverted({ kind }) : '';
+	}
+
+	/** Five seconds after the last interaction, never while the operator is reading the dial. */
+	function resumePendingTimer(): void {
+		cancelPendingTimer();
+		if (pending && !focused && !hovered && !legendHovered) {
+			pendingTimer = setTimeout(() => cancelPending(true), PENDING_MS);
+		}
 	}
 
 	$effect(() => {
@@ -164,13 +175,14 @@
 		}
 		if (!enabled.some((stop) => stop.kind === next)) return;
 		cancelPendingTimer();
+		revertedText = '';
 		const id = ++requestId;
 		const applied = kind;
 		const context = resetKey;
 		const currentLayer = layer;
 		requested = next;
 		if (next === applied) {
-			cancelPending();
+			cancelPending(true);
 			return;
 		}
 		let check: KindCheck;
@@ -196,7 +208,7 @@
 			onkind(next);
 		} else {
 			pending = { kind: next, reason: check.reason || m.curva_reason_unknown() };
-			pendingTimer = setTimeout(cancelPending, PENDING_MS);
+			resumePendingTimer();
 		}
 	}
 
@@ -330,17 +342,18 @@
 		};
 	});
 
-	$effect(() => {
+	// Local bubbling listener: Escape in a sibling rename field belongs to that field, not a dial.
+	function escapeKey(element: HTMLElement) {
 		const onEscape = (event: KeyboardEvent) => {
 			if (event.key !== 'Escape' || (!pending && requested === null && !tipOpen)) return;
 			event.preventDefault();
 			event.stopPropagation();
-			cancelPending();
+			cancelPending(true);
 			hideTip();
 		};
-		document.addEventListener('keydown', onEscape, true);
-		return () => document.removeEventListener('keydown', onEscape, true);
-	});
+		element.addEventListener('keydown', onEscape);
+		return () => element.removeEventListener('keydown', onEscape);
+	}
 
 	onDestroy(() => {
 		clearTimers();
@@ -348,7 +361,7 @@
 	});
 </script>
 
-<div class="kind-dial">
+<div class="kind-dial" {@attach escapeKey}>
 	<div
 		bind:this={trigger}
 		class="switch"
@@ -365,24 +378,42 @@
 		onclick={(event) => step(event.shiftKey ? -1 : 1)}
 		onkeydown={handleKey}
 		onpointerenter={(event) => {
-			if (event.pointerType !== 'touch') scheduleOpen();
+			if (event.pointerType !== 'touch') {
+				hovered = true;
+				cancelPendingTimer();
+				scheduleOpen();
+			}
 		}}
 		onpointerleave={(event) => {
-			if (event.pointerType !== 'touch') scheduleClose();
+			if (event.pointerType !== 'touch') {
+				hovered = false;
+				resumePendingTimer();
+				scheduleClose();
+			}
 		}}
 		onpointerdown={() => (pressed = true)}
 		onpointerup={() => (pressed = false)}
 		onpointercancel={() => (pressed = false)}
 		onfocusin={() => {
+			focused = true;
+			cancelPendingTimer();
 			if (!pressed) showTip();
 		}}
 		onfocusout={(event) => {
+			focused = false;
 			pressed = false;
-			if (!(event.relatedTarget instanceof Node) || !focusBoundary?.contains(event.relatedTarget)) {
+			if (
+				focusBoundary &&
+				(!(event.relatedTarget instanceof Node) || !focusBoundary.contains(event.relatedTarget))
+			) {
 				cancelPending();
+			} else {
+				resumePendingTimer();
 			}
 			// Deferred: a focused switch removed during an update fires focusout mid-flush.
-			queueMicrotask(hideTip);
+			queueMicrotask(() => {
+				if (!legendHovered) hideTip();
+			});
 		}}
 	>
 		<svg viewBox="-46 -34 92 68" aria-hidden="true">
@@ -406,7 +437,9 @@
 			>
 		</svg>
 	</div>
-	<p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{pendingText}</p>
+	<p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+		{pendingText || revertedText}
+	</p>
 	<div
 		id={tipId}
 		bind:this={tip}
@@ -416,11 +449,18 @@
 		style:top={tipPos ? `${tipPos.top}px` : null}
 		style:left={tipPos ? `${tipPos.left}px` : null}
 		style:visibility={tipPos ? null : 'hidden'}
-		onpointerenter={() => {
+		onpointerenter={(event) => {
+			if (event.pointerType === 'touch') return;
+			legendHovered = true;
+			cancelPendingTimer();
 			clearTimeout(closeTimer);
 			closeTimer = undefined;
 		}}
-		onpointerleave={scheduleClose}
+		onpointerleave={() => {
+			legendHovered = false;
+			resumePendingTimer();
+			scheduleClose();
+		}}
 	>
 		<p class="kd-now">
 			<b class="kd-acr" class:invalid={pending !== null}>{shown}{pending ? ' ✕' : ''}</b>

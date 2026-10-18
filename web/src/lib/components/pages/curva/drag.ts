@@ -38,6 +38,12 @@ export interface DragOutcome {
 	reasons: Reason[];
 	/** Whether the full-grid commit approved the result (always true for `accepted`). */
 	committed: boolean;
+	/**
+	 * Committed by the free preview's codec only: the gate itself refuses the curve. It may only
+	 * live in the page's memory-only free-preview draft (C1): never `curve.set`, `oa.current`,
+	 * the undo history or a write.
+	 */
+	previewOnly?: true;
 }
 
 export function isAbortError(error: unknown): boolean {
@@ -120,8 +126,13 @@ export async function commitBand(
 		preampDb: moved.preampDb,
 		experimental
 	});
-	// `accepted` differs from `verdict.ok` only in the free preview (codec-only, never written).
-	if (accepted ?? verdict.ok) return { ...moved, bands, committed: true };
+	// `accepted` differs from `verdict.ok` only in the free preview (codec-only, never written):
+	// such a result is marked `previewOnly` whatever the worker said, so it is never stored.
+	if (accepted ?? verdict.ok) {
+		return verdict.ok
+			? { ...moved, bands, committed: true }
+			: { ...moved, bands, committed: true, previewOnly: true };
+	}
 	return {
 		bands: original.bands.slice(),
 		preampDb: original.preampDb,
