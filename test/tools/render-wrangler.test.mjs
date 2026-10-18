@@ -332,6 +332,7 @@ const RUN_WORKER_FIRST = [
   '/*',
   '!/_app/*',
   '!/art/*',
+  '!/audio/*',
   '!/data/*',
   '!/fonts/*',
   '!/icons/*',
