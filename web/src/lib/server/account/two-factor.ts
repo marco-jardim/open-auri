@@ -14,16 +14,20 @@
 //     checks the code: no rotation, and the after-hook marks the current session.
 //   - `/two-factor/disable` checks the password, sets `twoFactorEnabled = false`, deletes the row
 //     and rotates the session. It also cancels a pending enrolment.
+//   - `/verify-password` (core) checks the session user's password and changes nothing (400
+//     INVALID_PASSWORD when wrong).
 //
 // Turning 2FA off (issue #21) also needs the second factor: a current TOTP code or an unused
-// backup code, checked first with the same endpoints as the sign-in 2FA step (so the same per-user
-// limits apply), then the password through `/two-factor/disable` (closed over HTTP, auth/hooks.ts
-// CLOSED_AUTH_PATHS; reached here server-side). A wrong code and a wrong password get the same
-// result code ('wrong-password-or-code'); only that result is shared. Timing differs (a wrong
-// code returns before the password is checked), each factor counts in its own per-user bucket (a
-// 429 can tell them apart), and a backup code is spent even when the password is then wrong.
-// The code alone can be tried on `/two-factor/verify-totp` directly anyway (open over HTTP for the
-// sign-in step, with the same per-user limits).
+// backup code. The password is checked first, through `/verify-password` (no side effect; the
+// auth hooks count it in the per-user password bucket), so a typo never spends a backup code.
+// Then the code, with the same endpoints as the sign-in 2FA step (so the same per-user limits
+// apply), and last `/two-factor/disable`, which checks the password again. Both password
+// endpoints are closed over HTTP (auth/hooks.ts CLOSED_AUTH_PATHS) and reached here server-side.
+// A wrong password and a wrong code get the same result code ('wrong-password-or-code'); only that
+// result is shared. Timing differs (a wrong password returns before the code is checked) and each
+// factor counts in its own per-user bucket (a 429 can tell them apart). A backup code is spent
+// only once the password is confirmed. The code alone can be tried on `/two-factor/verify-totp`
+// directly anyway (open over HTTP for the sign-in step, with the same per-user limits).
 //
 // The URI and the backup codes are secrets: they go back to the caller once and are never stored,
 // logged or put in a cookie or URL by this module.
@@ -34,10 +38,10 @@ import { readAuthError } from './auth-actions.ts';
 
 export type TwoFactorAuthApi = Pick<
 	Auth['api'],
-	'enableTwoFactor' | 'verifyTOTP' | 'verifyBackupCode' | 'disableTwoFactor'
+	'enableTwoFactor' | 'verifyTOTP' | 'verifyBackupCode' | 'disableTwoFactor' | 'verifyPassword'
 >;
 
-/** `locals.auth` (or a test harness's instance): only the 2FA endpoints are used. */
+/** `locals.auth` (or a test harness's instance): only the 2FA endpoints and `/verify-password`. */
 export interface TwoFactorAuth {
 	api: TwoFactorAuthApi;
 }
@@ -209,16 +213,18 @@ export interface DisableTwoFactorInput {
 }
 
 /**
- * Turns 2FA off: the password plus a current TOTP code or an unused backup code. The code is
- * checked first (`/two-factor/verify-totp` or `/verify-backup-code`, as in the sign-in 2FA step;
- * for an admin it also sets the session's 2FA marker), then the password (`/two-factor/disable`).
- * A missing or malformed field is refused before Better Auth (no attempt counted); a wrong code or
- * a wrong password gets the same result code, 'wrong-password-or-code'. That result is all they
- * share: the timing and the per-user rate-limit bucket (second factor vs password) still differ,
- * and `/two-factor/verify-totp` can be called directly to try a code on its own. A backup code that
- * passed is spent even when the password is then wrong: Better Auth has no password check without
- * side effects that the auth hooks limit, and the password is only known to be right once 2FA is
- * off.
+ * Turns 2FA off: the password plus a current TOTP code or an unused backup code, in that order.
+ * (1) The password (`/verify-password`: no side effect, per-user password bucket); a wrong one
+ * returns before any code is tried. (2) The code (`/two-factor/verify-totp` or
+ * `/verify-backup-code`, as in the sign-in 2FA step; for an admin it also sets the session's 2FA
+ * marker). (3) `/two-factor/disable`, which checks the password again. A backup code is spent
+ * only once the password is confirmed. A missing or malformed field is refused before Better Auth
+ * (no attempt counted); a wrong password or a wrong code gets the same result code,
+ * 'wrong-password-or-code'. That result is all they share: the timing and the per-user rate-limit
+ * bucket (password vs second factor) still differ, and `/two-factor/verify-totp` can be called
+ * directly to try a code on its own. A success counts two password attempts (steps 1 and 3); a
+ * backup code that passed step 2 is still spent if step 3 is then refused (password limit reached
+ * in between, rate-limit store unavailable).
  *
  * A pending setup (2FA not on yet) is cancelled with the password alone, and any code is ignored
  * there: checking it would confirm the setup instead.
@@ -241,6 +247,13 @@ export async function disableTwoFactor(
 	}
 	const factor = readSecondFactor(input.code ?? '');
 	if (!password || !factor) return refused();
+	// (1) The password, before any code is tried: checking a backup code spends it.
+	try {
+		await auth.api.verifyPassword({ headers, body: { password } });
+	} catch (error) {
+		return disableFailure(error);
+	}
+	// (2) The second factor.
 	try {
 		if (factor.method === 'totp') {
 			await auth.api.verifyTOTP({ headers, body: { code: factor.code } });
@@ -250,6 +263,7 @@ export async function disableTwoFactor(
 	} catch (error) {
 		return disableFailure(error);
 	}
+	// (3) Off (Better Auth checks the password again).
 	try {
 		await auth.api.disableTwoFactor({ headers, body: { password } });
 		return { ok: true };
