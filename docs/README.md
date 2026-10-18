@@ -120,6 +120,9 @@ reexporte, cada nome aparece uma única vez no índice da área.
 
 - [`schemas/preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json):
   esquema JSON do envelope v1, validado pela API `open-auri/share`.
+- [`schemas/preset-envelope-2.schema.json`](../schemas/preset-envelope-2.schema.json):
+  esquema JSON do envelope v2 (v1 mais rótulos de filtro opcionais), emitido só quando a
+  curva tem rótulos.
 - [`docs/s1-format.md`](s1-format.md): especificação congelada do S1 v1, implementado em
   `open-auri/share`.
 

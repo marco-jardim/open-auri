@@ -28,6 +28,8 @@ export interface LocalLibraryItem {
 	s1: string;
 	/** S5 description ('' or absent when never set). */
 	description?: string;
+	/** Filter labels by wire index of `s1` (null or absent when none). */
+	labels?: readonly (string | null)[] | null;
 	updatedAt: number;
 }
 
@@ -138,6 +140,8 @@ export function toMergeItem(item: LocalLibraryItem, locale: string): LibraryMerg
 		name: item.name,
 		// Only a real description is sent; the server applies its own text rules to it.
 		...(item.description ? { description: item.description } : {}),
+		// Filter labels by wire index of `s1` (already normalized locally); only when there are any.
+		...(item.labels ? { labels: [...item.labels] } : {}),
 		lang: locale === 'en-US' ? 'en-US' : 'pt-BR'
 	};
 }

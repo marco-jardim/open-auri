@@ -283,6 +283,8 @@ export interface LibraryMergeItem {
 	description?: string;
 	lang?: Lang;
 	license?: License;
+	/** Filter labels by wire index of `s1` (preset@2 rules); refused text: INVALID_TEXT. */
+	labels?: (string | null)[] | null;
 }
 
 export interface ProfileListItems {

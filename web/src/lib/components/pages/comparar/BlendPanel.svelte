@@ -337,7 +337,13 @@
 					disabledReason={appReason}
 					onclick={() => {
 						if (accepted && app)
-							app.requestWrite({ ...accepted.curve, schema: 1, updatedAt: Date.now() });
+							app.requestWrite({
+								...accepted.curve,
+								schema: 1,
+								// A blended curve is new: it has no filter labels.
+								labels: null,
+								updatedAt: Date.now()
+							});
 					}}>{t.write}</Button
 				>
 				<label class="field">

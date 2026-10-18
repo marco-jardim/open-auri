@@ -43,6 +43,7 @@ function version(id: string, parentId: string | null, name: string, isHead: bool
 		description: '',
 		license: 'CC0-1.0',
 		lang: 'pt-BR',
+		labels: null,
 		createdAt: isHead ? 1_700_000_100_000 : 1_700_000_000_000,
 		isHead
 	};

@@ -5,7 +5,10 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import fc from 'fast-check';
 import {
   EnvelopeError,
+  LABEL_COUNT,
+  LABEL_MAX,
   normalizeText,
+  normalizeLabels,
   normalizeEnvelope,
   validateEnvelope,
   serializeEnvelope,
@@ -116,7 +119,8 @@ for (const key of [
   structural(`${key} type`, withField(key, 42), false);
 }
 for (const [key, value] of [
-  ['format', 'open-auri/preset@2'],
+  // `@2` is valid (filter labels) and has its own schema; see the labels tests below.
+  ['format', 'open-auri/preset@3'],
   ['name', ''],
   ['name', 'x'.repeat(49)],
   ['description', 'x'.repeat(281)],
@@ -1152,5 +1156,271 @@ test('arbitrary JSON never throws or mutates; valid results serialize and revali
       else assert.ok(result.errors.length > 0);
     }),
     { numRuns: 1000 },
+  );
+});
+
+// open-auri/preset@2: filter labels by wire index.
+const schema2 = JSON.parse(
+  readFileSync(new URL('../../schemas/preset-envelope-2.schema.json', import.meta.url), 'utf8'),
+);
+const schema2Validate = ajv.compile(schema2);
+/** Ten entries; missing ones are null, an explicit `undefined` stays undefined. */
+const tenLabels = (entries) =>
+  Array.from({ length: LABEL_COUNT }, (_, index) =>
+    index < entries.length ? entries[index] : null,
+  );
+const labelled = (labels, value = copy()) => ({
+  ...value,
+  format: 'open-auri/preset@2',
+  labels,
+});
+
+test('@1 output stays byte-identical; labels in @1 stay env:extra', () => {
+  const pinned = (value) =>
+    JSON.stringify({
+      format: 'open-auri/preset@1',
+      name: value.name,
+      description: value.description ?? '',
+      ...(value.author === undefined ? {} : { author: value.author }),
+      source: value.source,
+      license: value.license,
+      code: value.code,
+      preampDb: value.preampDb,
+      bands: value.bands.map(({ kind, freqHz, gainDb, qFactor }) => ({
+        kind,
+        freqHz,
+        gainDb,
+        qFactor,
+      })),
+      lang: value.lang,
+      createdAt: value.createdAt,
+    });
+  for (const input of [copy(), without('description'), withField('author', 'Autor')]) {
+    const json = serializeEnvelope(input);
+    assert.equal(json, pinned(input));
+    assert.ok(!json.includes('labels'));
+  }
+  for (const labels of [tenLabels(['Grave']), tenLabels([]), [], null, 'Grave']) {
+    const value = { ...copy(), labels };
+    const errors = expectIssue(value, 'env:extra', '/labels');
+    assert.ok(errors.every((error) => !error.path.startsWith('/labels/')));
+    assert.equal(schemaValidate(value), false);
+    assert.throws(() => serializeEnvelope(value), EnvelopeError);
+  }
+});
+
+test('@2 labels follow the name pipeline; empty becomes null; all-null drops the key', () => {
+  const input = labelled(
+    tenLabels([
+      '  Ｇｒａｖｅ  ',
+      '',
+      '   ',
+      'Pa\u200bdrão',
+      null,
+      '\u202e\u200d',
+      '🎧 mix',
+      'a  b',
+    ]),
+  );
+  const before = structuredClone(input);
+  const result = validateEnvelope(input);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(input, before);
+  assert.deepEqual(result.value.labels, [
+    'Grave',
+    null,
+    null,
+    'Padrão',
+    null,
+    null,
+    '🎧 mix',
+    'a b',
+    null,
+    null,
+  ]);
+  assert.equal(schema2Validate(result.value), true, ajv.errorsText(schema2Validate.errors));
+  assert.equal(schemaValidate(result.value), false);
+  assert.deepEqual(parseEnvelope(serializeEnvelope(input)), result);
+  assert.deepEqual(normalizeEnvelope(input).labels, result.value.labels);
+  for (const labels of [tenLabels([]), tenLabels(['', ' ', '\u200b', '\u202e'])]) {
+    const empty = validateEnvelope(labelled(labels));
+    assert.equal(empty.ok, true);
+    assert.equal(Object.hasOwn(empty.value, 'labels'), false);
+    assert.equal(empty.value.format, 'open-auri/preset@2');
+    assert.ok(!serializeEnvelope(labelled(labels)).includes('labels'));
+    assert.equal(Object.hasOwn(normalizeEnvelope(labelled(labels)), 'labels'), false);
+    assert.equal(normalizeLabels(labels), null);
+    assert.equal(schema2Validate(empty.value), true);
+  }
+  // A @2 envelope without labels is valid (labels are optional), though writers emit @1 then.
+  assert.equal(validateEnvelope({ ...copy(), format: 'open-auri/preset@2' }).ok, true);
+  assert.deepEqual(
+    normalizeLabels(tenLabels([' a  b ', null, 'Ｘ'])),
+    tenLabels(['a b', null, 'X']),
+  );
+  assert.equal(LABEL_COUNT, 10);
+  assert.equal(LABEL_MAX, 24);
+});
+
+test('label count, type, length, links and controls are refused with stable codes', () => {
+  for (const count of [0, 9, 11]) {
+    const labels = Array.from({ length: count }, (_, index) => `L${index}`);
+    expectIssue(labelled(labels), 'env:labels', '/labels');
+    assert.equal(schema2Validate(labelled(labels)), false);
+    assert.throws(
+      () => normalizeLabels(labels),
+      (error) =>
+        error instanceof EnvelopeError && error.errors.some((e) => e.code === 'env:labels'),
+    );
+    assert.equal(normalizeLabels(labels, { lenient: true }), null);
+  }
+  // Nine or eleven nulls are still a count error, never silently dropped.
+  expectIssue(labelled(Array(9).fill(null)), 'env:labels', '/labels');
+  expectIssue(labelled(Array(11).fill(null)), 'env:labels', '/labels');
+  for (const labels of [null, 'Grave', {}, 1]) {
+    expectIssue(labelled(labels), 'env:type', '/labels');
+    assert.equal(schema2Validate(labelled(labels)), false);
+  }
+  for (const entry of [1, true, {}, [], undefined]) {
+    expectIssue(labelled(tenLabels([null, entry])), 'env:type', '/labels/1');
+  }
+  const sparse = tenLabels(['Grave']);
+  delete sparse[3];
+  expectIssue(labelled(sparse), 'env:type', '/labels/3');
+
+  const max = 'x'.repeat(LABEL_MAX);
+  for (const text of [max, '🎧'.repeat(LABEL_MAX), `  ${'ｅ\u0301'.repeat(LABEL_MAX)}  `]) {
+    const result = validateEnvelope(labelled(tenLabels([text])));
+    assert.equal(result.ok, true, text);
+    assert.equal([...result.value.labels[0]].length, LABEL_MAX);
+    assert.equal(schema2Validate(result.value), true);
+  }
+  for (const text of [`${max}x`, '🎧'.repeat(LABEL_MAX + 1), 'ﬃ'.repeat(9)]) {
+    expectIssue(labelled(tenLabels([null, null, text])), 'env:length', '/labels/2');
+    assert.throws(() => normalizeLabels(tenLabels([null, null, text])), EnvelopeError);
+  }
+  assert.equal(schema2Validate(labelled(tenLabels([`${max}x`]))), false);
+
+  for (const text of [
+    'https://example.com',
+    'evil.com',
+    'www.host',
+    'hxxp host',
+    '10.0.0.1',
+    'ｅｖｉｌ．ｃｏｍ',
+    'evil.c\u200dom',
+  ]) {
+    expectIssue(labelled(tenLabels([null, null, null, text])), 'env:url', '/labels/3');
+    assert.throws(() => normalizeLabels(tenLabels([text])), EnvelopeError);
+  }
+  expectIssue(labelled(tenLabels(['grave.Agudo'])), 'env:url-like', '/labels/0');
+  for (const text of ['a\tb', 'a\nb', 'a\rb', 'a\u0085b', 'a\u0000b']) {
+    expectIssue(labelled(tenLabels([text])), 'env:pattern', '/labels/0');
+  }
+  // Every entry is checked; issues are collected per index.
+  const errors = expectIssue(
+    labelled(tenLabels(['evil.com', 'ok', 'a\tb', 'x'.repeat(LABEL_MAX + 1)])),
+    'env:url',
+    '/labels/0',
+  );
+  assert.ok(errors.some((error) => error.path === '/labels/2' && error.code === 'env:pattern'));
+  assert.ok(errors.some((error) => error.path === '/labels/3' && error.code === 'env:length'));
+  assert.ok(errors.every((error) => error.path !== '/labels/1'));
+  assert.deepEqual(
+    normalizeLabels(tenLabels(['evil.com', ' ok ', 'a\tb', 'x'.repeat(LABEL_MAX + 1)]), {
+      lenient: true,
+    }),
+    tenLabels([null, 'ok']),
+  );
+  for (const input of [null, undefined, 'Grave', {}, tenLabels([]), tenLabels(['evil.com'])]) {
+    assert.equal(normalizeLabels(input, { lenient: true }), null);
+  }
+});
+
+test('labels count toward the 8 KiB serialized cap', () => {
+  const params = Object.fromEntries(
+    Array.from({ length: 32 }, (_, index) => [`p${index}`, 'a'.repeat(128)]),
+  );
+  const value = labelled(undefined, withRecipe({ params }));
+  delete value.labels;
+  const labels = tenLabels(['🎧'.repeat(LABEL_MAX), 'Grave', null, 'Ar']);
+  const labelBytes =
+    Buffer.byteLength(serializeEnvelope({ ...value, labels })) -
+    Buffer.byteLength(serializeEnvelope(value));
+  assert.ok(labelBytes > LABEL_MAX * 4);
+  /** The same envelope with params padded to exactly `target` serialized bytes. */
+  const pad = (target) => {
+    const padded = structuredClone(value);
+    let extra = target - Buffer.byteLength(serializeEnvelope(padded));
+    assert.ok(extra >= 0 && extra <= 32 * 128, String(extra));
+    for (const key of Object.keys(padded.recipe.params)) {
+      const count = Math.min(extra, 128);
+      padded.recipe.params[key] = 'é'.repeat(count) + 'a'.repeat(128 - count);
+      extra -= count;
+    }
+    assert.equal(Buffer.byteLength(serializeEnvelope(padded)), target);
+    return padded;
+  };
+  const fits = { ...pad(8192 - labelBytes), labels };
+  assert.equal(Buffer.byteLength(serializeEnvelope(fits)), 8192);
+  assert.equal(parseEnvelope(serializeEnvelope(fits)).ok, true);
+  const over = pad(8192 - labelBytes + 1);
+  assert.equal(validateEnvelope(over).ok, true);
+  expectIssue({ ...over, labels }, 'env:size', '');
+  assert.throws(() => serializeEnvelope({ ...over, labels }), EnvelopeError);
+});
+
+test('@2 serialization is deterministic, ordered after bands and round-trips', () => {
+  const input = labelled(tenLabels(['Sub', null, 'Corpo ↑', null, '🎧']), withRecipe(recipe));
+  input.author = 'Autor';
+  const shuffled = Object.fromEntries(Object.entries(input).reverse());
+  const json = serializeEnvelope(shuffled);
+  assert.equal(json, serializeEnvelope(input));
+  assert.deepEqual(Object.keys(JSON.parse(json)), [
+    'format',
+    'name',
+    'description',
+    'author',
+    'source',
+    'license',
+    'code',
+    'preampDb',
+    'bands',
+    'labels',
+    'recipe',
+    'lang',
+    'createdAt',
+  ]);
+  const parsed = parseEnvelope(json);
+  assert.equal(parsed.ok, true);
+  assert.equal(serializeEnvelope(parsed.value), json);
+  assert.deepEqual(parseEnvelope(serializeEnvelope(parsed.value)), parsed);
+  assert.equal(schema2Validate(parsed.value), true, ajv.errorsText(schema2Validate.errors));
+  // Without labels and back on @1, the bytes are the plain @1 envelope.
+  const plain = { ...parsed.value, format: 'open-auri/preset@1' };
+  delete plain.labels;
+  const reference = withRecipe(recipe);
+  reference.author = 'Autor';
+  assert.equal(serializeEnvelope(plain), serializeEnvelope(reference));
+  fc.assert(
+    fc.property(
+      fc.array(fc.option(fc.string({ maxLength: 30 }), { nil: null }), {
+        minLength: LABEL_COUNT,
+        maxLength: LABEL_COUNT,
+      }),
+      (raw) => {
+        const result = validateEnvelope(labelled(raw));
+        if (!result.ok) {
+          assert.throws(() => normalizeLabels(raw), EnvelopeError);
+          return;
+        }
+        assert.deepEqual(normalizeLabels(raw), result.value.labels ?? null);
+        assert.deepEqual(normalizeLabels(raw, { lenient: true }), result.value.labels ?? null);
+        const again = serializeEnvelope(result.value);
+        assert.equal(serializeEnvelope(labelled(raw)), again);
+        assert.deepEqual(parseEnvelope(again), result);
+      },
+    ),
+    { numRuns: 500 },
   );
 });

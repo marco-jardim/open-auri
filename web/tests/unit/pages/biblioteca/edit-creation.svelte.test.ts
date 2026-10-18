@@ -45,6 +45,7 @@ function item(id: string, name: string, over: Partial<LibraryItem> = {}): Librar
 			license: 'CC-BY-4.0',
 			lang: 'pt-BR',
 			recipe: null,
+			labels: null,
 			createdAt: 1
 		},
 		curve: { id: `${id}c`, s1, levelDb: null, gateOk: true },

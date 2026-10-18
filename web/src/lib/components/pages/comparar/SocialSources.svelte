@@ -96,7 +96,9 @@
 				bands: curve.bands,
 				preampDb: curve.preampDb,
 				name: result.version.name,
-				source: `community:${result.lineage.id}`
+				source: `community:${result.lineage.id}`,
+				// The version's filter labels (detail read; never from list cards).
+				labels: result.version.labels
 			});
 		} catch (cause) {
 			if (token === generation) error = social.failure(cause);

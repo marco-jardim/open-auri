@@ -412,7 +412,8 @@
 	}
 	function useCurve() {
 		if (!app) return;
-		if (app.state.curve.set(tape)) {
+		// A local tape carries its item's filter labels (`CurveData.labels`); presets carry none.
+		if (app.state.curve.set({ ...tape, labels: tape.labels ?? null })) {
 			onStatus(m.biblioteca_used());
 			close();
 		} else onStatus(m.biblioteca_local_error());
@@ -421,7 +422,14 @@
 		if (!app) return;
 		stop();
 		// The selected tape may be a deep $state proxy: hand over a plain copy (R2-02).
-		app.requestWrite({ ...$state.snapshot(tape), schema: 1, updatedAt: Date.now() });
+		const copy = $state.snapshot(tape);
+		app.requestWrite({
+			...copy,
+			schema: 1,
+			// A local tape carries its library item's filter labels; presets carry none.
+			labels: copy.labels ?? null,
+			updatedAt: Date.now()
+		});
 		onClose();
 	}
 </script>

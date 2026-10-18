@@ -137,6 +137,8 @@ export function createClientApp(options: ClientAppOptions = {}) {
 					...NEUTRAL_CURVE,
 					bands: NEUTRAL_CURVE.bands.map((band) => ({ ...band })),
 					source: `preset:${NEUTRO.id}`,
+					// The rescue curve is the Neutro preset: presets never carry filter labels.
+					labels: null,
 					updatedAt: now()
 				};
 			}

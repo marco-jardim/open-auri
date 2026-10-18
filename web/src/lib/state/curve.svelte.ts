@@ -1,12 +1,14 @@
 import { getPreset } from 'open-auri/catalog';
 import { createStorage, type ClientStorage } from './storage.ts';
-import { checkedCurve, curveSignature, neutralCurve, nextTimestamp } from './model.ts';
-import type { Clock, CurrentCurve, CurveData } from './model.ts';
+import { LABEL_COUNT } from 'open-auri/share';
+import { checkedCurve, curveSignature, neutralCurve, nextTimestamp, sameLabels } from './model.ts';
+import type { Clock, CurrentCurve, CurveData, CurveLabels } from './model.ts';
 import { storageStatus } from './status.svelte.ts';
 
 export const CURRENT_STORAGE_KEY = 'oa.current';
 export const WRITTEN_STORAGE_KEY = 'oa.curve.written';
 export const UNDO_LIMIT = 100;
+const NO_LABELS: CurveLabels = Object.freeze([]);
 
 export function createCurveStore(options: { storage?: ClientStorage; now?: Clock } = {}) {
 	const storage = options.storage ?? createStorage();
@@ -33,10 +35,6 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 	let written = $state.raw<CurrentCurve | null>(readWritten());
 	// True once the user changed the curve in this session (set/update/preset/undo/redo).
 	let edited = $state(false);
-	// Custom names of the band slots (A to J), null where the automatic name applies. Client state
-	// only for now: not part of CurveData, so neither `oa.current`, the undo history, share links
-	// nor the library carry them. Loading another curve (any source but "custom") clears them.
-	let labels = $state.raw<readonly (string | null)[]>([]);
 	function persist(next: CurrentCurve) {
 		value = next;
 		edited = true;
@@ -89,13 +87,13 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 			if (
 				curveSignature(next) === curveSignature(value) &&
 				next.name === value.name &&
-				next.source === value.source
+				next.source === value.source &&
+				sameLabels(next.labels, value.labels)
 			) {
 				return true;
 			}
 			past = [...past, value].slice(-UNDO_LIMIT);
 			future = [];
-			if (next.source !== 'custom') labels = [];
 			persist(next);
 			return true;
 		} catch (cause) {
@@ -136,18 +134,29 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 		get error() {
 			return status.error;
 		},
-		/** Custom band names by slot (client state only; Curva reads and writes them through
-		 * `band-labels.svelte.ts`). */
-		get labels() {
-			return labels;
+		/**
+		 * Custom band names by wire index, from the current curve (`CurveData.labels`, persisted
+		 * with it in `oa.current`, the undo history and the library). Empty when none is set.
+		 * Curva reads and writes them through `band-labels.svelte.ts`.
+		 */
+		get labels(): CurveLabels {
+			return value.labels ?? NO_LABELS;
 		},
+		/**
+		 * Sets the labels of the current curve (padded or cut to ten entries, normalized by core
+		 * `normalizeLabels`): a label-only change is a real, persisted, undoable edit.
+		 */
 		setLabels(next: readonly (string | null)[]) {
-			labels = [...next];
+			return set({
+				...value,
+				labels: Array.from({ length: LABEL_COUNT }, (_, index) => next[index] ?? null)
+			});
 		},
 		set,
 		update(patch: Partial<CurveData>) {
 			return set({ ...value, ...patch });
 		},
+		/** A preset never carries labels: loading one clears them. */
 		loadPreset(id: string) {
 			const preset = getPreset(id);
 			return preset
@@ -155,7 +164,8 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 						name: preset.label,
 						source: `preset:${id}`,
 						preampDb: preset.preampDb,
-						bands: preset.bands
+						bands: preset.bands,
+						labels: null
 					})
 				: false;
 		},

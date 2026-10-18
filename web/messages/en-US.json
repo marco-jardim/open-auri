@@ -1671,7 +1671,7 @@
 	"curva_rescue_note": "Neutral and Auri default load into the editor. Nothing is written without the Write button.",
 	"curva_safe_box": "safe box for this section",
 	"curva_saved": "Same as the last write",
-	"curva_scope_desc": "From 20 Hz to 20 kHz: EQ sum and output with preamp. Draggable handles in the Adjust and Engineering layers.",
+	"curva_scope_desc": "From 20 Hz to 48 kHz; above 20 kHz is inaudible. EQ sum and output with preamp. Draggable handles in the Adjust and Engineering layers.",
 	"curva_scope_eq": "EQ sum",
 	"curva_scope_heading": "Oscilloscope",
 	"curva_scope_label": "Frequency response",
@@ -2407,5 +2407,6 @@
 	"transport_toggle_pause": "Pause the preview",
 	"transport_toggle_resume": "Resume the preview",
 	"transport_toggle_unsupported": "This browser has no Web Audio.",
-	"transport_valuetext": "{elapsed} of {total}"
+	"transport_valuetext": "{elapsed} of {total}",
+	"curva_scope_inaudible": "inaudible · up to Nyquist (48 kHz)"
 }

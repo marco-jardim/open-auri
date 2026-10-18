@@ -51,6 +51,9 @@
 				source: `community:${shared.lineageId}`,
 				preampDb: decoded.preampDb,
 				bands: decoded.bands,
+				// The version's filter labels (lenient: refused entries become null). They travel with
+				// "Instalar"; the `#p=` link of "Abrir na Curva" never carries them.
+				labels: shared.labels ?? null,
 				updatedAt: 0
 			});
 		} catch (error) {

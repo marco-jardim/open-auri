@@ -95,6 +95,7 @@ function publication(
 			license: 'CC-BY-4.0',
 			lang: 'pt-BR',
 			recipe: null,
+			labels: null,
 			createdAt: CREATED
 		},
 		curve: { id: `c-${id}`, s1: S1_NEUTRAL, levelDb: null, gateOk: overrides.gateOk ?? true },

@@ -50,7 +50,16 @@
 		type DragView,
 		type GateClient
 	} from './drag.ts';
-	import { changeKind, defaultOrder, maxPreamp, moveSection, reorderSections } from './edit.ts';
+	import {
+		changeKind,
+		defaultOrder,
+		defaultPermutation,
+		maxPreamp,
+		movePermutation,
+		moveSection,
+		permuteLabels,
+		reorderSections
+	} from './edit.ts';
 	import { formatSignedDb, payloadCrc } from './format.ts';
 	import { readLinkHash, type ImportResult } from './io.ts';
 	import { ioFailureText } from './io-text.ts';
@@ -177,13 +186,26 @@
 
 	// --- editor writes (never the cable) ------------------------------------------------------
 
-	function apply(next: Curve, meta: { name?: string; source?: 'custom' | 'import' } = {}): boolean {
+	/**
+	 * Edits keep the current filter labels (a kind change keeps the slot's label); reorders pass
+	 * them permuted; an import brings its own (or none).
+	 */
+	function apply(
+		next: Curve,
+		meta: {
+			name?: string;
+			source?: 'custom' | 'import';
+			labels?: readonly (string | null)[] | null;
+		} = {}
+	): boolean {
 		if (!app) return false;
+		const current = app.state.curve.current;
 		return app.state.curve.set({
-			name: meta.name ?? app.state.curve.current.name,
+			name: meta.name ?? current.name,
 			source: meta.source ?? 'custom',
 			preampDb: next.preampDb,
-			bands: next.bands
+			bands: next.bands,
+			labels: meta.labels !== undefined ? meta.labels : meta.source ? null : current.labels
 		});
 	}
 	function notify(message: string, tone: 'info' | 'error' = 'info') {
@@ -551,7 +573,8 @@
 		const bands = defaultOrder(curve.bands);
 		const result = verdictFor({ bands, preampDb: curve.preampDb });
 		if (result.ok) {
-			apply({ bands, preampDb: curve.preampDb });
+			const labels = permuteLabels(app?.state.curve.labels, defaultPermutation(curve.bands));
+			apply({ bands, preampDb: curve.preampDb }, { labels });
 			bankMessage = null;
 		} else {
 			bankMessage = m.curva_reorder_refused({
@@ -571,7 +594,9 @@
 		if (!app) return;
 		const result = reorderSections(curve, from, to);
 		if (result.ok) {
-			apply({ bands: result.bands, preampDb: curve.preampDb });
+			const order = movePermutation(curve.bands.length, from, to);
+			const labels = permuteLabels(app.state.curve.labels, order);
+			apply({ bands: result.bands, preampDb: curve.preampDb }, { labels });
 			selected = to;
 			refused = null;
 			cabMessage = m.curva_reorder_ok();
@@ -600,7 +625,14 @@
 		}
 		const { bands, preampDb } = result.curve;
 		if (
-			!apply({ bands, preampDb }, { name: result.curve.name || fallbackName, source: 'import' })
+			!apply(
+				{ bands, preampDb },
+				{
+					name: result.curve.name || fallbackName,
+					source: 'import',
+					labels: result.curve.labels ?? null
+				}
+			)
 		) {
 			notify(m.curva_import_refused({ reason: m.curva_io_error_format() }), 'error');
 			return;
@@ -1001,6 +1033,7 @@
 					{curve}
 					name={curveName}
 					source={stored?.source ?? `preset:${NEUTRO.id}`}
+					labels={stored?.labels ?? null}
 					{layer}
 					{locale}
 					{pageUrl}

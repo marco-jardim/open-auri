@@ -1,9 +1,13 @@
 /**
  * Geometry and cheap curve analysis for the Curva oscilloscope (pure, no DOM).
  *
- * - Plot space follows the v2 mock: 820 × 380 viewBox, 20 Hz to 20 kHz (log), ±15 dB.
+ * - Plot space follows the v2 mock: 820 × 380 viewBox, ±15 dB, log frequency from 20 Hz to the
+ *   Nyquist of core's 96 kHz evaluator (48 kHz). 20 Hz to 20 kHz is the audible, editable band;
+ *   above it the scope only shows where the response really converges (shaded as inaudible).
  * - Responses come from core (`curveResponseDb`, one call per section, summed in dB, which is
- *   exactly how core sums a cascade). Nothing here designs or evaluates a biquad.
+ *   exactly how core sums a cascade), on the whole axis. Nothing here designs or evaluates a biquad.
+ * - Readouts (preview peak, over/near zones) read the audible part of a grid only (`audiblePeak`,
+ *   `audibleSpansAbove`): the band above 20 kHz never changes a reading.
  * - The prefix (internal) and output peaks are a drawing preview on a coarse grid. They show WHERE
  *   a curve gets close to or over the limits while a handle moves; the gate (full grid, worker)
  *   still decides every commit and write.
@@ -20,7 +24,10 @@ export const PLOT = { left: 66, right: 790, top: 26, bottom: 346 } as const;
 export const DB_MIN = -15;
 export const DB_MAX = 15;
 export const F_MIN = 20;
+/** Top of the audible band: the editable range, the zones and every readout end here. */
 export const F_MAX = 20000;
+/** Nyquist of core's 96 kHz evaluator (`SAMPLE_RATE / 2`): the plot's right edge. */
+export const NYQUIST_HZ = 48000;
 /** Output limit drawn on the scope (the gate's audible output threshold). */
 export const OUTPUT_LIMIT_DB = THRESHOLDS.outputAudibleDb;
 /** Internal (prefix) limit: clipping inside the chain. */
@@ -28,14 +35,30 @@ export const INTERNAL_LIMIT_DB = THRESHOLDS.internalAudibleDb;
 /** How close to a limit counts as "near" (amber) on the scope. */
 export const NEAR_MARGIN_DB = 1;
 
-/** Drawing grid: coarser than core's analysis GRID, enough for a smooth trace on every frame. */
-export const SCOPE_GRID: readonly number[] = Object.freeze(logGrid(193, F_MIN, F_MAX));
+/**
+ * Steps from 20 kHz to Nyquist: the audible density (64 per decade) over log10(2.4) decades,
+ * rounded to an even count so DRAG_GRID (every other point) keeps both 20 kHz and Nyquist.
+ */
+const INAUDIBLE_STEPS = 24;
+
+/**
+ * Drawing grid: coarser than core's analysis GRID, enough for a smooth trace on every frame. The
+ * audible part (20 Hz to 20 kHz, 193 points) is the grid the readouts have always used; the
+ * inaudible band continues it up to Nyquist, both ends exact.
+ */
+export const SCOPE_GRID: readonly number[] = Object.freeze([
+	...logGrid(193, F_MIN, F_MAX),
+	...logGrid(INAUDIBLE_STEPS + 1, F_MAX, NYQUIST_HZ).slice(1)
+]);
 
 const span = PLOT.right - PLOT.left;
 const height = PLOT.bottom - PLOT.top;
+const decades = Math.log10(NYQUIST_HZ / F_MIN);
 
-export const xOf = (freqHz: number): number => PLOT.left + (Math.log10(freqHz / F_MIN) / 3) * span;
-export const freqOf = (x: number): number => F_MIN * 1000 ** ((x - PLOT.left) / span);
+export const xOf = (freqHz: number): number =>
+	PLOT.left + (Math.log10(freqHz / F_MIN) / decades) * span;
+export const freqOf = (x: number): number =>
+	F_MIN * (NYQUIST_HZ / F_MIN) ** ((x - PLOT.left) / span);
 export const yOf = (db: number): number => PLOT.top + ((DB_MAX - db) / (DB_MAX - DB_MIN)) * height;
 export const dbOf = (y: number): number => DB_MAX - ((y - PLOT.top) / height) * (DB_MAX - DB_MIN);
 
@@ -49,6 +72,8 @@ export const MINOR_FREQS: readonly number[] = [10, 100, 1000, 10000].flatMap((de
 		.map((k) => decade * k)
 		.filter((f) => f > F_MIN && f < F_MAX && !(MAJOR_FREQS as readonly number[]).includes(f))
 );
+/** Graticule lines inside the inaudible band (20 kHz to Nyquist). */
+export const INAUDIBLE_FREQS = [30000, 40000] as const;
 
 type Section = Exclude<Band, { kind: 'OFF' }>;
 
@@ -149,11 +174,39 @@ export function traces(curve: Curve, grid: readonly number[] = SCOPE_GRID): Trac
 }
 
 /**
- * Grid of the traces while a point moves: every other SCOPE_GRID frequency (97 points, both ends
- * kept), so each drag frame builds, parses and paints half the path points. On release the scope
- * draws on SCOPE_GRID again, so every resting trace is the full-resolution one.
+ * Grid of the traces while a point moves: every other SCOPE_GRID frequency (109 points, both ends
+ * and 20 kHz kept), so each drag frame builds, parses and paints half the path points. On release
+ * the scope draws on SCOPE_GRID again, so every resting trace is the full-resolution one.
  */
 export const DRAG_GRID: readonly number[] = Object.freeze(SCOPE_GRID.filter((_, i) => i % 2 === 0));
+
+/** Leading points of an ascending `grid` inside the audible band (up to F_MAX, included). */
+export function audibleLength(grid: readonly number[]): number {
+	let n = 0;
+	while (n < grid.length && (grid[n] ?? Infinity) <= F_MAX) n++;
+	return n;
+}
+
+/**
+ * Highest value of `values` in the audible band and where (the scope's preview peak readout), or
+ * null when nothing there is finite. The band above 20 kHz is drawn but never read.
+ */
+export function audiblePeak(
+	values: readonly number[],
+	grid: readonly number[] = SCOPE_GRID
+): { db: number; hz: number } | null {
+	const n = Math.min(values.length, audibleLength(grid));
+	let db = -Infinity;
+	let hz = grid[0] ?? F_MIN;
+	for (let i = 0; i < n; i++) {
+		const value = values[i] ?? -Infinity;
+		if (value > db) {
+			db = value;
+			hz = grid[i] ?? hz;
+		}
+	}
+	return Number.isFinite(db) ? { db, hz } : null;
+}
 
 /** `xOf(f).toFixed(1)` of every frequency of a frozen grid: the same text on every redraw. */
 const xTexts = new WeakMap<readonly number[], readonly string[]>();
@@ -168,6 +221,12 @@ function xTextsOf(grid: readonly number[]): readonly string[] | null {
 	return texts;
 }
 
+/**
+ * y text of a response value, clamped far outside the plot so the clip crops it at the axis edge.
+ * −∞ (an LP's exact zero at Nyquist) is pinned there too instead of being dropped.
+ */
+const yText = (db: number): string => yOf(clamp(db, -60, 60)).toFixed(1);
+
 /** SVG path of a response on `grid` (values clamped far outside the plot; the clip crops). */
 export function pathOf(values: readonly number[], grid: readonly number[] = SCOPE_GRID): string {
 	const xs = xTextsOf(grid);
@@ -175,8 +234,8 @@ export function pathOf(values: readonly number[], grid: readonly number[] = SCOP
 	for (let i = 0; i < values.length; i++) {
 		const f = grid[i];
 		const v = values[i];
-		if (f === undefined || v === undefined || !Number.isFinite(v)) continue;
-		d += `${d ? 'L' : 'M'}${xs?.[i] ?? xOf(f).toFixed(1)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
+		if (f === undefined || v === undefined || Number.isNaN(v)) continue;
+		d += `${d ? 'L' : 'M'}${xs?.[i] ?? xOf(f).toFixed(1)} ${yText(v)}`;
 	}
 	return d;
 }
@@ -241,6 +300,15 @@ export function spansAbove(
 	return spans;
 }
 
+/** `spansAbove` on the audible part of `grid` only: the inaudible band never lights a zone. */
+export function audibleSpansAbove(
+	values: readonly number[],
+	threshold: number,
+	grid: readonly number[] = SCOPE_GRID
+): Span[] {
+	return spansAbove(values.slice(0, audibleLength(grid)), threshold, grid);
+}
+
 /** Path of `values` restricted to one span (to stroke the part of a trace that is over). */
 export function segmentPath(
 	values: readonly number[],
@@ -253,8 +321,8 @@ export function segmentPath(
 	for (let i = 0; i < values.length; i++) {
 		const f = grid[i];
 		const v = values[i];
-		if (f === undefined || v === undefined || f < from || f > to || !Number.isFinite(v)) continue;
-		d += `${d ? 'L' : 'M'}${xs?.[i] ?? xOf(f).toFixed(1)} ${yOf(clamp(v, -60, 60)).toFixed(1)}`;
+		if (f === undefined || v === undefined || f < from || f > to || Number.isNaN(v)) continue;
+		d += `${d ? 'L' : 'M'}${xs?.[i] ?? xOf(f).toFixed(1)} ${yText(v)}`;
 	}
 	return d;
 }

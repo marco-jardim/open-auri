@@ -1,8 +1,8 @@
 /**
  * The one place that reads and writes the custom band names (bank rename and scope handles).
- * They live beside the editor curve (`app.state.curve.labels`), in client state only: share
- * links, the local library and the cloud do not carry them yet. Wiring persistence later means
- * changing this module (and the store), not its callers.
+ * They are the editor curve's own `CurveData.labels` (`app.state.curve.labels`), the single
+ * source of truth: persisted in `oa.current`, the undo history, the local library, S5 files
+ * (`open-auri/preset@2`) and cloud versions. Never in `#p=` links, S1, curveId or the gate.
  * Without the app (SSR before mount, isolated renders) the names live in a local state.
  */
 import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';

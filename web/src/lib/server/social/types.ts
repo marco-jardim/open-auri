@@ -88,6 +88,10 @@ export const NAME_MAX = 80;
 export const DESCRIPTION_MAX = 1000;
 export const NOTE_MAX = 500;
 export const RECIPE_MAX = 16384;
+/** Serialized `versions.labels` JSON (migration 0012 CHECK: `length(labels) <= 1024`). */
+export const LABELS_JSON_MAX = 1024;
+/** Filter labels by wire index (exactly ten entries, null = automatic name). */
+export type VersionLabels = (string | null)[];
 export const PACK_ITEMS_MAX = 100;
 export const S6_PAIRS_MAX = 100;
 export const PAGE_SIZE_DEFAULT = 20;
@@ -161,6 +165,11 @@ export interface VersionInput {
 	/** S5 recipe, already serialized JSON, or null. */
 	recipe: string | null;
 	lang: Lang;
+	/**
+	 * Filter labels of an `open-auri/preset@2` envelope (normalized by core `normalizeLabels`),
+	 * or null/absent. Presentation only: never part of the curve row, its id or the gate.
+	 */
+	labels?: VersionLabels | null;
 }
 
 export interface VersionRecord {
@@ -173,6 +182,8 @@ export interface VersionRecord {
 	license: License;
 	recipe: string | null;
 	lang: Lang;
+	/** `versions.labels` (migration 0012); null for versions without labels. */
+	labels: VersionLabels | null;
 	createdAt: number;
 }
 

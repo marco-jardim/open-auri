@@ -20,6 +20,11 @@ export interface SharedCurveData {
 	author: SharedCurveAuthor | null;
 	/** S1 code of the version's curve (68 chars). */
 	s1: string;
+	/**
+	 * Filter labels of the version by wire index of `s1` (ten entries, null = automatic name), or
+	 * null. User content like `name`; never in the OG image, the meta tags or `#p=` links.
+	 */
+	labels?: (string | null)[] | null;
 	visibility: 'private' | 'unlisted' | 'public';
 	/** The share id of `?s=`, only when it belongs to this lineage. */
 	shareId: string | null;

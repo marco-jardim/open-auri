@@ -1671,7 +1671,7 @@
 	"curva_rescue_note": "Neutro e Padrão Auri carregam no editor. Nada é gravado sem o botão Gravar.",
 	"curva_safe_box": "caixa segura desta seção",
 	"curva_saved": "Igual à última gravação",
-	"curva_scope_desc": "De 20 Hz a 20 kHz: soma EQ e saída com preamp. Alças arrastáveis nas camadas Ajustar e Engenharia.",
+	"curva_scope_desc": "De 20 Hz a 48 kHz; acima de 20 kHz é inaudível. Soma EQ e saída com preamp. Alças arrastáveis nas camadas Ajustar e Engenharia.",
 	"curva_scope_eq": "soma EQ",
 	"curva_scope_heading": "Osciloscópio",
 	"curva_scope_label": "Resposta em frequência",
@@ -2407,5 +2407,6 @@
 	"transport_toggle_pause": "Pausar a prévia",
 	"transport_toggle_resume": "Continuar a prévia",
 	"transport_toggle_unsupported": "Este navegador não tem Web Audio.",
-	"transport_valuetext": "{elapsed} de {total}"
+	"transport_valuetext": "{elapsed} de {total}",
+	"curva_scope_inaudible": "inaudível · até Nyquist (48 kHz)"
 }

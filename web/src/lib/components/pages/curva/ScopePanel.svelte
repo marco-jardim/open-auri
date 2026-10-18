@@ -6,6 +6,9 @@
 	- Every trace is core data (`scope.ts`: core responses summed per section). The output limit
 	  line is the gate threshold; red/amber regions show where the drawn curve is over or near the
 	  output limit, or where it would clip inside the chain. They are a preview: the gate decides.
+	- The axis runs to Nyquist (48 kHz, core's 96 kHz evaluator) so the traces show where the
+	  response really converges; 20 kHz to 48 kHz is shaded as inaudible. Readouts, zones, the
+	  limit line and the handles stay in 20 Hz to 20 kHz.
 	- Selected section: its safe box (core SOFT_RANGES) and the hatched zones it can never reach
 	  (ABS_RANGES gain cap, D7: no PK boost above 16 kHz). The box lights while a point is grabbed.
 	- Handles follow the pointer freely (the page draws a draft every frame and asks the worker for
@@ -48,15 +51,20 @@
 		DB_MAX,
 		DB_MIN,
 		DRAG_GRID,
+		F_MAX,
+		INAUDIBLE_FREQS,
 		INTERNAL_LIMIT_DB,
 		MAJOR_FREQS,
 		MINOR_FREQS,
 		NEAR_MARGIN_DB,
+		NYQUIST_HZ,
 		OUTPUT_LIMIT_DB,
 		PLOT,
 		SCOPE_GRID,
 		VIEW_HEIGHT,
 		VIEW_WIDTH,
+		audiblePeak,
+		audibleSpansAbove,
 		clamp,
 		handleGain,
 		hardZones,
@@ -66,7 +74,6 @@
 		responsePath,
 		segmentPath,
 		softBox,
-		spansAbove,
 		stepQ,
 		traces,
 		xOf,
@@ -241,11 +248,14 @@
 		live.bands.map((response) => (response ? responsePath(response, grid) : ''))
 	);
 	const refPath = $derived(reference ? pathOf(traces(reference).output) : '');
-	const overOutput = $derived(spansAbove(live.output, OUTPUT_LIMIT_DB, grid));
+	// Zones and peak read the audible part of the grid only: the band above 20 kHz is drawn, not read.
+	const overOutput = $derived(audibleSpansAbove(live.output, OUTPUT_LIMIT_DB, grid));
 	const nearOutput = $derived(
-		overOutput.length > 0 ? [] : spansAbove(live.output, OUTPUT_LIMIT_DB - NEAR_MARGIN_DB, grid)
+		overOutput.length > 0
+			? []
+			: audibleSpansAbove(live.output, OUTPUT_LIMIT_DB - NEAR_MARGIN_DB, grid)
 	);
-	const overInternal = $derived(spansAbove(live.internal, INTERNAL_LIMIT_DB, grid));
+	const overInternal = $derived(audibleSpansAbove(live.internal, INTERNAL_LIMIT_DB, grid));
 	const widest = <T extends { fromHz: number; toHz: number }>(spans: readonly T[]): T | null =>
 		spans.reduce<T | null>(
 			(best, s) => (!best || s.toHz / s.fromHz > best.toHz / best.fromHz ? s : best),
@@ -254,23 +264,22 @@
 	const hotLabel = $derived(widest(overOutput));
 	const internalLabel = $derived(overOutput.length > 0 ? null : widest(overInternal));
 
-	/** Gate metrics when the drawn curve is the committed one; else the drawn preview's maximum. */
+	/** Gate metrics when the drawn curve is the committed one; else the preview's audible maximum. */
 	const peak = $derived.by(() => {
 		const audible = verdict?.metrics.outputAudible;
 		if (!moving && audible && curve === committed) {
 			return { db: audible.db, hz: audible.frequencyHz ?? SCOPE_GRID[0] ?? 20 };
 		}
-		const points = grid;
-		let db = -Infinity;
-		let hz = points[0] ?? 20;
-		live.output.forEach((value, i) => {
-			if (value > db) {
-				db = value;
-				hz = points[i] ?? hz;
-			}
-		});
-		return Number.isFinite(db) ? { db, hz } : null;
+		return audiblePeak(live.output, grid);
 	});
+	// The inaudible band (20 kHz to Nyquist): shaded, with its label running down the middle.
+	const inaudibleX = xOf(F_MAX);
+	const inaudibleLabel = {
+		x: (inaudibleX + PLOT.right) / 2,
+		y: (PLOT.top + PLOT.bottom) / 2
+	};
+	/** The band label stays inside the band's height whatever the scope width. */
+	const inaudibleFont = $derived(Math.min(labelSize, 14));
 
 	// Ghost of the previous committed EQ, fading for 1.5 s after each commit (mock .tr-after).
 	const committedEq = $derived(committed ? pathOf(traces(committed).eq) : '');
@@ -644,6 +653,15 @@
 					>
 						<line x1="0" y1="0" x2="0" y2="7" class="hatch-line" />
 					</pattern>
+					<pattern
+						id="{legendId}-inaudible"
+						width="6"
+						height="6"
+						patternUnits="userSpaceOnUse"
+						patternTransform="rotate(-45)"
+					>
+						<line x1="0" y1="0" x2="0" y2="6" class="inaudible-line" />
+					</pattern>
 					<linearGradient id="{legendId}-sweep" x1="0" x2="1">
 						<stop offset="0" stop-color="#ff7a2f" stop-opacity="0" />
 						<stop offset="1" stop-color="#ff7a2f" stop-opacity="0.08" />
@@ -660,11 +678,17 @@
 								class:alt={f === 50 || f === 200 || f === 2000 || f === 5000}
 								x={xOf(f)}
 								y={PLOT.bottom + 20}
-								text-anchor={k === 0 ? 'start' : k === MAJOR_FREQS.length - 1 ? 'end' : 'middle'}
-								>{f >= 1000 ? `${f / 1000}k` : f}</text
+								text-anchor={k === 0 ? 'start' : 'middle'}>{f >= 1000 ? `${f / 1000}k` : f}</text
 							>
 						{/if}
 					{/each}
+					{#each INAUDIBLE_FREQS as f (f)}
+						<line class="ginaud" x1={xOf(f)} x2={xOf(f)} y1={PLOT.top} y2={PLOT.bottom} />
+					{/each}
+					<text class="alt" x={xOf(30000)} y={PLOT.bottom + 20} text-anchor="middle">30k</text>
+					<text x={PLOT.right} y={PLOT.bottom + 20} text-anchor="end"
+						>{`${NYQUIST_HZ / 1000}k`}</text
+					>
 					{#each [-15, -10, -5, 0, 5, 10, 15] as db (db)}
 						<line
 							class={db === 0 ? 'g0' : 'gmaj'}
@@ -679,6 +703,28 @@
 					{/each}
 				</g>
 				<g clip-path="url(#{legendId}-clip)" aria-hidden="true">
+					<rect
+						class="inaudible"
+						x={inaudibleX}
+						y={PLOT.top}
+						width={PLOT.right - inaudibleX}
+						height={PLOT.bottom - PLOT.top}
+					/>
+					<rect
+						x={inaudibleX}
+						y={PLOT.top}
+						width={PLOT.right - inaudibleX}
+						height={PLOT.bottom - PLOT.top}
+						fill="url(#{legendId}-inaudible)"
+					/>
+					<text
+						class="inaudible-t"
+						x={inaudibleLabel.x}
+						y={inaudibleLabel.y}
+						text-anchor="middle"
+						transform={`rotate(-90 ${inaudibleLabel.x.toFixed(1)} ${inaudibleLabel.y.toFixed(1)})`}
+						style={`font-size:${inaudibleFont.toFixed(1)}px`}>{m.curva_scope_inaudible()}</text
+					>
 					{#if !reduced}
 						<rect
 							class="sweep"
@@ -716,10 +762,11 @@
 							height={PLOT.bottom - PLOT.top}
 						/>
 					{/each}
+					<!-- The gate's limit is an audible threshold: the line stops at 20 kHz. -->
 					<line
 						class="lim"
 						x1={PLOT.left}
-						x2={PLOT.right}
+						x2={inaudibleX}
 						y1={yOf(OUTPUT_LIMIT_DB)}
 						y2={yOf(OUTPUT_LIMIT_DB)}
 					/>
@@ -1198,6 +1245,22 @@
 	.hatch-line {
 		stroke: rgb(229 72 77 / 0.35);
 		stroke-width: 2;
+	}
+	/* 20 kHz to Nyquist: drawn so the convergence shows, darker and hatched as inaudible. */
+	.inaudible {
+		fill: rgb(0 0 0 / 0.38);
+	}
+	.inaudible-line {
+		stroke: rgb(255 180 120 / 0.08);
+		stroke-width: 1.5;
+	}
+	.grat .ginaud {
+		stroke: rgb(255 140 70 / 0.08);
+	}
+	.inaudible-t {
+		fill: rgb(255 180 120 / 0.5);
+		dominant-baseline: central;
+		letter-spacing: 0.04em;
 	}
 	.sweep {
 		animation: sweep 9s linear infinite;

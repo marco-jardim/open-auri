@@ -28,6 +28,8 @@
 		curve: Curve;
 		name: string;
 		source: string;
+		/** Filter labels by wire index; S5 only (`open-auri/preset@2` when one is set). */
+		labels?: readonly (string | null)[] | null;
 		layer: Layer;
 		locale: string;
 		pageUrl: UrlLike;
@@ -44,6 +46,7 @@
 		curve,
 		name,
 		source,
+		labels = null,
 		layer,
 		locale,
 		pageUrl,
@@ -86,7 +89,7 @@
 	}
 	function onJson() {
 		const lang = locale.startsWith('en') ? 'en-US' : 'pt-BR';
-		const result = exportS5(curve, { name, source, lang, now: now() }, layer);
+		const result = exportS5(curve, { name, source, lang, now: now(), labels }, layer);
 		if (!result.ok)
 			return notify(m.curva_export_refused({ reason: ioFailureText(result) }), 'error');
 		save(fileName(name, 'json'), new Blob([result.value], { type: 'application/json' }));

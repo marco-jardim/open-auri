@@ -1,7 +1,9 @@
 /**
  * Discrete edits validated by the core gate on the full grid: reordering sections (patch cables in
  * Engenharia) and changing a section's kind. A refusal leaves the curve untouched and returns the
- * reasons, so the UI snaps the module back and explains why.
+ * reasons, so the UI snaps the module back and explains why. A reorder moves the filter labels
+ * with their bands (`movePermutation`, `defaultPermutation`, `permuteLabels`); a kind change
+ * keeps the slot's label.
  */
 import { autoPreamp, clampToAbs, roundToGrid, SOFT_RANGES } from 'open-auri/safety';
 import { hasExperimental, hasGain, replaceBand, verdictFor } from './model.ts';
@@ -29,12 +31,36 @@ export function maxPreamp(curve: Curve): PreampResult {
 }
 
 /** Section `from` moves to position `to`; the others keep their relative order. */
-export function moveSection(bands: readonly Band[], from: number, to: number): Band[] {
+export function moveSection<T>(bands: readonly T[], from: number, to: number): T[] {
 	const out = bands.slice();
 	if (from === to || from < 0 || to < 0 || from >= out.length || to >= out.length) return out;
 	const [moved] = out.splice(from, 1);
-	if (moved) out.splice(to, 0, moved);
+	if (moved !== undefined) out.splice(to, 0, moved);
 	return out;
+}
+
+/**
+ * The reorder permutation of `moveSection` over `length` slots: entry i is the old wire index of
+ * the section that lands at index i (identity when out of range).
+ */
+export function movePermutation(length: number, from: number, to: number): number[] {
+	return moveSection(
+		Array.from({ length }, (_, index) => index),
+		from,
+		to
+	);
+}
+
+/**
+ * Filter labels follow their bands through a reorder: entry i of the result is
+ * `labels[order[i]]`. No labels stay no labels.
+ */
+export function permuteLabels(
+	labels: readonly (string | null)[] | null | undefined,
+	order: readonly number[]
+): (string | null)[] | null {
+	if (!labels) return null;
+	return order.map((index) => labels[index] ?? null);
 }
 
 export function reorderSections(curve: Curve, from: number, to: number): EditResult {
@@ -43,16 +69,25 @@ export function reorderSections(curve: Curve, from: number, to: number): EditRes
 	return verdict.ok ? { ok: true, bands, verdict } : { ok: false, reasons: verdict.reasons };
 }
 
-/** The core default order (D1): cuts before boosts, OFF last; stable within each group. */
-export function defaultOrder(bands: readonly Band[]): Band[] {
+/** Bands in the core default order (D1) with their old wire index. */
+function defaultEntries(bands: readonly Band[]): { band: Band; index: number }[] {
 	const rank = (band: Band) => {
 		if (band.kind === 'OFF') return 2;
 		return hasGain(band) && band.gainDb > 0 ? 1 : 0;
 	};
 	return bands
 		.map((band, index) => ({ band, index }))
-		.sort((a, b) => rank(a.band) - rank(b.band) || a.index - b.index)
-		.map(({ band }) => band);
+		.sort((a, b) => rank(a.band) - rank(b.band) || a.index - b.index);
+}
+
+/** The core default order (D1): cuts before boosts, OFF last; stable within each group. */
+export function defaultOrder(bands: readonly Band[]): Band[] {
+	return defaultEntries(bands).map(({ band }) => band);
+}
+
+/** The permutation `defaultOrder` applies: entry i is the old wire index now at index i. */
+export function defaultPermutation(bands: readonly Band[]): number[] {
+	return defaultEntries(bands).map(({ index }) => index);
 }
 
 const SOFT_BY_KIND = {

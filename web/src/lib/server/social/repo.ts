@@ -11,11 +11,13 @@
 // W4.2 services must not query social tables directly: new queries go in social/queries/*.ts and
 // reuse the predicates exported here (see README.md).
 import type { D1Database, D1Result } from '@cloudflare/workers-types';
+import { LABEL_COUNT, LABEL_MAX } from 'open-auri/share';
 import { all, batch, first, run, sql, type BoundStatement, type SqlParam } from '#lib/server/db.ts';
 import {
 	ACTIVITY_KINDS,
 	AUDIENCE_NAMES_MAX,
 	DESCRIPTION_MAX,
+	LABELS_JSON_MAX,
 	LANGS,
 	LICENSES,
 	LINEAGE_VISIBILITIES,
@@ -88,6 +90,7 @@ import {
 	type TradeStatus,
 	type TradeView,
 	type VersionInput,
+	type VersionLabels,
 	type VersionRecord,
 	type Viewer
 } from '#lib/server/social/types.ts';
@@ -334,6 +337,7 @@ interface VersionCols {
 	v_license: string;
 	v_recipe: string | null;
 	v_lang: string;
+	v_labels: string | null;
 	v_created: number;
 }
 
@@ -363,7 +367,7 @@ const LINEAGE_COLUMNS =
 const VERSION_COLUMNS =
 	'v.id AS v_id, v.lineage_id AS v_lineage, v.parent_id AS v_parent, v.curve_id AS v_curve, ' +
 	'v.name AS v_name, v.description AS v_description, v.license AS v_license, ' +
-	'v.recipe AS v_recipe, v.lang AS v_lang, v.created_at AS v_created';
+	'v.recipe AS v_recipe, v.lang AS v_lang, v.labels AS v_labels, v.created_at AS v_created';
 const CURVE_COLUMNS =
 	'c.id AS c_id, c.s1 AS c_s1, c.canon_key AS c_canon, c.gate_ver AS c_gate_ver, ' +
 	'c.gate_ok AS c_gate_ok, c.gate_reasons AS c_gate_reasons, c.level_db AS c_level, ' +
@@ -398,6 +402,35 @@ function toLineage(row: LineageCols): LineageRecord {
 	};
 }
 
+/** Ten entries, each null or a string of 1–LABEL_MAX code points. */
+function isLabelList(value: unknown): value is VersionLabels {
+	return (
+		Array.isArray(value) &&
+		value.length === LABEL_COUNT &&
+		value.every(
+			(label) =>
+				label === null ||
+				(typeof label === 'string' && textLength(label) >= 1 && textLength(label) <= LABEL_MAX)
+		)
+	);
+}
+
+/** `versions.labels` → labels; anything unreadable (or all null) reads as no labels. */
+function parseLabels(text: string | null): VersionLabels | null {
+	if (text === null) return null;
+	try {
+		const value: unknown = JSON.parse(text);
+		return isLabelList(value) && value.some((label) => label !== null) ? value : null;
+	} catch {
+		return null;
+	}
+}
+
+/** Labels → `versions.labels` JSON; null when there is none (an all-null list included). */
+function labelsText(labels: VersionLabels | null | undefined): string | null {
+	return labels && labels.some((label) => label !== null) ? JSON.stringify(labels) : null;
+}
+
 function toVersion(row: VersionCols): VersionRecord {
 	return {
 		id: row.v_id,
@@ -409,6 +442,7 @@ function toVersion(row: VersionCols): VersionRecord {
 		license: row.v_license as License,
 		recipe: row.v_recipe,
 		lang: row.v_lang as Lang,
+		labels: parseLabels(row.v_labels),
 		createdAt: row.v_created
 	};
 }
@@ -487,8 +521,16 @@ function validVersion(version: VersionInput): boolean {
 		isOneOf(LICENSES, version.license) &&
 		isOneOf(LANGS, version.lang) &&
 		(version.recipe === null ||
-			(typeof version.recipe === 'string' && version.recipe.length <= RECIPE_MAX))
+			(typeof version.recipe === 'string' && version.recipe.length <= RECIPE_MAX)) &&
+		validLabels(version.labels)
 	);
+}
+
+/** Absent, null or ten valid entries whose JSON fits the 0012 CHECK (length <= 1024). */
+function validLabels(labels: unknown): boolean {
+	if (labels === undefined || labels === null) return true;
+	if (!isLabelList(labels)) return false;
+	return textLength(JSON.stringify(labels)) <= LABELS_JSON_MAX;
 }
 
 /** Maps a constraint failure raised by D1 to a stable code; null for anything else. */
@@ -726,7 +768,7 @@ function insertVersionStatement(
 	return sql(
 		db,
 		'INSERT INTO versions (id, lineage_id, parent_id, curve_id, name, description, license, ' +
-			'recipe, lang, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)',
+			'recipe, lang, labels, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
 		version.id,
 		lineageId,
 		curveId,
@@ -735,6 +777,7 @@ function insertVersionStatement(
 		version.license,
 		version.recipe,
 		version.lang,
+		labelsText(version.labels),
 		now
 	);
 }
@@ -820,7 +863,7 @@ export async function appendVersion(
 		sql(
 			db,
 			'INSERT INTO versions (id, lineage_id, parent_id, curve_id, name, description, license, ' +
-				'recipe, lang, created_at) SELECT ?, l.id, l.head_version, ?, ?, ?, ?, ?, ?, ? ' +
+				'recipe, lang, labels, created_at) SELECT ?, l.id, l.head_version, ?, ?, ?, ?, ?, ?, ?, ? ' +
 				"FROM lineages l WHERE l.id = ? AND l.owner_user_id = ? AND l.head_version = ? AND l.status = 'active'",
 			version.id,
 			input.curve.id,
@@ -829,6 +872,7 @@ export async function appendVersion(
 			version.license,
 			version.recipe,
 			version.lang,
+			labelsText(version.labels),
 			input.now,
 			input.lineageId,
 			input.ownerUserId,

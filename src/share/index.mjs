@@ -14,7 +14,10 @@ export {
 } from './s1.mjs';
 export {
   EnvelopeError,
+  LABEL_COUNT,
+  LABEL_MAX,
   normalizeText,
+  normalizeLabels,
   normalizeEnvelope,
   validateEnvelope,
   serializeEnvelope,

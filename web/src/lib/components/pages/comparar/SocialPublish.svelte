@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { decodeS1, encodeS1, validateEnvelope } from 'open-auri/share';
+	import { decodeS1, encodeS1, normalizeLabels, validateEnvelope } from 'open-auri/share';
 	import { isSocialApiError, rememberOrigin, requireLoginHref } from '#lib/social/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
@@ -26,6 +26,8 @@
 		code: string;
 		curve: ReturnType<typeof decodeS1>;
 		recipe?: Envelope['recipe'];
+		/** The curve's filter labels (refused entries dropped); null: published as preset@1. */
+		labels: (string | null)[] | null;
 	} | null = null;
 	let name = $state('');
 	let description = $state('');
@@ -42,7 +44,8 @@
 			snapshot = {
 				code,
 				curve: decodeS1(code),
-				...(recipe ? { recipe: structuredClone(recipe) } : {})
+				...(recipe ? { recipe: structuredClone(recipe) } : {}),
+				labels: normalizeLabels(curve.labels ?? null, { lenient: true })
 			};
 			name = curve.name;
 			description = '';
@@ -59,13 +62,15 @@
 		event.preventDefault();
 		if (!snapshot || busy || social.unavailable || !social.session.verified) return;
 		const input = validateEnvelope({
-			format: 'open-auri/preset@1',
+			// preset@2 only when the curve has filter labels; @1 (unchanged) otherwise.
+			format: snapshot.labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
 			name,
 			description,
 			source: 'custom',
 			license,
 			code: snapshot.code,
 			bands: snapshot.curve.bands,
+			...(snapshot.labels ? { labels: snapshot.labels } : {}),
 			preampDb: snapshot.curve.preampDb,
 			lang: getLocale(),
 			createdAt: new Date().toISOString(),

@@ -1,2 +1,2 @@
 export { S1_VERSION, S1_VARIANT_PARAMETRIC, S1_BYTES, S1_LENGTH, S1_KIND_CODES, S1Error, encodeS1, decodeS1, canonKey, curveId } from "./s1.mjs";
-export { EnvelopeError, normalizeText, normalizeEnvelope, validateEnvelope, serializeEnvelope, parseEnvelope } from "./envelope.mjs";
+export { EnvelopeError, LABEL_COUNT, LABEL_MAX, normalizeText, normalizeLabels, normalizeEnvelope, validateEnvelope, serializeEnvelope, parseEnvelope } from "./envelope.mjs";

@@ -97,6 +97,8 @@
 	let nameField = $state<HTMLInputElement | null>(null);
 	let descriptionField = $state<HTMLTextAreaElement | null>(null);
 	let draftCurve = $state.raw<Curve | null>(null);
+	/** The editor curve's filter labels, frozen with `draftCurve` (published as preset@2). */
+	let draftLabels = $state.raw<readonly (string | null)[] | null>(null);
 	let draftName = $state('');
 	let description = $state('');
 	let license = $state<'CC0-1.0' | 'CC-BY-4.0'>('CC0-1.0');
@@ -328,6 +330,7 @@
 		if (unavailable) return;
 		mode = next;
 		draftCurve = structuredClone($state.snapshot(curve));
+		draftLabels = app?.state.curve.current.labels ?? null;
 		// `draftCopy` now reads the frozen draft: prefill from the saved copy it would update.
 		const copy = draftCopy;
 		draftName = copy && copy.editorName === name ? copy.name : name;
@@ -358,7 +361,13 @@
 		// Same core rules as the server (lengths, lines, links, control characters): nothing is
 		// sent while the text cannot be published.
 		const checked = checkEnvelope(
-			socialEnvelope(snapshot, { name: draftName, description, license: chosen, locale })
+			socialEnvelope(snapshot, {
+				name: draftName,
+				description,
+				license: chosen,
+				locale,
+				labels: draftLabels
+			})
 		);
 		if (!checked.ok) {
 			issues = checked.issues;

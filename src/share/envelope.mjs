@@ -13,18 +13,30 @@ import { decodeS1, encodeS1 } from './s1.mjs';
  * characters and primitive values (strings at most 128, numbers finite).
  * @typedef {{measurement?: Measurement, target?: {source: string, name: string},
  *   solver?: {name: string, version: string}, params?: Record<string, Primitive>}} Recipe
- * @typedef {{format: 'open-auri/preset@1', name: string, description: string,
- *   author?: string | null, source: string, license: 'CC0-1.0' | 'CC-BY-4.0',
- *   code: string, preampDb: number, bands: Band[], recipe?: Recipe,
- *   lang: 'pt-BR' | 'en-US', createdAt: string}} Envelope
+ * Filter labels (`open-auri/preset@2` only): exactly LABEL_COUNT entries by wire
+ * index, each 1–LABEL_MAX normalized code points or null (automatic name). An
+ * all-null list is omitted. Labels are presentation only: never part of S1,
+ * curveId, canonKey or the safety gate.
+ * @typedef {(string | null)[]} Labels
+ * @typedef {{format: 'open-auri/preset@1' | 'open-auri/preset@2', name: string,
+ *   description: string, author?: string | null, source: string,
+ *   license: 'CC0-1.0' | 'CC-BY-4.0', code: string, preampDb: number, bands: Band[],
+ *   labels?: Labels, recipe?: Recipe, lang: 'pt-BR' | 'en-US', createdAt: string}} Envelope
  * @typedef {'env:type' | 'env:required' | 'env:extra' | 'env:length' | 'env:enum'
  *   | 'env:pattern' | 'env:range' | 'env:url' | 'env:url-like' | 'env:code-mismatch' | 'env:s1'
- *   | 'env:bands' | 'env:json' | 'env:size'} EnvelopeErrorCode
+ *   | 'env:bands' | 'env:labels' | 'env:json' | 'env:size'} EnvelopeErrorCode
  * @typedef {{path: string, code: EnvelopeErrorCode, message: string}} EnvelopeIssue
  * @typedef {{ok: true, value: Envelope} | {ok: false, errors: EnvelopeIssue[]}} EnvelopeResult
  */
 
-const KEYS = [
+const FORMAT_1 = 'open-auri/preset@1';
+const FORMAT_2 = 'open-auri/preset@2';
+/** Filter labels by wire index (`open-auri/preset@2`). */
+export const LABEL_COUNT = 10;
+/** Longest filter label, in normalized code points. */
+export const LABEL_MAX = 24;
+// `open-auri/preset@1` keys; `@1` output stays byte-identical (labels are env:extra).
+const KEYS_1 = [
   'format',
   'name',
   'description',
@@ -38,6 +50,24 @@ const KEYS = [
   'lang',
   'createdAt',
 ];
+// `open-auri/preset@2` adds `labels` after `bands`; also the serialization order.
+const KEYS_2 = [
+  'format',
+  'name',
+  'description',
+  'author',
+  'source',
+  'license',
+  'code',
+  'preampDb',
+  'bands',
+  'labels',
+  'recipe',
+  'lang',
+  'createdAt',
+];
+/** @param {unknown} format */
+const keysOf = (format) => (format === FORMAT_2 ? KEYS_2 : KEYS_1);
 const REQUIRED = [
   'format',
   'name',
@@ -223,6 +253,86 @@ function normalizeFieldText(text, multiline, path, kind) {
 }
 
 /**
+ * One label through the `name` pipeline (single-line prose); empty becomes null.
+ * Non-strings and refused text are retained for the structural check.
+ * @param {unknown} entry @param {number} index @param {EnvelopeIssue[]} errors
+ * @returns {unknown}
+ */
+function normalizeLabel(entry, index, errors) {
+  if (typeof entry !== 'string') return entry;
+  try {
+    const text = normalizeFieldText(entry, false, `/labels/${index}`, 'prose');
+    return text === '' ? null : text;
+  } catch (error) {
+    if (!(error instanceof EnvelopeError)) throw error;
+    errors.push(...error.errors);
+    return entry;
+  }
+}
+
+/**
+ * Structural label checks on normalized entries (holes and non-strings are env:type).
+ * @param {unknown} labels
+ * @param {(path: string, code: EnvelopeErrorCode, message: string) => void} add
+ */
+function checkLabels(labels, add) {
+  if (!Array.isArray(labels)) {
+    add('/labels', 'env:type', 'Expected an array of labels');
+    return;
+  }
+  if (labels.length !== LABEL_COUNT) {
+    add('/labels', 'env:labels', `Expected exactly ${LABEL_COUNT} labels`);
+  }
+  for (let index = 0; index < labels.length; index++) {
+    const entry = labels[index];
+    const path = `/labels/${index}`;
+    if (entry === null) continue;
+    if (typeof entry !== 'string') add(path, 'env:type', 'Expected a string or null');
+    else if ([...entry].length < 1 || [...entry].length > LABEL_MAX) {
+      add(path, 'env:length', `Expected 1–${LABEL_MAX} code points`);
+    }
+  }
+}
+
+/**
+ * Filter labels by wire index, as `open-auri/preset@2` stores them: each entry goes
+ * through the same normalization as `name` (NFKC, invisibles stripped, controls and
+ * URL/domain/IP text refused), empty text becomes null, then exactly LABEL_COUNT
+ * entries of 1–LABEL_MAX code points or null. Returns null when every entry is null
+ * (the key is omitted). Strict by default: throws EnvelopeError with every issue
+ * (env:type, env:labels, env:length, env:pattern, env:url, env:url-like; paths
+ * `/labels/i`). `lenient` never throws: a refused entry becomes null and a list that
+ * is not an array of LABEL_COUNT entries becomes null (local state, old records).
+ * Labels never take part in S1, curveId, canonKey or the safety gate.
+ * @param {unknown} input
+ * @param {{lenient?: boolean}} [options]
+ * @returns {Labels | null}
+ */
+export function normalizeLabels(input, { lenient = false } = {}) {
+  if (lenient) {
+    if (!Array.isArray(input) || input.length !== LABEL_COUNT) return null;
+    const labels = Array.from(input, (entry, index) => {
+      /** @type {EnvelopeIssue[]} */
+      const errors = [];
+      const text = normalizeLabel(entry, index, errors);
+      return typeof text === 'string' && !errors.length && [...text].length <= LABEL_MAX
+        ? text
+        : null;
+    });
+    return labels.some((entry) => entry !== null) ? labels : null;
+  }
+  /** @type {EnvelopeIssue[]} */
+  const errors = [];
+  const labels = Array.isArray(input)
+    ? Array.from(input, (entry, index) => normalizeLabel(entry, index, errors))
+    : input;
+  checkLabels(labels, (path, code, message) => errors.push(issue(path, code, message)));
+  if (errors.length) throw new EnvelopeError(errors);
+  const list = /** @type {Labels} */ (labels);
+  return list.some((entry) => entry !== null) ? list : null;
+}
+
+/**
  * Clone the known object levels, retaining unknown keys for env:extra checks.
  * Malformed values are retained for validation, not silently discarded/coerced.
  * @param {unknown} input
@@ -252,6 +362,13 @@ function normalize(input, errors) {
   if (!Object.hasOwn(value, 'description')) value.description = '';
   if (Array.isArray(value.bands)) {
     value.bands = value.bands.map((band) => (isObject(band) ? { ...band } : band));
+  }
+  // Labels exist only in @2; in @1 they stay raw for the env:extra check.
+  if (value.format === FORMAT_2 && Array.isArray(value.labels)) {
+    const labels = Array.from(value.labels, (entry, index) => normalizeLabel(entry, index, errors));
+    if (labels.length === LABEL_COUNT && labels.every((entry) => entry === null)) {
+      delete value.labels;
+    } else value.labels = labels;
   }
   if (isObject(value.recipe)) {
     const recipe = { ...value.recipe };
@@ -289,7 +406,8 @@ export function normalizeEnvelope(obj) {
 
 /**
  * Deterministic JSON: fixed envelope/band/recipe key order, sorted params keys.
- * Called only after structural validation. Optional fields stay absent.
+ * Called only after structural validation. Optional fields stay absent, so `@1`
+ * (never with labels) serializes exactly as before `@2` existed.
  * @param {Envelope} value
  */
 function stringify(value) {
@@ -300,8 +418,9 @@ function stringify(value) {
       keys.filter((key) => Object.hasOwn(record, key)).map((key) => [key, record[key]]),
     );
   };
-  const result = ordered(value, KEYS);
+  const result = ordered(value, KEYS_2);
   result.bands = value.bands.map((band) => ordered(band, ['kind', 'freqHz', 'gainDb', 'qFactor']));
+  if (value.labels) result.labels = [...value.labels];
   if (value.recipe) {
     const recipe = ordered(value.recipe, ['measurement', 'target', 'solver', 'params']);
     for (const key of ['measurement', 'target', 'solver', 'params']) {
@@ -398,8 +517,10 @@ export function validateEnvelope(obj) {
       add(path, 'env:range', `Expected [${min}, ${max}] on the ${1 / scale} grid`);
     }
   };
-  if (!object(value, '', KEYS, REQUIRED)) return { ok: false, errors };
-  enumeration(value.format, '/format', ['open-auri/preset@1']);
+  const keys = isObject(value) ? keysOf(value.format) : KEYS_1;
+  if (!object(value, '', keys, REQUIRED)) return { ok: false, errors };
+  enumeration(value.format, '/format', [FORMAT_1, FORMAT_2]);
+  if (value.format === FORMAT_2 && Object.hasOwn(value, 'labels')) checkLabels(value.labels, add);
   string(value.name, '/name', 1, 48);
   string(value.description, '/description', 0, 280);
   if (Object.hasOwn(value, 'author') && value.author !== null) {

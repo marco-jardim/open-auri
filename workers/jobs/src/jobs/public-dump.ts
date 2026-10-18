@@ -11,7 +11,10 @@
 // attribution ("autor removido" after an anonymized account closure). Never included: e-mails,
 // user ids, nominal activity (who favorited or installed), hashes, IPs, recipes, private or
 // unlisted content, moderation data. A fork points to its origin only when the origin version is
-// itself in the dump. The `readme` field explains the licenses.
+// itself in the dump. The `readme` field explains the licenses. A version with filter labels
+// (open-auri/preset@2, migration 0012) carries them as `labels` (ten entries by wire index of its
+// S1, null = automatic name); the field is additive and absent otherwise, so `formatVersion`
+// stays 1.
 //
 // Idempotent: a re-run on the same day overwrites the same two objects. Logs carry counts only.
 import { countedUserSql, publicLineageSql } from '../../../../web/src/lib/server/social/repo.ts';
@@ -54,6 +57,8 @@ export interface DumpVersion {
   lang: string;
   createdAt: string;
   curve: { id: string; s1: string };
+  /** Only on versions with filter labels: ten entries by wire index of `curve.s1`. */
+  labels?: (string | null)[];
   /** Only on CC-BY-4.0 versions: the public nickname, or "autor removido". */
   author?: string;
 }
@@ -108,10 +113,32 @@ interface VersionRow {
   created_at: number;
   curve_id: string;
   s1: string;
+  labels: string | null;
 }
 
 function iso(ms: number): string {
   return new Date(ms).toISOString();
+}
+
+/** `versions.labels` JSON → ten entries with at least one label; null for anything else. */
+function dumpLabels(text: string | null): (string | null)[] | null {
+  if (text === null) return null;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (
+      !Array.isArray(value) ||
+      value.length !== 10 ||
+      !value.every((label) => label === null || typeof label === 'string')
+    ) {
+      return null;
+    }
+    const labels: (string | null)[] = value.map((label) =>
+      typeof label === 'string' ? label : null,
+    );
+    return labels.some((label) => label !== null) ? labels : null;
+  } catch {
+    return null;
+  }
 }
 
 async function countsBy(
@@ -147,7 +174,8 @@ export async function buildPublicDump(db: D1Database, now: Date): Promise<Public
     const versions = await db
       .prepare(
         'SELECT v.id, v.lineage_id, v.parent_id, v.name, v.description, v.license, v.lang, ' +
-          'v.created_at, c.id AS curve_id, c.s1 FROM versions v JOIN curves c ON c.id = v.curve_id ' +
+          'v.created_at, v.labels, c.id AS curve_id, c.s1 FROM versions v ' +
+          'JOIN curves c ON c.id = v.curve_id ' +
           `WHERE v.lineage_id IN (${marks}) AND c.gate_ok = 1 ORDER BY v.lineage_id, v.created_at, v.id`,
       )
       .bind(...ids)
@@ -178,6 +206,8 @@ export async function buildPublicDump(db: D1Database, now: Date): Promise<Public
         createdAt: iso(version.created_at),
         curve: { id: version.curve_id, s1: version.s1 },
       };
+      const labels = dumpLabels(version.labels);
+      if (labels) entry.labels = labels;
       if (version.license === 'CC-BY-4.0') {
         entry.author = authorOf.get(version.lineage_id) ?? AUTHOR_REMOVED;
       }

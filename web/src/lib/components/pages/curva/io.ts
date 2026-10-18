@@ -11,6 +11,7 @@ import {
 	decodeS1,
 	encodeS1,
 	EnvelopeError,
+	normalizeLabels,
 	normalizeText,
 	parseEnvelope,
 	S1Error,
@@ -23,6 +24,21 @@ import type { Reason } from './reasons.ts';
 export const NAME_MAX = 48;
 export const LINK_PREFIX = '#p=';
 export const S5_FORMAT = 'open-auri/preset@1';
+/** Emitted only when the curve has at least one filter label; `@1` otherwise. */
+export const S5_FORMAT_LABELS = 'open-auri/preset@2';
+
+/**
+ * The S5 format and `labels` field for a curve: `@2` with the normalized labels when at least
+ * one is set, else `@1` without the key (byte-identical to an `@1` export). Labels refused by
+ * the core rules are dropped here (entry by entry), never published.
+ */
+export function s5Labels(labels: unknown): {
+	format: typeof S5_FORMAT | typeof S5_FORMAT_LABELS;
+	labels?: (string | null)[];
+} {
+	const normalized = normalizeLabels(labels, { lenient: true });
+	return normalized ? { format: S5_FORMAT_LABELS, labels: normalized } : { format: S5_FORMAT };
+}
 
 export type IoError =
 	'format' | 'too-many' | 'experimental-layer' | 'gate' | 'link' | 'envelope' | 'grid';
@@ -31,6 +47,8 @@ export type IoFailure = { ok: false; error: IoError; reasons: Reason[]; detail?:
 export interface ImportedCurve extends Curve {
 	readonly name: string | null;
 	readonly bands: Band[];
+	/** Filter labels of an `open-auri/preset@2` file; never from `.txt` or `#p=` links. */
+	readonly labels?: (string | null)[] | null;
 }
 export type ImportResult = { ok: true; curve: ImportedCurve; warnings: number } | IoFailure;
 export type ExportResult<T> = { ok: true; value: T } | IoFailure;
@@ -105,17 +123,20 @@ export interface S5Meta {
 	source: string;
 	lang: 'pt-BR' | 'en-US';
 	now: number;
+	/** Filter labels by wire index: any set label makes the file `open-auri/preset@2`. */
+	labels?: readonly (string | null)[] | null;
 }
 
 export function exportS5(curve: Curve, meta: S5Meta, layer: Layer): ExportResult<string> {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
 	const code = s1Of(curve);
 	if (!code.ok) return code;
+	const { format, labels } = s5Labels(meta.labels);
 	try {
 		return {
 			ok: true,
 			value: serializeEnvelope({
-				format: S5_FORMAT,
+				format,
 				name: safeName(meta.name, 'open-auri'),
 				description: '',
 				source: meta.source,
@@ -123,6 +144,7 @@ export function exportS5(curve: Curve, meta: S5Meta, layer: Layer): ExportResult
 				code: code.value,
 				preampDb: curve.preampDb,
 				bands: curve.bands,
+				...(labels ? { labels } : {}),
 				lang: meta.lang,
 				createdAt: new Date(meta.now).toISOString()
 			})
@@ -142,7 +164,12 @@ export function importS5(json: string, layer: Layer): ImportResult {
 	}
 	const { value } = parsed;
 	return admit(
-		{ name: safeName(value.name, ''), bands: value.bands, preampDb: value.preampDb },
+		{
+			name: safeName(value.name, ''),
+			bands: value.bands,
+			preampDb: value.preampDb,
+			labels: value.labels ?? null
+		},
 		layer
 	);
 }

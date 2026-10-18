@@ -8,6 +8,7 @@ import {
 	curveId,
 	decodeS1,
 	EnvelopeError,
+	normalizeLabels,
 	normalizeText,
 	S1Error
 } from 'open-auri/share';
@@ -47,7 +48,8 @@ import {
 	type LineageVisibility,
 	type ModerationState,
 	type Page,
-	type SocialErrorCode
+	type SocialErrorCode,
+	type VersionLabels
 } from '#lib/server/social/types.ts';
 
 // ---- Shelves --------------------------------------------------------------------------------
@@ -84,6 +86,8 @@ export interface LibraryItem {
 		license: License;
 		lang: Lang;
 		recipe: string | null;
+		/** Filter labels of the head version by wire index of `curve.s1`, or null (0012). */
+		labels: VersionLabels | null;
 		createdAt: number;
 	};
 	curve: { id: string; s1: string; levelDb: number | null; gateOk: boolean };
@@ -112,6 +116,7 @@ export function toLibraryItem(lineage: LineageSummary, at: number, userId: strin
 			license: head.license,
 			lang: head.lang,
 			recipe: head.recipe,
+			labels: head.labels,
 			createdAt: head.createdAt
 		},
 		curve: { id: curve.id, s1: curve.s1, levelDb: curve.levelDb, gateOk: curve.gateOk },
@@ -248,6 +253,12 @@ export interface MergeItem {
 	description?: string | undefined;
 	lang?: Lang | undefined;
 	license?: License | undefined;
+	/**
+	 * Filter labels by wire index of `s1` (ten entries, null = automatic name). Same rules as an
+	 * `open-auri/preset@2` envelope: refused text rejects the item with INVALID_TEXT. Never part
+	 * of the dedupe identity (`curveId`, `canonKey`).
+	 */
+	labels?: (string | null)[] | null | undefined;
 }
 
 export type MergeRejectCode =
@@ -301,6 +312,18 @@ function truncate(value: string, max: number): string {
 }
 
 type TextResult = { ok: true; value: string } | { ok: false; reasons: string[] };
+type LabelsResult = { ok: true; value: VersionLabels | null } | { ok: false; reasons: string[] };
+
+/** Core `normalizeLabels` (strict, the preset@2 rules); null or absent means no labels. */
+function cleanLabels(value: unknown): LabelsResult {
+	if (value === undefined || value === null) return { ok: true, value: null };
+	try {
+		return { ok: true, value: normalizeLabels(value) };
+	} catch (error) {
+		if (error instanceof EnvelopeError) return { ok: false, reasons: issueCodes(error) };
+		throw error;
+	}
+}
 
 /** NFKC, no invisibles/bidi, no URL (core `normalizeText`), then cut to `max` code points. */
 function cleanText(value: string, multiline: boolean, max: number, path: string): TextResult {
@@ -456,10 +479,12 @@ export async function mergeLocalLibrary(
 
 		const name = cleanText(item.name, false, NAME_MAX, 'name');
 		const description = cleanText(item.description ?? '', true, DESCRIPTION_MAX, 'description');
-		if (!name.ok || !description.ok || name.value === '') {
+		const labels = cleanLabels(item.labels);
+		if (!name.ok || !description.ok || !labels.ok || name.value === '') {
 			const reasons = [
 				...(name.ok ? (name.value === '' ? ['env:length'] : []) : name.reasons),
-				...(description.ok ? [] : description.reasons)
+				...(description.ok ? [] : description.reasons),
+				...(labels.ok ? [] : labels.reasons)
 			];
 			report.rejected.push({ localId: item.localId, code: 'INVALID_TEXT', reasons });
 			continue;
@@ -505,7 +530,8 @@ export async function mergeLocalLibrary(
 				description: description.value,
 				license: item.license ?? MERGE_DEFAULT_LICENSE,
 				recipe: null,
-				lang: item.lang ?? MERGE_DEFAULT_LANG
+				lang: item.lang ?? MERGE_DEFAULT_LANG,
+				labels: labels.value
 			},
 			now
 		});

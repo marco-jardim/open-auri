@@ -1,17 +1,22 @@
 import { describe, expect, test } from 'vitest';
-import { curveResponseDb } from 'open-auri/dsp';
+import { curveResponseDb, logGrid } from 'open-auri/dsp';
 import { ABS_RANGES, gateForWrite, SOFT_RANGES, THRESHOLDS } from 'open-auri/safety';
 import type { Band, Curve } from '#lib/components/pages/curva/model.ts';
 import {
+	audibleLength,
+	audiblePeak,
+	audibleSpansAbove,
 	bandResponse,
 	dbOf,
 	DRAG_GRID,
+	F_MAX,
 	freqOf,
 	hardZones,
 	INTERNAL_LIMIT_DB,
 	keyTarget,
 	MAJOR_FREQS,
 	MINOR_FREQS,
+	NYQUIST_HZ,
 	OUTPUT_LIMIT_DB,
 	pathOf,
 	PLOT,
@@ -41,10 +46,10 @@ const nearest = (freqHz: number) =>
 		0
 	);
 
-describe('scope geometry (mock plot: 20 Hz to 20 kHz, ±15 dB)', () => {
+describe('scope geometry (mock plot: 20 Hz to Nyquist, 48 kHz, ±15 dB)', () => {
 	test('scales map the plot corners and invert each other', () => {
 		expect(xOf(20)).toBeCloseTo(PLOT.left, 9);
-		expect(xOf(20000)).toBeCloseTo(PLOT.right, 9);
+		expect(xOf(NYQUIST_HZ)).toBeCloseTo(PLOT.right, 9);
 		expect(yOf(15)).toBeCloseTo(PLOT.top, 9);
 		expect(yOf(-15)).toBeCloseTo(PLOT.bottom, 9);
 		expect(freqOf(xOf(1234))).toBeCloseTo(1234, 6);
@@ -183,6 +188,84 @@ describe('scope traces come from core responses', () => {
 		expect(spansAbove([1, 0, 1], 0.5, [10, 20, 30])).toHaveLength(2);
 		expect(spansAbove([0, 0], 0.5, [10, 20])).toEqual([]);
 		expect(segmentPath([0, 1, 2], 15, 30, [10, 20, 30]).split('L')).toHaveLength(2);
+	});
+});
+
+describe('the axis runs to Nyquist (48 kHz): exact convergence drawn, audible readouts', () => {
+	const last = SCOPE_GRID.length - 1;
+	const at20k = SCOPE_GRID.indexOf(F_MAX);
+	const within = (value: number | undefined, db: number) =>
+		expect(Math.abs((value ?? NaN) - db)).toBeLessThan(0.01);
+
+	test('the grid ends at 48 kHz and keeps the audible grid the readouts always used', () => {
+		expect(NYQUIST_HZ).toBe(48000);
+		expect(SCOPE_GRID[last]).toBe(48000);
+		expect(xOf(F_MAX)).toBeLessThan(PLOT.right);
+		expect(SCOPE_GRID.slice(0, at20k + 1)).toEqual(logGrid(193, 20, 20000));
+		SCOPE_GRID.forEach((f, i) => {
+			if (i > 0) expect(f).toBeGreaterThan(SCOPE_GRID[i - 1] ?? Infinity);
+		});
+		// The drag decimation keeps both 20 kHz and Nyquist.
+		expect(DRAG_GRID[DRAG_GRID.length - 1]).toBe(48000);
+		expect(DRAG_GRID).toContain(F_MAX);
+		expect(audibleLength(SCOPE_GRID)).toBe(at20k + 1);
+		expect(audibleLength(DRAG_GRID)).toBe(DRAG_GRID.indexOf(F_MAX) + 1);
+	});
+
+	test('a PK and an LS return to the preamp baseline at 48 kHz (within 0.01 dB)', () => {
+		const curve: Curve = {
+			bands: pad([
+				{ kind: 'PK', freqHz: 10000, gainDb: -4, qFactor: 1.4 },
+				{ kind: 'LS', freqHz: 120, gainDb: 3, qFactor: 0.7 }
+			]),
+			preampDb: -3.5
+		};
+		const t = traces(curve);
+		within(t.output[last], curve.preampDb);
+		within(t.eq[last], 0);
+		// Core's exact response on the extended grid, not an approximation of it.
+		const core = curveResponseDb(curve, SCOPE_GRID);
+		t.output.forEach((value, i) => expect(value).toBeCloseTo(core[i] ?? NaN, 9));
+	});
+
+	test('an HS keeps its gain at 48 kHz and an LP falls toward −∞, pinned at the floor', () => {
+		const hs = bandResponse({ kind: 'HS', freqHz: 8000, gainDb: 4, qFactor: 0.7 });
+		within(hs?.[last], 4);
+		const lp = bandResponse({ kind: 'LP', freqHz: 12000, qFactor: 0.7 });
+		if (!lp) throw new Error('the LP has a trace');
+		for (let i = at20k + 1; i <= last; i++) expect(lp[i]).toBeLessThan(lp[i - 1] ?? NaN);
+		expect(lp[last]).toBeLessThan((lp[at20k] ?? NaN) - 40);
+		// The path keeps every point: the last one clamped below the floor, where the clip crops.
+		const d = pathOf(lp);
+		expect(d.split('L')).toHaveLength(SCOPE_GRID.length);
+		expect(d.endsWith(`L${xOf(NYQUIST_HZ).toFixed(1)} ${yOf(-60).toFixed(1)}`)).toBe(true);
+	});
+
+	test('the audible peak and zones ignore the 20 to 48 kHz band', () => {
+		// A rising shelf: the output keeps climbing past 20 kHz, up to its full gain at Nyquist.
+		const curve: Curve = {
+			bands: pad([{ kind: 'HS', freqHz: 10000, gainDb: 5, qFactor: 0.7 }]),
+			preampDb: -6
+		};
+		const t = traces(curve);
+		const audible = t.output.slice(0, at20k + 1);
+		const audibleMax = Math.max(...audible);
+		const fullMax = Math.max(...t.output);
+		expect(fullMax).toBeGreaterThan(audibleMax);
+		within(t.output[last], curve.preampDb + 5);
+		const peak = audiblePeak(t.output);
+		expect(peak).toEqual({ db: audibleMax, hz: SCOPE_GRID[audible.indexOf(audibleMax)] });
+		expect(peak?.hz).toBeLessThanOrEqual(F_MAX);
+		const coarse = traces(curve, DRAG_GRID);
+		expect(audiblePeak(coarse.output, DRAG_GRID)?.hz).toBeLessThanOrEqual(F_MAX);
+		// A threshold only the inaudible band crosses lights no zone.
+		const between = (audibleMax + fullMax) / 2;
+		expect(spansAbove(t.output, between).length).toBeGreaterThan(0);
+		expect(audibleSpansAbove(t.output, between)).toEqual([]);
+		expect(audibleSpansAbove(t.output, OUTPUT_LIMIT_DB).every((s) => s.toHz <= F_MAX)).toBe(true);
+		// A spike above 20 kHz is never the peak.
+		expect(audiblePeak([0, 1, 9], [1000, 20000, 30000])).toEqual({ db: 1, hz: 20000 });
+		expect(audiblePeak([9], [30000])).toBeNull();
 	});
 });
 
