@@ -122,6 +122,33 @@ test('a pending report blocks duplicate sends and releases the form after failur
 	expect(fetch).not.toHaveBeenCalled();
 });
 
+test('a report marks the submitted channel, even when the selection changes in flight', async () => {
+	const { props } = setup();
+	let resolve: (value: { reported: true }) => void = () => undefined;
+	vi.spyOn(props.api, 'report').mockReturnValueOnce(
+		new Promise((done) => {
+			resolve = done;
+		})
+	);
+	const screen = await render(ReportPanel, props);
+	await send().click();
+	await expect.element(send()).toHaveAttribute('aria-busy', 'true');
+	await screen.rerender({ channel: { ...channel, lineageId: 'lin-second', name: 'Outra curva' } });
+	resolve({ reported: true });
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.comunidade_report_sent());
+	expect(props.api.report).toHaveBeenCalledWith(
+		expect.objectContaining({ targetId: channel.lineageId }),
+		'token'
+	);
+	// The channel now on screen was not reported: a fresh check makes it sendable.
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_report_needs_check());
+	await screen.rerender({ token: 'fresh' });
+	await expect.element(send()).not.toHaveAttribute('aria-disabled');
+	// The submitted channel is the one marked as reported.
+	await screen.rerender({ channel });
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_v2_reason_report_sent());
+});
+
 test('lazy widget callback enables sending and expiry disables it again without a network script', async () => {
 	const { props } = setup();
 	let options: TurnstileRenderOptions | undefined;

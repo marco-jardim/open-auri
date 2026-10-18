@@ -277,6 +277,38 @@ test('preferred lineage is honored only when owned, and changing it ignores a st
 	expect(page.getByRole('table').elements()).toHaveLength(0);
 });
 
+test('a stale failed lineage request never clears the lineage now selected', async () => {
+	const { props } = setup(() => apiError('INTERNAL', 500));
+	const original = await props.api.getLineage(LINEAGE.id);
+	let reject: (error: Error) => void = () => undefined;
+	const old = new Promise<typeof original>((_resolve, fail) => {
+		reject = fail;
+	});
+	const get = vi.spyOn(props.api, 'getLineage').mockImplementation(async (id) => {
+		if (id === LINEAGE.id) return old;
+		return { ...original, lineage: { ...original.lineage, id } };
+	});
+	// The second lineage reuses the fixture's versions and curves.
+	const getCurve = props.api.getCurve.bind(props.api);
+	vi.spyOn(props.api, 'getCurve').mockImplementation((_id, query) => getCurve(LINEAGE.id, query));
+	const screen = await render(TotalRecall, {
+		...props,
+		owned: [...props.owned, { id: 'lin-second', name: 'Segunda criação' }]
+	});
+	await expect.poll(() => get.mock.calls.length).toBe(1);
+	await screen.rerender({ preferred: 'lin-second' });
+	await expect.poll(() => get.mock.calls.length).toBe(2);
+	expect(get.mock.calls[1]?.[0]).toBe('lin-second');
+	await expect.element(page.getByRole('table')).toBeVisible();
+	reject(new Error('stale failure'));
+	await old.catch(() => undefined);
+	// One macrotask: the stale catch and the effect flush (microtasks) have both run.
+	await new Promise((done) => setTimeout(done, 0));
+	expect(page.getByRole('alert').elements()).toHaveLength(0);
+	expect(document.querySelectorAll('.commit')).toHaveLength(VERSIONS.length);
+	await expect.element(page.getByRole('table')).toBeVisible();
+});
+
 test.each([{ versions: [] }, { versions: [version('ver1xxxxx', null, 'Única versão', true)] }])(
 	'empty and root-only histories have no restore action ($versions)',
 	async ({ versions }) => {

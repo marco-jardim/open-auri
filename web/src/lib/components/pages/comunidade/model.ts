@@ -76,8 +76,13 @@ export const REPORT_REASONS: readonly ReportReason[] = [
 export const FEED_SORTS: readonly FeedSortKey[] = ['new', 'favorites', 'installs'];
 export const FEED_WINDOWS: readonly FeedWindowKey[] = ['7d', '30d', 'all'];
 export const FEED_PAGE_SIZE = 24;
+/** Pack text limits (server `NAME_MAX`/`DESCRIPTION_MAX`, `#lib/server/social/types.ts`). */
 export const NAME_MAX = 80;
 export const DESCRIPTION_MAX = 1000;
+// S5 envelope limits in code points (src/share/envelope.mjs:403-404, `validateEnvelope`; the core
+// does not export them): a longer published name or description is always refused.
+export const S5_NAME_MAX = 48;
+export const S5_DESCRIPTION_MAX = 280;
 export const NOTE_MAX = 500;
 /** Local copies of the S6 receipts (the only way to withdraw an anonymous batch). */
 export const S6_RECEIPTS_KEY = 'oa.social.s6.receipts';

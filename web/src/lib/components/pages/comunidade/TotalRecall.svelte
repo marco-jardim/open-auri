@@ -96,6 +96,8 @@
 			toId = head?.id ?? '';
 			fromId = head?.parentId ?? result.versions.find((version) => !version.isHead)?.id ?? '';
 		} catch (error) {
+			// A stale request (the selected lineage changed meanwhile) never clears the current one.
+			if (target !== lineageId) return;
 			data = null;
 			loadError = errorText(error);
 		} finally {

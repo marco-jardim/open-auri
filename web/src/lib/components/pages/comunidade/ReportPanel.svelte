@@ -113,17 +113,19 @@
 		if (!canSend || !channel) return;
 		busy = true;
 		message = '';
+		// The submitted target: the selected channel may change while the request is in flight.
+		const targetId = channel.lineageId;
 		try {
 			await api.report(
 				{
 					targetKind: 'lineage',
-					targetId: channel.lineageId,
+					targetId,
 					reason,
 					note: note.trim() === '' ? null : note
 				},
 				token
 			);
-			sentFor = channel.lineageId;
+			sentFor = targetId;
 			note = '';
 			message = m.comunidade_report_sent();
 		} catch (error) {

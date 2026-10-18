@@ -197,12 +197,10 @@ test('a name the user typed is never replaced when the editor name changes', asy
 	await expect.element(name).toHaveValue('Meu nome');
 });
 
-// PRODUCT BUG (OnAir.svelte:67-69 with :161): `nameTouched` is a plain flag set by the delegated
-// `oninput` handler, which runs AFTER bind:value has written `name = ''`. For a real (trusted)
-// input event the microtask checkpoint between the two listeners flushes the prefill effect
-// first, which still sees `!nameTouched && name === ''` and writes the editor name back. Clearing
-// the field as the first edit therefore refills it. Remove `.fails` once the product is fixed.
-test.fails('a name the user clears stays empty, even when the editor name changes', async () => {
+// Regression: `nameTouched` used to be set by a delegated `oninput` that ran AFTER bind:value had
+// written `name = ''`, so the prefill effect refilled a field cleared as the first edit. The flag
+// is now set in the binding's setter, before `name` changes.
+test('a name the user clears stays empty, even when the editor name changes', async () => {
 	const { props } = setup(() => undefined);
 	const screen = await render(OnAir, props);
 	const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
@@ -213,28 +211,22 @@ test.fails('a name the user clears stays empty, even when the editor name change
 	await expect.element(name).toHaveValue('');
 });
 
-// PRODUCT BUG (model.ts:79-80 used by OnAir.svelte:68, :158 and :167): NAME_MAX = 80 and
-// DESCRIPTION_MAX = 1000, but the S5 envelope accepts 48 and 280 code points
-// (src/share/envelope.mjs:403-404). A long editor name is prefilled at 80 characters, so the
-// default name can never be published, and both fields accept text the gate always refuses.
-// Remove `.fails` once the product is fixed.
-test.fails(
-	'the publish fields stay within the S5 limits, so a long editor name prefills publishable',
-	async () => {
-		const { props } = setup(() => undefined);
-		await render(OnAir, { ...props, editorName: 'N'.repeat(100) });
-		const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
-		await expect.element(name).toHaveValue('N'.repeat(48));
-		await expect.element(name).toHaveAttribute('maxlength', '48');
-		await expect
-			.element(page.getByRole('textbox', { name: m.comunidade_onair_description() }))
-			.toHaveAttribute('maxlength', '280');
-		expect(document.querySelector('[data-testid="envelope-issues"]')).toBeNull();
-		await expect
-			.element(page.getByRole('button', { name: m.comunidade_onair_publish(), exact: true }))
-			.not.toHaveAttribute('aria-disabled');
-	}
-);
+// Regression: S5_NAME_MAX and S5_DESCRIPTION_MAX follow the S5 envelope (48 and 280 code points,
+// src/share/envelope.mjs:403-404), so a long editor name is prefilled at a publishable length.
+test('the publish fields stay within the S5 limits, so a long editor name prefills publishable', async () => {
+	const { props } = setup(() => undefined);
+	await render(OnAir, { ...props, editorName: 'N'.repeat(100) });
+	const name = page.getByRole('textbox', { name: m.comunidade_onair_name() });
+	await expect.element(name).toHaveValue('N'.repeat(48));
+	await expect.element(name).toHaveAttribute('maxlength', '48');
+	await expect
+		.element(page.getByRole('textbox', { name: m.comunidade_onair_description() }))
+		.toHaveAttribute('maxlength', '280');
+	expect(document.querySelector('[data-testid="envelope-issues"]')).toBeNull();
+	await expect
+		.element(page.getByRole('button', { name: m.comunidade_onair_publish(), exact: true }))
+		.not.toHaveAttribute('aria-disabled');
+});
 
 test('chosen license, visibility and maximum description reach the server; edited audio extinguishes the lamp', async () => {
 	const { props, fetch, onpublished } = setup(() =>

@@ -17,8 +17,8 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { isSocialApiError, type PublishedInfo, type SocialApi } from '#lib/social/index.ts';
 	import {
-		DESCRIPTION_MAX,
-		NAME_MAX,
+		S5_DESCRIPTION_MAX,
+		S5_NAME_MAX,
 		buildEnvelope,
 		curveCodesOf,
 		encodeCurve,
@@ -64,8 +64,14 @@
 	let rejected = $state(false);
 	let nameTouched = false;
 
+	/** The input's setter: marks the name as the user's before the prefill effect can run. */
+	function setName(value: string) {
+		nameTouched = true;
+		name = value;
+	}
+
 	$effect(() => {
-		if (!nameTouched && name === '' && editorName) name = editorName.slice(0, NAME_MAX);
+		if (!nameTouched && name === '' && editorName) name = editorName.slice(0, S5_NAME_MAX);
 	});
 
 	const lang = $derived<Lang>(getLocale() === 'en-US' ? 'en-US' : 'pt-BR');
@@ -155,17 +161,18 @@
 				<span class="fld-lbl">{m.comunidade_onair_name()}</span>
 				<input
 					class="tape-input"
-					maxlength={NAME_MAX}
+					maxlength={S5_NAME_MAX}
 					autocomplete="off"
-					bind:value={name}
-					oninput={() => (nameTouched = true)}
+					bind:value={() => name, setName}
 					disabled={!session.verified}
 				/>
 			</label>
 			<label>
 				<span class="fld-lbl">{m.comunidade_onair_description()}</span>
-				<textarea maxlength={DESCRIPTION_MAX} bind:value={description} disabled={!session.verified}
-				></textarea>
+				<textarea
+					maxlength={S5_DESCRIPTION_MAX}
+					bind:value={description}
+					disabled={!session.verified}></textarea>
 			</label>
 			<fieldset>
 				<legend class="fld-lbl">{m.comunidade_onair_license()}</legend>
