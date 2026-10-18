@@ -120,6 +120,19 @@
 		editorName: string;
 	}
 	let saved = $state.raw<SavedCopy | null>(null);
+	/**
+	 * What a fresh read of the saved copy allows. The dialog promises a private copy, and the
+	 * server appends to any lineage the owner has: a new version only while it is private and
+	 * active (Minha Biblioteca, or another tab, may have published it since).
+	 */
+	function copyState(lineage: {
+		visibility: string;
+		status: string;
+		headVersion: string | null;
+	}): 'private' | 'exposed' | 'gone' {
+		if (lineage.status !== 'active' || !lineage.headVersion) return 'gone';
+		return lineage.visibility === 'private' ? 'private' : 'exposed';
+	}
 	const draftS1 = $derived(draftCurve ? currentS1(draftCurve) : null);
 	/** The saved copy a "Salvar" of the frozen draft updates (same account, exact same S1). */
 	const draftCopy = $derived(
@@ -353,21 +366,41 @@
 			focusIssue(checked.issues);
 			return;
 		}
-		if (copy && checked.name === copy.name && checked.description === copy.description) {
-			message = m.cvedit_save_unchanged();
-			dialog?.close();
-			return;
-		}
 		busy = true;
+		/** The saved copy this submit still targets; null once a new lineage is created instead. */
+		let target = copy;
+		let notice = '';
 		try {
-			if (copy) {
+			if (target) {
+				// Never trust a remembered visibility: read the lineage right before appending.
+				const current = await api.getLineage(target.lineageId);
+				const state = copyState(current.lineage);
+				if (state === 'gone') {
+					saved = null;
+					message = m.cvedit_save_gone();
+					return;
+				}
+				const unchanged =
+					checked.name === target.name && checked.description === target.description;
+				if (state === 'exposed') {
+					// No longer private: leave it untouched and keep the promise with a new private copy.
+					saved = null;
+					target = null;
+					notice = m.cvedit_save_not_private();
+				} else if (unchanged) {
+					message = m.cvedit_save_unchanged();
+					dialog?.close();
+					return;
+				}
+			}
+			if (target) {
 				// Name and description live on the (append-only) version: a new version, same lineage.
-				const result = await api.appendVersion(copy.lineageId, {
-					parentVersionId: copy.versionId,
+				const result = await api.appendVersion(target.lineageId, {
+					parentVersionId: target.versionId,
 					envelope: checked.envelope
 				});
 				saved = {
-					...copy,
+					...target,
 					versionId: result.versionId,
 					name: checked.name,
 					description: checked.description,
@@ -404,16 +437,24 @@
 				originRevision++;
 			}
 			message =
-				targetVisibility === 'private' ? m.curva_social_saved() : m.curva_social_published();
+				notice ||
+				(targetVisibility === 'private' ? m.curva_social_saved() : m.curva_social_published());
 			dialog?.close();
 		} catch (cause) {
-			if (copy) await copyFailed(copy, cause);
-			else failure(cause);
+			if (target) await copyFailed(target, cause);
+			else {
+				failure(cause);
+				// The exposed copy is already forgotten: say why the next save creates a new one.
+				if (notice) {
+					const retry = m.cvedit_save_not_private_retry();
+					message = message ? `${retry} ${message}` : retry;
+				}
+			}
 		} finally {
 			busy = false;
 		}
 	}
-	/** A new version of the saved copy failed: its head moved, or it is gone. */
+	/** The read before a new version, or the new version, failed: its head moved, or it is gone. */
 	async function copyFailed(copy: SavedCopy, cause: unknown) {
 		if (!isSocialApiError(cause) || cause.unreachable || cause.status >= 500) {
 			failure(cause);
@@ -436,9 +477,16 @@
 			const current = await api.getLineage(copy.lineageId);
 			const headId = current.lineage.headVersion;
 			const head = current.versions.find((version) => version.id === headId);
-			if (current.lineage.status !== 'active' || !headId) {
+			const state = copyState(current.lineage);
+			if (state === 'gone' || !headId) {
 				saved = null;
 				message = m.cvedit_save_gone();
+				return;
+			}
+			if (state === 'exposed') {
+				// Published or unlisted meanwhile: never reload it as the private copy to update.
+				saved = null;
+				message = m.cvedit_save_not_private_retry();
 				return;
 			}
 			saved = {
@@ -630,7 +678,7 @@
 		{/if}
 		{#if saving}
 			<p class="note">{m.cvedit_save_private()}</p>
-			{#if draftCopy}<p class="note">{m.cvedit_save_version()}</p>{/if}
+			{#if draftCopy}<p class="note">{m.cvedit_save_version_page()}</p>{/if}
 		{:else}
 			<label>
 				{m.curva_social_license()}

@@ -1,5 +1,6 @@
 // "Salvar" on the Curva page asks for the name and description of the private copy, and saving
-// the same curve again appends a version to that copy instead of creating a duplicate lineage.
+// the same curve again appends a version to that copy instead of creating a duplicate lineage,
+// but only after a fresh read shows the copy is still private and active.
 import { afterEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -11,42 +12,6 @@ import { m } from '#lib/paraglide/messages.js';
 import SocialActions from '#lib/components/pages/curva/SocialActions.svelte';
 import { curvaSocialApi } from '#lib/components/pages/curva/social.ts';
 import { fakeAppOptions } from '../../app/fakes.ts';
-
-// Layer this task's staging copy over the generated catalogs (same pattern as the T4.14 tests).
-vi.mock('#lib/paraglide/messages.js', async (importOriginal) => {
-	const original = await importOriginal<typeof import('#lib/paraglide/messages.js')>();
-	const { getLocale } = await import('#lib/paraglide/runtime.js');
-	const catalogs = import.meta.glob<Record<string, string>>(
-		[
-			'../../../../messages/_staging/CVEDIT.*.json',
-			'../../../../messages/pt-BR.json',
-			'../../../../messages/en-US.json'
-		],
-		{ eager: true, import: 'default' }
-	);
-	const catalog = (locale: string): Record<string, string> =>
-		Object.assign(
-			{},
-			...Object.entries(catalogs)
-				.filter(([path]) => path.endsWith(`${locale}.json`))
-				.map(([, values]) => values)
-		);
-	const pt = catalog('pt-BR');
-	const en = catalog('en-US');
-	const task = Object.fromEntries(
-		Object.keys(pt)
-			.filter((key) => key.startsWith('cvedit_'))
-			.map((key) => [
-				key,
-				(values: Record<string, string | number> = {}) =>
-					((getLocale() === 'en-US' ? en : pt)[key] ?? '').replace(
-						/\{(\w+)\}/g,
-						(_, name: string) => String(values[name] ?? '')
-					)
-			])
-	);
-	return { ...original, m: { ...original.m, ...task } };
-});
 
 const curve = { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb };
 const s1 = encodeS1(curve);
@@ -101,7 +66,9 @@ async function setup(routes: Record<string, Route>) {
 	});
 	const posts = (path: string) =>
 		calls.filter((call) => call.method === 'POST' && call.path === path);
-	return { app, calls, posts, screen };
+	const reads = (path: string) =>
+		calls.filter((call) => call.method === 'GET' && call.path === path);
+	return { app, calls, posts, reads, screen, session };
 }
 
 const dialog = () => page.getByRole('dialog');
@@ -122,6 +89,33 @@ async function openSave() {
 
 const created = (lineageId: string, versionId: string) => () =>
 	json({ lineageId, versionId, curveId: 'hash' }, 201);
+
+interface LineageFixture {
+	visibility?: 'public' | 'unlisted' | 'private';
+	status?: string;
+	head?: string;
+}
+/** `GET /api/v1/lineages/[id]` as its owner reads it (private and active unless told otherwise). */
+const lineage =
+	(id: string, { visibility = 'private', status = 'active', head = 'v1' }: LineageFixture = {}) =>
+	() =>
+		json({
+			lineage: {
+				id,
+				visibility,
+				status,
+				moderation: 'visible',
+				curated: false,
+				forkedFromVersion: null,
+				headVersion: head,
+				createdAt: 1,
+				updatedAt: 2,
+				isOwner: true
+			},
+			author: null,
+			versions: [],
+			nextCursor: null
+		});
 
 test('Salvar opens a private save dialog prefilled with the editor name; Esc cancels without a request', async () => {
 	const { calls } = await setup({ 'POST /api/v1/curves': created('mine', 'v1') });
@@ -164,8 +158,9 @@ test('the save sends the chosen name and description, privately, and remembers n
 });
 
 test('saving the same curve again appends versions to the saved lineage with the right parent', async () => {
-	const { posts, screen } = await setup({
+	const { posts, reads, screen } = await setup({
 		'POST /api/v1/curves': (_body, count) => created(`mine-${count}`, `v1-${count}`)(),
+		'GET /api/v1/lineages/mine-0': lineage('mine-0', { head: 'v1-0' }),
 		'POST /api/v1/lineages/mine-0/versions': (_body, count) =>
 			json({ lineageId: 'mine-0', versionId: `v${count + 2}`, curveId: 'hash' }, 201)
 	});
@@ -177,7 +172,7 @@ test('saving the same curve again appends versions to the saved lineage with the
 	// Reopening prefills the saved text and says a new version will be created.
 	await openSave();
 	await expect.element(nameBox()).toHaveValue('Primeiro nome');
-	await expect.element(dialog()).toMatchTextContent(m.cvedit_save_version());
+	await expect.element(dialog()).toMatchTextContent(m.cvedit_save_version_page());
 	await descriptionBox().fill('Agora com descrição.');
 	await confirm().click();
 	await expect.poll(() => nativeDialog().open).toBe(false);
@@ -190,6 +185,8 @@ test('saving the same curve again appends versions to the saved lineage with the
 		parentVersionId: 'v1-0',
 		envelope: { name: 'Primeiro nome', description: 'Agora com descrição.', code: s1 }
 	});
+	// The visibility was read right before that append, not trusted from memory.
+	expect(reads('/api/v1/lineages/mine-0')).toHaveLength(1);
 
 	// The new version is the next parent.
 	await openSave();
@@ -203,7 +200,7 @@ test('saving the same curve again appends versions to the saved lineage with the
 		envelope: { name: 'Segundo nome', description: 'Agora com descrição.' }
 	});
 
-	// Unchanged text sends nothing.
+	// Unchanged text appends nothing.
 	await openSave();
 	await confirm().click();
 	await expect.poll(() => nativeDialog().open).toBe(false);
@@ -216,7 +213,7 @@ test('saving the same curve again appends versions to the saved lineage with the
 	// Another curve is another lineage.
 	await screen.rerender({ curve: { ...curve, preampDb: -1 } });
 	await openSave();
-	await expect.element(dialog()).not.toMatchTextContent(m.cvedit_save_version());
+	await expect.element(dialog()).not.toMatchTextContent(m.cvedit_save_version_page());
 	await confirm().click();
 	await expect.poll(() => posts('/api/v1/curves').length).toBe(2);
 	expect(versions()).toHaveLength(2);
@@ -245,6 +242,85 @@ test('too long and linked text is explained per field and nothing is sent', asyn
 	await expect.element(nameBox()).not.toHaveAttribute('aria-invalid');
 	expect(calls).toEqual([]);
 });
+
+test('after an account switch, Salvar creates a new lineage and never appends to the other account copy', async () => {
+	const { calls, posts, session } = await setup({
+		'POST /api/v1/curves': (_body, count) => created(`mine-${count}`, 'v1')(),
+		'GET /api/v1/lineages/mine-0': lineage('mine-0'),
+		'POST /api/v1/lineages/mine-0/versions': () =>
+			json({ lineageId: 'mine-0', versionId: 'v2', curveId: 'hash' }, 201)
+	});
+	await openSave();
+	await nameBox().fill('Da Ana');
+	await confirm().click();
+	await expect.poll(() => nativeDialog().open).toBe(false);
+
+	session.set({ id: 'u-bia', username: 'Bia', emailVerified: true });
+	await openSave();
+	// Ana's copy is neither offered nor prefilled to Bia.
+	await expect.element(dialog()).not.toMatchTextContent(m.cvedit_save_version_page());
+	await expect.element(nameBox()).toHaveValue('Editor');
+	await nameBox().fill('Da Bia');
+	await confirm().click();
+	await expect.poll(() => posts('/api/v1/curves').length).toBe(2);
+	await expect.poll(() => nativeDialog().open).toBe(false);
+	expect(posts('/api/v1/curves')[1]?.body).toMatchObject({
+		visibility: 'private',
+		envelope: { name: 'Da Bia', code: s1 }
+	});
+	expect(calls.filter((call) => call.path.startsWith('/api/v1/lineages/'))).toEqual([]);
+});
+
+test.each(['public', 'unlisted'] as const)(
+	'a saved copy made %s elsewhere gets no new version: Salvar creates a new private lineage and says so',
+	async (visibility) => {
+		const { posts, reads } = await setup({
+			'POST /api/v1/curves': (_body, count) => created(`mine-${count}`, `v1-${count}`)(),
+			'GET /api/v1/lineages/mine-0': lineage('mine-0', { visibility, head: 'v1-0' }),
+			'GET /api/v1/lineages/mine-1': lineage('mine-1', { head: 'v1-1' }),
+			'POST /api/v1/lineages/mine-0/versions': () =>
+				json({ lineageId: 'mine-0', versionId: 'v2', curveId: 'hash' }, 201),
+			'POST /api/v1/lineages/mine-1/versions': () =>
+				json({ lineageId: 'mine-1', versionId: 'v2', curveId: 'hash' }, 201)
+		});
+		await openSave();
+		await nameBox().fill('Privada');
+		await confirm().click();
+		await expect.poll(() => nativeDialog().open).toBe(false);
+
+		// This page still remembers the copy, so the dialog offers a new version of it...
+		await openSave();
+		await expect.element(dialog()).toMatchTextContent(m.cvedit_save_version_page());
+		await descriptionBox().fill('Texto que só eu vejo.');
+		await confirm().click();
+		await expect.poll(() => nativeDialog().open).toBe(false);
+		// ...but the read right before the append finds it is no longer private.
+		await expect
+			.element(page.getByRole('status').first())
+			.toMatchTextContent(m.cvedit_save_not_private());
+		expect(reads('/api/v1/lineages/mine-0')).toHaveLength(1);
+		expect(posts('/api/v1/lineages/mine-0/versions')).toEqual([]);
+		expect(posts('/api/v1/curves')).toHaveLength(2);
+		expect(posts('/api/v1/curves')[1]?.body).toMatchObject({
+			visibility: 'private',
+			envelope: { name: 'Privada', description: 'Texto que só eu vejo.', code: s1 }
+		});
+
+		// The new private lineage is the copy the next "Salvar" updates.
+		await openSave();
+		await expect.element(descriptionBox()).toHaveValue('Texto que só eu vejo.');
+		await nameBox().fill('Privada de novo');
+		await confirm().click();
+		await expect.poll(() => posts('/api/v1/lineages/mine-1/versions').length).toBe(1);
+		await expect.poll(() => nativeDialog().open).toBe(false);
+		expect(posts('/api/v1/lineages/mine-1/versions')[0]?.body).toMatchObject({
+			parentVersionId: 'v1-1',
+			envelope: { name: 'Privada de novo' }
+		});
+		expect(posts('/api/v1/lineages/mine-0/versions')).toEqual([]);
+		expect(posts('/api/v1/curves')).toHaveLength(2);
+	}
+);
 
 test('HEAD_MOVED on a re-save explains, reloads the head and the next save uses it', async () => {
 	const { posts, calls } = await setup({
@@ -306,12 +382,42 @@ test('HEAD_MOVED on a re-save explains, reloads the head and the next save uses 
 	expect(posts('/api/v1/curves')).toHaveLength(1);
 });
 
+test('a HEAD_MOVED reload that finds the copy no longer private forgets it instead of reloading it', async () => {
+	const { posts } = await setup({
+		'POST /api/v1/curves': (_body, count) => created(`mine-${count}`, 'v1')(),
+		// Private at the read before the append, public by the time the head is reloaded.
+		'GET /api/v1/lineages/mine-0': (_body, count) =>
+			lineage('mine-0', { visibility: count === 0 ? 'private' : 'public', head: 'v9' })(),
+		'POST /api/v1/lineages/mine-0/versions': () => json({ error: { code: 'HEAD_MOVED' } }, 409)
+	});
+	await openSave();
+	await confirm().click();
+	await expect.poll(() => nativeDialog().open).toBe(false);
+	await openSave();
+	await nameBox().fill('Nome novo');
+	await confirm().click();
+	await expect
+		.element(dialog().getByRole('status'))
+		.toHaveTextContent(m.cvedit_save_not_private_retry());
+	expect(nativeDialog().open).toBe(true);
+	await expect.element(dialog()).not.toMatchTextContent(m.cvedit_save_version_page());
+	await confirm().click();
+	await expect.poll(() => posts('/api/v1/curves').length).toBe(2);
+	await expect.poll(() => nativeDialog().open).toBe(false);
+	expect(posts('/api/v1/curves')[1]?.body).toMatchObject({
+		visibility: 'private',
+		envelope: { name: 'Nome novo' }
+	});
+	expect(posts('/api/v1/lineages/mine-0/versions')).toHaveLength(1);
+});
+
 test('gate rejection and account limits keep the dialog, its text and the saved copy', async () => {
 	const { posts } = await setup({
 		'POST /api/v1/curves': (_body, count) =>
 			count === 0
 				? json({ error: { code: 'GATE_REJECTED', details: { reasons: ['e:output-full'] } } }, 422)
 				: created('mine', 'v1')(),
+		'GET /api/v1/lineages/mine': lineage('mine'),
 		'POST /api/v1/lineages/mine/versions': (_body, count) =>
 			count === 0
 				? json({ error: { code: 'RATE_LIMITED' } }, 429)
@@ -343,6 +449,7 @@ test('gate rejection and account limits keep the dialog, its text and the saved 
 test('a retracted saved copy is forgotten: the next save creates a new private lineage', async () => {
 	const { posts } = await setup({
 		'POST /api/v1/curves': (_body, count) => created(`mine-${count}`, 'v1')(),
+		'GET /api/v1/lineages/mine-0': lineage('mine-0'),
 		'POST /api/v1/lineages/mine-0/versions': () => json({ error: { code: 'CONFLICT' } }, 409)
 	});
 	await openSave();
@@ -352,7 +459,7 @@ test('a retracted saved copy is forgotten: the next save creates a new private l
 	await nameBox().fill('Depois de retirada');
 	await confirm().click();
 	await expect.element(dialog().getByRole('status')).toHaveTextContent(m.cvedit_save_gone());
-	await expect.element(dialog()).not.toMatchTextContent(m.cvedit_save_version());
+	await expect.element(dialog()).not.toMatchTextContent(m.cvedit_save_version_page());
 	await confirm().click();
 	await expect.poll(() => posts('/api/v1/curves').length).toBe(2);
 	expect(posts('/api/v1/curves')[1]?.body).toMatchObject({
@@ -364,6 +471,7 @@ test('a retracted saved copy is forgotten: the next save creates a new private l
 test('a 200 answer cannot claim a new version', async () => {
 	const { screen } = await setup({
 		'POST /api/v1/curves': created('mine', 'v1'),
+		'GET /api/v1/lineages/mine': lineage('mine'),
 		'POST /api/v1/lineages/mine/versions': () =>
 			json({ lineageId: 'mine', versionId: 'v2', curveId: 'hash' }, 200)
 	});
