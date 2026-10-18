@@ -367,11 +367,12 @@ test('Neutro: ten parked points at 0 dB with the hint; keys or drags create a fi
 	pointer(element, 'pointerup', { clientX: 0, clientY: 0 });
 	expect(onpark).toHaveBeenCalledTimes(2);
 	expect(onpark.mock.calls[1]?.[0]).toBe(2);
-	// Ouvir: the points and the hint stay, without handles.
+	// Ouvir: the points stay, without handles, and the hint explains how to edit instead.
 	await screen.rerender({ layer: 'ouvir' });
 	expect(screen.container.querySelectorAll('.parked-dot')).toHaveLength(10);
 	expect(screen.container.querySelector('.handle')).toBeNull();
-	expect(screen.container.textContent).toContain(m.empty_neutral_body());
+	expect(screen.container.textContent).toContain(m.curva_ouvir_hint_title());
+	expect(screen.container.textContent).not.toContain(m.empty_neutral_body());
 });
 
 test('the preview lever says its state, warms audio on press and A/B explains itself', async () => {

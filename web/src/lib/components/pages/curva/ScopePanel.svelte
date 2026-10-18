@@ -119,6 +119,11 @@
 		oncommit: (index: number, target: DragTarget) => void;
 		/** A parked Neutro point was moved: create a filter there (page, gate-checked). */
 		onpark?: (index: number, target: DragTarget) => void;
+		/**
+		 * The page's layer change (the same path as the layer selector, `?camada=`). In Ouvir the
+		 * Neutro hint offers a button that switches to Ajustar through it.
+		 */
+		onlayer?: (layer: Layer) => void;
 		onpreview: () => void;
 		/** Pointer down or key down on the preview lever: warm the audio engine before the click. */
 		onpreviewwarm?: () => void;
@@ -154,6 +159,7 @@
 		ondrag,
 		oncommit,
 		onpark,
+		onlayer,
 		onpreview,
 		onpreviewwarm,
 		onside
@@ -169,6 +175,19 @@
 	const messages = { locale: getLocale() };
 	let overlay: SVGSVGElement | undefined = $state();
 	let screenWidth = $state(0);
+	/** The Ouvir hint's button asked for Ajustar: focus the first parked point once it is editable. */
+	let focusParked = $state(false);
+	function editInAjustar() {
+		focusParked = true;
+		onlayer?.('ajustar');
+	}
+	// The hint (and its button) leaves with Ouvir: hand the focus to the point the user can now drag
+	// instead of dropping it on the body.
+	$effect(() => {
+		if (!focusParked || !editable || !overlay) return;
+		focusParked = false;
+		overlay.querySelector<SVGGElement>('[data-parked]')?.focus();
+	});
 	interface ActiveDrag {
 		index: number;
 		pointer: number;
@@ -918,8 +937,19 @@
 					{#if chipWhy}<span class="chip-why">{chipWhy}</span>{/if}
 				</p>
 			{/if}
-			{#if parked}
+			{#if parked && editable}
 				<p class="park-hint">{m.empty_neutral_body()}</p>
+			{:else if parked}
+				<!-- Ouvir: nothing drags here, so the hint says what the layer is and how to edit. -->
+				<div class="park-hint ouvir-hint" data-testid="ouvir-hint">
+					<p class="oh-title">{m.curva_ouvir_hint_title()}</p>
+					<p>{m.curva_ouvir_hint_body()}</p>
+					{#if onlayer}
+						<button type="button" class="oh-action" onclick={editInAjustar}
+							>{m.curva_ouvir_hint_action()}</button
+						>
+					{/if}
+				</div>
 			{/if}
 		</div>
 	</div>
@@ -1477,6 +1507,40 @@
 		color: #ffe0c7;
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 		pointer-events: none;
+	}
+	/* Absolutely placed over the plot like the drag hint: no layout shift when the layer changes. */
+	.ouvir-hint {
+		z-index: 1;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		align-items: flex-start;
+		padding: 8px 12px;
+		border-style: solid;
+		pointer-events: auto;
+	}
+	.ouvir-hint p {
+		margin: 0;
+	}
+	.oh-title {
+		font-weight: 600;
+	}
+	.oh-action {
+		min-height: var(--hit);
+		padding: 0 14px;
+		border: 1px solid var(--accent);
+		border-radius: var(--rad-sm);
+		background: rgb(8 6 4 / 0.92);
+		color: #ffe0c7;
+		font: 600 var(--fs-small) / 1 var(--face-body);
+		cursor: pointer;
+	}
+	.oh-action:hover {
+		border-color: #ffe0c7;
+	}
+	.oh-action:focus-visible {
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: 2px;
 	}
 	.scope-legend {
 		display: flex;

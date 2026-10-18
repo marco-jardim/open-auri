@@ -812,6 +812,7 @@
 				ondrag={onDrag}
 				oncommit={(index, target) => void onCommit(index, target)}
 				onpark={onPark}
+				{onlayer}
 				onpreview={onPreview}
 				onpreviewwarm={onPreviewWarm}
 				onside={(side) => preview?.select(side)}
