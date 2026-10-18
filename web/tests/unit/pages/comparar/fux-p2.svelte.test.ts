@@ -83,7 +83,10 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 			expect(container.querySelector('.main-plot .limit text')?.textContent).toBe(t.outputLimit);
 			expect(container.querySelector('.main-plot .peak')).not.toBeNull();
 			expect(container.querySelector('.bay-cables .cable')).not.toBeNull();
-			expect(container.querySelectorAll('.sect-table-pending tbody tr')).toHaveLength(10);
+			// The pending PEQ table fills in once the blend is computed: wait for it under load (CI).
+			await expect
+				.poll(() => container.querySelectorAll('.sect-table-pending tbody tr').length)
+				.toBe(10);
 			for (const name of [t.save, t.write, t.bounce]) {
 				const button = page.getByRole('button', { name, exact: true });
 				await expect.element(button).toHaveAttribute('aria-disabled', 'true');
