@@ -32,6 +32,11 @@ export type PreviewError = 'gesture' | 'suspended' | 'unsupported' | 'failed';
 export const CURVA_SESSION = 'curva';
 
 export interface CurvaPreviewOptions {
+	/**
+	 * Modo YOLO is on (read at each A/B build): the A/B gets the engine's YOLO preview protection
+	 * (float peak normalized to -1 dBFS, then a limiter). Off by default: nothing changes.
+	 */
+	yolo?: () => boolean;
 	/** 0 VU reference for the taps (the app's `meterRef`); defaults to the module reference. */
 	reference?: () => VuReference;
 }
@@ -59,6 +64,8 @@ export class CurvaPreview {
 	/** Band index of each stage tap (the editor's non-OFF sections, in written order). */
 	#stageBands: number[] = [];
 	#generation = 0;
+	/** Whether Modo YOLO is on (the preview protection applies). */
+	#yolo: () => boolean;
 	/** Start attempts; `stop`/`dispose` bump it so a start still awaiting knows it lost. */
 	#attempt = 0;
 	/** This preview started (or is starting) chain mode, so it must stop it. */
@@ -73,6 +80,7 @@ export class CurvaPreview {
 	constructor(engine: AudioEngine, options: CurvaPreviewOptions = {}) {
 		this.#engine = engine;
 		this.#reference = options.reference ?? getReference;
+		this.#yolo = options.yolo ?? (() => false);
 	}
 
 	/**
@@ -271,7 +279,9 @@ export class CurvaPreview {
 		this.#disconnectMeters();
 		this.#ab = this.#engine.createAB(reference, editor, {
 			experimental: hasExperimental(reference.bands) || hasExperimental(editor.bands),
-			initial: this.side
+			initial: this.side,
+			// Modo YOLO previews only: normalized to -1 dBFS and limited (engine, opt-in).
+			...(this.#yolo() ? { protect: 'yolo' as const } : {})
 		});
 		this.#built = { reference, editor };
 		previous?.dispose();

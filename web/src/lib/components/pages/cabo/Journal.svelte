@@ -90,7 +90,19 @@
 		<ol class="cards">
 			{#each entries.toReversed() as entry, index (index)}
 				{@const encoded = encoderData(entry)}
-				<li class="card" data-status={entry.status}>
+				<li
+					class="card"
+					data-status={entry.status}
+					data-yolo={entry.profile === 'yolo' ? 'true' : undefined}
+				>
+					{#if entry.profile === 'yolo'}
+						<!-- A Modo YOLO write: red tape, with the criteria it waived. -->
+						<span
+							class="yolo-tape"
+							title={m.yolo_journal_entry({ criteria: (entry.waived ?? []).join(', ') || '-' })}
+							>{m.yolo_tape()}</span
+						>
+					{/if}
 					<header>
 						<time datetime={new Date(entry.at).toISOString()}
 							>{new Intl.DateTimeFormat(getLocale(), {
@@ -208,6 +220,16 @@
 	}
 	.example .tag {
 		transform: rotate(-5deg);
+	}
+	.yolo-tape {
+		display: inline-block;
+		margin-bottom: 4px;
+		padding: 1px 8px;
+		background: #a3262c;
+		color: #fff;
+		font: 700 var(--fs-caption, 12px) / 1.4 var(--face-data, 'JetBrains Mono', monospace);
+		letter-spacing: 0.16em;
+		transform: rotate(-2deg);
 	}
 	[data-status='interrupted'] .tag {
 		color: #901e23;

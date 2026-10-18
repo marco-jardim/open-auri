@@ -25,6 +25,7 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { JournalEntry } from '#lib/cable/types.ts';
+	import { loadDecision } from './load-entry.ts';
 	import { lampsFromGate } from '#lib/cable/checklist.ts';
 	import { neutralCurve } from '#lib/state/model.ts';
 	// Direct imports (FUX.B): the charts and chrome barrels would bring every chart, HelpOverlay
@@ -167,13 +168,25 @@
 	}
 
 	function loadEntry(entry: JournalEntry) {
-		// Loading a journal card is editor-only, including interrupted and simulated entries.
-		app?.state.curve.set({
+		// Loading a journal card is editor-only, including interrupted and simulated entries, but
+		// gated: a YOLO entry needs YOLO on in this tab (and the YOLO gate), any other entry the
+		// standard gate.
+		if (!app) return;
+		const decision = loadDecision(entry, app.yolo.enabled);
+		if (!decision.load) {
+			app.toasts.push(
+				decision.reason === 'yolo-off' ? m.yolo_load_refused() : m.yolo_load_gate_refused(),
+				{ tone: 'error' }
+			);
+			return;
+		}
+		app.state.curve.set({
 			name: entry.name,
 			source: 'custom',
 			bands: entry.bands,
 			preampDb: entry.preampDb
 		});
+		if (decision.profile === 'yolo') app.toasts.push(m.yolo_load_yolo());
 	}
 </script>
 

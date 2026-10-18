@@ -31,11 +31,35 @@
 //   4. `g:preamp`;
 //   5. per stage, in stage order: `a:<position>` in wire order (b0, b2, -a1,
 //      b1, -a2), then `b:pole-radius`, then `c:section-peak`;
-//   6. `d:prefix-peak`, `e:output-audible`, `e:output-full`.
+//   6. `d:prefix-peak`, `d:prefix-peak-full` (YOLO profile only),
+//      `e:output-audible`, `e:output-full`.
 // Every comparison is written so that NaN fails (`!(x <= limit)`).
 //
 // UI control ranges are NOT enforced here (that is src/safety/policy.mjs),
 // except the D7 boost rules and the filter kinds, which are part of the contract.
+//
+// Profiles (`options.profile`). The standard profile (the default, and what the
+// server always uses) blocks on every reason above. The YOLO profile, selected
+// only by an own data property holding exactly the string 'yolo' (see
+// gateProfile), sorts the reasons in two classes:
+//   - class 1, hard, blocking in every profile: `f:codec` (known kind, finite
+//     values, 0 < f < 48 kHz, Q > 0, int32 Q27 words, quantized poles strictly
+//     inside the unit circle, finite preamp <= 0), `a:-a1` and `a:-a2` (the
+//     feedback words, i.e. the pole positions), `b:pole-radius`,
+//     `d:prefix-peak`, `e:output-audible`, `e:output-full`, plus the YOLO-only
+//     `d:prefix-peak-full` (every prefix, preamp included, over DC–48 kHz, at
+//     most the presets' largest: it bounds the out-of-band energy that
+//     `c:section-peak` bounded);
+//   - class 2, waived (YOLO_WAIVABLE): `k:kind-not-allowed`, `d7:*`,
+//     `g:preamp`, `a:b0`, `a:b2`, `a:b1` (feedforward words) and
+//     `c:section-peak`.
+// The classification is an allowlist of waivable codes: any other code blocks.
+// In YOLO, waived reasons leave `reasons` for `waived` (codes) and
+// `waivedReasons` (objects), the result carries `profile: 'yolo'`, and `ok`
+// depends on the blocking reasons only. A standard result keeps exactly its
+// former shape `{ok, reasons, metrics}` (no `waived` key: read a missing one as
+// empty), so standard verdicts, metrics and reasons are bit-identical to a gate
+// without profiles.
 //
 // Pure ESM: no DOM, no Node-only APIs.
 
@@ -55,19 +79,20 @@ import {
   sectionDbFromTerms,
 } from '../dsp/level.mjs';
 import { ABS_RANGES, isKindAllowed } from './policy.mjs';
-import { THRESHOLDS } from './thresholds.mjs';
+import { THRESHOLDS, YOLO_THRESHOLDS } from './thresholds.mjs';
 
 export { levelDb, MEAN_FREQUENCIES, sectionDb } from '../dsp/level.mjs';
-export { THRESHOLDS, PROVENANCE } from './thresholds.mjs';
+export { THRESHOLDS, PROVENANCE, YOLO_THRESHOLDS } from './thresholds.mjs';
 
 /**
  * @typedef {import('../dsp/eq0xcb.mjs').Band} Band
  * @typedef {import('../dsp/eq0xcb.mjs').Section} Section
  * @typedef {import('./thresholds.mjs').Thresholds} Thresholds
  * @typedef {'drag' | 'full'} Grid
+ * @typedef {'standard' | 'yolo'} GateProfile
  * @typedef {'a:b0' | 'a:b2' | 'a:-a1' | 'a:b1' | 'a:-a2' | 'b:pole-radius' | 'c:section-peak'
- *   | 'd:prefix-peak' | 'e:output-audible' | 'e:output-full' | 'f:codec' | 'g:preamp'
- *   | 'k:kind-not-allowed' | 'd7:pk-boost-above-16k' | 'd7:boost-q'} ReasonCode
+ *   | 'd:prefix-peak' | 'd:prefix-peak-full' | 'e:output-audible' | 'e:output-full' | 'f:codec'
+ *   | 'g:preamp' | 'k:kind-not-allowed' | 'd7:pk-boost-above-16k' | 'd7:boost-q'} ReasonCode
  * @typedef {{code: ReasonCode, stage?: number, value?: unknown, limit?: number}} Reason
  * @typedef {{db: number, frequencyHz: number}} Peak
  * @typedef {{stage: number, db: number, frequencyHz: number | null}} PrefixPeak
@@ -92,10 +117,116 @@ export { THRESHOLDS, PROVENANCE } from './thresholds.mjs';
  *   internalAudible?: PrefixPeak,
  *   outputAudible?: PrefixPeak,
  *   outputFull?: Peak,
+ *   prefixFull?: PrefixPeak[],
+ *   internalFull?: PrefixPeak,
  * }} GateMetrics
- * @typedef {{ok: boolean, reasons: Reason[], metrics: GateMetrics}} GateResult
- * @typedef {{experimental?: boolean, grid?: Grid}} GateOptions
+ * `prefixFull` and `internalFull` (DC–48 kHz prefix peaks) exist in the YOLO
+ * profile only.
+ * @typedef {{
+ *   ok: boolean,
+ *   reasons: Reason[],
+ *   waived?: ReasonCode[],
+ *   waivedReasons?: Reason[],
+ *   profile?: 'yolo',
+ *   metrics: GateMetrics,
+ * }} GateResult
+ * `reasons` are the blocking reasons (all of them in the standard profile).
+ * YOLO results only: `profile: 'yolo'`, `waived` lists, once each in order of
+ * first appearance, the codes the YOLO profile waived, and `waivedReasons` the
+ * waived reasons themselves. A standard result has none of these keys.
+ * @typedef {{experimental?: boolean, grid?: Grid, profile?: GateProfile}} GateOptions
  */
+
+/**
+ * Reason codes the YOLO profile waives (class 2): engineering and similarity
+ * limits of the editor, not limits of the chip's arithmetic. Every other code,
+ * present or future, blocks in every profile.
+ * @type {readonly ReasonCode[]}
+ */
+export const YOLO_WAIVABLE = Object.freeze([
+  'k:kind-not-allowed',
+  'd7:pk-boost-above-16k',
+  'd7:boost-q',
+  'g:preamp',
+  'a:b0',
+  'a:b2',
+  'a:b1',
+  'c:section-peak',
+]);
+
+/**
+ * Reason codes that block in every profile (class 1), in reason order. Listed
+ * for callers and tests; the gate itself blocks on anything not in
+ * {@link YOLO_WAIVABLE}.
+ * @type {readonly ReasonCode[]}
+ */
+export const HARD_REASONS = Object.freeze([
+  'f:codec',
+  'a:-a1',
+  'a:-a2',
+  'b:pole-radius',
+  'd:prefix-peak',
+  'd:prefix-peak-full',
+  'e:output-audible',
+  'e:output-full',
+]);
+
+/** @type {ReadonlySet<string>} */
+const WAIVABLE = new Set(YOLO_WAIVABLE);
+
+/**
+ * Whether the YOLO profile waives `code` (class 2).
+ * @param {unknown} code
+ * @returns {boolean}
+ */
+export function isWaivable(code) {
+  return typeof code === 'string' && WAIVABLE.has(code);
+}
+
+/**
+ * The gate profile `options` asks for, read once and never coerced. Only an own
+ * data property `profile` holding exactly the string `'yolo'` selects YOLO.
+ * Anything else is the standard profile: another string (`'YOLO'`, `' yolo'`),
+ * `true` or any other truthy value, a String object, an inherited property, a
+ * property behind a getter (the getter is never called) and an options value
+ * that is not an object or cannot be inspected. The property descriptor is read
+ * with one `Object.getOwnPropertyDescriptor` (one trap on a Proxy); the engine
+ * returns a fresh plain descriptor, so no caller getter, `valueOf`, `toString`
+ * or `Symbol.toPrimitive` runs on the value.
+ * @param {unknown} options
+ * @returns {GateProfile}
+ */
+export function gateProfile(options) {
+  if (options === null || typeof options !== 'object') return 'standard';
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(options, 'profile');
+    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) return 'standard';
+    return descriptor.value === 'yolo' ? 'yolo' : 'standard';
+  } catch {
+    // A throwing trap: nothing it threw is inspected.
+    return 'standard';
+  }
+}
+
+/**
+ * The verdict for `reasons` under `profile`: standard blocks on all of them;
+ * YOLO moves the waivable ones (class 2) to `waived`/`waivedReasons`.
+ * @param {Reason[]} reasons
+ * @param {GateMetrics} metrics
+ * @param {GateProfile} profile
+ * @returns {GateResult}
+ */
+function verdict(reasons, metrics, profile) {
+  if (profile !== 'yolo') {
+    // The former shape, key for key: a standard verdict is exactly what it was.
+    return { ok: reasons.length === 0, reasons, metrics };
+  }
+  const blocking = reasons.filter((r) => !WAIVABLE.has(r.code));
+  const waivedReasons = reasons.filter((r) => WAIVABLE.has(r.code));
+  const waived = [...new Set(waivedReasons.map((r) => r.code))];
+  const ok = blocking.length === 0;
+  return { ok, reasons: blocking, waived, waivedReasons, profile: 'yolo', metrics };
+}
 
 /**
  * Log intervals of the multi-section scans per grid mode (`full` = reference).
@@ -565,15 +696,21 @@ function codecMessage(error) {
  * sparse array)`, `band <i>: not an object`), and a value thrown by a getter or
  * trap is never inspected (fixed text). A codec refusal of the copy keeps the
  * codec's message.
+ *
+ * `options.profile` is read first, by {@link gateProfile} (only an own data
+ * property equal to `'yolo'` selects YOLO); see the header for the classes.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {GateOptions} [options]
  * @returns {GateResult}
  */
-export function gate(bands, preampDb, { experimental = false, grid = 'full' } = {}) {
+export function gate(bands, preampDb, options = {}) {
+  const profile = gateProfile(options);
+  const { experimental = false, grid = 'full' } = options;
   if (!Object.hasOwn(GRID_INTERVALS, grid)) {
     throw new RangeError(`grid must be 'drag' or 'full', got ${JSON.stringify(grid)}`);
   }
+  const yolo = profile === 'yolo';
   const intervals = GRID_INTERVALS[grid];
   /** @type {GateMetrics} */
   const metrics = { thresholds: THRESHOLDS, grid };
@@ -581,7 +718,7 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
   let snapshot;
   try {
     if (!Array.isArray(bands)) {
-      return { ok: false, reasons: [{ code: 'f:codec', value: NOT_AN_ARRAY }], metrics };
+      return verdict([{ code: 'f:codec', value: NOT_AN_ARRAY }], metrics, profile);
     }
     snapshot = copyBands(bands);
   } catch (error) {
@@ -589,7 +726,7 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
     // runs no caller code. Anything else may be the caller's and is never read.
     const own = COPY_ERRORS.has(/** @type {Error} */ (error));
     const value = own ? /** @type {Error} */ (error).message : UNREADABLE;
-    return { ok: false, reasons: [{ code: 'f:codec', value }], metrics };
+    return verdict([{ code: 'f:codec', value }], metrics, profile);
   }
   const reasons = policyReasons(snapshot, experimental === true);
   /** @type {number[]} */
@@ -598,7 +735,7 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
     payload = encodePayload(snapshot, preampDb);
   } catch (error) {
     reasons.push({ code: 'f:codec', value: codecMessage(error) });
-    return { ok: false, reasons, metrics };
+    return verdict(reasons, metrics, profile);
   }
   metrics.payloadCrc = payloadCrc(payload);
   metrics.payload = Uint8Array.from(payload);
@@ -647,10 +784,36 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
   metrics.internalAudible = internalAudible;
   metrics.outputAudible = outputAudible;
   const fullScan = new CascadeScan(intervals, 0, FULL_MAX_HZ, scan);
-  for (const s of active) fullScan.add(s);
+  /** @type {PrefixPeak[] | null} */
+  let prefixFull = null;
+  if (yolo) {
+    // YOLO only (d:prefix-peak-full): every prefix over DC–48 kHz. The sections
+    // are added in the same order as below, so the last prefix's scan is the
+    // very scan `outputFull` reads.
+    prefixFull = [{ stage: 0, db: preamp, frequencyHz: null }];
+    /** @type {Peak | null} */
+    let fullPeak = null;
+    for (const [i, item] of sections.entries()) {
+      if (!isIdentitySection(item.section)) {
+        fullScan.add(item.section);
+        fullPeak = null;
+      }
+      if (fullPeak === null) fullPeak = fullScan.peak();
+      prefixFull.push({ stage: i + 1, db: fullPeak.db + preamp, frequencyHz: fullPeak.frequencyHz });
+    }
+  } else {
+    for (const s of active) fullScan.add(s);
+  }
   const full = fullScan.peak();
   const outputFull = { db: full.db + preamp, frequencyHz: full.frequencyHz };
   metrics.outputFull = outputFull;
+  /** @type {PrefixPeak | null} */
+  let internalFull = null;
+  if (prefixFull) {
+    internalFull = prefixFull.reduce((a, b) => (b.db > a.db ? b : a));
+    metrics.prefixFull = prefixFull;
+    metrics.internalFull = internalFull;
+  }
 
   const tolerance = THRESHOLDS.dbNumericalTolerance;
   if (!(internalAudible.db <= THRESHOLDS.internalAudibleDb + tolerance)) {
@@ -663,6 +826,18 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
       limit: THRESHOLDS.internalAudibleDb,
     });
   }
+  if (prefixFull && internalFull) {
+    const limit = YOLO_THRESHOLDS.internalFullDb;
+    if (!(internalFull.db <= limit + tolerance)) {
+      const first = prefixFull.find((p) => !(p.db <= limit + tolerance));
+      reasons.push({
+        code: 'd:prefix-peak-full',
+        stage: first ? first.stage : internalFull.stage,
+        value: internalFull.db,
+        limit,
+      });
+    }
+  }
   if (!(outputAudible.db <= THRESHOLDS.outputAudibleDb + tolerance)) {
     reasons.push({
       code: 'e:output-audible',
@@ -673,51 +848,76 @@ export function gate(bands, preampDb, { experimental = false, grid = 'full' } = 
   if (!(outputFull.db <= THRESHOLDS.outputFullDb + tolerance)) {
     reasons.push({ code: 'e:output-full', value: outputFull.db, limit: THRESHOLDS.outputFullDb });
   }
-  return { ok: reasons.length === 0, reasons, metrics };
+  return verdict(reasons, metrics, profile);
 }
 
 /**
  * The gate transport and server MUST call before writing or publishing: always
- * the `full` grid, whatever `options.grid` says.
+ * the `full` grid, whatever `options.grid` says. `profile` is passed through
+ * as {@link gateProfile} reads it (a getter or any value other than `'yolo'` is
+ * the standard profile); the server never passes it.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {GateOptions} [options]
  * @returns {GateResult}
  */
 export function gateForWrite(bands, preampDb, options = {}) {
-  return gate(bands, preampDb, { ...options, grid: 'full' });
+  const profile = gateProfile(options);
+  const { experimental = false } = options ?? {};
+  return gate(bands, preampDb, { experimental, grid: 'full', profile });
 }
 
 const PREAMP_STEPS_PER_DB = 10;
+
+/**
+ * Lowest preamp on the 0.1 dB grid whose Q23 word is not zero: the codec floor,
+ * the YOLO profile's only lower bound (g:preamp is waived there). About
+ * −144.4 dB, where the preamp is practically silence.
+ */
+export const CODEC_PREAMP_FLOOR_DB =
+  Math.ceil(20 * Math.log10(0.5 / 2 ** 23) * PREAMP_STEPS_PER_DB) / PREAMP_STEPS_PER_DB;
 
 /**
  * Highest preamp on the 0.1 dB UI grid within [preampMinDb, preampMaxDb] for
  * which `gateForWrite` accepts the curve, or `null` when none does (including
  * curves failing checks a preamp cannot fix: kinds, D7, codec, a, b, c).
  *
+ * In the YOLO profile (`options.profile`, read like {@link gateProfile}) the
+ * lower bound is {@link CODEC_PREAMP_FLOOR_DB} instead, `d:prefix-peak-full` is
+ * fixable too, and only class-1 reasons count (class 2 is waived).
+ *
  * A candidate is derived analytically from the metrics at the top preamp,
  * rounded down to the grid, then verified with the gate and stepped down by
  * 0.1 dB while refused (the verdict is monotone in the preamp). The bands are
  * read once: every later verification runs on the first verdict's snapshot.
  * @param {readonly Band[]} bands
- * @param {{experimental?: boolean}} [options]
+ * @param {{experimental?: boolean, profile?: GateProfile}} [options]
  * @returns {number | null}
  */
-export function autoPreamp(bands, { experimental = false } = {}) {
-  const top = gateForWrite(bands, THRESHOLDS.preampMaxDb, { experimental });
+export function autoPreamp(bands, options = {}) {
+  const profile = gateProfile(options);
+  const { experimental = false } = options ?? {};
+  const yolo = profile === 'yolo';
+  const top = gateForWrite(bands, THRESHOLDS.preampMaxDb, { experimental, profile });
   if (top.ok) return THRESHOLDS.preampMaxDb;
   const fixable = new Set(['d:prefix-peak', 'e:output-audible', 'e:output-full']);
+  if (yolo) fixable.add('d:prefix-peak-full');
   if (!top.reasons.every((r) => fixable.has(r.code))) return null;
   const m = /** @type {Required<GateMetrics>} */ (top.metrics);
   const snapshot = m.bands;
   const relative = (/** @type {number} */ db) => db - m.quantizedPreampDb;
   const internalPeak = Math.max(0, ...m.prefixAudible.slice(1).map((p) => relative(p.db)));
-  const cap = Math.min(
+  let cap = Math.min(
     THRESHOLDS.internalAudibleDb - internalPeak,
     THRESHOLDS.outputAudibleDb - relative(m.outputAudible.db),
     THRESHOLDS.outputFullDb - relative(m.outputFull.db),
   );
-  const minStep = Math.round(THRESHOLDS.preampMinDb * PREAMP_STEPS_PER_DB);
+  if (yolo) {
+    const internalFullPeak = Math.max(0, ...m.prefixFull.slice(1).map((p) => relative(p.db)));
+    cap = Math.min(cap, YOLO_THRESHOLDS.internalFullDb - internalFullPeak);
+  }
+  const floorDb = yolo ? CODEC_PREAMP_FLOOR_DB : THRESHOLDS.preampMinDb;
+  const minStep = Math.round(floorDb * PREAMP_STEPS_PER_DB);
   const maxStep = Math.round(THRESHOLDS.preampMaxDb * PREAMP_STEPS_PER_DB);
   // Slightly optimistic start (Q23 rounding and the dB tolerance can admit a
   // grid point just above the analytic cap); the gate decides.
@@ -725,7 +925,7 @@ export function autoPreamp(bands, { experimental = false } = {}) {
   if (!(step >= minStep)) return null;
   for (; step >= minStep; step--) {
     const preampDb = step / PREAMP_STEPS_PER_DB;
-    if (gateForWrite(snapshot, preampDb, { experimental }).ok) return preampDb;
+    if (gateForWrite(snapshot, preampDb, { experimental, profile }).ok) return preampDb;
   }
   return null;
 }

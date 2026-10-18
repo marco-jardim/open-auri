@@ -205,8 +205,10 @@
 		query = '';
 		tag = 'all';
 	}
+	/** Modo YOLO: the editor curve may be YOLO-only, and YOLO curves never go to the library. */
+	const yoloSaveReason = $derived(app?.yolo.enabled ? m.yolo_reason_no_export() : null);
 	async function save() {
-		if (!app || saving) return;
+		if (!app || saving || app.yolo.enabled) return;
 		saving = true;
 		try {
 			const result = await app.state.library.save(current);
@@ -343,7 +345,7 @@
 					>{#if group === 'local'}<span class="shelf-action"
 							><Button
 								size="sm"
-								disabledReason={app ? null : m.biblioteca_reason_loading()}
+								disabledReason={app ? yoloSaveReason : m.biblioteca_reason_loading()}
 								loading={saving}
 								onclick={save}>{m.biblioteca_save()}</Button
 							></span
@@ -372,8 +374,11 @@
 									</svg>
 								{/snippet}
 								{#snippet action()}
-									<Button variant="primary" loading={saving} onclick={save}
-										>{m.empty_library_action()}</Button
+									<Button
+										variant="primary"
+										loading={saving}
+										disabledReason={yoloSaveReason}
+										onclick={save}>{m.empty_library_action()}</Button
 									>
 								{/snippet}
 							</EmptyState>

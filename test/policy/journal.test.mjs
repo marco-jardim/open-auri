@@ -39,6 +39,52 @@ test('journal constants document localStorage and the 500-entry FIFO limit', () 
   assert.equal(JOURNAL_MAX, 500);
 });
 
+test('YOLO: optional profile and waived mark a YOLO write; schema 1 stays compatible', () => {
+  const yolo = entry({ profile: 'yolo', waived: ['c:section-peak', 'g:preamp'] });
+  assert.deepEqual(validateEntry(yolo), { ok: true, errors: [] });
+  const stored = appendEntry([], yolo);
+  assert.deepEqual(stored[0], yolo);
+  assert.notEqual(stored[0].waived, yolo.waived);
+  // Round trip through storage keeps the marks.
+  const parsed = parseJournal(serializeJournal(stored));
+  assert.deepEqual(parsed, { entries: [yolo], dropped: 0 });
+  // A YOLO entry may list nothing waived, or omit the list.
+  assert.equal(validateEntry(entry({ profile: 'yolo', waived: [] })).ok, true);
+  assert.deepEqual(appendEntry([], entry({ profile: 'yolo' }))[0], entry({ profile: 'yolo' }));
+
+  // Entries without the marks keep the exact old shape and bytes.
+  const plain = entry();
+  const json = serializeJournal([plain]);
+  assert.equal(json, JSON.stringify([plain]));
+  assert.ok(!json.includes('profile') && !json.includes('waived'));
+  assert.deepEqual(Object.keys(appendEntry([], plain)[0]), Object.keys(plain));
+  // Old journals (written before YOLO existed) parse unchanged.
+  assert.deepEqual(parseJournal(JSON.stringify([plain, plain])), {
+    entries: [plain, plain],
+    dropped: 0,
+  });
+
+  // Anything else is refused: no other profile, no waived without YOLO, codes only.
+  for (const bad of [
+    entry({ profile: 'standard' }),
+    entry({ profile: 'YOLO' }),
+    entry({ profile: true }),
+    entry({ profile: undefined }),
+    entry({ waived: ['c:section-peak'] }),
+    entry({ profile: 'yolo', waived: 'c:section-peak' }),
+    entry({ profile: 'yolo', waived: [1] }),
+    entry({ profile: 'yolo', waived: ['not a code'] }),
+    entry({ profile: 'yolo', waived: ['c:section-peak\n'] }),
+    entry({ profile: 'yolo', waived: Array.from({ length: 17 }, () => 'a:b0') }),
+  ]) {
+    assert.equal(validateEntry(bad).ok, false, JSON.stringify(bad));
+    assert.throws(() => appendEntry([], bad), TypeError);
+  }
+  // An invalid mark drops only that record when parsing.
+  const mixed = parseJournal(JSON.stringify([plain, { ...plain, profile: 'standard' }, yolo]));
+  assert.deepEqual(mixed, { entries: [plain, yolo], dropped: 1 });
+});
+
 test('all supported kinds and statuses validate without imposing the safety gate', () => {
   assert.deepEqual(validateEntry(entry()), { ok: true, errors: [] });
   for (const kind of ['PK', 'LS', 'HS', 'LP', 'HP']) {

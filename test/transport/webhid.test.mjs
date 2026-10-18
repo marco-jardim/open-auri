@@ -1161,6 +1161,116 @@ function manyDevices(count, faultsByIndex = {}, { autoAdvance = true } = {}) {
   return { clock, devices, hid: new FakeHID({ devices }) };
 }
 
+// --- Modo YOLO (gate profile 'yolo') -------------------------------------------
+
+// design/analysis/limites-v2.md:40: passes every hardware check, fails only c:section-peak.
+const YOLO_ONLY = Object.freeze([
+  Object.freeze({ kind: 'PK', freqHz: 1000, gainDb: 12, qFactor: 4 }),
+  ...NEUTRAL_BANDS.slice(1),
+]);
+const YOLO_PRE = -12.6;
+
+test('YOLO: without the profile a YOLO-only curve is refused and nothing is sent', async () => {
+  const { clock, device, hid } = setup();
+  let getterCalls = 0;
+  const getter = Object.defineProperty({ clock, hid }, 'profile', {
+    enumerable: true,
+    get() {
+      getterCalls++;
+      return 'yolo';
+    },
+  });
+  for (const options of [
+    { clock, hid },
+    { clock, hid, profile: 'standard' },
+    { clock, hid, profile: 'YOLO' },
+    { clock, hid, profile: true },
+    { clock, hid, profile: Object('yolo') },
+    getter,
+    Object.assign(Object.create({ profile: 'yolo' }), { clock, hid }),
+  ]) {
+    await assert.rejects(writeCurve(device, YOLO_ONLY, YOLO_PRE, options), GateRejectedError);
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(device.attempts, 0);
+  assert.equal(device.sent.length, 0);
+});
+
+test('YOLO: with the profile the exact gated bytes are sent', async () => {
+  const { clock, device, hid } = setup();
+  const result = await writeCurve(device, YOLO_ONLY, YOLO_PRE, { clock, hid, profile: 'yolo' });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.committed, true);
+  const payload = encodePayload(YOLO_ONLY, YOLO_PRE);
+  const verdict = gateForWrite(YOLO_ONLY, YOLO_PRE, { profile: 'yolo' });
+  assert.equal(verdict.ok, true);
+  assert.deepEqual(verdict.waived, ['c:section-peak']);
+  assert.deepEqual([...verdict.metrics.payload], payload);
+  assert.deepEqual(bytesOf(device), [...reportsFromPayload(payload).map((r) => [...r]), COMMIT]);
+  assert.deepEqual(
+    bytesOf(device).slice(0, 9),
+    encodeReports(YOLO_ONLY, YOLO_PRE).map((r) => [...r]),
+  );
+  assert.equal(result.crc, payload[218] | (payload[219] << 8));
+});
+
+test('YOLO: class 1 still blocks with the profile', async () => {
+  const { clock, device, hid } = setup();
+  // Feedback words and pole radius beyond the presets (a:-a1, a:-a2, b:pole-radius).
+  const poles = [{ kind: 'PK', freqHz: 20, gainDb: -12, qFactor: 20 }, ...NEUTRAL_BANDS.slice(1)];
+  await assert.rejects(
+    writeCurve(device, poles, -1, { clock, hid, profile: 'yolo' }),
+    GateRejectedError,
+  );
+  // The YOLO-only curve with a preamp too high: d and e still block.
+  await assert.rejects(
+    writeCurve(device, YOLO_ONLY, PRE, { clock, hid, profile: 'yolo' }),
+    GateRejectedError,
+  );
+  // A positive preamp is still a codec refusal.
+  await assert.rejects(
+    writeCurve(device, NEUTRAL_BANDS, 0.5, { clock, hid, profile: 'yolo' }),
+    GateRejectedError,
+  );
+  assert.equal(device.attempts, 0);
+  assert.equal(device.sent.length, 0);
+});
+
+test('YOLO: the extra gate sees the profile and can still refuse; writeMany refuses YOLO', async () => {
+  const { clock, device, hid } = setup();
+  const { gate, calls } = countingGate();
+  await writeCurve(device, YOLO_ONLY, YOLO_PRE, { gate, clock, hid, profile: 'yolo' });
+  assert.deepEqual(calls[0].options, { experimental: false, profile: 'yolo' });
+  const refusing = countingGate({ ok: false, reasons: ['house rule'] });
+  const second = setup();
+  await assert.rejects(
+    writeCurve(second.device, YOLO_ONLY, YOLO_PRE, {
+      gate: refusing.gate,
+      clock: second.clock,
+      hid: second.hid,
+      profile: 'yolo',
+    }),
+    GateRejectedError,
+  );
+  assert.equal(second.device.attempts, 0);
+  // No multi-cable queue in YOLO, whatever the curve.
+  const many = setup();
+  for (const [bands, preampDb] of [
+    [YOLO_ONLY, YOLO_PRE],
+    [NEUTRAL_BANDS, PRE],
+  ]) {
+    await assert.rejects(
+      writeMany([many.device], bands, preampDb, {
+        clock: many.clock,
+        hid: many.hid,
+        profile: 'yolo',
+      }),
+      TypeError,
+    );
+  }
+  assert.equal(many.device.attempts, 0);
+});
+
 test('writeMany writes sequentially, >= 2 s apart', async () => {
   const { clock, devices, hid } = manyDevices(3);
   const { preampDb, eqBands, reports } = fixture.presets.harman;

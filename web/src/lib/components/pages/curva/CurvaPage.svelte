@@ -91,6 +91,9 @@
 	} from './model.ts';
 	import { parkedBand } from './parked.ts';
 	import { CurvaPreview } from './preview.svelte.ts';
+	import YoloToggle from '#lib/components/yolo/YoloToggle.svelte';
+	import { withProfile } from './drag.ts';
+	import { canBringBack, editorProfile, yoloWriteBlock } from './yolo.ts';
 	import { firstReasonText, type Reason } from './reasons.ts';
 
 	type SocialComponent = typeof import('./SocialActions.svelte').default;
@@ -145,7 +148,11 @@
 
 	const injected = untrack(() => gateClient);
 	const owned = injected === undefined ? createGateWorker() : null;
-	const gate: GateClient = injected ?? owned ?? createGateWorker();
+	// Every drag and commit carries the editor profile of that moment (Modo YOLO: class 1 still
+	// snaps; free preview: codec-only). Standard unless YOLO is on in this tab.
+	const gate: GateClient = withProfile(injected ?? owned ?? createGateWorker(), () =>
+		editorProfile(app?.yolo.enabled ?? false, app?.yolo.freePreview ?? false)
+	);
 	onDestroy(() => owned?.dispose());
 
 	const locale = getLocale();
@@ -155,7 +162,60 @@
 	const stored = $derived(app?.state.curve.current ?? null);
 	const curve = $derived<Curve>(stored ?? neutral);
 	const signature = $derived(curveSignature(curve));
-	const verdict = $derived(verdictFor(curve));
+	// --- Modo YOLO (this tab only, memory only; see lib/state/yolo.svelte.ts) -------------------
+	const yoloOn = $derived(app?.yolo.enabled ?? false);
+	const freePreview = $derived(app?.yolo.freePreview ?? false);
+	/** Gate profile of a write from this editor. */
+	const writeProfile = $derived<'standard' | 'yolo'>(yoloOn ? 'yolo' : 'standard');
+	/** Why YOLO itself disables writing (the free preview), or null. */
+	const yoloWriteReason = $derived(
+		yoloWriteBlock(yoloOn, freePreview) ? m.yolo_reason_free_preview() : null
+	);
+	const verdict = $derived(verdictFor(curve, yoloOn ? 'yolo' : 'standard'));
+	// YOLO exists only in Engenharia: leaving the layer turns it off.
+	$effect(() => {
+		app?.yolo.syncLayer(layer);
+	});
+	/** The editor curve when YOLO was turned on: restored if YOLO ends on a curve the standard gate refuses. */
+	let beforeYolo: { curve: Curve; labels: readonly (string | null)[] | null } | null = null;
+	let wasYolo = false;
+	$effect(() => {
+		const on = yoloOn;
+		untrack(() => {
+			if (on && !wasYolo && app) {
+				const current = app.state.curve.current;
+				beforeYolo = {
+					curve: { bands: current.bands.slice(), preampDb: current.preampDb },
+					labels: current.labels ?? null
+				};
+			} else if (!on && wasYolo && app && beforeYolo !== null) {
+				// "Desligar" (or leaving Engenharia) on a YOLO-only curve: the editor goes back to
+				// the curve it had before; a curve the standard gate accepts stays as it is.
+				if (!canBringBack(app.state.curve.current)) {
+					apply(beforeYolo.curve, { labels: beforeYolo.labels });
+					notify(m.yolo_restored());
+				}
+				beforeYolo = null;
+			}
+			wasYolo = on;
+		});
+	});
+	/** "Trazer para o modo normal": only when the standard gate accepts the curve. */
+	function bringBack() {
+		if (!app) return;
+		if (canBringBack(app.state.curve.current)) {
+			beforeYolo = null;
+			app.yolo.disable();
+			notify(m.yolo_bring_back_done());
+		} else {
+			notify(m.yolo_bring_back_refused(), 'error');
+		}
+	}
+	/** Opens the write checklist with this editor's profile (YOLO while it is on). */
+	function requestEditorWrite() {
+		if (!app || yoloWriteReason !== null) return;
+		app.requestWrite(undefined, { profile: writeProfile });
+	}
 	const experimental = $derived(hasExperimental(curve.bands));
 	const crc = $derived(verdict.metrics.payload ? payloadCrc(verdict.metrics.payload) : '…');
 	const activePreset = $derived(
@@ -746,7 +806,11 @@
 		const client = app;
 		if (!client) return;
 		const meterRef = client.state.meterRef;
-		const instance = new CurvaPreview(client.audio, { reference: () => meterRef.value });
+		const instance = new CurvaPreview(client.audio, {
+			reference: () => meterRef.value,
+			// Modo YOLO previews get the engine's protection (-1 dBFS peak, limiter).
+			yolo: () => client.yolo.enabled
+		});
 		preview = instance;
 		return () => {
 			instance.dispose();
@@ -771,6 +835,8 @@
 	$effect(() => {
 		const ref = reference;
 		const editor = curve;
+		// Turning YOLO on or off rebuilds the A/B with or without the preview protection.
+		void yoloOn;
 		untrack(() => preview?.update(ref, editor));
 	});
 	const previewError = $derived.by(() => {
@@ -854,6 +920,19 @@
 		</div>
 		<LayerSelector {layer} {onlayer} />
 		<div class="np-help"><TourTrigger page="curva" /></div>
+		{#if app}
+			<div class="np-yolo">
+				<YoloToggle yolo={app.yolo} {layer} />
+				{#if yoloOn}
+					<button type="button" class="yolo-back" onclick={bringBack} data-yolo-bring-back>
+						{m.yolo_bring_back()}
+					</button>
+					{#if yoloWriteReason}
+						<p class="yolo-why" role="status">{yoloWriteReason}</p>
+					{/if}
+				{/if}
+			</div>
+		{/if}
 	</section>
 
 	<div class="instrument" aria-busy={app === null ? 'true' : 'false'}>
@@ -953,7 +1032,7 @@
 					journalCount={app?.state.journal.entries.length ?? 0}
 					disabled={!app}
 					disabledReason={loadingReason}
-					writeDisabled={app?.cableState.writing ?? true}
+					writeDisabled={(app?.cableState.writing ?? true) || yoloWriteReason !== null}
 					neutralActive={activePreset === NEUTRO.id}
 					defaultActive={activePreset === PADRAO_AURI.id}
 					onneutral={() => loaded(app?.loadNeutral())}
@@ -961,7 +1040,7 @@
 					onrescue={() => app?.requestRescue()}
 					onundo={() => app?.state.curve.undo()}
 					onredo={() => app?.state.curve.redo()}
-					onwrite={() => app?.requestWrite()}
+					onwrite={requestEditorWrite}
 				/>
 			</div>
 		</div>
@@ -994,17 +1073,18 @@
 				{/await}
 				{#await import('./Sequencer.svelte') then { default: Sequencer }}
 					{@const sequencerReason =
-						loadingReason ?? (app?.cableState.writing ? m.curva_v2_writing_reason() : null)}
+						loadingReason ??
+						(app?.cableState.writing ? m.curva_v2_writing_reason() : yoloWriteReason)}
 					<fieldset
 						class="min-w-0 border-0 p-0"
-						disabled={!app || (app?.cableState.writing ?? true)}
+						disabled={!app || (app?.cableState.writing ?? true) || yoloWriteReason !== null}
 						aria-describedby={sequencerReason ? `${titleId}-sequencer-why` : undefined}
 					>
 						<legend class="visually-hidden">{m.curva_seq_heading()}</legend>
 						<Sequencer
 							{curve}
-							disabled={!app || (app?.cableState.writing ?? true)}
-							onsend={() => app?.requestWrite()}
+							disabled={!app || (app?.cableState.writing ?? true) || yoloWriteReason !== null}
+							onsend={requestEditorWrite}
 						/>
 						{#if sequencerReason}
 							<p id={`${titleId}-sequencer-why`} role="status">{sequencerReason}</p>
@@ -1019,7 +1099,10 @@
 
 	<div class="lower">
 		<div class="social-slot" bind:this={socialSlot}>
-			{#if Social}
+			{#if yoloOn}
+				<!-- Modo YOLO: no S5, link, library, publish or account save. -->
+				<p class="yolo-why" role="note" data-yolo-locked="social">{m.yolo_reason_no_export()}</p>
+			{:else if Social}
 				<Social {app} {curve} name={curveName} {locale} {pageUrl} {preview} {originHint} />
 			{:else if socialFailed}
 				<p role="alert">{m.layout_error_generic()}</p>
@@ -1037,8 +1120,8 @@
 					{layer}
 					{locale}
 					{pageUrl}
-					disabled={!app}
-					disabledReason={loadingReason}
+					disabled={!app || yoloOn}
+					disabledReason={loadingReason ?? (yoloOn ? m.yolo_reason_no_export() : null)}
 					onimport={(result) => onImport(result)}
 					{notify}
 				/>
@@ -1051,6 +1134,25 @@
 </main>
 
 <style>
+	.np-yolo {
+		display: grid;
+		gap: 6px;
+		justify-items: start;
+	}
+	.yolo-back {
+		padding: 4px 12px;
+		border: 1px solid #a3262c;
+		border-radius: 3px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+	.yolo-why {
+		margin: 0;
+		color: #e0656b;
+		font-size: var(--fs-small, 13px);
+	}
 	.curva {
 		/* Panel legends read the design-system text tokens (silk on the satin panel). */
 		--curva-silk: var(--text);

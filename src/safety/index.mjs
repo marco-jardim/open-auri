@@ -2,7 +2,7 @@
 
 // The gate also exposes these names; re-export them once from their owning modules.
 export { levelDb, MEAN_FREQUENCIES, sectionDb } from '../dsp/level.mjs';
-export { THRESHOLDS, PROVENANCE } from './thresholds.mjs';
+export { THRESHOLDS, PROVENANCE, YOLO_THRESHOLDS } from './thresholds.mjs';
 export {
   GRID_INTERVALS,
   poleRadius,
@@ -11,6 +11,11 @@ export {
   autoPreampForSection,
   gate,
   gateForWrite,
+  gateProfile,
+  isWaivable,
+  YOLO_WAIVABLE,
+  HARD_REASONS,
+  CODEC_PREAMP_FLOOR_DB,
   autoPreamp,
 } from './gate.mjs';
 export {

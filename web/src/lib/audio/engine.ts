@@ -149,6 +149,40 @@ export interface ChainOptions {
 	gainDb?: number;
 	/** Whether the chain is audible; default true. */
 	on?: boolean;
+	/**
+	 * Modo YOLO preview protection (opt-in, additive): a fixed gain of `gainDb` (<= 0) after the
+	 * sections, then a DynamicsCompressor limiter, before the chain's output. Absent: the chain is
+	 * exactly as before. Browser preview only; never part of what is written.
+	 */
+	protect?: { gainDb: number };
+}
+
+/** YOLO preview: the float peak of the chain is normalized to this level (dBFS). */
+export const YOLO_PREVIEW_PEAK_DBFS = -1;
+
+/**
+ * Peak of a chain's float transfer function (preamp included), in dB, over a log grid from
+ * 10 Hz to just below Nyquist. Presentation-side estimate for the YOLO preview protection only.
+ */
+export function chainPeakDb(bands: readonly Band[], preampDb: number, rate: number): number {
+	const coefficients = chainCoefficients(snapshotBands(bands), rate);
+	const preamp = preampGain(preampDb);
+	const points = 1024;
+	const lo = 10;
+	const hi = rate / 2 - 1;
+	let peak = -Infinity;
+	for (let i = 0; i <= points; i++) {
+		const f = lo * Math.pow(hi / lo, i / points);
+		const w = (2 * Math.PI * f) / rate;
+		let gain = preamp;
+		for (const { feedforward: b, feedback: a } of coefficients) {
+			const re = (c: readonly number[]) => c[0] + c[1] * Math.cos(w) + c[2] * Math.cos(2 * w);
+			const im = (c: readonly number[]) => -c[1] * Math.sin(w) - c[2] * Math.sin(2 * w);
+			gain *= Math.hypot(re(b), im(b)) / Math.hypot(re(a), im(a));
+		}
+		peak = Math.max(peak, 20 * Math.log10(gain));
+	}
+	return peak;
 }
 
 export interface PreviewChain {
@@ -240,10 +274,15 @@ export interface AudioEngine {
 	setVolume(db: number): void;
 	buildChain(bands: readonly Band[], preampDb: number, options?: ChainOptions): PreviewChain;
 	matchGains(levels: readonly number[]): number[];
+	/**
+	 * `protect: 'yolo'` (Modo YOLO previews only): both chains get the same protection gain, so
+	 * the louder one peaks at `YOLO_PREVIEW_PEAK_DBFS` after its trim (the level match stays),
+	 * followed by a limiter. Without it nothing changes.
+	 */
 	createAB(
 		curveA: PreviewCurve,
 		curveB: PreviewCurve,
-		options?: { experimental?: boolean; initial?: ABSide }
+		options?: { experimental?: boolean; initial?: ABSide; protect?: 'yolo' }
 	): ABPreview;
 	/**
 	 * Analyser fed by the meter bus (post-chain, pre-volume), for spectrum displays. The preview
@@ -1350,6 +1389,22 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			tail = stage;
 			stages.push(stage);
 		}
+		// Modo YOLO preview protection (opt-in): normalizing gain, then a brick-wall-ish limiter.
+		const protection: AudioNode[] = [];
+		if (chainOptions.protect !== undefined) {
+			const normalize = context.createGain();
+			normalize.gain.value = dbToGain(Math.min(0, chainOptions.protect.gainDb));
+			const limiter = context.createDynamicsCompressor();
+			limiter.threshold.value = YOLO_PREVIEW_PEAK_DBFS - 2;
+			limiter.knee.value = 0;
+			limiter.ratio.value = 20;
+			limiter.attack.value = 0.001;
+			limiter.release.value = 0.1;
+			tail.connect(normalize);
+			normalize.connect(limiter);
+			tail = limiter;
+			protection.push(normalize, limiter);
+		}
 		tail.connect(output);
 		output.connect(nodes.chainsGain);
 		nodes.bus.connect(input);
@@ -1360,7 +1415,7 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			if (!wired) return;
 			wired = false;
 			nodes.bus.disconnect(input);
-			for (const node of [input, preamp, ...stages, output]) node.disconnect();
+			for (const node of [input, preamp, ...stages, ...protection, output]) node.disconnect();
 		};
 		const chain: PreviewChain = {
 			id,
@@ -1408,7 +1463,7 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 	function createAB(
 		curveA: PreviewCurve,
 		curveB: PreviewCurve,
-		abOptions: { experimental?: boolean; initial?: ABSide } = {}
+		abOptions: { experimental?: boolean; initial?: ABSide; protect?: 'yolo' } = {}
 	): ABPreview {
 		const [trimA = 0, trimB = 0] = matchGains([
 			levelDb(curveA.bands, curveA.preampDb),
@@ -1416,17 +1471,31 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		]);
 		let current: ABSide = abOptions.initial ?? 'A';
 		const experimental = abOptions.experimental === true;
+		// YOLO preview: one protection gain for both sides keeps the level match; the louder
+		// side's float peak (after its trim) lands at YOLO_PREVIEW_PEAK_DBFS.
+		let protect: ChainOptions['protect'];
+		if (abOptions.protect === 'yolo') {
+			const rate = ensure().context.sampleRate;
+			const loudest = Math.max(
+				chainPeakDb(curveA.bands, curveA.preampDb, rate) + trimA,
+				chainPeakDb(curveB.bands, curveB.preampDb, rate) + trimB
+			);
+			const gainDb = Number.isFinite(loudest) ? YOLO_PREVIEW_PEAK_DBFS - loudest : -60;
+			protect = { gainDb: Math.min(0, gainDb) };
+		}
 		const a = buildChain(curveA.bands, curveA.preampDb, {
 			experimental,
 			gainDb: trimA,
-			on: current === 'A'
+			on: current === 'A',
+			...(protect ? { protect } : {})
 		});
 		let b: PreviewChain;
 		try {
 			b = buildChain(curveB.bands, curveB.preampDb, {
 				experimental,
 				gainDb: trimB,
-				on: current === 'B'
+				on: current === 'B',
+				...(protect ? { protect } : {})
 			});
 		} catch (buildError) {
 			a.dispose();

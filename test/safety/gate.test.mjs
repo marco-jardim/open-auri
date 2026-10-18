@@ -6,9 +6,13 @@ import * as reference from '../../design/analysis/gate.mjs';
 import {
   autoPreamp,
   autoPreampForSection,
+  CODEC_PREAMP_FLOOR_DB,
   gate,
   gateForWrite,
+  gateProfile,
   GRID_INTERVALS,
+  HARD_REASONS,
+  isWaivable,
   levelDb,
   MEAN_FREQUENCIES,
   poleRadius,
@@ -16,12 +20,15 @@ import {
   sectionAnalysis,
   sectionPeaks,
   THRESHOLDS,
+  YOLO_THRESHOLDS,
+  YOLO_WAIVABLE,
 } from '../../src/safety/gate.mjs';
 import { encodePayload, NEUTRAL_BANDS, preampWord } from '../../src/dsp/eq0xcb.mjs';
 import * as level from '../../src/dsp/level.mjs';
 import { boundarySearch } from '../../src/safety/policy.mjs';
 import {
   computeThresholds,
+  computeYoloThresholds,
   GENERATED_BY,
   OUTPUT_PATH,
   renderThresholdsModule,
@@ -1144,4 +1151,357 @@ test('gate is pure: same input, same output; arguments are not mutated', () => {
   const snapshot = structuredClone(bands);
   assert.deepEqual(gate(bands, -3, { grid: 'drag' }), gate(bands, -3, { grid: 'drag' }));
   assert.deepEqual(bands, snapshot);
+});
+
+// --- Modo YOLO (gate profile 'yolo') -------------------------------------------
+
+const PK = (freqHz, gainDb, qFactor) => ({ kind: 'PK', freqHz, gainDb, qFactor });
+/** `bands` followed by OFF up to 10 stages. */
+const curveOf = (...bands) => [...bands, ...Array.from({ length: 10 - bands.length }, () => OFF)];
+const YOLO = Object.freeze({ profile: 'yolo' });
+/** design/analysis/limites-v2.md:40: fails only (c) in the standard profile. */
+const LIMITES_40 = Object.freeze({ bands: curveOf(PK(1000, 12, 4)), preampDb: -12.6 });
+/** Metrics without the YOLO-only DC–48 kHz prefix peaks. */
+const withoutFullPrefix = (metrics) => {
+  const rest = { ...metrics };
+  delete rest.prefixFull;
+  delete rest.internalFull;
+  return rest;
+};
+/** The parity corpus: presets as shipped, reversed and sorted by frequency, plus the counterexample. */
+const sortedActive = (bands) => [
+  ...byFrequency(bands.filter((b) => b.kind !== 'OFF')),
+  ...bands.filter((b) => b.kind === 'OFF'),
+];
+const parityCorpus = [
+  ...presets.flatMap(([id, p]) => [
+    [id, p.eqBands, p.preampDb],
+    [`${id} reversed`, [...p.eqBands].reverse(), p.preampDb],
+    [`${id} sorted`, sortedActive(p.eqBands), p.preampDb],
+  ]),
+  ['counterexample', counterexample, -6],
+];
+
+test('YOLO: thresholds are a separate export; THRESHOLDS keeps its keys and values', () => {
+  const envelope = JSON.parse(envelopeText);
+  assert.deepEqual(computeYoloThresholds(envelope), {
+    internalFullDb: envelope.aggregate.peaks.full.quantizedInternalPeak.db,
+  });
+  assert.deepEqual({ ...YOLO_THRESHOLDS }, computeYoloThresholds(envelope));
+  assert.equal(YOLO_THRESHOLDS.internalFullDb, 2.5000638697363913);
+  assert.ok(Object.isFrozen(YOLO_THRESHOLDS));
+  // The gate version hashes JSON.stringify(THRESHOLDS): it must not see YOLO.
+  assert.deepEqual({ ...THRESHOLDS }, limites.thresholds);
+  assert.equal(Object.hasOwn(THRESHOLDS, 'internalFullDb'), false);
+  assert.ok(!JSON.stringify(THRESHOLDS).includes('internalFull'));
+  assert.equal(CODEC_PREAMP_FLOOR_DB, -144.4);
+  assert.equal(preampWord(CODEC_PREAMP_FLOOR_DB), 1);
+  assert.equal(preampWord(CODEC_PREAMP_FLOOR_DB - 0.1), 0);
+});
+
+test('YOLO: the standard profile is bit-identical on the parity corpus', () => {
+  for (const [label, bands, preampDb] of parityCorpus) {
+    const plain = gate(bands, preampDb, { experimental: true });
+    // A standard verdict keeps its former shape exactly: no profile or waived keys.
+    assert.deepEqual(Object.keys(plain), ['ok', 'reasons', 'metrics'], label);
+    assert.equal(plain.ok, plain.reasons.length === 0, label);
+    assert.equal(plain.metrics.prefixFull, undefined, label);
+    assert.equal(plain.metrics.internalFull, undefined, label);
+    for (const profile of ['standard', undefined, 'YOLO', 'normal', true]) {
+      assert.deepEqual(gate(bands, preampDb, { experimental: true, profile }), plain, label);
+    }
+    // Still the reference, bit for bit (assertParity runs the default profile).
+    assertParity(bands, preampDb, label);
+    // YOLO computes the same metrics, plus the DC–48 kHz prefix peaks only.
+    const yolo = gate(bands, preampDb, { experimental: true, profile: 'yolo' });
+    assert.deepEqual(withoutFullPrefix(yolo.metrics), plain.metrics, label);
+    assert.equal(yolo.metrics.prefixFull.length, 11, label);
+    // The last DC–48 kHz prefix is the output: same scan, same value.
+    assert.equal(yolo.metrics.prefixFull[10].db, plain.metrics.outputFull.db, label);
+  }
+});
+
+test('YOLO: every class-1 code still blocks; every class-2 code moves to waived', () => {
+  assert.deepEqual([...YOLO_WAIVABLE].sort(), [
+    'a:b0',
+    'a:b1',
+    'a:b2',
+    'c:section-peak',
+    'd7:boost-q',
+    'd7:pk-boost-above-16k',
+    'g:preamp',
+    'k:kind-not-allowed',
+  ]);
+  assert.deepEqual([...HARD_REASONS].sort(), [
+    'a:-a1',
+    'a:-a2',
+    'b:pole-radius',
+    'd:prefix-peak',
+    'd:prefix-peak-full',
+    'e:output-audible',
+    'e:output-full',
+    'f:codec',
+  ]);
+  for (const code of HARD_REASONS) assert.equal(isWaivable(code), false, code);
+  for (const code of YOLO_WAIVABLE) assert.equal(isWaivable(code), true, code);
+  // Unknown codes are never waivable (allowlist).
+  for (const code of ['x:new', '', 'a:', undefined, null, 1]) assert.equal(isWaivable(code), false);
+
+  /** [label, bands, preampDb, codes the standard profile must report] */
+  const cases = [
+    ['k', curveOf({ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 }), -1, ['k:kind-not-allowed']],
+    ['d7 above 16k', curveOf(PK(18000, 3, 1)), -6, ['d7:pk-boost-above-16k']],
+    ['d7 boost Q', curveOf(PK(1000, 3, 6)), -6, ['d7:boost-q']],
+    ['g low', curveOf(), -30, ['g:preamp']],
+    ['feedforward b0 b2', curveOf(PK(10000, 12, 0.1)), -20, ['a:b0', 'a:b2', 'c:section-peak']],
+    ['c (limites-v2.md:40)', LIMITES_40.bands, LIMITES_40.preampDb, ['c:section-peak']],
+    [
+      'feedback and pole',
+      curveOf(PK(20, -12, 20)),
+      -1,
+      ['a:b2', 'a:-a1', 'a:b1', 'a:-a2', 'b:pole-radius'],
+    ],
+    ['f preamp above 0', curveOf(), 0.5, ['f:codec']],
+    ['f frequency', curveOf(PK(48000, -3, 1)), -1, ['f:codec']],
+    ['f unknown kind', curveOf({ kind: 'XX', freqHz: 1000, gainDb: -3, qFactor: 1 }), -1, ['f:codec']],
+    ['f NaN gain', curveOf(PK(1000, NaN, 1)), -1, ['f:codec']],
+    ['d', curveOf(PK(1000, 6, 1), PK(1000, -6, 1)), -0.5, ['d:prefix-peak']],
+    ['e', curveOf(PK(1000, 6, 1)), -0.5, ['d:prefix-peak', 'e:output-audible', 'e:output-full']],
+  ];
+  const seenStandard = new Set();
+  const seenYolo = new Set();
+  const seenWaived = new Set();
+  for (const [label, bands, preampDb, expected] of cases) {
+    const standard = gateForWrite(bands, preampDb);
+    const yolo = gateForWrite(bands, preampDb, YOLO);
+    const standardCodes = codes(standard);
+    for (const code of expected) assert.ok(standardCodes.includes(code), `${label}: ${code}`);
+    assert.equal(standard.ok, false, label);
+    assert.equal(yolo.profile, 'yolo', label);
+    // Class 1: the standard profile's hard reasons, unchanged (same objects' values).
+    assert.deepEqual(
+      yolo.reasons.filter((r) => r.code !== 'd:prefix-peak-full'),
+      standard.reasons.filter((r) => !isWaivable(r.code)),
+      label,
+    );
+    // Class 2: moved, never dropped.
+    assert.deepEqual(yolo.waivedReasons, standard.reasons.filter((r) => isWaivable(r.code)), label);
+    assert.deepEqual(yolo.waived, [...new Set(yolo.waivedReasons.map((r) => r.code))], label);
+    assert.ok(yolo.reasons.every((r) => !isWaivable(r.code)), label);
+    assert.equal(yolo.ok, yolo.reasons.length === 0, label);
+    const hard = standardCodes.filter((code) => !isWaivable(code));
+    if (hard.length) assert.equal(yolo.ok, false, label);
+    for (const code of hard) assert.ok(codes(yolo).includes(code), `${label}: ${code} blocks`);
+    // Writing needs the full grid: drag in YOLO waives the same class.
+    const drag = gate(bands, preampDb, { profile: 'yolo', grid: 'drag' });
+    assert.ok(drag.reasons.every((r) => !isWaivable(r.code)), label);
+    standardCodes.forEach((code) => seenStandard.add(code));
+    codes(yolo).forEach((code) => seenYolo.add(code));
+    yolo.waived.forEach((code) => seenWaived.add(code));
+  }
+  // Every class is exercised: each waivable code was waived, each hard code blocked.
+  for (const code of YOLO_WAIVABLE) assert.ok(seenWaived.has(code), `waived ${code}`);
+  for (const code of HARD_REASONS) assert.ok(seenYolo.has(code), `blocks ${code}`);
+  for (const code of HARD_REASONS.filter((c) => c !== 'd:prefix-peak-full')) {
+    assert.ok(seenStandard.has(code), `standard ${code}`);
+  }
+});
+
+test('YOLO: classification holds on arbitrary curves (property)', () => {
+  const active = fc.oneof(
+    fc.record({
+      kind: fc.constantFrom('PK', 'LS', 'HS'),
+      freqHz: fc.double({ min: 5, max: 47_000, noNaN: true }),
+      gainDb: fc.double({ min: -30, max: 24, noNaN: true }),
+      qFactor: fc.double({ min: 0.05, max: 25, noNaN: true }),
+    }),
+    fc.record({
+      kind: fc.constantFrom('LP', 'HP'),
+      freqHz: fc.double({ min: 5, max: 47_000, noNaN: true }),
+      qFactor: fc.double({ min: 0.05, max: 25, noNaN: true }),
+    }),
+    fc.constant(OFF),
+  );
+  fc.assert(
+    fc.property(
+      fc.array(active, { minLength: 10, maxLength: 10 }),
+      fc.double({ min: -60, max: 0, noNaN: true }),
+      fc.boolean(),
+      (bands, preampDb, experimental) => {
+        const standard = gate(bands, preampDb, { experimental, grid: 'drag' });
+        const yolo = gate(bands, preampDb, { experimental, grid: 'drag', profile: 'yolo' });
+        assert.deepEqual(
+          yolo.reasons.filter((r) => r.code !== 'd:prefix-peak-full'),
+          standard.reasons.filter((r) => !isWaivable(r.code)),
+        );
+        assert.deepEqual(yolo.waivedReasons, standard.reasons.filter((r) => isWaivable(r.code)));
+        assert.equal(yolo.ok, yolo.reasons.length === 0);
+        // YOLO never passes what standard blocks on class 1.
+        if (standard.reasons.some((r) => !isWaivable(r.code))) assert.equal(yolo.ok, false);
+        // Whatever YOLO accepts stays under the presets' DC–48 kHz prefix peak.
+        if (yolo.ok) {
+          assert.ok(
+            yolo.metrics.internalFull.db <=
+              YOLO_THRESHOLDS.internalFullDb + THRESHOLDS.dbNumericalTolerance,
+          );
+        }
+        if (yolo.metrics.sections) {
+          assert.deepEqual(withoutFullPrefix(yolo.metrics), standard.metrics);
+        }
+      },
+    ),
+    { numRuns: 120, seed: 20261018 },
+  );
+});
+
+test('YOLO: the limites-v2.md:40 example passes in YOLO and fails in standard', () => {
+  const { bands, preampDb } = LIMITES_40;
+  const standard = gateForWrite(bands, preampDb);
+  assert.equal(standard.ok, false);
+  assert.deepEqual(codes(standard), ['c:section-peak']);
+  const yolo = gateForWrite(bands, preampDb, { profile: 'yolo' });
+  assert.equal(yolo.ok, true);
+  assert.deepEqual(yolo.reasons, []);
+  assert.deepEqual(yolo.waived, ['c:section-peak']);
+  assert.deepEqual(yolo.waivedReasons, standard.reasons);
+  // The payload is the same exact bytes either way: the profile never changes the codec.
+  assert.deepEqual(yolo.metrics.payload, Uint8Array.from(encodePayload(bands, preampDb)));
+  assert.deepEqual(yolo.metrics.payload, standard.metrics.payload);
+});
+
+test('YOLO: d:prefix-peak-full catches an out-of-band prefix that d and e miss', () => {
+  // A +12 dB boost at 35 kHz undone by the next section: the audible prefixes and
+  // the output stay low, but prefix 1 sends 9 dB of ultrasound into the cascade.
+  const bands = curveOf(PK(35000, 12, 10), PK(35000, -12, 10));
+  const standard = gateForWrite(bands, -3);
+  assert.ok(codes(standard).includes('c:section-peak'));
+  assert.ok(codes(standard).includes('d7:pk-boost-above-16k'));
+  const yolo = gateForWrite(bands, -3, YOLO);
+  assert.equal(yolo.ok, false);
+  assert.ok(codes(yolo).includes('d:prefix-peak-full'));
+  assert.ok(!codes(yolo).includes('d:prefix-peak'));
+  assert.ok(!codes(yolo).includes('e:output-audible'));
+  assert.ok(!codes(yolo).includes('e:output-full'));
+  const reason = yolo.reasons.find((r) => r.code === 'd:prefix-peak-full');
+  assert.equal(reason.stage, 1);
+  assert.equal(reason.limit, YOLO_THRESHOLDS.internalFullDb);
+  assert.ok(reason.value > 8.9 && reason.value < 9.1, String(reason.value));
+  assert.equal(yolo.metrics.internalFull.stage, 1);
+  assert.ok(yolo.metrics.internalFull.frequencyHz > 30000);
+  // A preamp can fix it; autoPreamp in YOLO finds one, the standard profile cannot.
+  assert.equal(autoPreamp(bands), null);
+  const preamp = autoPreamp(bands, YOLO);
+  assert.equal(typeof preamp, 'number');
+  assert.equal(gateForWrite(bands, preamp, YOLO).ok, true);
+  assert.equal(gateForWrite(bands, preamp + 0.1, YOLO).ok, false);
+});
+
+test('YOLO: only an own data property equal to "yolo" enables it; getters never run', () => {
+  let calls = 0;
+  const trap = {
+    [Symbol.toPrimitive]() {
+      calls++;
+      return 'yolo';
+    },
+    toString() {
+      calls++;
+      return 'yolo';
+    },
+    valueOf() {
+      calls++;
+      return 'yolo';
+    },
+  };
+  const getter = Object.defineProperty({}, 'profile', {
+    enumerable: true,
+    get() {
+      calls++;
+      return 'yolo';
+    },
+  });
+  const throwingTrap = new Proxy(
+    {},
+    {
+      getOwnPropertyDescriptor() {
+        throw trap;
+      },
+    },
+  );
+  const fallbacks = [
+    ['true', { profile: true }],
+    ['1', { profile: 1 }],
+    ['YOLO', { profile: 'YOLO' }],
+    ['spaced', { profile: ' yolo' }],
+    ['trailing', { profile: 'yolo ' }],
+    ['String object', { profile: Object('yolo') }],
+    ['coercible object', { profile: trap }],
+    ['array', { profile: ['yolo'] }],
+    ['getter', getter],
+    ['inherited', Object.create({ profile: 'yolo' })],
+    ['throwing trap', throwingTrap],
+  ];
+  const { bands, preampDb } = LIMITES_40;
+  for (const [label, options] of fallbacks) {
+    assert.equal(gateProfile(options), 'standard', label);
+    for (const result of [
+      gate(bands, preampDb, options),
+      gateForWrite(bands, preampDb, options),
+    ]) {
+      assert.equal(result.profile, undefined, label);
+      assert.equal(result.ok, false, label);
+      assert.deepEqual(codes(result), ['c:section-peak'], label);
+      assert.equal(result.waived, undefined, label);
+    }
+    assert.equal(autoPreamp(bands, options), null, label);
+  }
+  for (const value of [undefined, null, 'yolo', 42, true]) {
+    assert.equal(gateProfile(value), 'standard');
+  }
+  assert.equal(gateProfile({ profile: 'yolo' }), 'yolo');
+  assert.equal(gateProfile(Object.freeze({ profile: 'yolo' })), 'yolo');
+  assert.equal(gateForWrite(bands, preampDb, { profile: 'yolo' }).ok, true);
+  // gateForWrite passes the profile it read, never a getter's value (no spread).
+  assert.equal(gateForWrite(bands, preampDb, getter).profile, undefined);
+  assert.equal(calls, 0);
+});
+
+test('YOLO: the 11 official presets pass, with nothing waived', () => {
+  assert.equal(presets.length, 11);
+  for (const [id, preset] of presets) {
+    const yolo = gateForWrite(preset.eqBands, preset.preampDb, YOLO);
+    assert.equal(yolo.ok, true, `${id}: ${JSON.stringify(yolo.reasons)}`);
+    assert.deepEqual(yolo.waived, [], id);
+    assert.ok(
+      yolo.metrics.internalFull.db <=
+        YOLO_THRESHOLDS.internalFullDb + THRESHOLDS.dbNumericalTolerance,
+      id,
+    );
+    // Same bytes as the standard profile.
+    const standard = gateForWrite(preset.eqBands, preset.preampDb);
+    assert.deepEqual(yolo.metrics.payload, standard.metrics.payload, id);
+  }
+});
+
+test('YOLO: autoPreamp may go below -25.5 dB down to the codec floor', () => {
+  // Three +12 dB peaks at 1 kHz: +36 dB, beyond the standard preamp range.
+  const bands = curveOf(PK(1000, 12, 4), PK(1000, 12, 4), PK(1000, 12, 4));
+  assert.equal(autoPreamp(bands), null);
+  const preamp = autoPreamp(bands, YOLO);
+  assert.equal(typeof preamp, 'number');
+  assert.ok(preamp < THRESHOLDS.preampMinDb && preamp >= CODEC_PREAMP_FLOOR_DB, String(preamp));
+  const verdict = gateForWrite(bands, preamp, YOLO);
+  assert.equal(verdict.ok, true);
+  assert.ok(verdict.waived.includes('g:preamp'));
+  assert.ok(verdict.waived.includes('c:section-peak'));
+  assert.equal(gateForWrite(bands, preamp + 0.1, YOLO).ok, false);
+  // A class-1 failure no preamp can fix stays null in YOLO.
+  assert.equal(autoPreamp(curveOf(PK(20, -12, 20)), YOLO), null);
+  // On the presets nothing is waivable, so YOLO is at most as high (d-full is extra).
+  for (const [id, preset] of presets) {
+    const yolo = autoPreamp(preset.eqBands, YOLO);
+    const standard = autoPreamp(preset.eqBands);
+    assert.equal(typeof yolo, 'number', id);
+    assert.ok(standard === null || yolo <= standard, id);
+    assert.equal(gateForWrite(preset.eqBands, yolo, YOLO).ok, true, id);
+  }
 });

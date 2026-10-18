@@ -20,6 +20,7 @@ export const REASON_MESSAGE_KEYS = {
 	'b:pole-radius': 'curva_why_pole',
 	'c:section-peak': 'curva_why_section_peak',
 	'd:prefix-peak': 'curva_why_prefix_peak',
+	'd:prefix-peak-full': 'curva_why_prefix_peak_full',
 	'e:output-audible': 'curva_why_output_audible',
 	'e:output-full': 'curva_why_output_full',
 	'f:codec': 'curva_why_codec',
@@ -84,6 +85,8 @@ export function reasonText(reason: Reason, context: ReasonContext = {}): string 
 			return m.curva_why_section_peak({ where: where() });
 		case 'd:prefix-peak':
 			return m.curva_why_prefix_peak({ where: where() });
+		case 'd:prefix-peak-full':
+			return m.curva_why_prefix_peak_full({ where: where() });
 		case 'e:output-audible':
 			return m.curva_why_output_audible();
 		case 'e:output-full':

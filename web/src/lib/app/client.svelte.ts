@@ -14,6 +14,8 @@ import {
 	type WriteOutcome
 } from '#lib/cable/index.ts';
 import { createClientState, type CurrentCurve, type StorageOptions } from '#lib/state/index.ts';
+import { yolo, type YoloState } from '#lib/state/yolo.svelte.ts';
+import type { WriteProfile } from '#lib/cable/types.ts';
 import { createToastStore, type ToastStore } from '#lib/components/chrome/toast.ts';
 
 export interface ClientAppOptions {
@@ -27,6 +29,17 @@ export interface ClientAppOptions {
 	 * it, so the same region serves messages from before and after the mount (FUX.2).
 	 */
 	toasts?: ToastStore;
+	/** This tab's Modo YOLO (memory only). The module singleton by default; tests isolate it. */
+	yolo?: YoloState;
+}
+
+/** Options of `requestWrite`. */
+export interface WriteRequestOptions {
+	/**
+	 * `'yolo'`: open the checklist with the YOLO gate profile. Honoured only while Modo YOLO is on
+	 * in this tab and the free preview is off; otherwise nothing opens.
+	 */
+	profile?: WriteProfile;
 }
 
 /** Explicit factory: the layout calls this only on mount, never during SSR. */
@@ -35,7 +48,10 @@ export function createClientApp(options: ClientAppOptions = {}) {
 	const state = createClientState({ ...options.storage, now });
 	const audio = options.audio ?? getAudioEngine();
 	const toasts = options.toasts ?? createToastStore();
+	const yoloState = options.yolo ?? yolo;
 	let pending = $state.raw<CurrentCurve | null>(null);
+	/** Gate profile of the open checklist (`'yolo'` only when asked for while YOLO was on). */
+	let pendingProfile = $state<WriteProfile>('standard');
 	let disposed = false;
 	let started: Promise<void> | undefined;
 
@@ -69,6 +85,9 @@ export function createClientApp(options: ClientAppOptions = {}) {
 			return entry === null ? null : writtenLevelDb(entry);
 		},
 		sessionWriteCount: () => state.flash.state.session,
+		// Modo YOLO, read live at every checklist evaluation: off, or the free preview on, refuses
+		// a YOLO write (the per-write confirmation is the checklist's own item).
+		yoloSession: () => yoloState.enabled && yoloState.writeBlock() === null,
 		// Same localStorage (and failure reporting) as the rest of the app state.
 		inflight: {
 			read: () => state.storage.readPersisted('local', CABLE_INFLIGHT_KEY),
@@ -117,6 +136,12 @@ export function createClientApp(options: ClientAppOptions = {}) {
 		get pendingWrite() {
 			return pending;
 		},
+		/** Gate profile of the open checklist. */
+		get pendingProfile(): WriteProfile {
+			return pending === null ? 'standard' : pendingProfile;
+		},
+		/** This tab's Modo YOLO. */
+		yolo: yoloState,
 		get experimentalWrite() {
 			return pending?.bands.some((band) => isExperimentalKind(band.kind)) ?? false;
 		},
@@ -127,11 +152,18 @@ export function createClientApp(options: ClientAppOptions = {}) {
 		 * Open a checklist on an immutable copy. No cable I/O here. `$state.snapshot` also copies
 		 * deep `$state` proxies (a page's selected tape), which `structuredClone` cannot clone.
 		 */
-		requestWrite(curve: CurrentCurve = state.curve.current) {
-			if (!cableState.writing && pending === null) pending = $state.snapshot(curve);
+		requestWrite(curve: CurrentCurve = state.curve.current, request: WriteRequestOptions = {}) {
+			if (cableState.writing || pending !== null) return;
+			const yoloWrite = request.profile === 'yolo';
+			// A YOLO checklist opens only while YOLO is on here and writing is not disabled.
+			if (yoloWrite && !(yoloState.enabled && yoloState.writeBlock() === null)) return;
+			pendingProfile = yoloWrite ? 'yolo' : 'standard';
+			pending = $state.snapshot(curve);
 		},
 		requestRescue() {
 			if (!cableState.writing && pending === null) {
+				// The rescue is always the standard Neutro write.
+				pendingProfile = 'standard';
 				pending = {
 					schema: 1,
 					...NEUTRAL_CURVE,

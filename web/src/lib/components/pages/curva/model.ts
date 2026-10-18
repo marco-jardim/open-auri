@@ -22,11 +22,17 @@ export function activeCount(bands: readonly Band[]): number {
 	return bands.filter((band) => band.kind !== 'OFF').length;
 }
 
-/** Full-grid verdict, the same one a write uses. Experimental kinds pass only with the flag. */
-export function verdictFor(curve: Curve): GateVerdict {
-	const verdict = gateForWrite(curve.bands, curve.preampDb, {
-		experimental: hasExperimental(curve.bands)
-	});
+/**
+ * Full-grid verdict, the same one a write uses. Experimental kinds pass only with the flag.
+ * `'yolo'` (Modo YOLO, also during the free preview): the core's YOLO profile, class 2 waived.
+ */
+export function verdictFor(curve: Curve, profile: 'standard' | 'yolo' = 'standard'): GateVerdict {
+	const experimental = hasExperimental(curve.bands);
+	const verdict = gateForWrite(
+		curve.bands,
+		curve.preampDb,
+		profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
+	);
 	// Core names the first prefix over the limit; older cores sent no stage, so fall back to the
 	// stage of the measured maximum. Presentation only: the verdict itself is unchanged.
 	const stage = verdict.metrics.internalAudible?.stage;
