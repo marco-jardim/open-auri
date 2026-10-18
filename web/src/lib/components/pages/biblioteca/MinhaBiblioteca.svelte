@@ -4,15 +4,23 @@
 	// explicit merge of the local library after sign-in. Signed out it is a single sign-in line;
 	// offline it says so and the local library of the page keeps working. Never writes to a cable:
 	// "Abrir" leads to /c/[id], where installing goes through `app.requestWrite`.
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import {
+		isSocialApiError,
 		rememberOrigin,
 		requireLoginHref,
 		type LibraryItem,
 		type SocialApi,
 		type SocialSession
 	} from '#lib/social/index.ts';
+	import {
+		checkEnvelope,
+		serverGateMessages,
+		textIssueText,
+		versionEnvelope,
+		type TextIssue
+	} from '#lib/components/pages/curva/social.ts';
 	import CreationInsights from './CreationInsights.svelte';
 	import MergeBanner from './MergeBanner.svelte';
 	import {
@@ -53,6 +61,7 @@
 		remember = rememberOrigin
 	}: {
 		session: Pick<SocialSession, 'signedIn' | 'verified' | 'nickname' | 'account' | 'known'>;
+		/** Without `appendVersion`, own creations are not offered "Editar nome e descrição". */
 		api: Pick<
 			SocialApi,
 			| 'myLibrary'
@@ -65,7 +74,8 @@
 			| 'audience'
 			| 'shareStats'
 			| 'createShare'
-		>;
+		> &
+			Partial<Pick<SocialApi, 'appendVersion'>>;
 		localItems?: readonly LocalLibraryItem[];
 		origin: string;
 		locale: string;
@@ -91,6 +101,20 @@
 	let notice = $state('');
 	let reload = $state(0);
 	let online = $state(typeof navigator === 'undefined' ? true : navigator.onLine !== false);
+	/** The own creation whose name and description are being edited (one at a time). */
+	let editing = $state<string | null>(null);
+	let editName = $state('');
+	let editDescription = $state('');
+	let editIssues = $state.raw<TextIssue[]>([]);
+	let editMessage = $state('');
+	let editGate = $state.raw<string[]>([]);
+	let editNameField = $state<HTMLInputElement | null>(null);
+	let editDescriptionField = $state<HTMLTextAreaElement | null>(null);
+	const editNameIssues = $derived(editIssues.filter((issue) => issue.field === 'name'));
+	const editDescriptionIssues = $derived(
+		editIssues.filter((issue) => issue.field === 'description')
+	);
+	const editOtherIssues = $derived(editIssues.filter((issue) => issue.field === null));
 
 	const shelfTab = $derived<Shelf | null>(tab === 'packs' ? null : tab);
 	const signedIn = $derived(session.signedIn);
@@ -295,6 +319,7 @@
 				notice = m.biblioteca_social_saved_visibility();
 			} else if (action === 'retract') {
 				patch(item.id, await api.retractLineage(item.id));
+				if (editing === item.id) editing = null;
 				notice = m.biblioteca_social_retracted_done();
 			} else if (action === 'restore') {
 				patch(item.id, await api.restoreLineage(item.id));
@@ -302,6 +327,140 @@
 			}
 		} catch (error) {
 			notice = errorText(errorKind(error));
+		} finally {
+			busy = null;
+		}
+	}
+
+	// ---- Name and description of an own creation -------------------------------------------
+	// Text lives on the (append-only) version: editing appends a version with the head's exact
+	// curve, license, language and recipe, through the gate, with the head as its parent.
+
+	/** Only active, unmoderated own creations can get a new version. */
+	function editable(item: LibraryItem): boolean {
+		return (
+			item.own &&
+			item.status === 'active' &&
+			item.moderation === 'visible' &&
+			api.appendVersion !== undefined
+		);
+	}
+
+	function resetEditFeedback() {
+		editIssues = [];
+		editMessage = '';
+		editGate = [];
+	}
+
+	async function openEdit(item: LibraryItem) {
+		if (busy || !editable(item)) return;
+		editing = item.id;
+		editName = item.head.name;
+		editDescription = item.head.description;
+		resetEditFeedback();
+		await tick();
+		editNameField?.focus();
+	}
+
+	function closeEdit(lineageId: string) {
+		if (editing !== lineageId) return;
+		editing = null;
+		resetEditFeedback();
+		void tick().then(() => document.getElementById(`${id}-edit-${lineageId}`)?.focus());
+	}
+
+	function escapeEdit(event: KeyboardEvent, lineageId: string) {
+		if (event.key !== 'Escape' || busy !== null) return;
+		event.preventDefault();
+		closeEdit(lineageId);
+	}
+
+	function renamed(lineageId: string, head: LibraryItem['head']) {
+		const update = (item: LibraryItem) => (item.id === lineageId ? { ...item, head } : item);
+		shelves = {
+			created: { ...shelves.created, items: shelves.created.items.map(update) },
+			favorites: { ...shelves.favorites, items: shelves.favorites.items.map(update) },
+			installed: { ...shelves.installed, items: shelves.installed.items.map(update) }
+		};
+	}
+
+	function editFailed(error: unknown) {
+		if (isSocialApiError(error) && !error.unreachable) {
+			if (error.code === 'HEAD_MOVED') {
+				// Edited elsewhere: reload the rows so the next save starts from the current head.
+				editMessage = m.cvedit_head_moved_reload();
+				reload += 1;
+				return;
+			}
+			if (error.code === 'CONFLICT') {
+				editMessage = m.cvedit_edit_unavailable();
+				reload += 1;
+				return;
+			}
+			if (error.code === 'GATE_REJECTED') {
+				editMessage = errorText('gate');
+				editGate = serverGateMessages(error.details);
+				return;
+			}
+			if (error.code === 'INVALID_CURVE') {
+				editMessage = m.curva_social_invalid();
+				return;
+			}
+		}
+		const kind = errorKind(error);
+		editMessage = errorText(kind);
+		if (kind === 'missing') reload += 1;
+	}
+
+	async function saveEdit(item: LibraryItem) {
+		const append = api.appendVersion;
+		if (busy || editing !== item.id || !append || !editable(item)) return;
+		resetEditFeedback();
+		const checked = checkEnvelope(
+			versionEnvelope(
+				{
+					s1: item.curve.s1,
+					license: item.head.license,
+					lang: item.head.lang,
+					recipe: item.head.recipe
+				},
+				{ name: editName, description: editDescription }
+			)
+		);
+		if (!checked.ok) {
+			editIssues = checked.issues;
+			editMessage = m.cvedit_invalid();
+			if (checked.issues.some((issue) => issue.field === 'name')) editNameField?.focus();
+			else if (checked.issues.some((issue) => issue.field === 'description')) {
+				editDescriptionField?.focus();
+			}
+			return;
+		}
+		if (checked.name === item.head.name && checked.description === item.head.description) {
+			closeEdit(item.id);
+			notice = m.cvedit_edit_unchanged();
+			return;
+		}
+		busy = item.id;
+		notice = '';
+		try {
+			const result = await append(item.id, {
+				parentVersionId: item.head.id,
+				envelope: checked.envelope
+			});
+			renamed(item.id, {
+				...item.head,
+				id: result.versionId,
+				parentId: item.head.id,
+				name: checked.name,
+				description: checked.description,
+				createdAt: Date.now()
+			});
+			void remember({ s1: item.curve.s1, lineageId: item.id, versionId: result.versionId });
+			closeEdit(item.id);
+			notice = m.cvedit_edit_done({ name: checked.name });
+		} catch (error) {
+			if (!isAbort(error)) editFailed(error);
 		} finally {
 			busy = null;
 		}
@@ -443,6 +602,7 @@
 									>{#if item.author}{m.biblioteca_social_by({
 											name: item.author.displayUsername
 										})}{:else}{m.biblioteca_social_author_removed()}{/if}</span
+								>{:else if item.head.description}<span class="desc">{item.head.description}</span
 								>{/if}
 							<div class="row-actions">
 								{#if item.status === 'active'}<a
@@ -482,6 +642,20 @@
 											onclick={() => act(item, 'restore')}>{m.biblioteca_social_restore()}</button
 										>
 									{/if}
+									{#if editable(item)}
+										<button
+											type="button"
+											id="{id}-edit-{item.id}"
+											aria-label={m.cvedit_edit_label({ name: item.head.name })}
+											aria-expanded={editing === item.id}
+											aria-controls={editing === item.id ? `${id}-edit-form-${item.id}` : undefined}
+											disabled={!verified || busy !== null}
+											onclick={() => {
+												if (editing === item.id) closeEdit(item.id);
+												else void openEdit(item);
+											}}>{m.cvedit_edit()}</button
+										>
+									{/if}
 									<button
 										type="button"
 										aria-expanded={open === item.id}
@@ -491,6 +665,96 @@
 									>
 								{/if}
 							</div>
+							{#if shelf === 'created' && editing === item.id && editable(item)}
+								<form
+									class="edit"
+									id="{id}-edit-form-{item.id}"
+									aria-labelledby="{id}-edit-title-{item.id}"
+									onsubmit={(event) => {
+										event.preventDefault();
+										void saveEdit(item);
+									}}
+								>
+									<h3 id="{id}-edit-title-{item.id}">
+										{m.cvedit_edit_title({ name: item.head.name })}
+									</h3>
+									<label class="field"
+										>{m.curva_social_name()}
+										<input
+											bind:this={editNameField}
+											bind:value={editName}
+											required
+											maxlength="48"
+											disabled={busy !== null}
+											aria-invalid={editNameIssues.length > 0 ? 'true' : undefined}
+											aria-describedby={editNameIssues.length > 0
+												? `${id}-edit-name-issue`
+												: undefined}
+											onkeydown={(event) => escapeEdit(event, item.id)}
+										/></label
+									>
+									{#if editNameIssues.length}
+										<p class="issue" id="{id}-edit-name-issue">
+											{editNameIssues.map(textIssueText).join(' ')}
+										</p>
+									{/if}
+									<label class="field"
+										>{m.curva_social_description()}
+										<textarea
+											bind:this={editDescriptionField}
+											bind:value={editDescription}
+											maxlength="280"
+											rows="3"
+											disabled={busy !== null}
+											aria-invalid={editDescriptionIssues.length > 0 ? 'true' : undefined}
+											aria-describedby={editDescriptionIssues.length > 0
+												? `${id}-edit-description-issue`
+												: `${id}-edit-description-hint`}
+											onkeydown={(event) => escapeEdit(event, item.id)}></textarea></label
+									>
+									{#if editDescriptionIssues.length}
+										<p class="issue" id="{id}-edit-description-issue">
+											{editDescriptionIssues.map(textIssueText).join(' ')}
+										</p>
+									{:else}
+										<p class="hint" id="{id}-edit-description-hint">
+											{m.cvedit_description_hint()}
+										</p>
+									{/if}
+									<p class="hint">{m.cvedit_edit_version()}</p>
+									<div class="edit-status" role="status" aria-live="polite">
+										{editMessage}
+										{#if editOtherIssues.length}
+											<ul>
+												{#each editOtherIssues as issue (issue.code)}
+													<li>{textIssueText(issue)}</li>
+												{/each}
+											</ul>
+										{/if}
+										{#if editGate.length}
+											<ul>
+												{#each editGate as text, index (`${index}:${text}`)}
+													<li>{text}</li>
+												{/each}
+											</ul>
+										{/if}
+									</div>
+									<div class="row-actions">
+										<button
+											type="submit"
+											disabled={!verified || busy !== null}
+											onkeydown={(event) => escapeEdit(event, item.id)}
+											>{busy === item.id ? m.cvedit_saving() : m.cvedit_save_confirm()}</button
+										>
+										<button
+											type="button"
+											disabled={busy !== null}
+											onkeydown={(event) => escapeEdit(event, item.id)}
+											onclick={() => closeEdit(item.id)}>{m.cvedit_cancel()}</button
+										>
+									</div>
+								</form>
+							{/if}
 							{#if shelf === 'created' && open === item.id}
 								<CreationInsights
 									lineageId={item.id}
@@ -643,6 +907,51 @@
 	}
 	.notice:empty {
 		margin: 0;
+	}
+	.edit {
+		max-width: 34rem;
+		margin-top: 10px;
+		padding: 10px 12px;
+		border: 1px solid #b99c6a44;
+	}
+	.edit h3 {
+		margin: 0 0 6px;
+		color: #ede0bf;
+		font: inherit;
+		font-weight: 700;
+		overflow-wrap: anywhere;
+	}
+	.field {
+		display: grid;
+		gap: 4px;
+		margin: 8px 0 4px;
+	}
+	.field input,
+	.field textarea {
+		box-sizing: border-box;
+		width: 100%;
+		min-height: 36px;
+		padding: 6px 8px;
+		color: #f3eed5;
+		background: #293023;
+		border: 1px solid #abb28c66;
+		font: inherit;
+	}
+	.field textarea {
+		resize: vertical;
+	}
+	.field [aria-invalid='true'] {
+		border-color: #ffb48a;
+	}
+	.edit .issue {
+		color: #ffb48a;
+	}
+	.edit .hint {
+		color: #cdbb98;
+	}
+	.field :where(input, textarea):focus-visible {
+		outline: 3px solid #f6bd55;
+		outline-offset: 2px;
 	}
 	:where(button, a, select):focus-visible {
 		outline: 3px solid #f6bd55;

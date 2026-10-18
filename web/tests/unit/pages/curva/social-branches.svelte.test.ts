@@ -93,7 +93,11 @@ test.each([
 		vi.spyOn(api, 'publishCurve').mockRejectedValueOnce(error);
 		const before = structuredClone(app.state.curve.current);
 		await page.getByRole('button', { name: m.curva_social_save(), exact: true }).click();
+		const dialog = page.getByRole('dialog');
+		await dialog.getByRole('button', { name: m.cvedit_save_confirm(), exact: true }).click();
 		await expect.poll(() => screen.container.textContent).toContain(message());
+		// The dialog keeps the text for a retry; closing it shows why the panel action waits.
+		await dialog.getByRole('button', { name: m.curva_social_cancel() }).click();
 		const save = page.getByRole('button', { name: m.curva_social_save(), exact: true });
 		const why = reason();
 		if (why) {

@@ -19,11 +19,14 @@
 	import type { UrlLike } from './layers.ts';
 	import type { CurvaPreview } from './preview.svelte.ts';
 	import {
+		checkEnvelope,
 		currentS1,
 		curvaSocialApi,
 		PreviewActivity,
 		serverGateMessages,
-		socialEnvelope
+		socialEnvelope,
+		textIssueText,
+		type TextIssue
 	} from './social.ts';
 
 	interface Props {
@@ -89,11 +92,45 @@
 	const activity = new PreviewActivity();
 	let dialog = $state<HTMLDialogElement | null>(null);
 	let dialogOpen = $state(false);
+	/** "Salvar" asks for the text of a private copy; "Publicar" also picks license and visibility. */
+	let mode = $state<'publish' | 'save'>('publish');
+	let nameField = $state<HTMLInputElement | null>(null);
+	let descriptionField = $state<HTMLTextAreaElement | null>(null);
 	let draftCurve = $state.raw<Curve | null>(null);
 	let draftName = $state('');
 	let description = $state('');
 	let license = $state<'CC0-1.0' | 'CC-BY-4.0'>('CC0-1.0');
 	let visibility = $state<'public' | 'unlisted' | 'private'>('public');
+	let issues = $state.raw<TextIssue[]>([]);
+	const saving = $derived(mode === 'save');
+	const nameIssues = $derived(issues.filter((issue) => issue.field === 'name'));
+	const descriptionIssues = $derived(issues.filter((issue) => issue.field === 'description'));
+	const otherIssues = $derived(issues.filter((issue) => issue.field === null));
+
+	/** The private lineage this page saved for the signed-in account: saving again adds a version. */
+	interface SavedCopy {
+		account: string;
+		s1: string;
+		lineageId: string;
+		versionId: string;
+		name: string;
+		description: string;
+		license: 'CC0-1.0' | 'CC-BY-4.0';
+		/** Editor name at that save: a later rename in the editor wins in the prefill. */
+		editorName: string;
+	}
+	let saved = $state.raw<SavedCopy | null>(null);
+	const draftS1 = $derived(draftCurve ? currentS1(draftCurve) : null);
+	/** The saved copy a "Salvar" of the frozen draft updates (same account, exact same S1). */
+	const draftCopy = $derived(
+		saving &&
+			saved &&
+			draftS1 !== null &&
+			saved.s1 === draftS1 &&
+			saved.account === session.accountId
+			? saved
+			: null
+	);
 
 	async function fetchSession(input: string, init?: RequestInit): Promise<Response> {
 		try {
@@ -147,6 +184,10 @@
 			}
 			if (cause.code === 'RATE_LIMITED' || cause.code === 'QUOTA_EXCEEDED') {
 				message = m.curva_social_limit();
+				return;
+			}
+			if (cause.code === 'INVALID_CURVE') {
+				message = m.curva_social_invalid();
 				return;
 			}
 		}
@@ -270,37 +311,93 @@
 		reconnectRevision++;
 		void session.refresh();
 	}
-	function openPublish() {
+	function openDialog(next: 'publish' | 'save') {
 		if (unavailable) return;
+		mode = next;
 		draftCurve = structuredClone($state.snapshot(curve));
-		draftName = name;
-		description = '';
-		license = 'CC0-1.0';
-		visibility = 'public';
+		// `draftCopy` now reads the frozen draft: prefill from the saved copy it would update.
+		const copy = draftCopy;
+		draftName = copy && copy.editorName === name ? copy.name : name;
+		description = copy?.description ?? '';
+		license = copy?.license ?? 'CC0-1.0';
+		visibility = next === 'save' ? 'private' : 'public';
 		message = '';
 		gateMessages = [];
+		issues = [];
 		dialog?.showModal();
 		dialogOpen = true;
+		nameField?.focus();
 	}
-	async function publish(privateSave = false) {
+	function focusIssue(found: readonly TextIssue[]) {
+		if (found.some((issue) => issue.field === 'name')) nameField?.focus();
+		else if (found.some((issue) => issue.field === 'description')) descriptionField?.focus();
+	}
+	async function submit() {
 		if (unavailable) return;
-		const snapshot = privateSave ? structuredClone($state.snapshot(curve)) : draftCurve;
+		const snapshot = draftCurve;
 		if (!snapshot) return;
-		busy = true;
+		const copy = draftCopy;
+		const account = session.accountId;
+		const chosen = copy?.license ?? license;
 		message = '';
 		gateMessages = [];
+		issues = [];
+		// Same core rules as the server (lengths, lines, links, control characters): nothing is
+		// sent while the text cannot be published.
+		const checked = checkEnvelope(
+			socialEnvelope(snapshot, { name: draftName, description, license: chosen, locale })
+		);
+		if (!checked.ok) {
+			issues = checked.issues;
+			message = m.cvedit_invalid();
+			focusIssue(checked.issues);
+			return;
+		}
+		if (copy && checked.name === copy.name && checked.description === copy.description) {
+			message = m.cvedit_save_unchanged();
+			dialog?.close();
+			return;
+		}
+		busy = true;
 		try {
-			const targetVisibility = privateSave ? 'private' : visibility;
-			const envelope = socialEnvelope(snapshot, {
-				name: privateSave ? name : draftName,
-				description: privateSave ? '' : description,
-				license: privateSave ? 'CC0-1.0' : license,
-				locale
+			if (copy) {
+				// Name and description live on the (append-only) version: a new version, same lineage.
+				const result = await api.appendVersion(copy.lineageId, {
+					parentVersionId: copy.versionId,
+					envelope: checked.envelope
+				});
+				saved = {
+					...copy,
+					versionId: result.versionId,
+					name: checked.name,
+					description: checked.description,
+					editorName: name
+				};
+				message = m.cvedit_save_updated();
+				dialog?.close();
+				return;
+			}
+			const targetVisibility = saving ? 'private' : visibility;
+			const result = await api.publishCurve({
+				envelope: checked.envelope,
+				visibility: targetVisibility
 			});
-			const result = await api.publishCurve({ envelope, visibility: targetVisibility });
-			if (targetVisibility !== 'private') {
+			if (targetVisibility === 'private') {
+				if (account) {
+					saved = {
+						account,
+						s1: checked.code,
+						lineageId: result.lineageId,
+						versionId: result.versionId,
+						name: checked.name,
+						description: checked.description,
+						license: chosen,
+						editorName: name
+					};
+				}
+			} else {
 				await rememberOrigin({
-					s1: envelope.code,
+					s1: checked.code,
 					lineageId: result.lineageId,
 					versionId: result.versionId
 				});
@@ -308,11 +405,53 @@
 			}
 			message =
 				targetVisibility === 'private' ? m.curva_social_saved() : m.curva_social_published();
-			if (!privateSave) dialog?.close();
+			dialog?.close();
 		} catch (cause) {
-			failure(cause);
+			if (copy) await copyFailed(copy, cause);
+			else failure(cause);
 		} finally {
 			busy = false;
+		}
+	}
+	/** A new version of the saved copy failed: its head moved, or it is gone. */
+	async function copyFailed(copy: SavedCopy, cause: unknown) {
+		if (!isSocialApiError(cause) || cause.unreachable || cause.status >= 500) {
+			failure(cause);
+			return;
+		}
+		if (cause.code === 'CONFLICT' || cause.code === 'NOT_FOUND' || cause.code === 'GONE') {
+			// Retracted or deleted elsewhere: the next "Salvar" creates a new private copy.
+			saved = null;
+			gateMessages = [];
+			message = m.cvedit_save_gone();
+			return;
+		}
+		if (cause.code !== 'HEAD_MOVED') {
+			failure(cause);
+			return;
+		}
+		gateMessages = [];
+		message = m.cvedit_head_moved();
+		try {
+			const current = await api.getLineage(copy.lineageId);
+			const headId = current.lineage.headVersion;
+			const head = current.versions.find((version) => version.id === headId);
+			if (current.lineage.status !== 'active' || !headId) {
+				saved = null;
+				message = m.cvedit_save_gone();
+				return;
+			}
+			saved = {
+				...copy,
+				versionId: headId,
+				name: head?.name ?? copy.name,
+				description: head?.description ?? copy.description
+			};
+		} catch (reload) {
+			// The copy stays as it was: the next "Salvar" meets HEAD_MOVED again and reloads.
+			if (!isSocialApiError(reload) || reload.unreachable || reload.status >= 500) {
+				failure(reload);
+			}
 		}
 	}
 	async function toggleFavorite() {
@@ -380,10 +519,14 @@
 		<p>{m.curva_social_verify()} <a href="/conta">{m.curva_social_account()}</a></p>
 	{/if}
 	<div class="actions">
-		<Button size="sm" caps disabledReason={reason} onclick={() => void publish(true)}
-			>{m.curva_social_save()}</Button
+		<Button
+			size="sm"
+			caps
+			aria-haspopup="dialog"
+			disabledReason={reason}
+			onclick={() => openDialog('save')}>{m.curva_social_save()}</Button
 		>
-		<Button size="sm" caps disabledReason={reason} onclick={openPublish}
+		<Button size="sm" caps disabledReason={reason} onclick={() => openDialog('publish')}
 			>{m.curva_social_publish()}</Button
 		>
 		{#if origin}
@@ -441,38 +584,82 @@
 	<form
 		onsubmit={(event) => {
 			event.preventDefault();
-			void publish();
+			void submit();
 		}}
 	>
-		<h2 id={`${headingId}-dialog`}>{m.curva_social_publish()}</h2>
+		<h2 id={`${headingId}-dialog`}>
+			{saving ? m.curva_social_save() : m.curva_social_publish()}
+		</h2>
 		<label>
 			{m.curva_social_name()}
-			<input required maxlength="48" bind:value={draftName} disabled={busy} />
+			<input
+				bind:this={nameField}
+				required
+				maxlength="48"
+				bind:value={draftName}
+				disabled={busy}
+				aria-invalid={nameIssues.length > 0 ? 'true' : undefined}
+				aria-describedby={nameIssues.length > 0 ? `${headingId}-name-issue` : undefined}
+			/>
 		</label>
+		{#if nameIssues.length}
+			<p class="issue" id={`${headingId}-name-issue`}>
+				{nameIssues.map(textIssueText).join(' ')}
+			</p>
+		{/if}
 		<label>
 			{m.curva_social_description()}
-			<textarea maxlength="280" bind:value={description} disabled={busy}></textarea>
+			<textarea
+				bind:this={descriptionField}
+				maxlength="280"
+				bind:value={description}
+				disabled={busy}
+				aria-invalid={descriptionIssues.length > 0 ? 'true' : undefined}
+				aria-describedby={descriptionIssues.length > 0
+					? `${headingId}-description-issue`
+					: saving
+						? `${headingId}-description-hint`
+						: undefined}></textarea>
 		</label>
-		<label>
-			{m.curva_social_license()}
-			<select bind:value={license} disabled={busy}>
-				<option value="CC0-1.0">CC0</option>
-				<option value="CC-BY-4.0">CC-BY 4.0</option>
-			</select>
-		</label>
-		<label>
-			{m.curva_social_visibility()}
-			<select bind:value={visibility} disabled={busy}>
-				<option value="public">{m.curva_social_public()}</option>
-				<option value="unlisted">{m.curva_social_unlisted()}</option>
-				<option value="private">{m.curva_social_private()}</option>
-			</select>
-		</label>
+		{#if descriptionIssues.length}
+			<p class="issue" id={`${headingId}-description-issue`}>
+				{descriptionIssues.map(textIssueText).join(' ')}
+			</p>
+		{:else if saving}
+			<p class="note" id={`${headingId}-description-hint`}>{m.cvedit_description_hint()}</p>
+		{/if}
+		{#if saving}
+			<p class="note">{m.cvedit_save_private()}</p>
+			{#if draftCopy}<p class="note">{m.cvedit_save_version()}</p>{/if}
+		{:else}
+			<label>
+				{m.curva_social_license()}
+				<select bind:value={license} disabled={busy}>
+					<option value="CC0-1.0">CC0</option>
+					<option value="CC-BY-4.0">CC-BY 4.0</option>
+				</select>
+			</label>
+			<label>
+				{m.curva_social_visibility()}
+				<select bind:value={visibility} disabled={busy}>
+					<option value="public">{m.curva_social_public()}</option>
+					<option value="unlisted">{m.curva_social_unlisted()}</option>
+					<option value="private">{m.curva_social_private()}</option>
+				</select>
+			</label>
+		{/if}
 		{#if offline}
 			<p class="note" role="status">{m.curva_social_offline()}</p>
 		{/if}
-		<div role="status">
+		<div role="status" aria-live="polite">
 			{message}
+			{#if otherIssues.length}
+				<ul>
+					{#each otherIssues as issue (issue.code)}
+						<li>{textIssueText(issue)}</li>
+					{/each}
+				</ul>
+			{/if}
 			{#if gateMessages.length}
 				<ul>
 					{#each gateMessages as text, index (`${index}:${text}`)}
@@ -483,7 +670,11 @@
 		</div>
 		<div class="actions">
 			<Button variant="primary" type="submit" loading={busy} disabledReason={busy ? null : reason}
-				>{busy ? m.curva_social_busy() : m.curva_social_publish()}</Button
+				>{busy
+					? m.curva_social_busy()
+					: saving
+						? m.cvedit_save_confirm()
+						: m.curva_social_publish()}</Button
 			>
 			<Button
 				variant="ghost"
@@ -515,6 +706,14 @@
 	.note {
 		color: var(--muted);
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
+	}
+	.issue {
+		margin: -6px 0 12px;
+		color: var(--warn);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
+	}
+	[aria-invalid='true'] {
+		border-color: var(--warn);
 	}
 	a:not(.btn) {
 		color: var(--accent-text);

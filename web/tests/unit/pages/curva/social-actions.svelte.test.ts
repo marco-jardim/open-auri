@@ -59,18 +59,24 @@ async function setup(
 	return { app, fetcher, session, clipboard, screen };
 }
 
-test('account save is private and never edits or writes the cable', async () => {
+test('account save asks for the text, is private and never edits or writes the cable', async () => {
 	const { app, fetcher } = await setup(async () =>
 		json({ lineageId: 'mine', versionId: 'v1', curveId: 'hash' }, 201)
 	);
 	const before = app.state.curve.current;
 	await page.getByRole('button', { name: m.curva_social_save() }).click();
+	const dialog = page.getByRole('dialog');
+	await expect
+		.element(dialog.getByRole('textbox', { name: m.curva_social_name() }))
+		.toHaveValue('Editor');
+	expect(fetcher.mock.calls.some(([url]) => url === '/api/v1/curves')).toBe(false);
+	await dialog.getByRole('button', { name: m.cvedit_save_confirm(), exact: true }).click();
 	await expect.element(page.getByRole('status').first()).toMatchTextContent(m.curva_social_saved());
 	const request = fetcher.mock.calls.find(([url]) => url === '/api/v1/curves');
 	expect(request?.[1].method).toBe('POST');
 	expect(JSON.parse(String(request?.[1].body))).toMatchObject({
 		visibility: 'private',
-		envelope: { name: 'Editor', code: s1 }
+		envelope: { name: 'Editor', description: '', code: s1 }
 	});
 	expect(await originOf(s1)).toBeNull();
 	expect(app.state.curve.current).toEqual(before);
@@ -120,6 +126,10 @@ test('a 200 response cannot claim publication or remember an origin', async () =
 		json({ lineageId: 'not-created', versionId: 'v1', curveId: 'hash' }, 200)
 	);
 	await page.getByRole('button', { name: m.curva_social_save() }).click();
+	await page
+		.getByRole('dialog')
+		.getByRole('button', { name: m.cvedit_save_confirm(), exact: true })
+		.click();
 	await vi.waitFor(() => expect(screen.container.textContent).toContain(m.curva_social_offline()));
 	expect(screen.container.textContent).not.toContain(m.curva_social_saved());
 	expect(await originOf(s1)).toBeNull();
@@ -183,6 +193,10 @@ test('network failure is discreet and preserves local use and offline fallback',
 		throw new TypeError('network');
 	});
 	await page.getByRole('button', { name: m.curva_social_save() }).click();
+	await page
+		.getByRole('dialog')
+		.getByRole('button', { name: m.cvedit_save_confirm(), exact: true })
+		.click();
 	await vi.waitFor(() => expect(screen.container.textContent).toContain(m.curva_social_offline()));
 	expect(screen.container.textContent).toContain(m.curva_social_fallback());
 	expect(app.state.curve.update({ preampDb: -1 })).toBe(true);
