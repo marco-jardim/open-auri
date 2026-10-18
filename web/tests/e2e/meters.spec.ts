@@ -217,7 +217,25 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 	// 440 Hz at −18 dBFS reads about 0 VU with the default −18 dBFS reference.
 	await expect.poll(reading, { timeout: 5000 }).toBeGreaterThan(-1);
 	await expect.poll(reading).toBeLessThan(1);
-	const before = await reading();
+	// Every later step is measured from the needle at rest. It rises from zero when the tap starts
+	// (IEC ballistics: 99 % in 300 ms) and the readout moves at 10 Hz, so the first reading above
+	// −1 VU is still on its way up (−1 VU is crossed ~220 ms in; −0.77 at 233 ms, −0.52 at 250 ms),
+	// and a reference taken there fails the ±0.5 check of the 2 dB step below by that much. Rest:
+	// two readings 400 ms apart (past the rise, its overshoot and one readout step) within 0.1 VU.
+	let before = Number.NaN;
+	await expect
+		.poll(
+			async () => {
+				const first = await reading();
+				await page.waitForTimeout(400);
+				before = await reading();
+				return Math.abs(before - first);
+			},
+			{ timeout: 10000 }
+		)
+		.toBeLessThanOrEqual(0.1);
+	expect(before).toBeGreaterThan(-1);
+	expect(before).toBeLessThan(1);
 
 	const volume = popover.getByRole('slider', { name: 'Volume da prévia (só no navegador)' });
 	await volume.fill('-40');
@@ -236,7 +254,8 @@ test('Biblioteca VU is metered pre-volume (AO VIVO) and follows the global 0 VU 
 
 	// 0 VU at −20 dBFS: the same −18 dBFS tone reads about +2 VU on every tap.
 	await popover.getByRole('radio', { name: '−20 dBFS' }).check();
-	// The needle overshoots briefly on the 2 dB step (IEC ballistics); wait for it to settle.
+	// The page taps again with the new reference: the needle rises from zero once more and
+	// overshoots briefly (IEC ballistics); wait for it to settle.
 	await expect
 		.poll(async () => Math.abs((await reading()) - before - 2), { timeout: 5000 })
 		.toBeLessThanOrEqual(0.5);
