@@ -172,6 +172,13 @@
 	const freePreview = $derived(app?.yolo.freePreview ?? false);
 	/** Gate profile of a write from this editor, and of every discrete edit. */
 	const writeProfile = $derived<'standard' | 'yolo'>(yoloOn ? 'yolo' : 'standard');
+	/**
+	 * What judges every discrete edit (kinds and the dial's preflight, parked points, reorders and
+	 * the default order, the preamp, "Máximo sem clipping", macros): the write profile, except in
+	 * "Prévia sem limites", where the codec accepts, the same check the drags use (`'codec'`).
+	 * Those edits then go to the memory-only draft (`apply` → `applyFree`), never to the store.
+	 */
+	const editJudge = $derived(editorProfile(yoloOn, freePreview));
 
 	const stored = $derived(app?.state.curve.current ?? null);
 	const storedCurve = $derived<Curve>(stored ?? neutral);
@@ -739,7 +746,7 @@
 	function onPark(index: number, target: DragTarget) {
 		if (!app) return;
 		const bands = replaceBand(curve.bands, index, parkedBand(index));
-		const check = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
+		const check = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		if (!check.ok) {
 			dragMessage = m.curva_v2_parked_refused({
 				index: String(index + 1),
@@ -781,7 +788,7 @@
 			values,
 			index,
 			target: value,
-			profile: writeProfile
+			profile: editJudge
 		});
 		const macro = MACROS[index];
 		if (proposal.ok && apply(proposal)) {
@@ -809,7 +816,7 @@
 	const maxClipMessage = $derived(maxClip?.signature === signature ? maxClip.text : null);
 	function onMaxClip() {
 		if (!app) return;
-		const result = maxPreamp(curve, writeProfile);
+		const result = maxPreamp(curve, editJudge);
 		let text: string;
 		if (!result.ok) {
 			text = m.curva_maxclip_none({
@@ -853,7 +860,7 @@
 		const preampDb = snapPreamp(value);
 		if (preampDb === null || preampDb === curve.preampDb) return;
 		const bands = curve.bands;
-		const check = editorVerdict({ bands, preampDb }, writeProfile);
+		const check = editorVerdict({ bands, preampDb }, editJudge);
 		if (!check.ok) {
 			const text = m.curva_preamp_refused({
 				value: formatSignedDb(preampDb, locale),
@@ -879,7 +886,7 @@
 		const previous = curve.bands[index];
 		if (!previous) return { ok: false as const, reason: m.curva_reason_unknown() };
 		const bands = replaceBand(curve.bands, index, bandOfKind(previous, kind));
-		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		return result.ok
 			? { ok: true as const, bands }
 			: {
@@ -900,7 +907,7 @@
 	}
 	function onDefaultOrder() {
 		const bands = defaultOrder(curve.bands);
-		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		if (result.ok) {
 			// The labels follow their filters (in the free preview: the draft's labels).
 			apply({ bands, preampDb: curve.preampDb }, { order: defaultPermutation(curve.bands) });
@@ -921,7 +928,7 @@
 	let springTimer: ReturnType<typeof setTimeout> | undefined;
 	function onReorder(from: number, to: number) {
 		if (!app) return;
-		const result = reorderSections(curve, from, to, writeProfile);
+		const result = reorderSections(curve, from, to, editJudge);
 		if (result.ok) {
 			// The labels follow their filters (in the free preview: the draft's labels).
 			const order = movePermutation(curve.bands.length, from, to);

@@ -16,6 +16,7 @@ export {
   YOLO_WAIVABLE,
   HARD_REASONS,
   CODEC_PREAMP_FLOOR_DB,
+  YOLO_PREAMP_MAX_DB,
   autoPreamp,
 } from './gate.mjs';
 export {

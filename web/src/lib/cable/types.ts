@@ -121,6 +121,16 @@ export interface InflightMarker {
 	 * one has not started. No cable is being written, so recovering it records nothing.
 	 */
 	between?: true;
+	/**
+	 * Modo YOLO write: recovered as a YOLO `interrupted` entry. Absent on standard writes and on
+	 * markers persisted before it existed (both recovered as standard).
+	 */
+	profile?: 'yolo';
+	/**
+	 * The class-2 codes the YOLO write waived (only with `profile: 'yolo'`; at most
+	 * `JOURNAL_WAIVED_MAX`, waivable codes only), copied into the recovered entry.
+	 */
+	waived?: ReasonCode[];
 }
 
 export interface CableServiceDeps {

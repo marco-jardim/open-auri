@@ -31,6 +31,7 @@ import {
 	listFavorites,
 	listInstalled,
 	listOwnLineages,
+	ownHeadCurves,
 	ownHeadLabels,
 	publishLineage,
 	recordShareEvent,
@@ -289,7 +290,14 @@ interface Identity {
 }
 
 type Outcome =
-	| { kind: 'lineage'; lineageId: string; name: string; labels: VersionLabels | null }
+	| {
+			kind: 'lineage';
+			lineageId: string;
+			name: string;
+			labels: VersionLabels | null;
+			/** The S1 whose wire order `labels` follow (the head version's curve), if known. */
+			s1: string | null;
+	  }
 	| { kind: 'rejected'; code: MergeRejectCode; reasons?: string[] };
 
 /** Labels by value; null and an all-null list are the same (no labels). */
@@ -298,6 +306,55 @@ function sameLabels(a: VersionLabels | null, b: VersionLabels | null): boolean {
 	const right = b?.some((label) => label !== null) ? b : null;
 	if (left === null || right === null) return left === right;
 	return left.length === right.length && left.every((label, index) => label === right[index]);
+}
+
+/**
+ * The non-null labels of a curve, each paired with the band it names: kind, frequency, gain and
+ * Q, the tuple `canonKey` sorts by, so the result does not depend on the wire order. Identical
+ * bands are interchangeable (one canonical curve), so their labels count as a multiset: the
+ * pairs are sorted, and which of two identical filters carries a name never matters. Null when
+ * `s1` does not decode.
+ */
+function labelsByBand(s1: string, labels: VersionLabels | null): string[] | null {
+	let bands: ReturnType<typeof decodeS1>['bands'];
+	try {
+		bands = decodeS1(s1).bands;
+	} catch (error) {
+		if (error instanceof S1Error) return null;
+		throw error;
+	}
+	const pairs: string[] = [];
+	for (const [index, label] of (labels ?? []).entries()) {
+		if (label === null) continue;
+		const band = bands[index];
+		const identity =
+			band === undefined
+				? `#${index}`
+				: band.kind === 'OFF'
+					? 'OFF'
+					: `${band.kind},${band.freqHz},${band.gainDb ?? 0},${band.qFactor}`;
+		pairs.push(JSON.stringify([identity, label]));
+	}
+	return pairs.sort();
+}
+
+/**
+ * Whether an item's labels (by wire index of `itemS1`) equal a lineage's (by wire index of `s1`).
+ * The same S1: compared by index (`sameLabels`). Another S1 (a match by `canonKey`, the same bands
+ * in another wire order, or a head on another version): each list follows its own wire order, so
+ * every label is first matched to its band by identity (`labelsByBand`), then compared.
+ */
+function sameLabelsOf(
+	itemS1: string,
+	itemLabels: VersionLabels | null,
+	s1: string | null,
+	labels: VersionLabels | null
+): boolean {
+	if (s1 === null || s1 === itemS1) return sameLabels(itemLabels, labels);
+	const left = labelsByBand(itemS1, itemLabels);
+	const right = labelsByBand(s1, labels);
+	if (left === null || right === null) return sameLabels(itemLabels, labels);
+	return left.length === right.length && left.every((pair, index) => pair === right[index]);
 }
 
 async function identify(s1: string): Promise<Identity | null> {
@@ -418,7 +475,8 @@ const REPO_REJECT: Partial<Record<SocialErrorCode, MergeRejectCode>> = {
  * - `duplicates`: the user already owns a lineage with a version of the same curve (`curve_id` or
  *   `canonKey`), or an earlier item of the batch has it, with the same name and filter labels;
  * - `conflicts`: same, but the name (`field: 'name'`) or the filter labels (`field: 'labels'`,
- *   compared by value with the head version's; refused labels differ) differ, one entry per
+ *   compared by value with the head version's, band by band when the two S1 wire orders differ;
+ *   refused labels differ) differ, one entry per
  *   field; nothing is changed, so local labels are never silently dropped without a report;
  * - `rejected`: invalid S1, curve reproved by the gate, text refused by the normalizer, or a quota
  *   is spent (`QUOTA_EXCEEDED`: lineages created in 24 h, items gated in 24 h, or this request's
@@ -446,6 +504,7 @@ export async function mergeLocalLibrary(
 	const ownedIds = [...new Set(owned.map((row) => row.lineageId))];
 	const names = await ownHeadNames(db, userId, ownedIds);
 	const headLabels = await ownHeadLabels(db, userId, ownedIds);
+	const headCurves = await ownHeadCurves(db, userId, ownedIds);
 
 	/** Outcomes by `id:<curveId>` and `ck:<canonKey>`: the account's lineages, then the batch's. */
 	const seen = new Map<string, Outcome>();
@@ -457,7 +516,8 @@ export async function mergeLocalLibrary(
 		const name = names.get(row.lineageId);
 		if (name === undefined) continue;
 		const labels = headLabels.get(row.lineageId) ?? null;
-		remember(row, { kind: 'lineage', lineageId: row.lineageId, name, labels });
+		const s1 = headCurves.get(row.lineageId) ?? null;
+		remember(row, { kind: 'lineage', lineageId: row.lineageId, name, labels, s1 });
 	}
 
 	const recent = await countOwnLineagesSince(db, userId, now - DAY_MS);
@@ -486,7 +546,11 @@ export async function mergeLocalLibrary(
 		const labels = cleanLabels(item.labels);
 		const fields: MergeConflictField[] = [];
 		if (!name.ok || name.value !== outcome.name) fields.push('name');
-		if (!labels.ok || !sameLabels(labels.value, outcome.labels)) fields.push('labels');
+		// Matched by `canonKey` (or on another version than the head), the two label lists follow
+		// different wire orders: they are compared band by band (`sameLabelsOf`).
+		if (!labels.ok || !sameLabelsOf(item.s1, labels.value, outcome.s1, outcome.labels)) {
+			fields.push('labels');
+		}
 		if (fields.length === 0) {
 			report.duplicates.push({ localId, lineageId: outcome.lineageId });
 			return;
@@ -574,7 +638,8 @@ export async function mergeLocalLibrary(
 				kind: 'lineage',
 				lineageId: ids.lineageId,
 				name: name.value,
-				labels: labels.value
+				labels: labels.value,
+				s1: item.s1
 			};
 			remember(identity, outcome);
 			report.created.push({ localId: item.localId, lineageId: ids.lineageId });
@@ -588,7 +653,8 @@ export async function mergeLocalLibrary(
 					kind: 'lineage',
 					lineageId: winner.id,
 					name: winner.head.name,
-					labels: winner.head.labels
+					labels: winner.head.labels,
+					s1: winner.curve.s1
 				};
 				remember(identity, outcome);
 				existing(item, outcome);

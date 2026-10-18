@@ -9,8 +9,13 @@
  * the discrete edits judge a curve exactly as the dial and the drags do. In YOLO the preamp still
  * never goes below −25,5 dB (`EDITOR_PREAMP_FLOOR_DB`, the S1 floor): a curve that would need
  * more attenuation is refused with the `g:preamp` reason, so a YOLO curve always stays storable.
+ *
+ * During "Prévia sem limites" the discrete edits take the `'codec'` judge (`EditJudge`): the codec
+ * accepts the curve, the very check the drags use (`codecAccepts`), within the same −25,5 dB floor.
+ * The page then keeps such an edit in its memory-only draft, never in the store.
  */
 import { autoPreamp, clampToAbs, roundToGrid, SOFT_RANGES, THRESHOLDS } from 'open-auri/safety';
+import { codecAccepts } from '#lib/workers/gate-handler.ts';
 import { hasExperimental, hasGain, replaceBand, verdictFor } from './model.ts';
 import type { Band, BandKind, Curve } from './model.ts';
 import type { GateVerdict, Reason } from './reasons.ts';
@@ -24,6 +29,17 @@ export type PreampResult =
 
 /** Gate profile of an editor edit: `'yolo'` only while Modo YOLO is on in this tab. */
 export type EditProfile = 'standard' | 'yolo';
+
+/**
+ * What judges a discrete edit: a gate profile, or `'codec'` during "Prévia sem limites" (the
+ * editor profile of that moment, `editorProfile`), where the codec alone accepts, as for drags.
+ */
+export type EditJudge = EditProfile | 'codec';
+
+/** The gate profile behind a judge: the free preview searches and explains with YOLO's. */
+function gateProfileOf(judge: EditJudge): EditProfile {
+	return judge === 'standard' ? 'standard' : 'yolo';
+}
 
 /**
  * Lowest editor preamp in every profile, YOLO included (operator decision): −25,5 dB, the floor S1
@@ -48,10 +64,30 @@ function floorReason(preampDb: number, profile: EditProfile): Reason | null {
 }
 
 /**
- * The write gate's full-grid verdict in `profile` (`verdictFor`), plus the editor's −25,5 dB
- * preamp floor in YOLO: the verdict every discrete edit of the editor uses.
+ * The free preview's verdict: the codec accepts the curve (`codecAccepts`, as for drags) and the
+ * preamp is not below the editor floor. The metrics are the YOLO gate's, but its refusals do not
+ * count: such a curve is only heard (behind the preview protection) from the memory-only draft,
+ * never stored or written. A refusal names the codec's reasons (`f:codec`) and the floor's.
  */
-export function editorVerdict(curve: Curve, profile: EditProfile = 'standard'): GateVerdict {
+function codecVerdict(curve: Curve): GateVerdict {
+	const verdict = verdictFor(curve, 'yolo');
+	const reasons: Reason[] = [];
+	if (!codecAccepts(curve.bands, curve.preampDb)) {
+		const codec = verdict.reasons.filter((reason) => reason.code === 'f:codec');
+		reasons.push(...(codec.length > 0 ? codec : verdict.reasons));
+	}
+	const floor = floorReason(curve.preampDb, 'yolo');
+	if (floor !== null) reasons.push(floor);
+	return { ...verdict, ok: reasons.length === 0, reasons };
+}
+
+/**
+ * The write gate's full-grid verdict in `profile` (`verdictFor`), plus the editor's −25,5 dB
+ * preamp floor in YOLO: the verdict every discrete edit of the editor uses. With the `'codec'`
+ * judge ("Prévia sem limites") the codec's acceptance decides instead (`codecVerdict`).
+ */
+export function editorVerdict(curve: Curve, profile: EditJudge = 'standard'): GateVerdict {
+	if (profile === 'codec') return codecVerdict(curve);
 	const verdict = verdictFor(curve, profile);
 	const floor = floorReason(curve.preampDb, profile);
 	return floor === null ? verdict : { ...verdict, ok: false, reasons: [...verdict.reasons, floor] };
@@ -62,17 +98,19 @@ export function editorVerdict(curve: Curve, profile: EditProfile = 'standard'): 
  * accepts for these bands (core `autoPreamp`), verified again with the write gate. The bands are
  * never touched. When no preamp can fix the curve (kinds, D7, coefficients…), the curve's own
  * reasons explain why; in YOLO, a curve that needs a preamp below −25,5 dB is refused with the
- * `g:preamp` reason.
+ * `g:preamp` reason. In the free preview (`'codec'`) the search is YOLO's (what avoids clipping)
+ * and the codec judges the result, like every other free-preview edit.
  */
-export function maxPreamp(curve: Curve, profile: EditProfile = 'standard'): PreampResult {
+export function maxPreamp(curve: Curve, profile: EditJudge = 'standard'): PreampResult {
+	const gateProfile = gateProfileOf(profile);
 	const experimental = hasExperimental(curve.bands);
 	const preampDb = autoPreamp(
 		curve.bands,
-		profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
+		gateProfile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
 	);
 	const verdict =
 		preampDb === null
-			? verdictFor(curve, profile)
+			? verdictFor(curve, gateProfile)
 			: editorVerdict({ bands: curve.bands, preampDb }, profile);
 	if (preampDb === null || !verdict.ok) return { ok: false, reasons: verdict.reasons };
 	return { ok: true, preampDb, changed: preampDb !== curve.preampDb, verdict };
@@ -115,7 +153,7 @@ export function reorderSections(
 	curve: Curve,
 	from: number,
 	to: number,
-	profile: EditProfile = 'standard'
+	profile: EditJudge = 'standard'
 ): EditResult {
 	const bands = moveSection(curve.bands, from, to);
 	const verdict = editorVerdict({ bands, preampDb: curve.preampDb }, profile);
@@ -172,7 +210,7 @@ export function changeKind(
 	curve: Curve,
 	index: number,
 	kind: BandKind,
-	profile: EditProfile = 'standard'
+	profile: EditJudge = 'standard'
 ): EditResult {
 	const previous = curve.bands[index];
 	if (!previous) return { ok: false, reasons: [] };

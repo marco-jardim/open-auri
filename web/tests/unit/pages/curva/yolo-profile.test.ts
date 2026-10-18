@@ -17,6 +17,7 @@ import {
 } from '#lib/components/pages/curva/edit.ts';
 import { proposeMacro, ZERO_MACROS } from '#lib/components/pages/curva/macros.ts';
 import { verdictFor, type Band, type Curve } from '#lib/components/pages/curva/model.ts';
+import { codecAccepts } from '#lib/workers/gate-handler.ts';
 
 const pad = (active: Band[]): Band[] => [...active, ...NEUTRO.bands.slice(active.length)];
 const codes = (reasons: readonly { code: string }[]) => reasons.map((reason) => reason.code);
@@ -92,6 +93,102 @@ test('reorder and kinds use the profile they are given', () => {
 	if (moved.ok) expect(moved.bands[1]).toEqual(yoloOnly.bands[0]);
 	expect(changeKind(yoloOnly, 1, 'PK').ok).toBe(false);
 	expect(changeKind(yoloOnly, 1, 'PK', 'yolo').ok).toBe(true);
+});
+
+describe('Prévia sem limites: the codec judges every discrete edit (the drags’ check)', () => {
+	/** +4 dB out of a −1 dB preamp: the YOLO gate refuses it on output; a preamp would fix it. */
+	const loudCut: Curve = {
+		bands: pad([{ kind: 'PK', freqHz: 1000, gainDb: 4, qFactor: 1 }]),
+		preampDb: -1
+	};
+	/** A pole radius no preamp fixes (class 1): the YOLO gate refuses it, the codec accepts it. */
+	const hardOnly: Curve = {
+		bands: pad([{ kind: 'PK', freqHz: 20, gainDb: -12, qFactor: 20 }]),
+		preampDb: -1
+	};
+
+	test('the fixtures are codec-only', () => {
+		for (const curve of [loudCut, hardOnly]) {
+			expect(verdictFor(curve, 'yolo').ok).toBe(false);
+			expect(editorVerdict(curve, 'yolo').ok).toBe(false);
+			expect(codecAccepts(curve.bands, curve.preampDb)).toBe(true);
+		}
+		expect(autoPreamp(loudCut.bands, { profile: 'yolo' })).not.toBeNull();
+		expect(autoPreamp(hardOnly.bands, { profile: 'yolo' })).toBeNull();
+	});
+
+	test('editorVerdict: the codec accepts; a refusal names the codec or the editor floor', () => {
+		for (const curve of [loudCut, hardOnly]) {
+			const free = editorVerdict(curve, 'codec');
+			expect(free.ok).toBe(true);
+			expect(free.reasons).toEqual([]);
+		}
+		// A positive preamp does not encode.
+		const positive = editorVerdict({ bands: cut.bands, preampDb: 0.5 }, 'codec');
+		expect(positive.ok).toBe(false);
+		expect(codes(positive.reasons)).toEqual(['f:codec']);
+		// The editor floor (−25,5 dB) holds in the free preview too.
+		const deep = editorVerdict({ bands: cut.bands, preampDb: -30 }, 'codec');
+		expect(deep.ok).toBe(false);
+		expect(deep.reasons).toEqual([{ code: 'g:preamp', value: -30, limit: -25.5 }]);
+		expect(editorVerdict({ bands: cut.bands, preampDb: -25.5 }, 'codec').ok).toBe(true);
+		expect(editorVerdict({ bands: cut.bands, preampDb: 0 }, 'codec').ok).toBe(true);
+	});
+
+	test('kinds, parked points and reorders on a codec-only curve', () => {
+		for (const curve of [loudCut, hardOnly]) {
+			// A kind change (the dial's preflight and its commit) and a parked point (OFF → PK).
+			expect(changeKind(curve, 1, 'PK', 'yolo').ok).toBe(false);
+			const kind = changeKind(curve, 1, 'PK', 'codec');
+			expect(kind.ok).toBe(true);
+			if (kind.ok) expect(kind.bands[1]).toMatchObject({ kind: 'PK' });
+			// Reorders and the default order.
+			expect(reorderSections(curve, 0, 1, 'yolo').ok).toBe(false);
+			const moved = reorderSections(curve, 0, 1, 'codec');
+			expect(moved.ok).toBe(true);
+			if (moved.ok) expect(moved.bands[1]).toEqual(curve.bands[0]);
+		}
+	});
+
+	test('Máximo sem clipping: the YOLO search, judged by the codec', () => {
+		const result = maxPreamp(loudCut, 'codec');
+		expect(result).toMatchObject({
+			ok: true,
+			preampDb: autoPreamp(loudCut.bands, { experimental: false, profile: 'yolo' })
+		});
+		if (result.ok) expect(result.verdict.ok).toBe(true);
+		// No preamp fixes a class-1 reason: nothing to propose, and it says why.
+		const none = maxPreamp(hardOnly, 'codec');
+		expect(none.ok).toBe(false);
+		if (!none.ok) expect(none.reasons.length).toBeGreaterThan(0);
+		// Below the editor floor it is refused, as in YOLO.
+		const deep = maxPreamp(loud, 'codec');
+		expect(deep.ok).toBe(false);
+		if (!deep.ok) expect(codes(deep.reasons)).toEqual(['g:preamp']);
+	});
+
+	test('macros: the codec accepts where YOLO refuses; the preamp is never raised', () => {
+		const input = {
+			base: hardOnly.bands,
+			basePreampDb: hardOnly.preampDb,
+			values: ZERO_MACROS,
+			index: 1,
+			target: -1
+		};
+		expect(proposeMacro({ ...input, profile: 'yolo' }).ok).toBe(false);
+		const free = proposeMacro({ ...input, profile: 'codec' });
+		expect(free.ok).toBe(true);
+		expect(free.bands[1]).toMatchObject({ kind: 'PK', freqHz: 500, gainDb: -1 });
+		expect(free.preampDb).toBe(hardOnly.preampDb);
+		expect(free.verdict?.ok).toBe(true);
+		// A curve the YOLO search can attenuate: the codec takes the same lowered preamp.
+		const loudInput = { ...input, base: loudCut.bands, basePreampDb: loudCut.preampDb };
+		const yolo = proposeMacro({ ...loudInput, profile: 'yolo' });
+		const codec = proposeMacro({ ...loudInput, profile: 'codec' });
+		expect(codec.ok).toBe(true);
+		expect(codec.preampDb).toBeLessThanOrEqual(loudCut.preampDb);
+		if (yolo.ok) expect(codec.preampDb).toBe(yolo.preampDb);
+	});
 });
 
 test('macros use the profile they are given', () => {

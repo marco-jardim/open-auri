@@ -1250,6 +1250,32 @@ export async function ownHeadLabels(
 	return labels;
 }
 
+/**
+ * S1 of the head version of each of the owner's lineages among `lineageIds`: the wire order its
+ * filter labels (`ownHeadLabels`) are indexed by. Others are absent. Owner-scoped: the user id
+ * must come from the session.
+ */
+export async function ownHeadCurves(
+	db: D1Database,
+	ownerUserId: string,
+	lineageIds: readonly string[]
+): Promise<Map<string, string>> {
+	const curves = new Map<string, string>();
+	if (lineageIds.length === 0) return curves;
+	const rows = await all<{ id: string; s1: string }>(
+		sql(
+			db,
+			'SELECT l.id AS id, c.s1 AS s1 FROM lineages l JOIN versions v ON v.id = l.head_version ' +
+				'JOIN curves c ON c.id = v.curve_id ' +
+				'WHERE l.owner_user_id = ? AND l.id IN (SELECT value FROM json_each(?))',
+			ownerUserId,
+			idList(lineageIds)
+		)
+	);
+	for (const row of rows) curves.set(row.id, row.s1);
+	return curves;
+}
+
 // ---- Favorites ------------------------------------------------------------------------------
 
 /** Idempotent. 'not-found' when the lineage is not readable by the user. */

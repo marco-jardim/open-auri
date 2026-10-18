@@ -6,7 +6,7 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { gateForWrite } from 'open-auri/safety';
-import { LABEL_COUNT, LABEL_MAX } from 'open-auri/share';
+import { canonKey, decodeS1, encodeS1, LABEL_COUNT, LABEL_MAX } from 'open-auri/share';
 import { mergeLocalLibrary, type MergeItem } from '#lib/server/social/library.ts';
 import { LABELS_JSON_MAX } from '#lib/server/social/types.ts';
 import { count, member, presetS1 } from './helpers.ts';
@@ -127,5 +127,122 @@ describe('mergeLocalLibrary: filter labels', () => {
 		expect(await count(counter, `u:library.merge.gated:${me.user.id}:86400`)).toBe(0);
 		const lineages = 'SELECT count(*) AS n FROM lineages WHERE owner_user_id = ?';
 		expect(await count(lineages, me.user.id)).toBe(0);
+	});
+});
+
+describe('mergeLocalLibrary: labels of a canonKey duplicate follow their bands', () => {
+	type Curve = Parameters<typeof encodeS1>[0];
+	type Band = Curve['bands'][number];
+
+	/** `s1` in another wire order: entry i of `order` is the old index of the band now at i. */
+	function reorder(s1: string, order: readonly number[]): string {
+		const { bands, preampDb } = decodeS1(s1);
+		const moved = order.map((index) => {
+			const band = bands[index];
+			if (!band) throw new Error(`no band ${index}`);
+			return band;
+		});
+		return encodeS1({ bands: moved, preampDb });
+	}
+	const moveLabels = (labels: (string | null)[], order: readonly number[]) =>
+		order.map((index) => labels[index] ?? null);
+	/** The first band goes last: every band changes wire index. */
+	const ROTATE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
+
+	it('the same bands in another order: labels that moved with their filters are no conflict', async () => {
+		const me = await member();
+		const s1 = presetS1(3);
+		const moved = reorder(s1, ROTATE);
+		// Another curve id (wire order), the same canonical curve.
+		expect(moved).not.toBe(s1);
+		const original = decodeS1(s1);
+		const other = decodeS1(moved);
+		expect(canonKey(other.bands, other.preampDb)).toBe(canonKey(original.bands, original.preampDb));
+		const labels = ten(['Grave', 'Corpo', 'Médio']);
+		const first = await mergeLocalLibrary(env.DB, me.user.id, [item('a', s1, 'Curva', labels)]);
+		expect(first.created).toHaveLength(1);
+		const lineageId = first.created[0]?.lineageId ?? '';
+
+		const result = await mergeLocalLibrary(env.DB, me.user.id, [
+			// The names moved with their filters: the same labels, a plain duplicate.
+			item('moved', moved, 'Curva', moveLabels(labels, ROTATE)),
+			// The names stayed on the slots, so now they name other filters.
+			item('stayed', moved, 'Curva', labels),
+			// Two filters traded names.
+			item('traded', moved, 'Curva', moveLabels(ten(['Corpo', 'Grave', 'Médio']), ROTATE)),
+			// One name less.
+			item('fewer', moved, 'Curva', moveLabels(ten(['Grave', 'Corpo']), ROTATE))
+		]);
+		expect(result.created).toEqual([]);
+		expect(result.rejected).toEqual([]);
+		expect(result.duplicates).toEqual([{ localId: 'moved', lineageId }]);
+		expect(result.conflicts).toEqual([
+			{ localId: 'stayed', lineageId, field: 'labels' },
+			{ localId: 'traded', lineageId, field: 'labels' },
+			{ localId: 'fewer', lineageId, field: 'labels' }
+		]);
+		// Nothing changed in the account.
+		expect(JSON.parse((await headLabels(lineageId)) ?? 'null')).toEqual(labels);
+		const versions = 'SELECT count(*) AS n FROM versions WHERE lineage_id = ?';
+		expect(await count(versions, lineageId)).toBe(1);
+	});
+
+	it('inside the batch too: a reordered copy is compared band by band', async () => {
+		const me = await member();
+		const s1 = presetS1(4);
+		const moved = reorder(s1, ROTATE);
+		expect(moved).not.toBe(s1);
+		const labels = ten(['Sub', null, 'Ar']);
+		const result = await mergeLocalLibrary(env.DB, me.user.id, [
+			item('first', s1, 'Lote', labels),
+			item('moved', moved, 'Lote', moveLabels(labels, ROTATE)),
+			item('stayed', moved, 'Lote', labels)
+		]);
+		expect(result.created).toHaveLength(1);
+		const lineageId = result.created[0]?.lineageId ?? '';
+		expect(result.duplicates).toEqual([{ localId: 'moved', lineageId }]);
+		expect(result.conflicts).toEqual([{ localId: 'stayed', lineageId, field: 'labels' }]);
+	});
+
+	it('identical bands are interchangeable: which one carries a name never matters', async () => {
+		const me = await member();
+		const cut: Band = { kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 };
+		const other: Band = { kind: 'PK', freqHz: 4000, gainDb: -2, qFactor: 1 };
+		const off: Band = { kind: 'OFF' };
+		const s1 = encodeS1({
+			bands: [cut, cut, other, ...Array.from({ length: 7 }, () => off)],
+			preampDb: -1.3
+		});
+		/** The distinct band first: [other, cut, cut, OFF…]. */
+		const order = [2, 0, 1, 3, 4, 5, 6, 7, 8, 9];
+		const moved = reorder(s1, order);
+		expect(moved).not.toBe(s1);
+		const labels = ten(['A', 'B', 'C']);
+		const first = await mergeLocalLibrary(env.DB, me.user.id, [item('a', s1, 'Par', labels)]);
+		expect(first.created).toHaveLength(1);
+		const lineageId = first.created[0]?.lineageId ?? '';
+
+		const batch = [
+			item('moved', moved, 'Par', ten(['C', 'A', 'B'])),
+			// The two identical cuts traded names: still the same labelled curve.
+			item('twins', moved, 'Par', ten(['C', 'B', 'A'])),
+			// 'C' left the distinct band for a cut, 'A' went to the distinct band.
+			item('crossed', moved, 'Par', ten(['A', 'B', 'C']))
+		];
+		const expected = {
+			duplicates: [
+				{ localId: 'moved', lineageId },
+				{ localId: 'twins', lineageId }
+			],
+			conflicts: [{ localId: 'crossed', lineageId, field: 'labels' }]
+		};
+		// Deterministic: the same answer every time.
+		for (let run = 0; run < 2; run++) {
+			const result = await mergeLocalLibrary(env.DB, me.user.id, batch);
+			expect(result.created).toEqual([]);
+			expect(result.rejected).toEqual([]);
+			expect({ duplicates: result.duplicates, conflicts: result.conflicts }).toEqual(expected);
+		}
+		expect(JSON.parse((await headLabels(lineageId)) ?? 'null')).toEqual(labels);
 	});
 });

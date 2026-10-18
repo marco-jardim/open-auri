@@ -182,9 +182,9 @@ async function setup(hold?: Hold, options: SetupOptions = {}) {
 
 const editorState = () => page.getByTestId('editor-state');
 
-/** Shift+↑ on the first handle: a release only the codec accepts. */
-async function loudEdit() {
-	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
+/** Shift+↑ on a handle (the first by default): a release only the codec accepts. */
+async function loudEdit(filter: 'A' | 'B' = 'A') {
+	const handle = page.getByRole('slider', { name: new RegExp(`^Filtro ${filter},`) }).element();
 	if (handle instanceof HTMLElement || handle instanceof SVGElement) handle.focus();
 	await userEvent.keyboard('{Shift>}{ArrowUp}{/Shift}');
 }
@@ -290,6 +290,61 @@ test('a free-preview reorder moves the names with their filters; a rename lands 
 	await tick();
 	await expect.element(editorState()).toMatchTextContent(crc(ORDERED));
 	await expect.poll(() => bankNames()).toEqual(['Kick', 'Lead']);
+});
+
+/** A boost, a cut and a cut: the standard gate accepts it. */
+const THREE: Curve = {
+	bands: pad([
+		{ kind: 'PK', freqHz: 200, gainDb: 2, qFactor: 1 },
+		CUT,
+		{ kind: 'PK', freqHz: 5000, gainDb: -6, qFactor: 1 }
+	]),
+	preampDb: -3
+};
+/** Shift+↑ on Filtro B: the cut becomes +4 dB, about +1 dB out (codec-only). */
+const THREE_LOUD: Curve = {
+	bands: THREE.bands.map((band, index) => (index === 1 ? { ...CUT, gainDb: 4 } : band)),
+	preampDb: THREE.preampDb
+};
+/** "Ordem padrão" of that draft: the 5 kHz cut first, then both boosts (still codec-only). */
+const THREE_DEFAULT: Curve = {
+	bands: defaultOrder(THREE_LOUD.bands),
+	preampDb: THREE_LOUD.preampDb
+};
+
+test('the discrete-edit fixtures: only the codec accepts the draft, in either order', () => {
+	expect(verdictFor(THREE).ok).toBe(true);
+	for (const curve of [THREE_LOUD, THREE_DEFAULT]) {
+		expect(verdictFor(curve, 'yolo').ok).toBe(false);
+		expect(codecAccepts(curve.bands, curve.preampDb)).toBe(true);
+	}
+	expect(THREE_DEFAULT.bands.slice(0, 3)).toEqual([
+		THREE_LOUD.bands[2],
+		THREE_LOUD.bands[0],
+		THREE_LOUD.bands[1]
+	]);
+	expect(crc(THREE_DEFAULT)).not.toBe(crc(THREE_LOUD));
+});
+
+test('a discrete edit of a codec-only draft is judged by the codec and stays in the draft', async () => {
+	const { app, local, stored, persisted, undoCount } = await setup(undefined, { stored: THREE });
+	await expect.element(editorState()).toMatchTextContent(crc(THREE));
+	await loudEdit('B');
+	await expect.element(editorState()).toMatchTextContent(crc(THREE_LOUD));
+	// "Ordem padrão" on the draft: the YOLO gate would refuse it; the codec, as for drags, accepts.
+	await userEvent.click(bankOrderButton());
+	await expect.element(editorState()).toMatchTextContent(crc(THREE_DEFAULT));
+	// Into the memory-only draft (`applyFree`): never the store, oa.current or the undo history.
+	expect(app.state.curve.current).toBe(stored);
+	expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(persisted);
+	expect(app.state.curve.undoCount).toBe(undoCount);
+	// It is a draft step: Desfazer goes back to the loud draft, then to the stored curve.
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	await expect.element(editorState()).toMatchTextContent(crc(THREE_LOUD));
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	await expect.element(editorState()).toMatchTextContent(crc(THREE));
+	expect(app.state.curve.current).toBe(stored);
+	expect(app.state.curve.undoCount).toBe(undoCount);
 });
 
 test('a commit answer is dropped when the stored curve changed while the gate answered', async () => {

@@ -5,8 +5,9 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { FakeHIDDevice, WRITE_SPACING_MS } from 'open-auri/transport';
 import { NEUTRAL_BANDS } from 'open-auri/dsp';
-import { levelDb } from 'open-auri/safety';
-import { localDateKey } from 'open-auri/policy';
+import { gateForWrite, levelDb } from 'open-auri/safety';
+import { JOURNAL_WAIVED_MAX, localDateKey } from 'open-auri/policy';
+import { loadDecision } from '../../../src/lib/components/pages/cabo/load-entry.ts';
 import {
 	CABLE_WRITE_LOCK,
 	INFLIGHT_STALE_MS,
@@ -16,6 +17,7 @@ import {
 } from '../../../src/lib/cable/service.ts';
 import { lastWrittenLevelDbOf, writtenLevelDb } from '../../../src/lib/cable/checklist.ts';
 import type {
+	Band,
 	CableService,
 	Clock,
 	InflightMarker,
@@ -441,6 +443,109 @@ describe('stale marker on load', () => {
 		const h = await tab({ hid: null, inflight: memoryInflight(JSON.stringify(closed)) });
 		expect(h.journal.entries).toMatchObject([interruptedEntry(closed)]);
 		expect(h.service.getState().rescue).toBeNull();
+	});
+});
+
+describe('an interrupted Modo YOLO write keeps its profile and waived codes', () => {
+	/** Complementary −6 dB shelves at −0.3 dB: only the YOLO gate accepts them (HS, g:preamp). */
+	const yoloOnly: Band[] = [
+		{ kind: 'LS', freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+		{ kind: 'HS', freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+		...NEUTRAL_BANDS.slice(2).map((band) => ({ ...band }))
+	];
+	const YOLO_PREAMP_DB = -0.3;
+
+	function yoloRequest(service: CableService): WriteRequest {
+		return request(service, {
+			bands: yoloOnly,
+			preampDb: YOLO_PREAMP_DB,
+			profile: 'yolo',
+			confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true },
+			name: 'Prateleiras'
+		});
+	}
+
+	test('the fixture is YOLO-only and waives the kind and the preamp', () => {
+		expect(gateForWrite(yoloOnly, YOLO_PREAMP_DB, { experimental: true }).ok).toBe(false);
+		const yolo = gateForWrite(yoloOnly, YOLO_PREAMP_DB, { profile: 'yolo' });
+		expect(yolo.ok).toBe(true);
+		expect(yolo.waived).toEqual(expect.arrayContaining(['k:kind-not-allowed', 'g:preamp']));
+	});
+
+	test('a tab closed mid-write: the next load journals a YOLO interruption that YOLO can reload', async () => {
+		const writer = await tab({ tabId: 'yolo-tab', yoloSession: true });
+		const send = writer.device.sendReport.bind(writer.device);
+		const seen: (string | null)[] = [];
+		vi.spyOn(writer.device, 'sendReport').mockImplementation((reportId, data) => {
+			seen.push(writer.inflight.value);
+			return send(reportId, data);
+		});
+		const outcome = await writer.service.write(yoloRequest(writer.service));
+		expect(outcome.status).toBe('ok');
+		const waived = gateForWrite(yoloOnly, YOLO_PREAMP_DB, { profile: 'yolo' }).waived;
+		expect(writer.journal.last()).toMatchObject({ status: 'ok', profile: 'yolo', waived });
+		expect(writer.written).toEqual([]);
+		// What a tab closed during the write leaves behind: the marker of that YOLO write.
+		const left = seen[0] ?? null;
+		expect(stored(left)).toMatchObject({ tabId: 'yolo-tab', profile: 'yolo', waived });
+
+		const inflight = memoryInflight(left);
+		const next = await tab({ inflight, connect: false });
+		expect(next.journal.entries).toHaveLength(1);
+		const entry = next.journal.last();
+		expect(entry).toMatchObject({
+			status: 'interrupted',
+			name: 'Prateleiras',
+			preampDb: YOLO_PREAMP_DB,
+			profile: 'yolo',
+			waived
+		});
+		expect(inflight.value).toBeNull();
+		if (entry === null) throw new Error('no recovered entry');
+		// The recovered curve is a YOLO curve: it reloads with YOLO on, and only then.
+		expect(loadDecision(entry, true)).toEqual({ load: true, profile: 'yolo' });
+		expect(loadDecision(entry, false)).toEqual({ load: false, reason: 'yolo-off' });
+	});
+
+	test('a marker without a profile (a standard write, or an older marker) stays standard', async () => {
+		const closed = marker();
+		const h = await tab({ inflight: memoryInflight(JSON.stringify(closed)), connect: false });
+		const entry = h.journal.last();
+		expect(entry).toEqual(interruptedEntry(closed));
+		expect(entry).not.toHaveProperty('profile');
+		expect(entry).not.toHaveProperty('waived');
+		// Waived codes without the YOLO profile are ignored, like any other profile value.
+		for (const extra of [{ waived: ['g:preamp'] }, { profile: 'YOLO', waived: ['g:preamp'] }]) {
+			const parsed = parseInflightMarker(JSON.stringify({ ...closed, ...extra }));
+			expect(parsed).toEqual(closed);
+		}
+	});
+
+	test('the waived codes are checked like the journal checks them; invalid lists are dropped', async () => {
+		const valid = marker({ profile: 'yolo', waived: ['k:kind-not-allowed', 'g:preamp'] });
+		expect(parseInflightMarker(JSON.stringify(valid))).toEqual(valid);
+		const sixteen = Array.from({ length: JOURNAL_WAIVED_MAX }, () => 'g:preamp');
+		const full = parseInflightMarker(JSON.stringify({ ...valid, waived: sixteen }));
+		expect(full?.waived).toHaveLength(JOURNAL_WAIVED_MAX);
+		const invalid: unknown[] = [
+			[...sixteen, 'g:preamp'],
+			['g:preamp', 'f:codec'],
+			['d:prefix-peak'],
+			['g:preamp', 7],
+			'g:preamp',
+			null
+		];
+		for (const waived of invalid) {
+			const parsed = parseInflightMarker(JSON.stringify({ ...valid, waived }));
+			expect(parsed).toMatchObject({ profile: 'yolo' });
+			expect(parsed).not.toHaveProperty('waived');
+		}
+		// Recovered: still a YOLO interruption, naming no waived code it cannot vouch for.
+		const raw = JSON.stringify({ ...valid, waived: ['g:preamp', 'f:codec'] });
+		const h = await tab({ inflight: memoryInflight(raw), connect: false });
+		const entry = h.journal.last();
+		expect(entry).toMatchObject({ status: 'interrupted', profile: 'yolo' });
+		expect(entry).not.toHaveProperty('waived');
 	});
 });
 

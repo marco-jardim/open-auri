@@ -70,8 +70,8 @@ import { autoPreamp } from 'open-auri/safety';
 
 - [`gate.mjs`](../src/safety/gate.mjs): análise de estabilidade, headroom e pré-amp
   dentro do envelope observado para gravação, sem constituir prova de segurança.
-  Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS` e
-  `CODEC_PREAMP_FLOOR_DB` para seleção e consulta dos perfis do gate.
+  Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS`,
+  `CODEC_PREAMP_FLOOR_DB` e `YOLO_PREAMP_MAX_DB` para seleção e consulta dos perfis do gate.
 - [`policy.mjs`](../src/safety/policy.mjs): limites de edição, grade, interpolação e busca de fronteira.
 - [`thresholds.mjs`](../src/safety/thresholds.mjs): limiares de segurança e sua proveniência.
 
