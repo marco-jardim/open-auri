@@ -10,6 +10,10 @@ function catalog(locale: string): Record<string, string> {
 	const messages = JSON.parse(
 		readFileSync(existsSync(staging) ? staging : merged, 'utf8')
 	) as Record<string, string>;
+	const qa = fileURLToPath(
+		new URL(`../../../../messages/_staging/QA1TC.${locale}.json`, import.meta.url)
+	);
+	if (existsSync(qa)) Object.assign(messages, JSON.parse(readFileSync(qa, 'utf8')));
 	return Object.fromEntries(Object.entries(messages).filter(([key]) => key.startsWith('cego_')));
 }
 
@@ -47,7 +51,13 @@ test('both locales cover every page key and use the same interpolation fields', 
 		),
 		'utf8'
 	);
-	for (const match of `${component}\n${room}\n${meter}`.matchAll(/m\.(cego_\w+)\(/g)) {
+	const stage = readFileSync(
+		fileURLToPath(
+			new URL('../../../../src/lib/components/pages/teste-cego/Stage.svelte', import.meta.url)
+		),
+		'utf8'
+	);
+	for (const match of `${component}\n${room}\n${meter}\n${stage}`.matchAll(/m\.(cego_\w+)\(/g)) {
 		expect(pt[match[1]!], match[1]).toBeTruthy();
 	}
 });

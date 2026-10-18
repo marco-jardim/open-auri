@@ -1,9 +1,10 @@
 // Preparo's output (SAÍDA) is preselected from the live cable: a connected real cable means
-// "Cabo em Neutro", no cable (or no WebHID, a simulated cable) means "Outra saída". It follows
+// "Cabo em Neutro" unless the last real write was not Neutro; no cable (or no WebHID, a simulated
+// cable) means "Outra saída". It follows
 // connects and disconnects until the listener picks an output by hand, and never overrides that
 // pick. The cable cannot be read, so when this browser's journal says the last real write did not
-// leave Neutro, the cable choice stays but a note says to write Neutro first or pick another
-// output. Choosing only declares the output: no HID report is ever sent.
+// leave Neutro, neither output is selected: a note asks for Neutro or another output, and starting
+// requires a hand pick. Choosing only declares the output: no HID report is ever sent.
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -48,7 +49,12 @@ function view(
 	};
 }
 
-async function expectOutput(choice: 'neutral' | 'other') {
+async function expectOutput(choice: 'neutral' | 'other' | null) {
+	if (choice === null) {
+		await expect.element(neutral()).not.toBeChecked();
+		await expect.element(other()).not.toBeChecked();
+		return;
+	}
 	await expect.element(choice === 'neutral' ? neutral() : other()).toBeChecked();
 	await expect.element(choice === 'neutral' ? other() : neutral()).not.toBeChecked();
 }
@@ -132,16 +138,24 @@ test('the note shows only when the last real write of this browser was not Neutr
 			],
 			shown: true
 		},
+		{
+			journal: [
+				{ crc: 0x2b2b, status: 'ok' },
+				{ crc: NEUTRAL_CRC, status: 'simulated' }
+			],
+			shown: true
+		},
 		{ journal: [{ crc: 0x1234, status: 'simulated' }], shown: false }
 	];
 	const screen = await mount(view(device, 'connected'));
 	for (const { journal, shown } of cases) {
 		await screen.rerender({ cable: view(device, 'connected', journal) });
-		// The automatic cable choice stays either way; the note only warns.
-		await expectOutput('neutral');
+		await expectOutput(shown ? null : 'neutral');
 		if (shown) {
 			await expect.element(note()).toBeVisible();
 			await expect.element(neutral()).toHaveAccessibleDescription(m.cego_tcout_not_neutral());
+			await expect.element(page.getByText(m.cego_fux_output_hint(), { exact: true })).toBeVisible();
+			expect(screen.container.textContent).not.toContain(m.cego_tcout_auto_cable());
 		} else {
 			await expect.element(note()).not.toBeInTheDocument();
 		}
@@ -152,13 +166,88 @@ test('the note shows only when the last real write of this browser was not Neutr
 	await expect.element(note()).not.toBeInTheDocument();
 });
 
+for (const choice of ['neutral', 'other'] as const) {
+	test(`a non-Neutral write refuses start until ${choice} is picked by hand`, async () => {
+		await setLocale('en-US', { reload: false });
+		const device = new FakeHIDDevice();
+		audio = createAudioEngine({ indexedDB: null, hasUserActivation: () => true });
+		audio.setVolume(-40);
+		const screen = await mount(view(device, 'connected', [{ crc: 0x1234, status: 'ok' }]), {
+			audio
+		});
+		await expectOutput(null);
+		await page.getByRole('tab', { name: new RegExp(m.cego_candidates()) }).click();
+		await page.getByRole('checkbox', { name: /^Auri\b/ }).click();
+		await page.getByRole('checkbox', { name: /^Natural\b/ }).click();
+		await page.getByRole('button', { name: m.cego_start(), exact: true }).click();
+		await expect
+			.element(page.getByText(m.cego_confirmation_required(), { exact: true }))
+			.toBeVisible();
+		expect(screen.container.querySelectorAll('.stage .fader')).toHaveLength(0);
+		await page.getByRole('tab', { name: new RegExp(m.cego_setup()) }).click();
+		await (choice === 'neutral' ? neutral() : other()).click();
+		await expectOutput(choice);
+		if (choice === 'neutral') {
+			await expect
+				.element(page.getByText(m.cego_tcout_not_neutral(), { exact: true }))
+				.toBeVisible();
+		} else {
+			await expect
+				.element(page.getByText(m.cego_tcout_not_neutral(), { exact: true }))
+				.not.toBeInTheDocument();
+		}
+		// Subsequent cable updates must not overwrite either explicit declaration.
+		await screen.rerender({ cable: view(device, 'disconnected') });
+		await screen.rerender({ cable: view(device, 'connected', [{ crc: 0x1234, status: 'ok' }]) });
+		await expectOutput(choice);
+		await page.getByRole('tab', { name: new RegExp(m.cego_candidates()) }).click();
+		await page.getByRole('button', { name: m.cego_start(), exact: true }).click();
+		await expect
+			.element(page.getByRole('slider', { name: m.cego_rating({ number: 1 }), exact: true }))
+			.toBeInTheDocument();
+		await page.getByRole('button', { name: m.cego_cancel(), exact: true }).click();
+		expect(device.opened).toBe(false);
+		expect(device.attempts).toBe(0);
+		expect(device.sent).toEqual([]);
+	}, 30000);
+}
+
+for (const scenario of ['empty journal', 'Neutral journal', 'disconnected'] as const) {
+	test(`${scenario} still starts without a hand pick`, async () => {
+		await setLocale('en-US', { reload: false });
+		const device = new FakeHIDDevice();
+		audio = createAudioEngine({ indexedDB: null, hasUserActivation: () => true });
+		audio.setVolume(-40);
+		await mount(
+			view(
+				device,
+				scenario === 'disconnected' ? 'disconnected' : 'connected',
+				scenario === 'empty journal'
+					? []
+					: [{ crc: scenario === 'Neutral journal' ? NEUTRAL_CRC : 0x1234, status: 'ok' }]
+			),
+			{ audio }
+		);
+		await expectOutput(scenario === 'disconnected' ? 'other' : 'neutral');
+		await page.getByRole('tab', { name: new RegExp(m.cego_candidates()) }).click();
+		await page.getByRole('checkbox', { name: /^Auri\b/ }).click();
+		await page.getByRole('checkbox', { name: /^Natural\b/ }).click();
+		await page.getByRole('button', { name: m.cego_start(), exact: true }).click();
+		await expect
+			.element(page.getByRole('slider', { name: m.cego_rating({ number: 1 }), exact: true }))
+			.toBeInTheDocument();
+		await page.getByRole('button', { name: m.cego_cancel(), exact: true }).click();
+		expect(device.attempts).toBe(0);
+	}, 30000);
+}
+
 test('declaring the output, following the cable and starting the test never send a HID report', async () => {
 	await setLocale('en-US', { reload: false });
 	const device = new FakeHIDDevice();
 	audio = createAudioEngine({ indexedDB: null, hasUserActivation: () => true });
 	audio.setVolume(-40);
 	const screen = await mount(view(device, 'connected', [{ crc: 0x1234, status: 'ok' }]), { audio });
-	await expectOutput('neutral');
+	await expectOutput(null);
 	await screen.rerender({ cable: view(device, 'disconnected') });
 	await screen.rerender({ cable: view(device, 'connected') });
 	await other().click();

@@ -73,7 +73,7 @@
 		meter?: MeterSource | null;
 		/** Escuta: each bay carries its own score fader on the floor. */
 		scoring?: boolean;
-		/** Each position's rating (0 to 10, null when not rated): live in Escuta, final at the result. */
+		/** Each position's rating (0 to 10, null when not rated): live, or the last round at the result. */
 		ratings?: readonly (number | null)[];
 		/** Escuta: the positions heard so far, the only ones that can be rated. */
 		rateable?: readonly boolean[];
@@ -319,13 +319,14 @@
 							</div>
 						{:else}
 							<p class="score final" data-rated={rating !== null}>
-								<span class="sr-only">{m.cego_rating({ number: position + 1 })}:</span>
-								<span class="score-num" aria-hidden="true">{position + 1}</span>
+								<span class="sr-only">{m.cego_position({ number: position + 1 })}:</span>
 								<span class="score-track" aria-hidden="true"
 									><span class="score-fill" style:--pct="{(rating ?? 0) * 10}%"></span></span
 								>
 								<span class="score-value"
-									>{rating === null ? m.cego_unrated() : formatScore(rating)}</span
+									>{m.cego_qa1tc_last_round({
+										value: rating === null ? m.cego_unrated() : formatScore(rating)
+									})}</span
 								>
 							</p>
 						{/if}
@@ -974,9 +975,20 @@
 		background: #3a342c;
 		box-shadow: none;
 	}
-	/* The result: the score given, read-only. */
+	/* The result: explicitly the last round, not the plaque's mean. Let the label wrap. */
 	.score.final {
 		min-height: 28px;
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.score.final .score-value {
+		grid-area: 1 / 1;
+		font-size: var(--fs-caption);
+		text-align: center;
+		white-space: normal;
+	}
+	.score.final .score-track {
+		grid-area: 2 / 1;
+		margin-block: 0;
 	}
 	.score-track {
 		position: relative;

@@ -180,15 +180,50 @@ test('the stage faders drive the round votes; blind while listening, read-only a
 	expect(stage.querySelectorAll('input, [role="slider"]')).toHaveLength(0);
 	const finals = [...stage.querySelectorAll('.score.final')];
 	expect(finals.map((final) => final.querySelector('.score-value')?.textContent)).toEqual([
-		'10.0',
-		'0.0'
+		m.cego_qa1tc_last_round({ value: '10.0' }),
+		m.cego_qa1tc_last_round({ value: '0.0' })
 	]);
-	expect(finals[0]?.textContent).toContain(m.cego_rating({ number: 1 }));
+	expect(finals[0]?.textContent).toContain(m.cego_position({ number: 1 }));
 	expect(stage.textContent).toContain('Auri');
 	expect(stage.textContent).toContain('Natural');
 	await stageAxe(stage);
 	expect(audio?.state().playing).toBe(false);
 }, 30000);
+
+for (const locale of ['pt-BR', 'en-US'] as const) {
+	test(`the result labels the last round separately from the mean in ${locale}`, async () => {
+		await setLocale(locale, { reload: false });
+		await page.viewport(320, 568);
+		const screen = await render(Stage, {
+			onselect: vi.fn(),
+			revealed: true,
+			reducedMotion: true,
+			names: ['Auri', 'Natural', 'Third'],
+			scores: ['6', '5', '4'],
+			ratings: [10, 0, null]
+		});
+		const finals = [...screen.container.querySelectorAll<HTMLElement>('.score.final')];
+		const format = new Intl.NumberFormat(locale, {
+			minimumFractionDigits: 1,
+			maximumFractionDigits: 1
+		});
+		expect(finals.map((final) => final.querySelector('.score-value')?.textContent)).toEqual([
+			m.cego_qa1tc_last_round({ value: format.format(10) }),
+			m.cego_qa1tc_last_round({ value: format.format(0) }),
+			m.cego_qa1tc_last_round({ value: m.cego_unrated() })
+		]);
+		await expect
+			.element(page.getByText(m.cego_tcwow_score({ value: '6' }), { exact: true }))
+			.toBeVisible();
+		for (const final of finals) {
+			expect(final.scrollWidth).toBeLessThanOrEqual(final.clientWidth);
+			const bay = final.closest('.bay')?.getBoundingClientRect();
+			if (!bay) throw new Error('Missing result bay');
+			expect(final.getBoundingClientRect().top).toBeGreaterThanOrEqual(bay.top);
+			expect(final.getBoundingClientRect().bottom).toBeLessThanOrEqual(bay.bottom);
+		}
+	});
+}
 
 for (const viewport of [
 	{ width: 320, height: 640 },

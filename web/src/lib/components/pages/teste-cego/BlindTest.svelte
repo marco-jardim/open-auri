@@ -105,24 +105,43 @@
 		}
 	}
 	const appContext = optionalAppContext();
+	/** No last-real accessor: scan once per journal change, never once per cable-state update. */
+	const appLastRealWrite = $derived.by(() => {
+		if (cable !== undefined) return null;
+		const entries = appContext?.client?.state.journal.entries ?? [];
+		for (let index = entries.length - 1; index >= 0; index--) {
+			const entry = entries[index];
+			if (entry && entry.status !== 'simulated') return entry;
+		}
+		return null;
+	});
 	/** Read only: the live connection and the journal. This page never talks to the cable. */
 	const cableView = $derived.by((): CableView | null => {
 		if (cable !== undefined) return cable;
 		const client = appContext?.client;
-		return client ? { state: client.cableState, journal: client.state.journal.entries } : null;
+		return client
+			? { state: client.cableState, journal: appLastRealWrite ? [appLastRealWrite] : [] }
+			: null;
 	});
 	/** Chosen by hand in Preparo: from then on the cable state never changes the output. */
 	let pickedOutput = $state<OutputConfirmation | null>(null);
 	/**
-	 * The declared output: the hand-picked one, else the live cable's suggestion (a connected
-	 * cable in Neutro, otherwise another output), following connects and disconnects until then.
+	 * The declared output: a hand pick, else the live suggestion. A connected cable with a known
+	 * non-Neutral write stays undeclared until picked by hand.
 	 */
-	const output = $derived<OutputConfirmation>(pickedOutput ?? autoOutput(cableView));
+	const output = $derived<OutputConfirmation | null>(pickedOutput ?? autoOutput(cableView));
 	/** The cable cannot be read; the journal says its last write here did not leave Neutro. */
-	const outputWarning = $derived(output === 'neutral' && lastWriteNotNeutral(cableView));
-	/** Why the output is preselected, shown until the listener picks one by hand. */
+	const outputWarning = $derived(
+		(output === 'neutral' || (output === null && cableConnected(cableView))) &&
+			lastWriteNotNeutral(cableView)
+	);
+	/** Explain the automatic choice, or the required hand pick, until the listener declares it. */
 	const outputAuto = $derived(
-		cableConnected(cableView) ? m.cego_tcout_auto_cable() : m.cego_tcout_auto_none()
+		output === null
+			? m.cego_fux_output_hint()
+			: cableConnected(cableView)
+				? m.cego_tcout_auto_cable()
+				: m.cego_tcout_auto_none()
 	);
 	/**
 	 * A hand pick, also of the option already preselected (a click on a checked radio fires no
@@ -417,7 +436,10 @@
 	}
 	function start(candidates = chosen, keepHistory = false) {
 		message = '';
-		// The output is always declared: preselected from the cable, or picked by hand.
+		if (output === null) {
+			message = m.cego_confirmation_required();
+			return;
+		}
 		if (candidates.length < 2 || candidates.length > 3 || candidates.some((c) => !c.accepted)) {
 			message = m.cego_candidates_required();
 			return;
@@ -795,7 +817,7 @@
 												/><span><b>{m.cego_other()}</b><small>{m.cego_other_note()}</small></span
 												></label
 											>
-											<!-- Preselected from the live cable until the listener picks by hand. -->
+											<!-- Suggest an output, or ask for a hand pick after a non-Neutral write. -->
 											{#if pickedOutput === null}<p class="hint output-auto">{outputAuto}</p>{/if}
 										</fieldset>
 										<div class="card">

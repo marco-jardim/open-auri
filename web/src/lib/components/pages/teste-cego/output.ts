@@ -26,9 +26,10 @@ export function cableConnected(view: CableView | null): boolean {
 	);
 }
 
-/** The output to preselect: the cable in Neutro when one is connected, another output otherwise. */
-export function autoOutput(view: CableView | null): OutputConfirmation {
-	return cableConnected(view) ? 'neutral' : 'other';
+/** A known non-Neutral write requires a hand pick; otherwise suggest the connected output. */
+export function autoOutput(view: CableView | null): OutputConfirmation | null {
+	if (!cableConnected(view)) return 'other';
+	return lastWriteNotNeutral(view) ? null : 'neutral';
 }
 
 /**
