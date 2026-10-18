@@ -175,7 +175,9 @@ test.describe('content security policy', () => {
 			expect(response?.status(), path).toBe(200);
 			const html = (await response?.text()) ?? '';
 			expect(html, `${path}: placeholder must never leak`).not.toContain('%analytics%');
-			expect(html, path).not.toContain('simpleanalyticscdn.com');
+			// Prerendered pages carry the policy in a CSP meta tag, which names the hosts: only the
+			// script tag itself must be absent.
+			expect(html, path).not.toMatch(/<script[^>]*simpleanalyticscdn\.com/);
 			expect(html, path).not.toContain('privacy-first analytics');
 			await expect(page.locator('script[src*="simpleanalyticscdn.com"]')).toHaveCount(0);
 			await settle(page);

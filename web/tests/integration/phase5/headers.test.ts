@@ -64,7 +64,7 @@ function endpoint(module: unknown) {
 describe('the pipeline mirrors hooks.server.ts', () => {
 	it('same steps in the same order as the real handle', () => {
 		expect(hooksSource).toMatch(
-			/export const handle: Handle = sequence\(\s*platformShim,\s*canonicalHost,\s*requestLog,\s*\.\.\.orderedHandles\(\{ readOnly, paraglide, auth, securityHeaders, accessLog \}\)\s*\);/
+			/export const handle: Handle = sequence\(\s*platformShim,\s*canonicalHost,\s*requestLog,\s*analytics,\s*\.\.\.orderedHandles\(\{ readOnly, paraglide, auth, securityHeaders, accessLog \}\)\s*\);/
 		);
 		expect(HOOK_ORDER).toEqual(['readOnly', 'paraglide', 'auth', 'securityHeaders', 'accessLog']);
 		// The 503 gets the same header function as every other response.
