@@ -401,6 +401,13 @@ export async function runDeploy(argv, deps) {
           env: { ...childEnv, ...step.env },
         });
         if (code !== 0) throw new RenderError(`Step ${step.name} failed (exit ${code})`);
+        // Same post-build step as `npm run build`: the canonical-host wrapper becomes the entry
+        // (issue #33), so a deploy never ships the bare SvelteKit worker.
+        const wrapped = await deps.tool('node', ['scripts/wrap-worker.mjs'], {
+          cwd,
+          env: plainEnv(deps.baseEnv ?? {}),
+        });
+        if (wrapped !== 0) throw new RenderError(`Step ${step.name} failed to wrap the worker`);
         break;
       }
       case 'render':

@@ -328,6 +328,7 @@ test('runDeploy executes the plan in order and prints the bookmark, never values
     `node --test test/**/*.test.mjs @${join('ROOT', '.')}`,
     `render ${web}`,
     `vite build @${web}`,
+    `node scripts/wrap-worker.mjs @${web}`,
     `render ${web}`,
     `render ${jobs}`,
     'secrets --env staging --worker web',
