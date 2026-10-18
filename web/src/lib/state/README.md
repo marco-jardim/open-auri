@@ -9,8 +9,10 @@ All store properties are rune-backed getters. Do not destructure reactive proper
 reactive context. All stores expose `error: StorageFailure | null` and `dispose()`.
 
 - `createCurveStore({storage?, now?})`: properties `current`, `dirty`, `unsaved`, `lastWritten`,
-  `canUndo`, `canRedo`, `undoCount`, `redoCount`; actions `set(CurveData)`, `update(Partial<CurveData>)`,
-  `loadPreset(id)`, `undo()`, `redo()`, `markWritten(snapshot?)`.
+  `canUndo`, `canRedo`, `undoCount`, `redoCount`, `labels`; actions `set(CurveData)`, `update(Partial<CurveData>)`,
+  `loadPreset(id)`, `undo()`, `redo()`, `markWritten(snapshot?)`, `setLabels(labels)`. `labels` (custom
+  band names by slot) is client state only: never persisted, not undoable, cleared when a curve
+  with a source other than `custom` is set.
 - `createJournalStore({storage?})`: properties `entries`, `dropped`; action `append(entry)`.
 - `createFlashStore({storage?, now?})`: property `state`; actions `canWriteNow(at?)`,
   `dailyNotice(at?)`, `recordWrite(at?)`.

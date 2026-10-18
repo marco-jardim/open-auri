@@ -33,6 +33,10 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 	let written = $state.raw<CurrentCurve | null>(readWritten());
 	// True once the user changed the curve in this session (set/update/preset/undo/redo).
 	let edited = $state(false);
+	// Custom names of the band slots (A to J), null where the automatic name applies. Client state
+	// only for now: not part of CurveData, so neither `oa.current`, the undo history, share links
+	// nor the library carry them. Loading another curve (any source but "custom") clears them.
+	let labels = $state.raw<readonly (string | null)[]>([]);
 	function persist(next: CurrentCurve) {
 		value = next;
 		edited = true;
@@ -91,6 +95,7 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 			}
 			past = [...past, value].slice(-UNDO_LIMIT);
 			future = [];
+			if (next.source !== 'custom') labels = [];
 			persist(next);
 			return true;
 		} catch (cause) {
@@ -130,6 +135,14 @@ export function createCurveStore(options: { storage?: ClientStorage; now?: Clock
 		},
 		get error() {
 			return status.error;
+		},
+		/** Custom band names by slot (client state only; Curva reads and writes them through
+		 * `band-labels.svelte.ts`). */
+		get labels() {
+			return labels;
+		},
+		setLabels(next: readonly (string | null)[]) {
+			labels = [...next];
 		},
 		set,
 		update(patch: Partial<CurveData>) {

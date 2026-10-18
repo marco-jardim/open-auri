@@ -2,7 +2,8 @@
 	Curva page (homage: Robert Moog). Container for the three layers Ouvir ⊂ Ajustar ⊂ Engenharia.
 	- The layer comes from the route (`?camada=`) as a prop; changes go back through `onlayer`.
 	- Editor state is `app.state.curve` (undo/redo/dirty); every change is gate-approved first
-	  (macros, drags, knobs, typed values, kinds, reorders, imports, links, parked points).
+	  (macros, drags, knobs, typed values, kinds, reorders, imports, links, parked points, the
+	  manual preamp).
 	- Writing is only ever `app.requestWrite()` / `app.requestRescue()` (layout checklist).
 	- Works without `app` (SSR, before mount): renders Neutro read-only, `aria-busy`, and every
 	  action says it is still loading.
@@ -35,7 +36,7 @@
 	import { cabinet, filterBank, importExport } from './lazy.ts';
 	import LayerSelector from './LayerSelector.svelte';
 	import MacroKnobs from './MacroKnobs.svelte';
-	import OutputPanel from './OutputPanel.svelte';
+	import OutputPanel, { snapPreamp } from './OutputPanel.svelte';
 	import PresetTabs from './PresetTabs.svelte';
 	import RescuePanel from './RescuePanel.svelte';
 	import ScopePanel from './ScopePanel.svelte';
@@ -490,6 +491,45 @@
 		announcement = text;
 	}
 
+	// --- output: manual preamp (Ajustar, Engenharia) ------------------------------------------
+
+	/** Why the manual preamp is unavailable (T8): loading, Ouvir (read-only), a write running. */
+	const preampReason = $derived(
+		loadingReason ??
+			(!includesLayer(layer, 'ajustar')
+				? m.curva_preamp_ouvir_reason()
+				: app?.cableState.writing
+					? m.curva_v2_writing_reason()
+					: null)
+	);
+	/** The last refusal, shown only while the curve is still the one it talks about. */
+	let preampRefusal = $state.raw<{ text: string; signature: string } | null>(null);
+	const preampMessage = $derived(
+		preampRefusal?.signature === signature ? preampRefusal.text : null
+	);
+	/**
+	 * A stepped or typed preamp. Same path as the other discrete edits (kinds, order, "Máximo sem
+	 * clipping"): the full write gate judges the bands with the new preamp and only an accepted
+	 * curve goes to the editor (one undo step). A refusal keeps the curve and says why.
+	 */
+	function onPreamp(value: number) {
+		if (!app || preampReason) return;
+		const preampDb = snapPreamp(value);
+		if (preampDb === null || preampDb === curve.preampDb) return;
+		const bands = curve.bands;
+		const check = verdictFor({ bands, preampDb });
+		if (!check.ok) {
+			const text = m.curva_preamp_refused({
+				value: formatSignedDb(preampDb, locale),
+				reason: firstReasonText(check.reasons, { bands, locale })
+			});
+			preampRefusal = { text, signature };
+			announcement = text;
+			return;
+		}
+		if (apply({ bands, preampDb })) preampRefusal = null;
+	}
+
 	// --- bank and cabinet ---------------------------------------------------------------------
 
 	function onKind(index: number, kind: BandKind) {
@@ -856,6 +896,9 @@
 					{maxClipMessage}
 					disabled={!app}
 					disabledReason={loadingReason}
+					onpreamp={onPreamp}
+					{preampReason}
+					{preampMessage}
 				/>
 				<PresetTabs
 					activeId={activePreset}
@@ -1115,22 +1158,14 @@
 	}
 	/* The filter bank, under the scope inside the rack; its edges line up with the scope bezel.
 	   The layouts below place it in their `bank` area; a full row is only the safe fallback. */
+	/* The bank is a size container of its own: its head and its strips follow the slot's width
+	   (never the viewport's), so it needs no layout rule from here. `min-width: 0` keeps the
+	   grid cell from growing with the bank's content. */
 	.bank-slot {
 		grid-column: 1 / -1;
 		align-self: start;
-		container: curva-bank / inline-size;
+		min-width: 0;
 		padding: 0 var(--space-4);
-	}
-	/* The bank lays out its header by the viewport (two columns above 1100 px). Beside the side
-	   column it is narrower than that, so the slot's width picks its stacked header instead (the
-	   same geometry the bank uses up to 1100 px). Layout only; nothing inside the modules. */
-	@container curva-bank (max-width: 860px) {
-		.bank-slot :global(.bank-head) {
-			grid-template-columns: minmax(0, 1fr);
-		}
-		.bank-slot :global(.gaterow) {
-			grid-template-columns: repeat(4, minmax(0, 1fr));
-		}
 	}
 	/* Desktop with the bank (Ajustar, Engenharia): the scope and the bank fill the main column and
 	   the side panels ride along them in one column, sticky under the bar, so presets and the fine

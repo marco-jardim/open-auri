@@ -15,6 +15,9 @@
 	- Neutro (every section OFF): ten points parked at 0 dB with the empty-state hint. Grabbing one
 	  (pointer or arrow keys) asks the page to create a filter there (`onpark`, gate-checked).
 	- HS/LP/HP handles are locked outside Engenharia, with a hint.
+	- Handle shapes tell the kind (PK circle, LS/HS a tag pointing to the shelf's side, LP/HP a
+	  slope on the cut side, parked points a dashed circle) and carry the slot badge (A to J) the
+	  bank shows; their names say the band's functional or custom name (`band-names.ts`).
 	- Motion: the trace draws in once when a preset loads (`drawKey`), the after-commit ghost, the
 	  detent and refused shake and a faint CRT sweep (decorative, aria-hidden, never a reading); all
 	  off under prefers-reduced-motion.
@@ -33,9 +36,11 @@
 	import { CURVA_SESSION } from './preview.svelte.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
+	import { bandWords, useBandLabels } from './band-labels.svelte.ts';
+	import { badgeOf, bandNames } from './band-names.ts';
 	import { formatHz, formatQ, formatSignedDb } from './format.ts';
 	import { isLockedKind, type Layer } from './layers.ts';
-	import { hasGain, type Band, type Curve } from './model.ts';
+	import { hasGain, type Band, type BandKind, type Curve } from './model.ts';
 	import type { DragTarget, DragView } from './drag.ts';
 	import { isEmptyCurve, PARKED_HZ, parkedBand } from './parked.ts';
 	import type { GateVerdict } from './reasons.ts';
@@ -361,14 +366,43 @@
 	const handleX = (band: Band) => (band.kind === 'OFF' ? 0 : xOf(band.freqHz));
 	const handleY = (band: Band) => yOf(clamp(handleGain(band), DB_MIN, DB_MAX));
 
+	// Names and badges (A to J) shared with the bank: the same letter on the handle and the strip.
+	const labelStore = useBandLabels();
+	const words = bandWords();
+	const names = $derived(bandNames(curve.bands, words, labelStore.labels));
+	const badge = (index: number) => names[index]?.badge ?? badgeOf(index);
+	const nameOf = (index: number) => names[index]?.label ?? '';
+
+	/**
+	 * Handle outline by kind, radius `r`: PK (and OFF, parked) keep the circle; LS and HS a tag
+	 * pointing to the side the shelf lifts or lowers; LP and HP a slope on the side they cut.
+	 */
+	function glyphPaths(r: number): Partial<Record<BandKind, string>> {
+		const f = (n: number) => n.toFixed(1);
+		// Tip at 1.35 r on the shelf's side, flat back at r on the other.
+		const tag = (side: -1 | 1) =>
+			`M${f(side * 1.35 * r)} 0L${f(side * 0.45 * r)} ${f(-r)}` +
+			`H${f(-side * r)}V${f(r)}H${f(side * 0.45 * r)}Z`;
+		// Flat top, then a ramp down to the outer bottom corner on the cut side.
+		const slope = (side: -1 | 1) =>
+			`M${f(-side * 1.1 * r)} ${f(-r)}H${f(side * 0.25 * r)}` +
+			`L${f(side * 1.15 * r)} ${f(r)}H${f(-side * 1.1 * r)}Z`;
+		return { LS: tag(-1), HS: tag(1), LP: slope(1), HP: slope(-1) };
+	}
+	const glyphs = $derived(glyphPaths(ringR));
+
 	function handleLabel(band: Band, index: number): string {
 		if (band.kind === 'OFF') return '';
 		if (isLockedKind(band.kind, layer)) {
-			return m.curva_handle_locked({ index: String(index + 1), kind: band.kind }, messages);
+			return m.curva_bn_handle_locked(
+				{ badge: badge(index), name: nameOf(index), kind: band.kind },
+				messages
+			);
 		}
-		return m.curva_handle_hint(
+		return m.curva_bn_handle_hint(
 			{
-				index: String(index + 1),
+				badge: badge(index),
+				name: nameOf(index),
 				kind: band.kind,
 				freq: formatHz(band.freqHz, locale),
 				gain: hasGain(band) ? formatSignedDb(band.gainDb, locale) : '',
@@ -773,7 +807,7 @@
 								transform={`translate(${xOf(hz).toFixed(1)} ${yOf(0).toFixed(1)})`}
 							>
 								<circle r={ringR} />
-								<text style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text>
+								<text style={`font-size:${handleFont.toFixed(1)}px`}>{badge(index)}</text>
 							</g>
 						{/each}
 					{/if}
@@ -879,8 +913,13 @@
 							>
 								<circle r={hitR} class="hit" />
 								<g class="body">
-									<circle r={ringR} class="ring" />
-									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text
+									{#if glyphs[band.kind]}
+										<path d={glyphs[band.kind]} class="ring" />
+									{:else}
+										<circle r={ringR} class="ring" />
+									{/if}
+									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}
+										>{badge(index)}</text
 									>
 								</g>
 							</g>
@@ -896,7 +935,7 @@
 								data-parked={index}
 								role="slider"
 								tabindex="0"
-								aria-label={m.curva_v2_parked({ index: String(index + 1) })}
+								aria-label={m.curva_bn_parked({ badge: badge(index), name: nameOf(index) })}
 								aria-valuemin={20}
 								aria-valuemax={20000}
 								aria-valuenow={hz}
@@ -915,7 +954,8 @@
 								<circle r={hitR} class="hit" />
 								<g class="body">
 									<circle r={ringR} class="ring" />
-									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text
+									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}
+										>{badge(index)}</text
 									>
 								</g>
 							</g>
@@ -1328,10 +1368,12 @@
 	.handle .hit {
 		fill: transparent;
 	}
+	/* The outline is a circle (PK, parked) or a path (LS, HS tags; LP, HP slopes): same states. */
 	.handle .ring {
 		fill: rgb(10 8 6 / 0.85);
 		stroke: #ffe0c7;
 		stroke-width: 1.6;
+		stroke-linejoin: round;
 		transition:
 			stroke var(--dur-fast) var(--ease-out),
 			fill var(--dur-fast) var(--ease-out);
