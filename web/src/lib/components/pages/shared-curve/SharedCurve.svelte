@@ -141,6 +141,12 @@
 		await begin();
 	}
 
+	/** Drops the notice of an earlier playback attempt; other notices (favorite) stay. */
+	function clearAudioNotice() {
+		if (notice === m.shared_curve_audio_error() || notice === m.shared_curve_audio_unavailable())
+			notice = '';
+	}
+
 	async function begin() {
 		if (!app || !curve || busy) {
 			notice = m.shared_curve_audio_unavailable();
@@ -149,6 +155,7 @@
 		const engine = app.audio;
 		const token = ++attempt;
 		busy = true;
+		clearAudioNotice();
 		try {
 			preview = engine.createAB(app.state.curve.current, curve, {
 				experimental: true,
@@ -162,15 +169,20 @@
 			}
 			startedBy = engine;
 			listening = true;
+			// A successful start supersedes the error of an earlier failed attempt.
+			clearAudioNotice();
 			unsubscribe = engine.onChange(follow);
 			// Another page may have taken the engine between the start and this subscription.
 			if (!owned(engine)) stopListening();
 		} catch (error) {
+			// A failure of an earlier attempt must not end (or flag) the attempt that replaced it.
+			if (token !== attempt) return;
 			stopListening();
 			notice = m.shared_curve_audio_error();
 			console.error('Shared curve preview failed', error instanceof Error ? error.name : 'unknown');
 		} finally {
-			busy = false;
+			// `busy` belongs to the current attempt (stopListening already released it otherwise).
+			if (token === attempt) busy = false;
 		}
 	}
 

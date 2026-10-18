@@ -300,11 +300,17 @@ test('missing head marker falls back to first version and restoring legacy langu
 	const { props, fetch } = setup(() =>
 		json({ lineageId: LINEAGE.id, versionId: 'ver3', curveId: 'c3' })
 	);
-	const original = await props.api.getLineage(LINEAGE.id);
-	vi.spyOn(props.api, 'getLineage').mockResolvedValue({
-		...original,
-		versions: original.versions.map((value) => ({ ...value, isHead: false, lang: 'legacy' }))
-	});
+	// A stored version from before the language field was constrained: the API returns it as is.
+	const legacy = VERSIONS.map((value) => ({ ...value, isHead: false, lang: 'legacy' }));
+	const lineageUrl = `/api/v1/lineages/${LINEAGE.id}`;
+	const answer = fetch.getMockImplementation();
+	fetch.mockImplementation((input, init) =>
+		new URL(String(input), 'http://x').pathname === lineageUrl && (init?.method ?? 'GET') === 'GET'
+			? Promise.resolve(
+					json({ lineage: LINEAGE, author: null, versions: legacy, nextCursor: null })
+				)
+			: (answer?.(input, init) ?? Promise.reject(new Error('no route')))
+	);
 	await render(TotalRecall, props);
 	const from = page.getByRole('combobox', { name: m.comunidade_recall_from() });
 	await expect

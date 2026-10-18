@@ -142,6 +142,7 @@
 	}
 
 	async function loadShelf(shelf: Shelf, signal: AbortSignal, cursor: string | null = null) {
+		const owner = account;
 		const previous = shelves[shelf];
 		setShelf(shelf, { ...previous, status: 'loading', error: null });
 		try {
@@ -155,6 +156,8 @@
 				},
 				{ signal }
 			);
+			// A late answer for a cancelled load or a previous account is not this shelf's.
+			if (signal.aborted || owner !== account) return;
 			track(page.items);
 			setShelf(shelf, {
 				items: cursor === null ? page.items : [...shelves[shelf].items, ...page.items],
@@ -163,16 +166,18 @@
 				error: null
 			});
 		} catch (error) {
-			if (isAbort(error)) return;
+			if (signal.aborted || owner !== account || isAbort(error)) return;
 			setShelf(shelf, { ...shelves[shelf], status: 'error', error: errorKind(error) });
 		}
 	}
 
 	async function loadPacks(signal: AbortSignal, cursor: string | null = null) {
+		const owner = account;
 		packs = { ...packs, status: 'loading', error: null };
 		try {
 			// All own packs, any visibility (`GET /me/packs`).
 			const page = await api.myPacks({ cursor }, { signal });
+			if (signal.aborted || owner !== account) return;
 			const rows = page.items.map((pack) => ({
 				id: pack.id,
 				name: pack.name,
@@ -187,15 +192,28 @@
 				error: null
 			};
 		} catch (error) {
-			if (isAbort(error)) return;
+			if (signal.aborted || owner !== account || isAbort(error)) return;
 			packs = { ...packs, status: 'error', error: errorKind(error) };
 		}
 	}
 
+	// Rows belong to one account: another account (even straight from a signed-in one) starts
+	// from empty shelves, and the loaders below reload for it.
+	let rowsOf: string | null = null;
+	$effect(() => {
+		const key = account;
+		if (rowsOf !== null && rowsOf !== key) {
+			shelves = { created: empty(), favorites: empty(), installed: empty() };
+			packs = empty();
+		}
+		rowsOf = key;
+	});
+
 	// The loaders read and write `shelves`/`packs`: run them untracked so only the listed inputs
-	// (session, filter, reload) re-run the effects.
+	// (session, account, filter, reload) re-run the effects.
 	$effect(() => {
 		void reload;
+		void account;
 		if (!signedIn) return;
 		const controller = new AbortController();
 		untrack(() => {
@@ -209,6 +227,7 @@
 	$effect(() => {
 		void reload;
 		void visibilityFilter;
+		void account;
 		if (!signedIn) return;
 		const controller = new AbortController();
 		untrack(() => {

@@ -30,6 +30,10 @@
 	let creating = $state(false);
 	let createError = $state<ErrorKind | null>(null);
 	let reload = $state(0);
+	/** Lineage whose links, stats and create state are shown; a new `lineageId` starts over. */
+	let shown: string | null = null;
+	/** Bumped per lineage: a share created for an earlier lineage is not one of this one's. */
+	let generation = 0;
 
 	const groups = $derived([
 		{ key: 'previewed', label: m.biblioteca_social_audience_previewed() },
@@ -44,10 +48,11 @@
 		audienceError = null;
 		api.audience(lineageId, { signal: controller.signal }).then(
 			(answer) => {
+				if (controller.signal.aborted) return;
 				audience = answer.audience;
 			},
 			(error: unknown) => {
-				if (isAbort(error)) return;
+				if (controller.signal.aborted || isAbort(error)) return;
 				audienceError = errorKind(error);
 			}
 		);
@@ -58,16 +63,27 @@
 		void reload;
 		const target = lineageId;
 		const controller = new AbortController();
+		if (target !== shown) {
+			// Another lineage: none of the previous one's links, stats or create state carry over.
+			shown = target;
+			generation += 1;
+			shareIds = [];
+			funnels = {};
+			creating = false;
+			createError = null;
+		}
 		sharesState = 'loading';
 		sharesOf(api, target, controller.signal).then(
 			(shares) => {
+				// A late answer for an earlier lineage (or a reload) is not this list's.
+				if (controller.signal.aborted) return;
 				// Keep links created meanwhile (they are already at the top).
 				const created = untrack(() => shareIds);
 				shareIds = [...new Set([...created, ...shares.map((share) => share.id)])];
 				sharesState = 'ready';
 			},
 			(error: unknown) => {
-				if (isAbort(error)) return;
+				if (controller.signal.aborted || isAbort(error)) return;
 				sharesState = errorKind(error);
 			}
 		);
@@ -76,11 +92,12 @@
 
 	$effect(() => {
 		void reload;
+		void lineageId;
 		const client = api;
 		const controller = new AbortController();
 		const requested: Record<string, true> = {};
 		// Adding a share must not abort in-flight stats or refetch existing shares. Only an
-		// explicit reload (or a new API) resets this request set and its controller.
+		// explicit reload, a new lineage (or a new API) resets this request set and its controller.
 		$effect(() => {
 			for (const shareId of shareIds) {
 				if (requested[shareId]) continue;
@@ -102,15 +119,18 @@
 
 	async function createShare() {
 		if (creating || !verified) return;
+		const token = generation;
 		creating = true;
 		createError = null;
 		try {
 			const created = await api.createShare({ lineageId, channel: 'link' });
+			// Created for a lineage that is no longer shown: not one of this lineage's links.
+			if (token !== generation) return;
 			shareIds = [created.shareId, ...shareIds.filter((other) => other !== created.shareId)];
 		} catch (error) {
-			createError = errorKind(error);
+			if (token === generation) createError = errorKind(error);
 		} finally {
-			creating = false;
+			if (token === generation) creating = false;
 		}
 	}
 
