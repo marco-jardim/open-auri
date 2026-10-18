@@ -55,6 +55,160 @@ afterEach(async () => {
 });
 
 describe('Teste cego: candidates from the Comunidade', () => {
+	test('rankings paginate, trim the search and explain already-added and running-test controls', async () => {
+		const { api, typed } = fakeApi();
+		api.rankings.mockResolvedValueOnce({
+			items: [{ lineage: { id: 'first', head: { id: 'v-first', name: 'Warm bass' } } }],
+			nextCursor: 'next'
+		});
+		api.rankings.mockResolvedValueOnce({
+			items: [{ lineage: { id: 'second', head: { id: 'v-second', name: 'Clear voice' } } }],
+			nextCursor: null
+		});
+		const screen = await render(CommunityCandidates, {
+			api: typed,
+			added: ['community:v-first'],
+			onadd: vi.fn()
+		});
+		await page.getByRole('combobox').selectOptions('rankings');
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		const first = page.getByRole('button', { name: m.cegocom_add_label({ name: 'Warm bass' }) });
+		await expect.element(first).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(first).toHaveAccessibleDescription(why(m.cego_fuxb_reason_added()));
+		await page.getByRole('button', { name: m.cegocom_more(), exact: true }).click();
+		expect(api.rankings).toHaveBeenLastCalledWith(
+			{ cursor: 'next', limit: 50 },
+			expect.objectContaining({ signal: expect.any(AbortSignal) })
+		);
+		await expect.element(page.getByText('Warm bass', { exact: true })).toBeVisible();
+		await expect.element(page.getByText('Clear voice', { exact: true })).toBeVisible();
+		await page.getByRole('searchbox').fill('  VOICE  ');
+		await expect.element(page.getByText('Warm bass', { exact: true })).not.toBeInTheDocument();
+		await expect.element(page.getByText('Clear voice', { exact: true })).toBeVisible();
+		await page.getByRole('searchbox').fill('missing');
+		await expect.element(page.getByText(m.cegocom_empty(), { exact: true })).toBeVisible();
+		await page.getByRole('searchbox').fill('');
+		await screen.rerender({ disabled: true });
+		await expect.element(first).toHaveAccessibleDescription(why(m.cego_fuxb_reason_test_running()));
+		expect(api.feed).not.toHaveBeenCalled();
+	});
+
+	test('adding a curve locks competing actions but does not issue duplicate requests', async () => {
+		const { api, typed } = fakeApi();
+		const result = await api.getCurve();
+		api.getCurve.mockClear();
+		let finish: ((value: typeof result) => void) | undefined;
+		api.getCurve.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				})
+		);
+		const onadd = vi.fn();
+		await render(CommunityCandidates, { api: typed, onadd });
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		const add = page.getByRole('button', { name: m.cegocom_add_label({ name: NAME }) });
+		await add.click();
+		await expect.element(add).toHaveAttribute('aria-busy', 'true');
+		const load = page.getByRole('button', { name: m.cegocom_load(), exact: true });
+		await expect.element(load).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(load).toHaveAccessibleDescription(why(m.cego_fuxb_reason_busy()));
+		const element = add.element();
+		if (!(element instanceof HTMLElement)) throw new Error('Missing add button');
+		element.click();
+		expect(api.getCurve).toHaveBeenCalledOnce();
+		finish?.(result);
+		await expect.poll(() => onadd.mock.calls.length).toBe(1);
+		await expect
+			.element(page.getByRole('status'))
+			.toHaveTextContent(m.cegocom_added({ name: NAME }));
+		await expect.element(load).not.toHaveAttribute('aria-disabled');
+	});
+
+	test.each([
+		new Error('bad response'),
+		new SocialApiError(403, 'FORBIDDEN'),
+		new DOMException('cancelled', 'AbortError')
+	])('list failures distinguish cancellation from visible failures (%s)', async (cause) => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const { api, typed } = fakeApi(async () => {
+			throw cause;
+		});
+		await render(CommunityCandidates, { api: typed, onadd: vi.fn() });
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		await expect
+			.element(page.getByRole('button', { name: m.cegocom_load(), exact: true }))
+			.not.toHaveAttribute('aria-busy');
+		if (cause instanceof DOMException)
+			expect(page.getByRole('status').element().textContent?.trim()).toBe('');
+		else await expect.element(page.getByRole('status')).toHaveTextContent(m.cegocom_failed());
+		expect(api.getCurve).not.toHaveBeenCalled();
+	});
+
+	test('invalid curve responses report failure, while a decoded unsafe candidate is explicitly rejected', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const { api, typed } = fakeApi();
+		const result = await api.getCurve();
+		api.getCurve.mockClear();
+		api.getCurve.mockResolvedValueOnce({ ...result, curve: { ...result.curve, s1: 'not-an-s1' } });
+		api.getCurve.mockResolvedValueOnce({
+			...result,
+			curve: { ...result.curve, s1: encodeS1({ bands: preset.bands, preampDb: 0 }) }
+		});
+		const onadd = vi.fn();
+		await render(CommunityCandidates, { api: typed, onadd });
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		const add = page.getByRole('button', { name: m.cegocom_add_label({ name: NAME }) });
+		await add.click();
+		await expect.element(page.getByRole('status')).toHaveTextContent(m.cegocom_failed());
+		expect(onadd).not.toHaveBeenCalled();
+		await add.click();
+		await expect.element(page.getByRole('status')).toHaveTextContent(m.cegocom_rejected());
+		expect(onadd).toHaveBeenCalledWith(
+			expect.objectContaining({ accepted: false, id: 'community:ver_c1' })
+		);
+	});
+
+	test('changing source ignores a late feed response and an unmounted add cannot mutate the candidates', async () => {
+		let finishFeed: ((value: unknown) => void) | undefined;
+		const { api, typed } = fakeApi(
+			() =>
+				new Promise((resolve) => {
+					finishFeed = resolve;
+				})
+		);
+		api.rankings.mockResolvedValue({ items: [], nextCursor: null });
+		const onadd = vi.fn();
+		await render(CommunityCandidates, { api: typed, onadd });
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		await page.getByRole('combobox').selectOptions('rankings');
+		finishFeed?.({
+			items: [{ lineage: { id: 'late', head: { id: 'late-version', name: 'Stale candidate' } } }],
+			nextCursor: null
+		});
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		await expect.element(page.getByText(m.cegocom_empty(), { exact: true })).toBeVisible();
+		await expect
+			.element(page.getByText('Stale candidate', { exact: true }))
+			.not.toBeInTheDocument();
+		await cleanup();
+		const fresh = fakeApi();
+		const result = await fresh.api.getCurve();
+		let finishAdd: ((value: typeof result) => void) | undefined;
+		fresh.api.getCurve.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishAdd = resolve;
+				})
+		);
+		await render(CommunityCandidates, { api: fresh.typed, onadd });
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		await page.getByRole('button', { name: m.cegocom_add_label({ name: NAME }) }).click();
+		await cleanup();
+		finishAdd?.(result);
+		await fresh.api.getCurve.mock.results.at(-1)?.value;
+		expect(onadd).not.toHaveBeenCalled();
+	});
 	test('a published curve joins the candidates and its origin is remembered', async () => {
 		await setLocale('pt-BR', { reload: false });
 		const { api, typed } = fakeApi();
