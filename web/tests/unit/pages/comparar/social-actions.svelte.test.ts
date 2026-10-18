@@ -5,7 +5,7 @@ import { encodeS1 } from 'open-auri/share';
 import { neutralCurve } from '#lib/state/model.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
-import { createSocialApi, createSocialSession, originOf } from '#lib/social/index.ts';
+import { createSocialApi, createSocialSession, ORIGINS_KEY, originOf } from '#lib/social/index.ts';
 import { createCurveSocial } from '#lib/components/pages/comparar/social.svelte.ts';
 import CompararPage from '#lib/components/pages/comparar/CompararPage.svelte';
 import SocialSources from '#lib/components/pages/comparar/SocialSources.svelte';
@@ -14,6 +14,8 @@ import SocialPublish from '#lib/components/pages/comparar/SocialPublish.svelte';
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
+	// Remembered origins live in localStorage, shared with other files in the same browser run.
+	localStorage.removeItem(ORIGINS_KEY);
 	await setLocale('pt-BR', { reload: false });
 });
 
