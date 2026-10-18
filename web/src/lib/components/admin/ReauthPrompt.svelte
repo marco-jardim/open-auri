@@ -42,7 +42,8 @@
 			/>
 			<button type="submit">{m.admin_reauth_submit()}</button>
 		</form>
-	{:else}
+	{:else if error !== 'NO_SECOND_FACTOR'}
+		<!-- With that error the alert below carries this same sentence: it is said once, as the alert. -->
 		<p>{m.admin_reauth_no_2fa()}</p>
 	{/if}
 	{#if errorText}

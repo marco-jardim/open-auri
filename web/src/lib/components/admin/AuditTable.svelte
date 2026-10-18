@@ -11,6 +11,12 @@
 		if (kind === 'operator') return m.admin_actor_operator();
 		return m.admin_actor_system();
 	}
+
+	/** Machine-readable instant for `<time datetime>`; undefined (attribute omitted) if invalid. */
+	function isoInstant(value: AuditTableRow['createdAt']): string | undefined {
+		const date = new Date(value);
+		return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+	}
 </script>
 
 {#if rows.length === 0}
@@ -32,8 +38,7 @@
 				{#each rows as row (row.id)}
 					<tr>
 						<td
-							><time datetime={new Date(row.createdAt).toISOString()}
-								>{formatWhen(row.createdAt, locale)}</time
+							><time datetime={isoInstant(row.createdAt)}>{formatWhen(row.createdAt, locale)}</time
 							></td
 						>
 						<td>{actorLabel(row.actorKind)}{row.actorId ? ` ${row.actorId}` : ''}</td>

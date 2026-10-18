@@ -104,6 +104,19 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 			expect(page.getByRole('alert').elements()).toHaveLength(0);
 		});
 
+		test('ReauthPrompt without 2FA and NO_SECOND_FACTOR says the sentence once, as the alert', async () => {
+			await setLocale(locale, { reload: false });
+			const screen = await render(ReauthPrompt, {
+				twoFactorEnabled: false,
+				error: 'NO_SECOND_FACTOR'
+			});
+			expect(screen.container.querySelector('form')).toBeNull();
+			const sentence = m.admin_reauth_no_2fa();
+			await expect.element(page.getByRole('alert')).toHaveTextContent(sentence);
+			expect(page.getByRole('alert').elements()).toHaveLength(1);
+			expect((screen.container.textContent ?? '').split(sentence)).toHaveLength(2);
+		});
+
 		test('ReauthPrompt without 2FA still announces a refused attempt', async () => {
 			await setLocale(locale, { reload: false });
 			const screen = await render(ReauthPrompt, {
@@ -258,6 +271,32 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 			expect(cells[0]![4]!.querySelector('b')).toBeNull();
 			expect(cells[1]![4]!.textContent).toBe('');
 			expect(cells[2]![4]!.textContent).toBe('note=auto');
+		});
+
+		test('AuditTable: a row with an invalid date shows "-" without breaking the table', async () => {
+			await setLocale(locale, { reload: false });
+			const createdAt = Date.UTC(2026, 9, 16, 14, 5);
+			const row = (id: string, at: number): AuditTableRow => ({
+				id,
+				actorId: null,
+				actorKind: 'system',
+				action: 'ban.expire',
+				targetKind: null,
+				targetId: null,
+				detail: null,
+				createdAt: at
+			});
+			const screen = await render(AuditTable, {
+				rows: [row('bad', Number.NaN), row('good', createdAt)],
+				locale
+			});
+			const times = [...screen.container.querySelectorAll('tbody tr td:first-child time')];
+			expect(times).toHaveLength(2);
+			expect(times[0]!.textContent).toBe('-');
+			expect(times[0]!.hasAttribute('datetime')).toBe(false);
+			// The other rows still render as usual.
+			expect(times[1]!.getAttribute('datetime')).toBe(new Date(createdAt).toISOString());
+			expect(times[1]!.textContent).toBe(formatWhen(createdAt, locale));
 		});
 	});
 }

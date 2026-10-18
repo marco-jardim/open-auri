@@ -29,35 +29,57 @@
 		return (window as WindowWithTurnstile).turnstile;
 	}
 
+	/** Outcome stamped on the api.js tag ('loaded' | 'failed'). A tag never fires load/error twice. */
+	const STATE_ATTR = 'data-turnstile-state';
+
 	let loading: Promise<TurnstileApi> | null = null;
 
 	/** Loads api.js once (explicit rendering), only when a widget is mounted. */
 	export function loadTurnstile(): Promise<TurnstileApi> {
+		// Also covers a reused tag that already loaded: the api is there, nothing to wait for.
 		const ready = globalApi();
 		if (ready) return Promise.resolve(ready);
 		if (loading) return loading;
-		loading = new Promise<TurnstileApi>((resolve, reject) => {
-			const existing = document.getElementById(SCRIPT_ID);
-			const script =
-				existing instanceof HTMLScriptElement ? existing : document.createElement('script');
-			const done = () => {
-				const api = globalApi();
-				if (api) resolve(api);
-				else reject(new Error('turnstile-missing'));
+		const pending = new Promise<TurnstileApi>((resolve, reject) => {
+			let existing = document.getElementById(SCRIPT_ID);
+			// A tag that already settled (failed, or loaded without defining the api) will not fire
+			// again: waiting on it would hang, so it is replaced by a fresh one.
+			if (existing instanceof HTMLScriptElement && existing.hasAttribute(STATE_ATTR)) {
+				existing.remove();
+				existing = null;
+			}
+			const reused = existing instanceof HTMLScriptElement ? existing : null;
+			const script = reused ?? document.createElement('script');
+			const fail = (error: Error) => {
+				script.setAttribute(STATE_ATTR, 'failed');
+				// Out of <head> and out of the cache: the next mount injects a fresh tag.
+				script.remove();
+				if (loading === pending) loading = null;
+				reject(error);
 			};
-			script.addEventListener('load', done, { once: true });
-			script.addEventListener('error', () => reject(new Error('turnstile-load')), { once: true });
-			if (!existing) {
+			script.addEventListener(
+				'load',
+				() => {
+					const api = globalApi();
+					if (!api) {
+						fail(new Error('turnstile-missing'));
+						return;
+					}
+					script.setAttribute(STATE_ATTR, 'loaded');
+					resolve(api);
+				},
+				{ once: true }
+			);
+			script.addEventListener('error', () => fail(new Error('turnstile-load')), { once: true });
+			if (!reused) {
 				script.id = SCRIPT_ID;
 				script.src = TURNSTILE_SCRIPT_URL;
 				script.async = true;
 				document.head.append(script);
 			}
-		}).catch((error: unknown) => {
-			loading = null;
-			throw error;
 		});
-		return loading;
+		loading = pending;
+		return pending;
 	}
 </script>
 

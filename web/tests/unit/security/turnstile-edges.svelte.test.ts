@@ -1,6 +1,7 @@
 // Turnstile wrapper edges: the api.js loader (script injection, reuse, failures, de-duplication)
 // and the widget callbacks not covered by tests/unit/server/security/turnstile.svelte.test.ts.
-// The real api.js is never fetched: `document.head.append` keeps the injected script detached.
+// The real api.js is never fetched: `document.head.append` puts the injected script into <head> as
+// on a real page, but inert (type text/plain), so its load/error events are dispatched by hand.
 //
 // Order matters inside this file: the loader keeps a successful load for the page's lifetime,
 // so every test that needs a pending load runs before the only test that lets a load succeed.
@@ -17,6 +18,8 @@ import Turnstile, {
 } from '#lib/components/security/Turnstile.svelte';
 
 const SCRIPT_ID = 'cf-turnstile-api';
+/** Outcome the loader stamps on the api.js tag ('loaded' | 'failed'). */
+const STATE_ATTR = 'data-turnstile-state';
 
 interface FakeTurnstile extends TurnstileApi {
 	options: TurnstileRenderOptions | null;
@@ -60,19 +63,34 @@ async function renderedOptions(fake: FakeTurnstile): Promise<TurnstileRenderOpti
 	return options;
 }
 
-/** Keeps injected api.js scripts detached (no network) and returns them. */
+/**
+ * Keeps injected api.js scripts inert (no network) and returns them. They still go into <head>,
+ * so a later load meets whatever tag an earlier one left there, as on a real page.
+ */
 function trapScripts() {
 	const original = HTMLHeadElement.prototype.append;
 	const trapped: HTMLScriptElement[] = [];
 	const spy = vi.spyOn(document.head, 'append').mockImplementation((...nodes) => {
-		const kept: (Node | string)[] = [];
 		for (const node of nodes) {
-			if (node instanceof HTMLScriptElement && node.id === SCRIPT_ID) trapped.push(node);
-			else kept.push(node);
+			if (node instanceof HTMLScriptElement && node.id === SCRIPT_ID) {
+				// Not a JavaScript type: the browser neither fetches it nor fires its events.
+				node.type = 'text/plain';
+				trapped.push(node);
+			}
 		}
-		original.apply(document.head, kept);
+		original.apply(document.head, nodes);
 	});
 	return { trapped, restore: () => spy.mockRestore() };
+}
+
+/** A tag already in <head> before the loader runs (inert, no src). */
+function placeTag(state?: 'loaded' | 'failed'): HTMLScriptElement {
+	const tag = document.createElement('script');
+	tag.id = SCRIPT_ID;
+	tag.type = 'text/plain';
+	if (state) tag.setAttribute(STATE_ATTR, state);
+	document.head.appendChild(tag);
+	return tag;
 }
 
 const hiddenToken = (container: HTMLElement, name = 'cf-turnstile-response') =>
@@ -85,7 +103,7 @@ beforeEach(async () => {
 afterEach(async () => {
 	await cleanup();
 	Reflect.deleteProperty(window, 'turnstile');
-	document.getElementById(SCRIPT_ID)?.remove();
+	for (const tag of document.querySelectorAll(`#${SCRIPT_ID}`)) tag.remove();
 });
 
 describe('loadTurnstile', () => {
@@ -100,31 +118,61 @@ describe('loadTurnstile', () => {
 			expect(script.src).toBe(TURNSTILE_SCRIPT_URL);
 			expect(script.async).toBe(true);
 			expect(script.id).toBe(SCRIPT_ID);
-			// Loaded, but api.js did not define window.turnstile.
+			expect(document.getElementById(SCRIPT_ID)).toBe(script);
+			// Loaded, but api.js did not define window.turnstile: the useless tag leaves <head>.
 			script.dispatchEvent(new Event('load'));
 			await expect(first).rejects.toThrow('turnstile-missing');
+			expect(script.isConnected).toBe(false);
 		} finally {
 			scripts.restore();
 		}
 	});
 
-	// The trap keeps each script detached, so the retry cannot find the failed one by id. In a real
-	// page the failed <script id="cf-turnstile-api"> stays in <head> and is reused (see report).
-	test('a network error rejects and is not cached: the next call starts a new load', async () => {
+	test('a network error rejects and is not cached: the failed tag leaves <head> and the retry injects a fresh one', async () => {
 		const scripts = trapScripts();
 		try {
 			const failed = loadTurnstile();
-			scripts.trapped[0]!.dispatchEvent(new Event('error'));
+			const dead = scripts.trapped[0]!;
+			expect(document.getElementById(SCRIPT_ID)).toBe(dead);
+			dead.dispatchEvent(new Event('error'));
 			await expect(failed).rejects.toThrow('turnstile-load');
+			expect(dead.isConnected).toBe(false);
+			expect(dead.getAttribute(STATE_ATTR)).toBe('failed');
+
 			const retry = loadTurnstile();
 			expect(retry).not.toBe(failed);
 			expect(scripts.trapped).toHaveLength(2);
-			scripts.trapped[1]!.dispatchEvent(new Event('error'));
+			const fresh = scripts.trapped[1]!;
+			expect(fresh).not.toBe(dead);
+			expect(fresh.src).toBe(TURNSTILE_SCRIPT_URL);
+			expect(fresh.hasAttribute(STATE_ATTR)).toBe(false);
+			expect(document.getElementById(SCRIPT_ID)).toBe(fresh);
+			fresh.dispatchEvent(new Event('error'));
 			await expect(retry).rejects.toThrow('turnstile-load');
+			expect(fresh.isConnected).toBe(false);
 		} finally {
 			scripts.restore();
 		}
 	});
+
+	// Such a tag fired its events already (e.g. left by an earlier copy of the module): waiting on it
+	// would hang, so it is swapped for a fresh one.
+	for (const state of ['failed', 'loaded'] as const) {
+		test(`a tag marked "${state}" without the api on the page is replaced, not awaited`, async () => {
+			const stale = placeTag(state);
+			const scripts = trapScripts();
+			try {
+				const load = loadTurnstile();
+				expect(stale.isConnected).toBe(false);
+				expect(scripts.trapped).toHaveLength(1);
+				expect(document.getElementById(SCRIPT_ID)).toBe(scripts.trapped[0]);
+				scripts.trapped[0]!.dispatchEvent(new Event('error'));
+				await expect(load).rejects.toThrow('turnstile-load');
+			} finally {
+				scripts.restore();
+			}
+		});
+	}
 
 	test('an api already on the page is used at once, without a script', async () => {
 		const scripts = trapScripts();
@@ -132,6 +180,19 @@ describe('loadTurnstile', () => {
 			const fake = install(fakeTurnstile());
 			await expect(loadTurnstile()).resolves.toBe(fake);
 			expect(scripts.trapped).toHaveLength(0);
+		} finally {
+			scripts.restore();
+		}
+	});
+
+	test('a reused tag that already loaded resolves at once: no wait, no new script', async () => {
+		const loaded = placeTag('loaded');
+		const scripts = trapScripts();
+		try {
+			const fake = install(fakeTurnstile());
+			await expect(loadTurnstile()).resolves.toBe(fake);
+			expect(scripts.trapped).toHaveLength(0);
+			expect(document.getElementById(SCRIPT_ID)).toBe(loaded);
 		} finally {
 			scripts.restore();
 		}
@@ -177,6 +238,39 @@ describe('widget lifecycle while api.js is loading', () => {
 			expect(codes).toEqual(['load']);
 			expect(hiddenToken(screen.container)).toBe('');
 			expect(screen.container.querySelector('.placeholder')).toBeNull();
+		} finally {
+			scripts.restore();
+		}
+	});
+
+	test('after a failed load the next mount retries with a fresh tag and reports its failure too', async () => {
+		const scripts = trapScripts();
+		const codes: string[] = [];
+		const onerror = (code: string) => codes.push(code);
+		try {
+			const first = await render(Turnstile, { siteKey: 'k', action: 'sign-in', onerror });
+			await expect.poll(() => scripts.trapped.length).toBe(1);
+			const dead = scripts.trapped[0]!;
+			expect(document.getElementById(SCRIPT_ID)).toBe(dead);
+			dead.dispatchEvent(new Event('error'));
+			await expect.poll(() => codes).toEqual(['load']);
+			expect(dead.isConnected).toBe(false);
+			await first.unmount();
+
+			// The retry must not wait on the dead tag (it would stay "Preparando verificação…").
+			const second = await render(Turnstile, { siteKey: 'k', action: 'sign-in', onerror });
+			await expect.poll(() => scripts.trapped.length).toBe(2);
+			const fresh = scripts.trapped[1]!;
+			expect(fresh).not.toBe(dead);
+			expect(document.getElementById(SCRIPT_ID)).toBe(fresh);
+			fresh.dispatchEvent(new Event('error'));
+			await expect
+				.element(page.getByRole('alert'))
+				.toHaveTextContent(
+					'Não foi possível carregar a verificação de segurança. Recarregue a página e tente de novo.'
+				);
+			expect(codes).toEqual(['load', 'load']);
+			expect(second.container.querySelector('.placeholder')).toBeNull();
 		} finally {
 			scripts.restore();
 		}
