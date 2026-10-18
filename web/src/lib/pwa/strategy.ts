@@ -36,6 +36,11 @@ export function isAutoEq(path: string): boolean {
 	return path.startsWith('/data/autoeq/');
 }
 
+/** Preview recordings are fetched only when selected, never as part of the app shell. */
+export function isPreviewAudio(path: string): boolean {
+	return path.startsWith('/audio/preview/') && /\.mp3$/i.test(path);
+}
+
 export function isPrivatePath(path: string): boolean {
 	return /^\/(?:auth|account|profile|admin|login|logout)(?:\/|$)/.test(path);
 }
@@ -43,7 +48,13 @@ export function isPrivatePath(path: string): boolean {
 export function precacheUrls(entries: ReadonlyArray<{ path: string }>, scope: string): string[] {
 	return [...new Set(entries.map(({ path }) => manifestUrl(path, scope)))].filter((href) => {
 		const path = scopedPath(new URL(href), scope);
-		return path !== null && !isApi(path) && !isAutoEq(path) && !isPrivatePath(path);
+		return (
+			path !== null &&
+			!isApi(path) &&
+			!isAutoEq(path) &&
+			!isPreviewAudio(path) &&
+			!isPrivatePath(path)
+		);
 	});
 }
 

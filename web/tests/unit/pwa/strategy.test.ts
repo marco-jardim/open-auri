@@ -72,6 +72,26 @@ describe('build-versioned precache', () => {
 		expect(scopedPath(new URL('https://open-auri.test/application/a'), scope)).toBeNull();
 		expect(scopedPath(new URL('https://elsewhere.test/app/a'), scope)).toBeNull();
 	});
+
+	test('does not precache preview MP3s, at the root or under a deployment base', () => {
+		const paths = [
+			'/audio/preview/test-signals.mp3',
+			...['rock', 'pop', 'country', 'percussion', 'electronic', 'hiphop', 'funk', 'worship'].map(
+				(id) => `audio/preview/genre-${id}.mp3`
+			)
+		];
+		for (const base of ['https://open-auri.test/', scope]) {
+			const urls = precacheUrls(
+				[...paths.map((path) => ({ path })), { path: '/audio/preview/manifest.json' }],
+				base
+			);
+			expect(urls).toEqual([`${base}audio/preview/manifest.json`]);
+			for (const path of paths) {
+				const recording = new Request(manifestUrl(path, base));
+				expect(requestStrategy(recording, base, new Set(urls))).toBe('network-only');
+			}
+		}
+	});
 });
 
 describe('request routing', () => {

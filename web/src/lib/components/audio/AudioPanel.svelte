@@ -7,6 +7,9 @@
 	state and the placement.
 -->
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	// The app is served from the origin root (no paths.base), like every other static URL here.
+	const PREVIEW_BASE = '';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import {
@@ -18,6 +21,15 @@
 		type AudioEngineState,
 		type AudioErrorCode
 	} from '#lib/audio/engine.ts';
+	import {
+		fetchPreviewSources,
+		loadPreviewSource,
+		previewFilename,
+		readAudioSource,
+		rememberAudioSource,
+		sectionAtTime,
+		type PreviewSource
+	} from '#lib/audio/preview-sources.ts';
 	import { VuReferenceSelect, type VuReferenceStore } from '#lib/components/meters/index.ts';
 	import Transport from './Transport.svelte';
 
@@ -40,6 +52,113 @@
 	let dragging = $state(false);
 	let rejected = $state<AudioErrorCode | null>(null);
 	const errorCode = $derived(rejected ?? s.error);
+	// Staged copy stays usable before the central Paraglide message merge.
+	let sources = $state.raw<PreviewSource[]>([]);
+	let selectedBuiltin = $state<string | null>(null);
+	let loading = $state(false);
+	let referenceFailed = $state(false);
+	let fileInput: HTMLInputElement | undefined = $state();
+	let initialized = false;
+	let sourceVersion = 0;
+	let audioRequest: AbortController | null = null;
+	let manifestRequest: AbortController | null = null;
+	const activeBuiltin = $derived(
+		sources.find(
+			(source) => source.id === selectedBuiltin && s.file?.name === previewFilename(source)
+		) ?? null
+	);
+	const sourceChoice = $derived(
+		activeBuiltin ? `builtin:${activeBuiltin.id}` : s.file ? 'file' : 'noise'
+	);
+	const sectionName = $derived(
+		s.playing && activeBuiltin?.id === 'test-signals'
+			? (sectionAtTime(activeBuiltin.sections, s.position)?.title[getLocale()] ?? '')
+			: ''
+	);
+
+	function cancelBuiltin(): void {
+		sourceVersion++;
+		audioRequest?.abort();
+		audioRequest = null;
+		loading = false;
+	}
+
+	async function useBuiltin(source: PreviewSource): Promise<void> {
+		cancelBuiltin();
+		const request = new AbortController();
+		audioRequest = request;
+		loading = true;
+		rejected = null;
+		referenceFailed = false;
+		try {
+			await loadPreviewSource(engine, source, PREVIEW_BASE, request.signal);
+			if (request.signal.aborted) return;
+			selectedBuiltin = source.id;
+			rememberAudioSource(`builtin:${source.id}`);
+		} catch (error) {
+			if (request.signal.aborted) return;
+			if (error instanceof AudioEngineError) rejected = error.code;
+			else referenceFailed = true;
+		} finally {
+			if (audioRequest === request) {
+				audioRequest = null;
+				loading = false;
+			}
+		}
+	}
+
+	async function initializeSources(): Promise<void> {
+		manifestRequest?.abort();
+		const request = new AbortController();
+		manifestRequest = request;
+		const version = sourceVersion;
+		const choice = readAudioSource();
+		referenceFailed = false;
+		try {
+			const tracks = await fetchPreviewSources(PREVIEW_BASE, request.signal);
+			if (request.signal.aborted) return;
+			sources = tracks;
+			// A file pick or source change while metadata was loading wins over restoration.
+			if (version !== sourceVersion) return;
+			const saved = tracks.find((source) => choice === `builtin:${source.id}`);
+			if (saved) {
+				// The engine may already have restored this File from its existing IndexedDB store.
+				if (engine.state().file?.name === previewFilename(saved)) selectedBuiltin = saved.id;
+				else await useBuiltin(saved);
+			} else if (choice === 'noise' && engine.state().file) {
+				removeFile();
+			}
+		} catch {
+			if (!request.signal.aborted) referenceFailed = true;
+		}
+	}
+
+	// Warming the popover chunk must not download recordings or even its metadata.
+	$effect(() => {
+		if (open && !initialized) {
+			initialized = true;
+			void initializeSources();
+		}
+	});
+
+	onDestroy(() => {
+		manifestRequest?.abort();
+		cancelBuiltin();
+	});
+
+	function onSourceChange(event: Event & { currentTarget: HTMLSelectElement }): void {
+		const choice = event.currentTarget.value;
+		// Keep the current selection until a fetch or a file dialog actually succeeds.
+		event.currentTarget.value = sourceChoice;
+		if (choice === 'noise') removeFile();
+		else if (choice === 'file') {
+			// A cancelled file dialog keeps the current source and its saved preference.
+			fileInput?.click();
+		} else {
+			const source = sources.find((track) => choice === `builtin:${track.id}`);
+			if (source) void useBuiltin(source);
+		}
+	}
 
 	function fmtDb(db: number): string {
 		return `${db < 0 ? '−' : ''}${Math.abs(db)} dB`;
@@ -89,11 +208,17 @@
 
 	async function useFile(file: File | null | undefined): Promise<void> {
 		if (!file) return;
+		cancelBuiltin();
+		const version = sourceVersion;
 		rejected = null;
+		referenceFailed = false;
 		try {
 			await engine.loadFile(file);
+			if (version !== sourceVersion) return;
+			selectedBuiltin = null;
+			rememberAudioSource('file');
 		} catch (error) {
-			rejected = codeOf(error, 'invalid-file');
+			if (version === sourceVersion) rejected = codeOf(error, 'invalid-file');
 		}
 	}
 
@@ -120,7 +245,11 @@
 	});
 
 	function removeFile(): void {
+		cancelBuiltin();
 		rejected = null;
+		referenceFailed = false;
+		selectedBuiltin = null;
+		rememberAudioSource('noise');
 		void engine.removeFile();
 	}
 
@@ -166,6 +295,31 @@
 >
 	<h3 id={ids.title}>{m.audio_title()}</h3>
 
+	<label class="oa-audio-source">
+		<span>{m.preview_source_label()}</span>
+		<select value={sourceChoice} disabled={loading} onchange={onSourceChange}>
+			<option value="noise">{m.preview_source_noise()}</option>
+			<option value="file">{m.preview_source_file()}</option>
+			<optgroup label={m.preview_source_group()}>
+				{#each sources as source (source.id)}
+					<option value={`builtin:${source.id}`}>{source.title[getLocale()]}</option>
+				{/each}
+			</optgroup>
+		</select>
+	</label>
+	<p class="oa-audio-credit">{m.preview_source_license()}</p>
+	{#if loading}
+		<p class="oa-audio-credit" role="status">{m.preview_source_loading()}</p>
+	{/if}
+	{#if referenceFailed}
+		<p class="oa-audio-error" role="alert">{m.preview_source_error()}</p>
+		{#if sources.length === 0}
+			<button type="button" onclick={() => void initializeSources()}>
+				{m.preview_source_retry()}
+			</button>
+		{/if}
+	{/if}
+
 	<div class="oa-audio-drop" class:dragging {@attach dropZone}>
 		<label class="oa-audio-load">
 			<span>{m.audio_load()}</span>
@@ -173,6 +327,7 @@
 				type="file"
 				class="oa-audio-file"
 				accept="audio/mpeg,audio/mp3,audio/*"
+				bind:this={fileInput}
 				onchange={onFileChange}
 			/>
 		</label>
@@ -206,6 +361,8 @@
 				playDisabledReason={s.file ? null : m.transport_reason_no_file()}
 				onerror={onTransportError}
 			/>
+			<!-- The derived string stays unchanged on position ticks inside the same section. -->
+			<p class="oa-audio-section" aria-live="polite" aria-atomic="true">{sectionName}</p>
 		</div>
 		<button type="button" disabled={!s.file} onclick={removeFile}>{m.audio_remove()}</button>
 	</div>
@@ -239,6 +396,8 @@
 		z-index: 80;
 		width: 320px;
 		max-width: calc(100vw - 24px);
+		max-height: calc(100dvh - 140px);
+		overflow-y: auto;
 		background: #1b1b19;
 		border: 1px solid #34332f;
 		border-radius: 6px;
@@ -254,6 +413,7 @@
 	}
 	.oa-audio-pop:focus-visible,
 	.oa-audio-pop button:focus-visible,
+	.oa-audio-pop select:focus-visible,
 	.oa-audio-pop input[type='range']:focus-visible {
 		outline: 2px solid var(--oa-accent);
 		outline-offset: 3px;
@@ -265,6 +425,29 @@
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		color: var(--oa-muted);
+	}
+	.oa-audio-source {
+		display: grid;
+		gap: 4px;
+	}
+	.oa-audio-source select {
+		width: 100%;
+		min-width: 0;
+		padding: 6px;
+		border: 1px solid var(--oa-rule);
+		border-radius: 3px;
+		background: #1b1b19;
+		color: inherit;
+		font: inherit;
+	}
+	.oa-audio-credit,
+	.oa-audio-section {
+		margin: 4px 0 8px;
+		font-size: 10.5px;
+		color: var(--oa-muted);
+	}
+	.oa-audio-section:empty {
+		margin: 0;
 	}
 	.oa-audio-drop {
 		display: flex;

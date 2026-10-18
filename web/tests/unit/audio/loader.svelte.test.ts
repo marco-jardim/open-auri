@@ -14,6 +14,8 @@ import {
 } from '#lib/audio/engine.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
+import { AUDIO_SOURCE_KEY } from '#lib/audio/preview-sources.ts';
+import previewManifest from '../../../static/audio/preview/manifest.json';
 
 vi.mock(import('#lib/audio/engine.ts'), async (original) => ({
 	...(await original()),
@@ -78,12 +80,15 @@ function audioUi(initial: Partial<AudioEngineState> = {}) {
 
 beforeEach(async () => {
 	await setLocale('pt-BR', { reload: false });
+	localStorage.removeItem(AUDIO_SOURCE_KEY);
+	vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json(previewManifest));
 	vi.mocked(getAudioEngine).mockReset();
 });
 
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
+	localStorage.removeItem(AUDIO_SOURCE_KEY);
 	await setLocale('pt-BR', { reload: false });
 });
 
@@ -245,6 +250,7 @@ test('file picking resets the input, ignores cancellation and reports both typed
 	await tick();
 	expect(page.getByRole('alert').elements()).toHaveLength(0);
 	expect(fake.engine.loadFile).toHaveBeenCalledTimes(3);
+	expect(localStorage.getItem(AUDIO_SOURCE_KEY)).toBe('file');
 	expect(getAudioEngine).not.toHaveBeenCalled();
 });
 
@@ -468,4 +474,150 @@ test.each(errors)('announces the engine %s error', async (error, text) => {
 	await render(AudioLoader, { engine: fake.engine });
 	await page.getByRole('button').click();
 	await expect.element(page.getByRole('alert')).toHaveTextContent(text());
+});
+
+function attachLoadedFiles(fake: ReturnType<typeof audioUi>): void {
+	vi.mocked(fake.engine.loadFile).mockImplementation(async (file) => {
+		const duration = file.name === 'test-signals.mp3' ? 62 : 20;
+		fake.publish({
+			source: 'file',
+			file: { name: file.name, type: file.type, size: file.size, addedAt: 1, duration },
+			duration,
+			position: 0
+		});
+	});
+}
+
+test.each(['pt-BR', 'en-US'] as const)(
+	'the picker has nine localized reference tracks in %s',
+	async (locale) => {
+		await setLocale(locale, { reload: false });
+		const fake = audioUi();
+		const screen = await render(AudioLoader, { engine: fake.engine });
+		await page.getByRole('button').click();
+		const picker = page.getByRole('combobox', { name: m.preview_source_label() });
+		await expect.element(picker).toBeVisible();
+		await expect.poll(() => screen.container.querySelectorAll('optgroup option').length).toBe(9);
+		const group = screen.container.querySelector('optgroup')!;
+		expect(group.label).toBe(m.preview_source_group());
+		expect([...group.querySelectorAll('option')].map((option) => option.textContent)).toEqual(
+			previewManifest.files.map((source) => source.title[locale])
+		);
+		await expect.element(page.getByText(m.preview_source_license())).toBeVisible();
+		expect(fake.engine.loadFile).not.toHaveBeenCalled();
+		expect(fake.engine.start).not.toHaveBeenCalled();
+		expect(
+			vi.mocked(fetch).mock.calls.every(([url]) => String(url).endsWith('/manifest.json'))
+		).toBe(true);
+	}
+);
+
+test('selecting a reference fetches its MP3 and hands a File to the same loader, saving only the choice', async () => {
+	const fake = audioUi();
+	attachLoadedFiles(fake);
+	vi.mocked(fetch).mockImplementation(async (url) =>
+		String(url).endsWith('/manifest.json')
+			? Response.json(previewManifest)
+			: new Response('MP3 bytes')
+	);
+	await render(AudioLoader, { engine: fake.engine });
+	await page.getByRole('button').click();
+	const picker = page.getByRole('combobox', { name: m.preview_source_label() });
+	await picker.selectOptions('builtin:percussion');
+	await expect.poll(() => fake.engine.loadFile).toHaveBeenCalledOnce();
+	expect(fetch).toHaveBeenCalledWith('/audio/preview/genre-percussion.mp3', {
+		signal: expect.any(AbortSignal)
+	});
+	const [file] = vi.mocked(fake.engine.loadFile).mock.calls[0];
+	expect(file).toBeInstanceOf(File);
+	expect(file.name).toBe('genre-percussion.mp3');
+	expect(file.type).toBe('audio/mpeg');
+	expect(await file.text()).toBe('MP3 bytes');
+	await expect.element(picker).toHaveValue('builtin:percussion');
+	expect(localStorage.getItem(AUDIO_SOURCE_KEY)).toBe('builtin:percussion');
+	expect(fake.engine.start).not.toHaveBeenCalled();
+	await page.getByRole('button', { name: m.audio_play(), exact: true }).click();
+	expect(fake.engine.start).toHaveBeenCalledExactlyOnceWith('raw', { session: 'audio-panel' });
+	await picker.selectOptions('noise');
+	expect(fake.engine.removeFile).toHaveBeenCalledOnce();
+	expect(localStorage.getItem(AUDIO_SOURCE_KEY)).toBe('noise');
+});
+
+test('a saved built-in choice is restored through the file loader when its stored File is absent', async () => {
+	localStorage.setItem(AUDIO_SOURCE_KEY, 'builtin:rock');
+	const fake = audioUi();
+	attachLoadedFiles(fake);
+	vi.mocked(fetch).mockImplementation(async (url) =>
+		String(url).endsWith('/manifest.json') ? Response.json(previewManifest) : new Response('MP3')
+	);
+	await render(AudioLoader, { engine: fake.engine });
+	expect(fetch).not.toHaveBeenCalled();
+	await page.getByRole('button').click();
+	await expect
+		.element(page.getByRole('combobox', { name: m.preview_source_label() }))
+		.toHaveValue('builtin:rock');
+	expect(fetch).toHaveBeenCalledWith('/audio/preview/genre-rock.mp3', {
+		signal: expect.any(AbortSignal)
+	});
+	expect(fake.engine.loadFile).toHaveBeenCalledOnce();
+	expect(fake.engine.start).not.toHaveBeenCalled();
+});
+
+test('test-track sections announce changes, not the five-per-second position ticks, seeks and loops included', async () => {
+	localStorage.setItem(AUDIO_SOURCE_KEY, 'builtin:test-signals');
+	const fake = audioUi({
+		source: 'file',
+		file: { ...fileInfo, name: 'test-signals.mp3', duration: 62 },
+		duration: 62
+	});
+	const screen = await render(AudioLoader, { engine: fake.engine });
+	await page.getByRole('button').click();
+	await expect
+		.element(page.getByRole('combobox', { name: m.preview_source_label() }))
+		.toHaveValue('builtin:test-signals');
+	// Reuse the engine's existing IndexedDB restoration instead of downloading the same file twice.
+	expect(fake.engine.loadFile).not.toHaveBeenCalled();
+	const line = screen.container.querySelector<HTMLParagraphElement>('.oa-audio-section')!;
+	expect(line.getAttribute('aria-live')).toBe('polite');
+	expect(line.textContent).toBe('');
+	fake.publish({ playing: true, position: 7 });
+	await expect.poll(() => line.textContent).toBe('Varredura: 20 Hz a 20 kHz');
+	const changes: MutationRecord[] = [];
+	const observer = new MutationObserver((records) => changes.push(...records));
+	observer.observe(line, { subtree: true, childList: true, characterData: true });
+	try {
+		for (const position of [7.2, 7.4, 10, 18.9]) {
+			fake.publish({ position });
+			await tick();
+		}
+		expect(changes).toHaveLength(0);
+		fake.publish({ position: 20 });
+		await expect.poll(() => line.textContent).toBe('Ruído rosa: 31.5 Hz');
+		fake.publish({ position: 58 });
+		await expect.poll(() => line.textContent).toBe('Estéreo: canal direito invertido');
+		fake.publish({ position: 0 });
+		await expect.poll(() => line.textContent).toBe('Referência de nível: 1 kHz');
+		fake.publish({ playing: false });
+		await expect.poll(() => line.textContent).toBe('');
+	} finally {
+		observer.disconnect();
+	}
+});
+
+test('a failed built-in fetch keeps the current file and persisted choice', async () => {
+	localStorage.setItem(AUDIO_SOURCE_KEY, 'file');
+	const fake = audioUi({ source: 'file', file: fileInfo });
+	vi.mocked(fetch).mockImplementation(async (url) =>
+		String(url).endsWith('/manifest.json')
+			? Response.json(previewManifest)
+			: new Response(null, { status: 503 })
+	);
+	await render(AudioLoader, { engine: fake.engine });
+	await page.getByRole('button').click();
+	const picker = page.getByRole('combobox', { name: m.preview_source_label() });
+	await picker.selectOptions('builtin:pop');
+	await expect.element(page.getByRole('alert')).toHaveTextContent(m.preview_source_error());
+	await expect.element(picker).toHaveValue('file');
+	expect(fake.engine.loadFile).not.toHaveBeenCalled();
+	expect(localStorage.getItem(AUDIO_SOURCE_KEY)).toBe('file');
 });

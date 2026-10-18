@@ -19,6 +19,17 @@ test.beforeEach(async ({ page }) => {
 	await page.goto('/');
 });
 
+test('the audio picker offers nine built-in CC0 reference tracks', async ({ page }) => {
+	const popover = await openAudio(page);
+	await expect(popover.getByRole('combobox', { name: 'Fonte da prévia' })).toBeVisible();
+	const group = popover.locator('optgroup[label="Faixas de referência"]');
+	await expect(group.locator('option')).toHaveCount(9);
+	await expect(group.locator('option').first()).toHaveText('Sinais de teste');
+	await expect(
+		popover.getByText('Material sintetizado pelo open-auri, licença CC0.')
+	).toBeVisible();
+});
+
 async function storedAudio(page: Page) {
 	return page.evaluate(async () => {
 		const db = await new Promise<IDBDatabase>((resolve, reject) => {
