@@ -48,9 +48,24 @@ export interface OgSvgInput {
 	/** Version name (already normalized at publication; cleaned again here). */
 	name: string;
 	license: string;
-	/** S1 string of the version's curve. */
+	/** S1 string of the version's curve (v1 or v2: bands above 20 kHz fall off the 20 kHz plot). */
 	s1: string;
 	lang: Lang;
+	/** The curve is YOLO (server class): the card shows a "YOLO" chip after the mark. */
+	yolo?: boolean;
+}
+
+/** The "YOLO" chip of a YOLO curve: an outlined pill next to the open-auri mark. */
+export const OG_YOLO_CHIP = { x: 250, y: 66, w: 104, h: 42, label: 'YOLO' } as const;
+
+function yoloChip(): string {
+	const { x, y, w, h, label } = OG_YOLO_CHIP;
+	const { accent } = OG_COLORS;
+	return (
+		`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="none" ` +
+		`stroke="${accent}" stroke-width="3"/>\n` +
+		text(x + w / 2, y + 30, label, { family: OG_MONO, size: 24, fill: accent, anchor: 'middle' })
+	);
 }
 
 // Bidi embeddings/overrides/isolates and marks: they could reorder the card's text.
@@ -154,6 +169,7 @@ export function ogSvg(input: OgSvgInput): string {
 		`<rect width="${OG_WIDTH}" height="${OG_HEIGHT}" fill="${ink}"/>`,
 		`<rect x="40" y="40" width="1120" height="550" rx="6" fill="${ink2}" stroke="${muted}" stroke-opacity="0.35"/>`,
 		text(80, 98, 'open-auri', { family: OG_MONO, size: 28, fill: accent }),
+		...(input.yolo === true ? [yoloChip()] : []),
 		text(1120, 98, license, { family: OG_MONO, size: 22, fill: muted, anchor: 'end' }),
 		text(80, 182, name, { family: OG_SERIF, size: 64, fill: fg })
 	];

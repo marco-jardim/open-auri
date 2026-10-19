@@ -109,7 +109,9 @@ const API_CODES: Readonly<Record<ApiErrorCode, true>> = {
 	DUPLICATE: true,
 	GONE: true,
 	QUOTA_EXCEEDED: true,
-	CONSENT_REQUIRED: true
+	CONSENT_REQUIRED: true,
+	YOLO_ACK_REQUIRED: true,
+	YOLO_PUBLICATION_OFF: true
 };
 
 /** `NETWORK`: the request never got an answer; `OFFLINE`: same, and the browser reports offline. */
@@ -237,6 +239,13 @@ export interface PageQuery {
 export interface FeedQuery extends PageQuery {
 	sort?: FeedSort;
 	window?: RankingWindow;
+	/** `'only'`: the separate list of public YOLO curves (`sort` must be `new`). */
+	yolo?: 'only';
+}
+
+/** The owner's acknowledgement that a YOLO curve is shown to others (migration 0013). */
+export interface YoloAckOptions extends RequestOptions {
+	acknowledge?: 'yolo';
 }
 
 export interface RankingsQuery extends PageQuery {
@@ -468,12 +477,15 @@ export function createSocialApi(options: SocialApiOptions = {}) {
 			call<ForkResult>('POST', `/lineages/${seg(lineageId)}/fork`, { ...opts, body }),
 		retractLineage: (lineageId: string, opts: RequestOptions = {}) =>
 			call<LineageState>('POST', `/lineages/${seg(lineageId)}/retract`, opts),
-		restoreLineage: (lineageId: string, opts: RequestOptions = {}) =>
-			call<LineageState>('POST', `/lineages/${seg(lineageId)}/restore`, opts),
-		setVisibility: (lineageId: string, visibility: LineageVisibility, opts: RequestOptions = {}) =>
+		restoreLineage: (lineageId: string, opts: YoloAckOptions = {}) =>
+			call<LineageState>('POST', `/lineages/${seg(lineageId)}/restore`, {
+				signal: opts.signal,
+				...(opts.acknowledge ? { body: { acknowledge: opts.acknowledge } } : {})
+			}),
+		setVisibility: (lineageId: string, visibility: LineageVisibility, opts: YoloAckOptions = {}) =>
 			call<LineageState>('PUT', `/lineages/${seg(lineageId)}/visibility`, {
-				...opts,
-				body: { visibility }
+				signal: opts.signal,
+				body: opts.acknowledge ? { visibility, acknowledge: opts.acknowledge } : { visibility }
 			}),
 
 		// Favorites, activity and audience.

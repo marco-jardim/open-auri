@@ -88,8 +88,9 @@ export class JobFailedError extends Error {
  *   read (idempotent per backup week).
  * - Weekly (Monday 03:00 UTC): the public dump.
  * - Every 15 minutes: the re-gate of curves cached under an older gate version FIRST (the most
- *   CPU-heavy step, ~150 ms per curve, time-budgeted in regate.ts and only non-zero after a
- *   threshold change; FX4.9: the short period shortens the window in which lists still show a
+ *   CPU-heavy step, ~150 ms per gate run and two runs for a YOLO curve, time-budgeted in
+ *   regate.ts and only non-zero after a threshold change; FX4.9: the short period shortens the
+ *   window in which lists still show a
  *   head the current gate rejects, and the next tick continues where it stopped), THEN rankings
  *   materialization, so a fresh ranking already sees the refreshed verdicts. The re-gate is
  *   registered ONLY here (#28): the hourly cron also fires at minute 0, and listing it there too

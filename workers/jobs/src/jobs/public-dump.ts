@@ -13,8 +13,15 @@
 // unlisted content, moderation data. A fork points to its origin only when the origin version is
 // itself in the dump. The `readme` field explains the licenses. A version with filter labels
 // (open-auri/preset@2, migration 0012) carries them as `labels` (ten entries by wire index of its
-// S1, null = automatic name); the field is additive and absent otherwise, so `formatVersion`
-// stays 1.
+// S1, null = automatic name); the field is additive and absent otherwise. Curves are S1 strings as
+// stored; nothing here decodes them. `formatVersion` 2: since GATE_IMPL 2 a STANDARD curve may be
+// S1 v2 (a non-amplifying cut above 20 kHz, bands up to 32 kHz), which a format-1 reader (S1 v1
+// only) cannot decode. S1 is self-describing (its version is in the code itself, docs/s1-format.md),
+// so a reader decodes each `curve.s1` as v1 or v2; the rest of the shape is unchanged.
+//
+// YOLO (migration 0013) stays OUT of the dump for now: `publicLineageSql` needs a STANDARD head
+// (`gate_ok = 1`), and only versions whose own curve is standard are exported, so neither a YOLO
+// lineage nor an older YOLO version of a standard lineage is ever in it.
 //
 // Idempotent: a re-run on the same day overwrites the same two objects. Logs carry counts only.
 import { countedUserSql, publicLineageSql } from '../../../../web/src/lib/server/social/repo.ts';
@@ -24,6 +31,8 @@ export const PUBLIC_DUMP_JOB = 'public-dump';
 export const PUBLIC_DUMP_PREFIX = 'public/dump/';
 export const PUBLIC_DUMP_LATEST_KEY = `${PUBLIC_DUMP_PREFIX}latest.json.gz`;
 export const PUBLIC_DUMP_FORMAT = 'open-auri-public-dump';
+/** 2 since standard curves may be S1 v2 (see the header). */
+export const PUBLIC_DUMP_FORMAT_VERSION = 2;
 export const AUTHOR_REMOVED = 'autor removido';
 
 /** Lineages per page (their ids are bound parameters: D1 allows 100 per statement). */
@@ -36,14 +45,16 @@ export const PUBLIC_DUMP_README = {
     'CC-BY-4.0 (uso livre com atribuição ao autor indicado em "author"; ' +
     'https://creativecommons.org/licenses/by/4.0/). O apelido do autor só aparece nas versões ' +
     'CC-BY-4.0, porque a licença exige a atribuição. Não há e-mails, identificadores de conta nem ' +
-    'atividade individual. Contagens e rankings são agregados.',
+    'atividade individual. Contagens e rankings são agregados. Cada curva ("curve.s1") é um código ' +
+    'S1 v1 ou S1 v2 (bandas até 32 kHz); o código diz a própria versão (docs/s1-format.md).',
   'en-US':
     'Public collection of open-auri curves. Each version carries its own license: CC0-1.0 ' +
     '(public domain, free use without attribution; https://creativecommons.org/publicdomain/zero/1.0/) ' +
     'or CC-BY-4.0 (free use with attribution to the author given in "author"; ' +
     'https://creativecommons.org/licenses/by/4.0/). The author nickname appears only on CC-BY-4.0 ' +
     'versions, because that license requires attribution. No e-mails, account identifiers or ' +
-    'individual activity. Counts and rankings are aggregates.',
+    'individual activity. Counts and rankings are aggregates. Each curve ("curve.s1") is an S1 v1 ' +
+    'or S1 v2 code (bands up to 32 kHz); the code states its own version (docs/s1-format.md).',
 } as const;
 
 export type DumpLicense = 'CC0-1.0' | 'CC-BY-4.0';
@@ -84,7 +95,8 @@ export interface DumpRanking {
 
 export interface PublicDump {
   format: typeof PUBLIC_DUMP_FORMAT;
-  formatVersion: 1;
+  /** 2: `curve.s1` may be S1 v1 or v2 (self-describing); 1 had S1 v1 only. */
+  formatVersion: typeof PUBLIC_DUMP_FORMAT_VERSION;
   generatedAt: string;
   readme: typeof PUBLIC_DUMP_README;
   licenses: Record<DumpLicense, string>;
@@ -262,7 +274,7 @@ export async function buildPublicDump(db: D1Database, now: Date): Promise<Public
 
   return {
     format: PUBLIC_DUMP_FORMAT,
-    formatVersion: 1,
+    formatVersion: PUBLIC_DUMP_FORMAT_VERSION,
     generatedAt: now.toISOString(),
     readme: PUBLIC_DUMP_README,
     licenses: {

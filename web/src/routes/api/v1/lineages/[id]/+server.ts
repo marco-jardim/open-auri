@@ -15,7 +15,8 @@ export const GET: RequestHandler = defineApi(
 			env.db,
 			event.params.id ?? '',
 			{ userId: user?.id ?? null },
-			{ cursor: params.get('cursor'), ...(limit === null ? {} : { limit: Number(limit) }) }
+			{ cursor: params.get('cursor'), ...(limit === null ? {} : { limit: Number(limit) }) },
+			{ yoloPublication: env.yoloPublication }
 		);
 		return readResponse(event.request, result, user === null);
 	}

@@ -1,7 +1,10 @@
 // Personal library (T4.3): the three shelves of the signed-in user (created, favorites,
 // installed), idempotent favorite/unfavorite with optional share attribution, and the merge of the
 // anonymous browser library into the account. Data access goes through repo.ts and
-// queries/library.ts; curves are validated and gated only through gate.ts (`checkCurve`).
+// queries/library.ts; curves are validated and classified only through gate.ts
+// (`checkPublishable`). Merged lineages are private, so a YOLO curve merges without an
+// acknowledgement; a classification that ran the YOLO profile counts twice toward
+// MERGE_GATE_RUNS_MAX.
 import type { D1Database } from '@cloudflare/workers-types';
 import {
 	canonKey,
@@ -15,7 +18,7 @@ import {
 import { gateForWrite } from 'open-auri/safety';
 import { ApiError } from '#lib/server/api/errors.ts';
 import { rateLimitKey, slidingWindowLimit } from '#lib/server/security/ratelimit.ts';
-import { checkCurve, type GateDeps } from '#lib/server/social/gate.ts';
+import { checkPublishable, type GateDeps } from '#lib/server/social/gate.ts';
 import { hasPublicActivity } from '#lib/server/social/queries/activity.ts';
 import {
 	countOwnLineagesSince,
@@ -52,7 +55,8 @@ import {
 	type ModerationState,
 	type Page,
 	type SocialErrorCode,
-	type VersionLabels
+	type VersionLabels,
+	type YoloPublication
 } from '#lib/server/social/types.ts';
 
 // ---- Shelves --------------------------------------------------------------------------------
@@ -93,7 +97,18 @@ export interface LibraryItem {
 		labels: VersionLabels | null;
 		createdAt: number;
 	};
-	curve: { id: string; s1: string; levelDb: number | null; gateOk: boolean };
+	/**
+	 * `gateOk` = standard (unchanged meaning). `yolo` and `waived` (the codes the YOLO profile
+	 * waived) are always sent; optional in the type only for client fixtures written before 0013.
+	 */
+	curve: {
+		id: string;
+		s1: string;
+		levelDb: number | null;
+		gateOk: boolean;
+		yolo?: boolean;
+		waived?: string[];
+	};
 	/** Shelf time: creation (created), favorited (favorites) or last install (installed). */
 	at: number;
 }
@@ -122,7 +137,14 @@ export function toLibraryItem(lineage: LineageSummary, at: number, userId: strin
 			labels: head.labels,
 			createdAt: head.createdAt
 		},
-		curve: { id: curve.id, s1: curve.s1, levelDb: curve.levelDb, gateOk: curve.gateOk },
+		curve: {
+			id: curve.id,
+			s1: curve.s1,
+			levelDb: curve.levelDb,
+			gateOk: curve.gateOk,
+			yolo: curve.gateYolo,
+			waived: curve.gateYolo ? [...curve.gateReasons] : []
+		},
 		at
 	};
 }
@@ -136,13 +158,15 @@ function entries(page: Page<LibraryEntry>, userId: string): Page<LibraryItem> {
 
 /**
  * One page of a shelf of `userId` (from the session): own lineages in every visibility and state
- * (optionally filtered by visibility), favorites and installed curves still readable by the user.
- * Throws SocialRepoError('invalid-cursor') for a cursor that does not decode.
+ * (optionally filtered by visibility), favorites and installed curves still readable by the user
+ * (under the kill switch `yolo`, default 'off': someone else's YOLO lineage is then left out of
+ * both shelves). Throws SocialRepoError('invalid-cursor') for a cursor that does not decode.
  */
 export async function listLibrary(
 	db: D1Database,
 	userId: string,
-	query: LibraryQuery
+	query: LibraryQuery,
+	yolo: YoloPublication = 'off'
 ): Promise<Page<LibraryItem>> {
 	const page = { cursor: query.cursor ?? null, ...(query.limit ? { limit: query.limit } : {}) };
 	switch (query.shelf) {
@@ -157,9 +181,9 @@ export async function listLibrary(
 			};
 		}
 		case 'favorites':
-			return entries(await listFavorites(db, userId, page), userId);
+			return entries(await listFavorites(db, userId, page, yolo), userId);
 		case 'installed':
-			return entries(await listInstalled(db, userId, page), userId);
+			return entries(await listInstalled(db, userId, page, yolo), userId);
 	}
 }
 
@@ -177,19 +201,22 @@ function utcDay(now: number): string {
  * else's private lineage, retracted, moderated...). With `shareId`, a newly created favorite is
  * attributed to that share as a `favorited` funnel event when the share points to the same lineage
  * and the user's `activity_visibility` is 'public' (once per user and share; a share of another
- * lineage, a missing share, the share owner or a private actor is ignored: FX4.6).
+ * lineage, a missing share, the share owner or a private actor is ignored: FX4.6). Readable under
+ * the kill switch `options.yoloPublication` (default 'off': someone else's YOLO lineage is then
+ * 'not-found').
  */
 export async function favoriteLineage(
 	db: D1Database,
 	userId: string,
 	lineageId: string,
-	options: { shareId?: string | null; now?: number } = {}
+	options: { shareId?: string | null; now?: number; yoloPublication?: YoloPublication } = {}
 ): Promise<FavoriteResult> {
 	const now = options.now ?? Date.now();
+	const yolo = options.yoloPublication ?? 'off';
 	if (!isSocialId(lineageId)) return { ok: false, code: 'not-found' };
-	const readable = await getLineageForViewer(db, lineageId, { userId });
+	const readable = await getLineageForViewer(db, lineageId, { userId }, yolo);
 	if (!readable) return { ok: false, code: 'not-found' };
-	const added = await addFavorite(db, userId, lineageId, now);
+	const added = await addFavorite(db, userId, lineageId, now, yolo);
 	if (!added.ok) return { ok: false, code: 'not-found' };
 	let attributed = false;
 	const shareId = options.shareId ?? null;
@@ -236,7 +263,9 @@ export const MERGE_BATCH_MAX = 100;
 export const MERGE_DAILY_MAX = 500;
 /**
  * Uncached gate runs per merge request (~150 ms of CPU each): items past it are reported as
- * QUOTA_EXCEEDED and the client retries them in a later request (their verdicts get cached).
+ * QUOTA_EXCEEDED and the client retries them in a later request (their verdicts get cached). A
+ * classification that ran the YOLO profile counts 2 (its second run is counted after it ends, so
+ * a request may end one run above the cap).
  */
 export const MERGE_GATE_RUNS_MAX = 20;
 /**
@@ -271,7 +300,11 @@ export type MergeRejectCode =
 export type MergeConflictField = 'name' | 'labels';
 
 export interface MergeReport {
-	created: { localId: string; lineageId: string }[];
+	/**
+	 * New private lineages; `yolo` = the curve is YOLO (always sent; optional in the type only for
+	 * client fixtures written before 0013).
+	 */
+	created: { localId: string; lineageId: string; yolo?: boolean }[];
 	duplicates: { localId: string; lineageId: string }[];
 	rejected: { localId: string; code: MergeRejectCode; reasons?: string[] }[];
 	/** One entry per differing field ('name' first, then 'labels'); an item may have both. */
@@ -526,10 +559,14 @@ export async function mergeLocalLibrary(
 	let gateOpen = true;
 	let gateRuns = 0;
 	const baseGate = options.deps?.gate ?? gateForWrite;
-	const countedGate: typeof gateForWrite = (bands, preampDb) => {
+	// Counts every run of each uncached classification, standard and YOLO profile alike (the
+	// classification reuses its standard verdict, so a YOLO curve is exactly 2 runs), and forwards
+	// its options (the `experimental` flag and the profile). A run past the budget throws before
+	// it starts, so the request never exceeds MERGE_GATE_RUNS_MAX.
+	const countedGate: typeof gateForWrite = (bands, preampDb, gateOptions) => {
 		if (gateRuns >= MERGE_GATE_RUNS_MAX) throw new GateBudgetSpent();
 		gateRuns++;
-		return baseGate(bands, preampDb);
+		return baseGate(bands, preampDb, gateOptions);
 	};
 
 	const existing = (item: MergeItem, outcome: Outcome): void => {
@@ -563,7 +600,7 @@ export async function mergeLocalLibrary(
 	for (const [index, item] of items.entries()) {
 		const identity = identities[index] ?? null;
 		if (identity === null) {
-			const check = await checkCurve(db, item.s1, now, options.deps);
+			const check = await checkPublishable(db, item.s1, now, options.deps);
 			const reasons = check.ok ? [] : check.code === 'invalid-curve' ? check.codes : check.reasons;
 			report.rejected.push({ localId: item.localId, code: 'INVALID_CURVE', reasons });
 			continue;
@@ -596,9 +633,9 @@ export async function mergeLocalLibrary(
 			continue;
 		}
 
-		let check: Awaited<ReturnType<typeof checkCurve>>;
+		let check: Awaited<ReturnType<typeof checkPublishable>>;
 		try {
-			check = await checkCurve(db, item.s1, now, { ...options.deps, gate: countedGate });
+			check = await checkPublishable(db, item.s1, now, { ...options.deps, gate: countedGate });
 		} catch (error) {
 			if (!(error instanceof GateBudgetSpent)) throw error;
 			gateOpen = false;
@@ -642,7 +679,11 @@ export async function mergeLocalLibrary(
 				s1: item.s1
 			};
 			remember(identity, outcome);
-			report.created.push({ localId: item.localId, lineageId: ids.lineageId });
+			report.created.push({
+				localId: item.localId,
+				lineageId: ids.lineageId,
+				yolo: check.class === 'yolo'
+			});
 			continue;
 		}
 		if (published.code === 'duplicate') {

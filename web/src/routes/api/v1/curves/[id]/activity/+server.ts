@@ -28,7 +28,8 @@ export const POST = defineApi<CurveActivityEvent>(
 	async ({ event, env, user }) => {
 		const body = await readJson(event.request, ActivityEventBody, { maxBytes: 2048 });
 		const outcome = await recordActivityEvent(env.db, user.id, event.params.id ?? '', body, {
-			claimSecret: env.secrets.betterAuthSecret
+			claimSecret: env.secrets.betterAuthSecret,
+			yoloPublication: env.yoloPublication
 		});
 		switch (outcome.status) {
 			case 'recorded':

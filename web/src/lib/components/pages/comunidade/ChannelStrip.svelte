@@ -10,6 +10,7 @@
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import ChannelMeter from './ChannelMeter.svelte';
 	import CurveAvatar from './CurveAvatar.svelte';
 	import { knobAngle, knobSummary, licenseShort, profileHref, type Channel } from './model.ts';
@@ -135,6 +136,10 @@
 				>{licenseShort(channel.license)}</span
 			>
 		</div>
+		{#if channel.yolo}
+			<!-- Every YOLO card carries the mark (compact: no interactive content). -->
+			<YoloCurveNotice variant="public" compact class="strip-yolo" />
+		{/if}
 	</div>
 </li>
 

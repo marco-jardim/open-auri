@@ -122,6 +122,28 @@ test('the preset selector remains natively disabled and describes the active wri
 	expect(load).not.toHaveBeenCalled();
 });
 
+test('a curve with a filter above 20 kHz says the write needs the experimental lever', async () => {
+	await setLocale('pt-BR', { reload: false });
+	app = createClientApp(fakeAppOptions().options);
+	const screen = await render(CaboPage, { app, tourAutoOpen: false });
+	const note = () => screen.container.querySelector('[data-testid="cabo-ultra"]');
+	expect(note()).toBeNull();
+	app.state.curve.set({
+		name: 'Ultra cut',
+		source: 'custom',
+		bands: [{ kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 }, ...NEUTRO.bands.slice(1)],
+		preampDb: -1
+	});
+	await expect.element(page.getByText(m.cable_experimental_ultra())).toBeVisible();
+	app.state.curve.set({
+		name: 'Audible cut',
+		source: 'custom',
+		bands: [{ kind: 'PK', freqHz: 20000, gainDb: -3, qFactor: 1 }, ...NEUTRO.bands.slice(1)],
+		preampDb: -1
+	});
+	await expect.poll(note).toBeNull();
+});
+
 for (const status of ['ok', 'simulated', 'interrupted'] as const) {
 	test(`transport replays ${status} acceptance, not an unconditional commit`, async () => {
 		const screen = await render(TransportTape, { curve: NEUTRO, outcome: outcome(status) });

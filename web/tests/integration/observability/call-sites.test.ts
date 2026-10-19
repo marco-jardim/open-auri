@@ -96,7 +96,7 @@ describe('curves publication path: gate_rejected', () => {
 			expect(point.blobs[2]).toBe('publish');
 			expect(point.blobs[1]).not.toBe('other');
 		}
-		expect(points.map((point) => point.blobs[1])).toContain('k:kind-not-allowed');
+		expect(points.map((point) => point.blobs[1])).toContain('e:output-audible');
 
 		const before = points.length;
 		await publishCurve(

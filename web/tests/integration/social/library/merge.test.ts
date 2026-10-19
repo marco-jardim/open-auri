@@ -147,7 +147,7 @@ describe('POST /api/v1/me/library/merge', () => {
 			['url', 'INVALID_TEXT'],
 			['blank', 'INVALID_TEXT']
 		]);
-		expect(result.rejected[0]?.reasons).toContain('k:kind-not-allowed');
+		expect(result.rejected[0]?.reasons).toContain('e:output-audible');
 		expect(result.rejected[2]?.reasons?.length).toBeGreaterThan(0);
 		expect(await ownLineages(me.user.id)).toBe(0);
 	});

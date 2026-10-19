@@ -67,17 +67,32 @@ export function gateForWrite(bands: readonly Band[], preampDb: number, options?:
  * which `gateForWrite` accepts the curve, or `null` when none does (including
  * curves failing checks a preamp cannot fix: kinds, D7, codec, a, b, c).
  *
+ * In the YOLO profile (`options.profile`, read like {@link gateProfile}) the
+ * range is [{@link CODEC_PREAMP_FLOOR_DB}, {@link YOLO_PREAMP_MAX_DB}] instead
+ * (`g:preamp` is waived), `d:prefix-peak-full`, `d:prefix-peak-extended` and
+ * `e:output-extended` are fixable too, and only class-1 reasons count (class 2
+ * is waived).
+ *
+ * `storable: true` (an own data property holding exactly `true`, read like
+ * `profile`: a getter is never called) asks for a preamp a stored curve may
+ * keep: in YOLO the lower bound is then {@link YOLO_STORAGE_PREAMP_FLOOR_DB}
+ * (−25.5 dB, S1's floor), so the range is [−25.5, 0] dB and a curve that needs
+ * more attenuation gets `null`. Use it for every curve that is saved, shared or
+ * published. It changes nothing in the standard profile, whose floor is already
+ * −25.5 dB.
+ *
  * A candidate is derived analytically from the metrics at the top preamp,
  * rounded down to the grid, then verified with the gate and stepped down by
  * 0.1 dB while refused (the verdict is monotone in the preamp). The bands are
  * read once: every later verification runs on the first verdict's snapshot.
  * @param {readonly Band[]} bands
- * @param {{experimental?: boolean}} [options]
+ * @param {{experimental?: boolean, profile?: GateProfile, storable?: boolean}} [options]
  * @returns {number | null}
  */
 export function autoPreamp(bands: readonly Band[], options?: {
     experimental?: boolean;
     profile?: GateProfile;
+    storable?: boolean;
 }): number | null;
 /**
  * Whether the YOLO profile waives `code` (class 2).
@@ -107,6 +122,14 @@ export const HARD_REASONS: readonly ReasonCode[];
  */
 export const CODEC_PREAMP_FLOOR_DB: number;
 /**
+ * Lowest preamp of a curve that is stored, published or classified, in every
+ * profile, YOLO included: −25.5 dB (`THRESHOLDS.preampMinDb`), the floor S1 and
+ * S5 encode and the editor keeps in YOLO. The YOLO gate itself waives
+ * `g:preamp` down to {@link CODEC_PREAMP_FLOOR_DB}; `autoPreamp` stops here
+ * with `storable: true`, and `classifyCurve` refuses a curve below it.
+ */
+export const YOLO_STORAGE_PREAMP_FLOOR_DB: number;
+/**
  * Highest preamp the YOLO profile searches from: 0 dB, the codec ceiling (a
  * positive preamp does not encode) and the editor's YOLO maximum. `g:preamp`
  * is waived there, so only the hard limits (class 1) bound the preamp.
@@ -118,8 +141,9 @@ export const YOLO_PREAMP_MAX_DB: 0;
  * @typedef {import('./thresholds.mjs').Thresholds} Thresholds
  * @typedef {'drag' | 'full'} Grid
  * @typedef {'a:b0' | 'a:b2' | 'a:-a1' | 'a:b1' | 'a:-a2' | 'b:pole-radius' | 'c:section-peak'
- *   | 'd:prefix-peak' | 'e:output-audible' | 'e:output-full' | 'f:codec' | 'g:preamp'
- *   | 'k:kind-not-allowed' | 'd7:pk-boost-above-16k' | 'd7:boost-q'} ReasonCode
+ *   | 'd:prefix-peak' | 'd:prefix-peak-full' | 'd:prefix-peak-extended' | 'e:output-audible'
+ *   | 'e:output-extended' | 'e:output-full' | 'f:codec' | 'g:preamp' | 'k:kind-not-allowed'
+ *   | 'd7:pk-boost-above-16k' | 'd7:boost-q' | 'd7:boost-above-20k'} ReasonCode
  * @typedef {{code: ReasonCode, stage?: number, value?: unknown, limit?: number}} Reason
  * @typedef {{db: number, frequencyHz: number}} Peak
  * @typedef {{stage: number, db: number, frequencyHz: number | null}} PrefixPeak
@@ -144,6 +168,11 @@ export const YOLO_PREAMP_MAX_DB: 0;
  *   internalAudible?: PrefixPeak,
  *   outputAudible?: PrefixPeak,
  *   outputFull?: Peak,
+ *   prefixFull?: PrefixPeak[],
+ *   internalFull?: PrefixPeak,
+ *   prefixExtended?: PrefixPeak[],
+ *   internalExtended?: PrefixPeak,
+ *   outputExtended?: PrefixPeak,
  * }} GateMetrics
  * @typedef {{ok: boolean, reasons: Reason[], metrics: GateMetrics}} GateResult
  * @typedef {{experimental?: boolean, grid?: Grid}} GateOptions
@@ -179,7 +208,7 @@ export type Band = import("../dsp/eq0xcb.mjs").Band;
 export type Section = import("../dsp/eq0xcb.mjs").Section;
 export type Thresholds = import("./thresholds.mjs").Thresholds;
 export type Grid = "drag" | "full";
-export type ReasonCode = "a:b0" | "a:b2" | "a:-a1" | "a:b1" | "a:-a2" | "b:pole-radius" | "c:section-peak" | "d:prefix-peak" | "d:prefix-peak-full" | "e:output-audible" | "e:output-full" | "f:codec" | "g:preamp" | "k:kind-not-allowed" | "d7:pk-boost-above-16k" | "d7:boost-q";
+export type ReasonCode = "a:b0" | "a:b2" | "a:-a1" | "a:b1" | "a:-a2" | "b:pole-radius" | "c:section-peak" | "d:prefix-peak" | "d:prefix-peak-full" | "d:prefix-peak-extended" | "e:output-audible" | "e:output-extended" | "e:output-full" | "f:codec" | "g:preamp" | "k:kind-not-allowed" | "d7:pk-boost-above-16k" | "d7:boost-q" | "d7:boost-above-20k";
 export type Reason = {
     code: ReasonCode;
     stage?: number;
@@ -218,6 +247,9 @@ export type GateMetrics = {
     outputFull?: Peak;
     prefixFull?: PrefixPeak[];
     internalFull?: PrefixPeak;
+    prefixExtended?: PrefixPeak[];
+    internalExtended?: PrefixPeak;
+    outputExtended?: PrefixPeak;
 };
 export type GateProfile = "standard" | "yolo";
 export type GateResult = {

@@ -13,9 +13,22 @@
  *   still decides every commit and write.
  * - Safe boxes come from SOFT_RANGES (conservative single-section boxes) and the hard limits from
  *   ABS_RANGES and the D7 rules of core policy.
+ * - Frequency limits follow the layer (core `freqMaxFor`, `freqMax` here): Ouvir and Ajustar stop
+ *   at 20 kHz; Engenharia goes to 32 kHz for sections that never amplify (a PK with gain <= 0, an
+ *   LS/HS with gain <= 0 and Q <= 0.71, an LP/HP with Q <= 0.71); Modo YOLO (Engenharia only) to
+ *   32 kHz for every kind. Readouts still read 20 Hz to 20 kHz only; 32 to 48 kHz is never
+ *   editable.
  */
 import { curveResponseDb, logGrid } from 'open-auri/dsp';
-import { ABS_RANGES, SOFT_RANGES, THRESHOLDS } from 'open-auri/safety';
+import {
+	ABS_RANGES,
+	AUDIBLE_MAX_HZ,
+	freqMaxFor,
+	SOFT_RANGES,
+	THRESHOLDS,
+	ULTRA_MAX_HZ
+} from 'open-auri/safety';
+import type { Layer } from './layers.ts';
 import { hasGain, type Band, type Curve } from './model.ts';
 
 export const VIEW_WIDTH = 820;
@@ -24,8 +37,11 @@ export const PLOT = { left: 66, right: 790, top: 26, bottom: 346 } as const;
 export const DB_MIN = -15;
 export const DB_MAX = 15;
 export const F_MIN = 20;
-/** Top of the audible band: the editable range, the zones and every readout end here. */
-export const F_MAX = 20000;
+/**
+ * Top of the audible band: every readout ends here, and so does the editable range of Ouvir and
+ * Ajustar (Engenharia edits up to 32 kHz, see `editableMaxHz` and `freqMax`).
+ */
+export const F_MAX = AUDIBLE_MAX_HZ;
 /** Nyquist of core's 96 kHz evaluator (`SAMPLE_RATE / 2`): the plot's right edge. */
 export const NYQUIST_HZ = 48000;
 /** Output limit drawn on the scope (the gate's audible output threshold). */
@@ -366,16 +382,44 @@ export function softBox(band: Band): Box | null {
 	};
 }
 
-export type HardZoneKind = 'gain-cap' | 'pk-high-boost';
+export type HardZoneKind = 'gain-cap' | 'pk-high-boost' | 'ultra-boost';
 export interface HardZone extends Box {
 	kind: HardZoneKind;
 }
 
-/** Where the handle of this section can never go (ABS_RANGES gain cap, D7 PK boost above 16 kHz). */
-export function hardZones(band: Band): HardZone[] {
+/**
+ * Editor context of the frequency limits: the layer and Modo YOLO (which exists only in
+ * Engenharia; `freqMaxFor` counts `yolo` there only). Without a layer the limits are Ouvir's.
+ */
+export interface FreqContext {
+	readonly layer?: Layer;
+	readonly yolo?: boolean;
+}
+
+/** Highest frequency `band` may take in `context` (core `freqMaxFor`; 20 or 32 kHz). */
+export function freqMax(band: Band, context: FreqContext = {}): number {
+	return freqMaxFor(band, { layer: context.layer ?? '', yolo: context.yolo === true });
+}
+
+/**
+ * Top of the editable band of a layer, whatever the section: 32 kHz in Engenharia (where sections
+ * that never amplify, and every section in Modo YOLO, may go above 20 kHz), else 20 kHz. Above it,
+ * up to Nyquist, nothing is editable.
+ */
+export function editableMaxHz(context: FreqContext = {}): number {
+	return context.layer === 'engenharia' ? ULTRA_MAX_HZ : AUDIBLE_MAX_HZ;
+}
+
+/**
+ * Where the handle of this section can never go: the ABS_RANGES gain cap (up to the layer's top,
+ * `editableMaxHz`), D7's PK boost above 16 kHz and, in Engenharia without Modo YOLO, any boost
+ * between 20 and 32 kHz (`ultra-boost`, core `d7:boost-above-20k`).
+ */
+export function hardZones(band: Band, context: FreqContext = {}): HardZone[] {
 	if (band.kind === 'OFF' || !hasGain(band)) return [];
+	const maxHz = editableMaxHz(context);
 	const zones: HardZone[] = [
-		{ kind: 'gain-cap', fMin: F_MIN, fMax: F_MAX, gMin: ABS_RANGES.gainDb.max, gMax: DB_MAX }
+		{ kind: 'gain-cap', fMin: F_MIN, fMax: maxHz, gMin: ABS_RANGES.gainDb.max, gMax: DB_MAX }
 	];
 	if (band.kind === 'PK') {
 		zones.push({
@@ -386,30 +430,52 @@ export function hardZones(band: Band): HardZone[] {
 			gMax: ABS_RANGES.gainDb.max
 		});
 	}
+	if (maxHz > AUDIBLE_MAX_HZ && context.yolo !== true) {
+		zones.push({
+			kind: 'ultra-boost',
+			fMin: AUDIBLE_MAX_HZ,
+			fMax: maxHz,
+			gMin: 0,
+			gMax: ABS_RANGES.gainDb.max
+		});
+	}
 	return zones;
 }
 
 /** The handle's gain on the plot (LP/HP sit at 0 dB). */
 export const handleGain = (band: Band): number => (hasGain(band) ? band.gainDb : 0);
 
-/** Pointer position (viewBox units) to a target inside the absolute control ranges. */
+/**
+ * Pointer position (viewBox units) to a target inside the control ranges of `context`: gain in
+ * ABS_RANGES, frequency up to `freqMax` of the band as it would be at the pointer's gain (so in
+ * Engenharia a boost stops at 20 kHz, a cut goes on to 32 kHz; Modo YOLO lets both go to 32 kHz).
+ */
 export function pointerTarget(
 	vx: number,
 	vy: number,
-	band: Band
+	band: Band,
+	context: FreqContext = {}
 ): { freqHz: number; gainDb?: number } {
-	const freqHz = Math.round(clamp(freqOf(vx), ABS_RANGES.freqHz.min, ABS_RANGES.freqHz.max));
-	if (!hasGain(band)) return { freqHz };
-	const gainDb =
+	const fMax = (target: Band) => freqMax(target, context);
+	if (!hasGain(band)) {
+		return { freqHz: Math.round(clamp(freqOf(vx), ABS_RANGES.freqHz.min, fMax(band))) };
+	}
+	const rounded =
 		Math.round(clamp(dbOf(vy), ABS_RANGES.gainDb.min, ABS_RANGES.gainDb.max) * 10) / 10;
-	return { freqHz, gainDb: Object.is(gainDb, -0) ? 0 : gainDb };
+	const gainDb = Object.is(rounded, -0) ? 0 : rounded;
+	const freqHz = Math.round(clamp(freqOf(vx), ABS_RANGES.freqHz.min, fMax({ ...band, gainDb })));
+	return { freqHz, gainDb };
 }
 
-/** Keyboard steps of the mock: ←/→ 1/24 octave, ↑/↓ 1 dB, PgUp/PgDn Q 0.1; Shift ×10, Alt ×0.1. */
+/**
+ * Keyboard steps of the mock: ←/→ 1/24 octave, ↑/↓ 1 dB, PgUp/PgDn Q 0.1; Shift ×10, Alt ×0.1.
+ * Frequencies stay inside `freqMax` of the band in `context` (20 kHz outside Engenharia).
+ */
 export function keyTarget(
 	key: string,
 	band: Band,
-	modifiers: { shiftKey: boolean; altKey: boolean }
+	modifiers: { shiftKey: boolean; altKey: boolean },
+	context: FreqContext = {}
 ): { freqHz?: number; gainDb?: number; qFactor?: number } | null {
 	if (band.kind === 'OFF') return null;
 	const scale = modifiers.shiftKey ? 10 : modifiers.altKey ? 0.1 : 1;
@@ -419,7 +485,9 @@ export function keyTarget(
 			const dir = key === 'ArrowRight' ? 1 : -1;
 			let freqHz = Math.round(band.freqHz * 2 ** ((dir * scale) / 24));
 			if (freqHz === band.freqHz) freqHz += dir;
-			return { freqHz: clamp(freqHz, ABS_RANGES.freqHz.min, ABS_RANGES.freqHz.max) };
+			// A band already above this context's top (shown, not editable) is not pulled down here.
+			const top = Math.max(freqMax(band, context), Math.min(band.freqHz, ULTRA_MAX_HZ));
+			return { freqHz: clamp(freqHz, ABS_RANGES.freqHz.min, top) };
 		}
 		case 'ArrowUp':
 		case 'ArrowDown': {

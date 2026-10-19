@@ -265,8 +265,24 @@ export const socialSection: ExportSection = {
 					)
 				)
 			]);
+		// The owner's YOLO acknowledgements (migration 0013): which curve of which own lineage was
+		// acknowledged as shown to others, and when. Rows go with the lineage (ON DELETE CASCADE).
+		const yoloAcks = await all<{ lineage_id: string; curve_id: string; acked_at: number }>(
+			sql(
+				db,
+				'SELECT k.lineage_id, k.curve_id, k.acked_at FROM lineage_yolo_acks k ' +
+					'JOIN lineages l ON l.id = k.lineage_id WHERE l.owner_user_id = ? ' +
+					'ORDER BY k.acked_at, k.lineage_id, k.curve_id',
+				userId
+			)
+		);
 		return {
 			lineages,
+			yoloAcks: yoloAcks.map((row) => ({
+				lineageId: row.lineage_id,
+				curveId: row.curve_id,
+				ackedAt: iso(row.acked_at)
+			})),
 			favorites: favorites.map((row) => ({
 				lineageId: row.lineage_id,
 				createdAt: iso(row.created_at)

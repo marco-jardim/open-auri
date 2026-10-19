@@ -22,7 +22,7 @@ receita (S5), agregação anônima (S6) e troca às cegas (S7).
 
 | ID | Ideia | Decisão |
 |---|---|---|
-| **S1** | Formato compacto canônico | ✅ **adotado**: S1 v1, ver [`s1-format.md`](s1-format.md) |
+| **S1** | Formato compacto canônico | ✅ **adotado**: S1 v1 (e v2 para bandas acima de 20 kHz), ver [`s1-format.md`](s1-format.md) |
 | **S2** | Assinatura criptográfica | ❌ **descartada**: proveniência por link basta |
 | **S3** | Curvas versionadas | ✅ **ativo**: linhagens com versões só por acréscimo, forks e lápide |
 | **S4** | Distância entre curvas | ✅ **adotado**: barato, `magnitudeDb()` já existe |
@@ -146,6 +146,11 @@ O desenho inicial (48 B, 64 caracteres, CRC-8) foi substituído. O formato
 congelado é o **S1 v1**, definido em [`s1-format.md`](s1-format.md): 51 B
 (68 caracteres base64url), grade da UI sem perda (ganho de −25,6 a +12,7 dB, Q
 até 20,47) e CRC-16/CCITT-FALSE.
+
+A **S1 v2** ([`s1-format.md`](s1-format.md#s1-v2)) tem o mesmo layout e o mesmo
+tamanho, com a frequência indo até 32 000 Hz. Os escritores só a emitem quando
+alguma banda passa de 20 000 Hz; toda curva que cabe na v1 mantém o código, o
+`curveId` e o `canonKey` v1.
 
 O range observado é **estreito**: é aí que está o ganho, não em algoritmo.
 
@@ -280,9 +285,11 @@ até `gainDb: 0` é recusado como `env:extra`.
 ### Rótulos de filtro (`open-auri/preset@2`)
 
 O formato `open-auri/preset@2` é o `@1` com um campo opcional a mais,
-`labels: (string | null)[]`, e só é emitido quando a curva tem ao menos um
-rótulo; sem rótulos, todo escritor continua emitindo `@1`, byte a byte igual ao
-de antes. Em `@1`, `labels` segue recusado como `env:extra`. O esquema normativo é
+`labels: (string | null)[]`, e com bandas até 32 000 Hz em S1 v2 (ver
+[abaixo](#bandas-acima-de-20-khz-s1-v2-em-open-auripreset2)). Ele só é emitido
+quando a curva tem ao menos um rótulo ou uma banda acima de 20 000 Hz; senão,
+todo escritor continua emitindo `@1`, byte a byte igual ao de antes. Em `@1`,
+`labels` segue recusado como `env:extra`. O esquema normativo é
 [`preset-envelope-2.schema.json`](../schemas/preset-envelope-2.schema.json).
 
 - **Por índice de fio:** exatamente 10 entradas; `labels[i]` nomeia `bands[i]`.
@@ -306,6 +313,27 @@ Na nuvem, cada versão guarda os rótulos em `versions.labels` (JSON, migração
 `0012_version_labels.sql`). Uma mudança só de rótulos acrescenta uma versão
 nova (conta na cota) e reaproveita o gate da curva, que não muda.
 
+### Bandas acima de 20 kHz (S1 v2 em `open-auri/preset@2`)
+
+O `@2` também carrega as curvas [S1 v2](s1-format.md#s1-v2): não existe `@3`.
+
+| Formato | `freqHz` das bandas | Código `code` | `labels` |
+|---|---|---|---|
+| `open-auri/preset@1` | 1 a **20 000** | só S1 v1 | recusado (`env:extra`) |
+| `open-auri/preset@2` | 1 a **32 000** | S1 v1 ou v2 | opcional |
+
+- **Coerência com o S1:** o `code` é v2 se e somente se alguma banda que não é
+  `OFF` passa de 20 000 Hz, e v1 senão; um `code` que não descreve exatamente as
+  bandas e o pré-amp dá `env:code-mismatch`, e um v2 sem banda acima de 20 kHz
+  dá `env:s1` (`s1:noncanonical`).
+- **`@1` continua igual:** banda acima de 20 000 Hz dá `env:range`, e um código
+  v2 dá `env:s1` ("S1 v2 requires open-auri/preset@2"). O esquema
+  [`preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json) não
+  muda.
+- **O menor formato que cabe:** os escritores emitem `@1` quando não há rótulo
+  nem banda acima de 20 kHz, e `@2` nos outros casos. `envelopeFormat({ bands,
+  labels })`, exportado por `open-auri/share`, faz essa escolha.
+
 Esboço conceitual da receita (o esquema normativo é
 [`preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json)):
 
@@ -327,6 +355,58 @@ Esboço conceitual da receita (o esquema normativo é
   }
 }
 ```
+
+### Classes de curva e publicação YOLO (migração 0013)
+
+O servidor classifica cada curva publicada, versionada, bifurcada ou mesclada (`classifyCurve` do
+núcleo, em `web/src/lib/server/social/gate.ts`); a classe nunca vem do cliente:
+
+- **padrão**: o gate padrão aceita. `experimental` é derivado da própria curva (tem HS, LP ou HP),
+  como no editor, então HS/LP/HP dentro dos limites são curvas padrão também no servidor;
+- **YOLO**: o gate padrão recusa só por motivos dispensáveis e o perfil YOLO aceita; o cache guarda
+  os códigos dispensados (`waived`);
+- **reprovada**: nem um nem outro; nada é gravado (422 `GATE_REJECTED` com `details.hard`).
+
+Uma curva YOLO sempre pode ser salva como **privada**. Para mostrá-la a terceiros (não listada ou
+pública), a escrita precisa do interruptor `YOLO_PUBLICATION` = `on` (variável do Worker em
+`web/wrangler.template.jsonc`, **padrão `off`**: 403 `YOLO_PUBLICATION_OFF`), de uma conta com 72 h
+ou mais e do reconhecimento explícito `acknowledge: "yolo"` (409 `YOLO_ACK_REQUIRED` com os códigos
+dispensados), no máximo 5 por 24 h. A vaga é reservada de forma atômica antes da escrita (pedidos
+simultâneos nunca passam de 5) e devolvida se a escrita falha, então só reconhecimentos gravados
+contam. O reconhecimento fica em `lineage_yolo_acks` (linhagem, curva): sem ele, um head YOLO não
+abre nem por link.
+
+As regras dependem da classe do head e da visibilidade, que podem mudar entre a leitura e a escrita
+(uma versão YOLO nova e uma troca de visibilidade ao mesmo tempo). Cada escrita só vale no estado
+que a decisão leu: uma versão YOLO só entra se a visibilidade não mudou, e abrir a linhagem
+(visibilidade, restauração) só vale se o head classificado ainda é o head. Se o estado mudou, nada
+é gravado e o servidor reaplica as regras ao estado novo (até 3 vezes, depois 409 `HEAD_MOVED`):
+uma linhagem nunca fica visível a terceiros com um head YOLO que o dono não reconheceu.
+
+O interruptor vale também para as **leituras**: com `YOLO_PUBLICATION` desligado, nenhum head YOLO
+é servido a quem não é o dono, reconhecido ou não. Ele não abre por link (API, `/c/:id`), não vira
+imagem OG, não aparece em `feed?yolo=only` (página vazia), não serve de origem de fork e não pode
+ser favoritado, compartilhado ou denunciado por terceiros. O dono continua vendo a própria linhagem.
+Religado, os heads reconhecidos voltam a abrir. Restaurar uma linhagem YOLO não privada com o
+interruptor desligado a deixa **privada**. Packs nunca mostram linhagens YOLO de terceiros, com o
+interruptor ligado ou não.
+
+Separação: feed, rankings, perfis, packs de terceiros, S6, S7 e o dump público só mostram heads
+**padrão**. Curvas YOLO públicas só aparecem em `GET /api/v1/feed?yolo=only` (ordem `new`). O dump
+público semanal deixa YOLO de fora por enquanto (head e versões precisam de `gate_ok = 1`). O dump
+tem `formatVersion` **2**: desde o GATE_IMPL 2 uma curva **padrão** pode ser S1 v2 (corte que não
+amplifica acima de 20 kHz, bandas até 32 kHz), então cada `curve.s1` pode ser S1 v1 ou S1 v2. O
+código S1 diz a própria versão ([`s1-format.md`](s1-format.md)); o resto do formato não mudou. A
+imagem OG de uma curva YOLO leva o selo "YOLO" (layout de cartão `3`), a URL da imagem leva `?y=1`
+e a página `/c/:id` sai com `noindex`. Uma URL de imagem cujo `?y=` não corresponde à classe atual
+da versão recebe 302 para a URL certa (`no-store`; só `y` muda, os outros parâmetros ficam), para
+que nenhum cache guarde o cartão da outra classe. O job `og-sweep` lê o mesmo interruptor (variável
+`YOLO_PUBLICATION` também em `workers/jobs/wrangler.template.jsonc`, com o mesmo valor do Worker
+web): ligado, mantém as imagens das versões YOLO reconhecidas; desligado, as apaga. Moderação: uma
+linhagem com head YOLO é ocultada automaticamente com 2 denunciantes elegíveis (3 nas demais),
+contando o head que ela tem no momento da ocultação (a condição está na própria escrita, e a
+auditoria registra o limite aplicado); a fila do admin mostra o selo e os códigos dispensados; e a
+curadoria recusa heads YOLO, conferidos de novo na escrita (recusada, nada é gravado nem auditado).
 
 ---
 

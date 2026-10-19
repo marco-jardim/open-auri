@@ -6,10 +6,13 @@ import { createClientApp, type ClientApp } from '#lib/app/client.svelte.ts';
 import { createAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
 import { createTour } from '#lib/comprehension/tour.svelte.ts';
 import { m } from '#lib/paraglide/messages.js';
+import { encodeS1 } from 'open-auri/share';
+import { createYoloState, YOLO_PHRASE } from '#lib/state/yolo.svelte.ts';
 import { fakeAppOptions } from '../../app/fakes.ts';
 import { fakeEnv } from '../../audio/fake-audio.ts';
 import {
 	ANONYMOUS,
+	NEUTRAL,
 	VERIFIED,
 	S1_BOOST,
 	apiError,
@@ -214,6 +217,63 @@ test('using and installing a channel update only the editor and open the write c
 		source: 'community:lin-aaaaaaaaaaaa'
 	});
 	expect(app.cableState.writing).toBe(false);
+});
+
+const S1_YOLO = encodeS1({
+	preampDb: -0.5,
+	bands: [{ kind: 'HP' as const, freqHz: 30, qFactor: 0.71 }, ...NEUTRAL.bands.slice(1)]
+});
+
+test('a YOLO channel offers "Ativar Modo YOLO" until YOLO is ready, then writes with the YOLO profile', async () => {
+	const audio = createAudioEngine(fakeEnv(null).env);
+	engines.push(audio);
+	const yolo = createYoloState();
+	const app = createClientApp({ ...fakeAppOptions().options, audio, yolo });
+	apps.push(app);
+	const { props } = setup((url) =>
+		url.pathname === '/api/v1/feed' ? json(feedPage([feedItem({ s1: S1_YOLO })])) : undefined
+	);
+	const write = vi.spyOn(app, 'requestWrite');
+	await render(Comunidade, { ...props, app });
+	await select('Rádio de madrugada').click();
+	// YOLO off: the standard checklist would refuse the curve, so the action opens Engenharia.
+	const enable = page.getByTestId('scope-yolo-enable');
+	await expect.element(enable).toHaveTextContent(m.yolopub_enable_yolo());
+	expect(enable.element().getAttribute('href')).toMatch(
+		/^\/\?camada=engenharia&l=lin-aaaaaaaaaaaa&v=[^#]+#p=/
+	);
+	await expect.element(page.getByTestId('scope-yolo-why')).toBeVisible();
+	expect(
+		page.getByRole('button', { name: m.comunidade_install(), exact: true }).elements()
+	).toEqual([]);
+	expect(write).not.toHaveBeenCalled();
+	// YOLO on in Engenharia: the button is labelled YOLO and opens the YOLO checklist.
+	expect(yolo.enable(YOLO_PHRASE, 'engenharia')).toBe(true);
+	await page.getByRole('button', { name: m.qa1y_write_yolo(), exact: true }).click();
+	expect(write).toHaveBeenCalledOnce();
+	expect(write.mock.calls[0]?.[1]).toEqual({ profile: 'yolo' });
+	expect(app.pendingProfile).toBe('yolo');
+	expect(app.pendingWrite).toMatchObject({ source: 'community:lin-aaaaaaaaaaaa', preampDb: -0.5 });
+	expect(page.getByTestId('scope-yolo-enable').elements()).toEqual([]);
+});
+
+test('a standard channel keeps the standard checklist while Modo YOLO is on', async () => {
+	const audio = createAudioEngine(fakeEnv(null).env);
+	engines.push(audio);
+	const yolo = createYoloState();
+	const app = createClientApp({ ...fakeAppOptions().options, audio, yolo });
+	apps.push(app);
+	expect(yolo.enable(YOLO_PHRASE, 'engenharia')).toBe(true);
+	const { props } = setup((url) =>
+		url.pathname === '/api/v1/feed' ? json(feedPage([feedItem({ s1: S1_BOOST })])) : undefined
+	);
+	const write = vi.spyOn(app, 'requestWrite');
+	await render(Comunidade, { ...props, app });
+	await select('Rádio de madrugada').click();
+	await page.getByRole('button', { name: m.comunidade_install(), exact: true }).click();
+	expect(write).toHaveBeenCalledOnce();
+	expect(write.mock.calls[0]?.[1]).toBeUndefined();
+	expect(app.pendingProfile).toBe('standard');
 });
 
 test('without the app, use/install actions show notices instead of mutating anything', async () => {

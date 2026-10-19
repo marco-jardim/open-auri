@@ -4,7 +4,7 @@
 // this file's rows (through the `list` injection) so it never touches other tests' curves.
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { gateForWrite, THRESHOLDS } from 'open-auri/safety';
+import { classifierVersionInput, gateForWrite, THRESHOLDS } from 'open-auri/safety';
 import { curveId, encodeS1 } from 'open-auri/share';
 import {
 	checkCurve,
@@ -19,6 +19,7 @@ import {
 import { getCurve, listCurvesWithStaleGate, saveCurveGate } from '#lib/server/social/repo.ts';
 import type { CurveRecord } from '#lib/server/social/types.ts';
 import reference from '../../../../../test/fixtures/eq0xcb.reference.json';
+import { randomInt } from '../../random.ts';
 
 type Curve = Parameters<typeof encodeS1>[0];
 type Band = Curve['bands'][number];
@@ -28,25 +29,21 @@ const presets = Object.entries(reference.presets).map(([name, preset]) => ({
 	curve: { bands: preset.eqBands as Band[], preampDb: preset.preampDb } satisfies Curve
 }));
 
-function randomInt(min: number, max: number): number {
-	const [value] = crypto.getRandomValues(new Uint32Array(1));
-	return min + (value % (max - min + 1));
-}
-
 /**
- * A unique curve the gate refuses: the first preset with its first two bands replaced by HS
- * shelves (HS is only allowed in the experimental layer, so `gateForWrite` reports
- * `k:kind-not-allowed` for both stages).
+ * A unique curve the gate refuses in every profile: the first preset with its first two bands
+ * replaced by +12 dB peaks and a 0 dB preamp, so the output is far above the presets' largest
+ * (`e:output-audible`, a hard reason: no YOLO waiver lifts it). HS shelves are no longer a
+ * rejected example: since GATE_IMPL 2 the server derives `experimental` from the curve.
  */
 function rejectedCurve(): Curve {
 	const base = presets[0].curve;
-	const shelf = (): Band => ({
-		kind: 'HS',
-		freqHz: randomInt(1000, 15999),
-		gainDb: -randomInt(1, 60) / 10,
-		qFactor: 0.71
+	const peak = (): Band => ({
+		kind: 'PK',
+		freqHz: randomInt(800, 4000),
+		gainDb: 12,
+		qFactor: 1
 	});
-	return { bands: [shelf(), shelf(), ...base.bands.slice(2)], preampDb: base.preampDb };
+	return { bands: [peak(), peak(), ...base.bands.slice(2)], preampDb: 0 };
 }
 
 function countingGate(): { gate: typeof gateForWrite; calls: () => number } {
@@ -81,8 +78,9 @@ async function storeStale(
 }
 
 describe('gateVersion', () => {
-	it('is v2.<GATE_IMPL>: plus 16 hex of SHA-256(ordinal + thresholds), memoized', async () => {
-		const input = `${GATE_IMPL}:${JSON.stringify(THRESHOLDS)}`;
+	it('is v2.<GATE_IMPL>: plus 16 hex of SHA-256(ordinal + thresholds + classifier), memoized', async () => {
+		expect(GATE_IMPL).toBe(2);
+		const input = `${GATE_IMPL}:${JSON.stringify(THRESHOLDS)}:${classifierVersionInput()}`;
 		expect(gateVersionInput()).toBe(input);
 		const bytes = new TextEncoder().encode(input);
 		const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
@@ -256,8 +254,9 @@ describe('checkCurve: rejection and cache', () => {
 		expect(spy.calls()).toBe(1);
 		expect(first.ok).toBe(false);
 		if (first.ok || first.code !== 'gate-rejected') throw new Error('expected gate-rejected');
-		expect(first.reasons[0]).toBe('k:kind-not-allowed');
-		expect(first.reasons.filter((r) => r === 'k:kind-not-allowed')).toHaveLength(1);
+		expect(first.reasons).toContain('e:output-audible');
+		expect(first.reasons.filter((r) => r === 'e:output-audible')).toHaveLength(1);
+		expect(first.curve.gateYolo).toBe(false);
 		expect(new Set(first.reasons).size).toBe(first.reasons.length);
 		expect(first.curve.gateOk).toBe(false);
 		expect(first.curve.gateVer).toBe(await gateVersion());
@@ -278,7 +277,7 @@ describe('checkCurve: rejection and cache', () => {
 		expect(spy.calls()).toBe(1);
 		expect(result.ok).toBe(false);
 		if (result.ok || result.code !== 'gate-rejected') throw new Error('expected gate-rejected');
-		expect(result.reasons).toContain('k:kind-not-allowed');
+		expect(result.reasons).toContain('e:output-audible');
 
 		const stored = await getCurve(env.DB, id);
 		expect(stored?.gateVer).toBe(await gateVersion());
@@ -317,7 +316,7 @@ describe('regateStale', () => {
 		const flippedRow = await getCurve(env.DB, flippedId);
 		expect(flippedRow?.gateVer).toBe(version);
 		expect(flippedRow?.gateOk).toBe(false);
-		expect(flippedRow?.gateReasons).toContain('k:kind-not-allowed');
+		expect(flippedRow?.gateReasons).toContain('e:output-audible');
 		expect(Number.isFinite(flippedRow?.levelDb)).toBe(true);
 
 		const steadyRow = await getCurve(env.DB, steadyId);

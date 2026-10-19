@@ -19,6 +19,8 @@
 		s4,
 		scopePath,
 		scopeScales,
+		channelIsYolo,
+		yoloHref,
 		type Channel,
 		type DecodedCurve
 	} from './model.ts';
@@ -32,7 +34,8 @@
 		onnotice,
 		onuse,
 		oninstall,
-		onopen
+		onopen,
+		yoloReady = false
 	}: {
 		selected: Channel[];
 		editor: DecodedCurve | null;
@@ -43,6 +46,8 @@
 		onuse: (channel: Channel) => void;
 		oninstall: (channel: Channel) => void;
 		onopen: (channel: Channel) => void;
+		/** Modo YOLO is on (Engenharia, this tab) and may write: a YOLO curve can go to the cable. */
+		yoloReady?: boolean;
 	} = $props();
 
 	const id = $props.id();
@@ -52,6 +57,12 @@
 	let bSelect = $state<HTMLSelectElement | undefined>();
 
 	const target = $derived(selected[0] ?? null);
+	/**
+	 * The target is a YOLO curve (its class, derived from its own bands): "Gravar" then opens the
+	 * YOLO checklist when Modo YOLO is ready, else becomes "Ativar Modo YOLO", which opens the
+	 * curve in the editor's Engenharia layer.
+	 */
+	const targetYolo = $derived(target?.curve ? channelIsYolo(target.curve) : false);
 	const others = $derived(selected.slice(1).filter((channel) => channel.curve !== null));
 	const bChannel = $derived(others.find((channel) => channel.lineageId === bChoice) ?? null);
 	const scales = $derived(scopeScales(-range, range));
@@ -309,9 +320,24 @@
 				onclick={() => onopen(target)}>{m.comunidade_open_curva()}</a
 			>
 			<Button onclick={() => onuse(target)}>{m.comunidade_use_curve()}</Button>
-			<Button variant="primary" onclick={() => oninstall(target)}>{m.comunidade_install()}</Button>
+			{#if targetYolo && !yoloReady}
+				<a
+					class="btn btn--primary btn--md"
+					href={yoloHref(target)}
+					data-sveltekit-reload
+					data-testid="scope-yolo-enable"
+					onclick={() => onopen(target)}>{m.yolopub_enable_yolo()}</a
+				>
+			{:else}
+				<Button variant="primary" onclick={() => oninstall(target)}
+					>{targetYolo ? m.qa1y_write_yolo() : m.comunidade_install()}</Button
+				>
+			{/if}
 		</div>
 		<p class="note">{m.comunidade_install_note()}</p>
+		{#if targetYolo && !yoloReady}
+			<p class="note" data-testid="scope-yolo-why">{m.yolopub_install_needs_yolo()}</p>
+		{/if}
 	{/if}
 </div>
 

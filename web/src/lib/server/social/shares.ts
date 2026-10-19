@@ -34,17 +34,31 @@ import {
 	recordShareEvent,
 	type VersionView
 } from '#lib/server/social/repo.ts';
-import type { LineageSummary, SocialErrorCode, Viewer } from '#lib/server/social/types.ts';
+import type {
+	LineageSummary,
+	SocialErrorCode,
+	Viewer,
+	YoloPublication
+} from '#lib/server/social/types.ts';
 
 /** Injection points of the by-id public reads (tests); the defaults are the production ones. */
 export interface PublicReadDeps {
 	/** Gate used when a stored verdict is stale (default: the core's gateForWrite). */
 	gate?: typeof gateForWrite;
 	now?: number;
+	/**
+	 * Kill switch of YOLO publication (ServerEnv `yoloPublication`); absent = 'off': no YOLO head
+	 * is served to anyone but its owner (or an admin), acknowledged or not.
+	 */
+	yoloPublication?: YoloPublication;
 }
 
 function regateOptions(deps: PublicReadDeps): { gate?: typeof gateForWrite } {
 	return deps.gate ? { gate: deps.gate } : {};
+}
+
+function yoloOf(deps: PublicReadDeps): YoloPublication {
+	return deps.yoloPublication ?? 'off';
 }
 
 /**
@@ -63,14 +77,15 @@ export async function readCurrentLineage(
 	deps: PublicReadDeps = {}
 ): Promise<LineageSummary | null> {
 	const now = deps.now ?? Date.now();
-	const summary = await getLineageForViewer(db, lineageId, viewer);
+	const yolo = yoloOf(deps);
+	const summary = await getLineageForViewer(db, lineageId, viewer, yolo);
 	if (!summary) {
 		if (!(await regateRejectedHead(db, lineageId, now, regateOptions(deps)))) return null;
-		return getLineageForViewer(db, lineageId, viewer);
+		return getLineageForViewer(db, lineageId, viewer, yolo);
 	}
 	if (await isGateCurrent(summary.curve.gateVer)) return summary;
 	await regateCurve(db, summary.curve, now, regateOptions(deps));
-	return getLineageForViewer(db, lineageId, viewer);
+	return getLineageForViewer(db, lineageId, viewer, yolo);
 }
 
 /**
@@ -87,11 +102,12 @@ export async function readCurrentVersion(
 	deps: PublicReadDeps = {}
 ): Promise<VersionView | null> {
 	const now = deps.now ?? Date.now();
-	let view = await getVersionForViewer(db, versionId, viewer);
+	const yolo = yoloOf(deps);
+	let view = await getVersionForViewer(db, versionId, viewer, yolo);
 	if (!view) {
 		if (!(await regateRejectedVersion(db, versionId, now, regateOptions(deps)))) return null;
 		// Re-gated curves are current now; a head still stale (accepted) is handled below.
-		view = await getVersionForViewer(db, versionId, viewer);
+		view = await getVersionForViewer(db, versionId, viewer, yolo);
 		if (!view) return null;
 	}
 	let regated = false;
@@ -100,13 +116,13 @@ export async function readCurrentVersion(
 		regated = true;
 	}
 	if (view.lineage.headVersion !== view.version.id) {
-		const lineage = await getLineageForViewer(db, view.lineage.id, viewer);
+		const lineage = await getLineageForViewer(db, view.lineage.id, viewer, yolo);
 		if (lineage && !(await isGateCurrent(lineage.curve.gateVer))) {
 			await regateCurve(db, lineage.curve, now, regateOptions(deps));
 			regated = true;
 		}
 	}
-	return regated ? getVersionForViewer(db, versionId, viewer) : view;
+	return regated ? getVersionForViewer(db, versionId, viewer, yolo) : view;
 }
 
 export const SHARE_CHANNELS = ['link', 'qr', 'whatsapp', 'x', 'email', 'other'] as const;
@@ -166,26 +182,34 @@ export interface CreatedShare {
 	url: string;
 }
 
-/** Creates a share of a lineage the caller can link (see the header). */
+/**
+ * Creates a share of a lineage the caller can link (see the header), under the kill switch
+ * `yolo` (default 'off': someone else's YOLO lineage cannot be shared; the owner's can).
+ */
 export async function createShareFor(
 	db: D1Database,
 	userId: string,
 	input: CreateShareInput,
-	now: number = Date.now()
+	now: number = Date.now(),
+	yolo: YoloPublication = 'off'
 ): Promise<CreatedShare> {
 	if (!isSocialId(input.lineageId)) throw new ApiError(404, 'NOT_FOUND');
 	if (input.versionId !== undefined && !isSocialId(input.versionId)) {
 		throw new ApiError(404, 'NOT_FOUND');
 	}
 	const id = newShareId();
-	const result = await createShare(db, {
-		id,
-		lineageId: input.lineageId,
-		versionId: input.versionId ?? null,
-		ownerUserId: userId,
-		channel: input.channel ?? null,
-		now
-	});
+	const result = await createShare(
+		db,
+		{
+			id,
+			lineageId: input.lineageId,
+			versionId: input.versionId ?? null,
+			ownerUserId: userId,
+			channel: input.channel ?? null,
+			now
+		},
+		yolo
+	);
 	if (!result.ok) throw repoError(result.code);
 	return { shareId: result.value.id, url: shareUrl(result.value.lineageId, result.value.id) };
 }
@@ -264,8 +288,18 @@ export async function recordShareOpenLimited(
 	return recordShareOpen(env.db, shareId, now);
 }
 
+/**
+ * `/c/[id]` data as the server builds it: the page's SharedCurveData plus the YOLO class of the
+ * shown curve (derived on the server). A superset until the client type is widened.
+ */
+export interface SharedCurvePayload extends SharedCurveData {
+	yolo: boolean;
+	/** Codes the YOLO profile waived ([] unless `yolo`). */
+	waived: string[];
+}
+
 export type SharedCurveResult =
-	{ kind: 'ok'; curve: SharedCurveData } | { kind: 'not-found' } | { kind: 'gone' };
+	{ kind: 'ok'; curve: SharedCurvePayload } | { kind: 'not-found' } | { kind: 'gone' };
 
 /**
  * Data of `/c/[id]` for `viewer`, read through the repository visibility (linkable, or the
@@ -284,7 +318,9 @@ export async function loadSharedCurve(
 	if (!isSocialId(lineageId)) return { kind: 'not-found' };
 	const lineage = await readCurrentLineage(db, lineageId, viewer, deps);
 	if (!lineage) {
-		return (await isRetractedLinkable(db, lineageId)) ? { kind: 'gone' } : { kind: 'not-found' };
+		return (await isRetractedLinkable(db, lineageId, yoloOf(deps)))
+			? { kind: 'gone' }
+			: { kind: 'not-found' };
 	}
 	if (lineage.status === 'retracted') return { kind: 'gone' };
 
@@ -317,17 +353,27 @@ export async function loadSharedCurve(
 			// Filter labels of the shown version (page only; never the OG image or meta tags).
 			labels: version.labels,
 			visibility: lineage.visibility,
-			shareId: ownShare ? ownShare.id : null
+			shareId: ownShare ? ownShare.id : null,
+			yolo: curve.gateYolo,
+			waived: curve.gateYolo ? [...curve.gateReasons] : []
 		}
 	};
 }
 
-/** Absolute URLs of the meta tags; `origin` is PUBLIC_ORIGIN (never the request host). */
-export function sharedCurveMeta(origin: string, curve: SharedCurveData): SharedCurveMeta {
+/**
+ * Absolute URLs of the meta tags; `origin` is PUBLIC_ORIGIN (never the request host). A YOLO curve
+ * is never indexable (`noindex`) and its image URL carries `?y=1`, so caches keyed by URL keep the
+ * card with the YOLO chip apart from a standard one.
+ */
+export function sharedCurveMeta(
+	origin: string,
+	curve: SharedCurveData & { yolo?: boolean }
+): SharedCurveMeta {
 	const base = origin.replace(/\/+$/, '');
+	const yolo = curve.yolo === true;
 	return {
 		canonical: `${base}/c/${encodeURIComponent(curve.lineageId)}`,
-		image: `${base}/og/${encodeURIComponent(curve.versionId)}.png`,
-		indexable: curve.visibility === 'public'
+		image: `${base}/og/${encodeURIComponent(curve.versionId)}.png${yolo ? '?y=1' : ''}`,
+		indexable: curve.visibility === 'public' && !yolo
 	};
 }

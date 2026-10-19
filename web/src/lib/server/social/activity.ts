@@ -59,7 +59,8 @@ import {
 	type ActivityRecord,
 	type Audience,
 	type Page,
-	type PageRequest
+	type PageRequest,
+	type YoloPublication
 } from '#lib/server/social/types.ts';
 
 /** Minimum audible preview that counts as "experimentou". */
@@ -244,6 +245,11 @@ export interface ActivityOptions {
 	/** BETTER_AUTH_SECRET (`env.secrets.betterAuthSecret`): keys the event-id claims. */
 	claimSecret: string;
 	now?: number;
+	/**
+	 * Kill switch of YOLO publication (ServerEnv `yoloPublication`); absent = 'off': someone
+	 * else's YOLO lineage is then not readable, so an event on it is rejected `not-found`.
+	 */
+	yoloPublication?: YoloPublication;
 }
 
 /** After the cheap checks: claim, write, attribute. */
@@ -254,12 +260,13 @@ async function recordChecked(
 	lineageId: string,
 	input: ActivityEventInput,
 	at: number,
-	now: number
+	now: number,
+	yolo: YoloPublication
 ): Promise<ActivityOutcome> {
 	if (!(await claimEventId(db, await subject(), input.eventId, now))) {
 		return { status: 'duplicate' };
 	}
-	const recorded = await recordActivity(db, userId, lineageId, input.kind, at);
+	const recorded = await recordActivity(db, userId, lineageId, input.kind, at, yolo);
 	if (!recorded.ok) {
 		return {
 			status: 'rejected',
@@ -286,7 +293,8 @@ export async function recordActivityEvent(
 	if (!checked.ok) return { status: 'rejected', reason: checked.reason };
 	if (!isSocialId(lineageId)) return { status: 'rejected', reason: 'not-found' };
 	const subject = () => eventClaimSubject(options.claimSecret, userId);
-	return recordChecked(db, userId, subject, lineageId, input, checked.at, now);
+	const yolo = options.yoloPublication ?? 'off';
+	return recordChecked(db, userId, subject, lineageId, input, checked.at, now, yolo);
 }
 
 export interface OutboxResult {
@@ -308,6 +316,8 @@ export interface OutboxOptions {
 	 */
 	actor?: string;
 	now?: number;
+	/** Kill switch of YOLO publication, as ActivityOptions.yoloPublication (absent = 'off'). */
+	yoloPublication?: YoloPublication;
 }
 
 function eventIdOf(item: unknown): string | null {
@@ -361,7 +371,16 @@ export async function recordOutbox(
 			results.push({ index, eventId: event.eventId, status: 'limited' });
 			continue;
 		}
-		const outcome = await recordChecked(db, userId, subject, lineageId, event, checked.at, now);
+		const outcome = await recordChecked(
+			db,
+			userId,
+			subject,
+			lineageId,
+			event,
+			checked.at,
+			now,
+			options.yoloPublication ?? 'off'
+		);
 		const result: OutboxResult = { index, eventId: event.eventId, status: outcome.status };
 		if (outcome.status === 'rejected') result.reason = outcome.reason;
 		results.push(result);

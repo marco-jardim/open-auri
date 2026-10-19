@@ -3,23 +3,138 @@ import assert from 'node:assert/strict';
 import fc from 'fast-check';
 import {
   ABS_RANGES,
+  AUDIBLE_MAX_HZ,
   boundarySearch,
   clampToAbs,
   EXPERIMENTAL_KINDS,
+  freqMaxFor,
   GRID_STEPS,
   interpolateBand,
   interpolateLinear,
   isExperimentalKind,
   isKindAllowed,
+  isUltrasonic,
   LAYER_KINDS,
   roundToGrid,
   snapToGridAccepted,
   SOFT_RANGES,
+  ULTRA_CUT_Q_MAX,
+  ULTRA_MAX_HZ,
 } from '../../src/safety/policy.mjs';
 import { gateForWrite } from '../../src/safety/gate.mjs';
 import { NEUTRAL_BANDS } from '../../src/dsp/eq0xcb.mjs';
 
 const OFF = Object.freeze({ kind: 'OFF' });
+
+test('ABS_RANGES stays pinned at 20 Hz–20 kHz; the ultrasonic ceiling is separate', () => {
+  assert.deepEqual(ABS_RANGES, {
+    freqHz: { min: 20, max: 20000 },
+    gainDb: { min: -24, max: 9.2 },
+    qFactor: { min: 0.1, max: 20 },
+    boostQMax: 4,
+    pkBoostMaxHz: 16000,
+  });
+  assert.ok(Object.isFrozen(ABS_RANGES) && Object.isFrozen(ABS_RANGES.freqHz));
+  assert.equal(AUDIBLE_MAX_HZ, 20000);
+  assert.equal(AUDIBLE_MAX_HZ, ABS_RANGES.freqHz.max);
+  assert.equal(ULTRA_MAX_HZ, 32000);
+  assert.equal(ULTRA_CUT_Q_MAX, 0.71);
+  // clampToAbs keeps clamping to 20 kHz, even a cut Engenharia may place higher.
+  const cut = { kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 };
+  assert.equal(freqMaxFor(cut, { layer: 'engenharia' }), ULTRA_MAX_HZ);
+  assert.equal(clampToAbs(cut).freqHz, 20000);
+});
+
+test('freqMaxFor: Ouvir/Ajustar 20 kHz; Engenharia 32 kHz for non-amplifying sections; YOLO 32 kHz', () => {
+  /** [band, Engenharia maximum without YOLO] */
+  const cases = [
+    [{ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 10 }, ULTRA_MAX_HZ],
+    [{ kind: 'PK', freqHz: 1000, gainDb: 0, qFactor: 20 }, ULTRA_MAX_HZ],
+    [{ kind: 'PK', freqHz: 1000, gainDb: -0, qFactor: 0.1 }, ULTRA_MAX_HZ],
+    [{ kind: 'PK', freqHz: 1000, gainDb: 0.1, qFactor: 1 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'LS', freqHz: 1000, gainDb: -3, qFactor: 0.71 }, ULTRA_MAX_HZ],
+    [{ kind: 'LS', freqHz: 1000, gainDb: -3, qFactor: 0.72 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'LS', freqHz: 1000, gainDb: 1, qFactor: 0.5 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'HS', freqHz: 1000, gainDb: 0, qFactor: 0.71 }, ULTRA_MAX_HZ],
+    [{ kind: 'HS', freqHz: 1000, gainDb: -6, qFactor: 0.72 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'HS', freqHz: 1000, gainDb: 2, qFactor: 0.5 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'LP', freqHz: 1000, qFactor: 0.71 }, ULTRA_MAX_HZ],
+    [{ kind: 'LP', freqHz: 1000, qFactor: 0.72 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'HP', freqHz: 1000, qFactor: 0.5 }, ULTRA_MAX_HZ],
+    [{ kind: 'HP', freqHz: 1000, qFactor: 2 }, AUDIBLE_MAX_HZ],
+    // NaN-safe: a missing, NaN or non-number gain or Q never qualifies.
+    [{ kind: 'PK', freqHz: 1000, gainDb: NaN, qFactor: 1 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'PK', freqHz: 1000, qFactor: 1 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'LS', freqHz: 1000, gainDb: -3, qFactor: NaN }, AUDIBLE_MAX_HZ],
+    [{ kind: 'HS', freqHz: 1000, gainDb: '-3', qFactor: 0.5 }, AUDIBLE_MAX_HZ],
+    [{ kind: 'LP', freqHz: 1000, qFactor: '0.5' }, AUDIBLE_MAX_HZ],
+    [{ kind: 'HP', freqHz: 1000 }, AUDIBLE_MAX_HZ],
+    // Not a section.
+    [OFF, AUDIBLE_MAX_HZ],
+    [{ kind: 'XX', freqHz: 1000, gainDb: -3, qFactor: 0.5 }, AUDIBLE_MAX_HZ],
+    [null, AUDIBLE_MAX_HZ],
+    ['PK', AUDIBLE_MAX_HZ],
+  ];
+  for (const [band, engenharia] of cases) {
+    const label = JSON.stringify(band);
+    for (const layer of ['ouvir', 'ajustar']) {
+      assert.equal(freqMaxFor(band, { layer }), AUDIBLE_MAX_HZ, `${layer} ${label}`);
+      // Modo YOLO exists only in Engenharia.
+      assert.equal(freqMaxFor(band, { layer, yolo: true }), AUDIBLE_MAX_HZ, `${layer} ${label}`);
+    }
+    assert.equal(freqMaxFor(band, { layer: 'engenharia' }), engenharia, label);
+    assert.equal(freqMaxFor(band, { layer: 'engenharia', yolo: false }), engenharia, label);
+    assert.equal(freqMaxFor(band, { layer: 'engenharia', yolo: true }), ULTRA_MAX_HZ, label);
+    // Only yolo === true; unknown layers allow nothing above 20 kHz.
+    assert.equal(freqMaxFor(band, { layer: 'engenharia', yolo: 1 }), engenharia, label);
+    assert.equal(freqMaxFor(band, { layer: 'unknown', yolo: true }), AUDIBLE_MAX_HZ, label);
+    assert.equal(freqMaxFor(band, {}), AUDIBLE_MAX_HZ, label);
+    assert.equal(freqMaxFor(band), AUDIBLE_MAX_HZ, label);
+  }
+  // The answer depends on kind, gain and Q only, never on where the band is now.
+  for (const freqHz of [20, 20000, 25000, 32000, 40000]) {
+    assert.equal(
+      freqMaxFor({ kind: 'PK', freqHz, gainDb: -1, qFactor: 1 }, { layer: 'engenharia' }),
+      ULTRA_MAX_HZ,
+    );
+  }
+});
+
+test('isUltrasonic: a filter section above 20 kHz; NaN-safe; never OFF or a non-section', () => {
+  for (const kind of ['PK', 'LS', 'HS', 'LP', 'HP']) {
+    const at = (freqHz) => isUltrasonic({ kind, freqHz, gainDb: -3, qFactor: 0.7 });
+    assert.equal(at(1000), false, kind);
+    assert.equal(at(20000), false, kind);
+    assert.equal(at(20000.5), true, kind);
+    assert.equal(at(20001), true, kind);
+    assert.equal(at(ULTRA_MAX_HZ), true, kind);
+    assert.equal(at(-Infinity), false, kind);
+    // Like the gate's D7 checks: a frequency that is not a number <= 20 kHz counts as above.
+    for (const freqHz of [NaN, Infinity, undefined, null, '1000', 1000n]) {
+      assert.equal(at(freqHz), true, `${kind} ${String(freqHz)}`);
+    }
+  }
+  assert.equal(isUltrasonic({ kind: 'OFF' }), false);
+  assert.equal(isUltrasonic({ kind: 'OFF', freqHz: 30000 }), false);
+  assert.equal(isUltrasonic({ kind: 'XX', freqHz: 30000 }), false);
+  assert.equal(isUltrasonic({ freqHz: 30000 }), false);
+  for (const value of [null, undefined, 30000, 'PK', true]) {
+    assert.equal(isUltrasonic(value), false, String(value));
+  }
+  // Pure: nothing is coerced or changed.
+  let calls = 0;
+  const trap = {
+    valueOf() {
+      calls++;
+      return 1000;
+    },
+  };
+  const band = Object.freeze({ kind: 'PK', freqHz: trap, gainDb: -3, qFactor: 1 });
+  assert.equal(isUltrasonic(band), true);
+  const trapGain = { kind: 'PK', freqHz: 1000, gainDb: trap, qFactor: 1 };
+  assert.equal(freqMaxFor(trapGain, { layer: 'engenharia' }), AUDIBLE_MAX_HZ);
+  assert.equal(calls, 0);
+});
 
 test('soft ranges match the plan (§3.3)', () => {
   const r = (min, max) => ({ min, max });

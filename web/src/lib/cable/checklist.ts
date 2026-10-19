@@ -2,7 +2,7 @@
  * Pre-write checklist model (plan §3.1 N2/N3, T2.7). Pure: the context (clock, flash
  * state, last written level, journal status) is supplied by the caller.
  */
-import { gateForWrite, isExperimentalKind, levelDb } from 'open-auri/safety';
+import { gateForWrite, isExperimentalKind, isUltrasonic, levelDb } from 'open-auri/safety';
 import {
 	FLASH_NOTICE_TEXT,
 	LOUDNESS_WARNING_TEXT,
@@ -36,6 +36,10 @@ export { FLASH_NOTICE_TEXT, LOUDNESS_WARNING_TEXT };
 export const EXPERIMENTAL_CONFIRMATION_TEXT =
 	'Esta curva usa tipos que a página oficial nunca gravou. Os coeficientes estão dentro do envelope observado, mas o firmware nunca recebeu esses formatos.';
 
+/** Added to the experimental text when the curve has a section above 20 kHz. */
+export const ULTRASONIC_CONFIRMATION_TEXT =
+	'Filtros acima de 20 kHz: confirme a gravação experimental.';
+
 /** Gate reason code → message key, for every code the gate emits. */
 export const REASON_MESSAGE_KEYS: Readonly<Record<ReasonCode, ReasonMessageKey>> = Object.freeze({
 	'a:b0': 'cable_reason_a_b0',
@@ -47,13 +51,16 @@ export const REASON_MESSAGE_KEYS: Readonly<Record<ReasonCode, ReasonMessageKey>>
 	'c:section-peak': 'cable_reason_c_section_peak',
 	'd:prefix-peak': 'cable_reason_d_prefix_peak',
 	'd:prefix-peak-full': 'cable_reason_d_prefix_peak_full',
+	'd:prefix-peak-extended': 'cable_reason_d_prefix_peak_extended',
 	'e:output-audible': 'cable_reason_e_output_audible',
+	'e:output-extended': 'cable_reason_e_output_extended',
 	'e:output-full': 'cable_reason_e_output_full',
 	'f:codec': 'cable_reason_f_codec',
 	'g:preamp': 'cable_reason_g_preamp',
 	'k:kind-not-allowed': 'cable_reason_k_kind_not_allowed',
 	'd7:pk-boost-above-16k': 'cable_reason_d7_pk_boost_above_16k',
-	'd7:boost-q': 'cable_reason_d7_boost_q'
+	'd7:boost-q': 'cable_reason_d7_boost_q',
+	'd7:boost-above-20k': 'cable_reason_d7_boost_above_20k'
 });
 
 /** Gate lamps a–g plus `k` (kinds and D7 editing limits, part of the gate contract). */
@@ -127,10 +134,22 @@ export function hasExperimentalKinds(bands: readonly Readonly<Band>[]): boolean 
 	return bands.some((band) => isExperimentalKind(band.kind));
 }
 
-function safeExperimentalKinds(verdict: GateResult, raw: readonly Band[]): boolean {
-	if (verdict.metrics.bands !== undefined) return hasExperimentalKinds(verdict.metrics.bands);
+/**
+ * Whether the curve has a section above 20 kHz (core `isUltrasonic`): the official page never
+ * wrote one either, so a write asks for the same experimental confirmation.
+ */
+export function hasUltrasonicBands(bands: readonly Readonly<Band>[]): boolean {
+	return bands.some((band) => isUltrasonic(band));
+}
+
+function safeBandsTest(
+	verdict: GateResult,
+	raw: readonly Band[],
+	test: (bands: readonly Readonly<Band>[]) => boolean
+): boolean {
+	if (verdict.metrics.bands !== undefined) return test(verdict.metrics.bands);
 	try {
-		return Array.isArray(raw) && hasExperimentalKinds(raw);
+		return Array.isArray(raw) && test(raw);
 	} catch {
 		// Unreadable bands: the gate already refuses them (f:codec); be conservative.
 		return true;
@@ -218,7 +237,11 @@ export function evaluateChecklist(
 		lastJournalStatus: context.lastJournalStatus
 	});
 
-	const experimentalRequired = safeExperimentalKinds(verdict, input.bands);
+	// The confirmation covers HS/LP/HP and any section above 20 kHz; the gate's own
+	// `experimental` option (input.experimental) stays kind-based.
+	const experimentalUltrasonic = safeBandsTest(verdict, input.bands, hasUltrasonicBands);
+	const experimentalRequired =
+		safeBandsTest(verdict, input.bands, hasExperimentalKinds) || experimentalUltrasonic;
 	const spacing = canWriteNow(context.flash, context.nowMs);
 	const confirmations = input.confirmations;
 
@@ -256,7 +279,9 @@ export function evaluateChecklist(
 		newLevelDb,
 		loudness: { ...loudness, text: LOUDNESS_WARNING_TEXT },
 		experimentalRequired,
-		experimentalText: EXPERIMENTAL_CONFIRMATION_TEXT,
+		experimentalText: experimentalUltrasonic
+			? `${EXPERIMENTAL_CONFIRMATION_TEXT} ${ULTRASONIC_CONFIRMATION_TEXT}`
+			: EXPERIMENTAL_CONFIRMATION_TEXT,
 		spacing,
 		counters: flashCountersOf(context.flash, context.nowMs),
 		dailyNotice: { show: dailyNotice(context.flash, context.nowMs), text: FLASH_NOTICE_TEXT },

@@ -10,7 +10,8 @@ import type {
 	ModerationState,
 	ReportReason,
 	ReportTargetKind,
-	Viewer
+	Viewer,
+	YoloPublication
 } from '#lib/server/social/types.ts';
 
 /** What the moderation rules need to know about a report target. */
@@ -26,17 +27,19 @@ export interface TargetFacts {
 /**
  * The target if `viewer` can read it (lineage and pack: the repo predicates; user: a profile with
  * a nickname whose account is not banned), else null. User targets are resolved by nickname;
- * only explicit admin callers may pass internal user ids.
+ * only explicit admin callers may pass internal user ids. Lineages are read under the kill switch
+ * `yolo` (default 'off': someone else's YOLO lineage is then null).
  */
 export async function findTarget(
 	db: D1Database,
 	kind: ReportTargetKind,
 	id: string,
 	viewer: Viewer,
-	now: number = Date.now()
+	now: number = Date.now(),
+	yolo: YoloPublication = 'off'
 ): Promise<TargetFacts | null> {
 	if (kind === 'lineage') {
-		const readable = readableLineageSql('l', viewer);
+		const readable = readableLineageSql('l', viewer, yolo);
 		const row = await first<{ id: string; owner_user_id: string | null; moderation: string }>(
 			sql(
 				db,
@@ -144,6 +147,10 @@ export interface TargetPreview {
 	status: string | null;
 	moderation: ModerationState | null;
 	curated: boolean;
+	/** A lineage whose head is a YOLO curve (migration 0013); false for packs and users. */
+	yolo: boolean;
+	/** Codes the YOLO profile waived for that head ([] unless `yolo`). */
+	waived: string[];
 	author: { id: string; nickname: string | null; banned: boolean; admin: boolean } | null;
 }
 
@@ -154,11 +161,25 @@ interface PreviewRow {
 	status: string | null;
 	moderation: string | null;
 	curated: number | null;
+	gate_yolo: number | null;
+	gate_reasons: string | null;
 	owner_id: string | null;
 	owner_username: string | null;
 	owner_display: string | null;
 	owner_banned: number | null;
 	owner_role: string | null;
+}
+
+/** Cached gate reason codes (a JSON array); anything unreadable is no codes. */
+function reasonCodes(text: string | null): string[] {
+	if (text === null) return [];
+	try {
+		const value: unknown = JSON.parse(text);
+		return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
+	} catch {
+		// A malformed cache row has no usable codes; the next re-gate rewrites it.
+		return [];
+	}
 }
 
 const OWNER_COLUMNS =
@@ -177,9 +198,10 @@ export async function targetPreview(
 			sql(
 				db,
 				'SELECT l.id AS id, v.name AS name, l.visibility AS visibility, l.status AS status, ' +
-					`l.moderation AS moderation, l.curated AS curated, ${OWNER_COLUMNS} FROM lineages l ` +
-					'LEFT JOIN versions v ON v.id = l.head_version LEFT JOIN "user" u ON u."id" = l.owner_user_id ' +
-					'WHERE l.id = ?',
+					'l.moderation AS moderation, l.curated AS curated, c.gate_yolo AS gate_yolo, ' +
+					`c.gate_reasons AS gate_reasons, ${OWNER_COLUMNS} FROM lineages l ` +
+					'LEFT JOIN versions v ON v.id = l.head_version LEFT JOIN curves c ON c.id = v.curve_id ' +
+					'LEFT JOIN "user" u ON u."id" = l.owner_user_id WHERE l.id = ?',
 				id
 			)
 		);
@@ -188,7 +210,8 @@ export async function targetPreview(
 			sql(
 				db,
 				'SELECT p.id AS id, p.name AS name, p.visibility AS visibility, NULL AS status, ' +
-					`p.moderation AS moderation, 0 AS curated, ${OWNER_COLUMNS} FROM packs p ` +
+					'p.moderation AS moderation, 0 AS curated, 0 AS gate_yolo, NULL AS gate_reasons, ' +
+					`${OWNER_COLUMNS} FROM packs p ` +
 					'LEFT JOIN "user" u ON u."id" = p.owner_user_id WHERE p.id = ?',
 				id
 			)
@@ -198,13 +221,15 @@ export async function targetPreview(
 			sql(
 				db,
 				'SELECT u."id" AS id, COALESCE(u."displayUsername", u."username") AS name, NULL AS visibility, ' +
-					`NULL AS status, NULL AS moderation, 0 AS curated, ${OWNER_COLUMNS} FROM "user" u ` +
+					'NULL AS status, NULL AS moderation, 0 AS curated, 0 AS gate_yolo, NULL AS gate_reasons, ' +
+					`${OWNER_COLUMNS} FROM "user" u ` +
 					'WHERE u."id" = ?',
 				id
 			)
 		);
 	}
 	if (!row) return null;
+	const yolo = row.gate_yolo === 1;
 	return {
 		kind,
 		id: row.id,
@@ -213,6 +238,8 @@ export async function targetPreview(
 		status: row.status,
 		moderation: row.moderation as ModerationState | null,
 		curated: row.curated === 1,
+		yolo,
+		waived: yolo ? reasonCodes(row.gate_reasons) : [],
 		author:
 			row.owner_id === null
 				? null

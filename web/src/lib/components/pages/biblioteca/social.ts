@@ -1,6 +1,8 @@
 // "Minha biblioteca" (T4.14): pure helpers of the signed-in shelves, the local-library merge and the
 // share funnel. Nothing here touches the network or `window` at module load; storage is injected.
+import { decodeS1, S1Error } from 'open-auri/share';
 import type { AccountSummary } from '#lib/components/chrome/account.ts';
+import { classifiedCurve, type ClassifiedCurve } from '#lib/gate-verdicts.ts';
 import {
 	isSocialApiError,
 	type LibraryMergeItem,
@@ -146,6 +148,170 @@ export function toMergeItem(item: LocalLibraryItem, locale: string): LibraryMerg
 	};
 }
 
+/**
+ * Gate runs one merge item may cost on the server: the runs of its classification (`gateRuns`,
+ * counted as the server counts them): 2 whenever it ran the YOLO profile (a YOLO curve, or one
+ * rejected after every standard code was waivable), 1 otherwise. A code that does not decode
+ * costs 1 (the server refuses it before the gate). Merged lineages are private: YOLO needs no
+ * acknowledgement.
+ */
+export function mergeWeight(item: Pick<LibraryMergeItem, 's1'>): number {
+	const decoded = decodedOrNull(item.s1);
+	if (decoded === null) return 1;
+	return classifiedCurve(decoded.bands, decoded.preampDb).gateRuns;
+}
+
+/** The decoded S1, or null when it does not decode (the server refuses it before the gate). */
+function decodedOrNull(s1: string): ReturnType<typeof decodeS1> | null {
+	try {
+		return decodeS1(s1);
+	} catch (cause) {
+		if (cause instanceof S1Error) return null;
+		throw cause;
+	}
+}
+
+/**
+ * Off-main-thread classifier of the merge weights (workers/classifier.svelte.ts `classify`): the
+ * class and the gate runs it took (`gateRuns`, the weight).
+ */
+export type MergeClassify = (
+	curve: Pick<ReturnType<typeof decodeS1>, 'bands' | 'preampDb'>,
+	signal?: AbortSignal
+) => Promise<ClassifiedCurve>;
+
+export interface MergeOptions {
+	/**
+	 * Classifies each item off the main thread (the gate worker). Without it, each item is
+	 * classified here, one per task: the page yields between items, so a long library never
+	 * blocks it.
+	 */
+	classify?: MergeClassify;
+	signal?: AbortSignal;
+}
+
+function mergeCancelled(): DOMException {
+	return new DOMException('Merge cancelled', 'AbortError');
+}
+
+/** Lets the page breathe (input, paint) between two items classified on the main thread. */
+function nextTask(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** `mergeWeight`, asynchronously: through `options.classify`, else on the next task. */
+export async function mergeWeightAsync(
+	item: Pick<LibraryMergeItem, 's1'>,
+	options: MergeOptions = {}
+): Promise<number> {
+	const decoded = decodedOrNull(item.s1);
+	if (decoded === null) return 1;
+	if (options.signal?.aborted) throw mergeCancelled();
+	if (options.classify) {
+		const classified = await options.classify(decoded, options.signal);
+		return classified.gateRuns;
+	}
+	await nextTask();
+	if (options.signal?.aborted) throw mergeCancelled();
+	return mergeWeight(item);
+}
+
+/** Batches handed out as they fill (`batchFeed`); `next` gives null once every item is out. */
+interface BatchFeed<T> {
+	next(): Promise<T[] | null>;
+	/** Stops weighing (the items not weighed yet are dropped). */
+	stop(): void;
+}
+
+/**
+ * The batches of `mergeBatches`, weighed ahead of their consumer: a batch is handed out as soon
+ * as its weight is known to be full (MERGE_BATCH reached, or the next item would pass it) while
+ * the following items are still being weighed. Weighing stops on `options.signal` or `stop`; a
+ * weighing failure is thrown by `next` after the batches that were already full.
+ */
+function batchFeed<T extends Pick<LibraryMergeItem, 's1'>>(
+	items: readonly T[],
+	options: MergeOptions
+): BatchFeed<T> {
+	const stopper = new AbortController();
+	const outer = options.signal;
+	const forward = () => stopper.abort();
+	if (outer?.aborted) stopper.abort();
+	else outer?.addEventListener('abort', forward, { once: true });
+	const weighing: MergeOptions = { ...options, signal: stopper.signal };
+	const ready: T[][] = [];
+	let settled = false;
+	let failed = false;
+	let failure: unknown = null;
+	let wake: (() => void) | null = null;
+	const notify = () => {
+		const resolve = wake;
+		wake = null;
+		resolve?.();
+	};
+	void (async () => {
+		let current: T[] = [];
+		let weight = 0;
+		const flush = () => {
+			ready.push(current);
+			current = [];
+			weight = 0;
+			notify();
+		};
+		for (const item of items) {
+			const cost = await mergeWeightAsync(item, weighing);
+			if (current.length > 0 && weight + cost > MERGE_BATCH) flush();
+			current.push(item);
+			weight += cost;
+			if (weight >= MERGE_BATCH) flush();
+		}
+		if (current.length > 0) flush();
+	})()
+		.catch((error: unknown) => {
+			failed = true;
+			failure = error;
+		})
+		.finally(() => {
+			settled = true;
+			outer?.removeEventListener('abort', forward);
+			notify();
+		});
+	return {
+		async next() {
+			for (;;) {
+				const batch = ready.shift();
+				if (batch !== undefined) return batch;
+				if (settled) {
+					if (failed) throw failure;
+					return null;
+				}
+				await new Promise<void>((resolve) => {
+					wake = resolve;
+				});
+			}
+		},
+		stop: () => stopper.abort()
+	};
+}
+
+/**
+ * Consecutive batches of at most MERGE_BATCH gate runs each (`mergeWeight`): 20 standard items,
+ * or fewer when some ran the YOLO profile. Every batch has at least one item. Asynchronous: each
+ * weight goes through the worker (`options.classify`) or one task at a time
+ * (`mergeWeightAsync`), never one long main-thread run over the whole library.
+ */
+export async function mergeBatches<T extends Pick<LibraryMergeItem, 's1'>>(
+	items: readonly T[],
+	options: MergeOptions = {}
+): Promise<T[][]> {
+	const feed = batchFeed(items, options);
+	const batches: T[][] = [];
+	for (let batch = await feed.next(); batch !== null; batch = await feed.next()) {
+		batches.push(batch);
+	}
+	return batches;
+}
+
 export interface MergeOutcome {
 	report: MergeReport;
 	/** Local ids not to offer again (merged or permanently rejected). */
@@ -157,21 +323,41 @@ export interface MergeOutcome {
 }
 
 /**
- * Sends at most 20 items at a time, retrying quota rejections before the next fresh batch.
+ * Sends at most 20 gate runs at a time (`mergeBatches`: an item that runs the YOLO profile counts
+ * 2, weighed off the main thread through `options.classify`, or one task at a time), retrying
+ * quota rejections before the next fresh batch. Pipelined: a batch goes out as soon as its weight
+ * is full while the next items are being weighed, so `onBatch` reports progress from the first
+ * batch on, not after the whole library was classified.
  * The API does not distinguish daily quotas from the per-request gate budget: stop and report
- * QUOTA_EXCEEDED after one retry pass makes no progress. Other failed requests stop immediately
- * (only cancellation throws). Transient rejections remain offerable on a later user action.
+ * QUOTA_EXCEEDED after one retry pass makes no progress. Other failed requests, and a weighing
+ * failure, stop immediately (only cancellation throws: `options.signal`, checked before every
+ * request, also stops the weighing). Transient rejections remain offerable on a later user action.
  */
 export async function runMerge(
 	api: Pick<SocialApi, 'mergeLibrary'>,
 	items: readonly LibraryMergeItem[],
-	onBatch?: (done: number, total: number) => void
+	onBatch?: (done: number, total: number) => void,
+	options: MergeOptions = {}
 ): Promise<MergeOutcome> {
 	const report: MergeReport = { created: [], duplicates: [], rejected: [], conflicts: [] };
-	let error: SocialErrorCode | null = null;
+	/** Code of the failure that stopped the merge (set by the helpers below). */
+	const stop: { error: SocialErrorCode | null } = { error: null };
 	let sent = 0;
-	batches: for (let start = 0; start < items.length; start += MERGE_BATCH) {
-		let batch = items.slice(start, start + MERGE_BATCH);
+	const feed = batchFeed(items, options);
+	/** The next full batch; null when there is none, or when weighing failed (`stop.error`). */
+	const nextBatch = async (): Promise<LibraryMergeItem[] | null> => {
+		try {
+			return await feed.next();
+		} catch (cause) {
+			if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+			stop.error = 'INTERNAL';
+			console.error(JSON.stringify({ event: 'biblioteca.merge.weight', error: String(cause) }));
+			return null;
+		}
+	};
+	/** Sends one fresh batch and its quota retries; sets `stop.error` when the merge must stop. */
+	const sendBatch = async (fresh: LibraryMergeItem[]): Promise<void> => {
+		let batch = fresh;
 		let retrying = false;
 		let quotaRejected: MergeReport['rejected'] = [];
 		while (batch.length > 0) {
@@ -184,25 +370,34 @@ export async function runMerge(
 				if (!retrying) sent += batch.length;
 				quotaRejected = answer.rejected.filter((entry) => entry.code === 'QUOTA_EXCEEDED');
 				onBatch?.(sent - quotaRejected.length, items.length);
-				if (quotaRejected.length === 0) break;
+				if (quotaRejected.length === 0) return;
 				if (retrying && quotaRejected.length === batch.length) {
-					error = 'QUOTA_EXCEEDED';
+					stop.error = 'QUOTA_EXCEEDED';
 					report.rejected.push(...quotaRejected);
-					break batches;
+					return;
 				}
 				const retryIds = new Set(quotaRejected.map((entry) => entry.localId));
 				batch = batch.filter((entry) => retryIds.has(entry.localId));
 				retrying = true;
 			} catch (cause) {
 				if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
-				error = isSocialApiError(cause) ? cause.code : 'INTERNAL';
+				stop.error = isSocialApiError(cause) ? cause.code : 'INTERNAL';
 				if (!isSocialApiError(cause)) {
 					console.error(JSON.stringify({ event: 'biblioteca.merge', error: String(cause) }));
 				}
 				report.rejected.push(...quotaRejected);
-				break batches;
+				return;
 			}
 		}
+	};
+	try {
+		for (let fresh = await nextBatch(); fresh !== null; fresh = await nextBatch()) {
+			if (options.signal?.aborted) throw mergeCancelled();
+			await sendBatch(fresh);
+			if (stop.error !== null) break;
+		}
+	} finally {
+		feed.stop();
 	}
 	const handled = [
 		...report.created.map((entry) => entry.localId),
@@ -212,7 +407,7 @@ export async function runMerge(
 			.filter((entry) => PERMANENT_REJECTS.has(entry.code))
 			.map((entry) => entry.localId)
 	];
-	return { report, handled, error, unsent: items.length - sent };
+	return { report, handled, error: stop.error, unsent: items.length - sent };
 }
 
 // ---- Own shares (`GET /me/shares`) ----------------------------------------------------------

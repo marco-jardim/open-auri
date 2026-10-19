@@ -1,7 +1,7 @@
 import { encodeS1 } from 'open-auri/share';
 import { responseGeometry } from '#lib/charts/response.ts';
 import { presetUrl, qrSvg } from '#lib/qr/index.ts';
-import { number, type Locale, type Tape } from './archive.ts';
+import { number, tapeShareUrl, type Locale, type Tape } from './archive.ts';
 
 export interface SheetCopy {
 	title: string;
@@ -43,7 +43,8 @@ function xml(value: string): string {
 /** The complete track sheet, not a screenshot. Only core-derived chart geometry is projected. */
 export function sheetSvg(tape: Tape, origin: string, locale: Locale, copy: SheetCopy): string {
 	const code = encodeS1(tape);
-	const url = presetUrl(origin, code);
+	// The card's QR opens the tape where the editor admits it (`tapeShareUrl`).
+	const url = tapeShareUrl(presetUrl(origin, code), tape);
 	const chart = responseGeometry(tape, { left: 85, top: 195, width: 1030, height: 260 });
 	const text = (x: number, y: number, value: string, size = 18) =>
 		`<text x="${x}" y="${y}" font-size="${size}">${xml(value)}</text>`;

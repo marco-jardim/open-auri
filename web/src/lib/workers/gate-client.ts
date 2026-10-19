@@ -1,6 +1,7 @@
 import { createLatestClient, type RequestOptions, type WorkerClientOptions } from './client.ts';
 import {
 	handleGateRequest,
+	type ClassifyInput,
 	type CommitInput,
 	type DragInput,
 	type GateInput
@@ -26,6 +27,22 @@ export function createGateWorker(options: WorkerClientOptions = {}) {
 		async commit(input: Omit<CommitInput, 'type'>, requestOptions?: RequestOptions) {
 			const response = await client.request({ ...input, type: 'commit' }, requestOptions);
 			if (response.type !== 'commit') throw new Error('Unexpected gate response');
+			return response;
+		},
+		/**
+		 * The class of a curve (standard, YOLO or rejected), cached by signature in the worker's
+		 * own cache (not the page's: see `createClassifier`, which keeps the answers for the page).
+		 * Latest wins like the other requests: use a client of its own when drags may be in flight.
+		 */
+		async classify(
+			input: Pick<ClassifyInput, 'bands' | 'preampDb'>,
+			requestOptions?: RequestOptions
+		) {
+			const response = await client.request(
+				{ bands: input.bands, preampDb: input.preampDb, type: 'classify' },
+				requestOptions
+			);
+			if (response.type !== 'classify') throw new Error('Unexpected gate response');
 			return response;
 		}
 	};

@@ -4,13 +4,16 @@ import {
 	LAYERS,
 	includesLayer,
 	isLayerKeyEvent,
+	isLockedBand,
 	isLockedKind,
+	isUltrasonicLocked,
 	kindAllowed,
 	kindsForLayer,
 	layerFromKey,
 	layerUrl,
 	parseLayer
 } from '#lib/components/pages/curva/layers.ts';
+import { hasUltrasonic, type Band } from '#lib/components/pages/curva/model.ts';
 
 const key = (overrides: Partial<Parameters<typeof isLayerKeyEvent>[0]> = {}) => ({
 	key: '2',
@@ -95,5 +98,35 @@ describe('layer model', () => {
 		}
 		expect(isLockedKind('PK', 'ajustar')).toBe(false);
 		expect(kindAllowed('OFF', 'ouvir')).toBe(true);
+	});
+
+	test('bands above 20 kHz are locked outside Engenharia, like HS/LP/HP', () => {
+		const ultra: Band = { kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 };
+		const audible: Band = { kind: 'PK', freqHz: 20000, gainDb: -3, qFactor: 1 };
+		const hs: Band = { kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 };
+		const off: Band = { kind: 'OFF' };
+		for (const layer of ['ouvir', 'ajustar'] as const) {
+			expect(isLockedBand(ultra, layer)).toBe(true);
+			expect(isLockedBand(audible, layer)).toBe(false);
+			expect(isLockedBand(hs, layer)).toBe(true);
+			expect(isUltrasonicLocked([audible, ultra], layer)).toBe(true);
+			expect(isUltrasonicLocked({ bands: [audible, off], preampDb: -1 }, layer)).toBe(false);
+		}
+		for (const band of [ultra, audible, hs]) expect(isLockedBand(band, 'engenharia')).toBe(false);
+		expect(isUltrasonicLocked([ultra], 'engenharia')).toBe(false);
+		expect(isLockedBand(off, 'ouvir')).toBe(false);
+		// The shared rule (also used by the import layer check): any section above 20 kHz.
+		expect(hasUltrasonic({ bands: [audible, ultra], preampDb: -3 })).toBe(true);
+		expect(hasUltrasonic([audible, off, hs])).toBe(false);
+		expect(hasUltrasonic([{ kind: 'LP', freqHz: 20001, qFactor: 0.7 }])).toBe(true);
+		expect(hasUltrasonic([])).toBe(false);
+	});
+
+	test('one hasUltrasonic: the import layer check uses the core rule (NaN counts as above)', async () => {
+		const io = await import('#lib/components/pages/curva/io.ts');
+		expect(Object.keys(io)).not.toContain('hasUltrasonic');
+		const nan: Band = { kind: 'PK', freqHz: Number.NaN, gainDb: -3, qFactor: 1 };
+		expect(hasUltrasonic([nan])).toBe(true);
+		expect(hasUltrasonic([{ kind: 'PK', freqHz: 20000, gainDb: -3, qFactor: 1 }])).toBe(false);
 	});
 });

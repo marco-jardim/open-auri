@@ -26,7 +26,9 @@ export const API_ERROR_CODES = [
 	'DUPLICATE',
 	'GONE',
 	'QUOTA_EXCEEDED',
-	'CONSENT_REQUIRED'
+	'CONSENT_REQUIRED',
+	'YOLO_ACK_REQUIRED',
+	'YOLO_PUBLICATION_OFF'
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -55,7 +57,9 @@ export const API_ERROR_STATUS: Readonly<Record<ApiErrorCode, number>> = {
 	DUPLICATE: 409,
 	GONE: 410,
 	QUOTA_EXCEEDED: 429,
-	CONSENT_REQUIRED: 400
+	CONSENT_REQUIRED: 400,
+	YOLO_ACK_REQUIRED: 409,
+	YOLO_PUBLICATION_OFF: 403
 };
 
 /** JSON-serialisable detail payload (machine-readable; never echoes user input). */

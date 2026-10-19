@@ -1,4 +1,33 @@
 /**
+ * Whether `band` is a filter section (PK, LS, HS, LP or HP) above the audible
+ * band: `freqHz` > `AUDIBLE_MAX_HZ`. NaN-safe like the gate's D7 checks: a
+ * section whose `freqHz` is not a number at most `AUDIBLE_MAX_HZ` (NaN, a
+ * non-number, missing) counts as above. OFF, unknown kinds and non-objects
+ * never do. Each field is read once and never coerced.
+ * @param {unknown} band
+ * @returns {boolean}
+ */
+export function isUltrasonic(band: unknown): boolean;
+/**
+ * Highest frequency (Hz) `band` may take in `layer`:
+ * - Ouvir and Ajustar (and any other layer): `AUDIBLE_MAX_HZ`;
+ * - Engenharia: `ULTRA_MAX_HZ` for a section that never amplifies (PK with
+ *   gain <= 0, any Q; LS/HS with gain <= 0 and Q <= `ULTRA_CUT_Q_MAX`; LP/HP
+ *   with Q <= `ULTRA_CUT_Q_MAX`), else `AUDIBLE_MAX_HZ`;
+ * - Engenharia with `yolo: true` (Modo YOLO exists only there):
+ *   `ULTRA_MAX_HZ` for every kind.
+ * UI policy like the other ranges: above `AUDIBLE_MAX_HZ` the gate refuses
+ * whatever Engenharia would not allow (`d7:boost-above-20k`, waived by its YOLO
+ * profile only). Only `yolo === true` counts.
+ * @param {unknown} band
+ * @param {{layer?: string, yolo?: boolean}} [options]
+ * @returns {number}
+ */
+export function freqMaxFor(band: unknown, { layer, yolo }?: {
+    layer?: string;
+    yolo?: boolean;
+}): number;
+/**
  * Whether `kind` may be used in `layer`. Unknown layers allow nothing.
  * @param {unknown} kind
  * @param {string} layer
@@ -95,9 +124,25 @@ export const SOFT_RANGES: Readonly<Record<SoftRangeId, Readonly<SoftRange>>>;
 /**
  * Absolute control ranges (any layer) and the D7 boost rules: a boost (gain > 0)
  * on PK/LS/HS needs Q <= `boostQMax`, and no PK may boost above `pkBoostMaxHz`.
+ *
+ * `freqHz` stays [20, 20000]: the solver, the Ouvir and Ajustar layers and
+ * `clampToAbs` rely on it. Engenharia and Modo YOLO may go higher, up to
+ * `ULTRA_MAX_HZ`, through `freqMaxFor` only.
  * @type {Readonly<AbsRanges>}
  */
 export const ABS_RANGES: Readonly<AbsRanges>;
+/** Top of the audible band (Hz): the highest frequency of Ouvir and Ajustar. */
+export const AUDIBLE_MAX_HZ: 20000;
+/**
+ * Highest frequency of a section above the audible band (Hz): Engenharia, for
+ * sections that never amplify, and Modo YOLO, for every kind (`freqMaxFor`).
+ */
+export const ULTRA_MAX_HZ: 32000;
+/**
+ * Highest Q of an LS/HS cut and of an LP/HP placed above `AUDIBLE_MAX_HZ`
+ * outside Modo YOLO: up to it the section has no resonant bump above 0 dB.
+ */
+export const ULTRA_CUT_Q_MAX: 0.71;
 /** Kinds that exist only behind the `experimental` flag (engineering layer). */
 export const EXPERIMENTAL_KINDS: readonly string[];
 /**

@@ -194,6 +194,34 @@ test('the experimental lever appears only when required and is bound to its own 
 	await expect.element(lever).not.toHaveAttribute('aria-disabled');
 });
 
+test('a filter above 20 kHz asks for the experimental lever and says why', async () => {
+	const fake = connected();
+	// A PK cut at 25 kHz: no experimental kind, so the gate's own flag stays off.
+	const ultra: Band = { kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 };
+	const screen = await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		bands: [ultra, ...NEUTRO.bands.slice(1)],
+		preampDb: -1,
+		experimental: false,
+		onclose: vi.fn()
+	});
+	const lever = page.getByRole('button', { name: m.cable_write_simulated(), exact: true });
+	await page.getByRole('checkbox', { name: m.cable_confirm_volume(), exact: true }).click();
+	await page.getByRole('checkbox', { name: m.cable_confirm_connection(), exact: true }).click();
+	await expect.element(lever).toHaveAccessibleDescription(m.cable_fux_lock_experimental());
+	await expect.element(page.getByText(m.cable_experimental_ultra())).toBeVisible();
+	await page.getByRole('checkbox', { name: m.cable_confirm_experimental(), exact: true }).click();
+	await expect.element(lever).not.toHaveAttribute('aria-disabled');
+	// 20 kHz itself is audible: no lever, no note.
+	const audible: Band = { kind: 'PK', freqHz: 20000, gainDb: -3, qFactor: 1 };
+	await screen.rerender({ bands: [audible, ...NEUTRO.bands.slice(1)] });
+	await expect
+		.element(page.getByRole('checkbox', { name: m.cable_confirm_experimental(), exact: true }))
+		.not.toBeInTheDocument();
+	expect(screen.container.querySelector('[data-testid="ultra-experimental"]')).toBeNull();
+});
+
 test('the literal warning is always visible; its lamp and the salto follow the policy', async () => {
 	const fake = connected();
 	const original = fake.service.checklist;

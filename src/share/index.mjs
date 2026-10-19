@@ -2,6 +2,8 @@
 
 export {
   S1_VERSION,
+  S1_VERSIONS,
+  S1_FREQ_MAX,
   S1_VARIANT_PARAMETRIC,
   S1_BYTES,
   S1_LENGTH,
@@ -16,6 +18,7 @@ export {
   EnvelopeError,
   LABEL_COUNT,
   LABEL_MAX,
+  envelopeFormat,
   normalizeText,
   normalizeLabels,
   normalizeEnvelope,

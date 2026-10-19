@@ -1,13 +1,16 @@
 // Fixtures of the personal library tests (T4.3): verified members with route locals, synthetic
 // API events for the real `+server.ts` handlers, and S1 strings the real gate accepts (the official
-// presets) or refuses (HS shelves, unique per call). Every user and lineage is unique per test, so
+// presets), classifies as YOLO or refuses in every profile (unique per call). Every user and
+// lineage is unique per test, so
 // the files can share the database.
 import { env } from 'cloudflare:workers';
+import { NEUTRAL_BANDS } from 'open-auri/dsp';
 import { encodeS1 } from 'open-auri/share';
 import type { ApiEvent } from '#lib/server/api/index.ts';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
 import reference from '../../../../../test/fixtures/eq0xcb.reference.json';
 import { locals, seedUser, type SeededUser } from '../../account/helpers.ts';
+import { randomInt, randomTenths } from '../../random.ts';
 import { ban, count, curveInput, nick, publish, sid } from '../repo/helpers.ts';
 
 export { ban, count, curveInput, publish, sid };
@@ -29,22 +32,35 @@ export function presetS1(index: number): string {
 	return encodeS1(curve);
 }
 
-function randomInt(min: number, max: number): number {
-	const [value] = crypto.getRandomValues(new Uint32Array(1));
-	return min + ((value ?? 0) % (max - min + 1));
-}
-
-/** A unique curve the gate refuses (`k:kind-not-allowed`: HS shelves outside the lab layer). */
+/**
+ * A unique curve the gate refuses in every profile: two +12 dB peaks at a 0 dB preamp
+ * (`e:output-audible`, hard). HS shelves are standard on the server since GATE_IMPL 2.
+ */
 export function rejectedS1(): string {
 	const base = PRESETS[0];
 	if (!base) throw new Error('no preset');
-	const shelf = (): Band => ({
-		kind: 'HS',
-		freqHz: randomInt(1000, 15999),
-		gainDb: -randomInt(1, 60) / 10,
-		qFactor: 0.71
+	const peak = (): Band => ({
+		kind: 'PK',
+		freqHz: randomInt(800, 4000),
+		gainDb: 12,
+		qFactor: 1
 	});
-	return encodeS1({ bands: [shelf(), shelf(), ...base.bands.slice(2)], preampDb: base.preampDb });
+	return encodeS1({ bands: [peak(), peak(), ...base.bands.slice(2)], preampDb: 0 });
+}
+
+/**
+ * A unique YOLO curve: neutral bands with one small PK boost above 16 kHz
+ * (`d7:pk-boost-above-16k`, waived by the YOLO profile) and every hard check far inside the limits.
+ */
+export function yoloS1(): string {
+	const boost: Band = {
+		kind: 'PK',
+		freqHz: randomInt(16_200, 19_800),
+		gainDb: randomTenths(5, 15),
+		qFactor: 1
+	};
+	const bands = NEUTRAL_BANDS.map((neutral, i) => (i === 0 ? boost : neutral)) as Band[];
+	return encodeS1({ bands, preampDb: randomTenths(-90, -60) });
 }
 
 export interface Member {

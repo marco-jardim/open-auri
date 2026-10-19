@@ -1,4 +1,4 @@
-// S1 v1: compact, canonical and lossless share code for a 10-band EQ curve.
+// S1 v1 and v2: compact, canonical and lossless share code for a 10-band EQ curve.
 //
 // Spec (frozen): ../../docs/s1-format.md
 //
@@ -6,6 +6,11 @@
 // + CRC-16/CCITT-FALSE, written MSB first and serialized as exactly 68 base64url
 // characters without padding. Bands keep their wire order: the internal peak of
 // the chain depends on it.
+//
+// v2 has the v1 layout bit for bit; only the version field (2) and the frequency
+// range (1–32000 Hz instead of 1–20000 Hz) differ. Writers emit v2 if and only if
+// a non-OFF band is above 20000 Hz, so every v1 curve keeps its v1 code, curveId
+// and canonKey, and a curve has exactly one code.
 //
 // Pure ESM with no DOM or Node built-ins, so it runs unchanged in Node, browsers
 // and Workers. curveId() uses WebCrypto (globalThis.crypto.subtle).
@@ -17,21 +22,31 @@ import { BAND_COUNT, crc16Ccitt, snapshotBands } from '../dsp/eq0xcb.mjs';
 /**
  * @typedef {'s1:charset' | 's1:length' | 's1:version' | 's1:variant' | 's1:crc' | 's1:kind'
  *   | 's1:range' | 's1:noncanonical' | 's1:grid' | 's1:bands'} S1ErrorCode
- * @typedef {{version: number, variant: number, bands: Band[], preampDb: number}} S1Curve
+ * @typedef {1 | 2} S1Version
+ * @typedef {{version: S1Version, variant: number, bands: Band[], preampDb: number}} S1Curve
  * @typedef {{bands: readonly Band[], preampDb: number}} S1Input
  * @typedef {{code: number, freq: number, gain: number, q: number}} WireBand
  */
 
-/** Value of the version field for S1 v1. */
+/** Value of the version field for S1 v1 (a v2 code carries 2; see S1_VERSIONS). */
 export const S1_VERSION = 1;
 
-/** Value of the variant field for the parametric variant (the only one defined in v1). */
+/**
+ * Versions readers accept, oldest first. Writers emit the lowest one that fits
+ * the curve: v2 if and only if a non-OFF band is above S1_FREQ_MAX[1].
+ */
+export const S1_VERSIONS = Object.freeze(/** @type {const} */ ([1, 2]));
+
+/** Highest band frequency (Hz) of each version; the lowest is 1 Hz in both. */
+export const S1_FREQ_MAX = Object.freeze(/** @type {const} */ ({ 1: 20000, 2: 32000 }));
+
+/** Value of the variant field for the parametric variant (the only one defined in v1 and v2). */
 export const S1_VARIANT_PARAMETRIC = 0;
 
-/** Size of an S1 v1 code in bytes. */
+/** Size of an S1 code in bytes (v1 and v2). */
 export const S1_BYTES = 51;
 
-/** Size of an S1 v1 code in base64url characters (no padding). */
+/** Size of an S1 code in base64url characters, no padding (v1 and v2). */
 export const S1_LENGTH = 68;
 
 /**
@@ -48,7 +63,6 @@ const GAIN_BITS = 9;
 const Q_BITS = 11;
 const PREAMP_BITS = 8;
 const FREQ_MIN = 1;
-const FREQ_MAX = 20000;
 const GAIN_MIN = -256; // tenths of dB
 const GAIN_MAX = 127;
 const Q_MIN = 1; // hundredths
@@ -111,7 +125,8 @@ function toWireBand(band, index) {
     throw new S1Error('s1:kind', `${where}: unknown filter kind`);
   }
   if (band.kind === 'OFF') return { code, freq: 0, gain: 0, q: 0 };
-  const freq = toSteps(band.freqHz, 1, FREQ_MIN, FREQ_MAX, `${where} freqHz`);
+  // The widest grid of any version; the curve's version follows from its bands.
+  const freq = toSteps(band.freqHz, 1, FREQ_MIN, S1_FREQ_MAX[2], `${where} freqHz`);
   const q = toSteps(band.qFactor, 100, Q_MIN, Q_MAX, `${where} qFactor`);
   if (band.kind === 'LP' || band.kind === 'HP') {
     if (band.gainDb !== undefined) {
@@ -140,7 +155,17 @@ function toWireCurve(bands, preampDb) {
   }
   const wireBands = snapshot.map(toWireBand);
   const preamp = -toSteps(preampDb, 10, -PREAMP_MAX, 0, 'preampDb') + 0;
-  return { wireBands, preamp };
+  return { wireBands, preamp, version: versionOf(wireBands) };
+}
+
+/**
+ * The canonical version of a curve: the lowest that fits it. v2 if and only if a
+ * non-OFF band is above the v1 frequency maximum, v1 otherwise.
+ * @param {readonly WireBand[]} wireBands
+ * @returns {S1Version}
+ */
+function versionOf(wireBands) {
+  return wireBands.some((band) => band.code !== OFF_CODE && band.freq > S1_FREQ_MAX[1]) ? 2 : 1;
 }
 
 // --- Bit packing ----------------------------------------------------------------
@@ -148,8 +173,9 @@ function toWireCurve(bands, preampDb) {
 /**
  * @param {readonly WireBand[]} wireBands
  * @param {number} preamp tenths of dB below 0
+ * @param {S1Version} version
  */
-function pack(wireBands, preamp) {
+function pack(wireBands, preamp, version) {
   const bytes = new Uint8Array(S1_BYTES);
   let bit = 0;
   /**
@@ -162,7 +188,7 @@ function pack(wireBands, preamp) {
       bit++;
     }
   };
-  put(S1_VERSION, 2);
+  put(version, 2);
   put(S1_VARIANT_PARAMETRIC, 2);
   for (const band of wireBands) {
     put(band.code, KIND_BITS);
@@ -225,15 +251,19 @@ function fromBase64Url(text) {
 
 // --- Decoding -------------------------------------------------------------------
 
+/** @param {number} value @returns {value is S1Version} */
+const isVersion = (value) => value === 1 || value === 2;
+
 /**
  * @param {number} index
  * @param {number} code
  * @param {number} freq
  * @param {number} gain signed tenths of dB
  * @param {number} q hundredths
+ * @param {S1Version} version
  * @returns {Band}
  */
-function fromWireBand(index, code, freq, gain, q) {
+function fromWireBand(index, code, freq, gain, q, version) {
   const where = `band ${index}`;
   const kind = S1_KIND_CODES[code];
   if (kind === undefined) throw new S1Error('s1:kind', `${where}: invalid kind code ${code}`);
@@ -243,8 +273,12 @@ function fromWireBand(index, code, freq, gain, q) {
     }
     return { kind };
   }
-  if (freq < FREQ_MIN || freq > FREQ_MAX) {
-    throw new S1Error('s1:range', `${where}: freqHz ${freq} outside [${FREQ_MIN}, ${FREQ_MAX}]`);
+  const freqMax = S1_FREQ_MAX[version];
+  if (freq < FREQ_MIN || freq > freqMax) {
+    throw new S1Error(
+      's1:range',
+      `${where}: freqHz ${freq} outside [${FREQ_MIN}, ${freqMax}] (S1 v${version})`,
+    );
   }
   if (gain > GAIN_MAX) {
     throw new S1Error('s1:range', `${where}: gainDb ${gain / 10} above ${GAIN_MAX / 10}`);
@@ -267,7 +301,7 @@ function parse(text) {
   // before its (possibly different) length is judged.
   const head = BASE64URL.indexOf(text[0]);
   const version = head >>> 4;
-  if (version !== S1_VERSION) throw new S1Error('s1:version', `unsupported version ${version}`);
+  if (!isVersion(version)) throw new S1Error('s1:version', `unsupported version ${version}`);
   const variant = (head >>> 2) & 3;
   if (variant !== S1_VARIANT_PARAMETRIC) {
     throw new S1Error('s1:variant', `unsupported variant ${variant}`);
@@ -284,21 +318,34 @@ function parse(text) {
   read(4);
   /** @type {Band[]} */
   const bands = [];
+  /** @type {WireBand[]} */
+  const wireBands = [];
   for (let index = 0; index < BAND_COUNT; index++) {
     const code = read(KIND_BITS);
     const freq = read(FREQ_BITS);
     const rawGain = read(GAIN_BITS);
     const q = read(Q_BITS);
-    bands.push(fromWireBand(index, code, freq, rawGain >= 256 ? rawGain - 512 : rawGain, q));
+    const gain = rawGain >= 256 ? rawGain - 512 : rawGain;
+    bands.push(fromWireBand(index, code, freq, gain, q, version));
+    wireBands.push({ code, freq, gain, q });
+  }
+  // One curve, one code: a v2 code is only valid for a curve that v1 cannot carry.
+  if (versionOf(wireBands) !== version) {
+    throw new S1Error(
+      's1:noncanonical',
+      `S1 v${version} without a band above ${S1_FREQ_MAX[1]} Hz (the curve is S1 v1)`,
+    );
   }
   const preamp = read(PREAMP_BITS);
-  return { bytes, bands, preampDb: preamp === 0 ? 0 : -preamp / 10 };
+  return { bytes, version, bands, preampDb: preamp === 0 ? 0 : -preamp / 10 };
 }
 
 // --- Public API -----------------------------------------------------------------
 
 /**
- * Encodes a curve as its S1 v1 string (68 characters). Bands keep their order.
+ * Encodes a curve as its S1 string (68 characters). Bands keep their order. The
+ * lowest version that fits: v1 (1–20000 Hz), or v2 (1–32000 Hz) if and only if a
+ * non-OFF band is above 20000 Hz.
  * Throws an S1Error (`s1:bands`, `s1:kind`, `s1:range`, `s1:grid`) for anything
  * that is not exactly representable; values are never rounded.
  * @param {S1Input} curve
@@ -308,33 +355,34 @@ export function encodeS1(curve) {
   if (curve === null || typeof curve !== 'object') {
     throw new S1Error('s1:bands', 'expected { bands, preampDb }');
   }
-  const { wireBands, preamp } = toWireCurve(curve.bands, curve.preampDb);
-  return toBase64Url(pack(wireBands, preamp));
+  const { wireBands, preamp, version } = toWireCurve(curve.bands, curve.preampDb);
+  return toBase64Url(pack(wireBands, preamp, version));
 }
 
 /**
- * Decodes and validates an S1 string. Throws an S1Error with one of the codes
- * `s1:charset`, `s1:length`, `s1:version`, `s1:variant`, `s1:crc`, `s1:kind`,
- * `s1:range`, `s1:noncanonical`.
+ * Decodes and validates an S1 string (v1 or v2). Throws an S1Error with one of the
+ * codes `s1:charset`, `s1:length`, `s1:version`, `s1:variant`, `s1:crc`, `s1:kind`,
+ * `s1:range`, `s1:noncanonical` (including a v2 code without a band above 20000 Hz).
  * @param {string} s1
  * @returns {S1Curve}
  */
 export function decodeS1(s1) {
-  const { bands, preampDb } = parse(s1);
-  return { version: S1_VERSION, variant: S1_VARIANT_PARAMETRIC, bands, preampDb };
+  const { version, bands, preampDb } = parse(s1);
+  return { version, variant: S1_VARIANT_PARAMETRIC, bands, preampDb };
 }
 
 /**
  * Order-independent canonical key for deduplication and similarity: equal for
  * every permutation of the same bands. Integer units (Hz, 0.1 dB, 0.01 Q),
  * bands sorted by frequency, kind code, Q and gain, OFF bands last as `OFF`.
+ * Prefixed by the curve's version (`v1;` or, for a band above 20000 Hz, `v2;`).
  * Validates like encodeS1. Never use this order on the wire.
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @returns {string}
  */
 export function canonKey(bands, preampDb) {
-  const { wireBands, preamp } = toWireCurve(bands, preampDb);
+  const { wireBands, preamp, version } = toWireCurve(bands, preampDb);
   const sorted = [...wireBands].sort(
     (a, b) =>
       Number(a.code === OFF_CODE) - Number(b.code === OFF_CODE) ||
@@ -348,12 +396,12 @@ export function canonKey(bands, preampDb) {
       ? 'OFF'
       : `${S1_KIND_CODES[band.code]},${band.freq},${band.gain},${band.q}`,
   );
-  return [`v${S1_VERSION}`, String(-preamp + 0), ...parts].join(';');
+  return [`v${version}`, String(-preamp + 0), ...parts].join(';');
 }
 
 /**
  * Stable short id of a curve in wire order: the first 12 characters of the
- * lowercase, unpadded RFC 4648 base32 of SHA-256 over the 51 S1 bytes.
+ * lowercase, unpadded RFC 4648 base32 of SHA-256 over the 51 S1 bytes (v1 or v2).
  * Validates the string first (same errors as decodeS1).
  * @param {string} s1
  * @returns {Promise<string>}

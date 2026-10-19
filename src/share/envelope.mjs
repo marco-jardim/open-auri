@@ -1,7 +1,7 @@
 // S5 publication envelope. Pure ESM: no schema import, DOM or Node dependencies.
 // This validates publication data, NOT the safety gate; run the gate separately.
 
-import { decodeS1, encodeS1 } from './s1.mjs';
+import { decodeS1, encodeS1, S1_FREQ_MAX } from './s1.mjs';
 
 /** @import { Band } from '../dsp/eq0xcb.mjs' */
 
@@ -18,13 +18,19 @@ import { decodeS1, encodeS1 } from './s1.mjs';
  * all-null list is omitted. Labels are presentation only: never part of S1,
  * curveId, canonKey or the safety gate.
  * @typedef {(string | null)[]} Labels
+ * `open-auri/preset@1`: S1 v1, bands up to 20000 Hz, no labels. `open-auri/preset@2`:
+ * `@1` plus optional labels, bands up to 32000 Hz and an S1 v1 or v2 code. Writers
+ * emit the lowest format that fits (envelopeFormat).
+ * @typedef {'open-auri/preset@1' | 'open-auri/preset@2'} EnvelopeFormat
  * Fields shared by every envelope format.
  * @typedef {{name: string, description: string, author?: string | null, source: string,
  *   license: 'CC0-1.0' | 'CC-BY-4.0', code: string, preampDb: number, bands: Band[],
  *   recipe?: Recipe, lang: 'pt-BR' | 'en-US', createdAt: string}} EnvelopeFields
- * `open-auri/preset@1`: never carries labels (a `labels` key is env:extra).
+ * `open-auri/preset@1`: an S1 v1 code, bands up to 20000 Hz, never labels (a
+ * `labels` key is env:extra).
  * @typedef {EnvelopeFields & {format: 'open-auri/preset@1', labels?: never}} EnvelopeV1
- * `open-auri/preset@2`: optional filter labels (omitted when every entry is null).
+ * `open-auri/preset@2`: an S1 v1 or v2 code, bands up to 32000 Hz and optional
+ * filter labels (omitted when every entry is null).
  * @typedef {EnvelopeFields & {format: 'open-auri/preset@2', labels?: Labels}} EnvelopeV2
  * A validated envelope, discriminated by `format`.
  * @typedef {EnvelopeV1 | EnvelopeV2} Envelope
@@ -56,7 +62,8 @@ const KEYS_1 = [
   'lang',
   'createdAt',
 ];
-// `open-auri/preset@2` adds `labels` after `bands`; also the serialization order.
+// `open-auri/preset@2` adds `labels` after `bands`; also the serialization order. It also
+// widens the bands to 32000 Hz and accepts S1 v2 codes (a v2 code in `@1` is env:s1).
 const KEYS_2 = [
   'format',
   'name',
@@ -359,6 +366,46 @@ export function normalizeLabels(input, { lenient = false } = {}) {
 }
 
 /**
+ * Whether `@2` validation keeps a `labels` key for this input: anything but null,
+ * undefined or LABEL_COUNT entries that all normalize to null. A malformed list
+ * counts, so its errors are reported against `@2` (not as `@1` env:extra).
+ * @param {unknown} labels
+ * @returns {boolean}
+ */
+function hasLabels(labels) {
+  if (labels === null || labels === undefined) return false;
+  if (!Array.isArray(labels) || labels.length !== LABEL_COUNT) return true;
+  /** @type {EnvelopeIssue[]} */
+  const errors = [];
+  return Array.from(labels, (entry, index) => normalizeLabel(entry, index, errors)).some(
+    (entry) => entry !== null,
+  );
+}
+
+/**
+ * The lowest envelope format that carries this curve, the one writers emit:
+ * `open-auri/preset@2` when filter labels are set or a non-OFF band is above
+ * 20000 Hz (an S1 v2 curve), `open-auri/preset@1` otherwise. Labels are set unless
+ * null, undefined or LABEL_COUNT entries that all normalize to null (an envelope
+ * then omits the key). Only picks the format: validate the envelope afterwards.
+ * @param {{bands?: unknown, labels?: unknown}} curve
+ * @returns {EnvelopeFormat}
+ */
+export function envelopeFormat(curve) {
+  const bands = curve?.bands;
+  const ultrasonic =
+    Array.isArray(bands) &&
+    bands.some(
+      (band) =>
+        isObject(band) &&
+        band.kind !== 'OFF' &&
+        typeof band.freqHz === 'number' &&
+        band.freqHz > S1_FREQ_MAX[1],
+    );
+  return ultrasonic || hasLabels(curve?.labels) ? FORMAT_2 : FORMAT_1;
+}
+
+/**
  * Clone the known object levels, retaining unknown keys for env:extra checks.
  * Malformed values are retained for validation, not silently discarded/coerced.
  * @param {unknown} input
@@ -471,7 +518,8 @@ function stringify(value) {
  * Validate and normalize without mutating the input. Paths are JSON Pointers
  * ('' means root). All independent field errors are collected. S1 must describe
  * EXACTLY the supplied numbers and wire order, not merely round to the same code.
- * The safety gate is intentionally NOT checked here.
+ * Bands go up to 20000 Hz in `@1` and 32000 Hz in `@2` (env:range); an S1 v2 code
+ * needs `@2` (env:s1). The safety gate is intentionally NOT checked here.
  * @param {unknown} obj
  * @returns {EnvelopeResult}
  */
@@ -568,6 +616,8 @@ export function validateEnvelope(obj) {
     }
   }
   const curveStart = errors.length;
+  // `@2` carries S1 v2 curves (bands up to 32000 Hz); anything else is judged as `@1`.
+  const freqMax = value.format === FORMAT_2 ? S1_FREQ_MAX[2] : S1_FREQ_MAX[1];
   if (!Array.isArray(value.bands)) add('/bands', 'env:type', 'Expected an array');
   else {
     if (value.bands.length !== 10) add('/bands', 'env:bands', 'Expected exactly ten bands');
@@ -588,7 +638,7 @@ export function validateEnvelope(obj) {
       object(band, path, keys, keys);
       enumeration(band.kind, `${path}/kind`, ['PK', 'LS', 'HS', 'LP', 'HP', 'OFF']);
       if (!off) {
-        number(band.freqHz, `${path}/freqHz`, 1, 20000, 1);
+        number(band.freqHz, `${path}/freqHz`, 1, freqMax, 1);
         number(band.qFactor, `${path}/qFactor`, 0.01, 20.47, 100);
         if (!pass) number(band.gainDb, `${path}/gainDb`, -25.6, 12.7, 10);
       }
@@ -597,7 +647,9 @@ export function validateEnvelope(obj) {
   if (typeof value.code === 'string') {
     try {
       const decoded = decodeS1(value.code);
-      if (
+      if (decoded.version === 2 && value.format !== FORMAT_2) {
+        add('/code', 'env:s1', 'S1 v2 requires open-auri/preset@2');
+      } else if (
         errors.length === curveStart &&
         Array.isArray(value.bands) &&
         typeof value.preampDb === 'number'

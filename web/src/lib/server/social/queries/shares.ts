@@ -4,15 +4,21 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { first, sql } from '#lib/server/db.ts';
 import { isLinkableTombstone } from '#lib/server/social/queries/curves.ts';
 import { isSocialId } from '#lib/server/social/repo.ts';
+import type { YoloPublication } from '#lib/server/social/types.ts';
 
 /**
  * True when `lineageId` is a retracted lineage that was linkable before the retraction (public or
  * unlisted, not moderated, head curve passed the gate, owner not banned): the shared page answers
  * 410 instead of 404. Private, moderated, gate-failed or unknown lineages stay a plain 404, so
- * their existence is never revealed. Same rule as the curves service (`isLinkableTombstone`).
+ * their existence is never revealed. Same rule as the curves service (`isLinkableTombstone`,
+ * under the kill switch `yolo`, default 'off').
  */
-export function isRetractedLinkable(db: D1Database, lineageId: string): Promise<boolean> {
-	return isLinkableTombstone(db, lineageId);
+export function isRetractedLinkable(
+	db: D1Database,
+	lineageId: string,
+	yolo: YoloPublication = 'off'
+): Promise<boolean> {
+	return isLinkableTombstone(db, lineageId, yolo);
 }
 
 /** True when `userId` owns `lineageId` (any state): the lineage author. */

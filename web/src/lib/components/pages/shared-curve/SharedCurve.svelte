@@ -20,6 +20,9 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SharedCurveData, SharedCurveMeta } from './types.ts';
+	import { curveClassification } from '#lib/gate-verdicts.ts';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
+	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
 
 	type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -225,14 +228,34 @@
 		}
 	}
 
+	/**
+	 * The class of the published curve, derived from its own bands (never a stored marker): a YOLO
+	 * curve gets the `public` notice at the top and a YOLO install label. Writing it needs Modo
+	 * YOLO on (in Engenharia, this tab): then "Instalar curva YOLO" opens the checklist with the
+	 * YOLO profile; otherwise the action is "Ativar Modo YOLO", which opens the curve in the
+	 * editor's Engenharia layer (locked there until YOLO is on). The checklist re-gates every write.
+	 */
+	const sharedClass = $derived(curve ? curveClassification(curve.bands, curve.preampDb) : null);
+	const sharedYolo = $derived(sharedClass?.class === 'yolo');
+	/** Modo YOLO is on in this tab and allows a write (not the free preview). */
+	const yoloReady = $derived(app !== null && app.yolo.enabled && app.yolo.writeBlock() === null);
+	const yoloHref = $derived(
+		`/?camada=engenharia&l=${encodeURIComponent(shared.lineageId)}&v=${encodeURIComponent(shared.versionId)}#p=${shared.s1}`
+	);
+
 	function install() {
 		if (!app || !curve) {
 			notice = m.shared_curve_install_unavailable();
 			return;
 		}
+		// A YOLO curve with YOLO off: the checklist would refuse it; the template offers the
+		// "Ativar Modo YOLO" link instead.
+		if (sharedYolo && !yoloReady) return;
 		stopListening();
 		// Opens the checklist only; the write needs its explicit confirmation (and the gate).
-		app.requestWrite({ ...curve, updatedAt: Date.now() });
+		const snapshot = { ...curve, updatedAt: Date.now() };
+		if (sharedYolo) app.requestWrite(snapshot, { profile: 'yolo' });
+		else app.requestWrite(snapshot);
 	}
 </script>
 
@@ -258,6 +281,13 @@
 <div class="room">
 	<div class="window" aria-hidden="true"></div>
 	<article class="sheet" aria-labelledby="{id}-title">
+		{#if sharedYolo}
+			<YoloCurveNotice
+				variant="public"
+				waived={waivedLabels(sharedClass?.waived)}
+				data-testid="shared-yolo-notice"
+			/>
+		{/if}
 		<header class="tape-header">
 			<span class="caps">{m.shared_curve_eyebrow()}</span>
 			<span class="header-end"
@@ -323,7 +353,18 @@
 				<Button loading={favoriting} aria-pressed={favorited} onclick={favorite}
 					>{favorited ? m.shared_curve_favorited() : m.shared_curve_favorite()}</Button
 				>
-				<Button variant="primary" onclick={install}>{m.shared_curve_install()}</Button>
+				{#if sharedYolo && !yoloReady}
+					<a
+						class="btn btn--primary btn--md"
+						href={yoloHref}
+						data-sveltekit-reload
+						data-testid="shared-yolo-enable">{m.yolopub_enable_yolo()}</a
+					>
+				{:else}
+					<Button variant="primary" onclick={install}
+						>{sharedYolo ? m.yolopub_install_yolo() : m.shared_curve_install()}</Button
+					>
+				{/if}
 			</div>
 			<!-- Pause keeps the comparison (trims, position); "Parar" ends it. -->
 			<Transport
@@ -335,6 +376,9 @@
 			/>
 		</div>
 		<p class="install-note">{m.shared_curve_install_note()}</p>
+		{#if sharedYolo && !yoloReady}
+			<p class="install-note" data-testid="shared-yolo-why">{m.yolopub_install_needs_yolo()}</p>
+		{/if}
 		{#if loginPrompt}<div class="login" role="alert">
 				<p>{m.shared_curve_login_prompt()}</p>
 				<a href={signInHref}>{m.shared_curve_login()}</a>

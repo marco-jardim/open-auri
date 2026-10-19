@@ -15,7 +15,7 @@ const RANKINGS = '/api/v1/rankings';
 
 const CARD_KEYS = ['author', 'createdAt', 'curated', 'curve', 'forked', 'head', 'id', 'updatedAt'];
 const HEAD_KEYS = ['createdAt', 'description', 'id', 'lang', 'license', 'name'];
-const CURVE_KEYS = ['id', 'levelDb', 's1'];
+const CURVE_KEYS = ['id', 'levelDb', 's1', 'yolo'];
 
 interface RawPage {
 	items: { lineage: FeedLineageCard }[];
@@ -92,7 +92,12 @@ describe('public cards of the feed and the rankings', () => {
 		);
 		expectPublicCard(fresh.card, owner);
 		expect(fresh.card?.head.id).toBe(item.versionId);
-		expect(fresh.card?.curve).toEqual({ id: item.curve.id, s1: item.curve.s1, levelDb: -3 });
+		expect(fresh.card?.curve).toEqual({
+			id: item.curve.id,
+			s1: item.curve.s1,
+			levelDb: -3,
+			yolo: false
+		});
 		expectNoLeak(fresh.texts, owner);
 		for (const text of fresh.texts) {
 			expect(text).not.toContain(item.curve.canonKey);

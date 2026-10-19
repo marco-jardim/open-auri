@@ -7,10 +7,11 @@ import { gateForWrite } from 'open-auri/safety';
 import { encodeS1 } from 'open-auri/share';
 import type { ClientApp } from '#lib/app/client.svelte.ts';
 import { IDLE_STATE, type AudioEngineState } from '#lib/audio/engine.ts';
+import { knownClassification } from '#lib/gate-verdicts.ts';
 import type { MeterUpdate } from '#lib/audio/meters.ts';
 import { neutralCurve, type CurveData } from '#lib/state/model.ts';
 import type { LibraryItem } from '#lib/state/library.svelte.ts';
-import { createYoloState } from '#lib/state/yolo.svelte.ts';
+import { createYoloState, YOLO_PHRASE } from '#lib/state/yolo.svelte.ts';
 import type { CommitInput, CommitResult } from '#lib/workers/gate-handler.ts';
 import {
 	archiveTapes,
@@ -182,6 +183,119 @@ test('saving the editor curve is single-flight and announces success before unlo
 	pending.resolve(local('Editor', -9));
 	await expect.element(page.getByText(m.biblioteca_saved(), { exact: true })).toBeVisible();
 	await expect.element(button).not.toHaveAttribute('aria-busy', 'true');
+});
+
+// YOLO publication: the library save is class-based. A YOLO curve is saved (YOLO on or off) and
+// its tape carries the YOLO badge; a rejected curve is refused with the gate's reason.
+const yoloBands = [
+	{ kind: 'HP' as const, freqHz: 30, qFactor: 0.71 },
+	...neutralCurve().bands.slice(1)
+];
+const yoloEditor = (): CurveData => ({
+	...neutralCurve(),
+	name: 'Subsônica',
+	preampDb: -0.5,
+	bands: yoloBands
+});
+
+test('a YOLO editor curve is saved to the library and its tape shows the YOLO badge', async () => {
+	const curve = yoloEditor();
+	const savedItem: LibraryItem = {
+		...curve,
+		id: 'subsonica',
+		s1: encodeS1(curve),
+		favorite: false,
+		createdAt: 0,
+		updatedAt: 1
+	};
+	const client = fakeApp({ curve, items: [savedItem, local('Plain', -3)] });
+	client.library.save.mockResolvedValueOnce(savedItem);
+	const screen = await render(Biblioteca, { app: client.app, origin: 'https://example.test' });
+	const button = page.getByRole('button', { name: m.biblioteca_save(), exact: true });
+	await expect.element(button).not.toHaveAttribute('aria-disabled', 'true');
+	await button.click();
+	expect(client.library.save).toHaveBeenCalledExactlyOnceWith(curve);
+	await expect
+		.element(page.getByText(m.yolopub_library_saved_yolo(), { exact: true }))
+		.toBeVisible();
+	// Only the YOLO tape has the badge (derived from its bands; S1 and S5 carry no marker). Shelf
+	// badges are classified in the background worker: the card shows it once its class lands.
+	const badges = () => screen.container.querySelectorAll('[data-curve-badge="yolo"]');
+	await expect.poll(() => badges().length).toBe(1);
+	expect(badges()[0]?.closest('.tape')?.textContent).toContain('Subsônica');
+});
+
+test('a YOLO tape sheet offers "Ativar Modo YOLO", then writes with the YOLO profile', async () => {
+	const curve = yoloEditor();
+	const item: LibraryItem = {
+		...curve,
+		id: 'subsonica',
+		s1: encodeS1(curve),
+		favorite: false,
+		createdAt: 0,
+		updatedAt: 1
+	};
+	const client = fakeApp({ curve: neutralCurve(), items: [item] });
+	const requestWrite = vi.fn();
+	Object.assign(client.app, { requestWrite });
+	await render(Biblioteca, { app: client.app, origin: 'https://example.test' });
+	await page
+		.getByRole('button', { name: /Subsônica/ })
+		.first()
+		.click();
+	// YOLO off: the standard checklist would refuse the tape, so the action opens Engenharia.
+	const enable = page.getByTestId('sheet-yolo-enable');
+	await expect.element(enable).toHaveTextContent(m.yolopub_enable_yolo());
+	expect(enable.element().getAttribute('href')).toBe(`/?camada=engenharia#p=${item.s1}`);
+	await expect.element(page.getByTestId('sheet-yolo-why')).toBeVisible();
+	expect(page.getByRole('button', { name: m.biblioteca_write(), exact: true }).elements()).toEqual(
+		[]
+	);
+	// YOLO on in Engenharia: the button is labelled YOLO and opens the YOLO checklist.
+	expect(client.app.yolo.enable(YOLO_PHRASE, 'engenharia')).toBe(true);
+	await page.getByRole('button', { name: m.qa1y_write_yolo(), exact: true }).click();
+	expect(requestWrite).toHaveBeenCalledOnce();
+	expect(requestWrite.mock.calls[0]?.[0]).toMatchObject({ name: 'Subsônica', preampDb: -0.5 });
+	expect(requestWrite.mock.calls[0]?.[1]).toEqual({ profile: 'yolo' });
+});
+
+test('shelf badges come from the background classifier, never from a main-thread gate run', async () => {
+	const curve = yoloEditor();
+	const items: LibraryItem[] = Array.from({ length: 3 }, (_, index) => ({
+		...curve,
+		preampDb: curve.preampDb - index * 0.1,
+		name: `Subsônica ${index}`,
+		id: `subsonica-${index}`,
+		s1: encodeS1({ ...curve, preampDb: curve.preampDb - index * 0.1 }),
+		favorite: false,
+		createdAt: 0,
+		updatedAt: 1
+	}));
+	const client = fakeApp({ curve: neutralCurve(), items: [...items, local('Plain', -3)] });
+	const screen = await render(Biblioteca, { app: client.app, origin: 'https://example.test' });
+	await expect
+		.poll(() => screen.container.querySelectorAll('[data-curve-badge="yolo"]').length)
+		.toBe(3);
+	// The page cache now holds each class: a save or write exit finds it without a gate run.
+	for (const item of items) {
+		expect(knownClassification(item.bands, item.preampDb)?.class).toBe('yolo');
+	}
+});
+
+test('a rejected editor curve is not saved: the button says why', async () => {
+	const boost = { kind: 'PK' as const, freqHz: 1000, gainDb: 9, qFactor: 1 };
+	const curve: CurveData = {
+		...neutralCurve(),
+		name: 'Alta',
+		preampDb: -0.5,
+		bands: [boost, boost, boost, boost, ...neutralCurve().bands.slice(4)]
+	};
+	const client = fakeApp({ curve });
+	await render(Biblioteca, { app: client.app, origin: 'https://example.test' });
+	const button = page.getByRole('button', { name: m.biblioteca_save(), exact: true });
+	await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+	(button.element() as HTMLButtonElement).click();
+	expect(client.library.save).not.toHaveBeenCalled();
 });
 
 for (const locale of ['pt-BR', 'en-US'] as const) {

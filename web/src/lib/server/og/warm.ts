@@ -35,7 +35,8 @@ export function ogEnvOf(platform: OgWarmEvent['platform']): OgEnv {
 		db: env.db,
 		media: env.media,
 		publicOrigin: env.publicOrigin,
-		assets: assetsOf(platform?.env)
+		assets: assetsOf(platform?.env),
+		yoloPublication: env.yoloPublication
 	};
 }
 

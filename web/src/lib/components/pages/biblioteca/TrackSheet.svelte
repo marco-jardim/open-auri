@@ -21,8 +21,17 @@
 	import { m } from '#lib/paraglide/messages.js';
 	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
 	import { presetUrl, qrSvg } from '#lib/qr/index.ts';
-	import { envelopeView, number, type Locale, type Tape, type GateResult } from './archive.ts';
-	import { exitReason } from '#lib/components/pages/curva/yolo.ts';
+	import {
+		envelopeView,
+		number,
+		tapeShareUrl,
+		type Locale,
+		type Tape,
+		type GateResult
+	} from './archive.ts';
+	import { classOf, exitReason } from '#lib/components/pages/curva/yolo.ts';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
+	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
 
 	let {
 		tape,
@@ -76,9 +85,10 @@
 	const outputNode = $derived(
 		metering && audible ? (side === 'A' ? audible.a.output : audible.b.output) : null
 	);
+	/** QR and link: in Engenharia for HS/LP/HP or a band above 20 kHz (`tapeShareUrl`). */
 	const share = $derived.by(() => {
 		try {
-			const url = presetUrl(origin, code);
+			const url = tapeShareUrl(presetUrl(origin, code), tape);
 			return { url, image: `data:image/svg+xml,${encodeURIComponent(qrSvg(url))}` };
 		} catch (error) {
 			console.error('Biblioteca QR generation failed', error);
@@ -89,7 +99,7 @@
 		try {
 			return { ...envelopeView(tape, locale, license, author), error: false };
 		} catch (error) {
-			return { json: '', exportable: false, error: error instanceof Error };
+			return { json: '', exportable: false, yolo: false, error: error instanceof Error };
 		}
 	});
 	const localRights = $derived(tape.group === 'local' && !tape.source.startsWith('preset:'));
@@ -97,22 +107,37 @@
 		locale === 'en-US' && tape.descriptionEn ? tape.descriptionEn : tape.description
 	);
 	/**
-	 * The tape leaves the sheet (QR and link, S1 copy, SVG/PNG card, S5 file) only when the
-	 * standard gate accepts it: a library item stored before the library refused YOLO-only curves
-	 * is shown but never shared or exported. Official presets always pass.
+	 * The tape leaves the sheet (QR and link, S1 copy, SVG/PNG card, S5 file) unless it is
+	 * rejected (class-based, curva/yolo.ts): a YOLO tape leaves with the YOLO notice and `-yolo`
+	 * file names; a rejected one is shown but never shared or exported. Official presets pass.
 	 */
-	const shareRefusal = $derived(exitReason(tape, false, locale));
+	const shareRefusal = $derived(exitReason(tape, locale));
+	const tapeClass = $derived(classOf(tape));
+	const fileMark = $derived(tapeClass.class === 'yolo' ? '-yolo' : '');
 	/** Every unavailable control says why (spec §2.6): the Button primitive announces it. */
 	const audioReason = $derived(app ? null : m.biblioteca_reason_audio());
 	const linkReason = $derived(shareRefusal ?? (share.url ? null : m.biblioteca_reason_link()));
+	/**
+	 * A YOLO tape is written with the YOLO checklist, so only while Modo YOLO is on in this tab
+	 * (Engenharia) and may write; otherwise "Ativar Modo YOLO" opens it in the editor's Engenharia
+	 * layer. The standard verdict (`verdict`) does not apply to it: the YOLO checklist re-gates it.
+	 */
+	const tapeYolo = $derived(tapeClass.class === 'yolo');
+	const yoloState = $derived(app?.yolo);
+	const yoloReady = $derived(
+		tapeYolo && yoloState?.enabled === true && yoloState.writeBlock() === null
+	);
+	const yoloHref = $derived(`/?camada=engenharia#p=${code}`);
 	const writeReason = $derived(
 		!app
 			? m.biblioteca_reason_loading()
-			: verdict === null
-				? m.biblioteca_gate_pending()
-				: verdict.ok
-					? null
-					: m.biblioteca_gate_refused()
+			: tapeYolo
+				? null
+				: verdict === null
+					? m.biblioteca_gate_pending()
+					: verdict.ok
+						? null
+						: m.biblioteca_gate_refused()
 	);
 
 	// ---- Name and description of a personal local curve (LIBEDIT) ----------------------------
@@ -388,7 +413,7 @@
 				format === 'svg'
 					? new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
 					: await sheetPng(svg);
-			downloadBlob(blob, `open-auri-sheet.${format}`);
+			downloadBlob(blob, `open-auri-sheet${fileMark}.${format}`);
 		} catch (error) {
 			onStatus(m.biblioteca_export_error());
 			console.error('Biblioteca sheet export failed', error);
@@ -402,7 +427,7 @@
 			const { downloadBlob } = await import('./sheet-export.ts');
 			downloadBlob(
 				new Blob([envelope.json], { type: 'application/json' }),
-				'open-auri-preset.json'
+				`open-auri-preset${fileMark}.json`
 			);
 		} catch (error) {
 			onStatus(m.biblioteca_export_error());
@@ -432,13 +457,19 @@
 		stop();
 		// The selected tape may be a deep $state proxy: hand over a plain copy (R2-02).
 		const copy = $state.snapshot(tape);
-		app.requestWrite({
-			...copy,
-			schema: 1,
-			// A local tape carries its library item's filter labels; presets carry none.
-			labels: copy.labels ?? null,
-			updatedAt: Date.now()
-		});
+		// Classified at the click, on the exact copy the checklist gets.
+		const yolo = classOf(copy).class === 'yolo';
+		if (yolo && !yoloReady) return;
+		app.requestWrite(
+			{
+				...copy,
+				schema: 1,
+				// A local tape carries its library item's filter labels; presets carry none.
+				labels: copy.labels ?? null,
+				updatedAt: Date.now()
+			},
+			yolo ? { profile: 'yolo' } : {}
+		);
 		onClose();
 	}
 </script>
@@ -462,6 +493,9 @@
 			<div>
 				<h2 id="{id}-title">{tape.name}</h2>
 				<p class="byline">{tape.id} / {m.biblioteca_preamp()} {number(tape.preampDb, locale)} dB</p>
+				{#if tapeClass.class === 'yolo'}
+					<YoloCurveNotice variant="library" waived={waivedLabels(tapeClass.waived)} />
+				{/if}
 				{#if description && tape.group === 'local'}
 					<!-- The user's own text: untranslated, in whatever language they wrote it. -->
 					<p class="description own-description">{description}</p>
@@ -686,10 +720,18 @@
 		<div class="actions bottom">
 			<Button disabledReason={app ? null : m.biblioteca_reason_loading()} onclick={useCurve}
 				>{m.biblioteca_use()}</Button
-			><Button variant="primary" disabledReason={writeReason} onclick={requestWrite}
-				>{m.biblioteca_write()}</Button
-			>
+			>{#if tapeYolo && !yoloReady}<a
+					class="btn btn--primary btn--md"
+					href={yoloHref}
+					data-sveltekit-reload
+					data-testid="sheet-yolo-enable">{m.yolopub_enable_yolo()}</a
+				>{:else}<Button variant="primary" disabledReason={writeReason} onclick={requestWrite}
+					>{tapeYolo ? m.qa1y_write_yolo() : m.biblioteca_write()}</Button
+				>{/if}
 		</div>
+		{#if tapeYolo && !yoloReady}<p class="yolo-why" data-testid="sheet-yolo-why">
+				{m.yolopub_install_needs_yolo()}
+			</p>{/if}
 	</div>
 </dialog>
 

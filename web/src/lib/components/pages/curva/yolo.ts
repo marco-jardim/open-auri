@@ -2,48 +2,29 @@
  * Modo YOLO rules of the Curva editor (pure; the state lives in lib/state/yolo.svelte.ts).
  *
  * - The editor's gate profile: standard, YOLO, or codec-only during "Prévia sem limites".
- * - Every way a curve leaves the editor other than the cable is disabled in YOLO, with a reason:
- *   S5 envelope, `#p=` link, .txt and .bin export, save to the library, publish and save to the
- *   account. YOLO curves are never saved, shared or published.
  * - Writing is disabled during the free preview.
- * - "Trazer para o modo normal" only when the curve passes the standard gate.
- * - Whether or not YOLO is on, a curve leaves for the library, a link, a file, the account or a
- *   publication only when the **standard** gate accepts it (`exitRefusal`). YOLO lives in memory
- *   only, so a reload turns it off while the YOLO-only curve it left in `oa.current` comes back
- *   to the editor: checking whether YOLO is on is not enough.
+ * - "Trazer para o modo normal" only when the curve passes the standard gate; "Trazer para os
+ *   limites padrão" (`standardCurve`) only when clamping the bands and the automatic preamp give
+ *   a curve that does.
+ * - Exits (library, `#p=` link, .txt, S5, .bin, account save, publication) are class-based, with
+ *   the core's `classifyCurve` (cached, gate-verdicts.ts): a standard curve leaves as it is; a
+ *   YOLO curve leaves everywhere, whether or not YOLO is on in this tab, and carries the YOLO
+ *   mark (badge, `-yolo` file name, the .txt header, the publish acknowledgement); only a
+ *   rejected curve (class 1, or a preamp below −25,5 dB that S1 v1/v2 cannot encode) is refused.
+ *   The class is always derived from the curve: S1 and S5 never carry a YOLO marker.
  */
+import { autoPreamp, clampToAbs } from 'open-auri/safety';
+import { curveClassification, type CurveClassification } from '#lib/gate-verdicts.ts';
 import type { EditorProfile } from '#lib/workers/gate-handler.ts';
-import { m } from '#lib/paraglide/messages.js';
-import { verdictFor, type Curve } from './model.ts';
+import { hasExperimental, verdictFor, type Band, type Curve } from './model.ts';
 import { firstReasonText, type Reason } from './reasons.ts';
 
-/** Every export, share and save path of the editor (all disabled in Modo YOLO). */
-export const YOLO_BLOCKED_ACTIONS = Object.freeze([
-	's5',
-	'link',
-	'txt',
-	'bin',
-	'library',
-	'publish',
-	'account'
-] as const);
-
-export type EditorExit = (typeof YOLO_BLOCKED_ACTIONS)[number];
+export type { CurveClassification };
 
 /** Gate profile of the editor's drags and edits. */
 export function editorProfile(enabled: boolean, freePreview: boolean): EditorProfile {
 	if (!enabled) return 'standard';
 	return freePreview ? 'codec' : 'yolo';
-}
-
-/** Why `action` is unavailable: `'yolo'` while Modo YOLO is on, otherwise null. */
-export function exitBlock(action: EditorExit, yoloEnabled: boolean): 'yolo' | null {
-	return yoloEnabled && YOLO_BLOCKED_ACTIONS.includes(action) ? 'yolo' : null;
-}
-
-/** Whether every export, share and save path is disabled (Modo YOLO on). */
-export function exportsDisabled(yoloEnabled: boolean): boolean {
-	return YOLO_BLOCKED_ACTIONS.every((action) => exitBlock(action, yoloEnabled) !== null);
 }
 
 /** Why writing is disabled by Modo YOLO itself (the free preview), or null. */
@@ -57,31 +38,70 @@ export function canBringBack(curve: Curve): boolean {
 }
 
 /**
- * Why `curve` may not be saved to the library, shared, exported or published: `'yolo'` while
- * Modo YOLO is on (nothing leaves), `'gate'` (with the gate's reasons) when the standard gate
- * refuses it, else null. The standard profile is used whatever the editor's profile is, so a
- * curve that passes only under YOLO (class 2 waived) is refused with YOLO off as well.
+ * "Trazer para os limites padrão": every band clamped to the absolute ranges (`clampToAbs`, D7
+ * included), then the standard automatic preamp. The result only when it passes the standard
+ * gate (`canBringBack`), else null (the action is not offered).
  */
-export type ExitRefusal =
-	{ readonly kind: 'yolo' } | { readonly kind: 'gate'; readonly reasons: readonly Reason[] };
+export function standardCurve(curve: Curve): Curve | null {
+	const bands: Band[] = curve.bands.map((band) => clampToAbs(band));
+	const preampDb = autoPreamp(bands, { experimental: hasExperimental(bands) });
+	if (preampDb === null) return null;
+	const next: Curve = { bands, preampDb };
+	return canBringBack(next) ? next : null;
+}
 
-export function exitRefusal(curve: Curve, yoloEnabled = false): ExitRefusal | null {
-	if (yoloEnabled) return { kind: 'yolo' };
-	const verdict = verdictFor(curve, 'standard');
-	return verdict.ok ? null : { kind: 'gate', reasons: verdict.reasons };
+/** The class of a curve (standard, YOLO with its waived codes, rejected with its codes). */
+export function classOf(curve: Curve): CurveClassification {
+	return curveClassification(curve.bands, curve.preampDb);
+}
+
+/** Whether the curve is YOLO: refused by the standard gate on waivable reasons only. */
+export function isYoloCurve(curve: Curve): boolean {
+	return classOf(curve).class === 'yolo';
 }
 
 /**
- * The disabled-button text of an exit refusal: `yolo_reason_no_export` in Modo YOLO, otherwise
- * the standard gate's first reason (band and frequency from `curve`).
+ * The mark a curve carries when it leaves the editor: `{ waived }` for a YOLO curve (the codes
+ * the YOLO profile waived), null for a standard or rejected one.
  */
+export function exitMark(curve: Curve): { readonly waived: readonly string[] } | null {
+	const classification = classOf(curve);
+	return classification.class === 'yolo' ? { waived: classification.waived } : null;
+}
+
+/**
+ * Why `curve` may not be saved to the library, shared, exported or published: only a rejected
+ * curve (class 1, or a preamp below −25,5 dB) is refused, with the gate's reasons for its
+ * blocking codes. Standard and YOLO curves leave (YOLO with its mark), whatever the profile.
+ */
+export interface ExitRefusal {
+	readonly kind: 'gate';
+	readonly reasons: readonly Reason[];
+}
+
+export function exitRefusal(curve: Curve): ExitRefusal | null {
+	const classification = classOf(curve);
+	if (classification.class !== 'rejected') return null;
+	return { kind: 'gate', reasons: blockingReasons(curve, classification.reasons) };
+}
+
+/** The gate's reasons behind `codes` (standard first, then YOLO-only codes); never empty. */
+function blockingReasons(curve: Curve, codes: readonly string[]): readonly Reason[] {
+	const wanted = new Set(codes);
+	const standard = verdictFor(curve, 'standard').reasons;
+	const own = standard.filter((reason) => wanted.has(reason.code));
+	if (own.length > 0) return own;
+	const yolo = verdictFor(curve, 'yolo').reasons.filter((reason) => wanted.has(reason.code));
+	return yolo.length > 0 ? yolo : standard;
+}
+
+/** The disabled-button text of an exit refusal: the first blocking reason (band, frequency). */
 export function exitRefusalText(refusal: ExitRefusal, curve: Curve, locale?: string): string {
-	if (refusal.kind === 'yolo') return m.yolo_reason_no_export();
 	return firstReasonText(refusal.reasons, { bands: curve.bands, locale });
 }
 
 /** `exitRefusal` and its text in one call: null when `curve` may leave. */
-export function exitReason(curve: Curve, yoloEnabled = false, locale?: string): string | null {
-	const refusal = exitRefusal(curve, yoloEnabled);
+export function exitReason(curve: Curve, locale?: string): string | null {
+	const refusal = exitRefusal(curve);
 	return refusal === null ? null : exitRefusalText(refusal, curve, locale);
 }

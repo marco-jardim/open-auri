@@ -11,7 +11,7 @@ Não coloque valores reais neste arquivo: o repositório é público.
 
 # Política de Privacidade do open-auri
 
-**Versão:** 2026-10-18 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
+**Versão:** 2026-10-19 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
 
 Esta é a versão oficial da política. A tradução em inglês (`privacy-policy.en-US.md`) serve apenas como apoio. Em caso de diferença, vale este texto em português.
 
@@ -133,7 +133,7 @@ Você pode ver e apagar sua própria atividade a qualquer momento na sua conta.
 
 Pessoas com conta verificada podem denunciar conteúdo. Guardamos o alvo, o motivo, uma nota opcional, quem denunciou, a data e a decisão.
 
-Uma curva é ocultada automaticamente quando 3 contas verificadas diferentes, com 3 dias ou mais de existência, a denunciam. Essa ocultação é revista pela moderação, que pode restaurar o conteúdo. Se você foi afetado, pode pedir a revisão dessa decisão automatizada (art. 20) pelo canal {{PUBLIC_LGPD_CONTACT_EMAIL}}.
+Uma curva é ocultada automaticamente quando 3 contas verificadas diferentes, com 3 dias ou mais de existência, a denunciam; uma curva cuja versão atual é YOLO é ocultada já com 2 dessas contas. Essa ocultação é revista pela moderação, que pode restaurar o conteúdo. Se você foi afetado, pode pedir a revisão dessa decisão automatizada (art. 20) pelo canal {{PUBLIC_LGPD_CONTACT_EMAIL}}.
 
 As ações de moderação (ocultar, restaurar, retirar, banir, marcar curadoria) ficam num registro de auditoria com autor da ação, ação, alvo, detalhe e data.
 

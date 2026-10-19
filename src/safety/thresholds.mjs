@@ -61,9 +61,15 @@ export const PROVENANCE = Object.freeze({
  * @typedef {object} YoloThresholds
  * @property {number} internalFullDb Largest prefix peak with preamp, DC–48 kHz (dB): the
  *   `d:prefix-peak-full` limit.
+ * @property {number} internalExtendedDb Largest prefix peak with preamp, 20 Hz–48 kHz (dB):
+ *   the `d:prefix-peak-extended` limit.
+ * @property {number} outputExtendedDb Largest output peak with preamp, 20 Hz–48 kHz (dB): the
+ *   `e:output-extended` limit.
  */
 
 /** @type {Readonly<YoloThresholds>} */
 export const YOLO_THRESHOLDS = Object.freeze({
   internalFullDb: 2.5000638697363913,
+  internalExtendedDb: -0.20368875272917986,
+  outputExtendedDb: -0.4708753961520857,
 });

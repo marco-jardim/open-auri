@@ -3,9 +3,12 @@
 	// banner appears after sign-in while local items are not merged, and only a click sends them,
 	// in batches of at most 20, continuing quota retries while they make progress. Rejected items
 	// stay local only. The flag is kept per account.
+	import { onDestroy } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { MergeReport, SocialApi } from '#lib/social/index.ts';
+	import { createClassifier } from '#lib/workers/classifier.svelte.ts';
 	import {
+		isAbort,
 		readMergeFlag,
 		runMerge,
 		toMergeItem,
@@ -84,16 +87,34 @@
 		flagVersion += 1;
 	}
 
+	/** The merge in progress; aborted when the banner goes away (no batch is sent after that). */
+	let controller: AbortController | null = null;
+	onDestroy(() => controller?.abort());
+
 	async function merge() {
 		if (running || !verified || pending.length === 0) return;
 		running = true;
 		outcome = null;
 		const batch = pending.map((item) => toMergeItem(item, locale));
 		progress = { done: 0, total: batch.length };
+		// The gate weights (an item that runs the YOLO profile costs 2 runs) are classified in a
+		// worker of their own, one item at a time, so a long library never blocks the page; each
+		// batch goes out as soon as it is full, while the next items are being weighed.
+		const classifier = createClassifier();
+		const cancel = new AbortController();
+		controller = cancel;
 		try {
-			const result = await runMerge(api, batch, (done, total) => {
-				progress = { done, total };
-			});
+			const result = await runMerge(
+				api,
+				batch,
+				(done, total) => {
+					progress = { done, total };
+				},
+				{
+					classify: (curve, signal) => classifier.classify(curve, signal),
+					signal: cancel.signal
+				}
+			);
 			const current = readMergeFlag(storage, account);
 			writeMergeFlag(storage, account, {
 				offeredAt: current.offeredAt,
@@ -104,7 +125,13 @@
 			if (result.report.created.length + result.report.duplicates.length > 0) {
 				onMerged?.(result.report);
 			}
+		} catch (cause) {
+			// Unmounted mid-merge: nothing more is sent; items already merged come back as
+			// duplicates on the next merge.
+			if (!isAbort(cause)) throw cause;
 		} finally {
+			classifier.dispose();
+			if (controller === cancel) controller = null;
 			running = false;
 		}
 	}

@@ -15,7 +15,7 @@ import { getServerEnv } from '#lib/server/env.ts';
 import { loadOgFonts, resetOgFonts, toArrayBuffer, type OgAssets } from '#lib/server/og/render.ts';
 import { ogResponse } from '#lib/server/og/route.ts';
 import { errorName, getOrCreateOg, ogKey, type OgEnv } from '#lib/server/og/store.ts';
-import { OG_CARD_VERSION } from '#lib/server/og/keys.ts';
+import { OG_CARD_VERSION, yoloFlag } from '#lib/server/og/keys.ts';
 import { ogEnvOf } from '#lib/server/og/warm.ts';
 import { recordOutbox } from '#lib/server/social/activity.ts';
 import {
@@ -741,8 +741,9 @@ describe('OG image: fonts, store edge cases, route and warm-up environment', () 
 	it('an R2 object without the etag metadata gets a computed strong ETag', async () => {
 		const target = await linkableVersion();
 		const bytes = new Uint8Array([7, 7, 7, 7]);
+		// Every current-layout writer records the YOLO flag; only the etag is missing here.
 		await getServerEnv({ env }).media.put(ogKey(target.curveId, target.versionId), bytes, {
-			customMetadata: { card: OG_CARD_VERSION }
+			customMetadata: { card: OG_CARD_VERSION, yolo: yoloFlag(false) }
 		});
 		const { ctx } = collector();
 		const result = await getOrCreateOg(ogEnv(), ctx, target.versionId);

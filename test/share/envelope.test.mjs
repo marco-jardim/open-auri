@@ -7,6 +7,7 @@ import {
   EnvelopeError,
   LABEL_COUNT,
   LABEL_MAX,
+  envelopeFormat,
   normalizeText,
   normalizeLabels,
   normalizeEnvelope,
@@ -14,7 +15,8 @@ import {
   serializeEnvelope,
   parseEnvelope,
 } from '../../src/share/envelope.mjs';
-import { encodeS1 } from '../../src/share/s1.mjs';
+import { decodeS1, encodeS1 } from '../../src/share/s1.mjs';
+import { crc16Ccitt } from '../../src/dsp/eq0xcb.mjs';
 import { parseEqualizerApo } from '../../src/io/equalizer-apo.mjs';
 
 const { presets } = JSON.parse(
@@ -1481,5 +1483,272 @@ test('@2 serialization is deterministic, ordered after bands and round-trips', (
       },
     ),
     { numRuns: 500 },
+  );
+});
+
+// open-auri/preset@2 also carries S1 v2 curves: bands up to 32000 Hz (docs/s1-format.md).
+const FORMAT_1 = 'open-auri/preset@1';
+const FORMAT_2 = 'open-auri/preset@2';
+// The S1 v2 golden: padrao with band 6 cut at 25 kHz (pinned in test/share/s1.test.mjs).
+const V2_BAND = Object.freeze({ kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 });
+const PADRAO_V2_S1 = 'gABn8AeACW8QRQIvc4I0EPzhksBNe1pEAcCs4SwYajxBkAIID4UQL5hyJcF2sRA7HHGI';
+/** The padrao envelope with `band` at `index` (by default the S1 v2 golden), coherent code. */
+const ultrasonic = (format = FORMAT_2, band = V2_BAND, index = 6) => {
+  const value = { ...copy(), format };
+  value.bands[index] = { ...band };
+  value.code = encodeS1(value);
+  return value;
+};
+/** The golden `@2` envelope with band 6 at `freqHz` and the golden code kept. */
+const v2WithFreq = (freqHz) => {
+  const value = ultrasonic();
+  value.bands[6] = { ...V2_BAND, freqHz };
+  return value;
+};
+/** An S1 code with its version field rewritten and the CRC repaired. */
+const withVersion = (code, version) => {
+  const bytes = Buffer.from(code, 'base64url');
+  bytes[0] = (bytes[0] & 0x3f) | (version << 6);
+  const crc = crc16Ccitt(bytes.subarray(0, 49));
+  bytes[49] = crc >>> 8;
+  bytes[50] = crc & 0xff;
+  return bytes.toString('base64url');
+};
+/** The deterministic `@1`/`@2` JSON rebuilt by hand, for the byte pins. */
+const pinnedJson = (value) =>
+  JSON.stringify({
+    format: value.format,
+    name: value.name,
+    description: value.description ?? '',
+    ...(value.author === undefined ? {} : { author: value.author }),
+    source: value.source,
+    license: value.license,
+    code: value.code,
+    preampDb: value.preampDb,
+    bands: value.bands.map(({ kind, freqHz, gainDb, qFactor }) => ({
+      kind,
+      freqHz,
+      gainDb,
+      qFactor,
+    })),
+    ...(value.labels === undefined ? {} : { labels: value.labels }),
+    lang: value.lang,
+    createdAt: value.createdAt,
+  });
+
+test('@1/@2 pins: v1 curves keep their @1 bytes; an S1 v2 curve serializes as @2', () => {
+  // S1 v2 changes nothing for a v1 curve: same code, same @1 bytes.
+  assert.equal(base.code, 'QABn8AeACW8QRQIvc4I0EPzhksBNe1pEAcCs4SwKzfOEsAIID4UQL5hyJcF2sRA7HLwv');
+  const json1 = serializeEnvelope(copy());
+  assert.equal(json1, pinnedJson(copy()));
+  assert.ok(
+    json1.startsWith(
+      '{"format":"open-auri/preset@1","name":"Padrão","description":"",' +
+        `"source":"preset:padrao","license":"CC0-1.0","code":"${base.code}","preampDb":-2.8,`,
+    ),
+  );
+  // The v2 golden in @2, without labels...
+  const plain = ultrasonic();
+  assert.equal(plain.code, PADRAO_V2_S1);
+  const json2 = serializeEnvelope(plain);
+  assert.equal(json2, pinnedJson(plain));
+  assert.ok(
+    json2.startsWith(
+      '{"format":"open-auri/preset@2","name":"Padrão","description":"",' +
+        `"source":"preset:padrao","license":"CC0-1.0","code":"${PADRAO_V2_S1}","preampDb":-2.8,`,
+    ),
+  );
+  assert.ok(json2.includes(',{"kind":"PK","freqHz":25000,"gainDb":-3,"qFactor":1},'));
+  assert.ok(!json2.includes('labels'));
+  assert.ok(json2.endsWith('],"lang":"pt-BR","createdAt":"2026-10-16T12:34:56.789Z"}'));
+  // ...and with labels, right after the bands.
+  const labels = tenLabels(['Sub', null, null, null, null, null, 'Ar']);
+  const named = { ...ultrasonic(), labels };
+  const json3 = serializeEnvelope(named);
+  assert.equal(json3, pinnedJson(named));
+  assert.ok(json3.includes(`],"labels":${JSON.stringify(labels)},"lang":"pt-BR",`));
+});
+
+test('@1 keeps 1–20000 Hz and S1 v1: 20001 Hz is env:range, a v2 code is env:s1', () => {
+  for (const freqHz of [20001, 25000, 32000]) {
+    const value = ultrasonic(FORMAT_1, { ...V2_BAND, freqHz });
+    assert.equal(decodeS1(value.code).version, 2);
+    expectIssue(value, 'env:range', '/bands/6/freqHz');
+    const errors = expectIssue(value, 'env:s1', '/code');
+    assert.ok(
+      errors.some(
+        (error) => error.path === '/code' && error.message === 'S1 v2 requires open-auri/preset@2',
+      ),
+      JSON.stringify(errors),
+    );
+    assert.equal(schemaValidate(value), false);
+    assert.throws(() => serializeEnvelope(value), EnvelopeError);
+    expectIssue(JSON.stringify(value), 'env:s1', '/code', parseEnvelope);
+  }
+  // A v2 code over v1-range bands in @1 is env:s1, not a mere mismatch.
+  const codeOnly = withField('code', PADRAO_V2_S1);
+  const errors = expectIssue(codeOnly, 'env:s1', '/code');
+  assert.deepEqual(
+    errors.map((error) => error.code),
+    ['env:s1'],
+  );
+  // Schema 1 cannot decode S1: that refusal is runtime only.
+  assert.equal(schemaValidate(codeOnly), true);
+  // 20000 Hz is still the top of @1 and of S1 v1; schema 1 is unchanged.
+  const top = ultrasonic(FORMAT_1, { ...V2_BAND, freqHz: 20000 });
+  assert.equal(decodeS1(top.code).version, 1);
+  assert.equal(validateEnvelope(top).ok, true);
+  assert.equal(schemaValidate(top), true);
+  assert.equal(schema.$defs.frequency.maximum, 20000);
+});
+
+test('@2 carries S1 v2 curves up to 32000 Hz, with and without labels', () => {
+  const plain = ultrasonic();
+  const result = validateEnvelope(plain);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.format, FORMAT_2);
+  assert.equal(Object.hasOwn(result.value, 'labels'), false);
+  assert.equal(decodeS1(result.value.code).version, 2);
+  assert.deepEqual(parseEnvelope(serializeEnvelope(plain)), result);
+  assert.equal(schema2Validate(result.value), true, ajv.errorsText(schema2Validate.errors));
+  for (const labels of [
+    tenLabels(['Sub']),
+    tenLabels([null, null, null, null, null, null, 'Ar 25k']),
+  ]) {
+    const named = validateEnvelope({ ...ultrasonic(), labels });
+    assert.equal(named.ok, true, JSON.stringify(named));
+    assert.deepEqual(named.value.labels, labels);
+    assert.equal(named.value.code, PADRAO_V2_S1);
+    assert.deepEqual(named.value.bands, plain.bands);
+    assert.deepEqual(parseEnvelope(serializeEnvelope({ ...ultrasonic(), labels })), named);
+    assert.equal(schema2Validate(named.value), true, ajv.errorsText(schema2Validate.errors));
+  }
+  // All-null labels drop the key; the curve still needs @2.
+  const empty = validateEnvelope({ ...ultrasonic(), labels: tenLabels([]) });
+  assert.equal(empty.ok, true);
+  assert.equal(Object.hasOwn(empty.value, 'labels'), false);
+  assert.equal(empty.value.format, FORMAT_2);
+  // Coherence still applies: exact bands, and a canonical v2 code.
+  expectIssue(v2WithFreq(25001), 'env:code-mismatch', '/code');
+  expectIssue({ ...ultrasonic(), code: base.code }, 'env:code-mismatch', '/code');
+  const noncanonical = { ...copy(), format: FORMAT_2, code: withVersion(base.code, 2) };
+  assert.equal(noncanonical.code[0], 'g');
+  const errors = expectIssue(noncanonical, 'env:s1', '/code');
+  assert.ok(errors.some((error) => error.message.startsWith('s1:noncanonical: ')));
+  // Above the v2 grid.
+  for (const freqHz of [32001, 32767]) {
+    expectIssue(v2WithFreq(freqHz), 'env:range', '/bands/6/freqHz');
+    assert.equal(schema2Validate(v2WithFreq(freqHz)), false);
+  }
+});
+
+test('@2 structural corpus agrees with Ajv 2020 on schema 2 (bands up to 32000 Hz)', () => {
+  const lpAbove = ultrasonic();
+  lpAbove.bands[9] = { kind: 'LP', freqHz: 32001, qFactor: 0.71 };
+  const cases = [
+    ['v2 golden', ultrasonic(), true],
+    ['v2 golden with labels', { ...ultrasonic(), labels: tenLabels(['Ar']) }, true],
+    ['v1 curve in @2', { ...copy(), format: FORMAT_2 }, true],
+    ['v1 curve in @2 with labels', labelled(tenLabels(['Grave'])), true],
+    ['20000 Hz in @2 (S1 v1)', ultrasonic(FORMAT_2, { ...V2_BAND, freqHz: 20000 }), true],
+    ['20001 Hz', ultrasonic(FORMAT_2, { ...V2_BAND, freqHz: 20001 }), true],
+    ['32000 Hz PK', ultrasonic(FORMAT_2, { ...V2_BAND, freqHz: 32000 }), true],
+    ['32000 Hz LP', ultrasonic(FORMAT_2, { kind: 'LP', freqHz: 32000, qFactor: 0.71 }), true],
+    [
+      '32000 Hz HP in band 0',
+      ultrasonic(FORMAT_2, { kind: 'HP', freqHz: 32000, qFactor: 20.47 }, 0),
+      true,
+    ],
+    [
+      '32000 Hz LS',
+      ultrasonic(FORMAT_2, { kind: 'LS', freqHz: 32000, gainDb: 12.7, qFactor: 20.47 }),
+      true,
+    ],
+    ['32001 Hz', v2WithFreq(32001), false],
+    ['32767 Hz', v2WithFreq(32767), false],
+    ['0 Hz', v2WithFreq(0), false],
+    ['25000.5 Hz', v2WithFreq(25000.5), false],
+    ['25000 as text', v2WithFreq('25000'), false],
+    ['LP at 32001 Hz', lpAbove, false],
+  ];
+  for (const [name, value, valid] of cases) {
+    const result = validateEnvelope(value);
+    assert.equal(result.ok, valid, `${name}: ${JSON.stringify(result)}`);
+    const schemaOk = schema2Validate(value);
+    assert.equal(schemaOk, valid, `${name}: ${ajv.errorsText(schema2Validate.errors)}`);
+    assert.equal(result.ok, schemaOk, name);
+    if (!result.ok) continue;
+    assert.deepEqual(parseEnvelope(serializeEnvelope(value)), result, name);
+    // The same curve in @1, without labels: both refuse it above 20000 Hz, both accept it below.
+    const asV1 = { ...value, format: FORMAT_1 };
+    delete asV1.labels;
+    const highest = Math.max(...value.bands.map((band) => band.freqHz ?? 0));
+    assert.equal(validateEnvelope(asV1).ok, highest <= 20000, name);
+    assert.equal(schemaValidate(asV1), highest <= 20000, name);
+  }
+  assert.equal(schema2.$defs.frequency.maximum, 32000);
+  assert.equal(schema.$defs.frequency.maximum, 20000);
+});
+
+test('envelopeFormat picks the lowest format: @1 unless labels or a band above 20 kHz', () => {
+  const bands = base.bands;
+  const v2Bands = ultrasonic().bands;
+  assert.equal(envelopeFormat({ bands }), FORMAT_1);
+  assert.equal(envelopeFormat({ bands, labels: null }), FORMAT_1);
+  assert.equal(envelopeFormat({ bands, labels: undefined }), FORMAT_1);
+  assert.equal(envelopeFormat({ bands, labels: tenLabels([]) }), FORMAT_1);
+  assert.equal(envelopeFormat({ bands, labels: tenLabels(['', '  ', '\u200b']) }), FORMAT_1);
+  assert.equal(envelopeFormat({ bands, labels: tenLabels(['Grave']) }), FORMAT_2);
+  assert.equal(envelopeFormat({ bands: v2Bands }), FORMAT_2);
+  assert.equal(envelopeFormat({ bands: v2Bands, labels: null }), FORMAT_2);
+  assert.equal(envelopeFormat({ bands: v2Bands, labels: tenLabels(['Ar']) }), FORMAT_2);
+  // The 20 kHz boundary, for any non-OFF kind; OFF bands never count.
+  /** @param {object} band */
+  const at6 = (band) => bands.map((entry, index) => (index === 6 ? band : entry));
+  assert.equal(envelopeFormat({ bands: at6({ ...V2_BAND, freqHz: 20000 }) }), FORMAT_1);
+  assert.equal(envelopeFormat({ bands: at6({ ...V2_BAND, freqHz: 20001 }) }), FORMAT_2);
+  assert.equal(
+    envelopeFormat({ bands: at6({ kind: 'HP', freqHz: 24000, qFactor: 0.71 }) }),
+    FORMAT_2,
+  );
+  assert.equal(envelopeFormat({ bands: at6({ kind: 'OFF', freqHz: 25000 }) }), FORMAT_1);
+  // Malformed labels go to @2, where validation reports them (never as @1 env:extra).
+  const malformed = [tenLabels(['evil.com']), tenLabels([1]), Array(9).fill(null), 'Grave', {}];
+  for (const labels of malformed) {
+    assert.equal(envelopeFormat({ bands, labels }), FORMAT_2, JSON.stringify(labels));
+    const result = validateEnvelope({ ...copy(), format: FORMAT_2, labels });
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.every((error) => error.code !== 'env:extra'));
+    assert.ok(result.errors.some((error) => error.path.startsWith('/labels')));
+  }
+  // Anything that is not a band list, or not a band, has no band above 20 kHz.
+  for (const value of [
+    {},
+    { bands: 'x' },
+    { bands: [null, 1, { kind: 'PK', freqHz: '25000' }, { kind: 'PK' }] },
+  ]) {
+    assert.equal(envelopeFormat(value), FORMAT_1);
+  }
+  // Property: the chosen format validates, and it is the lowest one that does.
+  fc.assert(
+    fc.property(
+      fc.integer({ min: 1, max: 32000 }),
+      fc.option(
+        fc.constantFrom(tenLabels(['Grave']), tenLabels([null, 'Ar']), tenLabels([' ', null])),
+        { nil: null },
+      ),
+      (freqHz, labels) => {
+        const curve = ultrasonic(FORMAT_1, { ...V2_BAND, freqHz });
+        const format = envelopeFormat({ bands: curve.bands, labels });
+        // Writers leave out labels that normalize to nothing.
+        const named = labels === null || normalizeLabels(labels) === null ? {} : { labels };
+        assert.equal(format === FORMAT_2, freqHz > 20000 || Object.hasOwn(named, 'labels'));
+        const result = validateEnvelope({ ...curve, ...named, format });
+        assert.equal(result.ok, true, JSON.stringify(result));
+        const lowest = validateEnvelope({ ...curve, ...named, format: FORMAT_1 });
+        assert.equal(lowest.ok, format === FORMAT_1);
+      },
+    ),
+    { numRuns: 300 },
   );
 });

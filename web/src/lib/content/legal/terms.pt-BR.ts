@@ -51,12 +51,15 @@ export const termsPtBR: LegalDocument = {
 			'publicar conteúdo ilegal, ofensivo, discriminatório, de assédio ou que viole direitos de terceiros;',
 			'usar nomes, descrições ou packs para spam, propaganda, links ou dados pessoais de outras pessoas;',
 			'manipular rankings, contagens ou denúncias, inclusive com contas múltiplas ou automação;',
-			'publicar curvas feitas para causar desconforto, dano auditivo ou dano ao equipamento, ou contornar o gate, o limite de taxa ou o Turnstile;',
+			'publicar curvas feitas para causar desconforto, dano auditivo ou dano ao equipamento, ou contornar o gate, o limite de taxa ou o Turnstile (o Modo YOLO não contorna o gate: ele aplica o perfil YOLO do próprio gate, com as travas de hardware);',
 			'sondar falhas de segurança fora de um contato prévio pelo canal do projeto, ou sobrecarregar o serviço.'
 		]),
+		paragraph(
+			'**Curvas YOLO.** Curvas feitas além dos limites padrão, no Modo YOLO, só são publicadas com a marca YOLO, depois do seu reconhecimento explícito, e ficam fora do feed principal, dos rankings e das demais listas padrão. Passar nas verificações do open-auri não quer dizer que a curva não ofereça risco à audição ou ao equipamento. Quem grava uma curva YOLO no cabo assume o risco.'
+		),
 		heading('6. Moderação'),
 		list([
-			'Contas verificadas podem denunciar conteúdo. Uma curva é ocultada automaticamente quando 3 contas verificadas diferentes, com 3 dias ou mais de existência, a denunciam.',
+			'Contas verificadas podem denunciar conteúdo. Uma curva é ocultada automaticamente quando 3 contas verificadas diferentes, com 3 dias ou mais de existência, a denunciam; uma curva cuja versão atual é YOLO é ocultada já com 2 dessas contas.',
 			'A moderação revê as ocultações automáticas e pode restaurar, ocultar, retirar conteúdo, marcar curadoria e banir contas que violem estes termos ou a lei. Cada ação fica no registro de auditoria.',
 			'Se uma decisão afetar você, peça a revisão pelo canal de privacidade indicado na seção 8, inclusive de decisões automatizadas (LGPD, art. 20).',
 			'Podemos remover conteúdo ou suspender contas para cumprir ordem judicial ou obrigação legal.'

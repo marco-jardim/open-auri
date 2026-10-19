@@ -10,7 +10,7 @@ export const POST: RequestHandler = defineApi<ApiEvent>(
 	{ auth: 'verified', rateLimit: { group: 'api.shares.create', quotas: [{ limit: 200 }] } },
 	async ({ event, env, user }) => {
 		const body = await readJson(event.request, CreateShareBody);
-		const created = await createShareFor(env.db, user.id, body);
+		const created = await createShareFor(env.db, user.id, body, Date.now(), env.yoloPublication);
 		return json(created, { status: 201 });
 	}
 );

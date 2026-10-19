@@ -24,7 +24,8 @@ export const POST: RequestHandler = defineApi(
 				: { onPublished: (info) => void scheduleOgWarm(event, info) };
 		const published = await publishCurve(env.db, user.id, body, {
 			...deps,
-			metrics: env.metrics
+			metrics: env.metrics,
+			yoloPublication: env.yoloPublication
 		});
 		return json(published, { status: 201 });
 	}

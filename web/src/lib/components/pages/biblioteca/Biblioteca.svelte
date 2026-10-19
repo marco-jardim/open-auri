@@ -11,7 +11,9 @@
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { neutralCurve } from '#lib/state/model.ts';
+	import { onDestroy } from 'svelte';
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
+	import { createClassifier } from '#lib/workers/classifier.svelte.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi, SocialSession } from '#lib/social/index.ts';
@@ -20,12 +22,15 @@
 	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
 	import { minhaBiblioteca } from './lazy.ts';
 	import { exitReason } from '#lib/components/pages/curva/yolo.ts';
+	import YoloBadge from '#lib/components/yolo/YoloBadge.svelte';
 	import {
 		archiveTapes,
 		selectTapes,
 		referencePack,
 		rmsTo,
 		number,
+		classBadge,
+		tapeBadge,
 		type Sort,
 		type Tag,
 		type Tape,
@@ -202,21 +207,32 @@
 		};
 	});
 
+	/**
+	 * Shelf badges are classified in a worker of their own, one tape at a time (a library of
+	 * hundreds of tapes never blocks the page); a card shows its badge once its class lands. The
+	 * save exit below never waits for it: it classifies the exact curve at the click.
+	 */
+	const classifier = createClassifier();
+	onDestroy(() => classifier.dispose());
+	function shelfBadge(tape: Tape) {
+		return classBadge(classifier.peek(tape));
+	}
+
 	function clear() {
 		query = '';
 		tag = 'all';
 	}
 	/**
-	 * Only a curve the standard gate accepts goes to the library: nothing while Modo YOLO is on,
-	 * and, with YOLO off, never a YOLO-only curve (a reload turns YOLO off but restores the curve it
-	 * left in `oa.current`). The reason is the YOLO message or the gate's first reason.
+	 * Class-based (curva/yolo.ts): a standard or YOLO curve goes to the library, whether or not
+	 * Modo YOLO is on (a YOLO tape shows the YOLO badge, derived from its bands every time); only a
+	 * rejected curve is refused, with the gate's first reason.
 	 */
-	const saveReason = $derived(app ? exitReason(current, app.yolo.enabled, locale) : null);
+	const saveReason = $derived(app ? exitReason(current, locale) : null);
 	async function save() {
 		if (!app || saving) return;
-		// Re-gated at the click, on the exact curve that is stored.
+		// Re-classified at the click, on the exact curve that is stored.
 		const curve = current;
-		const refused = exitReason(curve, app.yolo.enabled, locale);
+		const refused = exitReason(curve, locale);
 		if (refused !== null) {
 			notice = refused;
 			return;
@@ -224,7 +240,11 @@
 		saving = true;
 		try {
 			const result = await app.state.library.save(curve);
-			notice = result ? m.biblioteca_saved() : m.biblioteca_local_error();
+			notice = result
+				? tapeBadge(curve) === 'yolo'
+					? m.yolopub_library_saved_yolo()
+					: m.biblioteca_saved()
+				: m.biblioteca_local_error();
 		} catch (error) {
 			notice = m.biblioteca_local_error();
 			console.error('Biblioteca save failed', error);
@@ -438,7 +458,7 @@
 								><strong>{tape.name}</strong><span class="tape-sub"
 									><span>{tape.source}</span><span>pre {number(tape.preampDb, locale)} dB</span
 									></span
-								></span
+								>{#if tape.group === 'local'}<YoloBadge badge={shelfBadge(tape)} />{/if}</span
 							>
 							<span class="tape-chart"
 								><span class="mini-frame"

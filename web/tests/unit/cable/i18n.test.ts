@@ -87,13 +87,16 @@ const reasonKeys: ReasonMessageKey[] = [
 	'cable_reason_b_pole_radius',
 	'cable_reason_c_section_peak',
 	'cable_reason_d_prefix_peak',
+	'cable_reason_d_prefix_peak_extended',
 	'cable_reason_e_output_audible',
+	'cable_reason_e_output_extended',
 	'cable_reason_e_output_full',
 	'cable_reason_f_codec',
 	'cable_reason_g_preamp',
 	'cable_reason_k_kind_not_allowed',
 	'cable_reason_d7_pk_boost_above_16k',
 	'cable_reason_d7_boost_q',
+	'cable_reason_d7_boost_above_20k',
 	'cable_reason_unknown'
 ];
 

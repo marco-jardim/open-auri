@@ -6,10 +6,12 @@ import fc from 'fast-check';
 import { crc16Ccitt, encodePayload } from '../../src/dsp/eq0xcb.mjs';
 import {
   S1_BYTES,
+  S1_FREQ_MAX,
   S1_KIND_CODES,
   S1_LENGTH,
   S1_VARIANT_PARAMETRIC,
   S1_VERSION,
+  S1_VERSIONS,
   S1Error,
   canonKey,
   curveId,
@@ -33,6 +35,18 @@ const PADRAO_HEX =
   '400067f00780096f1045022f73823410fce192c04d7b5a4401c0ace12c0acdf384b002080f85102f' +
   '987225c176b1103b1cbc2f';
 const PADRAO_ID = 'mlz36rzp4knt';
+
+// Frozen snapshots of S1 v2 (docs/s1-format.md, "padrao com um corte a 25 kHz"):
+// padrao with band 6 replaced by a PK cut at 25 kHz, -3 dB, Q 1.
+const PADRAO_V2_BAND = Object.freeze({ kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 });
+const PADRAO_V2_S1 = 'gABn8AeACW8QRQIvc4I0EPzhksBNe1pEAcCs4SwYajxBkAIID4UQL5hyJcF2sRA7HHGI';
+const PADRAO_V2_HEX =
+  '800067f00780096f1045022f73823410fce192c04d7b5a4401c0ace12c186a3c419002080f85102f' +
+  '987225c176b1103b1c7188';
+const PADRAO_V2_ID = '2sa7worwmkel';
+const PADRAO_V2_KEY =
+  'v2;-28;PK,25,-8,30;PK,150,-30,69;PK,520,31,81;PK,2237,-100,141;PK,3046,57,151;' +
+  'PK,4348,-61,300;PK,4958,-83,272;PK,5995,34,59;PK,7178,-100,300;PK,25000,-30,100';
 
 const BAND_BITS = 38;
 const PREAMP_OFFSET = 4 + 10 * BAND_BITS;
@@ -103,6 +117,32 @@ function base32(bytes) {
 /** @param {string} s1 */
 const expectedId = (s1) => base32(createHash('sha256').update(bytesOf(s1)).digest()).slice(0, 12);
 
+// Kind codes as docs/s1-format.md lists them (independent of S1_KIND_CODES).
+const WIRE_KINDS = ['PK', 'LS', 'HS', 'LP', 'HP', 'OFF'];
+
+/**
+ * Independent packer of the frozen bit layout (docs/s1-format.md), for byte-identity
+ * checks: the version field, then each band and the preamp at their documented
+ * offsets, then the CRC. Takes a curve on the grid.
+ * @param {1 | 2} version
+ * @param {{bands: Array<Record<string, any>>, preampDb: number}} curve
+ */
+function referenceS1(version, curve) {
+  const bytes = new Uint8Array(S1_BYTES);
+  setBits(bytes, 0, 2, version);
+  setBits(bytes, 2, 2, 0);
+  curve.bands.forEach((band, index) => {
+    const offset = bandOffset(index);
+    setBits(bytes, offset, 3, WIRE_KINDS.indexOf(band.kind));
+    if (band.kind === 'OFF') return;
+    setBits(bytes, offset + 3, 15, band.freqHz);
+    setBits(bytes, offset + 18, 9, Math.round((band.gainDb ?? 0) * 10) & 0x1ff);
+    setBits(bytes, offset + 27, 11, Math.round(band.qFactor * 100));
+  });
+  setBits(bytes, PREAMP_OFFSET, 8, Math.round(-curve.preampDb * 10));
+  return reseal(bytes);
+}
+
 const padraoS1 = () => encodeS1({ bands: PADRAO.eqBands, preampDb: PADRAO.preampDb });
 
 /** @param {number} index @param {object} band */
@@ -111,29 +151,53 @@ const padraoWith = (index, band) => ({
   preampDb: PADRAO.preampDb,
 });
 
+/** The v2 golden curve: padrao with band 6 at 25 kHz. */
+const padraoV2 = () => padraoWith(6, { ...PADRAO_V2_BAND });
+
 // --- Grid arbitraries -----------------------------------------------------------
 
 const freqArb = fc.integer({ min: 1, max: 20000 });
+const freqV2Arb = fc.integer({ min: 1, max: 32000 });
+const ultrasonicArb = fc.integer({ min: 20001, max: 32000 });
 const gainArb = fc.integer({ min: -256, max: 127 }).map((n) => n / 10);
 const qArb = fc.integer({ min: 1, max: 2047 }).map((n) => n / 100);
-const bandArb = fc.oneof(
-  fc.record({
-    kind: fc.constantFrom('PK', 'LS', 'HS'),
-    freqHz: freqArb,
-    gainDb: gainArb,
-    qFactor: qArb,
-  }),
-  fc.record({ kind: fc.constantFrom('LP', 'HP'), freqHz: freqArb, qFactor: qArb }),
-  fc.constant({ kind: 'OFF' }),
-);
+const preampArb = fc.integer({ min: 0, max: 255 }).map((n) => (n === 0 ? 0 : -n / 10));
+/**
+ * Bands on the grid with frequencies from `freq`; OFF unless `off` is false.
+ * fc.record may build null-prototype objects; decoded bands are plain objects.
+ * @param {fc.Arbitrary<number>} freq
+ * @param {boolean} [off]
+ */
+const bandArbOf = (freq, off = true) =>
+  fc
+    .oneof(
+      fc.record({
+        kind: fc.constantFrom('PK', 'LS', 'HS'),
+        freqHz: freq,
+        gainDb: gainArb,
+        qFactor: qArb,
+      }),
+      fc.record({ kind: fc.constantFrom('LP', 'HP'), freqHz: freq, qFactor: qArb }),
+      ...(off ? [fc.constant({ kind: 'OFF' })] : []),
+    )
+    .map((band) => ({ ...band }));
+const bandArb = bandArbOf(freqArb);
 const curveArb = fc.record({
-  // fc.record may build null-prototype objects; decoded bands are plain objects.
-  bands: fc.array(
-    bandArb.map((band) => ({ ...band })),
-    { minLength: 10, maxLength: 10 },
-  ),
-  preampDb: fc.integer({ min: 0, max: 255 }).map((n) => (n === 0 ? 0 : -n / 10)),
+  bands: fc.array(bandArb, { minLength: 10, maxLength: 10 }),
+  preampDb: preampArb,
 });
+// S1 v2 curves: bands up to 32 kHz, at least one non-OFF band above 20 kHz.
+const curveV2Arb = fc
+  .record({
+    bands: fc.array(bandArbOf(freqV2Arb), { minLength: 10, maxLength: 10 }),
+    preampDb: preampArb,
+    at: fc.integer({ min: 0, max: 9 }),
+    ultrasonic: bandArbOf(ultrasonicArb, false),
+  })
+  .map(({ bands, preampDb, at, ultrasonic }) => ({
+    bands: bands.map((band, index) => (index === at ? ultrasonic : band)),
+    preampDb,
+  }));
 
 // --- Round trips ----------------------------------------------------------------
 
@@ -177,6 +241,96 @@ test('padrao snapshot: frozen S1 v1 string, bytes and curveId', async () => {
   assert.equal(Buffer.from(bytesOf(s1)).toString('hex'), PADRAO_HEX);
   assert.equal(await curveId(s1), PADRAO_ID);
   assert.equal(s1[0], 'Q'); // version 1, variant 0, first kind PK
+  assert.equal(s1, referenceS1(1, { bands: PADRAO.eqBands, preampDb: PADRAO.preampDb }));
+});
+
+test('S1 versions: readers accept 1 and 2; S1_VERSION stays 1; one length for both', () => {
+  assert.equal(S1_VERSION, 1);
+  assert.deepEqual([...S1_VERSIONS], [1, 2]);
+  assert.deepEqual({ ...S1_FREQ_MAX }, { 1: 20000, 2: 32000 });
+  assert.ok(Object.isFrozen(S1_VERSIONS));
+  assert.ok(Object.isFrozen(S1_FREQ_MAX));
+  assert.equal(S1_BYTES, 51);
+  assert.equal(S1_LENGTH, 68);
+});
+
+test('padrao v2 snapshot: frozen S1 v2 string, bytes, curveId and v2; canonKey', async () => {
+  const curve = padraoV2();
+  const s1 = encodeS1(curve);
+  assert.equal(s1, PADRAO_V2_S1);
+  assert.equal(s1.length, S1_LENGTH);
+  assert.equal(Buffer.from(bytesOf(s1)).toString('hex'), PADRAO_V2_HEX);
+  assert.equal(s1, referenceS1(2, curve));
+  assert.equal(await curveId(s1), PADRAO_V2_ID);
+  assert.equal(expectedId(s1), PADRAO_V2_ID);
+  assert.equal(canonKey(curve.bands, curve.preampDb), PADRAO_V2_KEY);
+  assert.equal(s1[0], 'g'); // version 2, variant 0, first kind PK
+  const decoded = decodeS1(s1);
+  assert.deepEqual(decoded, {
+    version: 2,
+    variant: S1_VARIANT_PARAMETRIC,
+    bands: curve.bands,
+    preampDb: curve.preampDb,
+  });
+  assert.equal(encodeS1(decoded), s1);
+  // Against padrao v1: only the version field, band 6 (bytes 29 to 33) and the CRC.
+  const v1 = bytesOf(PADRAO_S1);
+  const v2 = bytesOf(s1);
+  const changed = [...v2.keys()].filter((index) => v1[index] !== v2[index]);
+  assert.deepEqual(changed, [0, 29, 30, 31, 32, 33, 49, 50]);
+});
+
+test('the version follows the bands: 20000 Hz stays v1, 20001 Hz makes v2', () => {
+  /** @param {number} freqHz */
+  const at = (freqHz) => padraoWith(6, { kind: 'PK', freqHz, gainDb: -3, qFactor: 1 });
+  const edge = encodeS1(at(20000));
+  assert.equal(edge[0], 'Q');
+  assert.equal(decodeS1(edge).version, 1);
+  assert.ok(canonKey(at(20000).bands, PADRAO.preampDb).startsWith('v1;'));
+  const above = encodeS1(at(20001));
+  assert.equal(above[0], 'g');
+  assert.equal(decodeS1(above).version, 2);
+  assert.deepEqual(decodeS1(above).bands, at(20001).bands);
+  assert.ok(canonKey(at(20001).bands, PADRAO.preampDb).startsWith('v2;'));
+  // An LP or HP band counts like any other non-OFF band.
+  const pass = padraoWith(9, { kind: 'LP', freqHz: 24000, qFactor: 0.71 });
+  assert.equal(decodeS1(encodeS1(pass)).version, 2);
+  // OFF bands never count, whatever stray fields they hold.
+  const stray = padraoWith(6, { kind: 'OFF', freqHz: 25000, gainDb: 0, qFactor: 1 });
+  assert.equal(encodeS1(stray)[0], 'Q');
+  assert.equal(decodeS1(encodeS1(stray)).version, 1);
+  assert.ok(canonKey(stray.bands, PADRAO.preampDb).startsWith('v1;'));
+});
+
+test('property: every v1-grid curve encodes byte-identically to the frozen v1 layout (Q–T)', () => {
+  fc.assert(
+    fc.property(curveArb, (curve) => {
+      const s1 = encodeS1(curve);
+      assert.equal(s1, referenceS1(1, curve));
+      assert.match(s1, /^[Q-T]/);
+      assert.equal(decodeS1(s1).version, 1);
+      assert.ok(canonKey(curve.bands, curve.preampDb).startsWith('v1;'));
+    }),
+    { numRuns: 2000 },
+  );
+});
+
+test('property: every v2 curve (a band above 20 kHz) round-trips as v2, first character g–i', () => {
+  fc.assert(
+    fc.property(curveV2Arb, (curve) => {
+      const s1 = encodeS1(curve);
+      assert.equal(s1.length, S1_LENGTH);
+      assert.equal(s1, referenceS1(2, curve));
+      assert.match(s1, /^[ghi]/);
+      const decoded = decodeS1(s1);
+      assert.equal(decoded.version, 2);
+      assert.deepEqual(decoded.bands, curve.bands);
+      assert.equal(decoded.preampDb, curve.preampDb);
+      assert.equal(encodeS1(decoded), s1);
+      assert.ok(canonKey(curve.bands, curve.preampDb).startsWith('v2;'));
+    }),
+    { numRuns: 2000 },
+  );
 });
 
 test('property: every curve on the UI grid round-trips losslessly', () => {
@@ -214,6 +368,37 @@ test('property: any sealed v1 body either decodes canonically or is refused with
   );
 });
 
+test('property: any sealed v2 body either decodes canonically as v2 or is refused with a code', () => {
+  fc.assert(
+    fc.property(
+      fc.uint8Array({ minLength: 49, maxLength: 49 }),
+      fc.boolean(),
+      (body, withGoldenBands) => {
+        const bytes = new Uint8Array(S1_BYTES);
+        bytes.set(body);
+        if (withGoldenBands) {
+          // Keep the golden bands and randomize only the preamp, so some bodies decode.
+          bytes.set(bytesOf(PADRAO_V2_S1).subarray(0, 48));
+        }
+        setBits(bytes, 0, 4, 0b1000);
+        const s1 = reseal(bytes);
+        let decoded;
+        try {
+          decoded = decodeS1(s1);
+        } catch (error) {
+          assert.ok(error instanceof S1Error);
+          assert.ok(['s1:kind', 's1:range', 's1:noncanonical'].includes(error.code), error.code);
+          return;
+        }
+        assert.equal(decoded.version, 2);
+        assert.ok(decoded.bands.some((band) => band.kind !== 'OFF' && band.freqHz > 20000));
+        assert.equal(encodeS1(decoded), s1);
+      },
+    ),
+    { numRuns: 1000 },
+  );
+});
+
 test('wire order is preserved', () => {
   const reversed = [...PADRAO.eqBands].reverse();
   const s1 = encodeS1({ bands: reversed, preampDb: PADRAO.preampDb });
@@ -226,6 +411,17 @@ test('kind codes are frozen in wire order and valid first characters are Q, R or
   for (const [index, kind] of S1_KIND_CODES.entries()) {
     const band = kind === 'OFF' ? { kind } : { kind, freqHz: 100, gainDb: 0, qFactor: 1 };
     assert.equal(encodeS1(padraoWith(0, band))[0], ['Q', 'Q', 'R', 'R', 'S', 'S'][index]);
+  }
+});
+
+test('valid S1 v2 first characters are g, h or i', () => {
+  for (const [index, kind] of S1_KIND_CODES.entries()) {
+    const band = kind === 'OFF' ? { kind } : { kind, freqHz: 100, gainDb: 0, qFactor: 1 };
+    const curve = padraoV2();
+    curve.bands[0] = band;
+    const s1 = encodeS1(curve);
+    assert.equal(s1[0], ['g', 'g', 'h', 'h', 'i', 'i'][index]);
+    assert.equal(decodeS1(s1).version, 2);
   }
 });
 
@@ -256,7 +452,10 @@ test('off-grid values are refused, never rounded', () => {
 test('out-of-range or non-numeric values are refused', () => {
   const cases = [
     { kind: 'PK', freqHz: 0, gainDb: 0, qFactor: 1 },
-    { kind: 'PK', freqHz: 20001, gainDb: 0, qFactor: 1 },
+    // 20001 to 32000 Hz is S1 v2; above the v2 grid is out of range.
+    { kind: 'PK', freqHz: 32001, gainDb: 0, qFactor: 1 },
+    { kind: 'LP', freqHz: 32001, qFactor: 0.71 },
+    { kind: 'PK', freqHz: 32768, gainDb: 0, qFactor: 1 },
     { kind: 'PK', freqHz: 100, gainDb: 12.8, qFactor: 1 },
     { kind: 'PK', freqHz: 100, gainDb: -25.7, qFactor: 1 },
     { kind: 'PK', freqHz: 100, gainDb: 0, qFactor: 0 },
@@ -279,6 +478,12 @@ test('out-of-range or non-numeric values are refused', () => {
   const s1 = encodeS1({ bands: [...extremes, ...PADRAO.eqBands.slice(2)], preampDb: -25.5 });
   assert.deepEqual(decodeS1(s1).bands.slice(0, 2), extremes);
   assert.equal(decodeS1(s1).preampDb, -25.5);
+  assert.equal(decodeS1(s1).version, 1);
+  // The top of the v2 grid is accepted too (as v2).
+  const top = { kind: 'HS', freqHz: 32000, gainDb: 12.7, qFactor: 20.47 };
+  const v2 = encodeS1({ bands: [extremes[0], top, ...PADRAO.eqBands.slice(2)], preampDb: -25.5 });
+  assert.equal(decodeS1(v2).version, 2);
+  assert.deepEqual(decodeS1(v2).bands.slice(0, 2), [extremes[0], top]);
 });
 
 test('exactly 10 bands and known kinds are required', () => {
@@ -428,15 +633,75 @@ test('OFF bands encode their unused fields as zero (one curve, one string)', () 
 
 // --- Decoding errors ------------------------------------------------------------
 
-test('decode refuses unknown versions and variants', () => {
-  const s1 = padraoS1();
-  for (const version of [0, 2, 3]) {
-    const other = mutate(s1, (bytes) => setBits(bytes, 0, 2, version));
-    expectCode(() => decodeS1(other), 's1:version');
-    expectCode(() => decodeS1(other.slice(0, 20)), 's1:version');
+test('decode refuses unknown versions (0 and 3) and variants, for v1 and v2 codes', () => {
+  for (const s1 of [padraoS1(), PADRAO_V2_S1]) {
+    for (const version of [0, 3]) {
+      const other = mutate(s1, (bytes) => setBits(bytes, 0, 2, version));
+      expectCode(() => decodeS1(other), 's1:version');
+      expectCode(() => decodeS1(other.slice(0, 20)), 's1:version');
+    }
+    for (const variant of [1, 2, 3]) {
+      expectCode(
+        () => decodeS1(mutate(s1, (bytes) => setBits(bytes, 2, 2, variant))),
+        's1:variant',
+      );
+    }
   }
-  for (const variant of [1, 2, 3]) {
-    expectCode(() => decodeS1(mutate(s1, (bytes) => setBits(bytes, 2, 2, variant))), 's1:variant');
+  // Version 2 is known: its length is judged next.
+  expectCode(() => decodeS1(PADRAO_V2_S1.slice(0, 20)), 's1:length');
+  expectCode(() => decodeS1(`${PADRAO_V2_S1}A`), 's1:length');
+});
+
+test('decode refuses a v2 code without a band above 20 kHz (s1:noncanonical)', async () => {
+  // padrao (every band at or below 20 kHz) relabelled as v2.
+  const relabelled = mutate(padraoS1(), (bytes) => setBits(bytes, 0, 2, 2));
+  assert.equal(relabelled[0], 'g');
+  expectCode(() => decodeS1(relabelled), 's1:noncanonical');
+  await assert.rejects(curveId(relabelled), (error) => {
+    assert.ok(error instanceof S1Error);
+    assert.equal(error.code, 's1:noncanonical');
+    return true;
+  });
+  // The golden code with its 25 kHz band lowered to exactly 20 kHz: a v1 curve.
+  const lowered = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(6) + 3, 15, 20000));
+  expectCode(() => decodeS1(lowered), 's1:noncanonical');
+  // Neutro (10 x OFF) relabelled as v2.
+  const neutral = encodeS1({ bands: NEUTRAL.eqBands, preampDb: NEUTRAL.preampDb });
+  const offV2 = mutate(neutral, (bytes) => setBits(bytes, 0, 2, 2));
+  assert.equal(offV2[0], 'i');
+  expectCode(() => decodeS1(offV2), 's1:noncanonical');
+  // The reverse: the golden v2 curve relabelled as v1 is outside the v1 range.
+  const asV1 = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, 0, 2, 1));
+  assert.equal(asV1[0], 'Q');
+  expectCode(() => decodeS1(asV1), 's1:range');
+});
+
+test('S1 v2 decode refuses frequencies above 32000 Hz (s1:range) and invalid kinds', () => {
+  for (const index of [0, 5, 6, 9]) {
+    for (const value of [32001, 32767]) {
+      const bad = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(index) + 3, 15, value));
+      expectCode(() => decodeS1(bad), 's1:range');
+    }
+    const zero = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(index) + 3, 15, 0));
+    expectCode(() => decodeS1(zero), 's1:range');
+  }
+  // The top of the v2 grid decodes.
+  const top = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(6) + 3, 15, 32000));
+  assert.equal(decodeS1(top).bands[6].freqHz, 32000);
+  // A v1-range band of a v2 code may sit anywhere in 1 to 32000 Hz too.
+  const both = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(0) + 3, 15, 31000));
+  /** @param {{freqHz: number}} band */
+  const hz = (band) => band.freqHz;
+  assert.deepEqual(decodeS1(both).bands.map(hz), [
+    31000,
+    ...PADRAO.eqBands.slice(1, 6).map(hz),
+    25000,
+    ...PADRAO.eqBands.slice(7).map(hz),
+  ]);
+  for (const code of [6, 7]) {
+    const invalidFirst = mutate(PADRAO_V2_S1, (bytes) => setBits(bytes, bandOffset(0), 3, code));
+    assert.equal(invalidFirst[0], 'j');
+    expectCode(() => decodeS1(invalidFirst), 's1:kind');
   }
 });
 
@@ -537,6 +802,30 @@ test('canonKey is equal for every permutation of the same bands', () => {
   );
 });
 
+test('v2: canonKey is equal for every permutation of the same bands, and stays v2', () => {
+  fc.assert(
+    fc.property(
+      curveV2Arb,
+      fc.shuffledSubarray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], { minLength: 10, maxLength: 10 }),
+      (curve, order) => {
+        const permuted = order.map((i) => curve.bands[i]);
+        const key = canonKey(curve.bands, curve.preampDb);
+        assert.ok(key.startsWith('v2;'), key);
+        assert.equal(canonKey(permuted, curve.preampDb), key);
+        // Every wire order of a v2 curve is a v2 code of its own.
+        const s1 = encodeS1({ bands: permuted, preampDb: curve.preampDb });
+        assert.equal(decodeS1(s1).version, 2);
+        assert.deepEqual(decodeS1(s1).bands, permuted);
+      },
+    ),
+    { numRuns: 1000 },
+  );
+  const golden = padraoV2();
+  const reversed = [...golden.bands].reverse();
+  assert.equal(canonKey(reversed, golden.preampDb), PADRAO_V2_KEY);
+  assert.notEqual(encodeS1({ bands: reversed, preampDb: golden.preampDb }), PADRAO_V2_S1);
+});
+
 test('canonKey format, OFF normalization and tie-breaking', () => {
   const bands = [
     { kind: 'OFF', freqHz: 5 },
@@ -575,6 +864,12 @@ test('curveId is SHA-256 of the S1 bytes in base32, 12 chars, and order-sensitiv
     const other = encodeS1({ bands: preset.eqBands, preampDb: preset.preampDb });
     assert.equal(await curveId(other), expectedId(other));
   }
+  // v2 keeps the definition, and is order-sensitive too.
+  assert.equal(await curveId(PADRAO_V2_S1), expectedId(PADRAO_V2_S1));
+  const golden = padraoV2();
+  const v2Reversed = encodeS1({ bands: [...golden.bands].reverse(), preampDb: golden.preampDb });
+  assert.equal(await curveId(v2Reversed), expectedId(v2Reversed));
+  assert.notEqual(await curveId(v2Reversed), await curveId(PADRAO_V2_S1));
 });
 
 test('curveId validates its input', async () => {

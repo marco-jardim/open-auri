@@ -129,7 +129,11 @@ test('the Transport renders; a comparison starts at a random point and pause kee
 		startAt: 'random',
 		session: 'soe-como-x'
 	});
-	await transport.getByRole('button', { name: m.transport_pause(), exact: true }).click();
+	// The engine reports `playing` before the page's start settles (its meters still connect):
+	// until then the lever is busy and blocks activation, so wait for it to be ready.
+	const lever = transport.getByRole('button', { name: m.transport_pause(), exact: true });
+	await expect.element(lever).not.toHaveAttribute('aria-busy', 'true');
+	await lever.click();
 	expect(pause).toHaveBeenCalledOnce();
 	expect(stop).not.toHaveBeenCalled();
 	expect(audio.state()).toMatchObject({ playing: false, paused: true, session: 'soe-como-x' });

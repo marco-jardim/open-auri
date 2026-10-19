@@ -1070,9 +1070,11 @@ export function createCableService(deps: CableServiceDeps) {
 		} else {
 			rescue = { at, deviceLabel: label, reportsSent, fresh: true };
 		}
-		// Every real committed write, YOLO ones too, is the cable's new written snapshot (the app
+		// Only a real, committed write dispatches the written event (simulated and interrupted
+		// writes never do). Every one, YOLO ones too, is the cable's new written snapshot (the app
 		// marks it). A YOLO write is marked like its journal entry: `profile: 'yolo'` with the
-		// class-2 codes it waived, so a listener (the outbox counts it) can tell it apart.
+		// class-2 codes it waived, so a listener can tell it apart (the outbox counts the install,
+		// YOLO publication option B); the curve's class is derived again wherever it goes.
 		if (!simulated && committed && entry !== null) {
 			const detail: CableWrittenDetail = {
 				entry,

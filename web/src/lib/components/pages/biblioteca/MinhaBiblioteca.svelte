@@ -23,6 +23,16 @@
 	} from '#lib/components/pages/curva/social.ts';
 	import CreationInsights from './CreationInsights.svelte';
 	import MergeBanner from './MergeBanner.svelte';
+	import YoloBadge from '#lib/components/yolo/YoloBadge.svelte';
+	import YoloPublishAck from '#lib/components/yolo/YoloPublishAck.svelte';
+	import {
+		ackWaived,
+		curveBadge,
+		needsYoloAck,
+		waivedLabels,
+		yoloPublishBlock,
+		yoloPublishText
+	} from '#lib/components/yolo/yolo-curve.ts';
 	import {
 		accountKey,
 		defaultStorage,
@@ -316,28 +326,78 @@
 		};
 	}
 
+	/**
+	 * The YOLO acknowledgement step of one row: opening a YOLO head to others (visibility unlisted
+	 * or public, or restoring a lineage that is not private) needs it; null when none is shown.
+	 */
+	let ackFor = $state.raw<{
+		id: string;
+		action: 'visibility' | 'restore';
+		value?: Visibility;
+		waived: string[];
+	} | null>(null);
+
+	/** Leaves the step: the visibility picker shows the lineage's real visibility again. */
+	function cancelAck(item: LibraryItem) {
+		ackFor = null;
+		const select = document.getElementById(`${id}-visibility-${item.id}`);
+		if (select instanceof HTMLSelectElement) select.value = item.visibility;
+	}
+
+	/** Whether `action` would show the YOLO head of `item` to others. */
+	function opensYolo(item: LibraryItem, action: 'visibility' | 'restore', value?: Visibility) {
+		const target = action === 'visibility' ? value : item.visibility;
+		return target !== undefined && needsYoloAck(item.curve.yolo === true, target);
+	}
+
+	/** `acknowledged`: the owner went through the YOLO step (sends `acknowledge: 'yolo'`). */
 	async function act(
 		item: LibraryItem,
 		action: 'visibility' | 'retract' | 'restore',
-		value?: Visibility
+		value?: Visibility,
+		acknowledged = false
 	) {
 		if (busy) return;
+		if (action !== 'retract' && !acknowledged && opensYolo(item, action, value)) {
+			ackFor = { id: item.id, action, value, waived: waivedLabels(item.curve.waived) };
+			notice = '';
+			return;
+		}
 		busy = item.id;
 		notice = '';
 		try {
 			if (action === 'visibility' && value) {
-				patch(item.id, await api.setVisibility(item.id, value));
+				patch(
+					item.id,
+					acknowledged
+						? await api.setVisibility(item.id, value, { acknowledge: 'yolo' })
+						: await api.setVisibility(item.id, value)
+				);
 				notice = m.biblioteca_social_saved_visibility();
 			} else if (action === 'retract') {
 				patch(item.id, await api.retractLineage(item.id));
 				if (editing === item.id) editing = null;
 				notice = m.biblioteca_social_retracted_done();
 			} else if (action === 'restore') {
-				patch(item.id, await api.restoreLineage(item.id));
+				patch(
+					item.id,
+					acknowledged
+						? await api.restoreLineage(item.id, { acknowledge: 'yolo' })
+						: await api.restoreLineage(item.id)
+				);
 				notice = m.biblioteca_social_restored_done();
 			}
+			if (ackFor?.id === item.id) ackFor = null;
 		} catch (error) {
-			notice = errorText(errorKind(error));
+			const block = yoloPublishBlock(error);
+			if (block === 'ack' && action !== 'retract') {
+				// The server asks for the acknowledgement (409 YOLO_ACK_REQUIRED): show the step.
+				ackFor = { id: item.id, action, value, waived: waivedLabels(ackWaived(error)) };
+			} else if (block === 'off' || block === 'account-age') {
+				notice = yoloPublishText(block);
+			} else {
+				notice = errorText(errorKind(error));
+			}
 		} finally {
 			busy = null;
 		}
@@ -374,6 +434,7 @@
 	}
 
 	function closeEdit(lineageId: string) {
+		editAck = null;
 		if (editing !== lineageId) return;
 		editing = null;
 		resetEditFeedback();
@@ -441,7 +502,10 @@
 		else editMessage = errorText(kind);
 	}
 
-	async function saveEdit(item: LibraryItem) {
+	/** The renamed version of a YOLO head in a lineage others see needs the YOLO step too. */
+	let editAck = $state<string | null>(null);
+
+	async function saveEdit(item: LibraryItem, acknowledged = false) {
 		const append = api.appendVersion;
 		if (busy || editing !== item.id || !append || !editable(item)) return;
 		resetEditFeedback();
@@ -472,14 +536,20 @@
 			notice = m.cvedit_edit_unchanged();
 			return;
 		}
+		if (!acknowledged && opensYolo(item, 'restore')) {
+			editAck = item.id;
+			return;
+		}
 		const owner = account;
 		busy = item.id;
 		notice = '';
 		try {
 			const result = await append(item.id, {
 				parentVersionId: item.head.id,
-				envelope: checked.envelope
+				envelope: checked.envelope,
+				...(acknowledged ? { acknowledge: 'yolo' as const } : {})
 			});
+			editAck = null;
 			if (owner !== account) return;
 			renamed(item.id, {
 				...item.head,
@@ -493,7 +563,12 @@
 			closeEdit(item.id);
 			notice = m.cvedit_edit_done({ name: checked.name });
 		} catch (error) {
-			if (owner === account && !isAbort(error)) editFailed(error);
+			if (owner === account) {
+				const block = yoloPublishBlock(error);
+				if (block === 'ack') editAck = item.id;
+				else if (block !== null) editMessage = yoloPublishText(block);
+				else if (!isAbort(error)) editFailed(error);
+			}
 		} finally {
 			if (owner === account) busy = null;
 		}
@@ -630,8 +705,11 @@
 								{#if item.moderation !== 'visible'}<span class="badge warn"
 										>{m.biblioteca_social_moderated()}</span
 									>{/if}
-								{#if !item.curve.gateOk}<span class="badge warn"
-										>{m.biblioteca_social_gate_failed()}</span
+								{#if curveBadge(item.curve) === 'yolo'}<YoloBadge
+										badge="yolo"
+									/>{:else if curveBadge(item.curve) === 'warn'}<span
+										class="badge warn"
+										data-curve-badge="warn">{m.biblioteca_social_gate_failed()}</span
 									>{/if}
 							</div>
 							{#if shelf !== 'created'}<span class="desc"
@@ -640,6 +718,16 @@
 										})}{:else}{m.biblioteca_social_author_removed()}{/if}</span
 								>{:else if item.head.description}<span class="desc">{item.head.description}</span
 								>{/if}
+							{#if ackFor?.id === item.id}
+								{@const pending = ackFor}
+								<YoloPublishAck
+									waived={pending.waived}
+									busy={busy === item.id}
+									headingLevel={4}
+									onconfirm={() => void act(item, pending.action, pending.value, true)}
+									oncancel={() => cancelAck(item)}
+								/>
+							{/if}
 							<div class="row-actions">
 								{#if item.status === 'active'}<a
 										href="/c/{encodeURIComponent(item.id)}"
@@ -650,6 +738,7 @@
 									<label
 										>{m.biblioteca_social_visibility()}
 										<select
+											id="{id}-visibility-{item.id}"
 											value={item.visibility}
 											disabled={!verified || busy !== null || item.status === 'retracted'}
 											aria-label={m.biblioteca_social_change_visibility({ name: item.head.name })}
@@ -758,8 +847,17 @@
 										</p>
 									{/if}
 									<p class="hint">{m.cvedit_edit_version()}</p>
-									{#if item.curve.gateOk === false}
+									{#if curveBadge(item.curve) === 'warn'}
 										<p class="hint">{m.biblioteca_edit_gate_refused_hint()}</p>
+									{/if}
+									{#if editAck === item.id}
+										<YoloPublishAck
+											waived={waivedLabels(item.curve.waived)}
+											busy={busy === item.id}
+											headingLevel={4}
+											onconfirm={() => void saveEdit(item, true)}
+											oncancel={() => (editAck = null)}
+										/>
 									{/if}
 									<div class="edit-status" role="status" aria-live="polite">
 										{editMessage}

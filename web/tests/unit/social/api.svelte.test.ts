@@ -139,6 +139,29 @@ describe('createSocialApi: request shapes', () => {
 			items: [{ localId: 'x', s1: 's1', name: 'n' }]
 		});
 		expect(JSON.parse(String(calls[16]?.init.body))).toEqual({ score: 4 });
+		// Restore without the YOLO acknowledgement has no body.
+		expect(calls[3]?.init.body).toBeUndefined();
+	});
+
+	it('sends the YOLO acknowledgement on visibility and restore, and asks for the YOLO feed', async () => {
+		const { calls, fetch } = fakeFetch(() => jsonResponse({}));
+		const api = createSocialApi({ fetch });
+		await api.setVisibility('L1', 'public', { acknowledge: 'yolo' });
+		await api.restoreLineage('L1', { acknowledge: 'yolo' });
+		await api.publishCurve({ envelope: {}, visibility: 'unlisted', acknowledge: 'yolo' });
+		await api.feed({ sort: 'new', yolo: 'only' });
+		expect(calls.map((call) => `${call.init.method} ${call.url}`)).toEqual([
+			'PUT /api/v1/lineages/L1/visibility',
+			'POST /api/v1/lineages/L1/restore',
+			'POST /api/v1/curves',
+			'GET /api/v1/feed?sort=new&yolo=only'
+		]);
+		expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+			visibility: 'public',
+			acknowledge: 'yolo'
+		});
+		expect(JSON.parse(String(calls[1]?.init.body))).toEqual({ acknowledge: 'yolo' });
+		expect(JSON.parse(String(calls[2]?.init.body))).toMatchObject({ acknowledge: 'yolo' });
 	});
 
 	it('sends activity and the outbox batch', async () => {

@@ -71,8 +71,25 @@ import { autoPreamp } from 'open-auri/safety';
 - [`gate.mjs`](../src/safety/gate.mjs): análise de estabilidade, headroom e pré-amp
   dentro do envelope observado para gravação, sem constituir prova de segurança.
   Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS`,
-  `CODEC_PREAMP_FLOOR_DB` e `YOLO_PREAMP_MAX_DB` para seleção e consulta dos perfis do gate.
-- [`policy.mjs`](../src/safety/policy.mjs): limites de edição, grade, interpolação e busca de fronteira.
+  `CODEC_PREAMP_FLOOR_DB`, `YOLO_STORAGE_PREAMP_FLOOR_DB` e `YOLO_PREAMP_MAX_DB` para
+  seleção e consulta dos perfis do gate. Acima de 20 kHz só passam seções que não amplificam
+  (`d7:boost-above-20k`, dispensável no perfil YOLO). Quando o veredito YOLO depende de
+  alguma dispensa (qualquer código dispensável, `g:preamp` incluído), valem também
+  `d:prefix-peak-full` e as checagens estendidas de 20 Hz a 48 kHz (`d:prefix-peak-extended`
+  e `e:output-extended`), com ou sem seção acima de 20 kHz: um reforço que precisa de
+  dispensa enfrenta os mesmos limites em 20000 Hz e em 20001 Hz. Sem dispensa, a curva é
+  julgada exatamente como no perfil padrão, então o YOLO nunca é mais restrito que ele.
+  No perfil YOLO, `autoPreamp` busca a partir de 0 dB (`YOLO_PREAMP_MAX_DB`), e
+  `autoPreamp(bands, {profile: 'yolo', storable: true})` não desce abaixo de −25,5 dB.
+- [`classify.mjs`](../src/safety/classify.mjs): `classifyCurve`, a classe de uma curva
+  para armazenar e publicar (`standard`, `yolo` ou `rejected`, com os códigos dispensados
+  ou os que bloqueiam), e `classifierVersionInput`, o JSON estável de `THRESHOLDS`,
+  `YOLO_THRESHOLDS` e dos códigos dispensáveis na classificação, para a versão do
+  classificador. O núcleo interno fica em `classify-core.mjs`, fora do índice.
+- [`policy.mjs`](../src/safety/policy.mjs): limites de edição, grade, interpolação e busca de fronteira,
+  além de `AUDIBLE_MAX_HZ`, `ULTRA_MAX_HZ`, `ULTRA_CUT_Q_MAX`, `isUltrasonic` e `freqMaxFor`
+  (frequência máxima por camada: 20 kHz em Ouvir e Ajustar; em Engenharia, 32 kHz para
+  seções que não amplificam e, no Modo YOLO, para todas).
 - [`thresholds.mjs`](../src/safety/thresholds.mjs): limiares de segurança e sua proveniência.
 
 Os aliases `levelDb`, `MEAN_FREQUENCIES` e `sectionDb` vêm de `dsp/level.mjs`;

@@ -111,7 +111,8 @@ export function bandWords(): BandWords {
 			mids: m.curva_bn_region_mids({}, options),
 			presence: m.curva_bn_region_presence({}, options),
 			brilliance: m.curva_bn_region_brilliance({}, options),
-			air: m.curva_bn_region_air({}, options)
+			air: m.curva_bn_region_air({}, options),
+			ultra: m.curva_bn_region_ultra({}, options)
 		},
 		free: m.curva_bn_free({}, options),
 		cut: (freq) => m.curva_bn_cut({ freq }, options),

@@ -7,17 +7,22 @@
 	  line is the gate threshold; red/amber regions show where the drawn curve is over or near the
 	  output limit, or where it would clip inside the chain. They are a preview: the gate decides.
 	- The axis runs to Nyquist (48 kHz, core's 96 kHz evaluator) so the traces show where the
-	  response really converges; 20 kHz to 48 kHz is shaded as inaudible. Readouts, zones, the
-	  limit line and the handles stay in 20 Hz to 20 kHz.
+	  response really converges; 20 kHz to 48 kHz is shaded as inaudible. Readouts, the over/near
+	  zones and the limit line stay in 20 Hz to 20 kHz. Handles follow the layer (`freqMax`):
+	  20 kHz in Ouvir and Ajustar; in Engenharia 32 kHz for sections that never amplify, and for
+	  every kind in Modo YOLO. In Engenharia 32 kHz to Nyquist is hatched as never editable.
 	- Selected section: its safe box (core SOFT_RANGES) and the hatched zones it can never reach
-	  (ABS_RANGES gain cap, D7: no PK boost above 16 kHz). The box lights while a point is grabbed.
+	  (ABS_RANGES gain cap, D7: no PK boost above 16 kHz, and in Engenharia without YOLO no boost
+	  from 20 to 32 kHz). The box lights while a point is grabbed.
 	- Handles follow the pointer freely (the page draws a draft every frame and asks the worker for
 	  an advisory verdict without blocking). When that verdict first says "outside", the handle hits
 	  a 120 ms detent and the chip shows the gate's reason. Release, keys and the wheel (Q) commit
 	  through the page, which judges the full grid and animates back when refused.
 	- Neutro (every section OFF): ten points parked at 0 dB with the empty-state hint. Grabbing one
 	  (pointer or arrow keys) asks the page to create a filter there (`onpark`, gate-checked).
-	- HS/LP/HP handles are locked outside Engenharia, with a hint.
+	- HS/LP/HP handles, and handles above 20 kHz, are locked outside Engenharia, with a hint.
+	- Away from 96 kHz the preview bypasses the filters above 20 kHz; the approximate-preview note
+	  says how many do not play.
 	- Handle shapes tell the kind (PK circle, LS/HS a tag pointing to the shelf's side, LP/HP a
 	  slope on the cut side, parked points a dashed circle) and carry the slot badge (A to J) the
 	  bank shows; their names say the band's functional or custom name (`band-names.ts`).
@@ -32,7 +37,15 @@
 	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
 	import SpectrumOverlay from '#lib/components/meters/SpectrumOverlay.svelte';
 	import type { MeterMode } from '#lib/audio/meters.ts';
-	import type { ABSide, AudioEngine } from '#lib/audio/engine.ts';
+	import {
+		approximatedSections,
+		PREVIEW_RATE,
+		skippedSections,
+		type ABSide,
+		type AudioEngine
+	} from '#lib/audio/engine.ts';
+	/** The usual rate a browser falls back to when it refuses 96 kHz (counts without a rate). */
+	const FALLBACK_RATE = 48000;
 	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
 	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
@@ -42,7 +55,7 @@
 	import { bandWords, useBandLabels } from './band-labels.svelte.ts';
 	import { badgeOf, bandNames } from './band-names.ts';
 	import { formatHz, formatQ, formatSignedDb } from './format.ts';
-	import { isLockedKind, type Layer } from './layers.ts';
+	import { isLockedBand, isLockedKind, isUltrasonicLocked, type Layer } from './layers.ts';
 	import { hasGain, type Band, type BandKind, type Curve } from './model.ts';
 	import type { DragTarget, DragView } from './drag.ts';
 	import { isEmptyCurve, PARKED_HZ, parkedBand } from './parked.ts';
@@ -66,6 +79,8 @@
 		audiblePeak,
 		audibleSpansAbove,
 		clamp,
+		editableMaxHz,
+		freqMax,
 		handleGain,
 		hardZones,
 		keyTarget,
@@ -77,7 +92,8 @@
 		stepQ,
 		traces,
 		xOf,
-		yOf
+		yOf,
+		type FreqContext
 	} from './scope.ts';
 
 	interface Props {
@@ -123,6 +139,23 @@
 		previewCaption?: string;
 		/** The preview runs at a rate other than 96 kHz (recomputed coefficients). */
 		approximate?: boolean;
+		/**
+		 * Filters above 20 kHz the playing chain bypasses at that rate (`PreviewChain.skipped`).
+		 * Omitted: counted from the curve of the side that plays while `approximate`.
+		 */
+		skipped?: number | null;
+		/**
+		 * Filters above 20 kHz the playing chain approximates at that rate
+		 * (`PreviewChain.approximated`). Omitted: counted from the curve of the side that plays.
+		 */
+		approximated?: number | null;
+		/** The preview's context rate (`CurvaPreview.rate`); omitted, a typical fallback rate. */
+		rate?: number | null;
+		/**
+		 * Modo YOLO (Engenharia only): handles may then take any kind up to 32 kHz. Omitted: the
+		 * app context's YOLO state (off without it).
+		 */
+		yolo?: boolean;
 		/** Engine of the preview Transport (SEEK.2); defaults to the app context's `audio`. */
 		engine?: AudioEngine | null;
 		/** Overrides the `prefers-reduced-motion` media query. */
@@ -166,6 +199,10 @@
 		previewReason = null,
 		previewCaption = '',
 		approximate = false,
+		skipped = null,
+		approximated = null,
+		rate = null,
+		yolo,
 		engine = null,
 		reducedMotion,
 		ondrag,
@@ -176,6 +213,23 @@
 		onpreviewwarm,
 		onside
 	}: Props = $props();
+
+	/** The layout provides the app context; isolated renders (tests) pass `engine` instead. */
+	function optionalAppContext(): AppContext | null {
+		try {
+			return getAppContext();
+		} catch (missing) {
+			console.debug('ScopePanel rendered without the app context', missing);
+			return null;
+		}
+	}
+	const appContext = optionalAppContext();
+	/** Modo YOLO of this tab (Engenharia only): the prop, else the app's state, else off. */
+	const yoloOn = $derived(yolo ?? appContext?.client?.yolo.enabled ?? false);
+	/** Frequency limits of the handles (`freqMax`): 20 kHz, or 32 kHz in Engenharia/YOLO. */
+	const freqContext = $derived<FreqContext>({ layer, yolo: yoloOn });
+	/** HS/LP/HP and sections above 20 kHz are shown but not edited outside Engenharia. */
+	const isLocked = (band: Band) => isLockedBand(band, layer);
 
 	const DETENT_MS = 120;
 	const editable = $derived(layer !== 'ouvir');
@@ -309,11 +363,21 @@
 			return index === null ? null : parkedBand(index);
 		}
 		const band = curve.bands[selected];
-		if (!band || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return null;
+		if (!band || band.kind === 'OFF' || isLocked(band)) return null;
 		return band;
 	});
 	const box = $derived(selectedBand ? softBox(selectedBand) : null);
-	const zones = $derived(selectedBand ? hardZones(selectedBand) : []);
+	const zones = $derived(selectedBand ? hardZones(selectedBand, freqContext) : []);
+	/**
+	 * Engenharia edits up to 32 kHz (`editableMaxHz`): from there to Nyquist nothing is editable,
+	 * shaded over the inaudible band. Ouvir and Ajustar stop at 20 kHz, where that band begins.
+	 */
+	const noEditX = $derived(xOf(editableMaxHz(freqContext)));
+	const noEditShown = $derived(editable && editableMaxHz(freqContext) > F_MAX);
+	/** The ultra-boost label goes one line below the PK zone's label when both are drawn. */
+	const ultraLabelShift = $derived(
+		zones.some((zone) => zone.kind === 'pk-high-boost') ? labelSize + 4 : 0
+	);
 	const boxRect = $derived(
 		box
 			? {
@@ -402,7 +466,7 @@
 
 	function handleLabel(band: Band, index: number): string {
 		if (band.kind === 'OFF') return '';
-		if (isLockedKind(band.kind, layer)) {
+		if (isLocked(band)) {
 			return m.curva_bn_handle_locked(
 				{ badge: badge(index), name: nameOf(index), kind: band.kind },
 				messages
@@ -462,7 +526,7 @@
 	}
 
 	function onpointerdown(event: PointerEvent, band: Band, index: number) {
-		if (!editable || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
+		if (!editable || band.kind === 'OFF' || isLocked(band)) return;
 		if (event.button > 0) return;
 		event.preventDefault();
 		if (event.currentTarget instanceof Element) {
@@ -477,7 +541,7 @@
 		const point = viewPoint(event);
 		if (!point) return;
 		const start = active.start;
-		let target: DragTarget = pointerTarget(point.vx, point.vy, start);
+		let target: DragTarget = pointerTarget(point.vx, point.vy, start, freqContext);
 		// Shift keeps the frequency, Alt keeps the gain (mock).
 		if (event.shiftKey && start.kind !== 'OFF') target = { ...target, freqHz: start.freqHz };
 		if (event.altKey && hasGain(start)) target = { ...target, gainDb: start.gainDb };
@@ -494,8 +558,8 @@
 	}
 
 	function onkeydown(event: KeyboardEvent, band: Band, index: number) {
-		if (band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
-		const target = keyTarget(event.key, band, event);
+		if (band.kind === 'OFF' || isLocked(band)) return;
+		const target = keyTarget(event.key, band, event, freqContext);
 		if (!target) return;
 		event.preventDefault();
 		selected = index;
@@ -517,7 +581,7 @@
 		if (!parkedActive || parkedActive.pointer !== event.pointerId) return;
 		const point = viewPoint(event);
 		if (!point) return;
-		const target = pointerTarget(point.vx, point.vy, parkedBand(parkedActive.index));
+		const target = pointerTarget(point.vx, point.vy, parkedBand(parkedActive.index), freqContext);
 		parkedActive = {
 			...parkedActive,
 			target,
@@ -533,7 +597,7 @@
 	}
 	function parkKey(event: KeyboardEvent, index: number) {
 		if (!onpark) return;
-		const target = keyTarget(event.key, parkedBand(index), event);
+		const target = keyTarget(event.key, parkedBand(index), event, freqContext);
 		if (!target) return;
 		event.preventDefault();
 		create(index, target);
@@ -554,7 +618,7 @@
 			if (!(element instanceof SVGGElement) || element.classList.contains('parked')) return;
 			const index = Number(element.dataset.index);
 			const band = curve.bands[index];
-			if (!band || band.kind === 'OFF' || isLockedKind(band.kind, layer)) return;
+			if (!band || band.kind === 'OFF' || isLocked(band)) return;
 			const delta = event.deltaY || event.deltaX;
 			if (!delta) return;
 			event.preventDefault();
@@ -581,6 +645,39 @@
 		if (event.key === 'Enter' || event.key === ' ') onpreviewwarm?.();
 	}
 	const previewNote = $derived(previewDisabled && previewReason ? previewReason : previewCaption);
+	/**
+	 * Filters above 20 kHz that do not play at this rate (away from 96 kHz the engine bypasses
+	 * the ones nobody hears below 20 kHz, `skippedSections`): the page's count, else the playing
+	 * side's curve (A: the reference, B: the editor curve).
+	 */
+	/** The curve of the side that plays (A: the reference, B: the editor curve). */
+	const playedCurve = $derived(side === 'A' ? reference : (committed ?? curve));
+	/** The rate the counts are judged at: the engine's, else a typical fallback rate. */
+	const playRate = $derived(rate ?? (approximate ? FALLBACK_RATE : PREVIEW_RATE));
+	const skippedCount = $derived.by(() => {
+		if (!approximate) return 0;
+		if (skipped !== null) return skipped;
+		return playedCurve ? skippedSections(playedCurve.bands, playRate) : 0;
+	});
+	const skippedText = $derived(
+		skippedCount === 1
+			? m.curva_ultra_skipped_one({}, messages)
+			: m.curva_ultra_skipped({ count: String(skippedCount) }, messages)
+	);
+	/**
+	 * Filters above 20 kHz that play as a stand-in at this rate (the engine approximates the ones
+	 * whose audible-band effect on the chip a bypass would lose, `approximatedSections`).
+	 */
+	const approximatedCount = $derived.by(() => {
+		if (!approximate) return 0;
+		if (approximated !== null) return approximated;
+		return playedCurve ? approximatedSections(playedCurve.bands, playRate) : 0;
+	});
+	const approximatedText = $derived(
+		approximatedCount === 1
+			? m.qa1y_ultra_approximated_one({}, messages)
+			: m.qa1y_ultra_approximated({ count: String(approximatedCount) }, messages)
+	);
 	// A/B needs this page's chains, which exist while playing and while paused (`select()` works
 	// on a paused preview); with no session there is nothing to switch, and the tabs say why.
 	const abReady = $derived(playing || paused);
@@ -593,16 +690,6 @@
 		onside(next);
 	}
 
-	/** The layout provides the app context; isolated renders (tests) pass `engine` instead. */
-	function optionalAppContext(): AppContext | null {
-		try {
-			return getAppContext();
-		} catch (missing) {
-			console.debug('ScopePanel rendered without the app context', missing);
-			return null;
-		}
-	}
-	const appContext = optionalAppContext();
 	const transportEngine = $derived(engine ?? appContext?.client?.audio ?? null);
 	/** Transport play with nothing of Curva paused: the page's own start (A/B, level match). */
 	function onTransportPlay(): void {
@@ -717,6 +804,17 @@
 						height={PLOT.bottom - PLOT.top}
 						fill="url(#{legendId}-inaudible)"
 					/>
+					{#if noEditShown}
+						<rect
+							class="noedit"
+							data-testid="scope-noedit"
+							x={noEditX}
+							y={PLOT.top}
+							width={PLOT.right - noEditX}
+							height={PLOT.bottom - PLOT.top}
+							fill="url(#{legendId}-hatch)"
+						/>
+					{/if}
 					<text
 						class="inaudible-t"
 						x={inaudibleLabel.x}
@@ -877,6 +975,14 @@
 								y={yOf(Math.min(zone.gMax, DB_MAX)) + 14}
 								text-anchor="end">{m.curva_d7_zone({}, messages)}</text
 							>
+						{:else if zone.kind === 'ultra-boost'}
+							<text
+								class="hard-t"
+								data-zone="ultra-boost"
+								x={xOf(zone.fMin) - 4}
+								y={yOf(Math.min(zone.gMax, DB_MAX)) + 14 + ultraLabelShift}
+								text-anchor="end">{m.curva_ultra_zone({}, messages)}</text
+							>
 						{:else}
 							<text class="hard-t" x={PLOT.left + 8} y={yOf(DB_MAX) + 14}
 								>{m.curva_hard_limit({}, messages)}</text
@@ -930,7 +1036,7 @@
 				>
 					{#each curve.bands as band, index (index)}
 						{#if band.kind !== 'OFF'}
-							{@const locked = isLockedKind(band.kind, layer)}
+							{@const locked = isLocked(band)}
 							<g
 								class="handle"
 								class:locked
@@ -944,7 +1050,7 @@
 								tabindex="0"
 								aria-label={handleLabel(band, index)}
 								aria-valuemin={20}
-								aria-valuemax={20000}
+								aria-valuemax={Math.max(freqMax(band, freqContext), band.freqHz)}
 								aria-valuenow={band.freqHz}
 								aria-valuetext={`${formatHz(band.freqHz, locale)}${hasGain(band) ? `, ${formatSignedDb(band.gainDb, locale)}` : ''}`}
 								aria-disabled={locked}
@@ -984,7 +1090,7 @@
 								tabindex="0"
 								aria-label={m.curva_bn_parked({ badge: badge(index), name: nameOf(index) })}
 								aria-valuemin={20}
-								aria-valuemax={20000}
+								aria-valuemax={freqMax(parkedBand(index), freqContext)}
 								aria-valuenow={hz}
 								aria-valuetext={`${formatHz(hz, locale)}, ${formatSignedDb(0, locale)}`}
 								transform={`translate(${(held?.x ?? xOf(hz)).toFixed(1)} ${(held?.y ?? yOf(0)).toFixed(1)})`}
@@ -1068,6 +1174,9 @@
 	{#if editable && curve.bands.some((band) => band.kind !== 'OFF' && isLockedKind(band.kind, layer))}
 		<p class="exp-hint">{m.curva_exp_hint()}</p>
 	{/if}
+	{#if editable && isUltrasonicLocked(curve, layer)}
+		<p class="exp-hint" data-testid="ultra-hint">{m.curva_ultra_hint()}</p>
+	{/if}
 	<div class="spectrum">
 		<MeterModeLabel mode={spectrumMode} />
 		<SpectrumOverlay
@@ -1143,6 +1252,14 @@
 		<div class="prev-note">{m.curva_preview_note()} <Explainer term="ab-nivel" /></div>
 		{#if playing && approximate}
 			<p class="prev-note prev-approx" role="status">{m.curva_approximate()}</p>
+			{#if skippedCount > 0}
+				<p class="prev-note prev-approx" role="status" data-testid="ultra-skip">{skippedText}</p>
+			{/if}
+			{#if approximatedCount > 0}
+				<p class="prev-note prev-approx" role="status" data-testid="ultra-approx">
+					{approximatedText}
+				</p>
+			{/if}
 		{/if}
 		{#if previewError}
 			<p class="prev-error" role="alert">{previewError}</p>
@@ -1266,6 +1383,10 @@
 		fill: rgb(255 180 120 / 0.5);
 		dominant-baseline: central;
 		letter-spacing: 0.04em;
+	}
+	/* Engenharia: 32 kHz to Nyquist is never editable (the hard-zone hatch, fainter). */
+	.noedit {
+		opacity: 0.45;
 	}
 	.sweep {
 		animation: sweep 9s linear infinite;

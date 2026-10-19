@@ -11,7 +11,10 @@
 	- CORTE and REFORÇO lamps (the sign of the band's real gain) and a mini response of the section;
 	- FREQ, GANHO and Q knobs with LCD fields. Typing goes through the same gate-bounded move as the
 	  handles (stop at the boundary, round, revalidate). Dragging a knob (up or down) previews the
-	  value on the scope every frame (`ondrag`, advisory only) and proposes it once, on release;
+	  value on the scope every frame (`ondrag`, advisory only) and proposes it once, on release.
+	  FREQ spans 20 Hz to 20 kHz in Ajustar and to 32 kHz in Engenharia; each band stops at its
+	  `freqMax` (in Engenharia a boost at 20 kHz, a cut at 32 kHz; Modo YOLO: any kind at 32 kHz).
+	  A strip above 20 kHz is locked outside Engenharia, like HS/LP/HP;
 	- a stage LED: live PPM after that section while the preview plays, otherwise the prefix peak
 	  from the gate metrics (DATA).
 	The head carries the observed-envelope strip: the gate's seven criteria (a) to (g), each with a
@@ -28,6 +31,7 @@
 	import LedLadder from '#lib/components/meters/LedLadder.svelte';
 	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
 	import type { MeterFrame, MeterMode } from '#lib/audio/meters.ts';
+	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button, Lamp } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
@@ -37,8 +41,9 @@
 	import { formatSignedDb } from './format.ts';
 	import KindDial, { type KindCheck } from './KindDial.svelte';
 	import { changeKind } from './edit.ts';
-	import { isLockedKind, type Layer } from './layers.ts';
+	import { isLockedBand, isLockedKind, type Layer } from './layers.ts';
 	import { miniPath } from './mini.ts';
+	import { editableMaxHz, freqMax, type FreqContext } from './scope.ts';
 	import {
 		bandValue,
 		hasGain,
@@ -75,6 +80,11 @@
 		/** Profile changes cancel pending dials, just like an external curve change. */
 		kindContext?: unknown;
 		kindDisabledReason?: string | null;
+		/**
+		 * Modo YOLO (Engenharia only): every kind may go up to 32 kHz. Omitted: the app context's
+		 * YOLO state (off without it).
+		 */
+		yolo?: boolean;
 		onorder: () => void;
 	}
 	let {
@@ -91,16 +101,34 @@
 		canApplyKind,
 		kindContext,
 		kindDisabledReason = null,
+		yolo,
 		onorder
 	}: Props = $props();
+
+	/** The layout provides the app context; isolated renders (tests) have none. */
+	function optionalAppContext(): AppContext | null {
+		try {
+			return getAppContext();
+		} catch (missing) {
+			console.debug('FilterBank rendered without the app context', missing);
+			return null;
+		}
+	}
+	const appContext = optionalAppContext();
+	/** Frequency limits (`freqMax`): 20 kHz, or 32 kHz in Engenharia (cuts) and Modo YOLO (any). */
+	const freqContext = $derived<FreqContext>({
+		layer,
+		yolo: yolo ?? appContext?.client?.yolo.enabled ?? false
+	});
 
 	const headingId = $props.id();
 	let focusGeneration = $state(0);
 	const dialContext = $derived({ curve, kindContext, focusGeneration });
 	function checkKind(index: number, kind: BandKind): KindCheck | Promise<KindCheck> {
 		if (canApplyKind) return canApplyKind(index, kind);
-		// Standalone banks keep the same full-grid, standard-profile discrete-edit gate.
-		const result = changeKind(curve, index, kind);
+		// Standalone banks keep the same full-grid, standard-profile discrete-edit gate; the layer
+		// lets a band above 20 kHz keep its frequency where it allows the new kind.
+		const result = changeKind(curve, index, kind, 'standard', layer);
 		return result.ok
 			? { ok: true }
 			: { ok: false, reason: firstReasonText(result.reasons, { bands: curve.bands, locale }) };
@@ -139,15 +167,31 @@
 		gainDb: { min: -15, max: 9.2, log: false, travel: 240, round: (v) => Math.round(v * 10) / 10 },
 		qFactor: { min: 0.1, max: 20, log: true, travel: 300, round: (v) => Math.round(v * 100) / 100 }
 	};
+	/**
+	 * The FREQ knob spans the layer's editable band (`editableMaxHz`): 20 kHz in Ajustar, 32 kHz
+	 * in Engenharia. Each band then stops at its own `freqMax` (a boost at 20 kHz outside YOLO).
+	 */
+	const knobs = $derived<Record<DragParam, KnobSpec>>({
+		...KNOBS,
+		freqHz: { ...KNOBS.freqHz, max: editableMaxHz(freqContext) }
+	});
+	/** Why a locked strip is locked: its kind (HS/LP/HP), else its frequency (above 20 kHz). */
+	function lockHint(band: Band): string {
+		return isLockedKind(band.kind, layer) ? m.curva_exp_hint() : m.curva_ultra_hint();
+	}
+	/** Highest value of `param` for `band` here: its `freqMax` for the frequency, else the knob's. */
+	function knobMax(band: Band, param: DragParam): number {
+		return param === 'freqHz' ? freqMax(band, freqContext) : knobs[param].max;
+	}
 	function position(param: DragParam, value: number): number {
-		const spec = KNOBS[param];
+		const spec = knobs[param];
 		const clamped = Math.min(spec.max, Math.max(spec.min, value));
 		return spec.log
 			? Math.log(clamped / spec.min) / Math.log(spec.max / spec.min)
 			: (clamped - spec.min) / (spec.max - spec.min);
 	}
 	function valueAt(param: DragParam, t: number): number {
-		const spec = KNOBS[param];
+		const spec = knobs[param];
 		const u = Math.min(1, Math.max(0, t));
 		const raw = spec.log
 			? spec.min * (spec.max / spec.min) ** u
@@ -180,7 +224,10 @@
 			};
 			const move = (event: PointerEvent) => {
 				if (!start || event.pointerId !== start.pointer) return;
-				const value = valueAt(param, start.t + (start.y - event.clientY) / KNOBS[param].travel);
+				const band = curve.bands[index];
+				const turned = valueAt(param, start.t + (start.y - event.clientY) / KNOBS[param].travel);
+				// A boost stops at 20 kHz outside YOLO, as on the scope (`freqMax`).
+				const value = band ? Math.min(knobMax(band, param), turned) : turned;
 				if (knob?.value === value) return;
 				knob = { index, param, value };
 				ondrag?.(index, { [param]: value });
@@ -220,7 +267,9 @@
 		// Show the accepted value until the gate answers; an accepted move updates the prop.
 		if (current !== null) input.valueAsNumber = current;
 		if (!Number.isFinite(value)) return;
-		onmove(index, { [param]: value });
+		// A typed frequency stops at the band's `freqMax` here (20 kHz, or 32 kHz in Engenharia).
+		const top = band && param === 'freqHz' ? knobMax(band, param) : Infinity;
+		onmove(index, { [param]: Math.min(top, value) });
 	}
 	/** Real sign of the band: a cut (negative gain, LP, HP) or a boost (positive gain). */
 	function sign(band: Band): { cut: boolean; boost: boolean } {
@@ -392,7 +441,7 @@
 	<p class="sr-only" id="{headingId}-rename">{m.curva_bn_rename_hint_max({ max: LABEL_MAX })}</p>
 	<ol class="modules">
 		{#each curve.bands as band, index (index)}
-			{@const locked = band.kind !== 'OFF' && isLockedKind(band.kind, layer)}
+			{@const locked = isLockedBand(band, layer)}
 			{@const off = band.kind === 'OFF'}
 			{@const lamps = sign(band)}
 			{@const name = names[index]}
@@ -478,7 +527,7 @@
 							<input
 								type="number"
 								min="20"
-								max="20000"
+								max={Math.max(knobMax(band, 'freqHz'), band.freqHz)}
 								step="1"
 								value={freq}
 								disabled={locked}
@@ -523,7 +572,7 @@
 						</div>
 					</div>
 					{#if locked}
-						<p class="hint">{m.curva_exp_hint()}</p>
+						<p class="hint">{lockHint(band)}</p>
 					{/if}
 				{/if}
 				<svg class="mini" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">

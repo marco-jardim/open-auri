@@ -18,7 +18,7 @@
  *   cable write as the reference, the free preview's draft). The engine adds it on its own to
  *   anything louder than the standard gate allows.
  */
-import { AudioEngineError } from '#lib/audio/engine.ts';
+import { AudioEngineError, PREVIEW_RATE } from '#lib/audio/engine.ts';
 import { gateAccepts } from '#lib/gate-verdicts.ts';
 import type { ABPreview, ABSide, AudioEngine } from '#lib/audio/engine.ts';
 import {
@@ -72,6 +72,8 @@ export class CurvaPreview {
 	starting = $state(false);
 	/** False when the engine runs at a rate other than 96 kHz (approximate preview). */
 	exact = $state(true);
+	/** The engine's context rate (the nominal 96 000 before it exists). */
+	rate = $state(PREVIEW_RATE);
 	side = $state<ABSide>('B');
 	error = $state<PreviewError | null>(null);
 	analyser = $state.raw<AnalyserNode | null>(null);
@@ -136,7 +138,9 @@ export class CurvaPreview {
 			this.playing = true;
 			// A resume plays again: the meters held in DATA while paused read the taps again.
 			if (resuming) this.#attachMeters();
-			this.exact = this.#engine.state().exact;
+			const started = this.#engine.state();
+			this.exact = started.exact;
+			this.rate = started.rate;
 			// An edit during the start must be heard, not the curve captured at the click.
 			const latest = this.#latest;
 			const built = this.#built;
@@ -258,6 +262,7 @@ export class CurvaPreview {
 		if (this.#unsubscribe) return;
 		this.#unsubscribe = this.#engine.onChange((state) => {
 			this.exact = state.exact;
+			this.rate = state.rate;
 			const ours = state.session === CURVA_SESSION;
 			if (ours && state.playing && state.mode === 'chains') {
 				// Continued from the Transport or the navbar (a resume of our own is still starting).

@@ -51,12 +51,15 @@ export const termsEnUS: LegalDocument = {
 			'publish illegal, offensive, discriminatory or harassing content, or content that infringes others’ rights;',
 			'use names, descriptions or packs for spam, advertising, links or other people’s personal data;',
 			'manipulate rankings, counts or reports, including with multiple accounts or automation;',
-			'publish curves made to cause discomfort, hearing damage or equipment damage, or circumvent the gate, rate limiting or Turnstile;',
+			'publish curves made to cause discomfort, hearing damage or equipment damage, or circumvent the gate, rate limiting or Turnstile (YOLO mode does not circumvent the gate: it applies the gate’s own YOLO profile, with the hardware locks);',
 			'probe for security flaws without first contacting the project, or overload the service.'
 		]),
+		paragraph(
+			'**YOLO curves.** Curves made beyond the standard limits, in YOLO mode, are published only with the YOLO mark, after your explicit acknowledgement, and stay outside the main feed, the rankings and the other standard lists. Passing the open-auri checks does not mean a curve poses no risk to hearing or equipment. Whoever writes a YOLO curve to the cable takes on the risk.'
+		),
 		heading('6. Moderation'),
 		list([
-			'Verified accounts can report content. A curve is hidden automatically when 3 different verified accounts, each at least 3 days old, report it.',
+			'Verified accounts can report content. A curve is hidden automatically when 3 different verified accounts, each at least 3 days old, report it; a curve whose current version is YOLO is hidden with just 2 such accounts.',
 			'Moderators review automatic hiding and may restore, hide or withdraw content, mark curation and ban accounts that breach these terms or the law. Every action is kept in the audit log.',
 			'If a decision affects you, ask for a review through the privacy channel in section 8, including for automated decisions (LGPD, art. 20).',
 			'We may remove content or suspend accounts to comply with a court order or legal obligation.'

@@ -21,6 +21,7 @@ export const POST: RequestHandler = defineApi(
 		});
 		const appended = await appendCurveVersion(env.db, user.id, event.params.id ?? '', body, {
 			metrics: env.metrics,
+			yoloPublication: env.yoloPublication,
 			onPublished: (info) => void scheduleOgWarm(event, info)
 		});
 		return json(appended, { status: 201 });

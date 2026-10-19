@@ -16,12 +16,19 @@ export {
   YOLO_WAIVABLE,
   HARD_REASONS,
   CODEC_PREAMP_FLOOR_DB,
+  YOLO_STORAGE_PREAMP_FLOOR_DB,
   YOLO_PREAMP_MAX_DB,
   autoPreamp,
 } from './gate.mjs';
+export { classifyCurve, classifierVersionInput } from './classify.mjs';
 export {
   SOFT_RANGES,
   ABS_RANGES,
+  AUDIBLE_MAX_HZ,
+  ULTRA_MAX_HZ,
+  ULTRA_CUT_Q_MAX,
+  isUltrasonic,
+  freqMaxFor,
   EXPERIMENTAL_KINDS,
   LAYER_KINDS,
   GRID_STEPS,

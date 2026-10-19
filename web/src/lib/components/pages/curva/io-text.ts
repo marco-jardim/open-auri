@@ -11,8 +11,13 @@ export function ioFailureText(failure: IoFailure): string {
 			return m.curva_io_error_too_many();
 		case 'experimental-layer':
 			return m.curva_io_error_experimental();
+		case 'ultrasonic-layer':
+			return m.yolopub_io_error_ultrasonic();
 		case 'link':
-			return m.curva_io_error_link();
+			// An S1 version this build does not know: the link comes from a newer open-auri.
+			return failure.detail === 's1:version'
+				? m.yolopub_io_error_link_newer()
+				: m.curva_io_error_link();
 		case 'envelope':
 			return m.curva_io_error_envelope();
 		case 'grid':

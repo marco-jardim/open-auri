@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { encodeS1 } from 'open-auri/share';
-import { neutralCurve } from '#lib/state/model.ts';
+import { neutralCurve, type CurveData } from '#lib/state/model.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import { createSocialApi, createSocialSession, ORIGINS_KEY, originOf } from '#lib/social/index.ts';
@@ -287,6 +287,49 @@ test('source changes discard a late response and unlock controls for the next lo
 	await page.getByRole('button', { name: m.curve_social_load(), exact: true }).click();
 	await expect.element(page.getByRole('option', { name: 'Community tone' })).toBeInTheDocument();
 	await expect.element(page.getByRole('option', { name: 'Stale tone' })).not.toBeInTheDocument();
+});
+
+// The YOLO step belongs to the curve frozen when the dialog opened (the one that is sent), never
+// to the live `curve` prop: an edit while the dialog is open neither skips the step nor asks it.
+const yoloCurve: CurveData = {
+	...neutralCurve(),
+	name: 'Subsônica',
+	preampDb: -0.5,
+	bands: [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }, ...neutralCurve().bands.slice(1)]
+};
+const ackStep = () => page.getByRole('group', { name: m.yolopub_ack_title() });
+const sentBody = (fetcher: ReturnType<typeof fixture>['fetcher'], index = 0): unknown =>
+	JSON.parse(String(fetcher.mock.calls[index]?.[1].body));
+
+test('a standard curve opened in the dialog is published as it was, even if the editor turns YOLO', async () => {
+	const { social, fetcher, curve } = fixture();
+	const screen = await render(SocialPublish, { social, curve, path: '/comparar' });
+	await page.getByRole('button', { name: m.curve_social_publish() }).click();
+	await screen.rerender({ curve: yoloCurve });
+	await page.getByRole('button', { name: m.curve_social_submit() }).click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.curve_social_published());
+	expect(ackStep().elements()).toEqual([]);
+	const body = sentBody(fetcher);
+	expect(body).toMatchObject({ visibility: 'unlisted', envelope: { code: encodeS1(curve) } });
+	expect(body).not.toHaveProperty('acknowledge');
+});
+
+test('a YOLO curve opened in the dialog still asks for the step after the editor turns standard', async () => {
+	const { social, fetcher, curve } = fixture();
+	const screen = await render(SocialPublish, { social, curve: yoloCurve, path: '/comparar' });
+	await page.getByRole('button', { name: m.curve_social_publish() }).click();
+	await screen.rerender({ curve });
+	await page.getByRole('button', { name: m.curve_social_submit() }).click();
+	await expect.element(ackStep()).toMatchTextContent(m.yolopub_ack_body());
+	expect(fetcher).not.toHaveBeenCalled();
+	await ackStep().getByRole('checkbox', { name: m.yolopub_ack_checkbox() }).click();
+	await ackStep().getByRole('button', { name: m.yolopub_ack_button() }).click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.curve_social_published());
+	expect(sentBody(fetcher)).toMatchObject({
+		visibility: 'unlisted',
+		acknowledge: 'yolo',
+		envelope: { code: encodeS1(yoloCurve) }
+	});
 });
 
 test('empty pages and curve errors are visible; offline retry reloads public sources', async () => {

@@ -1,4 +1,5 @@
 import { isKindAllowed, isExperimentalKind, LAYER_KINDS } from 'open-auri/safety';
+import { hasUltrasonic, type Band, type Curve } from './model.ts';
 
 export type Layer = keyof typeof LAYER_KINDS;
 
@@ -81,4 +82,18 @@ export function kindAllowed(kind: string, layer: Layer): boolean {
 /** HS/LP/HP are visible everywhere but editable only in Engenharia (experimental). */
 export function isLockedKind(kind: string, layer: Layer): boolean {
 	return isExperimentalKind(kind) && layer !== 'engenharia';
+}
+
+/**
+ * Sections above 20 kHz (`hasUltrasonic`) are visible everywhere but editable only in Engenharia,
+ * like HS/LP/HP: Ouvir and Ajustar stop at 20 kHz (`freqMaxFor`).
+ */
+export function isUltrasonicLocked(source: Curve | readonly Band[], layer: Layer): boolean {
+	return layer !== 'engenharia' && hasUltrasonic(source);
+}
+
+/** A section this layer shows but does not edit: an experimental kind or a band above 20 kHz. */
+export function isLockedBand(band: Band, layer: Layer): boolean {
+	if (band.kind === 'OFF') return false;
+	return isLockedKind(band.kind, layer) || isUltrasonicLocked([band], layer);
 }

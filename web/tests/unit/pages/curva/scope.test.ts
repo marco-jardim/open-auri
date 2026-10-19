@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import { curveResponseDb, logGrid } from 'open-auri/dsp';
-import { ABS_RANGES, gateForWrite, SOFT_RANGES, THRESHOLDS } from 'open-auri/safety';
+import {
+	ABS_RANGES,
+	AUDIBLE_MAX_HZ,
+	gateForWrite,
+	SOFT_RANGES,
+	THRESHOLDS,
+	ULTRA_MAX_HZ
+} from 'open-auri/safety';
 import type { Band, Curve } from '#lib/components/pages/curva/model.ts';
 import {
 	audibleLength,
@@ -9,7 +16,10 @@ import {
 	bandResponse,
 	dbOf,
 	DRAG_GRID,
+	editableMaxHz,
 	F_MAX,
+	F_MIN,
+	freqMax,
 	freqOf,
 	hardZones,
 	INTERNAL_LIMIT_DB,
@@ -307,6 +317,130 @@ describe('safe boxes and hard zones of the selected section', () => {
 		expect(hardZones({ kind: 'LS', freqHz: 200, gainDb: 0, qFactor: 0.7 })).toHaveLength(1);
 		expect(hardZones({ kind: 'LP', freqHz: 18000, qFactor: 0.7 })).toEqual([]);
 		expect(hardZones(OFF)).toEqual([]);
+	});
+
+	test('Engenharia: the gain cap reaches 32 kHz and boosts from 20 to 32 kHz are a hard zone', () => {
+		const ls: Band = { kind: 'LS', freqHz: 200, gainDb: 0, qFactor: 0.7 };
+		const pk: Band = { kind: 'PK', freqHz: 1000, gainDb: 0, qFactor: 1 };
+		const engenharia = hardZones(ls, { layer: 'engenharia' });
+		expect(engenharia.map((zone) => zone.kind)).toEqual(['gain-cap', 'ultra-boost']);
+		expect(engenharia[0]).toMatchObject({ fMin: F_MIN, fMax: ULTRA_MAX_HZ });
+		expect(engenharia[1]).toEqual({
+			kind: 'ultra-boost',
+			fMin: AUDIBLE_MAX_HZ,
+			fMax: ULTRA_MAX_HZ,
+			gMin: 0,
+			gMax: ABS_RANGES.gainDb.max
+		});
+		expect(hardZones(pk, { layer: 'engenharia' }).map((zone) => zone.kind)).toEqual([
+			'gain-cap',
+			'pk-high-boost',
+			'ultra-boost'
+		]);
+		// Modo YOLO: boosts may go to 32 kHz; the gain cap stays.
+		const yolo = hardZones(ls, { layer: 'engenharia', yolo: true });
+		expect(yolo.map((zone) => zone.kind)).toEqual(['gain-cap']);
+		expect(yolo[0]?.fMax).toBe(ULTRA_MAX_HZ);
+		// Ouvir and Ajustar stop at 20 kHz, YOLO or not.
+		for (const layer of ['ouvir', 'ajustar'] as const) {
+			const zones = hardZones(ls, { layer, yolo: true });
+			expect(zones.map((zone) => zone.kind)).toEqual(['gain-cap']);
+			expect(zones[0]?.fMax).toBe(F_MAX);
+		}
+		expect(editableMaxHz({ layer: 'engenharia' })).toBe(ULTRA_MAX_HZ);
+		expect(editableMaxHz({ layer: 'ajustar', yolo: true })).toBe(AUDIBLE_MAX_HZ);
+		expect(editableMaxHz()).toBe(AUDIBLE_MAX_HZ);
+	});
+});
+
+describe('frequency limits per layer (freqMaxFor)', () => {
+	// Core's gain band (PK/LS/HS share one type), so spreads keep a gain.
+	const cut: Extract<Band, { kind: 'PK' | 'LS' | 'HS' }> = {
+		kind: 'PK',
+		freqHz: 1000,
+		gainDb: -3,
+		qFactor: 1
+	};
+	const lift: Extract<Band, { kind: 'PK' | 'LS' | 'HS' }> = { ...cut, gainDb: 3 };
+	const lp: Band = { kind: 'LP', freqHz: 18000, qFactor: 0.7 };
+	const sharp: Band = { kind: 'LP', freqHz: 18000, qFactor: 2 };
+	const none = { shiftKey: false, altKey: false };
+	const shift = { shiftKey: true, altKey: false };
+
+	test('20 kHz in Ouvir and Ajustar; 32 kHz for cuts in Engenharia; 32 kHz for any in YOLO', () => {
+		for (const layer of ['ouvir', 'ajustar'] as const) {
+			for (const band of [cut, lift, lp]) {
+				expect(freqMax(band, { layer })).toBe(AUDIBLE_MAX_HZ);
+				expect(freqMax(band, { layer, yolo: true })).toBe(AUDIBLE_MAX_HZ);
+			}
+		}
+		expect(freqMax(cut, { layer: 'engenharia' })).toBe(ULTRA_MAX_HZ);
+		expect(freqMax(lp, { layer: 'engenharia' })).toBe(ULTRA_MAX_HZ);
+		expect(freqMax(lift, { layer: 'engenharia' })).toBe(AUDIBLE_MAX_HZ);
+		expect(freqMax(sharp, { layer: 'engenharia' })).toBe(AUDIBLE_MAX_HZ);
+		for (const band of [cut, lift, lp, sharp]) {
+			expect(freqMax(band, { layer: 'engenharia', yolo: true })).toBe(ULTRA_MAX_HZ);
+		}
+		expect(freqMax(cut)).toBe(AUDIBLE_MAX_HZ);
+	});
+
+	test('the pointer clamps per layer, at the gain under the pointer', () => {
+		const right = 5000;
+		const below = yOf(-6);
+		const above = yOf(6);
+		expect(pointerTarget(right, below, cut, { layer: 'ajustar' }).freqHz).toBe(AUDIBLE_MAX_HZ);
+		expect(pointerTarget(right, below, cut, { layer: 'engenharia' })).toEqual({
+			freqHz: ULTRA_MAX_HZ,
+			gainDb: -6
+		});
+		// The same cut lifted above 0 dB is a boost: it stops at 20 kHz outside YOLO.
+		expect(pointerTarget(right, above, cut, { layer: 'engenharia' })).toEqual({
+			freqHz: AUDIBLE_MAX_HZ,
+			gainDb: 6
+		});
+		expect(pointerTarget(right, above, cut, { layer: 'engenharia', yolo: true })).toEqual({
+			freqHz: ULTRA_MAX_HZ,
+			gainDb: 6
+		});
+		// 0 dB never amplifies: Engenharia allows it up to 32 kHz.
+		expect(pointerTarget(right, yOf(0), cut, { layer: 'engenharia' }).freqHz).toBe(ULTRA_MAX_HZ);
+		expect(pointerTarget(right, above, lp, { layer: 'engenharia' })).toEqual({
+			freqHz: ULTRA_MAX_HZ
+		});
+		expect(pointerTarget(right, above, sharp, { layer: 'engenharia' })).toEqual({
+			freqHz: AUDIBLE_MAX_HZ
+		});
+		// The plot's right edge is Nyquist (48 kHz): never past 32 kHz.
+		expect(freqOf(right)).toBeGreaterThan(NYQUIST_HZ);
+	});
+
+	test('arrow keys clamp per layer and never pull a band down from where it is', () => {
+		const high = { ...cut, freqHz: 19000 };
+		expect(keyTarget('ArrowRight', high, shift, { layer: 'ajustar' })).toEqual({
+			freqHz: AUDIBLE_MAX_HZ
+		});
+		expect(keyTarget('ArrowRight', high, shift, { layer: 'engenharia' })).toEqual({
+			freqHz: Math.round(19000 * 2 ** (10 / 24))
+		});
+		const top = { ...cut, freqHz: 31000 };
+		expect(keyTarget('ArrowRight', top, shift, { layer: 'engenharia' })).toEqual({
+			freqHz: ULTRA_MAX_HZ
+		});
+		const boost = { ...lift, freqHz: 19500 };
+		expect(keyTarget('ArrowRight', boost, shift, { layer: 'engenharia' })).toEqual({
+			freqHz: AUDIBLE_MAX_HZ
+		});
+		expect(keyTarget('ArrowRight', boost, shift, { layer: 'engenharia', yolo: true })).toEqual({
+			freqHz: Math.round(19500 * 2 ** (10 / 24))
+		});
+		// A boost left above 20 kHz (from YOLO) is not pulled down by a step to the right.
+		const left = { ...lift, freqHz: 25000 };
+		expect(keyTarget('ArrowRight', left, none, { layer: 'engenharia' })).toEqual({
+			freqHz: 25000
+		});
+		expect(keyTarget('ArrowLeft', left, none, { layer: 'engenharia' })).toEqual({
+			freqHz: Math.round(25000 * 2 ** (-1 / 24))
+		});
 	});
 });
 

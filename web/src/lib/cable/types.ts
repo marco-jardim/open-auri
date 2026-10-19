@@ -293,13 +293,16 @@ export type ReasonMessageKey =
 	| 'cable_reason_c_section_peak'
 	| 'cable_reason_d_prefix_peak'
 	| 'cable_reason_d_prefix_peak_full'
+	| 'cable_reason_d_prefix_peak_extended'
 	| 'cable_reason_e_output_audible'
+	| 'cable_reason_e_output_extended'
 	| 'cable_reason_e_output_full'
 	| 'cable_reason_f_codec'
 	| 'cable_reason_g_preamp'
 	| 'cable_reason_k_kind_not_allowed'
 	| 'cable_reason_d7_pk_boost_above_16k'
 	| 'cable_reason_d7_boost_q'
+	| 'cable_reason_d7_boost_above_20k'
 	| 'cable_reason_unknown';
 
 export type LampLabelKey =
@@ -431,8 +434,10 @@ export interface CableWrittenDetail {
 	at: number;
 	levelDb: number | null;
 	/**
-	 * `'yolo'`: a Modo YOLO write (marked like its journal entry). Absent, or `'standard'`, on a
-	 * standard write.
+	 * `'yolo'`: a real Modo YOLO write, marked like its journal entry (option B, YOLO
+	 * publication): the app marks the curve as written and the outbox counts the install like any
+	 * other. Absent, or `'standard'`, on a standard write. Simulated and interrupted writes
+	 * dispatch nothing.
 	 */
 	profile?: WriteProfile;
 	/** The class-2 codes the YOLO write waived (only with `profile: 'yolo'`). */

@@ -6,7 +6,9 @@
 	weight, drawers for sharing, packs and reports (spec §1.5, T13).
 
 	Safety (plan §0.12): nothing here writes to a cable; "Gravar no cabo" hands a copy of the curve to
-	`app.requestWrite`, which opens the checklist (gesture + browser gate). Channel LEDs exist only
+	`app.requestWrite`, which opens the checklist (gesture + browser gate); a YOLO curve (its class,
+	from its own bands) opens the YOLO checklist when Modo YOLO is ready, else the scope offers
+	"Ativar Modo YOLO" (the curve in the editor's Engenharia layer). Channel LEDs exist only
 	while that channel really plays (real meter tap); no decorative meters, no meter skeleton. User
 	text is only interpolated. Without an account browsing and listening work; ONE account card
 	says what needs an account (T9) and each social action says why it is unavailable (T8). Offline
@@ -69,6 +71,7 @@
 		FEED_SORTS,
 		FEED_WINDOWS,
 		browserStorage,
+		channelIsYolo,
 		channelOf,
 		encodeCurve,
 		errorText,
@@ -167,6 +170,11 @@
 
 	let sort = $state<FeedSortKey>('new');
 	let feedWindow = $state<FeedWindowKey>('7d');
+	/**
+	 * "Curvas YOLO": the separate list of public YOLO curves (`yolo=only`, newest first only). The
+	 * two lists never mix: the main feed and the rankings stay standard-only on the server.
+	 */
+	let yoloOnly = $state(false);
 	let channels = $state.raw<Channel[]>([]);
 	let cursor = $state<string | null>(null);
 	let feedStatus = $state<'loading' | 'ready' | 'offline' | 'error'>('loading');
@@ -179,18 +187,23 @@
 	async function loadFeed(
 		nextSort: FeedSortKey,
 		nextWindow: FeedWindowKey,
-		after: string | null
+		after: string | null,
+		onlyYolo = yoloOnly
 	): Promise<void> {
 		const token = ++generation;
 		if (after === null) feedStatus = 'loading';
 		else loadingMore = true;
 		try {
-			const page = await api.feed({
-				sort: nextSort,
-				...(nextSort === 'new' ? {} : { window: nextWindow }),
-				cursor: after,
-				limit: FEED_PAGE_SIZE
-			});
+			const page = await api.feed(
+				onlyYolo
+					? { sort: 'new', yolo: 'only', cursor: after, limit: FEED_PAGE_SIZE }
+					: {
+							sort: nextSort,
+							...(nextSort === 'new' ? {} : { window: nextWindow }),
+							cursor: after,
+							limit: FEED_PAGE_SIZE
+						}
+			);
 			if (token !== generation) return;
 			const fresh = page.items.map(channelOf);
 			channels = after === null ? fresh : [...channels, ...fresh];
@@ -214,12 +227,23 @@
 	$effect(() => {
 		const nextSort = sort;
 		const nextWindow = feedWindow;
+		const onlyYolo = yoloOnly;
 		const connected = online;
 		untrack(() => {
 			if (!connected && channels.length > 0) return;
-			void loadFeed(nextSort, nextWindow, null);
+			void loadFeed(nextSort, nextWindow, null, onlyYolo);
 		});
 	});
+
+	/** "Curvas YOLO" on: the YOLO list (newest only); a ranked sort turns it off. */
+	function toggleYolo() {
+		yoloOnly = !yoloOnly;
+		if (yoloOnly) sort = 'new';
+	}
+	function pickSort(value: FeedSortKey) {
+		sort = value;
+		if (value !== 'new') yoloOnly = false;
+	}
 
 	function sortLabel(value: FeedSortKey): string {
 		if (value === 'new') return m.comunidade_sort_new();
@@ -361,16 +385,27 @@
 		notice = m.comunidade_used({ name: channel.name });
 	}
 
+	/** Modo YOLO is on in this tab (Engenharia) and allows a write (not the free preview). */
+	const yoloReady = $derived(app !== null && app.yolo.enabled && app.yolo.writeBlock() === null);
+
 	function install(channel: Channel) {
 		const curve = curveOf(channel);
 		if (!app || !curve) {
 			notice = m.comunidade_install_unavailable();
 			return;
 		}
+		// Classified at the click, on the exact curve the checklist gets. A YOLO curve with YOLO not
+		// ready: the standard checklist would refuse it; the scope offers "Ativar Modo YOLO" instead.
+		const yolo = channelIsYolo(curve);
+		if (yolo && !yoloReady) {
+			notice = m.yolopub_install_needs_yolo();
+			return;
+		}
 		recordOrigin(channel);
 		listener.stop();
 		// Opens the pre-write checklist only; its confirmation writes (and the gate runs again).
-		app.requestWrite(curve);
+		if (yolo) app.requestWrite(curve, { profile: 'yolo' });
+		else app.requestWrite(curve);
 	}
 
 	// ---- The signed-in user's creations (Total Recall, S7) ---------------------------------------
@@ -490,10 +525,19 @@
 							type="button"
 							class="push"
 							aria-pressed={sort === value}
-							onclick={() => (sort = value)}>{sortLabel(value)}</button
+							onclick={() => pickSort(value)}>{sortLabel(value)}</button
 						>
 					{/each}
 				</div>
+				<button
+					type="button"
+					class="push push-yolo"
+					aria-pressed={yoloOnly}
+					aria-describedby="{id}-yolo-hint"
+					data-testid="feed-yolo-toggle"
+					onclick={toggleYolo}>{m.yolopub_feed_toggle()}</button
+				>
+				<span class="sr-only" id="{id}-yolo-hint">{m.yolopub_feed_toggle_hint()}</span>
 				{#if sort !== 'new'}
 					<div class="push-group" role="group" aria-label={m.comunidade_window_label()}>
 						{#each FEED_WINDOWS as value (value)}
@@ -535,6 +579,8 @@
 						<p>{feedError}</p>
 						<Button onclick={() => loadFeed(sort, feedWindow, null)}>{m.comunidade_retry()}</Button>
 					</div>
+				{:else if channels.length === 0 && yoloOnly}
+					<p class="bank-state" data-testid="feed-empty">{m.yolopub_feed_empty()}</p>
 				{:else if channels.length === 0 && sort === 'new'}
 					<div class="empty-desk" data-testid="feed-empty">
 						<EmptyState
@@ -608,6 +654,7 @@
 					onuse={useCurve}
 					oninstall={install}
 					onopen={recordOrigin}
+					{yoloReady}
 				/>
 				{#if session.signedIn}
 					<TotalRecall

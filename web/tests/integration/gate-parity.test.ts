@@ -13,7 +13,7 @@
 // (never in parallel), in chunks with their own generous timeout.
 import { env } from 'cloudflare:workers';
 import { NEUTRAL_BANDS } from 'open-auri/dsp';
-import { ABS_RANGES, THRESHOLDS } from 'open-auri/safety';
+import { ABS_RANGES, isExperimentalKind, THRESHOLDS } from 'open-auri/safety';
 import { decodeS1, encodeS1 } from 'open-auri/share';
 import { describe, expect, it } from 'vitest';
 import { checkCurve } from '#lib/server/social/gate.ts';
@@ -63,7 +63,8 @@ function knownRejected(): Curve[] {
 	const pk = (freqHz: number, gainDb: number, qFactor: number) =>
 		band('PK', freqHz, gainDb, qFactor);
 	return [
-		// HS shelves are experimental (refused without the flag, on both sides).
+		// HS shelves: experimental kinds, allowed by the flag both sides derive from the curve
+		// (standard since GATE_IMPL 2); the boost one still fails other checks or passes alike.
 		curve([band('HS', 8000, -3, 0.71)], -1),
 		curve([band('HS', 4000, 3, 0.71), band('HS', 12000, -6, 0.71)], -6),
 		// D7: no PK boost above 16 kHz, no boost with Q above 4.
@@ -167,9 +168,21 @@ function buildCorpus(): Entry[] {
 
 const CORPUS = buildCorpus();
 
+/**
+ * Codes only the YOLO profile computes: a rejected curve's cached reasons add them when the
+ * server's classification ran that profile (GATE_IMPL 2); the standard browser verdict never has
+ * them.
+ */
+const YOLO_ONLY = new Set(['d:prefix-peak-full', 'd:prefix-peak-extended', 'e:output-extended']);
+
+/**
+ * The editor's commit verdict, with `experimental` derived from the curve exactly as the editor
+ * (`hasExperimental`) and the server (gate.ts) derive it.
+ */
 function browserVerdict(s1: string): { ok: boolean; reasons: string[] } {
 	const { bands, preampDb } = decodeS1(s1);
-	const response = handleGateRequest({ type: 'commit', id: 1, bands, preampDb });
+	const experimental = bands.some((band) => isExperimentalKind(band.kind));
+	const response = handleGateRequest({ type: 'commit', id: 1, bands, preampDb, experimental });
 	if (response.type !== 'commit') throw new Error('unexpected gate response');
 	const { verdict } = response;
 	return { ok: verdict.ok, reasons: [...new Set(verdict.reasons.map((r) => String(r.code)))] };
@@ -184,7 +197,9 @@ async function serverVerdict(s1: string): Promise<{ ok: boolean; reasons: string
 	const check = await checkCurve(env.DB, s1);
 	if (check.ok) return { ok: true, reasons: [] };
 	if (check.code === 'invalid-curve') return { ok: false, reasons: check.codes };
-	return { ok: false, reasons: check.reasons };
+	// `checkCurve` keeps ok = standard: a YOLO curve answers its waived codes (the standard ones),
+	// a rejected one its standard codes plus the YOLO-only ones, dropped here.
+	return { ok: false, reasons: check.reasons.filter((code) => !YOLO_ONLY.has(code)) };
 }
 
 const verdicts = { accepted: 0, rejected: 0 };

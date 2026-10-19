@@ -20,7 +20,16 @@
 	import type { Curve } from './model.ts';
 	import type { UrlLike } from './layers.ts';
 	import type { CurvaPreview } from './preview.svelte.ts';
-	import { exitRefusal, exitRefusalText } from './yolo.ts';
+	import { classOf, exitRefusal, exitRefusalText } from './yolo.ts';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
+	import YoloPublishAck from '#lib/components/yolo/YoloPublishAck.svelte';
+	import {
+		ackWaived,
+		needsYoloAck,
+		waivedLabels,
+		yoloPublishBlock,
+		yoloPublishText
+	} from '#lib/components/yolo/yolo-curve.ts';
 	import {
 		checkEnvelope,
 		currentS1,
@@ -44,8 +53,9 @@
 		session?: SocialSession;
 		clipboard?: (text: string) => Promise<void>;
 		/**
-		 * Why the curve may not be saved to the account, published or shared: the standard gate
-		 * refuses it (a YOLO-only curve restored after a reload). `submit` re-gates the draft too.
+		 * Why the curve may not be saved to the account, published or shared: it is rejected
+		 * (neither standard nor YOLO). `submit` re-classifies the draft too; a YOLO draft is saved
+		 * privately as it is, and opened to others only after the acknowledgement step.
 		 */
 		blockedReason?: string | null;
 	}
@@ -115,7 +125,15 @@
 	let license = $state<'CC0-1.0' | 'CC-BY-4.0'>('CC0-1.0');
 	let visibility = $state<'public' | 'unlisted' | 'private'>('unlisted');
 	let issues = $state.raw<TextIssue[]>([]);
+	/**
+	 * The YOLO acknowledgement step (waived criteria as text): shown before a YOLO draft is opened
+	 * to others, or when the server answers 409 YOLO_ACK_REQUIRED. Never for a private save.
+	 */
+	let ackStep = $state.raw<{ waived: string[] } | null>(null);
 	const saving = $derived(mode === 'save');
+	const draftClass = $derived(draftCurve ? classOf(draftCurve) : null);
+	const draftYolo = $derived(draftClass?.class === 'yolo');
+	const showAck = $derived(ackStep !== null && !saving && visibility !== 'private');
 	const nameIssues = $derived(issues.filter((issue) => issue.field === 'name'));
 	const descriptionIssues = $derived(issues.filter((issue) => issue.field === 'description'));
 	const otherIssues = $derived(issues.filter((issue) => issue.field === null));
@@ -197,6 +215,17 @@
 
 	function failure(cause: unknown) {
 		gateMessages = [];
+		const yoloBlock = yoloPublishBlock(cause);
+		if (yoloBlock === 'ack') {
+			// The server needs the acknowledgement: show the step with what it waived.
+			ackStep = { waived: waivedLabels(ackWaived(cause)) };
+			message = '';
+			return;
+		}
+		if (yoloBlock !== null) {
+			message = yoloPublishText(yoloBlock);
+			return;
+		}
 		if (isSocialApiError(cause)) {
 			if (cause.unreachable || cause.status >= 500) {
 				offline = true;
@@ -279,7 +308,8 @@
 					result.curve.s1 !== hint.s1 ||
 					result.lineage.id !== hint.lineageId ||
 					result.version.id !== hint.versionId ||
-					!result.curve.gate.ok ||
+					// Standard, or YOLO (readable by others only once its owner acknowledged it).
+					!(result.curve.gate.ok || result.curve.yolo === true) ||
 					result.lineage.visibility === 'private'
 				)
 					return;
@@ -400,6 +430,7 @@
 		message = '';
 		gateMessages = [];
 		issues = [];
+		ackStep = null;
 		dialog?.showModal();
 		dialogOpen = true;
 		nameField?.focus();
@@ -408,12 +439,17 @@
 		if (found.some((issue) => issue.field === 'name')) nameField?.focus();
 		else if (found.some((issue) => issue.field === 'description')) descriptionField?.focus();
 	}
-	async function submit() {
+	/**
+	 * Saves or publishes the frozen draft. `acknowledged`: the owner went through the YOLO step
+	 * (sends `acknowledge: 'yolo'`).
+	 */
+	async function submit(acknowledged = false) {
 		if (unavailable) return;
 		const snapshot = draftCurve;
 		if (!snapshot) return;
-		// The exact draft that would be sent passes the standard gate, whatever the editor's profile
-		// was: a YOLO-only curve never reaches the account (the server refuses it as well).
+		// The exact draft that would be sent is classified, whatever the editor's profile was: a
+		// rejected curve never reaches the account (the server refuses it as well); a YOLO curve
+		// is saved privately as it is and opened to others only with the acknowledgement.
 		const refused = exitRefusal(snapshot);
 		if (refused) {
 			message = exitRefusalText(refused, snapshot, locale);
@@ -421,6 +457,7 @@
 			issues = [];
 			return;
 		}
+		const classification = classOf(snapshot);
 		const copy = draftCopy;
 		const account = session.accountId;
 		const chosen = copy?.license ?? license;
@@ -442,6 +479,12 @@
 			issues = checked.issues;
 			message = m.cvedit_invalid();
 			focusIssue(checked.issues);
+			return;
+		}
+		const opening = saving ? 'private' : visibility;
+		if (!copy && !acknowledged && needsYoloAck(classification.class === 'yolo', opening)) {
+			// A YOLO curve opened to others: the acknowledgement step first.
+			ackStep = { waived: waivedLabels(classification.waived) };
 			return;
 		}
 		busy = true;
@@ -496,8 +539,10 @@
 			const targetVisibility = saving ? 'private' : visibility;
 			const result = await api.publishCurve({
 				envelope: checked.envelope,
-				visibility: targetVisibility
+				visibility: targetVisibility,
+				...(acknowledged && targetVisibility !== 'private' ? { acknowledge: 'yolo' as const } : {})
 			});
+			ackStep = null;
 			if (targetVisibility === 'private') {
 				if (account) {
 					saved = {
@@ -781,6 +826,24 @@
 				</select>
 			</label>
 		{/if}
+		{#if draftYolo}
+			<!-- Saved privately as it is; opened to others only marked, after the step below. -->
+			<YoloCurveNotice
+				variant="editor"
+				compact
+				waived={waivedLabels(draftClass?.waived)}
+				data-testid="publish-yolo-mark"
+			/>
+		{/if}
+		{#if showAck && ackStep}
+			<YoloPublishAck
+				waived={ackStep.waived}
+				{busy}
+				headingLevel={3}
+				onconfirm={() => void submit(true)}
+				oncancel={() => (ackStep = null)}
+			/>
+		{/if}
 		{#if offline}
 			<p class="note" role="status">{m.curva_social_offline()}</p>
 		{/if}
@@ -802,17 +865,19 @@
 			{/if}
 		</div>
 		<div class="actions">
-			<Button
-				variant="primary"
-				type="submit"
-				loading={busy}
-				disabledReason={busy ? null : exitReason}
-				>{busy
-					? m.curva_social_busy()
-					: saving
-						? m.cvedit_save_confirm()
-						: m.curva_social_publish()}</Button
-			>
+			{#if !showAck}
+				<Button
+					variant="primary"
+					type="submit"
+					loading={busy}
+					disabledReason={busy ? null : exitReason}
+					>{busy
+						? m.curva_social_busy()
+						: saving
+							? m.cvedit_save_confirm()
+							: m.curva_social_publish()}</Button
+				>
+			{/if}
 			<Button
 				variant="ghost"
 				disabledReason={busy ? m.curva_v2_social_busy_reason() : null}

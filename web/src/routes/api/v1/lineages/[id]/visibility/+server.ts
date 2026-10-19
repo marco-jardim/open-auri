@@ -1,4 +1,5 @@
-// PUT /api/v1/lineages/[id]/visibility (T4.2): owner sets private, unlisted or public.
+// PUT /api/v1/lineages/[id]/visibility (T4.2): owner sets private, unlisted or public. Opening a
+// lineage whose head is YOLO needs `acknowledge: 'yolo'` (and YOLO_PUBLICATION on; docs/api.md).
 import { defineApi, json, readJson } from '#lib/server/api/index.ts';
 import { changeVisibility, VisibilityBodySchema } from '#lib/server/social/curves.ts';
 import type { RequestHandler } from './$types';
@@ -9,6 +10,15 @@ export const PUT: RequestHandler = defineApi(
 	{ auth: 'verified', rateLimit: { group: 'api.lineages.write' } },
 	async ({ event, env, user }) => {
 		const body = await readJson(event.request, VisibilityBodySchema);
-		return json(await changeVisibility(env.db, user.id, event.params.id ?? '', body.visibility));
+		return json(
+			await changeVisibility(
+				env.db,
+				user.id,
+				event.params.id ?? '',
+				body.visibility,
+				{ yoloPublication: env.yoloPublication },
+				body.acknowledge
+			)
+		);
 	}
 );

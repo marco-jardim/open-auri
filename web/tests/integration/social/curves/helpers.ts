@@ -3,14 +3,16 @@
 // with synthetic events. Every id and nickname is unique, so the files can share the database.
 import { env } from 'cloudflare:workers';
 import { expect } from 'vitest';
+import { NEUTRAL_BANDS } from 'open-auri/dsp';
 import { gateForWrite } from 'open-auri/safety';
-import { decodeS1, encodeS1 } from 'open-auri/share';
+import { decodeS1, encodeS1, envelopeFormat } from 'open-auri/share';
 import type { ApiErrorCode } from '#lib/server/api/index.ts';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
 import { publishCurve, type PublishedInfo } from '#lib/server/social/curves.ts';
 import type { LineageVisibility } from '#lib/server/social/types.ts';
 import reference from '../../../../../test/fixtures/eq0xcb.reference.json';
 import { count, locals, nick, seedUser, uid, type SeededUser } from '../../account/helpers.ts';
+import { randomInt, randomTenths } from '../../random.ts';
 
 export { count };
 
@@ -30,21 +32,57 @@ export function presetCurve(index = 0): Curve {
 	return curve;
 }
 
-function randomInt(min: number, max: number): number {
-	const [value = 0] = crypto.getRandomValues(new Uint32Array(1));
-	return min + (value % (max - min + 1));
+/** Neutral bands with `bands` in the first slots. */
+function neutralWith(bands: readonly Band[], preampDb: number): Curve {
+	return { bands: NEUTRAL_BANDS.map((neutral, i) => bands[i] ?? neutral) as Band[], preampDb };
 }
 
-/** A unique curve the real gate refuses (HS shelves are not allowed: `k:kind-not-allowed`). */
+/**
+ * A unique curve the real gate refuses in every profile: two +12 dB peaks at a 0 dB preamp put
+ * the output far above the presets' largest (`e:output-audible`, `d:prefix-peak`: hard reasons, no
+ * YOLO waiver lifts them). Since GATE_IMPL 2 an HS shelf is no longer a rejected example (HS, LP
+ * and HP are standard on the server).
+ */
 export function uniqueRejectedCurve(): Curve {
-	const base = presetCurve(0);
-	const shelf = (): Band => ({
-		kind: 'HS',
-		freqHz: randomInt(1000, 15999),
-		gainDb: -randomInt(1, 60) / 10,
-		qFactor: 0.71
+	const peak = (): Band => ({
+		kind: 'PK',
+		freqHz: randomInt(800, 4000),
+		gainDb: 12,
+		qFactor: 1
 	});
-	return { bands: [shelf(), shelf(), ...base.bands.slice(2)], preampDb: base.preampDb };
+	return neutralWith([peak(), peak()], 0);
+}
+
+/**
+ * A unique YOLO curve: one small PK boost above 16 kHz (`d7:pk-boost-above-16k`, waivable) with
+ * every hard check far inside the limits, so the standard gate refuses it and the YOLO profile
+ * accepts it.
+ */
+export function uniqueYoloCurve(): Curve {
+	const boost: Band = {
+		kind: 'PK',
+		freqHz: randomInt(16_200, 19_800),
+		gainDb: randomTenths(5, 15),
+		qFactor: 1
+	};
+	return neutralWith([boost], randomTenths(-90, -60));
+}
+
+/** A unique HS shelf cut (experimental kind): standard on the server since GATE_IMPL 2. */
+export function uniqueShelfCurve(): Curve {
+	const shelf: Band = {
+		kind: 'HS',
+		freqHz: randomInt(2000, 12000),
+		gainDb: randomTenths(-60, -10),
+		qFactor: 0.71
+	};
+	return neutralWith([shelf], randomTenths(-40, -10));
+}
+
+/** A unique S1 v2 curve: a PK cut at 25 kHz (never amplifies above 20 kHz: standard). */
+export function uniqueUltrasonicCut(): Curve {
+	const cut: Band = { kind: 'PK', freqHz: 25_000, gainDb: randomTenths(-60, -10), qFactor: 1 };
+	return neutralWith([cut], randomTenths(-40, -10));
 }
 
 /** The real gate with its verdict forced to "accepted" (unique accepted curves for tests). */
@@ -62,7 +100,8 @@ export function envelopeOf(
 	const code = encodeS1(curve);
 	const decoded = decodeS1(code);
 	return {
-		format: 'open-auri/preset@1',
+		// The lowest format that carries the curve: `@2` for an S1 v2 curve (a band above 20 kHz).
+		format: envelopeFormat({ bands: decoded.bands }),
 		name: 'Vocal quente',
 		description: 'Realce suave em 3 kHz.',
 		source: 'custom',
@@ -173,13 +212,17 @@ export async function expectError(
 	return body.error;
 }
 
-/** Publishes through the service (real gate unless `gate` is given). */
+/**
+ * Publishes through the service (real gate unless `gate` is given). `yolo: true` turns the kill
+ * switch on and sends the YOLO acknowledgement (the account must be older than 72 h).
+ */
 export async function published(
 	owner: Actor,
 	options: {
 		visibility?: LineageVisibility;
 		envelope?: Record<string, unknown>;
 		gate?: typeof gateForWrite;
+		yolo?: boolean;
 	} = {}
 ): Promise<PublishedInfo> {
 	return publishCurve(
@@ -187,8 +230,20 @@ export async function published(
 		owner.user.id,
 		{
 			envelope: options.envelope ?? envelopeOf(presetCurve(0)),
-			visibility: options.visibility ?? 'public'
+			visibility: options.visibility ?? 'public',
+			...(options.yolo ? { acknowledge: 'yolo' as const } : {})
 		},
-		options.gate ? { gate: options.gate } : {}
+		{
+			...(options.gate ? { gate: options.gate } : {}),
+			...(options.yolo ? { yoloPublication: 'on' as const } : {})
+		}
 	);
+}
+
+/** Moves the account's creation back by `ms` (the 72 h rule of YOLO publication). */
+export async function ageAccount(user: SeededUser, ms = 4 * 24 * 60 * 60 * 1000): Promise<void> {
+	const createdAt = new Date(Date.now() - ms).toISOString();
+	await env.DB.prepare('UPDATE "user" SET "createdAt" = ? WHERE "id" = ?')
+		.bind(createdAt, user.id)
+		.run();
 }
