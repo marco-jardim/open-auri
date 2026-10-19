@@ -192,6 +192,8 @@ export interface Confirmations {
 	 * aceito o risco." Required on every YOLO write; never remembered between writes.
 	 */
 	yoloWrite?: boolean;
+	/** Android app writing is not validated on a real cable; fresh acknowledgement per checklist. */
+	androidUntested?: boolean;
 }
 
 export interface ChecklistInput {
@@ -209,6 +211,10 @@ export interface ChecklistInput {
 }
 
 export interface ChecklistContext {
+	/** Native app transport, desktop WebHID or simulation; absent means desktop. */
+	cableMode?: CableMode | 'native';
+	/** Defaults to ANDROID_WRITE_VALIDATED; injectable for checklist tests. */
+	androidWriteValidated?: boolean;
 	nowMs: number;
 	flash: FlashState;
 	lastWrittenLevelDb: number | null;
@@ -250,7 +256,9 @@ export type ChecklistItemId =
 	/** Modo YOLO on in this tab, phrase typed (required for a YOLO write). */
 	| 'yolo-session'
 	/** The per-write YOLO confirmation (required for every YOLO write). */
-	| 'yolo-write';
+	| 'yolo-write'
+	/** Explicit acknowledgement while Android writes have not been validated on a real cable. */
+	| 'android-untested';
 
 export interface ChecklistItem {
 	id: ChecklistItemId;

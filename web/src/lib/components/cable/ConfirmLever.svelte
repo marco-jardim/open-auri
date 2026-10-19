@@ -10,7 +10,7 @@
 		/** Literal confirmation text (plan §3.4); also the checkbox's accessible name. */
 		label: string;
 		/** Which confirmation it is bound to (for styling hooks and tests). */
-		confirmation: 'volume' | 'connection' | 'experimental' | 'yolo';
+		confirmation: 'volume' | 'connection' | 'experimental' | 'yolo' | 'android-untested';
 	}
 
 	let { checked = $bindable(false), label, confirmation }: Props = $props();

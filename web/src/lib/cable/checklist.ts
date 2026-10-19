@@ -11,6 +11,7 @@ import {
 	localDateKey,
 	loudnessWarning
 } from 'open-auri/policy';
+import { ANDROID_WRITE_VALIDATED } from './android-status.ts';
 import type {
 	Band,
 	ChecklistContext,
@@ -266,6 +267,14 @@ export function evaluateChecklist(
 			satisfied: !yolo || confirmations.yoloWrite === true
 		}
 	];
+	// Keep desktop and simulated item lists exactly unchanged, including optional items.
+	if (context.cableMode === 'native') {
+		items.push({
+			id: 'android-untested',
+			required: !(context.androidWriteValidated ?? ANDROID_WRITE_VALIDATED),
+			satisfied: confirmations.androidUntested === true
+		});
+	}
 
 	return {
 		profile,
