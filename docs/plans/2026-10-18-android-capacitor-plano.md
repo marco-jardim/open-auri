@@ -2506,11 +2506,54 @@ Os achados viram FXGH.k (0.5).
 | Data | ID | Estado | Commit | Evidência |
 |---|---|---|---|---|
 | 2026-10-18 | Plano | proposto (revisão 3) | - | este arquivo |
+| 2026-10-19 | Plano | aprovado pelo mantenedor (início da execução) | - | pedido de execução na sessão |
+| 2026-10-19 | PF1 | OK | HEAD do PF1: `a39d048` | branch `feat/android-app` criada de `main`; `gh` com escopos `repo` e `workflow`; JDK 21 (Temurin 21.0.12) instalado via scoop; SDK com `platforms;android-36`, `build-tools;36.1.0` e `platform-tools`; Node 24.21.0, npm 12.0.2 |
 
-**Versões verificadas (0.14):** preenchido no PF1.
+**Versões verificadas (0.14), em 2026-10-19:**
+
+| Componente | Versão | Fonte | Nota |
+|---|---|---|---|
+| `@capacitor/core`, `@capacitor/cli`, `@capacitor/android` | 8.5.3 | https://registry.npmjs.org/@capacitor/android/latest | sem 9.x estável (só `9.0.0-alpha.8`) |
+| Template Android do Capacitor | minSdk 24, compile/target 36, AGP 8.13.0, Gradle 8.14.3, webkit 1.14.0 | https://raw.githubusercontent.com/ionic-team/capacitor/8.5.3/android-template/variables.gradle | o app usa minSdk 26 (RNF1) |
+| AGP | 8.13.2 | https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/maven-metadata.xml | maior AGP compatível com Gradle 8.14.3 (AGP 9 exige Gradle 9.1+) |
+| Gradle | 8.14.3 | template do Capacitor 8.5.3 | Gradle 9 exigiria AGP 9, fora do suporte do Capacitor 8 |
+| Kotlin (KGP) | 2.4.21 | https://kotlinlang.org/docs/gradle-configure-project.html | KGP 2.2.20 não lista AGP 8.13; 2.4.21 cobre Gradle 8.14.3 e AGP 8.13 |
+| JDK | 21 | build.gradle do Capacitor 8.5.3 (Java 21) | toolchain 21; Robolectric com SDK 36 exige JDK 21 |
+| `androidx.webkit:webkit` | 1.17.1 | https://dl.google.com/dl/android/maven2/androidx/webkit/webkit/maven-metadata.xml | |
+| Kover | 0.9.11 | https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kover-gradle-plugin/maven-metadata.xml | |
+| Licensee | 1.14.1 | https://plugins.gradle.org/m2/app/cash/licensee/licensee-gradle-plugin/maven-metadata.xml | mínimo Gradle 8.12 |
+| JUnit | 4.13.2 | https://repo1.maven.org/maven2/junit/junit/maven-metadata.xml | |
+| Robolectric | 4.17 | https://github.com/robolectric/robolectric/releases/tag/robolectric-4.17 | suporta SDK 36 |
+| `com.networknt:json-schema-validator` | 3.0.8 | https://repo1.maven.org/maven2/com/networknt/json-schema-validator/maven-metadata.xml | 3.x exige Java 17 e Jackson 3; só em teste (JVM 21) |
+| `org.json:json` | 20260814 | https://repo1.maven.org/maven2/org/json/json/maven-metadata.xml | |
+| `androidx.test.ext:junit`, `androidx.test:runner`, `espresso-intents` | 1.3.0, 1.7.0, 3.7.0 | Google Maven | |
+| `actions/checkout`, `actions/setup-node`, `actions/setup-java`, `actions/upload-artifact`, `actions/cache` | v7, v7, v6, v7, v6 | API de releases do GitHub | |
+| `gradle/actions/setup-gradle`, `android-actions/setup-android`, `reactivecircus/android-emulator-runner`, `dorny/paths-filter` | v6, v4, v2, v4 | API de releases do GitHub | |
+
+**Respostas do PF1.6:**
+- (a) Turnstile na Android WebView: funciona com JS, DOM storage, acesso a `challenges.cloudflare.com` e UA estável na sessão (https://developers.cloudflare.com/turnstile/get-started/mobile-implementation/). O Capacitor fixa o UA no início. O smoke do Anexo F confirma o login.
+- (b) CSP: com `DOCUMENT_START_SCRIPT`, o Capacitor 8.5.3 registra o bridge por `addDocumentStartJavaScript` e anula o injetor (`Bridge.loadWebView`), então o `WebViewLocalServer` não reescreve o HTML remoto e o header CSP do site chega intacto. O script roda por `ExecuteScript` do embedder (`components/js_injection/renderer/js_communication.cc`), fora das checagens de CSP da página (inferência pelo código; a T3.2 prova no emulador). Sem o recurso, o fallback injeta `<script>` inline sem nonce, que a CSP bloquearia: por isso o `WebViewCompatGate` exige o recurso (RNF2).
+- (c) Versão mínima da WebView com `DOCUMENT_START_SCRIPT`: não confirmada em fonte; a checagem é em tempo de execução (`WebViewFeature.isFeatureSupported`), e o gate também exige `minWebViewVersion`.
+- (d) Bridge: `addWebMessageListener("androidBridge")` com as regras de origem de `Bridge.setAllowedOriginRules()`, que inclui `server.url` como configurado. Por isso `server.url` é a origem pura `https://open-auri.com`, sem barra final.
+
+**PF1.7:** `build.target` não definido em `D:\git\open-auri\web\vite.config.ts`; Vite 8.3.4 usa o padrão `baseline-widely-available` (`chrome111` em `D:\git\open-auri\node_modules\vite\dist\node\chunks\node.js`), sem `browserslist`, então `minWebViewVersion = 111`. Ícone: `D:\git\open-auri\web\static\icons\icon.svg`; cor de fundo `#0f0f0e` (`--ink`, `D:\git\open-auri\web\src\lib\styles\tokens.css:13`). `D:\git\open-auri\test\tools\check-sensitive.test.mjs` existe. Rollback de deploy: `D:\git\open-auri\docs\deploy.md:74-87` (`npx wrangler rollback`), também em `D:\git\open-auri\docs\operacao\runbooks\incidente.md:84`. Environments do GitHub: consulta pendente para o PF4 (não bloqueia F1 a F3).
+
+**Falhas pré-existentes da baseline (HEAD `a39d048`):**
+- `npm test`, `npm run test:tools`, `npm run check:sensitive` e `npm run check:all`: verdes.
+- `npm run -w web test:unit`: 3493 testes verdes; a suíte `D:\git\open-auri\web\tests\unit\pages\curva\output-meter.svelte.test.ts` falhou uma vez ao importar no Chromium ("Failed to fetch dynamically imported module") e passou isolada (4/4). Instável, não atribuível à fase.
+- `npm run test:web:int` (exige `npm run build:web` antes): 1157/1158. Falha `D:\git\open-auri\web\tests\integration\social\yolo\qa-round1.test.ts:234` (`yoloPublication` esperado `off`, recebido `on`), dependente do `.dev.vars` local. Não atribuível à fase.
+
 **Tabelas de locks por wave:** preenchidas em cada PF.
-**Falhas pré-existentes da baseline:** preenchidas no PF1.
-**Trilha P:** estado de P0 a P7 e da revisão da Play, atualizado a cada passo.
+
+**Locks da W1.2 (PF1.11):** T1.2, T1.3, T1.4, T1.5, T1.6 e T1.8 escrevem apenas os arquivos dos seus conjuntos W (seção 7), todos disjuntos. Leituras: T1.3 lê `D:\git\open-auri\src\dsp\eq0xcb.mjs`, `D:\git\open-auri\src\transport\webhid.mjs`, `D:\git\open-auri\docs\protocol-0xcb.md` e `D:\git\open-auri\test\fixtures\eq0xcb.reference.json` (nenhum em W de outra tarefa); T1.5 lê `D:\git\open-auri\apps\android\capacitor.config.ts` (só escrito na T1.1, já commitada); T1.8 lê `D:\git\open-auri\web\static\icons\icon.svg`. P2 escreve `D:\git\open-auri\docs\android\play-listing.md` e `D:\git\open-auri\test\tools\play-listing.test.mjs`; P4 escreve `D:\git\open-auri\docs\android\data-safety.md` e `D:\git\open-auri\docs\android\play-conteudo.md`. Recurso exclusivo `res:gradle`: os builds Gradle da W1.2 rodam um por vez.
+
+**Trilha P:**
+
+| Passo | Estado | Evidência |
+|---|---|---|
+| P0 | concluído | `D:\git\open-auri\docs\android\play-requisitos.md` |
+| P1 | mensagem enviada ao mantenedor; aguardando resposta | `D:\git\open-auri\docs\android\play-conta.md` |
+| P2 a P7 | não iniciados | - |
 
 ---
 
