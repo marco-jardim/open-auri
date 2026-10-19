@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
 	ANDROID_DISCLAIMER_VERSION,
 	ANDROID_WRITE_POLICY,
@@ -20,6 +20,14 @@ describe('launch state', () => {
 		expect(ANDROID_WRITE_VALIDATED).toBe(false);
 		expect(ANDROID_DISCLAIMER_VERSION).toBe(1);
 		expect(ANDROID_WRITE_POLICY).toEqual({ enabled: true, blockedAppVersions: [] });
+	});
+
+	test('every shipped blocklist entry parses as an exact version or strict upper bound', () => {
+		expect(
+			ANDROID_WRITE_POLICY.blockedAppVersions.filter(
+				(entry) => parseSemVer(entry.startsWith('<') ? entry.slice(1) : entry) === null
+			)
+		).toEqual([]);
 	});
 });
 
@@ -97,11 +105,24 @@ describe('isAppVersionBlocked', () => {
 		expect(isAppVersionBlocked('1.1.0', ['<1.0.3'])).toBe(false);
 	});
 
-	test('invalid app versions are always blocked; invalid entries are ignored', () => {
+	test('invalid app versions are always blocked', () => {
 		expect(isAppVersionBlocked('', [])).toBe(true);
 		expect(isAppVersionBlocked('1.0', [])).toBe(true);
 		expect(isAppVersionBlocked('unknown', [])).toBe(true);
-		expect(isAppVersionBlocked('1.0.0', ['<x', 'abc', '<'])).toBe(false);
+	});
+
+	test('any malformed blocklist entry blocks every version and logs only once', () => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			for (const entry of ['<=1.0.3', 'v1.0.0', '<x', 'abc', '<', '']) {
+				for (const version of ['0.0.1', '1.0.0', '99.0.0']) {
+					expect(isAppVersionBlocked(version, ['2.0.0', entry]), `${version}: ${entry}`).toBe(true);
+				}
+			}
+			expect(log).toHaveBeenCalledTimes(1);
+		} finally {
+			log.mockRestore();
+		}
 	});
 
 	test('defaults to the deployed policy', () => {

@@ -74,10 +74,12 @@ export function compareSemVer(a: SemVer, b: SemVer): number {
 	return 0;
 }
 
+let malformedBlocklistLogged = false;
+
 /**
  * Whether `appVersion` matches a blocked entry: an exact version ("1.0.0") or an upper bound
  * ("<1.0.3", strictly lower). An app version that is not valid SemVer is blocked, so a
- * malformed or spoofed version can never write. Invalid entries in the list are ignored.
+ * malformed or spoofed version can never write. Any invalid entry blocks every version.
  */
 export function isAppVersionBlocked(
 	appVersion: string,
@@ -85,13 +87,21 @@ export function isAppVersionBlocked(
 ): boolean {
 	const version = parseSemVer(appVersion);
 	if (version === null) return true;
-	return blocked.some((entry) => {
+	let matches = false;
+	for (const entry of blocked) {
 		const bound = entry.startsWith('<');
 		const target = parseSemVer(bound ? entry.slice(1) : entry);
-		if (target === null) return false;
+		if (target === null) {
+			if (!malformedBlocklistLogged) {
+				console.error('Invalid Android write blocklist entry; all app versions are blocked', entry);
+				malformedBlocklistLogged = true;
+			}
+			return true;
+		}
 		const order = compareSemVer(version, target);
-		return bound ? order < 0 : order === 0;
-	});
+		matches ||= bound ? order < 0 : order === 0;
+	}
+	return matches;
 }
 
 /** Whether the app at `appVersion` may write to the cable under `policy` (evaluated before any I/O). */

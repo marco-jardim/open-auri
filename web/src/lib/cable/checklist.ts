@@ -268,10 +268,13 @@ export function evaluateChecklist(
 		}
 	];
 	// Keep desktop and simulated item lists exactly unchanged, including optional items.
-	if (context.cableMode === 'native') {
+	if (
+		context.cableMode === 'native' &&
+		!(context.androidWriteValidated ?? ANDROID_WRITE_VALIDATED)
+	) {
 		items.push({
 			id: 'android-untested',
-			required: !(context.androidWriteValidated ?? ANDROID_WRITE_VALIDATED),
+			required: true,
 			satisfied: confirmations.androidUntested === true
 		});
 	}

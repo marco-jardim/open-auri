@@ -4,6 +4,7 @@ import { cleanup, render } from 'vitest-browser-svelte';
 import { NEUTRO } from 'open-auri/catalog';
 import { FakeHIDDevice } from 'open-auri/transport';
 import { evaluateChecklist } from '#lib/cable/checklist.ts';
+import { NativeFreshnessError } from '#lib/cable/native-freshness.ts';
 import type { Band, ChecklistContext } from '#lib/cable/types.ts';
 import PreWriteChecklist from '#lib/components/cable/PreWriteChecklist.svelte';
 import { m } from '#lib/paraglide/messages.js';
@@ -192,3 +193,49 @@ test('one Android confirmation gates the whole queue, is rechecked during review
 	});
 	await expect.element(android).not.toBeChecked();
 });
+
+test.each([
+	{
+		locale: 'pt-BR',
+		reason: 'newer',
+		message: 'Há uma versão nova do site. Recarregue a página antes de gravar pelo app.'
+	},
+	{
+		locale: 'en-US',
+		reason: 'newer',
+		message:
+			'A newer version of the site is available. Reload the page before writing from the app.'
+	},
+	{
+		locale: 'pt-BR',
+		reason: 'unavailable',
+		message:
+			'A gravação pelo app precisa de uma conexão para confirmar a política de gravação atual. Conecte-se à internet e tente de novo.'
+	},
+	{
+		locale: 'en-US',
+		reason: 'unavailable',
+		message:
+			'Writing from the app needs a connection to confirm the current write policy. Connect to the internet and try again.'
+	}
+] as const)(
+	'$locale: a $reason policy check displays the actionable refusal',
+	async ({ locale, reason, message }) => {
+		await setLocale(locale, { reload: false });
+		const fake = connected({ androidWriteValidated: true });
+		fake.service.write = vi.fn<typeof fake.service.write>().mockResolvedValue({
+			status: 'refused',
+			reason: 'error',
+			error: new NativeFreshnessError(reason)
+		});
+		await render(PreWriteChecklist, {
+			service: fake.service,
+			open: true,
+			...NEUTRO,
+			onclose: vi.fn()
+		});
+		await confirmNormal();
+		await page.getByRole('button', { name: m.cable_write(), exact: true }).click();
+		await expect.element(page.getByText(message, { exact: true })).toBeVisible();
+	}
+);

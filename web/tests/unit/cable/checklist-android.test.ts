@@ -4,6 +4,7 @@ import { createFakeClock } from 'open-auri/transport';
 import { evaluateChecklist } from '#lib/cable/checklist.ts';
 import { createCableService, NEUTRAL_CURVE } from '#lib/cable/service.ts';
 import { NativeHID, type OpenAuriUsbPlugin } from '#lib/cable/native/hid.ts';
+import { NativeFreshnessError } from '#lib/cable/native-freshness.ts';
 import type { Band, ChecklistContext, ChecklistInput, JournalEntry } from '#lib/cable/types.ts';
 import { CONFIRMED, T0, TRUSTED_CLICK, memoryFlash, memoryJournal, padrao } from './harness.ts';
 
@@ -82,13 +83,10 @@ describe('Android checklist acknowledgement', () => {
 		).toBe(true);
 	});
 
-	test('validated native writes keep the conditional item but do not require it', () => {
+	test('validated native writes omit the acknowledgement item', () => {
 		const result = evaluateChecklist(input(), context({ androidWriteValidated: true }));
-		expect(result.items.at(-1)).toEqual({
-			id: 'android-untested',
-			required: false,
-			satisfied: false
-		});
+		expect(result.items.some(({ id }) => id === 'android-untested')).toBe(false);
+		expect(result.items).toEqual(evaluateChecklist(input(), context({ cableMode: 'real' })).items);
 		expect(result.canWrite).toBe(true);
 	});
 
@@ -164,7 +162,14 @@ async function nativeService(count = 1, interrupted = false) {
 		: [];
 	const journal = memoryJournal(initial);
 	const flash = memoryFlash();
+	const freshnessFetch = vi
+		.fn<typeof fetch>()
+		.mockImplementation(async () => new Response(JSON.stringify({ version: 'current' })));
 	const service = createCableService({
+		nativeFreshness: {
+			version: 'current',
+			fetch: freshnessFetch
+		},
 		hid,
 		clock,
 		journal,
@@ -186,7 +191,7 @@ async function nativeService(count = 1, interrupted = false) {
 	const first = service.getState().devices[0];
 	if (first === undefined) throw new Error('Missing native test cable');
 	service.selectDevice(first);
-	return { service, open, sendReport, flash, journal };
+	return { service, open, sendReport, flash, journal, freshnessFetch, clock };
 }
 
 describe('Native service enforces acknowledgement before any write I/O', () => {
@@ -230,6 +235,7 @@ describe('Native service enforces acknowledgement before any write I/O', () => {
 			expect(h.flash.records).toEqual([]);
 			const outcome = await write(true);
 			expect(outcome.status).toBe(path === 'queue' ? 'done' : 'ok');
+			expect(h.freshnessFetch).toHaveBeenCalledOnce();
 			expect(h.sendReport).toHaveBeenCalled();
 			expect(h.journal.entries.filter((entry) => entry.status === 'ok')).toHaveLength(
 				path === 'queue' ? 2 : 1
@@ -257,5 +263,71 @@ describe('Native service enforces acknowledgement before any write I/O', () => {
 		});
 		expect(result.status).toBe('ok');
 		expect(reads).toBe(1);
+	});
+});
+
+describe('Native service requires a fresh deployed policy on every write path', () => {
+	test.each(['single', 'rescue', 'queue', 'yolo'] as const)(
+		'%s refuses a newer deploy or offline cached build before any write I/O',
+		async (path) => {
+			for (const reason of ['newer', 'unavailable'] as const) {
+				const h = await nativeService(path === 'queue' ? 2 : 1, path === 'rescue');
+				if (reason === 'newer') {
+					h.freshnessFetch.mockResolvedValue(new Response(JSON.stringify({ version: 'disabled' })));
+				} else {
+					h.freshnessFetch.mockRejectedValue(new TypeError('offline'));
+				}
+				const request = {
+					...input({
+						...(path === 'rescue' ? NEUTRAL_CURVE : {}),
+						...(path === 'yolo'
+							? { bands: YOLO_BANDS, preampDb: -0.5, experimental: true, profile: 'yolo' as const }
+							: {}),
+						confirmations: {
+							...CONFIRMED,
+							experimental: true,
+							yoloWrite: true,
+							androidUntested: true
+						}
+					}),
+					gesture: h.service.createGesture(TRUSTED_CLICK)
+				};
+				const result =
+					path === 'queue'
+						? await h.service.writeQueue({ ...request, devices: h.service.getState().devices })
+						: await h.service.write(request);
+				expect(result).toMatchObject({
+					status: 'refused',
+					reason: 'error',
+					error: expect.objectContaining({ reason })
+				});
+				if (result.status === 'refused') expect(result.error).toBeInstanceOf(NativeFreshnessError);
+				expect(h.freshnessFetch).toHaveBeenCalledOnce();
+				expect(h.open).not.toHaveBeenCalled();
+				expect(h.sendReport).not.toHaveBeenCalled();
+				expect(h.flash.records).toEqual([]);
+				expect(h.journal.entries.filter((entry) => entry.status === 'ok')).toEqual([]);
+				expect(h.service.getState().writing).toBe(false);
+			}
+		}
+	);
+
+	test('an already-open page cannot reuse an earlier successful policy check', async () => {
+		const h = await nativeService();
+		const write = () =>
+			h.service.write({
+				...input({ confirmations: { ...CONFIRMED, androidUntested: true } }),
+				gesture: h.service.createGesture(TRUSTED_CLICK)
+			});
+		expect((await write()).status).toBe('ok');
+		h.open.mockClear();
+		h.sendReport.mockClear();
+		await h.clock.sleep(2500);
+		h.freshnessFetch.mockResolvedValue(new Response(JSON.stringify({ version: 'disabled' })));
+		expect(await write()).toMatchObject({ status: 'refused', error: { reason: 'newer' } });
+		expect(h.freshnessFetch).toHaveBeenCalledTimes(2);
+		expect(h.open).not.toHaveBeenCalled();
+		expect(h.sendReport).not.toHaveBeenCalled();
+		expect(h.flash.records).toHaveLength(1);
 	});
 });
