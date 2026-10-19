@@ -112,7 +112,11 @@ test('lists only missing names, deduplicated, without partial writes or value le
 });
 
 test('EMAIL_TRANSPORT defaults to resend when missing or empty; an explicit value wins', (t) => {
-  assert.deepEqual(DEFAULTS, { EMAIL_TRANSPORT: 'resend' });
+  assert.deepEqual(DEFAULTS, {
+    EMAIL_TRANSPORT: 'resend',
+    PUBLIC_ANDROID_APP_ID: 'com.openauri.app',
+    PUBLIC_ANDROID_CERT_SHA256: '',
+  });
   for (const [env, expected] of [
     [{}, 'resend'],
     [{ EMAIL_TRANSPORT: '' }, 'resend'],
@@ -149,6 +153,37 @@ test('invalid dotenv syntax never echoes its contents', (t) => {
     assert.match(result.stderr, /Invalid .env syntax at line 1/);
     silent(result, ['fixture-private-value-456']);
   }
+});
+
+test('public Android defaults render with an empty certificate list and explicit values win', (t) => {
+  const repo = fixture(t);
+  const template = join(repo.root, 'web', 'template.jsonc');
+  writeFileSync(
+    template,
+    '{"appId":"${PUBLIC_ANDROID_APP_ID}","certificates":"${PUBLIC_ANDROID_CERT_SHA256}"}\n',
+  );
+  for (const values of [
+    new Map(),
+    new Map([
+      ['PUBLIC_ANDROID_APP_ID', ''],
+      ['PUBLIC_ANDROID_CERT_SHA256', ''],
+    ]),
+  ]) {
+    renderTemplate(template, repo.output, values);
+    const output = readFileSync(repo.output, 'utf8').split('\n').slice(1).join('\n');
+    assert.deepEqual(JSON.parse(output), { appId: 'com.openauri.app', certificates: '' });
+  }
+  const fingerprint = Array(32).fill('AB').join(':');
+  renderTemplate(
+    template,
+    repo.output,
+    new Map([
+      ['PUBLIC_ANDROID_APP_ID', 'com.example.app'],
+      ['PUBLIC_ANDROID_CERT_SHA256', fingerprint],
+    ]),
+  );
+  const output = readFileSync(repo.output, 'utf8').split('\n').slice(1).join('\n');
+  assert.deepEqual(JSON.parse(output), { appId: 'com.example.app', certificates: fingerprint });
 });
 
 const SECRET_SOURCES = [
@@ -401,6 +436,8 @@ test('web template declares every binding at the top level and in each environme
       'ADMIN_2FA_REQUIRED',
       'EMAIL_TRANSPORT',
       'GITHUB_URL',
+      'PUBLIC_ANDROID_APP_ID',
+      'PUBLIC_ANDROID_CERT_SHA256',
       'PUBLIC_ORIGIN',
       'RESEND_FROM',
       'SIGNUP_ENABLED',
@@ -410,6 +447,8 @@ test('web template declares every binding at the top level and in each environme
     assert.equal(target.vars.YOLO_PUBLICATION, 'on');
     assert.equal(target.vars.GITHUB_URL, 'fixture:PUBLIC_GITHUB_URL');
     assert.equal(target.vars.EMAIL_TRANSPORT, 'fixture:EMAIL_TRANSPORT');
+    assert.equal(target.vars.PUBLIC_ANDROID_APP_ID, 'fixture:PUBLIC_ANDROID_APP_ID');
+    assert.equal(target.vars.PUBLIC_ANDROID_CERT_SHA256, 'fixture:PUBLIC_ANDROID_CERT_SHA256');
     // env.production serves the custom domain (T5.4b); the top level (wrangler dev, tests) and
     // staging have no route.
     assert.equal(target.workers_dev, true, label);

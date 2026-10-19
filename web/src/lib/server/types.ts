@@ -33,6 +33,8 @@ export interface Env {
 	METRICS?: AnalyticsEngineDataset;
 	// Vars (wrangler.template.jsonc), always strings
 	PUBLIC_ORIGIN: string;
+	PUBLIC_ANDROID_APP_ID: string;
+	PUBLIC_ANDROID_CERT_SHA256: string;
 	GITHUB_URL: string;
 	ACCESS_LOG_ENABLED: string;
 	SIGNUP_ENABLED: string;

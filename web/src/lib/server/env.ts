@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseAndroidAppId, parseAndroidCertSha256 } from './android/app-links.ts';
 import type { Env } from './types.ts';
 
 /**
@@ -15,6 +16,9 @@ export interface ServerEnv {
 	metrics: NonNullable<Env['METRICS']> | null;
 	/** Canonical origin, e.g. `https://example.org` (no path, no trailing slash). */
 	publicOrigin: string;
+	/** Public package/signing certificates for verified Android App Links (empty = unpublished). */
+	androidAppId: string | null;
+	androidCertSha256: readonly string[];
 	githubUrl: string;
 	resendFrom: string;
 	/**
@@ -117,6 +121,20 @@ const schema = z.object({
 		.string('expected a string')
 		.refine(isOrigin, 'not a bare https origin (scheme://host[:port])'),
 	GITHUB_URL: z.string('expected a string').refine(isHttpsUrl, 'not an https URL'),
+	PUBLIC_ANDROID_APP_ID: z
+		.string('expected a string')
+		.refine(
+			(value) => value === '' || parseAndroidAppId(value) !== null,
+			'not an Android Java package name'
+		)
+		.default('com.openauri.app'),
+	PUBLIC_ANDROID_CERT_SHA256: z
+		.string('expected a string')
+		.refine(
+			(value) => parseAndroidCertSha256(value) !== null,
+			'not a list of uppercase SHA-256 fingerprints'
+		)
+		.default(''),
 	RESEND_FROM: z.string('expected a string').min(3, 'empty'),
 	// Missing (configs rendered before the variable existed) means the production transport.
 	EMAIL_TRANSPORT: z.enum(EMAIL_TRANSPORTS, 'expected "resend" or "capture"').default('resend'),
@@ -168,6 +186,8 @@ export function getServerEnv(platform: { readonly env?: unknown } | undefined): 
 		rateLimit: { auth: data.RL_AUTH, api: data.RL_API, write: data.RL_WRITE },
 		metrics: data.METRICS ?? null,
 		publicOrigin: data.PUBLIC_ORIGIN,
+		androidAppId: parseAndroidAppId(data.PUBLIC_ANDROID_APP_ID),
+		androidCertSha256: parseAndroidCertSha256(data.PUBLIC_ANDROID_CERT_SHA256) ?? [],
 		githubUrl: data.GITHUB_URL,
 		resendFrom: data.RESEND_FROM,
 		emailTransport: data.EMAIL_TRANSPORT,

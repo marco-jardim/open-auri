@@ -27,6 +27,7 @@ const INTEGRATION_TEST_SECRETS = {
 // re-asserted in tests/integration/edges/email-edges.test.ts) and turnstile.svelte.test.ts
 // (browser component test).
 const PORTED_UNIT_TESTS = [
+	'tests/unit/server/android/app-links.test.ts',
 	'tests/unit/server/auth/compose.test.ts',
 	'tests/unit/server/auth/password.test.ts',
 	'tests/unit/server/auth/session-policy.test.ts',

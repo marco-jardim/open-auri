@@ -12,6 +12,8 @@ const ENV_KEYS = [
 	'RL_WRITE',
 	'METRICS',
 	'PUBLIC_ORIGIN',
+	'PUBLIC_ANDROID_APP_ID',
+	'PUBLIC_ANDROID_CERT_SHA256',
 	'GITHUB_URL',
 	'RESEND_FROM',
 	'ACCESS_LOG_ENABLED',
@@ -91,6 +93,39 @@ describe('getServerEnv', () => {
 			admin2faRequired: true
 		});
 		expect(serverEnv.secrets.resendWebhookSecret).toBeNull();
+	});
+
+	it('defaults public Android configuration to unpublished and parses configured certificates', () => {
+		const defaults = getServerEnv({
+			env: envWith({ PUBLIC_ANDROID_APP_ID: undefined, PUBLIC_ANDROID_CERT_SHA256: undefined })
+		});
+		expect(defaults.androidAppId).toBe('com.openauri.app');
+		expect(defaults.androidCertSha256).toEqual([]);
+		const fingerprint = Array<string>(32).fill('AB').join(':');
+		const configured = getServerEnv({
+			env: envWith({
+				PUBLIC_ANDROID_APP_ID: 'com.example.app',
+				PUBLIC_ANDROID_CERT_SHA256: `${fingerprint}, ${fingerprint}`
+			})
+		});
+		expect(configured.androidAppId).toBe('com.example.app');
+		expect(configured.androidCertSha256).toEqual([fingerprint]);
+		expect(getServerEnv({ env: envWith({ PUBLIC_ANDROID_APP_ID: '' }) }).androidAppId).toBeNull();
+	});
+
+	it.each([
+		['PUBLIC_ANDROID_APP_ID', 'not-a-package'],
+		['PUBLIC_ANDROID_CERT_SHA256', 'ab:cd']
+	])('rejects invalid %s with a name-only schema issue', (key, value) => {
+		let caught: unknown;
+		try {
+			getServerEnv({ env: envWith({ [key]: value }) });
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(ServerEnvError);
+		expect(String(caught)).toContain(key);
+		expect(String(caught)).not.toContain(value);
 	});
 
 	it('lists every problem by name without leaking values', () => {

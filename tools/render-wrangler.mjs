@@ -33,10 +33,15 @@ export const SECRETS = [
 
 /**
  * Placeholder values used when the key is missing or empty in .env / process.env. Only for
- * non-secret switches whose default is the production behaviour.
+ * non-secret settings whose default is the production behaviour. An empty Android certificate
+ * list deliberately leaves verified App Links unpublished until the signing key is configured.
  * @type {Readonly<Record<string, string>>}
  */
-export const DEFAULTS = Object.freeze({ EMAIL_TRANSPORT: 'resend' });
+export const DEFAULTS = Object.freeze({
+  EMAIL_TRANSPORT: 'resend',
+  PUBLIC_ANDROID_APP_ID: 'com.openauri.app',
+  PUBLIC_ANDROID_CERT_SHA256: '',
+});
 
 /** @param {string} source */
 export function parseEnv(source) {
@@ -111,7 +116,7 @@ export function renderTemplate(template, output, values) {
         (given === undefined || given === '') && Object.hasOwn(DEFAULTS, key)
           ? DEFAULTS[key]
           : given;
-      if (value === undefined || value === '') missing.add(key);
+      if (value === undefined || (value === '' && !Object.hasOwn(DEFAULTS, key))) missing.add(key);
       return JSON.stringify(value ?? '').slice(1, -1);
     },
   );
