@@ -94,7 +94,8 @@
     "test:android": "node tools/run-gradle.mjs :app:testDebugUnitTest :app:koverVerifyDebug",
     "lint:android": "node tools/run-gradle.mjs :app:lintDebug",
     "test:android:device": "node tools/run-gradle.mjs :app:connectedDebugAndroidTest",
-    "typecheck:android": "tsc -p apps/android/tsconfig.json --noEmit"
+    "typecheck:android": "tsc -p apps/android/tsconfig.json --noEmit",
+    "icons:android": "node tools/android-icons.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
