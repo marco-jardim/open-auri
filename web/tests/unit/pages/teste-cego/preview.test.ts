@@ -62,7 +62,14 @@ describe('shared preview level matching', () => {
 				trimDb: [-8, -5, 0][i]
 			}))
 		]);
-		for (const chain of preview.chains) expect(chain.setGain).toHaveBeenLastCalledWith(0, false);
+		// Each chain is built at its trim and stays there while silent (the trim runs ahead of a
+		// shared protection, whose gain counted it).
+		(fake.buildChain.mock.calls as unknown[][]).forEach((call, i) => {
+			expect(call[2]).toMatchObject({ gainDb: [-8, -5, 0][i], on: false });
+		});
+		preview.chains.forEach((chain, i) => {
+			expect(chain.setGain).toHaveBeenLastCalledWith([-8, -5, 0][i], false);
+		});
 		preview.select('1');
 		expect(fake.a.setGain).toHaveBeenLastCalledWith(-8, false);
 		expect(fake.b.setGain).toHaveBeenLastCalledWith(-5, true);
@@ -118,16 +125,26 @@ describe('protection on the real engine (C1)', () => {
 		if (!(node instanceof type)) throw new Error(`Expected ${type.name}`);
 		return node;
 	}
-	/** The normalize gain after the chain's sections, or null when it is unprotected. */
+	/**
+	 * The normalize gain of a protected chain (sections, trim, normalize, limiter, output), or
+	 * null when it is unprotected (the sections feed the output).
+	 */
 	function normalizeGain(chain: PreviewChain): number | null {
 		const tail = chain.stages.length > 0 ? as(chain.stages.at(-1), FakeIIRFilterNode) : null;
 		const [next] = (tail ?? as(chain.preamp, FakeGainNode)).connections;
 		// The fake node and the typed chain output: compared as plain objects.
 		if (Object.is(next, chain.output)) return null;
-		const normalize = as(next, FakeGainNode);
+		const [normalizeNode] = as(next, FakeGainNode).connections;
+		const normalize = as(normalizeNode, FakeGainNode);
 		const [limiter] = normalize.connections;
 		expect(as(limiter, FakeDynamicsCompressorNode).connections).toEqual([chain.output]);
 		return normalize.gain.value;
+	}
+	/** The trim gain ahead of a protected chain's normalize gain. */
+	function trimGain(chain: PreviewChain): number {
+		const tail = chain.stages.length > 0 ? as(chain.stages.at(-1), FakeIIRFilterNode) : null;
+		const [next] = (tail ?? as(chain.preamp, FakeGainNode)).connections;
+		return as(next, FakeGainNode).gain.value;
 	}
 
 	test('one YOLO-only candidate protects every chain with the same gain: nothing tells them apart', () => {
@@ -149,6 +166,23 @@ describe('protection on the real engine (C1)', () => {
 			expect(gain).not.toBeNull();
 			expect(gain ?? Number.NaN).toBeCloseTo(expected, 12);
 		}
+		// Every trim plays ahead of the limiter, muted or selected, so no limiter input passes
+		// -1 dBFS.
+		const check = () =>
+			preview.chains.forEach((chain, i) => {
+				const trim = preview.trims[i] ?? 0;
+				expect(trimGain(chain)).toBeCloseTo(dbToGain(trim), 12);
+				const c = candidates[i];
+				if (!c) throw new Error('missing candidate');
+				const atLimiter =
+					chainPeakDb(c.bands, c.preampDb, rate) + 20 * Math.log10(trimGain(chain) * expected);
+				expect(atLimiter).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+			});
+		check();
+		preview.select('b');
+		check();
+		preview.mute();
+		check();
 		expect(audioConfig.instances[0]?.compressors).toHaveLength(3);
 		preview.dispose();
 	});

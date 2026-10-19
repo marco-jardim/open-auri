@@ -1,8 +1,8 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
 import { gateForWrite } from 'open-auri/safety';
 import type { JournalEntry } from '#lib/cable/types.ts';
-import { loadDecision } from '#lib/components/pages/cabo/load-entry.ts';
+import { caboProfile, loadDecision } from '#lib/components/pages/cabo/load-entry.ts';
 import { EDITOR_PREAMP_FLOOR_DB } from '#lib/components/pages/curva/edit.ts';
 
 test.each([NEUTRO, PADRAO_AURI])(
@@ -84,4 +84,26 @@ test.each([false, true])('untagged entries always use the standard gate (YOLO %s
 	};
 	expect(loadDecision(entry, enabled)).toEqual({ load: true, profile: 'standard' });
 	expect(loadDecision({ ...entry, preampDb: 1 }, enabled)).toEqual({ load: false, reason: 'gate' });
+});
+
+describe('caboProfile', () => {
+	const yoloOn = { enabled: true, writeBlock: () => null };
+	const loaded = { signature: 'sig-a', profile: 'yolo' as const };
+
+	test('YOLO only for a YOLO entry still in the editor, with YOLO on and free to write', () => {
+		expect(caboProfile(loaded, 'sig-a', yoloOn)).toBe('yolo');
+	});
+
+	test('standard in every other case', () => {
+		expect(caboProfile(loaded, 'sig-b', yoloOn)).toBe('standard');
+		expect(caboProfile(loaded, 'sig-a', { enabled: false, writeBlock: () => null })).toBe(
+			'standard'
+		);
+		expect(caboProfile(loaded, 'sig-a', { enabled: true, writeBlock: () => 'free-preview' })).toBe(
+			'standard'
+		);
+		expect(caboProfile({ ...loaded, profile: 'standard' }, 'sig-a', yoloOn)).toBe('standard');
+		expect(caboProfile(null, 'sig-a', yoloOn)).toBe('standard');
+		expect(caboProfile(loaded, 'sig-a', null)).toBe('standard');
+	});
 });

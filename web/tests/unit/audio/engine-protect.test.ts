@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
+import { levelDb } from 'open-auri/dsp';
 import { gateForWrite } from 'open-auri/safety';
 import {
 	chainPeakDb,
@@ -65,15 +66,34 @@ function afterSections(chain: PreviewChain): unknown {
 	expect(next).toHaveLength(1);
 	return next[0];
 }
-/** Normalizing gain and limiter of a protected chain, or null when it is unprotected. */
+/**
+ * Level trim, normalizing gain and limiter of a protected chain (sections → trim → normalize →
+ * limiter → output), or null when it is unprotected (the sections feed the output).
+ */
 function protection(chain: PreviewChain) {
 	const next = afterSections(chain);
 	if (next === chain.output) return null;
-	const normalize = as(next, FakeGainNode);
+	const trim = as(next, FakeGainNode);
+	expect(trim.connections).toHaveLength(1);
+	const normalize = as(trim.connections[0], FakeGainNode);
 	const [limiter] = normalize.connections;
 	const compressor = as(limiter, FakeDynamicsCompressorNode);
 	expect(compressor.connections).toEqual([chain.output]);
-	return { gain: normalize.gain.value, compressor };
+	return { trim: trim.gain.value, gain: normalize.gain.value, compressor };
+}
+/** Peak (dBFS) of a protected chain's signal where it enters its limiter. */
+function limiterInputDb(chain: PreviewChain, curve: PreviewCurve): number {
+	const found = protection(chain);
+	if (!found) throw new Error('unprotected chain');
+	return (
+		chainPeakDb(curve.bands, curve.preampDb, chain.rate) + 20 * Math.log10(found.trim * found.gain)
+	);
+}
+/** Level (dB, `levelDb`) of a protected chain's signal where it enters its limiter. */
+function limiterInputLevelDb(chain: PreviewChain, curve: PreviewCurve): number {
+	const found = protection(chain);
+	if (!found) throw new Error('unprotected chain');
+	return levelDb(curve.bands, curve.preampDb) + 20 * Math.log10(found.trim * found.gain);
 }
 
 beforeEach(resetAudioConfig);
@@ -128,22 +148,149 @@ describe('createAB', () => {
 			chainPeakDb(b.bands, b.preampDb, rate) + ab.trims[1]
 		);
 		const expected = dbToGain(Math.min(0, YOLO_PREVIEW_PEAK_DBFS - loudest));
-		for (const chain of [ab.a, ab.b]) {
+		[ab.a, ab.b].forEach((chain, side) => {
 			const found = protection(chain);
 			expect(found).not.toBeNull();
 			// One gain for both sides keeps the level match.
 			expect(found?.gain).toBeCloseTo(expected, 12);
+			// Each side's trim plays ahead of that gain and the limiter.
+			expect(found?.trim).toBeCloseTo(dbToGain(ab.trims[side] ?? Number.NaN), 12);
 			expect(found?.compressor.threshold.value).toBe(YOLO_PREVIEW_PEAK_DBFS - 2);
-		}
+		});
 		expect(context().compressors).toHaveLength(2);
+		// Level-matched where the limiters act, and none above -1 dBFS there.
+		expect(limiterInputLevelDb(ab.a, a)).toBeCloseTo(limiterInputLevelDb(ab.b, b), 9);
+		expect(limiterInputDb(ab.a, a)).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+		expect(limiterInputDb(ab.b, b)).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+	});
+
+	it('A/B select keeps each trim ahead of the limiter and switches only the output', () => {
+		const ab = makeEngine().createAB(NEUTRAL, CODEC_ONLY, { initial: 'A' });
+		const trimNode = (chain: PreviewChain) => as(afterSections(chain), FakeGainNode);
+		const outA = as(ab.a.output, FakeGainNode);
+		const outB = as(ab.b.output, FakeGainNode);
+		expect([outA.gain.value, outB.gain.value]).toEqual([1, 0]);
+		ab.select('B');
+		expect([outA.gain.value, outB.gain.value]).toEqual([0, 1]);
+		expect(trimNode(ab.a).gain.value).toBeCloseTo(dbToGain(ab.trims[0]), 12);
+		expect(trimNode(ab.b).gain.value).toBeCloseTo(dbToGain(ab.trims[1]), 12);
 	});
 
 	it('the codec-only side is brought down to -1 dBFS', () => {
 		const ab = makeEngine().createAB(NEUTRAL, CODEC_ONLY);
 		const rate = context().sampleRate;
 		const peak = chainPeakDb(CODEC_ONLY.bands, CODEC_ONLY.preampDb, rate) + ab.trims[1];
-		const gain = protection(ab.b)?.gain ?? 1;
+		const found = protection(ab.b);
+		const gain = found?.gain ?? 1;
 		expect(peak + 20 * Math.log10(gain)).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+		// Where its limiter acts: the trim is already applied there.
+		expect(limiterInputDb(ab.b, CODEC_ONLY)).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+	});
+});
+
+describe('level trims run before the shared protection (#39)', () => {
+	/** Flat (Neutro) at -12,5 dB and at -0,5 dB: 12 dB apart, so the match trims are 0 and -12. */
+	const QUIET_FLAT: PreviewCurve = { bands: NEUTRO.bands, preampDb: -12.5 };
+	const LOUD_FLAT: PreviewCurve = { bands: NEUTRO.bands, preampDb: -0.5 };
+
+	it('two protected chains with trims 0 and -12 dB see the same limiter input level', () => {
+		const engine = makeEngine();
+		const set = [
+			{ ...QUIET_FLAT, trimDb: 0 },
+			{ ...LOUD_FLAT, trimDb: -12 }
+		];
+		const protect = engine.sharedProtection(set, { protect: 'yolo' });
+		expect(protect).toBeDefined();
+		const [quiet, loud] = set.map((curve) =>
+			engine.buildChain(curve.bands, curve.preampDb, {
+				gainDb: curve.trimDb,
+				...(protect ? { protect } : {})
+			})
+		);
+		if (!quiet || !loud) throw new Error('missing chains');
+		// One shared gain for both.
+		expect(protection(quiet)?.gain).toBe(protection(loud)?.gain);
+		const quietIn = limiterInputDb(quiet, QUIET_FLAT);
+		const loudIn = limiterInputDb(loud, LOUD_FLAT);
+		// The trim came first: the loud flat curve no longer reaches its limiter 12 dB hotter.
+		// Equal to well under 0.001 dB (float32 gains through the fake graph).
+		expect(loudIn).toBeCloseTo(quietIn, 4);
+		expect(Math.max(quietIn, loudIn)).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+	});
+
+	it('createAB of a pair 12 dB apart: trims 0 and -12, the same limiter input level', () => {
+		const ab = makeEngine().createAB(QUIET_FLAT, LOUD_FLAT, { protect: 'yolo' });
+		expect(ab.trims[0]).toBe(0);
+		expect(ab.trims[1]).toBeCloseTo(-12, 2);
+		expect(limiterInputLevelDb(ab.a, QUIET_FLAT)).toBeCloseTo(
+			limiterInputLevelDb(ab.b, LOUD_FLAT),
+			9
+		);
+		expect(limiterInputDb(ab.a, QUIET_FLAT)).toBeCloseTo(limiterInputDb(ab.b, LOUD_FLAT), 9);
+	});
+
+	it('a loud refused curve trimmed by -12 dB reaches its limiter at -1 dBFS, not +11', () => {
+		const engine = makeEngine();
+		const set = [
+			{ ...LOUD_FLAT, trimDb: 0 },
+			{ ...CODEC_ONLY, trimDb: -12 }
+		];
+		// Unasked (C1): the codec-only curve is refused by the standard gate.
+		const protect = engine.sharedProtection(set);
+		expect(protect).toBeDefined();
+		const chains = set.map((curve) =>
+			engine.buildChain(curve.bands, curve.preampDb, {
+				gainDb: curve.trimDb,
+				...(protect ? { protect } : {})
+			})
+		);
+		set.forEach((curve, i) => {
+			const chain = chains[i];
+			if (!chain) throw new Error('missing chain');
+			expect(limiterInputDb(chain, curve)).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+		});
+		// The louder trimmed peak lands exactly at -1 dBFS.
+		const peaks = set.map((curve, i) => {
+			const chain = chains[i];
+			if (!chain) throw new Error('missing chain');
+			return limiterInputDb(chain, curve);
+		});
+		expect(Math.max(...peaks)).toBeCloseTo(YOLO_PREVIEW_PEAK_DBFS, 9);
+	});
+
+	it('live trims (Comparar): setGain ramps the trim ahead of the limiter, output is the switch', () => {
+		const engine = makeEngine();
+		// Comparar judges the untrimmed peaks: its trims are <= 0 and change without a rebuild.
+		const protect = engine.sharedProtection([LOUD_FLAT, CODEC_ONLY]);
+		expect(protect).toBeDefined();
+		const chain = engine.buildChain(CODEC_ONLY.bands, CODEC_ONLY.preampDb, {
+			on: false,
+			...(protect ? { protect } : {})
+		});
+		const output = as(chain.output, FakeGainNode);
+		expect(protection(chain)?.trim).toBe(1);
+		expect(output.gain.value).toBe(0);
+		chain.setGain(-12, true);
+		expect(protection(chain)?.trim).toBeCloseTo(dbToGain(-12), 12);
+		expect(output.gain.value).toBe(1);
+		expect(limiterInputDb(chain, CODEC_ONLY)).toBeLessThanOrEqual(
+			YOLO_PREVIEW_PEAK_DBFS - 12 + 1e-9
+		);
+		chain.setGain(-3, false);
+		expect(protection(chain)?.trim).toBeCloseTo(dbToGain(-3), 12);
+		expect(output.gain.value).toBe(0);
+		for (const db of [0, -3, -12]) {
+			chain.setGain(db, true);
+			expect(limiterInputDb(chain, CODEC_ONLY)).toBeLessThanOrEqual(YOLO_PREVIEW_PEAK_DBFS + 1e-9);
+		}
+		// The protection gain itself never moves with the trim.
+		expect(protection(chain)?.gain).toBeCloseTo(dbToGain(protect?.gainDb ?? Number.NaN), 12);
+	});
+
+	it('an unprotected chain keeps its trim on the output, as before', () => {
+		const chain = makeEngine().buildChain(STANDARD.bands, STANDARD.preampDb, { gainDb: -6 });
+		expect(protection(chain)).toBeNull();
+		expect(as(chain.output, FakeGainNode).gain.value).toBeCloseTo(dbToGain(-6), 12);
 	});
 });
 

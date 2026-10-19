@@ -271,13 +271,32 @@
 				)
 					return;
 				await rememberOrigin(hint);
-				if (!controller.signal.aborted) originRevision++;
+				if (controller.signal.aborted) return;
+				originRevision++;
+				hydrateLabels(hint.s1, result.version.labels);
 			} catch (cause) {
 				if (!controller.signal.aborted) failure(cause);
 			}
 		})();
 		return () => controller.abort();
 	});
+
+	/**
+	 * The verified version's filter labels (`preset@2`) join the editor curve: `#p=` never carries
+	 * them, so "Abrir na Curva" loads the curve without labels and they arrive here. Only while
+	 * the editor still is exactly that S1 (stored and shown) and still has no label of its own: an
+	 * edit or a rename since the link loaded always wins. Through the store's label path, so it is
+	 * a normal labels-only edit (persisted, undoable); labels never touch S1 or the gate.
+	 */
+	function hydrateLabels(code: string, labels: readonly (string | null)[] | null | undefined) {
+		const store = app?.state.curve;
+		if (!store || !Array.isArray(labels) || !labels.some((label) => typeof label === 'string')) {
+			return;
+		}
+		if (s1 !== code || currentS1(store.current) !== code) return;
+		if (store.current.labels?.some((label) => label !== null)) return;
+		store.setLabels(labels);
+	}
 
 	$effect(() => {
 		const instance = preview;

@@ -107,6 +107,12 @@ export const HARD_REASONS: readonly ReasonCode[];
  */
 export const CODEC_PREAMP_FLOOR_DB: number;
 /**
+ * Highest preamp the YOLO profile searches from: 0 dB, the codec ceiling (a
+ * positive preamp does not encode) and the editor's YOLO maximum. `g:preamp`
+ * is waived there, so only the hard limits (class 1) bound the preamp.
+ */
+export const YOLO_PREAMP_MAX_DB: 0;
+/**
  * @typedef {import('../dsp/eq0xcb.mjs').Band} Band
  * @typedef {import('../dsp/eq0xcb.mjs').Section} Section
  * @typedef {import('./thresholds.mjs').Thresholds} Thresholds

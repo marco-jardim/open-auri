@@ -102,8 +102,10 @@ export type Recipe = {
  * curveId, canonKey or the safety gate.
  */
 export type Labels = (string | null)[];
-export type Envelope = {
-    format: "open-auri/preset@1" | "open-auri/preset@2";
+/**
+ * Fields shared by every envelope format.
+ */
+export type EnvelopeFields = {
     name: string;
     description: string;
     author?: string | null;
@@ -112,11 +114,28 @@ export type Envelope = {
     code: string;
     preampDb: number;
     bands: Band[];
-    labels?: Labels;
     recipe?: Recipe;
     lang: "pt-BR" | "en-US";
     createdAt: string;
 };
+/**
+ * `open-auri/preset@1`: never carries labels (a `labels` key is env:extra).
+ */
+export type EnvelopeV1 = EnvelopeFields & {
+    format: "open-auri/preset@1";
+    labels?: never;
+};
+/**
+ * `open-auri/preset@2`: optional filter labels (omitted when every entry is null).
+ */
+export type EnvelopeV2 = EnvelopeFields & {
+    format: "open-auri/preset@2";
+    labels?: Labels;
+};
+/**
+ * A validated envelope, discriminated by `format`.
+ */
+export type Envelope = EnvelopeV1 | EnvelopeV2;
 export type EnvelopeErrorCode = "env:type" | "env:required" | "env:extra" | "env:length" | "env:enum" | "env:pattern" | "env:range" | "env:url" | "env:url-like" | "env:code-mismatch" | "env:s1" | "env:bands" | "env:labels" | "env:json" | "env:size";
 export type EnvelopeIssue = {
     path: string;

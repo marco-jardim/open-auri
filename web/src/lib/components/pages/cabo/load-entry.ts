@@ -33,3 +33,29 @@ export function loadDecision(
 		? { load: true, profile: 'standard' }
 		: { load: false, reason: entry.profile === 'yolo' ? 'yolo-off' : 'gate' };
 }
+
+/** The journal entry Cabo loaded: its load decision's profile, keyed by the curve it set. */
+export interface LoadedEntry {
+	/** `curveSignature` of the editor curve the load set. */
+	signature: string;
+	profile: 'standard' | 'yolo';
+}
+
+/**
+ * The profile of Cabo's verdict, checklist and write request (`app.requestWrite`): YOLO only for
+ * a YOLO entry loaded there (`loadDecision`), while the editor still holds that curve
+ * (`signature`) and YOLO is on and may write in this tab. Anything else is standard: with YOLO
+ * off, a YOLO-only curve is then refused by the standard gate with its reasons (C1).
+ */
+export function caboProfile(
+	loaded: LoadedEntry | null,
+	signature: string,
+	yolo: { readonly enabled: boolean; writeBlock(): unknown } | null
+): 'standard' | 'yolo' {
+	return loaded?.profile === 'yolo' &&
+		loaded.signature === signature &&
+		yolo?.enabled === true &&
+		yolo.writeBlock() === null
+		? 'yolo'
+		: 'standard';
+}

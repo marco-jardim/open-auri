@@ -25,9 +25,9 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { JournalEntry } from '#lib/cable/types.ts';
-	import { loadDecision } from './load-entry.ts';
+	import { caboProfile, loadDecision, type LoadedEntry } from './load-entry.ts';
 	import { lampsFromGate } from '#lib/cable/checklist.ts';
-	import { neutralCurve } from '#lib/state/model.ts';
+	import { curveSignature, neutralCurve } from '#lib/state/model.ts';
 	// Direct imports (FUX.B): the charts and chrome barrels would bring every chart, HelpOverlay
 	// and ConfirmDialog into the page.
 	import ByteMap from '#lib/charts/ByteMap.svelte';
@@ -78,8 +78,26 @@
 	const encoder = $derived(encoderData(curve));
 	const experimental = $derived(curve.bands.some((band) => isExperimentalKind(band.kind)));
 	const unconfirmed = { volumeLowered: false, keepConnected: false, experimental: false };
+	/**
+	 * The journal entry this page loaded into the editor, with its load decision's profile, keyed
+	 * by the curve it set (`curveSignature`): any other editor curve since (an edit, a preset,
+	 * another tab) is no longer that entry, and plays the standard profile.
+	 */
+	let loaded = $state.raw<LoadedEntry | null>(null);
+	/**
+	 * The profile of the calibration unit and of "Gravar": YOLO only for a YOLO entry loaded here
+	 * while YOLO is on and may write in this tab. With YOLO off (or its writing blocked) it falls
+	 * back to standard, whose gate then refuses a YOLO-only curve with its reasons (C1).
+	 */
+	const profile = $derived(caboProfile(loaded, curveSignature(curve), app?.yolo ?? null));
 	// One gate verdict for the calibration unit: lamps, values and the checklist reuse it.
-	const gate = $derived(gateForWrite(curve.bands, curve.preampDb, { experimental }));
+	const gate = $derived(
+		gateForWrite(
+			curve.bands,
+			curve.preampDb,
+			profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
+		)
+	);
 	const lamps = $derived(lampsFromGate(gate));
 	const values = $derived(criteriaValues(gate));
 	const checklist = $derived.by(() => {
@@ -91,7 +109,8 @@
 					bands: curve.bands,
 					preampDb: curve.preampDb,
 					experimental,
-					confirmations: unconfirmed
+					confirmations: unconfirmed,
+					...(profile === 'yolo' ? { profile: 'yolo' as const } : {})
 				},
 				gate
 			) ?? null
@@ -163,7 +182,9 @@
 	});
 
 	function requestWrite() {
-		app?.requestWrite();
+		// A YOLO entry opens the YOLO checklist (its per-write confirmation included); the
+		// transport re-gates the snapshot with that profile.
+		app?.requestWrite(undefined, profile === 'yolo' ? { profile: 'yolo' } : {});
 		coverOpen = false;
 	}
 
@@ -183,12 +204,18 @@
 			app.toasts.push(message, { tone: 'error' });
 			return;
 		}
-		app.state.curve.set({
-			name: entry.name,
-			source: 'custom',
-			bands: entry.bands,
-			preampDb: entry.preampDb
-		});
+		if (
+			!app.state.curve.set({
+				name: entry.name,
+				source: 'custom',
+				bands: entry.bands,
+				preampDb: entry.preampDb
+			})
+		) {
+			return;
+		}
+		// The verdict and "Gravar" keep this decision's profile while the editor holds this curve.
+		loaded = { signature: curveSignature(app.state.curve.current), profile: decision.profile };
 		if (decision.profile === 'yolo') app.toasts.push(m.yolo_load_yolo());
 	}
 </script>

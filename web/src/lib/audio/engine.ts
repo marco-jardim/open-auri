@@ -152,8 +152,10 @@ export interface ChainOptions {
 	/** Whether the chain is audible; default true. */
 	on?: boolean;
 	/**
-	 * Preview protection (additive): a fixed gain of `gainDb` (<= 0) after the sections, then a
-	 * DynamicsCompressor limiter, before the chain's output. Asked for by Modo YOLO previews.
+	 * Preview protection (additive): a fixed gain of `gainDb` (<= 0) after the sections and the
+	 * chain's level trim (`gainDb` above, `setGain`), then a DynamicsCompressor limiter, before
+	 * the chain's output. The trim runs first, so the limiter sees the level-matched signal.
+	 * Asked for by Modo YOLO previews.
 	 * Absent, the engine adds it on its own (C1) to any chain whose curve the standard gate
 	 * refuses (`standardGateAccepts`) or that is louder than the standard gate allows
 	 * (`PREVIEW_PEAK_LIMIT_DB`), so no page can forget it. Otherwise the chain is exactly as
@@ -311,7 +313,10 @@ export interface PreviewChain {
 	readonly preamp: GainNode;
 	/** One IIRFilterNode per non-OFF section, in written order. */
 	readonly stages: readonly IIRFilterNode[];
-	/** Per-chain switch and level trim (crossfaded); feeds the shared preview volume. */
+	/**
+	 * Per-chain switch (crossfaded); feeds the shared preview volume. Unprotected, it also holds
+	 * the level trim; a protected chain applies its trim before the protection instead.
+	 */
 	readonly output: GainNode;
 	/** The shared preview volume (browser only; never written to the cable). */
 	readonly volume: GainNode;
@@ -319,7 +324,10 @@ export interface PreviewChain {
 	readonly rate: number;
 	/** False when the coefficients were recomputed for a rate other than 96 kHz. */
 	readonly exact: boolean;
-	/** Crossfades (30 ms) the chain to `db` when `on`, or to silence. */
+	/**
+	 * Crossfades (30 ms) the chain to its level trim `db` when `on`, or to silence. A protected
+	 * chain ramps the trim ahead of its normalize gain and limiter, and `output` to on or off.
+	 */
 	setGain(db: number, on?: boolean): void;
 	/** Fades out and disconnects every node of the chain. */
 	dispose(): void;
@@ -418,7 +426,8 @@ export interface AudioEngine {
 	 * them, which brings the loudest float peak (plus its `trimDb`) to `YOLO_PREVIEW_PEAK_DBFS`.
 	 * Undefined when none needs it. Pass it as `buildChain`'s `protect` to every chain of the set:
 	 * the same gain staging (normalize gain and limiter) on each keeps the level match, and no
-	 * chain stands out. Creates the AudioContext (its rate decides the peaks).
+	 * chain stands out. Each chain's trim (`gainDb`, `setGain`) plays ahead of that staging, so
+	 * every limiter sees the matched level. Creates the AudioContext (its rate decides the peaks).
 	 */
 	sharedProtection(
 		curves: readonly SharedCurve[],
@@ -1538,9 +1547,15 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			tail = stage;
 			stages.push(stage);
 		}
-		// Preview protection: normalizing gain, then a brick-wall-ish limiter.
+		// Preview protection: the chain's level trim, then the normalizing gain and a
+		// brick-wall-ish limiter. The trim comes first, so every chain of a level-matched set
+		// reaches its limiter at the matched level, under the one shared gain (at most -1 dBFS).
+		// An unprotected chain keeps its trim on `output`, exactly as before.
 		const protection: AudioNode[] = [];
+		let trim: GainNode | null = null;
 		if (protect !== undefined) {
+			trim = context.createGain();
+			trim.gain.value = dbToGain(chainOptions.gainDb ?? 0);
 			const normalize = context.createGain();
 			normalize.gain.value = dbToGain(Math.min(0, protect.gainDb));
 			const limiter = context.createDynamicsCompressor();
@@ -1549,10 +1564,11 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			limiter.ratio.value = 20;
 			limiter.attack.value = 0.001;
 			limiter.release.value = 0.1;
-			tail.connect(normalize);
+			tail.connect(trim);
+			trim.connect(normalize);
 			normalize.connect(limiter);
 			tail = limiter;
-			protection.push(normalize, limiter);
+			protection.push(trim, normalize, limiter);
 		}
 		tail.connect(output);
 		output.connect(nodes.chainsGain);
@@ -1578,7 +1594,13 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			exact: context.sampleRate === PREVIEW_RATE,
 			setGain(db: number, on = true) {
 				if (disposed || ctx !== context) return;
-				ramp(output.gain, on ? dbToGain(db) : 0, context.currentTime, CROSSFADE_S);
+				if (trim === null) {
+					ramp(output.gain, on ? dbToGain(db) : 0, context.currentTime, CROSSFADE_S);
+					return;
+				}
+				// Protected: the trim sits before the limiter; `output` is only the switch.
+				ramp(trim.gain, dbToGain(db), context.currentTime, CROSSFADE_S);
+				ramp(output.gain, on ? 1 : 0, context.currentTime, CROSSFADE_S);
 			},
 			dispose() {
 				if (disposed) return;

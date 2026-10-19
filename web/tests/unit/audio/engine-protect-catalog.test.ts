@@ -78,11 +78,15 @@ function afterSections(chain: PreviewChain): unknown {
 function unprotected(chain: PreviewChain): boolean {
 	return afterSections(chain) === chain.output;
 }
-/** Whether a normalize gain then a limiter sit between the sections and the chain's output. */
+/**
+ * Whether the level trim, a normalize gain then a limiter sit between the sections and the
+ * chain's output.
+ */
 function protectedChain(chain: PreviewChain): boolean {
 	const next = afterSections(chain);
 	if (next === chain.output) return false;
-	const [limiter] = as(next, FakeGainNode).connections;
+	const [normalize] = as(next, FakeGainNode).connections;
+	const [limiter] = as(normalize, FakeGainNode).connections;
 	expect(as(limiter, FakeDynamicsCompressorNode).connections).toEqual([chain.output]);
 	return true;
 }
