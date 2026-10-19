@@ -27,18 +27,27 @@ describe('Android App Links configuration', () => {
 		'com.app/evil'
 	])('rejects an invalid package: %j', (value) => expect(parseAndroidAppId(value)).toBeNull());
 
-	it('parses uppercase SHA-256 fingerprints, trims comma spacing and removes duplicates', () => {
-		expect(parseAndroidCertSha256(`${FIRST}, ${SECOND} , ${FIRST}`)).toEqual([FIRST, SECOND]);
+	it('normalizes mixed SHA-256 formats, trims comma spacing and removes duplicates', () => {
+		expect(
+			parseAndroidCertSha256(`${FIRST}, ${SECOND.toLowerCase()} , ${'ab'.repeat(32)}`)
+		).toEqual([FIRST, SECOND]);
 		expect(parseAndroidCertSha256(FIRST)).toEqual([FIRST]);
 		expect(parseAndroidCertSha256('')).toEqual([]);
 		expect(parseAndroidCertSha256(undefined)).toEqual([]);
 	});
 
+	it.each([FIRST, FIRST.toLowerCase(), 'ab'.repeat(32), 'aB'.repeat(32), 'AB'.repeat(32)])(
+		'normalizes a fingerprint to uppercase colon-separated hex: %s',
+		(value) => expect(parseAndroidCertSha256(value)).toEqual([FIRST])
+	);
+
 	it.each([
-		FIRST.toLowerCase(),
 		Array<string>(31).fill('AB').join(':'),
 		Array<string>(33).fill('AB').join(':'),
-		'AB'.repeat(32),
+		'AB'.repeat(31),
+		'AB'.repeat(33),
+		'GG'.repeat(32),
+		FIRST.replace(':', ''),
 		Array<string>(32).fill('GG').join(':'),
 		`${FIRST},`,
 		`${FIRST},invalid`,

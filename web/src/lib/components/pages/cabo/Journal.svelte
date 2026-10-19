@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import { saveFile } from '#lib/files/save.ts';
+	import { saveFile, saveFileErrorMessage } from '#lib/files/save.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { formatCrc, formatNumber } from '#lib/components/cable/i18n.ts';
 	import type { JournalEntry, JournalStatus } from '#lib/cable/types.ts';
@@ -37,7 +37,7 @@
 				bytes: JSON.stringify(entries, null, 2)
 			});
 		} catch (error) {
-			exportError = m.auth_error_generic();
+			exportError = saveFileErrorMessage(error);
 			console.error('Journal export failed', error);
 		}
 	}

@@ -9,7 +9,12 @@
 <script lang="ts">
 	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
-	import { dispositionFilename, isAndroidApp, saveFile } from '#lib/files/save.ts';
+	import {
+		dispositionFilename,
+		isAndroidApp,
+		saveFile,
+		saveFileErrorMessage
+	} from '#lib/files/save.ts';
 	import type { CreatedShare, SocialApi } from '#lib/social/index.ts';
 	import CurveAvatar from './CurveAvatar.svelte';
 	import { absoluteUrl, errorText, licenseShort, type Channel, type SessionView } from './model.ts';
@@ -100,7 +105,7 @@
 				bytes: await response.blob()
 			});
 		} catch (error) {
-			message = m.comunidade_error_generic();
+			message = saveFileErrorMessage(error, m.comunidade_error_generic());
 			console.error('Community PNG export failed', error);
 		}
 	}

@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
-	import { saveFile } from '#lib/files/save.ts';
+	import { saveFile, saveFileErrorMessage } from '#lib/files/save.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button, Panel } from '#lib/components/primitives/index.ts';
 	import type { Layer, UrlLike } from './layers.ts';
@@ -81,7 +81,7 @@
 			else if (!(await saveFile({ name: file, mime: blob.type, bytes: blob })).saved) return;
 			notify(m.curva_exported({ name: file }));
 		} catch (error) {
-			notify(m.auth_error_generic(), 'error');
+			notify(saveFileErrorMessage(error), 'error');
 			console.error('Curva export failed', error);
 		}
 	}

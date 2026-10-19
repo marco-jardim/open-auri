@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import routeMetadata from '../../../.svelte-kit/types/route_meta_data.json';
 import { listAccountSessions } from '#lib/server/account/sessions.ts';
 import { reduceUserAgent } from '#lib/server/auth/user-agent.ts';
@@ -46,7 +46,7 @@ describe('GET/HEAD /.well-known/assetlinks.json (workerd)', () => {
 	it('publishes exactly the verified App Links statement with caching and hook security headers', async () => {
 		const response = await request({
 			PUBLIC_ANDROID_APP_ID: 'com.openauri.app',
-			PUBLIC_ANDROID_CERT_SHA256: `${FIRST}, ${SECOND} , ${FIRST}`
+			PUBLIC_ANDROID_CERT_SHA256: `${FIRST.toLowerCase()}, ${'cd'.repeat(32)} , ${FIRST}`
 		});
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual([
@@ -91,6 +91,38 @@ describe('GET/HEAD /.well-known/assetlinks.json (workerd)', () => {
 			expectSecurityHeaders(response);
 		}
 	});
+
+	it.each(['invalid-fingerprint', `${FIRST},invalid-fingerprint`, null])(
+		'returns 404 instead of breaking requests for malformed fingerprints: %j',
+		async (value) => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+			try {
+				for (const method of ['GET', 'HEAD'] as const) {
+					const response = await request({ PUBLIC_ANDROID_CERT_SHA256: value }, method);
+					expect(response.status).toBe(404);
+					expect(response.headers.get('cache-control')).toBe('no-store');
+					expect(await response.text()).toBe('');
+					expectSecurityHeaders(response);
+				}
+				expect(warn).toHaveBeenCalledTimes(2);
+				for (const call of warn.mock.calls) {
+					expect(call).toEqual([
+						'PUBLIC_ANDROID_CERT_SHA256: invalid fingerprints; App Links disabled'
+					]);
+				}
+				const event = eventFor('/ordinary-page', {
+					routeId: '/ordinary-page',
+					platformEnv: { ...env, PUBLIC_ANDROID_CERT_SHA256: value }
+				});
+				const response = await through({ readOnly: false }, event, () => new Response('ok'));
+				expect(response.status).toBe(200);
+				expect(await response.text()).toBe('ok');
+				expectSecurityHeaders(response);
+			} finally {
+				warn.mockRestore();
+			}
+		}
+	);
 });
 
 describe('Android session label (workerd)', () => {

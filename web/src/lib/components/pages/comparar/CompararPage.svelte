@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import { saveFileErrorMessage } from '#lib/files/save.ts';
 	import SocialSources from './SocialSources.svelte';
 	import { createCurveSocial, type CurveSocial } from './social.svelte.ts';
 	import { SvelteMap } from 'svelte/reactivity';
@@ -283,7 +284,7 @@
 			await downloadComparison(exportSvg, format);
 		} catch (cause) {
 			console.error('Comparison export failed', cause);
-			error = t.failed;
+			error = saveFileErrorMessage(cause, t.failed);
 		}
 	}
 </script>

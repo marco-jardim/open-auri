@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { dispositionFilename, isAndroidApp, saveFile } from '#lib/files/save.ts';
+import {
+	dispositionFilename,
+	isAndroidApp,
+	saveFile,
+	saveFileErrorMessage,
+	type SaveFileError
+} from '#lib/files/save.ts';
+import { m } from '#lib/paraglide/messages.js';
+import { getLocale, overwriteGetLocale } from '#lib/paraglide/runtime.js';
 
 const { nativeSave, registerPlugin } = vi.hoisted(() => {
 	const nativeSave = vi.fn().mockResolvedValue({ saved: true });
@@ -174,6 +182,55 @@ test.each(['FILES_BAD_ARGS', 'FILES_TOO_LARGE', 'FILES_IO', 'FILES_BUSY', 'FILES
 		expect(error.code).toBe(code);
 	}
 );
+
+test.each(['pt-BR', 'en-US'] as const)('save errors are localized (%s)', (locale) => {
+	const previous = getLocale;
+	overwriteGetLocale(() => locale);
+	try {
+		for (const [code, message] of [
+			['FILES_BAD_ARGS', m.files_save_error_generic()],
+			['FILES_TOO_LARGE', m.files_save_error_too_large()],
+			['FILES_IO', m.files_save_error_io()],
+			['FILES_BUSY', m.files_save_error_busy()],
+			['FILES_ORIGIN', m.files_save_error_origin()]
+		] as const) {
+			const error: SaveFileError = Object.assign(new Error('Private native details'), { code });
+			expect(saveFileErrorMessage(error)).toBe(message);
+			expect(saveFileErrorMessage({ code })).toBe(message);
+			expect(message).not.toContain('Private native details');
+		}
+		expect(
+			new Set([
+				m.files_save_error_generic(),
+				m.files_save_error_too_large(),
+				m.files_save_error_io(),
+				m.files_save_error_busy(),
+				m.files_save_error_origin()
+			]).size
+		).toBe(5);
+		expect(saveFileErrorMessage({ code: 'FILES_ORIGIN' })).toBe(
+			locale === 'pt-BR'
+				? 'Não é permitido salvar arquivos aqui.'
+				: 'Saving files is not allowed here.'
+		);
+	} finally {
+		overwriteGetLocale(previous);
+	}
+});
+
+test.each([null, undefined, 'FILES_IO', {}, { code: 'UNKNOWN' }, new Error('Private details')])(
+	'unknown save errors use the generic save message, never native text: %j',
+	(error) => expect(saveFileErrorMessage(error)).toBe(m.files_save_error_generic())
+);
+
+test('a preparation fallback never masks a recognized native save code', () => {
+	const fallback = 'Preparation failed';
+	expect(saveFileErrorMessage(new Error('fetch failed'), fallback)).toBe(fallback);
+	expect(saveFileErrorMessage({ code: 'FILES_BAD_ARGS' }, fallback)).toBe(
+		m.files_save_error_generic()
+	);
+	expect(saveFileErrorMessage({ code: 'FILES_IO' }, fallback)).toBe(m.files_save_error_io());
+});
 
 test.each([
 	[null, null],

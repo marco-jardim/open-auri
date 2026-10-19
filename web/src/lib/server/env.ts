@@ -128,13 +128,8 @@ const schema = z.object({
 			'not an Android Java package name'
 		)
 		.default('com.openauri.app'),
-	PUBLIC_ANDROID_CERT_SHA256: z
-		.string('expected a string')
-		.refine(
-			(value) => parseAndroidCertSha256(value) !== null,
-			'not a list of uppercase SHA-256 fingerprints'
-		)
-		.default(''),
+	// Optional publication metadata must never invalidate the rest of the environment.
+	PUBLIC_ANDROID_CERT_SHA256: z.unknown().optional(),
 	RESEND_FROM: z.string('expected a string').min(3, 'empty'),
 	// Missing (configs rendered before the variable existed) means the production transport.
 	EMAIL_TRANSPORT: z.enum(EMAIL_TRANSPORTS, 'expected "resend" or "capture"').default('resend'),
@@ -178,6 +173,10 @@ export function getServerEnv(platform: { readonly env?: unknown } | undefined): 
 	if (data.EMAIL_TRANSPORT === 'capture' && !isLocalOrigin(data.PUBLIC_ORIGIN)) {
 		throw new ServerEnvError(['EMAIL_TRANSPORT: capture is only allowed on a localhost origin']);
 	}
+	const androidCertSha256 = parseAndroidCertSha256(data.PUBLIC_ANDROID_CERT_SHA256);
+	if (androidCertSha256 === null) {
+		console.warn('PUBLIC_ANDROID_CERT_SHA256: invalid fingerprints; App Links disabled');
+	}
 	const serverEnv: ServerEnv = {
 		db: data.DB,
 		config: data.CONFIG,
@@ -187,7 +186,7 @@ export function getServerEnv(platform: { readonly env?: unknown } | undefined): 
 		metrics: data.METRICS ?? null,
 		publicOrigin: data.PUBLIC_ORIGIN,
 		androidAppId: parseAndroidAppId(data.PUBLIC_ANDROID_APP_ID),
-		androidCertSha256: parseAndroidCertSha256(data.PUBLIC_ANDROID_CERT_SHA256) ?? [],
+		androidCertSha256: androidCertSha256 ?? [],
 		githubUrl: data.GITHUB_URL,
 		resendFrom: data.RESEND_FROM,
 		emailTransport: data.EMAIL_TRANSPORT,

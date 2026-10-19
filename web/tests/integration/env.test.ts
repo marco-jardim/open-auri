@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getServerEnv, ServerEnvError } from '#lib/server/env.ts';
 
 const ENV_KEYS = [
@@ -105,7 +105,7 @@ describe('getServerEnv', () => {
 		const configured = getServerEnv({
 			env: envWith({
 				PUBLIC_ANDROID_APP_ID: 'com.example.app',
-				PUBLIC_ANDROID_CERT_SHA256: `${fingerprint}, ${fingerprint}`
+				PUBLIC_ANDROID_CERT_SHA256: `${fingerprint}, ${'ab'.repeat(32)}`
 			})
 		});
 		expect(configured.androidAppId).toBe('com.example.app');
@@ -113,10 +113,28 @@ describe('getServerEnv', () => {
 		expect(getServerEnv({ env: envWith({ PUBLIC_ANDROID_APP_ID: '' }) }).androidAppId).toBeNull();
 	});
 
-	it.each([
-		['PUBLIC_ANDROID_APP_ID', 'not-a-package'],
-		['PUBLIC_ANDROID_CERT_SHA256', 'ab:cd']
-	])('rejects invalid %s with a name-only schema issue', (key, value) => {
+	it.each(['ab:cd', `${'ab'.repeat(32)},invalid`, null, 123])(
+		'disables malformed fingerprints without invalidating the env or logging values: %j',
+		(value) => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+			try {
+				const configuredEnv = envWith({ PUBLIC_ANDROID_CERT_SHA256: value });
+				const serverEnv = getServerEnv({ env: configuredEnv });
+				expect(serverEnv.db).toBe(env.DB);
+				expect(serverEnv.androidCertSha256).toEqual([]);
+				expect(getServerEnv({ env: configuredEnv })).toBe(serverEnv);
+				expect(warn).toHaveBeenCalledExactlyOnceWith(
+					'PUBLIC_ANDROID_CERT_SHA256: invalid fingerprints; App Links disabled'
+				);
+			} finally {
+				warn.mockRestore();
+			}
+		}
+	);
+
+	it('rejects an invalid package with a name-only schema issue', () => {
+		const key = 'PUBLIC_ANDROID_APP_ID';
+		const value = 'not-a-package';
 		let caught: unknown;
 		try {
 			getServerEnv({ env: envWith({ [key]: value }) });

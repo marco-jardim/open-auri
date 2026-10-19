@@ -1,3 +1,35 @@
+import { m } from '#lib/paraglide/messages.js';
+
+export type SaveFileErrorCode =
+	'FILES_BAD_ARGS' | 'FILES_TOO_LARGE' | 'FILES_IO' | 'FILES_BUSY' | 'FILES_ORIGIN';
+
+/** Native rejections retain their original code and identity. */
+export interface SaveFileError extends Error {
+	code: SaveFileErrorCode;
+}
+
+/** Never expose native exception text. A fallback may describe a fetch/preparation failure. */
+export function saveFileErrorMessage(
+	error: unknown,
+	fallback: string = m.files_save_error_generic()
+): string {
+	const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null;
+	switch (code) {
+		case 'FILES_TOO_LARGE':
+			return m.files_save_error_too_large();
+		case 'FILES_BUSY':
+			return m.files_save_error_busy();
+		case 'FILES_IO':
+			return m.files_save_error_io();
+		case 'FILES_ORIGIN':
+			return m.files_save_error_origin();
+		case 'FILES_BAD_ARGS':
+			return m.files_save_error_generic();
+		default:
+			return fallback;
+	}
+}
+
 export interface SaveFileOptions {
 	name: string;
 	mime: string;

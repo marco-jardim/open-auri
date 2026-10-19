@@ -10,7 +10,7 @@
 	// component's memory until the setup is confirmed or cancelled: never in storage, a cookie or
 	// the URL.
 	import { m } from '#lib/paraglide/messages.js';
-	import { saveFile } from '#lib/files/save.ts';
+	import { saveFile, saveFileErrorMessage } from '#lib/files/save.ts';
 	// Server render only (the setup works without JavaScript). In the client build
 	// `import.meta.env.SSR` is false, so this binding is unused and the encoder (side-effect free,
 	// like uqr) leaves /conta's initial JS; the browser imports it when an enrolment appears (FUX.B).
@@ -96,7 +96,7 @@
 				bytes: `${enrolment.backupCodes.join('\n')}\n`
 			});
 		} catch (error) {
-			copied = m.conta_error_generic();
+			copied = saveFileErrorMessage(error);
 			console.error('Recovery codes export failed', error);
 		}
 	}

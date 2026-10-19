@@ -1,6 +1,7 @@
 // Public Android App Links configuration. Fingerprints identify signing certificates, not secrets.
 const APP_ID = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
 const CERT_SHA256 = /^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/;
+const CERT_SHA256_INPUT = /^(?:[0-9a-f]{64}|(?:[0-9a-f]{2}:){31}[0-9a-f]{2})$/i;
 
 export function parseAndroidAppId(value: unknown): string | null {
 	return typeof value === 'string' && APP_ID.test(value) ? value : null;
@@ -11,8 +12,17 @@ export function parseAndroidCertSha256(value: unknown): string[] | null {
 	if (value === undefined || value === '') return [];
 	if (typeof value !== 'string') return null;
 	const fingerprints = value.split(',').map((entry) => entry.trim());
-	if (!fingerprints.every((entry) => CERT_SHA256.test(entry))) return null;
-	return [...new Set(fingerprints)];
+	if (!fingerprints.every((entry) => CERT_SHA256_INPUT.test(entry))) return null;
+	return [
+		...new Set(
+			fingerprints.map((entry) =>
+				entry
+					.replaceAll(':', '')
+					.toUpperCase()
+					.replace(/(..)(?=.)/g, '$1:')
+			)
+		)
+	];
 }
 
 export interface AndroidAppLink {

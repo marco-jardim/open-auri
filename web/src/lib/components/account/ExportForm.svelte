@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
 	import Button from '#lib/components/primitives/Button.svelte';
-	import { dispositionFilename, isAndroidApp, saveFile } from '#lib/files/save.ts';
+	import {
+		dispositionFilename,
+		isAndroidApp,
+		saveFile,
+		saveFileErrorMessage
+	} from '#lib/files/save.ts';
 	import './account.css';
 
 	interface Props {
@@ -33,7 +38,7 @@
 				bytes: await response.blob()
 			});
 		} catch (cause) {
-			error = m.conta_error_generic();
+			error = saveFileErrorMessage(cause, m.conta_error_generic());
 			console.error('Account export failed', cause);
 		} finally {
 			busy = false;

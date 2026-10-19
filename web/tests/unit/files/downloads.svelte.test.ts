@@ -5,10 +5,17 @@ import { NEUTRO } from 'open-auri/catalog';
 import { m } from '#lib/paraglide/messages.js';
 import { saveFile } from '#lib/files/save.ts';
 import type { JournalEntry } from '#lib/cable/types.ts';
+import { IDLE_STATE } from '#lib/audio/engine.ts';
+import { neutralCurve } from '#lib/state/model.ts';
 import ImportExport from '#lib/components/pages/curva/ImportExport.svelte';
 import { exportBin, exportS5, exportTxt } from '#lib/components/pages/curva/io.ts';
 import { downloadComparison } from '#lib/components/pages/comparar/export.ts';
 import { downloadBlob } from '#lib/components/pages/biblioteca/sheet-export.ts';
+import Biblioteca from '#lib/components/pages/biblioteca/Biblioteca.svelte';
+import TrackSheet from '#lib/components/pages/biblioteca/TrackSheet.svelte';
+import { archiveTapes } from '#lib/components/pages/biblioteca/archive.ts';
+import CompararPage from '#lib/components/pages/comparar/CompararPage.svelte';
+import { copy } from '#lib/components/pages/comparar/copy.ts';
 import Journal from '#lib/components/pages/cabo/Journal.svelte';
 import SharePanel from '#lib/components/pages/comunidade/SharePanel.svelte';
 import { channelOf, type FeedItem } from '#lib/components/pages/comunidade/model.ts';
@@ -20,6 +27,12 @@ const { nativeSave } = vi.hoisted(() => ({
 	nativeSave: vi.fn().mockResolvedValue({ saved: true })
 }));
 vi.mock('@capacitor/core', () => ({ registerPlugin: () => ({ save: nativeSave }) }));
+vi.mock('#lib/workers/gate-client.ts', () => ({
+	createGateWorker: () => ({
+		commit: () => new Promise(() => undefined),
+		dispose: () => undefined
+	})
+}));
 vi.mock('#lib/files/save.ts', async (importOriginal) => {
 	const original = await importOriginal<typeof import('#lib/files/save.ts')>();
 	return { ...original, saveFile: vi.fn(original.saveFile) };
@@ -369,7 +382,171 @@ test.each(['cancel', 'error'] as const)(
 		await expect.poll(() => nativeSave.mock.calls.length).toBe(1);
 		await expect.element(button).not.toHaveAttribute('aria-busy');
 		if (outcome === 'cancel') expect(page.getByRole('alert').elements()).toHaveLength(0);
-		else await expect.element(page.getByRole('alert')).toHaveTextContent(m.conta_error_generic());
+		else await expect.element(page.getByRole('alert')).toHaveTextContent(m.files_save_error_io());
 		expect(anchors).toEqual([]);
 	}
 );
+
+const saveFailures = [
+	['FILES_BAD_ARGS', () => m.files_save_error_generic()],
+	['FILES_TOO_LARGE', () => m.files_save_error_too_large()],
+	['FILES_IO', () => m.files_save_error_io()],
+	['FILES_BUSY', () => m.files_save_error_busy()],
+	['FILES_ORIGIN', () => m.files_save_error_origin()]
+] as const;
+
+function rejectNativeSave(code: string) {
+	vi.stubGlobal('Capacitor', { getPlatform: () => 'android' });
+	vi.spyOn(console, 'error').mockImplementation(() => undefined);
+	nativeSave.mockRejectedValueOnce(Object.assign(new Error('Private save details'), { code }));
+}
+
+test.each(saveFailures)('Journal maps %s to a save error, not auth', async (code, text) => {
+	rejectNativeSave(code);
+	await render(Journal, {
+		entries: [
+			{
+				schema: 1,
+				at: 1000,
+				name: 'Curva',
+				device: 'simulated cable',
+				bands: NEUTRO.bands.map((band) => ({ ...band })),
+				preampDb: NEUTRO.preampDb,
+				crc: NEUTRO.crc,
+				status: 'simulated'
+			}
+		]
+	});
+	await page.getByRole('button', { name: m.cabo_export(), exact: true }).click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(text());
+	expect(text()).not.toBe(m.auth_error_generic());
+});
+
+test.each(saveFailures)('Curva maps %s to a save error, not auth', async (code, text) => {
+	rejectNativeSave(code);
+	const notify = vi.fn();
+	await render(ImportExport, {
+		curve: { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb },
+		name: 'Minha curva',
+		source: 'custom',
+		layer: 'ajustar',
+		locale: 'pt-BR',
+		pageUrl: new URL('https://example.test/curva'),
+		onimport: vi.fn(),
+		notify
+	});
+	await page.getByRole('button', { name: m.curva_export_json(), exact: true }).click();
+	await expect.poll(() => notify.mock.lastCall).toEqual([text(), 'error']);
+	expect(text()).not.toBe(m.auth_error_generic());
+});
+
+test.each(saveFailures)('TwoFactor download shows the save message for %s', async (code, text) => {
+	rejectNativeSave(code);
+	await render(TwoFactorForm, {
+		status: 'pending',
+		feedback: {
+			form: 'twoFactor',
+			ok: true,
+			detail: 'started',
+			enrolment: { totpURI: 'otpauth://totp/test?secret=JBSWY3DPEHPK3PXP', backupCodes: codes }
+		}
+	});
+	await page.getByRole('link', { name: m.conta_2fa_codes_download() }).click();
+	await expect.element(page.getByText(text(), { exact: true })).toBeVisible();
+});
+
+test.each(saveFailures)('ExportForm maps %s and clears busy', async (code, text) => {
+	rejectNativeSave(code);
+	vi.stubGlobal(
+		'fetch',
+		vi.fn().mockResolvedValue(
+			new Response('{}', {
+				headers: { 'content-disposition': 'attachment; filename="account.json"' }
+			})
+		)
+	);
+	await render(ExportForm);
+	const button = page.getByRole('button', { name: m.conta_export_submit() });
+	await button.click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(text());
+	await expect.element(button).not.toHaveAttribute('aria-busy');
+});
+
+test.each(saveFailures)('SharePanel shows the save message for %s', async (code, text) => {
+	rejectNativeSave(code);
+	vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(png)));
+	await render(SharePanel, {
+		api: apiWith(fakeFetch(() => undefined)),
+		session: VERIFIED,
+		channel,
+		online: true
+	});
+	await page.getByRole('link', { name: m.comunidade_share_download_png() }).click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(text());
+});
+
+test.each(saveFailures)('Comparar shows the save message for %s', async (code, text) => {
+	rejectNativeSave(code);
+	await render(CompararPage, { locale: 'pt-BR' });
+	await page.getByRole('button', { name: copy('pt-BR').exportSvg, exact: true }).click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(text());
+});
+
+test.each(saveFailures)('Biblioteca pack shows the save message for %s', async (code, text) => {
+	rejectNativeSave(code);
+	const screen = await render(Biblioteca, { origin: 'https://example.test' });
+	await page.getByRole('button', { name: m.biblioteca_pack_export(), exact: true }).click();
+	await expect
+		.element(screen.container.querySelector<HTMLElement>('.notice'))
+		.toHaveTextContent(text());
+});
+
+for (const format of ['svg', 's5'] as const) {
+	test.each(saveFailures)(
+		`Biblioteca ${format} shows the save message for %s`,
+		async (code, text) => {
+			rejectNativeSave(code);
+			const onStatus = vi.fn();
+			// The S5 envelope is exportable only for a local custom tape (archive tapes keep it off).
+			const archive = archiveTapes([])[0];
+			const tape =
+				format === 's5'
+					? {
+							...archive,
+							...neutralCurve(),
+							source: 'custom' as const,
+							id: 'local:one',
+							group: 'local' as const,
+							createdAt: Date.UTC(2026, 9, 16),
+							description: '',
+							descriptionEn: null
+						}
+					: archive;
+			await render(TrackSheet, {
+				tape,
+				current: neutralCurve(),
+				origin: 'https://example.test',
+				locale: 'pt-BR',
+				app: null,
+				verdict: null,
+				audioState: { ...IDLE_STATE },
+				onClose: vi.fn(),
+				onStatus
+			});
+			if (format === 's5') {
+				await page.getByText(m.biblioteca_s5(), { exact: true }).click();
+				await page
+					.getByRole('combobox', { name: m.biblioteca_s5_license() })
+					.selectOptions('CC-BY-4.0');
+				await page.getByRole('textbox', { name: m.biblioteca_author() }).fill('Local author');
+			}
+			await page
+				.getByRole('button', {
+					name: format === 'svg' ? m.biblioteca_svg() : m.biblioteca_s5_export(),
+					exact: true
+				})
+				.click();
+			await expect.poll(() => onStatus.mock.lastCall?.[0]).toBe(text());
+		}
+	);
+}

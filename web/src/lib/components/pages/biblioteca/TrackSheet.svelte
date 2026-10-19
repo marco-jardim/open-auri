@@ -19,6 +19,7 @@
 	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
+	import { saveFileErrorMessage } from '#lib/files/save.ts';
 	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
 	import { presetUrl, qrSvg } from '#lib/qr/index.ts';
 	import {
@@ -415,7 +416,7 @@
 					: await sheetPng(svg);
 			await downloadBlob(blob, `open-auri-sheet${fileMark}.${format}`);
 		} catch (error) {
-			onStatus(m.biblioteca_export_error());
+			onStatus(saveFileErrorMessage(error, m.biblioteca_export_error()));
 			console.error('Biblioteca sheet export failed', error);
 		} finally {
 			exporting = false;
@@ -430,7 +431,7 @@
 				`open-auri-preset${fileMark}.json`
 			);
 		} catch (error) {
-			onStatus(m.biblioteca_export_error());
+			onStatus(saveFileErrorMessage(error, m.biblioteca_export_error()));
 			console.error('Biblioteca envelope export failed', error);
 		}
 	}

@@ -16,6 +16,7 @@
 	import { createClassifier } from '#lib/workers/classifier.svelte.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
+	import { saveFileErrorMessage } from '#lib/files/save.ts';
 	import type { SocialApi, SocialSession } from '#lib/social/index.ts';
 	import MeterBridge from './MeterBridge.svelte';
 	import ReelHousing from './ReelHousing.svelte';
@@ -260,7 +261,7 @@
 				'open-auri-reference-pack.json'
 			);
 		} catch (error) {
-			notice = m.biblioteca_export_error();
+			notice = saveFileErrorMessage(error, m.biblioteca_export_error());
 			console.error('Biblioteca pack export failed', error);
 		}
 	}
