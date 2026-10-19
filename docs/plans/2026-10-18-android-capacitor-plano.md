@@ -2509,6 +2509,32 @@ Os achados viram FXGH.k (0.5).
 | 2026-10-19 | Plano | aprovado pelo mantenedor (início da execução) | - | pedido de execução na sessão |
 | 2026-10-19 | PF1 | OK | HEAD do PF1: `a39d048` | branch `feat/android-app` criada de `main`; `gh` com escopos `repo` e `workflow`; JDK 21 (Temurin 21.0.12) instalado via scoop; SDK com `platforms;android-36`, `build-tools;36.1.0` e `platform-tools`; Node 24.21.0, npm 12.0.2 |
 
+| 2026-10-19 | T1.1 | concluído | `d0c7c38`, `43883e2`, `057618a`, `6cf87d5` | workspace, Gradle 8.14 com checksum, verificação de dependências, daemon Java 21, Kover, Licensee, `verifyCapacitorConfig`, `run-gradle.mjs`, `android-doctor.mjs` |
+| 2026-10-19 | T1.2 | concluído | `b1c5961` | parser HID e framing; 100% linhas e branches |
+| 2026-10-19 | T1.3 | concluído | `2ec23f0` | FrameGuard, CRC16, constantes com teste de deriva; 100% |
+| 2026-10-19 | T1.4 | concluído | `9efbc39` | backend USB, PermissionBroker, ClaimManager, FakeUsbBackend |
+| 2026-10-19 | T1.5 | concluído | `3c99d93` | manifest, rede, backup, gate da WebView, strings |
+| 2026-10-19 | T1.6 | concluído | `a62f538` | OpenAuriFiles e DownloadBridge |
+| 2026-10-19 | T1.8 | concluído | `168931e` | ícones |
+| 2026-10-19 | I1.1 | concluído | `7abd2d7` | `icons:android`, `mipmap-anydpi`, Gradle 8.14.6 |
+| 2026-10-19 | T1.7 | concluído | `f879bd4` | plugin `OpenAuriUsb`, OriginGuard, seletor, diagnóstico, schema |
+| 2026-10-19 | T1.9 | concluído | `4677cfe` | jobs `changes` e `android` no CI |
+| 2026-10-19 | T1.T | concluído | `363a7ad` (+ FX1.0 `87774b8`) | 276 testes; achou o defeito de permissão revogada (FX1.0) |
+| 2026-10-19 | Q1 r1 | 20 achados (6 major, 14 minor) | - | F1 a F20 |
+| 2026-10-19 | FX1.1 a FX1.2, FX1-A/B/C | concluído | `c69d8f5`, `fe99867`, `c308f42`, `cb6f3a0`, `64ec98e` | F1 a F20 corrigidos com testes de regressão |
+| 2026-10-19 | Q1 r2 | PASS (0 blocking/critical/major; 11 minor G1 a G11) | `cb6f3a0` | 302 testes; Kover 98,5% linhas, 96,3% branches; `src/` sem diff |
+
+**Achados minor do Q1 r2 (por decisão do mantenedor, depois da 2a rodada só se corrigem major ou acima). Ficam registrados para a fase indicada:**
+- G1 (release guard sem as chaves de fallback de topo `loggingBehavior`/`allowMixedContent` e `CapacitorHttp.enabled: "true"`) e G2 (`CapacitorCookies` e `CapacitorHttp` expostos a todos os frames por `addJavascriptInterface`; remover com `removeJavascriptInterface`): Q3 (segurança da Fase 3).
+- G3 (espaçamento de commit não sobrevive à morte do processo): F5, junto com a validação em hardware.
+- G4 (caminho de sucesso do `MainActivity` sem teste) e G8 (retry do offline e `location.replace` numa WebView real): T3.2.
+- G5 (exportação POST de `/conta/exportar` no app): T2.2 migra para `fetch` + `OpenAuriFiles.save`.
+- G6 (`--debug` permitido no `run-gradle.mjs`; guard contornável chamando o Gradle direto): T3.1 (workflow de release usa só os scripts npm, sem `--debug`).
+- G7 (higiene da tarefa `prepareRobolectricSdk`): T3.T.
+- G9 (`actions/checkout` e `actions/setup-node` em v4 no job `android`, como os demais jobs do repositório; a seção 14 registrava v7): mantido v4 por consistência com o repositório; SHAs fixados conferidos por `git ls-remote` em 2026-10-19.
+- G10 (`FILES_ORIGIN` e `FILES_BUSY` fora do Anexo C): T2.1 (mapeamento de erros) e T3.4 (docs).
+- G11 (texto do toast em `FILES_BUSY`, entradas antigas em `FrameGuards`, higiene de IDs de commit): F3.
+
 **Versões verificadas (0.14), em 2026-10-19:**
 
 | Componente | Versão | Fonte | Nota |
