@@ -69,10 +69,14 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
         val clock: () -> Long,
         val isDebug: Boolean,
         val onBackgroundError: (Throwable) -> Unit,
+        val commitSpacing: CommitSpacingStore = CommitSpacingStore.process,
     )
 
     /** One physical attachment of a device and its bridge key. */
-    private class Attachment(val device: UsbDeviceInfo, val key: String)
+    private class Attachment(val device: UsbDeviceInfo, val key: String) {
+        // Guarded by the session lock; every sequence reset invalidates pending Forward decisions.
+        var generation = 0L
+    }
 
     /** An open connection with everything `open` read, parsed and chose once. */
     private class Session(
@@ -84,10 +88,11 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
         val descriptor: ParsedDescriptor,
         val interruptOut: UsbEndpointInfo?,
         val wireLog: WireLog?,
+        val identity: PhysicalDeviceIdentity,
     )
 
     private lateinit var env: Environment
-    private val guards = FrameGuards()
+    private val guards by lazy { FrameGuards(env.commitSpacing) }
     private val lock = Any()
 
     // Guarded by lock.
@@ -153,7 +158,10 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
     fun requestDevice(call: PluginCall) = serve(call) {
         val filters = BridgeArgs.filters(call.data)
         requireHost()
-        val matches = env.backend.list(filters)
+        // Requested filters can narrow the supported cable identity, never broaden it.
+        val matches = env.backend.list(listOf(CB5100)).filter { device ->
+            filters.isEmpty() || filters.any { it.matches(device) }
+        }
         when (matches.size) {
             0 -> resolveDevices(call, emptyList())
             1 -> requestPermissions(call, matches, 0, ArrayList())
@@ -190,8 +198,10 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
     fun close(call: PluginCall) = serve(call) {
         val attachment = attachment(BridgeArgs.key(call.data))
         submit(call) {
-            val session = synchronized(lock) { sessions.remove(attachment.key) }
-            guards.reset(attachment.key)
+            val session = synchronized(lock) {
+                resetGuard(attachment)
+                sessions.remove(attachment.key)
+            }
             if (session != null) closeConnection(session)
             call.resolve()
         }
@@ -258,15 +268,15 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
      * is dropped, so a write interrupted here can only be retried from report 0.
      */
     public override fun handleOnStop() {
-        env.claims.releaseAll()
         resetAllGuards()
+        env.claims.releaseAll()
     }
 
     /** Stops listening, drops the sequences and disposes the backend after the queued work. */
     public override fun handleOnDestroy() {
         env.backend.removeListener(deviceListener)
-        env.claims.dispose()
         resetAllGuards()
+        env.claims.dispose()
         synchronized(lock) { sessions.clear() }
         background { env.backend.dispose() }
         env.worker.shutdown()
@@ -378,7 +388,9 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
     /** Worker thread. */
     private fun openSession(attachment: Attachment) {
         if (synchronized(lock) { attachment.key in sessions }) return
-        val device = attachment.device
+        // Attach broadcasts precede permission. Refresh now so a readable serial is not lost.
+        val device = env.backend.list(listOf(CB5100)).firstOrNull { it.key == attachment.device.key }
+            ?: throw UsbFailure.Detached(attachment.device.key)
         val connection = env.backend.open(device)
         try {
             val hid = env.backend.findHidInterface(device)
@@ -405,6 +417,7 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
                 descriptor = parsed,
                 interruptOut = hid.interruptOut,
                 wireLog = if (env.isDebug) WireLog() else null,
+                identity = PhysicalDeviceIdentity(device.vendorId, device.productId, device.serialNumber),
             )
             val stored = synchronized(lock) {
                 (byKey[attachment.key] === attachment).also { current -> if (current) sessions[attachment.key] = session }
@@ -429,14 +442,17 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
                 ?: throw UsbBridgeException(ErrorCodes.USB_NOT_OPEN, "$key is not open")
             // An open handle outlives a revoked grant: check it again before the guard and any I/O.
             if (!env.backend.hasPermission(attachment.device)) throw revoked(session)
-            val decision = guards.onReport(key, reportId, data, env.clock())
-            if (decision is FrameGuard.Decision.Reject) {
-                throw UsbBridgeException(ErrorCodes.USB_GUARD_REJECTED, decision.reason.message)
+            val generation = synchronized(lock) {
+                val decision = guards.onReport(key, reportId, data, env.clock(), session.identity)
+                if (decision is FrameGuard.Decision.Reject) {
+                    throw UsbBridgeException(ErrorCodes.USB_GUARD_REJECTED, decision.reason.message)
+                }
+                attachment.generation
             }
-            transmit(session, reportId, data)
+            transmit(session, generation, reportId, data)
             null
         } catch (error: Exception) {
-            guards.reset(key)
+            synchronized(lock) { resetGuard(attachment) }
             if (error is UsbFailure.Detached) drop(attachment)
             error
         }
@@ -462,9 +478,17 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
     }
 
     /** Worker thread: frames [data], claims the HID interface and sends it on the session's route. */
-    private fun transmit(session: Session, reportId: Int, data: ByteArray) {
+    private fun transmit(session: Session, generation: Long, reportId: Int, data: ByteArray) {
         val buffer = HidFraming.buildOutput(reportId, data, session.descriptor)
         val sent = env.claims.withClaim(session.connection, session.hidInterface) {
+            // Claiming can race stop/navigation. This check linearizes the start of the transfer;
+            // never hold the bridge lock during blocking backend I/O (detach must remain live).
+            synchronized(lock) {
+                val attachment = session.attachment
+                if (attachment.generation != generation || sessions[attachment.key] !== session) {
+                    throw UsbBridgeException(ErrorCodes.USB_GUARD_REJECTED, "write sequence reset before USB transfer")
+                }
+            }
             val endpoint = session.interruptOut
             if (endpoint != null) {
                 env.backend.transferInterrupt(session.connection, endpoint, buffer, UsbBackend.DEFAULT_TIMEOUT_MS)
@@ -509,9 +533,9 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
             if (attachments[attachment.device.key] !== attachment) return
             attachments.remove(attachment.device.key)
             byKey.remove(attachment.key)
+            resetGuard(attachment)
             sessions.remove(attachment.key)
         }
-        guards.reset(attachment.key)
         if (session != null) background { closeConnection(session) }
         emit(EVENT_DISCONNECT, attachment)
     }
@@ -521,7 +545,13 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
     }
 
     private fun resetAllGuards() {
-        synchronized(lock) { byKey.keys.toList() }.forEach(guards::reset)
+        synchronized(lock) { byKey.values.forEach(::resetGuard) }
+    }
+
+    /** Session lock held. Invalidated Forward decisions fail with USB_GUARD_REJECTED. */
+    private fun resetGuard(attachment: Attachment) {
+        attachment.generation++
+        guards.reset(attachment.key)
     }
 
     private fun deviceJson(attachment: Attachment): JSObject = JSObject()

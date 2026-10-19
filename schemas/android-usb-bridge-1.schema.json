@@ -99,7 +99,7 @@
 			}
 		},
 		"RequestDeviceRequest": {
-			"description": "An empty filters array matches every attached device.",
+			"description": "Filters are intersected with CB5100 (VID 0x3302, PID 0x8902). An empty array or an empty filter object means CB5100 only; other vendor/product identities match nothing.",
 			"type": "object",
 			"required": ["filters"],
 			"additionalProperties": false,

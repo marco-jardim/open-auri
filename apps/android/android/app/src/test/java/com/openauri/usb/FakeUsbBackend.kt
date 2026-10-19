@@ -142,6 +142,16 @@ class FakeUsbBackend(
         if (!hostSupported) throw UsbFailure.NoHost()
         return synchronized(lock) {
             attached.values.filter { device -> filters.isEmpty() || filters.any { it.matches(device) } }
+                .map { device ->
+                    if (device.key !in granted && device.serialNumber != null) {
+                        UsbDeviceInfo(
+                            device.key, device.vendorId, device.productId, device.productName,
+                            device.manufacturerName, device.interfaces,
+                        )
+                    } else {
+                        device
+                    }
+                }
         }
     }
 
@@ -336,7 +346,7 @@ class FakeUsbBackend(
          * streaming, interface 2 HID with an interrupt IN endpoint and, if [interruptOut], an
          * interrupt OUT endpoint ([INTERRUPT_OUT_ADDRESS]).
          */
-        fun cable(key: String = "/dev/bus/usb/001/002", interruptOut: Boolean = true): UsbDeviceInfo {
+        fun cable(key: String = "/dev/bus/usb/001/002", interruptOut: Boolean = true, serialNumber: String? = null): UsbDeviceInfo {
             val hidEndpoints = buildList {
                 add(UsbEndpointInfo(0x83, 0x03, 64, 1))
                 if (interruptOut) add(UsbEndpointInfo(INTERRUPT_OUT_ADDRESS, 0x03, 64, 1))
@@ -347,6 +357,7 @@ class FakeUsbBackend(
                 productId = PRODUCT_ID,
                 productName = PRODUCT_NAME,
                 manufacturerName = "Generic",
+                serialNumber = serialNumber,
                 interfaces = listOf(
                     UsbInterfaceInfo(0, 0, UsbBackend.CLASS_AUDIO, 0x01, 0x00, emptyList()),
                     UsbInterfaceInfo(1, 0, UsbBackend.CLASS_AUDIO, 0x02, 0x00, listOf(UsbEndpointInfo(0x01, 0x09, 192, 1))),

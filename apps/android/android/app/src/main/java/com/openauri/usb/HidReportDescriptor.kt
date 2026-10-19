@@ -63,8 +63,9 @@ data class ParsedDescriptor(
     val reports: Map<Int, HidReportInfo>,
     val collections: List<HidCollection>,
 ) {
-    /** Largest [HidReportInfo.outputBytes] over [reports]; 0 when no Output item is declared. */
-    val maxOutputReportBytes: Int = reports.values.maxOfOrNull { it.outputBytes } ?: 0
+    /** Largest wire-addressable output report; implicit report 0 is invalid with report IDs. */
+    val maxOutputReportBytes: Int = reports.values.filter { !usesReportIds || it.reportId != 0 }
+        .maxOfOrNull { it.outputBytes } ?: 0
 
     /** IDs of the reports that declare at least one Output item, ascending. */
     val outputReportIds: List<Int> = reports.filterValues { it.declaresOutput }.keys.sorted()
@@ -86,6 +87,10 @@ sealed class HidDescriptorException(val offset: Int, message: String) : Exceptio
     /** A Pop item at [offset] found the global item stack empty. */
     class PopWithoutPush(offset: Int) :
         HidDescriptorException(offset, "Pop at offset $offset without a matching Push")
+
+    /** A Push would exceed the bounded global-state stack. */
+    class PushStackOverflow(offset: Int) :
+        HidDescriptorException(offset, "Push at offset $offset exceeds depth ${HidReportDescriptor.MAX_PUSH_DEPTH}")
 
     /** Collection and End Collection items do not pair up. */
     sealed class UnbalancedCollection(offset: Int, message: String) : HidDescriptorException(offset, message) {
@@ -160,6 +165,9 @@ object HidReportDescriptor {
      * transports (USB wLength, Windows HIDP_CAPS) and bounds the buffers built from it.
      */
     const val MAX_REPORT_BYTES: Int = 65_535
+
+    /** Bounds untrusted Push nesting; more permissive than Linux's four entries for real devices. */
+    const val MAX_PUSH_DEPTH: Int = 16
 
     /**
      * Parses [descriptor] (the raw bytes of the HID report descriptor).
@@ -344,7 +352,10 @@ private class DescriptorParser(private val bytes: ByteArray) {
             GLOBAL_REPORT_SIZE -> globals.reportSize = data
             GLOBAL_REPORT_COUNT -> globals.reportCount = data
             GLOBAL_REPORT_ID -> setReportId(offset, data)
-            GLOBAL_PUSH -> globalStack.addLast(globals.snapshot())
+            GLOBAL_PUSH -> {
+                if (globalStack.size >= HidReportDescriptor.MAX_PUSH_DEPTH) throw HidDescriptorException.PushStackOverflow(offset)
+                globalStack.addLast(globals.snapshot())
+            }
             GLOBAL_POP -> globals = globalStack.removeLastOrNull() ?: throw HidDescriptorException.PopWithoutPush(offset)
         }
     }

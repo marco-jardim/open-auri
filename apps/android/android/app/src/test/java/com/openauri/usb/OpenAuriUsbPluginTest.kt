@@ -26,6 +26,8 @@ import org.robolectric.annotation.Config
 import java.util.Base64
 import java.util.Collections
 import java.util.concurrent.AbstractExecutorService
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 
@@ -86,6 +88,8 @@ internal class TestScheduler : ClaimManager.Scheduler {
 
 /** [FakeUsbBackend] with the failures it cannot produce itself. */
 internal class ScriptedBackend(private val fake: FakeUsbBackend) : UsbBackend by fake {
+    @Volatile var beforeClaim: () -> Unit = {}
+
     @Volatile var closeError: Exception? = null
 
     @Volatile var permissionError: RuntimeException? = null
@@ -120,6 +124,11 @@ internal class ScriptedBackend(private val fake: FakeUsbBackend) : UsbBackend by
         buffer: ByteArray,
         timeoutMs: Int,
     ): Int = fake.transferInterrupt(connection, endpoint, buffer, timeoutMs) - shortBy
+
+    override fun claim(connection: UsbConnectionHandle, usbInterface: UsbInterfaceInfo, force: Boolean): Boolean {
+        beforeClaim()
+        return fake.claim(connection, usbInterface, force)
+    }
 }
 
 /**
@@ -132,6 +141,8 @@ internal class UsbPluginHarness(
     val isDebug: Boolean = false,
     info: AppInfo = AppInfo("1.2.3", "16 (API 36)", { "140.0.7339.0" }, { true }),
     wrap: (FakeUsbBackend) -> UsbBackend = { it },
+    workerOverride: ExecutorService? = null,
+    val commitSpacing: CommitSpacingStore = CommitSpacingStore(),
 ) {
     val fake = FakeUsbBackend(devices)
     val backend: UsbBackend = wrap(fake)
@@ -166,10 +177,11 @@ internal class UsbPluginHarness(
             origin = OriginGuard({ pinnedUrl }, { pageUrl }),
             picker = picker,
             info = info,
-            worker = worker,
+            worker = workerOverride ?: worker,
             clock = { nowMs },
             isDebug = isDebug,
             onBackgroundError = { backgroundErrors += it },
+            commitSpacing = commitSpacing,
         ),
     ).also { it.load() }
 
@@ -366,16 +378,19 @@ class OpenAuriUsbPluginTest {
     }
 
     @Test
-    fun requestDeviceHonoursTheFiltersItIsGiven() {
+    fun requestDeviceIntersectsEveryFilterWithTheCb5100Identity() {
         val mouse = UsbDeviceInfo("/dev/bus/usb/003/001", 0x046D, 0xC077, null, null, emptyList())
         val harness = UsbPluginHarness(devices = listOf(FakeUsbBackend.cable(), mouse))
         harness.choose = { it }
-        val all = harness.requestDevice(emptyList())
-        assertEquals(listOf(listOf(FakeUsbBackend.cable().key, mouse.key)), harness.offered)
-        assertEquals(listOf("/dev/bus/usb/001/002#1", "/dev/bus/usb/003/001#2"), all.deviceKeys())
-        assertEquals("", all.payload?.getJSONArray("devices")?.getJSONObject(1)?.getString("productName"))
-        assertEquals(listOf("/dev/bus/usb/003/001#2"), harness.requestDevice(listOf(JSObject().put("productId", 0xC077))).deviceKeys())
-        // getDevices only lists CB5100 cables, even when another device was granted.
+        val cableKeys = listOf("/dev/bus/usb/001/002#1")
+        for (filters in listOf(emptyList(), listOf(JSObject()), listOf(JSObject().put("vendorId", 0x3302)))) {
+            assertEquals(cableKeys, harness.requestDevice(filters).deviceKeys())
+        }
+        for (filter in listOf(JSObject().put("productId", 0xC077), JSObject().put("vendorId", 0x046D))) {
+            assertTrue(harness.requestDevice(listOf(filter)).deviceKeys().isEmpty())
+        }
+        assertTrue(harness.offered.isEmpty())
+        assertFalse(harness.fake.hasPermission(mouse))
         assertEquals(listOf("/dev/bus/usb/001/002#1"), harness.call("getDevices").deviceKeys())
     }
 
@@ -675,6 +690,121 @@ class OpenAuriUsbPluginTest {
         harness.nowMs += ProtocolConstants.WRITE_SPACING_MS
         harness.writeCurve(key, ProtocolFixtureTest.presets[0]).forEach { assertTrue(it.resolved) }
         assertEquals(2, harness.fake.sent.count { it.bytes.contentEquals(UsbPluginHarness.wire(commit)) })
+    }
+
+    @Test
+    fun reconnectKeepsCommitSpacingAcrossAttachmentKeys() {
+        val harness = UsbPluginHarness()
+        val first = harness.connectFirst()
+        harness.writeCurve(first, neutral).forEach { assertTrue(it.resolved) }
+        val committedAt = harness.nowMs
+        harness.fake.detach(FakeUsbBackend.cable().key)
+        harness.fake.attach(FakeUsbBackend.cable("/dev/bus/usb/002/008"))
+        val second = harness.connectFirst()
+        assertNotEquals(first, second)
+        val calls = harness.writeCurve(second, neutral)
+        calls.dropLast(1).forEach { assertTrue(it.resolved) }
+        assertEquals(ErrorCodes.USB_GUARD_REJECTED, calls.last().code)
+        assertEquals(19, harness.fake.sent.size)
+        harness.nowMs = committedAt + ProtocolConstants.WRITE_SPACING_MS
+        harness.writeCurve(second, neutral).forEach { assertTrue(it.resolved) }
+    }
+
+    @Test
+    fun pluginRecreationKeepsCommitSpacingForThePhysicalDevice() {
+        val first = UsbPluginHarness()
+        first.writeCurve(first.connectFirst(), neutral).forEach { assertTrue(it.resolved) }
+        first.plugin.handleOnDestroy()
+        val second = UsbPluginHarness(commitSpacing = first.commitSpacing)
+        second.nowMs = first.nowMs
+        val key = second.connectFirst()
+        val calls = second.writeCurve(key, neutral)
+        calls.dropLast(1).forEach { assertTrue(it.resolved) }
+        assertEquals(ErrorCodes.USB_GUARD_REJECTED, calls.last().code)
+        assertEquals(9, second.fake.sent.size)
+        second.nowMs = first.nowMs + ProtocolConstants.WRITE_SPACING_MS
+        second.writeCurve(key, neutral).forEach { assertTrue(it.resolved) }
+    }
+
+    @Test
+    fun serialReadAfterPermissionDistinguishesCablesAndSurvivesPluginRecreation() {
+        val devices = listOf(
+            FakeUsbBackend.cable(serialNumber = "A"),
+            FakeUsbBackend.cable("/dev/bus/usb/001/003", serialNumber = "B"),
+        )
+        val harness = UsbPluginHarness(devices = emptyList())
+        devices.forEach { harness.fake.attach(it) }
+        assertTrue(harness.fake.list(emptyList()).all { it.serialNumber == null })
+        val keys = harness.requestDevice().deviceKeys()
+        keys.forEach { key ->
+            assertTrue(harness.open(key).resolved)
+            harness.writeCurve(key, neutral).forEach { assertTrue(it.resolved) }
+        }
+        assertEquals(20, harness.fake.sent.size)
+        val recreated = UsbPluginHarness(
+            devices = listOf(FakeUsbBackend.cable("/dev/bus/usb/002/009", serialNumber = "A")),
+            commitSpacing = harness.commitSpacing,
+        )
+        recreated.nowMs = harness.nowMs
+        val key = recreated.connectFirst()
+        assertEquals(ErrorCodes.USB_GUARD_REJECTED, recreated.writeCurve(key, neutral).last().code)
+        assertEquals(9, recreated.fake.sent.size)
+        recreated.nowMs += ProtocolConstants.WRITE_SPACING_MS
+        recreated.writeCurve(key, neutral).forEach { assertTrue(it.resolved) }
+    }
+
+    @Test
+    fun aCableWithoutAProductNameStillHasAnEmptyBridgeProductName() {
+        val cable = FakeUsbBackend.cable()
+        val unnamed = UsbDeviceInfo(cable.key, cable.vendorId, cable.productId, null, null, cable.interfaces)
+        val call = UsbPluginHarness(devices = listOf(unnamed)).requestDevice()
+        assertEquals("", call.payload?.getJSONArray("devices")?.getJSONObject(0)?.getString("productName"))
+    }
+
+    @Test
+    fun stopBetweenCommitDecisionAndTransferSendsNothing() {
+        val harness = UsbPluginHarness(wrap = ::ScriptedBackend)
+        val key = harness.connectFirst()
+        neutral.reports.forEach { assertTrue(harness.send(key, 0xCB, it).resolved) }
+        // Release the claim without resetting the validated sequence, so the commit reclaims it.
+        harness.claims.releaseAll()
+        (harness.backend as ScriptedBackend).beforeClaim = { harness.plugin.handleOnStop() }
+        val call = harness.send(key, 0xCB, commit)
+        assertEquals(ErrorCodes.USB_GUARD_REJECTED, call.code)
+        assertTrue(call.message.orEmpty().contains("reset"))
+        assertEquals(9, harness.fake.sent.size)
+        assertEquals(9, harness.fake.attempts)
+    }
+
+    @Test
+    fun realWorkerRejectsOneOfTwoConcurrentSendsOnTheSameKeyAsBusy() {
+        val worker = OpenAuriUsbPlugin.newWorker()
+        val harness = UsbPluginHarness(wrap = ::ScriptedBackend, workerOverride = worker)
+        val entered = CountDownLatch(1)
+        val proceed = CountDownLatch(1)
+        try {
+            val key = harness.requestDevice().deviceKeys().single()
+            val opened = harness.open(key)
+            UsbTestSupport.eventually("open on real worker") { opened.completed }
+            assertTrue(opened.resolved)
+            (harness.backend as ScriptedBackend).beforeClaim = {
+                entered.countDown()
+                check(proceed.await(UsbTestSupport.WAIT_SECONDS, TimeUnit.SECONDS))
+            }
+            val first = UsbTestSupport.offMain { harness.send(key, 0xCB, neutral.reports[0]) }
+            assertTrue(entered.await(UsbTestSupport.WAIT_SECONDS, TimeUnit.SECONDS))
+            val second = UsbTestSupport.offMain { harness.send(key, 0xCB, neutral.reports[0]) }
+            assertEquals(ErrorCodes.USB_BUSY, second.code)
+            assertFalse(first.completed)
+            proceed.countDown()
+            UsbTestSupport.eventually("first real-worker send") { first.completed }
+            assertTrue(first.resolved)
+            assertEquals(1, harness.fake.sent.size)
+        } finally {
+            proceed.countDown()
+            harness.plugin.handleOnDestroy()
+            assertTrue(worker.awaitTermination(UsbTestSupport.WAIT_SECONDS, TimeUnit.SECONDS))
+        }
     }
 
     @Test

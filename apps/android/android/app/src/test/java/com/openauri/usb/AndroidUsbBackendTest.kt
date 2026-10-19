@@ -305,7 +305,13 @@ internal object FrameworkUsb {
         return usbInterface
     }
 
-    fun device(name: String, vendorId: Int, productId: Int, vararg interfaces: UsbInterface): UsbDevice {
+    fun device(
+        name: String,
+        vendorId: Int,
+        productId: Int,
+        vararg interfaces: UsbInterface,
+        serial: () -> String? = { null },
+    ): UsbDevice {
         val configuration = UsbConfiguration::class.java
             .getDeclaredConstructor(int, String::class.java, int, int)
             .apply { isAccessible = true }
@@ -326,7 +332,9 @@ internal object FrameworkUsb {
                 type == int -> ints.removeFirstOrNull() ?: 0
                 type == java.lang.Boolean.TYPE -> false
                 type == Array<UsbConfiguration>::class.java -> arrayOf(configuration)
-                type.isInterface -> Proxy.newProxyInstance(type.classLoader, arrayOf(type), defaults)
+                type.isInterface -> Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { proxy, method, arguments ->
+                    if (method.name == "getSerial") serial() else defaults.invoke(proxy, method, arguments)
+                }
                 else -> null
             }
         }
@@ -595,6 +603,54 @@ class AndroidUsbBackendTest {
         assertTrue(request.closed)
         val names = io.calls.map { it.name }
         assertTrue(names.indexOf("close") < names.lastIndexOf("closeRequest"))
+    }
+
+    @Test
+    fun lateOrphanIsClosedAndCurrentTransferKeepsWaitingWithTheRemainingBudget() {
+        val now = AtomicLong(100L)
+        val backend = backend(clock = { now.get() })
+        val handle = UsbTestSupport.offMain { backend.open(cable) }
+        val connection = io.connections.single()
+        connection.waiter = { throw TimeoutException("orphan") }
+        assertTrue(UsbTestSupport.failureOffMain { backend.transferInterrupt(handle, out, ByteArray(32), 1000) } is UsbFailure.Timeout)
+        val orphan = connection.requests.single()
+        assertFalse(orphan.closed)
+        connection.waits.clear()
+        val waits = AtomicInteger()
+        connection.waiter = {
+            if (waits.getAndIncrement() == 0) {
+                now.addAndGet(250)
+                orphan
+            } else {
+                connection.requests.last().also { it.complete() }
+            }
+        }
+        assertEquals(32, UsbTestSupport.offMain { backend.transferInterrupt(handle, out, ByteArray(32), 1000) })
+        assertTrue(orphan.closed)
+        assertTrue(connection.requests.last().closed)
+        assertFalse(connection.requests.last().cancelled)
+        assertEquals(listOf(1000L, 750L), connection.waits.toList())
+    }
+
+    @Test
+    fun reapingAnOrphanCannotExtendTheCurrentTransferTimeout() {
+        val now = AtomicLong(100L)
+        val backend = backend(clock = { now.get() })
+        val handle = UsbTestSupport.offMain { backend.open(cable) }
+        val connection = io.connections.single()
+        connection.waiter = { throw TimeoutException("orphan") }
+        assertTrue(UsbTestSupport.failureOffMain { backend.transferInterrupt(handle, out, ByteArray(32), 1000) } is UsbFailure.Timeout)
+        val orphan = connection.requests.single()
+        connection.waits.clear()
+        connection.waiter = {
+            now.addAndGet(1000)
+            if (!orphan.closed) orphan else connection.requests.last()
+        }
+        assertTrue(UsbTestSupport.failureOffMain { backend.transferInterrupt(handle, out, ByteArray(32), 1000) } is UsbFailure.Timeout)
+        assertTrue(orphan.closed)
+        assertTrue(connection.requests.last().cancelled)
+        assertTrue(connection.requests.last().closed)
+        assertEquals(listOf(1000L, AndroidUsbBackend.REAP_TIMEOUT_MS), connection.waits.toList())
     }
 
     @Test
@@ -1011,6 +1067,28 @@ class AndroidUsbBackendTest {
         assertNull(frameworkIo.deviceFrom(Intent(UsbManager.ACTION_USB_DEVICE_DETACHED)))
         shadowOf(manager).addOrUpdateUsbDevice(device, false)
         assertFalse(frameworkIo.hasPermission(info.key))
+    }
+
+    @Test
+    fun frameworkSerialIsReadOnlyWithPermissionAndOnlySecurityExceptionsFallBackToNull() {
+        val manager = app.getSystemService(UsbManager::class.java)
+        var reads = 0
+        var serial: () -> String? = { "cable-serial" }
+        val device = FrameworkUsb.device("/dev/bus/usb/002/012", 0x3302, 0x8902, serial = {
+            reads++
+            serial()
+        })
+        val usbIo = FrameworkUsbIo(manager)
+        shadowOf(manager).addOrUpdateUsbDevice(device, false)
+        assertNull(usbIo.devices().single().serialNumber)
+        assertEquals(0, reads)
+        shadowOf(manager).addOrUpdateUsbDevice(device, true)
+        assertEquals("cable-serial", usbIo.devices().single().serialNumber)
+        serial = { throw SecurityException("revoked during serial read") }
+        assertNull(usbIo.devices().single().serialNumber)
+        serial = { throw IllegalStateException("not a permission failure") }
+        assertThrows(IllegalStateException::class.java) { usbIo.devices() }
+        assertEquals(3, reads)
     }
 
     @Test

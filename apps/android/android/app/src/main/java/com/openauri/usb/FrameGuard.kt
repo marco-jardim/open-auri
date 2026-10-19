@@ -60,7 +60,10 @@ import com.openauri.usb.ProtocolConstants.WRITE_SPACING_MS
  * Time comes from the caller (`nowMs`, a monotonic clock in milliseconds), so tests drive it.
  * Every public member is synchronized on the guard.
  */
-class FrameGuard {
+class FrameGuard(
+    private val commits: CommitSpacingStore = CommitSpacingStore(),
+    private val deviceIdentity: PhysicalDeviceIdentity = PhysicalDeviceIdentity(0, 0, null),
+) {
 
     /** What to do with one report. */
     sealed interface Decision {
@@ -141,9 +144,6 @@ class FrameGuard {
     /** When the last report of this sequence was forwarded; meaningful while [received] > 0. */
     private var lastReportAtMs = 0L
 
-    /** When this guard last forwarded a commit, or null if it never did. */
-    private var lastCommitAtMs: Long? = null
-
     /** The current state, for diagnostics and tests. */
     val state: State
         @Synchronized get() = when {
@@ -204,12 +204,9 @@ class FrameGuard {
     /** The 9 data reports were forwarded and validated; only the exact commit report passes. */
     private fun acceptCommit(data: ByteArray, nowMs: Long): Decision {
         if (!data.contentEquals(commitReport)) return reject(RejectReason.EXPECTED_COMMIT)
-        val last = lastCommitAtMs
-        // A clock that went back is refused first, so an overflowing difference never passes.
-        if (last != null && (nowMs < last || nowMs - last < WRITE_SPACING_MS)) {
+        if (!commits.forward(deviceIdentity, nowMs)) {
             return reject(RejectReason.COMMIT_TOO_SOON)
         }
-        lastCommitAtMs = nowMs
         clearSequence()
         return Decision.Forward
     }
@@ -252,20 +249,25 @@ class FrameGuard {
 }
 
 /**
- * One [FrameGuard] per device key (`deviceName#deviceId`, stable during one physical connection),
- * so two devices never share a sequence or a commit spacing.
+ * One sequence per attachment key; commit spacing is shared by physical identity, not bridge key.
  */
-class FrameGuards {
+class FrameGuards(private val commits: CommitSpacingStore = CommitSpacingStore()) {
 
     private val guards = HashMap<String, FrameGuard>()
 
     /** The guard of [key], created idle on first use. */
     @Synchronized
-    fun guardFor(key: String): FrameGuard = guards.getOrPut(key) { FrameGuard() }
+    fun guardFor(key: String, identity: PhysicalDeviceIdentity = PhysicalDeviceIdentity(0, 0, key)): FrameGuard =
+        guards.getOrPut(key) { FrameGuard(commits, identity) }
 
     /** [FrameGuard.onReport] on the guard of [key]. */
-    fun onReport(key: String, reportId: Int, data: ByteArray, nowMs: Long): FrameGuard.Decision =
-        guardFor(key).onReport(reportId, data, nowMs)
+    fun onReport(
+        key: String,
+        reportId: Int,
+        data: ByteArray,
+        nowMs: Long,
+        identity: PhysicalDeviceIdentity = PhysicalDeviceIdentity(0, 0, key),
+    ): FrameGuard.Decision = guardFor(key, identity).onReport(reportId, data, nowMs)
 
     /**
      * [FrameGuard.reset] on the guard of [key], on detach or close: the sequence is dropped, the
@@ -274,5 +276,35 @@ class FrameGuards {
     @Synchronized
     fun reset(key: String) {
         guards[key]?.reset()
+    }
+}
+
+/** USB identity across reconnects; without a serial all cables of that VID:PID share spacing. */
+data class PhysicalDeviceIdentity(val vendorId: Int, val productId: Int, val serialNumber: String?)
+
+/**
+ * Last forwarded commit times from the caller's monotonic clock. Check and record are atomic
+ * across guards, including guards in different plugin instances. A Forward reserves the time
+ * before I/O: a failed or invalidated transfer conservatively keeps that reservation.
+ */
+class CommitSpacingStore {
+    private val lastCommitAtMs = HashMap<PhysicalDeviceIdentity, Long>()
+
+    /** Records a Forward only if at least 2000 ms passed, refusing backwards clocks as well. */
+    @Synchronized
+    fun forward(identity: PhysicalDeviceIdentity, nowMs: Long): Boolean {
+        // An unknown serial overlaps every serial of that VID:PID, in either direction.
+        val last = lastCommitAtMs.asSequence().filter { (previous, _) ->
+            previous.vendorId == identity.vendorId && previous.productId == identity.productId &&
+                (previous.serialNumber == null || identity.serialNumber == null || previous.serialNumber == identity.serialNumber)
+        }.maxOfOrNull { it.value }
+        if (last != null && (nowMs < last || nowMs - last < WRITE_SPACING_MS)) return false
+        lastCommitAtMs[identity] = nowMs
+        return true
+    }
+
+    companion object {
+        /** Process lifetime, deliberately not reset by stop, detach or Activity re-creation. */
+        val process: CommitSpacingStore = CommitSpacingStore()
     }
 }

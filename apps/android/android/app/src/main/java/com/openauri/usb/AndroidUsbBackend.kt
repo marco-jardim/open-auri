@@ -239,7 +239,7 @@ class AndroidUsbBackend internal constructor(
         }
         conn.lane.pending = request
         val completed = try {
-            conn.io.requestWait(timeoutMs.toLong())
+            conn.awaitRequest(request, timeoutMs)
         } catch (timeout: TimeoutException) {
             throw conn.abandon(request, UsbFailure.Timeout(conn.key, timeoutMs, timeout))
         } finally {
@@ -372,6 +372,24 @@ class AndroidUsbBackend internal constructor(
             block()
         }
 
+        /** Late completions of cancelled requests do not fail the current, already queued write. */
+        fun awaitRequest(request: UsbIoRequest, timeoutMs: Int): UsbIoRequest? {
+            val started = clock()
+            var remaining = timeoutMs.toLong()
+            while (true) {
+                val completed = io.requestWait(remaining)
+                if (completed === request || !reapOrphan(completed)) return completed
+                remaining = timeoutMs - (clock() - started)
+                if (remaining <= 0) throw TimeoutException("USB completion budget exhausted while reaping orphans")
+            }
+        }
+
+        private fun reapOrphan(request: UsbIoRequest?): Boolean {
+            if (!orphans.remove(request)) return false
+            checkNotNull(request).close()
+            return true
+        }
+
         /**
          * Cancels [request] and reaps it, so that a later `requestWait` never returns a request
          * whose native memory was freed. If the kernel does not hand it back in time it is closed
@@ -385,7 +403,12 @@ class AndroidUsbBackend internal constructor(
                 failure.addSuppressed(timeout)
                 null
             }
-            if (reaped === request) request.close() else orphans += request
+            if (reaped === request) {
+                request.close()
+            } else {
+                reapOrphan(reaped)
+                orphans += request
+            }
             return failure
         }
 
@@ -489,7 +512,7 @@ internal interface UsbIoRequest {
 
 /** [UsbIo] backed by [UsbManager]. */
 internal class FrameworkUsbIo(private val manager: UsbManager) : UsbIo {
-    override fun devices(): List<UsbDeviceInfo> = manager.deviceList.values.map { it.toInfo() }.sortedBy { it.key }
+    override fun devices(): List<UsbDeviceInfo> = manager.deviceList.values.map { deviceInfo(it) }.sortedBy { it.key }
 
     override fun hasPermission(deviceKey: String): Boolean =
         manager.deviceList[deviceKey]?.let { manager.hasPermission(it) } ?: false
@@ -504,7 +527,21 @@ internal class FrameworkUsbIo(private val manager: UsbManager) : UsbIo {
     }
 
     override fun deviceFrom(intent: Intent): UsbDeviceInfo? =
-        IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)?.toInfo()
+        IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)?.let(::deviceInfo)
+
+    private fun deviceInfo(device: UsbDevice): UsbDeviceInfo {
+        val serial = if (manager.hasPermission(device)) {
+            try {
+                device.serialNumber
+            } catch (denied: SecurityException) {
+                // Permission can be revoked between hasPermission and getSerialNumber.
+                null
+            }
+        } else {
+            null
+        }
+        return device.toInfo(serial)
+    }
 
     private fun device(deviceKey: String): UsbDevice =
         manager.deviceList[deviceKey] ?: throw UsbFailure.NotFound(deviceKey)
@@ -568,13 +605,14 @@ private fun UsbDevice.interfaces(): List<UsbInterface> = (0 until interfaceCount
 
 private fun UsbInterface.endpoints(): List<UsbEndpoint> = (0 until endpointCount).map { getEndpoint(it) }
 
-private fun UsbDevice.toInfo(): UsbDeviceInfo = UsbDeviceInfo(
+private fun UsbDevice.toInfo(serialNumber: String?): UsbDeviceInfo = UsbDeviceInfo(
     key = deviceName,
     vendorId = vendorId,
     productId = productId,
     productName = productName,
     manufacturerName = manufacturerName,
     interfaces = interfaces().map { it.toInfo() },
+    serialNumber = serialNumber,
 )
 
 private fun UsbInterface.toInfo(): UsbInterfaceInfo = UsbInterfaceInfo(

@@ -213,7 +213,10 @@ class GuardAdversarialTest {
         UsbPluginHarness(devices = devices).also { harnesses += it }
 
     private fun twoCables(): UsbPluginHarness = harness(
-        listOf(FakeUsbBackend.cable("/dev/bus/usb/001/002"), FakeUsbBackend.cable("/dev/bus/usb/001/003", interruptOut = false)),
+        listOf(
+            FakeUsbBackend.cable("/dev/bus/usb/001/002", serialNumber = "A"),
+            FakeUsbBackend.cable("/dev/bus/usb/001/003", interruptOut = false, serialNumber = "B"),
+        ),
     )
 
     private fun permutations(values: List<Int>): List<List<Int>> = if (values.isEmpty()) {

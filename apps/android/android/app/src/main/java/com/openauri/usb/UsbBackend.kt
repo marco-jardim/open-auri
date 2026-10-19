@@ -136,6 +136,7 @@ class UsbFilter(val vendorId: Int?, val productId: Int?) {
  *
  * @property key stable identity while attached (the platform device name, e.g. `/dev/bus/usb/001/002`).
  * @property interfaces every interface of the active configuration, in descriptor order.
+ * @property serialNumber physical serial when permission allows reading it, otherwise null.
  */
 class UsbDeviceInfo(
     val key: String,
@@ -144,6 +145,7 @@ class UsbDeviceInfo(
     val productName: String?,
     val manufacturerName: String?,
     val interfaces: List<UsbInterfaceInfo>,
+    val serialNumber: String? = null,
 )
 
 /** One interface (alternate setting) of a [UsbDeviceInfo]. */

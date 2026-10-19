@@ -525,6 +525,26 @@ class HidReportDescriptorTest {
     }
 
     @Test
+    fun globalPushDepthIsBoundedWithATypedFailure() {
+        val limit = HidReportDescriptor.MAX_PUSH_DEPTH
+        HidReportDescriptor.parse(ByteArray(limit) { 0xA4.toByte() } + ByteArray(limit) { 0xB4.toByte() })
+        val error = assertThrows(HidDescriptorException.PushStackOverflow::class.java) {
+            HidReportDescriptor.parse(ByteArray(limit + 1) { 0xA4.toByte() })
+        }
+        assertEquals(limit, error.offset)
+        assertTrue(error.message.orEmpty().contains("depth $limit"))
+    }
+
+    @Test
+    fun implicitReportZeroDoesNotInflateNumberedOutputPadding() {
+        val parsed = parse("75 08", "95 40", "91 02", "85 CB", "95 1F", "91 02")
+        assertTrue(parsed.usesReportIds)
+        assertEquals(64, parsed.reports.getValue(0).outputBytes)
+        assertEquals(31, parsed.maxOutputReportBytes)
+        assertEquals(32, HidFraming.buildOutput(0xCB, ByteArray(31), parsed).size)
+    }
+
+    @Test
     fun popWithoutPushIsTyped() {
         assertEquals(0, expectThrows<HidDescriptorException.PopWithoutPush>("B4").offset)
         assertEquals(2, expectThrows<HidDescriptorException.PopWithoutPush>("A4", "B4", "B4").offset)

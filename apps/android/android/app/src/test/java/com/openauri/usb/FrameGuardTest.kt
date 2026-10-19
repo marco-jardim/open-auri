@@ -434,6 +434,41 @@ class FrameGuardTest {
     // --- Reset and per-device registry -------------------------------------------------------
 
     @Test
+    fun physicalCommitStoreSeparatesSerialsButUnknownSerialOverlapsBothWays() {
+        val store = CommitSpacingStore()
+        val a = PhysicalDeviceIdentity(0x3302, 0x8902, "A")
+        val b = a.copy(serialNumber = "B")
+        val unknown = a.copy(serialNumber = null)
+        assertTrue(store.forward(a, 1000))
+        assertTrue(store.forward(b, 1000))
+        assertEquals(false, store.forward(a, 2999))
+        assertEquals(false, store.forward(unknown, 2999))
+        assertTrue(store.forward(unknown, 3000))
+        assertEquals(false, store.forward(b, 4999))
+        assertEquals(false, store.forward(a, 2000))
+        assertTrue(store.forward(a, 5000))
+        assertTrue(store.forward(a.copy(vendorId = 1), 1000))
+        assertTrue(store.forward(a.copy(productId = 1), 1000))
+    }
+
+    @Test
+    fun defaultPluginEnvironmentsShareTheProcessStore() {
+        fun environment() = OpenAuriUsbPlugin.Environment(
+            backend = FakeUsbBackend(),
+            claims = ClaimManager(FakeUsbBackend(), TestScheduler(), ClaimManager.IDLE_RELEASE_MS),
+            origin = OriginGuard({ UsbPluginHarness.PINNED }, { UsbPluginHarness.PAGE }),
+            picker = DevicePicker { _, result -> result(emptyList()) },
+            info = AppInfo("test", "test", { "test" }, { true }),
+            worker = TestWorker(),
+            clock = { 0L },
+            isDebug = false,
+            onBackgroundError = { throw AssertionError(it) },
+        )
+        assertSame(CommitSpacingStore.process, environment().commitSpacing)
+        assertSame(environment().commitSpacing, environment().commitSpacing)
+    }
+
+    @Test
     fun resetDropsTheSequenceButKeepsTheCommitSpacing() {
         val wire = Wire()
         for (index in 0..3) wire.assertForward(reports[index], index * gap)

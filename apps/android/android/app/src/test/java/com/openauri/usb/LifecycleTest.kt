@@ -83,7 +83,10 @@ class LifecycleTest {
 
     @Test
     fun processRecreationRejectsEveryOldKeyEvenWhenSystemPermissionSurvives() {
-        val devices = listOf(FakeUsbBackend.cable(), FakeUsbBackend.cable("/dev/bus/usb/001/003"))
+        val devices = listOf(
+            FakeUsbBackend.cable(serialNumber = "A"),
+            FakeUsbBackend.cable("/dev/bus/usb/001/003", serialNumber = "B"),
+        )
         val old = harness(devices)
         val keys = old.requestDevice().deviceKeys()
         keys.forEach {
@@ -207,7 +210,10 @@ class LifecycleTest {
 
     @Test
     fun newMainFrameNavigationClosesBothSessionsAndResetsBothGuards() {
-        val devices = listOf(FakeUsbBackend.cable(), FakeUsbBackend.cable("/dev/bus/usb/001/003", interruptOut = false))
+        val devices = listOf(
+            FakeUsbBackend.cable(serialNumber = "A"),
+            FakeUsbBackend.cable("/dev/bus/usb/001/003", interruptOut = false, serialNumber = "B"),
+        )
         val harness = harness(devices)
         val keys = harness.requestDevice().deviceKeys()
         keys.forEachIndexed { index, key ->
