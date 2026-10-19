@@ -225,3 +225,74 @@ test('accepts inline comments and exported or multiline quoted values', (t) => {
     { path: 'multiline.txt', line: 2, label: 'MULTILINE_TOKEN' },
   ]);
 });
+
+test('blocks tracked Android secret filenames in any directory, including binary and large files', (t) => {
+  const names = {
+    'release.jks': 'file:ANDROID_KEYSTORE',
+    'nested/release.keystore': 'file:ANDROID_KEYSTORE',
+    'nested/keys/export.pepk': 'file:ANDROID_PEPK',
+    'nested/keystore.properties': 'file:ANDROID_KEYSTORE_PROPERTIES',
+    'google-services.json': 'file:ANDROID_GOOGLE_SERVICES',
+    'nested/local.properties': 'file:ANDROID_LOCAL_PROPERTIES',
+    'nested/UPPER.JKS': 'file:ANDROID_KEYSTORE',
+  };
+  const files = Object.fromEntries(
+    Object.keys(names).map((path) => [path, Buffer.from([0, 1, 2])]),
+  );
+  files['nested/keys/export.pepk'] = Buffer.alloc(5 * 1024 * 1024 + 1);
+  const repo = fixture(t, null, files);
+  // Even an ignored credential accidentally forced into the index must be blocked.
+  writeFileSync(join(repo.root, '.gitignore'), '.env\n*.jks\n*.keystore\n*.pepk\n');
+  execFileSync('git', ['add', '-f', '--', ...Object.keys(names)], {
+    cwd: repo.root,
+    stdio: 'pipe',
+  });
+  const result = repo.run('--no-env', '--json');
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(
+    JSON.parse(result.stdout),
+    Object.keys(names)
+      .sort()
+      .map((path) => ({ path, line: 1, label: names[path] })),
+  );
+  const text = repo.run('--no-env');
+  assert.equal(text.status, 1, text.stderr);
+  assert.match(text.stdout, /release\.jks:1: file:ANDROID_KEYSTORE/);
+  assert.match(text.stdout, /nested\/local\.properties:1: file:ANDROID_LOCAL_PROPERTIES/);
+});
+
+test('only exact Android basenames or final extensions are blocked, not example or backup names', (t) => {
+  const safe = [
+    'keystore.properties.example',
+    'nested/google-services.json.example',
+    'nested/local.properties.example',
+    'release.jks.example',
+    'release.keystore.bak',
+    'export.pepk.txt',
+    'not-keystore.properties',
+    'my-local.properties',
+    'other-google-services.json',
+    'local.properties-dir/README.md',
+    'keys.jks/README.md',
+  ];
+  const repo = fixture(
+    t,
+    null,
+    Object.fromEntries(safe.map((path) => [path, 'fixture placeholder\n'])),
+  );
+  execFileSync('git', ['add', '--', ...safe], { cwd: repo.root, stdio: 'pipe' });
+  const result = repo.run('--no-env', '--json');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), []);
+});
+
+test('Android filenames are also blocked in env mode and for nonignored untracked files', (t) => {
+  const repo = fixture(t, 'EMPTY_TOKEN=\n', { 'nested/local.properties': 'fixture setting\n' });
+  for (const args of [['--json'], ['--no-env', '--json']]) {
+    const result = repo.run(...args);
+    assert.equal(result.status, 1, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      { path: 'nested/local.properties', line: 1, label: 'file:ANDROID_LOCAL_PROPERTIES' },
+    ]);
+  }
+});

@@ -1,0 +1,34 @@
+// Top-level build file. Versions are pinned in variables.gradle and verified by
+// gradle/verification-metadata.xml.
+
+buildscript {
+    apply from: "variables.gradle"
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath "com.android.tools.build:gradle:$agpVersion"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
+        classpath "org.jetbrains.kotlinx:kover-gradle-plugin:$koverVersion"
+        classpath "app.cash.licensee:licensee-gradle-plugin:$licenseeVersion"
+    }
+}
+
+apply from: "variables.gradle"
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// The daemon JVM is pinned to Java 21 by gradle/gradle-daemon-jvm.properties, which matches the
+// Java 21 target of Capacitor's own modules.
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

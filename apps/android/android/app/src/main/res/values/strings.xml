@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">open-auri</string>
+    <string name="title_activity_main">open-auri</string>
+    <string name="package_name">com.openauri.app</string>
+    <string name="custom_url_scheme">com.openauri.app</string>
+</resources>

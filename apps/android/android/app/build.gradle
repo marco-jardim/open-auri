@@ -1,0 +1,132 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'org.jetbrains.kotlinx.kover'
+apply plugin: 'app.cash.licensee'
+
+def appPackage = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json'))
+
+android {
+    namespace = "com.openauri.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.openauri.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName appPackage.version
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            debuggable false
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    buildFeatures {
+        buildConfig true
+    }
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            all {
+                maxParallelForks = Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))
+            }
+        }
+    }
+    lint {
+        abortOnError true
+        checkReleaseBuilds true
+    }
+}
+
+kotlin {
+    jvmToolchain(21)
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    implementation project(':capacitor-android')
+    implementation project(':capacitor-cordova-android-plugins')
+
+    testImplementation "junit:junit:$junitVersion"
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
+    testImplementation "androidx.test:core:$androidxTestCoreVersion"
+    testImplementation "org.json:json:$orgJsonVersion"
+    testImplementation "com.networknt:json-schema-validator:$jsonSchemaValidatorVersion"
+
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test:runner:$androidxTestRunnerVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-intents:$androidxEspressoCoreVersion"
+}
+
+apply from: 'capacitor.build.gradle'
+
+kover {
+    reports {
+        filters {
+            includes {
+                packages('com.openauri.usb', 'com.openauri.files')
+            }
+        }
+        verify {
+            rule('USB and files packages: 90% lines and branches') {
+                bound {
+                    minValue = 90
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+                bound {
+                    minValue = 90
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.BRANCH
+                }
+            }
+        }
+    }
+}
+
+licensee {
+    allow('Apache-2.0')
+    allow('MIT')
+    allow('BSD-2-Clause')
+    allow('BSD-3-Clause')
+    allow('EPL-2.0')
+}
+
+// RS5: a dependency with a license outside the allow list fails every build, not only `check`.
+tasks.named('preBuild') {
+    dependsOn 'licensee'
+}
+
+// Release guard (plan 0.12.5): the synced capacitor.config.json must be the production one.
+def verifyCapacitorConfig = tasks.register('verifyCapacitorConfig', Exec) {
+    group = 'verification'
+    description = 'Fails when the synced Capacitor config is not valid for a release build.'
+    def configFile = file('src/main/assets/capacitor.config.json')
+    def script = rootProject.file('../../../tools/verify-capacitor-config.mjs')
+    inputs.file(configFile)
+    inputs.file(script)
+    commandLine 'node', script.absolutePath, configFile.absolutePath
+}
+
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+    dependsOn verifyCapacitorConfig
+}

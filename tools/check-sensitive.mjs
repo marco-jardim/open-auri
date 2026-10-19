@@ -67,6 +67,16 @@ const genericPatterns = [
   },
 ];
 
+// Block Android credentials and local configuration by filename, including binary or large files.
+/** @type {{ pattern: RegExp, label: string }[]} */
+const androidFilePatterns = [
+  { pattern: /\.(?:jks|keystore)$/i, label: 'file:ANDROID_KEYSTORE' },
+  { pattern: /\.pepk$/i, label: 'file:ANDROID_PEPK' },
+  { pattern: /(?:^|\/)keystore\.properties$/i, label: 'file:ANDROID_KEYSTORE_PROPERTIES' },
+  { pattern: /(?:^|\/)google-services\.json$/i, label: 'file:ANDROID_GOOGLE_SERVICES' },
+  { pattern: /(?:^|\/)local\.properties$/i, label: 'file:ANDROID_LOCAL_PROPERTIES' },
+];
+
 /** @param {string} text */
 function parseEnv(text) {
   /** @type {Map<string, string>} */
@@ -158,7 +168,7 @@ function lineAt(starts, offset) {
 
 /**
  * @param {string} root
- * @param {boolean} useEnv false (--no-env) scans only the generic shapes and the profile path
+ * @param {boolean} useEnv false (--no-env) scans filenames, generic shapes and the profile path
  */
 function scan(root, useEnv) {
   const values = useEnv ? parseEnv(readFileSync(resolve(root, '.env'), 'utf8')) : new Map();
@@ -181,7 +191,13 @@ function scan(root, useEnv) {
       if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') continue;
       throw error;
     }
-    if (!stat.isFile() || stat.size > maxFileSize) continue;
+    if (!stat.isFile()) continue;
+    const blockedName = androidFilePatterns.find(({ pattern }) => pattern.test(path));
+    if (blockedName) {
+      findings.push({ path, line: 1, label: blockedName.label });
+      continue;
+    }
+    if (stat.size > maxFileSize) continue;
     const bytes = readFileSync(absolute);
     if (bytes.includes(0)) continue;
     const original = bytes.toString('utf8');
@@ -218,7 +234,7 @@ function scan(root, useEnv) {
   return findings;
 }
 
-// --no-env: for CI, where no .env exists. Only the generic credential shapes and the user
+// --no-env: for CI, where no .env exists. Filenames, generic credential shapes and the user
 // profile path are scanned; the values of the operator's .env are covered by the local run.
 const json = process.argv.includes('--json');
 const useEnv = !process.argv.includes('--no-env');

@@ -13,6 +13,7 @@ export default defineConfig([
       'workers/**',
       '**/.svelte-kit/**',
       '**/.wrangler/**',
+      'apps/android/android/**',
     ],
   },
   js.configs.recommended,

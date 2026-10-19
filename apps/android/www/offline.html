@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-bq5TI0/wKnWCFS61jlVEyCeeiYUtNO+qfj4m1DV7XP8='"
+    />
+    <meta name="color-scheme" content="dark" />
+    <title>open-auri</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #0f0f0e;
+        color: #ece7dd;
+        font-family: system-ui, sans-serif;
+      }
+      main {
+        box-sizing: border-box;
+        display: flex;
+        min-height: 100vh;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 24px;
+        text-align: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.25rem;
+      }
+      p {
+        margin: 0;
+        max-width: 32rem;
+        line-height: 1.5;
+      }
+      a {
+        display: inline-flex;
+        min-width: 48px;
+        min-height: 48px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 20px;
+        border: 2px solid #ece7dd;
+        border-radius: 8px;
+        color: #ece7dd;
+        font: inherit;
+        text-decoration: none;
+      }
+      a:focus-visible {
+        outline: 3px solid #ece7dd;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Sem conexão</h1>
+      <p id="body">Não foi possível abrir open-auri.com. Confira a internet e tente de novo.</p>
+      <a id="retry" href="/">Tentar de novo</a>
+    </main>
+    <script>
+      (function () {
+        var en = !/^pt\b/i.test(navigator.language || '');
+        if (en) {
+          document.documentElement.lang = 'en-US';
+          document.getElementById('title').textContent = 'No connection';
+          document.getElementById('body').textContent =
+            'open-auri.com could not be opened. Check your internet connection and try again.';
+          document.getElementById('retry').textContent = 'Try again';
+        }
+        document.getElementById('retry').addEventListener('click', function (event) {
+          event.preventDefault();
+          location.replace(location.origin + '/');
+        });
+      })();
+    </script>
+  </body>
+</html>

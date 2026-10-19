@@ -1,0 +1,15 @@
+{
+  "name": "open-auri-android",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Android shell (Capacitor) for open-auri.com with native USB writing to the CB5100 cable",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
+}
