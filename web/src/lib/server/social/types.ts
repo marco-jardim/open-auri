@@ -250,6 +250,11 @@ export interface AppendVersionInput {
 	ownerUserId: string;
 	/** The head the client saw; the append fails with 'head-moved' when it is not the head. */
 	expectedHead: string;
+	/**
+	 * The visibility the caller's YOLO decision relied on (absent: any). When the lineage no longer
+	 * has it as the batch runs, nothing is written and the append fails with 'head-moved'.
+	 */
+	expectedVisibility?: LineageVisibility;
 	curve: CurveInput;
 	version: VersionInput;
 	/** Same as PublishInput.yoloAck; written only when the version is inserted. */

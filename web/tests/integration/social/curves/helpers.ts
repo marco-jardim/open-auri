@@ -12,6 +12,7 @@ import { publishCurve, type PublishedInfo } from '#lib/server/social/curves.ts';
 import type { LineageVisibility } from '#lib/server/social/types.ts';
 import reference from '../../../../../test/fixtures/eq0xcb.reference.json';
 import { count, locals, nick, seedUser, uid, type SeededUser } from '../../account/helpers.ts';
+import { randomInt, randomTenths } from '../../random.ts';
 
 export { count };
 
@@ -29,11 +30,6 @@ export function presetCurve(index = 0): Curve {
 	const curve = PRESETS[index % PRESETS.length];
 	if (!curve) throw new Error('no presets in the reference fixture');
 	return curve;
-}
-
-function randomInt(min: number, max: number): number {
-	const [value = 0] = crypto.getRandomValues(new Uint32Array(1));
-	return min + (value % (max - min + 1));
 }
 
 /** Neutral bands with `bands` in the first slots. */
@@ -66,10 +62,10 @@ export function uniqueYoloCurve(): Curve {
 	const boost: Band = {
 		kind: 'PK',
 		freqHz: randomInt(16_200, 19_800),
-		gainDb: randomInt(5, 15) / 10,
+		gainDb: randomTenths(5, 15),
 		qFactor: 1
 	};
-	return neutralWith([boost], -randomInt(60, 90) / 10);
+	return neutralWith([boost], randomTenths(-90, -60));
 }
 
 /** A unique HS shelf cut (experimental kind): standard on the server since GATE_IMPL 2. */
@@ -77,16 +73,16 @@ export function uniqueShelfCurve(): Curve {
 	const shelf: Band = {
 		kind: 'HS',
 		freqHz: randomInt(2000, 12000),
-		gainDb: -randomInt(10, 60) / 10,
+		gainDb: randomTenths(-60, -10),
 		qFactor: 0.71
 	};
-	return neutralWith([shelf], -randomInt(10, 40) / 10);
+	return neutralWith([shelf], randomTenths(-40, -10));
 }
 
 /** A unique S1 v2 curve: a PK cut at 25 kHz (never amplifies above 20 kHz: standard). */
 export function uniqueUltrasonicCut(): Curve {
-	const cut: Band = { kind: 'PK', freqHz: 25_000, gainDb: -randomInt(10, 60) / 10, qFactor: 1 };
-	return neutralWith([cut], -randomInt(10, 40) / 10);
+	const cut: Band = { kind: 'PK', freqHz: 25_000, gainDb: randomTenths(-60, -10), qFactor: 1 };
+	return neutralWith([cut], randomTenths(-40, -10));
 }
 
 /** The real gate with its verdict forced to "accepted" (unique accepted curves for tests). */

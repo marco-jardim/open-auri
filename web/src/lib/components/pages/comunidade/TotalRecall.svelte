@@ -4,9 +4,20 @@
 	publishes a NEW version copied from an old one (append with parentVersionId = the head you saw).
 	A concurrent change answers HEAD_MOVED: the page says so and offers to reload, never retries
 	silently. Versions are append-only: nothing is rewritten.
+	Restoring a YOLO version (`curve.yolo`, the server's class) into a lineage others can see
+	(unlisted or public) goes through the YOLO acknowledgement step first and is sent with
+	`acknowledge: 'yolo'`, like every other publication path; 409 YOLO_ACK_REQUIRED shows the step,
+	403 YOLO_PUBLICATION_OFF and the account-age refusal say why (`errorText`).
 -->
 <script lang="ts">
 	import Button from '#lib/components/primitives/Button.svelte';
+	import YoloPublishAck from '#lib/components/yolo/YoloPublishAck.svelte';
+	import {
+		ackWaived,
+		needsYoloAck,
+		waivedLabels,
+		yoloPublishBlock
+	} from '#lib/components/yolo/yolo-curve.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import {
@@ -71,6 +82,8 @@
 	let message = $state('');
 	let reasons = $state.raw<string[]>([]);
 	let codes = $state.raw<string[]>([]);
+	/** The YOLO acknowledgement step of a restore (the version and its waived criteria), or null. */
+	let ackStep = $state.raw<{ version: Version; waived: string[] } | null>(null);
 
 	$effect(() => {
 		const wanted = preferred && owned.some((item) => item.id === preferred) ? preferred : null;
@@ -159,13 +172,18 @@
 		return value === 'pt-BR' || value === 'en-US';
 	}
 
-	async function restore(version: Version) {
+	/**
+	 * Restores `version` as a new head. `acknowledged`: the owner went through the YOLO step
+	 * (sends `acknowledge: 'yolo'`).
+	 */
+	async function restore(version: Version, acknowledged = false) {
 		if (!canWrite || !headId || restoring) return;
 		restoring = true;
 		message = '';
 		reasons = [];
 		codes = [];
 		headMoved = false;
+		if (!acknowledged) ackStep = null;
 		try {
 			const source = await curveOf(version.id);
 			const built = buildEnvelope({
@@ -181,11 +199,31 @@
 				message = built.codes.map(envelopeIssueText).join(' ');
 				return;
 			}
-			await api.appendVersion(lineageId, { parentVersionId: headId, envelope: built.envelope });
+			// The restored version becomes the head of a lineage others may see: a YOLO curve is
+			// opened to them only after the step.
+			const visibility = data?.lineage.visibility ?? 'private';
+			if (!acknowledged && needsYoloAck(source.full.curve.yolo === true, visibility)) {
+				ackStep = { version, waived: waivedLabels(source.full.curve.waived) };
+				return;
+			}
+			await api.appendVersion(lineageId, {
+				parentVersionId: headId,
+				envelope: built.envelope,
+				...(acknowledged ? { acknowledge: 'yolo' as const } : {})
+			});
+			ackStep = null;
 			message = m.comunidade_recall_restored({ version: version.id.slice(0, 7) });
 			onrestored?.();
 			await load(lineageId);
 		} catch (error) {
+			if (yoloPublishBlock(error) === 'ack') {
+				// The server's class says YOLO (409): ask, then resend with the acknowledgement.
+				ackStep = { version, waived: waivedLabels(ackWaived(error)) };
+				return;
+			}
+			// Any other answer ends the step; the message says why (403: YOLO publication off, or
+			// the account too new).
+			ackStep = null;
 			if (isSocialApiError(error)) {
 				if (error.code === 'HEAD_MOVED') headMoved = true;
 				else if (error.code === 'GATE_REJECTED') reasons = gateReasonsOf(error);
@@ -296,13 +334,26 @@
 						</div>
 					{/if}
 					{#if restorable}
-						<Button
-							class="restore"
-							disabledReason={restoreReason}
-							loading={restoring}
-							onclick={() => restore(restorable)}
-							>{m.comunidade_recall_restore({ version: restorable.id.slice(0, 7) })}</Button
-						>
+						{#if ackStep && ackStep.version.id === restorable.id}
+							{@const step = ackStep}
+							<div class="ack" data-testid="recall-yolo-ack">
+								<YoloPublishAck
+									waived={step.waived}
+									busy={restoring}
+									headingLevel={3}
+									onconfirm={() => void restore(step.version, true)}
+									oncancel={() => (ackStep = null)}
+								/>
+							</div>
+						{:else}
+							<Button
+								class="restore"
+								disabledReason={restoreReason}
+								loading={restoring}
+								onclick={() => restore(restorable)}
+								>{m.comunidade_recall_restore({ version: restorable.id.slice(0, 7) })}</Button
+							>
+						{/if}
 						<p class="scr-note">{m.comunidade_recall_restore_note()}</p>
 					{/if}
 					{#if headMoved}
@@ -500,6 +551,9 @@
 		color: var(--amber);
 		font: var(--fs-lede) / 1 var(--crt);
 		letter-spacing: 0;
+	}
+	.ack {
+		margin-top: 10px;
 	}
 	.skel-rows {
 		display: grid;

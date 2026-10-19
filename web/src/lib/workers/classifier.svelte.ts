@@ -8,18 +8,18 @@
  *   kept for the page too (`rememberClassification`): a later synchronous exit (save, write,
  *   export) finds it there. An exit never waits for this queue, and never runs with an unknown
  *   class: it classifies on the spot (`curveClassification`).
- * - `peek` is for templates: the class when the page already knows it, else null while the curve
- *   waits for the worker; reading it again after the answer lands gives the class (reactive).
- *   Nothing is queued during SSR.
+ * - The queue and the answers are plain bookkeeping (classifier-store.ts), never signals: `peek`
+ *   fills them while a template is evaluated. The answers of a classifier are never evicted, so
+ *   a tape is classified once however large the library is.
+ * - `peek` is for templates: the class when it is known, else null while the curve waits for the
+ *   worker. Only a curve still waiting reads `revision`, which is bumped at most once per
+ *   animation frame however many answers land in it, so a template reads again after its answer
+ *   and an answered badge never runs again for someone else's. Nothing is queued during SSR.
  * - Curves are sent as plain snapshots (`$state.snapshot`): a worker message cannot clone a
  *   `$state` proxy.
  */
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-import {
-	knownClassification,
-	rememberClassification,
-	type CurveClassification
-} from '#lib/gate-verdicts.ts';
+import type { ClassifiedCurve, CurveClassification } from '#lib/gate-verdicts.ts';
+import { createClassifierStore, curveKey } from './classifier-store.ts';
 import { createLatestClient, type WorkerClientOptions } from './client.ts';
 import { handleGateRequest, type Band, type GateInput } from './gate-handler.ts';
 
@@ -31,10 +31,17 @@ function classifyClient(options: WorkerClientOptions) {
 		options
 	);
 	return {
-		async classify(bands: readonly Band[], preampDb: number): Promise<CurveClassification> {
-			const response = await client.request({ bands, preampDb, type: 'classify' });
+		async classify(
+			bands: readonly Band[],
+			preampDb: number,
+			signal: AbortSignal | undefined
+		): Promise<ClassifiedCurve> {
+			const response = await client.request(
+				{ bands, preampDb, type: 'classify' },
+				signal ? { signal } : {}
+			);
 			if (response.type !== 'classify') throw new Error('Unexpected gate response');
-			return response.classification;
+			return { classification: response.classification, gateRuns: response.gateRuns };
 		},
 		dispose: () => client.dispose()
 	};
@@ -48,117 +55,74 @@ export interface ClassifierCurve {
 export interface Classifier {
 	/** The known class of `curve`, else null (the curve is queued for the worker). Reactive. */
 	peek(curve: ClassifierCurve): CurveClassification | null;
-	/** The class of `curve`: the page's when known, else the worker's (queued, one at a time). */
-	classify(curve: ClassifierCurve, signal?: AbortSignal): Promise<CurveClassification>;
+	/**
+	 * The class of `curve` and the gate runs it took: known, else the worker's (queued, one at a
+	 * time). Aborting `signal` takes a queued request out of the queue at once.
+	 */
+	classify(curve: ClassifierCurve, signal?: AbortSignal): Promise<ClassifiedCurve>;
 	/** Stops the worker; queued and later requests reject with an `AbortError`. */
 	dispose(): void;
 }
 
-interface Job {
-	key: string;
-	bands: readonly Band[];
-	preampDb: number;
-	signal: AbortSignal | undefined;
-	resolve: (classification: CurveClassification) => void;
-	reject: (error: unknown) => void;
-}
-
-/** Answers kept for curves the page cache cannot key (plain-data curves never need them). */
-const ANSWERS_KEPT = 256;
-
-function abortError(): DOMException {
-	return new DOMException('Classification cancelled', 'AbortError');
+/** Runs `flush` on the next animation frame (a timer where there is none); returns the cancel. */
+function nextFrame(flush: () => void): () => void {
+	if (typeof requestAnimationFrame === 'function') {
+		const handle = requestAnimationFrame(flush);
+		return () => cancelAnimationFrame(handle);
+	}
+	const handle = setTimeout(flush, 16);
+	return () => clearTimeout(handle);
 }
 
 export function createClassifier(options: WorkerClientOptions = {}): Classifier {
 	let worker: ReturnType<typeof classifyClient> | null = null;
 	let disposed = false;
-	let running = false;
-	/** Bumped when an answer lands, so a `peek` read in a template or effect reads again. */
+	/** Bumped once per frame in which answers landed: a waiting `peek` reads again. */
 	let revision = $state(0);
-	const queue: Job[] = [];
-	/** Curves queued by `peek` and not answered yet (one request each). */
-	const peeking = new SvelteSet<string>();
-	const answers = new SvelteMap<string, CurveClassification>();
+	let cancelFrame: (() => void) | null = null;
 
-	/** Dedupe key of a queued curve (the page cache keys the class itself exactly). */
-	const keyOf = (bands: readonly Band[], preampDb: number) => JSON.stringify([preampDb, bands]);
-
-	function known(bands: readonly Band[], preampDb: number, key: string) {
-		return knownClassification(bands, preampDb) ?? answers.get(key) ?? null;
-	}
-
-	async function pump(): Promise<void> {
-		if (running) return;
-		running = true;
-		try {
-			for (let job = queue.shift(); job !== undefined; job = queue.shift()) {
-				if (disposed || job.signal?.aborted) {
-					job.reject(abortError());
-					continue;
-				}
-				const cached = known(job.bands, job.preampDb, job.key);
-				if (cached !== null) {
-					job.resolve(cached);
-					continue;
-				}
-				try {
-					worker ??= classifyClient(options);
-					const classification = await worker.classify(job.bands, job.preampDb);
-					rememberClassification(job.bands, job.preampDb, classification);
-					answers.delete(job.key);
-					if (answers.size >= ANSWERS_KEPT) {
-						const oldest = answers.keys().next();
-						if (!oldest.done) answers.delete(oldest.value);
-					}
-					answers.set(job.key, classification);
-					revision++;
-					job.resolve(classification);
-				} catch (error) {
-					job.reject(disposed ? abortError() : error);
-				}
-			}
-		} finally {
-			running = false;
+	const store = createClassifierStore({
+		run(curve, signal) {
+			worker ??= classifyClient(options);
+			return worker.classify(curve.bands, curve.preampDb, signal);
+		},
+		onAnswer() {
+			if (disposed || cancelFrame !== null) return;
+			cancelFrame = nextFrame(() => {
+				cancelFrame = null;
+				if (!disposed) revision++;
+			});
 		}
-	}
-
-	function classify(curve: ClassifierCurve, signal?: AbortSignal): Promise<CurveClassification> {
-		if (disposed || signal?.aborted) return Promise.reject(abortError());
-		const bands: readonly Band[] = $state.snapshot(curve.bands);
-		const preampDb = curve.preampDb;
-		const key = keyOf(bands, preampDb);
-		return new Promise<CurveClassification>((resolve, reject) => {
-			queue.push({ key, bands, preampDb, signal, resolve, reject });
-			void pump();
-		});
-	}
+	});
 
 	return {
 		peek(curve) {
+			const key = curveKey(curve.bands, curve.preampDb);
+			const answered = store.answered(key);
+			if (answered !== null) return answered.classification;
+			// Still waiting: read again when answers land.
 			void revision;
-			const key = keyOf(curve.bands, curve.preampDb);
-			const cached = known(curve.bands, curve.preampDb, key);
-			if (cached !== null || disposed || typeof window === 'undefined') return cached;
-			if (!peeking.has(key)) {
-				peeking.add(key);
-				classify(curve)
-					.catch((error: unknown) => {
-						if (!(error instanceof DOMException && error.name === 'AbortError')) {
-							console.warn('Background classification failed', error);
-						}
-					})
-					.finally(() => peeking.delete(key));
-			}
+			const known = store.known(curve.bands, curve.preampDb, key);
+			if (known !== null) return known.classification;
+			if (disposed || typeof window === 'undefined') return null;
+			store.request(key, () => {
+				const bands: readonly Band[] = $state.snapshot(curve.bands);
+				return { bands, preampDb: curve.preampDb };
+			});
 			return null;
 		},
-		classify,
+		classify(curve, signal) {
+			const bands: readonly Band[] = $state.snapshot(curve.bands);
+			return store.classify({ bands, preampDb: curve.preampDb }, signal);
+		},
 		dispose() {
 			if (disposed) return;
 			disposed = true;
+			cancelFrame?.();
+			cancelFrame = null;
+			store.dispose();
 			worker?.dispose();
 			worker = null;
-			for (const job of queue.splice(0)) job.reject(abortError());
 		}
 	};
 }

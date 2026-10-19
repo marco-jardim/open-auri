@@ -1,8 +1,8 @@
 /**
  * Import and export of the editor curve. All parsing/serialisation is core (`open-auri/io`,
  * `open-auri/share`, `open-auri/dsp`); this module only adds the page rules:
- * - HS/LP/HP travel in `.txt`, S5 and links only in Engenharia (experimental), and so does a
- *   band above 20 kHz (`ultrasonic-layer`);
+ * - HS/LP/HP travel in `.txt`, S5, `.bin` and links only in Engenharia (experimental), and so
+ *   does a band above 20 kHz (`ultrasonic-layer`);
  * - every imported curve is classified (core `classifyCurve`, see curva/yolo.ts): a standard or
  *   YOLO curve may reach the editor (YOLO with its mark, `ImportResult.yolo`), a rejected one
  *   never;
@@ -277,8 +277,11 @@ export function importFileText(text: string, layer: Layer): ImportResult {
 /**
  * The exact 220-byte payload a write would send, taken from the gate's own snapshot: the
  * standard verdict's for a standard curve, the YOLO verdict's for a YOLO curve (same codec).
+ * Same layer rule as every other exit: HS/LP/HP or a band above 20 kHz only from Engenharia.
  */
-export function exportBin(curve: Curve): ExportResult<Uint8Array<ArrayBuffer>> {
+export function exportBin(curve: Curve, layer: Layer): ExportResult<Uint8Array<ArrayBuffer>> {
+	const layered = layerRefusal(curve.bands, layer);
+	if (layered) return layered;
 	const refused = refusedByGate(curve);
 	if (refused) return refused;
 	const yolo = classOf(curve).class === 'yolo';

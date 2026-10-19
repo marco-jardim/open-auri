@@ -10,6 +10,7 @@ import type { ApiEvent } from '#lib/server/api/index.ts';
 import type { AuthLocals } from '#lib/server/auth/guards.ts';
 import reference from '../../../../../test/fixtures/eq0xcb.reference.json';
 import { locals, seedUser, type SeededUser } from '../../account/helpers.ts';
+import { randomInt, randomTenths } from '../../random.ts';
 import { ban, count, curveInput, nick, publish, sid } from '../repo/helpers.ts';
 
 export { ban, count, curveInput, publish, sid };
@@ -29,11 +30,6 @@ export function presetS1(index: number): string {
 	const curve = PRESETS[index % PRESETS.length];
 	if (!curve) throw new Error('no preset');
 	return encodeS1(curve);
-}
-
-function randomInt(min: number, max: number): number {
-	const [value] = crypto.getRandomValues(new Uint32Array(1));
-	return min + ((value ?? 0) % (max - min + 1));
 }
 
 /**
@@ -60,11 +56,11 @@ export function yoloS1(): string {
 	const boost: Band = {
 		kind: 'PK',
 		freqHz: randomInt(16_200, 19_800),
-		gainDb: randomInt(5, 15) / 10,
+		gainDb: randomTenths(5, 15),
 		qFactor: 1
 	};
 	const bands = NEUTRAL_BANDS.map((neutral, i) => (i === 0 ? boost : neutral)) as Band[];
-	return encodeS1({ bands, preampDb: -randomInt(60, 90) / 10 });
+	return encodeS1({ bands, preampDb: randomTenths(-90, -60) });
 }
 
 export interface Member {

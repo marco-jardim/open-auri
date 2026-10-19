@@ -140,6 +140,16 @@ JSON.stringify(THRESHOLDS) + ':' + classifierVersionInput()` (the core's stable 
   derivation of `experimental`, or `runGate` in `gate.ts`. The hash re-gates even if the bump is
   forgotten for a threshold or waivable-code change, but only the ordinal makes the cache monotonic
   across a deploy (and covers code changes).
+- **Why `GATE_IMPL` is still 2 after the YOLO verdict changes of PR #49 (QA round 1).** The bump
+  exists to invalidate verdicts some deployed D1 already holds. Round 1 changed YOLO verdicts
+  (YOLO-only checks only when a waiver is relied on, the extended checks at 20 kHz too) after
+  `GATE_IMPL` became 2, but no D1 has a single `v2.2:` row: the only staging and production deploys
+  were of `main` at `e157c16` (`_qa/deploy-staging-e157c16.txt`, `_qa/deploy-production-e157c16.txt`),
+  which predates the server classification, and the PR #49 branch (`de95c57`, `9f95b55` and the
+  QA rounds) never reached staging or production. Every verdict of ordinal 2 written so far lives in
+  local or test databases, recomputed from scratch. So ordinal 2 means "the server classification as
+  first deployed", whatever it is when the branch merges. Once this branch is deployed anywhere,
+  the next verdict change bumps to 3.
 - **Monotonic upsert:** `upsertCurveStatement` (used by `saveCurveGate`, `publishLineage`,
   `appendVersion`) never overwrites a row whose stored ordinal (`gateImplSql`) is greater than the
   writer's, and a verdict of a newer ordinal is served as current (`isGateCurrent`): an older
@@ -170,7 +180,10 @@ JSON.stringify(THRESHOLDS) + ':' + classifierVersionInput()` (the core's stable 
   already cached under the current gate version, the YOLO rules (403, 409 `YOLO_ACK_REQUIRED`, 429)
   answer before the attempt is counted. In a library merge, the counting gate wraps every run
   (a YOLO curve counts 2 toward `MERGE_GATE_RUNS_MAX`) and refuses a run past the budget before it
-  starts, so a request never exceeds it.
+  starts, so a request never exceeds it. The re-gate job's runs are counted the same way (one per
+  standard curve or hard rejection, two per YOLO curve or curve the YOLO profile rejects). Proof:
+  `tests/integration/social/yolo/classification.test.ts`, `qa-round1.test.ts` (m4) and
+  `qa-round2.test.ts` ("classification run counts"), `workers/jobs/test/regate.test.ts`.
 
 ## YOLO publication (`curves.ts`)
 
@@ -181,20 +194,39 @@ JSON.stringify(THRESHOLDS) + ':' + classifierVersionInput()` (the core's stable 
   `FORBIDDEN`, `details.reason = 'account-age'`), `acknowledge: 'yolo'` in the body (409
   `YOLO_ACK_REQUIRED`, `details.waived`) and one of `YOLO_ACKS_DAILY_MAX` (5) acknowledgements per
   sliding day (group `curves.yolo.ack`, 429 `QUOTA_EXCEEDED`). The acknowledgement row is written in
-  the same batch as the write, only while that curve is the lineage's head. The daily slot is only
-  checked before the write (`peek`) and counted once the batch succeeded, so a refused or failed
-  write (409 `HEAD_MOVED`, any repository error) spends none.
+  the same batch as the write, only in the state that write leaves (that curve and version are the
+  head, the lineage has that visibility), so it exists exactly when the write applied. The daily
+  slot is taken atomically right before the write (`writeWithAckSlot` → `takeWindowSlot` in
+  `security/ratelimit.ts`: increment and check in one D1 batch, so concurrent openings never exceed
+  the cap) and given back (`releaseWindowSlot`) when the write fails (409 `HEAD_MOVED`, any
+  repository error, a throw); a refused take is given back at once. When the class is cached, a
+  read-only check (`peek`) answers a 429 before a gate attempt is counted.
+- Lineage state races: the decision reads the head's class and the visibility, and an append or a
+  visibility change can land before the write. The writes carry what they relied on:
+  `appendVersion` `expectedVisibility` (a YOLO curve), `setLineageVisibility` `expectedHead` (an
+  opening), `restoreLineage` `expectedHead` + `expectedVisibility` (`LineageExpectation` in
+  `repo.ts`). A moved state writes nothing and returns `head-moved`; the service reads the lineage
+  again and re-applies the YOLO rules, up to `STATE_ATTEMPTS` (3) times, then 409 `HEAD_MOVED`. A
+  lineage is therefore never visible to others with a YOLO head its owner did not acknowledge,
+  whichever of the two requests lands first. `CurveDeps.beforeWrite` (tests only) runs a request in
+  that window.
 - Restore while `YOLO_PUBLICATION` is off: a non-private lineage whose head is YOLO is restored as
   **private** in the same statement (nothing to acknowledge); the answer carries the effective
   `visibility`. (A retracted lineage's visibility cannot be changed first, so a 403 was a dead end.)
 - Moderation: a lineage whose head is YOLO is auto-hidden at `YOLO_AUTO_HIDE_THRESHOLD` (2)
-  eligible reporters; the admin queue preview carries `yolo` and `waived`; curation refuses YOLO
-  heads (`setCurated`, decision `UNSUPPORTED`).
+  eligible reporters, judged by the head it has as the write runs (`autoHideLineage`: the threshold
+  condition is in the UPDATE, and the audit row of the threshold applied is written in the same
+  batch under the same condition); the admin queue preview carries `yolo` and `waived`; curation
+  refuses YOLO heads, checked again in the write (`curateLineage`: audit row and UPDATE in one batch
+  under the same condition; refused, nothing is written and the decision is `UNSUPPORTED`).
+- OG sweep (jobs Worker): it reads `YOLO_PUBLICATION` from its own env (same value as the web
+  Worker's) and keeps the images of acknowledged YOLO versions only while it is `on`.
 - OG: card layout `3` draws a "YOLO" chip; `customMetadata.yolo` is compared by the store; the meta
   image URL carries `?y=1` and a YOLO curve is never indexable. A request whose `?y=` does not name
   the version's current class (`?y=1` on a standard version, none on a YOLO one) is a 302 to the
   URL of the right class with `cache-control: no-store`, before any R2 read or render
-  (`og/route.ts`), so a URL-keyed cache only ever holds the card of the class its URL names.
+  (`og/route.ts`), so a URL-keyed cache only ever holds the card of the class its URL names. The
+  redirect only sets or removes `y`; the other query parameters are kept in order.
 - Data export (`export.ts`): the owner's `lineage_yolo_acks` rows (`lineageId`, `curveId`,
   `ackedAt`) as `social.yoloAcks`. Deleted lineages take their rows with them (ON DELETE CASCADE);
   an anonymized public lineage keeps them (they hold no user id).
@@ -223,7 +255,8 @@ JSON.stringify(THRESHOLDS) + ':' + classifierVersionInput()` (the core's stable 
   built with `sql()` from `#lib/server/db.ts` and the exported predicates (`publicLineageSql`,
   `readableLineageSql`, `countedUserSql`, cursor helpers).
 - Writes return `RepoResult<T>` (`{ ok: true, value }` or `{ ok: false, code }`, codes in
-  `SOCIAL_ERROR_CODES`): `head-moved` → 409, `not-found` → 404 (also for "exists but not
+  `SOCIAL_ERROR_CODES`): `head-moved` → 409 (also when a `LineageExpectation` or
+  `expectedVisibility` no longer holds), `not-found` → 404 (also for "exists but not
   readable"), `gate-rejected` → 422, `already-active` / `duplicate` → 409, `invalid-input` → 400.
   Invalid cursors throw `SocialRepoError('invalid-cursor')` (→ 400).
 - Pagination: pass `{ cursor, limit }`; get `{ items, nextCursor }`. Cursors are opaque base64url,

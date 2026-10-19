@@ -145,7 +145,7 @@ describe('S5 JSON (open-auri/preset@1)', () => {
 
 describe('.bin', () => {
 	test('is the exact 220-byte payload with the preset CRC', () => {
-		const bin = exportBin(auri);
+		const bin = exportBin(auri, 'ajustar');
 		expect(bin.ok).toBe(true);
 		if (!bin.ok) return;
 		expect(bin.value).toHaveLength(220);

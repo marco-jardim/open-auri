@@ -23,6 +23,7 @@ import {
 	uniqueUltrasonicCut,
 	uniqueYoloCurve
 } from '../curves/helpers.ts';
+import { randomInt, randomPick, randomTenths } from '../../random.ts';
 
 type Curve = Parameters<typeof encodeS1>[0];
 type Band = Curve['bands'][number];
@@ -64,11 +65,6 @@ async function row(
 		.first<{ gate_ok: number; gate_yolo: number; gate_reasons: string; gate_ver: string }>();
 }
 
-function randomInt(min: number, max: number): number {
-	const [value = 0] = crypto.getRandomValues(new Uint32Array(1));
-	return min + (value % (max - min + 1));
-}
-
 describe('server classification and its cache', () => {
 	it('is GATE_IMPL 2', () => {
 		expect(GATE_IMPL).toBe(2);
@@ -105,8 +101,12 @@ describe('server classification and its cache', () => {
 	it('a standard curve runs the write gate only (no classifier run)', async () => {
 		const spy = spies();
 		const curve = presetCurve(3);
-		// A lower preamp only lowers every peak: still standard, and most likely not cached yet.
-		const preampDb = Math.max(Math.round(curve.preampDb * 10 - randomInt(1, 9)) / 10, -25.5);
+		// A lower preamp only lowers every peak: still standard, and most likely not cached yet. One
+		// of the nine preamps 0.1 to 0.9 dB below the preset's, on the 0.1 dB grid.
+		const lower = Array.from({ length: 9 }, (_, i) =>
+			Math.max(Math.round(curve.preampDb * 10 - (i + 1)) / 10, -25.5)
+		);
+		const preampDb = randomPick(lower);
 		const s1 = encodeS1({ ...curve, preampDb });
 		const check = await checkPublishable(env.DB, s1, Date.now(), spy.deps);
 		if (!check.ok) throw new Error(`expected standard, got ${check.code}`);
@@ -143,7 +143,7 @@ describe('server classification and its cache', () => {
 		) as Band[];
 		const pass = await checkPublishable(
 			env.DB,
-			encodeS1({ bands, preampDb: -randomInt(10, 40) / 10 })
+			encodeS1({ bands, preampDb: randomTenths(-40, -10) })
 		);
 		expect(pass.ok && pass.class).toBe('standard');
 	});

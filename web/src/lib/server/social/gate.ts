@@ -48,7 +48,9 @@ import type { CurveInput, CurveRecord } from '#lib/server/social/types.ts';
  * a verdict: the core's `gateForWrite`, `classifyCurve`, `THRESHOLDS` or `YOLO_THRESHOLDS`, the S1
  * codec, `levelDb`, or `runGate` below. See README.md, "Gate cache".
  * 2 = server classification (standard / yolo / rejected) with `experimental` derived from the
- * curve (HS, LP and HP are standard on the server).
+ * curve (HS, LP and HP are standard on the server). Not bumped for the YOLO verdict changes of the
+ * same unreleased branch (PR #49): no deployed D1 holds an ordinal-2 row (README.md, "Gate
+ * cache"). Bump it for any verdict change once ordinal 2 is deployed.
  */
 export const GATE_IMPL = 2;
 

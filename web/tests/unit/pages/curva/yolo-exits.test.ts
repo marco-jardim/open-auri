@@ -134,7 +134,7 @@ describe('marked files', () => {
 		const json = exportS5(yolo, meta, 'engenharia');
 		expect(json).toMatchObject({ ok: true, yolo: true });
 		if (json.ok) expect(json.value.toLowerCase()).not.toContain('yolo');
-		const bin = exportBin(yolo);
+		const bin = exportBin(yolo, 'engenharia');
 		expect(bin).toMatchObject({ ok: true, yolo: true });
 		if (bin.ok) {
 			const payload = verdictFor(yolo, 'yolo').metrics.payload ?? [];
@@ -150,7 +150,7 @@ describe('marked files', () => {
 		for (const curve of [rejected, unencodable]) {
 			expect(exportTxt(curve, 'engenharia')).toMatchObject({ ok: false });
 			expect(exportS5(curve, meta, 'engenharia')).toMatchObject({ ok: false });
-			expect(exportBin(curve)).toMatchObject({ ok: false, error: 'gate' });
+			expect(exportBin(curve, 'engenharia')).toMatchObject({ ok: false, error: 'gate' });
 			expect(linkHash(curve, 'engenharia')).toMatchObject({ ok: false });
 			expect(admit(imported(curve), 'engenharia')).toMatchObject({ ok: false });
 		}
@@ -180,6 +180,9 @@ describe('loading', () => {
 				ok: false,
 				error: 'ultrasonic-layer'
 			});
+			expect(exportBin(ultrasonic, layer)).toMatchObject({ ok: false, error: 'ultrasonic-layer' });
+			// HS/LP/HP too, like the other exits (the YOLO fixture starts with an HP).
+			expect(exportBin(yolo, layer)).toMatchObject({ ok: false, error: 'experimental-layer' });
 			expect(readLinkHash(`#p=${encodeS1(ultrasonic)}`, layer)).toMatchObject({
 				ok: false,
 				error: 'ultrasonic-layer'
@@ -187,6 +190,8 @@ describe('loading', () => {
 		}
 		const engenharia = admit(imported(ultrasonic), 'engenharia');
 		expect(engenharia.ok ? null : engenharia.error).not.toBe('ultrasonic-layer');
+		const bin = exportBin(ultrasonic, 'engenharia');
+		expect(bin.ok ? null : bin.error).not.toBe('ultrasonic-layer');
 		expect(ioFailureText({ ok: false, error: 'ultrasonic-layer', reasons: [] })).toBe(
 			'Filtros acima de 20 kHz só entram na camada Engenharia'
 		);
@@ -219,7 +224,7 @@ describe('client classification', () => {
 	test('the gate worker answers a classify request (pure handler and the fallback client)', async () => {
 		expect(
 			handleGateRequest({ id: 7, type: 'classify', bands: yolo.bands, preampDb: yolo.preampDb })
-		).toEqual({ type: 'classify', id: 7, classification: classOf(yolo) });
+		).toEqual({ type: 'classify', id: 7, classification: classOf(yolo), gateRuns: 2 });
 		const client = createGateWorker({ worker: false });
 		try {
 			const answer = await client.classify({ bands: rejected.bands, preampDb: rejected.preampDb });

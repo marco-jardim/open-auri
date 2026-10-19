@@ -19,6 +19,7 @@ import {
 import { getCurve, listCurvesWithStaleGate, saveCurveGate } from '#lib/server/social/repo.ts';
 import type { CurveRecord } from '#lib/server/social/types.ts';
 import reference from '../../../../../test/fixtures/eq0xcb.reference.json';
+import { randomInt } from '../../random.ts';
 
 type Curve = Parameters<typeof encodeS1>[0];
 type Band = Curve['bands'][number];
@@ -27,11 +28,6 @@ const presets = Object.entries(reference.presets).map(([name, preset]) => ({
 	name,
 	curve: { bands: preset.eqBands as Band[], preampDb: preset.preampDb } satisfies Curve
 }));
-
-function randomInt(min: number, max: number): number {
-	const [value] = crypto.getRandomValues(new Uint32Array(1));
-	return min + (value % (max - min + 1));
-}
 
 /**
  * A unique curve the gate refuses in every profile: the first preset with its first two bands

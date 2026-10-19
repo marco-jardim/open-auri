@@ -5,7 +5,7 @@
 // helper accepts only flat JSON values and drops keys that look like personal fields.
 // No `$app/*` and no SvelteKit imports: tested inside workerd.
 import type { D1Database } from '@cloudflare/workers-types';
-import { all, first, run, sql, type BoundStatement } from '../db.ts';
+import { all, first, run, sql, type BoundStatement, type SqlParam } from '../db.ts';
 
 export type ActorKind = 'admin' | 'operator' | 'system';
 
@@ -72,21 +72,15 @@ export function serializeDetail(detail: AuditEntry['detail']): string | null {
 	return JSON.stringify(clean);
 }
 
-/** The INSERT for `entry`, to run alone or inside a `batch`. */
-export function auditStatement(
-	db: D1Database,
-	entry: AuditEntry,
-	options: AuditOptions = {}
-): BoundStatement {
+/** The row values of `entry`, validated, in the column order of AUDIT_COLUMNS. */
+function auditValues(entry: AuditEntry, options: AuditOptions): SqlParam[] {
 	if (!ACTION.test(entry.action)) throw new AuditEntryError('action');
 	if (!['admin', 'operator', 'system'].includes(entry.actorKind)) {
 		throw new AuditEntryError('actor kind');
 	}
 	const id = (options.id ?? (() => crypto.randomUUID()))();
 	const now = (options.now ?? Date.now)();
-	return sql(
-		db,
-		'INSERT INTO audit_log (id, actor_id, actor_kind, action, target_kind, target_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+	return [
 		id,
 		entry.actorId,
 		entry.actorKind,
@@ -95,6 +89,51 @@ export function auditStatement(
 		entry.targetId ?? null,
 		serializeDetail(entry.detail),
 		now
+	];
+}
+
+const AUDIT_COLUMNS =
+	'id, actor_id, actor_kind, action, target_kind, target_id, detail, created_at';
+
+/** The INSERT for `entry`, to run alone or inside a `batch`. */
+export function auditStatement(
+	db: D1Database,
+	entry: AuditEntry,
+	options: AuditOptions = {}
+): BoundStatement {
+	return sql(
+		db,
+		`INSERT INTO audit_log (${AUDIT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		...auditValues(entry, options)
+	);
+}
+
+/**
+ * A SQL condition with its own positional parameters (the same shape as repo.ts `SqlFragment`).
+ * The text is code, never user input: values always go through `params`.
+ */
+export interface AuditCondition {
+	readonly text: string;
+	readonly params: readonly SqlParam[];
+}
+
+/**
+ * The INSERT for `entry`, written only when `condition` holds when it runs: for a `batch` that
+ * applies a conditional mutation under the same condition, so the trail row exists exactly when
+ * the mutation happened (both statements see the same state inside the batch, and the batch is
+ * all or nothing). Audit-first like {@link audited}: put it before the mutation.
+ */
+export function auditStatementWhen(
+	db: D1Database,
+	entry: AuditEntry,
+	condition: AuditCondition,
+	options: AuditOptions = {}
+): BoundStatement {
+	return sql(
+		db,
+		`INSERT INTO audit_log (${AUDIT_COLUMNS}) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE ${condition.text}`,
+		...auditValues(entry, options),
+		...condition.params
 	);
 }
 

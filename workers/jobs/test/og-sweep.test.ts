@@ -15,6 +15,7 @@ import {
   OG_SWEEP_LIMITS,
   ogSweepJob,
   sweepOgImages,
+  yoloPublicationOf,
   type OgSweepDeps,
 } from '../src/jobs/og-sweep.ts';
 
@@ -48,7 +49,14 @@ interface Version {
   versionId: string;
 }
 
-async function publish(visibility: 'public' | 'unlisted' | 'private'): Promise<Version> {
+/**
+ * A lineage with one version. `yolo`: its curve is YOLO (`gate_yolo = 1`) and the owner's
+ * acknowledgement is written in the same batch, as the web's publication path does.
+ */
+async function publish(
+  visibility: 'public' | 'unlisted' | 'private',
+  { yolo = false }: { yolo?: boolean } = {},
+): Promise<Version> {
   const curveId = randomCurveId();
   const versionId = uid('ver');
   const result = await publishLineage(env.DB, {
@@ -60,10 +68,12 @@ async function publish(visibility: 'public' | 'unlisted' | 'private'): Promise<V
       s1: `S1-${crypto.randomUUID()}`.padEnd(68, 'x'),
       canonKey: `v1;0;PK,1000,30,100;${curveId}`,
       gateVer: 'v2:test',
-      gateOk: true,
-      gateReasons: [],
+      gateOk: !yolo,
+      gateYolo: yolo,
+      gateReasons: yolo ? ['d7:pk-boost-above-16k'] : [],
       levelDb: -3,
     },
+    yoloAck: yolo,
     version: {
       id: versionId,
       name: 'Sweep fixture',
@@ -247,5 +257,43 @@ describe('og-sweep job', () => {
     expect(parsed.deleted).toEqual(expect.any(Number));
     expect(line).not.toContain('og/');
     expect(line).not.toContain('ver-');
+  });
+
+  it('keeps the image of an acknowledged YOLO version while YOLO_PUBLICATION is on', async () => {
+    const acked = await publish('public', { yolo: true });
+    const key = ogKey(acked.curveId, acked.versionId);
+    await putOg(key);
+    // On: the store serves it (linkable), so every pass keeps it, run after run.
+    await sweepToEnd({ yoloPublication: 'on' });
+    expect(await exists(key)).toBe(true);
+    await sweepToEnd({ yoloPublication: 'on' });
+    expect(await exists(key)).toBe(true);
+    // Off (the default): the store refuses every YOLO version, so the sweep deletes the image.
+    await sweepToEnd();
+    expect(await exists(key)).toBe(false);
+  });
+
+  it('the scheduled job reads YOLO_PUBLICATION from its env (anything but "on" is off)', async () => {
+    const acked = await publish('public', { yolo: true });
+    const key = ogKey(acked.curveId, acked.versionId);
+    await putOg(key);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const on = { ...env, YOLO_PUBLICATION: 'on' };
+      await createOgSweepJob().run(controller(), on, createExecutionContext());
+      expect(await exists(key)).toBe(true);
+      const odd = { ...env, YOLO_PUBLICATION: 'ON' };
+      await createOgSweepJob().run(controller(), odd, createExecutionContext());
+      expect(await exists(key)).toBe(false);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('yoloPublicationOf: only "on" turns the switch on', () => {
+    expect(yoloPublicationOf('on')).toBe('on');
+    for (const value of ['off', 'ON', '', undefined, null, 1]) {
+      expect(yoloPublicationOf(value)).toBe('off');
+    }
   });
 });

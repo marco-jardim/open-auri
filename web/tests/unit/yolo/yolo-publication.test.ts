@@ -5,7 +5,8 @@
  */
 import { describe, expect, test, vi } from 'vitest';
 import { NEUTRO } from 'open-auri/catalog';
-import { encodeS1, parseEnvelope } from 'open-auri/share';
+import { decodeS1, encodeS1, parseEnvelope } from 'open-auri/share';
+import { classifiedCurve } from '#lib/gate-verdicts.ts';
 import {
 	ackWaived,
 	curveBadge,
@@ -155,6 +156,14 @@ describe('library merge', () => {
 		expect((await mergeBatches(plain)).map((batch) => batch.length)).toEqual([20, 20, 1]);
 	});
 
+	test('the weight is the gate runs of the classification, not its class', () => {
+		for (const curve of [yoloCurve, rejectedCurve, neutral]) {
+			const s1 = encodeS1(curve);
+			const decoded = decodeS1(s1);
+			expect(mergeWeight({ s1 })).toBe(classifiedCurve(decoded.bands, decoded.preampDb).gateRuns);
+		}
+	});
+
 	test('the weights never block the page: one task per item, or the worker', async () => {
 		const yoloS1 = encodeS1(yoloCurve);
 		const plainS1 = encodeS1(neutral);
@@ -176,8 +185,8 @@ describe('library merge', () => {
 		// Through the worker (`classify`): no main-thread classification at all.
 		const classify = vi.fn<MergeClassify>(async (curve) =>
 			curve.bands[0]?.kind === 'HP'
-				? { class: 'yolo', waived: [], reasons: [] }
-				: { class: 'standard', waived: [], reasons: [] }
+				? { classification: { class: 'yolo', waived: [], reasons: [] }, gateRuns: 2 }
+				: { classification: { class: 'standard', waived: [], reasons: [] }, gateRuns: 1 }
 		);
 		const batches = await mergeBatches(items, { classify });
 		expect(batches.flat()).toEqual(items);

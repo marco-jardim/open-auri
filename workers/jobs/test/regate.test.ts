@@ -4,6 +4,9 @@
 import { createExecutionContext, createScheduledController } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
+import { NEUTRAL_BANDS } from 'open-auri/dsp';
+import { gateForWrite } from 'open-auri/safety';
+import { curveId, encodeS1 } from 'open-auri/share';
 import { gateVersion, regateStale } from '../../../web/src/lib/server/social/gate.ts';
 import {
   getCurve,
@@ -39,6 +42,61 @@ async function seedStaleCurve(): Promise<string> {
       levelDb: -3,
     },
     // Oldest first: an early creation time puts it at the head of the stale list.
+    1,
+  );
+  if (!saved.ok) throw new Error(`seed failed: ${saved.code}`);
+  return id;
+}
+
+type Curve = Parameters<typeof encodeS1>[0];
+type Band = Curve['bands'][number];
+
+/** Two random bytes (no modulo: callers mask them to a power-of-two range). */
+function bytes(): [number, number] {
+  const [a = 0, b = 0] = crypto.getRandomValues(new Uint8Array(2));
+  return [a, b];
+}
+
+function neutralWith(bands: readonly Band[], preampDb: number): Curve {
+  return { bands: NEUTRAL_BANDS.map((neutral, i) => bands[i] ?? neutral) as Band[], preampDb };
+}
+
+const YOLO_GAINS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2];
+
+/**
+ * A YOLO curve: one small PK boost above 16 kHz (`d7:pk-boost-above-16k`, waivable) with every
+ * hard check far inside the limits. Frequency 16200–17223 Hz and gain on a grid: practically
+ * unique, every value equally likely.
+ */
+function yoloCurve(): Curve {
+  const [a, b] = bytes();
+  const freqHz = 16_200 + (((a << 8) | b) & 1023);
+  const gainDb = YOLO_GAINS[b & 7] ?? 1;
+  return neutralWith([{ kind: 'PK', freqHz, gainDb, qFactor: 1 }], -7.5);
+}
+
+/** A curve every profile refuses: two +12 dB peaks at a 0 dB preamp (`e:output-audible`, hard). */
+function hardCurve(): Curve {
+  const [a, b] = bytes();
+  const peak = (freqHz: number): Band => ({ kind: 'PK', freqHz, gainDb: 12, qFactor: 1 });
+  return neutralWith([peak(800 + (a << 3)), peak(3000 + (b << 2))], 0);
+}
+
+/** Caches `curve` under an old gate version (as standard, so the re-gate changes its verdict). */
+async function seedStale(curve: Curve): Promise<string> {
+  const s1 = encodeS1(curve);
+  const id = await curveId(s1);
+  const saved = await saveCurveGate(
+    env.DB,
+    {
+      id,
+      s1,
+      canonKey: `regate-runs;${id}`,
+      gateVer: 'v0:stale',
+      gateOk: true,
+      gateReasons: [],
+      levelDb: null,
+    },
     1,
   );
   if (!saved.ok) throw new Error(`seed failed: ${saved.code}`);
@@ -103,6 +161,41 @@ describe('regate job', () => {
     const result = await regateStale(env.DB, REGATE_LIMIT, Date.now(), { budgetMs: 0 });
     expect(result).toEqual({ checked: 0, changed: 0, timedOut: true });
     expect((await getCurve(env.DB, id))?.gateVer).toBe('v0:stale');
+  });
+
+  it('counts every gate run: a YOLO curve is exactly 2, a hard rejection exactly 1', async () => {
+    const yolo = await seedStale(yoloCurve());
+    const hard = await seedStale(hardCurve());
+    let runs = 0;
+    const gate: typeof gateForWrite = (bands, preampDb, options) => {
+      runs += 1;
+      return gateForWrite(bands, preampDb, options);
+    };
+    const only =
+      (id: string): typeof listCurvesWithStaleGate =>
+      async (db, version, limit) =>
+        (await listCurvesWithStaleGate(db, version, Math.max(limit ?? 0, 1000))).filter(
+          (record) => record.id === id,
+        );
+
+    // The standard profile, then the YOLO profile on the same snapshot: both through `gate`.
+    expect(await regateStale(env.DB, 50, Date.now(), { gate, list: only(yolo) })).toEqual({
+      checked: 1,
+      changed: 1,
+    });
+    expect(runs).toBe(2);
+    expect(await getCurve(env.DB, yolo)).toMatchObject({ gateOk: false, gateYolo: true });
+    expect((await getCurve(env.DB, yolo))?.gateReasons).toContain('d7:pk-boost-above-16k');
+
+    // A hard reason: no YOLO run at all.
+    runs = 0;
+    expect(await regateStale(env.DB, 50, Date.now(), { gate, list: only(hard) })).toEqual({
+      checked: 1,
+      changed: 1,
+    });
+    expect(runs).toBe(1);
+    expect(await getCurve(env.DB, hard)).toMatchObject({ gateOk: false, gateYolo: false });
+    expect((await getCurve(env.DB, hard))?.gateReasons).toContain('e:output-audible');
   });
 
   it('updates stale verdicts to the current gate version and is idempotent', async () => {

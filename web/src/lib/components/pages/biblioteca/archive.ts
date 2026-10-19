@@ -6,8 +6,31 @@ import type { LibraryItem } from '#lib/state/library.svelte.ts';
 import type { gateForWrite } from 'open-auri/safety';
 import { curveClassification, type CurveClassification } from '#lib/gate-verdicts.ts';
 import type { CurveBadge } from '#lib/components/yolo/yolo-curve.ts';
+import { hasExperimental, hasUltrasonic } from '#lib/components/pages/curva/model.ts';
+import { LAYER_PARAM } from '#lib/components/pages/curva/layers.ts';
 
 export type GateResult = ReturnType<typeof gateForWrite>;
+
+/**
+ * Whether a curve opens only in the editor's Engenharia layer: it has HS/LP/HP or a band above
+ * 20 kHz, which every other layer refuses (curva/io.ts `admit`: `experimental-layer`,
+ * `ultrasonic-layer`).
+ */
+export function needsEngineering(curve: Pick<CurveData, 'bands'>): boolean {
+	return hasExperimental(curve.bands) || hasUltrasonic(curve.bands);
+}
+
+/**
+ * The share link of a tape (`presetUrl`, `/#p=<S1>`), opened in Engenharia (`?camada=engenharia`,
+ * as the shared-curve YOLO link does) when the tape needs it (`needsEngineering`); otherwise the
+ * link is returned as it is. Used by the QR code, the link and the exported card alike.
+ */
+export function tapeShareUrl(presetLink: string, curve: Pick<CurveData, 'bands'>): string {
+	if (!needsEngineering(curve)) return presetLink;
+	const url = new URL(presetLink);
+	url.searchParams.set(LAYER_PARAM, 'engenharia');
+	return url.href;
+}
 export const ANALYSIS_GRID = Object.freeze(logGrid(601));
 
 export type Tag = 'bass' | 'bright' | 'dark' | 'lean' | 'flat';

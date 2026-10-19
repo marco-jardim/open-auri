@@ -12,7 +12,7 @@
 // Keys never contain a raw IP or e-mail: only keyed hashes (iphash.ts), user ids and route groups.
 // The key builders enforce that.
 import type { D1Database, D1Result, RateLimit } from '@cloudflare/workers-types';
-import { batch, sql, type BoundStatement } from '../db.ts';
+import { batch, run, sql, type BoundStatement } from '../db.ts';
 import { isKeyedHash } from './iphash.ts';
 import { TURNSTILE_ACTIONS } from './turnstile.ts';
 
@@ -108,10 +108,7 @@ export async function slidingWindowLimit(
 	const nowSeconds = now.getTime() / 1000;
 	const statements: BoundStatement[] = [];
 	const windows = rules.map((rule) => {
-		if (!Number.isInteger(rule.windowSeconds) || rule.windowSeconds < 1) {
-			throw new RangeError('windowSeconds must be a positive integer');
-		}
-		const start = Math.floor(nowSeconds / rule.windowSeconds) * rule.windowSeconds;
+		const start = windowStartOf(nowSeconds, rule.windowSeconds);
 		statements.push(
 			rule.peek
 				? sql(
@@ -158,6 +155,72 @@ export async function slidingWindowLimit(
 		}
 	}
 	return { ok: true };
+}
+
+/** Start (epoch seconds) of the fixed window of `windowSeconds` that contains `nowSeconds`. */
+function windowStartOf(nowSeconds: number, windowSeconds: number): number {
+	if (!Number.isInteger(windowSeconds) || windowSeconds < 1) {
+		throw new RangeError('windowSeconds must be a positive integer');
+	}
+	return Math.floor(nowSeconds / windowSeconds) * windowSeconds;
+}
+
+/** One unit counted by {@link takeWindowSlot}: the counter row it incremented. */
+export interface WindowSlot {
+	readonly key: string;
+	readonly windowStart: number;
+}
+
+export type SlotOutcome =
+	| { ok: true; slot: WindowSlot }
+	| { ok: false; reason: 'limited'; retryAfter: number }
+	| { ok: false; reason: 'unavailable' };
+
+/**
+ * Takes one unit of `rule` BEFORE the action it guards, atomically: the increment and the read
+ * of the count run in one D1 batch (slidingWindowLimit without `peek`), so whatever the
+ * interleaving, N concurrent takers never hold more than `limit` units of the sliding estimate (a
+ * peek before the action and a count after it let all N through). A refused take is given back at
+ * once, so only taken slots count. The caller gives a taken slot back with
+ * {@link releaseWindowSlot} when the action fails, so a failed action consumes nothing. Under
+ * concurrency a take may be refused while another taker's unit is still being given back: the
+ * limit errs on the side of refusing, never of exceeding.
+ */
+export async function takeWindowSlot(
+	db: D1Database,
+	rule: Omit<WindowRule, 'peek'>,
+	now: Date = new Date()
+): Promise<SlotOutcome> {
+	const slot: WindowSlot = {
+		key: `${rule.key}:${rule.windowSeconds}`,
+		windowStart: windowStartOf(now.getTime() / 1000, rule.windowSeconds)
+	};
+	const outcome = await slidingWindowLimit(db, [{ ...rule, peek: false }], now);
+	if (outcome.ok) return { ok: true, slot };
+	if (outcome.reason === 'limited') await releaseWindowSlot(db, slot);
+	return outcome;
+}
+
+/**
+ * Gives back a slot of {@link takeWindowSlot} (the window it was counted in, even if a new window
+ * started since). Never below zero. False when D1 is unavailable (the unit then stays counted
+ * until its window expires: the limit errs on the side of refusing).
+ */
+export async function releaseWindowSlot(db: D1Database, slot: WindowSlot): Promise<boolean> {
+	try {
+		await run(
+			sql(
+				db,
+				'UPDATE rate_limit_counters SET count = count - 1 ' +
+					'WHERE key = ? AND window_start = ? AND count > 0',
+				slot.key,
+				slot.windowStart
+			)
+		);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 // --- Authentication rules (plan T3.5 item 6) -------------------------------------------------

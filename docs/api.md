@@ -268,17 +268,32 @@ perfil). Uma curva YOLO sempre pode ser salva como privada. Para deixá-la visí
 `YOLO_PUBLICATION` = `on` (padrão `off`: 403 `YOLO_PUBLICATION_OFF`); conta com pelo menos 72 h
 (403 `FORBIDDEN`, `details.reason` = `"account-age"`); `"acknowledge": "yolo"` no corpo (409
 `YOLO_ACK_REQUIRED` com `details.waived`, os códigos dispensados); e no máximo 5 reconhecimentos
-por 24 h móveis (429 `QUOTA_EXCEEDED`). O reconhecimento é gravado no mesmo lote da escrita e só
-conta na cota diária depois que a escrita deu certo (um 409 `HEAD_MOVED` ou outra falha não gasta
-reconhecimento). Se a classe da curva já está no cache do gate, as regras YOLO (403, 409, 429)
-respondem antes de contar a tentativa de gate.
+por 24 h móveis (429 `QUOTA_EXCEEDED`). O reconhecimento é gravado no mesmo lote da escrita. A
+vaga da cota é reservada de forma atômica logo antes da escrita, então pedidos simultâneos nunca
+passam de 5; se a escrita falha (um 409 `HEAD_MOVED`, outro erro), a vaga é devolvida, e um 429
+também não gasta vaga. Se a classe da curva já está no cache do gate, as regras YOLO (403, 409,
+429) respondem antes de contar a tentativa de gate.
+
+Concorrência: as regras YOLO dependem da classe do head e da visibilidade da linhagem, e as duas
+podem mudar entre a leitura e a escrita (uma versão nova e uma troca de visibilidade ao mesmo
+tempo). Cada escrita só vale se a linhagem ainda está no estado que a decisão leu: uma versão YOLO
+só entra se a visibilidade não mudou; abrir a linhagem (visibilidade ou restauração) só vale se o
+head classificado ainda é o head (a restauração confere a visibilidade também). Se o estado mudou,
+nada é gravado (nem o reconhecimento, e a vaga volta), e o servidor relê a linhagem e reaplica as
+regras ao estado novo, até 3 vezes; depois disso, 409 `HEAD_MOVED`. Por exemplo, uma versão YOLO
+enviada sem `acknowledge` enquanto a linhagem passa de privada a pública recebe 409
+`YOLO_ACK_REQUIRED` e não entra. Assim uma linhagem nunca fica visível a terceiros com um head YOLO
+que o dono não reconheceu.
 
 Interruptor nas leituras: com `YOLO_PUBLICATION` desligado, nenhum head YOLO é servido a quem não
-é o dono (nem a admin), reconhecido ou não: `GET /curves/:id`, `GET /lineages/:id`, `/c/:id` e
+é o dono, reconhecido ou não: `GET /curves/:id`, `GET /lineages/:id`, `/c/:id` e
 `/og/:id.png` respondem 404 (uma lápide YOLO também é 404, não 410), `feed?yolo=only` fica vazio,
 e fork, favorito, atividade, compartilhamento e denúncia tratam a linhagem como inexistente. O dono
 continua lendo a própria linhagem. Ligado de novo, os heads reconhecidos voltam a abrir (o
-reconhecimento continua gravado). Packs nunca mostram linhagens YOLO de terceiros.
+reconhecimento continua gravado). Packs nunca mostram linhagens YOLO de terceiros. As rotas
+públicas leem sempre como visitante ou como o usuário da sessão, nunca com o papel de admin: só as
+leituras internas do painel de moderação (`/admin/moderacao`, a fila e as decisões) veem qualquer
+linhagem, YOLO ou não, para poder moderá-la.
 
 - 201 `{ lineageId, versionId, curveId, yolo }`. Pública ou não listada aquece a imagem OG em
   segundo plano.
@@ -315,8 +330,10 @@ gate/24 h da publicação. Uma versão YOLO numa linhagem não privada segue as 
 
 - 201 `{ lineageId, versionId, curveId, yolo }`.
 - 404 (não é dono ou não existe); 409 `HEAD_MOVED` (o pai não é mais o head: recarregue e
-  reaplique); 409 `CONFLICT` (linhagem retirada); 422 `INVALID_CURVE` / `GATE_REJECTED`; 429
-  `QUOTA_EXCEEDED`.
+  reaplique; também quando a visibilidade da linhagem mudou 3 vezes seguidas durante o envio de uma
+  versão YOLO); 409 `YOLO_ACK_REQUIRED` (inclusive quando a linhagem ficou não privada durante o
+  envio: a versão YOLO não entra sem `acknowledge`); 409 `CONFLICT` (linhagem retirada); 422
+  `INVALID_CURVE` / `GATE_REJECTED`; 429 `QUOTA_EXCEEDED`.
 
 ### `POST /api/v1/lineages/:id/fork`
 
@@ -346,14 +363,17 @@ não muda. O head é reavaliado no gate antes de voltar a aparecer; um head YOLO
 privada segue as regras YOLO com `YOLO_PUBLICATION` ligado. Desligado, essa linhagem volta como
 **privada** (sem reconhecimento), no mesmo comando: a resposta traz a `visibility` efetiva. 200
 com o estado `{ lineageId, status, visibility, moderation }`; 404; 403 `FORBIDDEN`; 409
-`YOLO_ACK_REQUIRED`; 422 `GATE_REJECTED`; 429 `QUOTA_EXCEEDED`.
+`YOLO_ACK_REQUIRED`; 409 `HEAD_MOVED` (head ou visibilidade mudaram 3 vezes seguidas durante o
+pedido, ver "Concorrência" acima); 422 `GATE_REJECTED`; 429 `QUOTA_EXCEEDED`.
 
 ### `PUT /api/v1/lineages/:id/visibility`
 
 Dono, verificado; corpo `{ "visibility": "private" | "unlisted" | "public", "acknowledge"?: "yolo" }`.
-Abrir a linhagem reavalia o head no gate; um head YOLO segue as regras YOLO. 200 com o estado; 404;
-403 `YOLO_PUBLICATION_OFF` / `FORBIDDEN`; 409 `CONFLICT` / `YOLO_ACK_REQUIRED`; 422
-`GATE_REJECTED`; 429 `QUOTA_EXCEEDED`.
+Abrir a linhagem reavalia o head no gate; um head YOLO segue as regras YOLO. Se uma versão nova
+vira o head antes da escrita, as regras valem para o head novo (ver "Concorrência" acima). 200 com
+o estado; 404; 403 `YOLO_PUBLICATION_OFF` / `FORBIDDEN`; 409 `CONFLICT` / `YOLO_ACK_REQUIRED`; 409
+`HEAD_MOVED` (o head mudou 3 vezes seguidas durante o pedido); 422 `GATE_REJECTED`; 429
+`QUOTA_EXCEEDED`.
 
 ## Favoritos, atividade e público
 
@@ -575,10 +595,15 @@ Verificado; Turnstile `report`; 30 por dia; corpo até 4 KiB.
   conteúdo ou perfil); 409 `DUPLICATE` (segunda denúncia do mesmo alvo); 400 `INVALID_BODY`.
 - Ocultação automática: quando 3 contas distintas, verificadas, não banidas e com 3 dias ou mais
   denunciam a mesma linhagem ou pack ainda visível, o alvo passa a `auto_hidden`, com registro de
-  auditoria do sistema. Nunca desfaz uma decisão de administrador. A resposta não revela a
-  ocultação. Perfis não são ocultados automaticamente.
+  auditoria do sistema. Uma linhagem cujo head é YOLO é ocultada já com 2 dessas contas. O limite
+  vale para o head que a linhagem tem no momento da ocultação (condição da própria escrita, no
+  mesmo lote do registro de auditoria): se o dono publicou uma versão padrão nesse meio tempo, valem
+  3 contas. O registro traz `reporters`, o `threshold` aplicado e `yolo: true` quando foi o limite
+  YOLO. Nunca desfaz uma decisão de administrador. A resposta não revela a ocultação. Perfis não
+  são ocultados automaticamente.
 - A revisão (ocultar, restaurar, remover, dispensar, banir o autor, curadoria) acontece em
-  `/admin`, fora da v1, com auditoria e sessão recente para remover e banir.
+  `/admin`, fora da v1, com auditoria e sessão recente para remover e banir. A curadoria recusa um
+  head YOLO, conferido de novo na própria escrita: recusada, nada muda e nada é registrado.
 
 ## S6: preferências anônimas
 
@@ -731,8 +756,11 @@ Classe do cartão na URL: `?y=1` pede o cartão YOLO (as meta tags de `/c/:id` o
 curva YOLO); sem ele, o cartão padrão. Se a URL não nomeia a classe atual da versão (`?y=1` numa
 versão padrão, ou uma versão YOLO sem `?y=1`), a resposta é 302 para a URL da classe certa, com
 `cache-control: no-store`, antes de ler o R2 ou renderizar: um cache indexado pela URL (navegador,
-CDN, robô de rede social) nunca guarda o cartão da outra classe. Uma versão YOLO com
-`YOLO_PUBLICATION` desligado é 404.
+CDN, robô de rede social) nunca guarda o cartão da outra classe. A URL de destino é a mesma, só com
+`y` trocado por `1` (no mesmo lugar) ou removido; os outros parâmetros ficam como estavam, na mesma
+ordem. Uma versão YOLO com `YOLO_PUBLICATION` desligado é 404, e o job `og-sweep` apaga as imagens
+de versões YOLO enquanto ele está desligado (ligado, mantém as reconhecidas): o `YOLO_PUBLICATION`
+do Worker de jobs precisa ser igual ao do Worker web.
 
 ### `GET /c/<id>?s=<shareId>`
 

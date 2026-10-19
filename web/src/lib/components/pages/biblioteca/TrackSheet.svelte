@@ -21,7 +21,14 @@
 	import { m } from '#lib/paraglide/messages.js';
 	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
 	import { presetUrl, qrSvg } from '#lib/qr/index.ts';
-	import { envelopeView, number, type Locale, type Tape, type GateResult } from './archive.ts';
+	import {
+		envelopeView,
+		number,
+		tapeShareUrl,
+		type Locale,
+		type Tape,
+		type GateResult
+	} from './archive.ts';
 	import { classOf, exitReason } from '#lib/components/pages/curva/yolo.ts';
 	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
@@ -78,9 +85,10 @@
 	const outputNode = $derived(
 		metering && audible ? (side === 'A' ? audible.a.output : audible.b.output) : null
 	);
+	/** QR and link: in Engenharia for HS/LP/HP or a band above 20 kHz (`tapeShareUrl`). */
 	const share = $derived.by(() => {
 		try {
-			const url = presetUrl(origin, code);
+			const url = tapeShareUrl(presetUrl(origin, code), tape);
 			return { url, image: `data:image/svg+xml,${encodeURIComponent(qrSvg(url))}` };
 		} catch (error) {
 			console.error('Biblioteca QR generation failed', error);

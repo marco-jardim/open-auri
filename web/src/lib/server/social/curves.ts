@@ -23,11 +23,22 @@
 // restore) needs, in this order: the kill switch on (`YOLO_PUBLICATION`, default off: 403
 // YOLO_PUBLICATION_OFF), an account at least 72 h old (403 FORBIDDEN, `details.reason:
 // 'account-age'`), `acknowledge: 'yolo'` in the body (409 YOLO_ACK_REQUIRED with
-// `details.waived`) and a free slot of YOLO_ACKS_DAILY_MAX per sliding day (429 QUOTA_EXCEEDED,
-// checked without counting); the acknowledgement row is then written in the same batch as the
-// write, and the slot is counted only once that batch succeeded. Reads follow the same switch:
+// `details.waived`) and a slot of YOLO_ACKS_DAILY_MAX per sliding day (429 QUOTA_EXCEEDED). The
+// slot is taken atomically right before the write (writeWithAckSlot: the cap holds under
+// concurrency) and given back when the write fails (a failed write consumes nothing); the
+// acknowledgement row is written in the same batch as the write. Reads follow the same switch:
 // while it is off, no YOLO head is served to anyone but its owner (curve, history, fork source),
 // and a restore leaves a non-private YOLO lineage private (see restoreCurve).
+//
+// The YOLO decision depends on two pieces of lineage state, its head's class and its visibility,
+// and both can change between the read and the write (an append vs a visibility change). Every
+// write applies only while the lineage still has the state its decision used: an append of a YOLO
+// curve only while the lineage keeps the visibility read (appendVersion `expectedVisibility`), an
+// opening visibility change or a restore only while the head classified is still the head (and,
+// for a restore, the visibility read). When the state moved, the batch writes nothing (no
+// acknowledgement either, and the slot is given back) and the service reads the lineage again and
+// re-applies the rules, up to STATE_ATTEMPTS times (then 409 HEAD_MOVED). So a lineage never
+// ends visible to others with a YOLO head its owner did not acknowledge for that visibility.
 import type { D1Database } from '@cloudflare/workers-types';
 import type { gateForWrite } from 'open-auri/safety';
 import { curveId, decodeS1, envelopeFormat, S1Error, validateEnvelope } from 'open-auri/share';
@@ -35,8 +46,11 @@ import { z } from 'zod';
 import { ApiError, CACHE_PUBLIC_60, cached, json } from '#lib/server/api/index.ts';
 import {
 	rateLimitKey,
+	releaseWindowSlot,
 	slidingWindowLimit,
-	type WindowRule
+	takeWindowSlot,
+	type WindowRule,
+	type WindowSlot
 } from '#lib/server/security/ratelimit.ts';
 import {
 	recordGateRejection,
@@ -85,6 +99,7 @@ import {
 	type ModerationState,
 	type PageRequest,
 	type PublicCounts,
+	type RepoResult,
 	type SocialErrorCode,
 	type VersionInput,
 	type VersionLabels,
@@ -117,6 +132,13 @@ const YOLO_ACK_GROUP = 'curves.yolo.ack';
 
 /** Minimum account age to open a YOLO lineage to others: the reporter age of moderation (72 h). */
 export const YOLO_MIN_ACCOUNT_AGE_MS = MIN_REPORTER_AGE_MS;
+
+/**
+ * Writes of an append, a visibility change or a restore whose lineage state (head, visibility)
+ * moved under them before 409 HEAD_MOVED (see the file header): each new attempt reads the lineage
+ * again and re-applies the YOLO rules.
+ */
+export const STATE_ATTEMPTS = 3;
 
 /** Kill switch of YOLO publication (`YOLO_PUBLICATION`): `off` (default) = private only. */
 export type { YoloPublication };
@@ -187,6 +209,11 @@ export interface CurveDeps {
 	now?: number;
 	/** Analytics Engine dataset (T5.2): gate rejections of the publication path, by reason. */
 	metrics?: MetricsDataset | null;
+	/**
+	 * Tests only: awaited between the reads an append, a visibility change or a restore relied on
+	 * and its write (attempt 1, then once per retry), to run a concurrent request in that window.
+	 */
+	beforeWrite?: (attempt: number) => Promise<void>;
 }
 
 /** Credit a CC-BY 4.0 fork must keep (null for CC0 sources). */
@@ -285,8 +312,8 @@ interface Prepared extends StoredClass {
 	curve: CurveInput;
 	version: VersionInput;
 	/**
-	 * The write opens a YOLO head to others (yoloOpening passed): the batch writes the
-	 * acknowledgement, and it is counted once the batch succeeded (recordYoloAck).
+	 * The write opens a YOLO head to others (yoloRules passed): it takes an acknowledgement slot
+	 * and its batch writes the acknowledgement (writeWithAckSlot).
 	 */
 	ack: boolean;
 }
@@ -363,56 +390,86 @@ function yoloOf(deps: CurveDeps): YoloPublication {
 	return deps.yoloPublication ?? 'off';
 }
 
-/** The sliding-day rule of the YOLO acknowledgements; `peek` checks without counting. */
-function yoloAckRule(userId: string, peek: boolean): WindowRule {
+/** The sliding-day rule of the YOLO acknowledgements (group `curves.yolo.ack`). */
+function yoloAckRule(userId: string): Omit<WindowRule, 'peek'> {
 	return {
 		key: rateLimitKey.user(YOLO_ACK_GROUP, userId),
 		limit: YOLO_ACKS_DAILY_MAX,
-		windowSeconds: DAY_MS / 1000,
-		peek
+		windowSeconds: DAY_MS / 1000
 	};
 }
 
-/**
- * Checks, WITHOUT counting, that one more YOLO acknowledgement fits: 429 QUOTA_EXCEEDED once the
- * user made YOLO_ACKS_DAILY_MAX of them over the sliding day. Fails closed (503) when D1 is
- * unavailable. The acknowledgement is counted only once its write succeeded (recordYoloAck), so
- * a refused or failed write (HEAD_MOVED, a repository error) never spends a slot.
- */
-async function assertYoloAckSlot(db: D1Database, userId: string, now: number): Promise<void> {
-	const outcome = await slidingWindowLimit(db, [yoloAckRule(userId, true)], new Date(now));
-	if (outcome.ok) return;
-	if (outcome.reason === 'unavailable') throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE');
-	throw new ApiError(
+function yoloAckQuotaExceeded(retryAfter: number): ApiError {
+	return new ApiError(
 		429,
 		'QUOTA_EXCEEDED',
 		{ limit: YOLO_ACKS_DAILY_MAX, group: YOLO_ACK_GROUP },
-		{ headers: { 'retry-after': String(outcome.retryAfter) } }
+		{ headers: { 'retry-after': String(retryAfter) } }
 	);
 }
 
 /**
- * Counts one YOLO acknowledgement whose write is committed. Never throws: the write stands (a D1
- * outage here is logged, without ids; two concurrent writes that both passed the check may end
- * one slot above the limit, and the next one is refused).
+ * Checks, WITHOUT counting, that one more YOLO acknowledgement fits (429 QUOTA_EXCEEDED once the
+ * user holds YOLO_ACKS_DAILY_MAX of them over the sliding day; 503 when D1 is unavailable). Only
+ * an early answer, before a gate attempt is counted (prepare): the cap itself is enforced by the
+ * atomic take of writeWithAckSlot.
  */
-async function recordYoloAck(db: D1Database, userId: string, now: number): Promise<void> {
-	const outcome = await slidingWindowLimit(db, [yoloAckRule(userId, false)], new Date(now));
-	if (!outcome.ok && outcome.reason === 'unavailable') {
-		console.error(JSON.stringify({ event: 'curves.yolo_ack_count', error: 'unavailable' }));
+async function peekYoloAckSlot(db: D1Database, userId: string, now: number): Promise<void> {
+	const rule: WindowRule = { ...yoloAckRule(userId), peek: true };
+	const outcome = await slidingWindowLimit(db, [rule], new Date(now));
+	if (outcome.ok) return;
+	if (outcome.reason === 'unavailable') throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE');
+	throw yoloAckQuotaExceeded(outcome.retryAfter);
+}
+
+/** Gives an acknowledgement slot back. Never throws: a D1 outage is logged (no ids). */
+async function giveBackYoloAckSlot(db: D1Database, slot: WindowSlot): Promise<void> {
+	if (!(await releaseWindowSlot(db, slot))) {
+		console.error(JSON.stringify({ event: 'curves.yolo_ack_release', error: 'unavailable' }));
 	}
 }
 
 /**
- * The YOLO rules of a write whose resulting head (`head`) will have `visibility`: nothing for a
- * standard head or a private lineage (false: no acknowledgement to write). A YOLO head shown to
- * others needs the kill switch on (403 YOLO_PUBLICATION_OFF), an account at least
- * YOLO_MIN_ACCOUNT_AGE_MS old (403 FORBIDDEN, `reason: 'account-age'`), `acknowledge: 'yolo'`
- * (409 YOLO_ACK_REQUIRED with `details.waived`) and a free YOLO_ACKS_DAILY_MAX slot (429, checked
- * without counting); then true: the caller writes the acknowledgement in the same batch and,
- * once the batch succeeded, counts it (recordYoloAck).
+ * Runs `write`, holding one YOLO acknowledgement slot when `ack` is set (the write opens a YOLO
+ * head to others and its batch writes the acknowledgement). The slot is taken BEFORE the write and
+ * atomically (takeWindowSlot: the increment and the check in one D1 batch), so N concurrent
+ * openings never hold more than YOLO_ACKS_DAILY_MAX per sliding day: past it, 429 QUOTA_EXCEEDED
+ * and nothing is written (503 when D1 is unavailable). A write that fails, with a repository error
+ * (HEAD_MOVED included) or a throw, gives its slot back: a failed write consumes nothing.
  */
-async function yoloOpening(
+async function writeWithAckSlot<T>(
+	db: D1Database,
+	userId: string,
+	now: number,
+	ack: boolean,
+	write: () => Promise<RepoResult<T>>
+): Promise<RepoResult<T>> {
+	if (!ack) return write();
+	const taken = await takeWindowSlot(db, yoloAckRule(userId), new Date(now));
+	if (!taken.ok) {
+		if (taken.reason === 'unavailable') throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE');
+		throw yoloAckQuotaExceeded(taken.retryAfter);
+	}
+	let result: RepoResult<T>;
+	try {
+		result = await write();
+	} catch (error) {
+		await giveBackYoloAckSlot(db, taken.slot);
+		throw error;
+	}
+	if (!result.ok) await giveBackYoloAckSlot(db, taken.slot);
+	return result;
+}
+
+/**
+ * The YOLO rules of a write whose resulting head (`head`) will have `visibility`, the daily quota
+ * aside: false for a standard head or a private lineage (nothing to acknowledge). A YOLO head shown
+ * to others needs the kill switch on (403 YOLO_PUBLICATION_OFF), an account at least
+ * YOLO_MIN_ACCOUNT_AGE_MS old (403 FORBIDDEN, `reason: 'account-age'`) and `acknowledge: 'yolo'`
+ * (409 YOLO_ACK_REQUIRED with `details.waived`); then true: the write takes a YOLO_ACKS_DAILY_MAX
+ * slot and writes the acknowledgement in its batch (writeWithAckSlot).
+ */
+async function yoloRules(
 	db: D1Database,
 	userId: string,
 	head: StoredClass,
@@ -422,7 +479,7 @@ async function yoloOpening(
 	deps: CurveDeps
 ): Promise<boolean> {
 	if (!head.yolo || visibility === 'private') return false;
-	if ((deps.yoloPublication ?? 'off') !== 'on') throw new ApiError(403, 'YOLO_PUBLICATION_OFF');
+	if (yoloOf(deps) !== 'on') throw new ApiError(403, 'YOLO_PUBLICATION_OFF');
 	if (!(await accountCreatedBy(db, userId, now - YOLO_MIN_ACCOUNT_AGE_MS))) {
 		throw new ApiError(403, 'FORBIDDEN', {
 			reason: 'account-age',
@@ -432,7 +489,6 @@ async function yoloOpening(
 	if (acknowledge !== 'yolo') {
 		throw new ApiError(409, 'YOLO_ACK_REQUIRED', { waived: [...head.waived] });
 	}
-	await assertYoloAckSlot(db, userId, now);
 	return true;
 }
 
@@ -528,10 +584,11 @@ async function cachedClass(db: D1Database, s1: string): Promise<StoredClass | nu
  * CC-BY 4.0 fork must keep (422 INVALID_CURVE `env:enum`), then the gate attempt quota and the
  * server classification through checkPublishable (422 GATE_REJECTED with `details.reasons` and
  * `details.hard` for a curve that passes neither profile; nothing is published), then the YOLO
- * rules for `rules.visibility` (yoloOpening). When the class is already cached under the current
- * gate version, the YOLO rules (403, 409 YOLO_ACK_REQUIRED, 429) answer first, so a refused
- * opening spends no gate attempt (the usual retry after a 409 is then cached). The YOLO
- * acknowledgement is only checked here; the caller counts it once its write succeeded.
+ * rules for `rules.visibility` (yoloRules). When the class is already cached under the current
+ * gate version, the YOLO rules (403, 409 YOLO_ACK_REQUIRED, and the daily quota read without
+ * counting: 429) answer first, so a refused opening spends no gate attempt (the usual retry after
+ * a 409 is then cached). No acknowledgement slot is taken here: the caller's write takes it
+ * atomically (writeWithAckSlot) and gives it back if it fails.
  */
 async function prepare(
 	db: D1Database,
@@ -553,9 +610,11 @@ async function prepare(
 		throw invalidCurve(['env:enum']);
 	}
 	const open = (head: StoredClass) =>
-		yoloOpening(db, userId, head, rules.visibility, rules.acknowledge, now, deps);
+		yoloRules(db, userId, head, rules.visibility, rules.acknowledge, now, deps);
 	const known = await cachedClass(db, envelope.code);
 	const early = known === null ? null : await open(known);
+	// Early answer only: the write takes the slot atomically.
+	if (early === true) await peekYoloAckSlot(db, userId, now);
 	await countGateAttempt(db, userId, now);
 	const verdict = await checkPublishable(db, envelope.code, now, gateOptions(deps));
 	if (!verdict.ok) {
@@ -774,23 +833,51 @@ export async function publishCurve(
 		visibility: body.visibility,
 		acknowledge: body.acknowledge
 	});
-	const result = await publishLineage(db, {
-		lineageId: newId(),
-		ownerUserId: userId,
-		visibility: body.visibility,
-		curve: prepared.curve,
-		version: prepared.version,
-		yoloAck: prepared.ack,
-		now
-	});
+	const result = await writeWithAckSlot(db, userId, now, prepared.ack, () =>
+		publishLineage(db, {
+			lineageId: newId(),
+			ownerUserId: userId,
+			visibility: body.visibility,
+			curve: prepared.curve,
+			version: prepared.version,
+			yoloAck: prepared.ack,
+			now
+		})
+	);
 	if (!result.ok) throw repoError(result.code);
-	if (prepared.ack) await recordYoloAck(db, userId, now);
 	return announce({ ...result.value, curveId: prepared.curve.id, yolo: prepared.yolo }, deps);
+}
+
+/** The test hook between the reads a write relied on and the write (CurveDeps.beforeWrite). */
+async function beforeWrite(deps: CurveDeps, attempt: number): Promise<void> {
+	if (deps.beforeWrite) await deps.beforeWrite(attempt);
+}
+
+/**
+ * The lineage read again after a write whose state moved: still the caller's, still active and
+ * with the same head `parentVersionId` (else 409 CONFLICT / HEAD_MOVED, as on the first read).
+ */
+async function appendTarget(
+	db: D1Database,
+	userId: string,
+	lineageId: string,
+	parentVersionId: string,
+	now: number,
+	deps: CurveDeps
+): Promise<LineageSummary> {
+	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
+	if (lineage.status !== 'active') throw new ApiError(409, 'CONFLICT');
+	if (parentVersionId !== lineage.headVersion) throw new ApiError(409, 'HEAD_MOVED');
+	return lineage;
 }
 
 /**
  * `POST /api/v1/lineages/[id]/versions`: appends a version whose parent must be the current head
- * (409 HEAD_MOVED otherwise; of two concurrent appends with the same parent exactly one wins).
+ * (409 HEAD_MOVED otherwise; of two concurrent appends with the same parent exactly one wins). A
+ * YOLO curve's acknowledgement depends on the lineage's visibility: its batch applies only while
+ * the lineage keeps the visibility read, and when a concurrent visibility change moved it, the
+ * lineage is read again and the YOLO rules re-applied to the visibility it has now (STATE_ATTEMPTS;
+ * the curve is already classified, so no gate run nor gate attempt is spent again).
  */
 export async function appendCurveVersion(
 	db: D1Database,
@@ -800,35 +887,50 @@ export async function appendCurveVersion(
 	deps: CurveDeps = {}
 ): Promise<PublishedInfo> {
 	const now = clockOf(deps);
-	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
-	if (lineage.status !== 'active') throw new ApiError(409, 'CONFLICT');
-	if (body.parentVersionId !== lineage.headVersion) throw new ApiError(409, 'HEAD_MOVED');
+	const first = await appendTarget(db, userId, lineageId, body.parentVersionId, now, deps);
 	await assertQuota(db, userId, now);
 	const prepared = await prepare(db, userId, body.envelope, now, deps, 'version', {
-		visibility: lineage.visibility,
+		visibility: first.visibility,
 		acknowledge: body.acknowledge
 	});
-	const result = await appendVersion(db, {
-		lineageId: lineage.id,
-		ownerUserId: userId,
-		expectedHead: body.parentVersionId,
-		curve: prepared.curve,
-		version: prepared.version,
-		yoloAck: prepared.ack,
-		now
-	});
-	// HEAD_MOVED (or any other failure) spends no acknowledgement slot.
-	if (!result.ok) throw repoError(result.code);
-	if (prepared.ack) await recordYoloAck(db, userId, now);
-	return announce(
-		{
-			lineageId: lineage.id,
-			versionId: result.value.versionId,
-			curveId: prepared.curve.id,
-			yolo: prepared.yolo
-		},
-		deps
-	);
+	let lineage = first;
+	let ack = prepared.ack;
+	for (let attempt = 1; ; attempt++) {
+		const target = lineage;
+		const opening = ack;
+		await beforeWrite(deps, attempt);
+		const result = await writeWithAckSlot(db, userId, now, opening, () =>
+			appendVersion(db, {
+				lineageId: target.id,
+				ownerUserId: userId,
+				expectedHead: body.parentVersionId,
+				// The YOLO rules above relied on this visibility: the batch writes nothing if it moved.
+				...(prepared.yolo ? { expectedVisibility: target.visibility } : {}),
+				curve: prepared.curve,
+				version: prepared.version,
+				yoloAck: opening,
+				now
+			})
+		);
+		if (result.ok) {
+			return announce(
+				{
+					lineageId: target.id,
+					versionId: result.value.versionId,
+					curveId: prepared.curve.id,
+					yolo: prepared.yolo
+				},
+				deps
+			);
+		}
+		// HEAD_MOVED (or any other failure) gave its acknowledgement slot back.
+		if (result.code !== 'head-moved' || !prepared.yolo || attempt >= STATE_ATTEMPTS) {
+			throw repoError(result.code);
+		}
+		// Same parent but the batch refused: the head moved (409 here) or the visibility did.
+		lineage = await appendTarget(db, userId, lineageId, body.parentVersionId, now, deps);
+		ack = await yoloRules(db, userId, prepared, lineage.visibility, body.acknowledge, now, deps);
+	}
 }
 
 /**
@@ -867,22 +969,23 @@ export async function forkCurve(
 		acknowledge: body.acknowledge,
 		...(byLicense ? { license: 'CC-BY-4.0' as const } : {})
 	});
-	const result = await forkLineage(
-		db,
-		view.version.id,
-		{
-			lineageId: newId(),
-			ownerUserId: userId,
-			visibility,
-			curve: prepared.curve,
-			version: prepared.version,
-			yoloAck: prepared.ack,
-			now
-		},
-		yoloOf(deps)
+	const result = await writeWithAckSlot(db, userId, now, prepared.ack, () =>
+		forkLineage(
+			db,
+			view.version.id,
+			{
+				lineageId: newId(),
+				ownerUserId: userId,
+				visibility,
+				curve: prepared.curve,
+				version: prepared.version,
+				yoloAck: prepared.ack,
+				now
+			},
+			yoloOf(deps)
+		)
 	);
 	if (!result.ok) throw repoError(result.code);
-	if (prepared.ack) await recordYoloAck(db, userId, now);
 	const info = announce({ ...result.value, curveId: prepared.curve.id, yolo: prepared.yolo }, deps);
 	return {
 		...info,
@@ -925,7 +1028,8 @@ export async function retractCurve(
  * on; while it is off (YOLO_PUBLICATION, `deps.yoloPublication` absent = 'off') it is restored as
  * PRIVATE in the same statement (nothing to acknowledge), instead of a 403 the owner could not get
  * past (a retracted lineage's visibility cannot be changed first). The answer carries the
- * effective `visibility`.
+ * effective `visibility`. A lineage is restored only while it keeps the head and the visibility
+ * the decision read; otherwise it is read again (STATE_ATTEMPTS, then 409 HEAD_MOVED).
  */
 export async function restoreCurve(
 	db: D1Database,
@@ -935,35 +1039,76 @@ export async function restoreCurve(
 	acknowledge?: Acknowledgement
 ): Promise<LineageState> {
 	const now = clockOf(deps);
-	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
-	let visibility = lineage.visibility;
-	let ackCurveId: string | null = null;
-	if (visibility !== 'private') {
-		const head = await headClassOf(db, lineage, now, deps);
-		if (head.yolo && yoloOf(deps) !== 'on') {
-			visibility = 'private';
-		} else if (await yoloOpening(db, userId, head, visibility, acknowledge, now, deps)) {
-			ackCurveId = head.curveId;
+	for (let attempt = 1; ; attempt++) {
+		const lineage = await ownedLineage(db, lineageId, userId, now, deps);
+		const plan = await restorePlan(db, userId, lineage, acknowledge, now, deps);
+		await beforeWrite(deps, attempt);
+		const result = await writeWithAckSlot(db, userId, now, plan.ackCurveId !== null, () =>
+			restoreLineage(db, lineage.id, userId, now, {
+				...(plan.ackCurveId === null ? {} : { yoloAckCurveId: plan.ackCurveId }),
+				...(plan.visibility === lineage.visibility ? {} : { visibility: plan.visibility }),
+				// The plan relied on both (a private lineage opened meanwhile is planned again).
+				expectedHead: lineage.headVersion,
+				expectedVisibility: lineage.visibility
+			})
+		);
+		if (result.ok) {
+			return {
+				lineageId: lineage.id,
+				status: 'active',
+				visibility: plan.visibility,
+				moderation: lineage.moderation
+			};
 		}
+		if (result.code !== 'head-moved' || attempt >= STATE_ATTEMPTS) throw repoError(result.code);
 	}
-	const result = await restoreLineage(db, lineage.id, userId, now, {
-		...(ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }),
-		...(visibility === lineage.visibility ? {} : { visibility })
-	});
-	if (!result.ok) throw repoError(result.code);
-	if (ackCurveId !== null) await recordYoloAck(db, userId, now);
-	return {
-		lineageId: lineage.id,
-		status: 'active',
-		visibility,
-		moderation: lineage.moderation
-	};
+}
+
+/**
+ * What a restore writes for `lineage` as read: the visibility it keeps (private for a non-private
+ * YOLO head while the kill switch is off) and the head curve to acknowledge (null: none).
+ */
+async function restorePlan(
+	db: D1Database,
+	userId: string,
+	lineage: LineageSummary,
+	acknowledge: Acknowledgement,
+	now: number,
+	deps: CurveDeps
+): Promise<{ visibility: LineageVisibility; ackCurveId: string | null }> {
+	if (lineage.visibility === 'private') return { visibility: 'private', ackCurveId: null };
+	const head = await headClassOf(db, lineage, now, deps);
+	if (head.yolo && yoloOf(deps) !== 'on') return { visibility: 'private', ackCurveId: null };
+	const opening = await yoloRules(db, userId, head, lineage.visibility, acknowledge, now, deps);
+	return { visibility: lineage.visibility, ackCurveId: opening ? head.curveId : null };
+}
+
+/**
+ * The head curve an opening visibility change acknowledges (null: nothing to acknowledge, a
+ * standard head or `private`): the head re-classified, then the YOLO rules.
+ */
+async function openingAck(
+	db: D1Database,
+	userId: string,
+	lineage: LineageSummary,
+	visibility: LineageVisibility,
+	acknowledge: Acknowledgement,
+	now: number,
+	deps: CurveDeps
+): Promise<string | null> {
+	if (visibility === 'private') return null;
+	const head = await headClassOf(db, lineage, now, deps);
+	return (await yoloRules(db, userId, head, visibility, acknowledge, now, deps))
+		? head.curveId
+		: null;
 }
 
 /**
  * `PUT /api/v1/lineages/[id]/visibility`: owner only. Opening a lineage (unlisted or public)
  * re-classifies its head first (a YOLO head follows the YOLO rules: `acknowledge`); moderation and
- * status are unchanged.
+ * status are unchanged. An opening applies only while the head it classified is still the head: an
+ * append in between (a YOLO version, say) makes it read the lineage again and re-apply the rules
+ * to the new head (STATE_ATTEMPTS, then 409 HEAD_MOVED).
  */
 export async function changeVisibility(
 	db: D1Database,
@@ -974,30 +1119,26 @@ export async function changeVisibility(
 	acknowledge?: Acknowledgement
 ): Promise<LineageState> {
 	const now = clockOf(deps);
-	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
-	let ackCurveId: string | null = null;
-	if (visibility !== 'private') {
-		const head = await headClassOf(db, lineage, now, deps);
-		if (await yoloOpening(db, userId, head, visibility, acknowledge, now, deps)) {
-			ackCurveId = head.curveId;
+	for (let attempt = 1; ; attempt++) {
+		const lineage = await ownedLineage(db, lineageId, userId, now, deps);
+		const ackCurveId = await openingAck(db, userId, lineage, visibility, acknowledge, now, deps);
+		await beforeWrite(deps, attempt);
+		const result = await writeWithAckSlot(db, userId, now, ackCurveId !== null, () =>
+			setLineageVisibility(db, lineage.id, userId, visibility, now, {
+				...(ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }),
+				...(visibility === 'private' ? {} : { expectedHead: lineage.headVersion })
+			})
+		);
+		if (result.ok) {
+			return {
+				lineageId: lineage.id,
+				status: lineage.status,
+				visibility,
+				moderation: lineage.moderation
+			};
 		}
+		if (result.code !== 'head-moved' || attempt >= STATE_ATTEMPTS) throw repoError(result.code);
 	}
-	const result = await setLineageVisibility(
-		db,
-		lineage.id,
-		userId,
-		visibility,
-		now,
-		ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }
-	);
-	if (!result.ok) throw repoError(result.code);
-	if (ackCurveId !== null) await recordYoloAck(db, userId, now);
-	return {
-		lineageId: lineage.id,
-		status: lineage.status,
-		visibility,
-		moderation: lineage.moderation
-	};
 }
 
 // ---- Reads ----------------------------------------------------------------------------------

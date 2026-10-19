@@ -164,7 +164,7 @@ describe('IO refusal and dispatch boundaries', () => {
 
 	test('an invalid curve cannot become a binary or an admitted import', () => {
 		const invalid = { ...neutral, preampDb: 1 };
-		expect(exportBin(invalid)).toMatchObject({ ok: false, error: 'gate' });
+		expect(exportBin(invalid, 'engenharia')).toMatchObject({ ok: false, error: 'gate' });
 		expect(
 			admit({ ...invalid, name: null, bands: [...invalid.bands] }, 'engenharia')
 		).toMatchObject({ ok: false, error: 'gate' });

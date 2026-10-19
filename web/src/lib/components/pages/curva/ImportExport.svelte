@@ -114,7 +114,7 @@
 		);
 	}
 	function onBin() {
-		const result = exportBin(curve);
+		const result = exportBin(curve, layer);
 		if (!result.ok)
 			return notify(m.curva_export_refused({ reason: ioFailureText(result) }), 'error');
 		save(

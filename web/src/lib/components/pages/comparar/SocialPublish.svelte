@@ -38,13 +38,14 @@
 	let dialog = $state<HTMLDialogElement>();
 	/** Reactive mirror of `dialog.open`: each message renders in exactly one place. */
 	let opened = $state(false);
-	let snapshot: {
+	/** The curve frozen by `open`: what is sent, and what the YOLO step is about. */
+	let snapshot = $state.raw<{
 		code: string;
 		curve: ReturnType<typeof decodeS1>;
 		recipe?: Envelope['recipe'];
 		/** The curve's filter labels (refused entries dropped); null: published as preset@1. */
 		labels: (string | null)[] | null;
-	} | null = null;
+	} | null>(null);
 	let name = $state('');
 	let description = $state('');
 	let license = $state<'CC0-1.0' | 'CC-BY-4.0'>('CC0-1.0');
@@ -52,9 +53,15 @@
 	let busy = $state(false);
 	let message = $state('');
 	let reasons = $state<string[]>([]);
-	/** Class of the curve (derived, never sent): a YOLO curve is published only after the step. */
-	const classification = $derived(curveClassification(curve.bands, curve.preampDb));
-	const yolo = $derived(classification.class === 'yolo');
+	/**
+	 * Class of the frozen curve (derived, never sent): a YOLO curve is published only after the
+	 * step. Always the snapshot `open` took, never the live `curve` prop, so an edit while the
+	 * dialog is open can neither skip the step nor ask it for a curve that is not sent.
+	 */
+	const classification = $derived(
+		snapshot ? curveClassification(snapshot.curve.bands, snapshot.curve.preampDb) : null
+	);
+	const yolo = $derived(classification?.class === 'yolo');
 	/** The YOLO acknowledgement step (waived criteria as text), or null. */
 	let ackStep = $state.raw<{ waived: string[] } | null>(null);
 	const showAck = $derived(ackStep !== null && visibility !== 'private');
@@ -111,7 +118,7 @@
 		// The visibility actually sent; the success message must describe it, not a later edit.
 		const sent = visibility;
 		if (!acknowledged && needsYoloAck(yolo, sent)) {
-			ackStep = { waived: waivedLabels(classification.waived) };
+			ackStep = { waived: waivedLabels(classification?.waived) };
 			return;
 		}
 		busy = true;
@@ -190,7 +197,7 @@
 		{#if yolo}<YoloCurveNotice
 				variant="editor"
 				compact
-				waived={waivedLabels(classification.waived)}
+				waived={waivedLabels(classification?.waived)}
 			/>{/if}
 		<fieldset class="fields" disabled={busy}>
 			<label>{m.curve_social_name()}<input required maxlength="48" bind:value={name} /></label>

@@ -14,10 +14,12 @@ import { NEUTRO, OFFICIAL_PRESETS } from 'open-auri/catalog';
 import { classifyCurve, gateForWrite, isExperimentalKind } from 'open-auri/safety';
 import {
 	CLASSIFICATIONS_KEPT,
+	classifiedCurve,
 	clearGateVerdicts,
 	curveClassification,
 	gateVerdict,
 	knownClassification,
+	knownClassified,
 	rememberClassification
 } from '#lib/gate-verdicts.ts';
 import type { Band } from '#lib/audio/engine.ts';
@@ -97,6 +99,58 @@ describe('classes run their gate passes through the shared cache', () => {
 		const answer = core(STANDARD);
 		rememberClassification(STANDARD.bands, STANDARD.preampDb, answer);
 		expect(curveClassification(STANDARD.bands, STANDARD.preampDb)).toBe(answer);
+		expect(runs()).toBe(0);
+	});
+});
+
+describe('gate runs of a classification (the server merge weight)', () => {
+	it('counts the runs the classification made: 1 standard only, 2 with the YOLO profile', () => {
+		for (const curve of [YOLO_ONLY, SHELVES, REJECTED, STANDARD, { ...YOLO_ONLY, preampDb: -26 }]) {
+			clearGateVerdicts();
+			vi.mocked(gateForWrite).mockClear();
+			const classified = classifiedCurve(curve.bands, curve.preampDb);
+			expect(classified.gateRuns).toBe(runs());
+			expect(classified.classification).toEqual(core(curve));
+		}
+		clearGateVerdicts();
+		expect(classifiedCurve(YOLO_ONLY.bands, YOLO_ONLY.preampDb).gateRuns).toBe(2);
+		expect(classifiedCurve(STANDARD.bands, STANDARD.preampDb).gateRuns).toBe(1);
+	});
+
+	it('a curve YOLO rejects after every standard code was waivable costs 2, not 1', () => {
+		const experimental = true;
+		// Real verdicts: YOLO_ONLY's standard one (waivable codes only), and REJECTED's YOLO one
+		// (it blocks in every profile).
+		const standard = gateForWrite(YOLO_ONLY.bands, YOLO_ONLY.preampDb, { experimental });
+		const blocked = gateForWrite(REJECTED.bands, REJECTED.preampDb, {
+			experimental: false,
+			profile: 'yolo'
+		});
+		expect(standard.ok).toBe(false);
+		expect(blocked.ok).toBe(false);
+		vi.mocked(gateForWrite).mockClear();
+		vi.mocked(gateForWrite).mockReturnValueOnce(standard).mockReturnValueOnce(blocked);
+		const classified = classifiedCurve(YOLO_ONLY.bands, YOLO_ONLY.preampDb);
+		expect(classified.classification.class).toBe('rejected');
+		expect(classified.gateRuns).toBe(2);
+		expect(runs()).toBe(2);
+		// Cached with its runs: asking again runs nothing and says the same.
+		expect(knownClassified(YOLO_ONLY.bands, YOLO_ONLY.preampDb)).toBe(classified);
+		expect(classifiedCurve(YOLO_ONLY.bands, YOLO_ONLY.preampDb)).toBe(classified);
+		expect(runs()).toBe(2);
+	});
+
+	it('a class taken from the worker keeps the runs it reported, else the upper bound', () => {
+		const answer = core(REJECTED);
+		rememberClassification(REJECTED.bands, REJECTED.preampDb, answer, 1);
+		expect(knownClassified(REJECTED.bands, REJECTED.preampDb)).toEqual({
+			classification: answer,
+			gateRuns: 1
+		});
+		rememberClassification(REJECTED.bands, REJECTED.preampDb, answer);
+		expect(knownClassified(REJECTED.bands, REJECTED.preampDb)?.gateRuns).toBe(2);
+		rememberClassification(STANDARD.bands, STANDARD.preampDb, core(STANDARD));
+		expect(knownClassified(STANDARD.bands, STANDARD.preampDb)?.gateRuns).toBe(1);
 		expect(runs()).toBe(0);
 	});
 });

@@ -371,8 +371,17 @@ Uma curva YOLO sempre pode ser salva como **privada**. Para mostrá-la a terceir
 pública), a escrita precisa do interruptor `YOLO_PUBLICATION` = `on` (variável do Worker em
 `web/wrangler.template.jsonc`, **padrão `off`**: 403 `YOLO_PUBLICATION_OFF`), de uma conta com 72 h
 ou mais e do reconhecimento explícito `acknowledge: "yolo"` (409 `YOLO_ACK_REQUIRED` com os códigos
-dispensados), no máximo 5 por 24 h (contados só quando a escrita dá certo). O reconhecimento fica
-em `lineage_yolo_acks` (linhagem, curva): sem ele, um head YOLO não abre nem por link.
+dispensados), no máximo 5 por 24 h. A vaga é reservada de forma atômica antes da escrita (pedidos
+simultâneos nunca passam de 5) e devolvida se a escrita falha, então só reconhecimentos gravados
+contam. O reconhecimento fica em `lineage_yolo_acks` (linhagem, curva): sem ele, um head YOLO não
+abre nem por link.
+
+As regras dependem da classe do head e da visibilidade, que podem mudar entre a leitura e a escrita
+(uma versão YOLO nova e uma troca de visibilidade ao mesmo tempo). Cada escrita só vale no estado
+que a decisão leu: uma versão YOLO só entra se a visibilidade não mudou, e abrir a linhagem
+(visibilidade, restauração) só vale se o head classificado ainda é o head. Se o estado mudou, nada
+é gravado e o servidor reaplica as regras ao estado novo (até 3 vezes, depois 409 `HEAD_MOVED`):
+uma linhagem nunca fica visível a terceiros com um head YOLO que o dono não reconheceu.
 
 O interruptor vale também para as **leituras**: com `YOLO_PUBLICATION` desligado, nenhum head YOLO
 é servido a quem não é o dono, reconhecido ou não. Ele não abre por link (API, `/c/:id`), não vira
@@ -390,10 +399,14 @@ amplifica acima de 20 kHz, bandas até 32 kHz), então cada `curve.s1` pode ser 
 código S1 diz a própria versão ([`s1-format.md`](s1-format.md)); o resto do formato não mudou. A
 imagem OG de uma curva YOLO leva o selo "YOLO" (layout de cartão `3`), a URL da imagem leva `?y=1`
 e a página `/c/:id` sai com `noindex`. Uma URL de imagem cujo `?y=` não corresponde à classe atual
-da versão recebe 302 para a URL certa (`no-store`), para que nenhum cache guarde o cartão da outra
-classe. Moderação: uma linhagem com head YOLO é ocultada
-automaticamente com 2 denunciantes elegíveis (3 nas demais), a fila do admin mostra o selo e os
-códigos dispensados, e a curadoria recusa heads YOLO.
+da versão recebe 302 para a URL certa (`no-store`; só `y` muda, os outros parâmetros ficam), para
+que nenhum cache guarde o cartão da outra classe. O job `og-sweep` lê o mesmo interruptor (variável
+`YOLO_PUBLICATION` também em `workers/jobs/wrangler.template.jsonc`, com o mesmo valor do Worker
+web): ligado, mantém as imagens das versões YOLO reconhecidas; desligado, as apaga. Moderação: uma
+linhagem com head YOLO é ocultada automaticamente com 2 denunciantes elegíveis (3 nas demais),
+contando o head que ela tem no momento da ocultação (a condição está na própria escrita, e a
+auditoria registra o limite aplicado); a fila do admin mostra o selo e os códigos dispensados; e a
+curadoria recusa heads YOLO, conferidos de novo na escrita (recusada, nada é gravado nem auditado).
 
 ---
 

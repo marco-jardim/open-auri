@@ -24,8 +24,12 @@ afterEach(() => clearGateVerdicts());
 test('classes come back in order, equal to the core, and stay known to the page', async () => {
 	const classifier = createClassifier({ worker: false });
 	const answers = await Promise.all([classifier.classify(yolo), classifier.classify(plain)]);
-	expect(answers.map((answer) => answer.class)).toEqual(['yolo', 'standard']);
-	expect(answers[0]).toEqual(classifyCurve(yolo.bands, yolo.preampDb, { experimental: true }));
+	expect(answers.map((answer) => answer.classification.class)).toEqual(['yolo', 'standard']);
+	expect(answers[0]?.classification).toEqual(
+		classifyCurve(yolo.bands, yolo.preampDb, { experimental: true })
+	);
+	// The runs the server counts: the YOLO profile ran for the YOLO curve only.
+	expect(answers.map((answer) => answer.gateRuns)).toEqual([2, 1]);
 	expect(knownClassification(yolo.bands, yolo.preampDb)?.class).toBe('yolo');
 	expect(knownClassification(plain.bands, plain.preampDb)?.class).toBe('standard');
 	classifier.dispose();

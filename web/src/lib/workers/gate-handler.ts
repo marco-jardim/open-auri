@@ -6,7 +6,7 @@ import {
 	interpolateBand,
 	snapToGridAccepted
 } from 'open-auri/safety';
-import { curveClassification, type CurveClassification } from '../gate-verdicts.ts';
+import { classifiedCurve, type CurveClassification, type GateRuns } from '../gate-verdicts.ts';
 
 export type Band = Parameters<typeof designSection>[0];
 export type GateVerdict = ReturnType<typeof gate>;
@@ -89,6 +89,8 @@ export interface ClassifyResult {
 	type: 'classify';
 	id: number;
 	classification: CurveClassification;
+	/** Write-gate runs of the classification: 2 when it ran the YOLO profile (`GateRuns`). */
+	gateRuns: GateRuns;
 }
 
 export type GateResponse = DragResult | CommitResult | ClassifyResult;
@@ -124,8 +126,9 @@ export function handleGateRequest(request: GateRequest): GateResponse {
 	if (request.type === 'classify') {
 		// Cached by signature in this realm's gate-verdicts.ts. In the worker that is the worker's
 		// own cache, not the page's: a page that wants its synchronous exits to find the class
-		// keeps the answer itself (`rememberClassification`, workers/classifier.svelte.ts).
-		return { type: 'classify', id, classification: curveClassification(bands, preampDb) };
+		// keeps the answer itself (`rememberClassification`, workers/classifier-store.ts).
+		const { classification, gateRuns } = classifiedCurve(bands, preampDb);
+		return { type: 'classify', id, classification, gateRuns };
 	}
 	const options = gateOptions(profile, experimental);
 	if (request.type === 'commit') {

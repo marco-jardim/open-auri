@@ -904,9 +904,20 @@ function isStorable(curve: CurveInput): boolean {
 	return curve.gateOk || curve.gateYolo === true;
 }
 
+/** Conditions of an acknowledgement on the lineage state after the write it goes with. */
+interface AckState {
+	/** The head version it is for: the new version of an append, the expected head otherwise. */
+	headVersion?: string | null;
+	/** The visibility the lineage must have once the write ran. */
+	visibility?: LineageVisibility | null;
+}
+
 /**
  * The owner's YOLO acknowledgement of (`lineageId`, `curveId`), written only when the lineage is
- * the owner's and the curve is its head (so a failed append or a lost race writes nothing). A
+ * the owner's and the curve is its head, and only in the state `after` (that version is the head,
+ * the lineage has that visibility): the state the write it goes with leaves when it applies. Run
+ * after that write in the same batch, it is written exactly when the write applied, so a failed
+ * append, a lost race or a moved state writes nothing (even for a curve an older head shared). A
  * repeated acknowledgement refreshes `acked_at`.
  */
 function yoloAckStatement(
@@ -914,18 +925,26 @@ function yoloAckStatement(
 	lineageId: string,
 	ownerUserId: string,
 	curveId: string,
-	now: number
+	now: number,
+	after: AckState = {}
 ): BoundStatement {
+	const headVersion = after.headVersion ?? null;
+	const visibility = after.visibility ?? null;
 	return sql(
 		db,
 		'INSERT INTO lineage_yolo_acks (lineage_id, curve_id, acked_at) SELECT l.id, c.id, ? ' +
 			'FROM lineages l JOIN versions v ON v.id = l.head_version JOIN curves c ON c.id = v.curve_id ' +
 			'WHERE l.id = ? AND l.owner_user_id = ? AND c.id = ? AND c.gate_yolo = 1 ' +
+			'AND (? IS NULL OR l.head_version = ?) AND (? IS NULL OR l.visibility = ?) ' +
 			'ON CONFLICT (lineage_id, curve_id) DO UPDATE SET acked_at = excluded.acked_at',
 		now,
 		lineageId,
 		ownerUserId,
-		curveId
+		curveId,
+		headVersion,
+		headVersion,
+		visibility,
+		visibility
 	);
 }
 
@@ -1001,15 +1020,20 @@ export async function forkLineage(
 /**
  * Appends a version to the owner's active lineage. The new version's parent is the current head,
  * which must equal `expectedHead`: otherwise 'head-moved' (two concurrent appends: one wins, the
- * other fails atomically on UNIQUE (lineage_id, parent_id)).
+ * other fails atomically on UNIQUE (lineage_id, parent_id)). With `expectedVisibility`, the
+ * lineage must also still have that visibility when the batch runs: otherwise nothing is written
+ * and the answer is 'head-moved' too (the caller reads the lineage again: same head, so it was the
+ * visibility). The service passes it for a YOLO curve, whose acknowledgement rules depend on it.
  */
 export async function appendVersion(
 	db: D1Database,
 	input: AppendVersionInput
 ): Promise<RepoResult<{ versionId: string }>> {
+	const expectedVisibility = input.expectedVisibility ?? null;
 	if (
 		!isSocialId(input.lineageId) ||
 		!isSocialId(input.expectedHead) ||
+		(expectedVisibility !== null && !isOneOf(LINEAGE_VISIBILITIES, expectedVisibility)) ||
 		!validCurve(input.curve) ||
 		!validVersion(input.version)
 	) {
@@ -1023,7 +1047,12 @@ export async function appendVersion(
 	// After the head moved to the new version only: a lost race writes no acknowledgement.
 	const ack =
 		input.yoloAck === true && input.curve.gateYolo === true
-			? [yoloAckStatement(db, input.lineageId, input.ownerUserId, input.curve.id, input.now)]
+			? [
+					yoloAckStatement(db, input.lineageId, input.ownerUserId, input.curve.id, input.now, {
+						headVersion: version.id,
+						visibility: expectedVisibility
+					})
+				]
 			: [];
 	const done = await guarded(db, [
 		upsertCurveStatement(db, input.curve, input.now),
@@ -1031,7 +1060,8 @@ export async function appendVersion(
 			db,
 			'INSERT INTO versions (id, lineage_id, parent_id, curve_id, name, description, license, ' +
 				'recipe, lang, labels, created_at) SELECT ?, l.id, l.head_version, ?, ?, ?, ?, ?, ?, ?, ? ' +
-				"FROM lineages l WHERE l.id = ? AND l.owner_user_id = ? AND l.head_version = ? AND l.status = 'active'",
+				"FROM lineages l WHERE l.id = ? AND l.owner_user_id = ? AND l.head_version = ? AND l.status = 'active' " +
+				'AND (? IS NULL OR l.visibility = ?)',
 			version.id,
 			input.curve.id,
 			version.name,
@@ -1043,7 +1073,9 @@ export async function appendVersion(
 			input.now,
 			input.lineageId,
 			input.ownerUserId,
-			input.expectedHead
+			input.expectedHead,
+			expectedVisibility,
+			expectedVisibility
 		),
 		sql(
 			db,
@@ -1077,35 +1109,92 @@ export async function appendVersion(
 	return { ok: false, code: 'head-moved' };
 }
 
+interface OwnedAck {
+	lineageId: string;
+	ownerUserId: string;
+	curveId: string;
+	now: number;
+	/** The state the update leaves when it applies (yoloAckStatement `after`). */
+	after: AckState;
+}
+
 /**
  * Runs an owner-scoped lineage update; with `ack`, the owner's YOLO acknowledgement of the head
  * curve `ack.curveId` is written in the same batch (yoloAckStatement: only while it is the head).
+ * No row changed: 'not-found' when the lineage is not the owner's, else 'head-moved' (the update
+ * carried a condition on the state, see LineageExpectation, and the state moved).
  */
 async function updateOwnedLineage(
 	db: D1Database,
 	statement: BoundStatement,
-	ack?: { lineageId: string; ownerUserId: string; curveId: string; now: number }
+	owner: { lineageId: string; ownerUserId: string },
+	ack?: OwnedAck
 ): Promise<RepoResult<{ changed: true }>> {
+	let changed: number;
 	if (!ack) {
-		const meta = await run(statement);
-		return meta.changes > 0
-			? { ok: true, value: { changed: true } }
-			: { ok: false, code: 'not-found' };
+		changed = (await run(statement)).changes;
+	} else {
+		const done = await guarded(db, [
+			statement,
+			yoloAckStatement(db, ack.lineageId, ack.ownerUserId, ack.curveId, ack.now, ack.after)
+		]);
+		if (!done.ok) return done;
+		changed = changes(done.results[0]);
 	}
-	const done = await guarded(db, [
-		statement,
-		yoloAckStatement(db, ack.lineageId, ack.ownerUserId, ack.curveId, ack.now)
-	]);
-	if (!done.ok) return done;
-	return changes(done.results[0]) > 0
-		? { ok: true, value: { changed: true } }
-		: { ok: false, code: 'not-found' };
+	if (changed > 0) return { ok: true, value: { changed: true } };
+	const row = await first<{ id: string }>(
+		sql(
+			db,
+			'SELECT id FROM lineages WHERE id = ? AND owner_user_id = ?',
+			owner.lineageId,
+			owner.ownerUserId
+		)
+	);
+	return { ok: false, code: row ? 'head-moved' : 'not-found' };
 }
 
 /** Options of the owner writes that may leave a YOLO head visible to others. */
 export interface YoloAckOption {
 	/** Head curve to acknowledge as YOLO in the same batch (the service checked it is the head). */
 	yoloAckCurveId?: string;
+}
+
+/**
+ * The lineage state an owner write relied on (the YOLO rules depend on the head's class and on the
+ * visibility). The update applies only while the lineage still has it when the statement runs;
+ * otherwise nothing is written (no acknowledgement either) and the write fails with 'head-moved',
+ * so the caller reads the lineage again and re-applies its rules.
+ */
+export interface LineageExpectation {
+	/** The head version the decision classified (`head_version IS ?`). */
+	expectedHead?: string | null;
+	/** The visibility the decision relied on. */
+	expectedVisibility?: LineageVisibility;
+}
+
+/** SQL condition (and its parameters) of a LineageExpectation on the `lineages` row. */
+function expectationSql(expected: LineageExpectation): { text: string; params: SqlParam[] } {
+	const parts: string[] = [];
+	const params: SqlParam[] = [];
+	if (expected.expectedHead !== undefined) {
+		parts.push(' AND head_version IS ?');
+		params.push(expected.expectedHead);
+	}
+	if (expected.expectedVisibility !== undefined) {
+		parts.push(' AND visibility = ?');
+		params.push(expected.expectedVisibility);
+	}
+	return { text: parts.join(''), params };
+}
+
+function validExpectation(expected: LineageExpectation): boolean {
+	const head = expected.expectedHead;
+	const visibility = expected.expectedVisibility;
+	// The head is only compared (bound), never interpolated: any stored id, or null.
+	return (
+		(head === undefined || head === null || typeof head === 'string') &&
+		(visibility === undefined || isOneOf(LINEAGE_VISIBILITIES, visibility))
+	);
 }
 
 /** Owner tombstone. Idempotent; 'not-found' when the lineage is not the owner's. */
@@ -1123,7 +1212,8 @@ export async function retractLineage(
 			now,
 			lineageId,
 			ownerUserId
-		)
+		),
+		{ lineageId, ownerUserId }
 	);
 }
 
@@ -1131,64 +1221,87 @@ function ackOf(
 	lineageId: string,
 	ownerUserId: string,
 	now: number,
-	options: YoloAckOption
-): { lineageId: string; ownerUserId: string; curveId: string; now: number } | undefined {
+	options: YoloAckOption,
+	after: AckState
+): OwnedAck | undefined {
 	return options.yoloAckCurveId === undefined
 		? undefined
-		: { lineageId, ownerUserId, curveId: options.yoloAckCurveId, now };
+		: { lineageId, ownerUserId, curveId: options.yoloAckCurveId, now, after };
 }
 
 /**
  * Undoes the owner's tombstone (never a moderation action). With `options.visibility`, the
  * lineage takes that visibility in the same statement (the service restores a YOLO head as
- * private while YOLO_PUBLICATION is off).
+ * private while YOLO_PUBLICATION is off). With `expectedHead` / `expectedVisibility`
+ * (LineageExpectation), it applies only while the lineage still has that head and visibility, else
+ * 'head-moved' and nothing is written.
  */
 export async function restoreLineage(
 	db: D1Database,
 	lineageId: string,
 	ownerUserId: string,
 	now: number,
-	options: YoloAckOption & { visibility?: LineageVisibility } = {}
+	options: YoloAckOption & LineageExpectation & { visibility?: LineageVisibility } = {}
 ): Promise<RepoResult<{ changed: true }>> {
 	const visibility = options.visibility ?? null;
 	if (visibility !== null && !isOneOf(LINEAGE_VISIBILITIES, visibility)) {
 		return { ok: false, code: 'invalid-input' };
 	}
+	if (!validExpectation(options)) return { ok: false, code: 'invalid-input' };
+	const expected = expectationSql(options);
 	return updateOwnedLineage(
 		db,
 		sql(
 			db,
 			"UPDATE lineages SET status = 'active', visibility = COALESCE(?, visibility), " +
-				'updated_at = ? WHERE id = ? AND owner_user_id = ?',
+				`updated_at = ? WHERE id = ? AND owner_user_id = ?${expected.text}`,
 			visibility,
 			now,
 			lineageId,
-			ownerUserId
+			ownerUserId,
+			...expected.params
 		),
-		ackOf(lineageId, ownerUserId, now, options)
+		{ lineageId, ownerUserId },
+		ackOf(lineageId, ownerUserId, now, options, {
+			headVersion: options.expectedHead ?? null,
+			visibility: visibility ?? options.expectedVisibility ?? null
+		})
 	);
 }
 
+/**
+ * Sets the owner's lineage visibility. With `expectedHead` (LineageExpectation), it applies only
+ * while that version is still the head (the service passes it when opening a lineage: the YOLO
+ * rules classified that head), else 'head-moved' and nothing is written.
+ */
 export async function setLineageVisibility(
 	db: D1Database,
 	lineageId: string,
 	ownerUserId: string,
 	visibility: LineageVisibility,
 	now: number,
-	options: YoloAckOption = {}
+	options: YoloAckOption & LineageExpectation = {}
 ): Promise<RepoResult<{ changed: true }>> {
 	if (!isOneOf(LINEAGE_VISIBILITIES, visibility)) return { ok: false, code: 'invalid-input' };
+	if (!validExpectation(options)) return { ok: false, code: 'invalid-input' };
+	const expected = expectationSql(options);
 	return updateOwnedLineage(
 		db,
 		sql(
 			db,
-			'UPDATE lineages SET visibility = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?',
+			'UPDATE lineages SET visibility = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?' +
+				expected.text,
 			visibility,
 			now,
 			lineageId,
-			ownerUserId
+			ownerUserId,
+			...expected.params
 		),
-		ackOf(lineageId, ownerUserId, now, options)
+		{ lineageId, ownerUserId },
+		ackOf(lineageId, ownerUserId, now, options, {
+			headVersion: options.expectedHead ?? null,
+			visibility
+		})
 	);
 }
 
@@ -1288,6 +1401,106 @@ export async function setCurated(
 		)
 	);
 	return meta.changes > 0;
+}
+
+/**
+ * Builds the audit row of a conditional moderation write (admin/audit.ts `auditStatementWhen`):
+ * written only when `condition` holds as the batch runs.
+ */
+export type ConditionalAudit = (condition: SqlFragment) => BoundStatement;
+
+/**
+ * setCurated with its audit row, atomic: in ONE batch, `audit` under the condition of the write
+ * (the lineage exists and, to curate, its head is not YOLO as the batch runs), then the UPDATE
+ * under that same condition. True when the pick was written, with its audit row; false when the
+ * condition failed (the head became YOLO after the caller's check, or the lineage is gone):
+ * nothing is written, no audit row either.
+ */
+export async function curateLineage(
+	db: D1Database,
+	lineageId: string,
+	curated: boolean,
+	now: number,
+	audit: ConditionalAudit
+): Promise<boolean> {
+	const notYolo = curated ? ` AND NOT ${headYoloSql('l')}` : '';
+	const results = await batch(db, [
+		audit({
+			text: `EXISTS (SELECT 1 FROM lineages l WHERE l.id = ?${notYolo})`,
+			params: [lineageId]
+		}),
+		sql(
+			db,
+			'UPDATE lineages SET curated = ?, updated_at = ? WHERE id = ? ' +
+				`AND (? = 0 OR NOT ${headYoloSql('lineages')})`,
+			curated ? 1 : 0,
+			now,
+			lineageId,
+			curated ? 1 : 0
+		)
+	]);
+	return changes(results[1]) > 0;
+}
+
+/** Eligible reporters that hide a lineage automatically, by the class of its CURRENT head. */
+export interface AutoHideThresholds {
+	standard: number;
+	yolo: number;
+}
+
+/** The threshold an automatic hiding applied, and the head class it was chosen by. */
+export interface AutoHideApplied {
+	threshold: number;
+	yolo: boolean;
+}
+
+/**
+ * The automatic hiding of a lineage, atomic on the class of its head. In ONE batch: the audit row
+ * of each class (`audit`, written only under its condition: the lineage is still 'visible', its
+ * head has that class as the batch runs, headYoloSql, and `reporters` reaches that class's
+ * threshold), then the UPDATE under the union of both conditions. The two conditions exclude each
+ * other, so exactly one audit row is written when the lineage is hidden and none otherwise, and it
+ * names the threshold actually applied. A standard version appended between the caller's reads and
+ * this batch is judged by the standard threshold. Returns what was applied, or null (nothing
+ * changed: below the threshold of the current head, or no longer 'visible').
+ */
+export async function autoHideLineage(
+	db: D1Database,
+	lineageId: string,
+	reporters: number,
+	thresholds: AutoHideThresholds,
+	now: number,
+	audit: (applied: AutoHideApplied, condition: SqlFragment) => BoundStatement
+): Promise<AutoHideApplied | null> {
+	const rule = (yolo: boolean): AutoHideApplied => ({
+		threshold: yolo ? thresholds.yolo : thresholds.standard,
+		yolo
+	});
+	const when = (applied: AutoHideApplied): SqlFragment => ({
+		text:
+			"EXISTS (SELECT 1 FROM lineages l WHERE l.id = ? AND l.moderation = 'visible' AND " +
+			`${applied.yolo ? '' : 'NOT '}${headYoloSql('l')} AND ? >= ?)`,
+		params: [lineageId, reporters, applied.threshold]
+	});
+	const yolo = rule(true);
+	const standard = rule(false);
+	const results = await batch(db, [
+		audit(yolo, when(yolo)),
+		audit(standard, when(standard)),
+		sql(
+			db,
+			"UPDATE lineages SET moderation = 'auto_hidden', updated_at = ? WHERE id = ? " +
+				"AND moderation = 'visible' AND " +
+				`? >= CASE WHEN ${headYoloSql('lineages')} THEN ? ELSE ? END`,
+			now,
+			lineageId,
+			reporters,
+			thresholds.yolo,
+			thresholds.standard
+		)
+	]);
+	if (changes(results[2]) === 0) return null;
+	return changes(results[0]) > 0 ? yolo : standard;
 }
 
 /** Versions created in the owner's lineages since `since` (daily publication quota). */

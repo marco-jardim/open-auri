@@ -59,10 +59,17 @@ export function requestedYolo(url: URL): boolean {
 	return url.searchParams.get('y') === '1';
 }
 
-/** 302 to the image URL of the class `yolo` (same path, `?y=1` only for YOLO), never cached. */
+/**
+ * 302 to the image URL of the class `yolo`, never cached: the same URL with `y` alone set to `1`
+ * (YOLO) or removed (standard). Every other query parameter is kept as is, in order.
+ */
 function toClassUrl(url: URL, yolo: boolean): Response {
-	const target = new URL(url.pathname, url);
+	const target = new URL(url);
+	target.hash = '';
 	if (yolo) target.searchParams.set('y', '1');
+	else target.searchParams.delete('y');
+	// No parameter left: no bare `?` either.
+	if (target.search === '?') target.search = '';
 	return new Response(null, {
 		status: 302,
 		headers: { location: target.toString(), 'cache-control': 'no-store' }

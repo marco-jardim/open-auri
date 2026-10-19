@@ -7,9 +7,12 @@
 // An object is kept only when its key parses, it carries the current card layout
 // (`customMetadata.card`) and its version is linkable for an anonymous viewer with that same curve:
 // the exact read the store does (`getVersionForViewer` + ANONYMOUS_VIEWER from the web repository,
-// imported by relative path like regate.ts and s6-aggregate.ts). Everything else under `og/` is
-// deleted. A deleted image of a version that becomes linkable again is simply rendered again on
-// its next request.
+// imported by relative path like regate.ts and s6-aggregate.ts), under the same YOLO kill switch
+// (`YOLO_PUBLICATION`, which must equal the web Worker's; absent or anything but `on` = `off`).
+// While it is on, the image of an acknowledged YOLO version is linkable and kept; while it is off,
+// the store refuses every YOLO version, so the sweep deletes their images too. Everything else
+// under `og/` is deleted. A deleted image of a version that becomes linkable again is simply
+// rendered again on its next request.
 //
 // Budget per run: at most `maxPages` list pages of `pageSize` objects (one D1 read per object with
 // a current card) and `budgetMs` of wall time, checked between pages. The R2 list cursor is kept in
@@ -21,7 +24,10 @@
 // Logs carry counts and timings only: no key, curve id, version id or user data.
 import { isCurrentCard, OG_PREFIX, parseOgKey } from '../../../../web/src/lib/server/og/keys.ts';
 import { getVersionForViewer } from '../../../../web/src/lib/server/social/repo.ts';
-import { ANONYMOUS_VIEWER } from '../../../../web/src/lib/server/social/types.ts';
+import {
+  ANONYMOUS_VIEWER,
+  type YoloPublication,
+} from '../../../../web/src/lib/server/social/types.ts';
 import type { ScheduledJob } from './registry.ts';
 
 export const OG_SWEEP_JOB = 'og-sweep';
@@ -49,15 +55,28 @@ export type OgLinkableCheck = (
   db: D1Database,
   curveId: string,
   versionId: string,
+  yolo: YoloPublication,
 ) => Promise<boolean>;
 
-/** Same read as the store: linkable for the anonymous viewer, and the key's curve is its curve. */
+/**
+ * The kill switch as the web reads it: `on` only when the variable says exactly `on` (the web's
+ * env schema accepts `off` and `on`); anything else is `off`, the side that deletes more.
+ */
+export function yoloPublicationOf(value: unknown): YoloPublication {
+  return value === 'on' ? 'on' : 'off';
+}
+
+/**
+ * Same read as the store: linkable for the anonymous viewer under the kill switch `yolo`, and the
+ * key's curve is its curve.
+ */
 export async function isLinkableOg(
   db: D1Database,
   curveId: string,
   versionId: string,
+  yolo: YoloPublication = 'off',
 ): Promise<boolean> {
-  const view = await getVersionForViewer(db, versionId, ANONYMOUS_VIEWER);
+  const view = await getVersionForViewer(db, versionId, ANONYMOUS_VIEWER, yolo);
   return view !== null && view.curve.id === curveId;
 }
 
@@ -65,6 +84,8 @@ export interface OgSweepDeps {
   media: Pick<R2Bucket, 'list' | 'delete'>;
   cursors: Pick<KVNamespace, 'get' | 'put' | 'delete'>;
   db: D1Database;
+  /** The web's YOLO kill switch (`YOLO_PUBLICATION`); absent = `off`. */
+  yoloPublication?: YoloPublication;
   isLinkable?: OgLinkableCheck;
   limits?: Readonly<OgSweepLimits>;
   /** Milliseconds clock for the time budget (default `Date.now`). */
@@ -87,6 +108,7 @@ export async function sweepOgImages(deps: OgSweepDeps): Promise<OgSweepResult> {
   const limits = deps.limits ?? OG_SWEEP_LIMITS;
   const clock = deps.clock ?? Date.now;
   const isLinkable = deps.isLinkable ?? isLinkableOg;
+  const yolo = deps.yoloPublication ?? 'off';
   const started = clock();
   const stored = await deps.cursors.get(OG_SWEEP_CURSOR_KEY);
   let cursor: string | undefined = stored === null || stored === '' ? undefined : stored;
@@ -95,7 +117,7 @@ export async function sweepOgImages(deps: OgSweepDeps): Promise<OgSweepResult> {
   const keep = async (object: R2Object): Promise<boolean> => {
     const ids = parseOgKey(object.key);
     if (ids === null || !isCurrentCard(object.customMetadata)) return false;
-    return isLinkable(deps.db, ids.curveId, ids.versionId);
+    return isLinkable(deps.db, ids.curveId, ids.versionId, yolo);
   };
 
   while (result.pages < limits.maxPages && clock() - started < limits.budgetMs) {
@@ -150,6 +172,7 @@ export function createOgSweepJob(
         media: env.MEDIA,
         cursors: env.CONFIG,
         db: env.DB,
+        yoloPublication: yoloPublicationOf(env.YOLO_PUBLICATION),
         ...options,
       });
       console.log(

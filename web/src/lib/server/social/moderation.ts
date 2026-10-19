@@ -7,7 +7,7 @@
 // actor_kind 'system'. Audit details hold ids, counts and the admin-written reason only; report
 // notes never leave the admin queue. No `$app/*`: tested inside workerd.
 import type { D1Database } from '@cloudflare/workers-types';
-import { audited, type AuditOptions } from '#lib/server/admin/audit.ts';
+import { audited, auditStatementWhen, type AuditOptions } from '#lib/server/admin/audit.ts';
 import {
 	banUser,
 	BAN_DURATIONS,
@@ -18,12 +18,13 @@ import {
 } from '#lib/server/admin/users.ts';
 import { recordReport, type MetricsDataset } from '#lib/server/observability/metrics.ts';
 import {
+	autoHideLineage,
 	countEligibleReporters,
+	curateLineage,
 	getHeadClass,
 	insertReport,
 	listReportQueue,
 	resolveReports,
-	setCurated,
 	setModeration
 } from '#lib/server/social/repo.ts';
 import {
@@ -131,9 +132,16 @@ export async function fileReport(
 
 /**
  * Applies the automatic hiding to a lineage or pack when enough eligible accounts reported it.
- * Only a target that is still 'visible' changes (`expected = 'visible'`), so an admin decision
- * (hidden, removed, or a restore followed by resolved reports) is never overridden. Writes the
- * audit row (actor_kind 'system') before the change. Returns whether the target was hidden.
+ * Only a target that is still 'visible' changes, so an admin decision (hidden, removed, or a
+ * restore followed by resolved reports) is never overridden. Writes the audit row (actor_kind
+ * 'system') before the change. Returns whether the target was hidden.
+ *
+ * A lineage is judged by the class of its head AS THE WRITE RUNS (repo.ts autoHideLineage: the
+ * threshold condition is part of the UPDATE, and the audit row is written in the same batch under
+ * the same condition): YOLO_AUTO_HIDE_THRESHOLD for a YOLO head, AUTO_HIDE_THRESHOLD otherwise. An
+ * owner who appends a standard version after the reporters were counted is judged by the standard
+ * threshold, and the audit detail records the threshold actually applied (`yolo: true` with the
+ * YOLO one).
  */
 export async function maybeAutoHide(
 	db: D1Database,
@@ -146,9 +154,29 @@ export async function maybeAutoHide(
 		minAccountAgeMs: MIN_REPORTER_AGE_MS,
 		now
 	});
-	if (reporters < YOLO_AUTO_HIDE_THRESHOLD) return false;
-	const yolo = kind === 'lineage' && (await getHeadClass(db, id))?.yolo === true;
-	const threshold = yolo ? YOLO_AUTO_HIDE_THRESHOLD : AUTO_HIDE_THRESHOLD;
+	if (reporters < Math.min(YOLO_AUTO_HIDE_THRESHOLD, AUTO_HIDE_THRESHOLD)) return false;
+	if (kind === 'lineage') {
+		const thresholds = { standard: AUTO_HIDE_THRESHOLD, yolo: YOLO_AUTO_HIDE_THRESHOLD };
+		const applied = await autoHideLineage(db, id, reporters, thresholds, now, (rule, condition) =>
+			auditStatementWhen(
+				db,
+				{
+					actorId: null,
+					actorKind: 'system',
+					action: MODERATION_ACTIONS.autoHide,
+					targetKind: kind,
+					targetId: id,
+					detail: rule.yolo
+						? { reporters, threshold: rule.threshold, yolo: true }
+						: { reporters, threshold: rule.threshold }
+				},
+				condition,
+				auditOptions
+			)
+		);
+		return applied !== null;
+	}
+	const threshold = AUTO_HIDE_THRESHOLD;
 	if (reporters < threshold) return false;
 	const current = await findTarget(db, kind, id, { userId: null, admin: true });
 	if (!current || current.moderation !== 'visible') return false;
@@ -160,7 +188,7 @@ export async function maybeAutoHide(
 			action: MODERATION_ACTIONS.autoHide,
 			targetKind: kind,
 			targetId: id,
-			detail: yolo ? { reporters, threshold, yolo: true } : { reporters, threshold }
+			detail: { reporters, threshold }
 		},
 		() => setModeration(db, kind, id, 'auto_hidden', now, 'visible'),
 		auditOptions
@@ -346,20 +374,23 @@ export async function decide(deps: DecisionDeps, input: DecisionInput): Promise<
 			case 'uncurate': {
 				if (target.kind !== 'lineage') return { ok: false, code: 'UNSUPPORTED' };
 				const curated = input.decision === 'curate';
-				// A YOLO head is never an editorial pick (setCurated refuses it too).
+				// A YOLO head is never an editorial pick.
 				if (curated && (await getHeadClass(deps.db, target.id))?.yolo === true) {
 					return { ok: false, code: 'UNSUPPORTED' };
 				}
-				await audited(
-					deps.db,
-					{
-						...base,
-						action: curated ? MODERATION_ACTIONS.curate : MODERATION_ACTIONS.uncurate,
-						detail: reason
-					},
-					() => setCurated(deps.db, target.id, curated, now),
-					deps.audit
+				const entry = {
+					...base,
+					action: curated ? MODERATION_ACTIONS.curate : MODERATION_ACTIONS.uncurate,
+					detail: reason
+				};
+				// The pick and its audit row in one batch, under the same condition (repo.ts
+				// curateLineage), so the head is checked again as the write runs: refused (an append
+				// made the head YOLO after the check above, or the lineage is gone), nothing is written,
+				// no audit row either.
+				const written = await curateLineage(deps.db, target.id, curated, now, (condition) =>
+					auditStatementWhen(deps.db, entry, condition, deps.audit)
 				);
+				if (!written) return { ok: false, code: curated ? 'UNSUPPORTED' : 'NOT_FOUND' };
 				return { ok: true, resolved: 0 };
 			}
 			case 'ban': {
