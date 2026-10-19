@@ -20,6 +20,7 @@ import {
   sectionAnalysis,
   sectionPeaks,
   THRESHOLDS,
+  YOLO_PREAMP_MAX_DB,
   YOLO_STORAGE_PREAMP_FLOOR_DB,
   YOLO_THRESHOLDS,
   YOLO_WAIVABLE,
@@ -1569,13 +1570,19 @@ test('YOLO: autoPreamp may go below -25.5 dB down to the codec floor', () => {
   assert.equal(gateForWrite(bands, preamp + 0.1, YOLO).ok, false);
   // A class-1 failure no preamp can fix stays null in YOLO.
   assert.equal(autoPreamp(curveOf(PK(20, -12, 20)), YOLO), null);
-  // On the presets nothing is waivable, so YOLO is at most as high (d-full is extra).
+  // On the presets only g:preamp is waivable (above −0.5 dB): within the standard range YOLO is
+  // at most as high (d-full is extra); above it, the standard result is its −0.5 dB ceiling.
   for (const [id, preset] of presets) {
     const yolo = autoPreamp(preset.eqBands, YOLO);
     const standard = autoPreamp(preset.eqBands);
     assert.equal(typeof yolo, 'number', id);
-    assert.ok(standard === null || yolo <= standard, id);
+    assert.ok(yolo <= YOLO_PREAMP_MAX_DB, id);
+    if (yolo > THRESHOLDS.preampMaxDb) assert.equal(standard, THRESHOLDS.preampMaxDb, id);
+    else assert.ok(standard === null || yolo <= standard, id);
     assert.equal(gateForWrite(preset.eqBands, yolo, YOLO).ok, true, id);
+    if (yolo < YOLO_PREAMP_MAX_DB) {
+      assert.equal(gateForWrite(preset.eqBands, Math.round(yolo * 10 + 1) / 10, YOLO).ok, false);
+    }
   }
 });
 
@@ -1927,4 +1934,151 @@ test('YOLO: autoPreamp fixes the extended checks; storable: true keeps the -25.5
   for (const [id, preset] of presets) {
     assert.equal(autoPreamp(preset.eqBands, { storable: true }), autoPreamp(preset.eqBands), id);
   }
+});
+
+test('YOLO: autoPreamp searches from 0 dB, where g:preamp is waived', () => {
+  assert.equal(YOLO_PREAMP_MAX_DB, 0);
+  // The hard limits pick the grid point: 0 dB itself never passes (the preamp alone is prefix 0
+  // of d:prefix-peak), and Neutro stops at e:output-audible (−0.47 dB).
+  assert.equal(gateForWrite(NEUTRAL_BANDS, YOLO_PREAMP_MAX_DB, YOLO).ok, false);
+  assert.equal(autoPreamp(NEUTRAL_BANDS, YOLO), -0.5);
+  assert.equal(autoPreamp(NEUTRAL_BANDS), THRESHOLDS.preampMaxDb);
+  // The reviewer's case: complementary −6 dB LS and HS at 1 kHz, Q 0.7 (HS is experimental).
+  const bands = curveOf(
+    { kind: 'LS', freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+    { kind: 'HS', freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+  );
+  const yoloExperimental = Object.freeze({ experimental: true, profile: 'yolo' });
+  for (const options of [yoloExperimental, YOLO]) {
+    const yolo = autoPreamp(bands, options);
+    assert.equal(yolo, -0.3);
+    const verdict = gateForWrite(bands, yolo, options);
+    assert.equal(verdict.ok, true);
+    assert.ok(verdict.waived.includes('g:preamp'));
+    // −0.2 dB: the preamp alone (prefix 0) is above the −0.2 dB internal limit.
+    assert.deepEqual(codes(gateForWrite(bands, -0.2, options)), ['d:prefix-peak']);
+  }
+  assert.deepEqual(gateForWrite(bands, -0.3, yoloExperimental).waived, ['g:preamp']);
+  // The standard profile is unchanged: its −0.5 dB ceiling, and null without the experimental flag.
+  assert.equal(autoPreamp(bands, { experimental: true }), THRESHOLDS.preampMaxDb);
+  assert.equal(autoPreamp(bands), null);
+});
+
+/**
+ * `autoPreamp` as it was before the YOLO search started at 0 dB, kept verbatim (with the
+ * extended checks above 20 kHz and the `storable` floor): the standard profile must return
+ * exactly what it returns. `storable` is read as a plain own property (the tests pass plain
+ * objects only).
+ */
+function legacyAutoPreamp(bands, options = {}) {
+  const profile = gateProfile(options);
+  const storable = Object.hasOwn(options ?? {}, 'storable') && options.storable === true;
+  const { experimental = false } = options ?? {};
+  const yolo = profile === 'yolo';
+  const top = gateForWrite(bands, THRESHOLDS.preampMaxDb, { experimental, profile });
+  if (top.ok) return THRESHOLDS.preampMaxDb;
+  const fixable = new Set(['d:prefix-peak', 'e:output-audible', 'e:output-full']);
+  if (yolo) {
+    fixable.add('d:prefix-peak-full');
+    fixable.add('d:prefix-peak-extended');
+    fixable.add('e:output-extended');
+  }
+  if (!top.reasons.every((r) => fixable.has(r.code))) return null;
+  const m = top.metrics;
+  const snapshot = m.bands;
+  const relative = (db) => db - m.quantizedPreampDb;
+  const internalPeak = Math.max(0, ...m.prefixAudible.slice(1).map((p) => relative(p.db)));
+  let cap = Math.min(
+    THRESHOLDS.internalAudibleDb - internalPeak,
+    THRESHOLDS.outputAudibleDb - relative(m.outputAudible.db),
+    THRESHOLDS.outputFullDb - relative(m.outputFull.db),
+  );
+  if (yolo) {
+    const internalFullPeak = Math.max(0, ...m.prefixFull.slice(1).map((p) => relative(p.db)));
+    cap = Math.min(cap, YOLO_THRESHOLDS.internalFullDb - internalFullPeak);
+  }
+  if (yolo && m.prefixExtended) {
+    const extendedPeaks = m.prefixExtended.slice(1).map((p) => relative(p.db));
+    cap = Math.min(
+      cap,
+      YOLO_THRESHOLDS.internalExtendedDb - Math.max(0, ...extendedPeaks),
+      YOLO_THRESHOLDS.outputExtendedDb - relative(m.outputExtended.db),
+    );
+  }
+  const yoloFloorDb = storable ? YOLO_STORAGE_PREAMP_FLOOR_DB : CODEC_PREAMP_FLOOR_DB;
+  const floorDb = yolo ? yoloFloorDb : THRESHOLDS.preampMinDb;
+  const minStep = Math.round(floorDb * 10);
+  const maxStep = Math.round(THRESHOLDS.preampMaxDb * 10);
+  let step = Math.min(maxStep - 1, Math.floor((cap + 1e-6) * 10));
+  if (!(step >= minStep)) return null;
+  for (; step >= minStep; step--) {
+    const preampDb = step / 10;
+    if (gateForWrite(snapshot, preampDb, { experimental, profile }).ok) return preampDb;
+  }
+  return null;
+}
+
+test('property: standard autoPreamp results are unchanged; YOLO only ever starts higher', () => {
+  const fixed = [
+    ...presets.flatMap(([, p]) => [p.eqBands, [...p.eqBands].reverse()]),
+    NEUTRAL_BANDS,
+    counterexample,
+    curveOf(PK(1000, 12, 4), PK(1000, 12, 4), PK(1000, 12, 4)),
+    curveOf(PK(35000, 12, 10), PK(35000, -12, 10)),
+    curveOf(
+      { kind: 'LS', freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+      { kind: 'HS', freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+    ),
+  ];
+  let searched = 0;
+  let raised = 0;
+  const compare = (bands) => {
+    for (const options of [
+      {},
+      { experimental: true },
+      { profile: 'standard' },
+      { storable: true },
+    ]) {
+      const now = autoPreamp(bands, options);
+      const before = legacyAutoPreamp(bands, options);
+      assert.ok(Object.is(now, before), `${JSON.stringify(bands)}: ${now} !== ${before}`);
+      if (now !== null && now < THRESHOLDS.preampMaxDb) searched++;
+    }
+    for (const options of [YOLO, { profile: 'yolo', storable: true }]) {
+      const yolo = autoPreamp(bands, options);
+      const before = legacyAutoPreamp(bands, options);
+      // Below the old −0.5 dB start YOLO is unchanged; it can only gain the range above it.
+      if (yolo === null || before === null || before < THRESHOLDS.preampMaxDb) {
+        assert.ok(Object.is(yolo, before), `${JSON.stringify(bands)}: yolo ${yolo} !== ${before}`);
+      } else {
+        assert.ok(yolo >= before && yolo <= YOLO_PREAMP_MAX_DB, `${yolo} < ${before}`);
+        assert.equal(gateForWrite(bands, yolo, YOLO).ok, true);
+        if (yolo < YOLO_PREAMP_MAX_DB) {
+          assert.equal(gateForWrite(bands, Math.round(yolo * 10 + 1) / 10, YOLO).ok, false);
+        }
+        if (yolo > before) raised++;
+      }
+      // storable: true never goes below the −25.5 dB floor S1 encodes.
+      if (options !== YOLO && yolo !== null) assert.ok(yolo >= YOLO_STORAGE_PREAMP_FLOOR_DB);
+    }
+  };
+  for (const bands of fixed) compare(bands);
+  const band = fc.oneof(
+    fc.constant(OFF),
+    fc.record({
+      kind: fc.constantFrom('PK', 'LS', 'HS'),
+      freqHz: fc.double({ min: Math.log(30), max: Math.log(16000), noNaN: true }).map(Math.exp),
+      gainDb: fc.integer({ min: -60, max: 30 }).map((tenths) => tenths / 10),
+      qFactor: fc.double({ min: 0.5, max: 2, noNaN: true }),
+    }),
+  );
+  fc.assert(
+    fc.property(fc.array(band, { minLength: 10, maxLength: 10 }), (bands) => {
+      compare(bands);
+    }),
+    { numRuns: 30, seed: 0x4f41 },
+  );
+  // Never vacuous: the standard search ran below its ceiling, and YOLO used the new range.
+  assert.ok(searched > 0, 'no standard search below −0.5 dB');
+  assert.ok(raised > 0, 'no YOLO result above −0.5 dB');
 });

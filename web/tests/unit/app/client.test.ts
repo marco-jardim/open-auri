@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { NEUTRO, PADRAO_AURI } from 'open-auri/catalog';
 import { levelDb } from 'open-auri/safety';
-import { CABLE_INFLIGHT_KEY, NEUTRAL_CURVE } from '../../../src/lib/cable/index.ts';
+import {
+	CABLE_INFLIGHT_KEY,
+	CABLE_WRITTEN_EVENT,
+	NEUTRAL_CURVE,
+	type CableWrittenDetail
+} from '../../../src/lib/cable/index.ts';
+import { WRITTEN_STORAGE_KEY } from '../../../src/lib/state/curve.svelte.ts';
+import { m } from '../../../src/lib/paraglide/messages.js';
 import { createClientApp, createAppContext, type ClientApp } from '../../../src/lib/app/index.ts';
 import { get } from 'svelte/store';
 import { createToastStore } from '../../../src/lib/components/chrome/toast.ts';
@@ -112,6 +119,110 @@ describe('browser app wiring with fake persistence and HID', () => {
 		yolo.disable();
 		expect(curve.undo()).toBe(true);
 		expect(curve.current.bands).toEqual(NEUTRO.bands);
+	});
+
+	describe('Modo YOLO free preview disables every normal write request', () => {
+		function freePreviewApp() {
+			const fake = fakeAppOptions();
+			const yolo = createYoloState();
+			const app = createClientApp({ ...fake.options, yolo });
+			apps.push(app);
+			expect(yolo.enable(YOLO_PHRASE, 'engenharia')).toBe(true);
+			yolo.setFreePreview(true);
+			expect(yolo.writeBlock()).toBe('free-preview');
+			return { ...fake, app, yolo };
+		}
+
+		test('a top-bar request (no profile) opens no checklist and says why', () => {
+			const { app, device } = freePreviewApp();
+			const write = vi.spyOn(app.cable, 'write');
+			app.requestWrite();
+			expect(app.pendingWrite).toBeNull();
+			expect(app.pendingProfile).toBe('standard');
+			expect(get(app.toasts)).toMatchObject([
+				{ message: m.yolo_reason_free_preview(), tone: 'error' }
+			]);
+			expect(write).not.toHaveBeenCalled();
+			expect(device.attempts).toBe(0);
+		});
+
+		test('the YOLO profile, the standard one or a page curve: none opens a checklist', () => {
+			const { app } = freePreviewApp();
+			app.loadAuriDefault();
+			// Curva/Cabo (YOLO profile), Biblioteca and the shared curve (an explicit curve).
+			app.requestWrite(undefined, { profile: 'yolo' });
+			expect(app.pendingWrite).toBeNull();
+			app.requestWrite(undefined, { profile: 'standard' });
+			expect(app.pendingWrite).toBeNull();
+			app.requestWrite({ ...app.state.curve.current, name: 'Faixa' });
+			expect(app.pendingWrite).toBeNull();
+			expect(get(app.toasts)).toHaveLength(3);
+		});
+
+		test('the rescue still opens during the free preview', () => {
+			const { app } = freePreviewApp();
+			app.loadAuriDefault();
+			app.requestRescue();
+			expect(app.pendingWrite).toMatchObject(NEUTRAL_CURVE);
+			expect(app.pendingProfile).toBe('standard');
+			expect(app.state.curve.current.bands).toEqual(PADRAO_AURI.bands);
+			expect(get(app.toasts)).toHaveLength(0);
+		});
+
+		test('turning the free preview off allows the request again', () => {
+			const { app, yolo } = freePreviewApp();
+			yolo.setFreePreview(false);
+			app.requestWrite(undefined, { profile: 'yolo' });
+			expect(app.pendingWrite).not.toBeNull();
+			expect(app.pendingProfile).toBe('yolo');
+		});
+	});
+
+	test('a real Modo YOLO write is marked and becomes the written snapshot', async () => {
+		const fake = fakeAppOptions();
+		const yolo = createYoloState();
+		const app = createClientApp({ ...fake.options, yolo });
+		apps.push(app);
+		await app.start();
+		await app.cable.connect();
+		expect(yolo.enable(YOLO_PHRASE, 'engenharia')).toBe(true);
+		// Complementary −6 dB shelves at −0.3 dB: only the YOLO gate accepts them (HS, g:preamp).
+		const yoloOnly = {
+			name: 'Prateleiras',
+			source: 'custom' as const,
+			preampDb: -0.3,
+			bands: [
+				{ kind: 'LS' as const, freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+				{ kind: 'HS' as const, freqHz: 1000, gainDb: -6, qFactor: 0.7 },
+				...NEUTRAL_CURVE.bands.slice(2).map((band) => ({ ...band }))
+			]
+		};
+		expect(app.state.curve.set(yoloOnly)).toBe(true);
+		app.requestWrite(undefined, { profile: 'yolo' });
+		expect(app.pendingProfile).toBe('yolo');
+		const curve = app.pendingWrite;
+		if (!curve) throw new Error('Missing checklist snapshot');
+		const heard: CableWrittenDetail[] = [];
+		app.cable.events.addEventListener(CABLE_WRITTEN_EVENT, (event) => {
+			heard.push((event as CustomEvent<CableWrittenDetail>).detail);
+		});
+		const outcome = await app.cable.write({
+			...curve,
+			experimental: false,
+			profile: 'yolo',
+			confirmations: { ...confirmations, experimental: true, yoloWrite: true },
+			gesture: app.cable.createGesture(click)
+		});
+		app.onWriteResult(outcome);
+		expect(outcome.status).toBe('ok');
+		expect(heard).toHaveLength(1);
+		expect(heard[0]?.profile).toBe('yolo');
+		expect(heard[0]?.waived).toEqual(expect.arrayContaining(['k:kind-not-allowed', 'g:preamp']));
+		expect(heard[0]?.entry).toMatchObject({ status: 'ok', profile: 'yolo' });
+		expect(app.state.curve.lastWritten?.bands).toEqual(yoloOnly.bands);
+		expect(app.state.curve.lastWritten?.preampDb).toBe(yoloOnly.preampDb);
+		expect(app.state.curve.dirty).toBe(false);
+		expect(fake.local.getItem(WRITTEN_STORAGE_KEY)).toContain('"preampDb":-0.3');
 	});
 
 	test('rescue selects Neutro for the checklist, leaving the editor and cable alone', () => {

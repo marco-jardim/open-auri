@@ -68,16 +68,18 @@ export function gateForWrite(bands: readonly Band[], preampDb: number, options?:
  * curves failing checks a preamp cannot fix: kinds, D7, codec, a, b, c).
  *
  * In the YOLO profile (`options.profile`, read like {@link gateProfile}) the
- * lower bound is {@link CODEC_PREAMP_FLOOR_DB} instead, `d:prefix-peak-full`,
- * `d:prefix-peak-extended` and `e:output-extended` are fixable too, and only
- * class-1 reasons count (class 2 is waived).
+ * range is [{@link CODEC_PREAMP_FLOOR_DB}, {@link YOLO_PREAMP_MAX_DB}] instead
+ * (`g:preamp` is waived), `d:prefix-peak-full`, `d:prefix-peak-extended` and
+ * `e:output-extended` are fixable too, and only class-1 reasons count (class 2
+ * is waived).
  *
  * `storable: true` (an own data property holding exactly `true`, read like
  * `profile`: a getter is never called) asks for a preamp a stored curve may
  * keep: in YOLO the lower bound is then {@link YOLO_STORAGE_PREAMP_FLOOR_DB}
- * (−25.5 dB, S1's floor), so a curve that needs more attenuation gets `null`.
- * Use it for every curve that is saved, shared or published. It changes
- * nothing in the standard profile, whose floor is already −25.5 dB.
+ * (−25.5 dB, S1's floor), so the range is [−25.5, 0] dB and a curve that needs
+ * more attenuation gets `null`. Use it for every curve that is saved, shared or
+ * published. It changes nothing in the standard profile, whose floor is already
+ * −25.5 dB.
  *
  * A candidate is derived analytically from the metrics at the top preamp,
  * rounded down to the grid, then verified with the gate and stepped down by
@@ -127,6 +129,12 @@ export const CODEC_PREAMP_FLOOR_DB: number;
  * with `storable: true`, and `classifyCurve` refuses a curve below it.
  */
 export const YOLO_STORAGE_PREAMP_FLOOR_DB: number;
+/**
+ * Highest preamp the YOLO profile searches from: 0 dB, the codec ceiling (a
+ * positive preamp does not encode) and the editor's YOLO maximum. `g:preamp`
+ * is waived there, so only the hard limits (class 1) bound the preamp.
+ */
+export const YOLO_PREAMP_MAX_DB: 0;
 /**
  * @typedef {import('../dsp/eq0xcb.mjs').Band} Band
  * @typedef {import('../dsp/eq0xcb.mjs').Section} Section

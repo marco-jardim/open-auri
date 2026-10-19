@@ -20,20 +20,23 @@ export function createBlindPreview(engine: AudioEngine, candidates: readonly Can
 	);
 	const chains: PreviewChain[] = [];
 	try {
-		for (const c of candidates) {
+		candidates.forEach((c, i) => {
 			chains.push(
 				engine.buildChain(c.bands, c.preampDb, {
 					experimental: c.experimental,
+					// The trim plays ahead of the protection: the shared gain counts it.
+					gainDb: trims[i] ?? 0,
 					on: false,
 					...(protect ? { protect } : {})
 				})
 			);
-		}
+		});
 	} catch (error) {
 		chains.forEach((chain) => chain.dispose());
 		throw error;
 	}
-	const mute = () => chains.forEach((chain) => chain.setGain(0, false));
+	// Silence keeps each chain's trim, so no limiter ever sees a level the shared gain did not count.
+	const mute = () => chains.forEach((chain, i) => chain.setGain(trims[i] ?? 0, false));
 	mute();
 	return {
 		chains,

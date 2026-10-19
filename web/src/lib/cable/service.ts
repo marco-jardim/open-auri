@@ -33,9 +33,14 @@ import {
 	writeCurve,
 	writeMany
 } from 'open-auri/transport';
-import { MIN_INTERVAL_MS, observeFlashState, recordWrite } from 'open-auri/policy';
+import {
+	JOURNAL_WAIVED_MAX,
+	MIN_INTERVAL_MS,
+	observeFlashState,
+	recordWrite
+} from 'open-auri/policy';
 import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
-import { gateForWrite } from 'open-auri/safety';
+import { gateForWrite, isWaivable } from 'open-auri/safety';
 import { evaluateChecklist, flashCountersOf } from './checklist.ts';
 import { consumeGestureToken, createGestureToken, type GestureEventLike } from './gesture.ts';
 import { withWriteFlag } from './write-flag.ts';
@@ -64,6 +69,7 @@ import type {
 	QueueOutcome,
 	QueueRequest,
 	QueueState,
+	ReasonCode,
 	Refused,
 	RefusalReason,
 	RescueState,
@@ -160,7 +166,26 @@ function finite(value: unknown): value is number {
 	return typeof value === 'number' && Number.isFinite(value);
 }
 
-/** Parses a persisted marker; null when it is unreadable or malformed. */
+/**
+ * The waived codes of a persisted YOLO marker, checked like the journal checks an entry's
+ * (`JOURNAL_WAIVED_MAX` at most) and restricted to the codes the YOLO profile can waive.
+ * Null when the list is not valid: the recovered entry then names no waived code.
+ */
+function markerWaived(value: unknown): ReasonCode[] | null {
+	if (!Array.isArray(value) || value.length > JOURNAL_WAIVED_MAX) return null;
+	const codes: ReasonCode[] = [];
+	for (const code of value as unknown[]) {
+		if (!isWaivable(code)) return null;
+		codes.push(code as ReasonCode);
+	}
+	return codes;
+}
+
+/**
+ * Parses a persisted marker; null when it is unreadable or malformed. A marker without
+ * `profile: 'yolo'` (a standard write, or one persisted before markers carried a profile) is
+ * standard; `waived` is kept only on a YOLO marker and only when it is valid.
+ */
 export function parseInflightMarker(raw: string): InflightMarker | null {
 	let value: unknown;
 	try {
@@ -186,6 +211,11 @@ export function parseInflightMarker(raw: string): InflightMarker | null {
 	}
 	const marker: InflightMarker = { at, crc, name, preampDb, bands: bands as Band[], device, tabId };
 	if (candidate.between === true) marker.between = true;
+	if (candidate.profile === 'yolo') {
+		marker.profile = 'yolo';
+		const waived = markerWaived(candidate.waived);
+		if (waived !== null) marker.waived = waived;
+	}
 	return marker;
 }
 
@@ -530,7 +560,15 @@ export function createCableService(deps: CableServiceDeps) {
 				preampDb: marker.preampDb,
 				bands: copyBands(marker.bands),
 				status: 'interrupted',
-				device: truncate(marker.device, 64)
+				device: truncate(marker.device, 64),
+				// An interrupted Modo YOLO write stays marked, with the codes it waived (a marker
+				// without a profile is a standard write, or one persisted before markers had one).
+				...(marker.profile === 'yolo'
+					? {
+							profile: 'yolo' as const,
+							...(marker.waived === undefined ? {} : { waived: [...marker.waived] })
+						}
+					: {})
 			};
 			try {
 				deps.journal.append(entry);
@@ -693,7 +731,11 @@ export function createCableService(deps: CableServiceDeps) {
 			preampDb: authorized.preampDb,
 			bands: copyBands(authorized.snapshot),
 			device: truncate(label, 64),
-			tabId
+			tabId,
+			// Modo YOLO: what the journal entry would carry, so a recovered interruption keeps it.
+			...(authorized.profile === 'yolo'
+				? { profile: 'yolo' as const, waived: [...authorized.checklist.waived] }
+				: {})
 		};
 		ownMarker = marker;
 		if (inflight.write(JSON.stringify(marker))) return true;
@@ -1029,9 +1071,10 @@ export function createCableService(deps: CableServiceDeps) {
 			rescue = { at, deviceLabel: label, reportsSent, fresh: true };
 		}
 		// Only a real, committed write dispatches the written event (simulated and interrupted
-		// writes never do). A YOLO write does too, marked (`profile: 'yolo'` and the waived codes):
-		// the app marks the curve as written and the outbox counts the install (YOLO publication,
-		// option B); the curve's class is derived again wherever it goes.
+		// writes never do). Every one, YOLO ones too, is the cable's new written snapshot (the app
+		// marks it). A YOLO write is marked like its journal entry: `profile: 'yolo'` with the
+		// class-2 codes it waived, so a listener can tell it apart (the outbox counts the install,
+		// YOLO publication option B); the curve's class is derived again wherever it goes.
 		if (!simulated && committed && entry !== null) {
 			const detail: CableWrittenDetail = {
 				entry,

@@ -1044,21 +1044,30 @@ export const CODEC_PREAMP_FLOOR_DB =
 export const YOLO_STORAGE_PREAMP_FLOOR_DB = THRESHOLDS.preampMinDb;
 
 /**
+ * Highest preamp the YOLO profile searches from: 0 dB, the codec ceiling (a
+ * positive preamp does not encode) and the editor's YOLO maximum. `g:preamp`
+ * is waived there, so only the hard limits (class 1) bound the preamp.
+ */
+export const YOLO_PREAMP_MAX_DB = 0;
+
+/**
  * Highest preamp on the 0.1 dB UI grid within [preampMinDb, preampMaxDb] for
  * which `gateForWrite` accepts the curve, or `null` when none does (including
  * curves failing checks a preamp cannot fix: kinds, D7, codec, a, b, c).
  *
  * In the YOLO profile (`options.profile`, read like {@link gateProfile}) the
- * lower bound is {@link CODEC_PREAMP_FLOOR_DB} instead, `d:prefix-peak-full`,
- * `d:prefix-peak-extended` and `e:output-extended` are fixable too, and only
- * class-1 reasons count (class 2 is waived).
+ * range is [{@link CODEC_PREAMP_FLOOR_DB}, {@link YOLO_PREAMP_MAX_DB}] instead
+ * (`g:preamp` is waived), `d:prefix-peak-full`, `d:prefix-peak-extended` and
+ * `e:output-extended` are fixable too, and only class-1 reasons count (class 2
+ * is waived).
  *
  * `storable: true` (an own data property holding exactly `true`, read like
  * `profile`: a getter is never called) asks for a preamp a stored curve may
  * keep: in YOLO the lower bound is then {@link YOLO_STORAGE_PREAMP_FLOOR_DB}
- * (−25.5 dB, S1's floor), so a curve that needs more attenuation gets `null`.
- * Use it for every curve that is saved, shared or published. It changes
- * nothing in the standard profile, whose floor is already −25.5 dB.
+ * (−25.5 dB, S1's floor), so the range is [−25.5, 0] dB and a curve that needs
+ * more attenuation gets `null`. Use it for every curve that is saved, shared or
+ * published. It changes nothing in the standard profile, whose floor is already
+ * −25.5 dB.
  *
  * A candidate is derived analytically from the metrics at the top preamp,
  * rounded down to the grid, then verified with the gate and stepped down by
@@ -1073,8 +1082,10 @@ export function autoPreamp(bands, options = {}) {
   const storable = ownDataValue(options, 'storable') === true;
   const { experimental = false } = options ?? {};
   const yolo = profile === 'yolo';
-  const top = gateForWrite(bands, THRESHOLDS.preampMaxDb, { experimental, profile });
-  if (top.ok) return THRESHOLDS.preampMaxDb;
+  // The standard profile keeps its −0.5 dB ceiling exactly as before.
+  const topDb = yolo ? YOLO_PREAMP_MAX_DB : THRESHOLDS.preampMaxDb;
+  const top = gateForWrite(bands, topDb, { experimental, profile });
+  if (top.ok) return topDb;
   const fixable = new Set(['d:prefix-peak', 'e:output-audible', 'e:output-full']);
   if (yolo) {
     fixable.add('d:prefix-peak-full');
@@ -1107,7 +1118,7 @@ export function autoPreamp(bands, options = {}) {
   const yoloFloorDb = storable ? YOLO_STORAGE_PREAMP_FLOOR_DB : CODEC_PREAMP_FLOOR_DB;
   const floorDb = yolo ? yoloFloorDb : THRESHOLDS.preampMinDb;
   const minStep = Math.round(floorDb * PREAMP_STEPS_PER_DB);
-  const maxStep = Math.round(THRESHOLDS.preampMaxDb * PREAMP_STEPS_PER_DB);
+  const maxStep = Math.round(topDb * PREAMP_STEPS_PER_DB);
   // Slightly optimistic start (Q23 rounding and the dB tolerance can admit a
   // grid point just above the analytic cap); the gate decides.
   let step = Math.min(maxStep - 1, Math.floor((cap + 1e-6) * PREAMP_STEPS_PER_DB));

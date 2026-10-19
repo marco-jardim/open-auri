@@ -28,10 +28,11 @@ interface RecordEntry {
  * Protection (C1): the armed lanes share one preview protection (`engine.sharedProtection`), as
  * `createAB` gives a pair. When any armed curve fails the standard gate (or is louder than it
  * allows), every armed lane gets the same normalize gain and limiter, so a YOLO-only lane plays
- * at the level the A/B match gives it instead of several dB below the others. The gain comes
- * from the untrimmed peaks: the level-match trims are ≤ 0 and change with the pair without a
- * rebuild, so no lane peaks above -1 dBFS whatever its trim. A change of that protection (a lane
- * armed, disarmed or edited) rebuilds every lane, replacements first.
+ * at the level the A/B match gives it instead of several dB below the others. Each lane's trim
+ * (`setGain`) plays ahead of that gain and limiter, so every limiter sees the matched level. The
+ * gain comes from the untrimmed peaks: the level-match trims are ≤ 0 and change with the pair
+ * without a rebuild, so no lane peaks above -1 dBFS whatever its trim. A change of that
+ * protection (a lane armed, disarmed or edited) rebuilds every lane, replacements first.
  */
 export function createTrackChains(
 	engine: Engine,

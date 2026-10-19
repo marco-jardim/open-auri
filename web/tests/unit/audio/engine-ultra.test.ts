@@ -65,7 +65,9 @@ function protectionDb(chain: PreviewChain): number | null {
 	const tail = chain.stages.length > 0 ? as(chain.stages.at(-1), FakeIIRFilterNode) : null;
 	const next: unknown = (tail ?? as(chain.preamp, FakeGainNode)).connections[0];
 	if (next === chain.output) return null;
-	const normalize = as(next, FakeGainNode);
+	// A protected chain runs sections → level trim → normalize → limiter → output (#39).
+	const trim = as(next, FakeGainNode);
+	const normalize = as(trim.connections[0], FakeGainNode);
 	expect(as(normalize.connections[0], FakeDynamicsCompressorNode).connections).toEqual([
 		chain.output
 	]);

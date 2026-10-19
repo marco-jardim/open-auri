@@ -121,6 +121,16 @@ export interface InflightMarker {
 	 * one has not started. No cable is being written, so recovering it records nothing.
 	 */
 	between?: true;
+	/**
+	 * Modo YOLO write: recovered as a YOLO `interrupted` entry. Absent on standard writes and on
+	 * markers persisted before it existed (both recovered as standard).
+	 */
+	profile?: 'yolo';
+	/**
+	 * The class-2 codes the YOLO write waived (only with `profile: 'yolo'`; at most
+	 * `JOURNAL_WAIVED_MAX`, waivable codes only), copied into the recovered entry.
+	 */
+	waived?: ReasonCode[];
 }
 
 export interface CableServiceDeps {
@@ -424,12 +434,12 @@ export interface CableWrittenDetail {
 	at: number;
 	levelDb: number | null;
 	/**
-	 * `'yolo'` for a real YOLO write (option B, YOLO publication): the app marks the curve as
-	 * written and the outbox counts the install like any other; the class-2 codes it waived are in
-	 * `waived`. Absent (or `'standard'`) for a standard write. Simulated and interrupted writes
+	 * `'yolo'`: a real Modo YOLO write, marked like its journal entry (option B, YOLO
+	 * publication): the app marks the curve as written and the outbox counts the install like any
+	 * other. Absent, or `'standard'`, on a standard write. Simulated and interrupted writes
 	 * dispatch nothing.
 	 */
-	profile?: 'standard' | 'yolo';
-	/** Codes the YOLO write waived (only with `profile: 'yolo'`). */
-	waived?: string[];
+	profile?: WriteProfile;
+	/** The class-2 codes the YOLO write waived (only with `profile: 'yolo'`). */
+	waived?: ReasonCode[];
 }

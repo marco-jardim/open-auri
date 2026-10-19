@@ -20,7 +20,7 @@
  *   (`EDITOR_PREAMP_FLOOR_DB`): a value that would need more attenuation is refused.
  */
 import { ABS_RANGES, autoPreamp, boundarySearch } from 'open-auri/safety';
-import { editorVerdict, EDITOR_PREAMP_FLOOR_DB, type EditProfile } from './edit.ts';
+import { editorVerdict, EDITOR_PREAMP_FLOOR_DB, type EditJudge } from './edit.ts';
 import type { Band, Curve } from './model.ts';
 import { hasExperimental } from './model.ts';
 import type { GateVerdict, Reason } from './reasons.ts';
@@ -128,8 +128,11 @@ export interface MacroInput {
 	values: MacroValues;
 	index: number;
 	target: number;
-	/** The editor's gate profile; standard when omitted, so a missing profile is never laxer. */
-	profile?: EditProfile;
+	/**
+	 * The editor's judge (`'codec'` during "Prévia sem limites"); standard when omitted, so a
+	 * missing profile is never laxer.
+	 */
+	profile?: EditJudge;
 }
 
 export function clampMacro(value: number): number {
@@ -145,11 +148,15 @@ export function macroCandidate(
 	const values: MacroValues = [pick(0), pick(1), pick(2), pick(3)];
 	const bands = applyMacros(input.base, values);
 	const experimental = hasExperimental(bands);
-	const auto = autoPreamp(
-		bands,
-		input.profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
-	);
-	if (auto === null) return { bands, preampDb: input.basePreampDb, accepted: false };
+	const yoloGate = input.profile === 'yolo' || input.profile === 'codec';
+	const auto = autoPreamp(bands, yoloGate ? { experimental, profile: 'yolo' } : { experimental });
+	if (auto === null) {
+		// The free preview judges with the codec alone: no preamp from the YOLO search (its hard
+		// limits) means none is lowered, and `editorVerdict(…, 'codec')` decides.
+		const preampDb = input.basePreampDb;
+		const accepted = input.profile === 'codec' && preampDb >= EDITOR_PREAMP_FLOOR_DB;
+		return { bands, preampDb, accepted };
+	}
 	const preampDb = Math.min(input.basePreampDb, auto);
 	// YOLO's own floor is the codec's; the editor stops at −25,5 dB (S1) in every profile.
 	return { bands, preampDb, accepted: preampDb >= EDITOR_PREAMP_FLOOR_DB };

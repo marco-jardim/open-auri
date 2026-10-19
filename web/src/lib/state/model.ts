@@ -1,5 +1,6 @@
 import { checkBand, snapshotBands } from 'open-auri/dsp';
 import { NEUTRO } from 'open-auri/catalog';
+import { THRESHOLDS } from 'open-auri/safety';
 import { normalizeLabels } from 'open-auri/share';
 import { isRecord } from './storage.ts';
 
@@ -42,7 +43,18 @@ export function isSource(value: unknown): value is CurveSource {
 	);
 }
 
-/** snapshotBands alone deliberately does not validate field types or values. */
+/**
+ * Lowest preamp of a curve the client keeps (C1): −25,5 dB, the floor S1 and S5 encode and the
+ * editor's in every profile (Curva `EDITOR_PREAMP_FLOOR_DB`). The YOLO gate alone waives it, so
+ * `checkedCurve` refuses anything below it: such a curve could neither be edited, encoded, saved
+ * nor restored, and never reaches `oa.current`, the undo history or the library.
+ */
+export const CURVE_PREAMP_FLOOR_DB = THRESHOLDS.preampMinDb;
+
+/**
+ * snapshotBands alone deliberately does not validate field types or values. The preamp must be
+ * finite and at least `CURVE_PREAMP_FLOOR_DB`.
+ */
 export function checkedCurve(value: unknown): CurrentCurve {
 	if (
 		!isRecord(value) ||
@@ -51,6 +63,7 @@ export function checkedCurve(value: unknown): CurrentCurve {
 		!isSource(value.source) ||
 		typeof value.preampDb !== 'number' ||
 		!Number.isFinite(value.preampDb) ||
+		!(value.preampDb >= CURVE_PREAMP_FLOOR_DB) ||
 		!isTimestamp(value.updatedAt)
 	) {
 		throw new TypeError('Invalid current curve structure');

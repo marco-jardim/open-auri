@@ -32,7 +32,7 @@
 	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import { createGateWorker } from '#lib/workers/index.ts';
-	import { curveSignature } from '#lib/state/model.ts';
+	import { curveSignature, type CurveData } from '#lib/state/model.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { whenIdle } from '#lib/app/runtime.ts';
@@ -182,6 +182,13 @@
 	const freePreview = $derived(app?.yolo.freePreview ?? false);
 	/** Gate profile of a write from this editor, and of every discrete edit. */
 	const writeProfile = $derived<'standard' | 'yolo'>(yoloOn ? 'yolo' : 'standard');
+	/**
+	 * What judges every discrete edit (kinds and the dial's preflight, parked points, reorders and
+	 * the default order, the preamp, "Máximo sem clipping", macros): the write profile, except in
+	 * "Prévia sem limites", where the codec accepts, the same check the drags use (`'codec'`).
+	 * Those edits then go to the memory-only draft (`apply` → `applyFree`), never to the store.
+	 */
+	const editJudge = $derived(editorProfile(yoloOn, freePreview));
 
 	const stored = $derived(app?.state.curve.current ?? null);
 	const storedCurve = $derived<Curve>(stored ?? neutral);
@@ -238,6 +245,19 @@
 		untrack(() => {
 			if (live === null && freeDraft !== null) freeDraft = null;
 		});
+	});
+	/**
+	 * Bumped each time the free preview starts or ends (not reactive): a commit begun before a
+	 * free-preview exit is stale even if the free preview is on again when the gate answers.
+	 */
+	let freePreviewEpoch = 0;
+	let wasFreePreview = false;
+	$effect(() => {
+		const on = freePreview;
+		if (on !== wasFreePreview) {
+			wasFreePreview = on;
+			freePreviewEpoch++;
+		}
 	});
 	/** Why YOLO itself disables writing (the free preview), or null. */
 	const yoloWriteReason = $derived(
@@ -301,8 +321,12 @@
 	$effect(() => {
 		app?.yolo.syncLayer(layer);
 	});
-	/** The editor curve when YOLO was turned on: restored if YOLO ends on a curve the standard gate refuses. */
-	let beforeYolo: { curve: Curve; labels: readonly (string | null)[] | null } | null = null;
+	/**
+	 * The editor curve when YOLO was turned on, whole (name, source, labels, bands and preamp):
+	 * restored, all of it, if YOLO ends on a curve the standard gate refuses, even when a YOLO-only
+	 * experiment or import renamed it or gave it another source meanwhile.
+	 */
+	let beforeYolo: CurveData | null = null;
 	let wasYolo = false;
 	$effect(() => {
 		const on = yoloOn;
@@ -310,14 +334,17 @@
 			if (on && !wasYolo && app) {
 				const current = app.state.curve.current;
 				beforeYolo = {
-					curve: { bands: current.bands.slice(), preampDb: current.preampDb },
+					name: current.name,
+					source: current.source,
+					preampDb: current.preampDb,
+					bands: current.bands,
 					labels: current.labels ?? null
 				};
 			} else if (!on && wasYolo && app && beforeYolo !== null) {
 				// "Desligar" (or leaving Engenharia) on a YOLO-only curve: the editor goes back to
-				// the curve it had before; a curve the standard gate accepts stays as it is.
-				if (!canBringBack(app.state.curve.current)) {
-					apply(beforeYolo.curve, { labels: beforeYolo.labels });
+				// the curve it had before, metadata included; a curve the standard gate accepts
+				// stays as it is.
+				if (!canBringBack(app.state.curve.current) && app.state.curve.set(beforeYolo)) {
 					notify(m.yolo_restored());
 				}
 				beforeYolo = null;
@@ -705,18 +732,30 @@
 		cancelFrames();
 		const start = curve;
 		const released = draft;
-		// What the answer is about: the stored curve under the edit and the gate profile it is
-		// judged in. Either may change while the gate answers (another tab, a preset, YOLO turned
-		// off and the curve before it restored): then the answer is stale and is dropped.
+		// What the answer is about: the stored curve under the edit, the gate profile it is judged
+		// in, and where it lands (the free preview's memory-only draft, and which step of it). Any
+		// of them may change while the gate answers (another tab, a preset, YOLO turned off and
+		// the curve before it restored, the free preview turned off or on, a draft Desfazer,
+		// Refazer, reorder or other edit): then the answer is stale and is dropped (C1, #38).
 		const startStored = storedSignature;
 		const startProfile = writeProfile;
+		const startFree = freePreview;
+		const startFreeEpoch = freePreviewEpoch;
+		const startDraft = liveDraft;
 		dragView = null;
 		dragReason = null;
 		try {
 			const result = await releaseBand(gate, start, index, target, experimental, startAccepted);
 			if (token !== dragToken) return;
-			if (storedSignature !== startStored || writeProfile !== startProfile) {
-				// C1: never applied over another curve, nor in a profile it was not judged in.
+			if (
+				storedSignature !== startStored ||
+				writeProfile !== startProfile ||
+				freePreview !== startFree ||
+				freePreviewEpoch !== startFreeEpoch ||
+				liveDraft !== startDraft
+			) {
+				// C1: never applied over another curve or draft step, in a profile it was not
+				// judged in, nor into the store once the free preview it began in has ended.
 				draft = null;
 				report(null, 'info');
 				return;
@@ -761,7 +800,7 @@
 	function onPark(index: number, target: DragTarget) {
 		if (!app || lockedEdit()) return;
 		const bands = replaceBand(curve.bands, index, parkedBand(index));
-		const check = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
+		const check = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		if (!check.ok) {
 			dragMessage = m.curva_v2_parked_refused({
 				index: String(index + 1),
@@ -807,7 +846,7 @@
 			values,
 			index,
 			target: value,
-			profile: writeProfile
+			profile: editJudge
 		});
 		const macro = MACROS[index];
 		if (proposal.ok && apply(proposal)) {
@@ -840,7 +879,7 @@
 			announcement = maxClip.text;
 			return;
 		}
-		const result = maxPreamp(curve, writeProfile);
+		const result = maxPreamp(curve, editJudge);
 		let text: string;
 		if (!result.ok) {
 			text = m.curva_maxclip_none({
@@ -886,7 +925,7 @@
 		const preampDb = snapPreamp(value);
 		if (preampDb === null || preampDb === curve.preampDb) return;
 		const bands = curve.bands;
-		const check = editorVerdict({ bands, preampDb }, writeProfile);
+		const check = editorVerdict({ bands, preampDb }, editJudge);
 		if (!check.ok) {
 			const text = m.curva_preamp_refused({
 				value: formatSignedDb(preampDb, locale),
@@ -917,7 +956,7 @@
 			index,
 			bandOfKind(previous, kind, { layer, yolo: yoloOn })
 		);
-		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		return result.ok
 			? { ok: true as const, bands }
 			: {
@@ -942,7 +981,7 @@
 			return;
 		}
 		const bands = defaultOrder(curve.bands);
-		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		if (result.ok) {
 			// The labels follow their filters (in the free preview: the draft's labels).
 			apply({ bands, preampDb: curve.preampDb }, { order: defaultPermutation(curve.bands) });
@@ -967,7 +1006,7 @@
 			cabMessage = m.yolopub_editor_locked();
 			return;
 		}
-		const result = reorderSections(curve, from, to, writeProfile);
+		const result = reorderSections(curve, from, to, editJudge);
 		if (result.ok) {
 			// The labels follow their filters (in the free preview: the draft's labels).
 			const order = movePermutation(curve.bands.length, from, to);

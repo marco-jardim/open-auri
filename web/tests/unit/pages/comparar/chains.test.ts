@@ -64,16 +64,29 @@ function is<T>(node: unknown, type: abstract new (...args: never[]) => T): T {
 	if (!(node instanceof type)) throw new Error(`Expected ${type.name}`);
 	return node;
 }
-/** The protection's normalize gain after the lane's sections, or null when it has none. */
-function normalizeGain(chain: PreviewChain): number | null {
+/** The node right after the lane's sections (or its preamp). */
+function afterSections(chain: PreviewChain): unknown {
 	const tail = chain.stages.length > 0 ? is(chain.stages.at(-1), FakeIIRFilterNode) : null;
 	const [next] = (tail ?? is(chain.preamp, FakeGainNode)).connections;
+	return next;
+}
+/**
+ * The protection's normalize gain (sections → trim → normalize → limiter → output), or null when
+ * the lane has none.
+ */
+function normalizeGain(chain: PreviewChain): number | null {
+	const next = afterSections(chain);
 	// The fake node and the typed chain output: compared as plain objects.
 	if (Object.is(next, chain.output)) return null;
-	const normalize = is(next, FakeGainNode);
+	const [normalizeNode] = is(next, FakeGainNode).connections;
+	const normalize = is(normalizeNode, FakeGainNode);
 	const [limiter] = normalize.connections;
 	expect(is(limiter, FakeDynamicsCompressorNode).connections).toEqual([chain.output]);
 	return normalize.gain.value;
+}
+/** The level trim ahead of a protected lane's normalize gain and limiter. */
+function trimGain(chain: PreviewChain): number {
+	return is(afterSections(chain), FakeGainNode).gain.value;
 }
 
 describe('parallel comparison chains', () => {
@@ -255,16 +268,46 @@ describe('parallel comparison chains', () => {
 			levelDb(one.curve.bands, one.curve.preampDb),
 			levelDb(two.curve.bands, two.curve.preampDb)
 		]);
+		const [first, second] = chains;
+		if (!first || !second) throw new Error('missing chains');
+		// Protected lanes apply their trim ahead of the limiter; the output is only the switch.
 		manager.select(1);
-		expect(asFake(chains[0]?.output, FakeGainNode).gain.value).toBeCloseTo(
-			dbToGain(trims[0] ?? 0),
-			12
-		);
+		expect(trimGain(first)).toBeCloseTo(dbToGain(trims[0] ?? 0), 12);
+		expect(asFake(first.output, FakeGainNode).gain.value).toBe(1);
+		expect(asFake(second.output, FakeGainNode).gain.value).toBe(0);
 		manager.select(2);
-		expect(asFake(chains[1]?.output, FakeGainNode).gain.value).toBeCloseTo(
-			dbToGain(trims[1] ?? 0),
-			12
-		);
+		expect(trimGain(second)).toBeCloseTo(dbToGain(trims[1] ?? 0), 12);
+		expect(asFake(first.output, FakeGainNode).gain.value).toBe(0);
+		expect(asFake(second.output, FakeGainNode).gain.value).toBe(1);
+		// Both limiters see the matched level, and no lane peaks above -1 dBFS there.
+		const atLimiter = (
+			chain: PreviewChain,
+			curve: Track['curve'],
+			db: (c: typeof curve) => number
+		) => db(curve) + 20 * Math.log10(trimGain(chain) * expected);
+		const level = (c: Track['curve']) => levelDb(c.bands, c.preampDb);
+		const peak = (c: Track['curve']) => chainPeakDb(c.bands, c.preampDb, rate);
+		expect(atLimiter(first, one.curve, level)).toBeCloseTo(atLimiter(second, two.curve, level), 9);
+		for (const [chain, track] of [
+			[first, one],
+			[second, two]
+		] as const) {
+			expect(atLimiter(chain, track.curve, peak)).toBeLessThanOrEqual(
+				YOLO_PREVIEW_PEAK_DBFS + 1e-9
+			);
+		}
+		// Unmatching moves the trims live (no rebuild): back to 0 dB, still at most -1 dBFS.
+		manager.configure([1, 2], false);
+		expect(trimGain(first)).toBe(1);
+		expect(trimGain(second)).toBe(1);
+		for (const [chain, track] of [
+			[first, one],
+			[second, two]
+		] as const) {
+			expect(atLimiter(chain, track.curve, peak)).toBeLessThanOrEqual(
+				YOLO_PREVIEW_PEAK_DBFS + 1e-9
+			);
+		}
 		manager.dispose();
 	});
 

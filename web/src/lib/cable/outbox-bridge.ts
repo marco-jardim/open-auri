@@ -1,6 +1,7 @@
 // T4.16: a real, successful cable write of a community curve becomes one `installed` activity.
 // Only `cable:written` is heard: the service dispatches it after a real committed write and never
-// for simulated, interrupted or refused writes (service.ts `journalSequence`). As defense in depth
+// for simulated, interrupted or refused writes (service.ts `journalSequence`). A Modo YOLO write
+// counts too (its detail is marked `profile: 'yolo'`): the install happened. As defense in depth
 // the bridge also drops any detail whose journal entry is not `ok` and anything heard while the
 // service reports simulated mode. The event goes through the social outbox (`enqueue`), never
 // straight to the API, and only when `originOf` finds the exact published bytes.

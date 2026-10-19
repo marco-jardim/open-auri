@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { EnvelopeError, S1Error } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/index.ts';
+	import type { CurrentCurve } from '#lib/state/index.ts';
 	import { sameLabels } from '#lib/state/model.ts';
 	import {
 		createSocialOutbox,
@@ -277,11 +278,23 @@
 		};
 	});
 
+	/**
+	 * The store curve (object identity: every store change is a new frozen object) when the
+	 * request for `hint` first started. A retry after a reconnect keeps it, so a same-S1 curve
+	 * loaded meanwhile (a preset, an import) never takes that version's labels.
+	 */
+	let linked: { hint: NonNullable<typeof originHint>; curve: CurrentCurve | null } | null = null;
+
 	// Query ids are hints, not proof: confirm the version's exact S1 through the public API.
 	$effect(() => {
 		const hint = originHint;
 		void reconnectRevision;
 		if (!hint) return;
+		const loaded =
+			linked !== null && linked.hint === hint
+				? linked.curve
+				: untrack(() => app?.state.curve.current ?? null);
+		linked = { hint, curve: loaded };
 		const controller = new AbortController();
 		void (async () => {
 			try {
@@ -301,13 +314,39 @@
 				)
 					return;
 				await rememberOrigin(hint);
-				if (!controller.signal.aborted) originRevision++;
+				if (controller.signal.aborted) return;
+				originRevision++;
+				hydrateLabels(hint.s1, loaded, result.version.labels);
 			} catch (cause) {
 				if (!controller.signal.aborted) failure(cause);
 			}
 		})();
 		return () => controller.abort();
 	});
+
+	/**
+	 * The verified version's filter labels (`preset@2`) join the editor curve: `#p=` never carries
+	 * them, so "Abrir na Curva" loads the curve without labels and they arrive here. Only while
+	 * the store still holds the very curve it held when the request started (`loaded`), the
+	 * editor still is exactly that S1 (stored and shown) and it still has no label of its own: an
+	 * edit, a rename or another load (even of the same S1) since the link loaded always wins.
+	 * Through the store's label path, so it is a normal labels-only edit (persisted, undoable);
+	 * labels never touch S1 or the gate.
+	 */
+	function hydrateLabels(
+		code: string,
+		loaded: CurrentCurve | null,
+		labels: readonly (string | null)[] | null | undefined
+	) {
+		const store = app?.state.curve;
+		if (!store || !Array.isArray(labels) || !labels.some((label) => typeof label === 'string')) {
+			return;
+		}
+		if (loaded === null || store.current !== loaded) return;
+		if (s1 !== code || currentS1(store.current) !== code) return;
+		if (store.current.labels?.some((label) => label !== null)) return;
+		store.setLabels(labels);
+	}
 
 	$effect(() => {
 		const instance = preview;

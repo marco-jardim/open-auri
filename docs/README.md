@@ -71,10 +71,11 @@ import { autoPreamp } from 'open-auri/safety';
 - [`gate.mjs`](../src/safety/gate.mjs): análise de estabilidade, headroom e pré-amp
   dentro do envelope observado para gravação, sem constituir prova de segurança.
   Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS`,
-  `CODEC_PREAMP_FLOOR_DB` e `YOLO_STORAGE_PREAMP_FLOOR_DB` para seleção e consulta
-  dos perfis do gate. Acima de 20 kHz só passam seções que não amplificam
+  `CODEC_PREAMP_FLOOR_DB`, `YOLO_STORAGE_PREAMP_FLOOR_DB` e `YOLO_PREAMP_MAX_DB` para
+  seleção e consulta dos perfis do gate. Acima de 20 kHz só passam seções que não amplificam
   (`d7:boost-above-20k`, dispensável no perfil YOLO, que então aplica as checagens
   estendidas de 20 Hz a 48 kHz, `d:prefix-peak-extended` e `e:output-extended`).
+  No perfil YOLO, `autoPreamp` busca a partir de 0 dB (`YOLO_PREAMP_MAX_DB`), e
   `autoPreamp(bands, {profile: 'yolo', storable: true})` não desce abaixo de −25,5 dB.
 - [`classify.mjs`](../src/safety/classify.mjs): `classifyCurve`, a classe de uma curva
   para armazenar e publicar (`standard`, `yolo` ou `rejected`, com os códigos dispensados

@@ -22,10 +22,18 @@ import { decodeS1, encodeS1, S1_FREQ_MAX } from './s1.mjs';
  * `@1` plus optional labels, bands up to 32000 Hz and an S1 v1 or v2 code. Writers
  * emit the lowest format that fits (envelopeFormat).
  * @typedef {'open-auri/preset@1' | 'open-auri/preset@2'} EnvelopeFormat
- * @typedef {{format: EnvelopeFormat, name: string,
- *   description: string, author?: string | null, source: string,
+ * Fields shared by every envelope format.
+ * @typedef {{name: string, description: string, author?: string | null, source: string,
  *   license: 'CC0-1.0' | 'CC-BY-4.0', code: string, preampDb: number, bands: Band[],
- *   labels?: Labels, recipe?: Recipe, lang: 'pt-BR' | 'en-US', createdAt: string}} Envelope
+ *   recipe?: Recipe, lang: 'pt-BR' | 'en-US', createdAt: string}} EnvelopeFields
+ * `open-auri/preset@1`: an S1 v1 code, bands up to 20000 Hz, never labels (a
+ * `labels` key is env:extra).
+ * @typedef {EnvelopeFields & {format: 'open-auri/preset@1', labels?: never}} EnvelopeV1
+ * `open-auri/preset@2`: an S1 v1 or v2 code, bands up to 32000 Hz and optional
+ * filter labels (omitted when every entry is null).
+ * @typedef {EnvelopeFields & {format: 'open-auri/preset@2', labels?: Labels}} EnvelopeV2
+ * A validated envelope, discriminated by `format`.
+ * @typedef {EnvelopeV1 | EnvelopeV2} Envelope
  * @typedef {'env:type' | 'env:required' | 'env:extra' | 'env:length' | 'env:enum'
  *   | 'env:pattern' | 'env:range' | 'env:url' | 'env:url-like' | 'env:code-mismatch' | 'env:s1'
  *   | 'env:bands' | 'env:labels' | 'env:json' | 'env:size'} EnvelopeErrorCode

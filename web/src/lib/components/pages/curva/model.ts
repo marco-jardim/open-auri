@@ -1,5 +1,6 @@
 import type { designSection } from 'open-auri/dsp';
-import { gateForWrite, isExperimentalKind, isUltrasonic } from 'open-auri/safety';
+import { isExperimentalKind, isUltrasonic } from 'open-auri/safety';
+import { gateVerdict } from '#lib/gate-verdicts.ts';
 import type { GateVerdict } from './reasons.ts';
 
 export type Band = Parameters<typeof designSection>[0];
@@ -36,10 +37,11 @@ export function activeCount(bands: readonly Band[]): number {
 /**
  * Full-grid verdict, the same one a write uses. Experimental kinds pass only with the flag.
  * `'yolo'` (Modo YOLO, also during the free preview): the core's YOLO profile, class 2 waived.
+ * Cached verdicts are shared: never mutate them; presentation-only stage annotations use a copy.
  */
 export function verdictFor(curve: Curve, profile: 'standard' | 'yolo' = 'standard'): GateVerdict {
 	const experimental = hasExperimental(curve.bands);
-	const verdict = gateForWrite(
+	const verdict = gateVerdict(
 		curve.bands,
 		curve.preampDb,
 		profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }

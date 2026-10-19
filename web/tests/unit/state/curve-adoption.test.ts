@@ -13,7 +13,11 @@ import {
 	gateAccepts
 } from '../../../src/lib/state/curve.svelte.ts';
 import { createStorage } from '../../../src/lib/state/storage.ts';
-import type { CurveData } from '../../../src/lib/state/model.ts';
+import {
+	checkedCurve,
+	CURVE_PREAMP_FLOOR_DB,
+	type CurveData
+} from '../../../src/lib/state/model.ts';
 import type { YoloProfile } from '../../../src/lib/state/yolo.svelte.ts';
 import { codecAccepts, type Band } from '../../../src/lib/workers/gate-handler.ts';
 import { createTabs, MemoryStorage } from './fakes.ts';
@@ -244,6 +248,47 @@ describe('reload (oa.current on load)', () => {
 			const store = own(createCurveStore({ storage: adapter(local), profile: () => 'standard' }));
 			expect(store.current).toMatchObject({ ...same(data), name: data.name });
 		}
+	});
+});
+
+describe('the editor preamp floor (−25,5 dB, S1 and S5)', () => {
+	/** Neutral at −100 dB: the YOLO gate accepts it (`g:preamp` waived), the editor never does. */
+	const DEEP = curve('Fundo', -100, []);
+
+	it('the fixture is accepted by the YOLO gate alone', () => {
+		expect(CURVE_PREAMP_FLOOR_DB).toBe(-25.5);
+		expect(judge(DEEP, 'yolo')).toBe(true);
+		expect(judge(DEEP, 'standard')).toBe(false);
+	});
+
+	it('checkedCurve refuses a preamp below the floor and keeps the floor itself', () => {
+		const at = (preampDb: number) => ({ ...DEEP, preampDb, schema: 1, updatedAt: 1 });
+		expect(() => checkedCurve(at(-100))).toThrow(TypeError);
+		expect(() => checkedCurve(at(-25.6))).toThrow(TypeError);
+		expect(checkedCurve(at(CURVE_PREAMP_FLOOR_DB)).preampDb).toBe(-25.5);
+	});
+
+	it('curve.set refuses it in YOLO: the curve, oa.current and history stay', () => {
+		const local = new MemoryStorage();
+		const store = own(createCurveStore({ storage: adapter(local), profile: () => 'yolo' }));
+		expect(store.set(YOLO_ONLY)).toBe(true);
+		const before = local.getItem(CURRENT_STORAGE_KEY);
+		expect(store.set(DEEP)).toBe(false);
+		expect(store.current).toMatchObject({ ...same(YOLO_ONLY), name: YOLO_ONLY.name });
+		expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(before);
+		expect(store.undoCount).toBe(1);
+		expect(store.update({ preampDb: -30 })).toBe(false);
+		expect(store.current.preampDb).toBe(YOLO_ONLY.preampDb);
+	});
+
+	it('a stored curve below the floor is not restored: the editor starts on Neutro', () => {
+		const local = new MemoryStorage();
+		local.setItem(
+			CURRENT_STORAGE_KEY,
+			JSON.stringify({ ...DEEP, schema: 1, labels: null, updatedAt: 500 })
+		);
+		const store = own(createCurveStore({ storage: adapter(local), profile: () => 'yolo' }));
+		expect(store.current).toMatchObject(same(NEUTRO));
 	});
 });
 

@@ -2542,6 +2542,7 @@
 	"yolo_journal_entry": "Gravação YOLO (dispensados: {criteria})",
 	"yolo_lamp_waived": "dispensado (YOLO)",
 	"yolo_load_gate_refused": "Esta gravação não passa no gate atual e não foi carregada no editor.",
+	"yolo_load_preamp_floor": "Esta gravação tem o preamp abaixo de −25,5 dB, o mínimo do editor, e não foi carregada no editor.",
 	"yolo_load_refused": "Esta gravação YOLO só abre com o Modo YOLO ligado nesta aba, na camada Engenharia.",
 	"yolo_load_yolo": "Gravação YOLO carregada no editor em Modo YOLO.",
 	"yolo_lock_session": "Ligue o Modo YOLO nesta aba, com a frase digitada, para gravar esta curva.",

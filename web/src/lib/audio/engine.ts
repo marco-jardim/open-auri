@@ -155,8 +155,10 @@ export interface ChainOptions {
 	/** Whether the chain is audible; default true. */
 	on?: boolean;
 	/**
-	 * Preview protection (additive): a fixed gain of `gainDb` (<= 0) after the sections, then a
-	 * DynamicsCompressor limiter, before the chain's output. Asked for by Modo YOLO previews.
+	 * Preview protection (additive): a fixed gain of `gainDb` (<= 0) after the sections and the
+	 * chain's level trim (`gainDb` above, `setGain`), then a DynamicsCompressor limiter, before
+	 * the chain's output. The trim runs first, so the limiter sees the level-matched signal.
+	 * Asked for by Modo YOLO previews.
 	 * Absent, the engine adds it on its own (C1) to any chain whose curve the standard gate
 	 * refuses (`standardGateAccepts`) or that is louder than the standard gate allows
 	 * (`PREVIEW_PEAK_LIMIT_DB`), so no page can forget it. Otherwise the chain is exactly as
@@ -216,25 +218,78 @@ function poleAngle(feedback: IIRCoefficients['feedback']): number | null {
 	return cosine > -1 && cosine < 1 ? Math.acos(cosine) : null;
 }
 
-/** Peak (dB) of a cascade: a log grid from 10 Hz to just below Nyquist, plus every pole angle. */
+/** Lowest frequency (Hz) of the peak search's log grid; DC itself is probed exactly below it. */
+const PEAK_GRID_FLOOR_HZ = 0.001;
+/** Intervals of the peak search's log grid, `PEAK_GRID_FLOOR_HZ` to Nyquist. */
+const PEAK_GRID_INTERVALS = 2048;
+
+/** Golden-section search for the largest `fn` (dB) in [a, b] (rad/sample). */
+function refinePeakDb(fn: (w: number) => number, a: number, b: number): number {
+	const r = (Math.sqrt(5) - 1) / 2;
+	let lo = a;
+	let hi = b;
+	let c = hi - r * (hi - lo);
+	let d = lo + r * (hi - lo);
+	let fc = fn(c);
+	let fd = fn(d);
+	for (let i = 0; i < 80 && hi - lo > 1e-13; i++) {
+		if (fc > fd) {
+			hi = d;
+			d = c;
+			fd = fc;
+			c = hi - r * (hi - lo);
+			fc = fn(c);
+		} else {
+			lo = c;
+			c = d;
+			fc = fd;
+			d = lo + r * (hi - lo);
+			fd = fn(d);
+		}
+	}
+	// NaN propagates (Math.max), so a broken response always reads as unbounded.
+	return Math.max(fc, fd);
+}
+
+/**
+ * Peak (dB) of a cascade, preamp included, at the context rate `rate`: DC (ω = 0) and Nyquist
+ * (ω = π) exactly, a log grid from `PEAK_GRID_FLOOR_HZ` to Nyquist, and each section's pole angle
+ * (where it resonates); then every local maximum of those probes, and both end intervals, are
+ * refined by golden-section search. A refinement only ever raises the estimate. A NaN or infinite
+ * response yields NaN or +Infinity, which the callers treat as unbounded (full protection).
+ */
 function cascadePeakDb(
 	coefficients: readonly IIRCoefficients[],
 	preamp: number,
 	rate: number
 ): number {
-	const points = 1024;
-	const lo = (2 * Math.PI * 10) / rate;
-	const hi = (2 * Math.PI * (rate / 2 - 1)) / rate;
-	let peak = -Infinity;
-	const probe = (w: number) => {
-		peak = Math.max(peak, 20 * Math.log10(cascadeGain(coefficients, preamp, w)));
-	};
-	for (let i = 0; i <= points; i++) probe(lo * Math.pow(hi / lo, i / points));
+	const db = (w: number) => 20 * Math.log10(cascadeGain(coefficients, preamp, w));
+	const nyquist = Math.PI;
+	const lo = (2 * Math.PI * PEAK_GRID_FLOOR_HZ) / rate;
+	const angles: number[] = [0];
+	for (let i = 0; i <= PEAK_GRID_INTERVALS; i++) {
+		angles.push(lo * Math.pow(nyquist / lo, i / PEAK_GRID_INTERVALS));
+	}
+	angles[angles.length - 1] = nyquist;
 	// A narrow resonance falls between grid points: probe each section where it resonates too.
 	for (const { feedback } of coefficients) {
 		const w = poleAngle(feedback);
-		if (w !== null && w >= lo && w <= hi) probe(w);
+		if (w !== null) angles.push(w);
 	}
+	angles.sort((x, y) => x - y);
+	const values = angles.map(db);
+	let peak = -Infinity;
+	for (const value of values) peak = Math.max(peak, value);
+	const last = angles.length - 1;
+	for (let i = 1; i < last; i++) {
+		const here = values[i] ?? NaN;
+		if (here > (values[i - 1] ?? NaN) && here >= (values[i + 1] ?? NaN)) {
+			peak = Math.max(peak, refinePeakDb(db, angles[i - 1] ?? 0, angles[i + 1] ?? nyquist));
+		}
+	}
+	// A peak inside the first or the last interval has no bracketing interior point.
+	peak = Math.max(peak, refinePeakDb(db, angles[0] ?? 0, angles[1] ?? nyquist));
+	peak = Math.max(peak, refinePeakDb(db, angles[last - 1] ?? 0, angles[last] ?? nyquist));
 	return peak;
 }
 
@@ -244,10 +299,12 @@ function protectionGainDb(peakDb: number): number {
 }
 
 /**
- * Peak of a chain's float transfer function (preamp included), in dB, over a log grid from
- * 10 Hz to just below Nyquist plus each section's resonance. Presentation-side estimate for the
- * preview protection only. At a fallback rate with sections bypassed (above 20 kHz,
- * `isBypassedAt`) it is the louder of the chain that plays and the full curve at 96 kHz.
+ * Peak of a chain's float transfer function (preamp included), in dB, at the context rate `rate`:
+ * DC and Nyquist exactly, a log grid from `PEAK_GRID_FLOOR_HZ` to Nyquist and each section's
+ * resonance, each local maximum refined (`cascadePeakDb`). A shelf whose gain sits below 10 Hz
+ * is measured at DC, where it peaks. Presentation-side estimate for the preview protection only.
+ * At a fallback rate with sections bypassed (above 20 kHz, `isBypassedAt`) it is the louder of
+ * the chain that plays and the full curve at 96 kHz (`protectedPeakDb`).
  */
 export function chainPeakDb(bands: readonly Band[], preampDb: number, rate: number): number {
 	const snapshot = snapshotBands(bands);
@@ -262,7 +319,10 @@ export interface PreviewChain {
 	readonly preamp: GainNode;
 	/** One IIRFilterNode per non-OFF section, in written order. */
 	readonly stages: readonly IIRFilterNode[];
-	/** Per-chain switch and level trim (crossfaded); feeds the shared preview volume. */
+	/**
+	 * Per-chain switch (crossfaded); feeds the shared preview volume. Unprotected, it also holds
+	 * the level trim; a protected chain applies its trim before the protection instead.
+	 */
 	readonly output: GainNode;
 	/** The shared preview volume (browser only; never written to the cable). */
 	readonly volume: GainNode;
@@ -275,7 +335,10 @@ export interface PreviewChain {
 	 * 96 kHz (`skippedSections`); 0 when exact. Its protection still counts them.
 	 */
 	readonly skipped: number;
-	/** Crossfades (30 ms) the chain to `db` when `on`, or to silence. */
+	/**
+	 * Crossfades (30 ms) the chain to its level trim `db` when `on`, or to silence. A protected
+	 * chain ramps the trim ahead of its normalize gain and limiter, and `output` to on or off.
+	 */
 	setGain(db: number, on?: boolean): void;
 	/** Fades out and disconnects every node of the chain. */
 	dispose(): void;
@@ -374,7 +437,8 @@ export interface AudioEngine {
 	 * them, which brings the loudest float peak (plus its `trimDb`) to `YOLO_PREVIEW_PEAK_DBFS`.
 	 * Undefined when none needs it. Pass it as `buildChain`'s `protect` to every chain of the set:
 	 * the same gain staging (normalize gain and limiter) on each keeps the level match, and no
-	 * chain stands out. Creates the AudioContext (its rate decides the peaks).
+	 * chain stands out. Each chain's trim (`gainDb`, `setGain`) plays ahead of that staging, so
+	 * every limiter sees the matched level. Creates the AudioContext (its rate decides the peaks).
 	 */
 	sharedProtection(
 		curves: readonly SharedCurve[],
@@ -1546,9 +1610,15 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			tail = stage;
 			stages.push(stage);
 		}
-		// Preview protection: normalizing gain, then a brick-wall-ish limiter.
+		// Preview protection: the chain's level trim, then the normalizing gain and a
+		// brick-wall-ish limiter. The trim comes first, so every chain of a level-matched set
+		// reaches its limiter at the matched level, under the one shared gain (at most -1 dBFS).
+		// An unprotected chain keeps its trim on `output`, exactly as before.
 		const protection: AudioNode[] = [];
+		let trim: GainNode | null = null;
 		if (protect !== undefined) {
+			trim = context.createGain();
+			trim.gain.value = dbToGain(chainOptions.gainDb ?? 0);
 			const normalize = context.createGain();
 			normalize.gain.value = dbToGain(Math.min(0, protect.gainDb));
 			const limiter = context.createDynamicsCompressor();
@@ -1557,10 +1627,11 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			limiter.ratio.value = 20;
 			limiter.attack.value = 0.001;
 			limiter.release.value = 0.1;
-			tail.connect(normalize);
+			tail.connect(trim);
+			trim.connect(normalize);
 			normalize.connect(limiter);
 			tail = limiter;
-			protection.push(normalize, limiter);
+			protection.push(trim, normalize, limiter);
 		}
 		tail.connect(output);
 		output.connect(nodes.chainsGain);
@@ -1587,7 +1658,13 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			skipped: skippedSections(snapshot, context.sampleRate),
 			setGain(db: number, on = true) {
 				if (disposed || ctx !== context) return;
-				ramp(output.gain, on ? dbToGain(db) : 0, context.currentTime, CROSSFADE_S);
+				if (trim === null) {
+					ramp(output.gain, on ? dbToGain(db) : 0, context.currentTime, CROSSFADE_S);
+					return;
+				}
+				// Protected: the trim sits before the limiter; `output` is only the switch.
+				ramp(trim.gain, dbToGain(db), context.currentTime, CROSSFADE_S);
+				ramp(output.gain, on ? 1 : 0, context.currentTime, CROSSFADE_S);
 			},
 			dispose() {
 				if (disposed) return;

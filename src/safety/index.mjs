@@ -17,6 +17,7 @@ export {
   HARD_REASONS,
   CODEC_PREAMP_FLOOR_DB,
   YOLO_STORAGE_PREAMP_FLOOR_DB,
+  YOLO_PREAMP_MAX_DB,
   autoPreamp,
 } from './gate.mjs';
 export { classifyCurve, classifierVersionInput } from './classify.mjs';

@@ -23,7 +23,7 @@ import type { GateClient } from '#lib/components/pages/curva/drag.ts';
 import { payloadCrc } from '#lib/components/pages/curva/format.ts';
 import { verdictFor, type Band, type Curve } from '#lib/components/pages/curva/model.ts';
 import { defaultOrder } from '#lib/components/pages/curva/edit.ts';
-import { curveSignature } from '#lib/state/model.ts';
+import { curveSignature, type CurveSource } from '#lib/state/model.ts';
 import { fakeAppOptions } from '../../app/fakes.ts';
 
 const CUT: Band = { kind: 'PK', freqHz: 1000, gainDb: -6, qFactor: 1 };
@@ -131,6 +131,9 @@ function gateClient(hold?: Hold): GateClient {
 interface SetupOptions {
 	/** The stored curve the editor starts on (STORED by default). */
 	stored?: Curve;
+	/** Its name ('Editor' by default) and source ('custom' by default). */
+	name?: string;
+	source?: CurveSource;
 	labels?: (string | null)[];
 	/** "Prévia sem limites" on (default) or YOLO alone. */
 	freePreview?: boolean;
@@ -148,8 +151,8 @@ async function setup(hold?: Hold, options: SetupOptions = {}) {
 	apps.push(app);
 	await app.state.ready;
 	app.state.curve.set({
-		name: 'Editor',
-		source: 'custom',
+		name: options.name ?? 'Editor',
+		source: options.source ?? 'custom',
 		...(options.stored ?? STORED),
 		labels: options.labels ? ten(options.labels) : null
 	});
@@ -179,9 +182,9 @@ async function setup(hold?: Hold, options: SetupOptions = {}) {
 
 const editorState = () => page.getByTestId('editor-state');
 
-/** Shift+↑ on the first handle: a release only the codec accepts. */
-async function loudEdit() {
-	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
+/** Shift+↑ on a handle (the first by default): a release only the codec accepts. */
+async function loudEdit(filter: 'A' | 'B' = 'A') {
+	const handle = page.getByRole('slider', { name: new RegExp(`^Filtro ${filter},`) }).element();
 	if (handle instanceof HTMLElement || handle instanceof SVGElement) handle.focus();
 	await userEvent.keyboard('{Shift>}{ArrowUp}{/Shift}');
 }
@@ -289,6 +292,61 @@ test('a free-preview reorder moves the names with their filters; a rename lands 
 	await expect.poll(() => bankNames()).toEqual(['Kick', 'Lead']);
 });
 
+/** A boost, a cut and a cut: the standard gate accepts it. */
+const THREE: Curve = {
+	bands: pad([
+		{ kind: 'PK', freqHz: 200, gainDb: 2, qFactor: 1 },
+		CUT,
+		{ kind: 'PK', freqHz: 5000, gainDb: -6, qFactor: 1 }
+	]),
+	preampDb: -3
+};
+/** Shift+↑ on Filtro B: the cut becomes +4 dB, about +1 dB out (codec-only). */
+const THREE_LOUD: Curve = {
+	bands: THREE.bands.map((band, index) => (index === 1 ? { ...CUT, gainDb: 4 } : band)),
+	preampDb: THREE.preampDb
+};
+/** "Ordem padrão" of that draft: the 5 kHz cut first, then both boosts (still codec-only). */
+const THREE_DEFAULT: Curve = {
+	bands: defaultOrder(THREE_LOUD.bands),
+	preampDb: THREE_LOUD.preampDb
+};
+
+test('the discrete-edit fixtures: only the codec accepts the draft, in either order', () => {
+	expect(verdictFor(THREE).ok).toBe(true);
+	for (const curve of [THREE_LOUD, THREE_DEFAULT]) {
+		expect(verdictFor(curve, 'yolo').ok).toBe(false);
+		expect(codecAccepts(curve.bands, curve.preampDb)).toBe(true);
+	}
+	expect(THREE_DEFAULT.bands.slice(0, 3)).toEqual([
+		THREE_LOUD.bands[2],
+		THREE_LOUD.bands[0],
+		THREE_LOUD.bands[1]
+	]);
+	expect(crc(THREE_DEFAULT)).not.toBe(crc(THREE_LOUD));
+});
+
+test('a discrete edit of a codec-only draft is judged by the codec and stays in the draft', async () => {
+	const { app, local, stored, persisted, undoCount } = await setup(undefined, { stored: THREE });
+	await expect.element(editorState()).toMatchTextContent(crc(THREE));
+	await loudEdit('B');
+	await expect.element(editorState()).toMatchTextContent(crc(THREE_LOUD));
+	// "Ordem padrão" on the draft: the YOLO gate would refuse it; the codec, as for drags, accepts.
+	await userEvent.click(bankOrderButton());
+	await expect.element(editorState()).toMatchTextContent(crc(THREE_DEFAULT));
+	// Into the memory-only draft (`applyFree`): never the store, oa.current or the undo history.
+	expect(app.state.curve.current).toBe(stored);
+	expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(persisted);
+	expect(app.state.curve.undoCount).toBe(undoCount);
+	// It is a draft step: Desfazer goes back to the loud draft, then to the stored curve.
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	await expect.element(editorState()).toMatchTextContent(crc(THREE_LOUD));
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	await expect.element(editorState()).toMatchTextContent(crc(THREE));
+	expect(app.state.curve.current).toBe(stored);
+	expect(app.state.curve.undoCount).toBe(undoCount);
+});
+
 test('a commit answer is dropped when the stored curve changed while the gate answered', async () => {
 	const hold: Hold = { release: null };
 	const { app, local } = await setup(hold);
@@ -333,6 +391,109 @@ test('the same release with no change while the gate answers is stored (YOLO alo
 	// Control for the test above: nothing changed, so the gate's answer is applied.
 	await expect.poll(() => app.state.curve.current).not.toBe(stored);
 	expect(app.state.curve.undoCount).toBe(undoCount + 1);
+});
+
+/** ↑ (or another key) on the first handle: one dB, a release the YOLO gate also accepts. */
+async function gentleEdit(key = '{ArrowUp}') {
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
+	if (handle instanceof HTMLElement || handle instanceof SVGElement) handle.focus();
+	await userEvent.keyboard(key);
+}
+/** STORED after ↑: −5 dB at −1 dB preamp. */
+const GENTLE: Curve = { bands: pad([{ ...CUT, gainDb: -5 }]), preampDb: -1 };
+
+test('the gentle fixture passes the YOLO gate: it is not preview-only', () => {
+	expect(verdictFor(GENTLE, 'yolo').ok).toBe(true);
+	expect(crc(GENTLE)).not.toBe(crc(STORED));
+});
+
+test.each([
+	['ended', false],
+	['ended, then on again', true]
+] as const)(
+	'an answer that passes the YOLO gate is dropped once the free preview it began in %s',
+	async (_, again) => {
+		const hold: Hold = { release: null };
+		const { app, yolo, local, stored, persisted, undoCount } = await setup(hold);
+		await gentleEdit();
+		await vi.waitFor(() => expect(hold.release).not.toBeNull());
+		// YOLO stays on: the gate profile ('yolo') is the same, only the free preview changed.
+		yolo.setFreePreview(false);
+		await tick();
+		if (again) {
+			yolo.setFreePreview(true);
+			await tick();
+		}
+		await releaseAll(hold);
+		// C1: begun as a memory-only draft edit, it reaches neither a draft nor the store.
+		await expect.element(editorState()).toMatchTextContent(crc(STORED));
+		expect(app.state.curve.current).toBe(stored);
+		expect(app.state.curve.undoCount).toBe(undoCount);
+		expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(persisted);
+	}
+);
+
+test('a free-preview answer is dropped after a draft Desfazer while the gate answered (#38)', async () => {
+	const hold: Hold = { release: null, open: true };
+	const { app, stored, undoCount } = await setup(hold);
+	// A first draft step, answered at once.
+	await loudEdit();
+	await expect.element(editorState()).toMatchTextContent(crc(LOUD));
+	// The next release waits for the gate…
+	hold.open = false;
+	hold.release = null;
+	await gentleEdit('{ArrowDown}');
+	await vi.waitFor(() => expect(hold.release).not.toBeNull());
+	// …while the draft steps back to the stored curve.
+	await page.getByRole('button', { name: m.curva_undo(), exact: true }).click();
+	await expect.element(editorState()).toMatchTextContent(crc(STORED));
+	await releaseAll(hold);
+	// The answer was about the step undone: it does not come back over the Desfazer.
+	await expect.element(editorState()).toMatchTextContent(crc(STORED));
+	expect(app.state.curve.current).toBe(stored);
+	expect(app.state.curve.undoCount).toBe(undoCount);
+});
+
+test('a free-preview answer is dropped after a draft reorder while the gate answered (#38)', async () => {
+	const hold: Hold = { release: null };
+	const { app, stored } = await setup(hold, { stored: ORDERED });
+	await expect.poll(() => document.querySelector('li.module')).not.toBeNull();
+	// Filtro A is the 200 Hz boost: +2 → +3 dB, held by the gate…
+	await gentleEdit();
+	await vi.waitFor(() => expect(hold.release).not.toBeNull());
+	// …while "Ordem padrão" reorders the draft.
+	await userEvent.click(bankOrderButton());
+	await expect.element(editorState()).toMatchTextContent(crc(DEFAULT_ORDER));
+	await releaseAll(hold);
+	// The answer, in the old order, does not undo the reorder.
+	await expect.element(editorState()).toMatchTextContent(crc(DEFAULT_ORDER));
+	expect(app.state.curve.current).toBe(stored);
+});
+
+test('turning YOLO off restores the whole curve before it: name, source, labels, bands, preamp', async () => {
+	const { app, yolo } = await setup(undefined, {
+		name: 'Arquivo',
+		source: 'import',
+		labels: ['Kick'],
+		freePreview: false
+	});
+	// A YOLO-only experiment or import renames the curve and gives it another source.
+	const yoloOnly = pad([{ kind: 'HP', freqHz: 30, qFactor: 0.71 }]);
+	expect(verdictFor({ bands: yoloOnly, preampDb: -0.5 }).ok).toBe(false);
+	const renamed = { name: 'Subsônica', source: 'custom' as const, labels: null };
+	expect(app.state.curve.set({ ...renamed, bands: yoloOnly, preampDb: -0.5 })).toBe(true);
+	yolo.disable();
+	await tick();
+	await expect
+		.poll(() => app.state.curve.current)
+		.toMatchObject({
+			name: 'Arquivo',
+			source: 'import',
+			labels: ten(['Kick']),
+			bands: STORED.bands,
+			preampDb: STORED.preampDb
+		});
+	await expect.element(editorState()).toMatchTextContent(crc(STORED));
 });
 
 test('a codec-only answer that arrives after the free preview ended is dropped', async () => {

@@ -104,6 +104,22 @@ describe('outbox bridge', () => {
 		);
 	});
 
+	test('a real ok Modo YOLO write (marked yolo) counts as one installed event too', async () => {
+		const { enqueue, queued, fire } = await setup();
+		const base = detail('ok');
+		fire({
+			...base,
+			entry: { ...base.entry, profile: 'yolo', waived: ['g:preamp'] },
+			profile: 'yolo',
+			waived: ['g:preamp']
+		});
+		await vi.waitFor(() => expect(queued).toHaveBeenCalledOnce());
+		expect(enqueue).toHaveBeenCalledWith(
+			{ kind: 'installed', lineageId: 'lin_1' },
+			{ actedAs: 'ana' }
+		);
+	});
+
 	test('anonymous or unverified writes never enqueue', async () => {
 		const anonymous = await setup('real', { signedIn: false, verified: false, accountId: null });
 		const unverified = await setup('real', { signedIn: true, verified: false, accountId: 'bia' });

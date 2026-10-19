@@ -39,7 +39,10 @@ test('only the shared app checklist can authorize page writes; connection remain
 		.filter((file) => /\.(svelte|ts)$/.test(file))
 		.map(source)
 		.join('\n');
-	expect(page).toContain('app?.requestWrite()');
+	// The page's only write path; a YOLO entry passes its profile so the shared checklist
+	// judges it with the YOLO gate and its per-write confirmation.
+	expect(page).toMatch(/\bapp\?\.requestWrite\(/);
+	expect(page).not.toMatch(/\bapp\??\.cable\.write\b/);
 	expect(page).toContain('onclick={() => app?.cable.connect()}');
 	// FUX.P6: the rack only lists cables (U7); queue selection and confirmation live only in
 	// the shared checklist, so the page renders no queue component at all.
