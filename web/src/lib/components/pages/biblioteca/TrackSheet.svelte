@@ -413,7 +413,7 @@
 				format === 'svg'
 					? new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
 					: await sheetPng(svg);
-			downloadBlob(blob, `open-auri-sheet${fileMark}.${format}`);
+			await downloadBlob(blob, `open-auri-sheet${fileMark}.${format}`);
 		} catch (error) {
 			onStatus(m.biblioteca_export_error());
 			console.error('Biblioteca sheet export failed', error);
@@ -425,7 +425,7 @@
 		if (shareRefusal !== null) return;
 		try {
 			const { downloadBlob } = await import('./sheet-export.ts');
-			downloadBlob(
+			await downloadBlob(
 				new Blob([envelope.json], { type: 'application/json' }),
 				`open-auri-preset${fileMark}.json`
 			);

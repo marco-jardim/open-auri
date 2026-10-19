@@ -1,5 +1,6 @@
 import { encodeS1 } from 'open-auri/share';
 import { responseGeometry } from '#lib/charts/response.ts';
+import { saveFile } from '#lib/files/save.ts';
 import { presetUrl, qrSvg } from '#lib/qr/index.ts';
 import { number, tapeShareUrl, type Locale, type Tape } from './archive.ts';
 
@@ -103,14 +104,8 @@ ${text(55, 1115, `${new URL(origin).origin} / open-auri`, 14)}
 </g>${qr}</svg>`;
 }
 
-export function downloadBlob(blob: Blob, filename: string): void {
-	const url = URL.createObjectURL(blob);
-	const link = document.createElement('a');
-	link.href = url;
-	link.download = filename;
-	link.click();
-	// Leave the URL alive through the browser's download handoff.
-	setTimeout(() => URL.revokeObjectURL(url), 1000);
+export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+	await saveFile({ name: filename, mime: blob.type, bytes: blob, revokeDelayMs: 1000 });
 }
 
 /** Canvas rasterization of that exact SVG, with cleanup on every success/failure path. */

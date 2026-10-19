@@ -10,6 +10,7 @@
 	// component's memory until the setup is confirmed or cancelled: never in storage, a cookie or
 	// the URL.
 	import { m } from '#lib/paraglide/messages.js';
+	import { saveFile } from '#lib/files/save.ts';
 	// Server render only (the setup works without JavaScript). In the client build
 	// `import.meta.env.SSR` is false, so this binding is unused and the encoder (side-effect free,
 	// like uqr) leaves /conta's initial JS; the browser imports it when an enrolment appears (FUX.B).
@@ -84,6 +85,21 @@
 	}
 
 	const codesFile = $derived(enrolment ? codesFileOf(enrolment.backupCodes) : '');
+	async function downloadCodes(event: MouseEvent) {
+		event.preventDefault();
+		if (!enrolment) return;
+		copied = '';
+		try {
+			await saveFile({
+				name: 'open-auri-recovery-codes.txt',
+				mime: 'text/plain;charset=utf-8',
+				bytes: `${enrolment.backupCodes.join('\n')}\n`
+			});
+		} catch (error) {
+			copied = m.conta_error_generic();
+			console.error('Recovery codes export failed', error);
+		}
+	}
 
 	const statusText = $derived(
 		status === 'on'
@@ -163,7 +179,12 @@
 						{m.conta_2fa_codes_copy()}
 					</Button>
 				{/if}
-				<a class="acc-link" href={codesFile} download="open-auri-recovery-codes.txt">
+				<a
+					class="acc-link"
+					href={codesFile}
+					download="open-auri-recovery-codes.txt"
+					onclick={downloadCodes}
+				>
 					{m.conta_2fa_codes_download()}
 				</a>
 			</div>

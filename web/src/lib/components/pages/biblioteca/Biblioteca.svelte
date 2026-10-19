@@ -255,7 +255,7 @@
 	async function exportPack() {
 		try {
 			const { downloadBlob } = await import('./sheet-export.ts');
-			downloadBlob(
+			await downloadBlob(
 				new Blob([referencePack()], { type: 'application/json' }),
 				'open-auri-reference-pack.json'
 			);
