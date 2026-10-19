@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
@@ -246,6 +246,137 @@ test.each([true, false])('origin hints require exact S1 bytes (%s)', async (matc
 		await new Promise<void>((done) => setTimeout(done, 50));
 		expect(await originOf(s1)).toBeNull();
 	}
+});
+
+describe('a verified link origin brings its version labels (never through #p=)', () => {
+	const LABELS = ['Grave', null, 'Presença', null, null, null, null, null, null, 'Ar'];
+	/** The public version of `l`/`v`, preset@2 with labels, whose S1 is `code`. */
+	const version = (code: string) => async () =>
+		json({
+			lineage: { id: 'linked', visibility: 'public' },
+			version: { id: 'v1', labels: LABELS },
+			curve: { s1: code, gate: { ok: true } },
+			items: [],
+			nextCursor: null
+		});
+	/** What "Abrir na Curva" leaves in the editor: the decoded `#p=` curve, without labels. */
+	function loadLink(app: ClientApp, preampDb = curve.preampDb) {
+		expect(
+			app.state.curve.set({
+				name: 'Link',
+				source: 'import',
+				preampDb,
+				bands: curve.bands,
+				labels: null
+			})
+		).toBe(true);
+	}
+
+	test('lineage, version and S1 match: the editor curve gets the labels, its S1 unchanged', async () => {
+		const { app, screen } = await setup(version(s1));
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		await vi.waitFor(() => expect(app.state.curve.current.labels).toEqual(LABELS));
+		expect(encodeS1(app.state.curve.current)).toBe(s1);
+		expect(app.state.curve.current.name).toBe('Link');
+		expect(app.pendingWrite).toBeNull();
+	});
+
+	test('a version with another S1 brings nothing', async () => {
+		const { app, screen } = await setup(version(encodeS1({ ...curve, preampDb: -1 })));
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		await new Promise<void>((done) => setTimeout(done, 50));
+		expect(app.state.curve.current.labels).toBeNull();
+	});
+
+	test('an edit since the link loaded wins: no labels on a curve that is no longer that S1', async () => {
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((done) => {
+			release = done;
+		});
+		const respond = version(s1);
+		const { app, screen } = await setup(async () => {
+			await gate;
+			return respond();
+		});
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		// The person edits before the origin check answers.
+		loadLink(app, -1);
+		await screen.rerender({ curve: { ...curve, preampDb: -1 } });
+		release();
+		await vi.waitFor(async () => expect((await originOf(s1))?.lineageId).toBe('linked'));
+		await new Promise<void>((done) => setTimeout(done, 20));
+		expect(app.state.curve.current.labels).toBeNull();
+	});
+
+	test('a same-S1 preset loaded while the check is pending never takes the labels', async () => {
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((done) => {
+			release = done;
+		});
+		const respond = version(s1);
+		const { app, screen } = await setup(async () => {
+			await gate;
+			return respond();
+		});
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		// Neutro is the link's exact S1, unlabeled: only the store curve's identity tells them apart.
+		expect(app.loadNeutral()).toBe(true);
+		expect(encodeS1(app.state.curve.current)).toBe(s1);
+		expect(app.state.curve.current.labels).toBeNull();
+		release();
+		await vi.waitFor(async () => expect((await originOf(s1))?.lineageId).toBe('linked'));
+		await new Promise<void>((done) => setTimeout(done, 20));
+		expect(app.state.curve.current.labels).toBeNull();
+		expect(app.state.curve.current.source).toBe(`preset:${NEUTRO.id}`);
+	});
+
+	test('a retry after a reconnect still compares with the curve the link loaded', async () => {
+		let attempt = 0;
+		const respond = version(s1);
+		const { app, screen, session } = await setup(async () => {
+			attempt++;
+			if (attempt === 1) throw new TypeError('network');
+			return respond();
+		});
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		await vi.waitFor(() =>
+			expect(screen.container.textContent).toContain(m.curva_social_offline())
+		);
+		expect(attempt).toBe(1);
+		// The same S1, unlabeled, loaded before the connection comes back.
+		expect(app.loadNeutral()).toBe(true);
+		const refresh = vi.spyOn(session, 'refresh').mockResolvedValue(session.account);
+		window.dispatchEvent(new Event('online'));
+		expect(refresh).toHaveBeenCalledOnce();
+		await vi.waitFor(async () => expect((await originOf(s1))?.lineageId).toBe('linked'));
+		await new Promise<void>((done) => setTimeout(done, 20));
+		expect(app.state.curve.current.labels).toBeNull();
+	});
+
+	test('a rename since the link loaded wins over the version labels', async () => {
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((done) => {
+			release = done;
+		});
+		const respond = version(s1);
+		const { app, screen } = await setup(async () => {
+			await gate;
+			return respond();
+		});
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		const mine = ['Meu', null, null, null, null, null, null, null, null, null];
+		expect(app.state.curve.setLabels(mine)).toBe(true);
+		release();
+		await vi.waitFor(async () => expect((await originOf(s1))?.lineageId).toBe('linked'));
+		await new Promise<void>((done) => setTimeout(done, 20));
+		expect(app.state.curve.current.labels).toEqual(mine);
+	});
 });
 
 test('gate details map strings and structured stages without rendering arbitrary API text', () => {

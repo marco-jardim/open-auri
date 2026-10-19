@@ -12,6 +12,7 @@
 	import ComparisonPlot from './ComparisonPlot.svelte';
 	import { reasonText, type Copy } from './copy.ts';
 	import type { CurveSocial } from './social.svelte.ts';
+	import { exitReason } from '#lib/components/pages/curva/yolo.ts';
 
 	let {
 		tracks,
@@ -59,9 +60,19 @@
 	);
 	/** Why a result action is unavailable: every disabled control names its reason. */
 	const appReason = $derived(!accepted ? t.pending : !app ? t.reasonEngine : null);
+	/**
+	 * Saving to the library and publishing re-run the standard gate (`verdictFor`, never the YOLO
+	 * profile) on the exact curve stored: a YOLO-only editor curve loaded as a track, or a blend that
+	 * reproduces one, never reaches the library or the account, whether or not Modo YOLO is on.
+	 * `solveBlend` already gates with the standard profile; this is the same check at the exit.
+	 */
+	const gateReason = $derived(accepted ? exitReason(accepted.curve, false, locale) : null);
+	const saveReason = $derived(appReason ?? gateReason);
 	const bounceReason = $derived(!accepted ? t.pending : null);
 	// L5: the publish island is fetched only once a layer passes the gate (below the fold).
-	const publishModule = $derived(accepted && social ? import('./SocialPublish.svelte') : null);
+	const publishModule = $derived(
+		accepted && social && gateReason === null ? import('./SocialPublish.svelte') : null
+	);
 	$effect(() => {
 		if (!signature) return;
 		generation++;
@@ -107,8 +118,14 @@
 
 	async function save() {
 		if (!accepted || !app) return;
+		const curve = accepted.curve;
+		const refused = exitReason(curve, false, locale);
+		if (refused !== null) {
+			error = refused;
+			return;
+		}
 		try {
-			const saved = await app.state.library.save(accepted.curve);
+			const saved = await app.state.library.save(curve);
 			if (!saved) throw new Error('Library refused the comparison curve');
 			status = t.saved;
 		} catch (cause) {
@@ -331,13 +348,19 @@
 					aria-describedby={appReason ? `${uid}-reason` : undefined}
 					onclick={open}>{t.open}</a
 				>
-				<Button disabledReason={appReason} onclick={save}>{t.save}</Button>
+				<Button disabledReason={saveReason} onclick={save}>{t.save}</Button>
 				<Button
 					variant="primary"
 					disabledReason={appReason}
 					onclick={() => {
 						if (accepted && app)
-							app.requestWrite({ ...accepted.curve, schema: 1, updatedAt: Date.now() });
+							app.requestWrite({
+								...accepted.curve,
+								schema: 1,
+								// A blended curve is new: it has no filter labels.
+								labels: null,
+								updatedAt: Date.now()
+							});
 					}}>{t.write}</Button
 				>
 				<label class="field">

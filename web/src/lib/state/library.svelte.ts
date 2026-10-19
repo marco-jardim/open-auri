@@ -1,7 +1,7 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { canonKey, encodeS1, EnvelopeError, normalizeText } from 'open-auri/share';
-import { checkedCurve, isTimestamp, nextTimestamp } from './model.ts';
-import type { Clock, CurveData } from './model.ts';
+import { canonKey, encodeS1, EnvelopeError, normalizeLabels, normalizeText } from 'open-auri/share';
+import { checkedCurve, isTimestamp, nextTimestamp, sameLabels } from './model.ts';
+import type { Clock, CurveData, CurveLabels } from './model.ts';
 import { createStorage, isRecord, type ClientStorage } from './storage.ts';
 import { storageStatus } from './status.svelte.ts';
 
@@ -13,6 +13,12 @@ export interface LibraryItem extends CurveData {
 	 * records written before it existed have no such field and load as ''.
 	 */
 	readonly description?: string;
+	/**
+	 * Filter labels by wire index of `s1` (core `normalizeLabels`). Loaded items always carry it
+	 * (null when none); records written before labels existed load as null. Never part of the
+	 * dedupe key (`canonKey`).
+	 */
+	readonly labels?: CurveLabels | null;
 	readonly favorite: boolean;
 	readonly createdAt: number;
 	readonly updatedAt: number;
@@ -28,7 +34,7 @@ export interface LibraryInput extends CurveData {
 export const LIBRARY_NAME_MAX = 48;
 export const LIBRARY_DESCRIPTION_MAX = 280;
 
-export type LibraryTextField = 'name' | 'description';
+export type LibraryTextField = 'name' | 'description' | 'labels';
 /** Core envelope issue code (`env:length`, `env:url`, `env:url-like`, `env:pattern`, ...). */
 export type LibraryTextCode = EnvelopeError['errors'][number]['code'];
 export interface LibraryTextIssue {
@@ -38,6 +44,8 @@ export interface LibraryTextIssue {
 export interface LibraryTextPatch {
 	name?: string;
 	description?: string;
+	/** Ten labels by wire index (strict S5 rules: refused text is `invalid-text`); null clears. */
+	labels?: readonly (string | null)[] | null;
 }
 export type LibraryUpdateCode = 'invalid-text' | 'not-found';
 
@@ -74,6 +82,25 @@ function checkedText(
 	return { value: text, issues: length < min || length > max ? [issue('env:length')] : [] };
 }
 
+/** S5 label rules (core `normalizeLabels`, strict); null or an all-empty list clears. */
+function checkedLabelPatch(value: unknown): {
+	value: CurveLabels | null;
+	issues: LibraryTextIssue[];
+} {
+	if (value === null) return { value: null, issues: [] };
+	try {
+		const labels = normalizeLabels(value);
+		return { value: labels ? Object.freeze(labels) : null, issues: [] };
+	} catch (cause) {
+		if (!(cause instanceof EnvelopeError)) throw cause;
+		const codes = new Set(cause.errors.map((error) => error.code));
+		return {
+			value: null,
+			issues: [...codes].map((code): LibraryTextIssue => ({ field: 'labels', code }))
+		};
+	}
+}
+
 function checkedItem(value: unknown): LibraryItem {
 	if (
 		!isRecord(value) ||
@@ -102,6 +129,8 @@ function checkedItem(value: unknown): LibraryItem {
 		bands: curve.bands,
 		s1: value.s1,
 		description,
+		// Records saved before labels existed have none: they load as null.
+		labels: curve.labels,
 		favorite: value.favorite,
 		createdAt: value.createdAt,
 		updatedAt: value.updatedAt
@@ -188,10 +217,13 @@ export function createLibraryStore(
 			let requestedId: string | undefined;
 			let favorite: boolean | undefined;
 			let updatedAt: number | undefined;
+			// No `labels` key: keep the kept record's labels, but only for the same wire order.
+			let ownLabels: boolean;
 			try {
 				requestedId = input.id;
 				favorite = input.favorite;
 				updatedAt = input.updatedAt;
+				ownLabels = input.labels !== undefined;
 				curve = checkedCurve({ ...input, schema: 1, updatedAt: updatedAt ?? now() });
 				encodeS1(curve);
 				if (
@@ -218,12 +250,18 @@ export function createLibraryStore(
 						return {};
 					}
 					const at = updatedAt ?? nextTimestamp(now, latest?.updatedAt);
+					const s1 = encodeS1(curve);
+					const kept = duplicate ?? previous;
+					// Labels name wire indexes: the input's own labels win; without them the kept
+					// record's survive only for the same S1 (a permuted duplicate drops them).
+					const keptLabels = kept?.s1 === s1 ? (kept.labels ?? null) : null;
 					result = checkedItem({
 						...curve,
 						id: duplicate?.id ?? previous?.id ?? requestedId ?? id(),
-						s1: encodeS1(curve),
+						s1,
 						// Re-saving overwrites the name; the description belongs to the kept record.
-						description: (duplicate ?? previous)?.description ?? '',
+						description: kept?.description ?? '',
+						labels: ownLabels ? curve.labels : keptLabels,
 						favorite: favorite ?? Boolean(previous?.favorite || duplicate?.favorite),
 						createdAt: duplicate?.createdAt ?? previous?.createdAt ?? at,
 						updatedAt: at
@@ -253,6 +291,8 @@ export function createLibraryStore(
 		/**
 		 * Renames and/or describes an item with the S5 text rules (name 1–48 code points;
 		 * description 0–280 and at most five lines; no links or controls), stored normalised.
+		 * `labels` (ten entries by wire index, 1–24 code points each) follows the same rules;
+		 * without it the item keeps its labels.
 		 * Rejects with a LibraryUpdateError: `invalid-text` (with its issues, nothing written) or
 		 * `not-found`. Resolves with the stored item; an unchanged text keeps its updatedAt.
 		 */
@@ -267,6 +307,8 @@ export function createLibraryStore(
 				issues.push(...checked.issues);
 				text[field] = checked.value;
 			}
+			const labelPatch = patch.labels === undefined ? null : checkedLabelPatch(patch.labels);
+			if (labelPatch) issues.push(...labelPatch.issues);
 			if (issues.length) return Promise.reject(new LibraryUpdateError('invalid-text', issues));
 			// The queued operation never rejects (a rejected task would block the queue): the
 			// not-found rejection is raised after it.
@@ -277,7 +319,13 @@ export function createLibraryStore(
 					if (!item) return {};
 					const name = text.name ?? item.name;
 					const description = text.description ?? item.description ?? '';
-					if (name === item.name && description === (item.description ?? '')) {
+					// Untouched labels stay with the item (same S1, same wire order).
+					const labels = labelPatch ? labelPatch.value : (item.labels ?? null);
+					if (
+						name === item.name &&
+						description === (item.description ?? '') &&
+						sameLabels(labels, item.labels)
+					) {
 						outcome.item = item;
 						return {};
 					}
@@ -285,6 +333,7 @@ export function createLibraryStore(
 						...item,
 						name,
 						description,
+						labels,
 						updatedAt: nextTimestamp(now, item.updatedAt)
 					});
 					return { put: [outcome.item] };

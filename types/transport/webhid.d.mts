@@ -198,6 +198,7 @@ export type GateVerdict = {
 };
 export type Gate = (bands: readonly Band[], preampDb: number, options: {
     experimental: boolean;
+    profile?: "yolo";
 }) => GateVerdict;
 export type WriteOptions = {
     /**
@@ -209,6 +210,11 @@ export type WriteOptions = {
      * Passed to the gates; only `true` enables it.
      */
     experimental?: boolean | undefined;
+    /**
+     * Gate profile for `gateForWrite` (Modo YOLO). Only an own data property equal
+     * to `'yolo'` selects it; `writeMany` refuses it.
+     */
+    profile?: "yolo" | undefined;
     signal?: AbortSignal | undefined;
     /**
      * Defaults to {@link systemClock}.

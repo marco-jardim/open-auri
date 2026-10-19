@@ -70,12 +70,14 @@ import { autoPreamp } from 'open-auri/safety';
 
 - [`gate.mjs`](../src/safety/gate.mjs): análise de estabilidade, headroom e pré-amp
   dentro do envelope observado para gravação, sem constituir prova de segurança.
+  Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS`,
+  `CODEC_PREAMP_FLOOR_DB` e `YOLO_PREAMP_MAX_DB` para seleção e consulta dos perfis do gate.
 - [`policy.mjs`](../src/safety/policy.mjs): limites de edição, grade, interpolação e busca de fronteira.
 - [`thresholds.mjs`](../src/safety/thresholds.mjs): limiares de segurança e sua proveniência.
 
 Os aliases `levelDb`, `MEAN_FREQUENCIES` e `sectionDb` vêm de `dsp/level.mjs`;
-`THRESHOLDS` e `PROVENANCE` vêm de `safety/thresholds.mjs`. Embora o gate também os
-reexporte, cada nome aparece uma única vez no índice da área.
+`THRESHOLDS`, `PROVENANCE` e `YOLO_THRESHOLDS` vêm de `safety/thresholds.mjs`.
+Embora o gate também os reexporte, cada nome aparece uma única vez no índice da área.
 
 ### Compartilhamento: `open-auri/share`
 
@@ -107,6 +109,8 @@ reexporte, cada nome aparece uma única vez no índice da área.
 - [`flash.mjs`](../src/policy/flash.mjs): intervalo entre gravações, contadores e avisos de uso da flash.
 - [`loudness.mjs`](../src/policy/loudness.mjs): aviso de salto de nível entre curvas.
 - [`journal.mjs`](../src/policy/journal.mjs): validação, limite de entradas e JSON do diário local.
+  Exporta `JOURNAL_WAIVED_MAX`, o limite de códigos dispensados por entrada YOLO,
+  também pelo índice da área.
 
 ### Medição de áudio: `open-auri/meter`
 
@@ -120,6 +124,9 @@ reexporte, cada nome aparece uma única vez no índice da área.
 
 - [`schemas/preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json):
   esquema JSON do envelope v1, validado pela API `open-auri/share`.
+- [`schemas/preset-envelope-2.schema.json`](../schemas/preset-envelope-2.schema.json):
+  esquema JSON do envelope v2 (v1 mais rótulos de filtro opcionais), emitido só quando a
+  curva tem rótulos.
 - [`docs/s1-format.md`](s1-format.md): especificação congelada do S1 v1, implementado em
   `open-auri/share`.
 

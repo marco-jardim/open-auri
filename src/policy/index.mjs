@@ -22,6 +22,7 @@ export {
 export {
   JOURNAL_STORAGE_KEY,
   JOURNAL_MAX,
+  JOURNAL_WAIVED_MAX,
   validateEntry,
   appendEntry,
   parseJournal,

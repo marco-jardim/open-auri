@@ -46,6 +46,7 @@ export const REASON_MESSAGE_KEYS: Readonly<Record<ReasonCode, ReasonMessageKey>>
 	'b:pole-radius': 'cable_reason_b_pole_radius',
 	'c:section-peak': 'cable_reason_c_section_peak',
 	'd:prefix-peak': 'cable_reason_d_prefix_peak',
+	'd:prefix-peak-full': 'cable_reason_d_prefix_peak_full',
 	'e:output-audible': 'cable_reason_e_output_audible',
 	'e:output-full': 'cable_reason_e_output_full',
 	'f:codec': 'cable_reason_f_codec',
@@ -91,14 +92,33 @@ export function reasonView(reason: GateReason): ReasonView {
 	};
 }
 
-/** Lamps a–g and k from a gate verdict. After an early codec refusal the analysis lamps are unknown. */
+/** The reasons a YOLO verdict waived, flagged `waived` (none for the standard profile). */
+export function waivedViews(verdict: GateResult): ReasonView[] {
+	if (verdict.profile !== 'yolo' || !Array.isArray(verdict.waivedReasons)) return [];
+	return verdict.waivedReasons.map((reason) => ({ ...reasonView(reason), waived: true as const }));
+}
+
+/**
+ * Lamps a–g and k from a gate verdict. After an early codec refusal the analysis lamps are
+ * unknown. A lamp with blocking reasons fails; one with only reasons the YOLO profile waived is
+ * `waived` (amber, "dispensado (YOLO)", values shown); class 1 never becomes `waived`.
+ */
 export function lampsFromGate(verdict: GateResult): Lamp[] {
 	const reasons = verdict.reasons.map(reasonView);
+	const waived = waivedViews(verdict);
 	const analysed = verdict.metrics.sections !== undefined;
 	return LAMP_IDS.map((id): Lamp => {
 		const own = reasons.filter((reason) => lampOf(reason.code) === id);
-		const state: LampState = own.length > 0 ? 'fail' : analysed || id === 'f' ? 'ok' : 'unknown';
-		return { id, state, labelKey: LAMP_LABEL_KEYS[id], reasons: own };
+		const ownWaived = waived.filter((reason) => lampOf(reason.code) === id);
+		const state: LampState =
+			own.length > 0
+				? 'fail'
+				: ownWaived.length > 0
+					? 'waived'
+					: analysed || id === 'f'
+						? 'ok'
+						: 'unknown';
+		return { id, state, labelKey: LAMP_LABEL_KEYS[id], reasons: [...own, ...ownWaived] };
 	});
 }
 
@@ -162,7 +182,13 @@ export function lastWrittenLevelDbOf(entries: readonly JournalEntry[]): number |
 
 /**
  * Evaluates the checklist. `gate` may be passed to reuse a verdict computed for the
- * same input (display only; `write()` always re-evaluates).
+ * same input (display only; `write()` always re-evaluates); a verdict of another profile
+ * is ignored and the gate runs again.
+ *
+ * Modo YOLO (`input.profile === 'yolo'`): the gate runs with the YOLO profile (class 2
+ * waived, class 1 and `d:prefix-peak-full` block) and two more items are required:
+ * `yolo-session` (YOLO on in this tab, phrase typed: `context.yoloSession`) and
+ * `yolo-write` (the per-write confirmation, on every write).
  */
 export function evaluateChecklist(
 	input: ChecklistInput,
@@ -170,8 +196,16 @@ export function evaluateChecklist(
 	gate?: GateResult
 ): ChecklistResult {
 	const experimental = input.experimental === true;
-	const verdict = gate ?? gateForWrite(input.bands, input.preampDb, { experimental });
+	const yolo = input.profile === 'yolo';
+	const profile = yolo ? 'yolo' : 'standard';
+	const options = yolo ? { experimental, profile: 'yolo' as const } : { experimental };
+	// A reused verdict must come from the same profile (a YOLO verdict never approves a
+	// standard write, and a standard one never stands in for YOLO).
+	const sameProfile = gate !== undefined && (gate.profile === 'yolo') === yolo;
+	const verdict =
+		gate !== undefined && sameProfile ? gate : gateForWrite(input.bands, input.preampDb, options);
 	const reasons = verdict.reasons.map(reasonView);
+	const waivedReasons = waivedViews(verdict);
 	const lamps = lampsFromGate(verdict);
 	const snapshot = verdict.metrics.bands ?? null;
 	const crc = verdict.metrics.payloadCrc === undefined ? null : Number(verdict.metrics.payloadCrc);
@@ -197,10 +231,23 @@ export function evaluateChecklist(
 			required: experimentalRequired,
 			satisfied: !experimentalRequired || confirmations.experimental === true
 		},
-		{ id: 'spacing', required: true, satisfied: spacing.ok }
+		{ id: 'spacing', required: true, satisfied: spacing.ok },
+		{
+			id: 'yolo-session',
+			required: yolo,
+			satisfied: !yolo || context.yoloSession === true
+		},
+		{
+			id: 'yolo-write',
+			required: yolo,
+			satisfied: !yolo || confirmations.yoloWrite === true
+		}
 	];
 
 	return {
+		profile,
+		waived: yolo && Array.isArray(verdict.waived) ? [...verdict.waived] : [],
+		waivedReasons,
 		gateOk: verdict.ok,
 		lamps,
 		reasons,

@@ -67,6 +67,7 @@ import {
 	type PublicCounts,
 	type SocialErrorCode,
 	type VersionInput,
+	type VersionLabels,
 	type VersionRecord,
 	type Viewer
 } from '#lib/server/social/types.ts';
@@ -168,6 +169,11 @@ export interface VersionDto {
 	description: string;
 	license: License;
 	lang: Lang;
+	/**
+	 * Filter labels by wire index of the version's S1 (ten entries, null = automatic name), or
+	 * null. Detail and history only: never in list or feed cards, OG images or blind trades.
+	 */
+	labels: VersionLabels | null;
 	createdAt: number;
 	isHead: boolean;
 }
@@ -324,7 +330,11 @@ function versionInputOf(envelope: Envelope): VersionInput {
 		description: envelope.description,
 		license: envelope.license,
 		recipe: envelope.recipe ? JSON.stringify(envelope.recipe) : null,
-		lang: envelope.lang
+		lang: envelope.lang,
+		// preset@2 labels, already normalized by validateEnvelope (absent: an all-null list or @1).
+		// Version data only: the curve row, its id and the gate never see them, so a labels-only
+		// append reuses the cached curve and its gate result.
+		labels: envelope.labels ?? null
 	};
 }
 
@@ -456,7 +466,10 @@ function parseRecipe(text: string | null): unknown {
 	}
 }
 
-/** S5 envelope of a stored version (fork without an explicit envelope). */
+/**
+ * S5 envelope of a stored version (fork without an explicit envelope): `open-auri/preset@2`
+ * with the version's labels when it has any (a fork copies them), `@1` otherwise.
+ */
 function envelopeOf(
 	version: VersionRecord,
 	curve: CurveRecord,
@@ -469,8 +482,9 @@ function envelopeOf(
 		if (error instanceof S1Error) throw invalidCurve([String(error.code)]);
 		throw error;
 	}
+	const labels = version.labels?.some((label) => label !== null) ? version.labels : null;
 	const envelope: Record<string, unknown> = {
-		format: 'open-auri/preset@1',
+		format: labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
 		name: version.name,
 		description: version.description,
 		source: 'custom',
@@ -478,6 +492,7 @@ function envelopeOf(
 		code: curve.s1,
 		preampDb: decoded.preampDb,
 		bands: decoded.bands,
+		...(labels ? { labels: [...labels] } : {}),
 		lang: version.lang,
 		createdAt: new Date(now).toISOString()
 	};
@@ -513,6 +528,7 @@ function versionDto(version: VersionRecord, headVersion: string | null): Version
 		description: version.description,
 		license: version.license,
 		lang: version.lang,
+		labels: version.labels,
 		createdAt: version.createdAt,
 		isHead: version.id === headVersion
 	};

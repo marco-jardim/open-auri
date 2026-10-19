@@ -3,6 +3,8 @@
  * `open-auri/share`, `open-auri/dsp`); this module only adds the page rules:
  * - HS/LP/HP travel in `.txt`, S5 and links only in Engenharia (experimental);
  * - every imported curve passes `gateForWrite` before it may reach the editor;
+ * - every export (`.txt`, S5, `.bin`) and `#p=` link carries only a curve the standard gate
+ *   accepts: a YOLO-only curve (restored after a reload, YOLO off) never leaves as a file or link;
  * - imported names are untrusted: normalised by core `normalizeText`, length-capped and always
  *   rendered as text by the components (never as HTML).
  */
@@ -11,6 +13,7 @@ import {
 	decodeS1,
 	encodeS1,
 	EnvelopeError,
+	normalizeLabels,
 	normalizeText,
 	parseEnvelope,
 	S1Error,
@@ -23,6 +26,21 @@ import type { Reason } from './reasons.ts';
 export const NAME_MAX = 48;
 export const LINK_PREFIX = '#p=';
 export const S5_FORMAT = 'open-auri/preset@1';
+/** Emitted only when the curve has at least one filter label; `@1` otherwise. */
+export const S5_FORMAT_LABELS = 'open-auri/preset@2';
+
+/**
+ * The S5 format and `labels` field for a curve: `@2` with the normalized labels when at least
+ * one is set, else `@1` without the key (byte-identical to an `@1` export). Labels refused by
+ * the core rules are dropped here (entry by entry), never published.
+ */
+export function s5Labels(labels: unknown): {
+	format: typeof S5_FORMAT | typeof S5_FORMAT_LABELS;
+	labels?: (string | null)[];
+} {
+	const normalized = normalizeLabels(labels, { lenient: true });
+	return normalized ? { format: S5_FORMAT_LABELS, labels: normalized } : { format: S5_FORMAT };
+}
 
 export type IoError =
 	'format' | 'too-many' | 'experimental-layer' | 'gate' | 'link' | 'envelope' | 'grid';
@@ -31,6 +49,8 @@ export type IoFailure = { ok: false; error: IoError; reasons: Reason[]; detail?:
 export interface ImportedCurve extends Curve {
 	readonly name: string | null;
 	readonly bands: Band[];
+	/** Filter labels of an `open-auri/preset@2` file; never from `.txt` or `#p=` links. */
+	readonly labels?: (string | null)[] | null;
 }
 export type ImportResult = { ok: true; curve: ImportedCurve; warnings: number } | IoFailure;
 export type ExportResult<T> = { ok: true; value: T } | IoFailure;
@@ -61,6 +81,12 @@ export function safeName(raw: unknown, fallback: string): string {
 	return points.length === 0 ? fallback : points.slice(0, NAME_MAX).join('');
 }
 
+/** The standard gate (`verdictFor`, profile `'standard'`) on a curve about to leave the editor. */
+function refusedByGate(curve: Curve): IoFailure | null {
+	const verdict = verdictFor(curve);
+	return verdict.ok ? null : fail('gate', verdict.reasons);
+}
+
 /** Layer rule and gate for anything coming from outside the editor. */
 export function admit(curve: ImportedCurve, layer: Layer): ImportResult {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
@@ -83,12 +109,16 @@ export function importTxt(text: string, layer: Layer): ImportResult {
 
 export function exportTxt(curve: Curve, layer: Layer): ExportResult<string> {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
+	let value: string;
 	try {
-		return { ok: true, value: serializeEqualizerApo(curve) };
+		value = serializeEqualizerApo(curve);
 	} catch (cause) {
 		if (cause instanceof EqualizerApoError) return fail('format', [], cause.code);
 		throw cause;
 	}
+	const refused = refusedByGate(curve);
+	if (refused) return refused;
+	return { ok: true, value };
 }
 
 function s1Of(curve: Curve): ExportResult<string> {
@@ -105,17 +135,22 @@ export interface S5Meta {
 	source: string;
 	lang: 'pt-BR' | 'en-US';
 	now: number;
+	/** Filter labels by wire index: any set label makes the file `open-auri/preset@2`. */
+	labels?: readonly (string | null)[] | null;
 }
 
 export function exportS5(curve: Curve, meta: S5Meta, layer: Layer): ExportResult<string> {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
 	const code = s1Of(curve);
 	if (!code.ok) return code;
+	const refused = refusedByGate(curve);
+	if (refused) return refused;
+	const { format, labels } = s5Labels(meta.labels);
 	try {
 		return {
 			ok: true,
 			value: serializeEnvelope({
-				format: S5_FORMAT,
+				format,
 				name: safeName(meta.name, 'open-auri'),
 				description: '',
 				source: meta.source,
@@ -123,6 +158,7 @@ export function exportS5(curve: Curve, meta: S5Meta, layer: Layer): ExportResult
 				code: code.value,
 				preampDb: curve.preampDb,
 				bands: curve.bands,
+				...(labels ? { labels } : {}),
 				lang: meta.lang,
 				createdAt: new Date(meta.now).toISOString()
 			})
@@ -142,7 +178,12 @@ export function importS5(json: string, layer: Layer): ImportResult {
 	}
 	const { value } = parsed;
 	return admit(
-		{ name: safeName(value.name, ''), bands: value.bands, preampDb: value.preampDb },
+		{
+			name: safeName(value.name, ''),
+			bands: value.bands,
+			preampDb: value.preampDb,
+			labels: value.labels ?? null
+		},
 		layer
 	);
 }
@@ -163,7 +204,10 @@ export function exportBin(curve: Curve): ExportResult<Uint8Array<ArrayBuffer>> {
 export function linkHash(curve: Curve, layer: Layer): ExportResult<string> {
 	if (hasExperimental(curve.bands) && layer !== 'engenharia') return fail('experimental-layer');
 	const code = s1Of(curve);
-	return code.ok ? { ok: true, value: `${LINK_PREFIX}${code.value}` } : code;
+	if (!code.ok) return code;
+	const refused = refusedByGate(curve);
+	if (refused) return refused;
+	return { ok: true, value: `${LINK_PREFIX}${code.value}` };
 }
 
 /** `#p=<S1>` → admitted curve; `null` when the hash carries no curve link. */

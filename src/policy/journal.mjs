@@ -10,11 +10,19 @@ export const JOURNAL_MAX = 500;
  * @typedef {import('../dsp/eq0xcb.mjs').Band} JournalBand
  * @typedef {{schema: 1, at: number, name: string, crc: number, preampDb: number,
  *   bands: JournalBand[], status: 'ok' | 'interrupted' | 'simulated',
- *   device: string | null}} JournalEntry
+ *   device: string | null, profile?: 'yolo', waived?: string[]}} JournalEntry
+ * `profile: 'yolo'` marks a write made in Modo YOLO (gate profile 'yolo') and
+ * `waived` lists the class-2 reason codes that write waived. Both are optional
+ * and absent on every other entry, so schema 1 records written before them stay
+ * valid and are stored byte for byte as before.
  */
 
 const ACTIVE_KINDS = new Set(['PK', 'LS', 'HS', 'LP', 'HP']);
 const STATUSES = new Set(['ok', 'interrupted', 'simulated']);
+/** Most waived codes one entry keeps (the gate has 8 waivable codes). */
+export const JOURNAL_WAIVED_MAX = 16;
+// A reason code such as `c:section-peak` or `d7:boost-q`.
+const WAIVED_CODE = /^[a-z0-9]{1,4}:[a-z0-9-]{1,32}$/;
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
@@ -67,6 +75,20 @@ export function validateEntry(entry) {
     (typeof entry.device !== 'string' || [...entry.device].length > 64)
   ) {
     errors.push('device must be null or a string of at most 64 characters');
+  }
+  if (Object.hasOwn(entry, 'profile') && entry.profile !== 'yolo') {
+    errors.push('profile must be absent or yolo');
+  }
+  if (Object.hasOwn(entry, 'waived')) {
+    const waived = entry.waived;
+    if (entry.profile !== 'yolo') errors.push('waived needs profile yolo');
+    if (
+      !Array.isArray(waived) ||
+      waived.length > JOURNAL_WAIVED_MAX ||
+      !waived.every((code) => typeof code === 'string' && WAIVED_CODE.test(code))
+    ) {
+      errors.push(`waived must be at most ${JOURNAL_WAIVED_MAX} reason codes`);
+    }
   }
   if (!Array.isArray(entry.bands) || entry.bands.length !== 10) {
     errors.push('bands must contain exactly 10 bands');
@@ -123,6 +145,11 @@ function checkedCopy(value) {
     }),
     status: entry.status,
     device: entry.device,
+    // Only a YOLO write carries these keys; every other entry keeps its old shape.
+    ...(entry.profile === 'yolo' ? { profile: /** @type {'yolo'} */ ('yolo') } : {}),
+    ...(entry.profile === 'yolo' && Array.isArray(entry.waived)
+      ? { waived: [...entry.waived] }
+      : {}),
   };
 }
 

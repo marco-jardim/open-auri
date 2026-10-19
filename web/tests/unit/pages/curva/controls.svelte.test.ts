@@ -195,12 +195,22 @@ test('bank locks HS/HP/LP in Ajustar and exposes pass filters without gain', asy
 	});
 	await expect.element(page.getByText('Typed value stopped')).toBeVisible();
 	for (const index of [1, 2, 3]) {
-		expect(modules[index]?.querySelector('select')).toHaveProperty('disabled', false);
+		const module = modules[index];
+		if (!module) throw new Error('Missing experimental module');
+		expect(module.classList.contains('locked')).toBe(false);
+		for (const field of module.querySelectorAll('input')) {
+			expect(field).toHaveProperty('disabled', false);
+		}
+		const kindDial = module.querySelector('.kind-dial [role="spinbutton"]');
+		expect(kindDial?.hasAttribute('aria-disabled')).toBe(false);
 	}
-	const selects = page.getByRole('combobox');
-	await selects.first().selectOptions('LS');
-	expect(onkind).toHaveBeenCalledExactlyOnceWith(0, 'LS');
-	expect(selects.first().element()).toHaveProperty('value', 'PK');
+	// The kind dial (the bank's own gate preflight) steps PK → LS; the bank waits for the page.
+	const dial = modules[0]?.querySelector<HTMLElement>('.kind-dial [role="spinbutton"]');
+	if (!dial) throw new Error('Missing kind dial');
+	dial.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+	await vi.waitFor(() => expect(onkind).toHaveBeenCalledExactlyOnceWith(0, 'LS'));
+	expect(dial.querySelector('.value')?.textContent).toBe('PK');
+	expect(dial.hasAttribute('aria-invalid')).toBe(false);
 	const freq = page.getByRole('spinbutton', { name: 'Freq (Hz)', exact: true }).first();
 	const gain = page.getByRole('spinbutton', { name: 'Ganho (dB)', exact: true }).first();
 	const q = page.getByRole('spinbutton', { name: 'Q', exact: true }).first();
@@ -215,10 +225,9 @@ test('bank locks HS/HP/LP in Ajustar and exposes pass filters without gain', asy
 	expect(freq.element()).toHaveProperty('valueAsNumber', 1000);
 	inputValue(freq.element(), '');
 	expect(onmove).toHaveBeenCalledTimes(3);
-	const select = selects.first().element();
-	if (!(select instanceof HTMLSelectElement)) throw new Error('Missing kind select');
-	select.value = 'not-a-kind';
-	select.dispatchEvent(new Event('change', { bubbles: true }));
+	// Only engraved stops are ever proposed: unrelated keys on the dial propose nothing.
+	for (const name of ['x', 'Tab', 'PageUp']) key(dial, name);
+	await tick();
 	expect(onkind).toHaveBeenCalledTimes(1);
 	await page.getByRole('button', { name: m.curva_order_reset() }).click();
 	expect(onorder).toHaveBeenCalledOnce();

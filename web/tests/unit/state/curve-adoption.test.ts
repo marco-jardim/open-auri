@@ -1,0 +1,302 @@
+/**
+ * C1 (hearing safety): what the curve store adopts without a gated edit of its own. A curve
+ * accepted only by the free preview's codec must never come back to the editor (another tab,
+ * undo/redo, a reload); a YOLO-only curve only while Modo YOLO is on in this tab.
+ */
+import { afterEach, describe, expect, it } from 'vitest';
+import { snapshotBands } from 'open-auri/dsp';
+import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
+import { NEUTRO } from 'open-auri/catalog';
+import {
+	CURRENT_STORAGE_KEY,
+	createCurveStore,
+	gateAccepts
+} from '../../../src/lib/state/curve.svelte.ts';
+import { createStorage } from '../../../src/lib/state/storage.ts';
+import {
+	checkedCurve,
+	CURVE_PREAMP_FLOOR_DB,
+	type CurveData
+} from '../../../src/lib/state/model.ts';
+import type { YoloProfile } from '../../../src/lib/state/yolo.svelte.ts';
+import { codecAccepts, type Band } from '../../../src/lib/workers/gate-handler.ts';
+import { createTabs, MemoryStorage } from './fakes.ts';
+
+const disposables: { dispose(): void }[] = [];
+function own<T extends { dispose(): void }>(value: T): T {
+	disposables.push(value);
+	return value;
+}
+afterEach(() => {
+	for (const disposable of disposables.reverse()) disposable.dispose();
+	disposables.length = 0;
+});
+
+function curve(name: string, preampDb: number, active: Band[]): CurveData {
+	const bands = [...active, ...NEUTRO.bands.slice(active.length)];
+	return { name, source: 'custom', preampDb, bands: snapshotBands(bands, 10) };
+}
+/** Passes the standard gate. */
+const STANDARD = curve('Corte', -1, [{ kind: 'PK', freqHz: 1000, gainDb: -6, qFactor: 1 }]);
+/** Fails the standard gate on class-2 reasons only: the YOLO gate accepts it ("subsônica"). */
+const YOLO_ONLY = curve('Subsônica', -0.5, [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }]);
+/** Another YOLO-only curve (other bands and preamp than YOLO_ONLY). */
+const YOLO_ONLY_2 = curve('Subsônica 2', -1, [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }]);
+/** Only the codec accepts it (the free preview): +11,5 dB out, far over every output limit. */
+const CODEC_ONLY = curve('Alto', -0.5, [{ kind: 'PK', freqHz: 1000, gainDb: 12, qFactor: 1 }]);
+
+function judge(data: CurveData, profile: YoloProfile): boolean {
+	const experimental = data.bands.some((band) => isExperimentalKind(band.kind));
+	return gateForWrite(
+		data.bands,
+		data.preampDb,
+		profile === 'yolo' ? { experimental, profile: 'yolo' } : { experimental }
+	).ok;
+}
+const same = (data: Pick<CurveData, 'bands' | 'preampDb'>) => ({
+	bands: data.bands,
+	preampDb: data.preampDb
+});
+const adapter = (local = new MemoryStorage()) =>
+	own(createStorage({ local, session: new MemoryStorage(), indexedDB: null, channel: null }));
+
+it('the fixtures are what they claim: standard, YOLO-only, codec-only', () => {
+	expect(judge(STANDARD, 'standard')).toBe(true);
+	expect(judge(YOLO_ONLY, 'standard')).toBe(false);
+	expect(judge(YOLO_ONLY, 'yolo')).toBe(true);
+	expect(judge(YOLO_ONLY_2, 'standard')).toBe(false);
+	expect(judge(YOLO_ONLY_2, 'yolo')).toBe(true);
+	expect(judge(CODEC_ONLY, 'yolo')).toBe(false);
+	expect(codecAccepts(CODEC_ONLY.bands, CODEC_ONLY.preampDb)).toBe(true);
+});
+
+describe('another tab (storage event)', () => {
+	function twoTabs(profileB: () => YoloProfile) {
+		const tabs = createTabs();
+		const a = own(
+			createCurveStore({
+				storage: own(createStorage(tabs.options(0))),
+				now: () => 1000,
+				profile: () => 'yolo'
+			})
+		);
+		const b = own(
+			createCurveStore({
+				storage: own(createStorage(tabs.options(1))),
+				now: () => 2000,
+				profile: profileB
+			})
+		);
+		b.set(STANDARD);
+		tabs.deliver();
+		return { tabs, a, b };
+	}
+
+	it('never adopts a codec-only curve, in any profile, and keeps its own history', () => {
+		for (const profile of ['standard', 'yolo'] as const) {
+			const { tabs, a, b } = twoTabs(() => profile);
+			b.update({ preampDb: -2 });
+			const before = b.current;
+			const undoCount = b.undoCount;
+			// The other tab's store got it somehow (an older build, a hand edit): it is persisted…
+			expect(a.set(CODEC_ONLY)).toBe(true);
+			tabs.deliver();
+			// …but this tab neither plays nor edits it.
+			expect(b.current).toBe(before);
+			expect(b.undoCount).toBe(undoCount);
+			expect(b.canUndo).toBe(true);
+			expect(JSON.parse(tabs.local.getItem(CURRENT_STORAGE_KEY) ?? 'null')).toMatchObject(
+				same(CODEC_ONLY)
+			);
+		}
+	});
+
+	it('adopts a YOLO-only curve only while YOLO is on in this tab', () => {
+		let profile: YoloProfile = 'standard';
+		const { tabs, a, b } = twoTabs(() => profile);
+		a.set(YOLO_ONLY);
+		tabs.deliver();
+		expect(b.current).toMatchObject(same(STANDARD));
+		profile = 'yolo';
+		a.update({ name: 'Subsônica 2' });
+		tabs.deliver();
+		expect(b.current).toMatchObject({ ...same(YOLO_ONLY), name: 'Subsônica 2' });
+	});
+
+	it('adopts a standard curve in every profile', () => {
+		const { tabs, a, b } = twoTabs(() => 'standard');
+		a.set({ ...STANDARD, name: 'Outra aba', preampDb: -3 });
+		tabs.deliver();
+		expect(b.current).toMatchObject({ name: 'Outra aba', preampDb: -3 });
+	});
+});
+
+describe('undo and redo', () => {
+	it('skip steps this tab may not adopt now, and come back to them with YOLO on', () => {
+		let profile: YoloProfile = 'standard';
+		const store = own(createCurveStore({ storage: adapter(), profile: () => profile }));
+		store.set(STANDARD);
+		profile = 'yolo';
+		store.set(YOLO_ONLY);
+		// `set` is the editor's own, already gated path; a codec-only curve must never get here,
+		// but if it does, history never brings it back.
+		store.set(CODEC_ONLY);
+		expect(store.undo()).toBe(true);
+		expect(store.current).toMatchObject(same(YOLO_ONLY));
+		// Redo would bring back the codec-only curve: refused in every profile.
+		expect(store.canRedo).toBe(false);
+		expect(store.redo()).toBe(false);
+		expect(store.current).toMatchObject(same(YOLO_ONLY));
+
+		// YOLO off: the YOLO-only step cannot come back either.
+		expect(store.undo()).toBe(true);
+		expect(store.current).toMatchObject(same(STANDARD));
+		profile = 'standard';
+		expect(store.canRedo).toBe(false);
+		expect(store.redo()).toBe(false);
+		expect(store.current).toMatchObject(same(STANDARD));
+		// YOLO on again: it can.
+		profile = 'yolo';
+		expect(store.canRedo).toBe(true);
+		expect(store.redo()).toBe(true);
+		expect(store.current).toMatchObject(same(YOLO_ONLY));
+	});
+
+	it('jumps over refused steps to the newest adoptable one and drops them', () => {
+		let profile: YoloProfile = 'yolo';
+		const store = own(createCurveStore({ storage: adapter(), profile: () => profile }));
+		store.set(STANDARD);
+		store.set(YOLO_ONLY);
+		store.set(CODEC_ONLY);
+		// Other bands and preamp than the YOLO-only step below it: no labels-only step here.
+		store.set(YOLO_ONLY_2);
+		profile = 'standard';
+		expect(store.canUndo).toBe(true);
+		expect(store.undo()).toBe(true);
+		// The codec-only and the YOLO-only steps in between are gone.
+		expect(store.current).toMatchObject(same(STANDARD));
+		expect(store.undoCount).toBe(1);
+		expect(store.undo()).toBe(true);
+		expect(store.current).toMatchObject(same(NEUTRO));
+		expect(store.canUndo).toBe(false);
+		expect(store.undo()).toBe(false);
+	});
+
+	it('renames of a YOLO-only curve restored with YOLO off can be undone and redone', () => {
+		const ten = (entries: (string | null)[]) =>
+			Array.from({ length: 10 }, (_, index) => entries[index] ?? null);
+		const local = new MemoryStorage();
+		local.setItem(
+			CURRENT_STORAGE_KEY,
+			JSON.stringify({ ...YOLO_ONLY, schema: 1, labels: null, updatedAt: 500 })
+		);
+		const store = own(createCurveStore({ storage: adapter(local), profile: () => 'standard' }));
+		expect(store.current).toMatchObject(same(YOLO_ONLY));
+		expect(store.canUndo).toBe(false);
+		expect(store.setLabels(['Sub'])).toBe(true);
+		expect(store.setLabels(['Sub', 'Grave'])).toBe(true);
+		// Labels-only steps: the same bands and preamp, nothing heard changes.
+		expect(store.canUndo).toBe(true);
+		expect(store.undo()).toBe(true);
+		expect(store.current.labels).toEqual(ten(['Sub']));
+		expect(store.undo()).toBe(true);
+		expect(store.current.labels).toBeNull();
+		expect(store.current).toMatchObject(same(YOLO_ONLY));
+		expect(store.canUndo).toBe(false);
+		expect(store.canRedo).toBe(true);
+		expect(store.redo()).toBe(true);
+		expect(store.redo()).toBe(true);
+		expect(store.current.labels).toEqual(ten(['Sub', 'Grave']));
+		expect(store.canRedo).toBe(false);
+	});
+
+	it('a labels-only step never lets another refused curve back', () => {
+		let profile: YoloProfile = 'yolo';
+		const store = own(createCurveStore({ storage: adapter(), profile: () => profile }));
+		store.set(YOLO_ONLY);
+		store.set(YOLO_ONLY_2);
+		profile = 'standard';
+		expect(store.setLabels(['Sub'])).toBe(true);
+		// The rename is undone…
+		expect(store.undo()).toBe(true);
+		expect(store.current).toMatchObject(same(YOLO_ONLY_2));
+		expect(store.current.labels).toBeNull();
+		// …but the other YOLO-only curve below it stays refused with YOLO off; Neutro is next.
+		expect(store.undo()).toBe(true);
+		expect(store.current).toMatchObject(same(NEUTRO));
+		expect(store.canUndo).toBe(false);
+		expect(store.canRedo).toBe(false);
+	});
+});
+
+describe('reload (oa.current on load)', () => {
+	const stored = (data: CurveData) =>
+		JSON.stringify({ ...data, schema: 1, labels: null, updatedAt: 500 });
+
+	it('refuses a codec-only curve: the editor starts on Neutro', () => {
+		const local = new MemoryStorage();
+		local.setItem(CURRENT_STORAGE_KEY, stored(CODEC_ONLY));
+		const store = own(createCurveStore({ storage: adapter(local) }));
+		expect(store.current).toMatchObject(same(NEUTRO));
+		expect(store.canUndo).toBe(false);
+	});
+
+	it('restores the YOLO-only and the standard curve a tab left there', () => {
+		for (const data of [YOLO_ONLY, STANDARD]) {
+			const local = new MemoryStorage();
+			local.setItem(CURRENT_STORAGE_KEY, stored(data));
+			const store = own(createCurveStore({ storage: adapter(local), profile: () => 'standard' }));
+			expect(store.current).toMatchObject({ ...same(data), name: data.name });
+		}
+	});
+});
+
+describe('the editor preamp floor (−25,5 dB, S1 and S5)', () => {
+	/** Neutral at −100 dB: the YOLO gate accepts it (`g:preamp` waived), the editor never does. */
+	const DEEP = curve('Fundo', -100, []);
+
+	it('the fixture is accepted by the YOLO gate alone', () => {
+		expect(CURVE_PREAMP_FLOOR_DB).toBe(-25.5);
+		expect(judge(DEEP, 'yolo')).toBe(true);
+		expect(judge(DEEP, 'standard')).toBe(false);
+	});
+
+	it('checkedCurve refuses a preamp below the floor and keeps the floor itself', () => {
+		const at = (preampDb: number) => ({ ...DEEP, preampDb, schema: 1, updatedAt: 1 });
+		expect(() => checkedCurve(at(-100))).toThrow(TypeError);
+		expect(() => checkedCurve(at(-25.6))).toThrow(TypeError);
+		expect(checkedCurve(at(CURVE_PREAMP_FLOOR_DB)).preampDb).toBe(-25.5);
+	});
+
+	it('curve.set refuses it in YOLO: the curve, oa.current and history stay', () => {
+		const local = new MemoryStorage();
+		const store = own(createCurveStore({ storage: adapter(local), profile: () => 'yolo' }));
+		expect(store.set(YOLO_ONLY)).toBe(true);
+		const before = local.getItem(CURRENT_STORAGE_KEY);
+		expect(store.set(DEEP)).toBe(false);
+		expect(store.current).toMatchObject({ ...same(YOLO_ONLY), name: YOLO_ONLY.name });
+		expect(local.getItem(CURRENT_STORAGE_KEY)).toBe(before);
+		expect(store.undoCount).toBe(1);
+		expect(store.update({ preampDb: -30 })).toBe(false);
+		expect(store.current.preampDb).toBe(YOLO_ONLY.preampDb);
+	});
+
+	it('a stored curve below the floor is not restored: the editor starts on Neutro', () => {
+		const local = new MemoryStorage();
+		local.setItem(
+			CURRENT_STORAGE_KEY,
+			JSON.stringify({ ...DEEP, schema: 1, labels: null, updatedAt: 500 })
+		);
+		const store = own(createCurveStore({ storage: adapter(local), profile: () => 'yolo' }));
+		expect(store.current).toMatchObject(same(NEUTRO));
+	});
+});
+
+it('gateAccepts judges each frozen curve once per profile', () => {
+	const store = own(createCurveStore({ storage: adapter() }));
+	store.set(YOLO_ONLY);
+	const current = store.current;
+	expect(gateAccepts(current, 'standard')).toBe(false);
+	expect(gateAccepts(current, 'yolo')).toBe(true);
+	expect(gateAccepts(current, 'standard')).toBe(false);
+});

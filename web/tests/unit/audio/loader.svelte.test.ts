@@ -62,6 +62,7 @@ function audioUi(initial: Partial<AudioEngineState> = {}) {
 		buildChain: unavailable,
 		matchGains: unavailable,
 		createAB: unavailable,
+		sharedProtection: unavailable,
 		getAnalyserTap: unavailable,
 		getMeterBus: unavailable,
 		getChainOutput: unavailable,

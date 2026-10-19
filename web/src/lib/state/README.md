@@ -9,8 +9,17 @@ All store properties are rune-backed getters. Do not destructure reactive proper
 reactive context. All stores expose `error: StorageFailure | null` and `dispose()`.
 
 - `createCurveStore({storage?, now?})`: properties `current`, `dirty`, `unsaved`, `lastWritten`,
-  `canUndo`, `canRedo`, `undoCount`, `redoCount`; actions `set(CurveData)`, `update(Partial<CurveData>)`,
-  `loadPreset(id)`, `undo()`, `redo()`, `markWritten(snapshot?)`.
+  `canUndo`, `canRedo`, `undoCount`, `redoCount`, `labels`; actions `set(CurveData)`, `update(Partial<CurveData>)`,
+  `loadPreset(id)`, `undo()`, `redo()`, `markWritten(snapshot?)`, `setLabels(labels)`. `labels`
+  (custom filter names by wire index) is `current.labels` (`CurveData.labels`, ten entries or
+  null, normalized by core `normalizeLabels`, invalid entries become null): persisted in
+  `oa.current`, undoable, and a label-only `set` is a real change. Old records load with
+  `labels = null`; `loadPreset` and any `set` without labels clear them. `curveSignature` stays
+  labels-free, so labels never make the curve dirty for the cable. Option `profile?` (this tab's
+  Modo YOLO by default): another tab's curve and undo/redo steps are adopted only when the
+  standard gate accepts them, or the YOLO gate while YOLO is on here; refused steps are skipped
+  (`canUndo`/`canRedo` count only adoptable ones). On load, a curve failing even the YOLO hard
+  reasons is refused (Neutro instead).
 - `createJournalStore({storage?})`: properties `entries`, `dropped`; action `append(entry)`.
 - `createFlashStore({storage?, now?})`: property `state`; actions `canWriteNow(at?)`,
   `dailyNotice(at?)`, `recordWrite(at?)`.

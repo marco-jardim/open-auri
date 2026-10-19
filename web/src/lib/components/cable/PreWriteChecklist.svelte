@@ -21,7 +21,8 @@
 		Confirmations,
 		GateResult,
 		QueueOutcome,
-		WriteOutcome
+		WriteOutcome,
+		WriteProfile
 	} from '#lib/cable/types.ts';
 	import { Button, Lamp } from '#lib/components/primitives/index.ts';
 	import Explainer from '#lib/components/comprehension/Explainer.svelte';
@@ -31,7 +32,7 @@
 	import LoudnessPanel from './LoudnessPanel.svelte';
 	import ConfirmLever from './ConfirmLever.svelte';
 	import { criteriaValues } from './criteria.ts';
-	import { describeOutcome, formatCrc, formatNumber } from './i18n.ts';
+	import { describeOutcome, formatCrc, formatNumber, waivedCriteriaText } from './i18n.ts';
 
 	interface Props {
 		service: CableService;
@@ -43,6 +44,11 @@
 		experimental?: boolean;
 		/** Curve name stored in the journal. */
 		name?: string;
+		/**
+		 * `'yolo'`: Modo YOLO write. The gate uses the YOLO profile, waived criteria show amber,
+		 * the per-write YOLO lever is required on every write and the X9 queue is not offered.
+		 */
+		profile?: WriteProfile;
 		onclose: () => void;
 		onresult?: (outcome: WriteOutcome | QueueOutcome) => void;
 	}
@@ -54,18 +60,22 @@
 		preampDb,
 		experimental = false,
 		name = '',
+		profile = 'standard',
 		onclose,
 		onresult
 	}: Props = $props();
 
-	const UNCONFIRMED: Confirmations = {
+	// Every lever, the YOLO one included, is a plain boolean here (each binds a ConfirmLever).
+	const UNCONFIRMED: Required<Confirmations> = {
 		volumeLowered: false,
 		keepConnected: false,
-		experimental: false
+		experimental: false,
+		yoloWrite: false
 	};
+	const yolo = $derived(profile === 'yolo');
 
 	let cable = $state.raw<CableState>(untrack(() => service.getState()));
-	let confirmations = $state<Confirmations>({ ...UNCONFIRMED });
+	let confirmations = $state<Required<Confirmations>>({ ...UNCONFIRMED });
 	/** The write target the confirmations were given for (plain: compared, never rendered). */
 	let confirmedTarget: CableDevice | null = untrack(() => cable.device);
 	$effect(() =>
@@ -87,17 +97,31 @@
 
 	// The gate runs only while the dialog is open; write() always re-gates on its own.
 	const gate = $derived<GateResult | null>(
-		open ? gateForWrite(bands, preampDb, { experimental }) : null
+		open
+			? gateForWrite(bands, preampDb, yolo ? { experimental, profile: 'yolo' } : { experimental })
+			: null
 	);
 	const checklist = $derived.by<ChecklistResult | null>(() => {
 		void tick;
 		void cable;
 		if (gate === null) return null;
 		return service.checklist(
-			{ bands, preampDb, experimental, confirmations: { ...confirmations } },
+			{
+				bands,
+				preampDb,
+				experimental,
+				confirmations: { ...confirmations },
+				...(yolo ? { profile: 'yolo' as const } : {})
+			},
 			gate
 		);
 	});
+	/** The per-write YOLO text, naming the waived criteria of this very verdict. */
+	const yoloText = $derived(
+		checklist === null
+			? ''
+			: m.yolo_confirm_write({ criteria: waivedCriteriaText(checklist.waived) })
+	);
 	/** Display values of the criteria, from the same verdict (presentation only). */
 	const values = $derived(criteriaValues(gate));
 
@@ -156,6 +180,8 @@
 		if (unmet('gate')) return m.cable_fux_lock_gate();
 		if (unmet('volume') || unmet('connection')) return m.cable_fux_lock_levers();
 		if (unmet('experimental')) return m.cable_fux_lock_experimental();
+		if (unmet('yolo-session')) return m.yolo_lock_session();
+		if (unmet('yolo-write')) return m.yolo_lock_write();
 		if (unmet('spacing')) return m.cable_fux_lock_spacing();
 		if (!checklist.canWrite) return m.cable_fux_lock_other();
 		return null;
@@ -209,7 +235,8 @@
 			experimental,
 			confirmations: { ...confirmations },
 			gesture,
-			name
+			name,
+			...(yolo ? { profile: 'yolo' as const } : {})
 		});
 		finish(outcome);
 	}
@@ -233,6 +260,12 @@
 					<h2 id={`${id}-title`} class="title">{m.cable_checklist_title()}</h2>
 					<Explainer term="checklist" />
 				</div>
+				{#if yolo}
+					<p class="yolo-banner" role="note" data-yolo-banner>
+						<strong>{m.yolo_tape()}</strong>
+						<span>{m.yolo_checklist_banner()}</span>
+					</p>
+				{/if}
 				<div class="model">
 					<span>{m.cable_fux_model()}</span>
 					{#if cable.mode === 'simulated'}
@@ -301,6 +334,14 @@
 									confirmation="experimental"
 								/>
 							{/if}
+							{#if yolo}
+								<!-- Shown on every YOLO write; reset after each one like the other levers. -->
+								<ConfirmLever
+									bind:checked={confirmations.yoloWrite}
+									label={yoloText}
+									confirmation="yolo"
+								/>
+							{/if}
 						</fieldset>
 						<div class="write-cell">
 							<span class="engrave" aria-hidden="true">{m.cable_fux_write_legend()}</span>
@@ -358,7 +399,8 @@
 				{/if}
 			</section>
 
-			{#if cable.devices.length > 1}
+			<!-- No X9 multi-cable queue in Modo YOLO: one cable, one confirmation, one write. -->
+			{#if cable.devices.length > 1 && !yolo}
 				<div class="queue">
 					<MultiCableQueue
 						{service}
@@ -574,6 +616,21 @@
 	}
 	.gate-note {
 		font-family: var(--face-body, 'Geist', sans-serif);
+	}
+	.yolo-banner {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 10px;
+		align-items: baseline;
+		margin: 8px 0 0;
+		padding: 6px 10px;
+		border-radius: 3px;
+		background: #a3262c;
+		color: #fff;
+		font: 600 var(--fs-small, 13px) / 1.35 var(--face-body, 'Geist', sans-serif);
+	}
+	.yolo-banner strong {
+		letter-spacing: 0.12em;
 	}
 	.experimental {
 		display: grid;

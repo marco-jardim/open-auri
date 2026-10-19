@@ -329,6 +329,9 @@
 				source: `community:${channel.lineageId}`,
 				preampDb: channel.curve.preampDb,
 				bands: channel.curve.bands,
+				// Feed and list cards never carry filter labels (design A): a channel loads without
+				// them; the curve page (`/c/[id]`) and the library carry the version's labels.
+				labels: null,
 				updatedAt: Date.now()
 			});
 		} catch (error) {

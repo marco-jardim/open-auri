@@ -9,7 +9,7 @@ import {
 } from '#lib/audio/meters.ts';
 import type { Track } from './comparison.ts';
 
-type Engine = Pick<AudioEngine, 'buildChain' | 'matchGains'>;
+type Engine = Pick<AudioEngine, 'buildChain' | 'matchGains' | 'sharedProtection'>;
 type TapHandle = Pick<MeterTap, 'disconnect' | 'subscribe'>;
 type TapFactory = (node: AudioNode) => Promise<TapHandle>;
 interface RecordEntry {
@@ -24,6 +24,15 @@ interface RecordEntry {
  * Every chain stays silent until `setAudible(true)` (the page's own Play): building chains, or
  * the engine having been left playing by another page, never makes a lane audible.
  * `reference` gives the 0 VU alignment for new taps (the app's `meterRef`).
+ *
+ * Protection (C1): the armed lanes share one preview protection (`engine.sharedProtection`), as
+ * `createAB` gives a pair. When any armed curve fails the standard gate (or is louder than it
+ * allows), every armed lane gets the same normalize gain and limiter, so a YOLO-only lane plays
+ * at the level the A/B match gives it instead of several dB below the others. Each lane's trim
+ * (`setGain`) plays ahead of that gain and limiter, so every limiter sees the matched level. The
+ * gain comes from the untrimmed peaks: the level-match trims are ≤ 0 and change with the pair
+ * without a rebuild, so no lane peaks above -1 dBFS whatever its trim. A change of that
+ * protection (a lane armed, disarmed or edited) rebuilds every lane, replacements first.
  */
 export function createTrackChains(
 	engine: Engine,
@@ -83,24 +92,29 @@ export function createTrackChains(
 		async sync(next: readonly Track[]) {
 			if (disposed) return;
 			tracks = next;
+			const armed = next.filter((item) => item.armed);
+			// One protection for every armed lane (or none): see above.
+			const protect = engine.sharedProtection(armed.map((track) => track.curve));
+			const signatureOf = (track: Track) => JSON.stringify([track.curve, protect ?? null]);
 			const stale: [number, RecordEntry][] = [];
 			for (const [id, record] of records) {
-				const track = next.find((item) => item.id === id && item.armed);
-				if (!track || JSON.stringify(track.curve) !== record.signature) {
+				const track = armed.find((item) => item.id === id);
+				if (!track || signatureOf(track) !== record.signature) {
 					records.delete(id);
 					stale.push([id, record]);
 				}
 			}
 			const pending: Promise<void>[] = [];
-			for (const track of next.filter((item) => item.armed)) {
+			for (const track of armed) {
 				let record = records.get(track.id);
 				if (!record) {
 					const chain = engine.buildChain(track.curve.bands, track.curve.preampDb, {
 						id: `comparar-${track.id}-${++sequence}`,
 						experimental: true,
-						on: false
+						on: false,
+						...(protect ? { protect } : {})
 					});
-					record = { signature: JSON.stringify(track.curve), chain, meter: null, loading: null };
+					record = { signature: signatureOf(track), chain, meter: null, loading: null };
 					records.set(track.id, record);
 				}
 				if (record.meter) continue;

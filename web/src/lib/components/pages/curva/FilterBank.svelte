@@ -1,7 +1,13 @@
 <!--
-	Filter bank (Ajustar and Engenharia, mock v2 .bank): 10 strips in written order, each with
-	- a rotary kind switch (PK, LS, OFF; HS, LP and HP engraved and locked outside Engenharia). The
-	  native select is the control, laid over the switch, so keyboard and screen readers keep it;
+	Filter bank (Ajustar and Engenharia, mock v2 .bank): 10 strips in written order, laid out as a
+	grid that never scrolls sideways (5 × 2 when the bank is at least 590 px wide, otherwise as many
+	columns of at least 116 px as fit: 4, 3, 2 or 1). Each strip has
+	- a header: the slot badge (A to J, the same letter as the scope handle), the functional name
+	  (`band-names.ts`) or the user's own one, a rename button (inline field, up to LABEL_MAX = 24
+	  code points under the strict label rules, a refused name keeps the field open with the
+	  reason; Enter saves, Esc cancels) and, on hover or focus, the processing stage ("estágio N");
+	- a click-stepped rotary kind switch (PK, LS, OFF; HS, LP and HP engraved and locked outside
+	  Engenharia), with keyboard stepping and a hover/focus legend;
 	- CORTE and REFORÇO lamps (the sign of the band's real gain) and a mini response of the section;
 	- FREQ, GANHO and Q knobs with LCD fields. Typing goes through the same gate-bounded move as the
 	  handles (stop at the boundary, round, revalidate). Dragging a knob (up or down) previews the
@@ -10,11 +16,13 @@
 	  from the gate metrics (DATA).
 	The head carries the observed-envelope strip: the gate's seven criteria (a) to (g), each with a
 	lamp that is lit while it passes and the measured value; limits and the gate's technical words
-	sit behind "Ver detalhes técnicos" (open in Engenharia).
+	sit behind "Ver detalhes técnicos" (open in Engenharia). The bank is its own size container:
+	head and strips follow its width, not the viewport's.
 	The technical words themselves open their explainers (term variant, dotted underline): the
 	strip title, the word "gate" in the strip's note and every strip's Q label.
 -->
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { isExperimentalKind } from 'open-auri/safety';
 	// Direct imports (FUX.B): the meters barrel would bring every meter component into the page.
 	import LedLadder from '#lib/components/meters/LedLadder.svelte';
@@ -23,9 +31,13 @@
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button, Lamp } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
+	import { bandWords, useBandLabels } from './band-labels.svelte.ts';
+	import { bandNames, checkLabel, LABEL_MAX, type LabelIssue } from './band-names.ts';
 	import { criteria, criterionName } from './envelope.ts';
 	import { formatSignedDb } from './format.ts';
-	import { isLockedKind, kindsForLayer, type Layer } from './layers.ts';
+	import KindDial, { type KindCheck } from './KindDial.svelte';
+	import { changeKind } from './edit.ts';
+	import { isLockedKind, type Layer } from './layers.ts';
 	import { miniPath } from './mini.ts';
 	import {
 		bandValue,
@@ -35,7 +47,7 @@
 		type Curve,
 		type DragParam
 	} from './model.ts';
-	import type { GateVerdict } from './reasons.ts';
+	import { firstReasonText, type GateVerdict } from './reasons.ts';
 	import type { DragTarget } from './drag.ts';
 
 	/** A LiveMeter, or an idle stand-in (DATA mode) before the preview exists. */
@@ -58,6 +70,11 @@
 		ondrag?: (index: number, target: DragTarget) => void;
 		onmove: (index: number, target: DragTarget) => void;
 		onkind: (index: number, kind: BandKind) => void;
+		/** Non-mutating preflight from the editor, including its current gate profile. */
+		canApplyKind?: (index: number, kind: BandKind) => KindCheck | Promise<KindCheck>;
+		/** Profile changes cancel pending dials, just like an external curve change. */
+		kindContext?: unknown;
+		kindDisabledReason?: string | null;
 		onorder: () => void;
 	}
 	let {
@@ -71,11 +88,23 @@
 		ondrag,
 		onmove,
 		onkind,
+		canApplyKind,
+		kindContext,
+		kindDisabledReason = null,
 		onorder
 	}: Props = $props();
 
 	const headingId = $props.id();
-	const options = $derived(['OFF', ...kindsForLayer(layer).filter((kind) => kind !== 'OFF')]);
+	let focusGeneration = $state(0);
+	const dialContext = $derived({ curve, kindContext, focusGeneration });
+	function checkKind(index: number, kind: BandKind): KindCheck | Promise<KindCheck> {
+		if (canApplyKind) return canApplyKind(index, kind);
+		// Standalone banks keep the same full-grid, standard-profile discrete-edit gate.
+		const result = changeKind(curve, index, kind);
+		return result.ok
+			? { ok: true }
+			: { ok: false, reason: firstReasonText(result.reasons, { bands: curve.bands, locale }) };
+	}
 	const stageMode = $derived(stages.some((stage) => stage.mode === 'live') ? 'live' : 'data');
 	const rows = $derived(criteria(verdict, locale));
 	// The note's own word "gate" (both locales say it) is the gate explainer; no text is added.
@@ -91,16 +120,6 @@
 		};
 	});
 
-	// Rotary kind switch: where each position sits (degrees from 12 o'clock).
-	const SWITCH: readonly { kind: BandKind; angle: number }[] = [
-		{ kind: 'PK', angle: -60 },
-		{ kind: 'LS', angle: 0 },
-		{ kind: 'OFF', angle: 60 },
-		{ kind: 'HS', angle: 120 },
-		{ kind: 'LP', angle: 180 },
-		{ kind: 'HP', angle: -120 }
-	];
-	const switchAngle = (kind: BandKind) => SWITCH.find((s) => s.kind === kind)?.angle ?? 60;
 	const at = (angle: number, radius: number) => {
 		const a = (angle * Math.PI) / 180;
 		return { x: radius * Math.sin(a), y: -radius * Math.cos(a) };
@@ -187,10 +206,6 @@
 		};
 	}
 
-	function kindName(kind: string): string {
-		if (kind === 'OFF') return m.curva_kind_off();
-		return isExperimentalKind(kind) ? `${kind} · ${m.curva_exp_badge()}` : kind;
-	}
 	function prefixPeak(index: number): number | null {
 		return verdict.metrics.prefixAudible?.find((peak) => peak.stage === index + 1)?.db ?? null;
 	}
@@ -207,15 +222,96 @@
 		if (!Number.isFinite(value)) return;
 		onmove(index, { [param]: value });
 	}
-	function isKind(value: string): value is BandKind {
-		return ['OFF', 'PK', 'LS', 'HS', 'LP', 'HP'].includes(value);
-	}
 	/** Real sign of the band: a cut (negative gain, LP, HP) or a boost (positive gain). */
 	function sign(band: Band): { cut: boolean; boost: boolean } {
 		if (band.kind === 'OFF') return { cut: false, boost: false };
 		if (!hasGain(band)) return { cut: true, boost: false };
 		return { cut: band.gainDb < 0, boost: band.gainDb > 0 };
 	}
+
+	// --- names: badge, functional or custom name, inline rename --------------------------------
+
+	const labelStore = useBandLabels();
+	const words = bandWords();
+	const names = $derived(bandNames(curve.bands, words, labelStore.labels));
+	let bankElement: HTMLElement | undefined = $state();
+	/** Slot whose name is being edited. */
+	let renaming = $state<number | null>(null);
+	/** Why the open field's name is refused (envelope codes); shown inline, the field stays open. */
+	let renameIssues = $state.raw<readonly LabelIssue[]>([]);
+	const renameIssueText: Record<LabelIssue, () => string> = {
+		'env:url': () => m.curva_bn_rename_url(),
+		'env:url-like': () => m.curva_bn_rename_url_like(),
+		'env:length': () => m.curva_bn_rename_length({ max: LABEL_MAX }),
+		'env:pattern': () => m.curva_bn_rename_pattern()
+	};
+
+	function startRename(index: number): void {
+		renameIssues = [];
+		renaming = index;
+	}
+	/**
+	 * The focused rename field that Enter or Escape is closing. Its removal blurs it with no
+	 * `relatedTarget` before its button exists again; that handoff is not focus leaving the bank.
+	 */
+	let renameHandoff: Element | null = null;
+	function focusRename(index: number): void {
+		void tick().then(() => {
+			bankElement?.querySelector<HTMLButtonElement>(`[data-rename="${index}"]`)?.focus();
+			const handedOff = renameHandoff !== null;
+			renameHandoff = null;
+			// Only a handoff that failed to land back in the bank counts as a real exit.
+			if (handedOff && !bankElement?.contains(document.activeElement)) focusGeneration++;
+		});
+	}
+	/**
+	 * Ends the edit of `index`: `value` null cancels. The name goes through the strict label rules
+	 * (`checkLabel`): a refused one is never stored or cut, the field stays open with the reason. A
+	 * name equal to the automatic one (or empty) goes back to the automatic name, so it keeps
+	 * following the band.
+	 */
+	function endRename(index: number, value: string | null, refocus: boolean): void {
+		if (renaming !== index) return;
+		if (value !== null) {
+			const checked = checkLabel(value);
+			const result = checked.ok
+				? labelStore.rename(index, checked.label === names[index]?.auto ? null : checked.label)
+				: checked;
+			if (!result.ok) {
+				renameIssues = result.issues;
+				return;
+			}
+		}
+		const active = document.activeElement;
+		if (refocus && active instanceof HTMLInputElement && bankElement?.contains(active)) {
+			renameHandoff = active;
+		}
+		renaming = null;
+		renameIssues = [];
+		if (refocus) focusRename(index);
+	}
+	/** Live length in code points (as the envelope counts them); other reasons wait for Enter. */
+	function renameInput(value: string): void {
+		const checked = checkLabel(value);
+		renameIssues = !checked.ok && checked.issues.includes('env:length') ? ['env:length'] : [];
+	}
+	function renameKey(
+		event: KeyboardEvent & { currentTarget: HTMLInputElement },
+		index: number
+	): void {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			endRename(index, event.currentTarget.value, true);
+		} else if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			endRename(index, null, true);
+		}
+	}
+	const selectAll = (node: HTMLInputElement) => {
+		node.focus();
+		node.select();
+	};
 </script>
 
 {#snippet dial(index: number, param: DragParam, value: number, locked: boolean)}
@@ -241,7 +337,21 @@
 	</span>
 {/snippet}
 
-<section class="bank" aria-labelledby={headingId}>
+<section
+	class="bank"
+	aria-labelledby={headingId}
+	bind:this={bankElement}
+	onfocusout={(event) => {
+		// The closing rename field: focusRename returns focus to its button, or counts the exit.
+		if (renameHandoff !== null && event.target === renameHandoff) return;
+		if (
+			!(event.relatedTarget instanceof Node) ||
+			!event.currentTarget.contains(event.relatedTarget)
+		) {
+			focusGeneration++;
+		}
+	}}
+>
 	<span class="hinge" aria-hidden="true"></span>
 	<header class="bank-head">
 		<div class="bank-title">
@@ -279,143 +389,165 @@
 	{#if message}
 		<p class="bank-msg" role="status">{message}</p>
 	{/if}
-	<div class="modules-scroll">
-		<ol class="modules">
-			{#each curve.bands as band, index (index)}
-				{@const locked = band.kind !== 'OFF' && isLockedKind(band.kind, layer)}
-				{@const off = band.kind === 'OFF'}
-				{@const lamps = sign(band)}
-				<li class="module" class:off class:locked class:sel={selected === index}>
-					<span class="screw sa" aria-hidden="true"></span>
-					<span class="screw sb" aria-hidden="true"></span>
-					<div class="mod-head">
-						<span class="mod-n">{m.curva_filter({ index: String(index + 1) })}</span>
-						<span class="mod-stage">{m.curva_v2_stage({ index: String(index + 1) })}</span>
-						{#if band.kind !== 'OFF' && isExperimentalKind(band.kind)}
-							<span class="badge">{m.curva_exp_badge()}</span>
-						{/if}
-					</div>
-					<label class="kind">
-						<span class="sr-only">{m.curva_kind()}</span>
-						<span class="switch" aria-hidden="true">
-							<svg viewBox="-46 -34 92 68">
-								{#each SWITCH as stop (stop.kind)}
-									{@const p = at(stop.angle, 25)}
-									<text
-										class="sw-label"
-										class:on={band.kind === stop.kind}
-										class:dim={stop.kind !== 'OFF' && isLockedKind(stop.kind, layer)}
-										x={p.x}
-										y={p.y + 3}>{stop.kind}</text
-									>
-								{/each}
-								<circle r="12" class="sw-skirt" />
-								<g class="sw-cap" style:--turn={`${switchAngle(band.kind)}deg`}>
-									<line x1="0" y1="-11" x2="0" y2="-3" class="sw-index" />
-								</g>
-							</svg>
-						</span>
-						<select
-							value={band.kind}
-							disabled={locked}
-							onchange={(event) => {
-								const select = event.currentTarget;
-								if (isKind(select.value)) onkind(index, select.value);
-								select.value = curve.bands[index]?.kind ?? 'OFF';
-							}}
+	<p class="sr-only" id="{headingId}-rename">{m.curva_bn_rename_hint_max({ max: LABEL_MAX })}</p>
+	<ol class="modules">
+		{#each curve.bands as band, index (index)}
+			{@const locked = band.kind !== 'OFF' && isLockedKind(band.kind, layer)}
+			{@const off = band.kind === 'OFF'}
+			{@const lamps = sign(band)}
+			{@const name = names[index]}
+			{@const badge = name?.badge ?? String(index + 1)}
+			{@const stage = String(index + 1)}
+			<li class="module" class:off class:locked class:sel={selected === index}>
+				<span class="screw sa" aria-hidden="true"></span>
+				<span class="screw sb" aria-hidden="true"></span>
+				<!-- Reading order: badge, name, stage, rename (the grid places them, see .mod-head). -->
+				<div class="mod-head">
+					<span class="mod-badge" data-kind={band.kind}>{badge}</span>
+					{#if renaming === index}
+						{@const invalid = renameIssues.length > 0}
+						<!-- No maxlength: it counts UTF-16 units; the limit is checked in code points. -->
+						<input
+							class="mod-input"
+							type="text"
+							value={name?.custom ? name.label : ''}
+							placeholder={name?.auto}
+							aria-label={m.curva_bn_rename_field({ badge })}
+							aria-describedby={invalid
+								? `${headingId}-rename-issue ${headingId}-rename`
+								: `${headingId}-rename`}
+							aria-invalid={invalid ? 'true' : undefined}
+							title={m.curva_bn_rename_hint_max({ max: LABEL_MAX })}
+							oninput={(event) => renameInput(event.currentTarget.value)}
+							onkeydown={(event) => renameKey(event, index)}
+							onblur={(event) => endRename(index, event.currentTarget.value, false)}
+							{@attach selectAll}
+						/>
+						<span class="mod-issue" id="{headingId}-rename-issue" aria-live="polite"
+							>{renameIssues.map((issue) => renameIssueText[issue]()).join(' ')}</span
 						>
-							{#if locked}
-								<option value={band.kind}>{kindName(band.kind)}</option>
-							{/if}
-							{#each options as kind (kind)}
-								<option value={kind}>{kindName(kind)}</option>
-							{/each}
-						</select>
-					</label>
-					<div class="signs">
-						<span class="sign"><Lamp on={lamps.cut} />{m.curva_v2_cut()}</span>
-						<span class="sign"><Lamp on={lamps.boost} />{m.curva_v2_boost()}</span>
+					{:else}
+						<span
+							class="mod-name"
+							class:custom={name?.custom}
+							title={name?.custom ? name.detail : undefined}>{name?.label}</span
+						>
+					{/if}
+					<span class="mod-stage" title={m.curva_bn_stage_title({ index: stage })}
+						>{m.curva_v2_stage({ index: stage })}</span
+					>
+					<!-- Hidden while its field is open: Enter or blur ends the edit with an accepted name
+						 (a refused one keeps the field open with its reason), Esc always cancels. -->
+					{#if renaming !== index}
+						<button
+							type="button"
+							class="mod-rename"
+							data-rename={index}
+							aria-label={m.curva_bn_rename({ badge })}
+							onclick={() => startRename(index)}
+						>
+							<svg viewBox="0 0 16 16" aria-hidden="true">
+								<path d="M3 13l.8-3.2L10.6 3l2.4 2.4-6.8 6.8z" />
+								<path d="M9.2 4.4l2.4 2.4" />
+							</svg>
+						</button>
+					{/if}
+					{#if band.kind !== 'OFF' && isExperimentalKind(band.kind)}
+						<span class="badge">{m.curva_exp_badge()}</span>
+					{/if}
+				</div>
+				<KindDial
+					kind={band.kind}
+					{layer}
+					disabledReason={kindDisabledReason}
+					canApply={(kind) => checkKind(index, kind)}
+					resetKey={dialContext}
+					focusBoundary={bankElement}
+					onkind={(kind) => onkind(index, kind)}
+				/>
+				<div class="signs">
+					<span class="sign"><Lamp on={lamps.cut} />{m.curva_v2_cut()}</span>
+					<span class="sign"><Lamp on={lamps.boost} />{m.curva_v2_boost()}</span>
+				</div>
+				{#if band.kind !== 'OFF'}
+					{@const freq = shownValue(band, index, 'freqHz') ?? band.freqHz}
+					<div class="kctl">
+						{@render dial(index, 'freqHz', freq, locked)}
+						<label class="field">
+							<span>{m.curva_freq()} (Hz)</span>
+							<input
+								type="number"
+								min="20"
+								max="20000"
+								step="1"
+								value={freq}
+								disabled={locked}
+								onchange={(event) => oncommit(index, 'freqHz', event.currentTarget)}
+							/>
+						</label>
 					</div>
-					{#if band.kind !== 'OFF'}
-						{@const freq = shownValue(band, index, 'freqHz') ?? band.freqHz}
+					{#if hasGain(band)}
+						{@const gain = shownValue(band, index, 'gainDb') ?? band.gainDb}
 						<div class="kctl">
-							{@render dial(index, 'freqHz', freq, locked)}
+							{@render dial(index, 'gainDb', gain, locked)}
 							<label class="field">
-								<span>{m.curva_freq()} (Hz)</span>
+								<span>{m.curva_gain()} (dB)</span>
 								<input
 									type="number"
-									min="20"
-									max="20000"
-									step="1"
-									value={freq}
+									min="-24"
+									max="9.2"
+									step="0.1"
+									value={gain}
 									disabled={locked}
-									onchange={(event) => oncommit(index, 'freqHz', event.currentTarget)}
+									onchange={(event) => oncommit(index, 'gainDb', event.currentTarget)}
 								/>
 							</label>
 						</div>
-						{#if hasGain(band)}
-							{@const gain = shownValue(band, index, 'gainDb') ?? band.gainDb}
-							<div class="kctl">
-								{@render dial(index, 'gainDb', gain, locked)}
-								<label class="field">
-									<span>{m.curva_gain()} (dB)</span>
-									<input
-										type="number"
-										min="-24"
-										max="9.2"
-										step="0.1"
-										value={gain}
-										disabled={locked}
-										onchange={(event) => oncommit(index, 'gainDb', event.currentTarget)}
-									/>
-								</label>
-							</div>
-						{/if}
-						{@const q = shownValue(band, index, 'qFactor') ?? band.qFactor}
-						<div class="kctl">
-							{@render dial(index, 'qFactor', q, locked)}
-							<!-- Not a <label>: its first labelable child would be the explainer button. -->
-							<div class="field">
-								<span><Explainer term="q" variant="term">{m.curva_q()}</Explainer></span>
-								<input
-									type="number"
-									aria-label={m.curva_q()}
-									min="0.1"
-									max="20"
-									step="0.01"
-									value={q}
-									disabled={locked}
-									onchange={(event) => oncommit(index, 'qFactor', event.currentTarget)}
-								/>
-							</div>
-						</div>
-						{#if locked}
-							<p class="hint">{m.curva_exp_hint()}</p>
-						{/if}
 					{/if}
-					<svg class="mini" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
-						<line x1="0" y1="12" x2="100" y2="12" />
-						{#if !off}<path
-								d={miniPath([band], 100, 24, 15)}
-								vector-effect="non-scaling-stroke"
-							/>{/if}
-					</svg>
-					<div class="led-row">
-						<LedLadder
-							mode={stages[index]?.mode ?? 'data'}
-							live={liveLevel(index)}
-							data={prefixPeak(index)}
-							label={m.curva_stage_led({ index: String(index + 1) })}
-							orientation="horizontal"
-						/>
-						{#if prefixPeak(index) !== null && !off}
-							<small>{formatSignedDb(prefixPeak(index) ?? 0, locale)}</small>
-						{/if}
+					{@const q = shownValue(band, index, 'qFactor') ?? band.qFactor}
+					<div class="kctl">
+						{@render dial(index, 'qFactor', q, locked)}
+						<!-- Not a <label>: its first labelable child would be the explainer button. -->
+						<div class="field">
+							<span><Explainer term="q" variant="term">{m.curva_q()}</Explainer></span>
+							<input
+								type="number"
+								aria-label={m.curva_q()}
+								min="0.1"
+								max="20"
+								step="0.01"
+								value={q}
+								disabled={locked}
+								onchange={(event) => oncommit(index, 'qFactor', event.currentTarget)}
+							/>
+						</div>
 					</div>
-				</li>
-			{/each}
-		</ol>
-	</div>
+					{#if locked}
+						<p class="hint">{m.curva_exp_hint()}</p>
+					{/if}
+				{/if}
+				<svg class="mini" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+					<line x1="0" y1="12" x2="100" y2="12" />
+					{#if !off}<path
+							d={miniPath([band], 100, 24, 15)}
+							vector-effect="non-scaling-stroke"
+						/>{/if}
+				</svg>
+				<div class="led-row">
+					<LedLadder
+						mode={stages[index]?.mode ?? 'data'}
+						live={liveLevel(index)}
+						data={prefixPeak(index)}
+						label={m.curva_stage_led({ index: String(index + 1) })}
+						orientation="horizontal"
+					/>
+					{#if prefixPeak(index) !== null && !off}
+						<small>{formatSignedDb(prefixPeak(index) ?? 0, locale)}</small>
+					{/if}
+				</div>
+			</li>
+		{/each}
+	</ol>
 	<details class="tech" open={layer === 'engenharia'}>
 		<summary>{m.curva_v2_details()}</summary>
 		<table>
@@ -439,6 +571,7 @@
 		<p>{m.curva_v2_details_note()}</p>
 	</details>
 	<div class="bank-foot">
+		<p class="soon-note">{m.curva_bn_kind_foot()}</p>
 		<button type="button" class="soon-ctl" aria-disabled="true">{m.curva_soon_raw()}</button>
 		<span class="soon-badge">{m.curva_soon()}</span>
 		<p class="soon-note">{m.curva_soon_note()}</p>
@@ -448,6 +581,8 @@
 <style>
 	.bank {
 		position: relative;
+		/* Head and strips follow the bank's own width (the @container blocks below). */
+		container: filter-bank / inline-size;
 		padding: var(--space-4) var(--space-5) var(--space-4);
 		border-radius: var(--rad-lg);
 		background:
@@ -465,9 +600,10 @@
 		border-radius: var(--rad-xs) var(--rad-xs) 0 0;
 		background: linear-gradient(180deg, #5d5c58, #2a2927);
 	}
+	/* Stacked by default; title beside the envelope strip from 860 px of bank (see below). */
 	.bank-head {
 		display: grid;
-		grid-template-columns: minmax(220px, 1fr) minmax(0, 2.4fr);
+		grid-template-columns: minmax(0, 1fr);
 		gap: var(--space-3) var(--space-5);
 		align-items: start;
 	}
@@ -501,19 +637,26 @@
 		letter-spacing: 0.2em;
 		text-transform: uppercase;
 	}
+	/* Seven criteria: 2, 4 or 7 per row by the bank's width (each cell keeps 75 px or more). */
 	.gaterow {
 		display: grid;
-		grid-template-columns: repeat(7, minmax(0, 1fr));
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: var(--space-2);
 		margin: var(--space-2) 0 0;
 		padding: 0;
 		list-style: none;
 	}
 	.crit {
+		min-width: 0;
 		display: grid;
 		justify-items: center;
 		gap: 3px;
 		text-align: center;
+	}
+	.crit-name,
+	.crit-value {
+		max-width: 100%;
+		overflow-wrap: break-word;
 	}
 	.crit-name {
 		color: var(--text);
@@ -543,18 +686,38 @@
 		border-left: 3px solid var(--accent);
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 	}
-	.modules-scroll {
-		margin-top: var(--space-4);
-		overflow-x: auto;
-		padding-bottom: var(--space-1);
-	}
+	/* No sideways scroll at any width: as many strips of 116 px or more as fit (2 on a 320 px
+	   phone, 4 on a tablet), and 5 × 2 from 590 px of bank (desktop from 1101 px: about 119 px
+	   each at the narrowest, 185 px at 1440 px). 116 px holds the 92 px kind switch and the
+	   88 px fields inside the strip's padding. */
 	.modules {
 		display: grid;
-		grid-template-columns: repeat(10, minmax(118px, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
 		gap: var(--space-2);
-		margin: 0;
+		margin: var(--space-4) 0 0;
 		padding: 0;
 		list-style: none;
+	}
+	@container filter-bank (min-width: 590px) {
+		.modules {
+			grid-template-columns: repeat(5, minmax(0, 1fr));
+		}
+	}
+	@container filter-bank (min-width: 400px) {
+		.gaterow {
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+		}
+	}
+	@container filter-bank (min-width: 600px) {
+		.gaterow {
+			grid-template-columns: repeat(7, minmax(0, 1fr));
+		}
+	}
+	/* Beside the title the strip still gets 590 px or more (77 px per criterion). */
+	@container filter-bank (min-width: 860px) {
+		.bank-head {
+			grid-template-columns: minmax(220px, 1fr) minmax(0, 2.4fr);
+		}
 	}
 	.module {
 		position: relative;
@@ -596,19 +759,147 @@
 	.sb {
 		right: 4px;
 	}
+	/* Header: the badge, the stage (shown on hover or focus) and the rename button on top, the
+	   name on a full row of its own (16 characters fit at 116 px; a longer label, up to 24, is
+	   shortened on screen by the ellipsis of .mod-name; it is stored and read out whole). */
 	.mod-head {
+		width: 100%;
+		min-width: 0;
 		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		grid-template-areas:
+			'badge stage tool'
+			'name name name'
+			'exp exp exp';
+		gap: 3px 4px;
+		align-items: center;
 		justify-items: center;
-		gap: 1px;
 	}
-	.mod-n {
-		font: 600 var(--fs-small) / 1.1 var(--face-engrave);
-		letter-spacing: 0.16em;
-		text-transform: uppercase;
+	.mod-badge {
+		grid-area: badge;
+		justify-self: start;
+		box-sizing: border-box;
+		min-width: 18px;
+		height: 18px;
+		display: inline-grid;
+		place-items: center;
+		padding: 0 3px;
+		border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+		border-radius: var(--rad-xs);
+		background: #0b0b0b;
+		color: var(--accent-text);
+		font: 600 var(--label-min) / 1 var(--face-data);
 	}
+	.module.off .mod-badge {
+		border-style: dashed;
+		border-color: var(--rule-control);
+		color: var(--text-2);
+	}
+	.mod-name {
+		grid-area: name;
+		max-width: 100%;
+		overflow: hidden;
+		color: var(--text);
+		font: 600 var(--fs-small) / 1.25 var(--face-body);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	/* The user's own name; its title gives the automatic one. */
+	.mod-name.custom {
+		font-style: italic;
+	}
+	.module.off .mod-name {
+		color: var(--text-2);
+		font-weight: 500;
+	}
+	.mod-input {
+		grid-area: name;
+		box-sizing: border-box;
+		width: 100%;
+		min-width: 0;
+		min-height: 24px;
+		padding: 2px 5px;
+		border: 1px solid var(--accent);
+		border-radius: var(--rad-xs);
+		background: #050505;
+		color: var(--text);
+		font: 500 var(--fs-caption) / 1.2 var(--face-body);
+	}
+	.mod-input::placeholder {
+		color: var(--muted-hi);
+	}
+	.mod-input:focus-visible {
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: 1px;
+	}
+	.mod-input[aria-invalid='true'] {
+		border-color: var(--warn);
+	}
+	/* Why the name is refused: under the open field, across the strip, wrapped (never cut). */
+	.mod-issue {
+		grid-column: 1 / -1;
+		max-width: 100%;
+		color: var(--warn);
+		font: 400 var(--label-min) / 1.25 var(--face-body);
+		overflow-wrap: anywhere;
+		text-align: center;
+	}
+	/* Processing order: secondary, so it waits for hover or focus (always on touch screens). */
 	.mod-stage {
+		grid-area: stage;
+		max-width: 100%;
+		overflow: hidden;
 		color: var(--text-2);
 		font: 400 var(--label-min) / 1.1 var(--face-data);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		opacity: 0;
+		transition: opacity var(--dur-fast) var(--ease-out);
+	}
+	.module:hover .mod-stage,
+	.module:focus-within .mod-stage {
+		opacity: 1;
+	}
+	@media (hover: none) {
+		.mod-stage {
+			opacity: 1;
+		}
+	}
+	.mod-rename {
+		grid-area: tool;
+		justify-self: end;
+		box-sizing: border-box;
+		width: 24px;
+		height: 24px;
+		display: grid;
+		place-items: center;
+		margin: -3px -3px -3px 0;
+		padding: 0;
+		border: 1px solid transparent;
+		border-radius: var(--rad-xs);
+		background: none;
+		color: var(--text-2);
+		cursor: pointer;
+	}
+	.mod-rename:hover {
+		border-color: var(--rule-control);
+		color: var(--text);
+	}
+	.mod-rename:focus-visible {
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: 1px;
+	}
+	.mod-rename svg {
+		width: 14px;
+		height: 14px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.4;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.mod-head .badge {
+		grid-area: exp;
 	}
 	.badge,
 	.soon-badge {
@@ -618,61 +909,6 @@
 		color: var(--accent-text);
 		font: 500 var(--label-min) / 1.3 var(--face-data);
 		letter-spacing: 0.08em;
-	}
-	.kind {
-		position: relative;
-		display: block;
-		width: 92px;
-		height: 68px;
-	}
-	.switch svg {
-		display: block;
-		width: 92px;
-		height: 68px;
-	}
-	.sw-label {
-		fill: var(--text-2);
-		font: 600 10px var(--face-engrave);
-		letter-spacing: 0.06em;
-		text-anchor: middle;
-	}
-	.sw-label.dim {
-		fill-opacity: 0.45;
-	}
-	.sw-label.on {
-		fill: var(--accent);
-		fill-opacity: 1;
-	}
-	.sw-skirt {
-		fill: #0d0d0d;
-		stroke: #000;
-	}
-	.sw-cap {
-		transform: rotate(var(--turn));
-		transition: transform var(--dur-base) var(--ease-mech);
-	}
-	.sw-index {
-		stroke: var(--text);
-		stroke-width: 2.6;
-		stroke-linecap: round;
-	}
-	/* The native select is the switch's control: invisible, over the whole switch. */
-	.kind select {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-		opacity: 0;
-		cursor: pointer;
-	}
-	.kind select:disabled {
-		cursor: not-allowed;
-	}
-	.kind:has(select:focus-visible) .switch {
-		display: block;
-		border-radius: var(--rad-md);
-		outline: var(--focus-width) solid var(--accent);
-		outline-offset: 1px;
 	}
 	/* CORTE / REFORÇO wrap onto two lines in a narrow strip instead of pushing it wider. */
 	.signs {
@@ -855,10 +1091,15 @@
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-data);
 		font-variant-numeric: tabular-nums slashed-zero;
 	}
+	.tech table {
+		max-width: 100%;
+	}
+	/* A phone-wide bank keeps the table inside it: long values break instead of overflowing. */
 	.tech th,
 	.tech td {
 		padding: 3px 14px 3px 0;
 		border-bottom: 1px solid var(--rule);
+		overflow-wrap: anywhere;
 		text-align: left;
 	}
 	.tech thead th {
@@ -906,17 +1147,9 @@
 		white-space: nowrap;
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.sw-cap,
-		.kcap {
+		.kcap,
+		.mod-stage {
 			transition: none;
-		}
-	}
-	@media (max-width: 1100px) {
-		.bank-head {
-			grid-template-columns: minmax(0, 1fr);
-		}
-		.gaterow {
-			grid-template-columns: repeat(4, minmax(0, 1fr));
 		}
 	}
 	@media (max-width: 720px) {

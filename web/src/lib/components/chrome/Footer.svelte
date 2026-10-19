@@ -9,6 +9,8 @@
 	export const DEFAULT_GITHUB_URL = 'https://github.com/marco-jardim/open-auri';
 	/** Public Simple Analytics dashboard of the production site (#lib/server/analytics.ts). */
 	export const PUBLIC_STATS_URL = 'https://dashboard.simpleanalytics.com/open-auri.com';
+	/** Kuba's sales page for the Auri cable. */
+	export const KUBA_AURI_URL = 'https://kuba.audio/products/auri';
 </script>
 
 <script lang="ts">
@@ -22,6 +24,15 @@
 
 	let { honoree, githubUrl = DEFAULT_GITHUB_URL }: Props = $props();
 	const id = $props.id();
+	// The sentence stays whole in each locale; its own link text becomes the link. Should a
+	// translation drop that text, the link follows the sentence.
+	const sales = (() => {
+		const text = m.chrome_sales();
+		const word = m.chrome_sales_link();
+		const at = text.indexOf(word);
+		if (at < 0) return { before: `${text} `, word, after: '' };
+		return { before: text.slice(0, at), word, after: text.slice(at + word.length) };
+	})();
 </script>
 
 <footer class="site-footer">
@@ -41,6 +52,13 @@
 	<section aria-labelledby="{id}-notice">
 		<h2 class="notice-title" id="{id}-notice">{m.chrome_notice_title()}</h2>
 		<p>{m.chrome_notice()}</p>
+		<p class="sales">
+			{sales.before}<a href={KUBA_AURI_URL} target="_blank" rel="noopener noreferrer"
+				>{sales.word}<span aria-hidden="true"> ↗</span><span class="sr-only">
+					({m.chrome_new_tab()})</span
+				></a
+			>{sales.after}
+		</p>
 		<div class="footer-links">
 			<a href="/docs#aviso-legal">{m.chrome_legal_link()}</a>
 			<a href={githubUrl}>{m.chrome_github_link()}</a>
@@ -96,6 +114,15 @@
 	p {
 		max-width: 600px;
 		margin: 0;
+	}
+
+	.sales {
+		margin-top: 8px;
+	}
+
+	/* A link inside running text is told apart without colour (WCAG 1.4.1): always underlined. */
+	.sales a {
+		text-decoration-line: underline;
 	}
 
 	.notice-title {

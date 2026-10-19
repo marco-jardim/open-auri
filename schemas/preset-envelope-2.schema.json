@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:open-auri:schema:preset-envelope-2",
+  "title": "Open Auri preset envelope v2 (S5, filter labels)",
+  "description": "Structure of normalized publication data: open-auri/preset@1 plus optional filter labels. Writers emit @2 only when at least one label is set and @1 otherwise; @1 rejects labels (env:extra). Labels are presentation only: they never take part in S1, curveId, canonKey or the safety gate. Each label goes through the same normalization as name (NFKC, invisible removal, whitespace collapse, control refusal, URL/domain/IP refusal); text that normalizes to nothing becomes null and an all-null list is omitted, so normalized data always carries at least one string. Labels count toward the 8192-byte serialized limit. Runtime semantics additionally require NFKC, invisible removal (preserving pictographic ZWJ/selector sequences and only the RGI subdivision tag flags gbeng, gbsct, gbwls), whitespace normalization, URL/domain/IP refusal in prose, valid UTC calendar dates, exact S1 v1 decoding/coherence with bands in wire order and preampDb, and at most 8192 serialized UTF-8 bytes. All other emoji tag runs are stripped. URL detection strips all invisibles and combining marks; spaced dots and middle dots are not links. Prose abbreviations (case-insensitive): p.ex., p. ex., a.C., d.C., S.A., Ltda., e.g., i.e., a.m., p.m., vs. An isolated letter-only word.Word with an uppercase initial after the dot or a non-ASCII letter is still refused as env:url-like, suggesting a space after the period; schemes/www/IPs retain env:url. Recipe measurement/target names retain their charset pattern and additionally undergo URL detection after stripping one trailing allowlisted file extension (csv, txt, json, frd, zma, mdat, wav, rew; case-insensitive). Solver versions use a narrow SemVer subset with release channels and hexadecimal git build metadata instead of URL detection. Lengths count Unicode code points after normalization. The safety gate is separate and is NOT checked by this envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "name",
+    "source",
+    "license",
+    "code",
+    "preampDb",
+    "bands",
+    "lang",
+    "createdAt"
+  ],
+  "properties": {
+    "format": { "type": "string", "const": "open-auri/preset@2" },
+    "name": { "type": "string", "$ref": "#/$defs/singleLine", "minLength": 1, "maxLength": 48 },
+    "description": {
+      "type": "string",
+      "maxLength": 280,
+      "default": "",
+      "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f\\n]*(?:\\n[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f\\n]*){0,4}$"
+    },
+    "author": {
+      "anyOf": [
+        { "type": "string", "$ref": "#/$defs/singleLine", "maxLength": 24 },
+        { "type": "null" }
+      ]
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 74,
+      "pattern": "^(?:custom|import|(?:preset|community):[A-Za-z0-9][A-Za-z0-9_-]{0,63})$(?![\\s\\S])"
+    },
+    "license": { "type": "string", "enum": ["CC0-1.0", "CC-BY-4.0"] },
+    "code": {
+      "type": "string",
+      "minLength": 68,
+      "maxLength": 68,
+      "pattern": "^[A-Za-z0-9_-]{68}$(?![\\s\\S])"
+    },
+    "preampDb": { "type": "number", "minimum": -25.5, "maximum": 0, "multipleOf": 0.1 },
+    "bands": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/band" }
+    },
+    "labels": {
+      "type": "array",
+      "description": "Filter labels by wire index (bands[i] is labelled by labels[i]); null keeps the automatic name. Error codes: env:labels (count), env:length (more than 24 code points), env:pattern (controls), env:url/env:url-like (links).",
+      "minItems": 10,
+      "maxItems": 10,
+      "contains": { "type": "string" },
+      "items": {
+        "anyOf": [
+          { "type": "string", "$ref": "#/$defs/singleLine", "minLength": 1, "maxLength": 24 },
+          { "type": "null" }
+        ]
+      }
+    },
+    "recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "measurement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "name"],
+          "properties": {
+            "source": { "$ref": "#/$defs/recipeSource" },
+            "name": { "$ref": "#/$defs/recipeName" },
+            "sha256": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64,
+              "pattern": "^[a-fA-F0-9]{64}$(?![\\s\\S])"
+            }
+          }
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "name"],
+          "properties": {
+            "source": { "$ref": "#/$defs/recipeSource" },
+            "name": { "$ref": "#/$defs/recipeName" }
+          }
+        },
+        "solver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "$ref": "#/$defs/singleLine",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "version": {
+              "type": "string",
+              "description": "MAJOR.MINOR.PATCH, optionally -(alpha|beta|rc|dev|pre) followed by numeric identifiers and +1-40 hexadecimal git SHA characters. Numeric identifiers have no leading zeroes; the existing total 32-code-point limit still applies.",
+              "$ref": "#/$defs/singleLine",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-(?:alpha|beta|rc|dev|pre)(?:\\.(?:0|[1-9]\\d*))*)?(?:\\+[0-9A-Fa-f]{1,40})?$(?![\\s\\S])"
+            }
+          }
+        },
+        "params": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$(?![\\s\\S])" },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "string", "$ref": "#/$defs/singleLine", "maxLength": 128 },
+              { "type": "number" },
+              { "type": "boolean" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    "lang": { "type": "string", "enum": ["pt-BR", "en-US"] },
+    "createdAt": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 24,
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,3})?Z$(?![\\s\\S])"
+    }
+  },
+  "$defs": {
+    "singleLine": { "type": "string", "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$" },
+    "recipeSource": {
+      "type": "string",
+      "$ref": "#/$defs/singleLine",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "recipeName": {
+      "type": "string",
+      "description": "Dataset/file name charset. Runtime additionally strips ONE trailing extension from csv, txt, json, frd, zma, mdat, wav, rew (case-insensitive) for URL/domain/IP detection on the remainder; the published name keeps its extension. This semantic refusal is not expressed by the charset pattern.",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^(?!.*[wW][wW][wW]\\.)[\\p{L}\\p{N} ._()+,'&-]{1,120}$(?![\\s\\S])"
+    },
+    "frequency": { "type": "integer", "minimum": 1, "maximum": 20000 },
+    "gain": { "type": "number", "minimum": -25.6, "maximum": 12.7, "multipleOf": 0.1 },
+    "q": { "type": "number", "minimum": 0.01, "maximum": 20.47, "multipleOf": 0.01 },
+    "band": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "freqHz", "gainDb", "qFactor"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["PK", "LS", "HS"] },
+            "freqHz": { "$ref": "#/$defs/frequency" },
+            "gainDb": { "$ref": "#/$defs/gain" },
+            "qFactor": { "$ref": "#/$defs/q" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "freqHz", "qFactor"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["LP", "HP"] },
+            "freqHz": { "$ref": "#/$defs/frequency" },
+            "qFactor": { "$ref": "#/$defs/q" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "type": "string", "const": "OFF" } }
+        }
+      ]
+    }
+  }
+}

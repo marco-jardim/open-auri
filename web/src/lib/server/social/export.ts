@@ -42,12 +42,13 @@ async function lineagesOf(db: D1Database, userId: string) {
 			license: string;
 			recipe: string | null;
 			lang: string;
+			labels: string | null;
 			created_at: number;
 		}>(
 			sql(
 				db,
 				'SELECT v.id, v.lineage_id, v.parent_id, v.curve_id, c.s1, v.name, v.description, ' +
-					'v.license, v.recipe, v.lang, v.created_at FROM versions v ' +
+					'v.license, v.recipe, v.lang, v.labels, v.created_at FROM versions v ' +
 					'JOIN lineages l ON l.id = v.lineage_id JOIN curves c ON c.id = v.curve_id ' +
 					'WHERE l.owner_user_id = ? ORDER BY v.created_at, v.id',
 				userId
@@ -76,9 +77,22 @@ async function lineagesOf(db: D1Database, userId: string) {
 				license: version.license,
 				recipe: version.recipe,
 				lang: version.lang,
+				// Filter labels by wire index of `s1` (migration 0012), as stored; null when none.
+				labels: exportedLabels(version.labels),
 				createdAt: iso(version.created_at)
 			}))
 	}));
+}
+
+/** `versions.labels` JSON → its array (the CHECK guarantees a 10-entry array); null otherwise. */
+function exportedLabels(text: string | null): unknown[] | null {
+	if (text === null) return null;
+	try {
+		const value: unknown = JSON.parse(text);
+		return Array.isArray(value) ? value : null;
+	} catch {
+		return null;
+	}
 }
 
 async function sharesOf(db: D1Database, userId: string) {

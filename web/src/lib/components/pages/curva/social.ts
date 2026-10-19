@@ -6,6 +6,7 @@ import {
 	type SocialFetch
 } from '#lib/social/index.ts';
 import type { Curve } from './model.ts';
+import { s5Labels } from './io.ts';
 import { REASON_CODES, reasonText } from './reasons.ts';
 import { m } from '#lib/paraglide/messages.js';
 
@@ -48,14 +49,22 @@ function langOf(locale: string): 'pt-BR' | 'en-US' {
 
 /**
  * Raw S5 envelope of an editor curve. The text is exactly what the person typed: `checkEnvelope`
- * normalizes and validates it with the same core rules as the server.
+ * normalizes and validates it with the same core rules as the server. Filter labels make it
+ * `open-auri/preset@2` (`s5Labels`: refused entries dropped); without labels it stays `@1`.
  */
 export function socialEnvelope(
 	curve: Curve,
-	meta: { name: string; description: string; license: License; locale: string }
+	meta: {
+		name: string;
+		description: string;
+		license: License;
+		locale: string;
+		labels?: readonly (string | null)[] | null;
+	}
 ): Record<string, unknown> {
+	const { format, labels } = s5Labels(meta.labels);
 	return {
-		format: 'open-auri/preset@1',
+		format,
 		name: meta.name,
 		description: meta.description,
 		license: meta.license,
@@ -63,6 +72,7 @@ export function socialEnvelope(
 		code: currentS1(curve) ?? '',
 		preampDb: curve.preampDb,
 		bands: curve.bands,
+		...(labels ? { labels } : {}),
 		lang: langOf(meta.locale),
 		createdAt: new Date().toISOString()
 	};
@@ -86,12 +96,20 @@ function parseRecipe(text: string | null): Record<string, unknown> | null {
 
 /**
  * Raw S5 envelope of a stored version with new text: the same curve (preamp and bands decoded
- * from its exact S1), license, language and recipe. Used to rename an own creation.
+ * from its exact S1), license, language, recipe and filter labels (`@2` when it has any). Used
+ * to rename an own creation: a rename keeps the version's labels.
  */
 export function versionEnvelope(
-	source: { s1: string; license: string; lang: string; recipe: string | null },
+	source: {
+		s1: string;
+		license: string;
+		lang: string;
+		recipe: string | null;
+		labels?: readonly (string | null)[] | null;
+	},
 	text: { name: string; description: string }
 ): Record<string, unknown> {
+	const { format, labels } = s5Labels(source.labels);
 	let decoded: ReturnType<typeof decodeS1> | null = null;
 	try {
 		decoded = decodeS1(source.s1);
@@ -99,7 +117,7 @@ export function versionEnvelope(
 		if (!(cause instanceof S1Error)) throw cause;
 	}
 	const raw: Record<string, unknown> = {
-		format: 'open-auri/preset@1',
+		format,
 		name: text.name,
 		description: text.description,
 		license: source.license,
@@ -107,6 +125,7 @@ export function versionEnvelope(
 		code: source.s1,
 		preampDb: decoded?.preampDb ?? 0,
 		bands: decoded?.bands ?? [],
+		...(labels ? { labels } : {}),
 		lang: source.lang,
 		createdAt: new Date().toISOString()
 	};

@@ -2,12 +2,19 @@
 	Curva page (homage: Robert Moog). Container for the three layers Ouvir ⊂ Ajustar ⊂ Engenharia.
 	- The layer comes from the route (`?camada=`) as a prop; changes go back through `onlayer`.
 	- Editor state is `app.state.curve` (undo/redo/dirty); every change is gate-approved first
-	  (macros, drags, knobs, typed values, kinds, reorders, imports, links, parked points).
+	  (macros, drags, knobs, typed values, kinds, reorders, imports, links, parked points, the
+	  manual preamp), in the editor's profile (Modo YOLO: the YOLO gate, preamp −25,5 to 0 dB).
+	  During "Prévia sem limites" edits stay in a memory-only draft (`freeDraft`) and never reach
+	  the store, `oa.current`, the undo history or another tab (C1).
 	- Writing is only ever `app.requestWrite()` / `app.requestRescue()` (layout checklist).
 	- Works without `app` (SSR, before mount): renders Neutro read-only, `aria-busy`, and every
 	  action says it is still loading.
-	- Rack (mock v2): the scope runs across the top beside the output; presets, fine adjust and
-	  rescue sit under it, each engraved with its name under the content.
+	- Rack (mock v2), each panel engraved with its name under the content. Ouvir: the scope runs
+	  across the top beside the output; presets (Experimentos under them), fine adjust and rescue
+	  sit under it. Ajustar and Engenharia (desktop): the filter bank hangs right under the scope
+	  and the side column (output, presets as a list, Experimentos, fine adjust, rescue) rides along
+	  it, sticky. Narrower screens stack the scope, the bank, then the side panels, in DOM
+	  (keyboard) order.
 	- Loading: the account panel (SocialActions) is a dynamic import, fetched when it comes into
 	  view, on idle, or at once for a community link; the gate worker warms on idle after the first
 	  paint; the audio engine warms on the preview lever's pointer or key down.
@@ -24,7 +31,7 @@
 	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
 	import { createGateWorker } from '#lib/workers/index.ts';
-	import { curveSignature } from '#lib/state/model.ts';
+	import { curveSignature, type CurveData } from '#lib/state/model.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { whenIdle } from '#lib/app/runtime.ts';
@@ -32,8 +39,9 @@
 	import { cabinet, filterBank, importExport } from './lazy.ts';
 	import LayerSelector from './LayerSelector.svelte';
 	import MacroKnobs from './MacroKnobs.svelte';
-	import OutputPanel from './OutputPanel.svelte';
+	import OutputPanel, { snapPreamp } from './OutputPanel.svelte';
 	import PresetTabs from './PresetTabs.svelte';
+	import Experiments from './Experiments.svelte';
 	import RescuePanel from './RescuePanel.svelte';
 	import ScopePanel from './ScopePanel.svelte';
 	import { currentS1 } from './social.ts';
@@ -46,7 +54,19 @@
 		type DragView,
 		type GateClient
 	} from './drag.ts';
-	import { changeKind, defaultOrder, maxPreamp, moveSection, reorderSections } from './edit.ts';
+	import {
+		bandOfKind,
+		defaultOrder,
+		defaultPermutation,
+		editorPreampMaxDb,
+		editorVerdict,
+		maxPreamp,
+		movePermutation,
+		moveSection,
+		permuteLabels,
+		reorderSections
+	} from './edit.ts';
+	import { codecAccepts } from '#lib/workers/gate-handler.ts';
 	import { formatSignedDb, payloadCrc } from './format.ts';
 	import { readLinkHash, type ImportResult } from './io.ts';
 	import { ioFailureText } from './io-text.ts';
@@ -78,6 +98,10 @@
 	} from './model.ts';
 	import { parkedBand } from './parked.ts';
 	import { CurvaPreview } from './preview.svelte.ts';
+	import { provideBandLabelView } from './band-labels.svelte.ts';
+	import YoloToggle from '#lib/components/yolo/YoloToggle.svelte';
+	import { withProfile } from './drag.ts';
+	import { canBringBack, editorProfile, yoloWriteBlock } from './yolo.ts';
 	import { firstReasonText, type Reason } from './reasons.ts';
 
 	type SocialComponent = typeof import('./SocialActions.svelte').default;
@@ -132,17 +156,170 @@
 
 	const injected = untrack(() => gateClient);
 	const owned = injected === undefined ? createGateWorker() : null;
-	const gate: GateClient = injected ?? owned ?? createGateWorker();
+	// Every drag and commit carries the editor profile of that moment (Modo YOLO: class 1 still
+	// snaps; free preview: codec-only). Standard unless YOLO is on in this tab.
+	const gate: GateClient = withProfile(injected ?? owned ?? createGateWorker(), () =>
+		editorProfile(app?.yolo.enabled ?? false, app?.yolo.freePreview ?? false)
+	);
 	onDestroy(() => owned?.dispose());
 
 	const locale = getLocale();
 	const titleId = $props.id();
 	const neutral: Curve = { bands: NEUTRO.bands, preampDb: NEUTRO.preampDb };
 
+	// --- Modo YOLO (this tab only, memory only; see lib/state/yolo.svelte.ts) -------------------
+	const yoloOn = $derived(app?.yolo.enabled ?? false);
+	const freePreview = $derived(app?.yolo.freePreview ?? false);
+	/** Gate profile of a write from this editor, and of every discrete edit. */
+	const writeProfile = $derived<'standard' | 'yolo'>(yoloOn ? 'yolo' : 'standard');
+	/**
+	 * What judges every discrete edit (kinds and the dial's preflight, parked points, reorders and
+	 * the default order, the preamp, "Máximo sem clipping", macros): the write profile, except in
+	 * "Prévia sem limites", where the codec accepts, the same check the drags use (`'codec'`).
+	 * Those edits then go to the memory-only draft (`apply` → `applyFree`), never to the store.
+	 */
+	const editJudge = $derived(editorProfile(yoloOn, freePreview));
+
 	const stored = $derived(app?.state.curve.current ?? null);
-	const curve = $derived<Curve>(stored ?? neutral);
+	const storedCurve = $derived<Curve>(stored ?? neutral);
+	const storedSignature = $derived(curveSignature(storedCurve));
+	/**
+	 * "Prévia sem limites" (C1): every edit made while it is on lives here only, in this page's
+	 * memory, over the stored curve it started from (`base`, its signature). It never reaches
+	 * `curve.set`, `oa.current`, the undo history or another tab, and is never written. Leaving the
+	 * free preview (or YOLO, or the page) discards it, and so does any change of the stored curve
+	 * (a preset, Neutro, an experiment, another tab). Its own Desfazer/Refazer steps live with it.
+	 *
+	 * Filter labels follow the draft's reorders: `order` maps each draft slot to the stored slot
+	 * its filter came from, and the draft shows the stored labels permuted by it
+	 * (`draftLabels`, through `provideBandLabelView` to the bank and the scope). A rename during
+	 * the draft is written to the stored curve (labels are presentation only, never the gate, C1)
+	 * at the stored slot `order` names, so the name stays on the filter it was given to, in the
+	 * draft and once the draft ends. Each step keeps its own order, so Desfazer/Refazer move the
+	 * names back with their filters.
+	 */
+	interface DraftStep {
+		readonly curve: Curve;
+		/** Entry i: the stored curve's slot of the filter at draft slot i. */
+		readonly order: readonly number[];
+	}
+	interface FreeDraft extends DraftStep {
+		readonly base: string;
+		readonly past: readonly DraftStep[];
+		readonly future: readonly DraftStep[];
+	}
+	const FREE_DRAFT_STEPS = 100;
+	let freeDraft = $state.raw<FreeDraft | null>(null);
+	/** The live draft (free preview on, still over the stored curve), or null. */
+	const liveDraft = $derived(
+		freePreview && freeDraft !== null && freeDraft.base === storedSignature ? freeDraft : null
+	);
+	const curve = $derived<Curve>(liveDraft?.curve ?? storedCurve);
+	/** The stored labels, in the live draft's slot order; null without a live draft or labels. */
+	const draftLabels = $derived(
+		liveDraft === null ? null : permuteLabels(stored?.labels ?? null, liveDraft.order)
+	);
+	/** The editor's labels by slot: the draft's while it is live, else the stored curve's. */
+	const editorLabels = $derived(liveDraft === null ? (stored?.labels ?? null) : draftLabels);
+	provideBandLabelView(() => {
+		const live = liveDraft;
+		if (live === null) return null;
+		return {
+			labels: draftLabels ?? [],
+			storedSlot: (index: number) => live.order[index] ?? index
+		};
+	});
 	const signature = $derived(curveSignature(curve));
-	const verdict = $derived(verdictFor(curve));
+	$effect(() => {
+		const live = liveDraft;
+		untrack(() => {
+			if (live === null && freeDraft !== null) freeDraft = null;
+		});
+	});
+	/**
+	 * Bumped each time the free preview starts or ends (not reactive): a commit begun before a
+	 * free-preview exit is stale even if the free preview is on again when the gate answers.
+	 */
+	let freePreviewEpoch = 0;
+	let wasFreePreview = false;
+	$effect(() => {
+		const on = freePreview;
+		if (on !== wasFreePreview) {
+			wasFreePreview = on;
+			freePreviewEpoch++;
+		}
+	});
+	/** Why YOLO itself disables writing (the free preview), or null. */
+	const yoloWriteReason = $derived(
+		yoloWriteBlock(yoloOn, freePreview) ? m.yolo_reason_free_preview() : null
+	);
+	const verdict = $derived(verdictFor(curve, writeProfile));
+	/**
+	 * Whether the editor's own profile accepts the curve as the start of a drag: the gate's verdict,
+	 * except in the free preview, where the codec alone decides (the worker's `accepted`).
+	 */
+	const startAccepted = $derived(
+		freePreview ? codecAccepts(curve.bands, curve.preampDb) : verdict.ok
+	);
+	/**
+	 * Why the editor curve may not leave as a file, a link or an account save/publication although
+	 * YOLO is off: the standard gate refuses it (a YOLO-only curve restored from `oa.current` after a
+	 * reload). With YOLO off `verdict` is the standard verdict (see `exitRefusal` in yolo.ts).
+	 */
+	const exitGateReason = $derived(
+		yoloOn || verdict.ok ? null : firstReasonText(verdict.reasons, { bands: curve.bands, locale })
+	);
+	// YOLO exists only in Engenharia: leaving the layer turns it off.
+	$effect(() => {
+		app?.yolo.syncLayer(layer);
+	});
+	/**
+	 * The editor curve when YOLO was turned on, whole (name, source, labels, bands and preamp):
+	 * restored, all of it, if YOLO ends on a curve the standard gate refuses, even when a YOLO-only
+	 * experiment or import renamed it or gave it another source meanwhile.
+	 */
+	let beforeYolo: CurveData | null = null;
+	let wasYolo = false;
+	$effect(() => {
+		const on = yoloOn;
+		untrack(() => {
+			if (on && !wasYolo && app) {
+				const current = app.state.curve.current;
+				beforeYolo = {
+					name: current.name,
+					source: current.source,
+					preampDb: current.preampDb,
+					bands: current.bands,
+					labels: current.labels ?? null
+				};
+			} else if (!on && wasYolo && app && beforeYolo !== null) {
+				// "Desligar" (or leaving Engenharia) on a YOLO-only curve: the editor goes back to
+				// the curve it had before, metadata included; a curve the standard gate accepts
+				// stays as it is.
+				if (!canBringBack(app.state.curve.current) && app.state.curve.set(beforeYolo)) {
+					notify(m.yolo_restored());
+				}
+				beforeYolo = null;
+			}
+			wasYolo = on;
+		});
+	});
+	/** "Trazer para o modo normal": only when the standard gate accepts the curve. */
+	function bringBack() {
+		if (!app) return;
+		if (canBringBack(app.state.curve.current)) {
+			beforeYolo = null;
+			app.yolo.disable();
+			notify(m.yolo_bring_back_done());
+		} else {
+			notify(m.yolo_bring_back_refused(), 'error');
+		}
+	}
+	/** Opens the write checklist with this editor's profile (YOLO while it is on). */
+	function requestEditorWrite() {
+		if (!app || yoloWriteReason !== null) return;
+		app.requestWrite(undefined, { profile: writeProfile });
+	}
 	const experimental = $derived(hasExperimental(curve.bands));
 	const crc = $derived(verdict.metrics.payload ? payloadCrc(verdict.metrics.payload) : '…');
 	const activePreset = $derived(
@@ -173,15 +350,137 @@
 
 	// --- editor writes (never the cable) ------------------------------------------------------
 
-	function apply(next: Curve, meta: { name?: string; source?: 'custom' | 'import' } = {}): boolean {
+	/**
+	 * Edits keep the current filter labels (a kind change keeps the slot's label); reorders pass
+	 * their permutation (`order`, entry i: the editor slot whose filter lands at i) and the labels
+	 * follow it; an import brings its own (or none).
+	 *
+	 * During "Prévia sem limites" an edit goes to the memory-only draft instead (C1, `freeDraft`):
+	 * nothing reaches the store, and a reorder permutes the draft's labels (its `order`). Loads
+	 * that name their own source (an experiment, an import, a link) still replace the stored
+	 * curve, like a preset, and so end the draft.
+	 */
+	function apply(
+		next: Curve,
+		meta: {
+			name?: string;
+			source?: 'custom' | 'import';
+			labels?: readonly (string | null)[] | null;
+			order?: readonly number[];
+		} = {}
+	): boolean {
 		if (!app) return false;
+		if (freePreview && meta.source === undefined) return applyFree(next, meta.order);
+		const current = app.state.curve.current;
+		const labels =
+			meta.labels !== undefined
+				? meta.labels
+				: meta.source
+					? null
+					: meta.order
+						? permuteLabels(current.labels, meta.order)
+						: current.labels;
 		return app.state.curve.set({
-			name: meta.name ?? app.state.curve.current.name,
+			name: meta.name ?? current.name,
 			source: meta.source ?? 'custom',
 			preampDb: next.preampDb,
-			bands: next.bands
+			bands: next.bands,
+			labels
 		});
 	}
+	/** The editor curve as a draft step: the live draft's, or the stored curve in its own order. */
+	function currentStep(): DraftStep {
+		return (
+			liveDraft ?? {
+				curve: storedCurve,
+				order: Array.from({ length: storedCurve.bands.length }, (_, index) => index)
+			}
+		);
+	}
+	/**
+	 * One free-preview edit: a new draft step (memory only). A reorder (`permutation`, over the
+	 * draft's slots) moves the draft's labels with their filters.
+	 */
+	function applyFree(next: Curve, permutation?: readonly number[]): boolean {
+		const current = currentStep();
+		const order = permutation
+			? permutation.map((index) => current.order[index] ?? index)
+			: current.order;
+		const moved = order.some((slot, index) => slot !== current.order[index]);
+		if (!moved && curveSignature(next) === curveSignature(current.curve)) return true;
+		freeDraft = {
+			base: storedSignature,
+			curve: { bands: next.bands.slice(), preampDb: next.preampDb },
+			order,
+			past: [...(liveDraft?.past ?? []), { curve: current.curve, order: current.order }].slice(
+				-FREE_DRAFT_STEPS
+			),
+			future: []
+		};
+		return true;
+	}
+	/** Desfazer: the draft's own steps first (free preview), then the editor history. */
+	function onUndo() {
+		const live = liveDraft;
+		const previous = live?.past.at(-1);
+		if (live && previous) {
+			freeDraft = {
+				...live,
+				curve: previous.curve,
+				order: previous.order,
+				past: live.past.slice(0, -1),
+				future: [...live.future, { curve: live.curve, order: live.order }]
+			};
+			return;
+		}
+		app?.state.curve.undo();
+	}
+	/** Refazer: within the draft while it is live; the editor history otherwise. */
+	function onRedo() {
+		const live = liveDraft;
+		if (live) {
+			const next = live.future.at(-1);
+			if (next) {
+				freeDraft = {
+					...live,
+					curve: next.curve,
+					order: next.order,
+					past: [...live.past, { curve: live.curve, order: live.order }],
+					future: live.future.slice(0, -1)
+				};
+			}
+			return;
+		}
+		app?.state.curve.redo();
+	}
+	// Ctrl/Cmd+Z (the layout's shortcut, a window bubble listener) steps the live draft first: this
+	// capture listener runs before it and claims the event, with the layout's own conditions.
+	$effect(() => {
+		if (liveDraft === null) return;
+		const onDraftKey = (event: KeyboardEvent) => {
+			if (event.defaultPrevented || event.repeat || event.isComposing || event.altKey) return;
+			if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
+			const target = event.target;
+			if (
+				target instanceof Element &&
+				target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+			) {
+				return;
+			}
+			if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+			event.preventDefault();
+			if (event.shiftKey) onRedo();
+			else onUndo();
+		};
+		window.addEventListener('keydown', onDraftKey, true);
+		return () => window.removeEventListener('keydown', onDraftKey, true);
+	});
+	const canUndo = $derived(
+		(liveDraft !== null && liveDraft.past.length > 0) || (app?.state.curve.canUndo ?? false)
+	);
+	const canRedo = $derived(
+		liveDraft !== null ? liveDraft.future.length > 0 : (app?.state.curve.canRedo ?? false)
+	);
 	function notify(message: string, tone: 'info' | 'error' = 'info') {
 		announcement = message;
 		app?.toasts.push(message, { tone });
@@ -191,6 +490,16 @@
 		if (!ok) return;
 		announcement = m.curva_loaded();
 		drawKey++;
+	}
+	/**
+	 * An experiment from the Experimentos panel, already judged by the editor's write gate in the
+	 * profile of the moment (`decideExperiment`): one undoable editor change, like a preset, that
+	 * also sets its filter labels. The panel announces the result; the scope traces the new curve.
+	 */
+	function onExperiment(next: Curve, meta: { name: string; labels: readonly (string | null)[] }) {
+		if (!apply(next, { name: meta.name, source: 'custom', labels: meta.labels })) return false;
+		drawKey++;
+		return true;
 	}
 
 	// --- free drags with an advisory gate, gate-decided releases ----------------------------------
@@ -268,14 +577,18 @@
 		const start = curve;
 		const candidate = moved(start, index, target);
 		// The worker's bisection needs an accepted start; otherwise judge the candidate directly.
-		const verdictOf = verdict.ok
+		// "Accepted" is the profile's: in the free preview the codec's (`accepted`), not the gate's.
+		const verdictOf = startAccepted
 			? dragBand(gate, start, index, target, experimental).then((result) => ({
 					refused: result.stopped,
 					reasons: result.reasons
 				}))
 			: gate
 					.commit({ bands: candidate.bands.slice(), preampDb: candidate.preampDb, experimental })
-					.then((result) => ({ refused: !result.verdict.ok, reasons: result.verdict.reasons }));
+					.then((result) => ({
+						refused: !(result.accepted ?? result.verdict.ok),
+						reasons: result.verdict.reasons
+					}));
 		verdictOf
 			.then(
 				(result) => {
@@ -365,11 +678,42 @@
 		cancelFrames();
 		const start = curve;
 		const released = draft;
+		// What the answer is about: the stored curve under the edit, the gate profile it is judged
+		// in, and where it lands (the free preview's memory-only draft, and which step of it). Any
+		// of them may change while the gate answers (another tab, a preset, YOLO turned off and
+		// the curve before it restored, the free preview turned off or on, a draft Desfazer,
+		// Refazer, reorder or other edit): then the answer is stale and is dropped (C1, #38).
+		const startStored = storedSignature;
+		const startProfile = writeProfile;
+		const startFree = freePreview;
+		const startFreeEpoch = freePreviewEpoch;
+		const startDraft = liveDraft;
 		dragView = null;
 		dragReason = null;
 		try {
-			const result = await releaseBand(gate, start, index, target, experimental, verdict.ok);
+			const result = await releaseBand(gate, start, index, target, experimental, startAccepted);
 			if (token !== dragToken) return;
+			if (
+				storedSignature !== startStored ||
+				writeProfile !== startProfile ||
+				freePreview !== startFree ||
+				freePreviewEpoch !== startFreeEpoch ||
+				liveDraft !== startDraft
+			) {
+				// C1: never applied over another curve or draft step, in a profile it was not
+				// judged in, nor into the store once the free preview it began in has ended.
+				draft = null;
+				report(null, 'info');
+				return;
+			}
+			if (result.previewOnly && !freePreview) {
+				// C1: only the codec accepted it and the free preview ended while the gate was
+				// answering. Such a curve is never stored: the editor keeps its curve.
+				draft = null;
+				report(null, 'info');
+				return;
+			}
+			// In the free preview `apply` keeps it in the memory-only draft.
 			if (result.committed) apply(result);
 			if (result.outcome === 'exact') {
 				draft = null;
@@ -402,7 +746,7 @@
 	function onPark(index: number, target: DragTarget) {
 		if (!app) return;
 		const bands = replaceBand(curve.bands, index, parkedBand(index));
-		const check = verdictFor({ bands, preampDb: curve.preampDb });
+		const check = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		if (!check.ok) {
 			dragMessage = m.curva_v2_parked_refused({
 				index: String(index + 1),
@@ -443,14 +787,16 @@
 			basePreampDb: base.preampDb,
 			values,
 			index,
-			target: value
+			target: value,
+			profile: editJudge
 		});
 		const macro = MACROS[index];
 		if (proposal.ok && apply(proposal)) {
 			const pick = (k: number): number => (k === index ? proposal.value : (values[k] ?? 0));
 			macroBase = base;
 			macroValues = [pick(0), pick(1), pick(2), pick(3)];
-			macroSignature = curveSignature(app.state.curve.current);
+			// The editor curve now (the free-preview draft or the stored curve).
+			macroSignature = curveSignature(curve);
 		}
 		macroStopped = proposal.stopped ? index : null;
 		macroMessage =
@@ -470,7 +816,7 @@
 	const maxClipMessage = $derived(maxClip?.signature === signature ? maxClip.text : null);
 	function onMaxClip() {
 		if (!app) return;
-		const result = maxPreamp(curve);
+		const result = maxPreamp(curve, editJudge);
 		let text: string;
 		if (!result.ok) {
 			text = m.curva_maxclip_none({
@@ -483,32 +829,88 @@
 		} else {
 			return;
 		}
-		maxClip = { text, signature: curveSignature(app.state.curve.current) };
+		maxClip = { text, signature: curveSignature(curve) };
 		announcement = text;
+	}
+
+	// --- output: manual preamp (Ajustar, Engenharia) ------------------------------------------
+
+	/** Why the manual preamp is unavailable (T8): loading, Ouvir (read-only), a write running. */
+	const preampReason = $derived(
+		loadingReason ??
+			(!includesLayer(layer, 'ajustar')
+				? m.curva_preamp_ouvir_reason()
+				: app?.cableState.writing
+					? m.curva_v2_writing_reason()
+					: null)
+	);
+	/** The last refusal, shown only while the curve is still the one it talks about. */
+	let preampRefusal = $state.raw<{ text: string; signature: string } | null>(null);
+	const preampMessage = $derived(
+		preampRefusal?.signature === signature ? preampRefusal.text : null
+	);
+	/**
+	 * A stepped or typed preamp. Same path as the other discrete edits (kinds, order, "Máximo sem
+	 * clipping"): the full write gate of the editor's profile judges the bands with the new preamp
+	 * and only an accepted curve goes to the editor (one undo step). In YOLO the range is −25,5 to
+	 * 0 dB (`editorPreampMaxDb`, `editorVerdict`'s floor). A refusal keeps the curve and says why.
+	 */
+	function onPreamp(value: number) {
+		if (!app || preampReason) return;
+		const preampDb = snapPreamp(value);
+		if (preampDb === null || preampDb === curve.preampDb) return;
+		const bands = curve.bands;
+		const check = editorVerdict({ bands, preampDb }, editJudge);
+		if (!check.ok) {
+			const text = m.curva_preamp_refused({
+				value: formatSignedDb(preampDb, locale),
+				reason: firstReasonText(check.reasons, { bands, locale })
+			});
+			preampRefusal = { text, signature };
+			announcement = text;
+			return;
+		}
+		if (apply({ bands, preampDb })) preampRefusal = null;
 	}
 
 	// --- bank and cabinet ---------------------------------------------------------------------
 
-	function onKind(index: number, kind: BandKind) {
-		if (kind !== 'OFF' && isLockedKind(kind, layer)) {
-			bankMessage = m.curva_exp_hint();
-			return;
+	/** Non-mutating discrete-edit preflight, shared by the dial and its commit handler. */
+	function kindProposal(index: number, kind: BandKind) {
+		if (!app || layer === 'ouvir') {
+			return { ok: false as const, reason: loadingReason ?? m.curva_kinddial_readonly() };
 		}
-		const result = changeKind(curve, index, kind);
+		if (kind !== 'OFF' && isLockedKind(kind, layer)) {
+			return { ok: false as const, reason: m.curva_exp_hint() };
+		}
+		const previous = curve.bands[index];
+		if (!previous) return { ok: false as const, reason: m.curva_reason_unknown() };
+		const bands = replaceBand(curve.bands, index, bandOfKind(previous, kind));
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
+		return result.ok
+			? { ok: true as const, bands }
+			: {
+					ok: false as const,
+					reason: firstReasonText(result.reasons, { bands, locale })
+				};
+	}
+	function onKind(index: number, kind: BandKind) {
+		const result = kindProposal(index, kind);
 		if (result.ok) {
 			apply({ bands: result.bands, preampDb: curve.preampDb });
 			bankMessage = null;
 		} else {
 			bankMessage = m.curva_kind_refused({
-				reason: firstReasonText(result.reasons, { bands: curve.bands, locale })
+				reason: result.reason
 			});
 		}
 	}
 	function onDefaultOrder() {
 		const bands = defaultOrder(curve.bands);
-		const result = verdictFor({ bands, preampDb: curve.preampDb });
+		const result = editorVerdict({ bands, preampDb: curve.preampDb }, editJudge);
 		if (result.ok) {
-			apply({ bands, preampDb: curve.preampDb });
+			// The labels follow their filters (in the free preview: the draft's labels).
+			apply({ bands, preampDb: curve.preampDb }, { order: defaultPermutation(curve.bands) });
 			bankMessage = null;
 		} else {
 			bankMessage = m.curva_reorder_refused({
@@ -526,9 +928,11 @@
 	let springTimer: ReturnType<typeof setTimeout> | undefined;
 	function onReorder(from: number, to: number) {
 		if (!app) return;
-		const result = reorderSections(curve, from, to);
+		const result = reorderSections(curve, from, to, editJudge);
 		if (result.ok) {
-			apply({ bands: result.bands, preampDb: curve.preampDb });
+			// The labels follow their filters (in the free preview: the draft's labels).
+			const order = movePermutation(curve.bands.length, from, to);
+			apply({ bands: result.bands, preampDb: curve.preampDb }, { order });
 			selected = to;
 			refused = null;
 			cabMessage = m.curva_reorder_ok();
@@ -557,7 +961,14 @@
 		}
 		const { bands, preampDb } = result.curve;
 		if (
-			!apply({ bands, preampDb }, { name: result.curve.name || fallbackName, source: 'import' })
+			!apply(
+				{ bands, preampDb },
+				{
+					name: result.curve.name || fallbackName,
+					source: 'import',
+					labels: result.curve.labels ?? null
+				}
+			)
 		) {
 			notify(m.curva_import_refused({ reason: m.curva_io_error_format() }), 'error');
 			return;
@@ -671,7 +1082,13 @@
 		const client = app;
 		if (!client) return;
 		const meterRef = client.state.meterRef;
-		const instance = new CurvaPreview(client.audio, { reference: () => meterRef.value });
+		const instance = new CurvaPreview(client.audio, {
+			reference: () => meterRef.value,
+			// Modo YOLO previews get the engine's protection (-1 dBFS peak, limiter); so does any
+			// curve the standard gate refuses, YOLO or not (the free-preview draft, a YOLO curve
+			// restored after a reload, a YOLO cable write as the reference).
+			yolo: () => client.yolo.enabled
+		});
 		preview = instance;
 		return () => {
 			instance.dispose();
@@ -696,6 +1113,8 @@
 	$effect(() => {
 		const ref = reference;
 		const editor = curve;
+		// Turning YOLO on or off rebuilds the A/B with or without the preview protection.
+		void yoloOn;
 		untrack(() => preview?.update(ref, editor));
 	});
 	const previewError = $derived.by(() => {
@@ -777,7 +1196,12 @@
 				<span class="np-dirty">{m.curva_unsaved()}</span>
 			{/if}
 		</div>
-		<LayerSelector {layer} {onlayer} />
+		<LayerSelector {layer} {onlayer}>
+			<!-- Modo YOLO sits with the layer choice: unavailable (with its reason) off Engenharia. -->
+			{#if app}
+				<YoloToggle yolo={app.yolo} {layer} onbringback={bringBack} writeReason={yoloWriteReason} />
+			{/if}
+		</LayerSelector>
 		<div class="np-help"><TourTrigger page="curva" /></div>
 	</section>
 
@@ -817,76 +1241,96 @@
 				onpreviewwarm={onPreviewWarm}
 				onside={(side) => preview?.select(side)}
 			/>
-			<OutputPanel
-				{curve}
-				{verdict}
-				{locale}
-				mode={preview?.playing ? preview.vu.mode : 'data'}
-				frame={preview?.playing ? preview.vu.frame : null}
-				side={preview?.side ?? 'B'}
-				onmaxclip={onMaxClip}
-				{maxClipMessage}
-				disabled={!app}
-				disabledReason={loadingReason}
-			/>
-			<PresetTabs
-				activeId={activePreset}
-				{locale}
-				onload={(id) => loaded(app?.state.curve.loadPreset(id))}
-			/>
-			<MacroKnobs
-				values={shownMacros}
-				scopes={macroScopes}
-				{locale}
-				disabled={!app}
-				message={macroMessage}
-				stopped={macroStopped}
-				onchange={onMacro}
-			/>
-			<RescuePanel
-				unsaved={app?.state.curve.unsaved ?? false}
-				canUndo={app?.state.curve.canUndo ?? false}
-				canRedo={app?.state.curve.canRedo ?? false}
-				journalCount={app?.state.journal.entries.length ?? 0}
-				disabled={!app}
-				disabledReason={loadingReason}
-				writeDisabled={app?.cableState.writing ?? true}
-				neutralActive={activePreset === NEUTRO.id}
-				defaultActive={activePreset === PADRAO_AURI.id}
-				onneutral={() => loaded(app?.loadNeutral())}
-				ondefault={() => loaded(app?.loadAuriDefault())}
-				onrescue={() => app?.requestRescue()}
-				onundo={() => app?.state.curve.undo()}
-				onredo={() => app?.state.curve.redo()}
-				onwrite={() => app?.requestWrite()}
-			/>
+			<!-- Ajustar and Engenharia: the bank hangs right under the scope, inside the rack. -->
+			{#if includesLayer(layer, 'ajustar')}
+				<div class="layer-block bank-slot" transition:slide={{ duration: motionMs }}>
+					<Deferred module={filterBank} height="560px">
+						{#snippet children(FilterBank)}
+							<FilterBank
+								{curve}
+								{verdict}
+								{layer}
+								{locale}
+								{selected}
+								stages={preview?.stages ?? idleStages}
+								message={bankMessage}
+								ondrag={onDrag}
+								onmove={onBankMove}
+								onkind={onKind}
+								canApplyKind={kindProposal}
+								kindContext={writeProfile}
+								kindDisabledReason={loadingReason}
+								onorder={onDefaultOrder}
+							/>
+						{/snippet}
+					</Deferred>
+				</div>
+			{/if}
+			<!-- Output, presets, fine adjust and rescue: one sticky column beside the bank (desktop),
+			     rack cells everywhere else (see `.side`). -->
+			<div class="side">
+				<OutputPanel
+					{curve}
+					{verdict}
+					{locale}
+					mode={preview?.playing ? preview.vu.mode : 'data'}
+					frame={preview?.playing ? preview.vu.frame : null}
+					side={preview?.side ?? 'B'}
+					onmaxclip={onMaxClip}
+					{maxClipMessage}
+					disabled={!app}
+					disabledReason={loadingReason}
+					onpreamp={onPreamp}
+					{preampReason}
+					{preampMessage}
+					preampMaxDb={editorPreampMaxDb(writeProfile)}
+				/>
+				<PresetTabs
+					activeId={activePreset}
+					{locale}
+					onload={(id) => loaded(app?.state.curve.loadPreset(id))}
+				/>
+				<Experiments
+					{layer}
+					{locale}
+					yolo={app?.yolo ?? null}
+					{signature}
+					disabledReason={loadingReason}
+					onapply={onExperiment}
+					{onlayer}
+				/>
+				<MacroKnobs
+					values={shownMacros}
+					scopes={macroScopes}
+					{locale}
+					disabled={!app}
+					message={macroMessage}
+					stopped={macroStopped}
+					onchange={onMacro}
+				/>
+				<RescuePanel
+					unsaved={app?.state.curve.unsaved ?? false}
+					{canUndo}
+					{canRedo}
+					journalCount={app?.state.journal.entries.length ?? 0}
+					disabled={!app}
+					disabledReason={loadingReason}
+					writeDisabled={(app?.cableState.writing ?? true) || yoloWriteReason !== null}
+					neutralActive={activePreset === NEUTRO.id}
+					defaultActive={activePreset === PADRAO_AURI.id}
+					onneutral={() => loaded(app?.loadNeutral())}
+					ondefault={() => loaded(app?.loadAuriDefault())}
+					onrescue={() => app?.requestRescue()}
+					onundo={onUndo}
+					onredo={onRedo}
+					onwrite={requestEditorWrite}
+				/>
+			</div>
 		</div>
 		<div class="cheek r" aria-hidden="true"></div>
 	</div>
 	{#if !app}
 		<p class="visually-hidden" role="status">{m.curva_v2_loading()}</p>
-	{/if}
-
-	{#if includesLayer(layer, 'ajustar')}
-		<div class="layer-block" transition:slide={{ duration: motionMs }}>
-			<Deferred module={filterBank} height="560px">
-				{#snippet children(FilterBank)}
-					<FilterBank
-						{curve}
-						{verdict}
-						{layer}
-						{locale}
-						{selected}
-						stages={preview?.stages ?? idleStages}
-						message={bankMessage}
-						ondrag={onDrag}
-						onmove={onBankMove}
-						onkind={onKind}
-						onorder={onDefaultOrder}
-					/>
-				{/snippet}
-			</Deferred>
-		</div>
 	{/if}
 
 	{#if layer === 'engenharia'}
@@ -912,17 +1356,18 @@
 				{/await}
 				{#await import('./Sequencer.svelte') then { default: Sequencer }}
 					{@const sequencerReason =
-						loadingReason ?? (app?.cableState.writing ? m.curva_v2_writing_reason() : null)}
+						loadingReason ??
+						(app?.cableState.writing ? m.curva_v2_writing_reason() : yoloWriteReason)}
 					<fieldset
 						class="min-w-0 border-0 p-0"
-						disabled={!app || (app?.cableState.writing ?? true)}
+						disabled={!app || (app?.cableState.writing ?? true) || yoloWriteReason !== null}
 						aria-describedby={sequencerReason ? `${titleId}-sequencer-why` : undefined}
 					>
 						<legend class="visually-hidden">{m.curva_seq_heading()}</legend>
 						<Sequencer
 							{curve}
-							disabled={!app || (app?.cableState.writing ?? true)}
-							onsend={() => app?.requestWrite()}
+							disabled={!app || (app?.cableState.writing ?? true) || yoloWriteReason !== null}
+							onsend={requestEditorWrite}
 						/>
 						{#if sequencerReason}
 							<p id={`${titleId}-sequencer-why`} role="status">{sequencerReason}</p>
@@ -937,8 +1382,20 @@
 
 	<div class="lower">
 		<div class="social-slot" bind:this={socialSlot}>
-			{#if Social}
-				<Social {app} {curve} name={curveName} {locale} {pageUrl} {preview} {originHint} />
+			{#if yoloOn}
+				<!-- Modo YOLO: no S5, link, library, publish or account save. -->
+				<p class="yolo-why" role="note" data-yolo-locked="social">{m.yolo_reason_no_export()}</p>
+			{:else if Social}
+				<Social
+					{app}
+					{curve}
+					name={curveName}
+					{locale}
+					{pageUrl}
+					{preview}
+					{originHint}
+					blockedReason={exitGateReason}
+				/>
 			{:else if socialFailed}
 				<p role="alert">{m.layout_error_generic()}</p>
 			{:else}
@@ -951,11 +1408,13 @@
 					{curve}
 					name={curveName}
 					source={stored?.source ?? `preset:${NEUTRO.id}`}
+					labels={editorLabels}
 					{layer}
 					{locale}
 					{pageUrl}
-					disabled={!app}
-					disabledReason={loadingReason}
+					disabled={!app || yoloOn}
+					disabledReason={loadingReason ?? (yoloOn ? m.yolo_reason_no_import_export() : null)}
+					exportReason={exitGateReason}
 					onimport={(result) => onImport(result)}
 					{notify}
 				/>
@@ -968,6 +1427,11 @@
 </main>
 
 <style>
+	.yolo-why {
+		margin: 0;
+		color: #e0656b;
+		font-size: var(--fs-small, 13px);
+	}
 	.curva {
 		/* Panel legends read the design-system text tokens (silk on the satin panel). */
 		--curva-silk: var(--text);
@@ -976,6 +1440,8 @@
 			linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 30%),
 			linear-gradient(#2e2d2b, #1f1e1c);
 		--curva-wood: linear-gradient(90deg, #26140a, #5b351c 30%, #4b2b16 62%, #22120a);
+		/* Width of the side column beside the filter bank (desktop): two fine-adjust knobs across. */
+		--curva-side: clamp(264px, 20vw, 304px);
 		/* FUX.ART: the art layer (first child) sits under the content inside this context. */
 		position: relative;
 		isolation: isolate;
@@ -1060,14 +1526,16 @@
 		border-radius: 0 var(--rad-lg) var(--rad-lg) 0;
 		box-shadow: inset 2px 0 4px rgb(0 0 0 / 0.5);
 	}
-	/* The rack (mock v2, Ajustar geometry for every layer): the scope runs almost the full width
-	   beside the output; presets, fine adjust and rescue sit under it. */
+	/* The rack (mock v2). Without the bank (Ouvir): the scope runs almost the full width beside the
+	   output; presets (a wide strip), fine adjust and rescue sit under it. With the bank, see the
+	   media blocks below. */
 	.rack {
 		display: grid;
 		grid-template-columns: minmax(280px, 1.15fr) minmax(0, 1fr) minmax(0, 0.95fr) 204px;
 		grid-template-areas:
 			'scope scope scope out'
-			'pre pre mac res';
+			'pre pre mac res'
+			'xp xp mac res';
 		gap: var(--space-5) 0;
 		padding: var(--space-5) var(--space-2) var(--space-4);
 		border-top: 1px solid rgb(255 255 255 / 0.07);
@@ -1090,6 +1558,10 @@
 	.rack :global(.ps-pre) {
 		grid-area: pre;
 	}
+	/* Experimentos: right under the presets, in every layout (DOM order on a phone). */
+	.rack :global(.ps-xp) {
+		grid-area: xp;
+	}
 	.rack :global(.ps-mac) {
 		grid-area: mac;
 		box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
@@ -1097,6 +1569,60 @@
 	.rack :global(.ps-res) {
 		grid-area: res;
 		box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
+	}
+	/* The side panels' wrapper lends them to the rack grid; only beside the bank on desktop is it
+	   a box of its own. A plain div with no role, so `display: contents` hides nothing. */
+	.side {
+		display: contents;
+	}
+	/* The filter bank, under the scope inside the rack; its edges line up with the scope bezel.
+	   The layouts below place it in their `bank` area; a full row is only the safe fallback. */
+	/* The bank is a size container of its own: its head and its strips follow the slot's width
+	   (never the viewport's), so it needs no layout rule from here. `min-width: 0` keeps the
+	   grid cell from growing with the bank's content. */
+	.bank-slot {
+		grid-column: 1 / -1;
+		align-self: start;
+		min-width: 0;
+		padding: 0 var(--space-4);
+	}
+	/* Desktop with the bank (Ajustar, Engenharia): the scope and the bank fill the main column and
+	   the side panels ride along them in one column, sticky under the bar, so presets and the fine
+	   knobs stay at hand while the bank is in use. Taller than the viewport, the column scrolls
+	   inside (popovers and tooltips sit in the top layer, so nothing is clipped). */
+	@media (min-width: 1101px) {
+		.rack:has(> .bank-slot) {
+			grid-template-columns: minmax(0, 1fr) var(--curva-side);
+			grid-template-rows: auto 1fr;
+			grid-template-areas:
+				'scope side'
+				'bank side';
+		}
+		.bank-slot {
+			grid-area: bank;
+		}
+		.rack:has(> .bank-slot) > .side {
+			grid-area: side;
+			position: sticky;
+			top: calc(var(--bar-h) + var(--space-4));
+			align-self: start;
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-5);
+			max-height: calc(100dvh - var(--bar-h) - 2 * var(--space-4));
+			/* Room for the focus rings and the tour outline inside the scroll box. */
+			padding: var(--space-2);
+			overflow-y: auto;
+			scrollbar-gutter: stable;
+			scrollbar-width: thin;
+			scrollbar-color: var(--rule-control) transparent;
+			box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
+		}
+		.rack:has(> .bank-slot) > .side > :global(.psec) {
+			flex: none;
+			padding: 0 var(--space-3);
+			box-shadow: none;
+		}
 	}
 	/* Engraved section names: centred under the content, on a rule (mock .legend-bar). The rule
 	   sits a fixed distance below the content; `margin-top: auto` aligns the names of a row. */
@@ -1212,16 +1738,36 @@
 			grid-column: 1 / 3;
 		}
 	}
+	/* Tablet: the scope, the bank (Ajustar, Engenharia), then output beside the presets and the fine
+	   knobs beside rescue. Rows read left to right in DOM (keyboard) order. The phone block below
+	   overrides this one (no width gap between the two). */
 	@media (max-width: 1100px) {
 		.rack {
-			grid-template-columns: minmax(0, 1fr) 204px;
+			grid-template-columns: 204px minmax(0, 1fr) 204px;
 			grid-template-areas:
-				'scope scope'
-				'pre out'
-				'mac res';
+				'scope scope scope'
+				'out pre pre'
+				'out xp xp'
+				'mac mac res';
 		}
+		.rack:has(> .bank-slot) {
+			grid-template-areas:
+				'scope scope scope'
+				'bank bank bank'
+				'out pre pre'
+				'out xp xp'
+				'mac mac res';
+		}
+		.bank-slot {
+			grid-area: bank;
+		}
+		.rack :global(.ps-out),
 		.rack :global(.ps-mac) {
 			box-shadow: none;
+		}
+		.rack :global(.ps-pre),
+		.rack :global(.ps-xp) {
+			box-shadow: inset 1px 0 0 rgb(236 231 221 / 0.1);
 		}
 		.below,
 		.lower {
@@ -1248,15 +1794,26 @@
 		.instrument {
 			grid-template-columns: 10px minmax(0, 1fr) 10px;
 		}
-		.rack {
+		/* Phone: one column in DOM order (scope, bank, output, presets, fine adjust, rescue). */
+		.rack,
+		.rack:has(> .bank-slot) {
 			grid-template-columns: minmax(0, 1fr);
-			grid-template-areas: 'scope' 'out' 'pre' 'mac' 'res';
+			grid-template-areas: none;
+		}
+		.rack {
 			padding: var(--space-3) 0;
 		}
 		.rack :global(.psec) {
+			grid-area: auto;
 			padding: 0 var(--space-3);
 		}
-		.rack :global(.psec + .psec) {
+		/* The bank card spans the rack (its own padding lines its content up with the panels'). */
+		.bank-slot {
+			grid-area: auto;
+			padding: 0;
+		}
+		.rack :global(.psec + .psec),
+		.side > :global(.psec:first-child) {
 			padding-top: var(--space-3);
 			border-top: 1px solid var(--rule);
 			box-shadow: none;

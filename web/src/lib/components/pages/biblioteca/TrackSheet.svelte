@@ -22,6 +22,7 @@
 	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
 	import { presetUrl, qrSvg } from '#lib/qr/index.ts';
 	import { envelopeView, number, type Locale, type Tape, type GateResult } from './archive.ts';
+	import { exitReason } from '#lib/components/pages/curva/yolo.ts';
 
 	let {
 		tape,
@@ -95,9 +96,15 @@
 	const description = $derived(
 		locale === 'en-US' && tape.descriptionEn ? tape.descriptionEn : tape.description
 	);
+	/**
+	 * The tape leaves the sheet (QR and link, S1 copy, SVG/PNG card, S5 file) only when the
+	 * standard gate accepts it: a library item stored before the library refused YOLO-only curves
+	 * is shown but never shared or exported. Official presets always pass.
+	 */
+	const shareRefusal = $derived(exitReason(tape, false, locale));
 	/** Every unavailable control says why (spec §2.6): the Button primitive announces it. */
 	const audioReason = $derived(app ? null : m.biblioteca_reason_audio());
-	const linkReason = $derived(share.url ? null : m.biblioteca_reason_link());
+	const linkReason = $derived(shareRefusal ?? (share.url ? null : m.biblioteca_reason_link()));
 	const writeReason = $derived(
 		!app
 			? m.biblioteca_reason_loading()
@@ -363,7 +370,7 @@
 		onClose();
 	}
 	async function exportSheet(format: 'svg' | 'png') {
-		if (exporting) return;
+		if (exporting || shareRefusal !== null) return;
 		exporting = true;
 		try {
 			const { sheetSvg, sheetPng, downloadBlob } = await import('./sheet-export.ts');
@@ -390,6 +397,7 @@
 		}
 	}
 	async function exportEnvelope() {
+		if (shareRefusal !== null) return;
 		try {
 			const { downloadBlob } = await import('./sheet-export.ts');
 			downloadBlob(
@@ -402,6 +410,7 @@
 		}
 	}
 	async function copyCode() {
+		if (shareRefusal !== null) return;
 		try {
 			await navigator.clipboard.writeText(code);
 			onStatus(m.biblioteca_copied());
@@ -412,7 +421,8 @@
 	}
 	function useCurve() {
 		if (!app) return;
-		if (app.state.curve.set(tape)) {
+		// A local tape carries its item's filter labels (`CurveData.labels`); presets carry none.
+		if (app.state.curve.set({ ...tape, labels: tape.labels ?? null })) {
 			onStatus(m.biblioteca_used());
 			close();
 		} else onStatus(m.biblioteca_local_error());
@@ -421,7 +431,14 @@
 		if (!app) return;
 		stop();
 		// The selected tape may be a deep $state proxy: hand over a plain copy (R2-02).
-		app.requestWrite({ ...$state.snapshot(tape), schema: 1, updatedAt: Date.now() });
+		const copy = $state.snapshot(tape);
+		app.requestWrite({
+			...copy,
+			schema: 1,
+			// A local tape carries its library item's filter labels; presets carry none.
+			labels: copy.labels ?? null,
+			updatedAt: Date.now()
+		});
 		onClose();
 	}
 </script>
@@ -628,13 +645,14 @@
 					<Explainer term="s1" />
 				</div>
 				<textarea readonly aria-label={m.biblioteca_code()} value={code} rows="5"></textarea>
-				<Button onclick={copyCode}>{m.biblioteca_copy()}</Button>
+				<Button disabledReason={shareRefusal} onclick={copyCode}>{m.biblioteca_copy()}</Button>
 			</section>
 			<section class="print-card">
 				<h3>{m.biblioteca_card()}</h3>
 				<strong>{tape.name}</strong>
 				<p>{tape.group === 'local' ? m.biblioteca_local_license() : m.biblioteca_license()}</p>
-				{#if share.image && share.url}<img
+				{#if shareRefusal}<p role="note">{shareRefusal}</p>
+				{:else if share.image && share.url}<img
 						src={share.image}
 						width="180"
 						height="180"
@@ -659,7 +677,7 @@
 						{m.biblioteca_s5_error()}
 					</p>{:else}<pre>{envelope.json}</pre>{/if}
 				<Button
-					disabledReason={envelope.exportable ? null : m.biblioteca_s5_note()}
+					disabledReason={shareRefusal ?? (envelope.exportable ? null : m.biblioteca_s5_note())}
 					onclick={exportEnvelope}>{m.biblioteca_s5_export()}</Button
 				>
 			</details>

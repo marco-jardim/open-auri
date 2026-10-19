@@ -6,6 +6,9 @@
 	- Every trace is core data (`scope.ts`: core responses summed per section). The output limit
 	  line is the gate threshold; red/amber regions show where the drawn curve is over or near the
 	  output limit, or where it would clip inside the chain. They are a preview: the gate decides.
+	- The axis runs to Nyquist (48 kHz, core's 96 kHz evaluator) so the traces show where the
+	  response really converges; 20 kHz to 48 kHz is shaded as inaudible. Readouts, zones, the
+	  limit line and the handles stay in 20 Hz to 20 kHz.
 	- Selected section: its safe box (core SOFT_RANGES) and the hatched zones it can never reach
 	  (ABS_RANGES gain cap, D7: no PK boost above 16 kHz). The box lights while a point is grabbed.
 	- Handles follow the pointer freely (the page draws a draft every frame and asks the worker for
@@ -15,6 +18,9 @@
 	- Neutro (every section OFF): ten points parked at 0 dB with the empty-state hint. Grabbing one
 	  (pointer or arrow keys) asks the page to create a filter there (`onpark`, gate-checked).
 	- HS/LP/HP handles are locked outside Engenharia, with a hint.
+	- Handle shapes tell the kind (PK circle, LS/HS a tag pointing to the shelf's side, LP/HP a
+	  slope on the cut side, parked points a dashed circle) and carry the slot badge (A to J) the
+	  bank shows; their names say the band's functional or custom name (`band-names.ts`).
 	- Motion: the trace draws in once when a preset loads (`drawKey`), the after-commit ghost, the
 	  detent and refused shake and a faint CRT sweep (decorative, aria-hidden, never a reading); all
 	  off under prefers-reduced-motion.
@@ -33,9 +39,11 @@
 	import { CURVA_SESSION } from './preview.svelte.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
+	import { bandWords, useBandLabels } from './band-labels.svelte.ts';
+	import { badgeOf, bandNames } from './band-names.ts';
 	import { formatHz, formatQ, formatSignedDb } from './format.ts';
 	import { isLockedKind, type Layer } from './layers.ts';
-	import { hasGain, type Band, type Curve } from './model.ts';
+	import { hasGain, type Band, type BandKind, type Curve } from './model.ts';
 	import type { DragTarget, DragView } from './drag.ts';
 	import { isEmptyCurve, PARKED_HZ, parkedBand } from './parked.ts';
 	import type { GateVerdict } from './reasons.ts';
@@ -43,15 +51,20 @@
 		DB_MAX,
 		DB_MIN,
 		DRAG_GRID,
+		F_MAX,
+		INAUDIBLE_FREQS,
 		INTERNAL_LIMIT_DB,
 		MAJOR_FREQS,
 		MINOR_FREQS,
 		NEAR_MARGIN_DB,
+		NYQUIST_HZ,
 		OUTPUT_LIMIT_DB,
 		PLOT,
 		SCOPE_GRID,
 		VIEW_HEIGHT,
 		VIEW_WIDTH,
+		audiblePeak,
+		audibleSpansAbove,
 		clamp,
 		handleGain,
 		hardZones,
@@ -61,7 +74,6 @@
 		responsePath,
 		segmentPath,
 		softBox,
-		spansAbove,
 		stepQ,
 		traces,
 		xOf,
@@ -236,11 +248,14 @@
 		live.bands.map((response) => (response ? responsePath(response, grid) : ''))
 	);
 	const refPath = $derived(reference ? pathOf(traces(reference).output) : '');
-	const overOutput = $derived(spansAbove(live.output, OUTPUT_LIMIT_DB, grid));
+	// Zones and peak read the audible part of the grid only: the band above 20 kHz is drawn, not read.
+	const overOutput = $derived(audibleSpansAbove(live.output, OUTPUT_LIMIT_DB, grid));
 	const nearOutput = $derived(
-		overOutput.length > 0 ? [] : spansAbove(live.output, OUTPUT_LIMIT_DB - NEAR_MARGIN_DB, grid)
+		overOutput.length > 0
+			? []
+			: audibleSpansAbove(live.output, OUTPUT_LIMIT_DB - NEAR_MARGIN_DB, grid)
 	);
-	const overInternal = $derived(spansAbove(live.internal, INTERNAL_LIMIT_DB, grid));
+	const overInternal = $derived(audibleSpansAbove(live.internal, INTERNAL_LIMIT_DB, grid));
 	const widest = <T extends { fromHz: number; toHz: number }>(spans: readonly T[]): T | null =>
 		spans.reduce<T | null>(
 			(best, s) => (!best || s.toHz / s.fromHz > best.toHz / best.fromHz ? s : best),
@@ -249,23 +264,22 @@
 	const hotLabel = $derived(widest(overOutput));
 	const internalLabel = $derived(overOutput.length > 0 ? null : widest(overInternal));
 
-	/** Gate metrics when the drawn curve is the committed one; else the drawn preview's maximum. */
+	/** Gate metrics when the drawn curve is the committed one; else the preview's audible maximum. */
 	const peak = $derived.by(() => {
 		const audible = verdict?.metrics.outputAudible;
 		if (!moving && audible && curve === committed) {
 			return { db: audible.db, hz: audible.frequencyHz ?? SCOPE_GRID[0] ?? 20 };
 		}
-		const points = grid;
-		let db = -Infinity;
-		let hz = points[0] ?? 20;
-		live.output.forEach((value, i) => {
-			if (value > db) {
-				db = value;
-				hz = points[i] ?? hz;
-			}
-		});
-		return Number.isFinite(db) ? { db, hz } : null;
+		return audiblePeak(live.output, grid);
 	});
+	// The inaudible band (20 kHz to Nyquist): shaded, with its label running down the middle.
+	const inaudibleX = xOf(F_MAX);
+	const inaudibleLabel = {
+		x: (inaudibleX + PLOT.right) / 2,
+		y: (PLOT.top + PLOT.bottom) / 2
+	};
+	/** The band label stays inside the band's height whatever the scope width. */
+	const inaudibleFont = $derived(Math.min(labelSize, 14));
 
 	// Ghost of the previous committed EQ, fading for 1.5 s after each commit (mock .tr-after).
 	const committedEq = $derived(committed ? pathOf(traces(committed).eq) : '');
@@ -361,14 +375,43 @@
 	const handleX = (band: Band) => (band.kind === 'OFF' ? 0 : xOf(band.freqHz));
 	const handleY = (band: Band) => yOf(clamp(handleGain(band), DB_MIN, DB_MAX));
 
+	// Names and badges (A to J) shared with the bank: the same letter on the handle and the strip.
+	const labelStore = useBandLabels();
+	const words = bandWords();
+	const names = $derived(bandNames(curve.bands, words, labelStore.labels));
+	const badge = (index: number) => names[index]?.badge ?? badgeOf(index);
+	const nameOf = (index: number) => names[index]?.label ?? '';
+
+	/**
+	 * Handle outline by kind, radius `r`: PK (and OFF, parked) keep the circle; LS and HS a tag
+	 * pointing to the side the shelf lifts or lowers; LP and HP a slope on the side they cut.
+	 */
+	function glyphPaths(r: number): Partial<Record<BandKind, string>> {
+		const f = (n: number) => n.toFixed(1);
+		// Tip at 1.35 r on the shelf's side, flat back at r on the other.
+		const tag = (side: -1 | 1) =>
+			`M${f(side * 1.35 * r)} 0L${f(side * 0.45 * r)} ${f(-r)}` +
+			`H${f(-side * r)}V${f(r)}H${f(side * 0.45 * r)}Z`;
+		// Flat top, then a ramp down to the outer bottom corner on the cut side.
+		const slope = (side: -1 | 1) =>
+			`M${f(-side * 1.1 * r)} ${f(-r)}H${f(side * 0.25 * r)}` +
+			`L${f(side * 1.15 * r)} ${f(r)}H${f(-side * 1.1 * r)}Z`;
+		return { LS: tag(-1), HS: tag(1), LP: slope(1), HP: slope(-1) };
+	}
+	const glyphs = $derived(glyphPaths(ringR));
+
 	function handleLabel(band: Band, index: number): string {
 		if (band.kind === 'OFF') return '';
 		if (isLockedKind(band.kind, layer)) {
-			return m.curva_handle_locked({ index: String(index + 1), kind: band.kind }, messages);
+			return m.curva_bn_handle_locked(
+				{ badge: badge(index), name: nameOf(index), kind: band.kind },
+				messages
+			);
 		}
-		return m.curva_handle_hint(
+		return m.curva_bn_handle_hint(
 			{
-				index: String(index + 1),
+				badge: badge(index),
+				name: nameOf(index),
 				kind: band.kind,
 				freq: formatHz(band.freqHz, locale),
 				gain: hasGain(band) ? formatSignedDb(band.gainDb, locale) : '',
@@ -610,6 +653,15 @@
 					>
 						<line x1="0" y1="0" x2="0" y2="7" class="hatch-line" />
 					</pattern>
+					<pattern
+						id="{legendId}-inaudible"
+						width="6"
+						height="6"
+						patternUnits="userSpaceOnUse"
+						patternTransform="rotate(-45)"
+					>
+						<line x1="0" y1="0" x2="0" y2="6" class="inaudible-line" />
+					</pattern>
 					<linearGradient id="{legendId}-sweep" x1="0" x2="1">
 						<stop offset="0" stop-color="#ff7a2f" stop-opacity="0" />
 						<stop offset="1" stop-color="#ff7a2f" stop-opacity="0.08" />
@@ -626,11 +678,17 @@
 								class:alt={f === 50 || f === 200 || f === 2000 || f === 5000}
 								x={xOf(f)}
 								y={PLOT.bottom + 20}
-								text-anchor={k === 0 ? 'start' : k === MAJOR_FREQS.length - 1 ? 'end' : 'middle'}
-								>{f >= 1000 ? `${f / 1000}k` : f}</text
+								text-anchor={k === 0 ? 'start' : 'middle'}>{f >= 1000 ? `${f / 1000}k` : f}</text
 							>
 						{/if}
 					{/each}
+					{#each INAUDIBLE_FREQS as f (f)}
+						<line class="ginaud" x1={xOf(f)} x2={xOf(f)} y1={PLOT.top} y2={PLOT.bottom} />
+					{/each}
+					<text class="alt" x={xOf(30000)} y={PLOT.bottom + 20} text-anchor="middle">30k</text>
+					<text x={PLOT.right} y={PLOT.bottom + 20} text-anchor="end"
+						>{`${NYQUIST_HZ / 1000}k`}</text
+					>
 					{#each [-15, -10, -5, 0, 5, 10, 15] as db (db)}
 						<line
 							class={db === 0 ? 'g0' : 'gmaj'}
@@ -645,6 +703,28 @@
 					{/each}
 				</g>
 				<g clip-path="url(#{legendId}-clip)" aria-hidden="true">
+					<rect
+						class="inaudible"
+						x={inaudibleX}
+						y={PLOT.top}
+						width={PLOT.right - inaudibleX}
+						height={PLOT.bottom - PLOT.top}
+					/>
+					<rect
+						x={inaudibleX}
+						y={PLOT.top}
+						width={PLOT.right - inaudibleX}
+						height={PLOT.bottom - PLOT.top}
+						fill="url(#{legendId}-inaudible)"
+					/>
+					<text
+						class="inaudible-t"
+						x={inaudibleLabel.x}
+						y={inaudibleLabel.y}
+						text-anchor="middle"
+						transform={`rotate(-90 ${inaudibleLabel.x.toFixed(1)} ${inaudibleLabel.y.toFixed(1)})`}
+						style={`font-size:${inaudibleFont.toFixed(1)}px`}>{m.curva_scope_inaudible()}</text
+					>
 					{#if !reduced}
 						<rect
 							class="sweep"
@@ -682,10 +762,11 @@
 							height={PLOT.bottom - PLOT.top}
 						/>
 					{/each}
+					<!-- The gate's limit is an audible threshold: the line stops at 20 kHz. -->
 					<line
 						class="lim"
 						x1={PLOT.left}
-						x2={PLOT.right}
+						x2={inaudibleX}
 						y1={yOf(OUTPUT_LIMIT_DB)}
 						y2={yOf(OUTPUT_LIMIT_DB)}
 					/>
@@ -773,7 +854,7 @@
 								transform={`translate(${xOf(hz).toFixed(1)} ${yOf(0).toFixed(1)})`}
 							>
 								<circle r={ringR} />
-								<text style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text>
+								<text style={`font-size:${handleFont.toFixed(1)}px`}>{badge(index)}</text>
 							</g>
 						{/each}
 					{/if}
@@ -879,8 +960,13 @@
 							>
 								<circle r={hitR} class="hit" />
 								<g class="body">
-									<circle r={ringR} class="ring" />
-									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text
+									{#if glyphs[band.kind]}
+										<path d={glyphs[band.kind]} class="ring" />
+									{:else}
+										<circle r={ringR} class="ring" />
+									{/if}
+									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}
+										>{badge(index)}</text
 									>
 								</g>
 							</g>
@@ -896,7 +982,7 @@
 								data-parked={index}
 								role="slider"
 								tabindex="0"
-								aria-label={m.curva_v2_parked({ index: String(index + 1) })}
+								aria-label={m.curva_bn_parked({ badge: badge(index), name: nameOf(index) })}
 								aria-valuemin={20}
 								aria-valuemax={20000}
 								aria-valuenow={hz}
@@ -915,7 +1001,8 @@
 								<circle r={hitR} class="hit" />
 								<g class="body">
 									<circle r={ringR} class="ring" />
-									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}>{index + 1}</text
+									<text class="num" style={`font-size:${handleFont.toFixed(1)}px`}
+										>{badge(index)}</text
 									>
 								</g>
 							</g>
@@ -939,19 +1026,21 @@
 			{/if}
 			{#if parked && editable}
 				<p class="park-hint">{m.empty_neutral_body()}</p>
-			{:else if parked}
-				<!-- Ouvir: nothing drags here, so the hint says what the layer is and how to edit. -->
-				<div class="park-hint ouvir-hint" data-testid="ouvir-hint">
-					<p class="oh-title">{m.curva_ouvir_hint_title()}</p>
-					<p>{m.curva_ouvir_hint_body()}</p>
-					{#if onlayer}
-						<button type="button" class="oh-action" onclick={editInAjustar}
-							>{m.curva_ouvir_hint_action()}</button
-						>
-					{/if}
-				</div>
 			{/if}
 		</div>
+		{#if parked && !editable}
+			<!-- Ouvir: nothing drags here, so the hint says what the layer is and how to edit. It sits
+			     outside the clipped screen: on a phone it is taller than the plot. -->
+			<div class="park-hint ouvir-hint" data-testid="ouvir-hint">
+				<p class="oh-title">{m.curva_ouvir_hint_title()}</p>
+				<p>{m.curva_ouvir_hint_body()}</p>
+				{#if onlayer}
+					<button type="button" class="oh-action" onclick={editInAjustar}
+						>{m.curva_ouvir_hint_action()}</button
+					>
+				{/if}
+			</div>
+		{/if}
 	</div>
 	<div class="scope-legend">
 		<span><i class="sw"></i>{m.curva_scope_eq()}</span>
@@ -1064,8 +1153,11 @@
 
 <style>
 	.bezel {
+		--bezel-pad: 13px;
 		position: relative;
-		padding: 13px;
+		/* Its content box is the screen's width: the Ouvir hint is placed in cqw (see .ouvir-hint). */
+		container: scope-bezel / inline-size;
+		padding: var(--bezel-pad);
 		border-radius: var(--rad-2xl);
 		background: linear-gradient(150deg, #323331, #1a1b1a 45%, #111211);
 		box-shadow:
@@ -1158,6 +1250,22 @@
 	.hatch-line {
 		stroke: rgb(229 72 77 / 0.35);
 		stroke-width: 2;
+	}
+	/* 20 kHz to Nyquist: drawn so the convergence shows, darker and hatched as inaudible. */
+	.inaudible {
+		fill: rgb(0 0 0 / 0.38);
+	}
+	.inaudible-line {
+		stroke: rgb(255 180 120 / 0.08);
+		stroke-width: 1.5;
+	}
+	.grat .ginaud {
+		stroke: rgb(255 140 70 / 0.08);
+	}
+	.inaudible-t {
+		fill: rgb(255 180 120 / 0.5);
+		dominant-baseline: central;
+		letter-spacing: 0.04em;
 	}
 	.sweep {
 		animation: sweep 9s linear infinite;
@@ -1328,10 +1436,12 @@
 	.handle .hit {
 		fill: transparent;
 	}
+	/* The outline is a circle (PK, parked) or a path (LS, HS tags; LP, HP slopes): same states. */
 	.handle .ring {
 		fill: rgb(10 8 6 / 0.85);
 		stroke: #ffe0c7;
 		stroke-width: 1.6;
+		stroke-linejoin: round;
 		transition:
 			stroke var(--dur-fast) var(--ease-out),
 			fill var(--dur-fast) var(--ease-out);
@@ -1508,8 +1618,14 @@
 		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
 		pointer-events: none;
 	}
-	/* Absolutely placed over the plot like the drag hint: no layout shift when the layer changes. */
+	/* Absolutely placed over the plot like the drag hint: no layout shift when the layer changes.
+	   It is the bezel's child, not the clipped screen's, so it is never cut; the drag hint's 5 %,
+	   17 % and 46 % of the screen are taken from the screen's width (100cqw, VIEW_WIDTH 820) and
+	   height (VIEW_HEIGHT 380, so 17 % of it is 7.878cqw), past the bezel's padding. */
 	.ouvir-hint {
+		right: calc(var(--bezel-pad) + 5cqw);
+		bottom: calc(var(--bezel-pad) + 7.878cqw);
+		max-width: 46cqw;
 		z-index: 1;
 		display: flex;
 		flex-direction: column;
@@ -1797,10 +1913,23 @@
 		.grat :global(.alt) {
 			display: none;
 		}
-		.park-hint {
+		/* The drag hint; the Ouvir hint keeps its screen-based place, or follows the screen. */
+		.park-hint:not(.ouvir-hint) {
 			right: 3%;
 			bottom: 20%;
 			max-width: 70%;
+		}
+	}
+	/* Below 40rem of plot width (640px at the default root font), the Ouvir hint follows the
+	   screen: its title, wrapped body and button need more height than the overlay has. This
+	   also covers the wider phone plot just below the 720px layout change, so narrowing the
+	   viewport never puts it back over the plot. A larger root font moves it below sooner;
+	   desktop plots keep the overlay's original offsets. The plot itself never changes size. */
+	@container scope-bezel (max-width: 40rem) {
+		.ouvir-hint {
+			position: static;
+			max-width: none;
+			margin-top: 8px;
 		}
 	}
 </style>

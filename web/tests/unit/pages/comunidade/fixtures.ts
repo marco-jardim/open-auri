@@ -71,6 +71,7 @@ export function feedItem(
 				license: overrides.license ?? 'CC-BY-4.0',
 				recipe: null,
 				lang: 'pt-BR',
+				labels: null,
 				createdAt: 1_700_000_000_000
 			},
 			curve: {

@@ -1,14 +1,28 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
+import { levelDb, snapshotBands } from 'open-auri/dsp';
+import { NEUTRO } from 'open-auri/catalog';
+import {
+	chainPeakDb,
+	createAudioEngine,
+	dbToGain,
+	matchGains,
+	standardGateAccepts,
+	YOLO_PREVIEW_PEAK_DBFS,
+	type AudioEngine,
+	type Band,
+	type PreviewChain
+} from '#lib/audio/engine.ts';
 import type { MeterSource, MeterTap } from '#lib/audio/meters.ts';
 import { createTrackChains } from '#lib/components/pages/comparar/chains.ts';
-import { initialTracks } from '#lib/components/pages/comparar/comparison.ts';
+import { initialTracks, type Track } from '#lib/components/pages/comparar/comparison.ts';
 import {
 	asFake,
 	fakeEnv,
 	onlyContext,
 	resetAudioConfig,
-	FakeGainNode
+	FakeDynamicsCompressorNode,
+	FakeGainNode,
+	FakeIIRFilterNode
 } from '../../audio/fake-audio.ts';
 
 type FakeTap = Pick<MeterTap, 'subscribe' | 'disconnect'>;
@@ -29,6 +43,50 @@ function setup() {
 	const meters = new Map<number, MeterSource | null>();
 	const manager = createTrackChains(engine, (id, meter) => meters.set(id, meter), makeTap);
 	return { engine, manager, handles, makeTap, meters };
+}
+
+/** Refused by the standard gate, accepted by the YOLO one (quiet): HP 30 Hz. */
+const YOLO_ONLY_BANDS: Band[] = [
+	{ kind: 'HP', freqHz: 30, qFactor: 0.71 },
+	...NEUTRO.bands.slice(1)
+];
+/** Lane 2 (armed) plays a YOLO-only curve; the other armed lanes are official presets. */
+function withYoloOnly(tracks: Track[]): Track[] {
+	const curve: Track['curve'] = {
+		name: 'Subsônica',
+		source: 'custom',
+		preampDb: -0.5,
+		bands: snapshotBands(YOLO_ONLY_BANDS)
+	};
+	return tracks.map((track) => (track.id === 2 ? { ...track, curve } : track));
+}
+function is<T>(node: unknown, type: abstract new (...args: never[]) => T): T {
+	if (!(node instanceof type)) throw new Error(`Expected ${type.name}`);
+	return node;
+}
+/** The node right after the lane's sections (or its preamp). */
+function afterSections(chain: PreviewChain): unknown {
+	const tail = chain.stages.length > 0 ? is(chain.stages.at(-1), FakeIIRFilterNode) : null;
+	const [next] = (tail ?? is(chain.preamp, FakeGainNode)).connections;
+	return next;
+}
+/**
+ * The protection's normalize gain (sections → trim → normalize → limiter → output), or null when
+ * the lane has none.
+ */
+function normalizeGain(chain: PreviewChain): number | null {
+	const next = afterSections(chain);
+	// The fake node and the typed chain output: compared as plain objects.
+	if (Object.is(next, chain.output)) return null;
+	const [normalizeNode] = is(next, FakeGainNode).connections;
+	const normalize = is(normalizeNode, FakeGainNode);
+	const [limiter] = normalize.connections;
+	expect(is(limiter, FakeDynamicsCompressorNode).connections).toEqual([chain.output]);
+	return normalize.gain.value;
+}
+/** The level trim ahead of a protected lane's normalize gain and limiter. */
+function trimGain(chain: PreviewChain): number {
+	return is(afterSections(chain), FakeGainNode).gain.value;
 }
 
 describe('parallel comparison chains', () => {
@@ -165,6 +223,113 @@ describe('parallel comparison chains', () => {
 		await pending;
 		expect(handle.disconnect).toHaveBeenCalledOnce();
 		expect(onMeter).not.toHaveBeenCalledWith(1, handle);
+	});
+
+	test('armed standard presets play exactly as before: no lane is protected', async () => {
+		const { engine, manager } = setup();
+		const build = vi.spyOn(engine, 'buildChain');
+		await manager.sync(initialTracks());
+		const chains = build.mock.results.map((result): PreviewChain => result.value);
+		expect(chains).toHaveLength(4);
+		expect(chains.map(normalizeGain)).toEqual([null, null, null, null]);
+		expect(onlyContext().compressors).toHaveLength(0);
+		manager.dispose();
+	});
+
+	test('one YOLO-only lane protects every armed lane with one gain: the level match holds', async () => {
+		const { engine, manager } = setup();
+		const build = vi.spyOn(engine, 'buildChain');
+		const tracks = withYoloOnly(initialTracks());
+		const armed = tracks.filter((track) => track.armed);
+		expect(
+			armed.map((track) => standardGateAccepts(track.curve.bands, track.curve.preampDb))
+		).toEqual([true, false, true, true]);
+		await manager.sync(tracks);
+		const chains = build.mock.results.map((result): PreviewChain => result.value);
+		expect(chains).toHaveLength(4);
+		// The loudest untrimmed peak of the armed lanes lands at -1 dBFS; every lane gets that gain.
+		const rate = chains[0]?.rate ?? 0;
+		const loudest = Math.max(
+			...armed.map((track) => chainPeakDb(track.curve.bands, track.curve.preampDb, rate))
+		);
+		const expected = dbToGain(Math.min(0, YOLO_PREVIEW_PEAK_DBFS - loudest));
+		for (const gain of chains.map(normalizeGain)) {
+			expect(gain).not.toBeNull();
+			expect(gain ?? Number.NaN).toBeCloseTo(expected, 12);
+		}
+		expect(onlyContext().compressors).toHaveLength(4);
+		// A/B of the standard lane 1 against the YOLO-only lane 2: the match trims alone set the
+		// levels, as for unprotected lanes (the shared gain is the same on both sides).
+		manager.configure([1, 2], true);
+		manager.setAudible(true);
+		const [one, two] = armed;
+		if (!one || !two) throw new Error('missing lanes');
+		const trims = matchGains([
+			levelDb(one.curve.bands, one.curve.preampDb),
+			levelDb(two.curve.bands, two.curve.preampDb)
+		]);
+		const [first, second] = chains;
+		if (!first || !second) throw new Error('missing chains');
+		// Protected lanes apply their trim ahead of the limiter; the output is only the switch.
+		manager.select(1);
+		expect(trimGain(first)).toBeCloseTo(dbToGain(trims[0] ?? 0), 12);
+		expect(asFake(first.output, FakeGainNode).gain.value).toBe(1);
+		expect(asFake(second.output, FakeGainNode).gain.value).toBe(0);
+		manager.select(2);
+		expect(trimGain(second)).toBeCloseTo(dbToGain(trims[1] ?? 0), 12);
+		expect(asFake(first.output, FakeGainNode).gain.value).toBe(0);
+		expect(asFake(second.output, FakeGainNode).gain.value).toBe(1);
+		// Both limiters see the matched level, and no lane peaks above -1 dBFS there.
+		const atLimiter = (
+			chain: PreviewChain,
+			curve: Track['curve'],
+			db: (c: typeof curve) => number
+		) => db(curve) + 20 * Math.log10(trimGain(chain) * expected);
+		const level = (c: Track['curve']) => levelDb(c.bands, c.preampDb);
+		const peak = (c: Track['curve']) => chainPeakDb(c.bands, c.preampDb, rate);
+		expect(atLimiter(first, one.curve, level)).toBeCloseTo(atLimiter(second, two.curve, level), 9);
+		for (const [chain, track] of [
+			[first, one],
+			[second, two]
+		] as const) {
+			expect(atLimiter(chain, track.curve, peak)).toBeLessThanOrEqual(
+				YOLO_PREVIEW_PEAK_DBFS + 1e-9
+			);
+		}
+		// Unmatching moves the trims live (no rebuild): back to 0 dB, still at most -1 dBFS.
+		manager.configure([1, 2], false);
+		expect(trimGain(first)).toBe(1);
+		expect(trimGain(second)).toBe(1);
+		for (const [chain, track] of [
+			[first, one],
+			[second, two]
+		] as const) {
+			expect(atLimiter(chain, track.curve, peak)).toBeLessThanOrEqual(
+				YOLO_PREVIEW_PEAK_DBFS + 1e-9
+			);
+		}
+		manager.dispose();
+	});
+
+	test('disarming the only refused lane rebuilds the others unprotected', async () => {
+		const { engine, manager } = setup();
+		const build = vi.spyOn(engine, 'buildChain');
+		const tracks = withYoloOnly(initialTracks());
+		await manager.sync(tracks);
+		expect(build).toHaveBeenCalledTimes(4);
+		await manager.sync(
+			tracks.map((track) => (track.id === 2 ? { ...track, armed: false } : track))
+		);
+		// The protection changed: lanes 1, 3 and 4 are rebuilt without it.
+		expect(build).toHaveBeenCalledTimes(7);
+		const rebuilt = build.mock.results.slice(4).map((result): PreviewChain => result.value);
+		expect(rebuilt.map(normalizeGain)).toEqual([null, null, null]);
+		// Arming it again protects every lane once more.
+		await manager.sync(tracks);
+		expect(build).toHaveBeenCalledTimes(11);
+		const again = build.mock.results.slice(7).map((result): PreviewChain => result.value);
+		expect(again.map(normalizeGain).every((gain) => gain !== null)).toBe(true);
+		manager.dispose();
 	});
 
 	test('failed worklet load is reported and can be retried without rebuilding', async () => {

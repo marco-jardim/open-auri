@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installHidStub, hidLog } from './helpers/b-hid';
+import { settleRendering } from './helpers/a-app';
 import {
 	apo,
 	downloadBytes,
@@ -32,7 +33,9 @@ test('layers are cumulative and reflected in ?camada=, including a reload', asyn
 	await layers.getByRole('radio', { name: 'Ajustar', exact: true }).click();
 	await expect(main).toHaveAttribute('data-layer', 'ajustar');
 	await expect(page).toHaveURL(/camada=ajustar/);
-	await expect(filterBank(page).getByRole('combobox')).toHaveCount(10);
+	await expect(filterBank(page).getByRole('spinbutton', { name: 'Tipo', exact: true })).toHaveCount(
+		10
+	);
 	await expect(page.getByRole('region', { name: 'Presets', exact: true })).toBeVisible();
 	await expect(page.getByRole('region', { name: 'Gabinete modular', exact: true })).toHaveCount(0);
 
@@ -59,7 +62,7 @@ test('layers are cumulative and reflected in ?camada=, including a reload', asyn
 test('pointer drag stops at the gate boundary with a reason', async ({ page }) => {
 	await openCurva(page);
 	await importTxt(page, apo(-0.5, 'PK Fc 1000 Hz Gain -6 dB Q 1'));
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ });
 	const overlay = page.getByRole('group', { name: 'Alças dos filtros', exact: true });
 	// The whole plot, not only the handle, sits mid-viewport: on a phone it is about 290 × 135 px
 	// and the limit caption plate above it pushes it toward the fold. Every pointer position is
@@ -118,25 +121,31 @@ for (const sample of [
 		// a kind switch.
 		const modules = bank
 			.getByRole('listitem')
-			.filter({ has: page.getByRole('combobox', { name: 'Tipo', exact: true }) });
+			.filter({ has: page.getByRole('spinbutton', { name: 'Tipo', exact: true }) });
 		await expect(modules).toHaveCount(10);
 		const module = modules.first();
-		const kind = module.getByRole('combobox', { name: 'Tipo', exact: true });
-		const handle = page.getByRole('slider', { name: /^Filtro 1:/ });
-		await expect(kind).toHaveValue(sample.kind);
+		const kind = module.getByRole('spinbutton', { name: 'Tipo', exact: true });
+		const handle = page.getByRole('slider', { name: /^Filtro A,/ });
+		await expect(kind).toHaveAttribute('aria-valuetext', new RegExp(`\\(${sample.kind}\\)$`));
 		await expect(kind).toBeEnabled();
 		await expect(handle).toHaveAttribute('aria-disabled', 'false');
-		await expect(module.getByText('EXPERIMENTAL', { exact: true })).toBeVisible();
-		for (const option of ['HS', 'LP', 'HP']) {
-			await expect(kind.locator(`option[value="${option}"]`)).toHaveText(
-				`${option} · EXPERIMENTAL`
-			);
+		await expect(
+			module.locator('.mod-head').getByText('EXPERIMENTAL', { exact: true })
+		).toBeVisible();
+		await kind.focus();
+		const legend = module.getByRole('tooltip');
+		await expect(legend).toBeVisible();
+		for (const experimental of ['HS', 'LP', 'HP']) {
+			await expect(
+				legend.getByRole('listitem').filter({ has: page.getByText(experimental, { exact: true }) })
+			).toContainText('EXPERIMENTAL');
 		}
 
 		await page.getByRole('radio', { name: 'Ajustar', exact: true }).click();
 		await expect(page).toHaveURL(/camada=ajustar/);
-		await expect(kind).toBeDisabled();
-		for (const input of await module.getByRole('spinbutton').all()) {
+		// The current experimental filter is locked, but its dial can leave through an unlocked stop.
+		await expect(kind).toBeEnabled();
+		for (const input of await module.locator('input[type="number"]').all()) {
 			await expect(input).toBeDisabled();
 		}
 		await expect(handle).toHaveAttribute('aria-disabled', 'true');
@@ -146,8 +155,11 @@ for (const sample of [
 				exact: true
 			})
 		).toBeVisible();
-		const unused = modules.nth(1).getByRole('combobox');
-		await expect(unused.locator('option')).toHaveText(['Desligado', 'PK', 'LS']);
+		const unused = modules.nth(1).getByRole('spinbutton', { name: 'Tipo', exact: true });
+		for (const next of ['PK', 'LS', 'OFF']) {
+			await unused.press('ArrowRight');
+			await expect(unused).toHaveAttribute('aria-valuetext', new RegExp(`\\(${next}\\)$`));
+		}
 		const before = await handle.getAttribute('aria-valuetext');
 		await handle.press('ArrowRight');
 		await expect(handle).toHaveAttribute('aria-valuetext', before ?? '');
@@ -156,6 +168,11 @@ for (const sample of [
 		await expect(kind).toBeEnabled();
 		await expect(module.getByRole('spinbutton', { name: 'Freq (Hz)', exact: true })).toBeEnabled();
 		await expect(handle).toHaveAttribute('aria-disabled', 'false');
+		await page.getByRole('radio', { name: 'Ajustar', exact: true }).click();
+		await kind.press('ArrowRight');
+		await expect(kind).toHaveAttribute('aria-valuetext', /\(PK\)$/);
+		await expect(handle).toHaveAttribute('aria-disabled', 'false');
+		expect((await hidLog(page)).reports).toEqual([]);
 	});
 }
 
@@ -170,27 +187,60 @@ test('Neutro parks ten points with a hint; one becomes a gated filter, nothing i
 	await expect(
 		page.getByText('Arraste um ponto para criar um filtro, ou carregue um preset', { exact: true })
 	).toBeVisible();
-	await expect(page.getByRole('slider', { name: /^Ponto \d+ estacionado em 0 dB/ })).toHaveCount(
-		10
-	);
+	await expect(
+		page.getByRole('slider', { name: /^Ponto [A-J], .*estacionado em 0 dB/ })
+	).toHaveCount(10);
 	const bank = filterBank(page);
 	await expect(bank.getByText('Envelope observado', { exact: true })).toBeVisible();
 	await expect(bank.locator('.gaterow li')).toHaveCount(7);
 	await expect(page.getByText(/GATE v2/)).toHaveCount(0);
-	await page.getByRole('slider', { name: /^Ponto 6 estacionado/ }).focus();
+	await page.getByRole('slider', { name: /^Ponto F,/ }).focus();
 	await page.keyboard.press('ArrowDown');
-	await expect(page.getByRole('slider', { name: /^Filtro 6:/ })).toBeVisible();
+	await expect(page.getByRole('slider', { name: /^Filtro F,/ })).toBeVisible();
 	await expect(
 		bank.getByRole('spinbutton', { name: 'Ganho (dB)', exact: true }).first()
 	).toHaveValue('-1');
-	await expect(page.getByRole('slider', { name: /^Ponto \d+ estacionado/ })).toHaveCount(0);
+	await expect(page.getByRole('slider', { name: /^Ponto [A-J],/ })).toHaveCount(0);
 	expect((await hidLog(page)).reports).toEqual([]);
+});
+
+test('the bank wraps without horizontal scrolling and shares its badges with the scope', async ({
+	page
+}) => {
+	await openCurva(page);
+	await importTxt(page, apo(-3, 'PK Fc 1000 Hz Gain -6 dB Q 1'));
+	await settleRendering(page);
+	const bank = filterBank(page);
+	const modules = bank.locator('ol.modules > li.module');
+	await expect(modules).toHaveCount(10);
+	await expect(modules.locator('.mod-badge')).toHaveText('ABCDEFGHIJ'.split(''));
+	await expect(bank.getByRole('spinbutton', { name: 'Tipo', exact: true })).toHaveCount(10);
+	const columns = await bank
+		.locator('ol.modules')
+		.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+	expect(columns).toBe((page.viewportSize()?.width ?? 0) >= 1000 ? 5 : 2);
+	expect(await bank.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	const name = (await modules.first().locator('.mod-name').textContent())?.trim();
+	expect(name).toBeTruthy();
+	expect(
+		await page.getByRole('slider', { name: /^Filtro A,/ }).getAttribute('aria-label')
+	).toContain(`Filtro A, ${name}: PK`);
+	// Processing order is secondary metadata, not the band's identity or its main heading.
+	await expect(modules.first().locator('.mod-stage')).toHaveAttribute(
+		'title',
+		'Estágio 1 na ordem de processamento'
+	);
+	const scope = page.getByRole('region', { name: 'Osciloscópio', exact: true });
+	await expect(scope.locator('.grat text').filter({ hasText: /^48k$/ })).toBeVisible();
+	await expect(scope.locator('.inaudible-t')).toHaveText('inaudível · até Nyquist (48 kHz)');
 });
 
 test('a refused reorder snaps back without changing the curve or its CRC', async ({ page }) => {
 	await openCurva(page, 'engenharia');
 	await importTxt(page, apo(-0.5, 'PK Fc 1000 Hz Gain -6 dB Q 1', 'PK Fc 1000 Hz Gain 6 dB Q 1'));
 	const cabinet = page.getByRole('region', { name: 'Gabinete modular', exact: true });
+	// Cabinet slots still name processing order; A–J badges identify the scope and bank instead.
 	const modules = cabinet.getByRole('button', { name: /^Filtro \d+ / });
 	await expect(modules).toHaveCount(10);
 	const order = await modules.allTextContents();

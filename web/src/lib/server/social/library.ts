@@ -8,6 +8,7 @@ import {
 	curveId,
 	decodeS1,
 	EnvelopeError,
+	normalizeLabels,
 	normalizeText,
 	S1Error
 } from 'open-auri/share';
@@ -30,9 +31,12 @@ import {
 	listFavorites,
 	listInstalled,
 	listOwnLineages,
+	ownHeadCurves,
+	ownHeadLabels,
 	publishLineage,
 	recordShareEvent,
-	removeFavorite
+	removeFavorite,
+	validLabels
 } from '#lib/server/social/repo.ts';
 import {
 	DAY_MS,
@@ -47,7 +51,8 @@ import {
 	type LineageVisibility,
 	type ModerationState,
 	type Page,
-	type SocialErrorCode
+	type SocialErrorCode,
+	type VersionLabels
 } from '#lib/server/social/types.ts';
 
 // ---- Shelves --------------------------------------------------------------------------------
@@ -84,6 +89,8 @@ export interface LibraryItem {
 		license: License;
 		lang: Lang;
 		recipe: string | null;
+		/** Filter labels of the head version by wire index of `curve.s1`, or null (0012). */
+		labels: VersionLabels | null;
 		createdAt: number;
 	};
 	curve: { id: string; s1: string; levelDb: number | null; gateOk: boolean };
@@ -112,6 +119,7 @@ export function toLibraryItem(lineage: LineageSummary, at: number, userId: strin
 			license: head.license,
 			lang: head.lang,
 			recipe: head.recipe,
+			labels: head.labels,
 			createdAt: head.createdAt
 		},
 		curve: { id: curve.id, s1: curve.s1, levelDb: curve.levelDb, gateOk: curve.gateOk },
@@ -248,16 +256,26 @@ export interface MergeItem {
 	description?: string | undefined;
 	lang?: Lang | undefined;
 	license?: License | undefined;
+	/**
+	 * Filter labels by wire index of `s1` (ten entries, null = automatic name). Same rules as an
+	 * `open-auri/preset@2` envelope: refused text rejects the item with INVALID_TEXT. Never part
+	 * of the dedupe identity (`curveId`, `canonKey`).
+	 */
+	labels?: (string | null)[] | null | undefined;
 }
 
 export type MergeRejectCode =
 	'INVALID_CURVE' | 'GATE_REJECTED' | 'INVALID_TEXT' | 'QUOTA_EXCEEDED' | 'DUPLICATE' | 'INTERNAL';
 
+/** A field of a merged item that differs from the head version of the account's lineage. */
+export type MergeConflictField = 'name' | 'labels';
+
 export interface MergeReport {
 	created: { localId: string; lineageId: string }[];
 	duplicates: { localId: string; lineageId: string }[];
 	rejected: { localId: string; code: MergeRejectCode; reasons?: string[] }[];
-	conflicts: { localId: string; lineageId: string; field: 'name' }[];
+	/** One entry per differing field ('name' first, then 'labels'); an item may have both. */
+	conflicts: { localId: string; lineageId: string; field: MergeConflictField }[];
 }
 
 export interface MergeOptions {
@@ -272,8 +290,72 @@ interface Identity {
 }
 
 type Outcome =
-	| { kind: 'lineage'; lineageId: string; name: string }
+	| {
+			kind: 'lineage';
+			lineageId: string;
+			name: string;
+			labels: VersionLabels | null;
+			/** The S1 whose wire order `labels` follow (the head version's curve), if known. */
+			s1: string | null;
+	  }
 	| { kind: 'rejected'; code: MergeRejectCode; reasons?: string[] };
+
+/** Labels by value; null and an all-null list are the same (no labels). */
+function sameLabels(a: VersionLabels | null, b: VersionLabels | null): boolean {
+	const left = a?.some((label) => label !== null) ? a : null;
+	const right = b?.some((label) => label !== null) ? b : null;
+	if (left === null || right === null) return left === right;
+	return left.length === right.length && left.every((label, index) => label === right[index]);
+}
+
+/**
+ * The non-null labels of a curve, each paired with the band it names: kind, frequency, gain and
+ * Q, the tuple `canonKey` sorts by, so the result does not depend on the wire order. Identical
+ * bands are interchangeable (one canonical curve), so their labels count as a multiset: the
+ * pairs are sorted, and which of two identical filters carries a name never matters. Null when
+ * `s1` does not decode.
+ */
+function labelsByBand(s1: string, labels: VersionLabels | null): string[] | null {
+	let bands: ReturnType<typeof decodeS1>['bands'];
+	try {
+		bands = decodeS1(s1).bands;
+	} catch (error) {
+		if (error instanceof S1Error) return null;
+		throw error;
+	}
+	const pairs: string[] = [];
+	for (const [index, label] of (labels ?? []).entries()) {
+		if (label === null) continue;
+		const band = bands[index];
+		const identity =
+			band === undefined
+				? `#${index}`
+				: band.kind === 'OFF'
+					? 'OFF'
+					: `${band.kind},${band.freqHz},${band.gainDb ?? 0},${band.qFactor}`;
+		pairs.push(JSON.stringify([identity, label]));
+	}
+	return pairs.sort();
+}
+
+/**
+ * Whether an item's labels (by wire index of `itemS1`) equal a lineage's (by wire index of `s1`).
+ * The same S1: compared by index (`sameLabels`). Another S1 (a match by `canonKey`, the same bands
+ * in another wire order, or a head on another version): each list follows its own wire order, so
+ * every label is first matched to its band by identity (`labelsByBand`), then compared.
+ */
+function sameLabelsOf(
+	itemS1: string,
+	itemLabels: VersionLabels | null,
+	s1: string | null,
+	labels: VersionLabels | null
+): boolean {
+	if (s1 === null || s1 === itemS1) return sameLabels(itemLabels, labels);
+	const left = labelsByBand(itemS1, itemLabels);
+	const right = labelsByBand(s1, labels);
+	if (left === null || right === null) return sameLabels(itemLabels, labels);
+	return left.length === right.length && left.every((pair, index) => pair === right[index]);
+}
 
 async function identify(s1: string): Promise<Identity | null> {
 	let decoded: ReturnType<typeof decodeS1>;
@@ -301,6 +383,25 @@ function truncate(value: string, max: number): string {
 }
 
 type TextResult = { ok: true; value: string } | { ok: false; reasons: string[] };
+type LabelsResult = { ok: true; value: VersionLabels | null } | { ok: false; reasons: string[] };
+
+/**
+ * Core `normalizeLabels` (strict, the preset@2 rules: ill-formed text is env:pattern); null or
+ * absent means no labels. Also the repo's own bound (`validLabels`: ten entries, LABEL_MAX, the
+ * 0012 JSON CHECK), so a list the insert would refuse is INVALID_TEXT before any quota is spent.
+ */
+function cleanLabels(value: unknown): LabelsResult {
+	if (value === undefined || value === null) return { ok: true, value: null };
+	try {
+		const labels = normalizeLabels(value);
+		return validLabels(labels)
+			? { ok: true, value: labels }
+			: { ok: false, reasons: ['env:length'] };
+	} catch (error) {
+		if (error instanceof EnvelopeError) return { ok: false, reasons: issueCodes(error) };
+		throw error;
+	}
+}
 
 /** NFKC, no invisibles/bidi, no URL (core `normalizeText`), then cut to `max` code points. */
 function cleanText(value: string, multiline: boolean, max: number, path: string): TextResult {
@@ -372,8 +473,11 @@ const REPO_REJECT: Partial<Record<SocialErrorCode, MergeRejectCode>> = {
  * the account of `userId` (from the session). Each item lands in exactly one list of the report:
  *
  * - `duplicates`: the user already owns a lineage with a version of the same curve (`curve_id` or
- *   `canonKey`), or an earlier item of the batch has it, with the same name;
- * - `conflicts`: same, but the name differs (`field: 'name'`); nothing is changed;
+ *   `canonKey`), or an earlier item of the batch has it, with the same name and filter labels;
+ * - `conflicts`: same, but the name (`field: 'name'`) or the filter labels (`field: 'labels'`,
+ *   compared by value with the head version's, band by band when the two S1 wire orders differ;
+ *   refused labels differ) differ, one entry per
+ *   field; nothing is changed, so local labels are never silently dropped without a report;
  * - `rejected`: invalid S1, curve reproved by the gate, text refused by the normalizer, or a quota
  *   is spent (`QUOTA_EXCEEDED`: lineages created in 24 h, items gated in 24 h, or this request's
  *   MERGE_GATE_RUNS_MAX uncached gate runs; retry later); the item stays local only;
@@ -397,7 +501,10 @@ export async function mergeLocalLibrary(
 		curveIds: [...new Set(known.map((identity) => identity.curveId))],
 		canonKeys: [...new Set(known.map((identity) => identity.canonKey))]
 	});
-	const names = await ownHeadNames(db, userId, [...new Set(owned.map((row) => row.lineageId))]);
+	const ownedIds = [...new Set(owned.map((row) => row.lineageId))];
+	const names = await ownHeadNames(db, userId, ownedIds);
+	const headLabels = await ownHeadLabels(db, userId, ownedIds);
+	const headCurves = await ownHeadCurves(db, userId, ownedIds);
 
 	/** Outcomes by `id:<curveId>` and `ck:<canonKey>`: the account's lineages, then the batch's. */
 	const seen = new Map<string, Outcome>();
@@ -408,7 +515,9 @@ export async function mergeLocalLibrary(
 	for (const row of owned) {
 		const name = names.get(row.lineageId);
 		if (name === undefined) continue;
-		remember(row, { kind: 'lineage', lineageId: row.lineageId, name });
+		const labels = headLabels.get(row.lineageId) ?? null;
+		const s1 = headCurves.get(row.lineageId) ?? null;
+		remember(row, { kind: 'lineage', lineageId: row.lineageId, name, labels, s1 });
 	}
 
 	const recent = await countOwnLineagesSince(db, userId, now - DAY_MS);
@@ -423,7 +532,8 @@ export async function mergeLocalLibrary(
 		return baseGate(bands, preampDb);
 	};
 
-	const existing = (localId: string, rawName: string, outcome: Outcome): void => {
+	const existing = (item: MergeItem, outcome: Outcome): void => {
+		const { localId } = item;
 		if (outcome.kind === 'rejected') {
 			report.rejected.push({
 				localId,
@@ -432,11 +542,21 @@ export async function mergeLocalLibrary(
 			});
 			return;
 		}
-		const name = cleanText(rawName, false, NAME_MAX, 'name');
-		if (name.ok && name.value === outcome.name) {
+		const name = cleanText(item.name, false, NAME_MAX, 'name');
+		const labels = cleanLabels(item.labels);
+		const fields: MergeConflictField[] = [];
+		if (!name.ok || name.value !== outcome.name) fields.push('name');
+		// Matched by `canonKey` (or on another version than the head), the two label lists follow
+		// different wire orders: they are compared band by band (`sameLabelsOf`).
+		if (!labels.ok || !sameLabelsOf(item.s1, labels.value, outcome.s1, outcome.labels)) {
+			fields.push('labels');
+		}
+		if (fields.length === 0) {
 			report.duplicates.push({ localId, lineageId: outcome.lineageId });
-		} else {
-			report.conflicts.push({ localId, lineageId: outcome.lineageId, field: 'name' });
+			return;
+		}
+		for (const field of fields) {
+			report.conflicts.push({ localId, lineageId: outcome.lineageId, field });
 		}
 	};
 
@@ -450,16 +570,18 @@ export async function mergeLocalLibrary(
 		}
 		const previous = seen.get(`id:${identity.curveId}`) ?? seen.get(`ck:${identity.canonKey}`);
 		if (previous) {
-			existing(item.localId, item.name, previous);
+			existing(item, previous);
 			continue;
 		}
 
 		const name = cleanText(item.name, false, NAME_MAX, 'name');
 		const description = cleanText(item.description ?? '', true, DESCRIPTION_MAX, 'description');
-		if (!name.ok || !description.ok || name.value === '') {
+		const labels = cleanLabels(item.labels);
+		if (!name.ok || !description.ok || !labels.ok || name.value === '') {
 			const reasons = [
 				...(name.ok ? (name.value === '' ? ['env:length'] : []) : name.reasons),
-				...(description.ok ? [] : description.reasons)
+				...(description.ok ? [] : description.reasons),
+				...(labels.ok ? [] : labels.reasons)
 			];
 			report.rejected.push({ localId: item.localId, code: 'INVALID_TEXT', reasons });
 			continue;
@@ -489,7 +611,7 @@ export async function mergeLocalLibrary(
 					? { kind: 'rejected', code: 'INVALID_CURVE', reasons: check.codes }
 					: { kind: 'rejected', code: 'GATE_REJECTED', reasons: check.reasons };
 			remember(identity, outcome);
-			existing(item.localId, item.name, outcome);
+			existing(item, outcome);
 			continue;
 		}
 
@@ -505,13 +627,20 @@ export async function mergeLocalLibrary(
 				description: description.value,
 				license: item.license ?? MERGE_DEFAULT_LICENSE,
 				recipe: null,
-				lang: item.lang ?? MERGE_DEFAULT_LANG
+				lang: item.lang ?? MERGE_DEFAULT_LANG,
+				labels: labels.value
 			},
 			now
 		});
 		if (published.ok) {
 			quota--;
-			const outcome: Outcome = { kind: 'lineage', lineageId: ids.lineageId, name: name.value };
+			const outcome: Outcome = {
+				kind: 'lineage',
+				lineageId: ids.lineageId,
+				name: name.value,
+				labels: labels.value,
+				s1: item.s1
+			};
 			remember(identity, outcome);
 			report.created.push({ localId: item.localId, lineageId: ids.lineageId });
 			continue;
@@ -523,10 +652,12 @@ export async function mergeLocalLibrary(
 				const outcome: Outcome = {
 					kind: 'lineage',
 					lineageId: winner.id,
-					name: winner.head.name
+					name: winner.head.name,
+					labels: winner.head.labels,
+					s1: winner.curve.s1
 				};
 				remember(identity, outcome);
-				existing(item.localId, item.name, outcome);
+				existing(item, outcome);
 				continue;
 			}
 		}

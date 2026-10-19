@@ -24,6 +24,7 @@
 	import CableBar from '#lib/components/chrome/CableBar.svelte';
 	import Footer from '#lib/components/chrome/Footer.svelte';
 	import Toast from '#lib/components/chrome/Toast.svelte';
+	import YoloBar from '#lib/components/yolo/YoloBar.svelte';
 	import { AccountSession } from '#lib/components/chrome/account.svelte.ts';
 	import { postPolicyAcceptance } from '#lib/components/chrome/account.ts';
 	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
@@ -592,6 +593,12 @@
 		</div>
 	{/if}
 
+	{#if app && app.yolo.enabled}
+		<!-- Modo YOLO: a compact hazard bar on every page of this tab while it is on. A direct child
+		     of the app root, so it stays sticky under the top bar for the whole page. -->
+		<YoloBar yolo={app.yolo} />
+	{/if}
+
 	{#if app}
 		<!-- The full cable status beside its short bar label; closed while the popover shows. -->
 		<Tooltip text={statusText} anchor={statusShown ? null : statusTrigger} bind:open={statusTip} />
@@ -632,6 +639,7 @@
 			preampDb={pending.preampDb}
 			name={pending.name}
 			experimental={app.experimentalWrite}
+			profile={app.pendingProfile}
 			onclose={() => app?.closeChecklist()}
 			onresult={(outcome) => app?.onWriteResult(outcome)}
 		/>

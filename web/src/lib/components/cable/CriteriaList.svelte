@@ -37,9 +37,10 @@
 		{@const explainer = EXPLAINERS[lamp.id]}
 		<li class="criterion" data-lamp={lamp.id} data-state={lamp.state}>
 			<span class="row">
+				<!-- A criterion the YOLO profile waived is amber ("dispensado (YOLO)"), never green. -->
 				<Lamp
 					on={lamp.state !== 'unknown'}
-					tone={lamp.state === 'fail' ? 'danger' : 'accent'}
+					tone={lamp.state === 'fail' ? 'danger' : lamp.state === 'waived' ? 'warn' : 'accent'}
 					class="criterion__lamp"
 				/>
 				<span class="key">({lamp.id})</span>
@@ -89,6 +90,16 @@
 			inset 3px 0 0 #a3262c,
 			inset 0 1px 2px #0003,
 			0 1px 0 #ffffff80;
+	}
+	.criterion[data-state='waived'] {
+		box-shadow:
+			inset 3px 0 0 #c98a0b,
+			inset 0 1px 2px #0003,
+			0 1px 0 #ffffff80;
+	}
+	.criterion[data-state='waived'] .state,
+	.criterion[data-state='waived'] .reasons {
+		color: #7a4f00;
 	}
 	.row {
 		display: flex;

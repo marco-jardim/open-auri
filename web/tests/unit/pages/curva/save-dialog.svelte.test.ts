@@ -353,6 +353,7 @@ test('HEAD_MOVED on a re-save explains, reloads the head and the next save uses 
 						description: '',
 						license: 'CC0-1.0',
 						lang: 'pt-BR',
+						labels: null,
 						createdAt: 2,
 						isHead: true
 					}

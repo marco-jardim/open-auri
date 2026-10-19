@@ -33,9 +33,14 @@ import {
 	writeCurve,
 	writeMany
 } from 'open-auri/transport';
-import { MIN_INTERVAL_MS, observeFlashState, recordWrite } from 'open-auri/policy';
+import {
+	JOURNAL_WAIVED_MAX,
+	MIN_INTERVAL_MS,
+	observeFlashState,
+	recordWrite
+} from 'open-auri/policy';
 import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
-import { gateForWrite } from 'open-auri/safety';
+import { gateForWrite, isWaivable } from 'open-auri/safety';
 import { evaluateChecklist, flashCountersOf } from './checklist.ts';
 import { consumeGestureToken, createGestureToken, type GestureEventLike } from './gesture.ts';
 import { withWriteFlag } from './write-flag.ts';
@@ -64,11 +69,13 @@ import type {
 	QueueOutcome,
 	QueueRequest,
 	QueueState,
+	ReasonCode,
 	Refused,
 	RefusalReason,
 	RescueState,
 	WriteOutcome,
 	WriteLockManager,
+	WriteProfile,
 	WriteRequest,
 	WriteResult,
 	Written
@@ -159,7 +166,26 @@ function finite(value: unknown): value is number {
 	return typeof value === 'number' && Number.isFinite(value);
 }
 
-/** Parses a persisted marker; null when it is unreadable or malformed. */
+/**
+ * The waived codes of a persisted YOLO marker, checked like the journal checks an entry's
+ * (`JOURNAL_WAIVED_MAX` at most) and restricted to the codes the YOLO profile can waive.
+ * Null when the list is not valid: the recovered entry then names no waived code.
+ */
+function markerWaived(value: unknown): ReasonCode[] | null {
+	if (!Array.isArray(value) || value.length > JOURNAL_WAIVED_MAX) return null;
+	const codes: ReasonCode[] = [];
+	for (const code of value as unknown[]) {
+		if (!isWaivable(code)) return null;
+		codes.push(code as ReasonCode);
+	}
+	return codes;
+}
+
+/**
+ * Parses a persisted marker; null when it is unreadable or malformed. A marker without
+ * `profile: 'yolo'` (a standard write, or one persisted before markers carried a profile) is
+ * standard; `waived` is kept only on a YOLO marker and only when it is valid.
+ */
 export function parseInflightMarker(raw: string): InflightMarker | null {
 	let value: unknown;
 	try {
@@ -185,6 +211,11 @@ export function parseInflightMarker(raw: string): InflightMarker | null {
 	}
 	const marker: InflightMarker = { at, crc, name, preampDb, bands: bands as Band[], device, tabId };
 	if (candidate.between === true) marker.between = true;
+	if (candidate.profile === 'yolo') {
+		marker.profile = 'yolo';
+		const waived = markerWaived(candidate.waived);
+		if (waived !== null) marker.waived = waived;
+	}
 	return marker;
 }
 
@@ -275,6 +306,8 @@ interface Authorized {
 	snapshot: readonly Readonly<Band>[];
 	preampDb: number;
 	experimental: boolean;
+	/** Gate profile of the write (`'yolo'`: Modo YOLO, journaled as such). */
+	profile: WriteProfile;
 	/** Journal name, truncated to 48 characters. */
 	name: string;
 	/** CRC-16 of the gated payload. */
@@ -398,6 +431,15 @@ export function createCableService(deps: CableServiceDeps) {
 			: flashView('real', deps.flash.get(), now);
 	}
 
+	/** Modo YOLO session of this tab, read live (memory only; a throwing port counts as off). */
+	function yoloSession(): boolean {
+		try {
+			return deps.yoloSession?.() === true;
+		} catch {
+			return false;
+		}
+	}
+
 	function context(): ChecklistContext {
 		const now = nowMs();
 		if (mode === 'simulated') {
@@ -406,7 +448,8 @@ export function createCableService(deps: CableServiceDeps) {
 				flash: currentFlash(now),
 				lastWrittenLevelDb: simulatedLevelDb,
 				sessionWriteCount: simulatedFlash.session,
-				lastJournalStatus: null
+				lastJournalStatus: null,
+				yoloSession: yoloSession()
 			};
 		}
 		return {
@@ -414,7 +457,8 @@ export function createCableService(deps: CableServiceDeps) {
 			flash: currentFlash(now),
 			lastWrittenLevelDb: deps.lastWrittenLevelDb(),
 			sessionWriteCount: deps.sessionWriteCount(),
-			lastJournalStatus: deps.journal.last()?.status ?? null
+			lastJournalStatus: deps.journal.last()?.status ?? null,
+			yoloSession: yoloSession()
 		};
 	}
 
@@ -516,7 +560,15 @@ export function createCableService(deps: CableServiceDeps) {
 				preampDb: marker.preampDb,
 				bands: copyBands(marker.bands),
 				status: 'interrupted',
-				device: truncate(marker.device, 64)
+				device: truncate(marker.device, 64),
+				// An interrupted Modo YOLO write stays marked, with the codes it waived (a marker
+				// without a profile is a standard write, or one persisted before markers had one).
+				...(marker.profile === 'yolo'
+					? {
+							profile: 'yolo' as const,
+							...(marker.waived === undefined ? {} : { waived: [...marker.waived] })
+						}
+					: {})
 			};
 			try {
 				deps.journal.append(entry);
@@ -679,7 +731,11 @@ export function createCableService(deps: CableServiceDeps) {
 			preampDb: authorized.preampDb,
 			bands: copyBands(authorized.snapshot),
 			device: truncate(label, 64),
-			tabId
+			tabId,
+			// Modo YOLO: what the journal entry would carry, so a recovered interruption keeps it.
+			...(authorized.profile === 'yolo'
+				? { profile: 'yolo' as const, waived: [...authorized.checklist.waived] }
+				: {})
 		};
 		ownMarker = marker;
 		if (inflight.write(JSON.stringify(marker))) return true;
@@ -863,12 +919,36 @@ export function createCableService(deps: CableServiceDeps) {
 		const volumeLowered = confirmations?.volumeLowered === true;
 		const keepConnected = confirmations?.keepConnected === true;
 		const experimentalConfirmed = confirmations?.experimental === true;
+		// Read once, compared without coercion: only the exact string selects YOLO.
+		const profile: unknown = request.profile;
+		if (profile !== 'yolo') {
+			return {
+				bands,
+				preampDb,
+				experimental,
+				confirmations: { volumeLowered, keepConnected, experimental: experimentalConfirmed }
+			};
+		}
+		const yoloWrite = confirmations?.yoloWrite === true;
 		return {
 			bands,
 			preampDb,
 			experimental,
-			confirmations: { volumeLowered, keepConnected, experimental: experimentalConfirmed }
+			profile: 'yolo',
+			confirmations: {
+				volumeLowered,
+				keepConnected,
+				experimental: experimentalConfirmed,
+				yoloWrite
+			}
 		};
+	}
+
+	/** Gate options of a captured input (the profile only when it is YOLO). */
+	function gateOptions(captured: ChecklistInput) {
+		return captured.profile === 'yolo'
+			? { experimental: captured.experimental, profile: 'yolo' as const }
+			: { experimental: captured.experimental };
 	}
 
 	function refuse(reason: RefusalReason, extra: Omit<Refused, 'status' | 'reason'> = {}): Refused {
@@ -890,9 +970,7 @@ export function createCableService(deps: CableServiceDeps) {
 		if (writing) return refuse('busy');
 		const captured = input(request);
 		const rawName: unknown = request.name;
-		const verdict = gateForWrite(captured.bands, captured.preampDb, {
-			experimental: captured.experimental
-		});
+		const verdict = gateForWrite(captured.bands, captured.preampDb, gateOptions(captured));
 		const checklist = evaluateChecklist(captured, context(), verdict);
 		if (!checklist.canWrite || checklist.snapshot === null || checklist.crc === null) {
 			return refuse('checklist', { checklist });
@@ -920,6 +998,7 @@ export function createCableService(deps: CableServiceDeps) {
 			snapshot: checklist.snapshot,
 			preampDb: prepared.captured.preampDb,
 			experimental: prepared.captured.experimental,
+			profile: prepared.captured.profile === 'yolo' ? 'yolo' : 'standard',
 			name: prepared.name,
 			crc: checklist.crc
 		};
@@ -954,7 +1033,8 @@ export function createCableService(deps: CableServiceDeps) {
 		label: string,
 		authorized: Authorized
 	): { status: Written['status']; entry: JournalEntry | null } {
-		const { checklist, snapshot, preampDb, name } = authorized;
+		const { checklist, snapshot, preampDb, name, profile } = authorized;
+		const yolo = profile === 'yolo';
 		const simulated = mode === 'simulated';
 		const at = nowMs();
 		const status: Written['status'] & JournalStatus = committed
@@ -972,7 +1052,9 @@ export function createCableService(deps: CableServiceDeps) {
 				preampDb,
 				bands: copyBands(snapshot),
 				status,
-				device: truncate(label, 64)
+				device: truncate(label, 64),
+				// Modo YOLO: the entry is marked, with the class-2 codes the write waived.
+				...(yolo ? { profile: 'yolo' as const, waived: [...checklist.waived] } : {})
 			};
 			try {
 				deps.journal.append(entry);
@@ -988,6 +1070,9 @@ export function createCableService(deps: CableServiceDeps) {
 		} else {
 			rescue = { at, deviceLabel: label, reportsSent, fresh: true };
 		}
+		// Every real committed write, YOLO ones too, is the cable's new written snapshot (the app
+		// marks it). A YOLO write is marked like its journal entry: `profile: 'yolo'` with the
+		// class-2 codes it waived, so a listener (the outbox counts it) can tell it apart.
 		if (!simulated && committed && entry !== null) {
 			const detail: CableWrittenDetail = {
 				entry,
@@ -996,7 +1081,8 @@ export function createCableService(deps: CableServiceDeps) {
 				bands: copyBands(snapshot),
 				deviceLabel: label,
 				at,
-				levelDb: checklist.newLevelDb
+				levelDb: checklist.newLevelDb,
+				...(yolo ? { profile: 'yolo' as const, waived: [...checklist.waived] } : {})
 			};
 			events.dispatchEvent(new CustomEvent(CABLE_WRITTEN_EVENT, { detail }));
 		}
@@ -1150,7 +1236,7 @@ export function createCableService(deps: CableServiceDeps) {
 					if (guard !== null) return guard;
 					const authorized = authorize(prepared);
 					if ('status' in authorized) return authorized;
-					const { checklist, snapshot, preampDb, experimental } = authorized;
+					const { checklist, snapshot, preampDb, experimental, profile } = authorized;
 					const device = primary;
 					if (device === null) return refuse('no-device', { checklist });
 					if (abort.signal.aborted) return refuse('aborted', { checklist });
@@ -1162,6 +1248,8 @@ export function createCableService(deps: CableServiceDeps) {
 						result = await withWriteFlag(() =>
 							writeCurve(device, snapshot, preampDb, {
 								experimental,
+								// The transport gates again with the same profile before any byte.
+								...(profile === 'yolo' ? { profile: 'yolo' as const } : {}),
 								signal: abort.signal,
 								clock,
 								hid: startHid
@@ -1192,6 +1280,13 @@ export function createCableService(deps: CableServiceDeps) {
 		 * one gesture on the explicit queue confirmation. Stops at the first failure.
 		 */
 		async writeQueue(request: QueueRequest): Promise<QueueOutcome> {
+			// Modo YOLO has no X9 queue: one cable, one confirmation, one write. The gesture is
+			// spent all the same, so a refused attempt cannot be replayed.
+			const profile: unknown = request.profile;
+			if (profile === 'yolo') {
+				consumeGestureToken(request.gesture, nowMs());
+				return refuse('yolo-queue');
+			}
 			// Read once: the queue the user confirmed is copied before anything else happens.
 			const requested: unknown = request.devices;
 			const list: CableDevice[] = [];

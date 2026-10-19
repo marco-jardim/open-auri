@@ -12,8 +12,14 @@
  *   the session (`engine.stop()`) and releases this page's chains and taps; never the engine.
  * - A stop or dispose during the engine start wins: when the start resolves late, the engine is
  *   stopped again and nothing is left audible. An edit during the start is played once it resolves.
+ * - Protection (C1): the A/B gets the engine's preview protection (float peak normalized to
+ *   -1 dBFS, then a limiter) while Modo YOLO is on and, whatever YOLO says, whenever either curve
+ *   fails the standard gate (a YOLO curve restored after a reload or adopted otherwise, a YOLO
+ *   cable write as the reference, the free preview's draft). The engine adds it on its own to
+ *   anything louder than the standard gate allows.
  */
 import { AudioEngineError } from '#lib/audio/engine.ts';
+import { gateAccepts } from '#lib/gate-verdicts.ts';
 import type { ABPreview, ABSide, AudioEngine } from '#lib/audio/engine.ts';
 import {
 	getReference,
@@ -31,7 +37,27 @@ export type PreviewError = 'gesture' | 'suspended' | 'unsupported' | 'failed';
 /** Session tag of the Curva preview (`engine.state().session`, the Transport and the navbar). */
 export const CURVA_SESSION = 'curva';
 
+/**
+ * Whether an A/B of these curves must play protected (C1): Modo YOLO on, or either curve refused
+ * by the standard gate (the engine also checks it by itself, `standardGateAccepts`; asking
+ * explicitly keeps this page's intent visible). The verdicts come from the client's shared cache
+ * (`gate-verdicts.ts`), the same entries the curve store and the engine's `createAB` read.
+ */
+export function needsProtection(reference: Curve, editor: Curve, yolo: boolean): boolean {
+	return (
+		yolo ||
+		!gateAccepts(reference.bands, reference.preampDb, { profile: 'standard' }) ||
+		!gateAccepts(editor.bands, editor.preampDb, { profile: 'standard' })
+	);
+}
+
 export interface CurvaPreviewOptions {
+	/**
+	 * Modo YOLO is on (read at each A/B build): the A/B gets the engine's preview protection
+	 * (float peak normalized to -1 dBFS, then a limiter). With YOLO off the A/B is protected
+	 * anyway when either curve fails the standard gate (`needsProtection`).
+	 */
+	yolo?: () => boolean;
 	/** 0 VU reference for the taps (the app's `meterRef`); defaults to the module reference. */
 	reference?: () => VuReference;
 }
@@ -59,6 +85,8 @@ export class CurvaPreview {
 	/** Band index of each stage tap (the editor's non-OFF sections, in written order). */
 	#stageBands: number[] = [];
 	#generation = 0;
+	/** Whether Modo YOLO is on (the preview protection applies). */
+	#yolo: () => boolean;
 	/** Start attempts; `stop`/`dispose` bump it so a start still awaiting knows it lost. */
 	#attempt = 0;
 	/** This preview started (or is starting) chain mode, so it must stop it. */
@@ -73,6 +101,7 @@ export class CurvaPreview {
 	constructor(engine: AudioEngine, options: CurvaPreviewOptions = {}) {
 		this.#engine = engine;
 		this.#reference = options.reference ?? getReference;
+		this.#yolo = options.yolo ?? (() => false);
 	}
 
 	/**
@@ -271,7 +300,9 @@ export class CurvaPreview {
 		this.#disconnectMeters();
 		this.#ab = this.#engine.createAB(reference, editor, {
 			experimental: hasExperimental(reference.bands) || hasExperimental(editor.bands),
-			initial: this.side
+			initial: this.side,
+			// Modo YOLO, or a curve the standard gate refuses (C1): normalized to -1 dBFS, limited.
+			...(needsProtection(reference, editor, this.#yolo()) ? { protect: 'yolo' as const } : {})
 		});
 		this.#built = { reference, editor };
 		previous?.dispose();

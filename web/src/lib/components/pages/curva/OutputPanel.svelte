@@ -11,7 +11,56 @@
 	  needle never moves without data. Reduced motion: no easing and a numeric readout.
 	- "Máximo sem clipping" (mock headroom button): the page sets the highest preamp the full gate
 	  accepts and the result is said here.
+	- Manual preamp (with `onpreamp`): −/+ steps of 0,1 dB (Shift: 0,5 dB) around an editable LCD
+	  spinbutton (arrows 0,1 dB, Shift+arrows 0,5 dB, Page Up/Down 1 dB, Enter or leaving the field
+	  applies, Escape drops the typed text). Values stay inside the gate's preamp range on the 0,1 dB
+	  grid (up to 0 dB in Modo YOLO, `preampMaxDb`; −25,5 dB is the floor in every profile); the
+	  page runs each one through the full gate of its profile and only an accepted value reaches the
+	  editor (undoable). A refusal keeps the last accepted value and its reason is said here.
+	  Unavailable (Ouvir, loading, writing): aria-disabled, still focusable, the reason announced.
+	  Without `onpreamp` the preamp is a plain readout.
 -->
+<script module lang="ts">
+	import { THRESHOLDS } from 'open-auri/safety';
+
+	/**
+	 * Manual preamp range and resolution. The gate refuses anything outside
+	 * [preampMinDb, preampMaxDb] (`g:preamp`, −25,5 to −0,5 dB); S1 and S5 encode the preamp in tenths
+	 * of a dB below 0 (−25,5 to 0), and `autoPreamp` works on the same 0,1 dB grid. The Q23 payload
+	 * word takes any value ≤ 0 dB, so every value offered here is encodable by all three.
+	 */
+	export const PREAMP_MIN_DB = THRESHOLDS.preampMinDb;
+	export const PREAMP_MAX_DB = THRESHOLDS.preampMaxDb;
+	const PREAMP_STEPS_PER_DB = 10;
+	export const PREAMP_STEP_DB = 1 / PREAMP_STEPS_PER_DB;
+
+	/** `value` on the 0,1 dB preamp grid (an exact tenth), or null when it is not a finite number. */
+	export function snapPreamp(value: number): number | null {
+		if (!Number.isFinite(value)) return null;
+		return Math.round(value * PREAMP_STEPS_PER_DB) / PREAMP_STEPS_PER_DB + 0;
+	}
+
+	/**
+	 * `value` inside the gate's preamp range, or up to `max` (Modo YOLO: 0 dB, where `g:preamp` is
+	 * waived). The floor is −25,5 dB in every profile.
+	 */
+	export function clampPreamp(value: number, max: number = PREAMP_MAX_DB): number {
+		return Math.min(max, Math.max(PREAMP_MIN_DB, value));
+	}
+
+	/** Typed text to dB ("−1,5", "-1.5", "-1,5 dB"), or null when it is not a number. */
+	export function parsePreamp(text: string): number | null {
+		const clean = text
+			.replace(/\s+/g, '')
+			.replace(/db$/i, '')
+			.replace(/[\u2212\u2013]/g, '-')
+			.replace(',', '.');
+		if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(clean)) return null;
+		const value = Number(clean);
+		return Number.isFinite(value) ? value : null;
+	}
+</script>
+
 <script lang="ts">
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { levelDb } from 'open-auri/safety';
@@ -21,6 +70,8 @@
 	import type { MeterFrame, MeterMode } from '#lib/audio/meters.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
+	import IconButton from '#lib/components/primitives/IconButton.svelte';
+	import Tooltip from '#lib/components/primitives/Tooltip.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import { formatHz, formatNumber, formatSignedDb } from './format.ts';
 	import type { Curve } from './model.ts';
@@ -44,6 +95,20 @@
 		disabled?: boolean;
 		/** Why "Máximo sem clipping" is unavailable while `disabled` (default: the editor is loading). */
 		disabledReason?: string | null;
+		/**
+		 * Manual preamp: proposes a value inside the gate's range on the 0,1 dB grid; the page gates
+		 * it (omitted: the preamp is a plain readout).
+		 */
+		onpreamp?: (preampDb: number) => void;
+		/** Why the manual preamp is unavailable (Ouvir, writing…); `disabled` alone says loading. */
+		preampReason?: string | null;
+		/** The gate's refusal of the last manual preamp, in plain language. */
+		preampMessage?: string | null;
+		/**
+		 * Highest manual preamp offered: the gate's −0,5 dB by default; 0 dB in Modo YOLO
+		 * (`editorPreampMaxDb`). The floor stays −25,5 dB.
+		 */
+		preampMaxDb?: number;
 	}
 	let {
 		curve,
@@ -56,7 +121,11 @@
 		onmaxclip,
 		maxClipMessage = null,
 		disabled = false,
-		disabledReason = null
+		disabledReason = null,
+		onpreamp,
+		preampReason = null,
+		preampMessage = null,
+		preampMaxDb = PREAMP_MAX_DB
 	}: Props = $props();
 
 	const legendId = $props.id();
@@ -116,6 +185,78 @@
 				: m.curva_vu_value_data({ db: formatSignedDb(shown, locale, 2) })
 	);
 	const reasonContext = $derived({ bands: curve.bands, locale });
+
+	// --- manual preamp ---------------------------------------------------------------------------
+
+	const preampId = `${legendId}-preamp`;
+	const preampTipId = `${legendId}-preamp-why`;
+	const preampHintId = `${legendId}-preamp-hint`;
+	let preampField = $state<HTMLInputElement | undefined>();
+	/** Text typed in the field and not applied yet (null: the field shows the editor's preamp). */
+	let preampDraft = $state<string | null>(null);
+	const preampText = $derived(preampDraft ?? formatNumber(curve.preampDb, locale, 1));
+	/** Why the control is unavailable right now (T8), or null when it acts. */
+	const preampBlock = $derived(
+		preampReason?.trim() ||
+			(disabled ? disabledReason?.trim() || m.curva_v2_loading_reason() : null) ||
+			null
+	);
+	const downReason = $derived(
+		preampBlock ??
+			(curve.preampDb <= PREAMP_MIN_DB
+				? m.curva_preamp_at_min({ value: formatSignedDb(PREAMP_MIN_DB, locale) })
+				: null)
+	);
+	const upReason = $derived(
+		preampBlock ??
+			(curve.preampDb >= preampMaxDb
+				? m.curva_preamp_at_max({ value: formatSignedDb(preampMaxDb, locale) })
+				: null)
+	);
+	// Field keys, in 0,1 dB steps (Shift on the arrows: 0,5 dB).
+	const KEY_STEPS: Record<string, number> = {
+		ArrowUp: 1,
+		ArrowDown: -1,
+		PageUp: 10,
+		PageDown: -10
+	};
+
+	/** Clamps and snaps `next`, then hands it to the page's gate unless it is the current value. */
+	function proposePreamp(next: number | null) {
+		preampDraft = null;
+		if (next === null || preampBlock || !onpreamp) return;
+		const snapped = snapPreamp(clampPreamp(next, preampMaxDb));
+		if (snapped !== null && snapped !== curve.preampDb) onpreamp(snapped);
+	}
+	/** Steps from the typed value when there is one, else from the editor's preamp. */
+	function stepPreamp(tenths: number) {
+		const typed = preampDraft === null ? null : parsePreamp(preampDraft);
+		const base = typed ?? curve.preampDb;
+		proposePreamp(Math.round(base * PREAMP_STEPS_PER_DB + tenths) / PREAMP_STEPS_PER_DB);
+	}
+	function commitPreampDraft() {
+		if (preampDraft === null) return;
+		// Unreadable text proposes nothing: the field goes back to the last accepted value.
+		proposePreamp(parsePreamp(preampDraft));
+	}
+	function onPreampKey(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			commitPreampDraft();
+			return;
+		}
+		if (event.key === 'Escape') {
+			if (preampDraft === null) return;
+			event.preventDefault();
+			preampDraft = null;
+			return;
+		}
+		const steps = KEY_STEPS[event.key];
+		if (steps === undefined || event.altKey || event.ctrlKey || event.metaKey) return;
+		event.preventDefault();
+		const arrow = event.key === 'ArrowUp' || event.key === 'ArrowDown';
+		stepPreamp(arrow && event.shiftKey ? steps * 5 : steps);
+	}
 </script>
 
 <section class="psec ps-out" aria-labelledby={legendId}>
@@ -154,9 +295,62 @@
 		<output class="vu-readout" data-testid="vu-readout">{valueText}</output>
 	{/if}
 	<dl class="ro-list">
-		<div class="ro-row">
+		<div class="ro-row" class:pre-row={onpreamp !== undefined}>
 			<dt>{m.curva_out_preamp()} <Explainer term="preamp" /></dt>
-			<dd><span class="ro-win">{formatSignedDb(curve.preampDb, locale)}</span></dd>
+			<dd>
+				{#if onpreamp}
+					<div class="pre-ctl">
+						<IconButton
+							size="sm"
+							class="pre-step"
+							label={m.curva_preamp_down()}
+							aria-controls={preampId}
+							disabledReason={downReason}
+							onclick={(event) => stepPreamp(event.shiftKey ? -5 : -1)}>−</IconButton
+						>
+						<span class="ro-win pre-win" class:locked={preampBlock !== null}>
+							<input
+								bind:this={preampField}
+								id={preampId}
+								class="pre-input"
+								type="text"
+								role="spinbutton"
+								autocomplete="off"
+								spellcheck="false"
+								aria-label={m.curva_out_preamp()}
+								aria-valuemin={PREAMP_MIN_DB}
+								aria-valuemax={preampMaxDb}
+								aria-valuenow={curve.preampDb}
+								aria-valuetext={formatSignedDb(curve.preampDb, locale)}
+								aria-disabled={preampBlock ? 'true' : undefined}
+								aria-describedby={preampBlock ? preampTipId : preampHintId}
+								readonly={preampBlock !== null}
+								value={preampText}
+								oninput={(event) => {
+									if (!preampBlock) preampDraft = event.currentTarget.value;
+								}}
+								onkeydown={onPreampKey}
+								onblur={commitPreampDraft}
+							/>
+							<span class="pre-unit" aria-hidden="true">dB</span>
+						</span>
+						<IconButton
+							size="sm"
+							class="pre-step"
+							label={m.curva_preamp_up()}
+							aria-controls={preampId}
+							disabledReason={upReason}
+							onclick={(event) => stepPreamp(event.shiftKey ? 5 : 1)}>+</IconButton
+						>
+					</div>
+					<span id={preampHintId} class="visually-hidden">{m.curva_preamp_hint()}</span>
+					{#if preampBlock}
+						<Tooltip id={preampTipId} text={preampBlock} anchor={preampField} />
+					{/if}
+				{:else}
+					<span class="ro-win">{formatSignedDb(curve.preampDb, locale)}</span>
+				{/if}
+			</dd>
 		</div>
 		<div class="ro-row">
 			<dt>{m.curva_out_peak()}</dt>
@@ -182,6 +376,9 @@
 			<dd><span class="ro-win">{formatSignedDb(level, locale)}</span></dd>
 		</div>
 	</dl>
+	{#if onpreamp && preampMessage}
+		<p class="pre-msg" role="status">{preampMessage}</p>
+	{/if}
 	{#if onmaxclip}
 		<Button
 			variant="plate"
@@ -336,6 +533,70 @@
 		margin-top: 2px;
 		color: var(--text-2);
 		font: 400 var(--label-min) var(--face-data);
+	}
+	/* Manual preamp: −/+ plates around the LCD well. On a narrow column the control wraps under
+	   its label, right-aligned like the other readouts. */
+	.pre-row {
+		flex-wrap: wrap;
+		align-items: center;
+	}
+	.pre-row dd {
+		margin-left: auto;
+	}
+	.pre-ctl {
+		display: inline-flex;
+		gap: 4px;
+		align-items: center;
+	}
+	.pre-win {
+		display: inline-flex;
+		gap: 0.3em;
+		align-items: baseline;
+		padding: 3px 6px;
+		cursor: text;
+	}
+	.pre-win.locked {
+		cursor: default;
+	}
+	.pre-win:has(.pre-input:focus-visible) {
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: 2px;
+	}
+	.pre-input {
+		width: 6ch;
+		min-width: 0;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		outline: none;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		font-variant-numeric: inherit;
+		letter-spacing: inherit;
+		text-align: right;
+		text-shadow: inherit;
+	}
+	.pre-unit {
+		font-size: var(--label-min);
+	}
+	.ps-out :global(.pre-step) {
+		flex: none;
+	}
+	.pre-msg {
+		margin: 6px 0 0;
+		padding: 6px 8px;
+		border-left: 3px solid var(--danger);
+		color: var(--text);
+		font: 400 var(--fs-caption) / var(--lh-small) var(--face-body);
+	}
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 	.ps-out :global(.maxclip) {
 		width: 100%;

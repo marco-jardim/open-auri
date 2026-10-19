@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import { openApp, settleRendering } from './helpers/a-app';
 import { routes } from './helpers/a-routes';
 import { dynamicRegions } from './helpers/a-visual';
+import { filterBank } from './helpers/b-ui';
 
 // The capture injects tests/e2e/helpers/visual.css as a <style>; the strict CSP (T5.4) blocks
 // injected styles. CSP itself is covered by csp.spec.ts, which runs without this bypass.
@@ -32,10 +33,14 @@ test.beforeEach(async ({ context }) => {
 
 // Both configured projects run every case: desktop 1440 px and mobile 390 px.
 const visualCss = fileURLToPath(new URL('./helpers/visual.css', import.meta.url));
-// Comunidade (Phase 4) is added here only: the shared route list (helpers/a-routes.ts) also drives
-// other specs. Its reference runs on :4173 (sign-up closed, nobody publishes there), so the feed is
-// stable.
-const visualRoutes = [...routes, { path: '/comunidade', name: 'comunidade' } as const];
+// Extra Curva layers and Comunidade are capture-only routes; the shared route list also drives
+// other specs. Comunidade runs on :4173 (sign-up closed, nobody publishes there), so it is stable.
+const visualRoutes = [
+	...routes,
+	{ path: '/?camada=ajustar', name: 'curva-ajustar' },
+	{ path: '/?camada=engenharia', name: 'curva-engenharia' },
+	{ path: '/comunidade', name: 'comunidade' }
+];
 
 /** Constant wall clock of the deterministic Comunidade capture (2026-01-01T00:00:00Z). */
 const COMUNIDADE_EPOCH = Date.UTC(2026, 0, 1);
@@ -110,6 +115,20 @@ for (const motion of [
 				}
 				await openApp(page, route.path);
 				await settleRendering(page);
+				if (route.name.startsWith('curva')) {
+					const scope = page.getByRole('region', { name: 'Osciloscópio', exact: true });
+					await expect(scope.locator('.grat text').filter({ hasText: /^48k$/ })).toBeVisible();
+					await expect(scope.locator('.inaudible-t')).toHaveText(
+						'inaudível · até Nyquist (48 kHz)'
+					);
+					if (route.name !== 'curva') {
+						const bank = filterBank(page);
+						await expect(bank.getByRole('spinbutton', { name: 'Tipo', exact: true })).toHaveCount(
+							10
+						);
+						await expect(bank.locator('.mod-badge')).toHaveText('ABCDEFGHIJ'.split(''));
+					}
+				}
 				expect(
 					await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
 				).toBe(motion.preference === 'reduce');

@@ -25,6 +25,8 @@ export const lampLabel: Record<LampLabelKey, () => string> = {
 export const lampState: Record<LampState, () => string> = {
 	ok: () => m.cable_lamp_state_ok(),
 	fail: () => m.cable_lamp_state_fail(),
+	// Modo YOLO: a class-2 criterion the YOLO profile waived (amber, values still shown).
+	waived: () => m.yolo_lamp_waived(),
 	unknown: () => m.cable_lamp_state_unknown()
 };
 
@@ -37,6 +39,7 @@ const reasonText: Record<ReasonView['messageKey'], () => string> = {
 	cable_reason_b_pole_radius: () => m.cable_reason_b_pole_radius(),
 	cable_reason_c_section_peak: () => m.cable_reason_c_section_peak(),
 	cable_reason_d_prefix_peak: () => m.cable_reason_d_prefix_peak(),
+	cable_reason_d_prefix_peak_full: () => m.cable_reason_d_prefix_peak_full(),
 	cable_reason_e_output_audible: () => m.cable_reason_e_output_audible(),
 	cable_reason_e_output_full: () => m.cable_reason_e_output_full(),
 	cable_reason_f_codec: () => m.cable_reason_f_codec(),
@@ -68,8 +71,18 @@ export const refusalText: Record<RefusalReason, () => string> = {
 	unusable: () => m.cable_refused_unusable(),
 	aborted: () => m.cable_refused_aborted(),
 	'interrupted-elsewhere': () => m.cable_refused_interrupted_elsewhere(),
+	'yolo-queue': () => m.yolo_queue_refused(),
 	error: () => m.cable_refused_error()
 };
+
+/** Display names of waived criteria for the per-write YOLO confirmation, e.g. "(c), (g)". */
+export function waivedCriteriaText(codes: readonly string[]): string {
+	const lamps = [...new Set(codes.map((code) => code.split(':')[0]))].map((prefix) =>
+		prefix === 'd7' ? 'k' : prefix
+	);
+	const unique = [...new Set(lamps)];
+	return unique.length === 0 ? m.yolo_waived_none() : unique.map((id) => `(${id})`).join(', ');
+}
 
 /** Locale-aware decimal (comma in pt-BR, point in en-US); negative values use a real minus sign. */
 export function formatNumber(value: number, digits = 1, signed = false): string {

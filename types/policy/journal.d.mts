@@ -38,6 +38,8 @@ export function lastEntry(entries: readonly JournalEntry[]): JournalEntry | null
 /** localStorage JSON array, oldest entry first. */
 export const JOURNAL_STORAGE_KEY: "oa.journal";
 export const JOURNAL_MAX: 500;
+/** Most waived codes one entry keeps (the gate has 8 waivable codes). */
+export const JOURNAL_WAIVED_MAX: 16;
 export type JournalBand = import("../dsp/eq0xcb.mjs").Band;
 export type JournalEntry = {
     schema: 1;
@@ -48,4 +50,6 @@ export type JournalEntry = {
     bands: JournalBand[];
     status: "ok" | "interrupted" | "simulated";
     device: string | null;
+    profile?: "yolo";
+    waived?: string[];
 };

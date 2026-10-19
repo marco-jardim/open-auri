@@ -2,8 +2,9 @@
  * NFKC, invisible-control removal, whitespace collapse and trim. Description keeps
  * LF line boundaries (at most five lines); all other C0/C1 controls are refused
  * BEFORE whitespace collapse, so tabs/newlines cannot be laundered into a name.
- * Throws EnvelopeError for invalid input, controls, line count or URL-like text.
- * Length bounds belong to the field validator and count Unicode code points.
+ * Text that is not well-formed UTF-16 (a lone surrogate) is refused (env:pattern).
+ * Throws EnvelopeError for invalid input, controls, ill-formed text, line count or
+ * URL-like text. Length bounds belong to the field validator and count Unicode code points.
  * @param {string} text
  * @param {{multiline?: boolean, path?: string}} [options]
  * @returns {string}
@@ -12,6 +13,23 @@ export function normalizeText(text: string, { multiline, path }?: {
     multiline?: boolean;
     path?: string;
 }): string;
+/**
+ * Filter labels by wire index, as `open-auri/preset@2` stores them: each entry goes
+ * through the same normalization as `name` (NFKC, invisibles stripped, controls, lone
+ * surrogates and URL/domain/IP text refused), empty text becomes null, then exactly LABEL_COUNT
+ * entries of 1–LABEL_MAX code points or null. Returns null when every entry is null
+ * (the key is omitted). Strict by default: throws EnvelopeError with every issue
+ * (env:type, env:labels, env:length, env:pattern, env:url, env:url-like; paths
+ * `/labels/i`). `lenient` never throws: a refused entry becomes null and a list that
+ * is not an array of LABEL_COUNT entries becomes null (local state, old records).
+ * Labels never take part in S1, curveId, canonKey or the safety gate.
+ * @param {unknown} input
+ * @param {{lenient?: boolean}} [options]
+ * @returns {Labels | null}
+ */
+export function normalizeLabels(input: unknown, { lenient }?: {
+    lenient?: boolean;
+}): Labels | null;
 /**
  * Returns a new object, normalizing free text and defaulting description to ''.
  * Does not repair structural errors or regenerate code. Throws EnvelopeError for
@@ -44,6 +62,10 @@ export function serializeEnvelope(value: unknown): string;
  * @returns {EnvelopeResult}
  */
 export function parseEnvelope(json: string): EnvelopeResult;
+/** Filter labels by wire index (`open-auri/preset@2`). */
+export const LABEL_COUNT: 10;
+/** Longest filter label, in normalized code points. */
+export const LABEL_MAX: 24;
 /** A thrown normalization/serialization error; validation APIs return these issues instead. */
 export class EnvelopeError extends Error {
     /** @param {EnvelopeIssue[]} errors */
@@ -73,8 +95,17 @@ export type Recipe = {
     };
     params?: Record<string, Primitive>;
 };
-export type Envelope = {
-    format: "open-auri/preset@1";
+/**
+ * Filter labels (`open-auri/preset@2` only): exactly LABEL_COUNT entries by wire
+ * index, each 1–LABEL_MAX normalized code points or null (automatic name). An
+ * all-null list is omitted. Labels are presentation only: never part of S1,
+ * curveId, canonKey or the safety gate.
+ */
+export type Labels = (string | null)[];
+/**
+ * Fields shared by every envelope format.
+ */
+export type EnvelopeFields = {
     name: string;
     description: string;
     author?: string | null;
@@ -87,7 +118,25 @@ export type Envelope = {
     lang: "pt-BR" | "en-US";
     createdAt: string;
 };
-export type EnvelopeErrorCode = "env:type" | "env:required" | "env:extra" | "env:length" | "env:enum" | "env:pattern" | "env:range" | "env:url" | "env:url-like" | "env:code-mismatch" | "env:s1" | "env:bands" | "env:json" | "env:size";
+/**
+ * `open-auri/preset@1`: never carries labels (a `labels` key is env:extra).
+ */
+export type EnvelopeV1 = EnvelopeFields & {
+    format: "open-auri/preset@1";
+    labels?: never;
+};
+/**
+ * `open-auri/preset@2`: optional filter labels (omitted when every entry is null).
+ */
+export type EnvelopeV2 = EnvelopeFields & {
+    format: "open-auri/preset@2";
+    labels?: Labels;
+};
+/**
+ * A validated envelope, discriminated by `format`.
+ */
+export type Envelope = EnvelopeV1 | EnvelopeV2;
+export type EnvelopeErrorCode = "env:type" | "env:required" | "env:extra" | "env:length" | "env:enum" | "env:pattern" | "env:range" | "env:url" | "env:url-like" | "env:code-mismatch" | "env:s1" | "env:bands" | "env:labels" | "env:json" | "env:size";
 export type EnvelopeIssue = {
     path: string;
     code: EnvelopeErrorCode;

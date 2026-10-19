@@ -6,6 +6,10 @@ import {
 	type GateInput
 } from './gate-handler.ts';
 
+// The editor profile (`'standard' | 'yolo' | 'codec'`) travels in each drag/commit input; the
+// codec-only predicate of the free preview is cheap and synchronous, so it runs in the page.
+export { codecAccepts, type EditorProfile } from './gate-handler.ts';
+
 export function createGateWorker(options: WorkerClientOptions = {}) {
 	const client = createLatestClient<GateInput, ReturnType<typeof handleGateRequest>>(
 		() => new Worker(new URL('./gate.worker.ts', import.meta.url), { type: 'module' }),

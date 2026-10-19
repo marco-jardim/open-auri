@@ -64,7 +64,7 @@ async function setup(gate: GateClient) {
 
 /** Pointer events on handle 1, at a fraction of the scope overlay (synthetic: no capture slot). */
 function pointerEditor(container: HTMLElement) {
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
 	const overlay = container.querySelector('svg.handles');
 	if (!overlay) throw new Error('Missing handle overlay');
@@ -89,7 +89,7 @@ test('outside the envelope the handle keeps following the pointer, coloured, wit
 	const commit = vi.spyOn(client, 'commit');
 	const { app, screen } = await setup(client);
 	const pointer = pointerEditor(screen.container);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	pointer('pointerdown');
 	// Top of the scope: +9.2 dB with a −1 dB preamp is far over the output and internal limits.
 	pointer('pointermove', 0.4, 0.05);
@@ -115,7 +115,7 @@ test('outside the envelope the handle keeps following the pointer, coloured, wit
 test('a release outside stops at the last safe point, names the band and never writes', async () => {
 	const { app, screen } = await setup(gateClient());
 	const pointer = pointerEditor(screen.container);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	pointer('pointerdown');
 	pointer('pointermove', 0.4, 0.05);
 	await vi.waitFor(() => expect(handle.getAttribute('aria-valuenow')).not.toBe('1000'));
@@ -144,7 +144,7 @@ test('a release the gate refuses everywhere goes back to where it was and shakes
 	vi.spyOn(client, 'commit').mockResolvedValue({ type: 'commit', id: 0, verdict: refused });
 	const { app, screen } = await setup(client);
 	const pointer = pointerEditor(screen.container);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	pointer('pointerdown');
 	pointer('pointermove', 0.4, 0.1);
 	pointer('pointerup', 0.4, 0.1);
@@ -183,7 +183,7 @@ test('the wheel over a handle changes Q and commits once after the last notch', 
 	const client = gateClient();
 	const commit = vi.spyOn(client, 'commit');
 	const { app } = await setup(client);
-	const handle = page.getByRole('slider', { name: /^Filtro 1:/ }).element();
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
 	const notch = () =>
 		handle.dispatchEvent(
 			new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true })

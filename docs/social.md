@@ -277,6 +277,35 @@ O limite do envelope normalizado continua em **8 KiB de JSON UTF-8**.
 Bandas `LP`/`HP` do envelope têm `kind`, `freqHz` e `qFactor`, sem `gainDb`;
 até `gainDb: 0` é recusado como `env:extra`.
 
+### Rótulos de filtro (`open-auri/preset@2`)
+
+O formato `open-auri/preset@2` é o `@1` com um campo opcional a mais,
+`labels: (string | null)[]`, e só é emitido quando a curva tem ao menos um
+rótulo; sem rótulos, todo escritor continua emitindo `@1`, byte a byte igual ao
+de antes. Em `@1`, `labels` segue recusado como `env:extra`. O esquema normativo é
+[`preset-envelope-2.schema.json`](../schemas/preset-envelope-2.schema.json).
+
+- **Por índice de fio:** exatamente 10 entradas; `labels[i]` nomeia `bands[i]`.
+  Contagem diferente dá `env:labels`.
+- **Mesmo pipeline do nome:** cada rótulo passa por NFKC, remoção de invisíveis,
+  colapso de espaços, recusa de controles (`env:pattern`) e de URL, domínio ou IP
+  (`env:url`, `env:url-like`). De 1 a 24 pontos de código depois de normalizar;
+  acima disso, `env:length`. Texto que normaliza para vazio vira `null`; uma
+  lista toda `null` some do envelope.
+- **Conta no teto de 8 KiB** do envelope serializado. Na ordem determinística,
+  `labels` vem logo depois de `bands`.
+- **Nunca é identidade:** rótulos ficam fora do S1, do `curveId`, do `canonKey`,
+  do gate e da linha `curves`; a deduplicação os ignora. Também ficam fora do
+  link `#p=`, da imagem OG, dos cartões de lista e feed e do payload da troca às
+  cegas antes da revelação.
+- `normalizeLabels` (exportado por `open-auri/share` com `LABEL_COUNT = 10` e
+  `LABEL_MAX = 24`) aplica as mesmas regras fora do envelope; no modo `lenient`,
+  usado pelo estado local, uma entrada recusada vira `null` em vez de erro.
+
+Na nuvem, cada versão guarda os rótulos em `versions.labels` (JSON, migração
+`0012_version_labels.sql`). Uma mudança só de rótulos acrescenta uma versão
+nova (conta na cota) e reaproveita o gate da curva, que não muda.
+
 Esboço conceitual da receita (o esquema normativo é
 [`preset-envelope-1.schema.json`](../schemas/preset-envelope-1.schema.json)):
 

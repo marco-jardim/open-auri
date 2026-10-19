@@ -35,6 +35,7 @@ const ALL_CODES = [
 	'b:pole-radius',
 	'c:section-peak',
 	'd:prefix-peak',
+	'd:prefix-peak-full',
 	'e:output-audible',
 	'e:output-full',
 	'f:codec',

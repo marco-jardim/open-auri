@@ -16,7 +16,8 @@ import type {
 	CommitInput,
 	CommitResult,
 	DragInput,
-	DragResult
+	DragResult,
+	EditorProfile
 } from '#lib/workers/gate-handler.ts';
 import { bandValue, hasGain, replaceBand, type Band, type Curve, type DragParam } from './model.ts';
 import type { Reason } from './reasons.ts';
@@ -37,6 +38,12 @@ export interface DragOutcome {
 	reasons: Reason[];
 	/** Whether the full-grid commit approved the result (always true for `accepted`). */
 	committed: boolean;
+	/**
+	 * Committed by the free preview's codec only: the gate itself refuses the curve. It may only
+	 * live in the page's memory-only free-preview draft (C1): never `curve.set`, `oa.current`,
+	 * the undo history or a write.
+	 */
+	previewOnly?: true;
 }
 
 export function isAbortError(error: unknown): boolean {
@@ -114,8 +121,18 @@ export async function commitBand(
 	const band = moved.bands[bandIndex];
 	if (!band) return { ...moved, bands: original.bands.slice(), committed: false };
 	const bands = replaceBand(moved.bands, bandIndex, roundToGrid(band));
-	const { verdict } = await client.commit({ bands, preampDb: moved.preampDb, experimental });
-	if (verdict.ok) return { ...moved, bands, committed: true };
+	const { verdict, accepted } = await client.commit({
+		bands,
+		preampDb: moved.preampDb,
+		experimental
+	});
+	// `accepted` differs from `verdict.ok` only in the free preview (codec-only, never written):
+	// such a result is marked `previewOnly` whatever the worker said, so it is never stored.
+	if (accepted ?? verdict.ok) {
+		return verdict.ok
+			? { ...moved, bands, committed: true }
+			: { ...moved, bands, committed: true, previewOnly: true };
+	}
 	return {
 		bands: original.bands.slice(),
 		preampDb: original.preampDb,
@@ -188,6 +205,19 @@ export async function releaseBand(
 		reasons: exact.reasons,
 		committed: false,
 		outcome: 'reverted'
+	};
+}
+
+/**
+ * The gate client with the editor profile added to every drag and commit, read at call time
+ * (Modo YOLO: `'yolo'`, handles may pass class-2 limits while class 1 still snaps; free preview:
+ * `'codec'`, codec-only). Standard by default, so a missing profile is never laxer.
+ */
+export function withProfile(client: GateClient, profile: () => EditorProfile): GateClient {
+	return {
+		...client,
+		drag: (input) => client.drag({ ...input, profile: profile() }),
+		commit: (input) => client.commit({ ...input, profile: profile() })
 	};
 }
 

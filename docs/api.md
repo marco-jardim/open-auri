@@ -238,6 +238,15 @@ invisíveis e bidi, sem URL; S1 igual às bandas) → cota de tentativas de gate
 (cacheado por curva e versão do gate) → gravação. O envelope normalizado tem no máximo 8 KiB.
 As cotas de 30 publicações/dia UTC e 60 tentativas/24 h são as mesmas para publicação, versão e fork.
 
+O envelope pode ser `open-auri/preset@2`, com `labels` (rótulos de filtro por índice de fio: 10
+entradas, cada uma `null` ou texto de 1 a 24 pontos de código, com as regras do nome; erros
+`env:labels`, `env:length`, `env:url`, `env:pattern` em `details.codes`). Os rótulos ficam na versão
+(`versions.labels`, migração 0012), nunca na linha `curves`, no `curveId`, no `canonKey` nem no
+gate: uma versão nova que só muda rótulos conta na cota, reaproveita a curva e o parecer cacheado
+do gate e não cria linha em `curves`. Um fork sem envelope explícito copia os rótulos da versão de
+origem. Rótulos não entram na imagem OG, nos cartões de lista e feed, no link `#p=` nem na troca às
+cegas antes da revelação.
+
 - 201 `{ lineageId, versionId, curveId }`. Pública ou não listada aquece a imagem OG em segundo
   plano.
 - 400 `INVALID_BODY`; 422 `INVALID_CURVE` (`details.codes`); 422 `GATE_REJECTED`
@@ -250,7 +259,8 @@ As cotas de 30 publicações/dia UTC e 60 tentativas/24 h são as mesmas para pu
 visibilidade da sessão. Reavalia o head e a versão pedida se o parecer do gate estiver
 desatualizado, depois relê a visibilidade; reprovação atual impede leitura por terceiros.
 
-- 200 com a linhagem, a versão pedida, a curva, as contagens públicas (`favorites`, `previewed`,
+- 200 com a linhagem, a versão pedida (com `labels`: os rótulos de filtro ou `null`; o
+  histórico também os traz por versão), a curva, as contagens públicas (`favorites`, `previewed`,
   `installed`) e o crédito do autor. Sem sessão: cache de 60 s com ETag; com sessão:
   `private, no-store`.
 - 404 `NOT_FOUND` (inexistente, privada de outra pessoa ou moderada); 410 `GONE` (retirada, para
@@ -383,7 +393,8 @@ deve guardá-los e tentar depois. As cotas de 30 lotes/h e 100 lotes/dia continu
 Logado. Query: `shelf` ∈ `created` | `favorites` | `installed` (obrigatório); `visibility`
 (filtra só `created`); `cursor` (até 512 caracteres); `limit` (1 a 100).
 200 `{ shelf, items, nextCursor }`; 400 `INVALID_BODY` com `details.issues`; 400
-`INVALID_CURSOR`.
+`INVALID_CURSOR`. O `head` de cada item traz `labels` (rótulos de filtro da versão head ou
+`null`), para carregar a curva no editor e renomear sem perder os rótulos.
 
 ### `GET /api/v1/me/packs`
 
@@ -404,9 +415,12 @@ linhagem. 400 `INVALID_BODY` com `details.issues`; 400 `INVALID_CURSOR`.
 ### `POST /api/v1/me/library/merge`
 
 Mescla a biblioteca local (anônima) do navegador na conta, sem duplicar. Verificado; corpo até
-1 MiB: `{ "items": [{ "localId", "s1", "name", "description"?, "lang"?, "license"? }] }`, de 1 a
-100 itens com `localId` distintos. Itens novos passam pela validação e pelo gate; os criados
+1 MiB: `{ "items": [{ "localId", "s1", "name", "description"?, "lang"?, "license"?, "labels"? }] }`,
+de 1 a 100 itens com `localId` distintos. Itens novos passam pela validação e pelo gate; os criados
 viram linhagens privadas. Duplicatas e conflitos de nome são identificados sem criar outra linhagem.
+`labels` (rótulos de filtro por índice de fio do `s1`, regras do envelope `preset@2`) segue a
+versão criada; contagem ou texto recusado recusa só o item, com `INVALID_TEXT`. Os rótulos não
+entram na identidade da curva: não mudam duplicatas nem conflitos.
 
 200 `{ created, duplicates, rejected, conflicts }`. Recusas por item usam `INVALID_CURVE`,
 `GATE_REJECTED`, `INVALID_TEXT`, `QUOTA_EXCEEDED`, `DUPLICATE` ou `INTERNAL`.

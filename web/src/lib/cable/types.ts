@@ -121,6 +121,16 @@ export interface InflightMarker {
 	 * one has not started. No cable is being written, so recovering it records nothing.
 	 */
 	between?: true;
+	/**
+	 * Modo YOLO write: recovered as a YOLO `interrupted` entry. Absent on standard writes and on
+	 * markers persisted before it existed (both recovered as standard).
+	 */
+	profile?: 'yolo';
+	/**
+	 * The class-2 codes the YOLO write waived (only with `profile: 'yolo'`; at most
+	 * `JOURNAL_WAIVED_MAX`, waivable codes only), copied into the recovered entry.
+	 */
+	waived?: ReasonCode[];
 }
 
 export interface CableServiceDeps {
@@ -156,7 +166,16 @@ export interface CableServiceDeps {
 	inflight?: InflightPort | null;
 	/** Identifies this service instance in the in-flight marker; random by default. */
 	tabId?: string;
+	/**
+	 * Modo YOLO session state of this tab (memory only, `lib/state/yolo.svelte.ts`): true while
+	 * the phrase was typed in this tab and YOLO is on. Read at each checklist evaluation; a YOLO
+	 * write is refused unless it returns true. Defaults to `() => false`.
+	 */
+	yoloSession?: () => boolean;
 }
+
+/** Gate profile of a write: only `'yolo'` (Modo YOLO) changes anything. */
+export type WriteProfile = 'standard' | 'yolo';
 
 export type CableMode = 'real' | 'simulated';
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
@@ -168,6 +187,11 @@ export interface Confirmations {
 	keepConnected: boolean;
 	/** Experimental kinds (HS/LP/HP) acknowledged. */
 	experimental: boolean;
+	/**
+	 * Modo YOLO, per write: "Gravar curva YOLO: fora do envelope observado (…). Abaixei o volume e
+	 * aceito o risco." Required on every YOLO write; never remembered between writes.
+	 */
+	yoloWrite?: boolean;
 }
 
 export interface ChecklistInput {
@@ -176,6 +200,12 @@ export interface ChecklistInput {
 	/** Lets the gate accept HS/LP/HP (the experimental confirmation is then required). */
 	experimental: boolean;
 	confirmations: Confirmations;
+	/**
+	 * `'yolo'`: gate with the YOLO profile (class-2 reasons waived, class 1 and
+	 * `d:prefix-peak-full` still block) and require `yolo-session` and `yolo-write`. Anything
+	 * else is the standard profile.
+	 */
+	profile?: WriteProfile;
 }
 
 export interface ChecklistContext {
@@ -184,10 +214,13 @@ export interface ChecklistContext {
 	lastWrittenLevelDb: number | null;
 	sessionWriteCount: number;
 	lastJournalStatus: JournalStatus | null;
+	/** Modo YOLO is on in this tab, with the phrase typed (see `CableServiceDeps.yoloSession`). */
+	yoloSession?: boolean;
 }
 
 export type LampId = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'k';
-export type LampState = 'ok' | 'fail' | 'unknown';
+/** `waived`: only class-2 reasons the YOLO profile waived (amber, "dispensado (YOLO)"). */
+export type LampState = 'ok' | 'fail' | 'waived' | 'unknown';
 
 export interface ReasonView {
 	code: ReasonCode;
@@ -196,16 +229,28 @@ export interface ReasonView {
 	stage: number | null;
 	value: number | null;
 	limit: number | null;
+	/** Waived by the YOLO profile (shown, never blocking). */
+	waived?: true;
 }
 
 export interface Lamp {
 	id: LampId;
 	state: LampState;
 	labelKey: LampLabelKey;
+	/** Blocking reasons first, then the waived ones (flagged `waived`). */
 	reasons: ReasonView[];
 }
 
-export type ChecklistItemId = 'gate' | 'volume' | 'connection' | 'experimental' | 'spacing';
+export type ChecklistItemId =
+	| 'gate'
+	| 'volume'
+	| 'connection'
+	| 'experimental'
+	| 'spacing'
+	/** Modo YOLO on in this tab, phrase typed (required for a YOLO write). */
+	| 'yolo-session'
+	/** The per-write YOLO confirmation (required for every YOLO write). */
+	| 'yolo-write';
 
 export interface ChecklistItem {
 	id: ChecklistItemId;
@@ -230,6 +275,12 @@ export interface ChecklistResult {
 	dailyNotice: { show: boolean; text: string };
 	items: ChecklistItem[];
 	canWrite: boolean;
+	/** Gate profile the verdict used. */
+	profile: WriteProfile;
+	/** Codes the YOLO profile waived, once each (empty in the standard profile). */
+	waived: ReasonCode[];
+	/** The waived reasons with their values (amber lamps). */
+	waivedReasons: ReasonView[];
 }
 
 export type ReasonMessageKey =
@@ -241,6 +292,7 @@ export type ReasonMessageKey =
 	| 'cable_reason_b_pole_radius'
 	| 'cable_reason_c_section_peak'
 	| 'cable_reason_d_prefix_peak'
+	| 'cable_reason_d_prefix_peak_full'
 	| 'cable_reason_e_output_audible'
 	| 'cable_reason_e_output_full'
 	| 'cable_reason_f_codec'
@@ -290,6 +342,8 @@ export type RefusalReason =
 	 * and the rescue notice raised; nothing was sent by this attempt.
 	 */
 	| 'interrupted-elsewhere'
+	/** Modo YOLO writes one cable at a time: the X9 queue refuses a YOLO request. */
+	| 'yolo-queue'
 	| 'error';
 
 export interface Refused {
@@ -376,4 +430,11 @@ export interface CableWrittenDetail {
 	deviceLabel: string;
 	at: number;
 	levelDb: number | null;
+	/**
+	 * `'yolo'`: a Modo YOLO write (marked like its journal entry). Absent, or `'standard'`, on a
+	 * standard write.
+	 */
+	profile?: WriteProfile;
+	/** The class-2 codes the YOLO write waived (only with `profile: 'yolo'`). */
+	waived?: ReasonCode[];
 }

@@ -1,6 +1,6 @@
 import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 import { curveResponseDb, distance, logGrid, levelDb } from 'open-auri/dsp';
-import { encodeS1, serializeEnvelope } from 'open-auri/share';
+import { encodeS1, normalizeLabels, serializeEnvelope } from 'open-auri/share';
 import type { CurveData } from '#lib/state/model.ts';
 import type { LibraryItem } from '#lib/state/library.svelte.ts';
 import type { gateForWrite } from 'open-auri/safety';
@@ -178,8 +178,10 @@ export function envelopeView(
 	if (allowed && license === 'CC-BY-4.0' && !author.trim()) {
 		throw new TypeError('CC-BY requires attribution');
 	}
+	// Filter labels make the draft preset@2; without them it stays the unchanged preset@1.
+	const labels = normalizeLabels(tape.labels ?? null, { lenient: true });
 	const envelope = {
-		format: 'open-auri/preset@1',
+		format: labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
 		name: tape.name,
 		description: tape.description,
 		...(author ? { author } : {}),
@@ -188,6 +190,7 @@ export function envelopeView(
 		code: encodeS1(tape),
 		preampDb: tape.preampDb,
 		bands: tape.bands,
+		...(labels ? { labels } : {}),
 		lang: locale,
 		createdAt: tape.createdAt === null ? null : new Date(tape.createdAt).toISOString()
 	};

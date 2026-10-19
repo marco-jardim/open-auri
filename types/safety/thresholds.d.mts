@@ -23,6 +23,13 @@
 export const THRESHOLDS: Readonly<Thresholds>;
 /** @type {Readonly<Provenance>} */
 export const PROVENANCE: Readonly<Provenance>;
+/**
+ * @typedef {object} YoloThresholds
+ * @property {number} internalFullDb Largest prefix peak with preamp, DC–48 kHz (dB): the
+ *   `d:prefix-peak-full` limit.
+ */
+/** @type {Readonly<YoloThresholds>} */
+export const YOLO_THRESHOLDS: Readonly<YoloThresholds>;
 export type Thresholds = {
     /**
      * Wire order of the section words.
@@ -86,4 +93,11 @@ export type Provenance = {
      * Repository-relative path of the generator.
      */
     generatedBy: string;
+};
+export type YoloThresholds = {
+    /**
+     * Largest prefix peak with preamp, DC–48 kHz (dB): the
+     * `d:prefix-peak-full` limit.
+     */
+    internalFullDb: number;
 };

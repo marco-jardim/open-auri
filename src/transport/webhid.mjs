@@ -42,7 +42,7 @@ import {
   encodePayload,
   reportsFromPayload,
 } from '../dsp/eq0xcb.mjs';
-import { gateForWrite } from '../safety/gate.mjs';
+import { gateForWrite, gateProfile } from '../safety/gate.mjs';
 
 /**
  * @typedef {import('../dsp/eq0xcb.mjs').Band} Band
@@ -71,13 +71,17 @@ import { gateForWrite } from '../safety/gate.mjs';
  * @typedef {(
  *   bands: readonly Band[],
  *   preampDb: number,
- *   options: {experimental: boolean},
+ *   options: {experimental: boolean, profile?: 'yolo'},
  * ) => GateVerdict} Gate
  *
  * @typedef {object} WriteOptions
  * @property {Gate} [gate] Optional additional check, called with the gate's frozen
  *   snapshot of the bands after `gateForWrite` approved them; it can only refuse.
  * @property {boolean} [experimental] Passed to the gates; only `true` enables it.
+ * @property {'yolo'} [profile] Gate profile for `gateForWrite` (Modo YOLO: class-2
+ *   reasons waived, class 1 and `d:prefix-peak-full` still block). Read like
+ *   `gateProfile` does: only an own data property equal to `'yolo'` selects it, a
+ *   getter is never called. `writeMany` refuses it (one cable at a time).
  * @property {AbortSignal} [signal]
  * @property {Clock} [clock] Defaults to {@link systemClock}.
  * @property {CableHID} [hid] Source of 'disconnect' events; defaults to `navigator.hid`.
@@ -250,18 +254,25 @@ function checkExtraGate(gate) {
  * @param {readonly Band[]} bands
  * @param {number} preampDb
  * @param {boolean} experimental
+ * @param {'standard' | 'yolo'} profile Already read by `gateProfile`.
  * @param {Gate | undefined} extraGate
  * @returns {Approved}
  */
-function approve(bands, preampDb, experimental, extraGate) {
-  const verdict = gateForWrite(bands, preampDb, { experimental });
-  if (!verdict.ok) throw new GateRejectedError(verdict.reasons);
+function approve(bands, preampDb, experimental, profile, extraGate) {
+  const verdict = gateForWrite(bands, preampDb, { experimental, profile });
+  // The verdict must come from the profile asked for (only YOLO verdicts carry `profile`).
+  const yoloVerdict = verdict.profile === 'yolo';
+  if (!verdict.ok || yoloVerdict !== (profile === 'yolo')) {
+    throw new GateRejectedError(verdict.reasons);
+  }
   const { bands: snapshot, payload, payloadCrc } = verdict.metrics;
   if (snapshot === undefined || payload === undefined || payloadCrc === undefined) {
     throw new Error('the safety gate returned no payload; nothing was sent');
   }
   if (extraGate !== undefined) {
-    const extra = extraGate(snapshot, preampDb, { experimental });
+    // The extra gate sees `profile` only in YOLO (standard options keep their shape).
+    const options = profile === 'yolo' ? { experimental, profile } : { experimental };
+    const extra = extraGate(snapshot, preampDb, options);
     if (extra === null || typeof extra !== 'object') {
       throw new TypeError('the safety gate must return {ok, reasons}');
     }
@@ -335,6 +346,8 @@ export async function requestCable(hid = navigatorHid()) {
  * @returns {Promise<WriteResult>}
  */
 export async function writeCurve(device, bands, preampDb, options) {
+  // Read first, as a descriptor: a `profile` getter is never called.
+  const profile = gateProfile(options);
   const {
     gate,
     experimental = false,
@@ -349,7 +362,7 @@ export async function writeCurve(device, bands, preampDb, options) {
   try {
     // Gate, snapshot and payload come from one synchronous step: the reports are
     // split from the very bytes the gate evaluated.
-    const { payload, crc } = approve(bands, preampDb, experimental === true, gate);
+    const { payload, crc } = approve(bands, preampDb, experimental === true, profile, gate);
     signal?.throwIfAborted(); // aborted while gating: nothing is sent
     const reports = reportsFromPayload(payload);
     return await sendSequence(device, reports, crc, { signal, clock, hid });
@@ -541,6 +554,10 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
  * @returns {Promise<ManyResult[]>}
  */
 export async function writeMany(devices, bands, preampDb, options) {
+  // Modo YOLO writes one cable at a time, each with its own confirmation: no queue.
+  if (gateProfile(options) === 'yolo') {
+    throw new TypeError('the YOLO profile writes one cable at a time; nothing was sent');
+  }
   const {
     gate,
     experimental = false,
@@ -554,7 +571,7 @@ export async function writeMany(devices, bands, preampDb, options) {
   }
   const list = Array.from({ length: devices.length }, (_, index) => devices[index]);
   signal?.throwIfAborted();
-  const { snapshot } = approve(bands, preampDb, experimental === true, gate);
+  const { snapshot } = approve(bands, preampDb, experimental === true, 'standard', gate);
   signal?.throwIfAborted(); // aborted while gating: no device is touched
   const perDevice = { gate, experimental, signal, clock, hid };
 

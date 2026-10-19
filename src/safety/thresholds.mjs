@@ -53,3 +53,17 @@ export const PROVENANCE = Object.freeze({
   sha256: '45c1976cc4e520e42af3a053905e1a38b6fb3e74cbad6c9c21457361d81f38a3',
   generatedBy: 'tools/gen-thresholds.mjs',
 });
+
+// YOLO gate profile only. A separate export: THRESHOLDS above (and so the gate
+// version) do not change when this one does.
+
+/**
+ * @typedef {object} YoloThresholds
+ * @property {number} internalFullDb Largest prefix peak with preamp, DC–48 kHz (dB): the
+ *   `d:prefix-peak-full` limit.
+ */
+
+/** @type {Readonly<YoloThresholds>} */
+export const YOLO_THRESHOLDS = Object.freeze({
+  internalFullDb: 2.5000638697363913,
+});

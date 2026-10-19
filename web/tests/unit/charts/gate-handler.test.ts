@@ -127,3 +127,43 @@ describe('full commit handler', () => {
 		);
 	});
 });
+
+describe('free preview commits (C1)', () => {
+	const loud: readonly Band[] = [
+		{ kind: 'PK', freqHz: 1000, gainDb: 12, qFactor: 1 },
+		...NEUTRO.bands.slice(1)
+	];
+
+	it('marks a curve only the codec accepts as previewOnly, never as a plain accept', () => {
+		const result = handleGateRequest({
+			type: 'commit',
+			id: 1,
+			bands: loud,
+			preampDb: -0.5,
+			profile: 'codec'
+		});
+		if (result.type !== 'commit') throw new Error('Expected commit');
+		expect(result.verdict.ok).toBe(false);
+		expect(result.accepted).toBe(true);
+		expect(result.previewOnly).toBe(true);
+	});
+
+	it('has no previewOnly outside the free preview or for gate-accepted curves', () => {
+		for (const profile of ['standard', 'yolo'] as const) {
+			const result = handleGateRequest({
+				type: 'commit',
+				id: 2,
+				bands: loud,
+				preampDb: -0.5,
+				profile
+			});
+			if (result.type !== 'commit') throw new Error('Expected commit');
+			expect(result.accepted).toBe(false);
+			expect(result.previewOnly).toBeUndefined();
+		}
+		const fine = handleGateRequest({ type: 'commit', ...NEUTRO, id: 3, profile: 'codec' });
+		if (fine.type !== 'commit') throw new Error('Expected commit');
+		expect(fine.accepted).toBe(true);
+		expect(fine.previewOnly).toBeUndefined();
+	});
+});

@@ -1,7 +1,9 @@
 // POST /api/v1/me/library/merge: merges a batch of the anonymous browser library into the
-// account (T4.3). Body `{ items: [{ localId, s1, name, description?, lang?, license? }] }`, at most
-// MERGE_BATCH_MAX items with distinct `localId`s. Answers 200 with the merge report
-// `{ created, duplicates, rejected, conflicts }` (see mergeLocalLibrary).
+// account (T4.3). Body `{ items: [{ localId, s1, name, description?, lang?, license?, labels? }] }`,
+// at most MERGE_BATCH_MAX items with distinct `localId`s. Answers 200 with the merge report
+// `{ created, duplicates, rejected, conflicts }` (see mergeLocalLibrary). `labels` (filter labels
+// by wire index of `s1`) is only bounded here; its count and text rules (core `normalizeLabels`)
+// reject the item with INVALID_TEXT, never the whole batch.
 import { z } from 'zod';
 import { defineApi, json, readJson, type ApiEvent } from '#lib/server/api/index.ts';
 import { MERGE_BATCH_MAX, mergeLocalLibrary } from '#lib/server/social/library.ts';
@@ -12,6 +14,9 @@ export const prerender = false;
 /** Raw text bounds before normalization (normalization then cuts to NAME_MAX/DESCRIPTION_MAX). */
 const NAME_RAW_MAX = 400;
 const DESCRIPTION_RAW_MAX = 4000;
+/** Raw label bounds (the core then requires exactly ten entries of 1-24 code points or null). */
+const LABEL_RAW_MAX = 200;
+const LABELS_RAW_MAX = 32;
 /** 100 items with the longest description fit (4 bytes per code point at worst). */
 const MERGE_MAX_BYTES = 1024 * 1024;
 
@@ -21,7 +26,12 @@ const Item = z.object({
 	name: z.string().max(NAME_RAW_MAX),
 	description: z.string().max(DESCRIPTION_RAW_MAX).optional(),
 	lang: z.enum(LANGS).optional(),
-	license: z.enum(LICENSES).optional()
+	license: z.enum(LICENSES).optional(),
+	labels: z
+		.array(z.string().max(LABEL_RAW_MAX).nullable())
+		.max(LABELS_RAW_MAX)
+		.nullable()
+		.optional()
 });
 
 const Body = z.object({

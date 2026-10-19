@@ -3,7 +3,7 @@
 // response math comes from the core (`open-auri/dsp`, `open-auri/share`); nothing here touches the
 // DOM, the audio engine or the cable.
 import { curveResponseDb, distance, GRID } from 'open-auri/dsp';
-import { decodeS1, encodeS1, validateEnvelope } from 'open-auri/share';
+import { decodeS1, encodeS1, normalizeLabels, validateEnvelope } from 'open-auri/share';
 import { REASON_MESSAGE_KEYS } from '#lib/cable/checklist.ts';
 import type { ReasonCode } from '#lib/cable/types.ts';
 import { responseGeometry } from '#lib/charts/response.ts';
@@ -308,6 +308,8 @@ export interface EnvelopeDraft {
 	lang: Lang;
 	s1: string;
 	recipe?: unknown;
+	/** Filter labels by wire index of `s1`: any set label makes the envelope preset@2. */
+	labels?: readonly (string | null)[] | null;
 	now: number;
 }
 
@@ -319,8 +321,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The S5 envelope (open-auri/preset@1) of a curve, validated by the core. The bands and preamp are
- * the decoded S1, so `code` and `bands` always agree (same rule as the server's fork path).
+ * The S5 envelope of a curve, validated by the core: open-auri/preset@2 with its filter labels
+ * when it has any, open-auri/preset@1 otherwise. The bands and preamp are the decoded S1, so
+ * `code` and `bands` always agree (same rule as the server's fork path).
  */
 export function buildEnvelope(draft: EnvelopeDraft): EnvelopeCheck {
 	let decoded: Decoded;
@@ -329,8 +332,9 @@ export function buildEnvelope(draft: EnvelopeDraft): EnvelopeCheck {
 	} catch {
 		return { ok: false, codes: ['env:s1'] };
 	}
+	const labels = normalizeLabels(draft.labels ?? null, { lenient: true });
 	const raw: Record<string, unknown> = {
-		format: 'open-auri/preset@1',
+		format: labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
 		name: draft.name,
 		description: draft.description,
 		source: 'custom',
@@ -338,6 +342,7 @@ export function buildEnvelope(draft: EnvelopeDraft): EnvelopeCheck {
 		code: draft.s1,
 		preampDb: decoded.preampDb,
 		bands: decoded.bands,
+		...(labels ? { labels } : {}),
 		lang: draft.lang,
 		createdAt: new Date(draft.now).toISOString()
 	};

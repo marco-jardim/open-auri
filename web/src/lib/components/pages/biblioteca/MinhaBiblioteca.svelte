@@ -451,7 +451,9 @@
 					s1: item.curve.s1,
 					license: item.head.license,
 					lang: item.head.lang,
-					recipe: item.head.recipe
+					recipe: item.head.recipe,
+					// A rename keeps the version's filter labels.
+					labels: item.head.labels ?? null
 				},
 				{ name: editName, description: editDescription }
 			)
