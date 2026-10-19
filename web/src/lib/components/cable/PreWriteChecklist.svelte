@@ -13,6 +13,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { hasUltrasonicBands } from '#lib/cable/checklist.ts';
 	import type { CableService } from '#lib/cable/service.ts';
+	import { isWriteInProgress, onWriteProgress } from '#lib/cable/write-flag.ts';
 	import type {
 		Band,
 		CableDevice,
@@ -33,7 +34,14 @@
 	import LoudnessPanel from './LoudnessPanel.svelte';
 	import ConfirmLever from './ConfirmLever.svelte';
 	import { criteriaValues } from './criteria.ts';
-	import { describeOutcome, formatCrc, formatNumber, waivedCriteriaText } from './i18n.ts';
+	import {
+		describeOutcome,
+		formatCrc,
+		formatNumber,
+		isFreshnessRefusal,
+		reloadWhenSafe,
+		waivedCriteriaText
+	} from './i18n.ts';
 
 	interface Props {
 		service: CableService;
@@ -52,6 +60,8 @@
 		profile?: WriteProfile;
 		onclose: () => void;
 		onresult?: (outcome: WriteOutcome | QueueOutcome) => void;
+		/** Defaults to location.reload; injectable without navigating a component test. */
+		reload?: () => void;
 	}
 
 	let {
@@ -63,7 +73,8 @@
 		name = '',
 		profile = 'standard',
 		onclose,
-		onresult
+		onresult,
+		reload
 	}: Props = $props();
 
 	// Every lever, the YOLO one included, is a plain boolean here (each binds a ConfirmLever).
@@ -98,6 +109,17 @@
 	/** Re-evaluates the time-dependent items (2 s spacing countdown). */
 	let tick = $state(0);
 	let message = $state<string | null>(null);
+	let reloadOffered = $state(false);
+	let writeInProgress = $state(false);
+	$effect(() => {
+		const sync = () => (writeInProgress = isWriteInProgress());
+		sync();
+		return onWriteProgress(sync);
+	});
+
+	function reloadPage() {
+		if (!service.getState().writing) reloadWhenSafe(reload);
+	}
 
 	// The gate runs only while the dialog is open; write() always re-gates on its own.
 	const gate = $derived<GateResult | null>(
@@ -151,6 +173,7 @@
 			untrack(() => {
 				confirmations = { ...UNCONFIRMED };
 				message = null;
+				reloadOffered = false;
 			});
 			dialog.showModal();
 		} else if (!open && dialog.open) {
@@ -228,6 +251,7 @@
 
 	function finish(outcome: WriteOutcome | QueueOutcome) {
 		message = describeOutcome(outcome);
+		reloadOffered = isFreshnessRefusal(outcome);
 		// Every write needs fresh confirmations.
 		if (outcome.status !== 'refused') confirmations = { ...UNCONFIRMED };
 		onresult?.(outcome);
@@ -428,6 +452,7 @@
 						{preampDb}
 						{experimental}
 						{name}
+						{reload}
 						confirmations={{ ...confirmations }}
 						canWrite={checklist.canWrite}
 						onresult={finish}
@@ -476,7 +501,12 @@
 				<p class="blocked">{m.cable_write_blocked()}</p>
 			{/if}
 			{#if message !== null}
-				<p role="status" class="message">{message}</p>
+				<div class="message">
+					<p role="status">{message}</p>
+					{#if reloadOffered && !cable.writing && !writeInProgress}
+						<Button variant="plate" onclick={reloadPage}>{m.cable_native_reload()}</Button>
+					{/if}
+				</div>
 			{/if}
 
 			<footer class="foot">
@@ -834,12 +864,19 @@
 		font-weight: 600;
 	}
 	.message {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
 		margin-top: 10px;
 		padding: 8px 10px;
 		border-radius: 3px;
 		background: #0b1312;
 		color: #a6f6ed;
 		font-family: var(--face-data, 'JetBrains Mono', monospace);
+	}
+	.message p {
+		margin: 0;
 	}
 	.foot {
 		display: flex;

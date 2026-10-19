@@ -25,6 +25,7 @@
 	import Footer from '#lib/components/chrome/Footer.svelte';
 	import Toast from '#lib/components/chrome/Toast.svelte';
 	import YoloBar from '#lib/components/yolo/YoloBar.svelte';
+	import AndroidUpdateBanner from '#lib/components/cable/AndroidUpdateBanner.svelte';
 	import { AccountSession } from '#lib/components/chrome/account.svelte.ts';
 	import { postPolicyAcceptance } from '#lib/components/chrome/account.ts';
 	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
@@ -599,6 +600,13 @@
 			{/snippet}
 		</CableBar>
 	</div>
+
+	{#if nativeCable.result.kind !== 'none'}
+		<AndroidUpdateBanner
+			kind={nativeCable.result.kind}
+			writing={app?.cableState.writing ?? false}
+		/>
+	{/if}
 
 	{#if policyBanner && showPolicy && policyBannerIsland.current}
 		{@const PolicyBanner = policyBannerIsland.current}

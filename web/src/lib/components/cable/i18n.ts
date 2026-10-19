@@ -2,6 +2,7 @@
 import { m } from '#lib/paraglide/messages.js';
 import { getLocale } from '#lib/paraglide/runtime.js';
 import { NativeFreshnessError } from '#lib/cable/native-freshness.ts';
+import { mayApplyUpdate } from '#lib/pwa/strategy.ts';
 import type {
 	LampLabelKey,
 	LampState,
@@ -119,13 +120,23 @@ export function describeReason(reason: ReasonView): string {
 	return parts.join(' ');
 }
 
+/** Only freshness refusals offer a reload, never unrelated cable failures. */
+export function isFreshnessRefusal(outcome: WriteOutcome | QueueOutcome): boolean {
+	return outcome.status === 'refused' && outcome.error instanceof NativeFreshnessError;
+}
+
+/** The same last-moment write guard as the PWA update flow; never schedules a later reload. */
+export function reloadWhenSafe(reload: () => void = () => window.location.reload()): void {
+	if (typeof window !== 'undefined' && mayApplyUpdate(window.__oaWriteInProgress)) reload();
+}
+
 /** Human-readable outcome of a write or a queue. */
 export function describeOutcome(outcome: WriteOutcome | QueueOutcome): string {
 	if (outcome.status === 'refused') {
 		if (outcome.error instanceof NativeFreshnessError) {
 			return outcome.error.reason === 'newer'
-				? m.cable_native_freshness_newer()
-				: m.cable_native_freshness_unavailable();
+				? m.cable_native_reload_newer()
+				: m.cable_native_reload_unavailable();
 		}
 		return refusalText[outcome.reason]();
 	}

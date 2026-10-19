@@ -137,6 +137,67 @@ test('real core + native bridge: Android confirmation gates a byte-exact write a
 	await expect(page.locator('#main-content li[data-status="ok"]')).toContainText('USB DSP Audio');
 });
 
+for (const freshness of ['newer', 'unavailable'] as const) {
+	test(`${freshness} deploy check: refusal reloads the app document and a fresh session can write`, async ({
+		page,
+		nativeBridge
+	}) => {
+		await openApp(page);
+		await loadPadrao(page);
+		await connectAndroid(page);
+		await page.route('**/_app/version.json', (route) =>
+			route.fulfill({
+				status: freshness === 'newer' ? 200 : 503,
+				json: { version: 'x' }
+			})
+		);
+		const dialog = await openChecklist(page);
+		await confirmAndroid(dialog);
+		await writeButton(dialog).click();
+		await expect(dialog.getByRole('status')).toHaveText(
+			freshness === 'newer'
+				? 'Há uma versão nova do site. Use o botão Recarregar antes de gravar pelo app.'
+				: 'Não foi possível confirmar a política de gravação atual. Conecte-se à internet e use o botão Recarregar antes de gravar pelo app.'
+		);
+		const reload = dialog.getByRole('button', { name: 'Recarregar', exact: true });
+		await expect(reload).toBeVisible();
+		expect(nativeBridge.reports).toEqual([]);
+		expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'open')).toEqual([]);
+		const navigation = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+		await reload.click();
+		await navigation;
+		await page.unroute('**/_app/version.json');
+		await expect(page.locator('.app-root')).toHaveAttribute('data-runtime', 'ready');
+		await expect(notice(page)).not.toBeVisible();
+		await loadPadrao(page);
+		// The native permission survives a document reload; the real service restores the cable.
+		await expect(page.getByRole('button', { name: 'Desconectar', exact: true })).toBeVisible();
+		const freshDialog = await openChecklist(page);
+		await confirmAndroid(freshDialog);
+		await writeButton(freshDialog).click();
+		await expect(freshDialog.getByRole('status')).toHaveText(/^Gravado no cabo\. CRC /);
+		expect(nativeBridge.reports.map(({ bytes }) => bytes)).toEqual(await expectedPadrao());
+	});
+}
+
+test('Kit version polling offers an app reload without a waiting service worker', async ({
+	page
+}) => {
+	await page.clock.install();
+	await openApp(page);
+	const banner = page.getByTestId('android-update-banner');
+	await expect(banner).toHaveCount(0);
+	await page.route('**/_app/version.json', (route) => route.fulfill({ json: { version: 'x' } }));
+	await page.clock.fastForward(300_001);
+	await expect(banner.getByRole('status')).toHaveText('Há uma versão nova do site.');
+	await expect(banner.getByRole('button', { name: 'Recarregar', exact: true })).toBeVisible();
+	const navigation = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+	await banner.getByRole('button', { name: 'Recarregar', exact: true }).click();
+	await navigation;
+	await page.unroute('**/_app/version.json');
+	await expect(banner).toHaveCount(0);
+});
+
 test('Engineering diagnostics loads immediately after connect, before any write', async ({
 	page,
 	nativeBridge
@@ -451,5 +512,16 @@ test.describe('desktop browser without the bridge', () => {
 			dialog.getByRole('button', { name: 'Gravar (simulado)', exact: true })
 		).toBeEnabled();
 		expect(nativeBridge.calls).toEqual([]);
+	});
+
+	test('Kit version polling does not add an app update banner on desktop', async ({ page }) => {
+		await page.clock.install();
+		await page.goto('/cabo');
+		await expect(page.locator('.app-root')).toHaveAttribute('data-runtime', 'ready');
+		await page.route('**/_app/version.json', (route) => route.fulfill({ json: { version: 'x' } }));
+		const poll = page.waitForResponse('**/_app/version.json');
+		await page.clock.fastForward(300_001);
+		await poll;
+		await expect(page.getByTestId('android-update-banner')).toHaveCount(0);
 	});
 });

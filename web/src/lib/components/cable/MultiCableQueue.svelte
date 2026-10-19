@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { CableService } from '#lib/cable/service.ts';
+	import { isWriteInProgress, onWriteProgress } from '#lib/cable/write-flag.ts';
 	import type {
 		Band,
 		CableDevice,
@@ -10,7 +11,7 @@
 		QueueOutcome
 	} from '#lib/cable/types.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
-	import { describeOutcome, queueStatus } from './i18n.ts';
+	import { describeOutcome, isFreshnessRefusal, queueStatus, reloadWhenSafe } from './i18n.ts';
 
 	interface Props {
 		service: CableService;
@@ -22,6 +23,7 @@
 		canWrite: boolean;
 		name?: string;
 		onresult?: (outcome: QueueOutcome) => void;
+		reload?: () => void;
 	}
 
 	let {
@@ -32,7 +34,8 @@
 		confirmations,
 		canWrite,
 		name = '',
-		onresult
+		onresult,
+		reload
 	}: Props = $props();
 
 	let cable = $state.raw<CableState>(untrack(() => service.getState()));
@@ -41,6 +44,17 @@
 	/** Connected cables when the review started (plain: compared, never rendered). */
 	let reviewedFrom: readonly CableDevice[] | null = null;
 	let message = $state<string | null>(null);
+	let reloadOffered = $state(false);
+	let writeInProgress = $state(false);
+	$effect(() => {
+		const sync = () => (writeInProgress = isWriteInProgress());
+		sync();
+		return onWriteProgress(sync);
+	});
+
+	function reloadPage() {
+		if (!service.getState().writing) reloadWhenSafe(reload);
+	}
 
 	function sameDevices(a: readonly CableDevice[], b: readonly CableDevice[]): boolean {
 		return a.length === b.length && a.every((device, index) => device === b[index]);
@@ -52,6 +66,7 @@
 			if (reviewedFrom !== null && !sameDevices(next.devices, reviewedFrom)) {
 				endReview();
 				message = m.cable_queue_changed();
+				reloadOffered = false;
 			}
 			cable = next;
 		})
@@ -82,6 +97,7 @@
 		reviewedFrom = cable.devices.slice();
 		reviewed = selected.slice();
 		message = null;
+		reloadOffered = false;
 	}
 
 	function endReview() {
@@ -112,6 +128,7 @@
 			name
 		});
 		message = describeOutcome(outcome);
+		reloadOffered = isFreshnessRefusal(outcome);
 		onresult?.(outcome);
 	}
 </script>
@@ -192,6 +209,11 @@
 	{/if}
 
 	{#if message !== null}
-		<p role="status" class="text-sm">{message}</p>
+		<div class="flex flex-wrap items-center gap-2">
+			<p role="status" class="text-sm">{message}</p>
+			{#if reloadOffered && !cable.writing && !writeInProgress}
+				<Button variant="plate" onclick={reloadPage}>{m.cable_native_reload()}</Button>
+			{/if}
+		</div>
 	{/if}
 </section>
