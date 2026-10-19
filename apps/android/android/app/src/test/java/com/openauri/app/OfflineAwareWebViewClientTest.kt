@@ -1,0 +1,167 @@
+package com.openauri.app
+
+import android.content.pm.PackageInfo
+import android.net.Uri
+import android.os.Bundle
+import android.os.Looper
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import com.getcapacitor.BridgeActivity
+import com.getcapacitor.BridgeWebViewClient
+import com.getcapacitor.CapConfig
+import com.getcapacitor.JSObject
+import com.getcapacitor.OfflineAwareWebViewClient
+import com.getcapacitor.PluginCall
+import com.getcapacitor.WebViewListener
+import com.openauri.files.OpenAuriFilesPlugin
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.android.controller.ActivityController
+import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowWebView
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
+class OfflineAwareWebViewClientTest {
+    class TestActivity : BridgeActivity() {
+        override fun onCreate(state: Bundle?) {
+            config = CapConfig.Builder(this)
+                .setServerUrl("https://staging.open-auri.com")
+                .setErrorPath("offline.html")
+                .setResolveServiceWorkerRequests(false)
+                .create()
+            registerPlugin(OpenAuriFilesPlugin::class.java)
+            super.onCreate(state)
+        }
+    }
+
+    private lateinit var controller: ActivityController<TestActivity>
+    private lateinit var client: OfflineAwareWebViewClient
+    private lateinit var view: WebView
+    private var httpErrors = 0
+    private var networkErrors = 0
+
+    @Before fun setUp() {
+        ShadowWebView.setCurrentWebViewPackage(PackageInfo().apply {
+            packageName = "com.google.android.webview"
+            versionName = "150.0.0.0"
+        })
+        controller = Robolectric.buildActivity(TestActivity::class.java)
+        controller.setup()
+        val bridge = controller.get().bridge
+        view = bridge.webView
+        client = OfflineAwareWebViewClient(bridge)
+        bridge.setWebViewClient(client)
+        bridge.addWebViewListener(object : WebViewListener() {
+            override fun onReceivedHttpError(view: WebView) { httpErrors++ }
+            override fun onReceivedError(view: WebView) { networkErrors++ }
+        })
+    }
+
+    @After fun tearDown() { controller.pause().stop().destroy() }
+
+    private fun request(url: String, main: Boolean = true) = object : WebResourceRequest {
+        override fun getUrl() = Uri.parse(url)
+        override fun isForMainFrame() = main
+        override fun isRedirect() = false
+        override fun hasGesture() = true
+        override fun getMethod() = "GET"
+        override fun getRequestHeaders() = emptyMap<String, String>()
+    }
+
+    @Test fun httpErrorsKeepTheSites404410And500PagesAndNotifyListeners() {
+        for (main in listOf(true, false)) for (status in listOf(404, 410, 500)) {
+            val url = "https://staging.open-auri.com/c/missing-$status"
+            view.loadUrl(url)
+            client.onReceivedHttpError(view, request(url, main), WebResourceResponse(
+                "text/html", "UTF-8", status, "Not available", emptyMap(), null,
+            ))
+            assertEquals(url, shadowOf(view).lastLoadedUrl)
+        }
+        assertEquals(6, httpErrors)
+    }
+
+    @Test fun upstreamHttpErrorRedirectReproducesTheOriginalFalseOfflinePage() {
+        val url = "https://staging.open-auri.com/c/missing"
+        view.loadUrl(url)
+        BridgeWebViewClient(controller.get().bridge).onReceivedHttpError(view, request(url),
+            WebResourceResponse("text/html", "UTF-8", 404, "Not found", emptyMap(), null))
+        assertEquals("https://localhost/offline.html", shadowOf(view).lastLoadedUrl)
+    }
+
+    @Test fun onlyMainFrameNetworkErrorsLoadTheBundledOfflinePage() {
+        val url = "https://staging.open-auri.com/c/example"
+        view.loadUrl(url)
+        client.receivedError(view, false, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        assertEquals("https://localhost/offline.html", shadowOf(view).lastLoadedUrl)
+        assertEquals(2, networkErrors)
+    }
+
+    @Test fun offlineDecisionIsLimitedToMainFrameNetworkErrors() {
+        for (main in listOf(true, false)) for (kind in OfflineAwareWebViewClient.ErrorKind.entries) {
+            assertEquals(main && kind == OfflineAwareWebViewClient.ErrorKind.NETWORK,
+                OfflineAwareWebViewClient.shouldShowOfflinePage(main, kind))
+        }
+    }
+
+    @Test fun productionFilesPluginUsesMainFrameTrackerAndRejectsTheLocalOfflineOrigin() {
+        val files = controller.get().bridge.getPlugin("OpenAuriFiles").instance as OpenAuriFilesPlugin
+        shadowOf(Looper.getMainLooper()).idle() // Install the production tracker after Bridge.Builder.
+        for ((url, expected) in listOf(
+            "https://staging.open-auri.com/conta" to "FILES_BAD_ARGS",
+            "https://localhost/offline.html" to "FILES_ORIGIN",
+            "https://staging.open-auri.com/conta" to "FILES_BAD_ARGS",
+        )) {
+            view.loadUrl(url)
+            client.onPageStarted(view, url, null)
+            var code: String? = null
+            val call = object : PluginCall(null, "OpenAuriFiles", "origin-test", "save", JSObject()) {
+                override fun reject(message: String, errorCode: String, error: Exception) { code = errorCode }
+            }
+            files.save(call)
+            for (attempt in 0 until 200) {
+                shadowOf(Looper.getMainLooper()).idle()
+                if (code != null) break
+                Thread.sleep(10)
+            }
+            assertEquals(url, expected, code)
+            assertNull(shadowOf(controller.get()).nextStartedActivity)
+        }
+    }
+
+    @Test fun exactMainFrameRetrySentinelLoadsTheConfiguredServerInsideTheWebView() {
+        view.loadUrl("https://localhost/offline.html")
+        assertTrue(client.shouldOverrideUrlLoading(view, request("https://localhost/__openauri_retry")))
+        assertEquals("https://staging.open-auri.com", shadowOf(view).lastLoadedUrl)
+        assertNull(shadowOf(controller.get()).nextStartedActivity)
+    }
+
+    @Test fun lookalikesAndSubframesKeepCapacitorNavigationPolicy() {
+        val urls = listOf(
+            "https://localhost/__openauri_retry/", "https://localhost/__openauri_retry?x=1",
+            "https://localhost/__openauri_retry#fragment", "https://localhost:443/__openauri_retry",
+            "http://localhost/__openauri_retry", "https://other.example/__openauri_retry",
+            "https://staging.open-auri.com/__openauri_retry",
+        )
+        val base = BridgeWebViewClient(controller.get().bridge)
+        for (url in urls) {
+            view.loadUrl("https://localhost/offline.html")
+            assertEquals(url, base.shouldOverrideUrlLoading(view, request(url)), client.shouldOverrideUrlLoading(view, request(url)))
+            assertEquals("https://localhost/offline.html", shadowOf(view).lastLoadedUrl)
+        }
+        assertEquals(
+            base.shouldOverrideUrlLoading(view, request("https://localhost/__openauri_retry", false)),
+            client.shouldOverrideUrlLoading(view, request("https://localhost/__openauri_retry", false)),
+        )
+        assertEquals("https://localhost/offline.html", shadowOf(view).lastLoadedUrl)
+    }
+}

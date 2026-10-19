@@ -35,6 +35,32 @@ test('accepts the production config', () => {
   assert.deepEqual(releaseViolations(prodConfig()), []);
 });
 
+test('release rejects every truthy legacy bridge override at either scope', () => {
+  for (const value of [true, 'true', 'false', 1, {}, []]) {
+    for (const scope of ['android', 'top-level']) {
+      const config = prodConfig();
+      (scope === 'android' ? config.android : config).useLegacyBridge = value;
+      assert.match(releaseViolations(config).join('; '), /useLegacyBridge/);
+    }
+  }
+});
+
+test('release allows only absent or none Android logging and disables native HTTP', () => {
+  for (const logging of ['debug', 'production', '', true, null]) {
+    const config = prodConfig();
+    config.android.loggingBehavior = logging;
+    assert.match(releaseViolations(config).join('; '), /loggingBehavior/);
+  }
+  const config = prodConfig();
+  config.plugins = { CapacitorHttp: { enabled: true } };
+  assert.match(releaseViolations(config).join('; '), /CapacitorHttp/);
+  config.plugins.CapacitorHttp.enabled = false;
+  config.android.loggingBehavior = 'none';
+  config.android.useLegacyBridge = false;
+  config.useLegacyBridge = false;
+  assert.deepEqual(releaseViolations(config), []);
+});
+
 test('rejects a non-object config', () => {
   for (const value of [null, [], 'x', 42]) {
     assert.deepEqual(releaseViolations(value), ['capacitor.config.json is not a JSON object']);

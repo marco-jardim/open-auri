@@ -39,16 +39,18 @@ class WebViewCompatGateTest {
     }
 
     @Test
-    fun sufficientWebViewRequiresDocumentStartScriptAndBaselineVersion() {
+    fun sufficientWebViewRequiresBothOriginSafeBridgeFeaturesAndBaselineVersion() {
         for (version in listOf("111.0.5563.0", "150.1.2.3")) {
+            val checked = mutableListOf<String>()
             val gate = WebViewCompatGate(
                 featureCheck = { feature ->
-                    assertEquals(WebViewFeature.DOCUMENT_START_SCRIPT, feature)
+                    checked.add(feature)
                     true
                 },
                 currentWebViewPackage = { webViewPackage(version) },
             )
             assertEquals(WebViewCompatGate.Result.Ok, gate.check())
+            assertEquals(listOf(WebViewFeature.DOCUMENT_START_SCRIPT, WebViewFeature.WEB_MESSAGE_LISTENER), checked)
         }
     }
 
@@ -71,6 +73,15 @@ class WebViewCompatGateTest {
     @Test
     fun missingDocumentStartFeatureFailsEvenWithNewVersion() {
         assertEquals(WebViewCompatGate.Result.MissingFeature, check(webViewPackage("150.0"), false))
+    }
+
+    @Test
+    fun missingWebMessageListenerMustNotFallBackToAnAllFrameJavascriptInterface() {
+        val gate = WebViewCompatGate(
+            { it != WebViewFeature.WEB_MESSAGE_LISTENER },
+            { webViewPackage("150.0") },
+        )
+        assertEquals(WebViewCompatGate.Result.MissingFeature, gate.check())
     }
 
     @Test

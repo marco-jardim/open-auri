@@ -12,6 +12,8 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.openauri.usb.MainFrameUrlTracker
+import com.openauri.usb.OriginGuard
 import java.io.IOException
 import java.util.Base64
 import java.util.UUID
@@ -22,12 +24,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 internal const val MAX_FILE_BYTES = 52_428_800
+internal const val FILES_ORIGIN = "FILES_ORIGIN"
 
 internal class FilesException(val code: String, message: String, cause: Throwable? = null) :
     Exception(message, cause)
 
 internal object FileNames {
-    private val unsafe = Regex("[/\\\\\u0000-\u001F\u007F]")
+    private val unsafe = Regex("[/\\\\\\p{Cc}\\p{Cf}]")
     private val dots = Regex("\\.{2,}")
     private val whitespace = Regex("(?U)\\s+")
 
@@ -91,14 +94,37 @@ internal class FileSaveRequest(val name: String, val mime: String, val bytes: By
 open class OpenAuriFilesPlugin internal constructor(
     private val worker: ExecutorService = Executors.newSingleThreadExecutor(),
     private val main: Executor = Executor { Handler(Looper.getMainLooper()).post(it) },
+    private var origin: OriginGuard? = null,
 ) : Plugin() {
     private class Pending(val call: PluginCall, val request: FileSaveRequest)
     private val busy = AtomicBoolean(false)
     private val pending = AtomicReference<Pending?>()
 
+    override fun load() {
+        if (origin != null) return
+        val activeBridge = bridge ?: return
+        val tracker = MainFrameUrlTracker { }
+        origin = OriginGuard({ activeBridge.serverUrl }, { tracker.url })
+        // Bridge.Builder replaces the listener list after loading plugins. Catch up on the next turn.
+        activeBridge.executeOnMainThread {
+            activeBridge.addWebViewListener(tracker)
+            tracker.update(activeBridge.webView.url)
+        }
+    }
+
+    /** Reject off-origin JavaScript with FILES_ORIGIN before parsing or reserving the SAF slot. */
     @PluginMethod
-    fun save(call: PluginCall) = submit(call) {
-        FileSaveRequest.parse(call.getString("name"), call.getString("mime"), call.getString("base64"))
+    fun save(call: PluginCall) {
+        if (origin?.isAllowed() != true) {
+            main.execute {
+                val error = FilesException(FILES_ORIGIN, "The page is not on the pinned origin")
+                call.reject(requireNotNull(error.message), error.code, error)
+            }
+            return
+        }
+        submit(call) {
+            FileSaveRequest.parse(call.getString("name"), call.getString("mime"), call.getString("base64"))
+        }
     }
 
     /** Native entry point. Completion is delivered on the main thread, including cancellation. */

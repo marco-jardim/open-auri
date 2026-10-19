@@ -12,4 +12,5 @@
     <string name="usb_picker_cancel">Cancelar</string>
     <string name="usb_picker_item">%1$s, cabo %2$d</string>
     <string name="usb_picker_unnamed_device">Dispositivo USB</string>
+    <string name="files_download_failed">Não foi possível baixar este arquivo no app. Tente pelo site no navegador.</string>
 </resources>

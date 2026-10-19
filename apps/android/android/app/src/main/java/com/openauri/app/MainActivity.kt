@@ -13,6 +13,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.getcapacitor.BridgeActivity
+import com.getcapacitor.OfflineAwareWebViewClient
 import com.openauri.files.DownloadBridge
 import com.openauri.files.OpenAuriFilesPlugin
 import com.openauri.usb.OpenAuriUsbPlugin
@@ -52,6 +53,7 @@ class MainActivity : BridgeActivity() {
 
         super.onCreate(savedInstanceState)
         if (gateResult == WebViewCompatGate.Result.Ok) {
+            bridge?.let { it.setWebViewClient(OfflineAwareWebViewClient(it)) }
             attachDownloads()
         } else {
             val screen = findViewById<View>(R.id.webview_update_screen)

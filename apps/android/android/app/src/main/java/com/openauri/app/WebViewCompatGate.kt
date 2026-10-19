@@ -26,6 +26,8 @@ class WebViewCompatGate(
             ?.toIntOrNull() ?: return Result.UnknownPackage
         if (major < minVersion) return Result.Outdated(packageName, versionName)
         if (!featureCheck(WebViewFeature.DOCUMENT_START_SCRIPT)) return Result.MissingFeature
+        // Capacitor otherwise falls back to addJavascriptInterface, exposing the bridge to all frames.
+        if (!featureCheck(WebViewFeature.WEB_MESSAGE_LISTENER)) return Result.MissingFeature
         return Result.Ok
     }
 

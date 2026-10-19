@@ -11,6 +11,7 @@ import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.openauri.usb.OriginGuard
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -64,7 +65,8 @@ class OpenAuriFilesPluginTest {
         private val app: Context,
         worker: ExecutorService,
         main: Executor,
-    ) : OpenAuriFilesPlugin(worker, main) {
+        origin: OriginGuard? = OriginGuard({ "https://open-auri.com" }, { "https://open-auri.com/conta" }),
+    ) : OpenAuriFilesPlugin(worker, main, origin) {
         var launched: Intent? = null
         var callback: String? = null
         var launchError: Exception? = null
@@ -101,6 +103,48 @@ class OpenAuriFilesPluginTest {
         assertEquals(128, unicode.codePointCount(0, unicode.length))
         assertTrue(unicode.endsWith(".png"))
         assertFalse(unicode.contains('\uFFFD'))
+    }
+
+    @Test fun namesStripBidiFormattingAndEveryC1Control() {
+        assertEquals("agpj.json", FileNames.sanitize("a\u202Egpj.json"))
+        val controls = (0x80..0x9F) + (0x202A..0x202E) + (0x2066..0x2069) + listOf(0x200E, 0x200F)
+        for (control in controls) assertEquals("ab.json", FileNames.sanitize("a${control.toChar()}b.json"))
+    }
+
+    @Test fun unknownOriginRejectsBeforeParsingOrLaunchingSaf() {
+        val worker = QueuedExecutor()
+        val plugin = TestPlugin(context, worker, direct, null)
+        val invalid = Call(JSObject())
+        plugin.save(invalid)
+        worker.runAll()
+        assertEquals("FILES_ORIGIN", invalid.code)
+        assertNull(plugin.launched)
+    }
+
+    @Test fun originGuardTracksNavigationAndRejectsLocalErrorPageBeforeArgumentsOrBusy() {
+        val worker = QueuedExecutor()
+        var current: String? = "https://open-auri.com/conta"
+        val plugin = TestPlugin(context, worker, direct, OriginGuard({ "https://open-auri.com" }, { current }))
+        val first = call()
+        plugin.save(first)
+        for (url in listOf(null, "https://localhost/offline.html", "https://evil.example", "https://open-auri.com:444/")) {
+            current = url
+            val denied = Call(JSObject())
+            plugin.save(denied)
+            assertEquals("FILES_ORIGIN", denied.code)
+            assertNull(plugin.launched)
+        }
+        current = "https://OPEN-AURI.com:443/conta"
+        val stillBusy = call()
+        plugin.save(stillBusy)
+        assertEquals("FILES_BUSY", stillBusy.code)
+        worker.runAll()
+        assertNotNull(plugin.launched)
+        plugin.deliver(Activity.RESULT_CANCELED)
+        assertEquals(false, first.saved)
+        val retry = call()
+        plugin.save(retry); worker.runAll(); plugin.deliver(Activity.RESULT_CANCELED)
+        assertEquals(false, retry.saved)
     }
 
     @Test fun parsingRequiresStringsAndExactlyTheMimeAllowList() {

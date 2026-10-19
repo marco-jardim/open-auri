@@ -1,8 +1,11 @@
 package com.openauri.files
 
 import android.app.Activity
+import android.content.Context
 import android.os.Looper
 import android.webkit.CookieManager
+import androidx.test.core.app.ApplicationProvider
+import com.openauri.app.R
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -10,6 +13,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowToast
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -23,7 +27,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class DownloadBridgeTest {
-    private val url = URL("https://open-auri.com/account/export.json")
+    private val url = URL("https://open-auri.com/dados/dump/latest.json.gz")
     private val direct = Executor { it.run() }
 
     private class Connection(url: URL) : HttpURLConnection(url) {
@@ -68,13 +72,13 @@ class DownloadBridgeTest {
             { target, cookie ->
                 fetched.add(target to cookie)
                 fetchError?.let { throw it }
-                FileSaveRequest.fromBytes("export.json", "application/json", byteArrayOf(7, 8))
+                FileSaveRequest.fromBytes("open-auri-dump-latest.json.gz", "application/gzip", byteArrayOf(7, 8))
             },
             { cookieUrls.add(it); "session=pinned" },
             { browseError?.let { error -> throw error }; browsed.add(it) },
             { errors.add(it) }, network, Executor { it.run() },
         )
-        fun start(url: String? = "https://open-auri.com/account/export?token=a") =
+        fun start(url: String? = "https://open-auri.com/dados/dump/latest.json.gz?token=a") =
             bridge.onDownloadStart(url, "untrusted UA", "attachment; filename=untrusted.exe", "text/html", Long.MAX_VALUE)
     }
 
@@ -84,10 +88,10 @@ class DownloadBridgeTest {
         assertTrue(h.fetched.isEmpty())
         assertTrue(h.cookieUrls.isEmpty())
         h.network.runAll()
-        assertEquals(listOf("https://open-auri.com/account/export?token=a"), h.cookieUrls)
+        assertEquals(listOf("https://open-auri.com/dados/dump/latest.json.gz?token=a"), h.cookieUrls)
         assertEquals("session=pinned", h.fetched.single().second)
-        assertEquals("export.json", h.saved.single().name)
-        assertEquals("application/json", h.saved.single().mime)
+        assertEquals("open-auri-dump-latest.json.gz", h.saved.single().name)
+        assertEquals("application/gzip", h.saved.single().mime)
         assertArrayEquals(byteArrayOf(7, 8), h.saved.single().bytes)
         assertTrue(h.browsed.isEmpty())
         assertTrue(h.errors.isEmpty())
@@ -175,7 +179,7 @@ class DownloadBridgeTest {
     }
 
     @Test fun redirectsAndAllNonSuccessStatusesFailWithoutReadingOrFollowingLocation() {
-        for (status in listOf(199, 300, 302, 307, 399, 400, 500)) {
+        for (status in listOf(199, 300, 302, 307, 399, 400, 405, 500)) {
             val connection = Connection(url).also { it.status = status }
             var opens = 0
             val error = assertThrows(IOException::class.java) {
@@ -192,6 +196,64 @@ class DownloadBridgeTest {
                 HttpFileFetcher { error("Must not open non-HTTPS or credentialed URL") }.fetch(target, "secret")
             }
         }
+    }
+
+    @Test fun realGetDumpSucceedsButPostOnlyAccountExport405ShowsAnErrorAndSavesNothing() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val network = QueuedExecutor()
+        val main = QueuedExecutor()
+        val saved = mutableListOf<FileSaveRequest>()
+        val connections = mutableListOf<Connection>()
+        val errors = mutableListOf<Throwable>()
+        val fetcher = HttpFileFetcher { target ->
+            Connection(target).also {
+                // The real /conta/exportar endpoint exports POST only; a listener replay is GET.
+                it.status = if (target.path == "/conta/exportar") 405 else 200
+                it.mime = "application/gzip"
+                it.disposition = "attachment; filename=\"open-auri-dump-latest.json.gz\""
+                connections.add(it)
+            }
+        }
+        val bridge = DownloadBridge(
+            "https://open-auri.com",
+            { name, mime, bytes, done -> saved.add(FileSaveRequest.fromBytes(name, mime, bytes)); done(Result.success(true)) },
+            fetcher::fetch, { "session=pinned" }, { fail("Must not open a browser automatically") },
+            {
+                assertEquals(Looper.getMainLooper(), Looper.myLooper())
+                errors.add(it)
+                reportDownloadFailure(context, it)
+            }, network, main,
+        )
+        bridge.onDownloadStart(url.toString(), null, null, null, -1)
+        network.runAll(); main.runAll()
+        assertEquals("open-auri-dump-latest.json.gz", saved.single().name)
+        assertEquals("application/gzip", saved.single().mime)
+        assertArrayEquals(byteArrayOf(0, 1, -1), saved.single().bytes)
+        assertTrue(errors.isEmpty())
+        saved.clear()
+        ShadowToast.reset()
+        bridge.onDownloadStart("https://open-auri.com/conta/exportar", null, null, null, -1)
+        network.runAll()
+        assertNull(ShadowToast.getTextOfLatestToast())
+        assertTrue(saved.isEmpty())
+        main.runAll()
+        assertEquals("Download failed: HTTP 405", errors.single().message)
+        assertEquals(context.getString(R.string.files_download_failed), ShadowToast.getTextOfLatestToast())
+        assertEquals(2, connections.size) // One fetch each, never a retry with invented method/body/Origin.
+        val rejected = connections.last()
+        assertEquals("GET", rejected.requestMethod)
+        assertFalse(rejected.inputOpened)
+        assertTrue(rejected.disconnected)
+        assertTrue(saved.isEmpty())
+        bridge.close()
+    }
+
+    @Test
+    @Config(qualifiers = "pt-rBR")
+    fun downloadFailureIsLocalizedInBrazilianPortuguese() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        reportDownloadFailure(context, IOException("HTTP 405"))
+        assertEquals("Não foi possível baixar este arquivo no app. Tente pelo site no navegador.", ShadowToast.getTextOfLatestToast())
     }
 
     @Test fun defaultConnectionFactoryUsesTheProvidedHttpsUrl() {
@@ -255,12 +317,12 @@ class DownloadBridgeTest {
             "attachment; filename*=UTF-8''bad%ZZ; filename=fallback" to "fallback",
             "attachment; filename*=invalid; filename=fallback" to "fallback",
             "attachment; filename*=UTF-8''; filename=fallback" to "fallback",
-            "attachment; filename=\" \"" to "export.json",
+            "attachment; filename=\" \"" to "latest.json.gz",
             "attachment; filename=..." to "download",
         )
         cases.forEach { (header, expected) -> assertEquals(header, expected, DownloadNames.from(header, url)) }
-        assertEquals("export.json", DownloadNames.from(null, url))
-        assertEquals("export.json", DownloadNames.from("attachment", url))
+        assertEquals("latest.json.gz", DownloadNames.from(null, url))
+        assertEquals("latest.json.gz", DownloadNames.from("attachment", url))
         assertEquals("café+mix.json", DownloadNames.from(null, URL("https://open-auri.com/caf%C3%A9+mix.json")))
         assertEquals("download", DownloadNames.from(null, URL("https://open-auri.com/")))
     }
@@ -271,7 +333,7 @@ class DownloadBridgeTest {
         val connection = Connection(url).also { it.mime = "text/html"; it.disposition = null }
         val file = HttpFileFetcher { connection }.fetch(url, null)
         assertEquals(FileMimeTypes.BINARY, file.mime)
-        assertEquals("export.json", file.name)
+        assertEquals("latest.json.gz", file.name)
     }
 
     @Test fun realCookieManagerSuppliesOnlyPinnedUrlAndNetworkRunsOffMain() {
@@ -312,7 +374,11 @@ class DownloadBridgeTest {
             assertEquals("https://foreign.example/export", intent.dataString)
             assertTrue(intent.hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
             bridge.onDownloadStart(null, null, null, null, -1)
-            shadowOf(Looper.getMainLooper()).idle() // Default reporting logs malformed URLs instead of swallowing them.
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(
+                "This file could not be downloaded in the app. Try the website in your browser.",
+                org.robolectric.shadows.ShadowToast.getTextOfLatestToast(),
+            )
         } finally {
             bridge.close()
             controller.pause().stop().destroy()

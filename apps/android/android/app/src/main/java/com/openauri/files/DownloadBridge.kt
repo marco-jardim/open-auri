@@ -8,6 +8,8 @@ import android.os.Looper
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
+import android.widget.Toast
+import com.openauri.app.R
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -21,7 +23,12 @@ import java.util.concurrent.Executors
 
 internal typealias SaveDownload = (String, String, ByteArray, (Result<Boolean>) -> Unit) -> Unit
 
-/** Attach with bridge.webView.setDownloadListener(DownloadBridge(context, origin, files)). */
+/**
+ * Attach with bridge.webView.setDownloadListener(DownloadBridge(context, origin, files)).
+ * DownloadListener supplies neither the original method nor its body: only replayable GET
+ * attachments work here. Non-2xx replays abort without saving or retrying and notify the user.
+ * T2.2 moves POST exports to fetch + OpenAuriFiles.save on the web side.
+ */
 class DownloadBridge internal constructor(
     pinnedOrigin: String,
     private val save: SaveDownload,
@@ -36,7 +43,7 @@ class DownloadBridge internal constructor(
         context: Context,
         pinnedOrigin: String,
         files: OpenAuriFilesPlugin,
-        onError: (Throwable) -> Unit = { Log.e("OpenAuriFiles", "Download failed", it) },
+        onError: (Throwable) -> Unit = { reportDownloadFailure(context, it) },
     ) : this(
         pinnedOrigin, files::saveBytes, HttpFileFetcher()::fetch,
         { CookieManager.getInstance().getCookie(it) },
@@ -96,6 +103,12 @@ class DownloadBridge internal constructor(
         left.scheme.equals(right.scheme, true) && left.host.equals(right.host, true) && port(left) == port(right)
 
     private fun port(uri: URI): Int = if (uri.port == -1) 443 else uri.port
+}
+
+/** DownloadBridge delivers every error on its main executor, including native save failures. */
+internal fun reportDownloadFailure(context: Context, error: Throwable) {
+    Log.e("OpenAuriFiles", "Download failed", error)
+    Toast.makeText(context, R.string.files_download_failed, Toast.LENGTH_LONG).show()
 }
 
 /** No automatic redirects: even a same-origin redirect must be reviewed by the caller. */

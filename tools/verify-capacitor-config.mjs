@@ -45,6 +45,13 @@ export function releaseViolations(config) {
     }
   }
   if (android !== null) {
+    if (android.useLegacyBridge) {
+      violations.push('android.useLegacyBridge must not be enabled');
+    }
+    // Even "debug" is rejected in release config: only an absent value or "none" is allowed.
+    if (android.loggingBehavior !== undefined && android.loggingBehavior !== 'none') {
+      violations.push('android.loggingBehavior must be "none" or absent');
+    }
     if (
       android.webContentsDebuggingEnabled !== undefined &&
       android.webContentsDebuggingEnabled !== false
@@ -60,6 +67,12 @@ export function releaseViolations(config) {
     record.webContentsDebuggingEnabled !== false
   ) {
     violations.push('webContentsDebuggingEnabled must be false');
+  }
+  if (record.useLegacyBridge) {
+    violations.push('useLegacyBridge must not be enabled');
+  }
+  if (asRecord(asRecord(record.plugins)?.CapacitorHttp)?.enabled === true) {
+    violations.push('plugins.CapacitorHttp.enabled must not be true');
   }
   return violations;
 }
