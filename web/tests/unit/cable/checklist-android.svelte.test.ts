@@ -22,6 +22,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	await cleanup();
+	// The locale persists (cookie/localStorage) into later test files of the same browser.
+	await setLocale('pt-BR', { reload: false });
 	vi.restoreAllMocks();
 });
 
