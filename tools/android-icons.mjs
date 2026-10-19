@@ -101,8 +101,8 @@ export async function renderAndroidIcons(svgText) {
     <monochrome android:drawable="@mipmap/ic_launcher_foreground"/>
 </adaptive-icon>
 `);
-  files.set('mipmap-anydpi-v26/ic_launcher.xml', adaptive);
-  files.set('mipmap-anydpi-v26/ic_launcher_round.xml', adaptive);
+  files.set('mipmap-anydpi/ic_launcher.xml', adaptive);
+  files.set('mipmap-anydpi/ic_launcher_round.xml', adaptive);
   files.set(
     'values/ic_launcher_background.xml',
     Buffer.from(`<?xml version="1.0" encoding="utf-8"?>

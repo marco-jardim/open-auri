@@ -159,7 +159,7 @@ test('adaptive foregrounds have transparent corners and artwork inside the centr
 });
 
 test('adaptive XMLs use the icon background, mipmap foreground and monochrome layer', () => {
-  const icon = fresh.get('mipmap-anydpi-v26/ic_launcher.xml').toString();
+  const icon = fresh.get('mipmap-anydpi/ic_launcher.xml').toString();
   assert.match(
     icon,
     /<adaptive-icon xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android">/,
@@ -168,7 +168,7 @@ test('adaptive XMLs use the icon background, mipmap foreground and monochrome la
   assert.match(icon, /<foreground android:drawable="@mipmap\/ic_launcher_foreground"\/>/);
   assert.match(icon, /<monochrome android:drawable="@mipmap\/ic_launcher_foreground"\/>/);
   assert.match(icon, /<\/adaptive-icon>\s*$/);
-  assert.equal(fresh.get('mipmap-anydpi-v26/ic_launcher_round.xml').toString(), icon);
+  assert.equal(fresh.get('mipmap-anydpi/ic_launcher_round.xml').toString(), icon);
   assert.match(
     fresh.get('values/ic_launcher_background.xml').toString(),
     /<color name="ic_launcher_background">#171715<\/color>/,
