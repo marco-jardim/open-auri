@@ -200,25 +200,25 @@ test.each([
 	{
 		locale: 'pt-BR',
 		reason: 'newer',
-		message: 'Há uma versão nova do site. Recarregue a página antes de gravar pelo app.'
+		message: 'Há uma versão nova do site. Use o botão Recarregar antes de gravar pelo app.'
 	},
 	{
 		locale: 'en-US',
 		reason: 'newer',
 		message:
-			'A newer version of the site is available. Reload the page before writing from the app.'
+			'A newer version of the site is available. Use the Reload button before writing from the app.'
 	},
 	{
 		locale: 'pt-BR',
 		reason: 'unavailable',
 		message:
-			'A gravação pelo app precisa de uma conexão para confirmar a política de gravação atual. Conecte-se à internet e tente de novo.'
+			'Não foi possível confirmar a política de gravação atual. Conecte-se à internet e use o botão Recarregar antes de gravar pelo app.'
 	},
 	{
 		locale: 'en-US',
 		reason: 'unavailable',
 		message:
-			'Writing from the app needs a connection to confirm the current write policy. Connect to the internet and try again.'
+			'The current write policy could not be confirmed. Connect to the internet and use the Reload button before writing from the app.'
 	}
 ] as const)(
 	'$locale: a $reason policy check displays the actionable refusal',
