@@ -39,6 +39,10 @@ android {
             includeAndroidResources = true
             all {
                 maxParallelForks = Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))
+                // Robolectric 4.17 reaches jdk.internal.access.SharedSecrets when it boots SDK 36 on JDK 21.
+                jvmArgs '--add-exports=java.base/jdk.internal.access=ALL-UNNAMED',
+                        '--add-opens=java.base/jdk.internal.access=ALL-UNNAMED',
+                        '--add-opens=java.base/java.lang=ALL-UNNAMED'
             }
         }
     }
