@@ -10,7 +10,8 @@
  * - `connect` fires only for devices the app may use (as WebHID fires only for permitted
  *   devices), `disconnect` for every device the page holds, before the rejection of any call
  *   pending on it (the plugin guarantees that order);
- * - `opened` is false until `open()` resolves and after `close()` or a disconnect;
+ * - `opened` is false until `open()` resolves and after `close()`, a disconnect or native
+ *   session loss;
  *   `sendReport()` on a device that is not open rejects with `InvalidStateError` before any
  *   plugin call; `close()` of a device the plugin no longer knows resolves.
  *
@@ -18,6 +19,7 @@
  * `@capacitor/core` import here: the plugin is injected (see `bridge.ts`, loaded on demand).
  */
 import type { CableFilter } from '../types.ts';
+import { NATIVE_HID_BRAND } from './brand.ts';
 import { callNative, nativeError, nativeErrorCode } from './errors.ts';
 
 /** A device as the plugin reports it (schema `NativeDeviceInfo`). */
@@ -237,7 +239,7 @@ export class NativeHIDDevice {
 		this.productName = info.productName;
 	}
 
-	/** True once `open()` resolved, until `close()` or a disconnect. */
+	/** True once `open()` resolved, until close, disconnect or native session loss. */
 	get opened(): boolean {
 		return this.#opened && !detached.has(this);
 	}
@@ -274,16 +276,32 @@ export class NativeHIDDevice {
 		if (!this.opened) {
 			throw new DOMException('The device must be opened first.', 'InvalidStateError');
 		}
-		await callNative(() => this.#plugin.sendReport({ key: this.#key, reportId, data: encoded }));
+		await this.#callSession(() =>
+			this.#plugin.sendReport({ key: this.#key, reportId, data: encoded })
+		);
 	}
 
-	/** USB diagnostics (RF8) of the open device, for the cable page. */
+	/** USB diagnostics (RF8), opening the device first when needed, for the cable page. */
 	async diagnostics(): Promise<UsbDiagnostics> {
-		const report = await callNative(() => this.#plugin.diagnostics({ key: this.#key }));
+		if (!this.opened) await this.open();
+		const report = await this.#callSession(() => this.#plugin.diagnostics({ key: this.#key }));
 		if (!isUsbDiagnostics(report)) {
 			throw new TypeError('OpenAuriUsb returned malformed diagnostics');
 		}
 		return report;
+	}
+
+	/** Native may drop a session without a disconnect; let the next operation reopen it. */
+	async #callSession<T>(operation: () => Promise<T>): Promise<T> {
+		try {
+			return await operation();
+		} catch (cause) {
+			const code = nativeErrorCode(cause);
+			if (code === 'USB_NOT_OPEN' || code === 'USB_PERMISSION_DENIED' || code === 'USB_DETACHED') {
+				this.#opened = false;
+			}
+			throw nativeError(cause);
+		}
 	}
 }
 
@@ -324,6 +342,7 @@ function filtersOf(options: unknown): NativeUsbFilter[] {
  * `addEventListener`, `requestDevice` or `getDevices`; `dispose()` removes them.
  */
 export class NativeHID extends EventTarget {
+	readonly [NATIVE_HID_BRAND] = true;
 	readonly #plugin: OpenAuriUsbPlugin;
 	/** Live devices by native key: one object per connection. */
 	readonly #devices = new Map<string, NativeHIDDevice>();

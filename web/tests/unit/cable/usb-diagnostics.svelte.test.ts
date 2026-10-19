@@ -10,6 +10,7 @@ import {
 	type NativeCableStatus
 } from '#lib/cable/native-state.svelte.ts';
 import type { UsbDiagnostics as UsbReport } from '#lib/cable/native/index.ts';
+import { NativeHIDDevice, type OpenAuriUsbPlugin } from '#lib/cable/native/hid.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import {
@@ -83,6 +84,39 @@ test('load is opt-in, JSON is text only, clipboard copies it and nothing is uplo
 		.element(page.getByRole('link', { name: m.android_report_result() }))
 		.toHaveAttribute('href', ANDROID_REPORT_URL);
 	expect(fetch).not.toHaveBeenCalled();
+});
+
+test('load works immediately after connecting a native device, before any write', async () => {
+	let opened = false;
+	const plugin: OpenAuriUsbPlugin = {
+		getInfo: vi.fn(async () => undefined),
+		requestDevice: vi.fn(async () => ({ devices: [report.device] })),
+		getDevices: vi.fn(async () => ({ devices: [report.device] })),
+		open: vi.fn(async () => {
+			opened = true;
+		}),
+		close: vi.fn(async () => {
+			opened = false;
+		}),
+		sendReport: vi.fn(async () => undefined),
+		diagnostics: vi.fn(async () => {
+			if (!opened)
+				throw Object.assign(new Error('open the device first'), { code: 'USB_NOT_OPEN' });
+			return report;
+		}),
+		addListener: vi.fn(async () => ({ remove: async () => undefined }))
+	};
+	const native = new NativeHIDDevice(plugin, report.device);
+	const screen = await render(UsbDiagnostics, { engineering: true, inApp: true, device: native });
+	expect(native.opened).toBe(false);
+	expect(plugin.open).not.toHaveBeenCalled();
+	await page.getByRole('button', { name: m.android_diagnostics_load() }).click();
+	await expect
+		.poll(() => screen.container.querySelector('pre')?.textContent)
+		.toBe(JSON.stringify(report, null, 2));
+	expect(plugin.open).toHaveBeenCalledExactlyOnceWith({ key: report.device.key });
+	expect(plugin.diagnostics).toHaveBeenCalledExactlyOnceWith({ key: report.device.key });
+	expect(plugin.sendReport).not.toHaveBeenCalled();
 });
 
 test('clipboard rejection and absent clipboard both show the manual-copy fallback', async () => {

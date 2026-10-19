@@ -97,6 +97,7 @@ const DIAGNOSTICS_DEBUG: UsbDiagnostics = {
 class FakeUsb {
 	readonly attached = new Map<string, NativeDeviceInfo>();
 	readonly permitted = new Set<string>();
+	readonly opened = new Set<string>();
 	readonly calls: { method: Method; options: unknown }[] = [];
 	readonly sends: NativeSendReportOptions[] = [];
 	readonly violations: string[] = [];
@@ -143,6 +144,7 @@ class FakeUsb {
 	unplug(info: NativeDeviceInfo): void {
 		this.attached.delete(info.key);
 		this.permitted.delete(info.key);
+		this.opened.delete(info.key);
 		this.emit('disconnect', { device: info });
 	}
 
@@ -192,7 +194,23 @@ class FakeUsb {
 		if (method === 'getDevices') {
 			return { devices: [...this.attached.values()].filter((d) => this.permitted.has(d.key)) };
 		}
-		if (method === 'diagnostics') return DIAGNOSTICS;
+		const key =
+			typeof options === 'object' && options !== null && 'key' in options
+				? String(options.key)
+				: '';
+		if (method === 'open') {
+			if (!this.permitted.has(key)) throw new CapacitorError('USB_PERMISSION_DENIED');
+			this.opened.add(key);
+		}
+		if (method === 'close') this.opened.delete(key);
+		if (method === 'sendReport' || method === 'diagnostics') {
+			if (!this.opened.has(key)) throw new CapacitorError('USB_NOT_OPEN');
+			if (!this.permitted.has(key)) {
+				this.opened.delete(key);
+				throw new CapacitorError('USB_PERMISSION_DENIED');
+			}
+			if (method === 'diagnostics') return DIAGNOSTICS;
+		}
 		return undefined;
 	}
 }
@@ -714,16 +732,57 @@ describe('NativeHIDDevice sendReport', () => {
 		const error: unknown = await device.sendReport(0xcb, new Uint8Array(31)).catch((e) => e);
 		expect(error).toMatchObject({ name, message: `report refused (${code})` });
 		expect(error instanceof TypeError).toBe(name === 'TypeError');
+		expect(device.opened).toBe(
+			!['USB_NOT_OPEN', 'USB_PERMISSION_DENIED', 'USB_DETACHED'].includes(code)
+		);
 	});
 });
 
 describe('NativeHIDDevice diagnostics', () => {
+	test('opens a newly connected device before diagnostics, without sending reports', async () => {
+		fake.plug(CABLE_A);
+		const hid = new NativeHID(fake.plugin);
+		const [device] = await hid.requestDevice({ filters: [] });
+		if (device === undefined) throw new Error('no device');
+		expect(device.opened).toBe(false);
+		await expect(device.diagnostics()).resolves.toEqual(DIAGNOSTICS);
+		expect(device.opened).toBe(true);
+		expect(fake.calls.map(({ method }) => method)).toEqual([
+			'requestDevice',
+			'open',
+			'diagnostics'
+		]);
+		expect(fake.sends).toEqual([]);
+		await device.diagnostics();
+		expect(fake.callsOf('open')).toHaveLength(1);
+	});
+
 	test('returns the validated diagnostics of the device', async () => {
 		const { device } = await openCable();
 		await expect(device.diagnostics()).resolves.toEqual(DIAGNOSTICS);
 		fake.overrides.set('diagnostics', () => DIAGNOSTICS_DEBUG);
 		await expect(device.diagnostics()).resolves.toEqual(DIAGNOSTICS_DEBUG);
 		expect(fake.callsOf('diagnostics')).toEqual([{ key: CABLE_A.key }, { key: CABLE_A.key }]);
+	});
+
+	test.each([
+		['USB_NOT_OPEN', 'InvalidStateError'],
+		['USB_PERMISSION_DENIED', 'NotAllowedError'],
+		['USB_DETACHED', 'NotAllowedError']
+	])('diagnostics rejected with %s closes the cached session before retry', async (code, name) => {
+		const { device } = await openCable();
+		fake.opened.delete(CABLE_A.key);
+		fake.overrides.set('diagnostics', () => {
+			throw new CapacitorError(code, 'session lost');
+		});
+		await expect(device.diagnostics()).rejects.toMatchObject({
+			name,
+			message: `session lost (${code})`
+		});
+		expect(device.opened).toBe(false);
+		fake.overrides.delete('diagnostics');
+		await expect(device.diagnostics()).resolves.toEqual(DIAGNOSTICS);
+		expect(fake.callsOf('open')).toHaveLength(2);
 	});
 
 	test('maps rejections and refuses malformed diagnostics', async () => {
@@ -749,6 +808,38 @@ describe('NativeHIDDevice diagnostics', () => {
 });
 
 describe('the core transport on NativeHID', () => {
+	test('a revoked native session reopens on the next write and recovers after re-grant', async () => {
+		const { hid, device } = await openCable();
+		const clock = createFakeClock(0, { autoAdvance: true });
+		fake.permitted.delete(CABLE_A.key);
+		const interrupted = await writeCurve(device, NEUTRAL_BANDS, -0.5, { hid, clock });
+		expect(interrupted).toMatchObject({
+			status: 'interrupted',
+			reportsSent: 0,
+			committed: false,
+			error: { name: 'NotAllowedError', message: expect.stringContaining('USB_PERMISSION_DENIED') }
+		});
+		expect(device.opened).toBe(false);
+		expect(fake.opened.has(CABLE_A.key)).toBe(false);
+		expect(fake.sends).toHaveLength(1);
+
+		const denied = await writeCurve(device, NEUTRAL_BANDS, -0.5, { hid, clock });
+		expect(denied).toMatchObject({ status: 'interrupted', reportsSent: 0, committed: false });
+		expect(fake.callsOf('open')).toHaveLength(2);
+		expect(fake.sends).toHaveLength(1);
+
+		expect(await requestCable(hid)).toBe(device);
+		const recovered = await writeCurve(device, NEUTRAL_BANDS, -0.5, { hid, clock });
+		expect(recovered).toMatchObject({ status: 'ok', reportsSent: 9, committed: true });
+		expect(fake.callsOf('open')).toEqual([
+			{ key: CABLE_A.key },
+			{ key: CABLE_A.key },
+			{ key: CABLE_A.key }
+		]);
+		expect(fake.sends).toHaveLength(11);
+		expect(decode(fake.sends[10]?.data ?? '')).toEqual([...commitReport()]);
+	});
+
 	test('requestCable and writeCurve write 9 reports and the commit, like WebHID', async () => {
 		fake.plug(CABLE_A);
 		const hid = new NativeHID(fake.plugin);

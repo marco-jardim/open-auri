@@ -267,11 +267,19 @@ export class FakeAndroidNative {
 			const key = String(options.key);
 			const device = this.#devices.get(key);
 			if (!device) return this.#reject(frame, call, 'USB_NOT_FOUND');
-			if (!this.#granted.has(key)) return this.#reject(frame, call, 'USB_PERMISSION_DENIED');
-			if (method === 'open') this.#opened.add(key);
+			if (method === 'open') {
+				if (!this.#granted.has(key)) return this.#reject(frame, call, 'USB_PERMISSION_DENIED');
+				this.#opened.add(key);
+			}
 			if (method === 'close') this.#opened.delete(key);
 			if (method === 'sendReport' || method === 'diagnostics') {
+				// Like native: diagnostics needs a session too. Revocation drops that session on
+				// the first I/O, so further I/O fails with USB_NOT_OPEN until open is called again.
 				if (!this.#opened.has(key)) return this.#reject(frame, call, 'USB_NOT_OPEN');
+				if (!this.#granted.has(key)) {
+					this.#opened.delete(key);
+					return this.#reject(frame, call, 'USB_PERMISSION_DENIED');
+				}
 				if (method === 'sendReport') {
 					const attempt = this.#attempts.get(key) ?? 0;
 					this.#attempts.set(key, attempt + 1);
@@ -341,6 +349,16 @@ export class FakeAndroidNative {
 		this.#granted.delete(device.key);
 		this.#opened.delete(device.key);
 		await this.#emit('disconnect', device);
+	}
+
+	/** Revocation has no disconnect event; native discovers it at the next session I/O. */
+	revokePermission(device: NativeDeviceInfo): void {
+		this.#granted.delete(device.key);
+	}
+
+	/** Re-grant permission without opening a session or changing the device key. */
+	grantPermission(device: NativeDeviceInfo): void {
+		this.#granted.add(device.key);
 	}
 
 	assertValid(): void {

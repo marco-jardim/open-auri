@@ -137,6 +137,68 @@ test('real core + native bridge: Android confirmation gates a byte-exact write a
 	await expect(page.locator('#main-content li[data-status="ok"]')).toContainText('USB DSP Audio');
 });
 
+test('Engineering diagnostics loads immediately after connect, before any write', async ({
+	page,
+	nativeBridge
+}) => {
+	await openApp(page, '/cabo?camada=engenharia');
+	await connectAndroid(page);
+	expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'open')).toEqual([]);
+	const diagnostics = page.getByRole('region', { name: 'Diagnóstico USB', exact: true });
+	await diagnostics.getByRole('button', { name: 'Carregar diagnóstico USB', exact: true }).click();
+	const json = diagnostics.locator('pre');
+	await expect(json).toBeVisible();
+	expect(JSON.parse((await json.textContent()) ?? '')).toMatchObject({
+		device: cableInfo(),
+		transfer: 'control',
+		outputReports: [{ reportId: 0xcb, bytes: 31 }]
+	});
+	expect(
+		nativeBridge.calls
+			.filter(({ methodName }) => ['requestDevice', 'open', 'diagnostics'].includes(methodName))
+			.map(({ methodName }) => methodName)
+	).toEqual(['requestDevice', 'open', 'diagnostics']);
+	expect(nativeBridge.reports).toEqual([]);
+});
+
+test('a revoked then re-granted native session can write again without a reload', async ({
+	page,
+	nativeBridge
+}) => {
+	await openApp(page);
+	await loadPadrao(page);
+	await connectAndroid(page);
+	const dialog = await openChecklist(page);
+	await confirmAndroid(dialog);
+	await writeButton(dialog).click();
+	await expect(dialog.getByRole('status')).toHaveText(/^Gravado no cabo\. CRC /);
+	expect(nativeBridge.reports.map(({ bytes }) => bytes)).toEqual(await expectedPadrao());
+
+	nativeBridge.revokePermission(cableInfo());
+	await confirmAndroid(dialog);
+	await writeButton(dialog).click();
+	await expect(dialog.getByRole('status')).toHaveText('A gravação foi interrompida.');
+	expect(nativeBridge.reports).toHaveLength(10);
+	expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'sendReport')).toHaveLength(
+		11
+	);
+	expect(nativeBridge.events).toEqual([]);
+
+	nativeBridge.grantPermission(cableInfo());
+	await confirmAndroid(dialog);
+	await writeButton(dialog).click();
+	await expect(dialog.getByRole('status')).toHaveText(/^Gravado no cabo\. CRC /);
+	expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'open')).toHaveLength(2);
+	expect(nativeBridge.reports.map(({ bytes }) => bytes)).toEqual([
+		...(await expectedPadrao()),
+		...(await expectedPadrao())
+	]);
+	expect(nativeBridge.reports[19].bytes).toEqual(COMMIT);
+	await closeChecklist(dialog);
+	await expect(page.locator('#main-content li[data-status="interrupted"]')).toHaveCount(1);
+	await expect(page.locator('#main-content li[data-status="ok"]')).toHaveCount(2);
+});
+
 for (const fault of ['detach', 'timeout'] as const) {
 	test.describe(fault, () => {
 		test.use({
