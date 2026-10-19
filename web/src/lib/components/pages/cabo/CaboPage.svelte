@@ -27,8 +27,8 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { JournalEntry } from '#lib/cable/types.ts';
-	import { getNativeCableState } from '#lib/cable/native-state.svelte.ts';
-	import { isNativeAndroid, NativeHIDDevice } from '#lib/cable/native/index.ts';
+	import { getNativeCableState, isNativeAndroid } from '#lib/app/context.svelte.ts';
+	import type { NativeHIDDevice } from '#lib/cable/native/index.ts';
 	import {
 		ANDROID_PLAY_LIVE,
 		ANDROID_PLAY_URL,
@@ -95,8 +95,11 @@
 		inApp && browser && parseLayer(page.url?.searchParams.get(LAYER_PARAM)) === 'engenharia'
 	);
 	const nativeDevice = $derived(
-		cable?.connection === 'connected' && cable.device instanceof NativeHIDDevice
-			? cable.device
+		cable?.connection === 'connected' &&
+			cable.device !== null &&
+			'diagnostics' in cable.device &&
+			typeof cable.device.diagnostics === 'function'
+			? (cable.device as Pick<NativeHIDDevice, 'diagnostics'>)
 			: null
 	);
 	const entries = $derived(app?.state.journal.entries ?? []);

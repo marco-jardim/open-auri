@@ -46,6 +46,24 @@
 		}
 		seenVersion = version;
 	}
+
+	function keepOpen(event: Event): void {
+		event.preventDefault();
+	}
+
+	function reopen(event: Event): void {
+		const dialog = event.currentTarget;
+		// Chromium can close on repeated Esc without a cancelable event. Restore the modal
+		// without acknowledging, but never reopen after navigating to the recovery banner.
+		if (open && presentation === 'modal' && dialog instanceof HTMLDialogElement) {
+			queueMicrotask(() => {
+				if (open && presentation === 'modal' && dialog.isConnected && !dialog.open) {
+					dialog.showModal();
+					dialog.querySelector<HTMLButtonElement>('[data-ack]')?.focus();
+				}
+			});
+		}
+	}
 </script>
 
 {#if enabled && presentation === 'banner'}
@@ -61,6 +79,8 @@
 		aria-modal="true"
 		aria-labelledby="{id}-title"
 		aria-describedby="{id}-description"
+		oncancel={keepOpen}
+		onclose={reopen}
 		use:modalDialog={{ open, onDismiss: () => undefined, initialFocus: '[data-ack]' }}
 	>
 		<h2 id="{id}-title">{m.android_untested_title()}</h2>

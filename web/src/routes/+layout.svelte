@@ -7,9 +7,8 @@
 	import { getLocale, getTextDirection } from '#lib/paraglide/runtime.js';
 	import { PUBLIC_GITHUB_URL } from '#lib/config/public.ts';
 	// FUX.2: no static import of the runtime (#lib/app/index.ts re-exports createClientApp).
-	import { setAppContext } from '#lib/app/context.svelte.ts';
+	import { setAppContext, mountNativeCable, setNativeCableState } from '#lib/app/context.svelte.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
-	import { mountNativeCable, setNativeCableState } from '#lib/cable/native-state.svelte.ts';
 	import {
 		hasInflightMarker,
 		isInstrumentRoute,
@@ -666,7 +665,10 @@
 	<Toast store={toasts} />
 	{#if nativeCable.result.kind !== 'none' && androidNotice.current}
 		{@const AndroidNotice = androidNotice.current}
-		<AndroidNotice kind={nativeCable.result.kind} />
+		<AndroidNotice
+			kind={nativeCable.result.kind}
+			presentation={page.url.pathname.replace(/\/$/, '') === '/docs' ? 'banner' : 'modal'}
+		/>
 	{/if}
 	{#if social && syncReady}
 		{@const SocialSync = social.runtime.SocialSync}

@@ -1,7 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { afterEach, expect, test, vi } from 'vitest';
 import { createToastStore } from '#lib/components/chrome/toast.ts';
-import { mountNativeCable, type NativeCableState } from '#lib/cable/native-state.svelte.ts';
+import {
+	isNativeAndroid,
+	mountNativeCable,
+	type NativeCableState
+} from '#lib/app/context.svelte.ts';
 import {
 	NativeHID,
 	type NativeCableDetection,
@@ -87,18 +91,54 @@ test.each<NativeCableDetection>([
 
 test('layout uses the tested mount path and lazy notice; Capacitor remains behind the native dynamic import', () => {
 	const layout = source('src/routes/+layout.svelte');
-	const state = source('src/lib/cable/native-state.svelte.ts');
+	const state = source('src/lib/app/context.svelte.ts');
+	const cabo = source('src/lib/components/pages/cabo/CaboPage.svelte');
+	const callout = source('src/lib/components/cable/AndroidAppCallout.svelte');
 	const index = source('src/lib/cable/native/index.ts');
 	const detect = source('src/lib/cable/native/detect.ts');
 	expect(layout).toContain('mountNativeCable(');
 	expect(layout).toContain('context.mount(options, mountOptions)');
 	expect(layout).toContain("() => import('#lib/components/cable/AndroidUntestedNotice.svelte')");
+	expect(layout).toContain(
+		String.raw`page.url.pathname.replace(/\/$/, '') === '/docs' ? 'banner' : 'modal'`
+	);
 	expect(state).toContain('if (!isNative()) return mount({ toasts });');
+	expect(state).toContain("await import('#lib/cable/native/index.ts')");
+	for (const text of [layout, state, cabo, callout]) {
+		expect(text).not.toMatch(
+			/import\s+(?!type\b)[^;]*?\bfrom\s*['"]#lib\/cable\/(?:native-state|native\/)/
+		);
+	}
+	expect(cabo).not.toContain('instanceof NativeHIDDevice');
 	expect(index).not.toMatch(/from\s+['"].*bridge/);
 	for (const text of [layout, state, index, detect]) {
 		expect(text).not.toMatch(/(?:from\s*|import\s*)['"]@capacitor\/core/);
 	}
 	expect(detect).toContain("import('./bridge.ts')");
+});
+
+test('the initial-chunk gate only accepts native Android and fails closed on hostile globals', () => {
+	expect(isNativeAndroid({})).toBe(false);
+	expect(isNativeAndroid({ Capacitor: null })).toBe(false);
+	for (const platform of ['android', 'ios', 'web']) {
+		for (const native of [true, false]) {
+			expect(
+				isNativeAndroid({
+					Capacitor: { isNativePlatform: () => native, getPlatform: () => platform }
+				})
+			).toBe(native && platform === 'android');
+		}
+	}
+	const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	expect(
+		isNativeAndroid({
+			get Capacitor() {
+				throw new Error('blocked');
+			}
+		})
+	).toBe(false);
+	expect(warning).toHaveBeenCalledOnce();
+	warning.mockRestore();
 });
 
 function catalog(locale: string): Record<string, string> {

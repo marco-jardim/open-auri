@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
-	import { isNativeAndroid } from '#lib/cable/native/gate.ts';
+	import { isNativeAndroid } from '#lib/app/context.svelte.ts';
 	import {
 		ANDROID_PLAY_LIVE,
 		ANDROID_PLAY_URL,

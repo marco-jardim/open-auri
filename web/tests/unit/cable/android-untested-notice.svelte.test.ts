@@ -34,9 +34,11 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect.element(dialog).toHaveAccessibleDescription(m.android_untested_body());
 		await expect.element(ack).toHaveFocus();
 		expect(dialog.getByRole('button').elements()).toHaveLength(1);
-		await userEvent.keyboard('{Escape}');
-		await expect.element(dialog).toBeVisible();
-		expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+		for (let press = 0; press < 3; press += 1) {
+			await userEvent.keyboard('{Escape}');
+			await expect.element(dialog).toBeVisible();
+			expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+		}
 		await userEvent.keyboard('{Tab}');
 		await expect
 			.element(dialog.getByRole('link', { name: m.android_report_result() }))
@@ -68,6 +70,28 @@ test('a higher disclaimer version reopens the modal', async () => {
 	await expect.element(page.getByRole('dialog')).toBeVisible();
 	await page.getByRole('button', { name: m.android_untested_ack() }).click();
 	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBe('2');
+});
+
+test('recovery docs use a banner without acknowledging; the next non-docs page still requires acknowledgement', async () => {
+	const screen = await render(AndroidUntestedNotice, {
+		kind: 'native',
+		validated: false,
+		version: 1
+	});
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	await expect
+		.element(page.getByRole('link', { name: m.android_how_to_recover() }))
+		.toHaveAttribute('href', '/docs#android-resgate');
+	// The root layout switches presentation when navigation reaches /docs.
+	await screen.rerender({ presentation: 'banner' });
+	expect(page.getByRole('dialog').elements()).toHaveLength(0);
+	await expect.element(page.getByRole('complementary')).toBeVisible();
+	expect(document.querySelector('dialog[open]')).toBeNull();
+	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+	await screen.rerender({ presentation: 'modal' });
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	await page.getByRole('button', { name: m.android_untested_ack() }).click();
+	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBe('1');
 });
 
 const kinds: NativeCableStatus['kind'][] = [
