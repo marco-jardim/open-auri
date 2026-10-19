@@ -59,7 +59,7 @@ são estáveis: novos podem ser acrescentados, nenhum é renomeado ou reutilizad
 | `EMAIL_NOT_VERIFIED`     | 403    | Rota `verificado` com e-mail não verificado                                                |
 | `BANNED`                 | 403    | Conta banida                                                                               |
 | `FORBIDDEN`              | 403    | Recusa específica da rota (ex.: denunciar o próprio conteúdo; conta nova abrindo YOLO)     |
-| `YOLO_PUBLICATION_OFF`   | 403    | Abrir uma curva YOLO a terceiros com `YOLO_PUBLICATION` desligado (padrão)                 |
+| `YOLO_PUBLICATION_OFF`   | 403    | Abrir uma curva YOLO a terceiros com `YOLO_PUBLICATION` desligado                           |
 | `REAUTH_REQUIRED`        | 403    | Ação administrativa destrutiva com sessão de mais de 10 minutos                            |
 | `TURNSTILE_FAILED`       | 403    | Token Turnstile ausente, inválido ou de outra ação                                         |
 | `NOT_FOUND`              | 404    | Inexistente, sem permissão de leitura, ou de outra pessoa (mesma resposta nos três casos)  |
@@ -188,7 +188,7 @@ Query: `sort` ∈ `new` (padrão) | `favorites` | `installs`; `window` ∈ `7d` 
 - `favorites` / `installs`: o ranking materializado da janela (também sem YOLO).
 - `yolo=only`: só as linhagens públicas cujo head é YOLO reconhecido pelo dono, mais novas
   primeiro; só com `sort=new` (um sort ranqueado com `yolo=only` é 400 `INVALID_BODY`, `path` =
-  `sort`). As duas listas nunca se misturam. Com `YOLO_PUBLICATION` desligado (padrão) responde
+  `sort`). As duas listas nunca se misturam. Com `YOLO_PUBLICATION` desligado responde
   200 com a página vazia (`items: []`, `nextCursor: null`).
 
 Cada `FeedLineageCard.curve` traz `yolo` (booleano).
@@ -265,7 +265,7 @@ gate padrão aceita; HS, LP e HP são aceitos, com `experimental` derivado da pr
 `GATE_REJECTED`, `details.reasons` e `details.hard` com os códigos que bloqueiam em qualquer
 perfil). Uma curva YOLO sempre pode ser salva como privada. Para deixá-la visível a terceiros
 (`unlisted` ou `public`, nesta rota e em versão, fork, visibilidade e restauração), nesta ordem:
-`YOLO_PUBLICATION` = `on` (padrão `off`: 403 `YOLO_PUBLICATION_OFF`); conta com pelo menos 72 h
+`YOLO_PUBLICATION` = `on` (ligado nos templates; ausente = `off`: 403 `YOLO_PUBLICATION_OFF`); conta com pelo menos 72 h
 (403 `FORBIDDEN`, `details.reason` = `"account-age"`); `"acknowledge": "yolo"` no corpo (409
 `YOLO_ACK_REQUIRED` com `details.waived`, os códigos dispensados); e no máximo 5 reconhecimentos
 por 24 h móveis (429 `QUOTA_EXCEEDED`). O reconhecimento é gravado no mesmo lote da escrita. A

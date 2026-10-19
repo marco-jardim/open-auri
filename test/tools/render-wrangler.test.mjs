@@ -406,8 +406,8 @@ test('web template declares every binding at the top level and in each environme
       'SIGNUP_ENABLED',
       'YOLO_PUBLICATION',
     ]);
-    // YOLO publication stays off unless the template is changed on purpose.
-    assert.equal(target.vars.YOLO_PUBLICATION, 'off');
+    // YOLO publication is on (operator decision, 2026-10-19); the jobs Worker must match it.
+    assert.equal(target.vars.YOLO_PUBLICATION, 'on');
     assert.equal(target.vars.GITHUB_URL, 'fixture:PUBLIC_GITHUB_URL');
     assert.equal(target.vars.EMAIL_TRANSPORT, 'fixture:EMAIL_TRANSPORT');
     // env.production serves the custom domain (T5.4b); the top level (wrangler dev, tests) and
@@ -541,6 +541,8 @@ test('jobs template consumes the access-log queue with a DLQ and runs the daily,
       ],
     });
     assert.equal(target.vars.ACCESS_LOG_QUEUE_NAME, `fixture:ACCESS_LOG_QUEUE${s}`);
+    // og-sweep must agree with the web Worker's YOLO switch in every environment (#50).
+    assert.equal(target.vars.YOLO_PUBLICATION, 'on', label);
     assert.deepEqual(target.analytics_engine_datasets, [
       { binding: 'METRICS', dataset: label === 'staging' ? METRICS_STAGING : METRICS_DATASET },
     ]);

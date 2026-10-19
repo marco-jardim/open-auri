@@ -369,7 +369,7 @@ núcleo, em `web/src/lib/server/social/gate.ts`); a classe nunca vem do cliente:
 
 Uma curva YOLO sempre pode ser salva como **privada**. Para mostrá-la a terceiros (não listada ou
 pública), a escrita precisa do interruptor `YOLO_PUBLICATION` = `on` (variável do Worker em
-`web/wrangler.template.jsonc`, **padrão `off`**: 403 `YOLO_PUBLICATION_OFF`), de uma conta com 72 h
+`web/wrangler.template.jsonc`, `on` nos templates desde 2026-10-19; ausente ou outro valor = `off`: 403 `YOLO_PUBLICATION_OFF`), de uma conta com 72 h
 ou mais e do reconhecimento explícito `acknowledge: "yolo"` (409 `YOLO_ACK_REQUIRED` com os códigos
 dispensados), no máximo 5 por 24 h. A vaga é reservada de forma atômica antes da escrita (pedidos
 simultâneos nunca passam de 5) e devolvida se a escrita falha, então só reconhecimentos gravados

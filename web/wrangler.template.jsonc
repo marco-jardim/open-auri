@@ -83,7 +83,7 @@
 		"RESEND_FROM": "${RESEND_FROM}",
 		"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}",
 		// Kill switch of YOLO publication (docs/social.md): "off" = YOLO curves are private only.
-		"YOLO_PUBLICATION": "off"
+		"YOLO_PUBLICATION": "on"
 	},
 	"env": {
 		"production": {
@@ -142,7 +142,7 @@
 				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
 				"RESEND_FROM": "${RESEND_FROM}",
 				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}",
-				"YOLO_PUBLICATION": "off"
+				"YOLO_PUBLICATION": "on"
 			}
 		},
 		"staging": {
@@ -202,7 +202,7 @@
 				"ADMIN_2FA_REQUIRED": "${ADMIN_2FA_REQUIRED}",
 				"RESEND_FROM": "${RESEND_FROM}",
 				"EMAIL_TRANSPORT": "${EMAIL_TRANSPORT}",
-				"YOLO_PUBLICATION": "off"
+				"YOLO_PUBLICATION": "on"
 			}
 		}
 	}

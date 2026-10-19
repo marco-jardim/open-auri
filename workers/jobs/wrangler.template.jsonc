@@ -14,7 +14,7 @@
 // platform's invocation logs off and redacts query strings, as in web/wrangler.template.jsonc.
 // Metrics (T5.2): one job_run data point per job to the METRICS Analytics Engine dataset (same
 // datasets as the web Worker); schema in docs/operacao/observabilidade.md.
-// YOLO_PUBLICATION is the web Worker's kill switch (web/wrangler.template.jsonc, default "off") and
+// YOLO_PUBLICATION is the web Worker's kill switch (web/wrangler.template.jsonc, "on" since 2026-10-19; absent means "off") and
 // must hold the same value here in every environment: the OG sweep keeps the images of
 // acknowledged YOLO versions only while it is "on" (src/jobs/og-sweep.ts).
 {
@@ -57,7 +57,7 @@
   "vars": {
     "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
     "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE}",
-    "YOLO_PUBLICATION": "off"
+    "YOLO_PUBLICATION": "on"
   },
   "env": {
     "production": {
@@ -95,7 +95,7 @@
       "vars": {
         "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
         "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE}",
-        "YOLO_PUBLICATION": "off"
+        "YOLO_PUBLICATION": "on"
       }
     },
     "staging": {
@@ -135,7 +135,7 @@
       "vars": {
         "ACCESS_LOG_ENABLED": "${ACCESS_LOG_ENABLED}",
         "ACCESS_LOG_QUEUE_NAME": "${ACCESS_LOG_QUEUE_STAGING}",
-        "YOLO_PUBLICATION": "off"
+        "YOLO_PUBLICATION": "on"
       }
     }
   }
