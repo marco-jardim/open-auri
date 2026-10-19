@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { inflateSync } from 'node:zlib';
 import {
   ANDROID_RES,
   SOURCE_SVG,
+  TEMPLATE_SPLASH_DIRS,
   androidSvgVariants,
   renderAndroidIcons,
   renderPng,
@@ -85,7 +86,7 @@ function transparentCorners(image) {
 }
 
 test('all 15 fresh and committed Android PNGs have the specified IHDR dimensions', async () => {
-  assert.equal(fresh.size, 18, '15 PNGs plus three XML resources');
+  assert.equal(fresh.size, 19, '15 PNGs plus four XML resources');
   for (const [density, legacy, foreground] of densities) {
     for (const [name, size] of [
       ['ic_launcher', legacy],
@@ -119,11 +120,26 @@ test('two independent renders have identical bytes and SHA-256 hashes', async ()
   }
 });
 
-test('legacy icons are opaque with the source background; round icons have circular clipping', () => {
+test('legacy icons have rounded corners and an 8% margin; round icons have circular clipping', () => {
   for (const [density] of densities) {
     const legacy = rgba(fresh.get(`mipmap-${density}/ic_launcher.png`));
-    assert.deepEqual([...legacy.pixels.subarray(0, 4)], [0x17, 0x17, 0x15, 255]);
-    assert.ok(legacy.pixels.every((value, index) => index % 4 !== 3 || value === 255));
+    transparentCorners(legacy);
+    assert.equal(alphaAt(legacy, legacy.width / 2, legacy.height / 2), 255);
+    const backgroundIndex =
+      (Math.floor(legacy.height * 0.15) * legacy.width + legacy.width / 2) * 4;
+    assert.deepEqual([...legacy.pixels.subarray(backgroundIndex, backgroundIndex + 4)], [
+      0x17, 0x17, 0x15, 255,
+    ]);
+    for (let y = 0; y < legacy.height; y++) {
+      for (let x = 0; x < legacy.width; x++) {
+        if (
+          x + 1 <= legacy.width * 0.08 || x >= legacy.width * 0.92 ||
+          y + 1 <= legacy.height * 0.08 || y >= legacy.height * 0.92
+        ) {
+          assert.equal(alphaAt(legacy, x, y), 0, `${density}: transparent legacy margin`);
+        }
+      }
+    }
     const round = rgba(fresh.get(`mipmap-${density}/ic_launcher_round.png`));
     transparentCorners(round);
     assert.equal(alphaAt(round, round.width / 2, round.height / 2), 255);
@@ -173,6 +189,20 @@ test('adaptive XMLs use the icon background, mipmap foreground and monochrome la
     fresh.get('values/ic_launcher_background.xml').toString(),
     /<color name="ic_launcher_background">#171715<\/color>/,
   );
+});
+
+test('splash keeps its drawable reference without inconsistent template bitmaps or obsolete qualifiers', async () => {
+  assert.match(
+    fresh.get('drawable/splash.xml').toString(),
+    /<solid android:color="@color\/ic_launcher_background"\/>/,
+  );
+  const directories = await readdir(ANDROID_RES);
+  assert.ok(!directories.includes('drawable-v24'));
+  for (const directory of TEMPLATE_SPLASH_DIRS) {
+    if (!directories.includes(directory)) continue;
+    const files = await readdir(join(ANDROID_RES, directory));
+    assert.ok(!files.includes('splash.png'), `${directory}: obsolete template splash`);
+  }
 });
 
 test('the reusable renderer supports the 512 px Play Store icon and render options', async () => {

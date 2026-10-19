@@ -9,6 +9,7 @@ import {
   gradleCommand,
   main,
   parseArgs,
+  runChild,
   validateArg,
 } from '../../tools/run-gradle.mjs';
 
@@ -40,12 +41,19 @@ function runner(outcomes = [0, 0], overrides = {}) {
 }
 
 test('parses wrapper options and leaves Gradle tasks and flags in their original order', () => {
-  assert.deepEqual(parseArgs([]), { target: 'prod', noSync: false, syncOnly: false, args: [] });
-  const tasks = ['verifyCapacitorConfig', 'bundleRelease', '-Pfixture=a,b', '--stacktrace'];
+  assert.deepEqual(parseArgs([]), {
+    target: 'prod',
+    noSync: false,
+    syncOnly: false,
+    maintainerMetadata: false,
+    args: [],
+  });
+  const tasks = ['verifyCapacitorConfig', 'bundleRelease', '--offline', '--stacktrace'];
   assert.deepEqual(parseArgs(['--target', 'staging', '--no-sync', ...tasks]), {
     target: 'staging',
     noSync: true,
     syncOnly: false,
+    maintainerMetadata: false,
     args: tasks,
   });
   assert.equal(parseArgs(['--target', 'e2e', '--sync-only']).syncOnly, true);
@@ -61,12 +69,7 @@ test('parses wrapper options and leaves Gradle tasks and flags in their original
 });
 
 test('selects the correct Gradle and Capacitor executable on Windows, Linux and macOS', () => {
-  const args = [
-    ':app:testDebugUnitTest',
-    '--info',
-    '-Pfixture=a,b',
-    '-Durl=https://fixture.invalid',
-  ];
+  const args = [':app:testDebugUnitTest', '--info', '--console=plain', '--max-workers=2'];
   for (const platform of ['linux', 'darwin']) {
     const command = gradleCommand(platform, args, { ComSpec: 'custom-cmd.exe' });
     assert.deepEqual(command, { command: './gradlew', args });
@@ -130,7 +133,7 @@ test('rejects empty arguments, whitespace and every cmd.exe metacharacter before
 test('sync runs first in the Capacitor workspace with the selected target and inherited environment', async () => {
   for (const platform of ['win32', 'linux', 'darwin']) {
     const fake = runner([0, 0], { platform });
-    const args = ['assembleDebug', '--stacktrace', '-Pfixture=a,b'];
+    const args = ['assembleDebug', '--stacktrace', '--offline'];
     assert.equal(await fake.run(['--target', 'e2e', ...args]), 0);
     assert.equal(fake.calls.length, 2);
     assert.deepEqual(fake.calls[0], {
@@ -139,6 +142,7 @@ test('sync runs first in the Capacitor workspace with the selected target and in
         cwd: join(root, 'apps', 'android'),
         env: { KEEP: 'fixture', OA_ANDROID_TARGET: 'e2e' },
         stdio: 'inherit',
+        shell: false,
       },
     });
     assert.deepEqual(fake.calls[1], {
@@ -147,9 +151,97 @@ test('sync runs first in the Capacitor workspace with the selected target and in
         cwd: join(root, 'apps', 'android', 'android'),
         env: { KEEP: 'fixture', OA_ANDROID_TARGET: 'e2e' },
         stdio: 'inherit',
+        shell: false,
       },
     });
     assert.equal(fake.dependencies.env.OA_ANDROID_TARGET, 'previous');
+  }
+});
+
+test('rejects options that can bypass release guards or replace the build before spawning', async () => {
+  for (const args of [
+    ['-x', 'verifyCapacitorConfig'],
+    ['-xverifyCapacitorConfig'],
+    ['--exclude-task', ':app:verifyCapacitorConfig'],
+    ['--exclude-task=verifyCapacitorConfig'],
+    ['-I', 'fixture.gradle'],
+    ['-Ifixture.gradle'],
+    ['--init-script=fixture.gradle'],
+    ['--init-script', 'fixture.gradle'],
+    ['-c', 'fixture.gradle'],
+    ['-cfixture.gradle'],
+    ['--settings-file=fixture.gradle'],
+    ['--settings-file', 'fixture.gradle'],
+    ['-p', 'other'],
+    ['-pother'],
+    ['--project-dir=other'],
+    ['--project-dir', 'other'],
+    ['-Dfixture=true'],
+    ['-D', 'fixture=true'],
+    ['--system-prop=fixture=true'],
+    ['-Pfixture=true'],
+    ['-P', 'fixture=true'],
+    ['--project-prop=fixture=true'],
+    ['--dependency-verification=off'],
+    ['--write-verification-metadata', 'sha256'],
+    ['--dry-run'],
+    ['-m'],
+    ['--'],
+    ['--unknown'],
+    ['.\\gradlew.bat'],
+  ]) {
+    for (const prefix of [[], ['--maintainer-metadata']]) {
+      if (prefix.length && args[0] === '--write-verification-metadata') continue;
+      const fake = runner();
+      assert.equal(await fake.run([...prefix, ':app:assembleRelease', ...args]), 2, args.join(' '));
+      assert.equal(fake.calls.length, 0);
+      assert.match(fake.errors.join('\n'), /Unsupported Gradle argument/);
+    }
+    assert.throws(() => gradleCommand('win32', args, {}), /Unsupported Gradle argument/);
+    const direct = runner();
+    assert.equal(
+      await runChild(
+        'win32', 'gradle', args, root, {},
+        direct.dependencies.spawn, direct.dependencies.error,
+      ),
+      1,
+    );
+    assert.equal(direct.calls.length, 0, 'spawn boundary also enforces option policy');
+  }
+});
+
+test('metadata writes require an explicit wrapper opt-in and only accept sha256', async () => {
+  const args = ['--write-verification-metadata', 'sha256', ':app:testDebugUnitTest'];
+  const fake = runner();
+  assert.equal(await fake.run(['--no-sync', '--maintainer-metadata', ...args]), 0);
+  assert.deepEqual(fake.calls[0].args, args);
+  assert.equal(parseArgs(['--maintainer-metadata', ...args]).maintainerMetadata, true);
+  for (const value of [[], ['sha1'], ['sha256,sha1'], ['-x']]) {
+    assert.throws(
+      () => parseArgs(['--maintainer-metadata', '--write-verification-metadata', ...value]),
+      /Maintainer metadata requires/,
+    );
+  }
+});
+
+test('every argument at the spawn boundary passed validateArg and shell is always disabled', async () => {
+  for (const platform of ['win32', 'linux', 'darwin']) {
+    const fake = runner([0, 0], { platform });
+    assert.equal(await fake.run([':app:assembleRelease', '--console=plain', '--offline']), 0);
+    for (const { args, options } of fake.calls) {
+      assert.ok(args.every(validateArg), JSON.stringify(args));
+      assert.equal(options.shell, false);
+    }
+    const rejected = runner();
+    assert.equal(
+      await runChild(
+        platform, 'gradle', ['task&evil'], root, {},
+        rejected.dependencies.spawn, rejected.dependencies.error,
+      ),
+      1,
+    );
+    assert.equal(rejected.calls.length, 0);
+    assert.match(rejected.errors.join('\n'), /Invalid Gradle argument/);
   }
 });
 

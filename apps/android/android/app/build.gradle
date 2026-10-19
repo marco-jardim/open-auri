@@ -5,6 +5,18 @@ apply plugin: 'app.cash.licensee'
 
 def appPackage = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json'))
 
+// Resolve the test SDK through Gradle so dependency verification covers it too.
+def robolectricSdk = configurations.create('robolectricSdk') {
+    canBeConsumed = false
+    canBeResolved = true
+    transitive = false
+}
+def robolectricSdkDir = layout.buildDirectory.dir('robolectric-sdk')
+def prepareRobolectricSdk = tasks.register('prepareRobolectricSdk', Copy) {
+    from robolectricSdk
+    into robolectricSdkDir
+}
+
 android {
     namespace = "com.openauri.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -38,7 +50,11 @@ android {
         unitTests {
             includeAndroidResources = true
             all {
-                maxParallelForks = Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))
+                // Each SDK 36 sandbox is memory-heavy, even on hosts with many cores.
+                maxParallelForks = Math.max(1, Math.min(2, Runtime.runtime.availableProcessors().intdiv(2)))
+                dependsOn prepareRobolectricSdk
+                systemProperty 'robolectric.offline', 'true'
+                systemProperty 'robolectric.dependency.dir', robolectricSdkDir.get().asFile.absolutePath
                 // Robolectric 4.17 reaches jdk.internal.access.SharedSecrets when it boots SDK 36 on JDK 21.
                 jvmArgs '--add-exports=java.base/jdk.internal.access=ALL-UNNAMED',
                         '--add-opens=java.base/jdk.internal.access=ALL-UNNAMED',
@@ -73,6 +89,8 @@ dependencies {
 
     testImplementation "junit:junit:$junitVersion"
     testImplementation "org.robolectric:robolectric:$robolectricVersion"
+    // Robolectric 4.17 DefaultSdkProvider: SDK 36 is Android 16 build 13921718, instrumentation i7.
+    add(robolectricSdk.name, 'org.robolectric:android-all-instrumented:16-robolectric-13921718-i7')
     testImplementation "androidx.test:core:$androidxTestCoreVersion"
     testImplementation "org.json:json:$orgJsonVersion"
     testImplementation "com.networknt:json-schema-validator:$jsonSchemaValidatorVersion"
@@ -120,17 +138,20 @@ tasks.named('preBuild') {
     dependsOn 'licensee'
 }
 
-// Release guard (plan 0.12.5): the synced capacitor.config.json must be the production one.
+// Release guard (plan 0.12.5): validate the actual merged release asset, including overlays.
 def verifyCapacitorConfig = tasks.register('verifyCapacitorConfig', Exec) {
     group = 'verification'
-    description = 'Fails when the synced Capacitor config is not valid for a release build.'
-    def configFile = file('src/main/assets/capacitor.config.json')
+    description = 'Fails when the merged Capacitor config is not valid for a release build.'
+    dependsOn 'mergeReleaseAssets'
+    def configFile = layout.buildDirectory.file('intermediates/assets/release/mergeReleaseAssets/capacitor.config.json')
     def script = rootProject.file('../../../tools/verify-capacitor-config.mjs')
     inputs.file(configFile)
     inputs.file(script)
-    commandLine 'node', script.absolutePath, configFile.absolutePath
+    commandLine 'node', script.absolutePath, configFile.get().asFile.absolutePath
 }
 
-tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+// Do not attach to preReleaseBuild: asset merging already depends on that task.
+// Both APK and bundle packaging must wait for verification, even when invoked directly.
+tasks.matching { it.name in ['packageRelease', 'packageReleaseBundle', 'signReleaseBundle', 'bundleRelease', 'assembleRelease'] }.configureEach {
     dependsOn verifyCapacitorConfig
 }

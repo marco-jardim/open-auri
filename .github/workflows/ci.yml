@@ -75,7 +75,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: dorny/paths-filter@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           filters: |
@@ -87,6 +87,7 @@ jobs:
               - 'src/transport/**'
               - 'schemas/android-*'
               - 'test/fixtures/**'
+              - 'docs/protocol-0xcb.md'
               - 'tools/run-gradle.mjs'
               - 'tools/android-*.mjs'
               - 'tools/verify-capacitor-config.mjs'
@@ -253,10 +254,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - uses: android-actions/setup-android@v4
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - run: npm ci
       - name: Tooling tests
         run: npm run test:tools

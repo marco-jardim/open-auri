@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Resvg } from '@cf-wasm/resvg/node';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -18,6 +18,14 @@ const DENSITIES = [
   { name: 'xhdpi', legacy: 96, foreground: 216 },
   { name: 'xxhdpi', legacy: 144, foreground: 324 },
   { name: 'xxxhdpi', legacy: 192, foreground: 432 },
+];
+// Replaced by the density-independent branded splash drawable below. These are
+// Capacitor template images with inconsistent dp sizes, not launcher artwork.
+export const TEMPLATE_SPLASH_DIRS = [
+  'drawable',
+  ...['land', 'port'].flatMap((orientation) =>
+    DENSITIES.map(({ name }) => `drawable-${orientation}-${name}`),
+  ),
 ];
 
 /**
@@ -63,6 +71,12 @@ export function androidSvgVariants(svgText) {
     throw new Error(`Expected exactly one full-bleed background path: ${BACKGROUND_PATH}`);
   }
   const artwork = body.replace(BACKGROUND_PATH, '');
+  // Legacy launchers do not apply an adaptive mask. Use a rounded square with an
+  // 8% transparent margin on each side instead of filling the launcher tile.
+  const legacy = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs><clipPath id="launcher-rounded"><rect x="40.96" y="40.96" width="430.08" height="430.08" rx="86.016"/></clipPath></defs>
+<g clip-path="url(#launcher-rounded)"><svg x="40.96" y="40.96" width="430.08" height="430.08" viewBox="0 0 512 512">${body}</svg></g>
+</svg>`;
   const round = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
 <defs><clipPath id="launcher-circle"><circle cx="256" cy="256" r="256"/></clipPath></defs>
 <g clip-path="url(#launcher-circle)">${body}</g>
@@ -73,7 +87,7 @@ export function androidSvgVariants(svgText) {
   const foreground = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
 <svg x="12.75" y="12.75" width="82.5" height="82.5" viewBox="0 0 512 512">${artwork}</svg>
 </svg>`;
-  return { legacy: svgText, round, foreground };
+  return { legacy, round, foreground };
 }
 
 /**
@@ -111,6 +125,14 @@ export async function renderAndroidIcons(svgText) {
 </resources>
 `),
   );
+  files.set(
+    'drawable/splash.xml',
+    Buffer.from(`<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/ic_launcher_background"/>
+</shape>
+`),
+  );
   return files;
 }
 
@@ -134,6 +156,9 @@ export async function writeAndroidIcons({
     const path = join(resourceDir, relativePath);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, data);
+  }
+  for (const directory of TEMPLATE_SPLASH_DIRS) {
+    await rm(join(resourceDir, directory, 'splash.png'), { force: true });
   }
   return files.size;
 }
