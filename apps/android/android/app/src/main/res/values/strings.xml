@@ -2,6 +2,11 @@
 <resources>
     <string name="app_name">open-auri</string>
     <string name="title_activity_main">open-auri</string>
-    <string name="package_name">com.openauri.app</string>
-    <string name="custom_url_scheme">com.openauri.app</string>
+    <string name="package_name" translatable="false">com.openauri.app</string>
+    <string name="custom_url_scheme" translatable="false">com.openauri.app</string>
+    <string name="webview_update_title">Update Android System WebView</string>
+    <string name="webview_update_body">open-auri needs an up-to-date WebView to open securely. Update your active WebView provider (Android System WebView or Chrome) in Google Play, then reopen open-auri.</string>
+    <string name="webview_update_button">Open Google Play</string>
+    <string name="webview_update_button_description">Open Google Play to update your active WebView provider</string>
+    <string name="webview_update_store_unavailable">No app can open Google Play. Update your WebView provider through your device’s app store, then reopen open-auri.</string>
 </resources>

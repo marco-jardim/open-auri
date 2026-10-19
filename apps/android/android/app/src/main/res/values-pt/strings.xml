@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">open-auri</string>
+    <string name="title_activity_main">open-auri</string>
+    <string name="webview_update_title">Atualize o Android System WebView</string>
+    <string name="webview_update_body">O open-auri precisa de um WebView atualizado para abrir com segurança. Atualize o provedor de WebView ativo (Android System WebView ou Chrome) no Google Play e abra o open-auri novamente.</string>
+    <string name="webview_update_button">Abrir Google Play</string>
+    <string name="webview_update_button_description">Abrir o Google Play para atualizar o provedor de WebView ativo</string>
+    <string name="webview_update_store_unavailable">Nenhum aplicativo pode abrir o Google Play. Atualize o provedor de WebView pela loja de aplicativos do dispositivo e abra o open-auri novamente.</string>
+</resources>
