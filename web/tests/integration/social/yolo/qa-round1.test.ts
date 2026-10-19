@@ -231,10 +231,14 @@ describe('M1: the kill switch hides YOLO heads from others on every read', () =>
 
 	it('/og/:id.png of a YOLO version is a 404 through the route while the env switch is off', async () => {
 		const { info } = await acknowledgedYolo();
-		expect(getServerEnv({ env }).yoloPublication).toBe('off');
-		const response = await ogResponse(ogEvent(`/og/${info.versionId}.png?y=1`, info.versionId), {
-			render: async () => PNG
-		});
+		// The deployed default is "on" (901f50e); this test pins the switch off explicitly.
+		const offEnv = { ...env, YOLO_PUBLICATION: 'off' };
+		expect(getServerEnv({ env: offEnv }).yoloPublication).toBe('off');
+		const event = ogEvent(`/og/${info.versionId}.png?y=1`, info.versionId);
+		const response = await ogResponse(
+			{ ...event, platform: { env: offEnv, ctx: noWait } },
+			{ render: async () => PNG }
+		);
 		expect(response.status).toBe(404);
 	});
 });
