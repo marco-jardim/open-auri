@@ -26,6 +26,12 @@ allprojects {
     }
 }
 
+// Capacitor's library module lives in node_modules; keep its build output inside this project so
+// node_modules stays read-only and parallel checkouts (git worktrees) never share a build dir.
+project(':capacitor-android') {
+    layout.buildDirectory = rootProject.layout.buildDirectory.dir('capacitor-android')
+}
+
 // The daemon JVM is pinned to Java 21 by gradle/gradle-daemon-jvm.properties, which matches the
 // Java 21 target of Capacitor's own modules.
 
