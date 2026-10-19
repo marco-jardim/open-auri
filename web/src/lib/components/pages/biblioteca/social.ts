@@ -1,6 +1,8 @@
 // "Minha biblioteca" (T4.14): pure helpers of the signed-in shelves, the local-library merge and the
 // share funnel. Nothing here touches the network or `window` at module load; storage is injected.
+import { decodeS1, S1Error } from 'open-auri/share';
 import type { AccountSummary } from '#lib/components/chrome/account.ts';
+import { curveClassification } from '#lib/gate-verdicts.ts';
 import {
 	isSocialApiError,
 	type LibraryMergeItem,
@@ -146,6 +148,44 @@ export function toMergeItem(item: LocalLibraryItem, locale: string): LibraryMerg
 	};
 }
 
+/**
+ * Gate runs one merge item may cost on the server: 2 for a YOLO curve (the server classifies it
+ * with both profiles and counts both), 1 otherwise. A code that does not decode costs 1 (the
+ * server refuses it before the gate). Merged lineages are private: YOLO needs no acknowledgement.
+ */
+export function mergeWeight(item: Pick<LibraryMergeItem, 's1'>): number {
+	let decoded: ReturnType<typeof decodeS1>;
+	try {
+		decoded = decodeS1(item.s1);
+	} catch (cause) {
+		if (cause instanceof S1Error) return 1;
+		throw cause;
+	}
+	return curveClassification(decoded.bands, decoded.preampDb).class === 'yolo' ? 2 : 1;
+}
+
+/**
+ * Consecutive batches of at most MERGE_BATCH gate runs each (`mergeWeight`): 20 standard items,
+ * or fewer when some are YOLO. Every batch has at least one item.
+ */
+export function mergeBatches<T extends Pick<LibraryMergeItem, 's1'>>(items: readonly T[]): T[][] {
+	const batches: T[][] = [];
+	let current: T[] = [];
+	let weight = 0;
+	for (const item of items) {
+		const cost = mergeWeight(item);
+		if (current.length > 0 && weight + cost > MERGE_BATCH) {
+			batches.push(current);
+			current = [];
+			weight = 0;
+		}
+		current.push(item);
+		weight += cost;
+	}
+	if (current.length > 0) batches.push(current);
+	return batches;
+}
+
 export interface MergeOutcome {
 	report: MergeReport;
 	/** Local ids not to offer again (merged or permanently rejected). */
@@ -157,7 +197,8 @@ export interface MergeOutcome {
 }
 
 /**
- * Sends at most 20 items at a time, retrying quota rejections before the next fresh batch.
+ * Sends at most 20 gate runs at a time (`mergeBatches`: a YOLO item counts 2), retrying quota
+ * rejections before the next fresh batch.
  * The API does not distinguish daily quotas from the per-request gate budget: stop and report
  * QUOTA_EXCEEDED after one retry pass makes no progress. Other failed requests stop immediately
  * (only cancellation throws). Transient rejections remain offerable on a later user action.
@@ -170,8 +211,8 @@ export async function runMerge(
 	const report: MergeReport = { created: [], duplicates: [], rejected: [], conflicts: [] };
 	let error: SocialErrorCode | null = null;
 	let sent = 0;
-	batches: for (let start = 0; start < items.length; start += MERGE_BATCH) {
-		let batch = items.slice(start, start + MERGE_BATCH);
+	batches: for (const fresh of mergeBatches(items)) {
+		let batch = fresh;
 		let retrying = false;
 		let quotaRejected: MergeReport['rejected'] = [];
 		while (batch.length > 0) {

@@ -113,6 +113,8 @@ export interface SetupOptions {
 	now?: number;
 	/** Wraps the auto-advancing fake clock the service uses (e.g. to hold a sleep open). */
 	wrapClock?: (clock: Clock) => Clock;
+	/** Modo YOLO on in this tab (`deps.yoloSession`); absent: no YOLO session. */
+	yoloSession?: boolean;
 }
 
 export async function setup(options: SetupOptions = {}) {
@@ -139,7 +141,10 @@ export async function setup(options: SetupOptions = {}) {
 		userActivation: () => ({ isActive: true }),
 		locks,
 		inflight,
-		tabId: options.tabId
+		tabId: options.tabId,
+		...(options.yoloSession === undefined
+			? {}
+			: { yoloSession: () => options.yoloSession === true })
 	};
 	const service = createCableService(deps);
 	const written: CableWrittenDetail[] = [];

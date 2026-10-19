@@ -1,9 +1,11 @@
 import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 import { curveResponseDb, distance, logGrid, levelDb } from 'open-auri/dsp';
-import { encodeS1, normalizeLabels, serializeEnvelope } from 'open-auri/share';
+import { encodeS1, envelopeFormat, normalizeLabels, serializeEnvelope } from 'open-auri/share';
 import type { CurveData } from '#lib/state/model.ts';
 import type { LibraryItem } from '#lib/state/library.svelte.ts';
 import type { gateForWrite } from 'open-auri/safety';
+import { curveClassification } from '#lib/gate-verdicts.ts';
+import type { CurveBadge } from '#lib/components/yolo/yolo-curve.ts';
 
 export type GateResult = ReturnType<typeof gateForWrite>;
 export const ANALYSIS_GRID = Object.freeze(logGrid(601));
@@ -167,21 +169,40 @@ export function number(value: number | null | undefined, locale: Locale, digits 
 		.replace(/-/g, '−');
 }
 
-/** No rights are invented for official presets. This is a view-only S5 draft until licensed. */
+/**
+ * Badge of a tape, from its class (core `classifyCurve`, derived every time, never stored):
+ * `yolo` for a YOLO curve, `warn` for one that passes neither profile today (a tape saved by an
+ * older build), `none` for a standard one.
+ */
+export function tapeBadge(curve: Pick<CurveData, 'bands' | 'preampDb'>): CurveBadge {
+	const { class: kind } = curveClassification(curve.bands, curve.preampDb);
+	return kind === 'yolo' ? 'yolo' : kind === 'rejected' ? 'warn' : 'none';
+}
+
+/**
+ * No rights are invented for official presets. This is a view-only S5 draft until licensed.
+ * Class-based like every exit: a rejected tape is view-only, a YOLO tape exports as it is (the
+ * envelope carries no YOLO marker; `yolo` tells the caller to mark the file name).
+ */
 export function envelopeView(
 	tape: Tape,
 	locale: Locale,
 	license: '' | 'CC0-1.0' | 'CC-BY-4.0' = '',
 	author = ''
-): { json: string; exportable: boolean } {
-	const allowed = tape.group === 'local' && !tape.source.startsWith('preset:') && license !== '';
+): { json: string; exportable: boolean; yolo: boolean } {
+	const kind = curveClassification(tape.bands, tape.preampDb).class;
+	const allowed =
+		tape.group === 'local' &&
+		!tape.source.startsWith('preset:') &&
+		license !== '' &&
+		kind !== 'rejected';
 	if (allowed && license === 'CC-BY-4.0' && !author.trim()) {
 		throw new TypeError('CC-BY requires attribution');
 	}
-	// Filter labels make the draft preset@2; without them it stays the unchanged preset@1.
+	// Filter labels (or a band above 20 kHz) make the draft preset@2; otherwise the unchanged @1.
 	const labels = normalizeLabels(tape.labels ?? null, { lenient: true });
 	const envelope = {
-		format: labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
+		format: envelopeFormat({ bands: tape.bands, labels }),
 		name: tape.name,
 		description: tape.description,
 		...(author ? { author } : {}),
@@ -194,9 +215,10 @@ export function envelopeView(
 		lang: locale,
 		createdAt: tape.createdAt === null ? null : new Date(tape.createdAt).toISOString()
 	};
+	const yolo = kind === 'yolo';
 	return allowed
-		? { json: serializeEnvelope(envelope), exportable: true }
-		: { json: JSON.stringify(envelope, null, 2), exportable: false };
+		? { json: serializeEnvelope(envelope), exportable: true, yolo }
+		: { json: JSON.stringify(envelope, null, 2), exportable: false, yolo };
 }
 
 /** S9 contains all 11 official presets, in catalog order, with per-curve rights status. */

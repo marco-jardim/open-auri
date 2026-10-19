@@ -7,7 +7,10 @@ import {
 	EXPERIMENTAL_CONFIRMATION_TEXT,
 	LAMP_IDS,
 	REASON_MESSAGE_KEYS,
+	ULTRASONIC_CONFIRMATION_TEXT,
 	evaluateChecklist,
+	hasExperimentalKinds,
+	hasUltrasonicBands,
 	lampOf
 } from '../../../src/lib/cable/checklist.ts';
 import type {
@@ -210,6 +213,46 @@ describe('evaluateChecklist', () => {
 	test('padrao needs no experimental confirmation', () => {
 		const result = evaluateChecklist(input(), context());
 		expect(result.experimentalRequired).toBe(false);
+		expect(result.experimentalText).toBe(EXPERIMENTAL_CONFIRMATION_TEXT);
+	});
+
+	test('a filter above 20 kHz requires the experimental confirmation, whatever its kind', () => {
+		// A PK cut at 25 kHz: not an experimental kind, so the gate runs without the flag.
+		const bands: Band[] = [
+			{ kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 },
+			...Array.from({ length: 9 }, off)
+		];
+		expect(hasUltrasonicBands(bands)).toBe(true);
+		expect(hasExperimentalKinds(bands)).toBe(false);
+		const without = evaluateChecklist(input({ bands, preampDb: -1 }), context());
+		expect(without.gateOk).toBe(true);
+		expect(without.experimentalRequired).toBe(true);
+		expect(without.experimentalText).toBe(
+			`${EXPERIMENTAL_CONFIRMATION_TEXT} ${ULTRASONIC_CONFIRMATION_TEXT}`
+		);
+		expect(without.items.find((item) => item.id === 'experimental')).toEqual({
+			id: 'experimental',
+			required: true,
+			satisfied: false
+		});
+		expect(without.canWrite).toBe(false);
+		const confirmed = evaluateChecklist(
+			input({ bands, preampDb: -1, confirmations: { ...CONFIRMED, experimental: true } }),
+			context()
+		);
+		expect(confirmed.canWrite).toBe(true);
+		// 20 kHz itself is audible: nothing to confirm.
+		const audible: Band[] = [
+			{ kind: 'PK', freqHz: 20000, gainDb: -3, qFactor: 1 },
+			...Array.from({ length: 9 }, off)
+		];
+		expect(evaluateChecklist(input({ bands: audible, preampDb: -1 }), context())).toMatchObject({
+			experimentalRequired: false,
+			canWrite: true
+		});
+		expect(ULTRASONIC_CONFIRMATION_TEXT).toBe(
+			'Filtros acima de 20 kHz: confirme a gravação experimental.'
+		);
 	});
 
 	test('loudness warning on the first write of the session', () => {

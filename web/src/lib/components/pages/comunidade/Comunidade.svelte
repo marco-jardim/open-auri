@@ -167,6 +167,11 @@
 
 	let sort = $state<FeedSortKey>('new');
 	let feedWindow = $state<FeedWindowKey>('7d');
+	/**
+	 * "Curvas YOLO": the separate list of public YOLO curves (`yolo=only`, newest first only). The
+	 * two lists never mix: the main feed and the rankings stay standard-only on the server.
+	 */
+	let yoloOnly = $state(false);
 	let channels = $state.raw<Channel[]>([]);
 	let cursor = $state<string | null>(null);
 	let feedStatus = $state<'loading' | 'ready' | 'offline' | 'error'>('loading');
@@ -179,18 +184,23 @@
 	async function loadFeed(
 		nextSort: FeedSortKey,
 		nextWindow: FeedWindowKey,
-		after: string | null
+		after: string | null,
+		onlyYolo = yoloOnly
 	): Promise<void> {
 		const token = ++generation;
 		if (after === null) feedStatus = 'loading';
 		else loadingMore = true;
 		try {
-			const page = await api.feed({
-				sort: nextSort,
-				...(nextSort === 'new' ? {} : { window: nextWindow }),
-				cursor: after,
-				limit: FEED_PAGE_SIZE
-			});
+			const page = await api.feed(
+				onlyYolo
+					? { sort: 'new', yolo: 'only', cursor: after, limit: FEED_PAGE_SIZE }
+					: {
+							sort: nextSort,
+							...(nextSort === 'new' ? {} : { window: nextWindow }),
+							cursor: after,
+							limit: FEED_PAGE_SIZE
+						}
+			);
 			if (token !== generation) return;
 			const fresh = page.items.map(channelOf);
 			channels = after === null ? fresh : [...channels, ...fresh];
@@ -214,12 +224,23 @@
 	$effect(() => {
 		const nextSort = sort;
 		const nextWindow = feedWindow;
+		const onlyYolo = yoloOnly;
 		const connected = online;
 		untrack(() => {
 			if (!connected && channels.length > 0) return;
-			void loadFeed(nextSort, nextWindow, null);
+			void loadFeed(nextSort, nextWindow, null, onlyYolo);
 		});
 	});
+
+	/** "Curvas YOLO" on: the YOLO list (newest only); a ranked sort turns it off. */
+	function toggleYolo() {
+		yoloOnly = !yoloOnly;
+		if (yoloOnly) sort = 'new';
+	}
+	function pickSort(value: FeedSortKey) {
+		sort = value;
+		if (value !== 'new') yoloOnly = false;
+	}
 
 	function sortLabel(value: FeedSortKey): string {
 		if (value === 'new') return m.comunidade_sort_new();
@@ -490,10 +511,19 @@
 							type="button"
 							class="push"
 							aria-pressed={sort === value}
-							onclick={() => (sort = value)}>{sortLabel(value)}</button
+							onclick={() => pickSort(value)}>{sortLabel(value)}</button
 						>
 					{/each}
 				</div>
+				<button
+					type="button"
+					class="push push-yolo"
+					aria-pressed={yoloOnly}
+					aria-describedby="{id}-yolo-hint"
+					data-testid="feed-yolo-toggle"
+					onclick={toggleYolo}>{m.yolopub_feed_toggle()}</button
+				>
+				<span class="sr-only" id="{id}-yolo-hint">{m.yolopub_feed_toggle_hint()}</span>
 				{#if sort !== 'new'}
 					<div class="push-group" role="group" aria-label={m.comunidade_window_label()}>
 						{#each FEED_WINDOWS as value (value)}
@@ -535,6 +565,8 @@
 						<p>{feedError}</p>
 						<Button onclick={() => loadFeed(sort, feedWindow, null)}>{m.comunidade_retry()}</Button>
 					</div>
+				{:else if channels.length === 0 && yoloOnly}
+					<p class="bank-state" data-testid="feed-empty">{m.yolopub_feed_empty()}</p>
 				{:else if channels.length === 0 && sort === 'new'}
 					<div class="empty-desk" data-testid="feed-empty">
 						<EmptyState

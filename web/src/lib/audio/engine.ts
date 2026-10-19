@@ -7,7 +7,10 @@
  *
  * - The AudioContext is created lazily at 96 kHz (the chip's rate). If the browser refuses that
  *   rate it falls back to the device rate, recomputes the coefficients for it and reports
- *   `state().exact === false` with the note `'rate-fallback'`.
+ *   `state().exact === false` with the note `'rate-fallback'`. At such a rate every section
+ *   above 20 kHz is bypassed (an identity stage, `isBypassedAt`) instead of being redesigned near
+ *   or past Nyquist; each chain says how many (`PreviewChain.skipped`), and its protection still
+ *   counts them (the full curve at 96 kHz, `chainPeakDb`).
  * - Files are never decoded whole: playback streams through `createMediaElementSource`.
  * - The chosen file is kept in IndexedDB (db `open-auri`, store `audio`, key `current`) and never
  *   leaves the browser.
@@ -58,7 +61,7 @@ import {
 	preampWord,
 	snapshotBands
 } from 'open-auri/dsp';
-import { isExperimentalKind, THRESHOLDS } from 'open-auri/safety';
+import { isExperimentalKind, isUltrasonic, THRESHOLDS } from 'open-auri/safety';
 import { gateAccepts } from '../gate-verdicts.ts';
 import { createPinkNoiseBuffer, createPinkNoiseSource } from './pink-noise.ts';
 import { clampSeek, knownDuration, resolveStart, type StartAt } from './transport.ts';
@@ -243,10 +246,12 @@ function protectionGainDb(peakDb: number): number {
 /**
  * Peak of a chain's float transfer function (preamp included), in dB, over a log grid from
  * 10 Hz to just below Nyquist plus each section's resonance. Presentation-side estimate for the
- * preview protection only.
+ * preview protection only. At a fallback rate with sections bypassed (above 20 kHz,
+ * `isBypassedAt`) it is the louder of the chain that plays and the full curve at 96 kHz.
  */
 export function chainPeakDb(bands: readonly Band[], preampDb: number, rate: number): number {
-	return cascadePeakDb(chainCoefficients(bands, rate), preampGain(preampDb), rate);
+	const snapshot = snapshotBands(bands);
+	return protectedPeakDb(snapshot, chainCoefficients(snapshot, rate), preampGain(preampDb), rate);
 }
 
 export interface PreviewChain {
@@ -265,6 +270,11 @@ export interface PreviewChain {
 	readonly rate: number;
 	/** False when the coefficients were recomputed for a rate other than 96 kHz. */
 	readonly exact: boolean;
+	/**
+	 * Sections above 20 kHz this chain bypasses (identity stages) because the context is not at
+	 * 96 kHz (`skippedSections`); 0 when exact. Its protection still counts them.
+	 */
+	readonly skipped: number;
 	/** Crossfades (30 ms) the chain to `db` when `on`, or to silence. */
 	setGain(db: number, on?: boolean): void;
 	/** Fades out and disconnects every node of the chain. */
@@ -487,11 +497,39 @@ export function clampVolumeDb(db: number): number {
 }
 
 /**
+ * Whether the preview bypasses `band` at every context rate other than 96 kHz: a section above
+ * 20 kHz (core `isUltrasonic`) at a frequency the chip accepts (below 48 kHz). At a fallback rate
+ * (44,1 or 48 kHz) such a section sits near or past that rate's Nyquist, so it is never
+ * redesigned there: it plays as an identity stage. Any other band (OFF, audible, or a frequency
+ * the codec refuses) is designed, or refused, as before.
+ */
+export function bypassedOffRate(band: Band): boolean {
+	return band.kind !== 'OFF' && isUltrasonic(band) && band.freqHz < PREVIEW_RATE / 2;
+}
+
+/** Whether the preview bypasses `band` at `rate` (`bypassedOffRate`, never at 96 kHz). */
+export function isBypassedAt(band: Band, rate: number): boolean {
+	return rate !== PREVIEW_RATE && bypassedOffRate(band);
+}
+
+/**
+ * How many sections of `bands` the preview bypasses at `rate`: 0 at 96 kHz (the preview is
+ * exact), else the sections above 20 kHz (`isBypassedAt`). The UI says "N filtros acima de 20 kHz
+ * não tocam nesta taxa" with it.
+ */
+export function skippedSections(bands: readonly Band[], rate: number): number {
+	if (rate === PREVIEW_RATE) return 0;
+	return snapshotBands(bands).filter((band) => isBypassedAt(band, rate)).length;
+}
+
+/**
  * IIR coefficients of one band at `rate`. At 96 kHz they are the dequantized Q27 wire words
  * (exactly what the chip runs); at any other rate the band is redesigned for that rate
- * (approximate preview).
+ * (approximate preview), except a section above 20 kHz, which is bypassed there (identity,
+ * `isBypassedAt`) instead of being redesigned near or past Nyquist.
  */
 export function sectionCoefficients(band: Band, index: number, rate: number): IIRCoefficients {
+	if (isBypassedAt(band, rate)) return { feedforward: [1, 0, 0], feedback: [1, 0, 0] };
 	let s: Section;
 	if (rate === PREVIEW_RATE) {
 		s = fromWords(encodeSection(designSection(band, PREVIEW_RATE), index));
@@ -505,13 +543,36 @@ export function sectionCoefficients(band: Band, index: number, rate: number): II
 	return { feedforward: [s.b0, s.b1, s.b2], feedback: [1, s.a1, s.a2] };
 }
 
-/** Coefficients of every non-OFF band, in written order. */
+/**
+ * Coefficients of every non-OFF band, in written order. A section bypassed at `rate`
+ * (`isBypassedAt`) keeps its place as an identity stage, so stage k is still the k-th active
+ * section (stage meters, `PreviewChain.stages`).
+ */
 export function chainCoefficients(bands: readonly Band[], rate: number): IIRCoefficients[] {
 	const out: IIRCoefficients[] = [];
 	snapshotBands(bands).forEach((band, index) => {
 		if (band.kind !== 'OFF') out.push(sectionCoefficients(band, index, rate));
 	});
 	return out;
+}
+
+/**
+ * Peak (dB) a chain is protected for: the float peak of what plays (`coefficients` at `rate`)
+ * and, when sections are bypassed at that rate, also the analytic peak of the full curve at
+ * 96 kHz (what the chip would play), whichever is louder. A bypassed section never makes a
+ * preview louder than its protection assumes.
+ */
+function protectedPeakDb(
+	snapshot: readonly Band[],
+	coefficients: readonly IIRCoefficients[],
+	preamp: number,
+	rate: number
+): number {
+	const played = cascadePeakDb(coefficients, preamp, rate);
+	if (skippedSections(snapshot, rate) === 0) return played;
+	const full = cascadePeakDb(chainCoefficients(snapshot, PREVIEW_RATE), preamp, PREVIEW_RATE);
+	// NaN on either side stays NaN (Math.max): `!(peak <= limit)` then always protects.
+	return Math.max(played, full);
 }
 
 /** Linear preamp gain the chip applies: the Q23 word over 2^23. */
@@ -1464,7 +1525,8 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 		// protected whether the caller asked or not.
 		let protect = chainOptions.protect;
 		if (protect === undefined) {
-			const peak = cascadePeakDb(coefficients, preampLinear, context.sampleRate);
+			// Bypassed sections (above 20 kHz at a fallback rate) still count: `protectedPeakDb`.
+			const peak = protectedPeakDb(snapshot, coefficients, preampLinear, context.sampleRate);
 			if (!(peak <= PREVIEW_PEAK_LIMIT_DB) || !standardGateAccepts(snapshot, preampDb)) {
 				protect = { gainDb: protectionGainDb(peak) };
 			}
@@ -1522,6 +1584,7 @@ export function createAudioEngine(options: AudioEngineEnv = {}): AudioEngine {
 			coefficients,
 			rate: context.sampleRate,
 			exact: context.sampleRate === PREVIEW_RATE,
+			skipped: skippedSections(snapshot, context.sampleRate),
 			setGain(db: number, on = true) {
 				if (disposed || ctx !== context) return;
 				ramp(output.gain, on ? dbToGain(db) : 0, context.currentTime, CROSSFADE_S);

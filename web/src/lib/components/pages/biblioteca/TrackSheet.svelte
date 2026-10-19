@@ -22,7 +22,9 @@
 	// Biblioteca imports this sheet only on selection, deferring the QR encoder with it.
 	import { presetUrl, qrSvg } from '#lib/qr/index.ts';
 	import { envelopeView, number, type Locale, type Tape, type GateResult } from './archive.ts';
-	import { exitReason } from '#lib/components/pages/curva/yolo.ts';
+	import { classOf, exitReason } from '#lib/components/pages/curva/yolo.ts';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
+	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
 
 	let {
 		tape,
@@ -89,7 +91,7 @@
 		try {
 			return { ...envelopeView(tape, locale, license, author), error: false };
 		} catch (error) {
-			return { json: '', exportable: false, error: error instanceof Error };
+			return { json: '', exportable: false, yolo: false, error: error instanceof Error };
 		}
 	});
 	const localRights = $derived(tape.group === 'local' && !tape.source.startsWith('preset:'));
@@ -97,11 +99,13 @@
 		locale === 'en-US' && tape.descriptionEn ? tape.descriptionEn : tape.description
 	);
 	/**
-	 * The tape leaves the sheet (QR and link, S1 copy, SVG/PNG card, S5 file) only when the
-	 * standard gate accepts it: a library item stored before the library refused YOLO-only curves
-	 * is shown but never shared or exported. Official presets always pass.
+	 * The tape leaves the sheet (QR and link, S1 copy, SVG/PNG card, S5 file) unless it is
+	 * rejected (class-based, curva/yolo.ts): a YOLO tape leaves with the YOLO notice and `-yolo`
+	 * file names; a rejected one is shown but never shared or exported. Official presets pass.
 	 */
-	const shareRefusal = $derived(exitReason(tape, false, locale));
+	const shareRefusal = $derived(exitReason(tape, locale));
+	const tapeClass = $derived(classOf(tape));
+	const fileMark = $derived(tapeClass.class === 'yolo' ? '-yolo' : '');
 	/** Every unavailable control says why (spec §2.6): the Button primitive announces it. */
 	const audioReason = $derived(app ? null : m.biblioteca_reason_audio());
 	const linkReason = $derived(shareRefusal ?? (share.url ? null : m.biblioteca_reason_link()));
@@ -388,7 +392,7 @@
 				format === 'svg'
 					? new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
 					: await sheetPng(svg);
-			downloadBlob(blob, `open-auri-sheet.${format}`);
+			downloadBlob(blob, `open-auri-sheet${fileMark}.${format}`);
 		} catch (error) {
 			onStatus(m.biblioteca_export_error());
 			console.error('Biblioteca sheet export failed', error);
@@ -402,7 +406,7 @@
 			const { downloadBlob } = await import('./sheet-export.ts');
 			downloadBlob(
 				new Blob([envelope.json], { type: 'application/json' }),
-				'open-auri-preset.json'
+				`open-auri-preset${fileMark}.json`
 			);
 		} catch (error) {
 			onStatus(m.biblioteca_export_error());
@@ -462,6 +466,9 @@
 			<div>
 				<h2 id="{id}-title">{tape.name}</h2>
 				<p class="byline">{tape.id} / {m.biblioteca_preamp()} {number(tape.preampDb, locale)} dB</p>
+				{#if tapeClass.class === 'yolo'}
+					<YoloCurveNotice variant="library" waived={waivedLabels(tapeClass.waived)} />
+				{/if}
 				{#if description && tape.group === 'local'}
 					<!-- The user's own text: untranslated, in whatever language they wrote it. -->
 					<p class="description own-description">{description}</p>

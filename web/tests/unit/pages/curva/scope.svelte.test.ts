@@ -6,6 +6,7 @@ import { NEUTRO } from 'open-auri/catalog';
 import { m } from '#lib/paraglide/messages.js';
 import ScopePanel from '#lib/components/pages/curva/ScopePanel.svelte';
 import { formatSignedDb } from '#lib/components/pages/curva/format.ts';
+import type { DragTarget } from '#lib/components/pages/curva/drag.ts';
 import type { Curve } from '#lib/components/pages/curva/model.ts';
 import {
 	DRAG_GRID,
@@ -145,10 +146,14 @@ test('pointer drags are advisory until release and clamp to visible limits', asy
 	pointer('pointermove', box.left - 100, box.top - 100);
 	expect(ondrag).toHaveBeenLastCalledWith(0, { freqHz: 20, gainDb: 9.2 });
 	expect(oncommit).not.toHaveBeenCalled();
+	// Engenharia: a cut goes on to 32 kHz (`freqMaxFor`); a boost stops at 20 kHz.
 	pointer('pointermove', box.right + 100, box.bottom + 100);
-	expect(ondrag).toHaveBeenLastCalledWith(0, { freqHz: 20000, gainDb: -24 });
+	expect(ondrag).toHaveBeenLastCalledWith(0, { freqHz: 32000, gainDb: -24 });
+	pointer('pointermove', box.right + 100, box.top + 10);
+	expect(ondrag).toHaveBeenLastCalledWith(0, expect.objectContaining({ freqHz: 20000 }));
+	pointer('pointermove', box.right + 100, box.bottom + 100);
 	pointer('pointerup', box.right, box.bottom);
-	expect(oncommit).toHaveBeenCalledExactlyOnceWith(0, { freqHz: 20000, gainDb: -24 });
+	expect(oncommit).toHaveBeenCalledExactlyOnceWith(0, { freqHz: 32000, gainDb: -24 });
 	pointer('pointerdown', box.left, box.top);
 	pointer('pointerup', box.left, box.top);
 	expect(oncommit).toHaveBeenCalledTimes(1);
@@ -498,6 +503,126 @@ test('the wheel over an editable handle steps Q and commits after a pause; locke
 	ondrag.mockClear();
 	expect(wheel(/^Filtro C,/, -100)).toBe(true);
 	expect(ondrag).not.toHaveBeenCalled();
+});
+
+// --- above 20 kHz (Engenharia up to 32 kHz for cuts, Modo YOLO for every kind) ----------------
+
+const boost: Curve = {
+	bands: [{ kind: 'PK', freqHz: 1000, gainDb: 3, qFactor: 1 }, ...NEUTRO.bands.slice(1)],
+	preampDb: -6
+};
+const ultraCut: Curve = {
+	bands: [
+		{ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 },
+		{ kind: 'PK', freqHz: 25000, gainDb: -3, qFactor: 1 },
+		...NEUTRO.bands.slice(2)
+	],
+	preampDb: -3
+};
+const valueMax = (badge: string) =>
+	page
+		.getByRole('slider', { name: new RegExp(`^Filtro ${badge},`) })
+		.element()
+		.getAttribute('aria-valuemax');
+
+test('handle frequency limits follow the layer, the band and Modo YOLO', async () => {
+	const { screen } = await setup({ layer: 'ajustar' });
+	expect(valueMax('A')).toBe('20000');
+	await screen.rerender({ layer: 'engenharia' });
+	// Sections that never amplify: PK cut, HP Q 0.7, HS cut Q 0.7.
+	for (const badge of ['A', 'B', 'C']) expect(valueMax(badge)).toBe('32000');
+	await screen.rerender({ curve: boost });
+	expect(valueMax('A')).toBe('20000');
+	await screen.rerender({ yolo: true });
+	expect(valueMax('A')).toBe('32000');
+	// YOLO exists only in Engenharia: elsewhere 20 kHz still.
+	await screen.rerender({ layer: 'ajustar' });
+	expect(valueMax('A')).toBe('20000');
+});
+
+test('pointer and keys clamp a boost at 20 kHz in Engenharia; YOLO lets it reach 32 kHz', async () => {
+	const { screen, ondrag, oncommit } = await setup({ curve: boost });
+	const overlay = screen.container.querySelector('svg.handles');
+	if (!overlay) throw new Error('Missing handle overlay');
+	const box = overlay.getBoundingClientRect();
+	// Far right, well above 0 dB (the top part of the plot).
+	const clientY = box.top + box.height * 0.15;
+	const dragRight = (pointerId: number): DragTarget => {
+		const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
+		vi.spyOn(handle, 'setPointerCapture').mockImplementation(() => undefined);
+		const send = (type: string, clientX: number) =>
+			handle.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId, clientX, clientY }));
+		send('pointerdown', box.left);
+		send('pointermove', box.right + 100);
+		send('pointercancel', box.right + 100);
+		return ondrag.mock.lastCall?.[1] ?? {};
+	};
+	const engenharia = dragRight(3);
+	expect(engenharia.freqHz).toBe(20000);
+	expect(engenharia.gainDb).toBeGreaterThan(0);
+	await screen.rerender({ yolo: true });
+	const yolo = dragRight(4);
+	expect(yolo.freqHz).toBe(32000);
+	expect(yolo.gainDb).toBeGreaterThan(0);
+	oncommit.mockClear();
+	const near: Curve = {
+		...boost,
+		bands: [{ kind: 'PK', freqHz: 19990, gainDb: 3, qFactor: 1 }, ...boost.bands.slice(1)]
+	};
+	await screen.rerender({ yolo: false, curve: near });
+	const handle = page.getByRole('slider', { name: /^Filtro A,/ }).element();
+	key(handle, 'ArrowRight', { shiftKey: true });
+	expect(oncommit).toHaveBeenLastCalledWith(0, { freqHz: 20000 });
+});
+
+test('Engenharia hatches the 20–32 kHz boost zone (not in YOLO) and 32–48 kHz as never editable', async () => {
+	const { screen } = await setup();
+	const text = () => screen.container.textContent ?? '';
+	const noEdit = () => screen.container.querySelector('[data-testid="scope-noedit"]');
+	expect(text()).toContain(m.curva_ultra_zone());
+	expect(screen.container.querySelector('[data-zone="ultra-boost"]')).not.toBeNull();
+	expect(noEdit()?.getAttribute('x')).toBe(String(xOf(32000)));
+	await screen.rerender({ yolo: true });
+	await vi.waitFor(() => expect(text()).not.toContain(m.curva_ultra_zone()));
+	expect(noEdit()).not.toBeNull();
+	await screen.rerender({ yolo: false, layer: 'ajustar' });
+	expect(text()).not.toContain(m.curva_ultra_zone());
+	expect(noEdit()).toBeNull();
+});
+
+test('bands above 20 kHz are locked outside Engenharia, with a hint', async () => {
+	const { screen, oncommit } = await setup({ curve: ultraCut, layer: 'ajustar' });
+	const ultra = page.getByRole('slider', { name: /^Filtro B,/ });
+	await expect.element(ultra).toHaveAttribute('aria-disabled', 'true');
+	key(ultra.element(), 'ArrowLeft');
+	expect(oncommit).not.toHaveBeenCalled();
+	await expect.element(page.getByText(m.curva_ultra_hint())).toBeVisible();
+	await screen.rerender({ layer: 'engenharia' });
+	await expect.element(ultra).toHaveAttribute('aria-disabled', 'false');
+	await expect.element(page.getByText(m.curva_ultra_hint())).not.toBeInTheDocument();
+	key(ultra.element(), 'ArrowLeft');
+	expect(oncommit).toHaveBeenCalledExactlyOnceWith(1, {
+		freqHz: Math.round(25000 * 2 ** (-1 / 24))
+	});
+});
+
+test('away from 96 kHz the preview note counts the filters above 20 kHz that do not play', async () => {
+	const { screen } = await setup({ curve: ultraCut, committed: ultraCut, playing: true });
+	const skip = () => screen.container.querySelector('[data-testid="ultra-skip"]');
+	expect(skip()).toBeNull();
+	await screen.rerender({ approximate: true });
+	await expect.element(page.getByText(m.curva_ultra_skipped_one())).toBeVisible();
+	await expect.element(page.getByText(m.curva_approximate())).toBeVisible();
+	// A plays the reference (nothing above 20 kHz there): no count.
+	await screen.rerender({ side: 'A', reference: curve });
+	expect(skip()).toBeNull();
+	// The page's own count wins.
+	await screen.rerender({ skipped: 3 });
+	await expect
+		.element(page.getByText(m.curva_ultra_skipped({ count: '3' })))
+		.toHaveAttribute('role', 'status');
+	await screen.rerender({ playing: false });
+	expect(skip()).toBeNull();
 });
 
 test.each([

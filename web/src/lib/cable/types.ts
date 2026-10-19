@@ -423,6 +423,13 @@ export interface CableWrittenDetail {
 	deviceLabel: string;
 	at: number;
 	levelDb: number | null;
-	/** Never `'yolo'`: YOLO writes dispatch no written event (nothing downstream may reuse them). */
-	profile?: 'standard';
+	/**
+	 * `'yolo'` for a real YOLO write (option B, YOLO publication): the app marks the curve as
+	 * written and the outbox counts the install like any other; the class-2 codes it waived are in
+	 * `waived`. Absent (or `'standard'`) for a standard write. Simulated and interrupted writes
+	 * dispatch nothing.
+	 */
+	profile?: 'standard' | 'yolo';
+	/** Codes the YOLO write waived (only with `profile: 'yolo'`). */
+	waived?: string[];
 }

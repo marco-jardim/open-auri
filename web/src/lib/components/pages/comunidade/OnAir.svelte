@@ -16,6 +16,15 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { isSocialApiError, type PublishedInfo, type SocialApi } from '#lib/social/index.ts';
+	import { curveClassification } from '#lib/gate-verdicts.ts';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
+	import YoloPublishAck from '#lib/components/yolo/YoloPublishAck.svelte';
+	import {
+		ackWaived,
+		needsYoloAck,
+		waivedLabels,
+		yoloPublishBlock
+	} from '#lib/components/yolo/yolo-curve.ts';
 	import {
 		S5_DESCRIPTION_MAX,
 		S5_NAME_MAX,
@@ -98,7 +107,17 @@
 					: null
 	);
 
-	async function publish() {
+	/** Class of the editor curve (derived on the client too; the server decides again). */
+	const classification = $derived(
+		editor ? curveClassification(editor.bands, editor.preampDb) : null
+	);
+	const yolo = $derived(classification?.class === 'yolo');
+	/** The YOLO acknowledgement step (waived criteria as text), or null. */
+	let ackStep = $state.raw<{ waived: string[] } | null>(null);
+	const showAck = $derived(ackStep !== null && visibility !== 'private');
+
+	/** `acknowledged`: the owner went through the YOLO step (sends `acknowledge: 'yolo'`). */
+	async function publish(acknowledged = false) {
 		if (!session.verified || publishing || !check) return;
 		message = '';
 		reasons = [];
@@ -109,15 +128,30 @@
 			message = m.comunidade_env_invalid();
 			return;
 		}
+		const sent = visibility;
+		if (!acknowledged && needsYoloAck(yolo, sent)) {
+			ackStep = { waived: waivedLabels(classification?.waived) };
+			return;
+		}
 		publishing = true;
 		const sentS1 = s1;
 		try {
-			const info = await api.publishCurve({ envelope: check.envelope, visibility });
+			const info = await api.publishCurve({
+				envelope: check.envelope,
+				visibility: sent,
+				...(acknowledged && sent !== 'private' ? { acknowledge: 'yolo' as const } : {})
+			});
+			ackStep = null;
 			published = { info, s1: sentS1 };
 			message = m.comunidade_onair_published();
 			onpublished?.(info, sentS1);
 		} catch (error) {
 			published = null;
+			if (yoloPublishBlock(error) === 'ack') {
+				// The server asks for the acknowledgement: show the step instead of an error.
+				ackStep = { waived: waivedLabels(ackWaived(error)) };
+				return;
+			}
 			if (isSocialApiError(error)) {
 				if (error.code === 'GATE_REJECTED') {
 					rejected = true;
@@ -202,14 +236,31 @@
 					{m.comunidade_visibility_private()}</label
 				>
 			</fieldset>
-			<Button
-				variant="primary"
-				size="lg"
-				class="publish"
-				disabledReason={publishReason}
-				onclick={publish}
-				>{publishing ? m.comunidade_onair_sending() : m.comunidade_onair_publish()}</Button
-			>
+			{#if yolo}
+				<YoloCurveNotice
+					variant="editor"
+					compact
+					waived={waivedLabels(classification?.waived)}
+					data-testid="onair-yolo"
+				/>
+			{/if}
+			{#if showAck && ackStep}
+				<YoloPublishAck
+					waived={ackStep.waived}
+					busy={publishing}
+					onconfirm={() => void publish(true)}
+					oncancel={() => (ackStep = null)}
+				/>
+			{:else}
+				<Button
+					variant="primary"
+					size="lg"
+					class="publish"
+					disabledReason={publishReason}
+					onclick={() => void publish()}
+					>{publishing ? m.comunidade_onair_sending() : m.comunidade_onair_publish()}</Button
+				>
+			{/if}
 			{#if session.verified && check && !check.ok}
 				<ul class="issues" data-testid="envelope-issues">
 					{#each check.codes as code (code)}<li>{envelopeIssueText(code)}</li>{/each}

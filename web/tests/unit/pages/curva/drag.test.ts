@@ -11,6 +11,7 @@ import {
 	isAbortError,
 	moveBand,
 	releaseBand,
+	withProfile,
 	withTarget,
 	type GateClient
 } from '#lib/components/pages/curva/drag.ts';
@@ -191,6 +192,32 @@ describe('gate-bounded drag', () => {
 		const off = await releaseBand(client, curveWith(OFF), 0, { freqHz: 100 }, false);
 		expect(off.outcome).toBe('reverted');
 		expect(client.commit).not.toHaveBeenCalled();
+	});
+
+	test('a boost moved past 20 kHz snaps at 20 kHz in Engenharia and passes in Modo YOLO', async () => {
+		// An HS boost (experimental kind, Engenharia): above 20 kHz the standard gate refuses any
+		// boost (d7:boost-above-20k); the YOLO profile waives it.
+		const start = curveWith({ kind: 'HS', freqHz: 18000, gainDb: 2, qFactor: 0.7 });
+		expect(gateForWrite(start.bands, start.preampDb, { experimental: true }).ok).toBe(true);
+		const standard = await releaseBand(handlerClient(), start, 0, { freqHz: 25000 }, true);
+		expect(standard.outcome).toBe('snapped');
+		expect(standard.bands[0]).toMatchObject({ kind: 'HS', freqHz: 20000, gainDb: 2 });
+		expect(standard.reasons.map((reason) => reason.code)).toContain('d7:boost-above-20k');
+		expect(gateForWrite(standard.bands, standard.preampDb, { experimental: true }).ok).toBe(true);
+		const yolo = await releaseBand(
+			withProfile(handlerClient(), () => 'yolo'),
+			start,
+			0,
+			{ freqHz: 25000 },
+			true
+		);
+		expect(yolo.outcome).toBe('exact');
+		expect(yolo.bands[0]).toMatchObject({ kind: 'HS', freqHz: 25000, gainDb: 2 });
+		// A cut is not a boost: Engenharia takes it above 20 kHz without YOLO.
+		const cut = curveWith({ kind: 'HS', freqHz: 18000, gainDb: -3, qFactor: 0.7 });
+		const exact = await releaseBand(handlerClient(), cut, 0, { freqHz: 25000 }, true);
+		expect(exact.outcome).toBe('exact');
+		expect(exact.bands[0]).toMatchObject({ freqHz: 25000 });
 	});
 
 	test('withTarget applies gain only where the kind has one', () => {

@@ -14,13 +14,18 @@
  *   different curves never share an entry.
  * - LRU of `GATE_VERDICTS_KEPT` entries.
  *
+ * The class of a curve (`curveClassification`, the core's `classifyCurve`: standard, YOLO or
+ * rejected) is cached the same way, in its own LRU, with `experimental` always derived from the
+ * curve (it has an HS, LP or HP section), as the server and `verdictFor` do.
+ *
  * Verdicts are shared: callers read them and never change them.
  */
 import { snapshotBands } from 'open-auri/dsp';
-import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
+import { classifyCurve, gateForWrite, isExperimentalKind } from 'open-auri/safety';
 
 export type GateProfile = 'standard' | 'yolo';
 export type GateVerdict = ReturnType<typeof gateForWrite>;
+export type CurveClassification = ReturnType<typeof classifyCurve>;
 type Bands = Parameters<typeof gateForWrite>[0];
 
 export interface GateVerdictOptions {
@@ -46,7 +51,7 @@ function keyOf(
 	snapshot: ReturnType<typeof snapshotBands>,
 	preampDb: unknown,
 	experimental: boolean,
-	profile: GateProfile
+	profile: GateProfile | 'class'
 ): string | null {
 	const preamp = numberKey(preampDb);
 	if (typeof preamp !== 'string') return null;
@@ -129,7 +134,42 @@ export function gateAccepts(
 	return gateVerdict(bands, preampDb, options).ok;
 }
 
-/** Forgets every cached verdict (tests). */
+const classes = new Map<string, CurveClassification>();
+
+/**
+ * The class of this curve (core `classifyCurve`: `standard`, `yolo` with the waived codes, or
+ * `rejected` with the blocking codes, a preamp below −25.5 dB included), from the shared cache.
+ * `experimental` is whether the curve has an HS, LP or HP section. Shared: never change it.
+ */
+export function curveClassification(bands: Bands, preampDb: number): CurveClassification {
+	let snapshot: ReturnType<typeof snapshotBands>;
+	try {
+		snapshot = snapshotBands(bands);
+	} catch {
+		// Not a band list: the classifier refuses it with its own codes.
+		return classifyCurve(bands, preampDb, { experimental: false });
+	}
+	const experimental = snapshot.some((band) => isExperimentalKind(band.kind));
+	const key = keyOf(snapshot, preampDb, experimental, 'class');
+	if (key === null) return classifyCurve(snapshot, preampDb, { experimental });
+	const known = classes.get(key);
+	if (known !== undefined) {
+		classes.delete(key);
+		classes.set(key, known);
+		return known;
+	}
+	const classification = classifyCurve(snapshot, preampDb, { experimental });
+	while (classes.size >= GATE_VERDICTS_KEPT) {
+		const oldest = classes.keys().next();
+		if (oldest.done) break;
+		classes.delete(oldest.value);
+	}
+	classes.set(key, classification);
+	return classification;
+}
+
+/** Forgets every cached verdict and class (tests). */
 export function clearGateVerdicts(): void {
 	verdicts.clear();
+	classes.clear();
 }

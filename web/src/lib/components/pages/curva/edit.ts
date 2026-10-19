@@ -10,7 +10,17 @@
  * never goes below −25,5 dB (`EDITOR_PREAMP_FLOOR_DB`, the S1 floor): a curve that would need
  * more attenuation is refused with the `g:preamp` reason, so a YOLO curve always stays storable.
  */
-import { autoPreamp, clampToAbs, roundToGrid, SOFT_RANGES, THRESHOLDS } from 'open-auri/safety';
+import {
+	autoPreamp,
+	clampToAbs,
+	freqMaxFor,
+	isUltrasonic,
+	roundToGrid,
+	SOFT_RANGES,
+	THRESHOLDS,
+	ULTRA_CUT_Q_MAX
+} from 'open-auri/safety';
+import type { Layer } from './layers.ts';
 import { hasExperimental, hasGain, replaceBand, verdictFor } from './model.ts';
 import type { Band, BandKind, Curve } from './model.ts';
 import type { GateVerdict, Reason } from './reasons.ts';
@@ -155,28 +165,79 @@ function clampRange(value: number, range: { min: number; max: number }) {
 	return Math.min(range.max, Math.max(range.min, value));
 }
 
-/** A band of `kind` that keeps the old parameters where they fit the kind's soft box. */
-export function bandOfKind(previous: Band, kind: BandKind): Band {
+/**
+ * Editor context of a kind change: the layer and Modo YOLO (`freqMaxFor`). Without a layer a
+ * band never stays above 20 kHz.
+ */
+export interface KindContext {
+	readonly layer?: Layer;
+	readonly yolo?: boolean;
+}
+
+/**
+ * The new kind at an old frequency above 20 kHz, when `context` allows that kind there
+ * (`freqMaxFor`), else null. In Engenharia without Modo YOLO only sections that never amplify go
+ * there, so the gain is clamped to <= 0 and an LS/HS/LP/HP Q to <= `ULTRA_CUT_Q_MAX` (0,71); in
+ * YOLO every kind keeps its frequency. Gain and Q stay inside the absolute ranges; the frequency
+ * is kept (`clampToAbs` would bring it down to 20 kHz).
+ */
+function ultrasonicOfKind(
+	freqHz: number,
+	kind: Exclude<BandKind, 'OFF'>,
+	gainDb: number,
+	qFactor: number,
+	context: KindContext
+): Band | null {
+	const yolo = context.layer === 'engenharia' && context.yolo === true;
+	const gain = yolo ? gainDb : Math.min(0, gainDb);
+	const q = yolo || kind === 'PK' ? qFactor : Math.min(ULTRA_CUT_Q_MAX, qFactor);
+	const band: Band =
+		kind === 'LP' || kind === 'HP'
+			? { kind, freqHz, qFactor: q }
+			: { ...clampToAbs({ kind, freqHz, gainDb: gain, qFactor: q }), freqHz };
+	const max = freqMaxFor(band, { layer: context.layer ?? '', yolo: context.yolo === true });
+	return freqHz <= max ? roundToGrid(band) : null;
+}
+
+/**
+ * A band of `kind` that keeps the old parameters where they fit the kind's soft box. A band
+ * above 20 kHz keeps its frequency when `context` allows the new kind there (Engenharia: gain
+ * clamped to <= 0 and Q to <= 0,71; Modo YOLO: any kind); otherwise, and without a context, the
+ * frequency comes back inside the soft box (20 kHz at most), as before.
+ */
+export function bandOfKind(previous: Band, kind: BandKind, context: KindContext = {}): Band {
 	if (kind === 'OFF') return { kind: 'OFF' };
 	const soft = SOFT_BY_KIND[kind];
 	const fresh = previous.kind === 'OFF';
-	const freqHz = clampRange(fresh ? 1000 : previous.freqHz, soft.freqHz);
 	const qFactor = clampRange(fresh ? soft.qFactor.min : previous.qFactor, soft.qFactor);
-	if (kind === 'LP' || kind === 'HP') return roundToGrid({ kind, freqHz, qFactor });
 	const range = soft.gainDb ?? { min: 0, max: 0 };
 	const oldGain = hasGain(previous) ? previous.gainDb : 0;
-	return roundToGrid(clampToAbs({ kind, freqHz, gainDb: clampRange(oldGain, range), qFactor }));
+	const gainDb = clampRange(oldGain, range);
+	if (previous.kind !== 'OFF' && isUltrasonic(previous)) {
+		const kept = ultrasonicOfKind(previous.freqHz, kind, gainDb, qFactor, context);
+		if (kept) return kept;
+	}
+	const freqHz = clampRange(fresh ? 1000 : previous.freqHz, soft.freqHz);
+	if (kind === 'LP' || kind === 'HP') return roundToGrid({ kind, freqHz, qFactor });
+	return roundToGrid(clampToAbs({ kind, freqHz, gainDb, qFactor }));
 }
 
+/**
+ * A kind change judged by the full gate of `profile`. `layer` (the editor's) lets a band above
+ * 20 kHz keep its frequency where that layer allows the new kind (`bandOfKind`); Modo YOLO is
+ * `profile === 'yolo'`.
+ */
 export function changeKind(
 	curve: Curve,
 	index: number,
 	kind: BandKind,
-	profile: EditProfile = 'standard'
+	profile: EditProfile = 'standard',
+	layer?: Layer
 ): EditResult {
 	const previous = curve.bands[index];
 	if (!previous) return { ok: false, reasons: [] };
-	const bands = replaceBand(curve.bands, index, bandOfKind(previous, kind));
+	const context: KindContext = layer ? { layer, yolo: profile === 'yolo' } : {};
+	const bands = replaceBand(curve.bands, index, bandOfKind(previous, kind, context));
 	const verdict = editorVerdict({ bands, preampDb: curve.preampDb }, profile);
 	return verdict.ok ? { ok: true, bands, verdict } : { ok: false, reasons: verdict.reasons };
 }

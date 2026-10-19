@@ -11,7 +11,7 @@ Do not put real values in this file: the repository is public.
 
 # open-auri Privacy Policy
 
-**Version:** 2026-10-18 · **Effective date:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Address:** {{PUBLIC_ORIGIN}}/privacidade
+**Version:** 2026-10-19 · **Effective date:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Address:** {{PUBLIC_ORIGIN}}/privacidade
 
 This is an English translation provided for convenience. The authoritative version is the Brazilian Portuguese text (`politica-de-privacidade.md`). **If the two versions differ, the pt-BR version prevails.**
 

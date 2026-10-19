@@ -61,12 +61,12 @@
 	/** Why a result action is unavailable: every disabled control names its reason. */
 	const appReason = $derived(!accepted ? t.pending : !app ? t.reasonEngine : null);
 	/**
-	 * Saving to the library and publishing re-run the standard gate (`verdictFor`, never the YOLO
-	 * profile) on the exact curve stored: a YOLO-only editor curve loaded as a track, or a blend that
-	 * reproduces one, never reaches the library or the account, whether or not Modo YOLO is on.
-	 * `solveBlend` already gates with the standard profile; this is the same check at the exit.
+	 * Saving to the library and publishing re-classify the exact curve stored (class-based, like
+	 * every exit: curva/yolo.ts): only a rejected curve is refused. `solveBlend` gates with the
+	 * standard profile, so a blend is standard; a YOLO curve would still leave marked, and its
+	 * publication goes through the acknowledgement step (SocialPublish).
 	 */
-	const gateReason = $derived(accepted ? exitReason(accepted.curve, false, locale) : null);
+	const gateReason = $derived(accepted ? exitReason(accepted.curve, locale) : null);
 	const saveReason = $derived(appReason ?? gateReason);
 	const bounceReason = $derived(!accepted ? t.pending : null);
 	// L5: the publish island is fetched only once a layer passes the gate (below the fold).
@@ -119,7 +119,7 @@
 	async function save() {
 		if (!accepted || !app) return;
 		const curve = accepted.curve;
-		const refused = exitReason(curve, false, locale);
+		const refused = exitReason(curve, locale);
 		if (refused !== null) {
 			error = refused;
 			return;

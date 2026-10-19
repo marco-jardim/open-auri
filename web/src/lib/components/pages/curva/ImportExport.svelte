@@ -23,6 +23,7 @@
 		type ImportResult
 	} from './io.ts';
 	import { ioFailureText } from './io-text.ts';
+	import { isYoloCurve } from './yolo.ts';
 
 	interface Props {
 		curve: Curve;
@@ -38,8 +39,9 @@
 		/** Why the controls are unavailable while `disabled` (default: the editor is loading). */
 		disabledReason?: string | null;
 		/**
-		 * Why the exports and the link are unavailable while import stays open: the curve fails the
-		 * standard gate (a YOLO-only curve restored after a reload). `io.ts` refuses it as well.
+		 * Why the exports and the link are unavailable while import stays open: the curve is
+		 * rejected (neither standard nor YOLO). `io.ts` refuses it as well; a YOLO curve leaves
+		 * marked.
 		 */
 		exportReason?: string | null;
 		onimport: (result: ImportResult) => void;
@@ -89,24 +91,36 @@
 		notify(m.curva_exported({ name: file }));
 	}
 
+	const lang = $derived(locale.startsWith('en') ? 'en-US' : 'pt-BR');
+	/** A YOLO curve leaves marked: `-yolo` file names, the `.txt` header, this note. */
+	const yolo = $derived(isYoloCurve(curve));
+
 	function onTxt() {
-		const result = exportTxt(curve, layer);
+		const result = exportTxt(curve, layer, lang);
 		if (!result.ok)
 			return notify(m.curva_export_refused({ reason: ioFailureText(result) }), 'error');
-		save(fileName(name, 'txt'), new Blob([result.value], { type: 'text/plain;charset=utf-8' }));
+		save(
+			fileName(name, 'txt', result.yolo),
+			new Blob([result.value], { type: 'text/plain;charset=utf-8' })
+		);
 	}
 	function onJson() {
-		const lang = locale.startsWith('en') ? 'en-US' : 'pt-BR';
 		const result = exportS5(curve, { name, source, lang, now: now(), labels }, layer);
 		if (!result.ok)
 			return notify(m.curva_export_refused({ reason: ioFailureText(result) }), 'error');
-		save(fileName(name, 'json'), new Blob([result.value], { type: 'application/json' }));
+		save(
+			fileName(name, 'json', result.yolo),
+			new Blob([result.value], { type: 'application/json' })
+		);
 	}
 	function onBin() {
 		const result = exportBin(curve);
 		if (!result.ok)
 			return notify(m.curva_export_refused({ reason: ioFailureText(result) }), 'error');
-		save(fileName(name, 'bin'), new Blob([result.value], { type: 'application/octet-stream' }));
+		save(
+			fileName(name, 'bin', result.yolo),
+			new Blob([result.value], { type: 'application/octet-stream' })
+		);
 	}
 	async function onFile(input: HTMLInputElement) {
 		const file = input.files?.[0];
@@ -165,6 +179,8 @@
 	</div>
 	{#if exportBlocked}
 		<p class="note" id={reasonId}>{exportBlocked}</p>
+	{:else if yolo}
+		<p class="note" data-yolo-export>{m.yolopub_export_marked()}</p>
 	{/if}
 	{#if link}
 		<label class="link">

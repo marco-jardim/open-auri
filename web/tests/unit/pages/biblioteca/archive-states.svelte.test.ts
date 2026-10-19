@@ -184,6 +184,61 @@ test('saving the editor curve is single-flight and announces success before unlo
 	await expect.element(button).not.toHaveAttribute('aria-busy', 'true');
 });
 
+// YOLO publication: the library save is class-based. A YOLO curve is saved (YOLO on or off) and
+// its tape carries the YOLO badge; a rejected curve is refused with the gate's reason.
+const yoloBands = [
+	{ kind: 'HP' as const, freqHz: 30, qFactor: 0.71 },
+	...neutralCurve().bands.slice(1)
+];
+const yoloEditor = (): CurveData => ({
+	...neutralCurve(),
+	name: 'Subsônica',
+	preampDb: -0.5,
+	bands: yoloBands
+});
+
+test('a YOLO editor curve is saved to the library and its tape shows the YOLO badge', async () => {
+	const curve = yoloEditor();
+	const savedItem: LibraryItem = {
+		...curve,
+		id: 'subsonica',
+		s1: encodeS1(curve),
+		favorite: false,
+		createdAt: 0,
+		updatedAt: 1
+	};
+	const client = fakeApp({ curve, items: [savedItem, local('Plain', -3)] });
+	client.library.save.mockResolvedValueOnce(savedItem);
+	const screen = await render(Biblioteca, { app: client.app, origin: 'https://example.test' });
+	const button = page.getByRole('button', { name: m.biblioteca_save(), exact: true });
+	await expect.element(button).not.toHaveAttribute('aria-disabled', 'true');
+	await button.click();
+	expect(client.library.save).toHaveBeenCalledExactlyOnceWith(curve);
+	await expect
+		.element(page.getByText(m.yolopub_library_saved_yolo(), { exact: true }))
+		.toBeVisible();
+	// Only the YOLO tape has the badge (derived from its bands; S1 and S5 carry no marker).
+	const badges = screen.container.querySelectorAll('[data-curve-badge="yolo"]');
+	expect(badges).toHaveLength(1);
+	expect(badges[0]?.closest('.tape')?.textContent).toContain('Subsônica');
+});
+
+test('a rejected editor curve is not saved: the button says why', async () => {
+	const boost = { kind: 'PK' as const, freqHz: 1000, gainDb: 9, qFactor: 1 };
+	const curve: CurveData = {
+		...neutralCurve(),
+		name: 'Alta',
+		preampDb: -0.5,
+		bands: [boost, boost, boost, boost, ...neutralCurve().bands.slice(4)]
+	};
+	const client = fakeApp({ curve });
+	await render(Biblioteca, { app: client.app, origin: 'https://example.test' });
+	const button = page.getByRole('button', { name: m.biblioteca_save(), exact: true });
+	await expect.element(button).toHaveAttribute('aria-disabled', 'true');
+	(button.element() as HTMLButtonElement).click();
+	expect(client.library.save).not.toHaveBeenCalled();
+});
+
 for (const locale of ['pt-BR', 'en-US'] as const) {
 	test(`local cards, official comparison, sorting and tag reset work in ${locale}`, async () => {
 		await setLocale(locale, { reload: false });

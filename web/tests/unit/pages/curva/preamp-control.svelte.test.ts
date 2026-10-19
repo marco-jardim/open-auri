@@ -284,19 +284,14 @@ test('in YOLO the manual preamp uses the YOLO gate, up to 0 dB, never below −2
 	expect(app.pendingWrite).toBeNull();
 });
 
-test('with YOLO off the same preamp step is refused by the standard gate', async () => {
-	const { app, screen } = await setup('engenharia', subsonic);
+test('with YOLO off a YOLO-only curve is locked: the preamp step is unavailable', async () => {
+	const { app } = await setup('engenharia', subsonic);
 	const before = app.state.curve.current;
-	const message = () => screen.container.querySelector('.ps-out .pre-msg')?.textContent ?? null;
+	// The standard gate refuses this curve, so with YOLO off the editor locks it instead.
+	expect(verdictFor({ bands: subsonic.bands, preampDb: -0.6 }).ok).toBe(false);
 	await expect.element(field()).toHaveAttribute('aria-valuemax', String(PREAMP_MAX_DB));
-	await down().click();
-	const refusal = m.curva_preamp_refused({
-		value: formatSignedDb(-0.6, locale),
-		reason: firstReasonText(verdictFor({ bands: subsonic.bands, preampDb: -0.6 }).reasons, {
-			bands: subsonic.bands,
-			locale
-		})
-	});
-	await vi.waitFor(() => expect(message()).toBe(refusal));
+	await expect.element(down()).toHaveAttribute('aria-disabled', 'true');
+	await down().click({ force: true });
 	expect(app.state.curve.current).toEqual(before);
+	expect(app.pendingWrite).toBeNull();
 });

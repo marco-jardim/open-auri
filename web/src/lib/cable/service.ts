@@ -1028,9 +1028,11 @@ export function createCableService(deps: CableServiceDeps) {
 		} else {
 			rescue = { at, deviceLabel: label, reportsSent, fresh: true };
 		}
-		// A YOLO write dispatches no written event: nothing downstream (library, social
-		// install counters, outbox) may pick a YOLO curve up. It stays in the journal only.
-		if (!simulated && committed && entry !== null && !yolo) {
+		// Only a real, committed write dispatches the written event (simulated and interrupted
+		// writes never do). A YOLO write does too, marked (`profile: 'yolo'` and the waived codes):
+		// the app marks the curve as written and the outbox counts the install (YOLO publication,
+		// option B); the curve's class is derived again wherever it goes.
+		if (!simulated && committed && entry !== null) {
 			const detail: CableWrittenDetail = {
 				entry,
 				crc,
@@ -1038,7 +1040,8 @@ export function createCableService(deps: CableServiceDeps) {
 				bands: copyBands(snapshot),
 				deviceLabel: label,
 				at,
-				levelDb: checklist.newLevelDb
+				levelDb: checklist.newLevelDb,
+				...(yolo ? { profile: 'yolo' as const, waived: [...checklist.waived] } : {})
 			};
 			events.dispatchEvent(new CustomEvent(CABLE_WRITTEN_EVENT, { detail }));
 		}

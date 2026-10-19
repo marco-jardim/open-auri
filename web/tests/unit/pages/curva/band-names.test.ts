@@ -26,7 +26,13 @@ function catalog(locale: Locale): Record<string, string> {
 		import.meta.url
 	);
 	const merged = new URL(`../../../../messages/${locale}.json`, import.meta.url);
-	return JSON.parse(readFileSync(existsSync(staging) ? staging : merged, 'utf8'));
+	// The region above 20 kHz ("Ultra") comes with the ULTRA staging until it is merged.
+	const ultra = new URL(`../../../../messages/_staging/ULTRA.${locale}.json`, import.meta.url);
+	const read = (url: URL): Record<string, string> => JSON.parse(readFileSync(url, 'utf8'));
+	return {
+		...read(existsSync(staging) ? staging : merged),
+		...(existsSync(ultra) ? read(ultra) : {})
+	};
 }
 
 function wordsFor(locale: Locale): BandWords {
@@ -45,7 +51,8 @@ function wordsFor(locale: Locale): BandWords {
 			mids: key('region_mids'),
 			presence: key('region_presence'),
 			brilliance: key('region_brilliance'),
-			air: key('region_air')
+			air: key('region_air'),
+			ultra: key('region_ultra')
 		},
 		free: key('free'),
 		cut: (freq) => key('cut').replace('{freq}', freq),
@@ -88,6 +95,23 @@ describe('regions by frequency', () => {
 		expect(regionOf(11999)).toBe('brilliance');
 		expect(regionOf(12000)).toBe('air');
 		expect(regionOf(20000)).toBe('air');
+		// Above the audible band (Engenharia and Modo YOLO): "Ultra".
+		expect(regionOf(20000.5)).toBe('ultra');
+		expect(regionOf(20001)).toBe('ultra');
+		expect(regionOf(32000)).toBe('ultra');
+	});
+
+	test('above 20 kHz a band is "Ultra" in both languages; passes keep "Corte 25k"', () => {
+		expect(one(pk(25000, -3)).label).toBe(`Ultra ${MINUS}`);
+		expect(one(pk(25000, -3), en).label).toBe(`Ultra ${MINUS}`);
+		expect(one(pk(30000, 3)).label).toBe('Ultra +');
+		expect(one(hs(25000, -6)).detail).toBe('Ultra \u2193 (HS)');
+		expect(one(ls(21000, 0), en).label).toBe('Ultra');
+		expect(one(lp(25000)).label).toBe('Corte 25k');
+		expect(one(lp(25000), en).label).toBe('Cut 25k');
+		expect(one(hp(32000)).detail).toBe('Corte de graves (HP)');
+		const twice = bandNames([pk(25000, -3), pk(30000, -2)], pt);
+		expect(twice.map((name) => name.label)).toEqual([`Ultra ${MINUS} a`, `Ultra ${MINUS} b`]);
 	});
 
 	test('a boosting peak is named after its region in both languages', () => {
@@ -286,8 +310,8 @@ describe('badges and custom labels', () => {
 
 describe('label length', () => {
 	const signs = [3, -3, 0];
-	const regionHz = [40, 100, 400, 1000, 3000, 8000, 14000];
-	const cutoffs = [20, 30, 99, 250, 999, 1000, 1550, 2200, 9900, 12000, 20000];
+	const regionHz = [40, 100, 400, 1000, 3000, 8000, 14000, 25000];
+	const cutoffs = [20, 30, 99, 250, 999, 1000, 1550, 2200, 9900, 12000, 20000, 25000, 32000];
 
 	test.each([
 		['pt-BR', pt],

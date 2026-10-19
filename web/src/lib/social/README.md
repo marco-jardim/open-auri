@@ -27,8 +27,13 @@ Methods (paths under `/api/v1`):
 - `getLineage(lineageId, { cursor?, limit? })`: `GET /lineages/[id]`.
 - `appendVersion(lineageId, { parentVersionId, envelope })`: `POST /lineages/[id]/versions`.
 - `forkLineage(lineageId, { versionId?, visibility?, envelope? })`: `POST /lineages/[id]/fork`.
-- `retractLineage(id)`, `restoreLineage(id)`: `POST /lineages/[id]/retract`, `.../restore`.
-- `setVisibility(id, visibility)`: `PUT /lineages/[id]/visibility`.
+- `retractLineage(id)`, `restoreLineage(id, { acknowledge? })`: `POST /lineages/[id]/retract`,
+  `.../restore` (a body only with `acknowledge: 'yolo'`).
+- `setVisibility(id, visibility, { acknowledge? })`: `PUT /lineages/[id]/visibility`.
+- YOLO curves (migration 0013): `publishCurve`, `appendVersion`, `forkLineage`, `setVisibility`
+  and `restoreLineage` take `acknowledge: 'yolo'` when a YOLO head is opened to others; the UI
+  sends it only after the acknowledgement step (`components/yolo/YoloPublishAck.svelte`).
+  `feed({ sort: 'new', yolo: 'only' })` is the separate list of public YOLO curves.
 - `favorite(lineageId, { shareId? })`, `unfavorite(lineageId)`: `PUT`/`DELETE /curves/[id]/favorite`.
 - `postActivity(lineageId, { kind, eventId, at?, durationMs?, shareId? })`:
   `POST /curves/[id]/activity` (pages use the outbox instead).

@@ -11,7 +11,7 @@ Não coloque valores reais neste arquivo: o repositório é público.
 
 # Política de Privacidade do open-auri
 
-**Versão:** 2026-10-18 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
+**Versão:** 2026-10-19 · **Vigência:** {{PUBLIC_POLICY_EFFECTIVE_DATE}} · **Endereço:** {{PUBLIC_ORIGIN}}/privacidade
 
 Esta é a versão oficial da política. A tradução em inglês (`privacy-policy.en-US.md`) serve apenas como apoio. Em caso de diferença, vale este texto em português.
 

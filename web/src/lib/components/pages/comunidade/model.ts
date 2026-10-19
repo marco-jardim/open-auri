@@ -3,7 +3,14 @@
 // response math comes from the core (`open-auri/dsp`, `open-auri/share`); nothing here touches the
 // DOM, the audio engine or the cable.
 import { curveResponseDb, distance, GRID } from 'open-auri/dsp';
-import { decodeS1, encodeS1, normalizeLabels, validateEnvelope } from 'open-auri/share';
+import {
+	decodeS1,
+	encodeS1,
+	envelopeFormat,
+	normalizeLabels,
+	validateEnvelope
+} from 'open-auri/share';
+import { yoloPublishBlock, yoloPublishText } from '#lib/components/yolo/yolo-curve.ts';
 import { REASON_MESSAGE_KEYS } from '#lib/cable/checklist.ts';
 import type { ReasonCode } from '#lib/cable/types.ts';
 import { responseGeometry } from '#lib/charts/response.ts';
@@ -50,6 +57,8 @@ export interface Channel {
 	score: number | null;
 	/** Null when the S1 does not decode (the strip stays listed, without audio or chart). */
 	curve: DecodedCurve | null;
+	/** The head is a YOLO curve (server class; only in the `yolo=only` list): shows the badge. */
+	yolo?: boolean;
 }
 
 /** What the page needs from the social session (`createSocialSession`). */
@@ -139,7 +148,8 @@ export function channelOf(item: FeedItem): Channel {
 			: null,
 		rank: item.rank,
 		score: item.score,
-		curve: decodeCurve(lineage.curve.s1)
+		curve: decodeCurve(lineage.curve.s1),
+		yolo: lineage.curve.yolo === true
 	};
 }
 
@@ -334,7 +344,8 @@ export function buildEnvelope(draft: EnvelopeDraft): EnvelopeCheck {
 	}
 	const labels = normalizeLabels(draft.labels ?? null, { lenient: true });
 	const raw: Record<string, unknown> = {
-		format: labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
+		// preset@2 with filter labels or a band above 20 kHz (an S1 v2 curve); @1 otherwise.
+		format: envelopeFormat({ bands: decoded.bands, labels }),
 		name: draft.name,
 		description: draft.description,
 		source: 'custom',
@@ -410,6 +421,10 @@ export function isUnreachable(error: unknown): boolean {
 /** Localized message of any social failure, by code (never `details` verbatim). */
 export function errorText(error: unknown): string {
 	if (!isSocialApiError(error)) return m.comunidade_error_generic();
+	// YOLO publication rules (migration 0013): the step, the kill switch, the account age.
+	const yolo = yoloPublishBlock(error);
+	if (yolo === 'ack') return m.yolopub_error_ack();
+	if (yolo !== null) return yoloPublishText(yolo);
 	switch (error.code) {
 		case 'OFFLINE':
 		case 'NETWORK':

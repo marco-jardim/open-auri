@@ -62,7 +62,8 @@ export function socialEnvelope(
 		labels?: readonly (string | null)[] | null;
 	}
 ): Record<string, unknown> {
-	const { format, labels } = s5Labels(meta.labels);
+	// `@2` with labels or a band above 20 kHz (an S1 v2 curve), `@1` otherwise.
+	const { format, labels } = s5Labels(meta.labels, curve.bands);
 	return {
 		format,
 		name: meta.name,
@@ -109,13 +110,14 @@ export function versionEnvelope(
 	},
 	text: { name: string; description: string }
 ): Record<string, unknown> {
-	const { format, labels } = s5Labels(source.labels);
 	let decoded: ReturnType<typeof decodeS1> | null = null;
 	try {
 		decoded = decodeS1(source.s1);
 	} catch (cause) {
 		if (!(cause instanceof S1Error)) throw cause;
 	}
+	// `@2` with labels or a band above 20 kHz (an S1 v2 curve), `@1` otherwise.
+	const { format, labels } = s5Labels(source.labels, decoded?.bands);
 	const raw: Record<string, unknown> = {
 		format,
 		name: text.name,

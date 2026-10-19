@@ -6,6 +6,7 @@ import {
 	interpolateBand,
 	snapToGridAccepted
 } from 'open-auri/safety';
+import { curveClassification, type CurveClassification } from '../gate-verdicts.ts';
 
 export type Band = Parameters<typeof designSection>[0];
 export type GateVerdict = ReturnType<typeof gate>;
@@ -43,7 +44,16 @@ export interface CommitInput extends CurveInput {
 	type: 'commit';
 }
 
-export type GateInput = DragInput | CommitInput;
+/**
+ * The class of a curve (core `classifyCurve`): standard, YOLO or rejected. `experimental` and
+ * `profile` are ignored: the classifier derives `experimental` from the curve (HS, LP or HP), as
+ * `verdictFor` and the server do, and runs both profiles itself.
+ */
+export interface ClassifyInput extends CurveInput {
+	type: 'classify';
+}
+
+export type GateInput = DragInput | CommitInput | ClassifyInput;
 export type GateRequest = GateInput & { id: number };
 
 export interface DragResult {
@@ -75,7 +85,13 @@ export interface CommitResult {
 	previewOnly?: true;
 }
 
-export type GateResponse = DragResult | CommitResult;
+export interface ClassifyResult {
+	type: 'classify';
+	id: number;
+	classification: CurveClassification;
+}
+
+export type GateResponse = DragResult | CommitResult | ClassifyResult;
 
 /**
  * Codec-only predicate of the free preview ("Prévia sem limites"): the codec can encode the
@@ -99,8 +115,16 @@ function gateOptions(profile: EditorProfile | undefined, experimental: boolean |
 }
 
 /** Pure entry point shared by the worker, SSR fallback and unit tests. */
+export function handleGateRequest(request: DragInput & { id: number }): DragResult;
+export function handleGateRequest(request: CommitInput & { id: number }): CommitResult;
+export function handleGateRequest(request: ClassifyInput & { id: number }): ClassifyResult;
+export function handleGateRequest(request: GateRequest): GateResponse;
 export function handleGateRequest(request: GateRequest): GateResponse {
 	const { id, bands, preampDb, experimental, profile } = request;
+	if (request.type === 'classify') {
+		// Cached by signature (gate-verdicts.ts), shared with the page's synchronous exits.
+		return { type: 'classify', id, classification: curveClassification(bands, preampDb) };
+	}
 	const options = gateOptions(profile, experimental);
 	if (request.type === 'commit') {
 		const verdict = gateForWrite(bands, preampDb, options);

@@ -30,6 +30,7 @@
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { Tour, TourTrigger } from '#lib/components/comprehension/index.ts';
 	import Skeleton from '#lib/components/primitives/Skeleton.svelte';
+	import Button from '#lib/components/primitives/Button.svelte';
 	import { createGateWorker } from '#lib/workers/index.ts';
 	import { curveSignature } from '#lib/state/model.ts';
 	import { m } from '#lib/paraglide/messages.js';
@@ -100,8 +101,17 @@
 	import { CurvaPreview } from './preview.svelte.ts';
 	import { provideBandLabelView } from './band-labels.svelte.ts';
 	import YoloToggle from '#lib/components/yolo/YoloToggle.svelte';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
+	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
 	import { withProfile } from './drag.ts';
-	import { canBringBack, editorProfile, yoloWriteBlock } from './yolo.ts';
+	import {
+		canBringBack,
+		classOf,
+		editorProfile,
+		exitReason,
+		standardCurve,
+		yoloWriteBlock
+	} from './yolo.ts';
 	import { firstReasonText, type Reason } from './reasons.ts';
 
 	type SocialComponent = typeof import('./SocialActions.svelte').default;
@@ -242,13 +252,51 @@
 		freePreview ? codecAccepts(curve.bands, curve.preampDb) : verdict.ok
 	);
 	/**
-	 * Why the editor curve may not leave as a file, a link or an account save/publication although
-	 * YOLO is off: the standard gate refuses it (a YOLO-only curve restored from `oa.current` after a
-	 * reload). With YOLO off `verdict` is the standard verdict (see `exitRefusal` in yolo.ts).
+	 * Why the editor curve may not leave as a file, a link or an account save/publication: only a
+	 * rejected curve (class-based, `exitRefusal` in yolo.ts). A YOLO curve leaves, marked, whether
+	 * or not YOLO is on.
 	 */
-	const exitGateReason = $derived(
-		yoloOn || verdict.ok ? null : firstReasonText(verdict.reasons, { bands: curve.bands, locale })
-	);
+	const exitGateReason = $derived(exitReason(curve, locale));
+	/** The class of the editor curve (cached by signature). */
+	const curveClass = $derived(classOf(curve));
+	const curveYolo = $derived(curveClass.class === 'yolo');
+	/**
+	 * A YOLO curve in the editor while YOLO is off (a link, a file, the library, a fork, or
+	 * `oa.current` after a reload): it is shown and may be previewed (the engine protects any curve
+	 * the standard gate refuses), but the handles and discrete edits are locked until YOLO is on in
+	 * Engenharia or the curve is brought back to the standard limits. The store keeps it: explicit
+	 * loads go through `curve.set`, and only another tab's curve and undo/redo steps follow the
+	 * adoption rules of state/curve.svelte.ts.
+	 */
+	const yoloLocked = $derived(curveYolo && !yoloOn);
+	/** "Trazer para os limites padrão": the clamped, auto-preamp curve, when it passes. */
+	const standardOffer = $derived(yoloLocked ? standardCurve(curve) : null);
+	const noticeVariant = $derived(stored?.source === 'import' ? 'share' : 'editor');
+	let yoloToggleSlot = $state<HTMLElement | undefined>();
+	/** Says why an edit did nothing while a YOLO curve is locked; true when locked. */
+	function lockedEdit(): boolean {
+		if (!yoloLocked) return false;
+		dragMessage = m.yolopub_editor_locked();
+		dragTone = 'info';
+		return true;
+	}
+	/** "Ativar Modo YOLO": in Engenharia (switching to it first), at the YOLO toggle. */
+	function offerYolo() {
+		if (layer !== 'engenharia') onlayer('engenharia');
+		// Focusing the toggle scrolls it into view (its slot has no box of its own).
+		requestAnimationFrame(() => {
+			yoloToggleSlot?.querySelector<HTMLElement>('button, input')?.focus();
+		});
+	}
+	/** "Trazer para os limites padrão": one undoable change to the standard curve. */
+	function bringToStandard() {
+		const next = standardOffer;
+		if (!next || !app) return;
+		if (apply(next, { name: curveName })) {
+			drawKey++;
+			notify(m.yolopub_bring_standard_done());
+		}
+	}
 	// YOLO exists only in Engenharia: leaving the layer turns it off.
 	$effect(() => {
 		app?.yolo.syncLayer(layer);
@@ -523,7 +571,7 @@
 	}
 
 	function onDrag(index: number, target: DragTarget) {
-		if (!app) return;
+		if (!app || lockedEdit()) return;
 		if (settleFrame !== null) {
 			unschedule(settleFrame);
 			settleFrame = null;
@@ -645,6 +693,12 @@
 		}
 	) {
 		if (!app) return;
+		if (yoloLocked) {
+			draft = null;
+			dragView = null;
+			report(m.yolopub_editor_locked(), 'info');
+			return;
+		}
 		const token = ++dragToken;
 		advisoryGeneration++;
 		advisoryNext = null;
@@ -705,7 +759,7 @@
 	// --- Neutro's parked points: grabbing one creates a PK filter there -----------------------
 
 	function onPark(index: number, target: DragTarget) {
-		if (!app) return;
+		if (!app || lockedEdit()) return;
 		const bands = replaceBand(curve.bands, index, parkedBand(index));
 		const check = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
 		if (!check.ok) {
@@ -741,6 +795,10 @@
 
 	function onMacro(index: number, value: number) {
 		if (!app) return;
+		if (yoloLocked) {
+			macroMessage = m.yolopub_editor_locked();
+			return;
+		}
 		const base = macrosLive && macroBase ? macroBase : curve;
 		const values = macrosLive ? macroValues : ZERO_MACROS;
 		const proposal = proposeMacro({
@@ -777,6 +835,11 @@
 	const maxClipMessage = $derived(maxClip?.signature === signature ? maxClip.text : null);
 	function onMaxClip() {
 		if (!app) return;
+		if (yoloLocked) {
+			maxClip = { text: m.yolopub_editor_locked(), signature };
+			announcement = maxClip.text;
+			return;
+		}
 		const result = maxPreamp(curve, writeProfile);
 		let text: string;
 		if (!result.ok) {
@@ -803,7 +866,9 @@
 				? m.curva_preamp_ouvir_reason()
 				: app?.cableState.writing
 					? m.curva_v2_writing_reason()
-					: null)
+					: yoloLocked
+						? m.yolopub_editor_locked()
+						: null)
 	);
 	/** The last refusal, shown only while the curve is still the one it talks about. */
 	let preampRefusal = $state.raw<{ text: string; signature: string } | null>(null);
@@ -841,12 +906,17 @@
 		if (!app || layer === 'ouvir') {
 			return { ok: false as const, reason: loadingReason ?? m.curva_kinddial_readonly() };
 		}
+		if (yoloLocked) return { ok: false as const, reason: m.yolopub_editor_locked() };
 		if (kind !== 'OFF' && isLockedKind(kind, layer)) {
 			return { ok: false as const, reason: m.curva_exp_hint() };
 		}
 		const previous = curve.bands[index];
 		if (!previous) return { ok: false as const, reason: m.curva_reason_unknown() };
-		const bands = replaceBand(curve.bands, index, bandOfKind(previous, kind));
+		const bands = replaceBand(
+			curve.bands,
+			index,
+			bandOfKind(previous, kind, { layer, yolo: yoloOn })
+		);
 		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
 		return result.ok
 			? { ok: true as const, bands }
@@ -867,6 +937,10 @@
 		}
 	}
 	function onDefaultOrder() {
+		if (yoloLocked) {
+			bankMessage = m.yolopub_editor_locked();
+			return;
+		}
 		const bands = defaultOrder(curve.bands);
 		const result = editorVerdict({ bands, preampDb: curve.preampDb }, writeProfile);
 		if (result.ok) {
@@ -889,6 +963,10 @@
 	let springTimer: ReturnType<typeof setTimeout> | undefined;
 	function onReorder(from: number, to: number) {
 		if (!app) return;
+		if (yoloLocked) {
+			cabMessage = m.yolopub_editor_locked();
+			return;
+		}
 		const result = reorderSections(curve, from, to, writeProfile);
 		if (result.ok) {
 			// The labels follow their filters (in the free preview: the draft's labels).
@@ -940,6 +1018,7 @@
 				preamp: formatSignedDb(preampDb, locale)
 			})
 		);
+		if (result.yolo) notify(m.yolopub_loaded_yolo());
 	}
 
 	let handledLinkHash: string | null = null;
@@ -974,6 +1053,7 @@
 			const code = currentS1(result.curve);
 			originHint = code && lineageId && versionId ? { s1: code, lineageId, versionId } : null;
 			notify(m.curva_link_loaded());
+			if (result.yolo) notify(m.yolopub_loaded_yolo());
 			clear();
 		});
 	});
@@ -1160,11 +1240,38 @@
 		<LayerSelector {layer} {onlayer}>
 			<!-- Modo YOLO sits with the layer choice: unavailable (with its reason) off Engenharia. -->
 			{#if app}
-				<YoloToggle yolo={app.yolo} {layer} onbringback={bringBack} writeReason={yoloWriteReason} />
+				<span class="yolo-toggle-slot" bind:this={yoloToggleSlot}>
+					<YoloToggle
+						yolo={app.yolo}
+						{layer}
+						onbringback={bringBack}
+						writeReason={yoloWriteReason}
+					/>
+				</span>
 			{/if}
 		</LayerSelector>
 		<div class="np-help"><TourTrigger page="curva" /></div>
 	</section>
+
+	{#if curveYolo}
+		<!-- A YOLO curve: marked wherever it is; with YOLO off, shown and previewed, not edited. -->
+		<section class="yolo-curve" data-yolo-locked={yoloLocked ? 'editor' : undefined}>
+			<YoloCurveNotice variant={noticeVariant} waived={waivedLabels(curveClass.waived)} />
+			{#if yoloLocked}
+				<p class="yolo-curve-why" role="status">{m.yolopub_editor_locked()}</p>
+				<div class="yolo-curve-actions">
+					<Button size="sm" caps disabledReason={loadingReason} onclick={offerYolo}
+						>{m.yolopub_enable_yolo()}</Button
+					>
+					{#if standardOffer}
+						<Button size="sm" caps disabledReason={loadingReason} onclick={bringToStandard}
+							>{m.yolopub_bring_standard()}</Button
+						>
+					{/if}
+				</div>
+			{/if}
+		</section>
+	{/if}
 
 	<div class="instrument" aria-busy={app === null ? 'true' : 'false'}>
 		<div class="cheek" aria-hidden="true"></div>
@@ -1343,10 +1450,7 @@
 
 	<div class="lower">
 		<div class="social-slot" bind:this={socialSlot}>
-			{#if yoloOn}
-				<!-- Modo YOLO: no S5, link, library, publish or account save. -->
-				<p class="yolo-why" role="note" data-yolo-locked="social">{m.yolo_reason_no_export()}</p>
-			{:else if Social}
+			{#if Social}
 				<Social
 					{app}
 					{curve}
@@ -1373,8 +1477,8 @@
 					{layer}
 					{locale}
 					{pageUrl}
-					disabled={!app || yoloOn}
-					disabledReason={loadingReason ?? (yoloOn ? m.yolo_reason_no_import_export() : null)}
+					disabled={!app}
+					disabledReason={loadingReason}
 					exportReason={exitGateReason}
 					onimport={(result) => onImport(result)}
 					{notify}
@@ -1388,10 +1492,22 @@
 </main>
 
 <style>
-	.yolo-why {
+	.yolo-curve {
+		display: grid;
+		gap: var(--space-2, 8px);
+	}
+	.yolo-curve-why {
 		margin: 0;
-		color: #e0656b;
+		color: var(--text-2);
 		font-size: var(--fs-small, 13px);
+	}
+	.yolo-curve-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2, 8px);
+	}
+	.yolo-toggle-slot {
+		display: contents;
 	}
 	.curva {
 		/* Panel legends read the design-system text tokens (silk on the satin panel). */

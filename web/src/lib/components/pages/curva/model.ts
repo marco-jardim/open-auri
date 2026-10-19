@@ -1,5 +1,5 @@
 import type { designSection } from 'open-auri/dsp';
-import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
+import { gateForWrite, isExperimentalKind, isUltrasonic } from 'open-auri/safety';
 import type { GateVerdict } from './reasons.ts';
 
 export type Band = Parameters<typeof designSection>[0];
@@ -12,6 +12,17 @@ export type DragParam = 'freqHz' | 'gainDb' | 'qFactor';
 
 export function hasExperimental(bands: readonly Band[]): boolean {
 	return bands.some((band) => isExperimentalKind(band.kind));
+}
+
+/**
+ * Whether any section of a curve (or of a band list) sits above 20 kHz (core `isUltrasonic`: a
+ * filter section whose frequency is not a number at most `AUDIBLE_MAX_HZ`; OFF never does). Such
+ * a curve is edited only in Engenharia (`layers.ts`) and asks for the experimental confirmation
+ * before a write (`cable/checklist.ts`). The gate's `experimental` flag stays kind-based.
+ */
+export function hasUltrasonic(source: Curve | readonly Band[]): boolean {
+	const bands = 'bands' in source ? source.bands : source;
+	return bands.some((band) => isUltrasonic(band));
 }
 
 export function hasGain(band: Band): band is Extract<Band, { kind: 'PK' | 'LS' | 'HS' }> {

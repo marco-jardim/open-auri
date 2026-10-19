@@ -1,9 +1,25 @@
 <script lang="ts">
-	import { decodeS1, encodeS1, normalizeLabels, validateEnvelope } from 'open-auri/share';
+	import {
+		decodeS1,
+		encodeS1,
+		envelopeFormat,
+		normalizeLabels,
+		validateEnvelope
+	} from 'open-auri/share';
 	import { isSocialApiError, rememberOrigin, requireLoginHref } from '#lib/social/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { CurveData } from '#lib/state/model.ts';
+	import { curveClassification } from '#lib/gate-verdicts.ts';
+	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
+	import YoloPublishAck from '#lib/components/yolo/YoloPublishAck.svelte';
+	import {
+		ackWaived,
+		needsYoloAck,
+		waivedLabels,
+		yoloPublishBlock,
+		yoloPublishText
+	} from '#lib/components/yolo/yolo-curve.ts';
 	import type { CurveSocial } from './social.svelte.ts';
 	import { copy, reasonText } from './copy.ts';
 
@@ -36,6 +52,12 @@
 	let busy = $state(false);
 	let message = $state('');
 	let reasons = $state<string[]>([]);
+	/** Class of the curve (derived, never sent): a YOLO curve is published only after the step. */
+	const classification = $derived(curveClassification(curve.bands, curve.preampDb));
+	const yolo = $derived(classification.class === 'yolo');
+	/** The YOLO acknowledgement step (waived criteria as text), or null. */
+	let ackStep = $state.raw<{ waived: string[] } | null>(null);
+	const showAck = $derived(ackStep !== null && visibility !== 'private');
 
 	function open(publish: boolean) {
 		if (!dialog || social.unavailable || !social.session.verified) return;
@@ -52,18 +74,23 @@
 			visibility = publish ? 'unlisted' : 'private';
 			message = '';
 			reasons = [];
+			ackStep = null;
 			dialog.showModal();
 			opened = true;
 		} catch (cause) {
 			message = social.failure(cause);
 		}
 	}
-	async function submit(event: SubmitEvent) {
+	function onSubmit(event: SubmitEvent) {
 		event.preventDefault();
+		void submit(false);
+	}
+	/** `acknowledged`: the owner went through the YOLO step (sends `acknowledge: 'yolo'`). */
+	async function submit(acknowledged: boolean) {
 		if (!snapshot || busy || social.unavailable || !social.session.verified) return;
 		const input = validateEnvelope({
-			// preset@2 only when the curve has filter labels; @1 (unchanged) otherwise.
-			format: snapshot.labels ? 'open-auri/preset@2' : 'open-auri/preset@1',
+			// preset@2 with filter labels or a band above 20 kHz; @1 (unchanged) otherwise.
+			format: envelopeFormat({ bands: snapshot.curve.bands, labels: snapshot.labels }),
 			name,
 			description,
 			source: 'custom',
@@ -83,10 +110,19 @@
 		}
 		// The visibility actually sent; the success message must describe it, not a later edit.
 		const sent = visibility;
+		if (!acknowledged && needsYoloAck(yolo, sent)) {
+			ackStep = { waived: waivedLabels(classification.waived) };
+			return;
+		}
 		busy = true;
 		message = '';
 		try {
-			const result = await social.api.publishCurve({ envelope: input.value, visibility: sent });
+			const result = await social.api.publishCurve({
+				envelope: input.value,
+				visibility: sent,
+				...(acknowledged && sent !== 'private' ? { acknowledge: 'yolo' as const } : {})
+			});
+			ackStep = null;
 			await rememberOrigin({
 				s1: input.value.code,
 				lineageId: result.lineageId,
@@ -95,7 +131,10 @@
 			message = sent === 'private' ? m.curve_social_saved() : m.curve_social_published();
 			close();
 		} catch (cause) {
-			if (isSocialApiError(cause) && cause.code === 'GATE_REJECTED') {
+			const block = yoloPublishBlock(cause);
+			if (block === 'ack') ackStep = { waived: waivedLabels(ackWaived(cause)) };
+			else if (block !== null) message = yoloPublishText(block);
+			else if (isSocialApiError(cause) && cause.code === 'GATE_REJECTED') {
 				message = m.curve_social_gate();
 				const details = cause.details;
 				if (
@@ -146,8 +185,13 @@
 		opened = false;
 	}}
 >
-	<form onsubmit={submit}>
+	<form onsubmit={onSubmit}>
 		<h3>{m.curve_social_dialog()}</h3>
+		{#if yolo}<YoloCurveNotice
+				variant="editor"
+				compact
+				waived={waivedLabels(classification.waived)}
+			/>{/if}
 		<fieldset class="fields" disabled={busy}>
 			<label>{m.curve_social_name()}<input required maxlength="48" bind:value={name} /></label>
 			<label
@@ -177,9 +221,19 @@
 						{reasonText(reason, copy(getLocale()))}
 					</li>{/each}
 			</ul>{/if}
-		<button type="submit" disabled={busy || social.unavailable}
-			>{busy ? m.curve_social_loading() : m.curve_social_submit()}</button
-		>
+		{#if showAck && ackStep}
+			<YoloPublishAck
+				waived={ackStep.waived}
+				{busy}
+				headingLevel={4}
+				onconfirm={() => void submit(true)}
+				oncancel={() => (ackStep = null)}
+			/>
+		{:else}
+			<button type="submit" disabled={busy || social.unavailable}
+				>{busy ? m.curve_social_loading() : m.curve_social_submit()}</button
+			>
+		{/if}
 		<button type="button" disabled={busy} onclick={close}>{m.curve_social_cancel()}</button>
 	</form>
 </dialog>

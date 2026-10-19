@@ -11,6 +11,7 @@
 	import { untrack } from 'svelte';
 	import { gateForWrite } from 'open-auri/safety';
 	import { m } from '#lib/paraglide/messages.js';
+	import { hasUltrasonicBands } from '#lib/cable/checklist.ts';
 	import type { CableService } from '#lib/cable/service.ts';
 	import type {
 		Band,
@@ -116,6 +117,8 @@
 			gate
 		);
 	});
+	/** The curve the gate read has a section above 20 kHz: the experimental note says so. */
+	const ultrasonic = $derived(checklist?.snapshot ? hasUltrasonicBands(checklist.snapshot) : false);
 	/** The per-write YOLO text, naming the waived criteria of this very verdict. */
 	const yoloText = $derived(
 		checklist === null
@@ -307,6 +310,9 @@
 								{m.cable_experimental_heading()}
 							</h3>
 							<p>{m.cable_experimental_text()}</p>
+							{#if ultrasonic}
+								<p data-testid="ultra-experimental">{m.cable_experimental_ultra()}</p>
+							{/if}
 						</section>
 					{/if}
 

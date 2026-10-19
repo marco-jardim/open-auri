@@ -5,11 +5,13 @@
  *
  * Rules
  * - Region of the band's frequency (Hz), lower bound inclusive:
- *   Sub < 60 ≤ Grave < 250 ≤ Corpo < 800 ≤ Médio < 2500 ≤ Presença < 6000 ≤ Brilho < 12000 ≤ Ar.
+ *   Sub < 60 ≤ Grave < 250 ≤ Corpo < 800 ≤ Médio < 2500 ≤ Presença < 6000 ≤ Brilho < 12000 ≤ Ar
+ *   ≤ 20000 < Ultra (above the audible band, Engenharia and Modo YOLO only; "Ultra" in both
+ *   locales).
  * - PK: region and "+" (boost) or "−" (cut). LS, HS: region of the corner and "↑" or "↓".
  *   A gain within ±0.05 dB is flat: the region alone.
- * - HP, LP: "Corte {freq}" ("Corte 30 Hz", "Corte 12k"); the detail says which side is cut
- *   ("Corte de graves (HP)", "Corte de agudos (LP)").
+ * - HP, LP: "Corte {freq}" ("Corte 30 Hz", "Corte 12k", "Corte 25k"); the detail says which side
+ *   is cut ("Corte de graves (HP)", "Corte de agudos (LP)").
  * - OFF: "Livre", never suffixed.
  * - Two or more equal automatic names get " a", " b", " c"… in slot order.
  * - A custom label (the S5 `@2` label rules of core `normalizeLabels`: at most `LABEL_MAX`, 24,
@@ -19,6 +21,7 @@
  * - Badge: the slot letter, A to J. Slot order is the processing order ("estágio N").
  * Automatic names stay within 12 characters (14 with a suffix) in both locales.
  */
+import { AUDIBLE_MAX_HZ } from 'open-auri/safety';
 import {
 	EnvelopeError,
 	LABEL_COUNT,
@@ -36,9 +39,20 @@ export const LABEL_MAX = CORE_LABEL_MAX;
 /** A gain this close to 0 dB is drawn and named as flat. */
 const FLAT_DB = 0.05;
 
-export const REGIONS = ['sub', 'bass', 'body', 'mids', 'presence', 'brilliance', 'air'] as const;
+export const REGIONS = [
+	'sub',
+	'bass',
+	'body',
+	'mids',
+	'presence',
+	'brilliance',
+	'air',
+	'ultra'
+] as const;
 export type Region = (typeof REGIONS)[number];
-/** Upper bound (exclusive) of every region but the last. */
+/** Top (inclusive) of Ar: above it a band is `ultra` (core `AUDIBLE_MAX_HZ`). */
+const AIR_MAX_HZ = AUDIBLE_MAX_HZ;
+/** Upper bound (exclusive) of every region below Ar. */
 const REGION_TOP: readonly [Region, number][] = [
 	['sub', 60],
 	['bass', 250],
@@ -79,7 +93,7 @@ export function badgeOf(index: number): string {
 
 export function regionOf(freqHz: number): Region {
 	for (const [region, top] of REGION_TOP) if (freqHz < top) return region;
-	return 'air';
+	return freqHz > AIR_MAX_HZ ? 'ultra' : 'air';
 }
 
 /** "30 Hz", "999 Hz", "1k", "2,2k" (pt-BR) or "2.2k" (en-US), "12k". */

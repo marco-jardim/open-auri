@@ -26,7 +26,7 @@
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { JournalEntry } from '#lib/cable/types.ts';
 	import { loadDecision } from './load-entry.ts';
-	import { lampsFromGate } from '#lib/cable/checklist.ts';
+	import { hasUltrasonicBands, lampsFromGate } from '#lib/cable/checklist.ts';
 	import { neutralCurve } from '#lib/state/model.ts';
 	// Direct imports (FUX.B): the charts and chrome barrels would bring every chart, HelpOverlay
 	// and ConfirmDialog into the page.
@@ -76,7 +76,10 @@
 	const entries = $derived(app?.state.journal.entries ?? []);
 	const last = $derived(entries.at(-1));
 	const encoder = $derived(encoderData(curve));
+	// The gate's `experimental` flag stays kind-based; the checklist also asks for the experimental
+	// confirmation when a section sits above 20 kHz (`hasUltrasonicBands`), and U3 says why.
 	const experimental = $derived(curve.bands.some((band) => isExperimentalKind(band.kind)));
+	const ultrasonic = $derived(hasUltrasonicBands(curve.bands));
 	const unconfirmed = { volumeLowered: false, keepConnected: false, experimental: false };
 	// One gate verdict for the calibration unit: lamps, values and the checklist reuse it.
 	const gate = $derived(gateForWrite(curve.bands, curve.preampDb, { experimental }));
@@ -400,6 +403,9 @@
 						newLevelDb={checklist?.newLevelDb ?? null}
 					/>
 					<p class="note small">{m.cabo_checklist_hint()}</p>
+					{#if ultrasonic}
+						<p class="note small" data-testid="cabo-ultra">{m.cable_experimental_ultra()}</p>
+					{/if}
 					<div class="guard" class:open={coverOpen}>
 						<Button
 							variant="plate"
