@@ -257,7 +257,16 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      # Plain cache instead of gradle/actions/setup-gradle: its init script resolves its own plugin
+      # classpath, which dependency verification (gradle/verification-metadata.xml) rejects.
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/android/**/*.gradle', 'apps/android/android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
       - run: npm ci
       - name: Tooling tests
         run: npm run test:tools
