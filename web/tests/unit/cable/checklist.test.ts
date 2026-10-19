@@ -132,6 +132,15 @@ describe('evaluateChecklist', () => {
 		expect(result.gateOk).toBe(true);
 		expect(result.canWrite).toBe(true);
 		expect(result.crc).toBe(0x1970);
+		expect(result.items.map(({ id, required }) => ({ id, required }))).toEqual([
+			{ id: 'gate', required: true },
+			{ id: 'volume', required: true },
+			{ id: 'connection', required: true },
+			{ id: 'experimental', required: false },
+			{ id: 'spacing', required: true },
+			{ id: 'yolo-session', required: false },
+			{ id: 'yolo-write', required: false }
+		]);
 		expect(result.lamps.map((lamp) => lamp.id)).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'k']);
 		expect(result.lamps.every((lamp) => lamp.state === 'ok')).toBe(true);
 		expect(result.snapshot).not.toBeNull();
