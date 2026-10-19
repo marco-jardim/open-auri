@@ -2538,6 +2538,19 @@ Os achados viram FXGH.k (0.5).
 - Correções de plano descobertas: (1) mensagens novas vão para `D:\git\open-auri\web\messages\_staging\<ID>.pt-BR.json` e `<ID>.en-US.json` (forma do `web\scripts\merge-messages.mjs` e do `CONTRIBUTING.md:46-49`), não `_staging\<ID>\`; (2) o modo do cabo é decidido em `createCableService` (`service.ts:345-348`), então a T2.3 resolve `detectNativeCable()` antes de `context.mount` (`+layout.svelte:229`).
 - Locks: W2.1 = T2.1 (`web\src\lib\cable\native\*`, `types.ts`, testes `native-*`), T2.2 (`web\src\lib\files\save.ts` e os arquivos de download listados), T2.4 (servidor, env, template, `.env.example`, `render-wrangler.test.mjs`, `env.test.ts`, rota `.well-known`), todos disjuntos; W2.2 = T2.3 e T2.5, disjuntos; T2.6 serial (escreve `types.ts`).
 
+| 2026-10-19 | T2.0 a T2.6, T2.T | concluído | `d99f450`, `7e73301`, `8dcc208`, `8c65b67`, `cfd3608`, `b9ab040`, `2f48e1e`, `82a49b7`, `ab0c4a4` | integração no site; paridade de bytes 12/12; e2e `android-bridge` com o `native-bridge.js` real (desktop e mobile) |
+| 2026-10-19 | Q2 r1 | 3 major, 8 minor | - | M1 diagnóstico sem `open`; M2 `opened` preso após perda de sessão; M3 política remota não alcançava páginas abertas/offline |
+| 2026-10-19 | FX2-A a FX2-D, FX2.5 | concluído | `c75533e`, `35f9a18`, `e4fd7a9`, `0833f2a`, `fa60778` | todos os achados do r1 corrigidos com testes; FX2.5 corrige vazamento de locale entre testes de componente no CI |
+| 2026-10-19 | Q2 r2 | 1 major (N1), 11 minor | `0833f2a` | N1: sem como recarregar o app depois de um deploy; corrigido no FX2-E |
+
+**Achados minor do Q2 r2 (registrados para a fase indicada):**
+- m1 (página aberta antes de um deploy que desliga a gravação ainda faz `requestDevice` e diagnóstico; as gravações já são barradas): Q3, com G1 e G2.
+- m2 (`version.pollInterval` sem consumidor): resolvido junto com o N1 (banner do app).
+- m3 (sem teste em navegador real de que o SW não intercepta `/_app/version.json`): T3.2 (emulador).
+- m4 (`/docs` não diz que a gravação pelo app exige conexão e página atual) e m7 (uma checagem de frescor por fila): T3.4 e runbook da T3.5, junto com o comportamento offline do M3.
+- m5 (`PUBLIC_ANDROID_APP_ID` malformado invalida o env): T4.1 (configuração do app id em produção).
+- m6 (`isNativeAndroid` duplicado em `native\gate.ts` e `app\context.svelte.ts`), m8 (fake do e2e recusa `diagnostics` sem permissão; o nativo não), m9 (banner no `/docs` aparece depois do `#main-content`), m10 (UI mostra "gravando" durante a checagem de até 3 s), m11 (mensagens do FX2-D no commit do FX2-B): F3, limpeza.
+
 **Achados minor do Q1 r2 (por decisão do mantenedor, depois da 2a rodada só se corrigem major ou acima). Ficam registrados para a fase indicada:**
 - G1 (release guard sem as chaves de fallback de topo `loggingBehavior`/`allowMixedContent` e `CapacitorHttp.enabled: "true"`) e G2 (`CapacitorCookies` e `CapacitorHttp` expostos a todos os frames por `addJavascriptInterface`; remover com `removeJavascriptInterface`): Q3 (segurança da Fase 3).
 - G3 (espaçamento de commit não sobrevive à morte do processo): F5, junto com a validação em hardware.
