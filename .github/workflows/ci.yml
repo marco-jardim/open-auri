@@ -63,6 +63,42 @@ env:
   EMAIL_TRANSPORT: resend
 
 jobs:
+  changes:
+    name: Android path filter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            android:
+              - 'apps/android/**'
+              - 'web/src/lib/cable/**'
+              - 'web/src/lib/files/**'
+              - 'src/dsp/**'
+              - 'src/transport/**'
+              - 'schemas/android-*'
+              - 'test/fixtures/**'
+              - 'tools/run-gradle.mjs'
+              - 'tools/android-*.mjs'
+              - 'tools/verify-capacitor-config.mjs'
+              - 'tools/usb-golden.mjs'
+              - 'tools/play-assets.mjs'
+              - 'test/tools/android-*.test.mjs'
+              - 'test/tools/run-gradle.test.mjs'
+              - 'test/tools/verify-capacitor-config.test.mjs'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
+
   static:
     name: Lint, types and scans
     runs-on: ubuntu-latest
@@ -194,4 +230,89 @@ jobs:
           path: |
             web/playwright-report
             web/test-results
+          retention-days: 7
+
+  android:
+    name: Android
+    needs: changes
+    # Job-level skips succeed for required checks on docs-only PRs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v6
+      - run: npm ci
+      - name: Tooling tests
+        run: npm run test:tools
+      - name: Android typecheck
+        run: npm run typecheck:android
+      - name: Android lint
+        run: npm run lint:android
+      - name: Android unit tests and coverage gates
+        run: npm run test:android
+      - name: Android debug build
+        run: npm run build:android
+      - name: Android release dry run (ephemeral signing)
+        shell: bash
+        run: |
+          KEYSTORE="$RUNNER_TEMP/android-ci.jks"
+          KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          export KEYSTORE_PASSWORD
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storetype JKS \
+            -storepass:env KEYSTORE_PASSWORD \
+            -keypass:env KEYSTORE_PASSWORD \
+            -alias android-ci \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -dname "CN=Android CI, O=Open Auri, C=BR" \
+            -noprompt
+          npm run build:android:release
+          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias android-ci \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEYSTORE_PASSWORD \
+            --out "$RUNNER_TEMP/android-release-signed.apk" \
+            apps/android/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$APKSIGNER" verify --verbose --print-certs "$RUNNER_TEMP/android-release-signed.apk"
+      - name: Delete ephemeral signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/android-ci.jks"
+      - name: Upload Android debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-debug-apk
+          path: apps/android/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+      - name: Upload Android coverage, lint and test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-reports
+          path: |
+            apps/android/android/app/build/reports/kover/
+            apps/android/android/app/build/reports/lint-results*
+            apps/android/android/app/build/reports/tests/
+            apps/android/android/app/build/test-results/
           retention-days: 7
