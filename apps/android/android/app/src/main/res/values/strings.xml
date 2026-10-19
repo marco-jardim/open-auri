@@ -9,4 +9,9 @@
     <string name="webview_update_button">Open Google Play</string>
     <string name="webview_update_button_description">Open Google Play to update your active WebView provider</string>
     <string name="webview_update_store_unavailable">No app can open Google Play. Update your WebView provider through your device’s app store, then reopen open-auri.</string>
+    <string name="usb_picker_title">Choose the cables to connect</string>
+    <string name="usb_picker_connect">Connect</string>
+    <string name="usb_picker_cancel">Cancel</string>
+    <string name="usb_picker_item">%1$s, cable %2$d</string>
+    <string name="usb_picker_unnamed_device">USB device</string>
 </resources>

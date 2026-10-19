@@ -13,6 +13,10 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.getcapacitor.BridgeActivity
+import com.openauri.files.DownloadBridge
+import com.openauri.files.OpenAuriFilesPlugin
+import com.openauri.usb.OpenAuriUsbPlugin
+import com.openauri.usb.OriginGuard
 
 /**
  * Evaluate the gate before BridgeActivity.onCreate, but always call the superclass lifecycle.
@@ -23,6 +27,7 @@ import com.getcapacitor.BridgeActivity
 class MainActivity : BridgeActivity() {
     private var gateResult: WebViewCompatGate.Result = WebViewCompatGate.Result.UnknownPackage
     private var activePackageName = WebViewCompatGate.DEFAULT_WEBVIEW_PACKAGE
+    private var downloads: DownloadBridge? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val injectedGate = gateForTesting
@@ -39,9 +44,16 @@ class MainActivity : BridgeActivity() {
         }
         val result = gateResult
         if (result is WebViewCompatGate.Result.Outdated) activePackageName = result.packageName
+        if (result == WebViewCompatGate.Result.Ok) {
+            // Plugins only exist behind a passing gate: without it no Bridge is ever created.
+            registerPlugin(OpenAuriUsbPlugin::class.java)
+            registerPlugin(OpenAuriFilesPlugin::class.java)
+        }
 
         super.onCreate(savedInstanceState)
-        if (gateResult != WebViewCompatGate.Result.Ok) {
+        if (gateResult == WebViewCompatGate.Result.Ok) {
+            attachDownloads()
+        } else {
             val screen = findViewById<View>(R.id.webview_update_screen)
             ViewCompat.setAccessibilityHeading(findViewById(R.id.webview_update_title), true)
             ViewCompat.setOnApplyWindowInsetsListener(screen) { view, insets ->
@@ -66,6 +78,34 @@ class MainActivity : BridgeActivity() {
         if (gateResult == WebViewCompatGate.Result.Ok) super.load()
     }
 
+    override fun onDestroy() {
+        downloads?.close()
+        downloads = null
+        super.onDestroy()
+    }
+
+    /**
+     * Routes WebView downloads through the files plugin, pinned to the origin of the bridge's
+     * server URL. Without a usable HTTPS origin (or plugin) the WebView keeps its default handling.
+     */
+    private fun attachDownloads() {
+        val activeBridge = bridge ?: return
+        val files = activeBridge.getPlugin(FILES_PLUGIN)?.instance as? OpenAuriFilesPlugin
+        val origin = OriginGuard.originOf(activeBridge.serverUrl)
+        if (files == null || origin == null) {
+            Log.w(TAG, "Downloads not attached: missing files plugin or server origin")
+            return
+        }
+        val downloadBridge = try {
+            DownloadBridge(this, origin, files)
+        } catch (notHttps: IllegalArgumentException) {
+            Log.w(TAG, "Downloads not attached: the server origin is not HTTPS", notHttps)
+            return
+        }
+        downloads = downloadBridge
+        activeBridge.webView.setDownloadListener(downloadBridge)
+    }
+
     private fun openWebViewStore() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, "market://details?id=$activePackageName".toUri()))
@@ -85,6 +125,7 @@ class MainActivity : BridgeActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        private const val FILES_PLUGIN = "OpenAuriFiles"
 
         /** Test-only injection, set before ActivityScenario launch and cleared after each test. */
         @Volatile

@@ -7,4 +7,9 @@
     <string name="webview_update_button">Abrir Google Play</string>
     <string name="webview_update_button_description">Abrir o Google Play para atualizar o provedor de WebView ativo</string>
     <string name="webview_update_store_unavailable">Nenhum aplicativo pode abrir o Google Play. Atualize o provedor de WebView pela loja de aplicativos do dispositivo e abra o open-auri novamente.</string>
+    <string name="usb_picker_title">Escolha os cabos para conectar</string>
+    <string name="usb_picker_connect">Conectar</string>
+    <string name="usb_picker_cancel">Cancelar</string>
+    <string name="usb_picker_item">%1$s, cabo %2$d</string>
+    <string name="usb_picker_unnamed_device">Dispositivo USB</string>
 </resources>
