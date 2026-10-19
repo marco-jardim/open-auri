@@ -430,6 +430,11 @@ export interface CableWrittenDetail {
 	deviceLabel: string;
 	at: number;
 	levelDb: number | null;
-	/** Never `'yolo'`: YOLO writes dispatch no written event (nothing downstream may reuse them). */
-	profile?: 'standard';
+	/**
+	 * `'yolo'`: a Modo YOLO write (marked like its journal entry). Absent, or `'standard'`, on a
+	 * standard write.
+	 */
+	profile?: WriteProfile;
+	/** The class-2 codes the YOLO write waived (only with `profile: 'yolo'`). */
+	waived?: ReasonCode[];
 }

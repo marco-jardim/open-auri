@@ -311,6 +311,53 @@ describe('a verified link origin brings its version labels (never through #p=)',
 		expect(app.state.curve.current.labels).toBeNull();
 	});
 
+	test('a same-S1 preset loaded while the check is pending never takes the labels', async () => {
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((done) => {
+			release = done;
+		});
+		const respond = version(s1);
+		const { app, screen } = await setup(async () => {
+			await gate;
+			return respond();
+		});
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		// Neutro is the link's exact S1, unlabeled: only the store curve's identity tells them apart.
+		expect(app.loadNeutral()).toBe(true);
+		expect(encodeS1(app.state.curve.current)).toBe(s1);
+		expect(app.state.curve.current.labels).toBeNull();
+		release();
+		await vi.waitFor(async () => expect((await originOf(s1))?.lineageId).toBe('linked'));
+		await new Promise<void>((done) => setTimeout(done, 20));
+		expect(app.state.curve.current.labels).toBeNull();
+		expect(app.state.curve.current.source).toBe(`preset:${NEUTRO.id}`);
+	});
+
+	test('a retry after a reconnect still compares with the curve the link loaded', async () => {
+		let attempt = 0;
+		const respond = version(s1);
+		const { app, screen, session } = await setup(async () => {
+			attempt++;
+			if (attempt === 1) throw new TypeError('network');
+			return respond();
+		});
+		loadLink(app);
+		await screen.rerender({ originHint: { s1, lineageId: 'linked', versionId: 'v1' } });
+		await vi.waitFor(() =>
+			expect(screen.container.textContent).toContain(m.curva_social_offline())
+		);
+		expect(attempt).toBe(1);
+		// The same S1, unlabeled, loaded before the connection comes back.
+		expect(app.loadNeutral()).toBe(true);
+		const refresh = vi.spyOn(session, 'refresh').mockResolvedValue(session.account);
+		window.dispatchEvent(new Event('online'));
+		expect(refresh).toHaveBeenCalledOnce();
+		await vi.waitFor(async () => expect((await originOf(s1))?.lineageId).toBe('linked'));
+		await new Promise<void>((done) => setTimeout(done, 20));
+		expect(app.state.curve.current.labels).toBeNull();
+	});
+
 	test('a rename since the link loaded wins over the version labels', async () => {
 		let release: () => void = () => undefined;
 		const gate = new Promise<void>((done) => {

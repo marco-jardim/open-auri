@@ -17,6 +17,7 @@ import { createClientState, type CurrentCurve, type StorageOptions } from '#lib/
 import { yolo, type YoloState } from '#lib/state/yolo.svelte.ts';
 import type { WriteProfile } from '#lib/cable/types.ts';
 import { createToastStore, type ToastStore } from '#lib/components/chrome/toast.ts';
+import { m } from '#lib/paraglide/messages.js';
 
 export interface ClientAppOptions {
 	storage?: StorageOptions;
@@ -37,7 +38,8 @@ export interface ClientAppOptions {
 export interface WriteRequestOptions {
 	/**
 	 * `'yolo'`: open the checklist with the YOLO gate profile. Honoured only while Modo YOLO is on
-	 * in this tab and the free preview is off; otherwise nothing opens.
+	 * in this tab; otherwise nothing opens. While the free preview is on nothing opens for any
+	 * profile (see `requestWrite`).
 	 */
 	profile?: WriteProfile;
 }
@@ -119,7 +121,8 @@ export function createClientApp(options: ClientAppOptions = {}) {
 
 	function written(event: Event) {
 		const detail = (event as CustomEvent<CableWrittenDetail>).detail;
-		// Mark exactly the sent snapshot, not an editor value changed during the write.
+		// Mark exactly the sent snapshot, not an editor value changed during the write. A Modo
+		// YOLO write (`detail.profile === 'yolo'`) is the cable's contents all the same.
 		state.curve.markWritten({
 			...(pending ?? state.curve.current),
 			name: detail.entry.name,
@@ -157,12 +160,21 @@ export function createClientApp(options: ClientAppOptions = {}) {
 		/**
 		 * Open a checklist on an immutable copy. No cable I/O here. `$state.snapshot` also copies
 		 * deep `$state` proxies (a page's selected tape), which `structuredClone` cannot clone.
+		 *
+		 * While the free preview is on, no checklist opens, whatever the profile: what is heard
+		 * is a memory-only draft, not the curve a write would send. The refusal is a toast. Every
+		 * page (top bar, Curva, Cabo, Biblioteca, shared curve) goes through here; only
+		 * `requestRescue` stays available.
 		 */
 		requestWrite(curve: CurrentCurve = state.curve.current, request: WriteRequestOptions = {}) {
 			if (cableState.writing || pending !== null) return;
+			if (yoloState.writeBlock() !== null) {
+				toasts.push(m.yolo_reason_free_preview(), { tone: 'error' });
+				return;
+			}
 			const yoloWrite = request.profile === 'yolo';
-			// A YOLO checklist opens only while YOLO is on here and writing is not disabled.
-			if (yoloWrite && !(yoloState.enabled && yoloState.writeBlock() === null)) return;
+			// A YOLO checklist opens only while YOLO is on in this tab.
+			if (yoloWrite && !yoloState.enabled) return;
 			pendingProfile = yoloWrite ? 'yolo' : 'standard';
 			pending = $state.snapshot(curve);
 		},

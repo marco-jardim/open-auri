@@ -484,7 +484,15 @@ describe('an interrupted Modo YOLO write keeps its profile and waived codes', ()
 		expect(outcome.status).toBe('ok');
 		const waived = gateForWrite(yoloOnly, YOLO_PREAMP_DB, { profile: 'yolo' }).waived;
 		expect(writer.journal.last()).toMatchObject({ status: 'ok', profile: 'yolo', waived });
-		expect(writer.written).toEqual([]);
+		// The real committed YOLO write is the cable's written snapshot, marked as YOLO.
+		expect(writer.written).toHaveLength(1);
+		expect(writer.written[0]).toMatchObject({
+			profile: 'yolo',
+			waived,
+			bands: yoloOnly,
+			preampDb: YOLO_PREAMP_DB,
+			entry: { status: 'ok', profile: 'yolo', waived }
+		});
 		// What a tab closed during the write leaves behind: the marker of that YOLO write.
 		const left = seen[0] ?? null;
 		expect(stored(left)).toMatchObject({ tabId: 'yolo-tab', profile: 'yolo', waived });
@@ -505,6 +513,22 @@ describe('an interrupted Modo YOLO write keeps its profile and waived codes', ()
 		// The recovered curve is a YOLO curve: it reloads with YOLO on, and only then.
 		expect(loadDecision(entry, true)).toEqual({ load: true, profile: 'yolo' });
 		expect(loadDecision(entry, false)).toEqual({ load: false, reason: 'yolo-off' });
+	});
+
+	test('a simulated YOLO write journals simulated and emits no cable:written', async () => {
+		const h = await tab({ hid: null, yoloSession: true });
+		const outcome = await h.service.write(yoloRequest(h.service));
+		expect(outcome.status).toBe('simulated');
+		expect(h.journal.last()).toMatchObject({ status: 'simulated', profile: 'yolo' });
+		expect(h.written).toEqual([]);
+	});
+
+	test('an interrupted YOLO write emits no cable:written', async () => {
+		const h = await tab({ yoloSession: true, deviceOptions: { disconnectAtReport: 2 } });
+		const outcome = await h.service.write(yoloRequest(h.service));
+		expect(outcome.status).toBe('interrupted');
+		expect(h.journal.last()).toMatchObject({ status: 'interrupted', profile: 'yolo' });
+		expect(h.written).toEqual([]);
 	});
 
 	test('a marker without a profile (a standard write, or an older marker) stays standard', async () => {
