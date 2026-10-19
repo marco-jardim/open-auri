@@ -64,7 +64,7 @@ export const GET = defineApi<ApiEvent>(
 		const viewer = { userId: user.id };
 		const names = new Map<string, string | null>();
 		for (const lineageId of new Set(items.map((share) => share.lineageId))) {
-			const lineage = await getLineageForViewer(env.db, lineageId, viewer);
+			const lineage = await getLineageForViewer(env.db, lineageId, viewer, env.yoloPublication);
 			// The lineage's name is its head version's name.
 			names.set(lineageId, lineage ? lineage.head.name : null);
 		}

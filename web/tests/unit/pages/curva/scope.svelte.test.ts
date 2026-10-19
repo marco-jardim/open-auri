@@ -18,7 +18,7 @@ import {
 	yOf
 } from '#lib/components/pages/curva/scope.ts';
 import { CURVA_SESSION } from '#lib/components/pages/curva/preview.svelte.ts';
-import { createAudioEngine } from '#lib/audio/engine.ts';
+import { approximatedSections, createAudioEngine, skippedSections } from '#lib/audio/engine.ts';
 import { fakeEnv, resetAudioConfig } from '../../audio/fake-audio.ts';
 import '../../primitives/design-system.ts';
 
@@ -606,23 +606,44 @@ test('bands above 20 kHz are locked outside Engenharia, with a hint', async () =
 	});
 });
 
-test('away from 96 kHz the preview note counts the filters above 20 kHz that do not play', async () => {
+test('away from 96 kHz the preview notes count the filters above 20 kHz skipped and approximated', async () => {
 	const { screen } = await setup({ curve: ultraCut, committed: ultraCut, playing: true });
 	const skip = () => screen.container.querySelector('[data-testid="ultra-skip"]');
+	const approx = () => screen.container.querySelector('[data-testid="ultra-approx"]');
 	expect(skip()).toBeNull();
-	await screen.rerender({ approximate: true });
-	await expect.element(page.getByText(m.curva_ultra_skipped_one())).toBeVisible();
+	expect(approx()).toBeNull();
+	// The 25 kHz cut lowers the top of the audible band on the chip: approximated, not skipped.
+	expect(approximatedSections(ultraCut.bands, 48000)).toBe(1);
+	await screen.rerender({ approximate: true, rate: 48000 });
+	await expect.element(page.getByText(m.qa1y_ultra_approximated_one())).toBeVisible();
 	await expect.element(page.getByText(m.curva_approximate())).toBeVisible();
+	expect(skip()).toBeNull();
+	// An inaudible one (−0,2 dB at 30 kHz) is skipped, with its own note next to it.
+	const both: Curve = {
+		...ultraCut,
+		bands: ultraCut.bands.map((band, index) =>
+			index === 2 ? { kind: 'PK' as const, freqHz: 30000, gainDb: -0.2, qFactor: 1 } : band
+		)
+	};
+	expect(skippedSections(both.bands, 48000)).toBe(1);
+	await screen.rerender({ curve: both, committed: both });
+	await expect.element(page.getByText(m.curva_ultra_skipped_one())).toBeVisible();
+	await expect.element(page.getByText(m.qa1y_ultra_approximated_one())).toBeVisible();
 	// A plays the reference (nothing above 20 kHz there): no count.
 	await screen.rerender({ side: 'A', reference: curve });
 	expect(skip()).toBeNull();
-	// The page's own count wins.
-	await screen.rerender({ skipped: 3 });
+	expect(approx()).toBeNull();
+	// The page's own counts win.
+	await screen.rerender({ skipped: 3, approximated: 2 });
 	await expect
 		.element(page.getByText(m.curva_ultra_skipped({ count: '3' })))
 		.toHaveAttribute('role', 'status');
+	await expect
+		.element(page.getByText(m.qa1y_ultra_approximated({ count: '2' })))
+		.toHaveAttribute('role', 'status');
 	await screen.rerender({ playing: false });
 	expect(skip()).toBeNull();
+	expect(approx()).toBeNull();
 });
 
 test.each([

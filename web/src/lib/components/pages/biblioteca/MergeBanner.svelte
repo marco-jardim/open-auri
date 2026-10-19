@@ -5,6 +5,7 @@
 	// stay local only. The flag is kept per account.
 	import { m } from '#lib/paraglide/messages.js';
 	import type { MergeReport, SocialApi } from '#lib/social/index.ts';
+	import { createClassifier } from '#lib/workers/classifier.svelte.ts';
 	import {
 		readMergeFlag,
 		runMerge,
@@ -90,10 +91,18 @@
 		outcome = null;
 		const batch = pending.map((item) => toMergeItem(item, locale));
 		progress = { done: 0, total: batch.length };
+		// The gate weights (a YOLO item costs 2 runs) are classified in a worker of their own, one
+		// item at a time, so a long library never blocks the page.
+		const classifier = createClassifier();
 		try {
-			const result = await runMerge(api, batch, (done, total) => {
-				progress = { done, total };
-			});
+			const result = await runMerge(
+				api,
+				batch,
+				(done, total) => {
+					progress = { done, total };
+				},
+				{ classify: (curve, signal) => classifier.classify(curve, signal) }
+			);
 			const current = readMergeFlag(storage, account);
 			writeMergeFlag(storage, account, {
 				offeredAt: current.offeredAt,
@@ -105,6 +114,7 @@
 				onMerged?.(result.report);
 			}
 		} finally {
+			classifier.dispose();
 			running = false;
 		}
 	}

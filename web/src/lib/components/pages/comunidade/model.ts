@@ -11,6 +11,7 @@ import {
 	validateEnvelope
 } from 'open-auri/share';
 import { yoloPublishBlock, yoloPublishText } from '#lib/components/yolo/yolo-curve.ts';
+import { curveClassification } from '#lib/gate-verdicts.ts';
 import { REASON_MESSAGE_KEYS } from '#lib/cable/checklist.ts';
 import type { ReasonCode } from '#lib/cable/types.ts';
 import { responseGeometry } from '#lib/charts/response.ts';
@@ -59,6 +60,23 @@ export interface Channel {
 	curve: DecodedCurve | null;
 	/** The head is a YOLO curve (server class; only in the `yolo=only` list): shows the badge. */
 	yolo?: boolean;
+}
+
+/**
+ * Whether a channel's curve is a YOLO curve: its class, derived from its own bands (core
+ * `classifyCurve` rules, cached, gate-verdicts.ts), never a stored marker. Writing it to the cable
+ * needs the YOLO checklist (`requestWrite(curve, { profile: 'yolo' })`).
+ */
+export function channelIsYolo(curve: DecodedCurve): boolean {
+	return curveClassification(curve.bands, curve.preampDb).class === 'yolo';
+}
+
+/**
+ * "Ativar Modo YOLO": the channel's curve in the editor's Engenharia layer (`?camada=engenharia`),
+ * with its origin (`l`/`v`, checked against the S1 there), where Modo YOLO can be turned on.
+ */
+export function yoloHref(channel: Pick<Channel, 'lineageId' | 'versionId' | 's1'>): string {
+	return `/?camada=engenharia&l=${encodeURIComponent(channel.lineageId)}&v=${encodeURIComponent(channel.versionId)}#p=${channel.s1}`;
 }
 
 /** What the page needs from the social session (`createSocialSession`). */

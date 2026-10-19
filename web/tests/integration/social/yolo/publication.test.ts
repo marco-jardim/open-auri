@@ -79,8 +79,9 @@ function publishYolo(
 	);
 }
 
+/** An anonymous read with YOLO_PUBLICATION on (off, no YOLO head is served to others). */
 async function anonymousRead(lineageId: string): Promise<string> {
-	return (await loadPublishedCurve(env.DB, lineageId, ANONYMOUS_VIEWER)).kind;
+	return (await loadPublishedCurve(env.DB, lineageId, ANONYMOUS_VIEWER, null, ON)).kind;
 }
 
 describe('publish', () => {
@@ -132,7 +133,7 @@ describe('publish', () => {
 			const info = await publishYolo(await veteran(), visibility, { acknowledge: true });
 			expect(info.yolo).toBe(true);
 			expect(await acks(info.lineageId)).toBe(1);
-			const read = await loadPublishedCurve(env.DB, info.lineageId, ANONYMOUS_VIEWER);
+			const read = await loadPublishedCurve(env.DB, info.lineageId, ANONYMOUS_VIEWER, null, ON);
 			if (read.kind !== 'ok') throw new Error('acknowledged YOLO lineage is not linkable');
 			expect(read.value.curve.yolo).toBe(true);
 			expect(read.value.curve.gate.ok).toBe(false);
@@ -241,7 +242,8 @@ describe('fork', () => {
 	it('forks a public YOLO lineage privately without acknowledgement, publicly only with it', async () => {
 		const source = await publishYolo(await veteran(), 'public', { acknowledge: true });
 		const forker = await veteran();
-		const own = await forkCurve(env.DB, forker.user.id, source.lineageId, {});
+		// The source is someone else's YOLO head: a fork source only while the switch is on.
+		const own = await forkCurve(env.DB, forker.user.id, source.lineageId, {}, ON);
 		expect(own.yolo).toBe(true);
 		expect(await acks(own.lineageId)).toBe(0);
 
@@ -314,10 +316,10 @@ describe('visibility and restore', () => {
 		await retractCurve(env.DB, owner.user.id, open.lineageId);
 		const missing = await rejection(restoreCurve(env.DB, owner.user.id, open.lineageId, ON));
 		expect(missing.code).toBe('YOLO_ACK_REQUIRED');
-		const off = await rejection(restoreCurve(env.DB, owner.user.id, open.lineageId, {}, 'yolo'));
-		expect(off.code).toBe('YOLO_PUBLICATION_OFF');
+		// With the switch off the restore makes it private instead (qa-round1.test.ts).
 		const restored = await restoreCurve(env.DB, owner.user.id, open.lineageId, ON, 'yolo');
 		expect(restored.status).toBe('active');
+		expect(restored.visibility).toBe('public');
 		expect(await anonymousRead(open.lineageId)).toBe('ok');
 
 		const closed = await publishYolo(owner, 'private');

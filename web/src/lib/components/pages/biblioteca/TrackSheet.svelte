@@ -109,14 +109,27 @@
 	/** Every unavailable control says why (spec §2.6): the Button primitive announces it. */
 	const audioReason = $derived(app ? null : m.biblioteca_reason_audio());
 	const linkReason = $derived(shareRefusal ?? (share.url ? null : m.biblioteca_reason_link()));
+	/**
+	 * A YOLO tape is written with the YOLO checklist, so only while Modo YOLO is on in this tab
+	 * (Engenharia) and may write; otherwise "Ativar Modo YOLO" opens it in the editor's Engenharia
+	 * layer. The standard verdict (`verdict`) does not apply to it: the YOLO checklist re-gates it.
+	 */
+	const tapeYolo = $derived(tapeClass.class === 'yolo');
+	const yoloState = $derived(app?.yolo);
+	const yoloReady = $derived(
+		tapeYolo && yoloState?.enabled === true && yoloState.writeBlock() === null
+	);
+	const yoloHref = $derived(`/?camada=engenharia#p=${code}`);
 	const writeReason = $derived(
 		!app
 			? m.biblioteca_reason_loading()
-			: verdict === null
-				? m.biblioteca_gate_pending()
-				: verdict.ok
-					? null
-					: m.biblioteca_gate_refused()
+			: tapeYolo
+				? null
+				: verdict === null
+					? m.biblioteca_gate_pending()
+					: verdict.ok
+						? null
+						: m.biblioteca_gate_refused()
 	);
 
 	// ---- Name and description of a personal local curve (LIBEDIT) ----------------------------
@@ -436,13 +449,19 @@
 		stop();
 		// The selected tape may be a deep $state proxy: hand over a plain copy (R2-02).
 		const copy = $state.snapshot(tape);
-		app.requestWrite({
-			...copy,
-			schema: 1,
-			// A local tape carries its library item's filter labels; presets carry none.
-			labels: copy.labels ?? null,
-			updatedAt: Date.now()
-		});
+		// Classified at the click, on the exact copy the checklist gets.
+		const yolo = classOf(copy).class === 'yolo';
+		if (yolo && !yoloReady) return;
+		app.requestWrite(
+			{
+				...copy,
+				schema: 1,
+				// A local tape carries its library item's filter labels; presets carry none.
+				labels: copy.labels ?? null,
+				updatedAt: Date.now()
+			},
+			yolo ? { profile: 'yolo' } : {}
+		);
 		onClose();
 	}
 </script>
@@ -693,10 +712,18 @@
 		<div class="actions bottom">
 			<Button disabledReason={app ? null : m.biblioteca_reason_loading()} onclick={useCurve}
 				>{m.biblioteca_use()}</Button
-			><Button variant="primary" disabledReason={writeReason} onclick={requestWrite}
-				>{m.biblioteca_write()}</Button
-			>
+			>{#if tapeYolo && !yoloReady}<a
+					class="btn btn--primary btn--md"
+					href={yoloHref}
+					data-sveltekit-reload
+					data-testid="sheet-yolo-enable">{m.yolopub_enable_yolo()}</a
+				>{:else}<Button variant="primary" disabledReason={writeReason} onclick={requestWrite}
+					>{tapeYolo ? m.qa1y_write_yolo() : m.biblioteca_write()}</Button
+				>{/if}
 		</div>
+		{#if tapeYolo && !yoloReady}<p class="yolo-why" data-testid="sheet-yolo-why">
+				{m.yolopub_install_needs_yolo()}
+			</p>{/if}
 	</div>
 </dialog>
 

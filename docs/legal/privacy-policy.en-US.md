@@ -133,7 +133,7 @@ You can see and delete your own activity at any time in your account.
 
 People with a verified account can report content. We store the target, the reason, an optional note, who reported, the date and the outcome.
 
-A curve is hidden automatically when 3 different verified accounts, each at least 3 days old, report it. This hiding is reviewed by moderators, who can restore the content. If you are affected, you can request a review of this automated decision (art. 20) at {{PUBLIC_LGPD_CONTACT_EMAIL}}.
+A curve is hidden automatically when 3 different verified accounts, each at least 3 days old, report it; a curve whose current version is YOLO is hidden with just 2 such accounts. This hiding is reviewed by moderators, who can restore the content. If you are affected, you can request a review of this automated decision (art. 20) at {{PUBLIC_LGPD_CONTACT_EMAIL}}.
 
 Moderation actions (hide, restore, withdraw, ban, mark as curated) are kept in an audit log with the actor, action, target, detail and date.
 

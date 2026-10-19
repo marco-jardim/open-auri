@@ -10,7 +10,8 @@ import type {
 	ModerationState,
 	ReportReason,
 	ReportTargetKind,
-	Viewer
+	Viewer,
+	YoloPublication
 } from '#lib/server/social/types.ts';
 
 /** What the moderation rules need to know about a report target. */
@@ -26,17 +27,19 @@ export interface TargetFacts {
 /**
  * The target if `viewer` can read it (lineage and pack: the repo predicates; user: a profile with
  * a nickname whose account is not banned), else null. User targets are resolved by nickname;
- * only explicit admin callers may pass internal user ids.
+ * only explicit admin callers may pass internal user ids. Lineages are read under the kill switch
+ * `yolo` (default 'off': someone else's YOLO lineage is then null).
  */
 export async function findTarget(
 	db: D1Database,
 	kind: ReportTargetKind,
 	id: string,
 	viewer: Viewer,
-	now: number = Date.now()
+	now: number = Date.now(),
+	yolo: YoloPublication = 'off'
 ): Promise<TargetFacts | null> {
 	if (kind === 'lineage') {
-		const readable = readableLineageSql('l', viewer);
+		const readable = readableLineageSql('l', viewer, yolo);
 		const row = await first<{ id: string; owner_user_id: string | null; moderation: string }>(
 			sql(
 				db,

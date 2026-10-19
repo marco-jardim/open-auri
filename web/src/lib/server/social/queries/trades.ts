@@ -10,6 +10,13 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { all, first, run, sql } from '#lib/server/db.ts';
 import { countedUserSql, linkableLineageSql, publicLineageSql } from '#lib/server/social/repo.ts';
 
+/**
+ * S7 reveal: the partner's lineage link is shown only when it is linkable with a STANDARD head
+ * (linkableLineageSql under 'off', which serves standard heads only), whatever the kill switch:
+ * trades never involve YOLO curves, so a reveal never opens an acknowledged YOLO head.
+ */
+const revealLinkableSql = (lineageAlias: string): string => linkableLineageSql(lineageAlias, 'off');
+
 /** Strict SQL alias (interpolated into SQL text). */
 const ALIAS = /^[a-z][a-z0-9_]{0,15}$/;
 
@@ -302,7 +309,7 @@ export async function revealedPartnerFacts(
 				'CASE WHEN COALESCE(pu."banned", 0) = 0 AND pu."username" IS NOT NULL ' +
 				'THEN COALESCE(pu."displayUsername", pu."username") END AS nickname, ' +
 				'CASE WHEN COALESCE(pu."banned", 0) = 0 THEN pu."username" END AS username, ' +
-				`CASE WHEN pl.id IS NOT NULL AND ${linkableLineageSql('pl')} THEN 1 ELSE 0 END AS linkable, ` +
+				`CASE WHEN pl.id IS NOT NULL AND ${revealLinkableSql('pl')} THEN 1 ELSE 0 END AS linkable, ` +
 				'pv.name AS version_name ' +
 				'FROM trades t JOIN trades p ON p.id = t.match_id ' +
 				'LEFT JOIN "user" pu ON pu."id" = p.user_id ' +

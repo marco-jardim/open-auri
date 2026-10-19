@@ -55,7 +55,8 @@ import {
 	type ModerationState,
 	type Page,
 	type SocialErrorCode,
-	type VersionLabels
+	type VersionLabels,
+	type YoloPublication
 } from '#lib/server/social/types.ts';
 
 // ---- Shelves --------------------------------------------------------------------------------
@@ -157,13 +158,15 @@ function entries(page: Page<LibraryEntry>, userId: string): Page<LibraryItem> {
 
 /**
  * One page of a shelf of `userId` (from the session): own lineages in every visibility and state
- * (optionally filtered by visibility), favorites and installed curves still readable by the user.
- * Throws SocialRepoError('invalid-cursor') for a cursor that does not decode.
+ * (optionally filtered by visibility), favorites and installed curves still readable by the user
+ * (under the kill switch `yolo`, default 'off': someone else's YOLO lineage is then left out of
+ * both shelves). Throws SocialRepoError('invalid-cursor') for a cursor that does not decode.
  */
 export async function listLibrary(
 	db: D1Database,
 	userId: string,
-	query: LibraryQuery
+	query: LibraryQuery,
+	yolo: YoloPublication = 'off'
 ): Promise<Page<LibraryItem>> {
 	const page = { cursor: query.cursor ?? null, ...(query.limit ? { limit: query.limit } : {}) };
 	switch (query.shelf) {
@@ -178,9 +181,9 @@ export async function listLibrary(
 			};
 		}
 		case 'favorites':
-			return entries(await listFavorites(db, userId, page), userId);
+			return entries(await listFavorites(db, userId, page, yolo), userId);
 		case 'installed':
-			return entries(await listInstalled(db, userId, page), userId);
+			return entries(await listInstalled(db, userId, page, yolo), userId);
 	}
 }
 
@@ -198,19 +201,22 @@ function utcDay(now: number): string {
  * else's private lineage, retracted, moderated...). With `shareId`, a newly created favorite is
  * attributed to that share as a `favorited` funnel event when the share points to the same lineage
  * and the user's `activity_visibility` is 'public' (once per user and share; a share of another
- * lineage, a missing share, the share owner or a private actor is ignored: FX4.6).
+ * lineage, a missing share, the share owner or a private actor is ignored: FX4.6). Readable under
+ * the kill switch `options.yoloPublication` (default 'off': someone else's YOLO lineage is then
+ * 'not-found').
  */
 export async function favoriteLineage(
 	db: D1Database,
 	userId: string,
 	lineageId: string,
-	options: { shareId?: string | null; now?: number } = {}
+	options: { shareId?: string | null; now?: number; yoloPublication?: YoloPublication } = {}
 ): Promise<FavoriteResult> {
 	const now = options.now ?? Date.now();
+	const yolo = options.yoloPublication ?? 'off';
 	if (!isSocialId(lineageId)) return { ok: false, code: 'not-found' };
-	const readable = await getLineageForViewer(db, lineageId, { userId });
+	const readable = await getLineageForViewer(db, lineageId, { userId }, yolo);
 	if (!readable) return { ok: false, code: 'not-found' };
-	const added = await addFavorite(db, userId, lineageId, now);
+	const added = await addFavorite(db, userId, lineageId, now, yolo);
 	if (!added.ok) return { ok: false, code: 'not-found' };
 	let attributed = false;
 	const shareId = options.shareId ?? null;
@@ -553,8 +559,10 @@ export async function mergeLocalLibrary(
 	let gateOpen = true;
 	let gateRuns = 0;
 	const baseGate = options.deps?.gate ?? gateForWrite;
-	// Counts the standard run of each uncached classification (and forwards its options: the
-	// `experimental` flag derived from the curve); a YOLO run is added after the check below.
+	// Counts every run of each uncached classification, standard and YOLO profile alike (the
+	// classification reuses its standard verdict, so a YOLO curve is exactly 2 runs), and forwards
+	// its options (the `experimental` flag and the profile). A run past the budget throws before
+	// it starts, so the request never exceeds MERGE_GATE_RUNS_MAX.
 	const countedGate: typeof gateForWrite = (bands, preampDb, gateOptions) => {
 		if (gateRuns >= MERGE_GATE_RUNS_MAX) throw new GateBudgetSpent();
 		gateRuns++;
@@ -634,8 +642,6 @@ export async function mergeLocalLibrary(
 			report.rejected.push({ localId: item.localId, code: 'QUOTA_EXCEEDED' });
 			continue;
 		}
-		// The YOLO profile's run (gateRuns 2): the standard one was counted by countedGate.
-		if (check.gateRuns > 1) gateRuns += check.gateRuns - 1;
 		if (!check.ok) {
 			const outcome: Outcome =
 				check.code === 'invalid-curve'

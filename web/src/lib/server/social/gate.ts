@@ -4,8 +4,11 @@
 //   - `standard`: the core's `gateForWrite` accepts it (~150 ms of CPU per curve in workerd);
 //   - `yolo`: the standard gate refuses it on waivable reasons only and the YOLO profile accepts it;
 //   - `rejected`: neither.
-// The class is the core's `classifyCurve` (run only when the standard write gate refuses the curve:
-// its first step is that same standard run, so a curve the write gate accepts is standard).
+// The class is the core's classification (`classifyWith`, the step behind `classifyCurve`, through
+// ./classify-core.mjs) on the injected write gate, run only when the standard write gate refuses
+// the curve. Its first step is that same standard run: it is handed the verdict already computed,
+// so a YOLO curve costs exactly two gate runs (standard + YOLO profile), both through the injected
+// gate (the library merge counts them all against MERGE_GATE_RUNS_MAX).
 // `experimental` (HS, LP, HP allowed) is derived from the curve itself, as the editor does
 // (web/src/lib/components/pages/curva/model.ts `hasExperimental`): the server accepts HS/LP/HP as
 // standard curves. The verdict is cached in `curves` per curve id and gate version (migration
@@ -22,7 +25,6 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import {
 	classifierVersionInput,
-	classifyCurve,
 	gateForWrite,
 	isExperimentalKind,
 	isWaivable,
@@ -30,6 +32,7 @@ import {
 	THRESHOLDS
 } from 'open-auri/safety';
 import { canonKey, curveId, decodeS1, S1Error } from 'open-auri/share';
+import { classifyWith } from './classify-core.mjs';
 import {
 	getCurve,
 	getHeadGateState,
@@ -66,7 +69,8 @@ export type CurveCheck =
 
 /**
  * Publication check: `ok` means the curve may be stored (standard or YOLO). `gateRuns` = write-gate
- * runs this call spent (0 cached, 1 one profile, 2 when the classification ran the YOLO profile).
+ * runs this call spent, every one of them through the injected gate (0 cached, 1 the standard
+ * profile only, 2 when the classification also ran the YOLO profile).
  */
 export type PublishableCheck =
 	| {
@@ -91,12 +95,13 @@ export type PublishableCheck =
 			gateRuns: number;
 	  };
 
-/** Injection points for tests (the defaults are the production ones). */
+/** Injection points (the defaults are the production ones). */
 export interface GateDeps {
-	/** Standard write gate (default: the core's gateForWrite). */
+	/**
+	 * Write gate of every run, standard and YOLO profile alike (default: the core's gateForWrite).
+	 * The library merge passes a counting wrapper; tests pass spies and forced verdicts.
+	 */
 	gate: typeof gateForWrite;
-	/** Classifier of the curves the write gate refuses (default: the core's classifyCurve). */
-	classify: typeof classifyCurve;
 }
 
 export interface RegateDeps extends GateDeps {
@@ -184,36 +189,32 @@ interface GateVerdict {
 	gateYolo: boolean;
 	gateReasons: string[];
 	levelDb: number | null;
-	/** Write-gate runs of the classification: 1, or 2 when it ran the YOLO profile. */
+	/** Write-gate runs of the classification (all through the injected gate): 1, or 2 with YOLO. */
 	runs: number;
 }
 
-/**
- * Whether a classification ran the YOLO profile: it is `yolo`, or `rejected` on a code the
- * standard run did not report (only the YOLO profile computes those: a rejection without a YOLO run
- * lists standard codes only).
- */
-function ranYoloProfile(
-	classification: ReturnType<typeof classifyCurve>,
-	standardCodes: readonly string[]
-): boolean {
-	if (classification.class === 'yolo') return true;
-	return (
-		classification.class === 'rejected' &&
-		classification.reasons.some((code) => !standardCodes.includes(String(code)))
-	);
-}
+type GateResult = ReturnType<typeof gateForWrite>;
 
 /**
  * Classifies a curve once. The standard write gate runs first (its reason codes, de-duplicated in
  * gate order, and the level when the codec accepted the curve); a curve it accepts is standard.
- * Otherwise the class is `classifyCurve`'s: `yolo` caches the waived codes, `rejected` the standard
- * codes plus the codes only the YOLO profile reports. A classifier that disagrees with the write
- * gate (tests only) never makes a refused curve standard.
+ * Otherwise the class is the core's classification (`classifyWith`) on the same gate, handed the
+ * standard verdict already computed for its first step, so only its YOLO-profile run (if any)
+ * reaches the gate again: exactly 2 runs for a YOLO curve, 1 for a curve rejected on a reason the
+ * classification never waives. `yolo` caches the waived codes, `rejected` the standard codes plus
+ * the codes only the YOLO profile reports. A gate that contradicts itself (tests only: a forced
+ * `ok`) never makes a refused curve standard or YOLO: a standard refusal without any reason, a
+ * `standard` classification of a refused curve and a `yolo` one whose YOLO run did not pass are
+ * rejected with the codes reported.
  */
-function runGate(deps: GateDeps, bands: CurveBands, preampDb: number): GateVerdict {
+function runGate(gate: typeof gateForWrite, bands: CurveBands, preampDb: number): GateVerdict {
 	const experimental = hasExperimental(bands);
-	const result = deps.gate(bands, preampDb, { experimental });
+	let runs = 0;
+	const counted: typeof gateForWrite = (runBands, runPreampDb, options) => {
+		runs++;
+		return gate(runBands, runPreampDb, options);
+	};
+	const result = counted(bands, preampDb, { experimental });
 	const standardCodes = [...new Set(result.reasons.map((reason) => String(reason.code)))];
 	let level: number | null = null;
 	if (result.metrics.payload) {
@@ -221,29 +222,43 @@ function runGate(deps: GateDeps, bands: CurveBands, preampDb: number): GateVerdi
 		level = Number.isFinite(value) ? value : null;
 	}
 	if (result.ok && standardCodes.length === 0) {
-		return { gateOk: true, gateYolo: false, gateReasons: [], levelDb: level, runs: 1 };
+		return { gateOk: true, gateYolo: false, gateReasons: [], levelDb: level, runs };
 	}
-	const classification = deps.classify(bands, preampDb, { experimental });
-	const runs = ranYoloProfile(classification, standardCodes) ? 2 : 1;
-	if (classification.class === 'yolo') {
+	const rejected = (codes: readonly string[]): GateVerdict => {
+		const yoloOnly = codes.filter((code) => !standardCodes.includes(code));
+		return {
+			gateOk: false,
+			gateYolo: false,
+			gateReasons: [...standardCodes, ...new Set(yoloOnly)],
+			levelDb: level,
+			runs
+		};
+	};
+	// Nothing for a YOLO profile to waive: no YOLO run.
+	if (standardCodes.length === 0) return rejected([]);
+	const seen: { standard: boolean; yolo: GateResult | null } = { standard: false, yolo: null };
+	// classifyWith's first call is the standard run above: answer it with that verdict. Any later
+	// call is its YOLO-profile run, through the counted gate (a result without the YOLO fields,
+	// from an injected gate, is read as waiving nothing).
+	const write: typeof gateForWrite = (runBands, runPreampDb, options) => {
+		if (!seen.standard) {
+			seen.standard = true;
+			return result;
+		}
+		const ran = counted(runBands, runPreampDb, options);
+		seen.yolo = ran;
+		return { ...ran, waived: ran.waived ?? [], waivedReasons: ran.waivedReasons ?? [] };
+	};
+	const classification = classifyWith(write, bands, preampDb, experimental);
+	if (classification.class === 'yolo' && seen.yolo?.ok === true) {
 		const waived = [...new Set(classification.waived.map(String))];
 		return { gateOk: false, gateYolo: true, gateReasons: waived, levelDb: level, runs };
 	}
-	const yoloOnly =
-		classification.class === 'rejected'
-			? classification.reasons.map(String).filter((code) => !standardCodes.includes(code))
-			: [];
-	return {
-		gateOk: false,
-		gateYolo: false,
-		gateReasons: [...standardCodes, ...new Set(yoloOnly)],
-		levelDb: level,
-		runs
-	};
+	return rejected(classification.class === 'rejected' ? classification.reasons.map(String) : []);
 }
 
-function resolveDeps(deps: Partial<GateDeps>): GateDeps {
-	return { gate: deps.gate ?? gateForWrite, classify: deps.classify ?? classifyCurve };
+function resolveGate(deps: Partial<GateDeps>): typeof gateForWrite {
+	return deps.gate ?? gateForWrite;
 }
 
 async function persist(db: D1Database, curve: CurveInput, now: number): Promise<CurveRecord> {
@@ -284,7 +299,7 @@ async function classifyStored(
 		return { curve: cached, bands, preampDb, gateRuns: 0 };
 	}
 	const version = await gateVersion();
-	const { runs, ...verdict } = runGate(resolveDeps(deps), bands, preampDb);
+	const { runs, ...verdict } = runGate(resolveGate(deps), bands, preampDb);
 	const key = canonKey(bands, preampDb);
 	const curve = await persist(db, { id, s1, canonKey: key, gateVer: version, ...verdict }, now);
 	return { curve, bands, preampDb, gateRuns: runs };
@@ -358,7 +373,7 @@ export async function regateCurve(
 	if ('invalid' in decoded) {
 		verdict = { gateOk: false, gateYolo: false, gateReasons: [decoded.invalid], levelDb: null };
 	} else {
-		const ran = runGate(resolveDeps(deps), decoded.bands, decoded.preampDb);
+		const ran = runGate(resolveGate(deps), decoded.bands, decoded.preampDb);
 		verdict = {
 			gateOk: ran.gateOk,
 			gateYolo: ran.gateYolo,
@@ -477,7 +492,6 @@ export async function regateStale(
 	now = Date.now(),
 	{
 		gate = gateForWrite,
-		classify = classifyCurve,
 		list = listStaleForThisImpl,
 		budgetMs = REGATE_BUDGET_MS,
 		clock = Date.now
@@ -490,7 +504,7 @@ export async function regateStale(
 	let changed = 0;
 	for (const record of stale) {
 		if (clock() - started >= budgetMs) return { checked, changed, timedOut: true };
-		const stored = await regateCurve(db, record, now, { gate, classify });
+		const stored = await regateCurve(db, record, now, { gate });
 		checked++;
 		if (!sameVerdict(record, stored)) changed++;
 	}

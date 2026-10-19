@@ -15,7 +15,10 @@ export const PUT = defineApi<FavoriteEvent>(
 	{ auth: 'verified', rateLimit: { group: 'api.curves.favorite' } },
 	async ({ event, env, user }) => {
 		const shareId = new URL(event.request.url).searchParams.get('s');
-		const result = await favoriteLineage(env.db, user.id, event.params.id, { shareId });
+		const result = await favoriteLineage(env.db, user.id, event.params.id, {
+			shareId,
+			yoloPublication: env.yoloPublication
+		});
 		if (!result.ok) throw new ApiError(404, 'NOT_FOUND');
 		return json({ favorited: true, created: result.created });
 	}

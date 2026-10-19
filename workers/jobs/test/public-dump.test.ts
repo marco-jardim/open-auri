@@ -9,6 +9,8 @@ import { publishLineage } from '../../../web/src/lib/server/social/repo.ts';
 import {
   AUTHOR_REMOVED,
   buildPublicDump,
+  PUBLIC_DUMP_FORMAT,
+  PUBLIC_DUMP_FORMAT_VERSION,
   PUBLIC_DUMP_JOB,
   PUBLIC_DUMP_LATEST_KEY,
   publicDumpJob,
@@ -162,6 +164,15 @@ describe('public dump', () => {
     expect(json).not.toContain(fan.nickname);
     expect(json).not.toContain(privateOne.versionId);
     expect(json).not.toContain('Private Name');
+  });
+
+  it('is format version 2: S1 v1 or v2 as stored, said in both readmes', async () => {
+    const dump = await buildPublicDump(env.DB, new Date());
+    expect(dump.format).toBe(PUBLIC_DUMP_FORMAT);
+    expect(dump.formatVersion).toBe(2);
+    expect(PUBLIC_DUMP_FORMAT_VERSION).toBe(2);
+    expect(dump.readme['pt-BR']).toMatch(/S1 v1 ou S1 v2/);
+    expect(dump.readme['en-US']).toMatch(/S1 v1 or S1 v2/);
   });
 
   it('writes the dated object and latest.json.gz', async () => {

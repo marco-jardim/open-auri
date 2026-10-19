@@ -30,8 +30,9 @@ export function createGateWorker(options: WorkerClientOptions = {}) {
 			return response;
 		},
 		/**
-		 * The class of a curve (standard, YOLO or rejected), cached by signature. Latest wins like
-		 * the other requests: use a client of its own when drags may be in flight.
+		 * The class of a curve (standard, YOLO or rejected), cached by signature in the worker's
+		 * own cache (not the page's: see `createClassifier`, which keeps the answers for the page).
+		 * Latest wins like the other requests: use a client of its own when drags may be in flight.
 		 */
 		async classify(
 			input: Pick<ClassifyInput, 'bands' | 'preampDb'>,

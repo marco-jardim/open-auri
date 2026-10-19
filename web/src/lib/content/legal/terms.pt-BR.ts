@@ -59,7 +59,7 @@ export const termsPtBR: LegalDocument = {
 		),
 		heading('6. Moderação'),
 		list([
-			'Contas verificadas podem denunciar conteúdo. Uma curva é ocultada automaticamente quando 3 contas verificadas diferentes, com 3 dias ou mais de existência, a denunciam.',
+			'Contas verificadas podem denunciar conteúdo. Uma curva é ocultada automaticamente quando 3 contas verificadas diferentes, com 3 dias ou mais de existência, a denunciam; uma curva cuja versão atual é YOLO é ocultada já com 2 dessas contas.',
 			'A moderação revê as ocultações automáticas e pode restaurar, ocultar, retirar conteúdo, marcar curadoria e banir contas que violem estes termos ou a lei. Cada ação fica no registro de auditoria.',
 			'Se uma decisão afetar você, peça a revisão pelo canal de privacidade indicado na seção 8, inclusive de decisões automatizadas (LGPD, art. 20).',
 			'Podemos remover conteúdo ou suspender contas para cumprir ordem judicial ou obrigação legal.'

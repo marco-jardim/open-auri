@@ -122,6 +122,15 @@ export interface Viewer {
 
 export const ANONYMOUS_VIEWER: Viewer = { userId: null };
 
+/**
+ * The YOLO publication kill switch (`YOLO_PUBLICATION`, ServerEnv `yoloPublication`) as the
+ * visibility predicates take it. 'off' (the default of every predicate and read): no YOLO head is
+ * served to anyone but its owner (or an admin), acknowledged or not: not by id, not in
+ * `feed?yolo=only`, not as an OG card nor as a fork source. 'on': a YOLO head its owner
+ * acknowledged opens by id and lists in `feed?yolo=only` (never in the other lists).
+ */
+export type YoloPublication = 'on' | 'off';
+
 export interface Page<T> {
 	items: T[];
 	/** Opaque cursor of the next page, or null on the last page. */

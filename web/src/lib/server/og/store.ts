@@ -1,9 +1,10 @@
 // OG images in R2 (T4.7): `og/<curveId>-<versionId>.png` (./keys.ts). The bytes of a key never
 // change for a given card layout (versions are append-only, curves content-addressed, and the card
 // carries no author: FX4.3). Visibility is always checked first, through the repository
-// (`readCurrentVersion` with the anonymous viewer = linkable lineage, gate_ok = 1; a verdict cached
-// under a stale gate version is re-gated first, FX4.9), so a private, hidden, retracted or
-// gate-rejected version is never rendered nor served, even when its PNG is still in R2 (the jobs
+// (`readCurrentVersion` with the anonymous viewer = linkable lineage: a standard curve, or, only
+// while YOLO_PUBLICATION is on, an acknowledged YOLO one; a verdict cached under a stale gate
+// version is re-gated first, FX4.9), so a private, hidden, retracted or gate-rejected version, and
+// a YOLO one while the switch is off, is never rendered nor served, even when its PNG is still in R2 (the jobs
 // Worker's `og-sweep` deletes such objects). A stored object of another card
 // layout (`customMetadata.card`) is treated as a miss and overwritten. Concurrency: two
 // simultaneous misses render twice at most and write the same bytes (the SVG and the renderer are
@@ -11,7 +12,7 @@
 import { strongEtag } from '#lib/server/api/cache.ts';
 import type { ServerEnv } from '#lib/server/env.ts';
 import { readCurrentVersion, type PublicReadDeps } from '#lib/server/social/shares.ts';
-import { ANONYMOUS_VIEWER } from '#lib/server/social/types.ts';
+import { ANONYMOUS_VIEWER, type YoloPublication } from '#lib/server/social/types.ts';
 import { isCurrentCard, OG_CARD_VERSION, ogKey, yoloFlag } from './keys.ts';
 import { loadOgFonts, renderPng, toArrayBuffer, type OgAssets } from './render.ts';
 import { ogSvg } from './svg.ts';
@@ -34,6 +35,11 @@ export interface OgEnv {
 	publicOrigin: string;
 	/** ASSETS binding (fonts); only needed by the default renderer. */
 	assets: OgAssets | null;
+	/**
+	 * Kill switch of YOLO publication (ServerEnv `yoloPublication`); absent = 'off': a YOLO version
+	 * is then never rendered nor served (404), acknowledged or not, even when its PNG is in R2.
+	 */
+	yoloPublication?: YoloPublication;
 }
 
 export interface OgContext {
@@ -47,11 +53,19 @@ export interface OgDeps {
 	beforeRender?: () => Promise<void>;
 	/** Gate used to refresh a stale verdict before serving (tests; default: the core's gate). */
 	gate?: PublicReadDeps['gate'];
+	/**
+	 * The card class the request URL names (`?y=1` = YOLO, anything else = standard); absent =
+	 * either (the publication warm-up). When it is not the version's current class, nothing is
+	 * read from R2 nor rendered: `class-mismatch` with the class, so the route redirects to the
+	 * URL of that class and a URL-keyed cache never holds a card of the other class.
+	 */
+	yolo?: boolean;
 }
 
 export type OgResult =
 	| { ok: true; key: string; body: ArrayBuffer; etag: string; source: 'r2' | 'render' }
-	| { ok: false; code: 'not-found' };
+	| { ok: false; code: 'not-found' }
+	| { ok: false; code: 'class-mismatch'; yolo: boolean };
 
 export function errorName(error: unknown): string {
 	return error instanceof Error ? error.name : typeof error;
@@ -66,7 +80,9 @@ function defaultRender(env: OgEnv): (svg: string) => Promise<Uint8Array> {
 
 /**
  * The OG PNG of a linkable version: from R2 when present, else rendered and written to R2 (the
- * write is handed to `ctx.waitUntil`). `not-found` for unknown, private or otherwise unlinkable ids.
+ * write is handed to `ctx.waitUntil`). `not-found` for unknown, private or otherwise unlinkable ids
+ * (a YOLO version while YOLO_PUBLICATION is off included); `class-mismatch` when `deps.yolo` names
+ * the other card class.
  */
 export async function getOrCreateOg(
 	env: OgEnv,
@@ -75,16 +91,17 @@ export async function getOrCreateOg(
 	deps: OgDeps = {}
 ): Promise<OgResult> {
 	if (!ID_PATTERN.test(versionId)) return { ok: false, code: 'not-found' };
-	const view = await readCurrentVersion(
-		env.db,
-		versionId,
-		ANONYMOUS_VIEWER,
-		deps.gate ? { gate: deps.gate } : {}
-	);
+	const view = await readCurrentVersion(env.db, versionId, ANONYMOUS_VIEWER, {
+		...(deps.gate ? { gate: deps.gate } : {}),
+		yoloPublication: env.yoloPublication ?? 'off'
+	});
 	if (!view) return { ok: false, code: 'not-found' };
 	const key = ogKey(view.curve.id, view.version.id);
 	// A YOLO curve (acknowledged by its owner, or it would not be linkable) gets the YOLO chip.
 	const yolo = view.curve.gateYolo;
+	if (deps.yolo !== undefined && deps.yolo !== yolo) {
+		return { ok: false, code: 'class-mismatch', yolo };
+	}
 
 	const stored = await env.media.get(key);
 	if (stored && isCurrentCard(stored.customMetadata, yolo)) {

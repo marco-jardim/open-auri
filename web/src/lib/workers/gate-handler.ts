@@ -122,7 +122,9 @@ export function handleGateRequest(request: GateRequest): GateResponse;
 export function handleGateRequest(request: GateRequest): GateResponse {
 	const { id, bands, preampDb, experimental, profile } = request;
 	if (request.type === 'classify') {
-		// Cached by signature (gate-verdicts.ts), shared with the page's synchronous exits.
+		// Cached by signature in this realm's gate-verdicts.ts. In the worker that is the worker's
+		// own cache, not the page's: a page that wants its synchronous exits to find the class
+		// keeps the answer itself (`rememberClassification`, workers/classifier.svelte.ts).
 		return { type: 'classify', id, classification: curveClassification(bands, preampDb) };
 	}
 	const options = gateOptions(profile, experimental);

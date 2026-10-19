@@ -45,7 +45,10 @@ async function loadPage(event: SharedCurveLoadEvent): Promise<SharedCurvePageDat
 	const userId = current.ok ? current.user.id : null;
 	const shareParam = event.url.searchParams.get('s');
 
-	const result = await loadSharedCurve(env.db, { userId }, event.params.id, shareParam);
+	// While YOLO_PUBLICATION is off, someone else's YOLO head is a 404 here (the owner still sees it).
+	const result = await loadSharedCurve(env.db, { userId }, event.params.id, shareParam, {
+		yoloPublication: env.yoloPublication
+	});
 	if (result.kind === 'not-found') error(404, 'Not found');
 	if (result.kind === 'gone') error(410, 'Gone');
 

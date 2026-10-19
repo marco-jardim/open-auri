@@ -73,8 +73,12 @@ import { autoPreamp } from 'open-auri/safety';
   Exporta também `gateProfile`, `isWaivable`, `YOLO_WAIVABLE`, `HARD_REASONS`,
   `CODEC_PREAMP_FLOOR_DB`, `YOLO_STORAGE_PREAMP_FLOOR_DB` e `YOLO_PREAMP_MAX_DB` para
   seleção e consulta dos perfis do gate. Acima de 20 kHz só passam seções que não amplificam
-  (`d7:boost-above-20k`, dispensável no perfil YOLO, que então aplica as checagens
-  estendidas de 20 Hz a 48 kHz, `d:prefix-peak-extended` e `e:output-extended`).
+  (`d7:boost-above-20k`, dispensável no perfil YOLO). Quando o veredito YOLO depende de
+  alguma dispensa (qualquer código dispensável, `g:preamp` incluído), valem também
+  `d:prefix-peak-full` e as checagens estendidas de 20 Hz a 48 kHz (`d:prefix-peak-extended`
+  e `e:output-extended`), com ou sem seção acima de 20 kHz: um reforço que precisa de
+  dispensa enfrenta os mesmos limites em 20000 Hz e em 20001 Hz. Sem dispensa, a curva é
+  julgada exatamente como no perfil padrão, então o YOLO nunca é mais restrito que ele.
   No perfil YOLO, `autoPreamp` busca a partir de 0 dB (`YOLO_PREAMP_MAX_DB`), e
   `autoPreamp(bands, {profile: 'yolo', storable: true})` não desce abaixo de −25,5 dB.
 - [`classify.mjs`](../src/safety/classify.mjs): `classifyCurve`, a classe de uma curva

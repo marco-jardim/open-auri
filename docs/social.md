@@ -371,14 +371,27 @@ Uma curva YOLO sempre pode ser salva como **privada**. Para mostrá-la a terceir
 pública), a escrita precisa do interruptor `YOLO_PUBLICATION` = `on` (variável do Worker em
 `web/wrangler.template.jsonc`, **padrão `off`**: 403 `YOLO_PUBLICATION_OFF`), de uma conta com 72 h
 ou mais e do reconhecimento explícito `acknowledge: "yolo"` (409 `YOLO_ACK_REQUIRED` com os códigos
-dispensados), no máximo 5 por 24 h. O reconhecimento fica em `lineage_yolo_acks` (linhagem, curva):
-sem ele, um head YOLO não abre nem por link.
+dispensados), no máximo 5 por 24 h (contados só quando a escrita dá certo). O reconhecimento fica
+em `lineage_yolo_acks` (linhagem, curva): sem ele, um head YOLO não abre nem por link.
+
+O interruptor vale também para as **leituras**: com `YOLO_PUBLICATION` desligado, nenhum head YOLO
+é servido a quem não é o dono, reconhecido ou não. Ele não abre por link (API, `/c/:id`), não vira
+imagem OG, não aparece em `feed?yolo=only` (página vazia), não serve de origem de fork e não pode
+ser favoritado, compartilhado ou denunciado por terceiros. O dono continua vendo a própria linhagem.
+Religado, os heads reconhecidos voltam a abrir. Restaurar uma linhagem YOLO não privada com o
+interruptor desligado a deixa **privada**. Packs nunca mostram linhagens YOLO de terceiros, com o
+interruptor ligado ou não.
 
 Separação: feed, rankings, perfis, packs de terceiros, S6, S7 e o dump público só mostram heads
 **padrão**. Curvas YOLO públicas só aparecem em `GET /api/v1/feed?yolo=only` (ordem `new`). O dump
-público semanal deixa YOLO de fora por enquanto (head e versões precisam de `gate_ok = 1`). A
+público semanal deixa YOLO de fora por enquanto (head e versões precisam de `gate_ok = 1`). O dump
+tem `formatVersion` **2**: desde o GATE_IMPL 2 uma curva **padrão** pode ser S1 v2 (corte que não
+amplifica acima de 20 kHz, bandas até 32 kHz), então cada `curve.s1` pode ser S1 v1 ou S1 v2. O
+código S1 diz a própria versão ([`s1-format.md`](s1-format.md)); o resto do formato não mudou. A
 imagem OG de uma curva YOLO leva o selo "YOLO" (layout de cartão `3`), a URL da imagem leva `?y=1`
-e a página `/c/:id` sai com `noindex`. Moderação: uma linhagem com head YOLO é ocultada
+e a página `/c/:id` sai com `noindex`. Uma URL de imagem cujo `?y=` não corresponde à classe atual
+da versão recebe 302 para a URL certa (`no-store`), para que nenhum cache guarde o cartão da outra
+classe. Moderação: uma linhagem com head YOLO é ocultada
 automaticamente com 2 denunciantes elegíveis (3 nas demais), a fila do admin mostra o selo e os
 códigos dispensados, e a curadoria recusa heads YOLO.
 

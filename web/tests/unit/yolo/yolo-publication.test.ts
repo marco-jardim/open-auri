@@ -3,7 +3,7 @@
  * 409/403 answers), the badges of stored curves, the library archive and merge, the Comunidade
  * model, and the Terms (amended, POLICY_VERSION bumped).
  */
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { NEUTRO } from 'open-auri/catalog';
 import { encodeS1, parseEnvelope } from 'open-auri/share';
 import {
@@ -15,9 +15,16 @@ import {
 	yoloPublishText
 } from '#lib/components/yolo/yolo-curve.ts';
 import { archiveTapes, envelopeView, tapeBadge } from '#lib/components/pages/biblioteca/archive.ts';
-import { MERGE_BATCH, mergeBatches, mergeWeight } from '#lib/components/pages/biblioteca/social.ts';
+import {
+	MERGE_BATCH,
+	mergeBatches,
+	mergeWeight,
+	type MergeClassify
+} from '#lib/components/pages/biblioteca/social.ts';
 import { errorText } from '#lib/components/pages/comunidade/model.ts';
 import { POLICY_VERSION } from '#lib/content/legal/version.ts';
+// The server module (workerd only) is read as text: the Terms must state its thresholds.
+import moderationSource from '../../../src/lib/server/social/moderation.ts?raw';
 import { termsEnUS } from '#lib/content/legal/terms.en-US.ts';
 import { termsPtBR } from '#lib/content/legal/terms.pt-BR.ts';
 import { m } from '#lib/paraglide/messages.js';
@@ -125,7 +132,7 @@ describe('badges', () => {
 });
 
 describe('library merge', () => {
-	test('a YOLO item costs two gate runs; batches stay within the server budget', () => {
+	test('a YOLO item costs two gate runs; batches stay within the server budget', async () => {
 		const yoloS1 = encodeS1(yoloCurve);
 		const plainS1 = encodeS1(neutral);
 		expect(mergeWeight({ s1: yoloS1 })).toBe(2);
@@ -135,7 +142,7 @@ describe('library merge', () => {
 			...Array.from({ length: 15 }, (_, index) => ({ localId: `y${index}`, s1: yoloS1 })),
 			...Array.from({ length: 5 }, (_, index) => ({ localId: `p${index}`, s1: plainS1 }))
 		];
-		const batches = mergeBatches(items);
+		const batches = await mergeBatches(items);
 		expect(batches.flat()).toEqual(items);
 		for (const batch of batches) {
 			const cost = batch.reduce((sum, item) => sum + mergeWeight(item), 0);
@@ -145,7 +152,45 @@ describe('library merge', () => {
 		expect(batches.map((batch) => batch.length)).toEqual([10, 10]);
 		// Standard items only: the unchanged batches of 20.
 		const plain = Array.from({ length: 41 }, (_, index) => ({ localId: `q${index}`, s1: plainS1 }));
-		expect(mergeBatches(plain).map((batch) => batch.length)).toEqual([20, 20, 1]);
+		expect((await mergeBatches(plain)).map((batch) => batch.length)).toEqual([20, 20, 1]);
+	});
+
+	test('the weights never block the page: one task per item, or the worker', async () => {
+		const yoloS1 = encodeS1(yoloCurve);
+		const plainS1 = encodeS1(neutral);
+		const items = [
+			{ localId: 'y', s1: yoloS1 },
+			{ localId: 'p', s1: plainS1 },
+			{ localId: 'x', s1: 'not-a-code' }
+		];
+		// Main thread: the page gets a task between two items (a timer queued now fires first).
+		const order: string[] = [];
+		const pending = mergeBatches(items).then((batches) => {
+			order.push('batches');
+			return batches;
+		});
+		setTimeout(() => order.push('page'), 0);
+		expect(order).toEqual([]);
+		expect((await pending).flat()).toEqual(items);
+		expect(order).toEqual(['page', 'batches']);
+		// Through the worker (`classify`): no main-thread classification at all.
+		const classify = vi.fn<MergeClassify>(async (curve) =>
+			curve.bands[0]?.kind === 'HP'
+				? { class: 'yolo', waived: [], reasons: [] }
+				: { class: 'standard', waived: [], reasons: [] }
+		);
+		const batches = await mergeBatches(items, { classify });
+		expect(batches.flat()).toEqual(items);
+		// The S1 that does not decode costs 1 without a classification.
+		expect(classify).toHaveBeenCalledTimes(2);
+		const many = Array.from({ length: 12 }, (_, index) => ({ localId: `y${index}`, s1: yoloS1 }));
+		expect((await mergeBatches(many, { classify })).map((batch) => batch.length)).toEqual([10, 2]);
+		// Cancelled: the remaining items are not weighed.
+		const controller = new AbortController();
+		controller.abort();
+		await expect(mergeBatches(items, { classify, signal: controller.signal })).rejects.toSatisfy(
+			(error: unknown) => error instanceof DOMException && error.name === 'AbortError'
+		);
 	});
 });
 
@@ -167,5 +212,18 @@ describe('Terms', () => {
 		// The version line interpolates POLICY_VERSION (the docs/legal lines must match it too).
 		expect(pt).toContain(POLICY_VERSION);
 		expect(en).toContain(POLICY_VERSION);
+	});
+
+	test('the moderation section names both automatic hiding thresholds, YOLO at 2', () => {
+		expect(moderationSource).toMatch(/export const AUTO_HIDE_THRESHOLD = 3;/);
+		expect(moderationSource).toMatch(/export const YOLO_AUTO_HIDE_THRESHOLD = 2;/);
+		const pt = JSON.stringify(termsPtBR);
+		const en = JSON.stringify(termsEnUS);
+		expect(pt).toContain('quando 3 contas verificadas diferentes');
+		expect(pt).toContain('uma curva cuja versão atual é YOLO é ocultada já com 2 dessas contas');
+		expect(en).toContain('when 3 different verified accounts');
+		expect(en).toContain(
+			'a curve whose current version is YOLO is hidden with just 2 such accounts'
+		);
 	});
 });

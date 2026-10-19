@@ -80,7 +80,8 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await page.getByRole('button', { name: t.save, exact: true }).click();
 		await expect.element(page.getByText(t.saved, { exact: true })).toBeVisible();
 		await page.getByRole('button', { name: t.write, exact: true }).click();
-		expect(write).toHaveBeenCalledWith(expect.objectContaining({ schema: 1 }));
+		// A blend is standard, so it opens the standard checklist (no YOLO profile).
+		expect(write).toHaveBeenCalledWith(expect.objectContaining({ schema: 1 }), {});
 		await page.getByRole('button', { name: t.bounce, exact: true }).click();
 		expect(onBounce).toHaveBeenCalledWith(8, expect.objectContaining({ bands: expect.any(Array) }));
 	});

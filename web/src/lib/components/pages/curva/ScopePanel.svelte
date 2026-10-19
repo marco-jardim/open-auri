@@ -37,7 +37,15 @@
 	import MeterModeLabel from '#lib/components/meters/MeterModeLabel.svelte';
 	import SpectrumOverlay from '#lib/components/meters/SpectrumOverlay.svelte';
 	import type { MeterMode } from '#lib/audio/meters.ts';
-	import { bypassedOffRate, type ABSide, type AudioEngine } from '#lib/audio/engine.ts';
+	import {
+		approximatedSections,
+		PREVIEW_RATE,
+		skippedSections,
+		type ABSide,
+		type AudioEngine
+	} from '#lib/audio/engine.ts';
+	/** The usual rate a browser falls back to when it refuses 96 kHz (counts without a rate). */
+	const FALLBACK_RATE = 48000;
 	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
 	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
@@ -137,6 +145,13 @@
 		 */
 		skipped?: number | null;
 		/**
+		 * Filters above 20 kHz the playing chain approximates at that rate
+		 * (`PreviewChain.approximated`). Omitted: counted from the curve of the side that plays.
+		 */
+		approximated?: number | null;
+		/** The preview's context rate (`CurvaPreview.rate`); omitted, a typical fallback rate. */
+		rate?: number | null;
+		/**
 		 * Modo YOLO (Engenharia only): handles may then take any kind up to 32 kHz. Omitted: the
 		 * app context's YOLO state (off without it).
 		 */
@@ -185,6 +200,8 @@
 		previewCaption = '',
 		approximate = false,
 		skipped = null,
+		approximated = null,
+		rate = null,
 		yolo,
 		engine = null,
 		reducedMotion,
@@ -629,20 +646,37 @@
 	}
 	const previewNote = $derived(previewDisabled && previewReason ? previewReason : previewCaption);
 	/**
-	 * Filters above 20 kHz that do not play at this rate (the engine bypasses them away from
-	 * 96 kHz, `bypassedOffRate`): the page's count, else the playing side's curve (A: the
-	 * reference, B: the editor curve).
+	 * Filters above 20 kHz that do not play at this rate (away from 96 kHz the engine bypasses
+	 * the ones nobody hears below 20 kHz, `skippedSections`): the page's count, else the playing
+	 * side's curve (A: the reference, B: the editor curve).
 	 */
+	/** The curve of the side that plays (A: the reference, B: the editor curve). */
+	const playedCurve = $derived(side === 'A' ? reference : (committed ?? curve));
+	/** The rate the counts are judged at: the engine's, else a typical fallback rate. */
+	const playRate = $derived(rate ?? (approximate ? FALLBACK_RATE : PREVIEW_RATE));
 	const skippedCount = $derived.by(() => {
 		if (!approximate) return 0;
 		if (skipped !== null) return skipped;
-		const played = side === 'A' ? reference : (committed ?? curve);
-		return played ? played.bands.filter((band) => bypassedOffRate(band)).length : 0;
+		return playedCurve ? skippedSections(playedCurve.bands, playRate) : 0;
 	});
 	const skippedText = $derived(
 		skippedCount === 1
 			? m.curva_ultra_skipped_one({}, messages)
 			: m.curva_ultra_skipped({ count: String(skippedCount) }, messages)
+	);
+	/**
+	 * Filters above 20 kHz that play as a stand-in at this rate (the engine approximates the ones
+	 * whose audible-band effect on the chip a bypass would lose, `approximatedSections`).
+	 */
+	const approximatedCount = $derived.by(() => {
+		if (!approximate) return 0;
+		if (approximated !== null) return approximated;
+		return playedCurve ? approximatedSections(playedCurve.bands, playRate) : 0;
+	});
+	const approximatedText = $derived(
+		approximatedCount === 1
+			? m.qa1y_ultra_approximated_one({}, messages)
+			: m.qa1y_ultra_approximated({ count: String(approximatedCount) }, messages)
 	);
 	// A/B needs this page's chains, which exist while playing and while paused (`select()` works
 	// on a paused preview); with no session there is nothing to switch, and the tabs say why.
@@ -1220,6 +1254,11 @@
 			<p class="prev-note prev-approx" role="status">{m.curva_approximate()}</p>
 			{#if skippedCount > 0}
 				<p class="prev-note prev-approx" role="status" data-testid="ultra-skip">{skippedText}</p>
+			{/if}
+			{#if approximatedCount > 0}
+				<p class="prev-note prev-approx" role="status" data-testid="ultra-approx">
+					{approximatedText}
+				</p>
 			{/if}
 		{/if}
 		{#if previewError}

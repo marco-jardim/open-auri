@@ -188,7 +188,8 @@ Query: `sort` ∈ `new` (padrão) | `favorites` | `installs`; `window` ∈ `7d` 
 - `favorites` / `installs`: o ranking materializado da janela (também sem YOLO).
 - `yolo=only`: só as linhagens públicas cujo head é YOLO reconhecido pelo dono, mais novas
   primeiro; só com `sort=new` (um sort ranqueado com `yolo=only` é 400 `INVALID_BODY`, `path` =
-  `sort`). As duas listas nunca se misturam.
+  `sort`). As duas listas nunca se misturam. Com `YOLO_PUBLICATION` desligado (padrão) responde
+  200 com a página vazia (`items: []`, `nextCursor: null`).
 
 Cada `FeedLineageCard.curve` traz `yolo` (booleano).
 
@@ -267,7 +268,17 @@ perfil). Uma curva YOLO sempre pode ser salva como privada. Para deixá-la visí
 `YOLO_PUBLICATION` = `on` (padrão `off`: 403 `YOLO_PUBLICATION_OFF`); conta com pelo menos 72 h
 (403 `FORBIDDEN`, `details.reason` = `"account-age"`); `"acknowledge": "yolo"` no corpo (409
 `YOLO_ACK_REQUIRED` com `details.waived`, os códigos dispensados); e no máximo 5 reconhecimentos
-por 24 h móveis (429 `QUOTA_EXCEEDED`). O reconhecimento é gravado no mesmo lote da escrita.
+por 24 h móveis (429 `QUOTA_EXCEEDED`). O reconhecimento é gravado no mesmo lote da escrita e só
+conta na cota diária depois que a escrita deu certo (um 409 `HEAD_MOVED` ou outra falha não gasta
+reconhecimento). Se a classe da curva já está no cache do gate, as regras YOLO (403, 409, 429)
+respondem antes de contar a tentativa de gate.
+
+Interruptor nas leituras: com `YOLO_PUBLICATION` desligado, nenhum head YOLO é servido a quem não
+é o dono (nem a admin), reconhecido ou não: `GET /curves/:id`, `GET /lineages/:id`, `/c/:id` e
+`/og/:id.png` respondem 404 (uma lápide YOLO também é 404, não 410), `feed?yolo=only` fica vazio,
+e fork, favorito, atividade, compartilhamento e denúncia tratam a linhagem como inexistente. O dono
+continua lendo a própria linhagem. Ligado de novo, os heads reconhecidos voltam a abrir (o
+reconhecimento continua gravado). Packs nunca mostram linhagens YOLO de terceiros.
 
 - 201 `{ lineageId, versionId, curveId, yolo }`. Pública ou não listada aquece a imagem OG em
   segundo plano.
@@ -332,7 +343,9 @@ das listas e responde 410 a quem não é o dono. 200 com o estado
 
 Dono, verificado; sem corpo, ou `{ "acknowledge": "yolo" }` (JSON). Desfaz a lápide; a moderação
 não muda. O head é reavaliado no gate antes de voltar a aparecer; um head YOLO numa linhagem não
-privada segue as regras YOLO. 200 com o estado; 404; 403 `YOLO_PUBLICATION_OFF` / `FORBIDDEN`; 409
+privada segue as regras YOLO com `YOLO_PUBLICATION` ligado. Desligado, essa linhagem volta como
+**privada** (sem reconhecimento), no mesmo comando: a resposta traz a `visibility` efetiva. 200
+com o estado `{ lineageId, status, visibility, moderation }`; 404; 403 `FORBIDDEN`; 409
 `YOLO_ACK_REQUIRED`; 422 `GATE_REJECTED`; 429 `QUOTA_EXCEEDED`.
 
 ### `PUT /api/v1/lineages/:id/visibility`
@@ -713,6 +726,13 @@ inclusive): 404 `text/plain` com `no-store`.
 uma mudança de visibilidade. Objetos do R2 com layout antigo, inclusive os que continham autor,
 são tratados como falta de cache e substituídos. Só as faltas de cache renderizam, e essas passam
 pelo rate limit do grupo `og` (`RL_API`, por usuário ou hash de IP).
+
+Classe do cartão na URL: `?y=1` pede o cartão YOLO (as meta tags de `/c/:id` o acrescentam a uma
+curva YOLO); sem ele, o cartão padrão. Se a URL não nomeia a classe atual da versão (`?y=1` numa
+versão padrão, ou uma versão YOLO sem `?y=1`), a resposta é 302 para a URL da classe certa, com
+`cache-control: no-store`, antes de ler o R2 ou renderizar: um cache indexado pela URL (navegador,
+CDN, robô de rede social) nunca guarda o cartão da outra classe. Uma versão YOLO com
+`YOLO_PUBLICATION` desligado é 404.
 
 ### `GET /c/<id>?s=<shareId>`
 

@@ -92,7 +92,8 @@ import {
 	type VersionInput,
 	type VersionLabels,
 	type VersionRecord,
-	type Viewer
+	type Viewer,
+	type YoloPublication
 } from '#lib/server/social/types.ts';
 
 // ---- Visibility predicates ------------------------------------------------------------------
@@ -158,15 +159,30 @@ export function headStandardSql(lineageAlias: string): string {
 }
 
 /**
- * The head version of the lineage references a PUBLISHABLE curve: standard (`gate_ok = 1`), or
- * YOLO (`gate_yolo = 1`) with the owner's acknowledgement of this lineage and curve. What may be
- * opened by id (linkableLineageSql); never a list.
+ * A curve (`curveAlias`) others may be served in the lineage `lineageAlias`: standard, or, only
+ * while the kill switch is on, YOLO acknowledged by the owner in this lineage.
  */
-export function headPublishableSql(lineageAlias: string): string {
+function publishableCurveSql(
+	lineageAlias: string,
+	curveAlias: string,
+	yolo: YoloPublication
+): string {
+	const c = alias(curveAlias);
+	if (yolo !== 'on') return `${c}.gate_ok = 1`;
+	return `(${c}.gate_ok = 1 OR ${yoloAckedCurveSql(lineageAlias, c)})`;
+}
+
+/**
+ * The head version of the lineage references a PUBLISHABLE curve: standard (`gate_ok = 1`), or,
+ * with `yolo` 'on' (the kill switch YOLO_PUBLICATION), YOLO (`gate_yolo = 1`) with the owner's
+ * acknowledgement of this lineage and curve. 'off' (the default) is exactly headStandardSql. What
+ * may be opened by id (linkableLineageSql); never a list.
+ */
+export function headPublishableSql(lineageAlias: string, yolo: YoloPublication = 'off'): string {
 	const a = alias(lineageAlias);
 	return (
 		`EXISTS (SELECT 1 FROM versions ${a}_pv JOIN curves ${a}_pc ON ${a}_pc.id = ${a}_pv.curve_id ` +
-		`WHERE ${a}_pv.id = ${a}.head_version AND (${a}_pc.gate_ok = 1 OR ${yoloAckedCurveSql(a, `${a}_pc`)}))`
+		`WHERE ${a}_pv.id = ${a}.head_version AND ${publishableCurveSql(a, `${a}_pc`, yolo)})`
 	);
 }
 
@@ -202,10 +218,12 @@ export function publicLineageSql(lineageAlias: string): string {
 
 /**
  * The public YOLO lineages of `GET /api/v1/feed?yolo=only`: the rules of publicLineageSql with an
- * acknowledged YOLO head instead of a standard one. Never mixed into the other lists.
+ * acknowledged YOLO head instead of a standard one. Never mixed into the other lists. With `yolo`
+ * 'off' (the kill switch, the default) it matches nothing: the YOLO feed is empty.
  */
-export function publicYoloLineageSql(lineageAlias: string): string {
+export function publicYoloLineageSql(lineageAlias: string, yolo: YoloPublication = 'off'): string {
 	const a = alias(lineageAlias);
+	if (yolo !== 'on') return '(0 = 1)';
 	return (
 		`(${a}.visibility = 'public' AND ${a}.status = 'active' AND ${a}.moderation = 'visible' ` +
 		`AND ${headYoloAckedSql(a)} AND ${ownerNotBannedSql(a)})`
@@ -214,13 +232,14 @@ export function publicYoloLineageSql(lineageAlias: string): string {
 
 /**
  * Readable by anyone who has the id: public or unlisted, with the other public rules and a
- * publishable head (standard, or YOLO acknowledged by the owner).
+ * publishable head (headPublishableSql: standard, or, with `yolo` 'on', YOLO acknowledged by the
+ * owner; 'off', the default, serves standard heads only).
  */
-export function linkableLineageSql(lineageAlias: string): string {
+export function linkableLineageSql(lineageAlias: string, yolo: YoloPublication = 'off'): string {
 	const a = alias(lineageAlias);
 	return (
 		`(${a}.visibility IN ('public', 'unlisted') AND ${a}.status = 'active' ` +
-		`AND ${a}.moderation = 'visible' AND ${headPublishableSql(a)} AND ${ownerNotBannedSql(a)})`
+		`AND ${a}.moderation = 'visible' AND ${headPublishableSql(a, yolo)} AND ${ownerNotBannedSql(a)})`
 	);
 }
 
@@ -249,10 +268,20 @@ export function ownerOrAdminSql(rowAlias: string, viewer: Viewer): SqlFragment {
 	return { text: '0 = 1', params: [] };
 }
 
-/** Readable by id for `viewer`: linkable, or the viewer's own (any state), or admin. */
-export function readableLineageSql(lineageAlias: string, viewer: Viewer): SqlFragment {
+/**
+ * Readable by id for `viewer`: linkable (under the kill switch `yolo`, default 'off'), or the
+ * viewer's own (any state, YOLO included), or admin.
+ */
+export function readableLineageSql(
+	lineageAlias: string,
+	viewer: Viewer,
+	yolo: YoloPublication = 'off'
+): SqlFragment {
 	const own = ownerOrAdminSql(lineageAlias, viewer);
-	return { text: `(${linkableLineageSql(lineageAlias)} OR ${own.text})`, params: own.params };
+	return {
+		text: `(${linkableLineageSql(lineageAlias, yolo)} OR ${own.text})`,
+		params: own.params
+	};
 }
 
 export function publicPackSql(packAlias: string): string {
@@ -753,12 +782,15 @@ export async function listStaleCurvesForRegate(
 	const headOf = (rule: (lineageAlias: string) => string, l: string, v: string): string =>
 		`EXISTS (SELECT 1 FROM lineages ${alias(l)} JOIN versions ${alias(v)} ` +
 		`ON ${v}.id = ${l}.head_version WHERE ${v}.curve_id = c.id AND ${rule(l)})`;
+	// Tier 0 counts acknowledged YOLO heads whatever the kill switch: they are served again as
+	// soon as it is turned on, so their verdict must be current first.
+	const linkable = (l: string): string => linkableLineageSql(l, 'on');
 	const rows = await all<CurveCols>(
 		sql(
 			db,
 			`SELECT ${CURVE_COLUMNS} FROM curves c ` +
 				`WHERE c.gate_ver <> ? AND ${gateImplSql('c.gate_ver')} <= ? ORDER BY CASE ` +
-				`WHEN (c.gate_ok = 1 OR c.gate_yolo = 1) AND ${headOf(linkableLineageSql, 'pl', 'pv')} THEN 0 ` +
+				`WHEN (c.gate_ok = 1 OR c.gate_yolo = 1) AND ${headOf(linkable, 'pl', 'pv')} THEN 0 ` +
 				`WHEN c.gate_ok = 0 AND ${headOf((l) => openExceptHeadGateSql(l, true), 'rl', 'rv')} ` +
 				'THEN 1 ELSE 2 END, c.created_at, c.id LIMIT ?',
 			gateVer,
@@ -946,13 +978,22 @@ export async function publishLineage(
 	return { ok: true, value: { lineageId: input.lineageId, versionId: input.version.id } };
 }
 
-/** Forks a version the new owner can read (same publication path, so the same gate rules). */
+/**
+ * Forks a version the new owner can read (same publication path, so the same gate rules); with
+ * the kill switch `yolo` 'off' (default) someone else's YOLO version is not a fork source.
+ */
 export async function forkLineage(
 	db: D1Database,
 	sourceVersionId: string,
-	input: Omit<PublishInput, 'forkedFromVersion'>
+	input: Omit<PublishInput, 'forkedFromVersion'>,
+	yolo: YoloPublication = 'off'
 ): Promise<RepoResult<{ lineageId: string; versionId: string }>> {
-	const source = await getVersionForViewer(db, sourceVersionId, { userId: input.ownerUserId });
+	const source = await getVersionForViewer(
+		db,
+		sourceVersionId,
+		{ userId: input.ownerUserId },
+		yolo
+	);
 	if (!source) return { ok: false, code: 'not-found' };
 	return publishLineage(db, { ...input, forkedFromVersion: sourceVersionId });
 }
@@ -1097,19 +1138,29 @@ function ackOf(
 		: { lineageId, ownerUserId, curveId: options.yoloAckCurveId, now };
 }
 
-/** Undoes the owner's tombstone (never a moderation action). */
+/**
+ * Undoes the owner's tombstone (never a moderation action). With `options.visibility`, the
+ * lineage takes that visibility in the same statement (the service restores a YOLO head as
+ * private while YOLO_PUBLICATION is off).
+ */
 export async function restoreLineage(
 	db: D1Database,
 	lineageId: string,
 	ownerUserId: string,
 	now: number,
-	options: YoloAckOption = {}
+	options: YoloAckOption & { visibility?: LineageVisibility } = {}
 ): Promise<RepoResult<{ changed: true }>> {
+	const visibility = options.visibility ?? null;
+	if (visibility !== null && !isOneOf(LINEAGE_VISIBILITIES, visibility)) {
+		return { ok: false, code: 'invalid-input' };
+	}
 	return updateOwnedLineage(
 		db,
 		sql(
 			db,
-			"UPDATE lineages SET status = 'active', updated_at = ? WHERE id = ? AND owner_user_id = ?",
+			"UPDATE lineages SET status = 'active', visibility = COALESCE(?, visibility), " +
+				'updated_at = ? WHERE id = ? AND owner_user_id = ?',
+			visibility,
 			now,
 			lineageId,
 			ownerUserId
@@ -1259,12 +1310,17 @@ export async function countVersionsSince(
 
 // ---- Lineages and versions: reads -----------------------------------------------------------
 
+/**
+ * The lineage with its head, if `viewer` may read it by id (readableLineageSql under the kill
+ * switch `yolo`, default 'off': someone else's YOLO head is then null, the owner's is not).
+ */
 export async function getLineageForViewer(
 	db: D1Database,
 	lineageId: string,
-	viewer: Viewer
+	viewer: Viewer,
+	yolo: YoloPublication = 'off'
 ): Promise<LineageSummary | null> {
-	const readable = readableLineageSql('l', viewer);
+	const readable = readableLineageSql('l', viewer, yolo);
 	const row = await first<SummaryRow>(
 		sql(
 			db,
@@ -1284,15 +1340,16 @@ export interface VersionView {
 
 /**
  * A version (any, not only the head) if its lineage is readable by `viewer`; for anyone but the
- * owner or an admin its own curve must also be publishable (standard, or YOLO acknowledged by the
- * owner in this lineage).
+ * owner or an admin its own curve must also be publishable (standard, or, with the kill switch
+ * `yolo` 'on', YOLO acknowledged by the owner in this lineage; default 'off').
  */
 export async function getVersionForViewer(
 	db: D1Database,
 	versionId: string,
-	viewer: Viewer
+	viewer: Viewer,
+	yolo: YoloPublication = 'off'
 ): Promise<VersionView | null> {
-	const readable = readableLineageSql('l', viewer);
+	const readable = readableLineageSql('l', viewer, yolo);
 	const own = ownerOrAdminSql('l', viewer);
 	const row = await first<LineageCols & VersionCols & CurveCols>(
 		sql(
@@ -1300,7 +1357,7 @@ export async function getVersionForViewer(
 			`SELECT ${LINEAGE_COLUMNS}, ${VERSION_COLUMNS}, ${CURVE_COLUMNS} FROM versions v ` +
 				'JOIN lineages l ON l.id = v.lineage_id JOIN curves c ON c.id = v.curve_id ' +
 				`WHERE v.id = ? AND ${readable.text} ` +
-				`AND (c.gate_ok = 1 OR ${yoloAckedCurveSql('l', 'c')} OR ${own.text})`,
+				`AND (${publishableCurveSql('l', 'c', yolo)} OR ${own.text})`,
 			versionId,
 			...readable.params,
 			...own.params
@@ -1309,14 +1366,15 @@ export async function getVersionForViewer(
 	return row ? { version: toVersion(row), curve: toCurve(row), lineage: toLineage(row) } : null;
 }
 
-/** History of a readable lineage, newest first. */
+/** History of a readable lineage (getLineageForViewer under `yolo`), newest first. */
 export async function listVersions(
 	db: D1Database,
 	lineageId: string,
 	viewer: Viewer,
-	page: PageRequest = {}
+	page: PageRequest = {},
+	yolo: YoloPublication = 'off'
 ): Promise<Page<VersionRecord> | null> {
-	const lineage = await getLineageForViewer(db, lineageId, viewer);
+	const lineage = await getLineageForViewer(db, lineageId, viewer, yolo);
 	if (!lineage) return null;
 	const size = clampPageSize(page.limit);
 	const keyset = before2('v.created_at', 'v.id', decodeCursor(page.cursor, ['number', 'string']));
@@ -1336,15 +1394,19 @@ export async function listVersions(
 /**
  * Public feed, newest first (sort 'new'; the ranked sorts read listRankings). Standard heads only;
  * with `yolo: 'only'`, the public lineages with an acknowledged YOLO head instead
- * (publicYoloLineageSql): the two never mix.
+ * (publicYoloLineageSql under the kill switch `yoloPublication`, default 'off': then an empty
+ * page): the two never mix.
  */
 export async function listPublicFeed(
 	db: D1Database,
-	page: PageRequest & { yolo?: 'only' } = {}
+	page: PageRequest & { yolo?: 'only'; yoloPublication?: YoloPublication } = {}
 ): Promise<Page<LineageSummary>> {
 	const size = clampPageSize(page.limit);
 	const keyset = before2('l.created_at', 'l.id', decodeCursor(page.cursor, ['number', 'string']));
-	const listable = page.yolo === 'only' ? publicYoloLineageSql('l') : publicLineageSql('l');
+	const listable =
+		page.yolo === 'only'
+			? publicYoloLineageSql('l', page.yoloPublication ?? 'off')
+			: publicLineageSql('l');
 	const rows = await all<SummaryRow>(
 		sql(
 			db,
@@ -1489,14 +1551,18 @@ export async function ownHeadCurves(
 
 // ---- Favorites ------------------------------------------------------------------------------
 
-/** Idempotent. 'not-found' when the lineage is not readable by the user. */
+/**
+ * Idempotent. 'not-found' when the lineage is not readable by the user (under the kill switch
+ * `yolo`, default 'off').
+ */
 export async function addFavorite(
 	db: D1Database,
 	userId: string,
 	lineageId: string,
-	now: number
+	now: number,
+	yolo: YoloPublication = 'off'
 ): Promise<RepoResult<{ created: boolean }>> {
-	const readable = readableLineageSql('l', { userId });
+	const readable = readableLineageSql('l', { userId }, yolo);
 	const meta = await run(
 		sql(
 			db,
@@ -1534,14 +1600,18 @@ export async function removeFavorite(
 	return meta.changes > 0;
 }
 
-/** The user's favorites still readable by the user, newest first. */
+/**
+ * The user's favorites still readable by the user (under the kill switch `yolo`, default 'off':
+ * someone else's YOLO lineage is then left out), newest first.
+ */
 export async function listFavorites(
 	db: D1Database,
 	userId: string,
-	page: PageRequest = {}
+	page: PageRequest = {},
+	yolo: YoloPublication = 'off'
 ): Promise<Page<LibraryEntry>> {
 	const size = clampPageSize(page.limit);
-	const readable = readableLineageSql('l', { userId });
+	const readable = readableLineageSql('l', { userId }, yolo);
 	const keyset = before2('f.created_at', 'l.id', decodeCursor(page.cursor, ['number', 'string']));
 	const rows = await all<SummaryRow & { at: number }>(
 		sql(
@@ -1586,19 +1656,21 @@ function toActivity(row: ActivityRow): ActivityRecord {
 
 /**
  * Records a 'previewed' or 'installed' event: one row per user, lineage and kind, keeping the
- * first and last time and a count. 'not-found' when the lineage is not readable by the user.
+ * first and last time and a count. 'not-found' when the lineage is not readable by the user
+ * (under the kill switch `yolo`, default 'off').
  */
 export async function recordActivity(
 	db: D1Database,
 	userId: string,
 	lineageId: string,
 	kind: ActivityKind,
-	at: number
+	at: number,
+	yolo: YoloPublication = 'off'
 ): Promise<RepoResult<ActivityRecord>> {
 	if (!isOneOf(ACTIVITY_KINDS, kind) || !Number.isSafeInteger(at)) {
 		return { ok: false, code: 'invalid-input' };
 	}
-	const readable = readableLineageSql('l', { userId });
+	const readable = readableLineageSql('l', { userId }, yolo);
 	const meta = await run(
 		sql(
 			db,
@@ -1695,14 +1767,18 @@ export async function deleteOwnActivity(
 	return changes(deleted);
 }
 
-/** The user's installed curves still readable by the user, last installed first. */
+/**
+ * The user's installed curves still readable by the user (under the kill switch `yolo`, default
+ * 'off'), last installed first.
+ */
 export async function listInstalled(
 	db: D1Database,
 	userId: string,
-	page: PageRequest = {}
+	page: PageRequest = {},
+	yolo: YoloPublication = 'off'
 ): Promise<Page<LibraryEntry>> {
 	const size = clampPageSize(page.limit);
-	const readable = readableLineageSql('l', { userId });
+	const readable = readableLineageSql('l', { userId }, yolo);
 	const keyset = before2('a.last_at', 'l.id', decodeCursor(page.cursor, ['number', 'string']));
 	const rows = await all<SummaryRow & { at: number }>(
 		sql(
@@ -1733,15 +1809,17 @@ const EVENTS_CTE =
 
 /**
  * Public counts (distinct verified, non-banned users, the owner excluded) of the lineages among
- * `lineageIds` that `viewer` can read. Lineages with no event are present with zeros.
+ * `lineageIds` that `viewer` can read (under the kill switch `yolo`, default 'off'). Lineages
+ * with no event are present with zeros.
  */
 export async function countsForLineages(
 	db: D1Database,
 	lineageIds: readonly string[],
-	viewer: Viewer
+	viewer: Viewer,
+	yolo: YoloPublication = 'off'
 ): Promise<Map<string, PublicCounts>> {
 	const ids = idList(lineageIds);
-	const readable = readableLineageSql('l', viewer);
+	const readable = readableLineageSql('l', viewer, yolo);
 	const rows = await all<{ lineage_id: string; kind: string; n: number }>(
 		sql(
 			db,
@@ -1869,7 +1947,10 @@ function toShare(row: ShareRow): ShareRecord {
 
 const SHARE_COLUMNS = 'id, lineage_id, version_id, owner_user_id, channel, created_at';
 
-/** A share of a lineage (and optionally one of its versions) readable by the sharer. */
+/**
+ * A share of a lineage (and optionally one of its versions) readable by the sharer (under the
+ * kill switch `yolo`, default 'off': the owner may still share their own YOLO lineage).
+ */
 export async function createShare(
 	db: D1Database,
 	input: {
@@ -1879,12 +1960,13 @@ export async function createShare(
 		ownerUserId: string;
 		channel: string | null;
 		now: number;
-	}
+	},
+	yolo: YoloPublication = 'off'
 ): Promise<RepoResult<ShareRecord>> {
 	if (!isSocialId(input.id) || (input.channel !== null && !CHANNEL.test(input.channel))) {
 		return { ok: false, code: 'invalid-input' };
 	}
-	const readable = readableLineageSql('l', { userId: input.ownerUserId });
+	const readable = readableLineageSql('l', { userId: input.ownerUserId }, yolo);
 	const created = await guarded(db, [
 		sql(
 			db,

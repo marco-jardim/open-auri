@@ -8,7 +8,7 @@ import {
 	linkableLineageSql,
 	ownerNotBannedSql
 } from '#lib/server/social/repo.ts';
-import type { CurveRecord } from '#lib/server/social/types.ts';
+import type { CurveRecord, YoloPublication } from '#lib/server/social/types.ts';
 
 interface StaleCurveRow {
 	id: string;
@@ -53,7 +53,8 @@ export async function listStaleCurvesByPriority(
 				`WHERE c.gate_ver <> ? AND ${gateImplSql('c.gate_ver')} <= ? ` +
 				'ORDER BY CASE WHEN EXISTS (SELECT 1 FROM lineages pl JOIN versions pv ' +
 				'ON pv.id = pl.head_version WHERE pv.curve_id = c.id AND ' +
-				`${linkableLineageSql('pl')}) THEN 0 ELSE 1 END, c.created_at, c.id LIMIT ?`,
+				// Acknowledged YOLO heads whatever the kill switch (served again once it is on).
+				`${linkableLineageSql('pl', 'on')}) THEN 0 ELSE 1 END, c.created_at, c.id LIMIT ?`,
 			gateVer,
 			gateImpl,
 			Math.min(Math.max(Math.trunc(limit), 1), 1000)
@@ -75,18 +76,23 @@ export async function listStaleCurvesByPriority(
 /**
  * True when `lineageId` is a tombstone that anyone with the id could have opened before the
  * retraction: status 'retracted' and every other rule of linkableLineageSql (public or unlisted,
- * not moderated, publishable head: standard, or YOLO acknowledged by the owner; owner not
- * banned). Private, moderated or unknown lineages are not tombstones (they stay a plain 404, so
- * their existence never leaks).
+ * not moderated, publishable head under the kill switch `yolo`: standard, or, while 'on', YOLO
+ * acknowledged by the owner; owner not banned). Private, moderated or unknown lineages are not
+ * tombstones (they stay a plain 404, so their existence never leaks), nor, while the switch is
+ * 'off' (the default), one whose head is YOLO.
  */
-export async function isLinkableTombstone(db: D1Database, lineageId: string): Promise<boolean> {
+export async function isLinkableTombstone(
+	db: D1Database,
+	lineageId: string,
+	yolo: YoloPublication = 'off'
+): Promise<boolean> {
 	if (!isSocialId(lineageId)) return false;
 	const row = await first<{ id: string }>(
 		sql(
 			db,
 			"SELECT l.id AS id FROM lineages l WHERE l.id = ? AND l.status = 'retracted' " +
 				"AND l.visibility IN ('public', 'unlisted') AND l.moderation = 'visible' " +
-				`AND ${headPublishableSql('l')} AND ${ownerNotBannedSql('l')}`,
+				`AND ${headPublishableSql('l', yolo)} AND ${ownerNotBannedSql('l')}`,
 			lineageId
 		)
 	);

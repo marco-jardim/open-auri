@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import fc from 'fast-check';
 import { classifierVersionInput, classifyCurve } from '../../src/safety/classify.mjs';
 import { classifyWith } from '../../src/safety/classify-core.mjs';
-import { gateForWrite, isWaivable, YOLO_WAIVABLE } from '../../src/safety/gate.mjs';
+import { autoPreamp, gateForWrite, isWaivable, YOLO_WAIVABLE } from '../../src/safety/gate.mjs';
 import { THRESHOLDS, YOLO_THRESHOLDS } from '../../src/safety/thresholds.mjs';
 import { NEUTRAL_BANDS } from '../../src/dsp/eq0xcb.mjs';
 
@@ -49,6 +49,11 @@ test('the 11 official presets are standard', () => {
       STANDARD,
       id,
     );
+    // They pass the YOLO profile too: nothing to waive, so the standard verdict.
+    const yolo = gateForWrite(preset.eqBands, preset.preampDb, { profile: 'yolo' });
+    assert.equal(yolo.ok, true, `${id}: ${JSON.stringify(yolo.reasons)}`);
+    assert.deepEqual(yolo.waived, [], id);
+    assert.equal(yolo.metrics.prefixExtended, undefined, id);
   }
   assert.deepEqual(classifyCurve(NEUTRAL_BANDS, -0.5), STANDARD);
 });
@@ -170,6 +175,49 @@ test('above 20 kHz: cuts are standard, boosts yolo within the extended envelope'
   assert.deepEqual(classifyCurve(boost, -3.5), {
     class: 'yolo',
     waived: ['d7:pk-boost-above-16k', 'd7:boost-above-20k'],
+    reasons: [],
+  });
+});
+
+test('at 20 kHz a yolo curve meets the extended envelope too: no 1 Hz cliff', () => {
+  const opts = { experimental: true };
+  // +10 dB at 48 kHz (+5 dB at its frequency): a:b0 and c:section-peak, both waivable, in the
+  // standard profile, at 20000 Hz as at 20001 Hz (which adds d7:boost-above-20k).
+  const hs = (freqHz) => curveOf({ kind: 'HS', freqHz, gainDb: 10, qFactor: 0.7 });
+  for (const freqHz of [20000, 20001]) {
+    const label = String(freqHz);
+    const d7 = freqHz > 20000 ? ['d7:boost-above-20k'] : [];
+    assert.deepEqual(codes(gateForWrite(hs(freqHz), -8, opts)), [...d7, 'a:b0', 'c:section-peak']);
+    // With −8 dB the audible output is −3 dB and the output above 20 kHz +2 dB: within
+    // e:output-full (2.5 dB), over the extended envelope. Before, 20000 Hz was yolo here.
+    assert.deepEqual(
+      classifyCurve(hs(freqHz), -8, opts),
+      { class: 'rejected', waived: [], reasons: ['d:prefix-peak-extended', 'e:output-extended'] },
+      label,
+    );
+    // With −10.5 dB (what autoPreamp gives) it is within the envelope: yolo on both sides.
+    const yoloStorable = { experimental: true, profile: 'yolo', storable: true };
+    const preampDb = autoPreamp(hs(freqHz), yoloStorable);
+    assert.equal(preampDb, -10.5, label);
+    assert.deepEqual(
+      classifyCurve(hs(freqHz), preampDb, opts),
+      { class: 'yolo', waived: [...d7, 'a:b0', 'c:section-peak'], reasons: [] },
+      label,
+    );
+  }
+  // An HS +3 dB boost needs no waiver at 20000 Hz in Engenharia: standard (the standard
+  // profile's own rule at 20 kHz). At 20001 Hz it needs d7:boost-above-20k, so the extended
+  // envelope holds it: rejected at −2 dB (+1 dB above 20 kHz), yolo at −3.5 dB.
+  const small = (freqHz) => curveOf({ kind: 'HS', freqHz, gainDb: 3, qFactor: 0.7 });
+  assert.deepEqual(classifyCurve(small(20000), -2, opts), STANDARD);
+  assert.deepEqual(classifyCurve(small(20001), -2, opts), {
+    class: 'rejected',
+    waived: [],
+    reasons: ['d:prefix-peak-extended', 'e:output-extended'],
+  });
+  assert.deepEqual(classifyCurve(small(20001), -3.5, opts), {
+    class: 'yolo',
+    waived: ['d7:boost-above-20k'],
     reasons: [],
   });
 });

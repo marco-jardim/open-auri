@@ -1340,6 +1340,7 @@
 				previewReason={m.curva_v2_preview_unavailable()}
 				{previewCaption}
 				approximate={preview ? !preview.exact : false}
+				rate={preview?.rate ?? null}
 				ondrag={onDrag}
 				oncommit={(index, target) => void onCommit(index, target)}
 				onpark={onPark}

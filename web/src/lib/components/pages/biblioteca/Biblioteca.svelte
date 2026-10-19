@@ -11,7 +11,9 @@
 	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { neutralCurve } from '#lib/state/model.ts';
+	import { onDestroy } from 'svelte';
 	import { createGateWorker } from '#lib/workers/gate-client.ts';
+	import { createClassifier } from '#lib/workers/classifier.svelte.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi, SocialSession } from '#lib/social/index.ts';
@@ -27,6 +29,7 @@
 		referencePack,
 		rmsTo,
 		number,
+		classBadge,
 		tapeBadge,
 		type Sort,
 		type Tag,
@@ -203,6 +206,17 @@
 			worker.dispose();
 		};
 	});
+
+	/**
+	 * Shelf badges are classified in a worker of their own, one tape at a time (a library of
+	 * hundreds of tapes never blocks the page); a card shows its badge once its class lands. The
+	 * save exit below never waits for it: it classifies the exact curve at the click.
+	 */
+	const classifier = createClassifier();
+	onDestroy(() => classifier.dispose());
+	function shelfBadge(tape: Tape) {
+		return classBadge(classifier.peek(tape));
+	}
 
 	function clear() {
 		query = '';
@@ -444,7 +458,7 @@
 								><strong>{tape.name}</strong><span class="tape-sub"
 									><span>{tape.source}</span><span>pre {number(tape.preampDb, locale)} dB</span
 									></span
-								>{#if tape.group === 'local'}<YoloBadge badge={tapeBadge(tape)} />{/if}</span
+								>{#if tape.group === 'local'}<YoloBadge badge={shelfBadge(tape)} />{/if}</span
 							>
 							<span class="tape-chart"
 								><span class="mini-frame"

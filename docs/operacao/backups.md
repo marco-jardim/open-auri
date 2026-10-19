@@ -45,7 +45,7 @@ O bucket continua privado: não pode ter acesso público (domínio `r2.dev` ou d
 
 Arquivos `public/dump/<AAAA-MM-DD>.json.gz` (dia UTC da execução) e `public/dump/latest.json.gz`, JSON em gzip (operação 23).
 
-Contém: linhagens publicamente listáveis (mesma regra das listas do site: pública, ativa, visível, cabeça aprovada no gate e dono não banido), as versões cuja curva passa no gate atual (S1, nome, descrição, licença, idioma, versão mãe, data), contagens públicas de favoritos e instalações (só contas verificadas e não banidas, como no site), rankings materializados restritos a essas linhagens, os links das licenças e um campo `readme` (pt-BR e en-US) que explica CC0 e CC-BY.
+Contém: linhagens publicamente listáveis (mesma regra das listas do site: pública, ativa, visível, cabeça aprovada no gate e dono não banido), as versões cuja curva passa no gate atual (S1, nome, descrição, licença, idioma, versão mãe, data), contagens públicas de favoritos e instalações (só contas verificadas e não banidas, como no site), rankings materializados restritos a essas linhagens, os links das licenças e um campo `readme` (pt-BR e en-US) que explica CC0 e CC-BY. Desde o `formatVersion` 2, o campo `s1` pode ser S1 v1 ou S1 v2 (filtros acima de 20 kHz); o próprio código diz a versão, ver [`docs/s1-format.md`](../s1-format.md). Curvas YOLO nunca entram no dump.
 
 O apelido do autor aparece só nas versões CC-BY-4.0, porque a licença exige atribuição. Após encerramento de conta com anonimização, o crédito é `autor removido`. Uma bifurcação aponta para a origem só quando a versão de origem também está no dump.
 

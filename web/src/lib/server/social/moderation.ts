@@ -76,6 +76,11 @@ export interface FileReportInput {
 	id?: string;
 	/** Analytics Engine dataset (T5.2): one `report` point (target kind, reason) per new report. */
 	metrics?: MetricsDataset | null;
+	/**
+	 * Kill switch of YOLO publication (ServerEnv `yoloPublication`); absent = 'off': someone
+	 * else's YOLO lineage is then not readable, so reporting it is NOT_FOUND like a missing one.
+	 */
+	yoloPublication?: 'on' | 'off';
 }
 
 export type FileReportResult =
@@ -101,7 +106,8 @@ export async function fileReport(
 		input.targetKind,
 		input.targetId,
 		{ userId: input.reporterUserId },
-		input.now
+		input.now,
+		input.yoloPublication ?? 'off'
 	);
 	if (!target) return { ok: false, code: 'NOT_FOUND' };
 	if (target.ownerUserId === input.reporterUserId) return { ok: false, code: 'SELF' };

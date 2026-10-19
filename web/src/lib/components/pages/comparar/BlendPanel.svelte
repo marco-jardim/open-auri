@@ -12,7 +12,7 @@
 	import ComparisonPlot from './ComparisonPlot.svelte';
 	import { reasonText, type Copy } from './copy.ts';
 	import type { CurveSocial } from './social.svelte.ts';
-	import { exitReason } from '#lib/components/pages/curva/yolo.ts';
+	import { classOf, exitReason } from '#lib/components/pages/curva/yolo.ts';
 
 	let {
 		tracks,
@@ -353,14 +353,25 @@
 					variant="primary"
 					disabledReason={appReason}
 					onclick={() => {
-						if (accepted && app)
-							app.requestWrite({
+						if (!accepted || !app) return;
+						// `solveBlend` keeps only what the standard gate accepts, so a blend is standard
+						// and opens the standard checklist. Classified at the click all the same: a YOLO
+						// curve takes the YOLO checklist while Modo YOLO may write (the standard one
+						// would refuse it), as every other write request does.
+						const yolo =
+							classOf(accepted.curve).class === 'yolo' &&
+							app.yolo.enabled &&
+							app.yolo.writeBlock() === null;
+						app.requestWrite(
+							{
 								...accepted.curve,
 								schema: 1,
 								// A blended curve is new: it has no filter labels.
 								labels: null,
 								updatedAt: Date.now()
-							});
+							},
+							yolo ? { profile: 'yolo' } : {}
+						);
 					}}>{t.write}</Button
 				>
 				<label class="field">

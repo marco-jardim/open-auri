@@ -27,7 +27,11 @@ import {
 type Curve = Parameters<typeof encodeS1>[0];
 type Band = Curve['bands'][number];
 
-/** Counting wrappers of the write gate and of the classifier (the production functions). */
+/**
+ * Counting wrappers of the write gate and of the public classifier (the production functions).
+ * The server classifies through the core's `classifyWith` on the injected gate: `classify` is no
+ * longer an injection point, and the wrapper below proves the public classifier is never called.
+ */
 function spies(): {
 	deps: { gate: typeof gateForWrite; classify: typeof classifyCurve };
 	gateRuns: () => number;
@@ -77,9 +81,11 @@ describe('server classification and its cache', () => {
 		if (!first.ok) throw new Error(`expected a storable curve, got ${first.code}`);
 		expect(first.class).toBe('yolo');
 		expect(first.waived).toContain('d7:pk-boost-above-16k');
+		// Both runs (standard + YOLO profile) go through the injected gate; the core classification
+		// reuses the standard verdict, so the public classifier never runs.
 		expect(first.gateRuns).toBe(2);
-		expect(spy.gateRuns()).toBe(1);
-		expect(spy.classifications()).toBe(1);
+		expect(spy.gateRuns()).toBe(2);
+		expect(spy.classifications()).toBe(0);
 		expect(first.curve.gateOk).toBe(false);
 		expect(first.curve.gateYolo).toBe(true);
 
@@ -92,8 +98,8 @@ describe('server classification and its cache', () => {
 		const second = await checkPublishable(env.DB, s1, Date.now(), spy.deps);
 		expect(second.ok && second.class).toBe('yolo');
 		expect(second.gateRuns).toBe(0);
-		expect(spy.gateRuns()).toBe(1);
-		expect(spy.classifications()).toBe(1);
+		expect(spy.gateRuns()).toBe(2);
+		expect(spy.classifications()).toBe(0);
 	});
 
 	it('a standard curve runs the write gate only (no classifier run)', async () => {
@@ -120,7 +126,7 @@ describe('server classification and its cache', () => {
 		expect(check.hard).toEqual(hardCodes(check.reasons));
 		expect(check.gateRuns).toBe(1);
 		expect(spy.gateRuns()).toBe(1);
-		expect(spy.classifications()).toBe(1);
+		expect(spy.classifications()).toBe(0);
 		const stored = await row(check.curve.id);
 		expect(stored?.gate_ok).toBe(0);
 		expect(stored?.gate_yolo).toBe(0);

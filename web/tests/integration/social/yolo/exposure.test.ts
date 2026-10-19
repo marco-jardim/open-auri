@@ -38,6 +38,9 @@ import {
 } from '../curves/helpers.ts';
 import { sid } from '../repo/helpers.ts';
 
+/** YOLO_PUBLICATION on for the reads (absent = 'off': no YOLO head is served to others). */
+const ON_READ = { yoloPublication: 'on' as const };
+
 async function veteran(): Promise<Actor> {
 	const owner = await actor();
 	await ageAccount(owner.user);
@@ -63,12 +66,11 @@ async function inFeed(lineageId: string, owner: Actor, yolo: boolean): Promise<b
 	if (!lineage) throw new Error('owner cannot read the lineage');
 	let cursor: string | null = encodeCursor([lineage.createdAt + 1, '']);
 	for (let guard = 0; guard < 20 && cursor !== null; guard++) {
-		const page = await readFeed(env.DB, {
-			sort: 'new',
-			cursor,
-			limit: 100,
-			...(yolo ? { yolo: 'only' as const } : {})
-		});
+		const page = await readFeed(
+			env.DB,
+			{ sort: 'new', cursor, limit: 100, ...(yolo ? { yolo: 'only' as const } : {}) },
+			'on'
+		);
 		if (page.items.some((item) => item.lineage.id === lineageId)) return true;
 		const last = page.items[page.items.length - 1];
 		if (!last || last.lineage.createdAt < lineage.createdAt) return false;
@@ -91,7 +93,7 @@ describe('lists keep YOLO apart', () => {
 		expect(await inFeed(standard.lineageId, owner, false)).toBe(true);
 		expect(await inFeed(yolo.lineageId, owner, true)).toBe(true);
 		expect(await inFeed(standard.lineageId, owner, true)).toBe(false);
-		const page = await readFeed(env.DB, { sort: 'new', limit: 100, yolo: 'only' });
+		const page = await readFeed(env.DB, { sort: 'new', limit: 100, yolo: 'only' }, 'on');
 		expect(page.items.every((item) => item.lineage.curve.yolo === true)).toBe(true);
 	});
 
@@ -120,7 +122,7 @@ describe('lists keep YOLO apart', () => {
 		expect(await listable(yolo.lineageId)).toBe(0);
 		expect(await listable(standard.lineageId)).toBe(1);
 		const fan = await actor();
-		await addFavorite(env.DB, fan.user.id, yolo.lineageId, Date.now() - 1000);
+		await addFavorite(env.DB, fan.user.id, yolo.lineageId, Date.now() - 1000, 'on');
 		await recomputeRankings(env.DB, 'favorites', 'all', Date.now());
 		expect(
 			await count('SELECT count(*) AS n FROM rankings WHERE lineage_id = ?', yolo.lineageId)
@@ -154,7 +156,7 @@ describe('lists keep YOLO apart', () => {
 
 	it('an acknowledged YOLO lineage still opens by id (public page data carries the class)', async () => {
 		const { yolo } = await pair();
-		const shared = await loadSharedCurve(env.DB, ANONYMOUS_VIEWER, yolo.lineageId, null);
+		const shared = await loadSharedCurve(env.DB, ANONYMOUS_VIEWER, yolo.lineageId, null, ON_READ);
 		if (shared.kind !== 'ok') throw new Error('YOLO lineage not linkable');
 		expect(shared.curve.yolo).toBe(true);
 		expect(shared.curve.waived).toContain('d7:pk-boost-above-16k');
@@ -174,7 +176,8 @@ describe('moderation', () => {
 					targetId: target,
 					reason: 'spam',
 					note: null,
-					now: Date.now()
+					now: Date.now(),
+					yoloPublication: 'on'
 				});
 				if (!filed.ok) throw new Error(`report refused: ${filed.code}`);
 				results.push(filed.autoHidden);
@@ -239,7 +242,8 @@ describe('OG and meta tags', () => {
 			db: server.db,
 			media: server.media,
 			publicOrigin: server.publicOrigin,
-			assets: null
+			assets: null,
+			yoloPublication: 'on'
 		};
 		const pending: Promise<unknown>[] = [];
 		const ctx = {
@@ -263,7 +267,7 @@ describe('OG and meta tags', () => {
 
 	it('/c/:id of a YOLO curve is noindex and its image URL carries ?y=1', async () => {
 		const { yolo, standard } = await pair();
-		const yoloPage = await loadSharedCurve(env.DB, ANONYMOUS_VIEWER, yolo.lineageId, null);
+		const yoloPage = await loadSharedCurve(env.DB, ANONYMOUS_VIEWER, yolo.lineageId, null, ON_READ);
 		const plainPage = await loadSharedCurve(env.DB, ANONYMOUS_VIEWER, standard.lineageId, null);
 		if (yoloPage.kind !== 'ok' || plainPage.kind !== 'ok') throw new Error('not linkable');
 		const yoloMeta = sharedCurveMeta(env.PUBLIC_ORIGIN, yoloPage.curve);

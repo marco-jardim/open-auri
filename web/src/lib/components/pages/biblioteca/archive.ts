@@ -4,7 +4,7 @@ import { encodeS1, envelopeFormat, normalizeLabels, serializeEnvelope } from 'op
 import type { CurveData } from '#lib/state/model.ts';
 import type { LibraryItem } from '#lib/state/library.svelte.ts';
 import type { gateForWrite } from 'open-auri/safety';
-import { curveClassification } from '#lib/gate-verdicts.ts';
+import { curveClassification, type CurveClassification } from '#lib/gate-verdicts.ts';
 import type { CurveBadge } from '#lib/components/yolo/yolo-curve.ts';
 
 export type GateResult = ReturnType<typeof gateForWrite>;
@@ -175,7 +175,15 @@ export function number(value: number | null | undefined, locale: Locale, digits 
  * older build), `none` for a standard one.
  */
 export function tapeBadge(curve: Pick<CurveData, 'bands' | 'preampDb'>): CurveBadge {
-	const { class: kind } = curveClassification(curve.bands, curve.preampDb);
+	return classBadge(curveClassification(curve.bands, curve.preampDb));
+}
+
+/**
+ * Badge of a class (`tapeBadge`); `none` while the class is not known yet (a shelf card waiting
+ * for the background classifier, workers/classifier.svelte.ts `peek`).
+ */
+export function classBadge(classification: CurveClassification | null): CurveBadge {
+	const kind = classification?.class ?? 'standard';
 	return kind === 'yolo' ? 'yolo' : kind === 'rejected' ? 'warn' : 'none';
 }
 

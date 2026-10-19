@@ -23,14 +23,21 @@
 // restore) needs, in this order: the kill switch on (`YOLO_PUBLICATION`, default off: 403
 // YOLO_PUBLICATION_OFF), an account at least 72 h old (403 FORBIDDEN, `details.reason:
 // 'account-age'`), `acknowledge: 'yolo'` in the body (409 YOLO_ACK_REQUIRED with
-// `details.waived`) and a free slot of YOLO_ACKS_DAILY_MAX per sliding day (429 QUOTA_EXCEEDED);
-// the acknowledgement row is then written in the same batch as the write.
+// `details.waived`) and a free slot of YOLO_ACKS_DAILY_MAX per sliding day (429 QUOTA_EXCEEDED,
+// checked without counting); the acknowledgement row is then written in the same batch as the
+// write, and the slot is counted only once that batch succeeded. Reads follow the same switch:
+// while it is off, no YOLO head is served to anyone but its owner (curve, history, fork source),
+// and a restore leaves a non-private YOLO lineage private (see restoreCurve).
 import type { D1Database } from '@cloudflare/workers-types';
-import type { classifyCurve, gateForWrite } from 'open-auri/safety';
-import { decodeS1, envelopeFormat, S1Error, validateEnvelope } from 'open-auri/share';
+import type { gateForWrite } from 'open-auri/safety';
+import { curveId, decodeS1, envelopeFormat, S1Error, validateEnvelope } from 'open-auri/share';
 import { z } from 'zod';
 import { ApiError, CACHE_PUBLIC_60, cached, json } from '#lib/server/api/index.ts';
-import { rateLimitKey, slidingWindowLimit } from '#lib/server/security/ratelimit.ts';
+import {
+	rateLimitKey,
+	slidingWindowLimit,
+	type WindowRule
+} from '#lib/server/security/ratelimit.ts';
 import {
 	recordGateRejection,
 	type MetricsDataset,
@@ -52,6 +59,7 @@ import {
 	countsForLineages,
 	countVersionsSince,
 	forkLineage,
+	getCurve,
 	getLineageForViewer,
 	getVersionForViewer,
 	isSocialId,
@@ -81,7 +89,8 @@ import {
 	type VersionInput,
 	type VersionLabels,
 	type VersionRecord,
-	type Viewer
+	type Viewer,
+	type YoloPublication
 } from '#lib/server/social/types.ts';
 
 // ---- Limits and body schemas ----------------------------------------------------------------
@@ -110,7 +119,7 @@ const YOLO_ACK_GROUP = 'curves.yolo.ack';
 export const YOLO_MIN_ACCOUNT_AGE_MS = MIN_REPORTER_AGE_MS;
 
 /** Kill switch of YOLO publication (`YOLO_PUBLICATION`): `off` (default) = private only. */
-export type YoloPublication = 'on' | 'off';
+export type { YoloPublication };
 
 /** Request body cap of the curve writes (the normalized envelope itself is at most 8 KiB). */
 export const CURVE_BODY_MAX_BYTES = 32 * 1024;
@@ -164,11 +173,16 @@ export interface PublishedInfo {
 export interface CurveDeps {
 	/** Called after every successful publish, version or fork (OG warm-up hook, T4.7). */
 	onPublished?: (info: PublishedInfo) => void;
-	/** Gate injection for tests (default: the core's gateForWrite through checkPublishable). */
+	/**
+	 * Gate injection for tests (default: the core's gateForWrite through checkPublishable); every
+	 * run of a classification, standard and YOLO profile, goes through it.
+	 */
 	gate?: typeof gateForWrite;
-	/** Classifier injection for tests (default: the core's classifyCurve). */
-	classify?: typeof classifyCurve;
-	/** Kill switch of YOLO publication (ServerEnv `yoloPublication`); absent = 'off'. */
+	/**
+	 * Kill switch of YOLO publication (ServerEnv `yoloPublication`); absent = 'off'. Writes: a YOLO
+	 * head is opened to others only while 'on'. Reads (curve, history, fork source): while 'off' no
+	 * YOLO head is served to anyone but its owner (or an admin), acknowledged or not.
+	 */
 	yoloPublication?: YoloPublication;
 	now?: number;
 	/** Analytics Engine dataset (T5.2): gate rejections of the publication path, by reason. */
@@ -270,6 +284,20 @@ interface StoredClass {
 interface Prepared extends StoredClass {
 	curve: CurveInput;
 	version: VersionInput;
+	/**
+	 * The write opens a YOLO head to others (yoloOpening passed): the batch writes the
+	 * acknowledgement, and it is counted once the batch succeeded (recordYoloAck).
+	 */
+	ack: boolean;
+}
+
+/** What the publication path checks besides the curve itself (see prepare). */
+interface PrepareRules {
+	/** Visibility the lineage will have after the write (YOLO rules). */
+	visibility: LineageVisibility;
+	acknowledge: Acknowledgement;
+	/** License the envelope must keep (a CC-BY 4.0 fork source), checked before the gate. */
+	license?: License;
 }
 
 // ---- Helpers --------------------------------------------------------------------------------
@@ -326,32 +354,33 @@ function clockOf(deps: CurveDeps): number {
 	return deps.now ?? Date.now();
 }
 
-function gateOptions(deps: CurveDeps): {
-	gate?: typeof gateForWrite;
-	classify?: typeof classifyCurve;
-} {
+function gateOptions(deps: CurveDeps): { gate?: typeof gateForWrite } {
+	return deps.gate ? { gate: deps.gate } : {};
+}
+
+/** The kill switch as the reads take it (absent = 'off'). */
+function yoloOf(deps: CurveDeps): YoloPublication {
+	return deps.yoloPublication ?? 'off';
+}
+
+/** The sliding-day rule of the YOLO acknowledgements; `peek` checks without counting. */
+function yoloAckRule(userId: string, peek: boolean): WindowRule {
 	return {
-		...(deps.gate ? { gate: deps.gate } : {}),
-		...(deps.classify ? { classify: deps.classify } : {})
+		key: rateLimitKey.user(YOLO_ACK_GROUP, userId),
+		limit: YOLO_ACKS_DAILY_MAX,
+		windowSeconds: DAY_MS / 1000,
+		peek
 	};
 }
 
 /**
- * Counts one YOLO acknowledgement; 429 QUOTA_EXCEEDED once the user made YOLO_ACKS_DAILY_MAX of
- * them over the sliding day. Fails closed (503) when D1 is unavailable.
+ * Checks, WITHOUT counting, that one more YOLO acknowledgement fits: 429 QUOTA_EXCEEDED once the
+ * user made YOLO_ACKS_DAILY_MAX of them over the sliding day. Fails closed (503) when D1 is
+ * unavailable. The acknowledgement is counted only once its write succeeded (recordYoloAck), so
+ * a refused or failed write (HEAD_MOVED, a repository error) never spends a slot.
  */
-async function countYoloAck(db: D1Database, userId: string, now: number): Promise<void> {
-	const outcome = await slidingWindowLimit(
-		db,
-		[
-			{
-				key: rateLimitKey.user(YOLO_ACK_GROUP, userId),
-				limit: YOLO_ACKS_DAILY_MAX,
-				windowSeconds: DAY_MS / 1000
-			}
-		],
-		new Date(now)
-	);
+async function assertYoloAckSlot(db: D1Database, userId: string, now: number): Promise<void> {
+	const outcome = await slidingWindowLimit(db, [yoloAckRule(userId, true)], new Date(now));
 	if (outcome.ok) return;
 	if (outcome.reason === 'unavailable') throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE');
 	throw new ApiError(
@@ -363,12 +392,25 @@ async function countYoloAck(db: D1Database, userId: string, now: number): Promis
 }
 
 /**
+ * Counts one YOLO acknowledgement whose write is committed. Never throws: the write stands (a D1
+ * outage here is logged, without ids; two concurrent writes that both passed the check may end
+ * one slot above the limit, and the next one is refused).
+ */
+async function recordYoloAck(db: D1Database, userId: string, now: number): Promise<void> {
+	const outcome = await slidingWindowLimit(db, [yoloAckRule(userId, false)], new Date(now));
+	if (!outcome.ok && outcome.reason === 'unavailable') {
+		console.error(JSON.stringify({ event: 'curves.yolo_ack_count', error: 'unavailable' }));
+	}
+}
+
+/**
  * The YOLO rules of a write whose resulting head (`head`) will have `visibility`: nothing for a
  * standard head or a private lineage (false: no acknowledgement to write). A YOLO head shown to
  * others needs the kill switch on (403 YOLO_PUBLICATION_OFF), an account at least
  * YOLO_MIN_ACCOUNT_AGE_MS old (403 FORBIDDEN, `reason: 'account-age'`), `acknowledge: 'yolo'`
- * (409 YOLO_ACK_REQUIRED with `details.waived`) and a free YOLO_ACKS_DAILY_MAX slot (429); then
- * true: the caller writes the acknowledgement in the same batch.
+ * (409 YOLO_ACK_REQUIRED with `details.waived`) and a free YOLO_ACKS_DAILY_MAX slot (429, checked
+ * without counting); then true: the caller writes the acknowledgement in the same batch and,
+ * once the batch succeeded, counts it (recordYoloAck).
  */
 async function yoloOpening(
 	db: D1Database,
@@ -390,7 +432,7 @@ async function yoloOpening(
 	if (acknowledge !== 'yolo') {
 		throw new ApiError(409, 'YOLO_ACK_REQUIRED', { waived: [...head.waived] });
 	}
-	await countYoloAck(db, userId, now);
+	await assertYoloAckSlot(db, userId, now);
 	return true;
 }
 
@@ -469,11 +511,27 @@ function versionInputOf(envelope: Envelope): VersionInput {
 }
 
 /**
+ * The class of `s1` when it is cached under a current gate version (no gate run): standard or
+ * YOLO; null when it is not cached, stale or rejected (the gate decides then).
+ */
+async function cachedClass(db: D1Database, s1: string): Promise<StoredClass | null> {
+	const cached = await getCurve(db, await curveId(s1));
+	if (!cached || cached.s1 !== s1 || !(await isGateCurrent(cached.gateVer))) return null;
+	if (cached.gateOk) return { yolo: false, waived: [] };
+	if (cached.gateYolo) return { yolo: true, waived: [...cached.gateReasons] };
+	return null;
+}
+
+/**
  * The publication path shared by publish, new version and fork: core validation (422
- * INVALID_CURVE with `details.codes`), text that normalizes to nothing refused, then the gate
- * attempt quota and the server classification through checkPublishable (422 GATE_REJECTED with
- * `details.reasons` and `details.hard` for a curve that passes neither profile; nothing is
- * published). A YOLO curve is returned with its waived codes: the caller applies the YOLO rules.
+ * INVALID_CURVE with `details.codes`), text that normalizes to nothing refused, the license a
+ * CC-BY 4.0 fork must keep (422 INVALID_CURVE `env:enum`), then the gate attempt quota and the
+ * server classification through checkPublishable (422 GATE_REJECTED with `details.reasons` and
+ * `details.hard` for a curve that passes neither profile; nothing is published), then the YOLO
+ * rules for `rules.visibility` (yoloOpening). When the class is already cached under the current
+ * gate version, the YOLO rules (403, 409 YOLO_ACK_REQUIRED, 429) answer first, so a refused
+ * opening spends no gate attempt (the usual retry after a 409 is then cached). The YOLO
+ * acknowledgement is only checked here; the caller counts it once its write succeeded.
  */
 async function prepare(
 	db: D1Database,
@@ -481,7 +539,8 @@ async function prepare(
 	raw: Record<string, unknown>,
 	now: number,
 	deps: CurveDeps,
-	path: PublicationPath
+	path: PublicationPath,
+	rules: PrepareRules
 ): Promise<Prepared> {
 	const checked = validateEnvelope(raw);
 	if (!checked.ok) throw invalidCurve(checked.errors.map((issue) => issue.code));
@@ -490,6 +549,13 @@ async function prepare(
 	if (hasContent(raw.description) && envelope.description === '') {
 		throw invalidCurve(['env:length']);
 	}
+	if (rules.license !== undefined && envelope.license !== rules.license) {
+		throw invalidCurve(['env:enum']);
+	}
+	const open = (head: StoredClass) =>
+		yoloOpening(db, userId, head, rules.visibility, rules.acknowledge, now, deps);
+	const known = await cachedClass(db, envelope.code);
+	const early = known === null ? null : await open(known);
 	await countGateAttempt(db, userId, now);
 	const verdict = await checkPublishable(db, envelope.code, now, gateOptions(deps));
 	if (!verdict.ok) {
@@ -497,11 +563,14 @@ async function prepare(
 		recordGateRejection(deps.metrics, verdict.reasons, path);
 		throw gateRejected(verdict.reasons, verdict.hard);
 	}
+	const stored: StoredClass = { yolo: verdict.class === 'yolo', waived: verdict.waived };
+	// The cached class normally is the verdict's; a re-gate in between re-applies the rules.
+	const ack = early !== null && known?.yolo === stored.yolo ? early : await open(stored);
 	return {
 		curve: curveInputOf(verdict.curve),
 		version: versionInputOf(envelope),
-		yolo: verdict.class === 'yolo',
-		waived: verdict.waived
+		...stored,
+		ack
 	};
 }
 
@@ -542,7 +611,8 @@ function announce(info: PublishedInfo, deps: CurveDeps): PublishedInfo {
  * not linkable (null for anyone but the owner or an admin). A head the readable rows hide because
  * it is cached as REJECTED under a stale gate version is re-gated too (#27, regateRejectedHead:
  * linkable lineages only), so it is served once the current gate accepts it; one gate run at
- * most either way. Invalid ids give null.
+ * most either way. Under the kill switch (`deps.yoloPublication`, absent = 'off'): while off,
+ * someone else's YOLO head is null, acknowledged or not. Invalid ids give null.
  */
 async function readLineage(
 	db: D1Database,
@@ -552,14 +622,15 @@ async function readLineage(
 	deps: CurveDeps
 ): Promise<LineageSummary | null> {
 	if (!isSocialId(lineageId)) return null;
-	const summary = await getLineageForViewer(db, lineageId, viewer);
+	const yolo = yoloOf(deps);
+	const summary = await getLineageForViewer(db, lineageId, viewer, yolo);
 	if (!summary) {
 		if (!(await regateRejectedHead(db, lineageId, now, gateOptions(deps)))) return null;
-		return getLineageForViewer(db, lineageId, viewer);
+		return getLineageForViewer(db, lineageId, viewer, yolo);
 	}
 	if (await isGateCurrent(summary.curve.gateVer)) return summary;
 	await regateCurve(db, summary.curve, now, gateOptions(deps));
-	return getLineageForViewer(db, lineageId, viewer);
+	return getLineageForViewer(db, lineageId, viewer, yolo);
 }
 
 /**
@@ -575,15 +646,16 @@ async function readVersion(
 	deps: CurveDeps
 ): Promise<VersionView | null> {
 	if (!isSocialId(versionId)) return null;
-	const view = await getVersionForViewer(db, versionId, viewer);
+	const yolo = yoloOf(deps);
+	const view = await getVersionForViewer(db, versionId, viewer, yolo);
 	if (!view) {
 		const options = gateOptions(deps);
 		if (!(await regateRejectedVersion(db, versionId, now, options, { head: false }))) return null;
-		return getVersionForViewer(db, versionId, viewer);
+		return getVersionForViewer(db, versionId, viewer, yolo);
 	}
 	if (await isGateCurrent(view.curve.gateVer)) return view;
 	await regateCurve(db, view.curve, now, gateOptions(deps));
-	return getVersionForViewer(db, versionId, viewer);
+	return getVersionForViewer(db, versionId, viewer, yolo);
 }
 
 /** The caller's own lineage (any state), or 404 (also for other people's lineages). */
@@ -679,9 +751,12 @@ function versionDto(version: VersionRecord, headVersion: string | null): Version
 
 async function missing(
 	db: D1Database,
-	lineageId: string
+	lineageId: string,
+	deps: CurveDeps
 ): Promise<{ kind: 'gone' } | { kind: 'not-found' }> {
-	return (await isLinkableTombstone(db, lineageId)) ? { kind: 'gone' } : { kind: 'not-found' };
+	return (await isLinkableTombstone(db, lineageId, yoloOf(deps)))
+		? { kind: 'gone' }
+		: { kind: 'not-found' };
 }
 
 // ---- Writes ---------------------------------------------------------------------------------
@@ -695,18 +770,21 @@ export async function publishCurve(
 ): Promise<PublishedInfo> {
 	const now = clockOf(deps);
 	await assertQuota(db, userId, now);
-	const prepared = await prepare(db, userId, body.envelope, now, deps, 'publish');
-	const ack = await yoloOpening(db, userId, prepared, body.visibility, body.acknowledge, now, deps);
+	const prepared = await prepare(db, userId, body.envelope, now, deps, 'publish', {
+		visibility: body.visibility,
+		acknowledge: body.acknowledge
+	});
 	const result = await publishLineage(db, {
 		lineageId: newId(),
 		ownerUserId: userId,
 		visibility: body.visibility,
 		curve: prepared.curve,
 		version: prepared.version,
-		yoloAck: ack,
+		yoloAck: prepared.ack,
 		now
 	});
 	if (!result.ok) throw repoError(result.code);
+	if (prepared.ack) await recordYoloAck(db, userId, now);
 	return announce({ ...result.value, curveId: prepared.curve.id, yolo: prepared.yolo }, deps);
 }
 
@@ -726,26 +804,22 @@ export async function appendCurveVersion(
 	if (lineage.status !== 'active') throw new ApiError(409, 'CONFLICT');
 	if (body.parentVersionId !== lineage.headVersion) throw new ApiError(409, 'HEAD_MOVED');
 	await assertQuota(db, userId, now);
-	const prepared = await prepare(db, userId, body.envelope, now, deps, 'version');
-	const ack = await yoloOpening(
-		db,
-		userId,
-		prepared,
-		lineage.visibility,
-		body.acknowledge,
-		now,
-		deps
-	);
+	const prepared = await prepare(db, userId, body.envelope, now, deps, 'version', {
+		visibility: lineage.visibility,
+		acknowledge: body.acknowledge
+	});
 	const result = await appendVersion(db, {
 		lineageId: lineage.id,
 		ownerUserId: userId,
 		expectedHead: body.parentVersionId,
 		curve: prepared.curve,
 		version: prepared.version,
-		yoloAck: ack,
+		yoloAck: prepared.ack,
 		now
 	});
+	// HEAD_MOVED (or any other failure) spends no acknowledgement slot.
 	if (!result.ok) throw repoError(result.code);
+	if (prepared.ack) await recordYoloAck(db, userId, now);
 	return announce(
 		{
 			lineageId: lineage.id,
@@ -773,7 +847,9 @@ export async function forkCurve(
 	const viewer: Viewer = { userId };
 	const source = await readLineage(db, sourceLineageId, viewer, now, deps);
 	if (!source) {
-		if ((await missing(db, sourceLineageId)).kind === 'gone') throw new ApiError(410, 'GONE');
+		if ((await missing(db, sourceLineageId, deps)).kind === 'gone') {
+			throw new ApiError(410, 'GONE');
+		}
 		throw new ApiError(404, 'NOT_FOUND');
 	}
 	if (source.status !== 'active') throw new ApiError(410, 'GONE');
@@ -784,21 +860,29 @@ export async function forkCurve(
 	if (!view || view.version.lineageId !== source.id) throw new ApiError(404, 'NOT_FOUND');
 	await assertQuota(db, userId, now);
 	const raw = body.envelope ?? envelopeOf(view.version, view.curve, now);
-	const prepared = await prepare(db, userId, raw, now, deps, 'fork');
 	const byLicense = view.version.license === 'CC-BY-4.0';
-	if (byLicense && prepared.version.license !== 'CC-BY-4.0') throw invalidCurve(['env:enum']);
 	const visibility = body.visibility ?? 'private';
-	const ack = await yoloOpening(db, userId, prepared, visibility, body.acknowledge, now, deps);
-	const result = await forkLineage(db, view.version.id, {
-		lineageId: newId(),
-		ownerUserId: userId,
+	const prepared = await prepare(db, userId, raw, now, deps, 'fork', {
 		visibility,
-		curve: prepared.curve,
-		version: prepared.version,
-		yoloAck: ack,
-		now
+		acknowledge: body.acknowledge,
+		...(byLicense ? { license: 'CC-BY-4.0' as const } : {})
 	});
+	const result = await forkLineage(
+		db,
+		view.version.id,
+		{
+			lineageId: newId(),
+			ownerUserId: userId,
+			visibility,
+			curve: prepared.curve,
+			version: prepared.version,
+			yoloAck: prepared.ack,
+			now
+		},
+		yoloOf(deps)
+	);
 	if (!result.ok) throw repoError(result.code);
+	if (prepared.ack) await recordYoloAck(db, userId, now);
 	const info = announce({ ...result.value, curveId: prepared.curve.id, yolo: prepared.yolo }, deps);
 	return {
 		...info,
@@ -837,7 +921,11 @@ export async function retractCurve(
 /**
  * `POST /api/v1/lineages/[id]/restore`: undoes the owner's tombstone. Never touches moderation (a
  * hidden lineage stays hidden); a non-private lineage whose head now passes neither profile is
- * refused, and one whose head is YOLO follows the YOLO rules (`acknowledge`).
+ * refused. One whose head is YOLO follows the YOLO rules (`acknowledge`) while the kill switch is
+ * on; while it is off (YOLO_PUBLICATION, `deps.yoloPublication` absent = 'off') it is restored as
+ * PRIVATE in the same statement (nothing to acknowledge), instead of a 403 the owner could not get
+ * past (a retracted lineage's visibility cannot be changed first). The answer carries the
+ * effective `visibility`.
  */
 export async function restoreCurve(
 	db: D1Database,
@@ -848,24 +936,26 @@ export async function restoreCurve(
 ): Promise<LineageState> {
 	const now = clockOf(deps);
 	const lineage = await ownedLineage(db, lineageId, userId, now, deps);
+	let visibility = lineage.visibility;
 	let ackCurveId: string | null = null;
-	if (lineage.visibility !== 'private') {
+	if (visibility !== 'private') {
 		const head = await headClassOf(db, lineage, now, deps);
-		const ack = await yoloOpening(db, userId, head, lineage.visibility, acknowledge, now, deps);
-		if (ack) ackCurveId = head.curveId;
+		if (head.yolo && yoloOf(deps) !== 'on') {
+			visibility = 'private';
+		} else if (await yoloOpening(db, userId, head, visibility, acknowledge, now, deps)) {
+			ackCurveId = head.curveId;
+		}
 	}
-	const result = await restoreLineage(
-		db,
-		lineage.id,
-		userId,
-		now,
-		ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }
-	);
+	const result = await restoreLineage(db, lineage.id, userId, now, {
+		...(ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }),
+		...(visibility === lineage.visibility ? {} : { visibility })
+	});
 	if (!result.ok) throw repoError(result.code);
+	if (ackCurveId !== null) await recordYoloAck(db, userId, now);
 	return {
 		lineageId: lineage.id,
 		status: 'active',
-		visibility: lineage.visibility,
+		visibility,
 		moderation: lineage.moderation
 	};
 }
@@ -901,6 +991,7 @@ export async function changeVisibility(
 		ackCurveId === null ? {} : { yoloAckCurveId: ackCurveId }
 	);
 	if (!result.ok) throw repoError(result.code);
+	if (ackCurveId !== null) await recordYoloAck(db, userId, now);
 	return {
 		lineageId: lineage.id,
 		status: lineage.status,
@@ -927,7 +1018,7 @@ export async function loadPublishedCurve(
 	if (!isSocialId(lineageId)) return { kind: 'not-found' };
 	const now = clockOf(deps);
 	const summary = await readLineage(db, lineageId, viewer, now, deps);
-	if (!summary) return missing(db, lineageId);
+	if (!summary) return missing(db, lineageId, deps);
 	let version = summary.head;
 	let curve = summary.curve;
 	if (versionId !== undefined && versionId !== null && versionId !== summary.headVersion) {
@@ -936,7 +1027,9 @@ export async function loadPublishedCurve(
 		version = view.version;
 		curve = view.curve;
 	}
-	const counts = (await countsForLineages(db, [summary.id], viewer)).get(summary.id) ?? {
+	const counts = (await countsForLineages(db, [summary.id], viewer, yoloOf(deps))).get(
+		summary.id
+	) ?? {
 		favorites: 0,
 		previewed: 0,
 		installed: 0
@@ -973,10 +1066,10 @@ export async function loadLineageVersions(
 ): Promise<ReadResult<LineageVersions>> {
 	if (!isSocialId(lineageId)) return { kind: 'not-found' };
 	const summary = await readLineage(db, lineageId, viewer, clockOf(deps), deps);
-	if (!summary) return missing(db, lineageId);
+	if (!summary) return missing(db, lineageId, deps);
 	let versions: Awaited<ReturnType<typeof listVersions>>;
 	try {
-		versions = await listVersions(db, summary.id, viewer, page);
+		versions = await listVersions(db, summary.id, viewer, page, yoloOf(deps));
 	} catch (error) {
 		if (error instanceof SocialRepoError) throw repoError(error.code);
 		throw error;

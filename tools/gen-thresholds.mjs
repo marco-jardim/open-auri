@@ -100,8 +100,8 @@ export function computeThresholds(envelope) {
  * `internalExtendedDb` and `outputExtendedDb` are the largest quantized prefix
  * and output peaks with preamp over 20 Hz–48 kHz
  * (`aggregate.peaks.extended.quantizedInternalPeak` and `quantizedOutputPeak`):
- * the `d:prefix-peak-extended` and `e:output-extended` limits, checked once
- * `d7:boost-above-20k` is waived.
+ * the `d:prefix-peak-extended` and `e:output-extended` limits, checked in
+ * every YOLO verdict that relies on a waiver.
  * @param {Envelope} envelope
  * @returns {YoloThresholdValues}
  */

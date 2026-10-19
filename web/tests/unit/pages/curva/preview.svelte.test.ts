@@ -402,15 +402,20 @@ test('reports an approximate preview when the browser refuses 96 kHz', async () 
 	audioConfig.supportedRates = [48000];
 	const { preview, engine } = setup();
 	expect(preview.exact).toBe(true);
+	expect(preview.rate).toBe(96000);
 	await preview.start(neutral, editor);
 	expect(engine.state().exact).toBe(false);
 	expect(preview.exact).toBe(false);
+	// The page counts the skipped and approximated filters above 20 kHz at this rate.
+	expect(preview.rate).toBe(engine.state().rate);
+	expect(preview.rate).not.toBe(96000);
 });
 
 test('reports an exact preview at 96 kHz', async () => {
 	const { preview } = setup();
 	await preview.start(neutral, editor);
 	expect(preview.exact).toBe(true);
+	expect(preview.rate).toBe(96000);
 });
 
 test('the lever pauses: the session, chains and A/B stay, and a press continues them', async () => {

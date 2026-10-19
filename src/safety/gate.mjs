@@ -32,10 +32,9 @@
 //   4. `g:preamp`;
 //   5. per stage, in stage order: `a:<position>` in wire order (b0, b2, -a1,
 //      b1, -a2), then `b:pole-radius`, then `c:section-peak`;
-//   6. `d:prefix-peak`, `d:prefix-peak-full` (YOLO profile only),
-//      `d:prefix-peak-extended` (YOLO, extended checks only),
-//      `e:output-audible`, `e:output-extended` (YOLO, extended checks only),
-//      `e:output-full`.
+//   6. `d:prefix-peak`, `d:prefix-peak-full` (YOLO, with a waiver only),
+//      `d:prefix-peak-extended` (YOLO, with a waiver only), `e:output-audible`,
+//      `e:output-extended` (YOLO, with a waiver only), `e:output-full`.
 // Every comparison is written so that NaN fails (`!(x <= limit)`).
 //
 // UI control ranges are NOT enforced here (that is src/safety/policy.mjs),
@@ -65,14 +64,33 @@
 //   - class 2, waived (YOLO_WAIVABLE): `k:kind-not-allowed`, `d7:*`
 //     (`d7:boost-above-20k` included), `g:preamp`, `a:b0`, `a:b2`, `a:b1`
 //     (feedforward words) and `c:section-peak`.
-// Extended checks (YOLO only, class 1): when the curve has a section that
-// raises `d7:boost-above-20k` (the YOLO profile waives it), every prefix,
-// preamp included, must stay at most the presets' largest prefix peak over
-// 20 Hz–48 kHz (`d:prefix-peak-extended`, YOLO_THRESHOLDS.internalExtendedDb),
-// and the output at most their largest output peak there (`e:output-extended`,
+// The YOLO-only checks apply only when the verdict relies on a waiver: some
+// class-2 reason (any of them, `g:preamp` included) is present. A YOLO curve
+// with no waivable reason is judged exactly like the standard profile (same
+// reasons and metrics, plus the YOLO keys), so YOLO accepts it iff the standard
+// profile does: YOLO is never stricter than the standard profile. A curve
+// that relies on a waiver leaves the standard envelope, so YOLO bounds it with
+// the presets' own out-of-band peaks instead.
+// Extended checks (YOLO with a waiver, class 1): every prefix, preamp included,
+// must stay at most the presets' largest prefix peak over 20 Hz–48 kHz
+// (`d:prefix-peak-extended`, YOLO_THRESHOLDS.internalExtendedDb), and the
+// output at most their largest output peak there (`e:output-extended`,
 // YOLO_THRESHOLDS.outputExtendedDb). Both come from envelope.json
-// (`aggregate.peaks.extended`). Without such a section they are not computed,
-// so YOLO verdicts of every other curve are unchanged.
+// (`aggregate.peaks.extended`). They apply whatever the waiver and the
+// sections' frequencies: out-of-band gain above 20 kHz does not need a section
+// above 20 kHz (an HS boost at 20000 Hz lifts 20–48 kHz as much as one at
+// 20001 Hz). Run only for `d7:boost-above-20k` sections, they left a 1 Hz
+// cliff: a waiver-needing boost at 20000 Hz had its ultrasonic output held to
+// `e:output-full` (2.5 dB), at 20001 Hz to −0.47 dB. A boost at 20000 Hz that
+// needs no waiver is a standard curve and keeps the standard verdict. The
+// presets' extended peaks are their audible peaks (envelope.json), so these
+// limits are the audible ones (within 1e-14 dB) carried up to 48 kHz: a
+// waiver-needing curve over an audible limit inside the band normally reports
+// the extended code too. The standard profile never computes them.
+// `g:preamp` depends on the preamp: for a curve whose bands need no waiver,
+// the YOLO-only checks apply above −0.5 dB and below −25.5 dB (outside the
+// standard range) and not inside it, so its YOLO verdict can accept a preamp
+// inside the range and refuse a lower one below −25.5 dB (see autoPreamp).
 // The classification is an allowlist of waivable codes: any other code blocks.
 // In YOLO, waived reasons leave `reasons` for `waived` (codes) and
 // `waivedReasons` (objects), the result carries `profile: 'yolo'`, and `ok`
@@ -150,9 +168,10 @@ export { THRESHOLDS, PROVENANCE, YOLO_THRESHOLDS } from './thresholds.mjs';
  *   internalExtended?: PrefixPeak,
  *   outputExtended?: PrefixPeak,
  * }} GateMetrics
- * `prefixFull` and `internalFull` (DC–48 kHz prefix peaks) exist in the YOLO
- * profile only; `prefixExtended`, `internalExtended` and `outputExtended`
- * (20 Hz–48 kHz) only in YOLO results that ran the extended checks.
+ * `prefixFull` and `internalFull` (DC–48 kHz prefix peaks), and
+ * `prefixExtended`, `internalExtended` and `outputExtended` (20 Hz–48 kHz, the
+ * extended checks), exist in YOLO results that rely on a waiver only (a
+ * non-empty `waived`): the metrics of every other result are the standard ones.
  * @typedef {{
  *   ok: boolean,
  *   reasons: Reason[],
@@ -190,7 +209,8 @@ export const YOLO_WAIVABLE = Object.freeze([
  * Reason codes that block in every profile (class 1), in reason order. Listed
  * for callers and tests; the gate itself blocks on anything not in
  * {@link YOLO_WAIVABLE}. `d:prefix-peak-full`, `d:prefix-peak-extended` and
- * `e:output-extended` are computed in the YOLO profile only.
+ * `e:output-extended` are computed in the YOLO profile only, when the verdict
+ * relies on a waiver.
  * @type {readonly ReasonCode[]}
  */
 export const HARD_REASONS = Object.freeze([
@@ -835,9 +855,6 @@ export function gate(bands, preampDb, options = {}) {
     return verdict([{ code: 'f:codec', value }], metrics, profile);
   }
   const reasons = policyReasons(snapshot, experimental === true);
-  // The YOLO-only extended checks run only for a curve with a section that
-  // breaks the rule above 20 kHz (the reason YOLO waives).
-  const extended = yolo && reasons.some((r) => r.code === 'd7:boost-above-20k');
   /** @type {number[]} */
   let payload;
   try {
@@ -867,6 +884,13 @@ export function gate(bands, preampDb, options = {}) {
     sections.push(s);
   }
   metrics.sections = sections;
+  // YOLO only: whether the verdict relies on a waiver, i.e. a reason YOLO waives
+  // (k, d7, g:preamp, a:b0/b2/b1, c) is present. Every waivable reason is already
+  // in `reasons` here (the d and e reasons below never are), so this is the final
+  // answer, read without a second standard run. Only then do the YOLO-only checks
+  // (d:prefix-peak-full and the extended checks) apply; without a waiver the
+  // YOLO verdict is the standard one.
+  const waiver = yolo && reasons.some((r) => WAIVABLE.has(r.code));
 
   // Identity sections (OFF) are skipped, as in the reference. The scan grids
   // are only built when more than one section is active (one active section
@@ -895,10 +919,10 @@ export function gate(bands, preampDb, options = {}) {
   const fullScan = new CascadeScan(intervals, 0, FULL_MAX_HZ, scan);
   /** @type {PrefixPeak[] | null} */
   let prefixFull = null;
-  if (yolo) {
-    // YOLO only (d:prefix-peak-full): every prefix over DC–48 kHz. The sections
-    // are added in the same order as below, so the last prefix's scan is the
-    // very scan `outputFull` reads.
+  if (waiver) {
+    // YOLO with a waiver only (d:prefix-peak-full): every prefix over DC–48 kHz.
+    // The sections are added in the same order as below, so the last prefix's
+    // scan is the very scan `outputFull` reads.
     prefixFull = [{ stage: 0, db: preamp, frequencyHz: null }];
     /** @type {Peak | null} */
     let fullPeak = null;
@@ -929,9 +953,11 @@ export function gate(bands, preampDb, options = {}) {
   }
   /** @type {PrefixPeak[] | null} */
   let prefixExtended = null;
-  if (extended) {
-    // YOLO with a section above 20 kHz only (d:prefix-peak-extended,
-    // e:output-extended): every prefix over 20 Hz–48 kHz.
+  if (waiver) {
+    // YOLO with a waiver only (d:prefix-peak-extended, e:output-extended): every
+    // prefix over 20 Hz–48 kHz, whatever the waiver and the sections'
+    // frequencies, so a boost at 20000 Hz that needs a waiver meets the limits
+    // of one at 20001 Hz (no cliff at 20 kHz).
     const extendedScan = new CascadeScan(intervals, EXTENDED_MIN_HZ, EXTENDED_MAX_HZ, scan);
     prefixExtended = [{ stage: 0, db: preamp, frequencyHz: null }];
     /** @type {Peak | null} */
@@ -1073,6 +1099,18 @@ export const YOLO_PREAMP_MAX_DB = 0;
  * rounded down to the grid, then verified with the gate and stepped down by
  * 0.1 dB while refused (the verdict is monotone in the preamp). The bands are
  * read once: every later verification runs on the first verdict's snapshot.
+ *
+ * In YOLO the YOLO-only checks apply only to a verdict that relies on a waiver
+ * (see the header). For bands that need one (k, d7, a:b*, c) that holds at
+ * every preamp and the verdict stays monotone. For bands that need none, only
+ * `g:preamp` can be waived: the YOLO-only checks apply above −0.5 dB and below
+ * −25.5 dB, and inside [−25.5, −0.5] dB the verdict is the standard one. The
+ * verdict is then monotone within each of those three ranges but not across
+ * −25.5 dB (a preamp accepted at −25.5 dB may be refused at −25.6 dB). The rule:
+ * the ranges are searched top-down, each from its own analytic cap (the
+ * standard limits inside the range, the YOLO-only ones too outside it), and
+ * the first accepted preamp is returned. It is the highest grid preamp the
+ * YOLO gate accepts, so it is never below the standard profile's result.
  * @param {readonly Band[]} bands
  * @param {{experimental?: boolean, profile?: GateProfile, storable?: boolean}} [options]
  * @returns {number | null}
@@ -1097,20 +1135,22 @@ export function autoPreamp(bands, options = {}) {
   const snapshot = m.bands;
   const relative = (/** @type {number} */ db) => db - m.quantizedPreampDb;
   const internalPeak = Math.max(0, ...m.prefixAudible.slice(1).map((p) => relative(p.db)));
-  let cap = Math.min(
+  // The standard limits: they apply at every preamp, in every profile.
+  const cap = Math.min(
     THRESHOLDS.internalAudibleDb - internalPeak,
     THRESHOLDS.outputAudibleDb - relative(m.outputAudible.db),
     THRESHOLDS.outputFullDb - relative(m.outputFull.db),
   );
-  if (yolo) {
+  // The YOLO-only limits too, where they apply. The YOLO top verdict (0 dB, so
+  // g:preamp at least) relies on a waiver and carries their metrics; without
+  // them `cap` is still an upper bound, only a less tight one.
+  let yoloCap = cap;
+  if (yolo && m.prefixFull && m.prefixExtended) {
     const internalFullPeak = Math.max(0, ...m.prefixFull.slice(1).map((p) => relative(p.db)));
-    cap = Math.min(cap, YOLO_THRESHOLDS.internalFullDb - internalFullPeak);
-  }
-  if (yolo && m.prefixExtended) {
-    // The extended checks ran (a section above 20 kHz that YOLO allows).
     const extendedPeaks = m.prefixExtended.slice(1).map((p) => relative(p.db));
-    cap = Math.min(
+    yoloCap = Math.min(
       cap,
+      YOLO_THRESHOLDS.internalFullDb - internalFullPeak,
       YOLO_THRESHOLDS.internalExtendedDb - Math.max(0, ...extendedPeaks),
       YOLO_THRESHOLDS.outputExtendedDb - relative(m.outputExtended.db),
     );
@@ -1119,13 +1159,32 @@ export function autoPreamp(bands, options = {}) {
   const floorDb = yolo ? yoloFloorDb : THRESHOLDS.preampMinDb;
   const minStep = Math.round(floorDb * PREAMP_STEPS_PER_DB);
   const maxStep = Math.round(topDb * PREAMP_STEPS_PER_DB);
-  // Slightly optimistic start (Q23 rounding and the dB tolerance can admit a
-  // grid point just above the analytic cap); the gate decides.
-  let step = Math.min(maxStep - 1, Math.floor((cap + 1e-6) * PREAMP_STEPS_PER_DB));
-  if (!(step >= minStep)) return null;
-  for (; step >= minStep; step--) {
-    const preampDb = step / PREAMP_STEPS_PER_DB;
-    if (gateForWrite(snapshot, preampDb, { experimental, profile }).ok) return preampDb;
+  // Preamp ranges (in 0.1 dB steps, searched top-down) over which the set of
+  // checks is fixed, so the verdict is monotone within each. In YOLO, bands
+  // that need a waiver (k, d7, a:b*, c: none depends on the preamp) get the
+  // YOLO-only checks at every preamp: one range. Bands that need none get them
+  // only where g:preamp is waived, above −0.5 dB and below −25.5 dB; inside the
+  // standard range their YOLO verdict is the standard one: three ranges.
+  const rangeTop = Math.round(THRESHOLDS.preampMaxDb * PREAMP_STEPS_PER_DB);
+  const rangeBottom = Math.round(THRESHOLDS.preampMinDb * PREAMP_STEPS_PER_DB);
+  const bandWaiver = (top.waivedReasons ?? []).some((r) => r.code !== 'g:preamp');
+  /** @type {{from: number, to: number, cap: number}[]} */
+  const ranges =
+    yolo && !bandWaiver
+      ? [
+          { from: maxStep - 1, to: rangeTop + 1, cap: yoloCap },
+          { from: Math.min(maxStep - 1, rangeTop), to: Math.max(minStep, rangeBottom), cap },
+          { from: rangeBottom - 1, to: minStep, cap: yoloCap },
+        ]
+      : [{ from: maxStep - 1, to: minStep, cap: yoloCap }];
+  for (const range of ranges) {
+    // Slightly optimistic start (Q23 rounding and the dB tolerance can admit a
+    // grid point just above the analytic cap); the gate decides.
+    let step = Math.min(range.from, Math.floor((range.cap + 1e-6) * PREAMP_STEPS_PER_DB));
+    for (; step >= range.to; step--) {
+      const preampDb = step / PREAMP_STEPS_PER_DB;
+      if (gateForWrite(snapshot, preampDb, { experimental, profile }).ok) return preampDb;
+    }
   }
   return null;
 }

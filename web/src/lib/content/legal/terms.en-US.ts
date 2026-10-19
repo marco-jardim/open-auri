@@ -59,7 +59,7 @@ export const termsEnUS: LegalDocument = {
 		),
 		heading('6. Moderation'),
 		list([
-			'Verified accounts can report content. A curve is hidden automatically when 3 different verified accounts, each at least 3 days old, report it.',
+			'Verified accounts can report content. A curve is hidden automatically when 3 different verified accounts, each at least 3 days old, report it; a curve whose current version is YOLO is hidden with just 2 such accounts.',
 			'Moderators review automatic hiding and may restore, hide or withdraw content, mark curation and ban accounts that breach these terms or the law. Every action is kept in the audit log.',
 			'If a decision affects you, ask for a review through the privacy channel in section 8, including for automated decisions (LGPD, art. 20).',
 			'We may remove content or suspend accounts to comply with a court order or legal obligation.'

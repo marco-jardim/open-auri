@@ -49,7 +49,8 @@ export const POST: RequestHandler = defineApi(
 			targetId: body.targetId,
 			reason: body.reason,
 			note: body.note ?? null,
-			now: Date.now()
+			now: Date.now(),
+			yoloPublication: env.yoloPublication
 		});
 		if (!result.ok) {
 			if (result.code === 'NOT_FOUND') throw new ApiError(404, 'NOT_FOUND');

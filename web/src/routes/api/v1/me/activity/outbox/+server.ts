@@ -29,7 +29,8 @@ export const POST = defineApi<ApiEvent>(
 		const body = await readJson(event.request, OutboxBody, { maxBytes: 32_768 });
 		const results = await recordOutbox(env.db, user.id, body.events, {
 			...(body.actor === undefined ? {} : { actor: body.actor }),
-			claimSecret: env.secrets.betterAuthSecret
+			claimSecret: env.secrets.betterAuthSecret,
+			yoloPublication: env.yoloPublication
 		});
 		return json({ results });
 	}

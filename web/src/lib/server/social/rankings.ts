@@ -23,7 +23,8 @@ import {
 	type PageRequest,
 	type RankingEntry,
 	type RankingMetric,
-	type RankingWindow
+	type RankingWindow,
+	type YoloPublication
 } from '#lib/server/social/types.ts';
 
 export const FEED_SORTS = ['new', 'favorites', 'installs'] as const;
@@ -229,9 +230,14 @@ export interface FeedRequest {
  * `favorites` / `installs` = the materialized ranking of `window`. Private and unlisted lineages
  * never appear (both paths use the repository's public-listing predicate), nor YOLO heads. With
  * `yolo: 'only'`, the newest public lineages with an acknowledged YOLO head instead (`new` only:
- * YOLO is never ranked).
+ * YOLO is never ranked), only while the kill switch `yoloPublication` (ServerEnv; default 'off')
+ * is on: while off, `yolo=only` is an empty page (`items: []`, `nextCursor: null`).
  */
-export async function readFeed(db: D1Database, request: FeedRequest): Promise<FeedPage> {
+export async function readFeed(
+	db: D1Database,
+	request: FeedRequest,
+	yoloPublication: YoloPublication = 'off'
+): Promise<FeedPage> {
 	const { sort } = request;
 	const page: PageRequest = {
 		cursor: request.cursor ?? null,
@@ -241,7 +247,7 @@ export async function readFeed(db: D1Database, request: FeedRequest): Promise<Fe
 	if (sort === 'new') {
 		const list = await listPublicFeed(
 			db,
-			request.yolo === 'only' ? { ...page, yolo: 'only' } : page
+			request.yolo === 'only' ? { ...page, yolo: 'only', yoloPublication } : page
 		);
 		return {
 			sort,

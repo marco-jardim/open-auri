@@ -47,7 +47,7 @@ export const GET = defineApi<ApiEvent>(
 	async ({ event, env, user }) => {
 		const query = readQuery(event.request);
 		try {
-			const page = await listLibrary(env.db, user.id, query);
+			const page = await listLibrary(env.db, user.id, query, env.yoloPublication);
 			return json({ shelf: query.shelf, items: page.items, nextCursor: page.nextCursor });
 		} catch (error) {
 			if (error instanceof SocialRepoError && error.code === 'invalid-cursor') {

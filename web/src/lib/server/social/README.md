@@ -70,9 +70,25 @@ recreated: a version may reference a standard or a YOLO curve, never a rejected 
 Use the predicates of `repo.ts`; never rewrite them.
 
 - Head predicates (0013): `headStandardSql(alias)` = the head curve is standard (`gate_ok = 1`);
-  `headPublishableSql(alias)` = standard, or YOLO (`gate_yolo = 1`) with a `lineage_yolo_acks` row
-  for this lineage and that curve; `headYoloSql(alias)` = the head is YOLO, acknowledged or not
-  (curation refusal). There is no unqualified "gate ok" predicate: every caller chooses.
+  `headPublishableSql(alias, yolo)` = standard, or, only with `yolo` = `'on'`, YOLO
+  (`gate_yolo = 1`) with a `lineage_yolo_acks` row for this lineage and that curve;
+  `headYoloSql(alias)` = the head is YOLO, acknowledged or not (curation refusal). There is no
+  unqualified "gate ok" predicate: every caller chooses.
+- **Kill switch on reads (`YoloPublication`, types.ts).** `headPublishableSql`, `linkableLineageSql`,
+  `readableLineageSql` and `publicYoloLineageSql` take the YOLO_PUBLICATION switch as a parameter,
+  **default `'off'`**, and so do the reads built on them (`getLineageForViewer`,
+  `getVersionForViewer`, `listVersions`, `listPublicFeed`, `forkLineage`, favorites, activity,
+  installed, counts, shares, `isLinkableTombstone`, report targets). While off, no YOLO head is
+  served to anyone but its owner (or an admin), acknowledged or not: not by id (curve, history,
+  `/c/:id`), not in `feed?yolo=only` (an empty page), not as an OG card (404), not as a fork source,
+  not favoritable, reportable or shareable. The routes pass `env.yoloPublication`; a forgotten
+  parameter hides YOLO (fail closed). Turned on again, acknowledged heads are served again (the
+  acknowledgement rows stay). The re-gate priority lists pass `'on'` explicitly (an acknowledged
+  YOLO head must be current before the switch serves it), and the S7 reveal passes `'off'`
+  explicitly (standard heads only, trades never involve YOLO curves).
+- **Packs fail closed.** `setPackItems`, `getPackForViewer` and the pack queries keep the default
+  `'off'` whatever the switch: someone else's YOLO lineage is never added to, nor shown in, a pack
+  (a pack is a list, and lists never show YOLO heads). The owner's own lineages pass as before.
 - `publicLineageSql(alias)`: **publicly listable** = `visibility = 'public'`, `status = 'active'`,
   `moderation = 'visible'`, STANDARD head (`headStandardSql`), owner not banned
   (`"user".banned = 1`) or anonymized. The only lineages that feeds, rankings, profiles, other
@@ -110,9 +126,14 @@ JSON.stringify(THRESHOLDS) + ':' + classifierVersionInput()` (the core's stable 
   the ordinal existed (`v2:<hash>`) have ordinal 0. `GATE_IMPL = 2`: the server classification.
 - **Classification (`checkPublishable`):** the standard write gate runs first with `experimental`
   derived from the curve (HS, LP or HP present, as the editor does), so HS/LP/HP curves within the
-  limits are standard on the server. A curve it refuses is classified by the core's `classifyCurve`
-  (yolo or rejected). The class is never taken from a client. `checkCurve` keeps its old meaning
-  (ok = standard) for the callers that only accept standard curves.
+  limits are standard on the server. A curve it refuses is classified by the core's classification
+  step `classifyWith` (the one behind `classifyCurve`; re-exported with its types by
+  `classify-core.mjs` / `classify-core.d.mts`, since `open-auri/safety` does not export it) on the
+  SAME injected gate, handed the standard verdict already computed: a YOLO curve costs exactly two
+  gate runs (standard + YOLO profile), a curve refused on a reason the classification never waives
+  one, and every run goes through the injected gate (`gateRuns` is exact). The class is never
+  taken from a client. `checkCurve` keeps its old meaning (ok = standard) for the callers that
+  only accept standard curves.
 - **Bump rule:** increase `GATE_IMPL` by one (never reuse or lower it) in the same commit as ANY
   change that can alter a verdict or a class: the core's `gateForWrite`, `classifyCurve`,
   `THRESHOLDS` or `YOLO_THRESHOLDS`, the S1 codec (`decodeS1`/`canonKey`), `levelDb`, the
@@ -145,8 +166,11 @@ JSON.stringify(THRESHOLDS) + ':' + classifierVersionInput()` (the core's stable 
   so no S1 of a rejected head is served by id, by OG or by S7 during the window.
 - **CPU quota:** every attempt that reaches the gate through the curves service (publish, version,
   fork; accepted or rejected) counts toward `DAILY_GATE_ATTEMPT_QUOTA` per user (D1 sliding window,
-  429 `QUOTA_EXCEEDED`), on top of the successful-publication quota. In a library merge, a
-  classification that ran the YOLO profile counts 2 toward `MERGE_GATE_RUNS_MAX`.
+  429 `QUOTA_EXCEEDED`), on top of the successful-publication quota. When the curve's class is
+  already cached under the current gate version, the YOLO rules (403, 409 `YOLO_ACK_REQUIRED`, 429)
+  answer before the attempt is counted. In a library merge, the counting gate wraps every run
+  (a YOLO curve counts 2 toward `MERGE_GATE_RUNS_MAX`) and refuses a run past the budget before it
+  starts, so a request never exceeds it.
 
 ## YOLO publication (`curves.ts`)
 
@@ -157,12 +181,23 @@ JSON.stringify(THRESHOLDS) + ':' + classifierVersionInput()` (the core's stable 
   `FORBIDDEN`, `details.reason = 'account-age'`), `acknowledge: 'yolo'` in the body (409
   `YOLO_ACK_REQUIRED`, `details.waived`) and one of `YOLO_ACKS_DAILY_MAX` (5) acknowledgements per
   sliding day (group `curves.yolo.ack`, 429 `QUOTA_EXCEEDED`). The acknowledgement row is written in
-  the same batch as the write, only while that curve is the lineage's head.
+  the same batch as the write, only while that curve is the lineage's head. The daily slot is only
+  checked before the write (`peek`) and counted once the batch succeeded, so a refused or failed
+  write (409 `HEAD_MOVED`, any repository error) spends none.
+- Restore while `YOLO_PUBLICATION` is off: a non-private lineage whose head is YOLO is restored as
+  **private** in the same statement (nothing to acknowledge); the answer carries the effective
+  `visibility`. (A retracted lineage's visibility cannot be changed first, so a 403 was a dead end.)
 - Moderation: a lineage whose head is YOLO is auto-hidden at `YOLO_AUTO_HIDE_THRESHOLD` (2)
   eligible reporters; the admin queue preview carries `yolo` and `waived`; curation refuses YOLO
   heads (`setCurated`, decision `UNSUPPORTED`).
 - OG: card layout `3` draws a "YOLO" chip; `customMetadata.yolo` is compared by the store; the meta
-  image URL carries `?y=1` and a YOLO curve is never indexable.
+  image URL carries `?y=1` and a YOLO curve is never indexable. A request whose `?y=` does not name
+  the version's current class (`?y=1` on a standard version, none on a YOLO one) is a 302 to the
+  URL of the right class with `cache-control: no-store`, before any R2 read or render
+  (`og/route.ts`), so a URL-keyed cache only ever holds the card of the class its URL names.
+- Data export (`export.ts`): the owner's `lineage_yolo_acks` rows (`lineageId`, `curveId`,
+  `ackedAt`) as `social.yoloAcks`. Deleted lineages take their rows with them (ON DELETE CASCADE);
+  an anonymized public lineage keeps them (they hold no user id).
 - Never listed: feed (except `yolo=only`), rankings, profiles, packs, S6 eligibility, S7 trades and
   the public dump keep `gate_ok = 1`.
 

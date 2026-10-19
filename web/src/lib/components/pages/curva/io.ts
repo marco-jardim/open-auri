@@ -27,7 +27,7 @@ import {
 } from 'open-auri/share';
 import { m } from '#lib/paraglide/messages.js';
 import type { Layer, UrlLike } from './layers.ts';
-import { hasExperimental, verdictFor, type Band, type Curve } from './model.ts';
+import { hasExperimental, hasUltrasonic, verdictFor, type Band, type Curve } from './model.ts';
 import type { Reason } from './reasons.ts';
 import { classOf, exitRefusal } from './yolo.ts';
 
@@ -58,11 +58,6 @@ export function s5Labels(
 			? S5_FORMAT_LABELS
 			: S5_FORMAT;
 	return normalized ? { format, labels: normalized } : { format };
-}
-
-/** Whether a band (not OFF) sits above 20 kHz: Engenharia only. */
-export function hasUltrasonic(bands: readonly Band[]): boolean {
-	return bands.some((band) => band.kind !== 'OFF' && band.freqHz > AUDIBLE_MAX_HZ);
 }
 
 export type IoError =
@@ -130,7 +125,10 @@ function refusedByGate(curve: Curve): IoFailure | null {
 	return refused === null ? null : fail('gate', [...refused.reasons]);
 }
 
-/** Engenharia-only content (HS/LP/HP, a band above 20 kHz) outside Engenharia, or null. */
+/**
+ * Engenharia-only content (HS/LP/HP, a band above 20 kHz: model.ts `hasUltrasonic`, the core's
+ * `isUltrasonic`, a frequency that is not a number counting as above) outside Engenharia, or null.
+ */
 function layerRefusal(bands: readonly Band[], layer: Layer): IoFailure | null {
 	if (layer === 'engenharia') return null;
 	if (hasExperimental(bands)) return fail('experimental-layer');

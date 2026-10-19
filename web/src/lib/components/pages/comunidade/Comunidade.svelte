@@ -6,7 +6,9 @@
 	weight, drawers for sharing, packs and reports (spec §1.5, T13).
 
 	Safety (plan §0.12): nothing here writes to a cable; "Gravar no cabo" hands a copy of the curve to
-	`app.requestWrite`, which opens the checklist (gesture + browser gate). Channel LEDs exist only
+	`app.requestWrite`, which opens the checklist (gesture + browser gate); a YOLO curve (its class,
+	from its own bands) opens the YOLO checklist when Modo YOLO is ready, else the scope offers
+	"Ativar Modo YOLO" (the curve in the editor's Engenharia layer). Channel LEDs exist only
 	while that channel really plays (real meter tap); no decorative meters, no meter skeleton. User
 	text is only interpolated. Without an account browsing and listening work; ONE account card
 	says what needs an account (T9) and each social action says why it is unavailable (T8). Offline
@@ -69,6 +71,7 @@
 		FEED_SORTS,
 		FEED_WINDOWS,
 		browserStorage,
+		channelIsYolo,
 		channelOf,
 		encodeCurve,
 		errorText,
@@ -382,16 +385,27 @@
 		notice = m.comunidade_used({ name: channel.name });
 	}
 
+	/** Modo YOLO is on in this tab (Engenharia) and allows a write (not the free preview). */
+	const yoloReady = $derived(app !== null && app.yolo.enabled && app.yolo.writeBlock() === null);
+
 	function install(channel: Channel) {
 		const curve = curveOf(channel);
 		if (!app || !curve) {
 			notice = m.comunidade_install_unavailable();
 			return;
 		}
+		// Classified at the click, on the exact curve the checklist gets. A YOLO curve with YOLO not
+		// ready: the standard checklist would refuse it; the scope offers "Ativar Modo YOLO" instead.
+		const yolo = channelIsYolo(curve);
+		if (yolo && !yoloReady) {
+			notice = m.yolopub_install_needs_yolo();
+			return;
+		}
 		recordOrigin(channel);
 		listener.stop();
 		// Opens the pre-write checklist only; its confirmation writes (and the gate runs again).
-		app.requestWrite(curve);
+		if (yolo) app.requestWrite(curve, { profile: 'yolo' });
+		else app.requestWrite(curve);
 	}
 
 	// ---- The signed-in user's creations (Total Recall, S7) ---------------------------------------
@@ -640,6 +654,7 @@
 					onuse={useCurve}
 					oninstall={install}
 					onopen={recordOrigin}
+					{yoloReady}
 				/>
 				{#if session.signedIn}
 					<TotalRecall

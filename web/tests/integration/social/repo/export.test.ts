@@ -198,7 +198,8 @@ describe('social export section', () => {
 			sharedWithMe: [],
 			packs: [],
 			reports: [],
-			trades: []
+			trades: [],
+			yoloAcks: []
 		});
 	});
 });

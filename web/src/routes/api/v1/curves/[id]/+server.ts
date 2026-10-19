@@ -10,11 +10,13 @@ export const GET: RequestHandler = defineApi(
 	{ auth: 'public', rateLimit: { group: 'api.curves.read' } },
 	async ({ event, env, user }) => {
 		const versionId = new URL(event.request.url).searchParams.get('v');
+		// While YOLO_PUBLICATION is off, someone else's YOLO head is a 404 (the owner still reads it).
 		const result = await loadPublishedCurve(
 			env.db,
 			event.params.id ?? '',
 			{ userId: user?.id ?? null },
-			versionId
+			versionId,
+			{ yoloPublication: env.yoloPublication }
 		);
 		return readResponse(event.request, result, user === null);
 	}

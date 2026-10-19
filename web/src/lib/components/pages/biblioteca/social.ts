@@ -2,7 +2,7 @@
 // share funnel. Nothing here touches the network or `window` at module load; storage is injected.
 import { decodeS1, S1Error } from 'open-auri/share';
 import type { AccountSummary } from '#lib/components/chrome/account.ts';
-import { curveClassification } from '#lib/gate-verdicts.ts';
+import { curveClassification, type CurveClassification } from '#lib/gate-verdicts.ts';
 import {
 	isSocialApiError,
 	type LibraryMergeItem,
@@ -154,26 +154,75 @@ export function toMergeItem(item: LocalLibraryItem, locale: string): LibraryMerg
  * server refuses it before the gate). Merged lineages are private: YOLO needs no acknowledgement.
  */
 export function mergeWeight(item: Pick<LibraryMergeItem, 's1'>): number {
-	let decoded: ReturnType<typeof decodeS1>;
+	const decoded = decodedOrNull(item.s1);
+	if (decoded === null) return 1;
+	return curveClassification(decoded.bands, decoded.preampDb).class === 'yolo' ? 2 : 1;
+}
+
+/** The decoded S1, or null when it does not decode (the server refuses it before the gate). */
+function decodedOrNull(s1: string): ReturnType<typeof decodeS1> | null {
 	try {
-		decoded = decodeS1(item.s1);
+		return decodeS1(s1);
 	} catch (cause) {
-		if (cause instanceof S1Error) return 1;
+		if (cause instanceof S1Error) return null;
 		throw cause;
 	}
-	return curveClassification(decoded.bands, decoded.preampDb).class === 'yolo' ? 2 : 1;
+}
+
+/** Off-main-thread classifier of the merge weights (workers/classifier.svelte.ts `classify`). */
+export type MergeClassify = (
+	curve: Pick<ReturnType<typeof decodeS1>, 'bands' | 'preampDb'>,
+	signal?: AbortSignal
+) => Promise<CurveClassification>;
+
+export interface MergeOptions {
+	/**
+	 * Classifies each item off the main thread (the gate worker). Without it, each item is
+	 * classified here, one per task: the page yields between items, so a long library never
+	 * blocks it.
+	 */
+	classify?: MergeClassify;
+	signal?: AbortSignal;
+}
+
+/** Lets the page breathe (input, paint) between two items classified on the main thread. */
+function nextTask(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** `mergeWeight`, asynchronously: through `options.classify`, else on the next task. */
+export async function mergeWeightAsync(
+	item: Pick<LibraryMergeItem, 's1'>,
+	options: MergeOptions = {}
+): Promise<number> {
+	const decoded = decodedOrNull(item.s1);
+	if (decoded === null) return 1;
+	if (options.signal?.aborted) {
+		throw new DOMException('Merge cancelled', 'AbortError');
+	}
+	if (options.classify) {
+		const classification = await options.classify(decoded, options.signal);
+		return classification.class === 'yolo' ? 2 : 1;
+	}
+	await nextTask();
+	return mergeWeight(item);
 }
 
 /**
  * Consecutive batches of at most MERGE_BATCH gate runs each (`mergeWeight`): 20 standard items,
- * or fewer when some are YOLO. Every batch has at least one item.
+ * or fewer when some are YOLO. Every batch has at least one item. Asynchronous: each weight goes
+ * through the worker (`options.classify`) or one task at a time (`mergeWeightAsync`), never one
+ * long main-thread run over the whole library.
  */
-export function mergeBatches<T extends Pick<LibraryMergeItem, 's1'>>(items: readonly T[]): T[][] {
+export async function mergeBatches<T extends Pick<LibraryMergeItem, 's1'>>(
+	items: readonly T[],
+	options: MergeOptions = {}
+): Promise<T[][]> {
 	const batches: T[][] = [];
 	let current: T[] = [];
 	let weight = 0;
 	for (const item of items) {
-		const cost = mergeWeight(item);
+		const cost = await mergeWeightAsync(item, options);
 		if (current.length > 0 && weight + cost > MERGE_BATCH) {
 			batches.push(current);
 			current = [];
@@ -197,8 +246,9 @@ export interface MergeOutcome {
 }
 
 /**
- * Sends at most 20 gate runs at a time (`mergeBatches`: a YOLO item counts 2), retrying quota
- * rejections before the next fresh batch.
+ * Sends at most 20 gate runs at a time (`mergeBatches`: a YOLO item counts 2, weighed off the
+ * main thread through `options.classify`, or one task at a time), retrying quota rejections
+ * before the next fresh batch.
  * The API does not distinguish daily quotas from the per-request gate budget: stop and report
  * QUOTA_EXCEEDED after one retry pass makes no progress. Other failed requests stop immediately
  * (only cancellation throws). Transient rejections remain offerable on a later user action.
@@ -206,12 +256,13 @@ export interface MergeOutcome {
 export async function runMerge(
 	api: Pick<SocialApi, 'mergeLibrary'>,
 	items: readonly LibraryMergeItem[],
-	onBatch?: (done: number, total: number) => void
+	onBatch?: (done: number, total: number) => void,
+	options: MergeOptions = {}
 ): Promise<MergeOutcome> {
 	const report: MergeReport = { created: [], duplicates: [], rejected: [], conflicts: [] };
 	let error: SocialErrorCode | null = null;
 	let sent = 0;
-	batches: for (const fresh of mergeBatches(items)) {
+	batches: for (const fresh of await mergeBatches(items, options)) {
 		let batch = fresh;
 		let retrying = false;
 		let quotaRejected: MergeReport['rejected'] = [];

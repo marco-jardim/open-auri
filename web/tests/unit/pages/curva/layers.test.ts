@@ -121,4 +121,12 @@ describe('layer model', () => {
 		expect(hasUltrasonic([{ kind: 'LP', freqHz: 20001, qFactor: 0.7 }])).toBe(true);
 		expect(hasUltrasonic([])).toBe(false);
 	});
+
+	test('one hasUltrasonic: the import layer check uses the core rule (NaN counts as above)', async () => {
+		const io = await import('#lib/components/pages/curva/io.ts');
+		expect(Object.keys(io)).not.toContain('hasUltrasonic');
+		const nan: Band = { kind: 'PK', freqHz: Number.NaN, gainDb: -3, qFactor: 1 };
+		expect(hasUltrasonic([nan])).toBe(true);
+		expect(hasUltrasonic([{ kind: 'PK', freqHz: 20000, gainDb: -3, qFactor: 1 }])).toBe(false);
+	});
 });
