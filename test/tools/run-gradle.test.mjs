@@ -79,7 +79,7 @@ test('selects the correct Gradle and Capacitor executable on Windows, Linux and 
   for (const env of [{}, { ComSpec: 'custom-cmd.exe' }]) {
     assert.deepEqual(gradleCommand('win32', args, env), {
       command: env.ComSpec || 'cmd.exe',
-      args: ['/d', '/s', '/c', 'gradlew.bat', ...args],
+      args: ['/d', '/s', '/c', '.\\gradlew.bat', ...args],
     });
     assert.deepEqual(capSyncCommand('win32', env), {
       command: env.ComSpec || 'cmd.exe',

@@ -48,7 +48,7 @@ export function parseArgs(argv) {
 }
 
 /**
- * Batch files need cmd.exe on Windows with Node 24. Keep each argument separate, and allow
+ * Batch files need cmd.exe on Windows with Node 24. The wrapper is called as .\gradlew.bat, a\n * qualified path, because cmd.exe skips the current directory when NoDefaultCurrentDirectoryInExePath\n * is set (sandboxed runners set it). Keep each argument separate, and allow
  * only characters that cannot introduce cmd.exe quoting, expansion or extra commands.
  * @param {string} platform
  * @param {string[]} args
@@ -59,7 +59,7 @@ export function gradleCommand(platform, args, env) {
     throw new Error('Invalid Gradle argument: use only [A-Za-z0-9_.:=@+/,-].');
   }
   return platform === 'win32'
-    ? { command: env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', 'gradlew.bat', ...args] }
+    ? { command: env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', '.\\gradlew.bat', ...args] }
     : { command: './gradlew', args: [...args] };
 }
 
