@@ -190,3 +190,6 @@ test-results/
 *.keystore
 *.pepk
 keystore.properties
+
+# Vitest browser-mode failure attachments
+/web/.vitest/

@@ -18,6 +18,8 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { browser } from '$app/env';
+	import { page } from '$app/state';
 	import { PRESETS_BY_ID } from 'open-auri/catalog';
 	import Deferred from '#lib/components/pages/lazy/Deferred.svelte';
 	import { gateForWrite, isExperimentalKind } from 'open-auri/safety';
@@ -25,6 +27,17 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { JournalEntry } from '#lib/cable/types.ts';
+	import { getNativeCableState } from '#lib/cable/native-state.svelte.ts';
+	import { isNativeAndroid, NativeHIDDevice } from '#lib/cable/native/index.ts';
+	import {
+		ANDROID_PLAY_LIVE,
+		ANDROID_PLAY_URL,
+		ANDROID_RELEASES_URL
+	} from '#lib/cable/android-links.ts';
+	import AndroidAppCallout from '#lib/components/cable/AndroidAppCallout.svelte';
+	import AndroidUntestedNotice from '#lib/components/cable/AndroidUntestedNotice.svelte';
+	import UsbDiagnostics from './UsbDiagnostics.svelte';
+	import { LAYER_PARAM, parseLayer } from '../curva/layers.ts';
 	import { caboProfile, loadDecision, type LoadedEntry } from './load-entry.ts';
 	import { hasUltrasonicBands, lampsFromGate } from '#lib/cable/checklist.ts';
 	import { curveSignature, neutralCurve } from '#lib/state/model.ts';
@@ -73,6 +86,19 @@
 		curve.source.startsWith('preset:') ? PRESETS_BY_ID[curve.source.slice(7)] : null
 	);
 	const cable = $derived(app?.cableState ?? null);
+	const nativeCable = getNativeCableState();
+	const native = $derived(nativeCable.result);
+	const inApp = $derived(native.kind !== 'none');
+	const updateUrl = ANDROID_PLAY_LIVE ? ANDROID_PLAY_URL : ANDROID_RELEASES_URL;
+	// Cabo previously had no layer-specific controls. Reuse Curva's URL layer, not a new setting.
+	const engineering = $derived(
+		inApp && browser && parseLayer(page.url?.searchParams.get(LAYER_PARAM)) === 'engenharia'
+	);
+	const nativeDevice = $derived(
+		cable?.connection === 'connected' && cable.device instanceof NativeHIDDevice
+			? cable.device
+			: null
+	);
 	const entries = $derived(app?.state.journal.entries ?? []);
 	const last = $derived(entries.at(-1));
 	const encoder = $derived(encoderData(curve));
@@ -233,6 +259,8 @@
 <Tour page="cabo" autoOpen={tourAutoOpen} />
 
 <div class="room">
+	<AndroidUntestedNotice kind={native.kind} presentation="banner" />
+	<AndroidAppCallout inApp={inApp || isNativeAndroid()} />
 	<LazyArt load={() => import('#lib/components/art/CaboArt.svelte')} />
 	<div class="intro">
 		<div>
@@ -251,7 +279,31 @@
 			<Lamp on={app !== null} />{m.cabo_power()}
 		</div>
 
-		<RackUnit number="U1" title={m.cabo_interface()} model="OA-01 · WebHID" silver>
+		<RackUnit
+			number="U1"
+			title={m.cabo_interface()}
+			model={inApp ? m.android_native_interface() : 'OA-01 · WebHID'}
+			silver
+		>
+			{#if native.kind === 'native'}
+				<p class="note" role="status">
+					{m.android_native_status({ version: native.appVersion ?? '' })}
+				</p>
+			{:else if native.kind !== 'none'}
+				<div class="android-policy" role="status">
+					<p>
+						{native.kind === 'native-outdated'
+							? m.android_native_outdated()
+							: native.kind === 'native-write-disabled'
+								? m.android_native_write_disabled()
+								: m.android_native_no_usb_host()}
+					</p>
+					{#if native.kind !== 'native-no-usb-host'}
+						<a href={updateUrl}>{m.android_update_app()}</a>
+					{/if}
+					<p>{m.cabo_simulation()}</p>
+				</div>
+			{/if}
 			<div class="interface">
 				<div data-tour="cabo-connect">
 					<p class="plate">CB5100 · 0xCB · VID 0x3302 · PID 0x8902</p>
@@ -280,15 +332,25 @@
 							disabledReason={connectReason}
 							onclick={() => app?.cable.connect()}
 						>
-							{realMode ? m.cabo_connect_real() : m.cabo_connect_simulated()}
+							{native.kind === 'native'
+								? m.android_native_connect()
+								: realMode
+									? m.cabo_connect_real()
+									: m.cabo_connect_simulated()}
 						</Button>
 					</div>
 					<p class="mode">{realMode ? m.cabo_real() : m.cabo_simulation()}</p>
-					<p class="note">{realMode ? m.cabo_fux_snippet_real() : m.cabo_fux_snippet_sim()}</p>
-					<code class="code"
-						>navigator.hid.<span class="fn">requestDevice</span
-						>{'({ filters: [{ vendorId: 0x3302, productId: 0x8902 }] })'}</code
-					>
+					<p class="note">
+						{native.kind === 'native'
+							? m.android_native_picker_hint()
+							: realMode
+								? m.cabo_fux_snippet_real()
+								: m.cabo_fux_snippet_sim()}
+					</p>
+					{#if !inApp}<code class="code"
+							>navigator.hid.<span class="fn">requestDevice</span
+							>{'({ filters: [{ vendorId: 0x3302, productId: 0x8902 }] })'}</code
+						>{/if}
 					<span class="tag-strip">{m.cabo_fux_tag_strip()}</span>
 					{#if cable?.device}
 						<Button
@@ -303,7 +365,7 @@
 				<div class="machine">
 					<StateDiagram current={node} written={lastWritten(cable)} labels={nodeLabels} />
 					<p class="state-readout" role="status">{nodeLabels[node]}</p>
-					{#if rackStatus === 'unsupported'}
+					{#if rackStatus === 'unsupported' && !inApp}
 						<p class="note warn">{m.cabo_fux_unsupported()}</p>
 					{/if}
 				</div>
@@ -318,7 +380,8 @@
 					</div>
 				</dl>
 			</div>
-			<p class="note interface-note">{m.cabo_support()}</p>
+			{#if !inApp}<p class="note interface-note">{m.cabo_support()}</p>{/if}
+			<UsbDiagnostics {engineering} {inApp} device={nativeDevice} />
 			{#if cable?.error === 'request-failed' || cable?.error === 'restore-failed'}<p role="status">
 					{m.cabo_connection_error()}
 				</p>{/if}
@@ -622,6 +685,20 @@
 		margin: 0 0 14px;
 	}
 	/* U1 */
+	.android-policy {
+		margin-bottom: 20px;
+		padding: 12px;
+		border: 1px solid #74521b;
+		border-radius: 4px;
+		color: #3f2b0b;
+		background: #fff1d0;
+	}
+	.android-policy a {
+		display: inline-flex;
+		align-items: center;
+		min-height: 48px;
+		color: inherit;
+	}
 	.interface {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) minmax(0, 0.9fr);

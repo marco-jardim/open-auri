@@ -9,6 +9,7 @@
 	// FUX.2: no static import of the runtime (#lib/app/index.ts re-exports createClientApp).
 	import { setAppContext } from '#lib/app/context.svelte.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
+	import { mountNativeCable, setNativeCableState } from '#lib/cable/native-state.svelte.ts';
 	import {
 		hasInflightMarker,
 		isInstrumentRoute,
@@ -69,6 +70,7 @@
 	// The toast region exists before the runtime: the app gets this store injected (FUX.2).
 	const toasts = createToastStore();
 	const context = setAppContext();
+	const nativeCable = setNativeCableState();
 	const app = $derived(context.client);
 	const meta = $derived(getPageMeta(page.route.id ?? page.url.pathname));
 	const homage = $derived(getFooterHonoree(meta));
@@ -83,6 +85,9 @@
 	const updatePrompt = new LazyModule(() => import('#lib/pwa/UpdatePrompt.svelte'));
 	const policyBannerIsland = new LazyModule(
 		() => import('#lib/components/legal/PolicyBanner.svelte')
+	);
+	const androidNotice = new LazyModule(
+		() => import('#lib/components/cable/AndroidUntestedNotice.svelte')
 	);
 
 	function islandFailed(error: unknown): void {
@@ -217,8 +222,10 @@
 		app?.requestRescue();
 	}
 
+	let startingRuntime = false;
 	function startRuntime(): void {
-		if (!browser || context.client || context.status === 'loading') return;
+		if (!browser || destroyed || startingRuntime || context.client || context.status === 'loading')
+			return;
 		loadSocialRuntime().catch((error: unknown) => console.warn('Social prefetch failed', error));
 		// Raced against SOCIAL_ATTACH_TIMEOUT_MS: a stalled social chunk never holds the cable and
 		// rescue chrome back; the app is published without social and the wiring may land later.
@@ -226,8 +233,16 @@
 			prepare: (client: ClientApp) => socialAttach.prepare(client),
 			optional: true
 		};
-		context.mount({ toasts }, mountOptions).then(
+		// Detection must precede creation: the cable service fixes its mode at construction.
+		// The helper is synchronous on desktop and never loads the native bridge there.
+		startingRuntime = true;
+		mountNativeCable(
+			(options) => (destroyed ? Promise.resolve(null) : context.mount(options, mountOptions)),
+			toasts,
+			nativeCable
+		).then(
 			(client) => {
+				startingRuntime = false;
 				if (!client) return;
 				client.start().catch((error: unknown) => {
 					console.error('App restore failed', error);
@@ -237,6 +252,7 @@
 				if (isInstrumentRoute(page.route.id)) whenIdle(() => checklist.request());
 			},
 			(error: unknown) => {
+				startingRuntime = false;
 				console.error('App runtime failed to load', error);
 				toasts.push(m.layout_error_generic(), { tone: 'error' });
 			}
@@ -285,6 +301,9 @@
 	const showPolicy = $derived(policyBanner !== null && policyBanner.seen !== POLICY_VERSION);
 	$effect(() => {
 		if (showPolicy) policyBannerIsland.request();
+	});
+	$effect(() => {
+		if (nativeCable.result.kind !== 'none') androidNotice.request(islandFailed);
 	});
 
 	function onChecklistFailed(error: unknown): void {
@@ -645,6 +664,10 @@
 		/>
 	{/if}
 	<Toast store={toasts} />
+	{#if nativeCable.result.kind !== 'none' && androidNotice.current}
+		{@const AndroidNotice = androidNotice.current}
+		<AndroidNotice kind={nativeCable.result.kind} />
+	{/if}
 	{#if social && syncReady}
 		{@const SocialSync = social.runtime.SocialSync}
 		<SocialSync
