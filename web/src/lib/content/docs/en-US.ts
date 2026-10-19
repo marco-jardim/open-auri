@@ -1,6 +1,24 @@
 import { legalNotice } from './legal-notice.ts';
 import type { DocsContent } from './types.ts';
 
+// BEGIN Android validation state ------------------------------------------------------------
+// The only place in this file that says whether writing from the Android app was validated on
+// a real cable (section `android-validacao`). While ANDROID_WRITE_VALIDATED is false
+// (src/lib/cable/android-status.ts), the first two entries are the exact Anexo G.1 title and
+// text of docs/plans/2026-10-18-android-capacitor-plano.md. At F5, replace this whole block
+// with the Anexo G.6 text (date, number of devices and report). pt-BR.ts has the twin block.
+const androidValidationState: readonly string[] = [
+	'Writing from the app has not been tested on a cable yet',
+	"The Android app has not been tested with a real Auri cable yet, so writing is not guaranteed to work. It uses the same protocol and sends the same bytes as the desktop site and Kuba's official page (automated tests check this byte by byte). Only the path to USB is different. In theory, the result should be the same. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge).",
+	'What the tests guarantee: for each curve, the app builds the same nine data reports and the same commit, byte for byte, that the desktop site and the official page send. Automated tests compare those bytes with the reference for the 11 official presets, and before the commit the app also checks every sequence with an extra guard.',
+	'What has not been verified yet: the physical path to USB. The Android driver, the OTG connection, the phone’s power and how the cable receives reports along this path are only confirmed by writing to and measuring a real cable. Until then, every write from the app asks for one more checklist item.'
+];
+// END Android validation state --------------------------------------------------------------
+
+const androidReportHref =
+	'https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml';
+const androidReleasesHref = 'https://github.com/marco-jardim/open-auri/releases/latest';
+
 export const enUS: DocsContent = {
 	locale: 'en-US',
 	title: 'Protocol 0xCB and its limits',
@@ -243,6 +261,79 @@ export const enUS: DocsContent = {
 				'When both have scored, the trade is revealed: you see your partner’s nickname, their curve when it opens by link, and both scores. Unrevealed trades expire 72 h after joining the queue or after pairing; while waiting, you can cancel.'
 			],
 			links: [{ label: 'Community', href: '/comunidade' }]
+		},
+		{
+			id: 'android',
+			title: 'Android app',
+			paragraphs: [
+				'The open-auri Android app writes curves to the Auri cable over the phone’s USB, which the phone browser cannot do: Chrome for Android has no WebHID. The app opens the open-auri.com site itself and replaces only the last stretch, down to USB, with a native transport. The editor, presets, library, account and community are the same as on the site.',
+				'Where to download: on Google Play once the listing is approved, and on GitHub Releases, where every version ships the APK, the AAB and a SHA256SUMS.txt file. Both sources use the same signature, so you can switch from one to the other without uninstalling.',
+				'Requirements: Android 8 or newer, USB host (OTG) support and an up-to-date Android System WebView. With an old WebView, the app shows a screen asking you to update it. Without USB host, the site says the device does not support OTG and stays in simulated mode.'
+			],
+			links: [{ label: 'Download from GitHub Releases', href: androidReleasesHref }]
+		},
+		{
+			id: 'android-validacao',
+			title: 'App validation state',
+			paragraphs: androidValidationState,
+			links: [{ label: 'Report result', href: androidReportHref }]
+		},
+		{
+			id: 'android-resgate',
+			title: 'How to recover with Neutral',
+			paragraphs: [
+				'If the sound seems off after writing from the app, lower the volume and write Neutral from the app itself, on the cable page. Neutral is 10 × OFF, exact identity, with −0.5 dB preamp: the cable plays again with no equalization.',
+				'If that does not fix it, write Neutral from the site on a computer with Chrome or Edge: connect the cable, authorize WebHID and use Neutral on the cable page. This path does not go through the app.',
+				'Then report the result, whether it worked or not. The GitHub form asks for the device, Android version, app version, WebView version, install source (Play or GitHub), the USB diagnostics JSON and what happened. Every report helps validate the app on more devices.'
+			],
+			links: [{ label: 'Report result', href: androidReportHref }]
+		},
+		{
+			id: 'android-usb',
+			title: 'USB permission in the app',
+			paragraphs: [
+				'On the cable page, Connect lists the Auri cables attached to the phone (VID 0x3302, PID 0x8902) and Android asks whether open-auri may access the USB device. Without that permission, nothing is sent. With more than one cable, an app picker takes the place of the WebHID picker.',
+				'What stays the same: the same gate v2, the same checklist and the same journal as the site, with the same codec and the same bytes. Nothing is written without your gesture on Write to cable, and disconnecting during a write interrupts it with no commit.',
+				'What changes: only the final stretch, from the site to USB, runs through the app’s native code, with an extra guard that checks every sequence before the commit. Downloads open the Android file picker, and external links open in the system browser. The app asks only for internet access and, when you connect the cable, for USB.'
+			]
+		},
+		{
+			id: 'android-diagnostico',
+			title: 'USB diagnostics',
+			paragraphs: [
+				'USB diagnostics live in the Engineering layer and exist only in the app. They show the device, configuration and HID report descriptors, the chosen interface and endpoint, and the computed output report size.',
+				'Copy puts all of this on the clipboard as JSON, ready to paste into a result report. Nothing is sent to the server: the JSON leaves the device only if you paste it somewhere.'
+			],
+			links: [{ label: 'Report result', href: androidReportHref }]
+		},
+		{
+			id: 'android-iphone',
+			title: 'Why there is no iPhone version',
+			paragraphs: [
+				'No public API lets an iPhone app send the cable the HID output report that writing needs, and Safari has no WebHID. On an iPhone, use the site to edit, compare and preview; to write, use a computer with Chrome or Edge or an Android phone with the app.'
+			],
+			items: [
+				'CoreHID, Apple’s HID API, exists only on macOS 15 or newer.',
+				'External Accessory only talks to accessories in Apple’s MFi program.',
+				'USBDriverKit runs only on iPads with an M-series chip and needs an entitlement granted by Apple.'
+			]
+		},
+		{
+			id: 'android-assinatura',
+			title: 'Verifying the signature',
+			paragraphs: [
+				'Every version of the app is signed with the same key on Google Play and on GitHub. Each release publishes the SHA-256 of the APK and the AAB, also in the SHA256SUMS.txt file, and the SHA-256 fingerprint of the signing certificate, which is the same for both sources.',
+				'To check an APK downloaded from GitHub, compute the file’s SHA-256 (with sha256sum or Get-FileHash, for example) and compare it with SHA256SUMS.txt. To check the certificate, run apksigner verify --print-certs on the APK and compare the certificate’s SHA-256 with the published fingerprint. If anything does not match, do not install it.'
+			],
+			links: [{ label: 'Releases and SHA256SUMS.txt', href: androidReleasesHref }]
+		},
+		{
+			id: 'android-privacidade',
+			title: 'App privacy',
+			paragraphs: [
+				'The app collects nothing beyond what the site already collects: it opens the same open-auri.com, under the same privacy policy rules, and adds no collection of its own.',
+				'Curves, the journal and settings stay in the app’s storage on this device, as they would in the browser, and are left out of Android backups. USB diagnostics and the bytes sent to the cable never leave the device. In your account’s session list, sessions opened from the app show as “App Android”.'
+			]
 		}
 	],
 	glossary: [
