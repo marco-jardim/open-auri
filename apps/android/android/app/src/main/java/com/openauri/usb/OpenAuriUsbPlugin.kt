@@ -427,6 +427,8 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
         val failure: Exception? = try {
             val session = synchronized(lock) { sessions[key] }
                 ?: throw UsbBridgeException(ErrorCodes.USB_NOT_OPEN, "$key is not open")
+            // An open handle outlives a revoked grant: check it again before the guard and any I/O.
+            if (!env.backend.hasPermission(attachment.device)) throw revoked(session)
             val decision = guards.onReport(key, reportId, data, env.clock())
             if (decision is FrameGuard.Decision.Reject) {
                 throw UsbBridgeException(ErrorCodes.USB_GUARD_REJECTED, decision.reason.message)
@@ -440,6 +442,23 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
         }
         synchronized(lock) { sending.remove(key) }
         if (failure == null) call.resolve() else reject(call, failure)
+    }
+
+    /**
+     * Worker thread: the USB permission of [session] was revoked. Its session is closed, so the
+     * page gets `USB_NOT_OPEN` until it reopens the device under a new permission. The caller
+     * resets the guard. A failed close is attached to the returned `USB_PERMISSION_DENIED`.
+     */
+    private fun revoked(session: Session): UsbBridgeException {
+        val key = session.attachment.key
+        val denied = UsbBridgeException(ErrorCodes.USB_PERMISSION_DENIED, "USB permission for $key was revoked")
+        synchronized(lock) { sessions.remove(key) }
+        try {
+            closeConnection(session)
+        } catch (closeError: Exception) {
+            denied.addSuppressed(closeError)
+        }
+        return denied
     }
 
     /** Worker thread: frames [data], claims the HID interface and sends it on the session's route. */
