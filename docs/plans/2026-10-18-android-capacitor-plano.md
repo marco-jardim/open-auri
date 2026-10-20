@@ -176,7 +176,7 @@ O objetivo é um app Android que grava curvas no cabo Auri pelo USB, coisa que o
 
 **Decisão do mantenedor (2026-10-18):** o app é lançado antes de ser testado num cabo real, porque o cabo vai demorar. A gravação usa o mesmo protocolo e os mesmos bytes de dados do site no desktop e da página oficial; testes automáticos provam isso byte a byte. O que não está validado é o caminho físico até o USB. Enquanto não houver validação:
 - o app mostra um aviso explícito (Anexo G) e exige o aceite dele no checklist de cada gravação;
-- o site consegue desligar ou restringir a gravação pelo app com um deploy, sem atualizar o app;
+- o site consegue desligar ou restringir a gravação pelo app com um deploy, sem atualizar o app (aparelhos cuja checagem do deploy falha: só quando ela volta a funcionar, ver RF15);
 - o usuário pode relatar o resultado por um issue template, levando o JSON do diagnóstico USB.
 
 | Fase | Subobjetivo |
@@ -259,7 +259,7 @@ Pesquisa externa (2026-10-18; fontes na seção 4.5):
   - item obrigatório no checklist de cada gravação pelo app.
 
   Sai só com deploy do site (F5), sem nova versão do app.
-- **RF15** · Controle remoto: `ANDROID_WRITE_POLICY = { enabled, blockedAppVersions }` no site desliga ou restringe a gravação pelo app com um deploy, sem atualizar o app.
+- **RF15** · Controle remoto: `ANDROID_WRITE_POLICY = { enabled, blockedAppVersions }` no site desliga ou restringe a gravação pelo app com um deploy, sem atualizar o app. Vale para aparelhos online; um aparelho cuja checagem do deploy falha (offline, `version.json` bloqueado, erro do servidor) só é alcançado quando ela volta a funcionar, porque pode gravar com a última confirmação da mesma versão da página (FX4-C, §14).
 - **RF16** · "Relatar resultado": link no aviso e no Diagnóstico USB para o issue template `D:\git\open-auri\.github\ISSUE_TEMPLATE\android-cable-report.yml`. O template pede aparelho, versão do Android, versão do app, o JSON do diagnóstico e o resultado.
 - **RF17** · Distribuição na Google Play e no GitHub Releases com a **mesma assinatura** (chave própria enviada ao Play App Signing), de modo que o usuário possa trocar de fonte sem desinstalar. Pacote `com.openauri.app` registrado na verificação de desenvolvedor do Android com o SHA-256 da chave.
 
@@ -2412,7 +2412,7 @@ Ver a seção 13. O orquestrador agrupa as perguntas no PF1, no PF4 e no PF5. Os
 - gasto de flash pela ponte;
 - commit sem os 9 reports válidos;
 - gravar pelo app sem aceitar o aviso;
-- política remota contornável;
+- política remota contornável (exceção aceita: com a checagem falhando, a gravação segue com a última confirmação da mesma versão da página, FX4-C; confirmar que o registro é apagado com deploy mais novo, `native-write-disabled` e página de outra versão, e que nenhuma outra via contorna a política);
 - download para fora do SAF;
 - vazamento de cookie;
 - segredo em log, artefato ou job fora do Environment;
@@ -2466,7 +2466,7 @@ Os achados viram FXGH.k (0.5).
 | Assinatura diferente entre Play e GitHub | Baixa | Médio | Chave própria no Play App Signing antes da primeira release em produção (4.6); verificação de fingerprint na P6; alternativa documentada |
 | Revisão da Play recusa (wrapper, aviso, hardware) | Média | Médio | Ficha deixa clara a função nativa; acesso ao app explica o cabo; QP ataca a ficha; resposta a recurso preparada pelo agente |
 | Merge ou deploy automático leva regressão à produção | Baixa | Alto | 0.21: CI verde no HEAD, QA PASS, staging e e2e antes de produção, smoke e rollback imediato |
-| Política remota não alcança app offline com site antigo em cache | Baixa | Médio | A navegação ao vivo nunca vem do cache (`D:\git\open-auri\web\src\service-worker.ts:92-93`); comportamento offline documentado no runbook; Q2 confirma |
+| Política remota não alcança app offline com site antigo em cache | Média | Médio | Com FX4-B o app mostra offline o shell em cache do service worker e com FX4-C (decisão do mantenedor) a gravação nativa segue quando a checagem falha, então gravar offline a partir de página em cache é possível. Mitigação: só com a última confirmação ao vivo da mesma versão da página; o registro é apagado com deploy mais novo (`newer` ou `updated` do Kit), com `native-write-disabled` e ao iniciar página de outra versão; aviso com a data e `freshness` no diário. Resta o aparelho que nunca viu o deploy de bloqueio: só é alcançado quando a checagem volta a funcionar (runbook, `docs/seguranca.md`) |
 | `server.url` não recomendado em produção | Média | Alto | Decisão A documentada; origem fixada; `verifyCapacitorConfig`; teste em emulador; fallback B está avaliado e é inviável sem reescrever o site |
 | CSP com nonce bloqueia a injeção do bridge em WebView antiga | Média | Alto | `DOCUMENT_START_SCRIPT` obrigatório; tela de atualização; teste em emulador contra a CSP real |
 | Turnstile não funciona na WebView | Baixa a média | Alto (login e cadastro) | Confirmação no PF1.6; smoke de login no Anexo F; se falhar, interrupção (0.1 a) |
@@ -2562,6 +2562,7 @@ Os achados viram FXGH.k (0.5).
 | 2026-10-20 | T4.1 (merge e deploy) | concluído | merge `b7d9ac2` (PR #55) | CI e CodeQL verdes em `main`; GitGuardian 38436941 falso positivo, sem ser check obrigatório. Deploy pela máquina do operador (`tools/deploy.mjs`; o `deploy.yml` não tem `CLOUDFLARE_API_TOKEN`), `PUBLIC_POLICY_EFFECTIVE_DATE` 2026-10-20. Staging: deploy, smoke e e2e `staging` 38/38 (com `STAGING_SIGNUP_ENABLED=true`, como no `.env`). Produção: bookmark do Time Travel antes das migrações `000002e5-00000004-0000510a-84625a6a9b3a69c624cfe667e83539e9`, migração 0014 aplicada, smoke verde, `assetlinks.json` com o certificado do app, HSTS/CSP/XFO/XCTO presentes, `/_app/version.json` `no-cache`, política 2026-10-20 no ar. Dry run do `android-release.yml` em `main` verde (run 39446055848). Falta a tag `android-v1.0.0`, criada pelo mantenedor (ruleset) |
 | 2026-10-20 | T4.1 (release) | concluído | tag `android-v1.0.0` → `b7d9ac2`, run 39453760614 | tag criada e assinatura aprovada pelo orquestrador a pedido explícito do mantenedor (exceção registrada ao runbook, que reserva a aprovação ao humano). https://github.com/marco-jardim/open-auri/releases/tag/android-v1.0.0 com APK, AAB, `SHA256SUMS.txt` (conferido), `release-manifest.json` (versionCode 10000, `hardwareValidated: false`) e aviso G.5 nas notas. APK: v2/v3, certificado `fb46e3…61d0` = assetlinks; `aapt2`: `com.openauri.app` 10000/1.0.0, min 26, target 36. AAB: `jar verified`, certificado de upload `59:1A:…:04:16`. Callout no `/cabo` de produção (Pixel 7) com a linha do aviso e o link `releases/latest`. README com o link final e o certificado. Minor: o workflow publica a release sem título (corrigido à mão nesta; F4, limpeza) |
 | 2026-10-20 | P1 | parcial | `f370205` | conta pessoal ativa, anterior a 2023-11-13 (isenta do teste fechado); verificação de identidade pendente, publicação bloqueada até concluir |
+| 2026-10-20 | FX4-C | decisão do mantenedor | `66bf188` (+ correções do Q4 r1) | Decisão do mantenedor: gravação nativa offline com last-good otimista (sem validade). Se a checagem de `/_app/version.json` falhar, a gravação segue só com a última confirmação ao vivo da mesma versão da página (`oa.cable.nativeLastGood.v1`), com aviso e registro no diário (`freshness`); o registro é apagado com deploy mais novo (checagem `newer` ou `updated` do Kit), com `native-write-disabled` e ao iniciar página de outra versão. Substitui o fail closed do Q2 m3; o controle remoto só alcança aparelho com checagem falhando quando ela volta a funcionar |
 
 **PF4 (2026-10-20):**
 - `doctor:android` OK (emulador e imagem opcionais ausentes na máquina local); release dry run verde local e no PR.
