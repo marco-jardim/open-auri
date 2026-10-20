@@ -1808,7 +1808,7 @@ Os achados viram FX3.k (0.5).
 1. Q3 e QP em PASS; `git status` limpo; HEAD registrado.
 2. Pergunta única ao humano, com estas confirmações (se faltar alguma, interrupção 0.1 c):
    - H-KEY: as duas chaves criadas conforme `D:\git\open-auri\docs\operacao\runbooks\android-release.md`, backup feito e fingerprint SHA-256 da chave do app informado;
-   - H-ENV: Environment `android-release` criado com aprovação obrigatória e restrito a tags `android-v*`, secrets das duas chaves configurados, regra de proteção das tags ativa;
+   - H-ENV: Environment `android-release` criado com aprovação obrigatória e restrito a tags `android-v*`, secrets das duas chaves e fingerprints `ANDROID_APP_CERT_SHA256`/`ANDROID_UPLOAD_CERT_SHA256` configurados (variable não vazia tem precedência sobre secret), regra de proteção das tags ativa;
    - Trilha P: P1 concluído (conta ativa, identidade verificada) e P5 concluído (app criado no Console, ficha e formulários preenchidos);
    - H-SMOKE: um celular Android qualquer, sem cabo, disponível para o smoke (adb opcional).
 3. `researcher`: versões (0.14) e prazos da Play (targetSdk; extensão até 2026-11-01; registro de pacotes).

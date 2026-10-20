@@ -47,6 +47,20 @@ test('all npm run scripts cited by Android development and release docs exist', 
   assert.ok(count > 0, 'No npm script citations found in Android docs');
 });
 
+test('release runbook documents every secret and variable read by the Android release workflow', () => {
+  const workflow = read('.github/workflows/android-release.yml');
+  const names = new Set(
+    [...workflow.matchAll(/\b(?:secrets|vars)\.([A-Za-z_][A-Za-z0-9_]*)\b/g)].map(
+      (match) => match[1],
+    ),
+  );
+  assert.ok(names.size > 0, 'No release workflow secrets or variables found');
+  const source = read(runbook);
+  for (const name of names) {
+    assert.ok(source.includes(`\`${name}\``), `${runbook}: missing workflow setting ${name}`);
+  }
+});
+
 test('backticked repository paths in docs/android.md exist on every checkout', () => {
   // Do not interpret fenced commands, URLs or the documented runtime endpoint as source files.
   const prose = android.replace(/^\s*```[^\n]*\n[\s\S]*?^\s*```/gm, '');
