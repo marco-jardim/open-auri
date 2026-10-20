@@ -1823,7 +1823,7 @@ Os achados viram FX3.k (0.5).
 **W:**
 - `D:\git\open-auri\web\wrangler.template.jsonc` (valores públicos `PUBLIC_ANDROID_APP_ID` e `PUBLIC_ANDROID_CERT_SHA256`)
 - `D:\git\open-auri\README.md` (links finais)
-- `D:\git\open-auri\apps\android\package.json` (versão 1.0.0, `versionCode` 1)
+- `D:\git\open-auri\apps\android\package.json` (versão 1.0.0; o workflow deriva `versionCode` 10000 da tag `android-v1.0.0`, `major*10000 + minor*100 + patch`)
 
 **Subtarefas:**
 1. Configurar o fingerprint de H-KEY. Commit, push, CI verde.
@@ -2546,6 +2546,15 @@ Os achados viram FXGH.k (0.5).
 | 2026-10-19 | FX2-E | concluído | `5e66f7c`, `8595148` | botão Recarregar na recusa e banner de nova versão só no app; e2e recusa, recarga e gravação |
 | 2026-10-19 | F2 (DoD) | concluído | HEAD `8595148` | Q2 r2 sem major aberto; CI do PR #55 todo verde no HEAD (Tests, E2E, Android, lint, build, CodeQL); branch enviada |
 | 2026-10-19 | PF3 | OK | HEAD do PF3: `8595148` | ver "PF3" abaixo |
+| 2026-10-19 | PF3.fix, T3.1 a T3.6, P3, I3.1, T3.T | concluído | `6288b92`, `6b322a9`, `9cafcd4`, `4cd86be`, `148233b`, `d350e85`, `a42816d`, `7b3a365`, `b3f126e`, `2571296`, `3df2b96`, `ccf7504` | release reprodutível com dry run de duas chaves, job de emulador, licenças nativas, docs, issue form, artes da loja |
+| 2026-10-20 | Q3 r1 | 3 major, 9 minor | `3df2b96` | M1 cache do Gradle envenenável no build de release; M2 dry run quebra depois da 1a release; M3 aviso MIT do Capacitor ausente |
+| 2026-10-20 | QP r1 | 2 critical, 7 major, 7 minor | `b3f126e` | C1 aviso de rascunho/advogado na política; C2 sem bloqueio de autores e público 13-17; M1 a M7 Data safety, controlador, ficha, acesso do revisor, links de APK no app, público, marca |
+| 2026-10-20 | FX3-A, FX3-B, FXP-A, FXP-B | concluído | `12e34b3`, `616fd07`, `7b1dd62`, `0a5463c`, `d0e7f61` | todos os achados do r1; decisões do mantenedor: sem a frase Q-LEGAL, público único 18+, "Ocultar autor/curva" (local para visitantes, sincronizado com conta) |
+| 2026-10-20 | FX3.1, FX3.2 | concluído | `bbb6cd0`, `34e050f`, `d9ef386`, `20a87d1` | CI do PR; o job do emulador pegou a regex `(?U)` que o ICU do Android rejeita e que quebrava todo salvamento nativo; matriz authz com `me/hidden` |
+| 2026-10-20 | Q3 r2 | 1 major (N1), 10 minor | `0a5463c` | N1 `ANDROID_UPLOAD_CERT_SHA256` lido pelo workflow e ausente do runbook; `tools:replace` do cleartext sem impacto na release (config de rede e checagem da config bastam) |
+| 2026-10-20 | QP r2 | 1 critical, 3 major, 13 minor | `0a5463c` | N1 denúncia só na Comunidade (sem usuários/packs); N2 registro LGPD defasado; N3 ocultar algo travava a troca cega; N4 `public_author_id` público não divulgado |
+| 2026-10-20 | FX3-C, FX3-D, FXP-C, FXP-D, FXP-E | concluído | `3cff306`, `8acc5f3`, `3d19032`, `b9da8f1`, `86bb882` | todos os critical/major do r2; teste exige que todo `secrets.*`/`vars.*` do workflow esteja no runbook; alertas CodeQL do dry run |
+| 2026-10-20 | P1 | parcial | `f370205` | conta pessoal ativa, anterior a 2023-11-13 (isenta do teste fechado); verificação de identidade pendente, publicação bloqueada até concluir |
 
 **PF3 (2026-10-19):**
 - Política de privacidade: `D:\git\open-auri\web\src\lib\content\legal\version.ts:6` (`POLICY_VERSION = '2026-10-19'`), textos em `D:\git\open-auri\docs\legal\politica-de-privacidade.md` e `privacy-policy.en-US.md` (versão na linha 14), aceite por `D:\git\open-auri\web\src\routes\conta\politica\+server.ts:9-11`. Não cita o app; a T3.5 decide a menção. `D:\git\open-auri\docs\lgpd.md:10` está com a versão 2026-10-18 (defasada).
@@ -2564,6 +2573,14 @@ Os achados viram FXGH.k (0.5).
 - m5 (`PUBLIC_ANDROID_APP_ID` malformado invalida o env): T4.1 (configuração do app id em produção).
 - m6 (`isNativeAndroid` duplicado em `native\gate.ts` e `app\context.svelte.ts`), m8 (fake do e2e recusa `diagnostics` sem permissão; o nativo não), m9 (banner no `/docs` aparece depois do `#main-content`), m10 (UI mostra "gravando" durante a checagem de até 3 s), m11 (mensagens do FX2-D no commit do FX2-B): F3, limpeza.
 
+**Achados minor do Q3 r2 e do QP r2 (depois da 2a rodada só se corrigem major ou acima). Ficam registrados para a fase indicada:**
+- Q3 n2 (`workflow_dispatch` a partir de uma tag aplica o piso estrito de versionCode), n3 (tag `android-v*` malformada quebra todos os runs até ser apagada), n4 (filtros de caminho sem `apps/android/www/**`, `web/src/lib/cable/android-status.ts` e, no CI, `web/static/third-party-licenses-android.txt`), n5 (nada compara versionCode/applicationId dos artefatos com o manifest de release) e n8 (conteúdo de NOTICE Apache, provável `org.apache.cordova:framework`): T4.1.
+- Q3 n6 (link de atualização sempre para a Play enquanto `ANDROID_PLAY_LIVE=false`): T4.3.
+- Q3 n7 e QP minor 4 (botão "Como funciona" cobre o eyebrow em `3-comparar.png`), QP m8 (`7-native-connect.png` mostra só as confirmações) e QP m9 (texto do revisor sem caminho para Denunciar/Ocultar; "Conectar" difere do botão): P5, antes do envio.
+- Q3 n9 (CLI de avisos falha depois de um sync e2e): F4, limpeza. Q3 n10 (T4.1 dizia `versionCode` 1): corrigido nesta atualização. Q3 m9 (seção 14 defasada): corrigido nesta atualização.
+- QP m1 (falha ao carregar ocultos deixa "Carregando…" com o erro dentro de `<details>` fechado), m2 (falha da checagem de sessão em página pré-renderizada conta como deslogado e não aplica os ocultos da conta), m3 (HTML do servidor de `/c/[id]` e `/u/[apelido]` só com o texto de carregamento), m5 (fontes da comparação sem Ocultar; curvas já carregadas em faixas ou candidatas continuam depois de ocultar), m10 (`/docs` pré-renderizado mostra o link do GitHub Releases até hidratar), m12 (menu e rodapé do app sem link direto para a política), m13 (redação "Nesta release" na política §7): F4, limpeza.
+- QP m4 (rótulo contado em UTF-16 no servidor), m6 (evidência de `hidden_items` no Data safety), m7 (18+ nos termos) e m11 (nomes acessíveis repetidos nos botões de ocultar): corrigidos no FXP-C e no FXP-E.
+- Ainda abertos de fases anteriores: Q2 m3 (o emulador usa HTTP `10.0.2.2` e não prova, em HTTPS, que o SW não intercepta `/_app/version.json`): QG; Q2 m6 (`isNativeAndroid` duplicado), m8 a m11 e Q1 G7/G11: F4, limpeza.
 **Achados minor do Q1 r2 (por decisão do mantenedor, depois da 2a rodada só se corrigem major ou acima). Ficam registrados para a fase indicada:**
 - G1 (release guard sem as chaves de fallback de topo `loggingBehavior`/`allowMixedContent` e `CapacitorHttp.enabled: "true"`) e G2 (`CapacitorCookies` e `CapacitorHttp` expostos a todos os frames por `addJavascriptInterface`; remover com `removeJavascriptInterface`): Q3 (segurança da Fase 3).
 - G3 (espaçamento de commit não sobrevive à morte do processo): F5, junto com a validação em hardware.
