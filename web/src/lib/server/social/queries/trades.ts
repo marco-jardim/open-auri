@@ -9,6 +9,7 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { all, first, run, sql } from '#lib/server/db.ts';
 import { countedUserSql, linkableLineageSql, publicLineageSql } from '#lib/server/social/repo.ts';
+import { tradePartnerVisibleSql } from '#lib/server/social/hidden.ts';
 
 /**
  * S7 reveal: the partner's lineage link is shown only when it is linkable with a STANDARD head
@@ -39,7 +40,7 @@ function tradeableLineageSql(lineageAlias: string, userExpr: string): string {
  * 1 when the partner trade `p` (aliases `pl` lineage, `pc` curve of its version, LEFT JOINed)
  * still qualifies to have its curve served, else 0 (never NULL).
  */
-const PARTNER_OK_SQL = `CASE WHEN pl.id IS NOT NULL AND pc.gate_ok = 1 AND ${tradeableLineageSql('pl', 'p.user_id')} THEN 1 ELSE 0 END`;
+const PARTNER_OK_SQL = `CASE WHEN pl.id IS NOT NULL AND pc.gate_ok = 1 AND ${tradeableLineageSql('pl', 'p.user_id')} AND ${tradePartnerVisibleSql('t.user_id', 'p.lineage_id')} THEN 1 ELSE 0 END`;
 const PARTNER_FROM_SQL =
 	'FROM trades t JOIN trades p ON p.id = t.match_id ' +
 	'LEFT JOIN lineages pl ON pl.id = p.lineage_id ' +
@@ -188,6 +189,8 @@ export async function listPairCandidates(
 				"WHERE m.id = ? AND m.status = 'waiting' AND m.expires_at > ? " +
 				`AND mc.gate_ok = 1 AND cc.gate_ok = 1 AND ${countedUserSql('mu')} AND ${countedUserSql('cu')} ` +
 				`AND ${tradeableLineageSql('ml', 'm.user_id')} AND ${tradeableLineageSql('cl', 'c.user_id')} ` +
+				`AND ${tradePartnerVisibleSql('m.user_id', 'c.lineage_id')} ` +
+				`AND ${tradePartnerVisibleSql('c.user_id', 'm.lineage_id')} ` +
 				'ORDER BY c.created_at, c.id LIMIT ?',
 			now,
 			tradeId,

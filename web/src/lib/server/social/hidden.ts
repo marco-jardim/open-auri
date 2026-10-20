@@ -8,6 +8,16 @@ export interface HiddenItem extends HiddenTarget {
 	label: string | null;
 }
 
+/** Internal SQL expressions only. Check the lineage's author, not the trader offering it. */
+export function tradePartnerVisibleSql(viewerExpr: string, lineageExpr: string): string {
+	return (
+		`NOT EXISTS (SELECT 1 FROM hidden_items hi WHERE hi.user_id = ${viewerExpr} AND (` +
+		`(hi.target_type = 'curve' AND hi.target_id = ${lineageExpr}) OR ` +
+		`(hi.target_type = 'author' AND hi.target_id IN (` +
+		`SELECT u.public_author_id FROM lineages l JOIN "user" u ON u.id = l.owner_user_id WHERE l.id = ${lineageExpr}))))`
+	);
+}
+
 export async function readHidden(db: D1Database, userId: string): Promise<{ items: HiddenItem[] }> {
 	const items = await all<HiddenItem>(
 		sql(

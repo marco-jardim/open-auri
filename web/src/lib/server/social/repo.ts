@@ -13,6 +13,7 @@
 import type { D1Database, D1Result } from '@cloudflare/workers-types';
 import { LABEL_COUNT, LABEL_MAX } from 'open-auri/share';
 import { all, batch, first, run, sql, type BoundStatement, type SqlParam } from '#lib/server/db.ts';
+import { tradePartnerVisibleSql } from '#lib/server/social/hidden.ts';
 import {
 	ACTIVITY_KINDS,
 	AUDIENCE_NAMES_MAX,
@@ -3111,7 +3112,9 @@ export async function tryPairTrades(
 			db,
 			"UPDATE trades SET status = 'matched', match_id = ?, matched_at = ?, expires_at = ? " +
 				"WHERE id = ? AND status = 'waiting' AND expires_at > ? AND EXISTS (SELECT 1 FROM trades m " +
-				"WHERE m.id = ? AND m.status = 'waiting' AND m.expires_at > ? AND m.user_id <> trades.user_id)",
+				"WHERE m.id = ? AND m.status = 'waiting' AND m.expires_at > ? AND m.user_id <> trades.user_id " +
+				`AND ${tradePartnerVisibleSql('m.user_id', 'trades.lineage_id')} ` +
+				`AND ${tradePartnerVisibleSql('trades.user_id', 'm.lineage_id')})`,
 			tradeId,
 			now,
 			expires,
