@@ -2554,6 +2554,8 @@ Os achados viram FXGH.k (0.5).
 | 2026-10-20 | Q3 r2 | 1 major (N1), 10 minor | `0a5463c` | N1 `ANDROID_UPLOAD_CERT_SHA256` lido pelo workflow e ausente do runbook; `tools:replace` do cleartext sem impacto na release (config de rede e checagem da config bastam) |
 | 2026-10-20 | QP r2 | 1 critical, 3 major, 13 minor | `0a5463c` | N1 denúncia só na Comunidade (sem usuários/packs); N2 registro LGPD defasado; N3 ocultar algo travava a troca cega; N4 `public_author_id` público não divulgado |
 | 2026-10-20 | FX3-C, FX3-D, FXP-C, FXP-D, FXP-E | concluído | `3cff306`, `8acc5f3`, `3d19032`, `b9da8f1`, `86bb882` | todos os critical/major do r2; teste exige que todo `secrets.*`/`vars.*` do workflow esteja no runbook; alertas CodeQL do dry run |
+| 2026-10-20 | Verificação r3, FX3.3 | PASS; concluído | `42c600a`, `5825394` | critical/major do r2 confirmados resolvidos; CodeQL `js/file-system-race` corrigido; nickname de teste que caía na blocklist por acaso (0,4%) |
+| 2026-10-20 | F3 (DoD) | concluído | HEAD `5825394` | Q3 e QP sem critical/major aberto; CI do PR #55 verde no HEAD (Tests, E2E, Android, Android emulator, release dry run, lint, build, CodeQL); GitGuardian 38436941 é falso positivo (nome de variável) e aguarda o mantenedor marcar no painel |
 | 2026-10-20 | P1 | parcial | `f370205` | conta pessoal ativa, anterior a 2023-11-13 (isenta do teste fechado); verificação de identidade pendente, publicação bloqueada até concluir |
 
 **PF3 (2026-10-19):**
