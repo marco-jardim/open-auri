@@ -405,7 +405,11 @@ test('workflow isolates secrets, restricts publishing to tags and shares identic
     publish,
     /if: github.event_name == 'push' && startsWith\(github.ref, 'refs\/tags\/android-v'\)/,
   );
-  assert.match(dryRun, /if: github.event_name == 'workflow_dispatch' && inputs.dry_run/);
+  assert.match(
+    dryRun,
+    /if: github.event_name == 'pull_request' \|\| \(github.event_name == 'workflow_dispatch' && inputs.dry_run\)/,
+  );
+  assert.doesNotMatch(dryRun, /environment:/);
   for (const job of [build, dryRun]) {
     assert.ok(!job.includes('secrets.'));
     assert.ok(!job.includes('environment:'));

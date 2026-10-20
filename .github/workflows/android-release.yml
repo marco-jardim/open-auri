@@ -3,6 +3,12 @@ name: Android release
 on:
   push:
     tags: ['android-v*']
+  # Pull requests that touch the release pipeline run the secret-free build and dry run.
+  pull_request:
+    paths:
+      - .github/workflows/android-release.yml
+      - tools/android-artifacts.mjs
+      - apps/android/android/app/build.gradle
   workflow_dispatch:
     inputs:
       dry_run:
@@ -247,7 +253,7 @@ jobs:
   dry-run:
     name: Sign with two ephemeral keys (no release)
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.dry_run)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
