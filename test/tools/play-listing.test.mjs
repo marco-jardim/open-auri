@@ -138,11 +138,20 @@ test('short descriptions say unofficial and full descriptions lead with Android 
     'en-US': ['Connect the Kuba Auri cable through USB-C/OTG', 'Independent project:'],
   };
   for (const [language, fields] of parseListing(listing)) {
-    assert.match(fields.get('Short description'), language === 'pt-BR' ? /não oficial/ : /unofficial/i);
+    assert.match(
+      fields.get('Short description'),
+      language === 'pt-BR' ? /não oficial/ : /unofficial/i,
+    );
     const paragraphs = fields.get('Full description').split('\n\n');
     assert.ok(paragraphs[1].startsWith(openings[language][0]), `${language}: native USB first`);
-    assert.ok(paragraphs[2].startsWith(openings[language][1]), `${language}: independence prominent`);
-    assert.doesNotMatch(fields.get('Full description'), /não coleta dados além|collects no data beyond/i);
+    assert.ok(
+      paragraphs[2].startsWith(openings[language][1]),
+      `${language}: independence prominent`,
+    );
+    assert.doesNotMatch(
+      fields.get('Full description'),
+      /não coleta dados além|collects no data beyond/i,
+    );
   }
 });
 

@@ -58,10 +58,21 @@
 	const hidden = getHiddenStore();
 	const profileAuthorId = $derived(profile.authorId ?? profile.username.toLowerCase());
 	const authorHidden = $derived($hidden.authors.includes(profileAuthorId));
-	const shown = $derived($hidden.ready ? selectCreations(creations.filter((item) =>
-		!isHidden($hidden, item.id, authorHiddenId(item.author))), { query, license, sort, locale }) : []);
-	const shownFavorites = $derived($hidden.ready ? favorites.filter((item) =>
-		!isHidden($hidden, item.lineage.id, authorHiddenId(item.lineage.author))) : []);
+	const shown = $derived(
+		$hidden.ready
+			? selectCreations(
+					creations.filter((item) => !isHidden($hidden, item.id, authorHiddenId(item.author))),
+					{ query, license, sort, locale }
+				)
+			: []
+	);
+	const shownFavorites = $derived(
+		$hidden.ready
+			? favorites.filter(
+					(item) => !isHidden($hidden, item.lineage.id, authorHiddenId(item.lineage.author))
+				)
+			: []
+	);
 	let loading = $state(false);
 	let notice = $state('');
 
@@ -116,7 +127,11 @@
 	}
 	onDestroy(stop);
 	$effect(() => {
-		if (playingId && (!$hidden.ready || authorHidden || isHidden($hidden, playingId, profileAuthorId))) stop();
+		if (
+			playingId &&
+			(!$hidden.ready || authorHidden || isHidden($hidden, playingId, profileAuthorId))
+		)
+			stop();
 	});
 
 	$effect.pre(() => {
@@ -413,7 +428,12 @@
 											>{m.perfil_by()} {favorite.lineage.author.displayUsername}</span
 										>{/if}
 									<small>{formatDate(favorite.at, locale)}</small>
-									<HideActions lineageId={favorite.lineage.id} author={authorHiddenId(favorite.lineage.author)} curveName={favorite.lineage.name} authorName={favorite.lineage.author?.displayUsername} />
+									<HideActions
+										lineageId={favorite.lineage.id}
+										author={authorHiddenId(favorite.lineage.author)}
+										curveName={favorite.lineage.name}
+										authorName={favorite.lineage.author?.displayUsername}
+									/>
 								</li>
 							{/each}
 						</ul>

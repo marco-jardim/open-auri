@@ -1,0 +1,6 @@
+version: 2
+secret:
+  # The release dry run passes ephemeral keystore passwords by environment variable NAME
+  # (e.g. -storepass:env ANDROID_UPLOAD_KEYSTORE_PASSWORD); no secret value is in the file.
+  ignored_paths:
+    - test/android-release/dryrun.mjs

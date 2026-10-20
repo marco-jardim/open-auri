@@ -160,7 +160,7 @@ for (const copy of [
 		await accessible(screen.container);
 		await expect.element(page.getByRole('button', { name: copy.close, exact: true })).toHaveFocus();
 		await userEvent.keyboard('{Escape}');
-		expect(screen.container.querySelector('dialog')).toBeNull();
+		await expect.poll(() => screen.container.querySelector('dialog')).toBeNull();
 		await expect.element(open).toHaveFocus();
 	}, 15000);
 }

@@ -49,8 +49,9 @@
 	} = $props();
 	const nativeCable = getNativeCableState();
 	const nativeAtLoad = isNativeAndroid();
-	const content = $derived(docsForEnvironment(sourceContent,
-		nativeAtLoad || nativeCable.result.kind !== 'none'));
+	const content = $derived(
+		docsForEnvironment(sourceContent, nativeAtLoad || nativeCable.result.kind !== 'none')
+	);
 	const glossaryTerms = $derived(glossaryEntries());
 	let progress = $state(0);
 	let showTop = $state(false);

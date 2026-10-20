@@ -267,12 +267,19 @@ export const ptBR: DocsContent = {
 				'Requisitos: Android 8 ou mais novo, suporte a USB host (OTG) e o Android System WebView atualizado. Com uma WebView antiga, o app mostra uma tela pedindo a atualização. Sem USB host, o site avisa que o aparelho não suporta OTG e fica no modo simulado.'
 			],
 			browserOnly: {
-				paragraphs: ['Onde baixar: na Google Play, quando a publicação for aprovada, e no GitHub Releases, onde cada versão traz o APK, o AAB e o arquivo SHA256SUMS.txt. As duas fontes usam a mesma assinatura, então dá para trocar de uma para a outra sem desinstalar.'],
+				paragraphs: [
+					'Onde baixar: na Google Play, quando a publicação for aprovada, e no GitHub Releases, onde cada versão traz o APK, o AAB e o arquivo SHA256SUMS.txt. As duas fontes usam a mesma assinatura, então dá para trocar de uma para a outra sem desinstalar.'
+				],
 				links: [{ label: 'Baixar no GitHub Releases', href: androidReleasesHref }]
 			},
 			appOnly: {
 				paragraphs: ['Atualize o app pela Google Play.'],
-				links: [{ label: 'Abrir na Google Play', href: 'https://play.google.com/store/apps/details?id=com.openauri.app' }]
+				links: [
+					{
+						label: 'Abrir na Google Play',
+						href: 'https://play.google.com/store/apps/details?id=com.openauri.app'
+					}
+				]
 			}
 		},
 		{
@@ -325,11 +332,13 @@ export const ptBR: DocsContent = {
 			id: 'android-assinatura',
 			title: 'Verificar a assinatura',
 			paragraphs: ['A Google Play verifica a assinatura ao instalar e atualizar o app.'],
-			browserOnly: { paragraphs: [
-				'Cada versão do app sai assinada com a mesma chave na Google Play e no GitHub. Junto com cada release são publicados o SHA-256 do APK e do AAB, também no arquivo SHA256SUMS.txt, e o fingerprint SHA-256 do certificado de assinatura, que é o mesmo nas duas fontes.',
-				'Para conferir o APK baixado do GitHub, calcule o SHA-256 do arquivo (com sha256sum ou Get-FileHash, por exemplo) e compare com o SHA256SUMS.txt. Para conferir o certificado, rode apksigner verify --print-certs no APK e compare o SHA-256 do certificado com o fingerprint publicado. Se algo não bater, não instale.'
-			],
-			links: [{ label: 'Releases e SHA256SUMS.txt', href: androidReleasesHref }] }
+			browserOnly: {
+				paragraphs: [
+					'Cada versão do app sai assinada com a mesma chave na Google Play e no GitHub. Junto com cada release são publicados o SHA-256 do APK e do AAB, também no arquivo SHA256SUMS.txt, e o fingerprint SHA-256 do certificado de assinatura, que é o mesmo nas duas fontes.',
+					'Para conferir o APK baixado do GitHub, calcule o SHA-256 do arquivo (com sha256sum ou Get-FileHash, por exemplo) e compare com o SHA256SUMS.txt. Para conferir o certificado, rode apksigner verify --print-certs no APK e compare o SHA-256 do certificado com o fingerprint publicado. Se algo não bater, não instale.'
+				],
+				links: [{ label: 'Releases e SHA256SUMS.txt', href: androidReleasesHref }]
+			}
 		},
 		{
 			id: 'android-privacidade',

@@ -126,7 +126,9 @@ export function versionCodeForRun(version, previous, refType, warn = console.war
   }
   const code = deriveVersionCode(version, refType === 'tag' ? previous : 0);
   if (refType !== 'tag' && code <= previous) {
-    warn(`::warning::Dry-run versionCode ${code} is not above the published/tag maximum ${previous}`);
+    warn(
+      `::warning::Dry-run versionCode ${code} is not above the published/tag maximum ${previous}`,
+    );
   }
   return code;
 }

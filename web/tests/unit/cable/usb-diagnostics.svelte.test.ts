@@ -13,10 +13,7 @@ import type { UsbDiagnostics as UsbReport } from '#lib/cable/native/index.ts';
 import { NativeHIDDevice, type OpenAuriUsbPlugin } from '#lib/cable/native/hid.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
-import {
-	ANDROID_PLAY_URL,
-	ANDROID_REPORT_URL
-} from '#lib/cable/android-links.ts';
+import { ANDROID_PLAY_URL, ANDROID_REPORT_URL } from '#lib/cable/android-links.ts';
 
 const report: UsbReport = {
 	device: {

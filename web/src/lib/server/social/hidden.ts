@@ -9,9 +9,14 @@ export interface HiddenItem extends HiddenTarget {
 }
 
 export async function readHidden(db: D1Database, userId: string): Promise<{ items: HiddenItem[] }> {
-	const items = await all<HiddenItem>(sql(db,
-		'SELECT target_type AS targetType, target_id AS targetId, created_at AS createdAt, label ' +
-		'FROM hidden_items WHERE user_id = ? ORDER BY created_at, target_type, target_id', userId));
+	const items = await all<HiddenItem>(
+		sql(
+			db,
+			'SELECT target_type AS targetType, target_id AS targetId, created_at AS createdAt, label ' +
+				'FROM hidden_items WHERE user_id = ? ORDER BY created_at, target_type, target_id',
+			userId
+		)
+	);
 	return { items };
 }
 
@@ -24,12 +29,23 @@ export async function putHidden(db: D1Database, userId: string, list: HiddenList
 	try {
 		// JSON1 keeps a full 1000-target merge to one statement, well below D1's query and
 		// bind-variable limits. The quota trigger aborts the whole statement atomically.
-		await run(sql(db,
-			'INSERT INTO hidden_items (user_id, target_type, target_id, created_at, label) ' +
-			"SELECT ?1, json_extract(value, '$.targetType'), json_extract(value, '$.targetId'), ?2, json_extract(value, '$.label') " +
-			'FROM json_each(?3) WHERE true ' +
-			'ON CONFLICT (user_id, target_type, target_id) DO UPDATE SET label = COALESCE(excluded.label, hidden_items.label)',
-			userId, now, JSON.stringify(targets.map((target) => ({ ...target, label: hiddenLabel(list, target.targetType, target.targetId) })))));
+		await run(
+			sql(
+				db,
+				'INSERT INTO hidden_items (user_id, target_type, target_id, created_at, label) ' +
+					"SELECT ?1, json_extract(value, '$.targetType'), json_extract(value, '$.targetId'), ?2, json_extract(value, '$.label') " +
+					'FROM json_each(?3) WHERE true ' +
+					'ON CONFLICT (user_id, target_type, target_id) DO UPDATE SET label = COALESCE(excluded.label, hidden_items.label)',
+				userId,
+				now,
+				JSON.stringify(
+					targets.map((target) => ({
+						...target,
+						label: hiddenLabel(list, target.targetType, target.targetId)
+					}))
+				)
+			)
+		);
 	} catch (error) {
 		if (error instanceof Error && error.message.includes('hidden_items_limit')) {
 			throw new ApiError(409, 'QUOTA_EXCEEDED');
@@ -40,7 +56,14 @@ export async function putHidden(db: D1Database, userId: string, list: HiddenList
 }
 
 export async function deleteHidden(db: D1Database, userId: string, target: HiddenTarget) {
-	await run(sql(db, 'DELETE FROM hidden_items WHERE user_id = ? AND target_type = ? AND target_id = ?',
-		userId, target.targetType, target.targetId));
+	await run(
+		sql(
+			db,
+			'DELETE FROM hidden_items WHERE user_id = ? AND target_type = ? AND target_id = ?',
+			userId,
+			target.targetType,
+			target.targetId
+		)
+	);
 	return readHidden(db, userId);
 }

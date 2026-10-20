@@ -59,7 +59,11 @@ function expectPublicCard(
 	expect(Object.keys(card).sort()).toEqual(CARD_KEYS);
 	expect(Object.keys(card.head).sort()).toEqual(HEAD_KEYS);
 	expect(Object.keys(card.curve).sort()).toEqual(CURVE_KEYS);
-	expect(card.author).toEqual({ id: expect.stringMatching(/^[a-f0-9]{32}$/), username: owner.username, displayUsername: owner.username });
+	expect(card.author).toEqual({
+		id: expect.stringMatching(/^[a-f0-9]{32}$/),
+		username: owner.username,
+		displayUsername: owner.username
+	});
 	expect(card.author?.id).not.toBe(owner.id);
 }
 

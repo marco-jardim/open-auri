@@ -695,7 +695,7 @@
 			{:else if shelfTab}
 				{@const shelf = shelfTab}
 				<ul class="rows">
-					{#each ($hidden.ready ? shelves[shelf].items.filter((item) => !isHidden($hidden, item.id, authorHiddenId(item.author))) : []) as item (item.id)}
+					{#each $hidden.ready ? shelves[shelf].items.filter((item) => !isHidden($hidden, item.id, authorHiddenId(item.author))) : [] as item (item.id)}
 						<li class="row" id="{id}-row-{item.id}" tabindex="-1">
 							<div class="row-head">
 								<strong>{item.head.name}</strong>

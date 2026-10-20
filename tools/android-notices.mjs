@@ -142,7 +142,8 @@ function optionalArray(value, context) {
 /** Preserve the complete copyright-bearing license, including paragraph boundaries.
  * @param {unknown} value @param {string} context */
 function licenseText(value, context) {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`Missing license text: ${context}`);
+  if (typeof value !== 'string' || !value.trim())
+    throw new Error(`Missing license text: ${context}`);
   return value.replaceAll('\r\n', '\n').trim();
 }
 
@@ -211,7 +212,10 @@ export function readBundledProjects(root = ROOT) {
       if (!packageDir.startsWith(`${modules}${sep}`)) {
         throw new Error(`Gradle project has no backing npm package: ${project}`);
       }
-      const pkg = record(JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')), project);
+      const pkg = record(
+        JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')),
+        project,
+      );
       const license = requiredText(pkg.license, `${project} license`);
       if (!ALLOWED_SPDX.includes(license)) {
         throw new Error(`Disallowed SPDX license ${license}: ${project}`);
@@ -219,14 +223,18 @@ export function readBundledProjects(root = ROOT) {
       const licenseFile = readdirSync(packageDir)
         .sort(compare)
         .find((name) => /^licen[cs]e(?:\.(?:txt|md))?$/i.test(name));
-      if (!licenseFile && license !== 'Apache-2.0') throw new Error(`Missing license text: ${project}`);
+      if (!licenseFile && license !== 'Apache-2.0')
+        throw new Error(`Missing license text: ${project}`);
       return {
         project,
         packageName: requiredText(pkg.name, `${project} package name`),
         version: requiredText(pkg.version, `${project} version`),
         license,
         licenseText: licenseFile
-          ? licenseText(readFileSync(join(packageDir, licenseFile), 'utf8'), relative(root, packageDir))
+          ? licenseText(
+              readFileSync(join(packageDir, licenseFile), 'utf8'),
+              relative(root, packageDir),
+            )
           : undefined,
       };
     });

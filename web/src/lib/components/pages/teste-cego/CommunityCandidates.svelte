@@ -23,7 +23,13 @@
 		onadd: (value: Candidate) => void;
 	} = $props();
 
-	type Row = { id: string; versionId: string; name: string; author: string | null; authorName?: string };
+	type Row = {
+		id: string;
+		versionId: string;
+		name: string;
+		author: string | null;
+		authorName?: string;
+	};
 	const hidden = getHiddenStore();
 	const uid = $props.id();
 	let source = $state<'feed' | 'rankings'>('feed');
@@ -38,8 +44,13 @@
 	let generation = 0;
 	let abort: AbortController | undefined;
 	const filtered = $derived(
-		$hidden.ready ? rows.filter((row) => !isHidden($hidden, row.id, row.author) &&
-			row.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) : []
+		$hidden.ready
+			? rows.filter(
+					(row) =>
+						!isHidden($hidden, row.id, row.author) &&
+						row.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
+				)
+			: []
 	);
 	// Unavailable always says why (spec §2.6); behaviour is the same as the old `disabled`.
 	// "Load more" can disappear while focused (last page), so it never carries a reason tooltip
@@ -92,8 +103,13 @@
 			if (token !== generation) return;
 			const items = page.items.map((item) => {
 				const lineage = item.lineage;
-				return { id: lineage.id, versionId: lineage.head.id, name: lineage.head.name,
-					author: authorHiddenId(lineage.author), authorName: lineage.author?.displayUsername };
+				return {
+					id: lineage.id,
+					versionId: lineage.head.id,
+					name: lineage.head.name,
+					author: authorHiddenId(lineage.author),
+					authorName: lineage.author?.displayUsername
+				};
 			});
 			rows = more ? [...rows, ...items] : items;
 			cursor = page.nextCursor;
@@ -185,7 +201,12 @@
 					{#each filtered as row (row.id)}
 						<li>
 							<span>{row.name}</span>
-							<HideActions lineageId={row.id} author={row.author} curveName={row.name} authorName={row.authorName} />
+							<HideActions
+								lineageId={row.id}
+								author={row.author}
+								curveName={row.name}
+								authorName={row.authorName}
+							/>
 							<Button
 								size="sm"
 								disabledReason={addReason(row)}

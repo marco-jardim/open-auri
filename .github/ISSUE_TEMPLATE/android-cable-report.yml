@@ -1,6 +1,6 @@
 name: Resultado de gravação no cabo pelo Android / Android USB report
 description: Relate o resultado, inclusive falhas antes de gravar. / Report results, including failures before writing.
-title: "[Android USB] "
+title: '[Android USB] '
 labels: [android-cable-report]
 body:
   - type: markdown
@@ -85,8 +85,8 @@ body:
       label: O som mudou como esperado? / Did sound change as expected?
       description: Escolha sim, não, não sei ou não se aplica. / Choose yes, no, unsure or not applicable (no write), in that order.
       options:
-        - "sim"
-        - "não"
+        - 'sim'
+        - 'não'
         - não sei
         - não se aplica (não houve gravação)
     validations:
@@ -97,8 +97,8 @@ body:
       label: O áudio cortou? / Did audio cut out?
       description: Escolha sim, não, não sei ou não havia áudio. / Choose yes, no, unsure or no audio was playing, in that order.
       options:
-        - "sim"
-        - "não"
+        - 'sim'
+        - 'não'
         - não sei
         - não havia áudio tocando
     validations:

@@ -142,7 +142,12 @@
 			<!-- Every YOLO card carries the mark (compact: no interactive content). -->
 			<YoloCurveNotice variant="public" compact class="strip-yolo" />
 		{/if}
-		<HideActions lineageId={channel.lineageId} author={authorHiddenId(channel.author)} curveName={channel.name} authorName={channel.author?.displayUsername} />
+		<HideActions
+			lineageId={channel.lineageId}
+			author={authorHiddenId(channel.author)}
+			curveName={channel.name}
+			authorName={channel.author?.displayUsername}
+		/>
 	</div>
 </li>
 

@@ -5,8 +5,11 @@
 	import { hiddenLabel, type HiddenType } from '#lib/social/hidden.ts';
 	const hidden = getHiddenStore();
 	async function unhide(type: HiddenType, id: string) {
-		try { await hidden.unhide(type, id); }
-		catch (error) { console.warn('Could not unhide item', error); }
+		try {
+			await hidden.unhide(type, id);
+		} catch (error) {
+			console.warn('Could not unhide item', error);
+		}
 	}
 </script>
 
@@ -15,7 +18,9 @@
 	<p>{$hidden.signedIn ? m.hidden_account_hint() : m.hidden_local_hint()}</p>
 	{#if $hidden.error}
 		<p role="alert">{m.hidden_error()}</p>
-		<Button size="sm" loading={$hidden.busy} onclick={() => hidden.retry()}>{m.hidden_retry()}</Button>
+		<Button size="sm" loading={$hidden.busy} onclick={() => hidden.retry()}
+			>{m.hidden_retry()}</Button
+		>
 	{/if}
 	{#if !$hidden.ready}<p role="status">{m.hidden_loading()}</p>{/if}
 	{#if !$hidden.authors.length && !$hidden.curves.length}
@@ -24,22 +29,49 @@
 		<ul>
 			{#each $hidden.authors as author (author)}
 				{@const name = hiddenLabel($hidden, 'author', author) ?? m.hidden_author()}
-				<li><span>{m.hidden_author()} @{name}</span>
-					<Button size="sm" loading={$hidden.busy} onclick={() => unhide('author', author)}
-						aria-label={m.hidden_unhide_named({ name })}>{m.hidden_unhide()}</Button></li>
+				<li>
+					<span>{m.hidden_author()} @{name}</span>
+					<Button
+						size="sm"
+						loading={$hidden.busy}
+						onclick={() => unhide('author', author)}
+						aria-label={m.hidden_unhide_named({ name })}>{m.hidden_unhide()}</Button
+					>
+				</li>
 			{/each}
 			{#each $hidden.curves as curve (curve)}
 				{@const name = hiddenLabel($hidden, 'curve', curve) ?? m.hidden_curve()}
-				<li><span>{m.hidden_curve()} {name}</span>
-					<Button size="sm" loading={$hidden.busy} onclick={() => unhide('curve', curve)}
-						aria-label={m.hidden_unhide_named({ name })}>{m.hidden_unhide()}</Button></li>
+				<li>
+					<span>{m.hidden_curve()} {name}</span>
+					<Button
+						size="sm"
+						loading={$hidden.busy}
+						onclick={() => unhide('curve', curve)}
+						aria-label={m.hidden_unhide_named({ name })}>{m.hidden_unhide()}</Button
+					>
+				</li>
 			{/each}
 		</ul>
 	{/if}
 </details>
 
 <style>
-	.hidden-items { padding: var(--space-3); border: 1px solid var(--rule); border-radius: var(--rad-md); }
-	ul { max-height: 24rem; overflow: auto; padding: 0; list-style: none; }
-	li { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; }
+	.hidden-items {
+		padding: var(--space-3);
+		border: 1px solid var(--rule);
+		border-radius: var(--rad-md);
+	}
+	ul {
+		max-height: 24rem;
+		overflow: auto;
+		padding: 0;
+		list-style: none;
+	}
+	li {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: var(--space-2);
+		overflow-wrap: anywhere;
+	}
 </style>

@@ -180,8 +180,13 @@
 	let yoloOnly = $state(false);
 	const hidden = getHiddenStore();
 	let allChannels = $state.raw<Channel[]>([]);
-	const channels = $derived($hidden.ready ? allChannels.filter((channel) =>
-		!isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))) : []);
+	const channels = $derived(
+		$hidden.ready
+			? allChannels.filter(
+					(channel) => !isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))
+				)
+			: []
+	);
 	let cursor = $state<string | null>(null);
 	let feedStatus = $state<'loading' | 'ready' | 'offline' | 'error'>('loading');
 	let feedError = $state('');
@@ -340,15 +345,23 @@
 
 	let selected = $state.raw<Channel[]>([]);
 	$effect(() => {
-		const visible = selected.filter((channel) => $hidden.ready &&
-			!isHidden($hidden, channel.lineageId, authorHiddenId(channel.author)));
+		const visible = selected.filter(
+			(channel) =>
+				$hidden.ready && !isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))
+		);
 		if (visible.length !== selected.length) {
 			selected = visible;
 			listener.stop();
 		}
-		if (allChannels.some((channel) =>
-			(!$hidden.ready || isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))) &&
-			listener.isPlaying(channel.lineageId))) listener.stop();
+		if (
+			allChannels.some(
+				(channel) =>
+					(!$hidden.ready ||
+						isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))) &&
+					listener.isPlaying(channel.lineageId)
+			)
+		)
+			listener.stop();
 	});
 	const target = $derived(selected[0] ?? null);
 

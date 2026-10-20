@@ -113,9 +113,17 @@ for (const locale of locales) {
 		const en = locale === 'en-US';
 		test('app projection keeps anchors but never offers a GitHub APK or switching sources', () => {
 			const app = docsContent(locale, true);
-			expect(app.sections.map((entry) => entry.id)).toEqual(docsContent(locale).sections.map((entry) => entry.id));
-			expect(app.sections.flatMap((entry) => entry.links ?? []).some((link) => link.href === RELEASES_URL)).toBe(false);
-			expect(app.sections.find((entry) => entry.id === 'android')?.links?.map((link) => link.href)).toEqual([ANDROID_PLAY_URL]);
+			expect(app.sections.map((entry) => entry.id)).toEqual(
+				docsContent(locale).sections.map((entry) => entry.id)
+			);
+			expect(
+				app.sections
+					.flatMap((entry) => entry.links ?? [])
+					.some((link) => link.href === RELEASES_URL)
+			).toBe(false);
+			expect(
+				app.sections.find((entry) => entry.id === 'android')?.links?.map((link) => link.href)
+			).toEqual([ANDROID_PLAY_URL]);
 			const text = JSON.stringify(app);
 			expect(text).not.toContain('GitHub Releases');
 			expect(text).not.toContain('apksigner');

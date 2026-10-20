@@ -569,7 +569,11 @@ function toCurve(row: CurveCols): CurveRecord {
 
 function toAuthor(row: AuthorCols): AuthorCredit | null {
 	if (row.u_username === null) return null;
-	return { ...(row.u_public_id ? { id: row.u_public_id } : {}), username: row.u_username, displayUsername: row.u_display ?? row.u_username };
+	return {
+		...(row.u_public_id ? { id: row.u_public_id } : {}),
+		username: row.u_username,
+		displayUsername: row.u_display ?? row.u_username
+	};
 }
 
 function toSummary(row: SummaryRow): LineageSummary {

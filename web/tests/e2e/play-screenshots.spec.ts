@@ -9,8 +9,8 @@ import { rgbPng, validateAsset } from '../../../tools/play-assets.mjs';
 // npx playwright test tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1
 // Follow with node tools/play-assets.mjs from the repository root.
 test.skip(process.env.PLAY_SCREENSHOTS !== '1', 'Store capture requires PLAY_SCREENSHOTS=1');
-test.beforeEach(({}, testInfo) => {
-	test.skip(testInfo.project.name !== 'mobile', 'Store capture uses the Pixel 7 mobile project');
+test.beforeEach(() => {
+	test.skip(test.info().project.name !== 'mobile', 'Store capture uses the Pixel 7 mobile project');
 });
 test.use({
 	// Keep Pixel 7 touch/UA emulation, with a Play-friendly 9:16, 1080x1920 capture.
@@ -103,7 +103,10 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 					exact: true
 				})
 				.click();
-			await expect(page.locator('[data-state="connected"]')).toHaveAttribute('aria-current', 'step');
+			await expect(page.locator('[data-state="connected"]')).toHaveAttribute(
+				'aria-current',
+				'step'
+			);
 			await page
 				.getByRole('button', {
 					name: locale === 'pt-BR' ? 'Levantar tampa do checklist' : 'Lift checklist cover',
@@ -132,7 +135,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 			expect(
 				nativeBridge.calls.filter(({ methodName }) => methodName === 'requestDevice')
 			).toHaveLength(1);
-			expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'sendReport')).toEqual([]);
+			expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'sendReport')).toEqual(
+				[]
+			);
 			expect(nativeBridge.reports).toEqual([]);
 		});
 	});

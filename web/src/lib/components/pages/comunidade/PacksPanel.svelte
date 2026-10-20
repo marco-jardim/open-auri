@@ -30,8 +30,11 @@
 	const id = $props.id();
 	let favorites = $state.raw<LibraryItem[]>([]);
 	const hidden = getHiddenStore();
-	const shownFavorites = $derived($hidden.ready ? favorites.filter((item) =>
-		!isHidden($hidden, item.id, authorHiddenId(item.author))) : []);
+	const shownFavorites = $derived(
+		$hidden.ready
+			? favorites.filter((item) => !isHidden($hidden, item.id, authorHiddenId(item.author)))
+			: []
+	);
 	let packs = $state.raw<PackRow[]>([]);
 	let chosen = $state<string[]>([]);
 	let name = $state('');
@@ -80,8 +83,12 @@
 		busy = true;
 		message = '';
 		try {
-			const pack = await api.createPack({ name, description, visibility,
-				items: chosen.filter((id) => shownFavorites.some((item) => item.id === id)) });
+			const pack = await api.createPack({
+				name,
+				description,
+				visibility,
+				items: chosen.filter((id) => shownFavorites.some((item) => item.id === id))
+			});
 			packs = [{ id: pack.id, name: pack.name, description: pack.description }, ...packs];
 			chosen = [];
 			name = '';

@@ -53,9 +53,13 @@ modification, are permitted provided that the following conditions are met:
 2. Redistributions in binary form must reproduce the above copyright notice,
    this list of conditions and the following disclaimer in the documentation
    and/or other materials provided with the distribution.
-${clauses === 3 ? `3. Neither the name of the copyright holder nor the names of its
+${
+  clauses === 3
+    ? `3. Neither the name of the copyright holder nor the names of its
    contributors may be used to endorse or promote products derived from
-   this software without specific prior written permission.\n` : ''}
+   this software without specific prior written permission.\n`
+    : ''
+}
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -122,7 +126,15 @@ project(':capacitor-android').projectDir = new File('../../../node_modules/@capa
       [script, '--input', input, '--output', output, '--project-root', directory, ...args],
       { cwd: root, encoding: 'utf8' },
     );
-  return { directory, input, output, put, run, write, projects: () => readBundledProjects(directory) };
+  return {
+    directory,
+    input,
+    output,
+    put,
+    run,
+    write,
+    projects: () => readBundledProjects(directory),
+  };
 }
 
 test('renders Licensee sample JSON with coordinates, project, SCM, SPDX identifiers and URLs', () => {
@@ -344,7 +356,10 @@ test('footer links both native Android and web notices with both locale messages
 
 test('bundled projects come from Gradle settings and preserve complete npm license text', (t) => {
   const repo = fixture(t);
-  repo.write('node_modules/@capacitor/android/LICENSE', `${mitLicense.replaceAll('\n', '\r\n')}\r\n`);
+  repo.write(
+    'node_modules/@capacitor/android/LICENSE',
+    `${mitLicense.replaceAll('\n', '\r\n')}\r\n`,
+  );
   const projects = repo.projects();
   assert.deepEqual(
     projects.map(({ project }) => project),
@@ -365,7 +380,8 @@ test('bundled projects come from Gradle settings and preserve complete npm licen
 test('MIT/BSD entries cannot silently become URL-only notices', (t) => {
   const repo = fixture(t);
   for (const license of ['MIT', 'BSD-2-Clause', 'BSD-3-Clause']) {
-    const fullText = license === 'MIT' ? mitLicense : bsdLicense(license === 'BSD-2-Clause' ? 2 : 3);
+    const fullText =
+      license === 'MIT' ? mitLicense : bsdLicense(license === 'BSD-2-Clause' ? 2 : 3);
     repo.write(
       'node_modules/@capacitor/android/package.json',
       JSON.stringify({ name: '@capacitor/android', version: '1.2.3', license }),
@@ -378,9 +394,14 @@ test('MIT/BSD entries cannot silently become URL-only notices', (t) => {
       /Missing license text/,
     );
     assert.throws(
-      () => renderNotices([{
-        ...sample[0], licenseText: undefined, spdxLicenses: [{ identifier: license }],
-      }]),
+      () =>
+        renderNotices([
+          {
+            ...sample[0],
+            licenseText: undefined,
+            spdxLicenses: [{ identifier: license }],
+          },
+        ]),
       /Missing copyright-bearing MIT\/BSD license text/,
     );
   }
@@ -389,15 +410,21 @@ test('MIT/BSD entries cannot silently become URL-only notices', (t) => {
 });
 
 test('canonical Apache-2.0 license is complete, at the end and emitted exactly once', () => {
-  const text = renderNotices([sample[0], { ...sample[0], artifactId: 'second' }], [
-    {
-      project: ':apache-project',
-      packageName: '@example/apache',
-      version: '1.0.0',
-      license: 'Apache-2.0',
-    },
-  ]);
-  assert.equal(text.match(/TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION/g).length, 1);
+  const text = renderNotices(
+    [sample[0], { ...sample[0], artifactId: 'second' }],
+    [
+      {
+        project: ':apache-project',
+        packageName: '@example/apache',
+        version: '1.0.0',
+        license: 'Apache-2.0',
+      },
+    ],
+  );
+  assert.equal(
+    text.match(/TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION/g).length,
+    1,
+  );
   assert.match(text, /Full Apache-2.0 text: see the canonical license at the end of this file/);
   for (const heading of [
     '1. Definitions.',
@@ -413,7 +440,8 @@ test('canonical Apache-2.0 license is complete, at the end and emitted exactly o
 
 test('new local projects and nonempty generated Cordova code fail closed', (t) => {
   const repo = fixture(t);
-  const source = 'apps/android/android/capacitor-cordova-android-plugins/src/main/java/ThirdParty.java';
+  const source =
+    'apps/android/android/capacitor-cordova-android-plugins/src/main/java/ThirdParty.java';
   repo.write(source, 'class ThirdParty {}');
   assert.throws(repo.projects, /Bundled Cordova code needs explicit package license attribution/);
   rmSync(join(repo.directory, source));
@@ -446,7 +474,9 @@ test('every real non-app Gradle project is listed in committed notices with the 
 });
 
 test('CI checks notices against the actual report after building the release', () => {
-  const android = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8').split('\n  android:')[1];
+  const android = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8').split(
+    '\n  android:',
+  )[1];
   assert.match(
     android,
     /run: npm run build:android:release\n {6}- name: Check Android notices against the release report\n {8}run: npm run notices:android -- --check/,

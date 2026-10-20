@@ -146,9 +146,14 @@ for (const copy of locales) {
 		// External marker, hidden from the accessible name like the other ↗ links.
 		const marker = stats.element().querySelector('[aria-hidden="true"]');
 		expect(marker?.textContent).toBe('↗');
-		// Last in the list: legal → GitHub → license stay adjacent.
+		// Last in the list: legal → GitHub → license → web and Android license files → stats.
 		const license = page.getByText(copy.license, { exact: true }).element();
-		expect(license.nextElementSibling).toBe(stats.element());
+		const thirdParty = license.nextElementSibling;
+		expect(thirdParty?.getAttribute('href')).toBe('/third-party-licenses.txt');
+		expect(thirdParty?.nextElementSibling?.getAttribute('href')).toBe(
+			'/third-party-licenses-android.txt'
+		);
+		expect(thirdParty?.nextElementSibling?.nextElementSibling).toBe(stats.element());
 		expect(stats.element().nextElementSibling).toBeNull();
 	});
 }

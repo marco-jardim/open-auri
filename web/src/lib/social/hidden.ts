@@ -18,10 +18,14 @@ export interface HiddenList {
 }
 
 export function hiddenLabelText(value: string): string {
-	return Array.from(value).filter((char) => {
-		const code = char.codePointAt(0) ?? 0;
-		return code >= 0x20 && code !== 0x7f;
-	}).join('').trim().slice(0, 80);
+	return Array.from(value)
+		.filter((char) => {
+			const code = char.codePointAt(0) ?? 0;
+			return code >= 0x20 && code !== 0x7f;
+		})
+		.join('')
+		.trim()
+		.slice(0, 80);
 }
 
 export function hiddenLabel(list: HiddenList, type: HiddenType, id: string): string | null {
@@ -30,16 +34,16 @@ export function hiddenLabel(list: HiddenList, type: HiddenType, id: string): str
 }
 
 /** Nickname fallback only for old cached cards and pre-FXP-B fixtures. */
-export function authorHiddenId(author: { id?: string; username: string } | null | undefined): string | null {
+export function authorHiddenId(
+	author: { id?: string; username: string } | null | undefined
+): string | null {
 	return author ? (author.id ?? author.username.toLowerCase()) : null;
 }
 
 export function hiddenId(type: HiddenType, value: unknown): string | null {
 	if (typeof value !== 'string') return null;
 	const id = type === 'author' ? value.toLowerCase() : value;
-	return (type === 'author' ? /^[a-z0-9._-]{1,64}$/ : /^[A-Za-z0-9_-]{1,64}$/).test(id)
-		? id
-		: null;
+	return (type === 'author' ? /^[a-z0-9._-]{1,64}$/ : /^[A-Za-z0-9_-]{1,64}$/).test(id) ? id : null;
 }
 
 export function normalizeHidden(value: unknown): HiddenList & { labels: HiddenLabels } {
@@ -47,8 +51,9 @@ export function normalizeHidden(value: unknown): HiddenList & { labels: HiddenLa
 	function ids(key: 'authors' | 'curves', type: HiddenType): string[] {
 		const input: unknown = Reflect.get(object, key);
 		if (!Array.isArray(input)) return [];
-		return [...new Set(input.map((id: unknown) => hiddenId(type, id)).filter((id) => id !== null))]
-			.slice(0, HIDDEN_LIMIT);
+		return [
+			...new Set(input.map((id: unknown) => hiddenId(type, id)).filter((id) => id !== null))
+		].slice(0, HIDDEN_LIMIT);
 	}
 	const authors = ids('authors', 'author');
 	const curves = ids('curves', 'curve');
@@ -71,10 +76,19 @@ export function normalizeHidden(value: unknown): HiddenList & { labels: HiddenLa
 }
 
 export function mergeHidden(left: HiddenList, right: HiddenList): HiddenList {
-	return normalizeHidden({ authors: [...left.authors, ...right.authors], curves: [...left.curves, ...right.curves],
-		labels: { authors: { ...left.labels?.authors, ...right.labels?.authors }, curves: { ...left.labels?.curves, ...right.labels?.curves } } });
+	return normalizeHidden({
+		authors: [...left.authors, ...right.authors],
+		curves: [...left.curves, ...right.curves],
+		labels: {
+			authors: { ...left.labels?.authors, ...right.labels?.authors },
+			curves: { ...left.labels?.curves, ...right.labels?.curves }
+		}
+	});
 }
 
 export function isHidden(list: HiddenList, lineageId: string, author?: string | null): boolean {
-	return list.curves.includes(lineageId) || (author != null && list.authors.includes(author.toLowerCase()));
+	return (
+		list.curves.includes(lineageId) ||
+		(author != null && list.authors.includes(author.toLowerCase()))
+	);
 }

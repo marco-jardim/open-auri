@@ -113,7 +113,12 @@
 			<span class="muted">{m.perfil_preview_unavailable()}</span>
 		{/if}
 	</footer>
-	<HideActions lineageId={item.id} author={authorHiddenId(item.author)} curveName={item.name} authorName={item.author?.displayUsername} />
+	<HideActions
+		lineageId={item.id}
+		author={authorHiddenId(item.author)}
+		curveName={item.name}
+		authorName={item.author?.displayUsername}
+	/>
 </article>
 
 <style>

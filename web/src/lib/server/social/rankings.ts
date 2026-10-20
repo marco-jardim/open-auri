@@ -137,10 +137,7 @@ export function feedLineageCard(summary: LineageSummary): FeedLineageCard {
 		id: summary.id,
 		curated: summary.curated,
 		forked: summary.forkedFromVersion !== null,
-		author:
-			author === null
-				? null
-				: { ...author },
+		author: author === null ? null : { ...author },
 		createdAt: summary.createdAt,
 		updatedAt: summary.updatedAt,
 		head: {

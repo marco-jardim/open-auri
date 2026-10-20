@@ -151,7 +151,7 @@ test('store screenshot spec is opt-in, mobile-only and keeps the native safety b
     'utf8',
   );
   assert.match(spec, /test\.skip\(process\.env\.PLAY_SCREENSHOTS !== '1',/);
-  assert.match(spec, /testInfo\.project\.name !== 'mobile'/);
+  assert.match(spec, /project\.name !== 'mobile'/);
   assert.match(spec, /fixtures\/capacitor-bridge/);
   assert.match(spec, /name: 'oa_lang'/);
   assert.match(spec, /getByRole\('complementary'/);

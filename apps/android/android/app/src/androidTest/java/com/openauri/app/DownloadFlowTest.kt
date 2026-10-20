@@ -31,7 +31,7 @@ class DownloadFlowTest {
 
     @Test
     fun realJsonExportUsesSafWithTheDisplayedCurveNameAndCanBeCanceled() {
-        WebAppScenario.launch("/curva").use { app ->
+        WebAppScenario.launch("/").use { app ->
             app.acceptDisclaimerIfPresent()
             // Import/export is an intersection-loaded island below the curve editor.
             app.awaitJs("document.querySelector('main.curva .lower') != null", "curve editor")

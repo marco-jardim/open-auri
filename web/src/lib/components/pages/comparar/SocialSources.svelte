@@ -31,8 +31,13 @@
 	let generation = 0;
 	let abort: AbortController | undefined;
 	const filtered = $derived(
-		$hidden.ready ? rows.filter((row) => !isHidden($hidden, row.id, row.author) &&
-			row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())) : []
+		$hidden.ready
+			? rows.filter(
+					(row) =>
+						!isHidden($hidden, row.id, row.author) &&
+						row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+				)
+			: []
 	);
 	function reset() {
 		generation++;
@@ -64,8 +69,12 @@
 			if (token !== generation) return;
 			const items = page.items.map((item) => {
 				const lineage = 'lineage' in item ? item.lineage : item;
-				return { id: lineage.id, versionId: lineage.head.id, name: lineage.head.name,
-					author: authorHiddenId(lineage.author) };
+				return {
+					id: lineage.id,
+					versionId: lineage.head.id,
+					name: lineage.head.name,
+					author: authorHiddenId(lineage.author)
+				};
 			});
 			rows = more ? [...rows, ...items] : items;
 			cursor = page.nextCursor;

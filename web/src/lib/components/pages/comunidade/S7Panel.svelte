@@ -46,7 +46,9 @@
 	const hidden = getHiddenStore();
 	// Blind partners have no public identity until both score. Do not bypass a viewer's
 	// preferences through anonymous audio: pause trades while their targets cannot be checked.
-	const contentAllowed = $derived($hidden.ready && !$hidden.authors.length && !$hidden.curves.length);
+	const contentAllowed = $derived(
+		$hidden.ready && !$hidden.authors.length && !$hidden.curves.length
+	);
 	$effect(() => {
 		if (!contentAllowed && listener.owner === 's7') listener.stop();
 	});
