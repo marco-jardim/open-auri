@@ -29,6 +29,7 @@ rollback.
 | [`exclusao-lgpd-manual.md`](operacao/runbooks/exclusao-lgpd-manual.md) | Pedido de eliminação recebido pelo canal LGPD. |
 | [`rotacao-de-segredos.md`](operacao/runbooks/rotacao-de-segredos.md) | Rotação planejada ou de emergência dos segredos dos Workers. |
 | [`somente-leitura.md`](operacao/runbooks/somente-leitura.md) | Ligar e desligar o interruptor de emergência. |
+| [`android-release.md`](operacao/runbooks/android-release.md) | Chaves, assinatura, Environment protegido, publicação Android, controles remotos de gravação e merge/deploy autônomos. |
 | [`ordem-judicial.md`](operacao/runbooks/ordem-judicial.md) | Entrega de registros de acesso (Marco Civil) por ordem judicial. |
 | [`ativacao-do-com.md`](operacao/runbooks/ativacao-do-com.md) | Levar a produção para `open-auri.com` e abrir o cadastro. |
 

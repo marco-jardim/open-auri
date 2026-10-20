@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { saveFile, saveFileErrorMessage } from '#lib/files/save.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import { Button, Panel } from '#lib/components/primitives/index.ts';
 	import type { Layer, UrlLike } from './layers.ts';
@@ -63,7 +64,7 @@
 		exportReason = null,
 		onimport,
 		notify,
-		download = browserDownload,
+		download,
 		clipboard = (text) => navigator.clipboard.writeText(text)
 	}: Props = $props();
 
@@ -74,21 +75,15 @@
 	const exportBlocked = $derived(reason ?? exportReason);
 	let link = $state('');
 
-	function browserDownload(file: string, blob: Blob) {
-		const url = URL.createObjectURL(blob);
-		const anchor = document.createElement('a');
-		anchor.href = url;
-		anchor.download = file;
-		anchor.rel = 'noopener';
-		document.body.append(anchor);
-		anchor.click();
-		anchor.remove();
-		setTimeout(() => URL.revokeObjectURL(url), 0);
-	}
-
-	function save(file: string, blob: Blob) {
-		download(file, blob);
-		notify(m.curva_exported({ name: file }));
+	async function save(file: string, blob: Blob) {
+		try {
+			if (download) download(file, blob);
+			else if (!(await saveFile({ name: file, mime: blob.type, bytes: blob })).saved) return;
+			notify(m.curva_exported({ name: file }));
+		} catch (error) {
+			notify(saveFileErrorMessage(error), 'error');
+			console.error('Curva export failed', error);
+		}
 	}
 
 	const lang = $derived(locale.startsWith('en') ? 'en-US' : 'pt-BR');

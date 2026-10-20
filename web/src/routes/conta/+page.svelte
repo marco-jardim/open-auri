@@ -19,6 +19,7 @@
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { PageProps } from './$types';
+	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
 
 	let { data, form }: PageProps = $props();
 
@@ -62,6 +63,7 @@
 		{ id: 'duas-etapas', label: () => m.conta_2fa_nav() },
 		{ id: 'email', label: () => m.conta_nav_email() },
 		{ id: 'dados', label: () => m.conta_nav_data() },
+		{ id: 'itens-ocultos', label: () => m.hidden_title() },
 		{ id: 'encerrar', label: () => m.conta_nav_close() }
 	];
 </script>
@@ -183,6 +185,7 @@
 	<Section id="dados" title={m.conta_export_title()} description={m.conta_export_description()}>
 		<ExportForm />
 	</Section>
+	<HiddenItems />
 
 	<Section
 		id="encerrar"

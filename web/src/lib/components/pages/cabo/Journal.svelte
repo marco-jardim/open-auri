@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '#lib/paraglide/messages.js';
+	import { saveFile, saveFileErrorMessage } from '#lib/files/save.ts';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { formatCrc, formatNumber } from '#lib/components/cable/i18n.ts';
 	import type { JournalEntry, JournalStatus } from '#lib/cable/types.ts';
@@ -25,16 +26,20 @@
 	};
 	/** Spec §4.4: three non-interactive EXAMPLE boxes; never entries, never loadable. */
 	const examples = exampleBoxes();
+	let exportError = $state('');
 
-	function exportJournal() {
-		const url = URL.createObjectURL(
-			new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' })
-		);
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = 'open-auri-journal.json';
-		link.click();
-		setTimeout(() => URL.revokeObjectURL(url), 0);
+	async function exportJournal() {
+		exportError = '';
+		try {
+			await saveFile({
+				name: 'open-auri-journal.json',
+				mime: 'application/json',
+				bytes: JSON.stringify(entries, null, 2)
+			});
+		} catch (error) {
+			exportError = saveFileErrorMessage(error);
+			console.error('Journal export failed', error);
+		}
 	}
 </script>
 
@@ -152,6 +157,7 @@
 		onclick={exportJournal}>{m.cabo_export()}</Button
 	>
 </div>
+{#if exportError}<p class="note" role="alert">{exportError}</p>{/if}
 
 <style>
 	.note {

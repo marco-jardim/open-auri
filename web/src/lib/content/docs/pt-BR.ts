@@ -1,6 +1,24 @@
 import { legalNotice } from './legal-notice.ts';
 import type { DocsContent } from './types.ts';
 
+// BEGIN Android validation state ------------------------------------------------------------
+// The only place in this file that says whether writing from the Android app was validated on
+// a real cable (section `android-validacao`). While ANDROID_WRITE_VALIDATED is false
+// (src/lib/cable/android-status.ts), the first two entries are the exact Anexo G.1 title and
+// text of docs/plans/2026-10-18-android-capacitor-plano.md. At F5, replace this whole block
+// with the Anexo G.6 text (date, number of devices and report). en-US.ts has the twin block.
+const androidValidationState: readonly string[] = [
+	'Gravação pelo app ainda não testada num cabo',
+	'O app Android ainda não foi testado num cabo Auri de verdade, então não dá para garantir que a gravação funcione. Ele usa o mesmo protocolo e envia os mesmos bytes que o site no computador e a página oficial da Kuba (testes automáticos conferem isso byte a byte). Só muda o caminho até o USB. Em teoria, o resultado deve ser o mesmo. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).',
+	'O que os testes garantem: para cada curva, o app monta os mesmos nove reports de dados e o mesmo commit, byte a byte, que o site no computador e a página oficial enviam. Testes automáticos comparam esses bytes com a referência dos 11 presets oficiais, e antes do commit o app ainda confere cada sequência com uma guarda extra.',
+	'O que ainda não foi verificado: o caminho físico até o USB. O driver do Android, a conexão OTG, a energia do celular e a forma como o cabo recebe os reports por esse caminho só se confirmam gravando e medindo um cabo real. Até lá, cada gravação pelo app pede um item a mais no checklist.'
+];
+// END Android validation state --------------------------------------------------------------
+
+const androidReportHref =
+	'https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml';
+const androidReleasesHref = 'https://github.com/marco-jardim/open-auri/releases/latest';
+
 export const ptBR: DocsContent = {
 	locale: 'pt-BR',
 	title: 'O protocolo 0xCB e seus limites',
@@ -240,6 +258,95 @@ export const ptBR: DocsContent = {
 				'Quando os dois dão nota, a troca é revelada: você vê o apelido do parceiro, a curva dele quando ela abre por link e as duas notas. Trocas não reveladas expiram 72 h depois de entrar na fila ou do pareamento; enquanto espera, você pode cancelar.'
 			],
 			links: [{ label: 'Comunidade', href: '/comunidade' }]
+		},
+		{
+			id: 'android',
+			title: 'App Android',
+			paragraphs: [
+				'O app Android do open-auri grava curvas no cabo Auri pelo USB do celular, coisa que o navegador do celular não consegue: o Chrome Android não tem WebHID. O app abre o próprio site open-auri.com e troca só o último trecho, até o USB, por um transporte nativo. Editor, presets, biblioteca, conta e comunidade são os mesmos do site.',
+				'Requisitos: Android 8 ou mais novo, suporte a USB host (OTG) e o Android System WebView atualizado. Com uma WebView antiga, o app mostra uma tela pedindo a atualização. Sem USB host, o site avisa que o aparelho não suporta OTG e fica no modo simulado.'
+			],
+			browserOnly: {
+				paragraphs: [
+					'Onde baixar: na Google Play, quando a publicação for aprovada, e no GitHub Releases, onde cada versão traz o APK, o AAB e o arquivo SHA256SUMS.txt. As duas fontes usam a mesma assinatura, então dá para trocar de uma para a outra sem desinstalar.'
+				],
+				links: [{ label: 'Baixar no GitHub Releases', href: androidReleasesHref }]
+			},
+			appOnly: {
+				paragraphs: ['Atualize o app pela Google Play.'],
+				links: [
+					{
+						label: 'Abrir na Google Play',
+						href: 'https://play.google.com/store/apps/details?id=com.openauri.app'
+					}
+				]
+			}
+		},
+		{
+			id: 'android-validacao',
+			title: 'Estado de validação do app',
+			paragraphs: androidValidationState,
+			links: [{ label: 'Relatar resultado', href: androidReportHref }]
+		},
+		{
+			id: 'android-resgate',
+			title: 'Como resgatar com o Neutro',
+			paragraphs: [
+				'Se o som ficar estranho depois de gravar pelo app, abaixe o volume e grave o Neutro pelo próprio app, na página do cabo. Neutro é 10 × OFF, identidade exata, com preamp −0,5 dB: o cabo volta a tocar sem equalização.',
+				'Se não resolver, grave o Neutro pelo site num computador com Chrome ou Edge: conecte o cabo, autorize o WebHID e use Neutro na página do cabo. Esse caminho não passa pelo app.',
+				'Depois, relate o resultado, tenha funcionado ou não. O formulário no GitHub pede aparelho, versão do Android, versão do app, versão da WebView, origem da instalação (Play ou GitHub), o JSON do Diagnóstico USB e o que aconteceu. Cada relato ajuda a validar o app em mais aparelhos.'
+			],
+			links: [{ label: 'Relatar resultado', href: androidReportHref }]
+		},
+		{
+			id: 'android-usb',
+			title: 'Permissão USB no app',
+			paragraphs: [
+				'Na página do cabo, Conectar lista os cabos Auri ligados ao celular (VID 0x3302, PID 0x8902) e o Android pergunta se o open-auri pode acessar o dispositivo USB. Sem essa permissão, nada é enviado. Com mais de um cabo, um seletor do app faz o papel do seletor do WebHID.',
+				'O que não muda: o mesmo gate v2, o mesmo checklist e o mesmo diário do site, com o mesmo codec e os mesmos bytes. Nada é gravado sem o seu gesto em Gravar no cabo, e desconectar no meio da gravação interrompe sem commit.',
+				'O que muda: só o trecho final, do site até o USB, passa por código nativo do app, com uma guarda extra que confere cada sequência antes do commit. Downloads abrem o seletor de arquivos do Android, e links externos abrem no navegador do sistema. O app pede só acesso à internet e, quando você conecta o cabo, ao USB.'
+			]
+		},
+		{
+			id: 'android-diagnostico',
+			title: 'Diagnóstico USB',
+			paragraphs: [
+				'O Diagnóstico USB fica na camada Engenharia e só existe no app. Ele mostra os descritores do dispositivo, da configuração e do HID report, a interface e o endpoint escolhidos e o tamanho calculado do output report.',
+				'Copiar põe tudo isso em JSON na área de transferência, para colar no relato do resultado. Nada é enviado ao servidor: o JSON só sai do aparelho se você o colar em algum lugar.'
+			],
+			links: [{ label: 'Relatar resultado', href: androidReportHref }]
+		},
+		{
+			id: 'android-iphone',
+			title: 'Por que não há iPhone',
+			paragraphs: [
+				'Não há API pública que deixe um app de iPhone enviar ao cabo o output report HID de que a gravação precisa, e o Safari não tem WebHID. No iPhone, use o site para editar, comparar e ouvir prévias; para gravar, use um computador com Chrome ou Edge ou um celular Android com o app.'
+			],
+			items: [
+				'CoreHID, a API de HID da Apple, só existe no macOS 15 ou mais novo.',
+				'External Accessory só conversa com acessórios do programa MFi, certificados pela Apple.',
+				'USBDriverKit só roda em iPad com chip da série M e exige um entitlement concedido pela Apple.'
+			]
+		},
+		{
+			id: 'android-assinatura',
+			title: 'Verificar a assinatura',
+			paragraphs: ['A Google Play verifica a assinatura ao instalar e atualizar o app.'],
+			browserOnly: {
+				paragraphs: [
+					'Cada versão do app sai assinada com a mesma chave na Google Play e no GitHub. Junto com cada release são publicados o SHA-256 do APK e do AAB, também no arquivo SHA256SUMS.txt, e o fingerprint SHA-256 do certificado de assinatura, que é o mesmo nas duas fontes.',
+					'Para conferir o APK baixado do GitHub, calcule o SHA-256 do arquivo (com sha256sum ou Get-FileHash, por exemplo) e compare com o SHA256SUMS.txt. Para conferir o certificado, rode apksigner verify --print-certs no APK e compare o SHA-256 do certificado com o fingerprint publicado. Se algo não bater, não instale.'
+				],
+				links: [{ label: 'Releases e SHA256SUMS.txt', href: androidReleasesHref }]
+			}
+		},
+		{
+			id: 'android-privacidade',
+			title: 'Privacidade do app',
+			paragraphs: [
+				'O app não coleta nada além do que o site já coleta: ele abre o mesmo open-auri.com, com as mesmas regras da política de privacidade, e não acrescenta nenhuma coleta própria.',
+				'Curvas, diário e configurações ficam no armazenamento do app, neste aparelho, como ficariam no navegador, e não entram no backup do Android. O Diagnóstico USB e os bytes enviados ao cabo não saem do aparelho. Na lista de sessões da conta, as sessões abertas pelo app aparecem como “App Android”.'
+			]
 		}
 	],
 	glossary: [

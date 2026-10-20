@@ -9,6 +9,12 @@
 <script lang="ts">
 	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import {
+		dispositionFilename,
+		isAndroidApp,
+		saveFile,
+		saveFileErrorMessage
+	} from '#lib/files/save.ts';
 	import type { CreatedShare, SocialApi } from '#lib/social/index.ts';
 	import CurveAvatar from './CurveAvatar.svelte';
 	import { absoluteUrl, errorText, licenseShort, type Channel, type SessionView } from './model.ts';
@@ -81,6 +87,29 @@
 		}
 	}
 
+	async function downloadPng(event: MouseEvent) {
+		if (!isAndroidApp()) return;
+		event.preventDefault();
+		if (!channel) return;
+		message = '';
+		try {
+			const response = await fetch(api.ogImageUrl(channel.versionId), {
+				credentials: 'same-origin'
+			});
+			if (!response.ok) throw new Error(`PNG download: ${response.status}`);
+			await saveFile({
+				name:
+					dispositionFilename(response.headers.get('content-disposition')) ??
+					`${channel.versionId}.png`,
+				mime: 'image/png',
+				bytes: await response.blob()
+			});
+		} catch (error) {
+			message = saveFileErrorMessage(error, m.comunidade_error_generic());
+			console.error('Community PNG export failed', error);
+		}
+	}
+
 	async function copy() {
 		if (!url) return;
 		try {
@@ -114,8 +143,11 @@
 					/>
 				</div>
 				<div class="row-btns">
-					<a class="btn btn--plate btn--md" href={api.ogImageUrl(channel.versionId)} download
-						>{m.comunidade_share_download_png()}</a
+					<a
+						class="btn btn--plate btn--md"
+						href={api.ogImageUrl(channel.versionId)}
+						download
+						onclick={downloadPng}>{m.comunidade_share_download_png()}</a
 					>
 				</div>
 			</div>

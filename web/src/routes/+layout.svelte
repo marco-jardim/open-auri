@@ -5,9 +5,9 @@
 	import { browser, dev } from '$app/env';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale, getTextDirection } from '#lib/paraglide/runtime.js';
-	import { PUBLIC_GITHUB_URL } from '#lib/config/public.ts';
+	import { PUBLIC_GITHUB_URL, PUBLIC_TURNSTILE_SITE_KEY } from '#lib/config/public.ts';
 	// FUX.2: no static import of the runtime (#lib/app/index.ts re-exports createClientApp).
-	import { setAppContext } from '#lib/app/context.svelte.ts';
+	import { setAppContext, mountNativeCable, setNativeCableState } from '#lib/app/context.svelte.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import {
 		hasInflightMarker,
@@ -25,6 +25,7 @@
 	import Footer from '#lib/components/chrome/Footer.svelte';
 	import Toast from '#lib/components/chrome/Toast.svelte';
 	import YoloBar from '#lib/components/yolo/YoloBar.svelte';
+	import AndroidUpdateBanner from '#lib/components/cable/AndroidUpdateBanner.svelte';
 	import { AccountSession } from '#lib/components/chrome/account.svelte.ts';
 	import { postPolicyAcceptance } from '#lib/components/chrome/account.ts';
 	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
@@ -41,6 +42,8 @@
 	import { loadSocialRuntime, type SocialRuntime } from '#lib/social/runtime.ts';
 	import type { SocialOutbox, SocialSession, SocialApi } from '#lib/social/index.ts';
 	import type { LayoutProps } from './$types';
+	import { setHiddenStore } from '#lib/social/hidden-context.ts';
+	import { setReportSiteKey } from '#lib/social/report-context.ts';
 
 	let { children, data }: LayoutProps = $props();
 	const accountSession = new AccountSession(() => ({
@@ -69,6 +72,12 @@
 	// The toast region exists before the runtime: the app gets this store injected (FUX.2).
 	const toasts = createToastStore();
 	const context = setAppContext();
+	const nativeCable = setNativeCableState();
+	const hidden = setHiddenStore();
+	setReportSiteKey(PUBLIC_TURNSTILE_SITE_KEY);
+	$effect(() => {
+		if (accountSession.known) void hidden.setUser(accountSession.current?.id ?? null);
+	});
 	const app = $derived(context.client);
 	const meta = $derived(getPageMeta(page.route.id ?? page.url.pathname));
 	const homage = $derived(getFooterHonoree(meta));
@@ -83,6 +92,9 @@
 	const updatePrompt = new LazyModule(() => import('#lib/pwa/UpdatePrompt.svelte'));
 	const policyBannerIsland = new LazyModule(
 		() => import('#lib/components/legal/PolicyBanner.svelte')
+	);
+	const androidNotice = new LazyModule(
+		() => import('#lib/components/cable/AndroidUntestedNotice.svelte')
 	);
 
 	function islandFailed(error: unknown): void {
@@ -217,8 +229,10 @@
 		app?.requestRescue();
 	}
 
+	let startingRuntime = false;
 	function startRuntime(): void {
-		if (!browser || context.client || context.status === 'loading') return;
+		if (!browser || destroyed || startingRuntime || context.client || context.status === 'loading')
+			return;
 		loadSocialRuntime().catch((error: unknown) => console.warn('Social prefetch failed', error));
 		// Raced against SOCIAL_ATTACH_TIMEOUT_MS: a stalled social chunk never holds the cable and
 		// rescue chrome back; the app is published without social and the wiring may land later.
@@ -226,8 +240,16 @@
 			prepare: (client: ClientApp) => socialAttach.prepare(client),
 			optional: true
 		};
-		context.mount({ toasts }, mountOptions).then(
+		// Detection must precede creation: the cable service fixes its mode at construction.
+		// The helper is synchronous on desktop and never loads the native bridge there.
+		startingRuntime = true;
+		mountNativeCable(
+			(options) => (destroyed ? Promise.resolve(null) : context.mount(options, mountOptions)),
+			toasts,
+			nativeCable
+		).then(
 			(client) => {
+				startingRuntime = false;
 				if (!client) return;
 				client.start().catch((error: unknown) => {
 					console.error('App restore failed', error);
@@ -237,6 +259,7 @@
 				if (isInstrumentRoute(page.route.id)) whenIdle(() => checklist.request());
 			},
 			(error: unknown) => {
+				startingRuntime = false;
 				console.error('App runtime failed to load', error);
 				toasts.push(m.layout_error_generic(), { tone: 'error' });
 			}
@@ -285,6 +308,9 @@
 	const showPolicy = $derived(policyBanner !== null && policyBanner.seen !== POLICY_VERSION);
 	$effect(() => {
 		if (showPolicy) policyBannerIsland.request();
+	});
+	$effect(() => {
+		if (nativeCable.result.kind !== 'none') androidNotice.request(islandFailed);
 	});
 
 	function onChecklistFailed(error: unknown): void {
@@ -582,6 +608,13 @@
 		</CableBar>
 	</div>
 
+	{#if nativeCable.result.kind !== 'none'}
+		<AndroidUpdateBanner
+			kind={nativeCable.result.kind}
+			writing={app?.cableState.writing ?? false}
+		/>
+	{/if}
+
 	{#if policyBanner && showPolicy && policyBannerIsland.current}
 		{@const PolicyBanner = policyBannerIsland.current}
 		<div data-chrome="policy">
@@ -645,6 +678,13 @@
 		/>
 	{/if}
 	<Toast store={toasts} />
+	{#if nativeCable.result.kind !== 'none' && androidNotice.current}
+		{@const AndroidNotice = androidNotice.current}
+		<AndroidNotice
+			kind={nativeCable.result.kind}
+			presentation={page.url.pathname.replace(/\/$/, '') === '/docs' ? 'banner' : 'modal'}
+		/>
+	{/if}
 	{#if social && syncReady}
 		{@const SocialSync = social.runtime.SocialSync}
 		<SocialSync

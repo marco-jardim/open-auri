@@ -63,6 +63,8 @@
 			<a href="/docs#aviso-legal">{m.chrome_legal_link()}</a>
 			<a href={githubUrl}>{m.chrome_github_link()}</a>
 			<span>{m.chrome_license()}</span>
+			<a href="/third-party-licenses.txt">{m.chrome_third_party_licenses_link()}</a>
+			<a href="/third-party-licenses-android.txt">{m.chrome_android_licenses_link()}</a>
 			<a href={PUBLIC_STATS_URL} target="_blank" rel="noopener"
 				>{m.chrome_stats_link()} <span aria-hidden="true">↗</span></a
 			>

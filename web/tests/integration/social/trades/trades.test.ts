@@ -24,6 +24,8 @@ import {
 	type TradeDto
 } from '#lib/server/social/trades.ts';
 import { DAY_MS, TRADE_TTL_MS } from '#lib/server/social/types.ts';
+import { putHidden } from '#lib/server/social/hidden.ts';
+import { pairWaitingTrade, retryWaitingPairs } from '#lib/server/social/trades.ts';
 import { DELETE as cancelRoute } from '../../../../src/routes/api/v1/trades/[id]/+server.ts';
 import { POST as scoreRoute } from '../../../../src/routes/api/v1/trades/[id]/score/+server.ts';
 import { POST as joinRoute } from '../../../../src/routes/api/v1/trades/+server.ts';
@@ -164,6 +166,81 @@ const TRADE_KEYS = [
 ];
 
 describe('S7 join and pairing', () => {
+	for (const type of ['author', 'curve'] as const) {
+		for (const direction of ['joining', 'waiting'] as const) {
+			it(`skips a hidden ${type} in the ${direction} user's preferences, including the atomic pairing primitive`, async () => {
+				const now = epoch();
+				const [a, b] = [await player(), await player()];
+				const ta = await rawCreate(a, now);
+				const tb = await rawCreate(b, now + 1);
+				const viewer = direction === 'joining' ? b : a;
+				const partner = direction === 'joining' ? a : b;
+				const author = await env.DB.prepare('SELECT public_author_id FROM "user" WHERE id = ?')
+					.bind(partner.user.id)
+					.first<{ public_author_id: string }>();
+				if (!author) throw new Error('Missing author');
+				await putHidden(
+					env.DB,
+					viewer.user.id,
+					{
+						authors: type === 'author' ? [author.public_author_id] : [],
+						curves: type === 'curve' ? [partner.pub.lineageId] : []
+					},
+					now
+				);
+				expect(await tryPairTrades(env.DB, tb, ta, now + 2)).toBe(false);
+				expect(await pairWaitingTrade(env.DB, tb, now + 2)).toEqual({ status: 'waiting' });
+				expect(await retryWaitingPairs(env.DB, now + 2)).toBe(0);
+				expect(
+					await getMyTrade(env.DB, viewer.user.id, direction === 'joining' ? tb : ta, { now })
+				).toMatchObject({ status: 'waiting', partner: null });
+				// Unrelated hidden items must not disable the queue: a permitted third user matches.
+				const c = await player();
+				expect((await join(c, now + 3)).status).toBe('matched');
+				for (const [id, owner] of [
+					[ta, a.user.id],
+					[tb, b.user.id]
+				]) {
+					await cancelTrade(env.DB, id ?? '', owner ?? '');
+				}
+			});
+		}
+	}
+
+	it('withholds a newly hidden partner and cancels the matched pair without hiding own status', async () => {
+		const now = epoch();
+		const [a, b] = [await player(), await player()];
+		const ta = await join(a, now);
+		const tb = await join(b, now + 1);
+		expect(tb.status).toBe('matched');
+		await putHidden(env.DB, a.user.id, { authors: [], curves: [b.pub.lineageId] }, now + 2);
+		expect(await getMyTrade(env.DB, a.user.id, ta.id, { now: now + 3 })).toMatchObject({
+			id: ta.id,
+			status: 'cancelled',
+			partner: null
+		});
+		expect(await getMyTrade(env.DB, b.user.id, tb.id, { now: now + 3 })).toMatchObject({
+			status: 'cancelled',
+			partner: null
+		});
+	});
+
+	it('hiding after reveal withholds the partner but preserves the user trade history', async () => {
+		const now = epoch();
+		const [a, b] = [await player(), await player()];
+		const ta = await join(a, now);
+		const tb = await join(b, now + 1);
+		await scoreMyTrade(env.DB, a.user.id, ta.id, 4, now + 2);
+		await scoreMyTrade(env.DB, b.user.id, tb.id, 5, now + 3);
+		await putHidden(env.DB, a.user.id, { authors: [], curves: [b.pub.lineageId] }, now + 4);
+		expect(await getMyTrade(env.DB, a.user.id, ta.id, { now: now + 5 })).toMatchObject({
+			id: ta.id,
+			status: 'revealed',
+			score: 4,
+			partner: null
+		});
+	});
+
 	it('waits alone, pairs the next join; the blind view leaks no partner identity', async () => {
 		const now = epoch();
 		const [a, b] = [await player(), await player()];

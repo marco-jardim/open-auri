@@ -7,6 +7,7 @@ export type License = 'CC0-1.0' | 'CC-BY-4.0';
 export const LICENSE_OPTIONS: readonly License[] = ['CC0-1.0', 'CC-BY-4.0'];
 
 export interface AuthorCredit {
+	id?: string;
 	username: string;
 	displayUsername: string;
 }
@@ -47,6 +48,7 @@ export interface CardPage<T> {
 
 export interface ProfileView {
 	profile: {
+		authorId?: string;
 		username: string;
 		displayUsername: string;
 		bio: string | null;

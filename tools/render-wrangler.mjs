@@ -33,10 +33,17 @@ export const SECRETS = [
 
 /**
  * Placeholder values used when the key is missing or empty in .env / process.env. Only for
- * non-secret switches whose default is the production behaviour.
+ * non-secret settings whose default is the production behaviour. The Android certificate is the
+ * public SHA-256 of the app signing key (H-KEY, also used by Play App Signing); deploys may override
+ * it, e.g. with a comma-separated list during a key rotation.
  * @type {Readonly<Record<string, string>>}
  */
-export const DEFAULTS = Object.freeze({ EMAIL_TRANSPORT: 'resend' });
+export const DEFAULTS = Object.freeze({
+  EMAIL_TRANSPORT: 'resend',
+  PUBLIC_ANDROID_APP_ID: 'com.openauri.app',
+  PUBLIC_ANDROID_CERT_SHA256:
+    'FB:46:E3:4F:03:FD:6F:59:5B:4B:70:36:74:8F:92:83:08:FA:BF:31:C1:55:BF:E2:C5:0E:B1:B4:43:FF:61:D0',
+});
 
 /** @param {string} source */
 export function parseEnv(source) {
@@ -111,7 +118,7 @@ export function renderTemplate(template, output, values) {
         (given === undefined || given === '') && Object.hasOwn(DEFAULTS, key)
           ? DEFAULTS[key]
           : given;
-      if (value === undefined || value === '') missing.add(key);
+      if (value === undefined || (value === '' && !Object.hasOwn(DEFAULTS, key))) missing.add(key);
       return JSON.stringify(value ?? '').slice(1, -1);
     },
   );

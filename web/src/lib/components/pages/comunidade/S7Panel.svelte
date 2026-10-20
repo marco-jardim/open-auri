@@ -12,6 +12,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { LibraryItem, SocialApi, TradeDto } from '#lib/social/index.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import type { Listener } from './listener.svelte.ts';
 	import {
 		decodeCurve,
@@ -42,6 +43,16 @@
 	} = $props();
 
 	const id = $props.id();
+	const hidden = getHiddenStore();
+	// Signed-in preferences are enforced on pairing and every partner read by the server.
+	// Wait for browser preferences to finish syncing before requesting blind audio.
+	const contentAllowed = $derived($hidden.ready && !$hidden.busy && !$hidden.error);
+	const hiddenKey = $derived(JSON.stringify([$hidden.authors, $hidden.curves]));
+	let loadedFor = $state<string | null>(null);
+	const partnerAllowed = $derived(contentAllowed && loadedFor === hiddenKey);
+	$effect(() => {
+		if (!partnerAllowed && listener.owner === 's7') listener.stop();
+	});
 	let trades = $state.raw<TradeDto[]>([]);
 	let choice = $state('');
 	let busy = $state(false);
@@ -61,9 +72,13 @@
 				: m.comunidade_v2_reason_account()
 			: !online
 				? m.comunidade_offline()
-				: busy
-					? m.comunidade_v2_reason_wait()
-					: null
+				: !contentAllowed
+					? $hidden.error
+						? m.hidden_error()
+						: m.hidden_loading()
+					: busy
+						? m.comunidade_v2_reason_wait()
+						: null
 	);
 
 	$effect(() => {
@@ -71,24 +86,29 @@
 	});
 
 	$effect(() => {
-		if (session.verified && online) void refresh();
+		if (session.verified && online && contentAllowed) {
+			// A newly hidden target must also invalidate an already loaded blind partner.
+			void refresh(hiddenKey);
+		}
 	});
 
 	$effect(() => {
 		if (listener.owner !== 's7') listeningTo = '';
 	});
 
-	async function refresh() {
+	async function refresh(key: string) {
 		try {
 			const page = await api.myTrades({ limit: 20 });
+			if (key !== hiddenKey || !contentAllowed) return;
 			trades = page.items;
+			loadedFor = key;
 		} catch (error) {
 			message = errorText(error);
 		}
 	}
 
 	async function join() {
-		if (!choice || busy) return;
+		if (!choice || busy || joinReason) return;
 		busy = true;
 		message = '';
 		try {
@@ -103,6 +123,7 @@
 	}
 
 	async function listen(trade: TradeDto) {
+		if (!partnerAllowed) return;
 		if (listeningTo === trade.id) {
 			listener.stop();
 			return;
@@ -215,6 +236,7 @@
 				>
 			{/if}
 		</div>
+		{#if !contentAllowed}<p class="note">{m.hidden_loading()}</p>{/if}
 		{#if trades.length === 0}
 			<p class="note">{m.comunidade_s7_none()}</p>
 		{:else}
@@ -225,7 +247,7 @@
 							<span class="status">{statusText(trade)}</span>
 							<span class="date">{formatDate(trade.createdAt, getLocale())}</span>
 						</div>
-						{#if trade.status === 'matched' && trade.partner}
+						{#if partnerAllowed && trade.status === 'matched' && trade.partner}
 							<div class="row-btns">
 								<Button aria-pressed={listeningTo === trade.id} onclick={() => listen(trade)}
 									>{listeningTo === trade.id
@@ -254,7 +276,7 @@
 									<span class="note">{m.comunidade_s7_waiting_partner()}</span>
 								{/if}
 							</div>
-						{:else if trade.status === 'revealed' && trade.partner?.revealed}
+						{:else if partnerAllowed && trade.status === 'revealed' && trade.partner?.revealed}
 							<p class="reveal">
 								{#if trade.partner.username}
 									<a href="/u/{encodeURIComponent(trade.partner.username)}"

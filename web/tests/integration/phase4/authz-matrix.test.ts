@@ -243,6 +243,14 @@ const TABLE: Record<string, Partial<Record<Method, Spec>>> = {
 			})
 		}
 	},
+	'me/hidden': {
+		GET: { auth: 'user', request: () => ({}) },
+		PUT: { auth: 'user', request: () => ({ body: { authors: [], curves: [] } }) },
+		DELETE: {
+			auth: 'user',
+			request: () => ({ body: { targetType: 'author', targetId: 'nobody' } })
+		}
+	},
 	'me/library': { GET: { auth: 'user', request: () => ({ query: '?shelf=created' }) } },
 	'me/library/merge': {
 		// An empty batch: the guards are what this row checks (merge itself: library/merge.test.ts).

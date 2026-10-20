@@ -46,6 +46,23 @@ const META: SharedCurveMeta = {
 	indexable: true
 };
 
+test('direct unlisted links expose reporting and explain verified sign-in to visitors', async () => {
+	vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+		new Response('null', { headers: { 'content-type': 'application/json' } })
+	);
+	await render(SharedCurve, {
+		curve: data({ visibility: 'unlisted' }),
+		meta: META,
+		signedIn: false
+	});
+	await page.getByText(m.fxpc_report_item({ name: 'Warm vocal' }), { exact: true }).click();
+	await expect.element(page.getByText(m.fxpc_report_account(), { exact: true })).toBeVisible();
+	await expect
+		.element(page.getByRole('link', { name: m.shared_curve_login() }))
+		.toHaveAttribute('href', '/entrar');
+	expect(page.getByRole('textbox').elements()).toHaveLength(0);
+});
+
 /** A stateful fake engine: sessions, pause and resume as the SEEK.1 transport reports them. */
 function fakeAudio() {
 	let current: AudioEngineState = { ...IDLE_STATE };

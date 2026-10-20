@@ -1,4 +1,5 @@
 import { numberLabel, frequencyLabel } from '#lib/charts/scales.ts';
+import { saveFile } from '#lib/files/save.ts';
 import { compareCurves, type NamedCurve } from './comparison.ts';
 import { PLOT_FREQUENCIES, plotPath, plotRange, plotTicks, plotX, plotY } from './plot.ts';
 import type { Copy } from './copy.ts';
@@ -86,26 +87,21 @@ export function comparisonSvg(
 	</g></svg>`;
 }
 
-function download(blob: Blob, filename: string) {
-	const url = URL.createObjectURL(blob);
-	const anchor = document.createElement('a');
-	anchor.href = url;
-	anchor.download = filename;
-	anchor.click();
-	setTimeout(() => URL.revokeObjectURL(url), 1000);
+async function download(blob: Blob, filename: string): Promise<void> {
+	await saveFile({ name: filename, mime: blob.type, bytes: blob, revokeDelayMs: 1000 });
 }
 
 /** Tests can capture the finished file without clicking a link in the shared browser runner. */
 export async function downloadComparison(
 	svg: string,
 	format: 'svg' | 'png',
-	saveFile: (blob: Blob, filename: string) => void = download
+	save: (blob: Blob, filename: string) => void | Promise<void> = download
 ): Promise<void> {
 	const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
 	if (format === 'svg') {
-		saveFile(blob, 'open-auri-comparar.svg');
+		await save(blob, 'open-auri-comparar.svg');
 		return;
 	}
 	const { comparisonPng } = await import('./png.ts');
-	saveFile(await comparisonPng(blob), 'open-auri-comparar.png');
+	await save(await comparisonPng(blob), 'open-auri-comparar.png');
 }

@@ -36,6 +36,29 @@ afterEach(async () => {
 
 const S1 = encodeS1(neutralCurve());
 
+test('profile, creations and public packs each expose a named report action', async () => {
+	vi.spyOn(globalThis, 'fetch').mockImplementation(
+		async () => new Response('null', { headers: { 'content-type': 'application/json' } })
+	);
+	await render(Perfil, {
+		data: view({
+			profile: { ...view().profile, authorId: 'opaque-public-author' },
+			lineages: { items: [card()], nextCursor: null },
+			packs: {
+				items: [{ id: 'pack-id', name: 'Night pack', description: '', createdAt: 1, updatedAt: 1 }],
+				nextCursor: null
+			}
+		})
+	});
+	for (const name of ['Ana', 'Warm vocal', 'Night pack']) {
+		await expect
+			.element(page.getByText(m.fxpc_report_item({ name }), { exact: true }))
+			.toBeVisible();
+	}
+	await page.getByText(m.fxpc_report_item({ name: 'Ana' }), { exact: true }).click();
+	await expect.element(page.getByText(m.fxpc_report_account(), { exact: true })).toBeVisible();
+});
+
 function card(overrides: Partial<LineageCard> = {}): LineageCard {
 	return {
 		id: `lin-${crypto.randomUUID()}`,

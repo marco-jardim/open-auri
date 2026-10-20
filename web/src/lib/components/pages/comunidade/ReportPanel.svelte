@@ -12,13 +12,12 @@
 	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi } from '#lib/social/index.ts';
-	import type { ReportReason } from '#lib/server/social/types.ts';
+	import type { ReportReason, ReportTargetKind } from '#lib/server/social/types.ts';
 	import {
 		NOTE_MAX,
 		REPORT_REASONS,
 		TURNSTILE_REPORT_ACTION,
 		errorText,
-		type Channel,
 		type SessionView
 	} from './model.ts';
 
@@ -27,14 +26,16 @@
 	let {
 		api,
 		session,
-		channel,
+		subject,
+		targetName,
 		siteKey,
 		online,
 		token = $bindable('')
 	}: {
 		api: SocialApi;
 		session: SessionView;
-		channel: Channel | null;
+		subject: { kind: ReportTargetKind; id: string } | null;
+		targetName?: string;
 		siteKey: string;
 		online: boolean;
 		token?: string;
@@ -46,18 +47,14 @@
 	let busy = $state(false);
 	let message = $state('');
 	let sentFor = $state('');
+	const targetKey = $derived(subject ? `${subject.kind}:${subject.id}` : '');
 
 	const canSend = $derived(
-		!!channel &&
-			session.verified &&
-			token !== '' &&
-			online &&
-			!busy &&
-			sentFor !== channel.lineageId
+		!!subject && session.verified && token !== '' && online && !busy && sentFor !== targetKey
 	);
 	/** Why "Enviar denúncia" cannot act right now; null when it can (T8). */
 	const sendReason = $derived(
-		!channel
+		!subject
 			? m.comunidade_select_first()
 			: !session.verified
 				? session.signedIn
@@ -65,13 +62,13 @@
 					: m.comunidade_v2_reason_account()
 				: !online
 					? m.comunidade_offline()
-					: sentFor === channel.lineageId
+					: sentFor === targetKey
 						? m.comunidade_v2_reason_report_sent()
 						: token === ''
 							? m.comunidade_report_needs_check()
 							: null
 	);
-	const formShown = $derived(!!channel && session.verified);
+	const formShown = $derived(!!subject && session.verified);
 
 	const reasonText: Record<ReportReason, () => string> = {
 		dangerous: () => m.comunidade_report_reason_dangerous(),
@@ -110,23 +107,24 @@
 	});
 
 	async function send() {
-		if (!canSend || !channel) return;
+		if (!canSend || !subject) return;
 		busy = true;
 		message = '';
 		// The submitted target: the selected channel may change while the request is in flight.
-		const targetId = channel.lineageId;
+		const { kind: targetKind, id: targetId } = subject;
+		const submittedKey = targetKey;
 		try {
 			await api.report(
 				{
-					targetKind: 'lineage',
+					targetKind,
 					targetId,
 					reason,
 					note: note.trim() === '' ? null : note
 				},
 				token
 			);
-			sentFor = targetId;
-			if (channel?.lineageId === targetId) {
+			sentFor = submittedKey;
+			if (targetKey === submittedKey) {
 				note = '';
 				message = m.comunidade_report_sent();
 			}
@@ -146,14 +144,16 @@
 </svelte:head>
 
 <div class="report" data-testid="report-panel">
-	{#if !channel}
+	{#if !subject}
 		<p class="note">{m.comunidade_select_first()}</p>
 	{:else if !session.verified}
+		<p>{m.fxpc_report_account()}</p>
+		<a href="/entrar">{m.shared_curve_login()}</a>
 		<div class="row-btns">
 			<Button variant="danger" disabledReason={sendReason}>{m.comunidade_report_send()}</Button>
 		</div>
 	{:else}
-		<p class="target">{m.comunidade_report_target({ name: channel.name })}</p>
+		<p class="target">{m.comunidade_report_target({ name: targetName ?? subject.id })}</p>
 		<label for="{id}-reason">
 			<span class="fld-lbl">{m.comunidade_report_reason()}</span>
 		</label>
@@ -183,7 +183,7 @@
 				>{m.comunidade_report_send()}</Button
 			>
 		</div>
-		{#if token === '' && sentFor !== channel.lineageId}
+		{#if token === '' && sentFor !== targetKey}
 			<p class="note">{m.comunidade_report_needs_check()}</p>
 		{/if}
 	{/if}

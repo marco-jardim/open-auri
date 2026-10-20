@@ -89,6 +89,7 @@
 		"#lib/*": "./src/lib/*"
 	},
 	"dependencies": {
+		"@capacitor/core": "8.5.3",
 		"@cf-wasm/resvg": "^0.4.0",
 		"better-auth": "^1.7.10",
 		"open-auri": "file:..",

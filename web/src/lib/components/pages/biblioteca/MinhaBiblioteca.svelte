@@ -6,6 +6,8 @@
 	// "Abrir" leads to /c/[id], where installing goes through `app.requestWrite`.
 	import { tick, untrack } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
 	import {
 		isSocialApiError,
 		rememberOrigin,
@@ -94,6 +96,7 @@
 		remember?: typeof rememberOrigin;
 	} = $props();
 	const id = $props.id();
+	const hidden = getHiddenStore();
 
 	function empty<T>(): ShelfState<T> {
 		return { items: [], cursor: null, status: 'idle', error: null };
@@ -692,7 +695,7 @@
 			{:else if shelfTab}
 				{@const shelf = shelfTab}
 				<ul class="rows">
-					{#each shelves[shelf].items as item (item.id)}
+					{#each $hidden.ready ? shelves[shelf].items.filter((item) => !isHidden($hidden, item.id, authorHiddenId(item.author))) : [] as item (item.id)}
 						<li class="row" id="{id}-row-{item.id}" tabindex="-1">
 							<div class="row-head">
 								<strong>{item.head.name}</strong>

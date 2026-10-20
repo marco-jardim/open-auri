@@ -5,6 +5,9 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import type { CurveData } from '#lib/state/model.ts';
 	import type { CurveSocial } from './social.svelte.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
+	import ReportAction from '#lib/components/social/ReportAction.svelte';
 
 	let {
 		social,
@@ -15,7 +18,8 @@
 		path: string;
 		onload: (curve: CurveData) => void;
 	} = $props();
-	type Row = { id: string; versionId: string; name: string };
+	type Row = { id: string; versionId: string; name: string; author: string | null };
+	const hidden = getHiddenStore();
 	let source = $state('feed');
 	let shelf = $state<'created' | 'favorites' | 'installed'>('created');
 	let query = $state('');
@@ -28,7 +32,13 @@
 	let generation = 0;
 	let abort: AbortController | undefined;
 	const filtered = $derived(
-		rows.filter((row) => row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
+		$hidden.ready
+			? rows.filter(
+					(row) =>
+						!isHidden($hidden, row.id, row.author) &&
+						row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+				)
+			: []
 	);
 	function reset() {
 		generation++;
@@ -60,7 +70,12 @@
 			if (token !== generation) return;
 			const items = page.items.map((item) => {
 				const lineage = 'lineage' in item ? item.lineage : item;
-				return { id: lineage.id, versionId: lineage.head.id, name: lineage.head.name };
+				return {
+					id: lineage.id,
+					versionId: lineage.head.id,
+					name: lineage.head.name,
+					author: authorHiddenId(lineage.author)
+				};
 			});
 			rows = more ? [...rows, ...items] : items;
 			cursor = page.nextCursor;
@@ -72,7 +87,7 @@
 		}
 	}
 	async function use() {
-		const row = rows.find((row) => row.id === selected);
+		const row = filtered.find((row) => row.id === selected);
 		if (!row || busy || social.unavailable) return;
 		const token = ++generation;
 		abort = new AbortController();
@@ -144,6 +159,15 @@
 		<button type="button" disabled={!selected || busy || social.unavailable} onclick={use}
 			>{m.curve_social_add()}</button
 		>
+		{#each filtered.filter((row) => row.id === selected) as row (row.id)}
+			<ReportAction
+				subject={{ kind: 'lineage', id: row.id }}
+				name={row.name}
+				api={social.api}
+				session={social.session}
+				online={!social.unavailable}
+			/>
+		{/each}
 		{#if cursor}<button
 				type="button"
 				disabled={busy || social.unavailable}

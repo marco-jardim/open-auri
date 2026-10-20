@@ -4,8 +4,9 @@
  *
  * Every write goes through, in this order: a fresh single-use gesture token, the
  * checklist (gate on a snapshot, confirmations, 2 s spacing), the cross-tab write lock
- * (Web Locks `oa-cable-write`, `ifAvailable`), the checklist again with fresh flash state,
- * then `writeCurve` / `writeMany` from `open-auri/transport`, which run `gateForWrite`
+ * (Web Locks `oa-cable-write`, `ifAvailable`), a bounded live deploy check for native writes,
+ * the checklist again with fresh flash state, then `writeCurve` / `writeMany` from
+ * `open-auri/transport`, which run `gateForWrite`
  * again on that snapshot. Nothing is ever retried or written automatically; the lock and
  * the in-flight marker only ever refuse or record.
  *
@@ -42,6 +43,8 @@ import {
 import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
 import { gateForWrite, isWaivable } from 'open-auri/safety';
 import { evaluateChecklist, flashCountersOf } from './checklist.ts';
+import { isNativeHid } from './native/brand.ts';
+import { assertNativeWriteFresh, type NativeFreshnessDeps } from './native-freshness.ts';
 import { consumeGestureToken, createGestureToken, type GestureEventLike } from './gesture.ts';
 import { withWriteFlag } from './write-flag.ts';
 import type {
@@ -342,10 +345,14 @@ function gateReasonsOf(error: unknown): Refused['gateReasons'] {
 	return error.reasons as Refused['gateReasons'];
 }
 
-export function createCableService(deps: CableServiceDeps) {
+export function createCableService(
+	/** Native freshness fetch/version overrides are for tests; desktop never reads them. */
+	deps: CableServiceDeps & { nativeFreshness?: NativeFreshnessDeps }
+) {
 	const detected = detectCableSupport() === 'real' ? navigatorHid() : null;
 	const resolved = deps.hid === undefined ? detected : deps.hid;
 	const mode: CableMode = resolved === null ? 'simulated' : 'real';
+	const native = isNativeHid(resolved);
 	const clock = deps.clock ?? systemClock;
 	const events = new EventTarget();
 	const listeners = new Set<(state: CableState) => void>();
@@ -453,6 +460,7 @@ export function createCableService(deps: CableServiceDeps) {
 			};
 		}
 		return {
+			cableMode: native ? 'native' : mode,
 			nowMs: now,
 			flash: currentFlash(now),
 			lastWrittenLevelDb: deps.lastWrittenLevelDb(),
@@ -892,6 +900,13 @@ export function createCableService(deps: CableServiceDeps) {
 	): Promise<T | Refused> {
 		const guarded = async (): Promise<T | Refused> => {
 			try {
+				if (native) {
+					try {
+						await assertNativeWriteFresh(deps.nativeFreshness);
+					} catch (cause) {
+						return refuse('error', { error: cause });
+					}
+				}
 				return await run();
 			} finally {
 				unmark();
@@ -919,6 +934,11 @@ export function createCableService(deps: CableServiceDeps) {
 		const volumeLowered = confirmations?.volumeLowered === true;
 		const keepConnected = confirmations?.keepConnected === true;
 		const experimentalConfirmed = confirmations?.experimental === true;
+		// Transport-owned context cannot be overridden by a write request. Capture once, just
+		// like the other confirmations, and leave desktop/simulated requests unchanged.
+		const androidConfirmation = native
+			? { androidUntested: confirmations?.androidUntested === true }
+			: {};
 		// Read once, compared without coercion: only the exact string selects YOLO.
 		const profile: unknown = request.profile;
 		if (profile !== 'yolo') {
@@ -926,7 +946,12 @@ export function createCableService(deps: CableServiceDeps) {
 				bands,
 				preampDb,
 				experimental,
-				confirmations: { volumeLowered, keepConnected, experimental: experimentalConfirmed }
+				confirmations: {
+					volumeLowered,
+					keepConnected,
+					experimental: experimentalConfirmed,
+					...androidConfirmation
+				}
 			};
 		}
 		const yoloWrite = confirmations?.yoloWrite === true;
@@ -939,7 +964,8 @@ export function createCableService(deps: CableServiceDeps) {
 				volumeLowered,
 				keepConnected,
 				experimental: experimentalConfirmed,
-				yoloWrite
+				yoloWrite,
+				...androidConfirmation
 			}
 		};
 	}

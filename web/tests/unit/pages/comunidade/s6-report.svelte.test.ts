@@ -524,13 +524,14 @@ test('S6: without storage the sent receipt is shown once, and the next batch sta
 });
 
 const channel = channelOf(feedItem() as unknown as FeedItem);
+const target = { kind: 'lineage' as const, id: channel.lineageId };
 
 test('report: without a Turnstile token the report cannot be sent', async () => {
 	const fetch = fakeFetch(() => json({ reported: true }));
 	await render(ReportPanel, {
 		api: apiWith(fetch),
 		session: VERIFIED,
-		channel,
+		subject: target,
 		siteKey: '',
 		online: true
 	});
@@ -548,7 +549,7 @@ test('report: with a token it posts the reason and sends the token header', asyn
 	await render(ReportPanel, {
 		api: apiWith(fetch),
 		session: VERIFIED,
-		channel,
+		subject: target,
 		siteKey: '',
 		online: true,
 		token: 'tok-123'
@@ -574,7 +575,7 @@ test('report: the Turnstile check mounts with the form, never before', async () 
 	await render(ReportPanel, {
 		api: apiWith(fetch),
 		session: VERIFIED,
-		channel: null,
+		subject: null,
 		siteKey: 'site-key',
 		online: true
 	});
@@ -584,7 +585,7 @@ test('report: the Turnstile check mounts with the form, never before', async () 
 	await render(ReportPanel, {
 		api: apiWith(fetch),
 		session: VERIFIED,
-		channel,
+		subject: target,
 		siteKey: 'site-key',
 		online: true
 	});
@@ -598,7 +599,7 @@ test('report: visitors get no form and no check, and the action says why', async
 	await render(ReportPanel, {
 		api: apiWith(fetch),
 		session: ANONYMOUS,
-		channel,
+		subject: target,
 		siteKey: 'site-key',
 		online: true
 	});

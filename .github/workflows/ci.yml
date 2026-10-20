@@ -41,6 +41,8 @@ env:
   # Public build values (fictitious; embedded in the CI bundle only)
   PUBLIC_ORIGIN: https://open-auri-ci.ci-fixture.workers.dev
   PUBLIC_GITHUB_URL: https://github.com/example/open-auri
+  PUBLIC_ANDROID_APP_ID: com.openauri.app
+  PUBLIC_ANDROID_CERT_SHA256: ''
   PUBLIC_LGPD_CONTROLLER: Controlador Ficticio de CI
   PUBLIC_LGPD_CONTACT_EMAIL: lgpd@example.com
   PUBLIC_LGPD_CNPJ: 00.000.000/0000-00
@@ -63,6 +65,43 @@ env:
   EMAIL_TRANSPORT: resend
 
 jobs:
+  changes:
+    name: Android path filter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            android:
+              - 'apps/android/**'
+              - 'web/src/lib/cable/**'
+              - 'web/src/lib/files/**'
+              - 'src/dsp/**'
+              - 'src/transport/**'
+              - 'schemas/android-*'
+              - 'test/fixtures/**'
+              - 'docs/protocol-0xcb.md'
+              - 'tools/run-gradle.mjs'
+              - 'tools/android-*.mjs'
+              - 'tools/verify-capacitor-config.mjs'
+              - 'tools/usb-golden.mjs'
+              - 'tools/play-assets.mjs'
+              - 'test/tools/android-*.test.mjs'
+              - 'test/tools/run-gradle.test.mjs'
+              - 'test/tools/verify-capacitor-config.test.mjs'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
+
   static:
     name: Lint, types and scans
     runs-on: ubuntu-latest
@@ -194,4 +233,165 @@ jobs:
           path: |
             web/playwright-report
             web/test-results
+          retention-days: 7
+
+  android-emulator:
+    name: Android emulator
+    needs: changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    env:
+      OA_NO_AUTOEQ: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
+      # Avoid setup-gradle's init script, which is not covered by dependency verification.
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/android/**/*.gradle', 'apps/android/android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - run: npm ci
+      - name: Render wrangler.jsonc and .dev.vars (fictitious values)
+        run: |
+          npm run -w web gen
+          npm run -w web dev-vars
+      - name: Build the real web preview (production CSP)
+        run: npm run -w web build
+      - name: Start preview on the emulator's host
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          npm run -w web preview > "$RUNNER_TEMP/android-preview.log" 2>&1 &
+          PREVIEW_PID=$!
+          for attempt in {1..90}; do
+            if curl --fail --silent --connect-timeout 1 --max-time 2 http://127.0.0.1:4173/ > /dev/null; then
+              printf 'Android preview ready (attempt %s/90)\n' "$attempt"
+              exit 0
+            fi
+            if ! kill -0 "$PREVIEW_PID" 2>/dev/null; then
+              echo '::error::Android preview exited before becoming ready'
+              cat "$RUNNER_TEMP/android-preview.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo '::error::Android preview was not ready after 90 bounded attempts'
+          cat "$RUNNER_TEMP/android-preview.log"
+          exit 1
+      - name: Build Android for the local preview
+        run: npm run build:android:e2e
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Instrumented tests against the real preview
+        # HTTP is not a secure context: service workers and HTTPS DownloadBridge attachment
+        # still need a separate HTTPS device run (Q2 m3).
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          # The wrapper syncs before testing; retain the e2e target instead of its prod default.
+          script: npm run test:android:device -- --target e2e
+      - name: Upload Android instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-emulator-reports
+          path: |
+            apps/android/android/app/build/reports/androidTests/
+            apps/android/android/app/build/outputs/androidTest-results/
+            ${{ runner.temp }}/android-preview.log
+          retention-days: 7
+
+  android:
+    name: Android
+    needs: changes
+    # Job-level skips succeed for required checks on docs-only PRs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
+      # Plain cache instead of gradle/actions/setup-gradle: its init script resolves its own plugin
+      # classpath, which dependency verification (gradle/verification-metadata.xml) rejects.
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/android/**/*.gradle', 'apps/android/android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - run: npm ci
+      - name: Tooling tests
+        run: npm run test:tools
+      - name: Android typecheck
+        run: npm run typecheck:android
+      - name: Android lint
+        run: npm run lint:android
+      - name: Android unit tests and coverage gates
+        run: npm run test:android
+      - name: Android debug build
+        run: npm run build:android
+      - name: Android release build
+        run: npm run build:android:release
+      - name: Check Android notices against the release report
+        run: npm run notices:android -- --check
+      - name: Android release dry run (two ephemeral signing keys)
+        run: npm run test:android:release
+      - name: Upload Android debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-debug-apk
+          path: apps/android/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+      - name: Upload Android coverage, lint and test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-reports
+          path: |
+            apps/android/android/app/build/reports/kover/
+            apps/android/android/app/build/reports/lint-results*
+            apps/android/android/app/build/reports/tests/
+            apps/android/android/app/build/test-results/
           retention-days: 7

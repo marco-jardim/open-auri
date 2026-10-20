@@ -1,6 +1,6 @@
 // FX4.1: the feed and the rankings are public (60 s public cache), so their items are public
 // cards: never the owner's user id, the curve's canonical key or gate version, nor any other
-// internal field. The author is the nickname only.
+// internal field. Author ids are stable public identifiers, not authentication ids.
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { runRankingsJob, type FeedLineageCard } from '#lib/server/social/rankings.ts';
@@ -59,7 +59,12 @@ function expectPublicCard(
 	expect(Object.keys(card).sort()).toEqual(CARD_KEYS);
 	expect(Object.keys(card.head).sort()).toEqual(HEAD_KEYS);
 	expect(Object.keys(card.curve).sort()).toEqual(CURVE_KEYS);
-	expect(card.author).toEqual({ username: owner.username, displayUsername: owner.username });
+	expect(card.author).toEqual({
+		id: expect.stringMatching(/^[a-f0-9]{32}$/),
+		username: owner.username,
+		displayUsername: owner.username
+	});
+	expect(card.author?.id).not.toBe(owner.id);
 }
 
 function expectNoLeak(texts: readonly string[], owner: { id: string; email: string }) {

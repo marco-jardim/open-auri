@@ -1,0 +1,110 @@
+name: Resultado de gravação no cabo pelo Android / Android USB report
+description: Relate o resultado, inclusive falhas antes de gravar. / Report results, including failures before writing.
+title: '[Android USB] '
+labels: [android-cable-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por ajudar a validar o caminho USB do app Android.
+        Use somente o fluxo normal de gravação, com gate e checklist. Não repita gravações só para preencher este relato.
+        Esta issue é pública: não cole nomes, e-mails, números de série, IDs de conta, caminhos pessoais, dados de recuperação ou outros dados pessoais. Revise o JSON antes de enviar.
+        Se o som ficou estranho, grave o Neutro; se não resolver, use o site no computador (Chrome ou Edge).
+        English: report the normal guarded write flow only; do not repeat writes just for this report.
+        This issue is public. Do not include names, emails, serial numbers, account IDs, personal paths or recovery data. Review the JSON before submitting.
+        If the sound is wrong, write Neutral; if that does not help, use the desktop site (Chrome or Edge).
+  - type: input
+    id: device
+    attributes:
+      label: Aparelho e fabricante / Device and manufacturer
+      description: Informe o modelo e a marca, sem número de série ou IMEI. / Model and brand only; no serial number or IMEI.
+      placeholder: Modelo do celular, fabricante
+    validations:
+      required: true
+  - type: input
+    id: android-version
+    attributes:
+      label: Versão do Android / Android version
+      description: Versão do sistema no aparelho. / Device OS version.
+      placeholder: Android 16
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: Versão do app / App version
+      description: Consulte as informações do app ou o Diagnóstico USB. / Check app info or USB Diagnostics.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: webview-version
+    attributes:
+      label: Versão da WebView / WebView version
+      description: Informe a versão do Android System WebView ou do provedor ativo; se desconhecida, escreva "não disponível". / Active WebView provider version, or "unavailable".
+    validations:
+      required: true
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Origem da instalação / Install source
+      description: Onde você instalou o app. / Where you installed the app from.
+      options:
+        - Play
+        - GitHub
+    validations:
+      required: true
+  - type: textarea
+    id: usb-diagnostics
+    attributes:
+      label: JSON do Diagnóstico USB / USB Diagnostics JSON
+      description: Em Cabo > Engenharia, copie o Diagnóstico USB e revise antes de colar; se indisponível, explique nas observações. / Copy from Cable > Engineering, review for personal data, or explain why unavailable in Notes.
+      render: json
+  - type: input
+    id: curve
+    attributes:
+      label: Curva gravada / Curve written
+      description: Informe o preset ou Neutro, ou a curva que tentou gravar se não começou. / Preset or Neutral; if writing never started, name the attempted curve.
+      placeholder: Padrão, Basshead, Neutro ou nome da curva
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Resultado / Result
+      description: Escolha funcionou, não funcionou ou parcial. / Choose worked, failed or partial, in that order.
+      options:
+        - funcionou
+        - não funcionou
+        - parcial
+    validations:
+      required: true
+  - type: dropdown
+    id: sound-changed
+    attributes:
+      label: O som mudou como esperado? / Did sound change as expected?
+      description: Escolha sim, não, não sei ou não se aplica. / Choose yes, no, unsure or not applicable (no write), in that order.
+      options:
+        - 'sim'
+        - 'não'
+        - não sei
+        - não se aplica (não houve gravação)
+    validations:
+      required: true
+  - type: dropdown
+    id: audio-cut
+    attributes:
+      label: O áudio cortou? / Did audio cut out?
+      description: Escolha sim, não, não sei ou não havia áudio. / Choose yes, no, unsure or no audio was playing, in that order.
+      options:
+        - 'sim'
+        - 'não'
+        - não sei
+        - não havia áudio tocando
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Observações / Notes
+      description: Descreva erros, adaptador OTG, interrupções, duração do corte e resgate com Neutro, sem dados pessoais. / Errors, OTG adapter, interruptions, cut duration and Neutral recovery; no personal data.

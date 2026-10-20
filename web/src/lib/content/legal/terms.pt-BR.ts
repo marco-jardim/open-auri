@@ -21,6 +21,9 @@ export const termsPtBR: LegalDocument = {
 		...legalNotice['pt-BR'].map(paragraph),
 		heading('2. Uso responsável e gravação'),
 		paragraph(
+			'O site e o app são destinados a pessoas com 18 anos ou mais, inclusive no uso sem conta, e não são direcionados a menores de idade.'
+		),
+		paragraph(
 			'O editor e as prévias locais não exigem conta. Nenhum byte deve ser enviado sem aprovação do gate v2 nos valores Q27/Q23 reais, checklist completo e gesto explícito. O gate é uma política de semelhança com o que os 11 presets oficiais já fazem o chip calcular, não uma prova de segurança do hardware. Abaixe o volume, mantenha a alimentação estável e não desconecte durante a gravação. Toda escrita conhecida persiste na flash, de vida útil desconhecida.'
 		),
 		paragraph(
@@ -28,7 +31,7 @@ export const termsPtBR: LegalDocument = {
 		),
 		heading('3. Conta e apelido público'),
 		list([
-			'A conta é opcional e só para pessoas com 18 anos ou mais. Cada pessoa mantém uma conta, com e-mail verificado para qualquer ação social.',
+			'A conta é opcional; o cadastro e o uso da conta exigem 18 anos ou mais. Cada pessoa mantém uma conta, com e-mail verificado para qualquer ação social.',
 			'Você responde pela guarda da sua senha e pelas ações feitas na sua conta. Avise-nos pelo canal de privacidade se suspeitar de uso indevido.',
 			'O apelido público é o único nome exibido. Ele não pode se passar por outra pessoa, por fabricantes, pelo projeto ou pelos homenageados, nem conter dados pessoais de terceiros. Apelidos reservados ou confundíveis com outros são recusados.',
 			'O apelido pode ser trocado a cada 30 dias. O antigo fica reservado por 90 dias e redireciona para o novo.'

@@ -9,6 +9,8 @@
 	import type { MeterTap, TapOptions } from '#lib/audio/meters.ts';
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
+	import HideActions from '#lib/components/social/HideActions.svelte';
+	import { authorHiddenId } from '#lib/social/hidden.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import ChannelMeter from './ChannelMeter.svelte';
@@ -140,6 +142,12 @@
 			<!-- Every YOLO card carries the mark (compact: no interactive content). -->
 			<YoloCurveNotice variant="public" compact class="strip-yolo" />
 		{/if}
+		<HideActions
+			lineageId={channel.lineageId}
+			author={authorHiddenId(channel.author)}
+			curveName={channel.name}
+			authorName={channel.author?.displayUsername}
+		/>
 	</div>
 </li>
 

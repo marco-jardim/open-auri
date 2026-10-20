@@ -47,6 +47,21 @@ está marcado como hipótese ou pendência, não como fato.
 | [`operacao.md`](operacao.md) | Índice da operação: observabilidade, backups, capacidade e runbooks. |
 | [`lgpd.md`](lgpd.md) | Registro das operações de tratamento (LGPD, art. 37). |
 
+## App Android
+
+| Documento | Conteúdo |
+|---|---|
+| [`android.md`](android.md) | Arquitetura do app, contrato da ponte, erros, framing, setup, scripts, testes e estado de validação. |
+| [`android-build-security.md`](android-build-security.md) | Verificação de dependências do Gradle e atualização do metadata. |
+| [`android/captura-usb.md`](android/captura-usb.md) | Runbook da captura de referência USB no Windows (Fase 5). |
+| [`operacao/runbooks/android-release.md`](operacao/runbooks/android-release.md) | Chaves, Environment `android-release`, release, controle remoto da gravação e merge/deploy. |
+| [`android/play-requisitos.md`](android/play-requisitos.md) | Requisitos atuais da Google Play e da verificação de desenvolvedor. |
+| [`android/play-conta.md`](android/play-conta.md) | Estado, identidade e segurança da conta da Play. |
+| [`android/play-listing.md`](android/play-listing.md) | Ficha da loja em pt-BR e en-US. |
+| [`android/data-safety.md`](android/data-safety.md) | Respostas de Data safety rastreadas ao código. |
+| [`android/play-conteudo.md`](android/play-conteudo.md) | Demais formulários de conteúdo do app. |
+| [`android/play-assets/`](android/play-assets/) | Ícone, feature graphic e capturas da loja. |
+
 ## Índice do núcleo
 
 A entrada [`src/index.mjs`](../src/index.mjs), importada como `open-auri`, oferece os

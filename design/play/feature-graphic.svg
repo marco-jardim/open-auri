@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500" role="img" aria-labelledby="title">
+  <title id="title">open-auri</title>
+  <rect width="1024" height="500" fill="#0f0f0e"/>
+  <rect x="96" y="110" width="280" height="280" rx="56" fill="#171715"/>
+  <!-- Artwork from web/static/icons/icon.svg; only its full-bleed background is omitted. -->
+  <svg x="96" y="110" width="280" height="280" viewBox="0 0 512 512">
+    <g fill="none" stroke="#ece7dd" stroke-linecap="round" stroke-linejoin="round">
+      <path stroke-width="20" d="M120 322l64-140h40l64 140M146 270h116"/>
+      <path stroke-width="18" d="M310 216v68c0 26 16 42 40 42s40-16 40-42v-68"/>
+    </g>
+    <circle cx="350" cy="180" r="10" fill="#ff7a2f"/>
+  </svg>
+  <!-- The renderer loads web/static/og-font/InstrumentSerif-Regular.ttf, never system fonts. -->
+  <text x="424" y="283" fill="#ece7dd" font-family="Instrument Serif" font-size="112" letter-spacing="-2">open-auri</text>
+  <path d="M428 318h56" fill="none" stroke="#ff7a2f" stroke-width="3"/>
+</svg>

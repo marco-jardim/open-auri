@@ -6,6 +6,9 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
+import { mount, unmount } from 'svelte';
+import { createHiddenStore } from '#lib/social/hidden-store.ts';
+import { HIDDEN_CONTEXT } from '#lib/social/hidden-context.ts';
 import { createAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
 import S7Panel from '#lib/components/pages/comunidade/S7Panel.svelte';
 import { createListener, type Listener } from '#lib/components/pages/comunidade/listener.svelte.ts';
@@ -178,6 +181,44 @@ const sendScore = () =>
 	page.getByRole('button', { name: m.comunidade_s7_send_score(), exact: true });
 const cancelButton = () =>
 	page.getByRole('button', { name: m.comunidade_s7_cancel(), exact: true });
+
+test('S7: hidden items do not remove own status/cancel or prevent joining after sync', async () => {
+	const hidden = createHiddenStore(
+		{
+			myHidden: async () => ({
+				items: [{ targetType: 'author', targetId: 'hidden-author', label: 'Hidden', createdAt: 1 }]
+			}),
+			putHidden: async () => ({ items: [] }),
+			deleteHidden: async () => ({ items: [] })
+		},
+		() => null
+	);
+	await hidden.setUser('me');
+	const fetch = tradesApi([trade('waiting', 'waiting')], (_url, init) =>
+		init.method === 'DELETE' ? json({ cancelled: true }) : undefined
+	);
+	const target = document.createElement('div');
+	document.body.append(target);
+	const instance = mount(S7Panel, {
+		target,
+		props: s7Props(fetch),
+		context: new Map([[HIDDEN_CONTEXT, hidden]])
+	});
+	try {
+		await expect
+			.element(page.getByText(m.comunidade_s7_status_waiting(), { exact: true }))
+			.toBeVisible();
+		await expect.element(joinButton()).not.toHaveAttribute('aria-disabled');
+		await cancelButton().click();
+		await expect
+			.element(page.getByText(m.comunidade_s7_status_cancelled(), { exact: true }))
+			.toBeVisible();
+		expect(callsWith(fetch, 'DELETE')).toHaveLength(1);
+	} finally {
+		await unmount(instance);
+		target.remove();
+	}
+});
 
 // ---- Who can join ------------------------------------------------------------------------------
 

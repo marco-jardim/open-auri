@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -65,6 +65,16 @@ const genericPatterns = [
     pattern: /\b[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}(?!(?:Public|Default|All Users)\b)[A-Za-z0-9]/g,
     label: 'generic:WINDOWS_USER_PROFILE',
   },
+];
+
+// Block Android credentials and local configuration by filename, including binary or large files.
+/** @type {{ pattern: RegExp, label: string }[]} */
+const androidFilePatterns = [
+  { pattern: /\.(?:jks|keystore)$/i, label: 'file:ANDROID_KEYSTORE' },
+  { pattern: /\.pepk$/i, label: 'file:ANDROID_PEPK' },
+  { pattern: /(?:^|\/)keystore\.properties$/i, label: 'file:ANDROID_KEYSTORE_PROPERTIES' },
+  { pattern: /(?:^|\/)google-services\.json$/i, label: 'file:ANDROID_GOOGLE_SERVICES' },
+  { pattern: /(?:^|\/)local\.properties$/i, label: 'file:ANDROID_LOCAL_PROPERTIES' },
 ];
 
 /** @param {string} text */
@@ -157,8 +167,34 @@ function lineAt(starts, offset) {
 }
 
 /**
+ * Reads a tracked regular file through one open handle, so the bytes scanned are the file that
+ * was checked. Missing files, directories and symlinks return null; oversized files return no bytes.
+ * @param {string} absolute
+ * @param {number} maxFileSize
+ * @returns {{ bytes: Buffer | null } | null}
+ */
+function readTrackedFile(absolute, maxFileSize) {
+  let fd;
+  try {
+    fd = openSync(absolute, 'r');
+  } catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    const stat = fstatSync(fd);
+    const link = lstatSync(absolute);
+    if (!stat.isFile() || !link.isFile() || stat.ino !== link.ino || stat.dev !== link.dev) {
+      return null;
+    }
+    return { bytes: stat.size > maxFileSize ? null : readFileSync(fd) };
+  } finally {
+    closeSync(fd);
+  }
+}
+/**
  * @param {string} root
- * @param {boolean} useEnv false (--no-env) scans only the generic shapes and the profile path
+ * @param {boolean} useEnv false (--no-env) scans filenames, generic shapes and the profile path
  */
 function scan(root, useEnv) {
   const values = useEnv ? parseEnv(readFileSync(resolve(root, '.env'), 'utf8')) : new Map();
@@ -173,16 +209,15 @@ function scan(root, useEnv) {
     .filter(Boolean);
   const findings = [];
   for (const path of new Set(files)) {
-    const absolute = resolve(root, path);
-    let stat;
-    try {
-      stat = lstatSync(absolute);
-    } catch (error) {
-      if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') continue;
-      throw error;
+    const file = readTrackedFile(resolve(root, path), maxFileSize);
+    if (!file) continue;
+    const blockedName = androidFilePatterns.find(({ pattern }) => pattern.test(path));
+    if (blockedName) {
+      findings.push({ path, line: 1, label: blockedName.label });
+      continue;
     }
-    if (!stat.isFile() || stat.size > maxFileSize) continue;
-    const bytes = readFileSync(absolute);
+    const { bytes } = file;
+    if (!bytes) continue;
     if (bytes.includes(0)) continue;
     const original = bytes.toString('utf8');
     const text = original.toLowerCase();
@@ -218,7 +253,7 @@ function scan(root, useEnv) {
   return findings;
 }
 
-// --no-env: for CI, where no .env exists. Only the generic credential shapes and the user
+// --no-env: for CI, where no .env exists. Filenames, generic credential shapes and the user
 // profile path are scanned; the values of the operator's .env are covered by the local run.
 const json = process.argv.includes('--json');
 const useEnv = !process.argv.includes('--no-env');

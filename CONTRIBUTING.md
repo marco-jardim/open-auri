@@ -40,6 +40,65 @@ Toda mudança de comportamento vem com teste; correção de bug vem com o teste 
 Regras de código: sem `as any`, `@ts-ignore`, `@ts-expect-error` ou `catch` vazio. Texto do usuário
 só por interpolação do Svelte (`{texto}`); `{@html}` é proibido.
 
+## Executar e testar o Android
+
+O projeto nativo fica em `D:\git\open-auri\apps\android`; a interface continua sendo o site
+remoto. Veja a arquitetura, os limites de validação e os scripts em
+[`D:\git\open-auri\docs\android.md`](docs/android.md). No Windows, instale JDK 21 e Android SDK
+com plataforma 36, Build-Tools 36.x e Platform-Tools. Configure `JAVA_HOME` e `ANDROID_HOME`
+(ou `ANDROID_SDK_ROOT`) para as instalações locais, sem versionar caminhos pessoais.
+
+Execute na raiz `D:\git\open-auri`, com Node 24 (mínimo 22.12) e npm:
+
+```pwsh
+Set-Location D:\git\open-auri
+npm ci
+npm run doctor:android
+npm run build:android
+npm run test:android
+npm run lint:android
+npm run typecheck:android
+```
+
+- `build:android` gera o debug que abre produção; instale-o pelo Android Studio ou ADB. Para o
+  site local no emulador, use `npm run build:android:e2e`, que fixa `http://10.0.2.2:4173`.
+- `test:android` executa unidade Kotlin, Robolectric e a verificação de cobertura Kover. Não
+  precisa de cabo nem emulador. Para instrumentação, com emulador ou aparelho disponível, use
+  `npm run test:android:device`; a camada instrumentada também é exercitada no CI da Fase 3.
+- A integração web precisa de `npm run test:web:unit`. Para paridade dos 11 presets e do
+  Neutro, o filtro é `npm run test:web:unit -- native-parity`.
+- Para o e2e `android-bridge`, configure o ambiente web conforme o desenvolvimento local no
+  README e instale o Chromium do Playwright (`npm exec -w web -- playwright install chromium`).
+  Com `STAGING_ORIGIN` ausente, rode
+  `npm run test:web:e2e -- android-bridge --project=desktop --project=mobile`.
+  O Playwright sobe os servidores locais e faz o build; a fixture usa o `native-bridge.js` real
+  do Capacitor, com o lado nativo falso, não um `window.Capacitor` substituto.
+- Execute as camadas em série. Não rode unidade web em paralelo com integração web, build ou
+  e2e. Não execute dois comandos Gradle ao mesmo tempo.
+
+**Gradle somente pelos scripts npm da raiz**, que passam por
+`D:\git\open-auri\tools\run-gradle.mjs`. Não chame o wrapper diretamente nem contorne guardas,
+verificação de dependências ou testes. Agentes e CI não gravam em cabo físico: essa validação é
+humana e segue o checklist normal.
+
+### Atualizar a verificação de dependências Android
+
+Siga [`D:\git\open-auri\docs\android-build-security.md`](docs/android-build-security.md).
+Robolectric usa os JARs do SDK resolvidos e verificados pelo Gradle; não habilite seu downloader
+Maven em tempo de teste para contornar uma falha. Ao atualizar uma dependência, o mantenedor
+pode regenerar os SHA-256 com o opt-in explícito, pelo mesmo runner:
+
+```pwsh
+npm run test:android -- --maintainer-metadata --write-verification-metadata sha256
+```
+
+Revise o diff de `D:\git\open-auri\apps\android\android\gradle\verification-metadata.xml` e
+confira os novos checksums contra uma fonte confiável do artefato, independente do download
+que os gerou. Não aceite checksums só porque o comando terminou. Depois da revisão, rode
+`npm run test:android` novamente **sem** o opt-in, além de lint e build da área. O opt-in não
+autoriza outros argumentos inseguros nem desliga a verificação; não use exclusões de tarefas
+ou redução do nível de verificação. Nunca versione keystores, senhas ou arquivos locais do SDK.
+
 ## i18n
 
 - Idiomas: pt-BR (base) e en-US, com Paraglide JS. As mesmas chaves existem nos dois idiomas.

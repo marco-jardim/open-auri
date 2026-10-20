@@ -3,6 +3,27 @@ import { createAuthLogger, redactLogMessage, type AuthLogEntry } from '#lib/serv
 import { reduceUserAgent } from '#lib/server/auth/user-agent.ts';
 
 describe('reduceUserAgent', () => {
+	const webView =
+		'Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.0.0 Mobile Safari/537.36';
+
+	it('prioritizes the Android app and keeps only its public release version', () => {
+		expect(reduceUserAgent(`${webView} OpenAuriAndroid/1.2.3`)).toBe(
+			'App Android 1.2.3 on Android'
+		);
+		expect(reduceUserAgent(`${webView} OpenAuriAndroid/12.34.56`)).toBe(
+			'App Android 12.34.56 on Android'
+		);
+		expect(reduceUserAgent(webView)).toBe('Chrome on Android');
+		expect(reduceUserAgent(`${webView} NotOpenAuriAndroid/1.2.3`)).toBe('Chrome on Android');
+	});
+
+	it.each(['', '/', '/1.2', '/1.2.3.4', '/1.2.3-beta', '/unknown'])(
+		'labels the app without an invalid or missing version: %s',
+		(suffix) => {
+			expect(reduceUserAgent(`${webView} OpenAuriAndroid${suffix}`)).toBe('App Android on Android');
+		}
+	);
+
 	it('keeps only browser family and operating system', () => {
 		expect(
 			reduceUserAgent(

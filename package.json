@@ -6,7 +6,8 @@
   "description": "Open protocol for the 0xCB firmware of the CB5100 chip family",
   "workspaces": [
     "web",
-    "workers/jobs"
+    "workers/jobs",
+    "apps/android"
   ],
   "engines": {
     "node": ">=22.12"
@@ -82,8 +83,23 @@
     "build:web": "npm run -w web build",
     "check:web": "npm run -w web check",
     "test:all": "npm test && npm run test:web:unit",
-    "check:all": "npm run lint && npm run typecheck && npm run check:web",
-    "data:autoeq": "node tools/import-autoeq.mjs"
+    "check:all": "npm run lint && npm run typecheck && npm run typecheck:android && npm run check:web",
+    "data:autoeq": "node tools/import-autoeq.mjs",
+    "doctor:android": "node tools/android-doctor.mjs",
+    "sync:android": "node tools/run-gradle.mjs --sync-only",
+    "build:android": "node tools/run-gradle.mjs :app:assembleDebug",
+    "build:android:e2e": "node tools/run-gradle.mjs --target e2e :app:assembleDebug",
+    "build:android:staging": "node tools/run-gradle.mjs --target staging :app:assembleDebug",
+    "build:android:release": "node tools/run-gradle.mjs :app:verifyCapacitorConfig :app:bundleRelease :app:assembleRelease",
+    "test:android": "node tools/run-gradle.mjs :app:testDebugUnitTest :app:koverVerifyDebug",
+    "test:android:release": "node --test test/android-release/dryrun.mjs",
+    "lint:android": "node tools/run-gradle.mjs :app:lintDebug",
+    "test:android:device": "node tools/run-gradle.mjs :app:connectedDebugAndroidTest",
+    "typecheck:android": "tsc -p apps/android/tsconfig.json --noEmit",
+    "icons:android": "node tools/android-icons.mjs",
+    "notices:android": "node tools/android-notices.mjs",
+    "usb:golden": "node tools/usb-golden.mjs",
+    "play:assets": "node tools/play-assets.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

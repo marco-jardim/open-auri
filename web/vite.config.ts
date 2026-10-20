@@ -14,6 +14,7 @@ export default defineConfig({
 	plugins: [
 		tailwindcss(),
 		sveltekit({
+			version: { pollInterval: 300_000 },
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
 				runes: ({ filename }) =>

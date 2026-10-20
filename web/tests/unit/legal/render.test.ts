@@ -277,6 +277,63 @@ describe('required fields and validation', () => {
 });
 
 describe('versioned content', () => {
+	test('rendered privacy pages contain no draft legal disclaimer in either locale', () => {
+		for (const values of [config, withoutOptional]) {
+			const page = renderLegalPage('privacy', values, noop);
+			for (const locale of ['pt-BR', 'en-US'] as const) {
+				expect(texts(page.documents[locale]).join('\n')).not.toMatch(/advogado|lawyer|Q-LEGAL/i);
+			}
+		}
+	});
+
+	test('both privacy locales describe Android and the corrected retention limits', () => {
+		const fragments = {
+			'pt-BR': [
+				'app Android open-auri',
+				'WebView',
+				'sem backup pelo app',
+				'local que você escolhe',
+				'não acrescenta coleta independente',
+				'USB',
+				'Nome privado',
+				'O lote é inserido diretamente, sem atraso aleatório.',
+				'rate_limit_counters',
+				'12 meses da primeira inserção',
+				'Não é um limite de 12 semanas exatas.',
+				'não uma verificação técnica de idade',
+				'não é direcionado a menores de idade',
+				'país aproximado a partir do fuso horário do navegador',
+				'Ocultar este autor',
+				'Ocultar esta curva',
+				'guardada e sincronizada como preferência da conta'
+			],
+			'en-US': [
+				'open-auri Android app',
+				'WebView',
+				'without app backup',
+				'where you choose',
+				'adds no collection independent',
+				'USB',
+				'Private name',
+				'The batch is inserted directly, without random delay.',
+				'rate_limit_counters',
+				'12 months from first insertion',
+				'This is not an exact 12-week limit.',
+				'not technical age verification',
+				'not directed to minors',
+				"approximate country from the browser's timezone",
+				'Hide this author',
+				'Hide this curve',
+				'stored and synced as an account preference'
+			]
+		};
+		for (const locale of ['pt-BR', 'en-US'] as const) {
+			const privacy = texts(legalContent('privacy', locale)).join('\n');
+			for (const fragment of fragments[locale]) expect(privacy).toContain(fragment);
+			expect(privacy).not.toContain('\u2014');
+		}
+	});
+
 	test('POLICY_VERSION is an ISO date and every document states it', () => {
 		expect(isPolicyVersion(POLICY_VERSION)).toBe(true);
 		expect(isPolicyVersion('v2')).toBe(false);
@@ -322,6 +379,6 @@ describe('versioned content', () => {
 		for (const fragment of ['CC0 1.0', 'CC BY 4.0', 'irrevogável', 'Conduta', 'Moderação']) {
 			expect(terms).toContain(fragment);
 		}
-		expect(`${privacy}\n${terms}`).not.toContain('—');
+		expect(`${privacy}\n${terms}`).not.toContain('\u2014');
 	});
 });

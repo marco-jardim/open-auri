@@ -86,6 +86,10 @@ export const policyAcceptancesPart: DeletionPart = {
  */
 export const ACCOUNT_DELETION_PARTS: readonly DeletionPart[] = [
 	socialContentPart,
+	{
+		name: 'hidden_items',
+		statements: (db, userId) => [sql(db, 'DELETE FROM hidden_items WHERE user_id = ?', userId)]
+	},
 	nicknameHoldsPart,
 	emailChangePart,
 	policyAcceptancesPart

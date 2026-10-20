@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-auri.com/schemas/android-usb-bridge-1.schema.json",
+  "title": "OpenAuriUsb Capacitor bridge, bridgeApi 1",
+  "description": "Payloads of the native Android plugin OpenAuriUsb (plan Anexo B and C). Each method M has $defs MRequest (the options the page passes) and MResponse (what the promise fulfils with); every rejection is an Error; the events connect and disconnect carry ConnectEvent and DisconnectEvent. Validate a payload against one definition, e.g. https://open-auri.com/schemas/android-usb-bridge-1.schema.json#/$defs/GetInfoResponse. The native side validates every response and event of its tests with this file (BridgeSchemaTest).",
+  "$defs": {
+    "Uint8": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "Uint16": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "Hex": {
+      "description": "Bytes as lower-case hex, two digits per byte, no separators.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{2})*$"
+    },
+    "KeyArgument": {
+      "description": "A device key as the page passes it back. Any non-empty string is accepted; an unknown one is rejected with USB_NOT_FOUND.",
+      "type": "string",
+      "minLength": 1
+    },
+    "NativeDeviceInfo": {
+      "description": "A device as the plugin reports it. key is deviceName#n: valid while the device stays attached; a reconnection always yields a new key.",
+      "type": "object",
+      "required": ["key", "vendorId", "productId", "productName"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^.+#[1-9][0-9]*$"
+        },
+        "vendorId": { "$ref": "#/$defs/Uint16" },
+        "productId": { "$ref": "#/$defs/Uint16" },
+        "productName": {
+          "description": "The USB product string; empty when the device has none.",
+          "type": "string"
+        }
+      }
+    },
+    "DeviceList": {
+      "type": "object",
+      "required": ["devices"],
+      "additionalProperties": false,
+      "properties": {
+        "devices": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/NativeDeviceInfo" }
+        }
+      }
+    },
+    "NoOptions": {
+      "description": "Options of a method without parameters (Capacitor sends {}).",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "KeyOptions": {
+      "type": "object",
+      "required": ["key"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "$ref": "#/$defs/KeyArgument" }
+      }
+    },
+    "VoidResponse": {
+      "description": "The method resolves without a payload: the promise fulfils with undefined. Validated here as JSON null.",
+      "type": "null"
+    },
+    "UsbFilter": {
+      "description": "Matches devices by vendor and product ID; a missing member matches any value.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "vendorId": { "$ref": "#/$defs/Uint16" },
+        "productId": { "$ref": "#/$defs/Uint16" }
+      }
+    },
+    "GetInfoRequest": { "$ref": "#/$defs/NoOptions" },
+    "GetInfoResponse": {
+      "type": "object",
+      "required": ["bridgeApi", "appVersion", "usbHost", "webViewVersion"],
+      "additionalProperties": false,
+      "properties": {
+        "bridgeApi": { "const": 1 },
+        "appVersion": { "type": "string", "minLength": 1 },
+        "usbHost": {
+          "description": "Whether the device declares android.hardware.usb.host (FEATURE_USB_HOST).",
+          "type": "boolean"
+        },
+        "webViewVersion": {
+          "description": "Version name of the active WebView provider, or unknown.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "RequestDeviceRequest": {
+      "description": "Filters are intersected with CB5100 (VID 0x3302, PID 0x8902). An empty array or an empty filter object means CB5100 only; other vendor/product identities match nothing.",
+      "type": "object",
+      "required": ["filters"],
+      "additionalProperties": false,
+      "properties": {
+        "filters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UsbFilter" }
+        }
+      }
+    },
+    "RequestDeviceResponse": {
+      "description": "The devices the user granted; empty when nothing matched, the user cancelled or denied.",
+      "$ref": "#/$defs/DeviceList"
+    },
+    "GetDevicesRequest": { "$ref": "#/$defs/NoOptions" },
+    "GetDevicesResponse": {
+      "description": "The attached CB5100 cables (VID 0x3302, PID 0x8902) the app has permission for.",
+      "$ref": "#/$defs/DeviceList"
+    },
+    "OpenRequest": { "$ref": "#/$defs/KeyOptions" },
+    "OpenResponse": { "$ref": "#/$defs/VoidResponse" },
+    "CloseRequest": { "$ref": "#/$defs/KeyOptions" },
+    "CloseResponse": { "$ref": "#/$defs/VoidResponse" },
+    "SendReportRequest": {
+      "type": "object",
+      "required": ["key", "reportId", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "$ref": "#/$defs/KeyArgument" },
+        "reportId": { "$ref": "#/$defs/Uint8" },
+        "data": {
+          "description": "The report data without the report ID, in standard base64 (RFC 4648, padding optional).",
+          "type": "string",
+          "maxLength": 87380,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?)?$"
+        }
+      }
+    },
+    "SendReportResponse": { "$ref": "#/$defs/VoidResponse" },
+    "DiagnosticsRequest": { "$ref": "#/$defs/KeyOptions" },
+    "DiagnosticsResponse": { "$ref": "#/$defs/UsbDiagnostics" },
+    "UsbDiagnostics": {
+      "description": "The USB diagnostics of an open device (RF8). wireLog is present only in debug builds of the app (RS7).",
+      "type": "object",
+      "required": [
+        "device",
+        "appVersion",
+        "androidVersion",
+        "webViewVersion",
+        "rawDescriptorsHex",
+        "hidInterfaceId",
+        "endpoints",
+        "reportDescriptorHex",
+        "outputReports",
+        "transfer",
+        "paddedLength",
+        "kernelDriverDetached"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device": { "$ref": "#/$defs/NativeDeviceInfo" },
+        "appVersion": { "type": "string", "minLength": 1 },
+        "androidVersion": { "type": "string", "minLength": 1 },
+        "webViewVersion": { "type": "string", "minLength": 1 },
+        "rawDescriptorsHex": {
+          "description": "UsbDeviceConnection.getRawDescriptors().",
+          "$ref": "#/$defs/Hex"
+        },
+        "hidInterfaceId": { "$ref": "#/$defs/Uint8" },
+        "endpoints": {
+          "description": "Endpoints of the HID interface. A conforming HID interface only has interrupt endpoints; isochronous is listed so a malformed device is still reported.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["address", "type", "direction", "maxPacketSize"],
+            "additionalProperties": false,
+            "properties": {
+              "address": { "$ref": "#/$defs/Uint8" },
+              "type": { "enum": ["interrupt", "bulk", "control", "isochronous"] },
+              "direction": { "enum": ["in", "out"] },
+              "maxPacketSize": { "$ref": "#/$defs/Uint16" }
+            }
+          }
+        },
+        "reportDescriptorHex": { "$ref": "#/$defs/Hex" },
+        "outputReports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["reportId", "bytes"],
+            "additionalProperties": false,
+            "properties": {
+              "reportId": { "$ref": "#/$defs/Uint8" },
+              "bytes": { "$ref": "#/$defs/Uint16" }
+            }
+          }
+        },
+        "transfer": { "enum": ["interrupt", "control"] },
+        "paddedLength": {
+          "description": "Length of every output buffer on the wire: the largest output report plus the report ID byte (WINDOWS_MAX_OUTPUT).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "kernelDriverDetached": { "type": "boolean" },
+        "wireLog": {
+          "description": "Debug builds only: the last buffers sent, oldest first, with the monotonic time in ms.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["atMs", "hex"],
+            "additionalProperties": false,
+            "properties": {
+              "atMs": { "type": "integer", "minimum": 0 },
+              "hex": { "$ref": "#/$defs/Hex" }
+            }
+          }
+        }
+      }
+    },
+    "ConnectEvent": {
+      "description": "A CB5100 cable was plugged in. It gets a new key; the app may still need permission (requestDevice).",
+      "type": "object",
+      "required": ["device"],
+      "additionalProperties": false,
+      "properties": {
+        "device": { "$ref": "#/$defs/NativeDeviceInfo" }
+      }
+    },
+    "DisconnectEvent": {
+      "description": "A device with a key was unplugged; the key is no longer valid. Sent before the rejection of any call pending on it.",
+      "type": "object",
+      "required": ["device"],
+      "additionalProperties": false,
+      "properties": {
+        "device": { "$ref": "#/$defs/NativeDeviceInfo" }
+      }
+    },
+    "ErrorCode": {
+      "description": "Native error codes (plan Anexo C).",
+      "enum": [
+        "USB_BAD_ARGS",
+        "USB_NOT_FOUND",
+        "USB_NOT_OPEN",
+        "USB_BUSY",
+        "USB_PERMISSION_DENIED",
+        "USB_GUARD_REJECTED",
+        "USB_TRANSFER_FAILED",
+        "USB_TIMEOUT",
+        "USB_DETACHED",
+        "USB_ORIGIN",
+        "USB_NO_HOST"
+      ]
+    },
+    "Error": {
+      "description": "Every rejection of the plugin: Capacitor's error object with a code of ErrorCode.",
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

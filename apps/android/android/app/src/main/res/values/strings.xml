@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">open-auri</string>
+    <string name="title_activity_main">open-auri</string>
+    <string name="package_name" translatable="false">com.openauri.app</string>
+    <string name="custom_url_scheme" translatable="false">com.openauri.app</string>
+    <string name="webview_update_title">Update Android System WebView</string>
+    <string name="webview_update_body">open-auri needs an up-to-date WebView to open securely. Update your active WebView provider (Android System WebView or Chrome) in Google Play, then reopen open-auri.</string>
+    <string name="webview_update_button">Open Google Play</string>
+    <string name="webview_update_button_description">Open Google Play to update your active WebView provider</string>
+    <string name="webview_update_store_unavailable">No app can open Google Play. Update your WebView provider through your device’s app store, then reopen open-auri.</string>
+    <string name="usb_picker_title">Choose the cables to connect</string>
+    <string name="usb_picker_connect">Connect</string>
+    <string name="usb_picker_cancel">Cancel</string>
+    <string name="usb_picker_item">%1$s, cable %2$d</string>
+    <string name="usb_picker_unnamed_device">USB device</string>
+    <string name="files_download_failed">This file could not be downloaded in the app. Try the website in your browser.</string>
+</resources>

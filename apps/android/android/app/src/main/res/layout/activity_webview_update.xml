@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/webview_update_screen"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0f0f0e"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/webview_update_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/webview_update_title"
+            android:textColor="#ece7dd"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/webview_update_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/webview_update_body"
+            android:textColor="#ece7dd"
+            android:textSize="18sp" />
+
+        <Button
+            android:id="@+id/webview_update_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:minHeight="48dp"
+            android:minWidth="48dp"
+            android:backgroundTint="#ece7dd"
+            android:contentDescription="@string/webview_update_button_description"
+            android:padding="16dp"
+            android:text="@string/webview_update_button"
+            android:textAllCaps="false"
+            android:textColor="#0f0f0e"
+            android:textSize="18sp" />
+    </LinearLayout>
+</ScrollView>

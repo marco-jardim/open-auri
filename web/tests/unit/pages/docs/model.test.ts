@@ -102,7 +102,15 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				'rankings',
 				'moderacao',
 				's6',
-				's7'
+				's7',
+				'android',
+				'android-validacao',
+				'android-resgate',
+				'android-usb',
+				'android-diagnostico',
+				'android-iphone',
+				'android-assinatura',
+				'android-privacidade'
 			]);
 			expect(content.safetyCaveat).toMatch(locale === 'pt-BR' ? /não uma prova/ : /not a proof/);
 			for (const id of ['contas', 'privacidade-atividade', 'rankings', 'moderacao', 's6', 's7']) {

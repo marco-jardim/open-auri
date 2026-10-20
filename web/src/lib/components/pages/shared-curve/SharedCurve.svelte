@@ -23,6 +23,11 @@
 	import { curveClassification } from '#lib/gate-verdicts.ts';
 	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
+	import HideActions from '#lib/components/social/HideActions.svelte';
+	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
+	import ReportAction from '#lib/components/social/ReportAction.svelte';
 
 	type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -41,6 +46,10 @@
 	} = $props();
 
 	const id = $props.id();
+	const hidden = getHiddenStore();
+	const contentHidden = $derived(
+		isHidden($hidden, shared.lineageId, authorHiddenId(shared.author))
+	);
 	const locale = $derived(getLocale());
 	const DESCRIPTION_META_MAX = 200;
 
@@ -131,6 +140,9 @@
 		busy = false;
 	}
 	onDestroy(stopListening);
+	$effect(() => {
+		if (!$hidden.ready || contentHidden) stopListening();
+	});
 
 	async function listen() {
 		if (listening) {
@@ -280,111 +292,123 @@
 
 <div class="room">
 	<div class="window" aria-hidden="true"></div>
-	<article class="sheet" aria-labelledby="{id}-title">
-		{#if sharedYolo}
-			<YoloCurveNotice
-				variant="public"
-				waived={waivedLabels(sharedClass?.waived)}
-				data-testid="shared-yolo-notice"
-			/>
-		{/if}
-		<header class="tape-header">
-			<span class="caps">{m.shared_curve_eyebrow()}</span>
-			<span class="header-end"
-				>{#if shared.visibility !== 'public'}<span class="badge">{m.shared_curve_unlisted()}</span
-					>{/if}<span>96 kHz</span><span class="dot" aria-hidden="true"></span></span
-			>
-		</header>
-		<div class="tape-label">
-			<h1 id="{id}-title" lang={shared.lang}>{shared.name}</h1>
-			<p class="author" data-testid="shared-curve-author">
-				{#if shared.author}{m.shared_curve_by()}
-					<a href="/u/{encodeURIComponent(shared.author.username)}">{authorName}</a>{:else}<span
-						class="removed">{authorName}</span
-					>{/if}
-			</p>
-		</div>
-		{#if !shared.isHead}<p class="version-note">{m.shared_curve_version_note()}</p>{/if}
-		<div class="paper">
-			<div class="chart">
-				{#if curve}
-					<ResponseChart
-						{curve}
-						label={shared.name}
-						description={m.shared_curve_response()}
-						{locale}
-						theme="paper"
-					/>
-				{:else}
-					<p role="alert">{m.shared_curve_invalid()}</p>
-				{/if}
+	{#if !$hidden.ready || contentHidden}
+		<p role="status">{$hidden.ready ? m.hidden_content() : m.hidden_loading()}</p>
+		<HiddenItems />
+	{:else}
+		<article class="sheet" aria-labelledby="{id}-title">
+			{#if sharedYolo}
+				<YoloCurveNotice
+					variant="public"
+					waived={waivedLabels(sharedClass?.waived)}
+					data-testid="shared-yolo-notice"
+				/>
+			{/if}
+			<header class="tape-header">
+				<span class="caps">{m.shared_curve_eyebrow()}</span>
+				<span class="header-end"
+					>{#if shared.visibility !== 'public'}<span class="badge">{m.shared_curve_unlisted()}</span
+						>{/if}<span>96 kHz</span><span class="dot" aria-hidden="true"></span></span
+				>
+			</header>
+			<div class="tape-label">
+				<h1 id="{id}-title" lang={shared.lang}>{shared.name}</h1>
+				<p class="author" data-testid="shared-curve-author">
+					{#if shared.author}{m.shared_curve_by()}
+						<a href="/u/{encodeURIComponent(shared.author.username)}">{authorName}</a>{:else}<span
+							class="removed">{authorName}</span
+						>{/if}
+				</p>
 			</div>
-			{#if shared.description}<p class="description" lang={shared.lang}>
-					{shared.description}
-				</p>{/if}
-		</div>
-		<dl class="facts">
-			<div>
-				<dt>{m.shared_curve_license()}</dt>
-				<dd data-testid="shared-curve-license">{shared.license}</dd>
+			{#if !shared.isHead}<p class="version-note">{m.shared_curve_version_note()}</p>{/if}
+			<div class="paper">
+				<div class="chart">
+					{#if curve}
+						<ResponseChart
+							{curve}
+							label={shared.name}
+							description={m.shared_curve_response()}
+							{locale}
+							theme="paper"
+						/>
+					{:else}
+						<p role="alert">{m.shared_curve_invalid()}</p>
+					{/if}
+				</div>
+				{#if shared.description}<p class="description" lang={shared.lang}>
+						{shared.description}
+					</p>{/if}
 			</div>
-			<div>
-				<dt class="term">
-					{m.shared_curve_code()}
-					<!-- The "?" trigger uses light ink (--text-2): give it its own dark key on the paper. -->
-					<span class="explain-key"><Explainer term="s1" /></span>
-				</dt>
-				<dd class="code">{shared.s1}</dd>
-			</div>
-		</dl>
-		<!--
+			<dl class="facts">
+				<div>
+					<dt>{m.shared_curve_license()}</dt>
+					<dd data-testid="shared-curve-license">{shared.license}</dd>
+				</div>
+				<div>
+					<dt class="term">
+						{m.shared_curve_code()}
+						<!-- The "?" trigger uses light ink (--text-2): give it its own dark key on the paper. -->
+						<span class="explain-key"><Explainer term="s1" /></span>
+					</dt>
+					<dd class="code">{shared.s1}</dd>
+				</div>
+			</dl>
+			<!--
 			Control deck: the plate/primary buttons and the Transport are drawn for dark surfaces
 			(light text, translucent faces, --rule-control borders), so they sit on a dark panel,
 			as on the Biblioteca sheet's listen panel, never on the light paper itself.
 		-->
-		<div class="deck">
-			<div class="actions">
-				<Button loading={busy} aria-pressed={listening} onclick={listen}
-					>{listening ? m.shared_curve_stop() : m.shared_curve_listen()}</Button
-				>
-				<a class="btn btn--plate btn--md" href={curvaHref} data-sveltekit-reload
-					>{m.shared_curve_open()}</a
-				>
-				<Button loading={favoriting} aria-pressed={favorited} onclick={favorite}
-					>{favorited ? m.shared_curve_favorited() : m.shared_curve_favorite()}</Button
-				>
-				{#if sharedYolo && !yoloReady}
-					<a
-						class="btn btn--primary btn--md"
-						href={yoloHref}
-						data-sveltekit-reload
-						data-testid="shared-yolo-enable">{m.yolopub_enable_yolo()}</a
+			<div class="deck">
+				<ReportAction subject={{ kind: 'lineage', id: shared.lineageId }} name={shared.name} />
+				<HideActions
+					lineageId={shared.lineageId}
+					author={authorHiddenId(shared.author)}
+					curveName={shared.name}
+					authorName={shared.author?.displayUsername}
+				/>
+				<div class="actions">
+					<Button loading={busy} aria-pressed={listening} onclick={listen}
+						>{listening ? m.shared_curve_stop() : m.shared_curve_listen()}</Button
 					>
-				{:else}
-					<Button variant="primary" onclick={install}
-						>{sharedYolo ? m.yolopub_install_yolo() : m.shared_curve_install()}</Button
+					<a class="btn btn--plate btn--md" href={curvaHref} data-sveltekit-reload
+						>{m.shared_curve_open()}</a
 					>
-				{/if}
+					<Button loading={favoriting} aria-pressed={favorited} onclick={favorite}
+						>{favorited ? m.shared_curve_favorited() : m.shared_curve_favorite()}</Button
+					>
+					{#if sharedYolo && !yoloReady}
+						<a
+							class="btn btn--primary btn--md"
+							href={yoloHref}
+							data-sveltekit-reload
+							data-testid="shared-yolo-enable">{m.yolopub_enable_yolo()}</a
+						>
+					{:else}
+						<Button variant="primary" onclick={install}
+							>{sharedYolo ? m.yolopub_install_yolo() : m.shared_curve_install()}</Button
+						>
+					{/if}
+				</div>
+				<!-- Pause keeps the comparison (trims, position); "Parar" ends it. -->
+				<Transport
+					engine={app?.audio ?? null}
+					variant="compact"
+					session={SHARED_CURVE_SESSION}
+					onplay={transportPlay}
+					playDisabledReason={app && curve ? null : m.shared_curve_audio_unavailable()}
+				/>
 			</div>
-			<!-- Pause keeps the comparison (trims, position); "Parar" ends it. -->
-			<Transport
-				engine={app?.audio ?? null}
-				variant="compact"
-				session={SHARED_CURVE_SESSION}
-				onplay={transportPlay}
-				playDisabledReason={app && curve ? null : m.shared_curve_audio_unavailable()}
-			/>
-		</div>
-		<p class="install-note">{m.shared_curve_install_note()}</p>
-		{#if sharedYolo && !yoloReady}
-			<p class="install-note" data-testid="shared-yolo-why">{m.yolopub_install_needs_yolo()}</p>
-		{/if}
-		{#if loginPrompt}<div class="login" role="alert">
-				<p>{m.shared_curve_login_prompt()}</p>
-				<a href={signInHref}>{m.shared_curve_login()}</a>
-			</div>{/if}
-		<div class="notice" role="status">{notice}</div>
-	</article>
+			<p class="install-note">{m.shared_curve_install_note()}</p>
+			{#if sharedYolo && !yoloReady}
+				<p class="install-note" data-testid="shared-yolo-why">{m.yolopub_install_needs_yolo()}</p>
+			{/if}
+			{#if loginPrompt}<div class="login" role="alert">
+					<p>{m.shared_curve_login_prompt()}</p>
+					<a href={signInHref}>{m.shared_curve_login()}</a>
+				</div>{/if}
+			<div class="notice" role="status">{notice}</div>
+		</article>
+	{/if}
 </div>
 
 <style>

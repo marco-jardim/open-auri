@@ -7,6 +7,7 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { all, first, sql } from '../db.ts';
 import { listAcceptances } from '../legal/acceptance.ts';
 import { socialSection } from '../social/export.ts';
+import { readHidden } from '../social/hidden.ts';
 import { readDeletionRequest } from './deletion.ts';
 import { pendingEmailChange } from './email-change.ts';
 import { listNicknameHolds } from './nickname.ts';
@@ -47,6 +48,7 @@ export const accountSection: ExportSection = {
 	async collect({ db, userId }) {
 		const user = await first<{
 			id: string;
+			public_author_id: string;
 			email: string;
 			name: string | null;
 			emailVerified: number | null;
@@ -60,7 +62,7 @@ export const accountSection: ExportSection = {
 		}>(
 			sql(
 				db,
-				'SELECT "id", "email", "name", "emailVerified", "createdAt", "updatedAt", "role", ' +
+				'SELECT "id", "public_author_id", "email", "name", "emailVerified", "createdAt", "updatedAt", "role", ' +
 					'"banned", "banReason", "banExpires", "twoFactorEnabled" FROM "user" WHERE "id" = ?',
 				userId
 			)
@@ -75,6 +77,7 @@ export const accountSection: ExportSection = {
 		);
 		return {
 			id: user.id,
+			publicAuthorId: user.public_author_id,
 			email: user.email,
 			name: user.name ?? '',
 			emailVerified: user.emailVerified === 1,
@@ -166,7 +169,8 @@ export const ACCOUNT_EXPORT_SECTIONS: readonly ExportSection[] = [
 	policyAcceptancesSection,
 	sessionsSection,
 	pendingRequestsSection,
-	socialSection
+	socialSection,
+	{ key: 'hiddenItems', collect: ({ db, userId }) => readHidden(db, userId) }
 ];
 
 export async function buildAccountExport(

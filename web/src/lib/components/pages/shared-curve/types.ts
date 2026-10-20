@@ -3,6 +3,7 @@
 // the components render them only through `{text}` interpolation.
 
 export interface SharedCurveAuthor {
+	id?: string;
 	username: string;
 	displayUsername: string;
 }

@@ -33,6 +33,7 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				ui: legalUi()
 			});
 			const text = screen.container.textContent ?? '';
+			if (kind === 'privacy') expect(text).not.toMatch(/advogado|lawyer|Q-LEGAL/i);
 			expect(text).toContain(hostile);
 			expect(screen.container.querySelector('img')).toBeNull();
 			expect(screen.container.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt; &amp;');

@@ -204,8 +204,8 @@ describe('library merge', () => {
 });
 
 describe('Terms', () => {
-	test('POLICY_VERSION is bumped for the YOLO terms', () => {
-		expect(POLICY_VERSION).toBe('2026-10-19');
+	test('POLICY_VERSION includes the YOLO terms and Android privacy update', () => {
+		expect(POLICY_VERSION).toBe('2026-10-20');
 	});
 
 	test('both locales say YOLO does not get around the gate and describe YOLO curves', () => {

@@ -10,6 +10,8 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import type { S6Preferences, SocialApi } from '#lib/social/index.ts';
 	import { errorText, isUnreachable, type Channel } from './model.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
 
 	const SKELETON_ROWS = [1, 2, 3, 4, 5] as const;
 
@@ -44,8 +46,26 @@
 		}
 	}
 
-	const names = $derived(new Map(channels.map((channel) => [channel.curveId, channel.name])));
-	const top = $derived((data?.items ?? []).slice(0, 10));
+	const hidden = getHiddenStore();
+	const visibleChannels = $derived(
+		channels.filter(
+			(channel) => !isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))
+		)
+	);
+	const names = $derived(
+		new Map(visibleChannels.map((channel) => [channel.curveId, channel.name]))
+	);
+	// S6 aggregates have no authors/lineages. With preferences, unknown ids fail closed rather
+	// than accidentally showing a hidden author's curve outside the loaded feed page.
+	const top = $derived(
+		$hidden.ready
+			? (data?.items ?? [])
+					.filter(
+						(item) => (!$hidden.authors.length && !$hidden.curves.length) || names.has(item.curveId)
+					)
+					.slice(0, 10)
+			: []
+	);
 </script>
 
 <Panel

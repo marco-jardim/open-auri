@@ -11,6 +11,9 @@ export interface DocSection {
 	paragraphs: readonly string[];
 	items?: readonly string[];
 	links?: readonly ContentLink[];
+	/** Sideloading instructions are browser-only, never rendered or indexed inside the app. */
+	browserOnly?: { paragraphs?: readonly string[]; links?: readonly ContentLink[] };
+	appOnly?: { paragraphs?: readonly string[]; links?: readonly ContentLink[] };
 }
 
 export interface DocsContent {

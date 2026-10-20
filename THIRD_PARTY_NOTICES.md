@@ -15,6 +15,13 @@ closure (including resvg WASM). The resvg-wasm npm tarballs omit a license file;
 the generator uses the identical full MPL-2.0 text shipped by `@cf-wasm/resvg`
 and records that provenance. Missing license texts otherwise stop generation.
 
+## Android app (native dependencies)
+
+Licenses of the native Android dependencies (Licensee androidRelease report) are listed in
+[web/static/third-party-licenses-android.txt](web/static/third-party-licenses-android.txt),
+published at /third-party-licenses-android.txt. Regenerate after a release build:
+`npm run build:android:release && npm run notices:android`.
+
 ## resvg (MPL-2.0)
 
 The server/Worker uses `@cf-wasm/resvg` and `@resvg/resvg-wasm` (including the

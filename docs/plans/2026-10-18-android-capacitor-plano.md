@@ -1808,7 +1808,7 @@ Os achados viram FX3.k (0.5).
 1. Q3 e QP em PASS; `git status` limpo; HEAD registrado.
 2. Pergunta única ao humano, com estas confirmações (se faltar alguma, interrupção 0.1 c):
    - H-KEY: as duas chaves criadas conforme `D:\git\open-auri\docs\operacao\runbooks\android-release.md`, backup feito e fingerprint SHA-256 da chave do app informado;
-   - H-ENV: Environment `android-release` criado com aprovação obrigatória e restrito a tags `android-v*`, secrets das duas chaves configurados, regra de proteção das tags ativa;
+   - H-ENV: Environment `android-release` criado com aprovação obrigatória e restrito a tags `android-v*`, secrets das duas chaves e fingerprints `ANDROID_APP_CERT_SHA256`/`ANDROID_UPLOAD_CERT_SHA256` configurados (variable não vazia tem precedência sobre secret), regra de proteção das tags ativa;
    - Trilha P: P1 concluído (conta ativa, identidade verificada) e P5 concluído (app criado no Console, ficha e formulários preenchidos);
    - H-SMOKE: um celular Android qualquer, sem cabo, disponível para o smoke (adb opcional).
 3. `researcher`: versões (0.14) e prazos da Play (targetSdk; extensão até 2026-11-01; registro de pacotes).
@@ -1823,7 +1823,7 @@ Os achados viram FX3.k (0.5).
 **W:**
 - `D:\git\open-auri\web\wrangler.template.jsonc` (valores públicos `PUBLIC_ANDROID_APP_ID` e `PUBLIC_ANDROID_CERT_SHA256`)
 - `D:\git\open-auri\README.md` (links finais)
-- `D:\git\open-auri\apps\android\package.json` (versão 1.0.0, `versionCode` 1)
+- `D:\git\open-auri\apps\android\package.json` (versão 1.0.0; o workflow deriva `versionCode` 10000 da tag `android-v1.0.0`, `major*10000 + minor*100 + patch`)
 
 **Subtarefas:**
 1. Configurar o fingerprint de H-KEY. Commit, push, CI verde.
@@ -2506,11 +2506,150 @@ Os achados viram FXGH.k (0.5).
 | Data | ID | Estado | Commit | Evidência |
 |---|---|---|---|---|
 | 2026-10-18 | Plano | proposto (revisão 3) | - | este arquivo |
+| 2026-10-19 | Plano | aprovado pelo mantenedor (início da execução) | - | pedido de execução na sessão |
+| 2026-10-19 | PF1 | OK | HEAD do PF1: `a39d048` | branch `feat/android-app` criada de `main`; `gh` com escopos `repo` e `workflow`; JDK 21 (Temurin 21.0.12) instalado via scoop; SDK com `platforms;android-36`, `build-tools;36.1.0` e `platform-tools`; Node 24.21.0, npm 12.0.2 |
 
-**Versões verificadas (0.14):** preenchido no PF1.
+| 2026-10-19 | T1.1 | concluído | `d0c7c38`, `43883e2`, `057618a`, `6cf87d5` | workspace, Gradle 8.14 com checksum, verificação de dependências, daemon Java 21, Kover, Licensee, `verifyCapacitorConfig`, `run-gradle.mjs`, `android-doctor.mjs` |
+| 2026-10-19 | T1.2 | concluído | `b1c5961` | parser HID e framing; 100% linhas e branches |
+| 2026-10-19 | T1.3 | concluído | `2ec23f0` | FrameGuard, CRC16, constantes com teste de deriva; 100% |
+| 2026-10-19 | T1.4 | concluído | `9efbc39` | backend USB, PermissionBroker, ClaimManager, FakeUsbBackend |
+| 2026-10-19 | T1.5 | concluído | `3c99d93` | manifest, rede, backup, gate da WebView, strings |
+| 2026-10-19 | T1.6 | concluído | `a62f538` | OpenAuriFiles e DownloadBridge |
+| 2026-10-19 | T1.8 | concluído | `168931e` | ícones |
+| 2026-10-19 | I1.1 | concluído | `7abd2d7` | `icons:android`, `mipmap-anydpi`, Gradle 8.14.6 |
+| 2026-10-19 | T1.7 | concluído | `f879bd4` | plugin `OpenAuriUsb`, OriginGuard, seletor, diagnóstico, schema |
+| 2026-10-19 | T1.9 | concluído | `4677cfe` | jobs `changes` e `android` no CI |
+| 2026-10-19 | T1.T | concluído | `363a7ad` (+ FX1.0 `87774b8`) | 276 testes; achou o defeito de permissão revogada (FX1.0) |
+| 2026-10-19 | Q1 r1 | 20 achados (6 major, 14 minor) | - | F1 a F20 |
+| 2026-10-19 | FX1.1 a FX1.2, FX1-A/B/C | concluído | `c69d8f5`, `fe99867`, `c308f42`, `cb6f3a0`, `64ec98e` | F1 a F20 corrigidos com testes de regressão |
+| 2026-10-19 | Q1 r2 | PASS (0 blocking/critical/major; 11 minor G1 a G11) | `cb6f3a0` | 302 testes; Kover 98,5% linhas, 96,3% branches; `src/` sem diff |
+
+| 2026-10-19 | FX1.3 | concluído | `a00c0e7` | metadata de verificação regenerada com cache limpo (CI Linux pedia `.module` de BOMs) |
+| 2026-10-19 | F1 (DoD) | concluído | HEAD `a00c0e7` | Q1 PASS; CI do PR #55 todo verde, inclusive o job `android` com release assinado por keystore efêmero e `apksigner verify` (run 39262005844); branch enviada |
+| 2026-10-19 | PF2 | OK | HEAD do PF2: `a00c0e7` | ver "PF2" abaixo |
+
+**PF2 (2026-10-19):**
+- Baseline: o CI do PR #55 no HEAD `a00c0e7` (run 39262005844) passou unit, integração, e2e Chrome e orçamentos; vale como baseline da Fase 2.
+- PF2.2: `@capacitor/core` 8.5.3 num navegador comum cria `window.Capacitor` com `getPlatform() === 'web'` e `isNativePlatform() === false` (`core/src/runtime.ts`, `getPlatformId` só retorna `android` com `window.androidBridge`). No app, o `native-bridge.js` injetado no início do documento já define `isNativePlatform() === true` e `getPlatform() === 'android'` sem importar o core. Qualquer página pode forjar `window.Capacitor`: a detecção é só um indício de UI; a fronteira real é nativa (origem fixada, OriginGuard, FrameGuard). O pacote não declara `sideEffects`; importar `@capacitor/core` cria `window.Capacitor`, então só se importa no caminho nativo (import dinâmico).
+- PF2.3: pontos de download em `D:\git\open-auri\web\src`: `lib\components\pages\curva\ImportExport.svelte:77-124` (TXT, JSON, BIN), `lib\components\pages\comparar\export.ts:89-111` (SVG, PNG), `lib\components\pages\biblioteca\sheet-export.ts:106-114` (usado por `Biblioteca.svelte:255-266` e `TrackSheet.svelte:400-436`), `lib\components\pages\cabo\Journal.svelte:29-38` (diário), `lib\components\pages\comunidade\SharePanel.svelte:117-119` (link `download` para `/og/<id>.png`), `lib\components\account\TwoFactorForm.svelte:82-86,166` (códigos de recuperação em `data:`), `lib\components\account\ExportForm.svelte:17` (POST `/conta/exportar`, resposta `attachment`; inclui o G5 do Q1). Nenhum `navigator.share`, `window.open(` nem `location.href =` de anexo. Esses arquivos formam o W da T2.2.
+- PF2.4: SvelteKit 3 com `adapter-cloudflare` 8; não há rota `.well-known` ainda; os headers de segurança valem para `+server.ts` (`D:\git\open-auri\web\src\hooks.server.ts:122-147`, `headers.ts:146-171`, o header da rota prevalece); `run_worker_first` não exclui `/.well-known/*`. A rota com diretório iniciado por ponto é confirmada na T2.4 por teste de integração.
+- PF2.5: env tipado em `D:\git\open-auri\web\src\lib\server\env.ts:107-134`; o teste de deriva existente é `D:\git\open-auri\test\tools\render-wrangler.test.mjs:268-302` (template contra `.env.example`); a lista `ENV_KEYS` de `D:\git\open-auri\web\tests\integration\env.test.ts:5-26` também precisa das chaves novas.
+- PF2.6: ids dos itens em `D:\git\open-auri\web\src\lib\cable\types.ts:244-253`; os itens condicionais ficam em `checklist.ts:248-268` (o plano citava `:225-244`) e usam `required`; `PreWriteChecklist.svelte` mapeia itens não atendidos em `:175-191` e mostra alavancas `ConfirmLever` em `:326-350`; testes: `checklist.test.ts`, `checklist-levers.svelte.test.ts`, `prewrite-edges.svelte.test.ts`.
+- Correções de plano descobertas: (1) mensagens novas vão para `D:\git\open-auri\web\messages\_staging\<ID>.pt-BR.json` e `<ID>.en-US.json` (forma do `web\scripts\merge-messages.mjs` e do `CONTRIBUTING.md:46-49`), não `_staging\<ID>\`; (2) o modo do cabo é decidido em `createCableService` (`service.ts:345-348`), então a T2.3 resolve `detectNativeCable()` antes de `context.mount` (`+layout.svelte:229`).
+- Locks: W2.1 = T2.1 (`web\src\lib\cable\native\*`, `types.ts`, testes `native-*`), T2.2 (`web\src\lib\files\save.ts` e os arquivos de download listados), T2.4 (servidor, env, template, `.env.example`, `render-wrangler.test.mjs`, `env.test.ts`, rota `.well-known`), todos disjuntos; W2.2 = T2.3 e T2.5, disjuntos; T2.6 serial (escreve `types.ts`).
+
+| 2026-10-19 | T2.0 a T2.6, T2.T | concluído | `d99f450`, `7e73301`, `8dcc208`, `8c65b67`, `cfd3608`, `b9ab040`, `2f48e1e`, `82a49b7`, `ab0c4a4` | integração no site; paridade de bytes 12/12; e2e `android-bridge` com o `native-bridge.js` real (desktop e mobile) |
+| 2026-10-19 | Q2 r1 | 3 major, 8 minor | - | M1 diagnóstico sem `open`; M2 `opened` preso após perda de sessão; M3 política remota não alcançava páginas abertas/offline |
+| 2026-10-19 | FX2-A a FX2-D, FX2.5 | concluído | `c75533e`, `35f9a18`, `e4fd7a9`, `0833f2a`, `fa60778` | todos os achados do r1 corrigidos com testes; FX2.5 corrige vazamento de locale entre testes de componente no CI |
+| 2026-10-19 | Q2 r2 | 1 major (N1), 11 minor | `0833f2a` | N1: sem como recarregar o app depois de um deploy; corrigido no FX2-E |
+
+| 2026-10-19 | FX2-E | concluído | `5e66f7c`, `8595148` | botão Recarregar na recusa e banner de nova versão só no app; e2e recusa, recarga e gravação |
+| 2026-10-19 | F2 (DoD) | concluído | HEAD `8595148` | Q2 r2 sem major aberto; CI do PR #55 todo verde no HEAD (Tests, E2E, Android, lint, build, CodeQL); branch enviada |
+| 2026-10-19 | PF3 | OK | HEAD do PF3: `8595148` | ver "PF3" abaixo |
+| 2026-10-19 | PF3.fix, T3.1 a T3.6, P3, I3.1, T3.T | concluído | `6288b92`, `6b322a9`, `9cafcd4`, `4cd86be`, `148233b`, `d350e85`, `a42816d`, `7b3a365`, `b3f126e`, `2571296`, `3df2b96`, `ccf7504` | release reprodutível com dry run de duas chaves, job de emulador, licenças nativas, docs, issue form, artes da loja |
+| 2026-10-20 | Q3 r1 | 3 major, 9 minor | `3df2b96` | M1 cache do Gradle envenenável no build de release; M2 dry run quebra depois da 1a release; M3 aviso MIT do Capacitor ausente |
+| 2026-10-20 | QP r1 | 2 critical, 7 major, 7 minor | `b3f126e` | C1 aviso de rascunho/advogado na política; C2 sem bloqueio de autores e público 13-17; M1 a M7 Data safety, controlador, ficha, acesso do revisor, links de APK no app, público, marca |
+| 2026-10-20 | FX3-A, FX3-B, FXP-A, FXP-B | concluído | `12e34b3`, `616fd07`, `7b1dd62`, `0a5463c`, `d0e7f61` | todos os achados do r1; decisões do mantenedor: sem a frase Q-LEGAL, público único 18+, "Ocultar autor/curva" (local para visitantes, sincronizado com conta) |
+| 2026-10-20 | FX3.1, FX3.2 | concluído | `bbb6cd0`, `34e050f`, `d9ef386`, `20a87d1` | CI do PR; o job do emulador pegou a regex `(?U)` que o ICU do Android rejeita e que quebrava todo salvamento nativo; matriz authz com `me/hidden` |
+| 2026-10-20 | Q3 r2 | 1 major (N1), 10 minor | `0a5463c` | N1 `ANDROID_UPLOAD_CERT_SHA256` lido pelo workflow e ausente do runbook; `tools:replace` do cleartext sem impacto na release (config de rede e checagem da config bastam) |
+| 2026-10-20 | QP r2 | 1 critical, 3 major, 13 minor | `0a5463c` | N1 denúncia só na Comunidade (sem usuários/packs); N2 registro LGPD defasado; N3 ocultar algo travava a troca cega; N4 `public_author_id` público não divulgado |
+| 2026-10-20 | FX3-C, FX3-D, FXP-C, FXP-D, FXP-E | concluído | `3cff306`, `8acc5f3`, `3d19032`, `b9da8f1`, `86bb882` | todos os critical/major do r2; teste exige que todo `secrets.*`/`vars.*` do workflow esteja no runbook; alertas CodeQL do dry run |
+| 2026-10-20 | Verificação r3, FX3.3 | PASS; concluído | `42c600a`, `5825394` | critical/major do r2 confirmados resolvidos; CodeQL `js/file-system-race` corrigido; nickname de teste que caía na blocklist por acaso (0,4%) |
+| 2026-10-20 | F3 (DoD) | concluído | HEAD `5825394` | Q3 e QP sem critical/major aberto; CI do PR #55 verde no HEAD (Tests, E2E, Android, Android emulator, release dry run, lint, build, CodeQL); GitGuardian 38436941 é falso positivo (nome de variável) e aguarda o mantenedor marcar no painel |
+| 2026-10-20 | PF4 (parcial) | em andamento | HEAD `00c82fc` | itens 1, 3, 4 e 5 OK (ver "PF4" abaixo); item 2 (H-KEY, H-ENV, P1/P5, H-SMOKE) aguardando o mantenedor |
+| 2026-10-20 | H-KEY (parcial) | chaves criadas | - | certificados públicos, RSA 4096, válidos até 2054-03-07: app `FB:46:E3:4F:03:FD:6F:59:5B:4B:70:36:74:8F:92:83:08:FA:BF:31:C1:55:BF:E2:C5:0E:B1:B4:43:FF:61:D0`, upload `59:1A:0A:1B:CC:E8:A5:39:AF:2F:25:60:DE:1D:D7:92:82:F0:42:BA:40:62:82:31:F3:E4:35:E3:A6:CD:04:16`; backup offline a confirmar |
+| 2026-10-20 | H-ENV (parcial) | configurado | - | Environment `android-release`: revisor obrigatório `marco-jardim` (sem prevenção de autoaprovação: mantenedor único), admins sem bypass, só tags `android-v*`; ruleset `android-release-tags` (25482064) ativo restringe criar/atualizar/apagar `refs/tags/android-v*`, bypass só do papel admin; label `android-cable-report` criado; os 10 secrets (8 de chave + 2 fingerprints) só no Environment, conferidos por nome às 14:44; nenhum secret `ANDROID_*` no nível do repositório. Os valores só se provam no primeiro job `sign-and-publish` (T4.1) |
+| 2026-10-20 | P1 | parcial | `f370205` | conta pessoal ativa, anterior a 2023-11-13 (isenta do teste fechado); verificação de identidade pendente, publicação bloqueada até concluir |
+
+**PF4 (2026-10-20):**
+- `doctor:android` OK (emulador e imagem opcionais ausentes na máquina local); release dry run verde local e no PR.
+- Versões (0.14), conferidas em 2026-10-20: Capacitor 8.5.3, KGP 2.4.21, webkit 1.17.1, Kover 0.9.11, Licensee 1.14.1 e Robolectric 4.17 são as últimas estáveis. AGP 9.4.1 e Gradle 9.8.2 existem, mas são troca de major e ficam para depois do lançamento. Build-tools 36.1.0 mantido (última versão não confirmada no índice oficial). Nenhuma atualização é exigida para o lançamento.
+- Play: targetSdk 36 é exigido para apps novos e atualizações desde 2026-08-31 (https://developer.android.com/google/play/requirements/target-sdk); o app já mira 36. A extensão até 2026-11-01 não se aplica.
+- Verificação de desenvolvedor (https://developer.android.com/developer-verification/guides/faq): vigora desde 2026-09-30 no Brasil, Indonésia, Singapura e Tailândia, só nas lojas participantes (inclusive a Play); global em 2027. A Play registra o pacote automaticamente; distribuição completa exige conta com identidade verificada (P1 pendente). O APK do GitHub (sideload) ainda não precisa de registro; registrar antes de 2027 fica na P6.
+- Teste fechado de 12 testadores por 14 dias vale só para contas pessoais criadas depois de 2023-11-13 (https://support.google.com/googleplay/android-developer/answer/14151465): a conta do mantenedor está fora.
+- UGC: denúncia, bloqueio e aceite de termos antes de criar conteúdo continuam exigidos (https://support.google.com/googleplay/android-developer/answer/9876937); cobertos pelo FXP-B e FXP-C e pelo aceite de termos no cadastro.
+**PF3 (2026-10-19):**
+- Política de privacidade: `D:\git\open-auri\web\src\lib\content\legal\version.ts:6` (`POLICY_VERSION = '2026-10-19'`), textos em `D:\git\open-auri\docs\legal\politica-de-privacidade.md` e `privacy-policy.en-US.md` (versão na linha 14), aceite por `D:\git\open-auri\web\src\routes\conta\politica\+server.ts:9-11`. Não cita o app; a T3.5 decide a menção. `D:\git\open-auri\docs\lgpd.md:10` está com a versão 2026-10-18 (defasada).
+- Docs: `operacao.md` (tabelas Referência e Runbooks), runbooks com `Quando usar`, `Pré-condições`, `Procedimento`, `Verificação`, `Rollback`; `seguranca.md` com tabela STRIDE em `:36-58`; `docs\README.md` com índice em tabelas; `.github\ISSUE_TEMPLATE\` não existe.
+- Licenças: `tools\third-party-notices.mjs` gera `web\static\third-party-licenses.txt` a partir dos sourcemaps; o rodapé não linka o arquivo de licenças.
+- CI e release: só `deploy.yml` usa `environment:`; não há workflow de release; `app\build.gradle` sem `signingConfigs` (`versionCode 1`, `versionName` do `apps\android\package.json`).
+- Pesquisa (fontes em docs.github.com e developer.android.com): ambientes aceitam política de tags (`android-v*` como tag, não branch); secrets de ambiente só para jobs com `environment:`; PR de fork não recebe secrets; tags protegidas por ruleset de tag. SHAs: `actions/setup-java` v6.1.0 `b843ebf9b913146b38da2eaa7aeddf76074ae1ad`, `reactivecircus/android-emulator-runner` v2.38.0 `a421e43855164a8197daf9d8d40fe71c6996bb0d`, `actions/upload-artifact` v7.0.2 `cf430e030ddbb5b0abf93d22962f4752f3646cd9`, `actions/download-artifact` v8.0.2 `9000827ccba6bdab643e8b6fd33ac0654aef8333`; release pelo `gh release create` (sem action de terceiro). APK: `zipalign -p -f 4` antes de `apksigner sign` com v2 e v3 (v1 desnecessário com minSdk 26). AAB: `jarsigner` com a chave de upload (o `apksigner` não assina AAB). Licensee: `build\reports\licensee\<variante>\artifacts.json` com `groupId`, `artifactId`, `version`, `spdxLicenses[{identifier,name,url}]`, `unknownLicenses[{name,url}]` (listas vazias podem faltar).
+- Correção de PF: os minor G1, G2 e G6 do Q1 (guarda de release, interfaces JS do Capacitor expostas, `--debug`) entram já na W3.1 (tarefa PF3.fix), antes do Q3.
+- Locks W3.1: T3.1 (`android-release.yml`, `android-artifacts.mjs`, `app\build.gradle`), T3.2 (`app\src\androidTest\**`, `ci.yml`), T3.3 (`android-notices.mjs`, `third-party-licenses-android.txt`, `Footer.svelte`, `_staging\T3.3.*`), T3.4 (`docs\android.md`, `docs\android\captura-usb.md`, `README.md`, `CONTRIBUTING.md`, `.github\ISSUE_TEMPLATE\*`), T3.5 (`docs\seguranca.md`, `docs\lgpd.md`, `docs\operacao.md`, `docs\operacao\runbooks\android-release.md`, política de privacidade), T3.6 (`usb-golden.mjs` e fixtures), P3 (`play-assets.mjs`, `design\play\*`, `docs\android\play-assets\*`, `play-screenshots.spec.ts`), PF3.fix (`verify-capacitor-config.mjs`, `MainActivity.kt`, `run-gradle.mjs` e testes). Gradle e builds web serializam pelos locks de recurso.
+
+**Achados minor do Q2 r2 (registrados para a fase indicada):**
+- m1 (página aberta antes de um deploy que desliga a gravação ainda faz `requestDevice` e diagnóstico; as gravações já são barradas): Q3, com G1 e G2.
+- m2 (`version.pollInterval` sem consumidor): resolvido junto com o N1 (banner do app).
+- m3 (sem teste em navegador real de que o SW não intercepta `/_app/version.json`): T3.2 (emulador).
+- m4 (`/docs` não diz que a gravação pelo app exige conexão e página atual) e m7 (uma checagem de frescor por fila): T3.4 e runbook da T3.5, junto com o comportamento offline do M3.
+- m5 (`PUBLIC_ANDROID_APP_ID` malformado invalida o env): T4.1 (configuração do app id em produção).
+- m6 (`isNativeAndroid` duplicado em `native\gate.ts` e `app\context.svelte.ts`), m8 (fake do e2e recusa `diagnostics` sem permissão; o nativo não), m9 (banner no `/docs` aparece depois do `#main-content`), m10 (UI mostra "gravando" durante a checagem de até 3 s), m11 (mensagens do FX2-D no commit do FX2-B): F3, limpeza.
+
+**Achados minor do Q3 r2 e do QP r2 (depois da 2a rodada só se corrigem major ou acima). Ficam registrados para a fase indicada:**
+- Q3 n2 (`workflow_dispatch` a partir de uma tag aplica o piso estrito de versionCode), n3 (tag `android-v*` malformada quebra todos os runs até ser apagada), n4 (filtros de caminho sem `apps/android/www/**`, `web/src/lib/cable/android-status.ts` e, no CI, `web/static/third-party-licenses-android.txt`), n5 (nada compara versionCode/applicationId dos artefatos com o manifest de release) e n8 (conteúdo de NOTICE Apache, provável `org.apache.cordova:framework`): T4.1.
+- Q3 n6 (link de atualização sempre para a Play enquanto `ANDROID_PLAY_LIVE=false`): T4.3.
+- Q3 n7 e QP minor 4 (botão "Como funciona" cobre o eyebrow em `3-comparar.png`), QP m8 (`7-native-connect.png` mostra só as confirmações) e QP m9 (texto do revisor sem caminho para Denunciar/Ocultar; "Conectar" difere do botão): P5, antes do envio.
+- Q3 n9 (CLI de avisos falha depois de um sync e2e): F4, limpeza. Q3 n10 (T4.1 dizia `versionCode` 1): corrigido nesta atualização. Q3 m9 (seção 14 defasada): corrigido nesta atualização.
+- QP m1 (falha ao carregar ocultos deixa "Carregando…" com o erro dentro de `<details>` fechado), m2 (falha da checagem de sessão em página pré-renderizada conta como deslogado e não aplica os ocultos da conta), m3 (HTML do servidor de `/c/[id]` e `/u/[apelido]` só com o texto de carregamento), m5 (fontes da comparação sem Ocultar; curvas já carregadas em faixas ou candidatas continuam depois de ocultar), m10 (`/docs` pré-renderizado mostra o link do GitHub Releases até hidratar), m12 (menu e rodapé do app sem link direto para a política), m13 (redação "Nesta release" na política §7): F4, limpeza.
+- QP m4 (rótulo contado em UTF-16 no servidor), m6 (evidência de `hidden_items` no Data safety), m7 (18+ nos termos) e m11 (nomes acessíveis repetidos nos botões de ocultar): corrigidos no FXP-C e no FXP-E.
+- Verificação r3 dos critical/major do r2 (PASS, `fdd17df`), minors novos: favoritos do perfil com Ocultar mas sem Denunciar nem link para `/c/`/`/u/` (e `play-conteudo.md:82` diz "todas as superfícies"), Denunciar nos próprios packs/perfil/criações sempre termina em 403, link `/entrar` sem retorno e texto de "entrar" para quem só falta verificar o e-mail, S7 desliga Entrar com qualquer erro da lista de ocultos, S7 sem Ouvir/Pontuar depois de uma carga falha, Turnstile não reinicia depois de envio falho: F4, limpeza (o texto do `play-conteudo.md` na P5).
+- Ainda abertos de fases anteriores: Q2 m3 (o emulador usa HTTP `10.0.2.2` e não prova, em HTTPS, que o SW não intercepta `/_app/version.json`): QG; Q2 m6 (`isNativeAndroid` duplicado), m8 a m11 e Q1 G7/G11: F4, limpeza.
+**Achados minor do Q1 r2 (por decisão do mantenedor, depois da 2a rodada só se corrigem major ou acima). Ficam registrados para a fase indicada:**
+- G1 (release guard sem as chaves de fallback de topo `loggingBehavior`/`allowMixedContent` e `CapacitorHttp.enabled: "true"`) e G2 (`CapacitorCookies` e `CapacitorHttp` expostos a todos os frames por `addJavascriptInterface`; remover com `removeJavascriptInterface`): Q3 (segurança da Fase 3).
+- G3 (espaçamento de commit não sobrevive à morte do processo): F5, junto com a validação em hardware.
+- G4 (caminho de sucesso do `MainActivity` sem teste) e G8 (retry do offline e `location.replace` numa WebView real): T3.2.
+- G5 (exportação POST de `/conta/exportar` no app): T2.2 migra para `fetch` + `OpenAuriFiles.save`.
+- G6 (`--debug` permitido no `run-gradle.mjs`; guard contornável chamando o Gradle direto): T3.1 (workflow de release usa só os scripts npm, sem `--debug`).
+- G7 (higiene da tarefa `prepareRobolectricSdk`): T3.T.
+- G9 (`actions/checkout` e `actions/setup-node` em v4 no job `android`, como os demais jobs do repositório; a seção 14 registrava v7): mantido v4 por consistência com o repositório; SHAs fixados conferidos por `git ls-remote` em 2026-10-19.
+- G10 (`FILES_ORIGIN` e `FILES_BUSY` fora do Anexo C): T2.1 (mapeamento de erros) e T3.4 (docs).
+- G11 (texto do toast em `FILES_BUSY`, entradas antigas em `FrameGuards`, higiene de IDs de commit): F3.
+
+**Versões verificadas (0.14), em 2026-10-19:**
+
+| Componente | Versão | Fonte | Nota |
+|---|---|---|---|
+| `@capacitor/core`, `@capacitor/cli`, `@capacitor/android` | 8.5.3 | https://registry.npmjs.org/@capacitor/android/latest | sem 9.x estável (só `9.0.0-alpha.8`) |
+| Template Android do Capacitor | minSdk 24, compile/target 36, AGP 8.13.0, Gradle 8.14.3, webkit 1.14.0 | https://raw.githubusercontent.com/ionic-team/capacitor/8.5.3/android-template/variables.gradle | o app usa minSdk 26 (RNF1) |
+| AGP | 8.13.2 | https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/maven-metadata.xml | maior AGP compatível com Gradle 8.14.3 (AGP 9 exige Gradle 9.1+) |
+| Gradle | 8.14.3 | template do Capacitor 8.5.3 | Gradle 9 exigiria AGP 9, fora do suporte do Capacitor 8 |
+| Kotlin (KGP) | 2.4.21 | https://kotlinlang.org/docs/gradle-configure-project.html | KGP 2.2.20 não lista AGP 8.13; 2.4.21 cobre Gradle 8.14.3 e AGP 8.13 |
+| JDK | 21 | build.gradle do Capacitor 8.5.3 (Java 21) | toolchain 21; Robolectric com SDK 36 exige JDK 21 |
+| `androidx.webkit:webkit` | 1.17.1 | https://dl.google.com/dl/android/maven2/androidx/webkit/webkit/maven-metadata.xml | |
+| Kover | 0.9.11 | https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kover-gradle-plugin/maven-metadata.xml | |
+| Licensee | 1.14.1 | https://plugins.gradle.org/m2/app/cash/licensee/licensee-gradle-plugin/maven-metadata.xml | mínimo Gradle 8.12 |
+| JUnit | 4.13.2 | https://repo1.maven.org/maven2/junit/junit/maven-metadata.xml | |
+| Robolectric | 4.17 | https://github.com/robolectric/robolectric/releases/tag/robolectric-4.17 | suporta SDK 36 |
+| `com.networknt:json-schema-validator` | 3.0.8 | https://repo1.maven.org/maven2/com/networknt/json-schema-validator/maven-metadata.xml | 3.x exige Java 17 e Jackson 3; só em teste (JVM 21) |
+| `org.json:json` | 20260814 | https://repo1.maven.org/maven2/org/json/json/maven-metadata.xml | |
+| `androidx.test.ext:junit`, `androidx.test:runner`, `espresso-intents` | 1.3.0, 1.7.0, 3.7.0 | Google Maven | |
+| `actions/checkout`, `actions/setup-node`, `actions/setup-java`, `actions/upload-artifact`, `actions/cache` | v7, v7, v6, v7, v6 | API de releases do GitHub | |
+| `gradle/actions/setup-gradle`, `android-actions/setup-android`, `reactivecircus/android-emulator-runner`, `dorny/paths-filter` | v6, v4, v2, v4 | API de releases do GitHub | |
+
+**Respostas do PF1.6:**
+- (a) Turnstile na Android WebView: funciona com JS, DOM storage, acesso a `challenges.cloudflare.com` e UA estável na sessão (https://developers.cloudflare.com/turnstile/get-started/mobile-implementation/). O Capacitor fixa o UA no início. O smoke do Anexo F confirma o login.
+- (b) CSP: com `DOCUMENT_START_SCRIPT`, o Capacitor 8.5.3 registra o bridge por `addDocumentStartJavaScript` e anula o injetor (`Bridge.loadWebView`), então o `WebViewLocalServer` não reescreve o HTML remoto e o header CSP do site chega intacto. O script roda por `ExecuteScript` do embedder (`components/js_injection/renderer/js_communication.cc`), fora das checagens de CSP da página (inferência pelo código; a T3.2 prova no emulador). Sem o recurso, o fallback injeta `<script>` inline sem nonce, que a CSP bloquearia: por isso o `WebViewCompatGate` exige o recurso (RNF2).
+- (c) Versão mínima da WebView com `DOCUMENT_START_SCRIPT`: não confirmada em fonte; a checagem é em tempo de execução (`WebViewFeature.isFeatureSupported`), e o gate também exige `minWebViewVersion`.
+- (d) Bridge: `addWebMessageListener("androidBridge")` com as regras de origem de `Bridge.setAllowedOriginRules()`, que inclui `server.url` como configurado. Por isso `server.url` é a origem pura `https://open-auri.com`, sem barra final.
+
+**PF1.7:** `build.target` não definido em `D:\git\open-auri\web\vite.config.ts`; Vite 8.3.4 usa o padrão `baseline-widely-available` (`chrome111` em `D:\git\open-auri\node_modules\vite\dist\node\chunks\node.js`), sem `browserslist`, então `minWebViewVersion = 111`. Ícone: `D:\git\open-auri\web\static\icons\icon.svg`; cor de fundo `#0f0f0e` (`--ink`, `D:\git\open-auri\web\src\lib\styles\tokens.css:13`). `D:\git\open-auri\test\tools\check-sensitive.test.mjs` existe. Rollback de deploy: `D:\git\open-auri\docs\deploy.md:74-87` (`npx wrangler rollback`), também em `D:\git\open-auri\docs\operacao\runbooks\incidente.md:84`. Environments do GitHub: consulta pendente para o PF4 (não bloqueia F1 a F3).
+
+**Falhas pré-existentes da baseline (HEAD `a39d048`):**
+- `npm test`, `npm run test:tools`, `npm run check:sensitive` e `npm run check:all`: verdes.
+- `npm run -w web test:unit`: 3493 testes verdes; a suíte `D:\git\open-auri\web\tests\unit\pages\curva\output-meter.svelte.test.ts` falhou uma vez ao importar no Chromium ("Failed to fetch dynamically imported module") e passou isolada (4/4). Instável, não atribuível à fase.
+- `npm run test:web:int` (exige `npm run build:web` antes): 1157/1158. Falha `D:\git\open-auri\web\tests\integration\social\yolo\qa-round1.test.ts:234` (`yoloPublication` esperado `off`, recebido `on`), dependente do `.dev.vars` local. Não atribuível à fase.
+
 **Tabelas de locks por wave:** preenchidas em cada PF.
-**Falhas pré-existentes da baseline:** preenchidas no PF1.
-**Trilha P:** estado de P0 a P7 e da revisão da Play, atualizado a cada passo.
+
+**Locks da W1.2 (PF1.11):** T1.2, T1.3, T1.4, T1.5, T1.6 e T1.8 escrevem apenas os arquivos dos seus conjuntos W (seção 7), todos disjuntos. Leituras: T1.3 lê `D:\git\open-auri\src\dsp\eq0xcb.mjs`, `D:\git\open-auri\src\transport\webhid.mjs`, `D:\git\open-auri\docs\protocol-0xcb.md` e `D:\git\open-auri\test\fixtures\eq0xcb.reference.json` (nenhum em W de outra tarefa); T1.5 lê `D:\git\open-auri\apps\android\capacitor.config.ts` (só escrito na T1.1, já commitada); T1.8 lê `D:\git\open-auri\web\static\icons\icon.svg`. P2 escreve `D:\git\open-auri\docs\android\play-listing.md` e `D:\git\open-auri\test\tools\play-listing.test.mjs`; P4 escreve `D:\git\open-auri\docs\android\data-safety.md` e `D:\git\open-auri\docs\android\play-conteudo.md`. Recurso exclusivo `res:gradle`: os builds Gradle da W1.2 rodam um por vez.
+
+**Trilha P:**
+
+| Passo | Estado | Evidência |
+|---|---|---|
+| P0 | concluído | `D:\git\open-auri\docs\android\play-requisitos.md` |
+| P1 | mensagem enviada ao mantenedor; aguardando resposta | `D:\git\open-auri\docs\android\play-conta.md` |
+| P2 a P7 | não iniciados | - |
 
 ---
 
