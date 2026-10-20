@@ -1,13 +1,28 @@
+import { registerNativeBack } from './native-back.ts';
+
 interface ModalOptions {
 	open: boolean;
 	onDismiss: () => void;
-	initialFocus: string;
+	initialFocus?: string;
+	/** Rechecked at the close request, not just when props last updated (e.g. USB writing). */
+	canDismiss?: () => boolean;
 }
 
 /** Native modal semantics, with deterministic tab wrapping and focus restoration. */
 export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 	let current = options;
 	let previousFocus: HTMLElement | null = null;
+	let releaseBack: (() => void) | undefined;
+	const canDismiss = () => current.canDismiss?.() ?? true;
+
+	function focusInitial() {
+		if (current.initialFocus) node.querySelector<HTMLElement>(current.initialFocus)?.focus();
+	}
+
+	function clearBack() {
+		releaseBack?.();
+		releaseBack = undefined;
+	}
 
 	function restoreFocus() {
 		if (previousFocus?.isConnected) previousFocus.focus();
@@ -18,20 +33,38 @@ export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 		if (current.open && !node.open) {
 			previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 			node.showModal();
-			node.querySelector<HTMLElement>(current.initialFocus)?.focus();
+			focusInitial();
 		} else if (!current.open && node.open) {
 			node.close();
 			restoreFocus();
+		}
+		// Android app: system Back closes the topmost open modal, like Escape (native-back.ts).
+		if (current.open && !releaseBack) {
+			releaseBack = registerNativeBack({ canDismiss, dismiss: () => current.onDismiss() });
+		} else if (!current.open) {
+			clearBack();
 		}
 	}
 
 	function cancel(event: Event) {
 		event.preventDefault();
-		current.onDismiss();
+		if (canDismiss()) current.onDismiss();
 	}
 
 	function close() {
 		if (!node.open) {
+			// Chromium can close after repeated Esc without a cancelable cancel event. Keep the
+			// page inert and the Back registration until the close guard permits dismissal.
+			if (current.open && !canDismiss()) {
+				queueMicrotask(() => {
+					if (current.open && node.isConnected && !node.open) {
+						node.showModal();
+						focusInitial();
+					}
+				});
+				return;
+			}
+			clearBack();
 			restoreFocus();
 			if (current.open) current.onDismiss();
 		}
@@ -81,6 +114,7 @@ export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 			node.removeEventListener('cancel', cancel);
 			node.removeEventListener('close', close);
 			node.removeEventListener('keydown', trapTab);
+			clearBack();
 			if (node.open) node.close();
 			restoreFocus();
 		}

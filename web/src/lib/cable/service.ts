@@ -4,8 +4,8 @@
  *
  * Every write goes through, in this order: a fresh single-use gesture token, the
  * checklist (gate on a snapshot, confirmations, 2 s spacing), the cross-tab write lock
- * (Web Locks `oa-cable-write`, `ifAvailable`), a bounded live deploy check for native writes,
- * the checklist again with fresh flash state, then `writeCurve` / `writeMany` from
+ * (Web Locks `oa-cable-write`, `ifAvailable`), a bounded live deploy check for native writes
+ * (offline: only the last live confirmation of this same build), the checklist again with fresh flash state, then `writeCurve` / `writeMany` from
  * `open-auri/transport`, which run `gateForWrite`
  * again on that snapshot. Nothing is ever retried or written automatically; the lock and
  * the in-flight marker only ever refuse or record.
@@ -44,7 +44,11 @@ import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
 import { gateForWrite, isWaivable } from 'open-auri/safety';
 import { evaluateChecklist, flashCountersOf } from './checklist.ts';
 import { isNativeHid } from './native/brand.ts';
-import { assertNativeWriteFresh, type NativeFreshnessDeps } from './native-freshness.ts';
+import {
+	assertNativeWriteFresh,
+	type NativeFreshnessDeps,
+	type NativeWriteFreshness
+} from './native-freshness.ts';
 import { consumeGestureToken, createGestureToken, type GestureEventLike } from './gesture.ts';
 import { withWriteFlag } from './write-flag.ts';
 import type {
@@ -184,6 +188,26 @@ function markerWaived(value: unknown): ReasonCode[] | null {
 	return codes;
 }
 
+/** The `freshness` key of a journal entry or marker: a copy, or nothing when null. */
+function journalFreshness(freshness: NativeWriteFreshness | null): Pick<JournalEntry, 'freshness'> {
+	return freshness === null
+		? {}
+		: { freshness: { basis: freshness.basis, checkedAt: freshness.checkedAt } };
+}
+
+/**
+ * The deploy check of a persisted marker, checked like the journal checks an entry's; null
+ * when absent or not valid (the recovered entry then names none).
+ */
+function markerFreshness(value: unknown): NativeWriteFreshness | null {
+	if (typeof value !== 'object' || value === null) return null;
+	const { basis, checkedAt } = value as Partial<Record<keyof NativeWriteFreshness, unknown>>;
+	if (basis !== 'live' && basis !== 'last-good') return null;
+	if (!Number.isSafeInteger(checkedAt) || (checkedAt as number) < 0) return null;
+	if ((checkedAt as number) > 8.64e15) return null;
+	return { basis, checkedAt: checkedAt as number };
+}
+
 /**
  * Parses a persisted marker; null when it is unreadable or malformed. A marker without
  * `profile: 'yolo'` (a standard write, or one persisted before markers carried a profile) is
@@ -219,6 +243,8 @@ export function parseInflightMarker(raw: string): InflightMarker | null {
 		const waived = markerWaived(candidate.waived);
 		if (waived !== null) marker.waived = waived;
 	}
+	const freshness = markerFreshness(candidate.freshness);
+	if (freshness !== null) marker.freshness = freshness;
 	return marker;
 }
 
@@ -315,6 +341,8 @@ interface Authorized {
 	name: string;
 	/** CRC-16 of the gated payload. */
 	crc: number;
+	/** Native writes: the deploy check that cleared it (journaled); null otherwise. */
+	freshness: NativeWriteFreshness | null;
 }
 
 /** What the synchronous first phase captured: the request read once and its gate verdict. */
@@ -346,7 +374,7 @@ function gateReasonsOf(error: unknown): Refused['gateReasons'] {
 }
 
 export function createCableService(
-	/** Native freshness fetch/version overrides are for tests; desktop never reads them. */
+	/** Freshness overrides (fetch, version, storage, now) are for tests; desktop ignores them. */
 	deps: CableServiceDeps & { nativeFreshness?: NativeFreshnessDeps }
 ) {
 	const detected = detectCableSupport() === 'real' ? navigatorHid() : null;
@@ -576,7 +604,9 @@ export function createCableService(
 							profile: 'yolo' as const,
 							...(marker.waived === undefined ? {} : { waived: [...marker.waived] })
 						}
-					: {})
+					: {}),
+				// A marker without it (desktop, or persisted before it existed) journals none.
+				...journalFreshness(marker.freshness ?? null)
 			};
 			try {
 				deps.journal.append(entry);
@@ -743,7 +773,9 @@ export function createCableService(
 			// Modo YOLO: what the journal entry would carry, so a recovered interruption keeps it.
 			...(authorized.profile === 'yolo'
 				? { profile: 'yolo' as const, waived: [...authorized.checklist.waived] }
-				: {})
+				: {}),
+			// Likewise the native deploy check that cleared the write.
+			...journalFreshness(authorized.freshness)
 		};
 		ownMarker = marker;
 		if (inflight.write(JSON.stringify(marker))) return true;
@@ -896,18 +928,20 @@ export function createCableService(
 	 * lock is released, so "marker present and lock free" always means the writing tab is gone.
 	 */
 	async function exclusive<T extends WriteOutcome | QueueOutcome>(
-		run: () => Promise<T | Refused>
+		run: (freshness: NativeWriteFreshness | null) => Promise<T | Refused>
 	): Promise<T | Refused> {
 		const guarded = async (): Promise<T | Refused> => {
 			try {
+				// Null for desktop and simulated writes, which never check the deployed policy.
+				let freshness: NativeWriteFreshness | null = null;
 				if (native) {
 					try {
-						await assertNativeWriteFresh(deps.nativeFreshness);
+						freshness = await assertNativeWriteFresh(deps.nativeFreshness);
 					} catch (cause) {
 						return refuse('error', { error: cause });
 					}
 				}
-				return await run();
+				return await run(freshness);
 			} finally {
 				unmark();
 			}
@@ -1011,9 +1045,13 @@ export function createCableService(
 
 	/**
 	 * Second phase, holding the cross-tab lock: the checklist again on the same gate verdict
-	 * with fresh flash/journal state (another tab may have written meanwhile).
+	 * with fresh flash/journal state (another tab may have written meanwhile). `freshness`: the
+	 * native deploy check that cleared this write (null for desktop and simulated writes).
 	 */
-	function authorize(prepared: Prepared): Authorized | Refused {
+	function authorize(
+		prepared: Prepared,
+		freshness: NativeWriteFreshness | null
+	): Authorized | Refused {
 		deps.flash.sync?.(nowMs());
 		const checklist = evaluateChecklist(prepared.captured, context(), prepared.verdict);
 		if (!checklist.canWrite || checklist.snapshot === null || checklist.crc === null) {
@@ -1026,7 +1064,8 @@ export function createCableService(
 			experimental: prepared.captured.experimental,
 			profile: prepared.captured.profile === 'yolo' ? 'yolo' : 'standard',
 			name: prepared.name,
-			crc: checklist.crc
+			crc: checklist.crc,
+			freshness
 		};
 	}
 
@@ -1059,7 +1098,7 @@ export function createCableService(
 		label: string,
 		authorized: Authorized
 	): { status: Written['status']; entry: JournalEntry | null } {
-		const { checklist, snapshot, preampDb, name, profile } = authorized;
+		const { checklist, snapshot, preampDb, name, profile, freshness } = authorized;
 		const yolo = profile === 'yolo';
 		const simulated = mode === 'simulated';
 		const at = nowMs();
@@ -1080,7 +1119,9 @@ export function createCableService(
 				status,
 				device: truncate(label, 64),
 				// Modo YOLO: the entry is marked, with the class-2 codes the write waived.
-				...(yolo ? { profile: 'yolo' as const, waived: [...checklist.waived] } : {})
+				...(yolo ? { profile: 'yolo' as const, waived: [...checklist.waived] } : {}),
+				// Android app: whether a live check or the last-good record cleared the write.
+				...journalFreshness(freshness)
 			};
 			try {
 				deps.journal.append(entry);
@@ -1259,10 +1300,10 @@ export function createCableService(
 			if ('status' in prepared) return prepared;
 			const abort = reserve();
 			try {
-				return await exclusive<WriteOutcome>(async () => {
+				return await exclusive<WriteOutcome>(async (freshness) => {
 					const guard = crossTabGuard();
 					if (guard !== null) return guard;
-					const authorized = authorize(prepared);
+					const authorized = authorize(prepared, freshness);
 					if ('status' in authorized) return authorized;
 					const { checklist, snapshot, preampDb, experimental, profile } = authorized;
 					const device = primary;
@@ -1291,7 +1332,8 @@ export function createCableService(
 							error: cause
 						});
 					}
-					const outcome = settle(result, label, authorized);
+					const written = settle(result, label, authorized);
+					const outcome: Written = freshness === null ? written : { ...written, freshness };
 					lastOutcome = outcome;
 					return outcome;
 				});
@@ -1344,10 +1386,10 @@ export function createCableService(
 			queue = { running: true, items };
 			const abort = reserve();
 			try {
-				return await exclusive<QueueOutcome>(async () => {
+				return await exclusive<QueueOutcome>(async (freshness) => {
 					const guard = crossTabGuard();
 					if (guard !== null) return guard;
-					const authorized = authorize(prepared);
+					const authorized = authorize(prepared, freshness);
 					if ('status' in authorized) return authorized;
 					const { checklist, snapshot, preampDb, experimental } = authorized;
 					// A cable may have been unplugged while waiting for the lock.
@@ -1449,7 +1491,8 @@ export function createCableService(
 					return {
 						status: 'done',
 						simulated: mode === 'simulated',
-						items: items.map((item) => ({ ...item }))
+						items: items.map((item) => ({ ...item })),
+						...(freshness === null ? {} : { freshness })
 					};
 				});
 			} catch (cause) {

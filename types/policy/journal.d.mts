@@ -52,4 +52,18 @@ export type JournalEntry = {
     device: string | null;
     profile?: "yolo";
     waived?: string[];
+    freshness?: JournalFreshness;
+};
+/**
+ * `profile: 'yolo'` marks a write made in Modo YOLO (gate profile 'yolo') and
+ * `waived` lists the class-2 reason codes that write waived. `freshness` marks a
+ * write from the Android app: `basis: 'live'` when the server confirmed the
+ * deployed page just before it, `'last-good'` when the check was unavailable and
+ * the write relied on the last confirmation of the same page, from `checkedAt`
+ * (epoch ms). All are optional and absent on every other entry, so schema 1
+ * records written before them stay valid and are stored byte for byte as before.
+ */
+export type JournalFreshness = {
+    basis: "live" | "last-good";
+    checkedAt: number;
 };

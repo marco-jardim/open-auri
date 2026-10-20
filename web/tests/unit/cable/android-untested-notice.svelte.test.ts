@@ -7,6 +7,7 @@ import type { NativeCableStatus } from '#lib/cable/native-state.svelte.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import { ANDROID_REPORT_URL } from '#lib/cable/android-links.ts';
+import '../primitives/design-system.ts';
 
 beforeEach(async () => {
 	localStorage.removeItem('oa.androidDisclaimerAck');
@@ -18,7 +19,26 @@ afterEach(async () => {
 	await setLocale('pt-BR', { reload: false });
 	vi.restoreAllMocks();
 	localStorage.removeItem('oa.androidDisclaimerAck');
+	await page.viewport(1440, 900);
 });
+
+test.each([320, 360, 1080])(
+	'the notice is horizontally centered and contained at %i CSS pixels',
+	async (width) => {
+		await page.viewport(width, 760);
+		await render(AndroidUntestedNotice, { kind: 'native', validated: false });
+		const dialog = page.getByRole('dialog');
+		await expect.element(dialog).toBeVisible();
+		const node = dialog.element();
+		const rect = node.getBoundingClientRect();
+		const viewport = document.documentElement.clientWidth;
+		expect(getComputedStyle(node).boxSizing).toBe('border-box');
+		expect(rect.left).toBeGreaterThanOrEqual(15);
+		expect(viewport - rect.right).toBeGreaterThanOrEqual(15);
+		expect(Math.abs(rect.left - (viewport - rect.right))).toBeLessThanOrEqual(1);
+		expect(node.scrollWidth).toBeLessThanOrEqual(node.clientWidth);
+	}
+);
 
 for (const locale of ['pt-BR', 'en-US'] as const) {
 	test(`first-use modal is labelled, described, focus-trapped and only acknowledgement closes it: ${locale}`, async () => {

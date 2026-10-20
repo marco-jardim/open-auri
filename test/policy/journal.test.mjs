@@ -85,6 +85,54 @@ test('YOLO: optional profile and waived mark a YOLO write; schema 1 stays compat
   assert.deepEqual(mixed, { entries: [plain, yolo], dropped: 1 });
 });
 
+test('Android: optional freshness records the deploy check; schema 1 stays compatible', () => {
+  for (const basis of ['live', 'last-good']) {
+    const app = entry({ freshness: { basis, checkedAt: 1792108700000 } });
+    assert.deepEqual(validateEntry(app), { ok: true, errors: [] });
+    const stored = appendEntry([], app);
+    assert.deepEqual(stored[0], app);
+    assert.notEqual(stored[0].freshness, app.freshness);
+    assert.deepEqual(parseJournal(serializeJournal(stored)), { entries: [app], dropped: 0 });
+  }
+  // With YOLO marks too, and extra keys inside freshness are stripped.
+  const both = entry({
+    profile: 'yolo',
+    waived: ['g:preamp'],
+    freshness: { basis: 'last-good', checkedAt: 0, extra: true },
+  });
+  assert.deepEqual(appendEntry([], both)[0].freshness, { basis: 'last-good', checkedAt: 0 });
+  // The last valid Date is accepted.
+  const latest = entry({ freshness: { basis: 'live', checkedAt: 8640000000000000 } });
+  assert.deepEqual(appendEntry([], latest)[0].freshness, latest.freshness);
+
+  // Entries without it keep the exact old shape and bytes.
+  const plain = entry();
+  const json = serializeJournal([plain]);
+  assert.equal(json, JSON.stringify([plain]));
+  assert.ok(!json.includes('freshness'));
+
+  for (const bad of [
+    entry({ freshness: undefined }),
+    entry({ freshness: null }),
+    entry({ freshness: 'last-good' }),
+    entry({ freshness: [] }),
+    entry({ freshness: { checkedAt: 0 } }),
+    entry({ freshness: { basis: 'offline', checkedAt: 0 } }),
+    entry({ freshness: { basis: 'live' } }),
+    entry({ freshness: { basis: 'live', checkedAt: '0' } }),
+    entry({ freshness: { basis: 'live', checkedAt: -1 } }),
+    entry({ freshness: { basis: 'live', checkedAt: 1.5 } }),
+    entry({ freshness: { basis: 'live', checkedAt: 8640000000000001 } }),
+  ]) {
+    assert.equal(validateEntry(bad).ok, false, JSON.stringify(bad));
+    assert.throws(() => appendEntry([], bad), TypeError);
+  }
+  const mixed = parseJournal(
+    JSON.stringify([plain, { ...plain, freshness: { basis: 'stale', checkedAt: 0 } }]),
+  );
+  assert.deepEqual(mixed, { entries: [plain], dropped: 1 });
+});
+
 test('all supported kinds and statuses validate without imposing the safety gate', () => {
   assert.deepEqual(validateEntry(entry()), { ok: true, errors: [] });
   for (const kind of ['PK', 'LS', 'HS', 'LP', 'HP']) {

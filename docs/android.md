@@ -18,8 +18,9 @@ no mesmo modelo do navegador. Um deploy atualiza o site, o aviso e a política
 de gravação sem republicar o APK.
 
 Essa é uma escolha deliberada: a documentação do Capacitor não recomenda
-`server.url` para produção. O app depende do site disponível e não promete
-gravação offline. Empacotar um front estático exigiria reescrever SSR e rotas
+`server.url` para produção. O app depende do site disponível; offline, só
+grava com a última confirmação do servidor para a mesma versão da página
+(ver "Controles remotos, página atual e modo offline"). Empacotar um front estático exigiria reescrever SSR e rotas
 de servidor e mudaria a origem usada por cookies e CSRF. Uma Trusted Web
 Activity não resolveria o acesso USB, pois não fornece a ponte nativa.
 
@@ -257,18 +258,36 @@ Versão de app inválida é bloqueada; uma entrada malformada na lista bloqueia
 todas as versões por segurança. Alterar política não corrige framing nativo:
 se houver esse defeito, publicar novo app e bloquear as versões afetadas.
 
-**Gravar pelo app exige conexão e a página do deploy atual.** Antes de uma
-gravação nativa, o serviço consulta `/_app/version.json` e compara a versão
-do servidor com a carregada. Esse é um endpoint gerado pelo SvelteKit no
-build, não um arquivo fonte do repositório. A implementação está em
+**Gravar pelo app exige a página do deploy atual, confirmada pelo servidor.**
+Antes de uma gravação nativa, o serviço consulta `/_app/version.json` e
+compara a versão do servidor com a carregada. Esse é um endpoint gerado pelo
+SvelteKit no build, não um arquivo fonte do repositório. A implementação está em
 [`D:\git\open-auri\web\src\lib\cable\native-freshness.ts`](../web/src/lib/cable/native-freshness.ts).
 
 - A consulta usa `cache: 'no-store'` e `cache-control: no-cache`, com limite
-  de 3000 ms incluindo a leitura do JSON. Não reutiliza resultado anterior.
-- Versão diferente gera recusa `newer`: há outro deploy, então recarregue
-  antes de tentar gravar. Nenhum report dessa operação é enviado.
-- Offline, erro HTTP, JSON inválido, falha de rede ou timeout geram recusa
-  `unavailable`. Cache antigo não autoriza a gravação, nem o Neutro pelo app.
+  de 3000 ms incluindo a leitura do JSON, e é feita a cada gravação.
+- Versão igual libera a gravação e guarda a última confirmação
+  (`oa.cable.nativeLastGood.v1` no `localStorage`: versão do deploy e horário
+  da verificação). Falha ao gravar esse registro só gera um aviso no console.
+- Versão diferente gera recusa `newer` e apaga essa última confirmação: há
+  outro deploy, então recarregue antes de tentar gravar. Nenhum report dessa
+  operação é enviado.
+- Offline, erro HTTP, JSON inválido, falha de rede ou timeout: a gravação
+  segue de forma otimista, sem prazo de validade, só se houver uma última
+  confirmação válida para a mesma versão da página. O resultado mostra um
+  aviso com a data dessa confirmação. Sem registro, com registro de outra
+  versão ou malformado, a recusa é `unavailable`, inclusive para o Neutro.
+- O registro também é apagado ao iniciar uma página de outra versão, quando a
+  detecção dá `native-write-disabled` e quando o Kit avisa que há deploy mais
+  novo (banner do app). Cada gravação nativa grava no diário `freshness`
+  (`live` ou `last-good`, com o horário da confirmação).
+- Risco residual: mudanças remotas em `ANDROID_WRITE_POLICY` só chegam a um
+  aparelho cuja checagem falha (offline, `/_app/version.json` bloqueado, erro
+  do servidor) quando ela volta a funcionar e ele carrega o deploy novo. A
+  página que grava pode ser o shell que o service worker serve offline,
+  possivelmente mais antigo que a última página que o aparelho rodou; a
+  limpeza acima limita isso a páginas da mesma versão da última confirmação,
+  de um aparelho que não viu deploy mais novo.
 - A recusa oferece o botão **Recarregar**. Só no app, um banner também
   avisa quando há nova versão do site. A recarga fica bloqueada enquanto
   uma gravação está em andamento e não é agendada para depois; tente de
@@ -281,8 +300,9 @@ build, não um arquivo fonte do repositório. A implementação está em
 
 Navegação e consulta de conteúdo podem funcionar com o cache disponível;
 sem página utilizável, aparece a tela local de falha de rede com tentativa
-novamente. Isso não significa que a gravação offline esteja liberada.
-Reconecte a rede e use **Recarregar** para receber a política atual. Se
+novamente. A gravação offline só segue com a última confirmação do servidor
+para esta mesma versão da página, como descrito acima. Reconecte a rede e use
+**Recarregar** para receber a política atual. Se
 precisar resgatar o cabo e o app recusar, use o site no computador com
 Chrome ou Edge para gravar o Neutro pelo fluxo normal.
 
@@ -410,7 +430,7 @@ ser baixada por um resolvedor não verificado durante o teste.
 | `USB_NOT_OPEN` no diagnóstico | Selecione e abra a conexão pelo fluxo do cabo antes de pedir diagnóstico; depois de desconectar, não reutilize a chave antiga |
 | `USB_GUARD_REJECTED`, timeout ou interrupção | Não repita commit manualmente. Preserve diagnóstico e diário; tente o Neutro pelo fluxo normal. Se necessário, faça o resgate no desktop e relate o resultado |
 | Recusa após deploy / versão nova | Conecte a rede e use Recarregar na recusa ou no banner do app, sem gravação em andamento. Só então refaça o checklist; não limpe proteções nem tente gravar de cache antigo |
-| Offline | Conteúdo em cache não autoriza escrita; recupere a conexão. A tela local permite tentar carregar novamente |
+| Offline | Só grava com a última confirmação do servidor para esta mesma versão da página; sem ela, recupere a conexão. A tela local permite tentar carregar novamente |
 | `FILES_BUSY` | Termine ou cancele o seletor de salvamento já aberto antes de iniciar outra exportação |
 | Falha no doctor ou Gradle | Confira JDK 21, SDK 36, variáveis de ambiente e licenças. Para falha de checksum, siga o procedimento de revisão de metadata; não desligue a verificação |
 

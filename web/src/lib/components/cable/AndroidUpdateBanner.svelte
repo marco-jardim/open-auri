@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { updated } from '$app/state';
 	import type { NativeCableStatus } from '#lib/app/context.svelte.ts';
+	import { forgetNativeLastGood } from '#lib/cable/native-freshness.ts';
 	import { isWriteInProgress, onWriteProgress } from '#lib/cable/write-flag.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import Button from '#lib/components/primitives/Button.svelte';
@@ -17,6 +18,10 @@
 		const sync = () => (writeInProgress = isWriteInProgress());
 		sync();
 		return onWriteProgress(sync);
+	});
+	// Kit saw a newer deploy: this page must not write offline on its own, older confirmation.
+	$effect(() => {
+		if (kind !== 'none' && updated.current) forgetNativeLastGood();
 	});
 
 	function reloadPage() {

@@ -10,11 +10,16 @@ export const JOURNAL_MAX = 500;
  * @typedef {import('../dsp/eq0xcb.mjs').Band} JournalBand
  * @typedef {{schema: 1, at: number, name: string, crc: number, preampDb: number,
  *   bands: JournalBand[], status: 'ok' | 'interrupted' | 'simulated',
- *   device: string | null, profile?: 'yolo', waived?: string[]}} JournalEntry
+ *   device: string | null, profile?: 'yolo', waived?: string[],
+ *   freshness?: JournalFreshness}} JournalEntry
+ * @typedef {{basis: 'live' | 'last-good', checkedAt: number}} JournalFreshness
  * `profile: 'yolo'` marks a write made in Modo YOLO (gate profile 'yolo') and
- * `waived` lists the class-2 reason codes that write waived. Both are optional
- * and absent on every other entry, so schema 1 records written before them stay
- * valid and are stored byte for byte as before.
+ * `waived` lists the class-2 reason codes that write waived. `freshness` marks a
+ * write from the Android app: `basis: 'live'` when the server confirmed the
+ * deployed page just before it, `'last-good'` when the check was unavailable and
+ * the write relied on the last confirmation of the same page, from `checkedAt`
+ * (epoch ms). All are optional and absent on every other entry, so schema 1
+ * records written before them stay valid and are stored byte for byte as before.
  */
 
 const ACTIVE_KINDS = new Set(['PK', 'LS', 'HS', 'LP', 'HP']);
@@ -23,6 +28,9 @@ const STATUSES = new Set(['ok', 'interrupted', 'simulated']);
 export const JOURNAL_WAIVED_MAX = 16;
 // A reason code such as `c:section-peak` or `d7:boost-q`.
 const WAIVED_CODE = /^[a-z0-9]{1,4}:[a-z0-9-]{1,32}$/;
+const FRESHNESS_BASES = new Set(['live', 'last-good']);
+/** Largest valid `Date` value, in epoch milliseconds. */
+const MAX_EPOCH_MS = 8640000000000000;
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
@@ -51,7 +59,7 @@ export function validateEntry(entry) {
     !isFiniteNumber(entry.at) ||
     !Number.isSafeInteger(entry.at) ||
     entry.at < 0 ||
-    entry.at > 8640000000000000
+    entry.at > MAX_EPOCH_MS
   ) {
     errors.push('at must be a valid nonnegative epoch millisecond');
   }
@@ -88,6 +96,19 @@ export function validateEntry(entry) {
       !waived.every((code) => typeof code === 'string' && WAIVED_CODE.test(code))
     ) {
       errors.push(`waived must be at most ${JOURNAL_WAIVED_MAX} reason codes`);
+    }
+  }
+  if (Object.hasOwn(entry, 'freshness')) {
+    const freshness = entry.freshness;
+    if (
+      !isRecord(freshness) ||
+      typeof freshness.basis !== 'string' ||
+      !FRESHNESS_BASES.has(freshness.basis) ||
+      !Number.isSafeInteger(freshness.checkedAt) ||
+      /** @type {number} */ (freshness.checkedAt) < 0 ||
+      /** @type {number} */ (freshness.checkedAt) > MAX_EPOCH_MS
+    ) {
+      errors.push('freshness must be absent or { basis: live | last-good, checkedAt }');
     }
   }
   if (!Array.isArray(entry.bands) || entry.bands.length !== 10) {
@@ -150,6 +171,10 @@ function checkedCopy(value) {
     ...(entry.profile === 'yolo' && Array.isArray(entry.waived)
       ? { waived: [...entry.waived] }
       : {}),
+    // Only an Android app write carries it, copied without any extra key.
+    ...(entry.freshness === undefined
+      ? {}
+      : { freshness: { basis: entry.freshness.basis, checkedAt: entry.freshness.checkedAt } }),
   };
 }
 

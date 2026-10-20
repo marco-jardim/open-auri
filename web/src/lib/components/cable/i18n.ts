@@ -130,8 +130,44 @@ export function reloadWhenSafe(reload: () => void = () => window.location.reload
 	if (typeof window !== 'undefined' && mayApplyUpdate(window.__oaWriteInProgress)) reload();
 }
 
-/** Human-readable outcome of a write or a queue. */
+const CHECKED_AT_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: 'short', timeStyle: 'short' };
+
+/** Locale date and time of `at` (epoch ms); ISO when Intl fails; null when it is no date. */
+export function formatCheckedAt(at: number): string | null {
+	try {
+		return new Intl.DateTimeFormat(getLocale(), CHECKED_AT_FORMAT).format(at);
+	} catch {
+		try {
+			return new Date(at).toISOString();
+		} catch {
+			return null;
+		}
+	}
+}
+
+/**
+ * Short, non-blocking notice for a native write that went ahead on the last live confirmation
+ * of this build because the check was unavailable (offline, server error, timeout), with that
+ * confirmation's date when it can be shown; null otherwise. Never throws.
+ */
+export function lastGoodNotice(outcome: WriteOutcome | QueueOutcome): string | null {
+	if (outcome.status === 'refused') return null;
+	const freshness = outcome.freshness;
+	if (freshness?.basis !== 'last-good') return null;
+	const date = formatCheckedAt(freshness.checkedAt);
+	return date === null
+		? m.cable_native_last_good_undated()
+		: m.cable_native_last_good_dated({ date });
+}
+
+/** Human-readable outcome of a write or a queue, followed by the offline last-good notice. */
 export function describeOutcome(outcome: WriteOutcome | QueueOutcome): string {
+	const text = outcomeText(outcome);
+	const notice = lastGoodNotice(outcome);
+	return notice === null ? text : `${text} ${notice}`;
+}
+
+function outcomeText(outcome: WriteOutcome | QueueOutcome): string {
 	if (outcome.status === 'refused') {
 		if (outcome.error instanceof NativeFreshnessError) {
 			return outcome.error.reason === 'newer'

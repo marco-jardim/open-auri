@@ -14,8 +14,13 @@
  *   created, so no I/O call to the plugin is possible (0.12.10);
  * - no USB host on the phone: `native-no-usb-host`;
  * - otherwise `native`, with the `NativeHID` to give the cable service.
+ *
+ * In the app, before the handshake (so before any cable service exists), the offline last-good
+ * record is kept only when it confirms this build; `native-write-disabled` forgets it, so a
+ * page served later from the service worker cache cannot write offline on it.
  */
 import { canWriteFromApp, type AndroidWritePolicy } from '../android-status.ts';
+import { forgetNativeLastGood, reconcileNativeLastGood } from '../native-freshness.ts';
 import { isNativeAndroid } from './gate.ts';
 import { NativeHID, type OpenAuriUsbPlugin } from './hid.ts';
 
@@ -100,6 +105,8 @@ export async function detectNativeCable(
 	const { loadBridge = loadDefaultBridge, policy, timeoutMs = HANDSHAKE_TIMEOUT_MS } = options;
 	const win = 'win' in options ? options.win : currentWindow();
 	if (!isNativeAndroid(win)) return { kind: 'none' };
+	// Page start in the app: a record from another build (older or newer) is dropped.
+	reconcileNativeLastGood();
 
 	let answer: Handshake;
 	try {
@@ -121,7 +128,11 @@ export async function detectNativeCable(
 	) {
 		return { kind: 'native-outdated', appVersion: appVersion === '' ? null : appVersion };
 	}
-	if (!canWriteFromApp(appVersion, policy)) return { kind: 'native-write-disabled', appVersion };
+	if (!canWriteFromApp(appVersion, policy)) {
+		// This deploy disables native writes for this app: no older page may write offline.
+		forgetNativeLastGood();
+		return { kind: 'native-write-disabled', appVersion };
+	}
 	if (!info.usbHost) return { kind: 'native-no-usb-host', appVersion };
 	return {
 		kind: 'native',

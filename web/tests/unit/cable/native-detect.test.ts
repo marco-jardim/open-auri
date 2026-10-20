@@ -11,7 +11,11 @@ import {
 	type NativeBridgeModule
 } from '#lib/cable/native/detect.ts';
 import { NativeHID, type OpenAuriUsbPlugin } from '#lib/cable/native/hid.ts';
+import { NATIVE_LAST_GOOD_KEY } from '#lib/cable/native-freshness.ts';
 import type { HidLike } from '#lib/cable/types.ts';
+import { memoryStorage } from './harness.ts';
+
+vi.mock('$app/env', () => ({ version: 'current' }));
 
 const SCHEMA_ID = 'https://open-auri.com/schemas/android-usb-bridge-1.schema.json';
 const SCHEMA_URL = new URL('../../../../schemas/android-usb-bridge-1.schema.json', import.meta.url);
@@ -84,9 +88,13 @@ function answering(info: unknown) {
 }
 
 let warn: MockInstance<typeof console.warn>;
+/** The offline last-good record lives here (the runtime's own Web Storage is never used). */
+let local: ReturnType<typeof memoryStorage>;
 
 beforeEach(() => {
 	warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	local = memoryStorage();
+	vi.stubGlobal('localStorage', local);
 });
 
 afterEach(() => {
@@ -333,6 +341,85 @@ describe('detectNativeCable in the app', () => {
 				policy: { enabled: true, blockedAppVersions: ['<0.1.0'] }
 			})
 		).resolves.toEqual({ kind: 'native-no-usb-host', appVersion: '1.0.0' });
+	});
+});
+
+describe('detection keeps the offline last-good record only while it may still be used', () => {
+	const record = (version: string) => JSON.stringify({ version, checkedAt: 1_792_108_800_000 });
+	const disabled: AndroidWritePolicy = { enabled: false, blockedAppVersions: [] };
+
+	test('outside the app the record is never touched', async () => {
+		local.items.set(NATIVE_LAST_GOOD_KEY, record('older'));
+		await expect(detectNativeCable({ win: WEB })).resolves.toEqual({ kind: 'none' });
+		await expect(detectNativeCable({ win: undefined })).resolves.toEqual({ kind: 'none' });
+		expect(local.items.get(NATIVE_LAST_GOOD_KEY)).toBe(record('older'));
+	});
+
+	test('(a) page start keeps a record of this build', async () => {
+		local.items.set(NATIVE_LAST_GOOD_KEY, record('current'));
+		const { loadBridge } = answering(INFO);
+		await expect(detectNativeCable({ win: ANDROID, loadBridge })).resolves.toMatchObject({
+			kind: 'native'
+		});
+		expect(local.items.get(NATIVE_LAST_GOOD_KEY)).toBe(record('current'));
+	});
+
+	test.each([
+		['an older build', record('older')],
+		['a newer build', record('newer')],
+		['a malformed record', '{"version":"current"}'],
+		['a record past the last Date', JSON.stringify({ version: 'current', checkedAt: 8.64e15 + 1 })]
+	])('(a) page start drops %s, before the handshake', async (_label, raw) => {
+		local.items.set(NATIVE_LAST_GOOD_KEY, raw);
+		const { loadBridge } = answering(INFO);
+		let presentAtHandshake: boolean | undefined;
+		const result = await detectNativeCable({
+			win: ANDROID,
+			loadBridge: () => {
+				presentAtHandshake = local.items.has(NATIVE_LAST_GOOD_KEY);
+				return loadBridge();
+			}
+		});
+		expect(result.kind).toBe('native');
+		expect(presentAtHandshake).toBe(false);
+		expect(local.items.has(NATIVE_LAST_GOOD_KEY)).toBe(false);
+	});
+
+	test('(b) native-write-disabled forgets even a record of this build', async () => {
+		local.items.set(NATIVE_LAST_GOOD_KEY, record('current'));
+		const { loadBridge } = answering(INFO);
+		await expect(
+			detectNativeCable({ win: ANDROID, loadBridge, policy: disabled })
+		).resolves.toEqual({ kind: 'native-write-disabled', appVersion: '1.0.0' });
+		expect(local.items.has(NATIVE_LAST_GOOD_KEY)).toBe(false);
+	});
+
+	test('(b) a blocked app version forgets it too', async () => {
+		local.items.set(NATIVE_LAST_GOOD_KEY, record('current'));
+		const { loadBridge } = answering(INFO);
+		const policy: AndroidWritePolicy = { enabled: true, blockedAppVersions: ['1.0.0'] };
+		await expect(detectNativeCable({ win: ANDROID, loadBridge, policy })).resolves.toMatchObject({
+			kind: 'native-write-disabled'
+		});
+		expect(local.items.has(NATIVE_LAST_GOOD_KEY)).toBe(false);
+	});
+
+	test('a storage that throws never breaks detection', async () => {
+		const broken = {
+			getItem: () => {
+				throw new DOMException('denied', 'SecurityError');
+			},
+			setItem: () => undefined,
+			removeItem: () => {
+				throw new DOMException('denied', 'SecurityError');
+			}
+		};
+		vi.stubGlobal('localStorage', broken);
+		const { loadBridge } = answering(INFO);
+		await expect(
+			detectNativeCable({ win: ANDROID, loadBridge, policy: disabled })
+		).resolves.toEqual({ kind: 'native-write-disabled', appVersion: '1.0.0' });
+		expect(warn).toHaveBeenCalled();
 	});
 });
 
