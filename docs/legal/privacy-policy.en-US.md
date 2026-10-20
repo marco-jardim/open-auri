@@ -21,7 +21,7 @@ This policy covers the website and the **open-auri Android app**, which opens th
 >
 > - You can use open-auri without an account. In that case your curves, your history and your settings stay in your browser. The audio file you load **never** leaves your device.
 > - An account is optional and is used for the social features. We store your email, a hash of your password (never the password itself), your public nickname and whatever you choose to publish.
-> - Publicly, you appear only by your nickname. The public library and the public activity profile are optional and off by default.
+> - Your public name is your nickname, accompanied by a stable random public author identifier that allows the same author to be recognized after nickname changes (section 6). The public library and the public activity profile are optional and off by default.
 > - Brazilian law (the Marco Civil da Internet) requires us to keep access records: IP address, date and time and, if you are signed in, your account, with the reduced precision for the blind test described in section 8. We keep them for 6 months, encrypted, and hand them over to third parties only under a court order. We do not use these records for profiling, analytics or marketing.
 > - Rate limiting uses hashes of the IP or identifier with a daily salt, including in database counters. Window validity, cleanup and salt rotation are described in section 10, without a promise of deletion within 48 hours.
 > - We use no analytics or advertising cookies. On the production site, including the Android WebView, we count visits with Simple Analytics. Claims of no personal data or fingerprinting come from the provider, not an audit by us (section 13). The counts dashboard is public. We do not sell data or send marketing email.
@@ -43,7 +43,7 @@ We are a small-size processing agent under ANPD Resolution CD/ANPD No. 2/2022. E
 
 ## 2. Local data, with or without an account
 
-The local open-auri tools run in the browser or the Android app's WebView. Local curves, the journal, account-free hiding preferences and audio stay on your device (localStorage, sessionStorage and IndexedDB), without automatic upload to us. Language may also accompany requests in the essential cookie; the library is synced if you sign in, and queued social actions are sent when connectivity returns:
+The local open-auri tools run in the browser or the Android app's WebView. Local curves, the journal, the list of hidden authors/curves without an account and audio stay on your device (localStorage, sessionStorage and IndexedDB). The visitor hidden list is not uploaded while you use the service without an account; when you sign in it is merged into the account list on the server, including cached labels, and removed from local storage after successful synchronization. Language may also accompany requests in the essential cookie; the library is synced if you sign in, and queued social actions are sent when connectivity returns:
 
 | What                                            | Why                                                                               |
 | ----------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -53,6 +53,7 @@ The local open-auri tools run in the browser or the Android app's WebView. Local
 | Write counters (`oa.flash.*`)                   | Limit the number of writes per day and per session, to protect the cable's memory |
 | Meter reference (`oa.meter.ref`)                | Remember your reference setting                                                   |
 | Policy version already seen (`oa.policy.seen`)  | Show the policy change notice only when the policy changes                        |
+| Local hidden list (`oa.hidden.v1`, localStorage) | Hide authors and curves without an account, keeping the target type and identifier and cached labels (authors' public nicknames or curve names); merge into the account on sign-in |
 | Local library (IndexedDB `library`)             | Keep curves and favorites without an account                                      |
 | Offline outbox (IndexedDB `outbox`)             | Hold social actions made offline until the connection returns (account only)      |
 | Audio file you load (IndexedDB `audio`)         | Play the preview with the curve applied                                           |
@@ -65,7 +66,7 @@ On Android, cookies and local storage stay in the app's WebView, **without app b
 
 To erase the tool's local data, use **Docs > "Dados neste navegador"** ("Data in this browser"); audio has its own removal option. You can also clear site data in browser settings or app data in Android settings. This does not close your account or delete files you already saved in your chosen location.
 
-**Legal basis:** since this data never reaches us, the controller does not process it. It remains under your control. Even without an account, the requests your browser makes to our server generate access records (section 11).
+**Legal basis:** the controller does not process content that stays only on your device. It remains under your control. The library and hidden list synced on sign-in follow section 3. Even without an account, the requests your browser makes to our server generate access records (section 11).
 
 ## 3. Optional account
 
@@ -78,14 +79,17 @@ Account creation may be temporarily unavailable while the domain used for transa
 | Email                                        | Sign in, verify the account, recover the password and receive security notices. Your email is never shown publicly                                                                                                                                                                      |
 | Password hash                                | Check your password without storing it. We never store the password itself                                                                                                                                                                                                              |
 | Private name (`name`, if submitted to the API) | Field accepted by the authentication system and included in the account export. The normal form sends it empty; we do not require a legal name or display it publicly |
-| Public nickname ("apelido", unique)          | Identify you publicly. It is the only name shown: it appears in rankings, the feed, curve credits, shares and at `{{PUBLIC_ORIGIN}}/u/[nickname]`. It has 3 to 24 characters, can be changed every 30 days, and the old nickname stays reserved for 90 days, redirecting to the new one |
+| Public nickname ("apelido", unique)          | Identify you publicly by name: it appears in rankings, the feed, curve credits, shares and at `{{PUBLIC_ORIGIN}}/u/[nickname]`, alongside the public author identifier described below. It has 3 to 24 characters, can be changed every 30 days, and the old nickname stays reserved for 90 days, redirecting to the new one |
+| Public author identifier (`public_author_id`) | Each account receives a stable random identifier, exposed with the public profile and content so that other people can hide the same author even after nickname changes. It is not the account's authentication identifier and cannot be used to sign in. It allows the profile to be linked across different nicknames and is deleted with the account |
 | Bio (optional, up to 280 characters)         | Present your profile, if you want                                                                                                                                                                                                                                                       |
 | Session records                              | Keep you signed in and let you see and end sessions. We store the browser and operating system (reduced from the user-agent) and the creation, last-activity and expiry times. The session does not store your IP: the authentication system runs with IP tracking turned off           |
 | Email verification and password-reset tokens | Confirm the email is yours and let you change the password safely                                                                                                                                                                                                                       |
-| Account preferences                          | Language, activity visibility (private or public, private by default), public library (on or off, off by default), and authors/curves you choose to hide from your view |
+| Account preferences                          | Language, activity visibility (private or public, private by default), public library (on or off, off by default), and hidden list (`hidden_items`): target type (author or curve), public author identifier or curve lineage identifier, cached label (public nickname or curve name, when available) and date |
 | Policy acknowledgements (version and date)   | Record that you saw the current version of this policy and of the terms, so the change notice is not repeated                                                                                                                                                                           |
 
 When you sign in, the app merges the browser's local library into your account library without duplicating curves. From then on those curves are also stored on the server.
+
+The local hidden list is also merged into the account list on sign-in, without replacing preferences already saved from other devices. With an account, hidden items stay on the server, can be synced on other devices and are not written to the local visitor list.
 
 **Legal basis:** performance of the service agreement you accept when creating the account (LGPD, art. 7, V). Public visibility preferences rely on your consent (art. 7, I), which you can withdraw at any time in the settings.
 
@@ -126,7 +130,9 @@ You can see and delete your own activity at any time in your account.
 
 ## 6. Public profile, public library, rankings and shares
 
-**Public profile.** Every account holder has the page `{{PUBLIC_ORIGIN}}/u/[nickname]`. With the public library off, it shows only the nickname and aggregate counts.
+**Public profile.** Every account holder has the page `{{PUBLIC_ORIGIN}}/u/[nickname]`. With the public library off, it shows the nickname and aggregate counts, and its public data includes the author identifier.
+
+**Public author identifier.** The public profile and content include a stable random identifier (`public_author_id`), distinct from the authentication identifier and not usable to sign in. It lets other people hide the same author after nickname changes, but also allows the profile to be linked across different nicknames. This identifier is deleted with the account (section 17); it does not change when the nickname changes.
 
 **Public library.** It is optional and **off** by default. When on, your page shows the public curves you created and your public packs, and also your favorites if your activity profile is public. You can turn it on and off at any time. In any case, each curve you published as public stays reachable at its own address, credited to your nickname. (Legal basis: consent, art. 7, I.)
 
@@ -249,7 +255,8 @@ We do not sell or rent data. Recipients are the services described in this polic
 | Data                                                                                  | Period                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Data in the browser (section 2)                                                       | Until you delete it. The journal keeps the latest 500 entries                                                                                                                                                                                                                                                                                                                                                                                  |
-| Account: email, password hash, private name if submitted, nickname, bio, preferences and policy acknowledgements | Until the account is closed |
+| Account: email, password hash, private name if submitted, nickname, public author identifier, bio, preferences and policy acknowledgements | Until the account is closed |
+| Account hidden list (`hidden_items`), including cached labels | Until you unhide the item or close the account |
 | Old nickname, after a change                                                          | Reserved for 90 days, redirecting to the new one; then released                                                                                                                                                                                                                                                                                                                                                                                |
 | Sessions                                                                              | Until they expire, you sign out or revoke them                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Verification and password-reset tokens                                                | Until used or expired                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -285,7 +292,7 @@ Under the LGPD (art. 18), you may request:
 **In the app, without writing to us:**
 
 - **correct:** edit nickname (one change every 30 days), bio and preferences in your profile, and change email and password at `{{PUBLIC_ORIGIN}}/conta`;
-- **access and take your data:** use "Exportar meus dados" ("Export my data") to download a JSON file with account, profile, curves, versions, favorites, activity and shares;
+- **access and take your data:** use "Exportar meus dados" ("Export my data") to download a JSON file with account, profile, public author identifier, curves, versions, favorites, activity, shares and hidden list (`hiddenItems`, with target type and identifier, cached label and date). These labels may include other people's public nicknames and curve names;
 - **delete activity:** see and delete your activity in your account;
 - **withdraw consent:** make your activity private, turn off the public library or use the blind-test receipt;
 - **close the account:** see section 17;
@@ -304,7 +311,7 @@ You close the account at `{{PUBLIC_ORIGIN}}/conta`, with your password and an em
 - **keep them anonymized:** the curves remain on the site credited to "autor removido" ("author removed"), with no link to you; or
 - **delete everything:** the curves are withdrawn from the site.
 
-In either case, **private content is always deleted**, together with your email, password hash, profile, nickname, sessions, tokens, favorites, activity and policy acknowledgements.
+In either case, **private content is always deleted**, together with your email, password hash, profile, nickname, public author identifier, sessions, tokens, favorites, activity, account hidden list (`hidden_items`, including cached labels) and policy acknowledgements.
 
 Access records linked to the account remain stored until they reach 6 months, as the Marco Civil da Internet requires, and are then deleted automatically. In backups, deleted data may remain unused until ISO-week cleanup, subject to the delays in section 15; we do not promise deletion within exactly 12 weeks.
 

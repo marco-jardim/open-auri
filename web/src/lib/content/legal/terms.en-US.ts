@@ -21,6 +21,9 @@ export const termsEnUS: LegalDocument = {
 		...legalNotice['en-US'].map(paragraph),
 		heading('2. Responsible use and writing'),
 		paragraph(
+			'The website and app are intended for people aged 18 or over, including use without an account, and are not directed to minors.'
+		),
+		paragraph(
 			'The editor and local previews require no account. No byte should be sent without gate v2 approval on the real Q27/Q23 values, a complete checklist and an explicit gesture. The gate is a similarity policy against what the 11 official presets already make the chip compute, not proof of hardware safety. Lower the volume, keep power stable and do not disconnect during a write. Every known write persists in flash of unknown endurance.'
 		),
 		paragraph(
@@ -28,7 +31,7 @@ export const termsEnUS: LegalDocument = {
 		),
 		heading('3. Account and public nickname'),
 		list([
-			'The account is optional and only for people aged 18 or over. Each person keeps one account, with a verified email for any social action.',
+			'The account is optional; sign-up and account use require users to be 18 or over. Each person keeps one account, with a verified email for any social action.',
 			'You are responsible for keeping your password safe and for the actions taken with your account. Tell us through the privacy channel if you suspect misuse.',
 			'The public nickname is the only name shown. It may not impersonate another person, manufacturers, the project or the honorees, nor contain other people’s personal data. Reserved nicknames or ones confusable with others are refused.',
 			'The nickname can be changed every 30 days. The old one stays reserved for 90 days and redirects to the new one.'

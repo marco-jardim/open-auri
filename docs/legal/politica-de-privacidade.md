@@ -21,7 +21,7 @@ Esta política cobre o site e o **app Android open-auri**, que abre o mesmo site
 >
 > - Você pode usar o open-auri sem conta. Nesse caso, suas curvas, seu histórico e suas configurações ficam no seu navegador. O arquivo de áudio que você carrega **nunca** sai do seu aparelho.
 > - A conta é opcional e serve para as funções sociais. Guardamos seu e-mail, um hash da senha (nunca a senha), seu apelido público e o que você escolher publicar.
-> - Publicamente, você aparece só pelo apelido. A biblioteca pública e o perfil de atividade público são opcionais e vêm desligados.
+> - Seu nome público é o apelido, acompanhado de um identificador público de autor aleatório e estável, que permite reconhecer o mesmo autor após trocas de apelido (seção 6). A biblioteca pública e o perfil de atividade público são opcionais e vêm desligados.
 > - A lei brasileira (Marco Civil da Internet) nos obriga a guardar registros de acesso: IP, data e hora e, se você estiver conectado, sua conta, com a redução de precisão do teste cego descrita na seção 8. Guardamos por 6 meses, cifrados, e só entregamos a terceiros com ordem judicial. Não usamos esses registros para perfil, análise ou marketing.
 > - O limite de taxa usa hashes do IP ou identificador com sal diário, inclusive em contadores no banco. Validade das janelas, expurgo e rotação do sal são descritos na seção 10, sem promessa de apagamento em 48 horas.
 > - Não usamos cookies de análise nem de publicidade. No site de produção, inclusive na WebView Android, contamos visitas com o Simple Analytics. As alegações de ausência de dados pessoais e fingerprinting são do fornecedor, não uma auditoria nossa (seção 13). O painel das contagens é público. Não vendemos dados nem mandamos e-mail de marketing.
@@ -43,7 +43,7 @@ Somos um agente de tratamento de pequeno porte, nos termos da Resolução CD/ANP
 
 ## 2. Dados locais, com ou sem conta
 
-As ferramentas locais do open-auri funcionam no navegador ou na WebView do app Android. Curvas locais, diário, preferências de ocultação sem conta e áudio ficam no próprio aparelho (localStorage, sessionStorage e IndexedDB), sem envio automático para nós. O idioma também pode acompanhar requisições pelo cookie essencial; a biblioteca é sincronizada se você entrar na conta, e ações sociais da fila são enviadas quando a conexão volta:
+As ferramentas locais do open-auri funcionam no navegador ou na WebView do app Android. Curvas locais, diário, lista de autores/curvas ocultos sem conta e áudio ficam no próprio aparelho (localStorage, sessionStorage e IndexedDB). A lista de ocultos de visitantes não é enviada enquanto você usa o serviço sem conta; ao entrar, ela é mesclada com a lista da conta no servidor, incluindo os rótulos em cache, e removida do armazenamento local após a sincronização bem-sucedida. O idioma também pode acompanhar requisições pelo cookie essencial; a biblioteca é sincronizada se você entrar na conta, e ações sociais da fila são enviadas quando a conexão volta:
 
 | O que                                                 | Para quê                                                                            |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -53,6 +53,7 @@ As ferramentas locais do open-auri funcionam no navegador ou na WebView do app A
 | Contadores de gravação (`oa.flash.*`)                 | Limitar o número de gravações por dia e por sessão, para proteger a memória do cabo |
 | Referência do medidor (`oa.meter.ref`)                | Lembrar sua escolha de referência                                                   |
 | Versão da política já vista (`oa.policy.seen`)        | Mostrar o aviso de mudança da política só quando ela muda                           |
+| Lista local de ocultos (`oa.hidden.v1`, localStorage) | Ocultar autores e curvas sem conta, guardando o tipo e identificador do alvo e rótulos em cache (apelidos públicos de autores ou nomes de curvas); mesclar com a conta ao entrar |
 | Biblioteca local (IndexedDB `library`)                | Guardar curvas e favoritos sem conta                                                |
 | Fila offline (IndexedDB `outbox`)                     | Guardar ações sociais feitas sem internet até a conexão voltar (só com conta)       |
 | Arquivo de áudio que você carrega (IndexedDB `audio`) | Tocar a prévia com a curva aplicada                                                 |
@@ -65,7 +66,7 @@ No Android, cookies e armazenamento local ficam na WebView do app, **sem backup 
 
 Para apagar os dados locais da ferramenta, use **Docs > "Dados neste navegador"**; o áudio tem opção própria de remoção. Você também pode limpar os dados do site nas configurações do navegador ou os dados do app nas configurações do Android. Isso não encerra a conta nem apaga arquivos que você já salvou no local escolhido.
 
-**Base legal:** como esses dados não chegam até nós, não há tratamento por parte do controlador. Eles ficam sob seu controle. Mesmo sem conta, as requisições que o navegador faz ao nosso servidor geram registros de acesso (seção 11).
+**Base legal:** para o conteúdo que permanece só no aparelho, não há tratamento por parte do controlador. Ele fica sob seu controle. A biblioteca e a lista de ocultos sincronizadas ao entrar seguem a seção 3. Mesmo sem conta, as requisições que o navegador faz ao nosso servidor geram registros de acesso (seção 11).
 
 ## 3. Conta opcional
 
@@ -78,14 +79,17 @@ A criação de conta pode ficar temporariamente indisponível enquanto o domíni
 | E-mail                                                    | Entrar, verificar a conta, recuperar a senha e receber avisos de segurança. O e-mail nunca é exibido publicamente                                                                                                                                                                                                       |
 | Hash da senha                                             | Conferir sua senha sem guardá-la. Nunca guardamos a senha em si                                                                                                                                                                                                                                                         |
 | Nome privado (`name`, se enviado à API)                    | Campo aceito pelo sistema de autenticação e incluído na exportação da conta. O formulário comum o envia vazio; não exigimos nome civil nem o exibimos publicamente |
-| Apelido público (único)                                   | Identificar você publicamente. É o único nome exibido: aparece nos rankings, no feed, nos créditos das curvas, nos compartilhamentos e no endereço `{{PUBLIC_ORIGIN}}/u/[apelido]`. Tem de 3 a 24 caracteres, pode ser trocado a cada 30 dias e o apelido antigo fica reservado por 90 dias, redirecionando para o novo |
+| Apelido público (único)                                   | Identificar você publicamente pelo nome: aparece nos rankings, no feed, nos créditos das curvas, nos compartilhamentos e no endereço `{{PUBLIC_ORIGIN}}/u/[apelido]`, junto do identificador público de autor descrito abaixo. Tem de 3 a 24 caracteres, pode ser trocado a cada 30 dias e o apelido antigo fica reservado por 90 dias, redirecionando para o novo |
+| Identificador público de autor (`public_author_id`)       | Cada conta recebe um identificador aleatório e estável, exposto com o perfil e o conteúdo público para que outras pessoas possam ocultar o mesmo autor mesmo após mudanças de apelido. Não é o identificador de autenticação da conta e não serve para entrar. Permite vincular o perfil entre apelidos diferentes e é apagado com a conta |
 | Bio (opcional, até 280 caracteres)                        | Apresentar seu perfil, se você quiser                                                                                                                                                                                                                                                                                   |
 | Registros de sessão                                       | Manter você conectado e permitir que veja e encerre sessões. Guardamos o navegador e o sistema (reduzidos a partir do user-agent) e as datas de criação, última atividade e expiração. A sessão não guarda seu IP: o sistema de autenticação roda com o rastreio de IP desligado                                        |
 | Tokens de verificação de e-mail e de redefinição de senha | Confirmar que o e-mail é seu e permitir trocar a senha com segurança                                                                                                                                                                                                                                                    |
-| Preferências da conta                                     | Idioma, visibilidade da atividade (privada ou pública, padrão privada), biblioteca pública (ligada ou desligada, padrão desligada) e autores/curvas que você escolhe ocultar da sua visualização |
+| Preferências da conta                                     | Idioma, visibilidade da atividade (privada ou pública, padrão privada), biblioteca pública (ligada ou desligada, padrão desligada) e lista de ocultos (`hidden_items`): tipo do alvo (autor ou curva), identificador público do autor ou da linhagem da curva, rótulo em cache (apelido público ou nome da curva, quando disponível) e data |
 | Aceites da política (versão e data)                       | Registrar que você viu a versão atual desta política e dos termos, para não repetir o aviso de mudança                                                                                                                                                                                                                  |
 
 Ao entrar na conta, o app mescla a biblioteca local do navegador com a biblioteca da conta, sem duplicar curvas. A partir daí, essas curvas ficam guardadas também no servidor.
+
+A lista local de ocultos também é mesclada com a lista da conta ao entrar, sem substituir as preferências já guardadas por outros aparelhos. Com conta, as ocultações ficam no servidor, podem ser sincronizadas em outros aparelhos e não são gravadas na lista local de visitantes.
 
 **Base legal:** execução do contrato de uso do serviço que você aceita ao criar a conta (LGPD, art. 7º, V). As preferências de visibilidade pública dependem do seu consentimento (art. 7º, I), que você pode retirar a qualquer momento nas configurações.
 
@@ -126,7 +130,9 @@ Você pode ver e apagar sua própria atividade a qualquer momento na sua conta.
 
 ## 6. Perfil público, biblioteca pública, rankings e compartilhamentos
 
-**Perfil público.** Todo usuário com conta tem a página `{{PUBLIC_ORIGIN}}/u/[apelido]`. Com a biblioteca pública desligada, ela mostra só o apelido e contagens agregadas.
+**Perfil público.** Todo usuário com conta tem a página `{{PUBLIC_ORIGIN}}/u/[apelido]`. Com a biblioteca pública desligada, ela mostra o apelido e contagens agregadas, e seus dados públicos incluem o identificador de autor.
+
+**Identificador público de autor.** O perfil e o conteúdo público incluem um identificador aleatório e estável (`public_author_id`), diferente do identificador de autenticação e que não serve para entrar na conta. Ele permite que outras pessoas ocultem o mesmo autor após trocas de apelido, mas também permite vincular o perfil entre apelidos diferentes. Esse identificador é apagado com a conta (seção 17); não muda quando o apelido muda.
 
 **Biblioteca pública.** É opcional e vem **desligada**. Ligada, sua página mostra as curvas públicas que você criou e seus packs públicos, e também seus favoritos se o perfil de atividade for público. Você liga e desliga quando quiser. Em qualquer caso, cada curva que você publicou como pública continua acessível no próprio endereço, com crédito ao seu apelido. (Base legal: consentimento, art. 7º, I.)
 
@@ -249,7 +255,8 @@ Não vendemos nem alugamos dados. Os destinatários são os serviços descritos 
 | Dado                                                                             | Prazo                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Dados no navegador (seção 2)                                                     | Até você apagar. O diário guarda as últimas 500 entradas                                                                                                                                                                                                                                                                                                                                                                                             |
-| Conta: e-mail, hash da senha, nome privado se enviado, apelido, bio, preferências e aceites da política | Até o encerramento da conta |
+| Conta: e-mail, hash da senha, nome privado se enviado, apelido, identificador público de autor, bio, preferências e aceites da política | Até o encerramento da conta |
+| Lista de ocultos da conta (`hidden_items`), incluindo rótulos em cache | Até você desfazer a ocultação ou encerrar a conta |
 | Apelido antigo, depois de uma troca                                              | Reservado por 90 dias, redirecionando para o novo; depois fica livre                                                                                                                                                                                                                                                                                                                                                                                 |
 | Sessões                                                                          | Até expirar, você sair ou revogar                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Tokens de verificação e de redefinição de senha                                  | Até serem usados ou expirarem                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -285,7 +292,7 @@ Pela LGPD (art. 18), você pode pedir:
 **No app, sem precisar escrever para nós:**
 
 - **corrigir:** edite apelido (uma troca a cada 30 dias), bio e preferências no perfil, e troque e-mail e senha em `{{PUBLIC_ORIGIN}}/conta`;
-- **acessar e levar seus dados:** use "Exportar meus dados" para baixar um arquivo JSON com conta, perfil, curvas, versões, favoritos, atividade e compartilhamentos;
+- **acessar e levar seus dados:** use "Exportar meus dados" para baixar um arquivo JSON com conta, perfil, identificador público de autor, curvas, versões, favoritos, atividade, compartilhamentos e lista de ocultos (`hiddenItems`, com tipo e identificador do alvo, rótulo em cache e data). Esses rótulos podem incluir apelidos públicos de outras pessoas e nomes de curvas;
 - **apagar atividade:** veja e apague sua atividade na conta;
 - **retirar consentimento:** torne a atividade privada, desligue a biblioteca pública ou use o recibo do teste cego;
 - **encerrar a conta:** veja a seção 17;
@@ -304,7 +311,7 @@ Você encerra a conta em `{{PUBLIC_ORIGIN}}/conta`, com sua senha e uma confirma
 - **manter anonimizadas:** as curvas continuam no site com o crédito "autor removido", sem ligação com você; ou
 - **apagar tudo:** as curvas são retiradas do site.
 
-Em qualquer caso, **o conteúdo privado é sempre apagado**, junto com e-mail, hash da senha, perfil, apelido, sessões, tokens, favoritos, atividade e aceites da política.
+Em qualquer caso, **o conteúdo privado é sempre apagado**, junto com e-mail, hash da senha, perfil, apelido, identificador público de autor, sessões, tokens, favoritos, atividade, lista de ocultos da conta (`hidden_items`, incluindo rótulos em cache) e aceites da política.
 
 Os registros de acesso ligados à conta continuam guardados até completar 6 meses, como exige o Marco Civil da Internet, e depois são apagados automaticamente. Nos backups, dados apagados podem permanecer sem uso até o expurgo por semana ISO, sujeito aos atrasos descritos na seção 15; não prometemos apagamento em 12 semanas exatas.
 

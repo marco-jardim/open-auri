@@ -48,6 +48,7 @@ export const accountSection: ExportSection = {
 	async collect({ db, userId }) {
 		const user = await first<{
 			id: string;
+			public_author_id: string;
 			email: string;
 			name: string | null;
 			emailVerified: number | null;
@@ -61,7 +62,7 @@ export const accountSection: ExportSection = {
 		}>(
 			sql(
 				db,
-				'SELECT "id", "email", "name", "emailVerified", "createdAt", "updatedAt", "role", ' +
+				'SELECT "id", "public_author_id", "email", "name", "emailVerified", "createdAt", "updatedAt", "role", ' +
 					'"banned", "banReason", "banExpires", "twoFactorEnabled" FROM "user" WHERE "id" = ?',
 				userId
 			)
@@ -76,6 +77,7 @@ export const accountSection: ExportSection = {
 		);
 		return {
 			id: user.id,
+			publicAuthorId: user.public_author_id,
 			email: user.email,
 			name: user.name ?? '',
 			emailVerified: user.emailVerified === 1,

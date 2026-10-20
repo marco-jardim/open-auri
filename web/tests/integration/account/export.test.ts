@@ -70,6 +70,9 @@ describe('buildAccountExport', () => {
 	it('covers every F3 section with the owner data', async () => {
 		const me = await person('ex');
 		const now = Date.now();
+		const publicId = await env.DB.prepare('SELECT public_author_id FROM "user" WHERE id = ?')
+			.bind(me.user.id)
+			.first<{ public_author_id: string }>();
 		const document = await buildAccountExport({
 			db: env.DB,
 			userId: me.user.id,
@@ -82,11 +85,13 @@ describe('buildAccountExport', () => {
 		const { account, profile, policyAcceptances, sessions, pendingRequests } = document.sections;
 		expect(account).toMatchObject({
 			id: me.user.id,
+			publicAuthorId: publicId?.public_author_id,
 			email: me.user.email,
 			name: 'Private Name',
 			emailVerified: true,
 			signInMethods: [{ provider: 'credential' }]
 		});
+		expect(publicId?.public_author_id).toMatch(/^[a-f0-9]{32}$/);
 		expect(profile).toMatchObject({
 			nickname: me.current,
 			bio: me.bio,
