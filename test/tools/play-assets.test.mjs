@@ -21,6 +21,7 @@ const expectedShots = [
   '4-soe-como-x.png',
   '5-comunidade.png',
   '6-teste-cego.png',
+  '7-native-connect.png',
 ];
 
 test('Play icon is 512x512, 32-bit RGBA, within 1024 KB and full bleed', async () => {
@@ -129,7 +130,7 @@ test('validator rejects wrong dimensions, alpha in feature/screenshots and overs
 });
 
 test('--check validates committed assets without writing', async () => {
-  assert.equal(await checkPlayAssets(), 14);
+  assert.equal(await checkPlayAssets(), 16);
 });
 
 test('missing captures fail clearly instead of creating placeholder screenshots', async () => {
