@@ -168,8 +168,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				expect(
 					nativeBridge.calls.filter(({ methodName }) => methodName === 'requestDevice')
 				).toHaveLength(1);
+				// Connecting only picks and authorizes the device; nothing opens it before a write.
 				expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'open')).toHaveLength(
-					1
+					0
 				);
 				expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'sendReport')).toEqual(
 					[]
