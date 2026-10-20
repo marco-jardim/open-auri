@@ -23,6 +23,7 @@ import com.openauri.files.DownloadBridge
 import com.openauri.files.OpenAuriFilesPlugin
 import com.openauri.usb.OpenAuriUsbPlugin
 import com.openauri.usb.OriginGuard
+import java.util.Locale
 
 /**
  * Evaluate the gate before BridgeActivity.onCreate, but always call the superclass lifecycle.
@@ -34,6 +35,7 @@ class MainActivity : BridgeActivity() {
     private var gateResult: WebViewCompatGate.Result = WebViewCompatGate.Result.UnknownPackage
     private var activePackageName = WebViewCompatGate.DEFAULT_WEBVIEW_PACKAGE
     private var downloads: DownloadBridge? = null
+    private var offlineClient: OfflineAwareWebViewClient? = null
 
     /** Set once a passing gate created the bridge and onCreate wired it; deep links load only then. */
     private var deepLinksReady = false
@@ -61,13 +63,19 @@ class MainActivity : BridgeActivity() {
 
         super.onCreate(savedInstanceState)
         if (gateResult == WebViewCompatGate.Result.Ok) {
-            bridge?.let { it.setWebViewClient(OfflineAwareWebViewClient(it)) }
+            bridge?.let { activeBridge ->
+                offlineClient = OfflineAwareWebViewClient(activeBridge).also(activeBridge::setWebViewClient)
+            }
             attachDownloads()
             if (bridge != null) {
                 onBackPressedDispatcher.addCallback(this, webViewBack)
                 deepLinksReady = true
-                // Supersedes the start URL that Bridge.loadWebView() is already loading.
-                openDeepLink(intent)
+                // Supersedes the start URL that Bridge.loadWebView() is already loading (that
+                // first request may still go out; accepted). Only a fresh launch opens its link:
+                // a recreated activity (saved state, also after process death) or a relaunch from
+                // Recents gets an old intent again, and replaying it (e.g. a /#p= preset) would
+                // overwrite what the user did since.
+                if (isFreshLaunch(savedInstanceState, intent)) openDeepLink(intent)
             }
         } else {
             val screen = findViewById<View>(R.id.webview_update_screen)
@@ -126,24 +134,44 @@ class MainActivity : BridgeActivity() {
      * thread. BridgeActivity.load() also calls this with the launch intent while onCreate is still
      * running; [deepLinksReady] is false then, and onCreate opens that intent itself once the
      * bridge is fully wired, so the page is loaded once. With a failing gate nothing is loaded.
+     *
+     * The running page may be writing to a cable: navigating away would interrupt the write, so
+     * the page is asked first ([WRITE_IN_PROGRESS_SCRIPT]); during a write the link is dropped
+     * with a short notice, otherwise (including a page that cannot answer) it is loaded.
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (deepLinksReady) openDeepLink(intent)
+        if (!deepLinksReady) return
+        val webView = bridge?.webView ?: return
+        val target = deepLinkTarget(intent) ?: return
+        webView.evaluateJavascript(WRITE_IN_PROGRESS_SCRIPT) { writing ->
+            // The answer may arrive after the activity (and its WebView) went away.
+            if (isDestroyed || isFinishing) return@evaluateJavascript
+            if (writing == "true") {
+                Toast.makeText(this, R.string.deep_link_write_in_progress, Toast.LENGTH_SHORT).show()
+            } else {
+                webView.loadUrl(target)
+            }
+        }
     }
 
     override fun onDestroy() {
+        // Before super: the pending offline check must not outlive (or probe) the WebView.
+        offlineClient?.dispose()
+        offlineClient = null
         downloads?.close()
         downloads = null
         super.onDestroy()
     }
 
-    /** Loads the page [intent] links to when [DeepLinks.targetFor] accepts it; otherwise keeps the page. */
+    private fun deepLinkTarget(intent: Intent): String? =
+        DeepLinks.targetFor(intent.action, intent.dataString, bridge?.serverUrl)
+
+    /** Cold start: loads the page [intent] links to when [DeepLinks.targetFor] accepts it. */
     private fun openDeepLink(intent: Intent) {
-        val activeBridge = bridge ?: return
-        val target = DeepLinks.targetFor(intent.action, intent.dataString, activeBridge.serverUrl) ?: return
-        activeBridge.webView.loadUrl(target)
+        val target = deepLinkTarget(intent) ?: return
+        bridge?.webView?.loadUrl(target)
     }
 
     /**
@@ -193,6 +221,16 @@ class MainActivity : BridgeActivity() {
         internal const val NATIVE_BACK_SCRIPT =
             "!window.dispatchEvent(new CustomEvent('oa:native-back', { cancelable: true }))"
 
+        /** True while the site writes to a cable (public contract, web/src/lib/cable/write-flag.ts). */
+        internal const val WRITE_IN_PROGRESS_SCRIPT = "window.__oaWriteInProgress === true"
+
+        /**
+         * Whether onCreate runs for a new launch. A recreation (saved state, including the restore
+         * after process death) or a relaunch from Recents redelivers an old intent instead.
+         */
+        internal fun isFreshLaunch(savedInstanceState: Bundle?, intent: Intent): Boolean =
+            savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
+
         /** Test-only injection, set before ActivityScenario launch and cleared after each test. */
         @Volatile
         internal var gateForTesting: (() -> WebViewCompatGate.Result)? = null
@@ -212,11 +250,21 @@ class MainActivity : BridgeActivity() {
  * The target is rebuilt as the normalized server origin plus the link's path, query and fragment,
  * so the WebView navigates to exactly the authority that was compared, not to raw authority text
  * another URL parser could read differently.
+ *
+ * Only pages are linkable: paths under `/api` (incl. auth endpoints) and `/dados` (data dumps the
+ * download bridge would fetch into a save dialog) and any `.json` resource are refused. The check
+ * runs on the path as the WebView and the server will see it ([normalizedSegments]), so dot
+ * segments, backslashes, escapes, case or doubled slashes cannot sneak such a path through.
  */
 internal object DeepLinks {
     private const val HTTPS_PREFIX = "https://"
     private const val SCHEME_SEPARATOR = "://"
     private val AUTHORITY_END = charArrayOf('/', '?', '#')
+    private val BLOCKED_FIRST_SEGMENTS = setOf("api", "dados")
+    private const val BLOCKED_SUFFIX = ".json"
+    private val PERCENT_ESCAPE = Regex("%[0-9A-Fa-f]{2}")
+    private val TAB_OR_NEWLINE = Regex("[\t\n\r]")
+    private const val HEX = 16
 
     /** The URL to load for an intent with [action] and [data] (`Intent.getDataString()`), or null. */
     internal fun targetFor(action: String?, data: String?, serverUrl: String?): String? {
@@ -226,7 +274,34 @@ internal object DeepLinks {
         // originOf accepted data, so it contains the scheme separator; same authority split as there.
         val authorityStart = data.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length
         val authorityEnd = data.indexOfAny(AUTHORITY_END, authorityStart)
-        return if (authorityEnd < 0) origin else origin + data.substring(authorityEnd)
+        val rest = if (authorityEnd < 0) "" else data.substring(authorityEnd)
+        return if (isLinkablePath(rest.takeWhile { it != '?' && it != '#' })) origin + rest else null
+    }
+
+    private fun isLinkablePath(path: String): Boolean {
+        val segments = normalizedSegments(path)
+        if (segments.isEmpty()) return true
+        return segments.first() !in BLOCKED_FIRST_SEGMENTS && !segments.last().endsWith(BLOCKED_SUFFIX)
+    }
+
+    /**
+     * Path segments, lower-cased, the way Chromium resolves them: tabs and newlines dropped,
+     * backslashes as slashes, `%XX` decoded once (so `%2e` is a dot), `.` and `..` resolved.
+     * Empty segments are dropped too, so `//api` counts as `/api` (stricter than Chromium).
+     */
+    internal fun normalizedSegments(path: String): List<String> {
+        val decoded = PERCENT_ESCAPE.replace(TAB_OR_NEWLINE.replace(path, "")) { escape ->
+            Char(escape.value.substring(1).toInt(HEX)).toString()
+        }
+        val segments = ArrayDeque<String>()
+        for (segment in decoded.replace('\\', '/').lowercase(Locale.ROOT).split('/')) {
+            when (segment) {
+                "", "." -> Unit
+                ".." -> segments.removeLastOrNull()
+                else -> segments.addLast(segment)
+            }
+        }
+        return segments
     }
 }
 

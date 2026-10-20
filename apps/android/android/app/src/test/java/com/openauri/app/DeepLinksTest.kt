@@ -3,12 +3,17 @@ package com.openauri.app
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
+import android.os.Bundle
+import android.os.Looper
 import androidx.core.net.toUri
 import androidx.test.core.app.ApplicationProvider
 import com.getcapacitor.CapConfig
+import com.getcapacitor.OfflineAwareWebViewClient
 import com.openauri.usb.OriginGuard
+import java.time.Duration
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -18,7 +23,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowToast
 import org.robolectric.shadows.ShadowWebView
 
 @RunWith(RobolectricTestRunner::class)
@@ -97,6 +104,46 @@ class DeepLinksTest {
         assertNull(DeepLinks.targetFor(Intent.ACTION_VIEW, "http://10.0.2.2:4173/c/abc", "http://10.0.2.2:4173"))
     }
 
+    @Test fun onlyPagesAreLinkableNotApiDataDumpsOrJson() {
+        val pages = listOf(
+            "/", "/c/abc", "/u/someone", "/#p=AbC123", "/?tab=1#p=x", "/docs/api", "/c/api", "/apix",
+            "/dados-abertos", "/c/x?format=.json", "/c/x#.json", "/manifest.webmanifest", "/c/a/../b",
+        )
+        for (path in pages) {
+            assertEquals(path, "$SERVER$path", DeepLinks.targetFor(Intent.ACTION_VIEW, "$SERVER$path", SERVER))
+        }
+        assertEquals("$SERVER?tab=1", DeepLinks.targetFor(Intent.ACTION_VIEW, "$SERVER?tab=1", SERVER))
+        val blocked = listOf(
+            "/api", "/api/", "/api/auth/session", "/API/Auth", "/dados", "/dados/", "/dados/dump/all",
+            "/c/x.json", "/c/X.JSON", "/c/x.json?y=1#z", "/c/x.json/", "/c/x%2Ejson",
+            // Spellings the WebView or the server resolve to the same blocked path.
+            "/c/../api/auth", "/%2e%2e/api/x", "/c/%2E%2E/dados/x", "/./api", "//api/auth", "/%61pi/x",
+            "/api%2Fauth", "/c\\..\\api\\auth", "/a\tpi/x", "/da\r\ndos/x",
+        )
+        for (path in blocked) {
+            assertNull(path, DeepLinks.targetFor(Intent.ACTION_VIEW, "$SERVER$path", SERVER))
+        }
+    }
+
+    @Test fun pathSegmentsAreNormalizedLikeTheWebView() {
+        assertEquals(listOf("b", "c"), DeepLinks.normalizedSegments("/C/./a/../%2e%2E/B%2f\\c//"))
+        assertEquals(emptyList<String>(), DeepLinks.normalizedSegments(""))
+        assertEquals(emptyList<String>(), DeepLinks.normalizedSegments("/../.."))
+        // Invalid escapes stay as they are; valid ones are decoded exactly once.
+        assertEquals(listOf("100%", "%4", "%zz"), DeepLinks.normalizedSegments("/100%/%4/%zz"))
+        assertEquals(listOf("%2e", "api"), DeepLinks.normalizedSegments("/%252e/api"))
+    }
+
+    @Test fun onlyAFreshLaunchOpensTheLaunchIntent() {
+        val view = Intent(Intent.ACTION_VIEW, "https://open-auri.com/c/abc".toUri())
+        assertTrue(MainActivity.isFreshLaunch(null, view))
+        assertTrue(MainActivity.isFreshLaunch(null, Intent(view).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)))
+        assertFalse(MainActivity.isFreshLaunch(Bundle(), view))
+        assertFalse(MainActivity.isFreshLaunch(null, Intent(view).addFlags(
+            Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY or Intent.FLAG_ACTIVITY_NEW_TASK,
+        )))
+    }
+
     @Test fun coldStartLoadsTheLinkedPageOnceAfterTheStartUrl() {
         val origin = httpsServerOrigin(CapConfig.loadDefault(ApplicationProvider.getApplicationContext<Context>()).serverUrl)
         val link = "$origin/c/abc?x=1#top"
@@ -114,26 +161,103 @@ class DeepLinksTest {
         }
     }
 
+    @Test fun recreationDoesNotReplayTheLaunchLink() {
+        val origin = httpsServerOrigin(CapConfig.loadDefault(ApplicationProvider.getApplicationContext<Context>()).serverUrl)
+        val link = "$origin/#p=preset"
+        passingGate()
+        val controller = Robolectric.buildActivity(MainActivity::class.java, Intent(Intent.ACTION_VIEW, link.toUri()))
+        try {
+            controller.setup()
+            assertEquals("load:$link", loads().last())
+            MainActivityBridgeHardeningTest.RecordingWebViewShadow.events.clear()
+            // In-process recreation (e.g. a font scale change outside configChanges).
+            controller.recreate()
+            assertNotNull(controller.get().bridge)
+            val loads = loads()
+            assertTrue("The new bridge loads its start URL: $loads", loads.isNotEmpty())
+            assertFalse("A preset link must not be re-applied: $loads", "load:$link" in loads)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test fun aRestoreAfterProcessDeathOrARelaunchFromRecentsDoesNotReplayTheLink() {
+        val origin = httpsServerOrigin(CapConfig.loadDefault(ApplicationProvider.getApplicationContext<Context>()).serverUrl)
+        val link = "$origin/c/abc"
+        passingGate()
+        val restored = loadsAfterLaunch(Intent(Intent.ACTION_VIEW, link.toUri()), Bundle())
+        assertTrue("$restored", restored.isNotEmpty() && "load:$link" !in restored)
+        val recents = Intent(Intent.ACTION_VIEW, link.toUri()).addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
+        val relaunched = loadsAfterLaunch(recents, null)
+        assertTrue("$relaunched", relaunched.isNotEmpty() && "load:$link" !in relaunched)
+    }
+
     @Test fun newIntentLoadsSameOriginLinksAndIgnoresOthers() {
         passingGate()
         val controller = Robolectric.buildActivity(MainActivity::class.java)
         try {
             controller.setup()
             val origin = httpsServerOrigin(controller.get().bridge.serverUrl)
+            val web = shadowOf(controller.get().bridge.webView)
             MainActivityBridgeHardeningTest.RecordingWebViewShadow.events.clear()
 
             val link = Intent(Intent.ACTION_VIEW, "$origin:443/c/abc?x=1#top".toUri())
             controller.newIntent(link)
             assertSame(link, controller.get().intent)
+            assertEquals(MainActivity.WRITE_IN_PROGRESS_SCRIPT, web.lastEvaluatedJavascript)
+            web.lastEvaluatedJavascriptCallback.onReceiveValue("false")
             assertEquals(listOf("load:$origin/c/abc?x=1#top"), loads())
 
             MainActivityBridgeHardeningTest.RecordingWebViewShadow.events.clear()
+            val answered = web.lastEvaluatedJavascriptCallback
             controller.newIntent(Intent(Intent.ACTION_VIEW, "https://evil.example/c/abc".toUri()))
+            controller.newIntent(Intent(Intent.ACTION_VIEW, "$origin/api/auth/session".toUri()))
             controller.newIntent(Intent(Intent.ACTION_MAIN))
+            assertSame("Refused links do not even ask the page", answered, web.lastEvaluatedJavascriptCallback)
             assertEquals(emptyList<String>(), loads())
         } finally {
             controller.pause().stop().destroy()
         }
+    }
+
+    @Test fun aWarmLinkDuringAWriteIsDroppedWithANotice() {
+        passingGate()
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        try {
+            controller.setup()
+            val activity = controller.get()
+            val origin = httpsServerOrigin(activity.bridge.serverUrl)
+            val web = shadowOf(activity.bridge.webView)
+            MainActivityBridgeHardeningTest.RecordingWebViewShadow.events.clear()
+
+            controller.newIntent(Intent(Intent.ACTION_VIEW, "$origin/c/abc".toUri()))
+            assertEquals(MainActivity.WRITE_IN_PROGRESS_SCRIPT, web.lastEvaluatedJavascript)
+            assertEquals("Nothing loads before the page answers", emptyList<String>(), loads())
+            web.lastEvaluatedJavascriptCallback.onReceiveValue("true")
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(emptyList<String>(), loads())
+            assertEquals(activity.getString(R.string.deep_link_write_in_progress), ShadowToast.getTextOfLatestToast())
+
+            // A page that cannot answer (no script result) does not block the link.
+            controller.newIntent(Intent(Intent.ACTION_VIEW, "$origin/u/someone".toUri()))
+            web.lastEvaluatedJavascriptCallback.onReceiveValue("null")
+            assertEquals(listOf("load:$origin/u/someone"), loads())
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test fun destroyCancelsThePendingOfflineCheck() {
+        passingGate()
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val bridge = controller.get().bridge
+        val client = bridge.webViewClient as OfflineAwareWebViewClient
+        var probes = 0
+        client.siteProbe = { _, result -> probes++; result(OfflineAwareWebViewClient.PageState.OTHER) }
+        client.receivedError(bridge.webView, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        controller.pause().stop().destroy()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2 * OfflineAwareWebViewClient.SETTLE_TIMEOUT_MS + 1))
+        assertEquals("No probe of the destroyed WebView", 0, probes)
     }
 
     @Test fun failingGateIgnoresLaunchAndNewIntents() {
@@ -188,7 +312,23 @@ class DeepLinksTest {
 
     private fun loads() = MainActivityBridgeHardeningTest.RecordingWebViewShadow.events.filter { it.startsWith("load:") }
 
-    /** The activity tests need the synced https server URL; an http (e2e) sync skips them. */
+    /** The navigations of one full launch with [intent] (restored from [savedState] when given). */
+    private fun loadsAfterLaunch(intent: Intent, savedState: Bundle?): List<String> {
+        val controller = Robolectric.buildActivity(MainActivity::class.java, intent)
+        try {
+            if (savedState == null) controller.setup() else controller.setup(savedState)
+            assertNotNull(controller.get().bridge)
+            return loads()
+        } finally {
+            controller.pause().stop().destroy()
+            MainActivityBridgeHardeningTest.RecordingWebViewShadow.events.clear()
+        }
+    }
+
+    /**
+     * The activity tests need the synced https server URL; an http (e2e) sync skips them
+     * (accepted: the helper tests above still run, and e2e builds never deep-link).
+     */
     private fun httpsServerOrigin(serverUrl: String?): String {
         val origin = OriginGuard.originOf(serverUrl)
         assumeTrue("Deep links need an https server URL, not $serverUrl", origin?.startsWith("https://") == true)

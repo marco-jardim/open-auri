@@ -137,7 +137,7 @@ class OfflineAwareWebViewClientTest {
         assertTrue(states.isEmpty())
     }
 
-    @Test fun aBlankPageThatNeverCommitsIsJudgedAfterTheSettleTimeout() {
+    @Test fun aBlankPageThatNeverCommitsIsJudgedAfterOneExtendedSettleTimeout() {
         val url = "https://staging.open-auri.com/"
         var probes = 0
         client.siteProbe = { _, result -> probes++; result(OfflineAwareWebViewClient.PageState.BLANK) }
@@ -147,11 +147,76 @@ class OfflineAwareWebViewClientTest {
         client.onPageFinished(view, "about:blank")
         assertEquals(url, shadowOf(view).lastLoadedUrl)
         idlePastSettle()
+        // Still blank at the timeout: one more window for a slow service worker boot.
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        assertEquals(2, probes)
+        idlePastSettle()
         assertEquals(OFFLINE, shadowOf(view).lastLoadedUrl)
-        assertEquals(2, probes)
-        // Nothing is pending afterwards: a later finish probes nothing.
+        assertEquals(3, probes)
+        // Nothing is pending afterwards: a later finish probes nothing, and there is no third wait.
         client.onPageFinished(view, OFFLINE)
-        assertEquals(2, probes)
+        idlePastSettle()
+        assertEquals(3, probes)
+    }
+
+    @Test fun theExtensionKeepsASiteThatCommitsLateAndJudgesAnythingElse() {
+        val url = "https://staging.open-auri.com/c/slow"
+        // Committed during the extension: the cached document is kept, nothing else is probed.
+        val committed = ArrayDeque(listOf(STATE[1], STATE[0]))
+        client.siteProbe = { _, result -> result(committed.removeFirst()) }
+        view.loadUrl(url)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        idlePastSettle()
+        client.onPageFinished(view, url)
+        idlePastSettle()
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        assertTrue(committed.isEmpty())
+        // Judged at the end of the extension.
+        for ((last, expected) in listOf(STATE[0] to url, STATE[2] to OFFLINE)) {
+            val states = ArrayDeque(listOf(STATE[1], last))
+            client.siteProbe = { _, result -> result(states.removeFirst()) }
+            view.loadUrl(url)
+            client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+            idlePastSettle()
+            assertEquals(url, shadowOf(view).lastLoadedUrl)
+            idlePastSettle()
+            assertEquals("$last", expected, shadowOf(view).lastLoadedUrl)
+            assertTrue(states.isEmpty())
+        }
+    }
+
+    @Test fun anErrorPageAtTheTimeoutIsJudgedWithoutAnExtension() {
+        val url = "https://staging.open-auri.com/docs"
+        var probes = 0
+        client.siteProbe = { _, result -> probes++; result(OfflineAwareWebViewClient.PageState.OTHER) }
+        view.loadUrl(url)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        idlePastSettle()
+        assertEquals(OFFLINE, shadowOf(view).lastLoadedUrl)
+        assertEquals(1, probes)
+    }
+
+    @Test fun disposeCancelsThePendingDecisionAndAnInFlightProbe() {
+        val url = "https://staging.open-auri.com/c/example"
+        var probes = 0
+        client.siteProbe = { _, result -> probes++; result(OfflineAwareWebViewClient.PageState.OTHER) }
+        view.loadUrl(url)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        client.dispose()
+        idlePastSettle()
+        idlePastSettle()
+        client.onPageFinished(view, url)
+        assertEquals(0, probes)
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+
+        var answer: ((OfflineAwareWebViewClient.PageState) -> Unit)? = null
+        client.siteProbe = { _, result -> answer = result }
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        idlePastSettle()
+        client.dispose()
+        checkNotNull(answer)(OfflineAwareWebViewClient.PageState.OTHER)
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        client.dispose() // Idempotent.
     }
 
     @Test fun theSiteShownAtTheTimeoutKeepsIt() {
@@ -219,6 +284,42 @@ class OfflineAwareWebViewClientTest {
         assertTrue(client.shouldOverrideUrlLoading(view, request("https://localhost/__openauri_retry")))
         assertEquals("https://staging.open-auri.com", shadowOf(view).lastLoadedUrl)
         assertNull(shadowOf(controller.get()).nextStartedActivity)
+    }
+
+    @Test fun retryReloadsTheFailedSameOriginPageSuchAsADeepLinkElseTheServer() {
+        val retry = request("https://localhost/__openauri_retry")
+        client.siteProbe = { _, result -> result(OfflineAwareWebViewClient.PageState.OTHER) }
+        val link = "https://staging.open-auri.com/c/abc?x=1#p=code"
+        view.loadUrl(link)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK, link)
+        idlePastSettle()
+        assertEquals(OFFLINE, shadowOf(view).lastLoadedUrl)
+        // Subframe and HTTP failures do not replace the candidate.
+        client.receivedError(view, false, OfflineAwareWebViewClient.ErrorKind.NETWORK, "https://staging.open-auri.com/frame")
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.HTTP, "https://staging.open-auri.com/missing")
+        assertTrue(client.shouldOverrideUrlLoading(view, retry))
+        assertEquals(link, shadowOf(view).lastLoadedUrl)
+        // A main-frame failure off the server's origin retries the server URL.
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK, "https://evil.example/c/abc")
+        assertTrue(client.shouldOverrideUrlLoading(view, retry))
+        assertEquals("https://staging.open-auri.com", shadowOf(view).lastLoadedUrl)
+        client.dispose()
+    }
+
+    @Test fun retryUrlKeepsOnlyFailuresOnTheServerOrigin() {
+        val server = "https://open-auri.com"
+        for (failed in listOf("https://open-auri.com/c/a?b=1#p=2", "https://open-auri.com:443/x", "HTTPS://OPEN-AURI.COM/u/x")) {
+            assertEquals(failed, failed, OfflineAwareWebViewClient.retryUrl(failed, server))
+        }
+        for (failed in listOf(
+            null, "", "about:blank", "https://localhost/offline.html", "https://evil.example/",
+            "https://www.open-auri.com/", "http://open-auri.com/x", "https://user@open-auri.com/x",
+            "https://open-auri.com:8443/x",
+        )) {
+            assertEquals("$failed", server, OfflineAwareWebViewClient.retryUrl(failed, server))
+        }
+        assertNull(OfflineAwareWebViewClient.retryUrl("https://open-auri.com/x", null))
+        assertEquals("not a url", OfflineAwareWebViewClient.retryUrl("https://open-auri.com/x", "not a url"))
     }
 
     @Test fun lookalikesAndSubframesKeepCapacitorNavigationPolicy() {
