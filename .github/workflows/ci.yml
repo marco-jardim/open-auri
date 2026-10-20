@@ -372,37 +372,10 @@ jobs:
         run: npm run test:android
       - name: Android debug build
         run: npm run build:android
-      - name: Android release dry run (ephemeral signing)
-        shell: bash
-        run: |
-          KEYSTORE="$RUNNER_TEMP/android-ci.jks"
-          KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
-          echo "::add-mask::$KEYSTORE_PASSWORD"
-          export KEYSTORE_PASSWORD
-          keytool -genkeypair \
-            -keystore "$KEYSTORE" \
-            -storetype JKS \
-            -storepass:env KEYSTORE_PASSWORD \
-            -keypass:env KEYSTORE_PASSWORD \
-            -alias android-ci \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 1 \
-            -dname "CN=Android CI, O=Open Auri, C=BR" \
-            -noprompt
-          npm run build:android:release
-          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
-          "$APKSIGNER" sign \
-            --ks "$KEYSTORE" \
-            --ks-key-alias android-ci \
-            --ks-pass env:KEYSTORE_PASSWORD \
-            --key-pass env:KEYSTORE_PASSWORD \
-            --out "$RUNNER_TEMP/android-release-signed.apk" \
-            apps/android/android/app/build/outputs/apk/release/app-release-unsigned.apk
-          "$APKSIGNER" verify --verbose --print-certs "$RUNNER_TEMP/android-release-signed.apk"
-      - name: Delete ephemeral signing keystore
-        if: always()
-        run: rm -f "$RUNNER_TEMP/android-ci.jks"
+      - name: Android release build
+        run: npm run build:android:release
+      - name: Android release dry run (two ephemeral signing keys)
+        run: npm run test:android:release
       - name: Upload Android debug APK
         uses: actions/upload-artifact@v7
         with:

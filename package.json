@@ -92,6 +92,7 @@
     "build:android:staging": "node tools/run-gradle.mjs --target staging :app:assembleDebug",
     "build:android:release": "node tools/run-gradle.mjs :app:verifyCapacitorConfig :app:bundleRelease :app:assembleRelease",
     "test:android": "node tools/run-gradle.mjs :app:testDebugUnitTest :app:koverVerifyDebug",
+    "test:android:release": "node --test test/android-release/dryrun.mjs",
     "lint:android": "node tools/run-gradle.mjs :app:lintDebug",
     "test:android:device": "node tools/run-gradle.mjs :app:connectedDebugAndroidTest",
     "typecheck:android": "tsc -p apps/android/tsconfig.json --noEmit",
