@@ -42,6 +42,7 @@
 	import { loadSocialRuntime, type SocialRuntime } from '#lib/social/runtime.ts';
 	import type { SocialOutbox, SocialSession, SocialApi } from '#lib/social/index.ts';
 	import type { LayoutProps } from './$types';
+	import { setHiddenStore } from '#lib/social/hidden-context.ts';
 
 	let { children, data }: LayoutProps = $props();
 	const accountSession = new AccountSession(() => ({
@@ -71,6 +72,10 @@
 	const toasts = createToastStore();
 	const context = setAppContext();
 	const nativeCable = setNativeCableState();
+	const hidden = setHiddenStore();
+	$effect(() => {
+		if (accountSession.known) void hidden.setUser(accountSession.current?.id ?? null);
+	});
 	const app = $derived(context.client);
 	const meta = $derived(getPageMeta(page.route.id ?? page.url.pathname));
 	const homage = $derived(getFooterHonoree(meta));

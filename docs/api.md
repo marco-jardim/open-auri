@@ -144,6 +144,9 @@ Para a próxima página, repita a requisição com `?cursor=<nextCursor>`; `next
 | `POST /api/v1/curves/:id/activity`            | verificado         | não       | `api.activity.write`; 120/h e 1000/dia          |
 | `GET /api/v1/curves/:id/audience`             | logado, dono       | não       | `api.curves.audience`                           |
 | `GET /api/v1/me/activity`                     | logado             | não       | `api.me.activity.read`                          |
+| `GET /api/v1/me/hidden`                       | logado             | não       | `api.me.hidden.read`                            |
+| `PUT /api/v1/me/hidden`                       | logado             | não       | `api.me.hidden.write`                           |
+| `DELETE /api/v1/me/hidden`                    | logado             | não       | `api.me.hidden.write`                           |
 | `DELETE /api/v1/me/activity`                  | logado             | não       | `api.me.activity.delete`                        |
 | `POST /api/v1/me/activity/outbox`             | verificado         | não       | `api.activity.outbox`; 30 lotes/h e 100 lotes/dia; 1000 eventos/dia compartilhados |
 | `GET /api/v1/me/library`                      | logado             | não       | `api.me.library.read`                           |
@@ -576,6 +579,52 @@ Dono. PUT (verificado, até 32 KiB): `{ name?, description?, visibility?, items?
 substitui a lista na ordem dada. 200 com o pack. DELETE (logado): 204. Pack de outra pessoa: 404.
 
 ## Moderação
+
+### `GET /api/v1/me/hidden`, `PUT /api/v1/me/hidden` e `DELETE /api/v1/me/hidden`
+
+Preferências privadas de quem vê o conteúdo, não uma denúncia ou decisão de moderação.
+Exigem sessão, inclusive de conta ainda não verificada; não exigem Turnstile. PUT e DELETE
+exigem `Origin` igual à origem pública e `Content-Type: application/json`. As três respostas
+são 200, privadas e `no-store`, no formato:
+
+```json
+{
+  "items": [
+    { "targetType": "author", "targetId": "<public-author-id>", "label": "Ana", "createdAt": 1792454400000 },
+    { "targetType": "curve", "targetId": "<lineage-id>", "label": "Rádio de madrugada", "createdAt": 1792454400000 }
+  ]
+}
+```
+
+- GET devolve a lista completa do solicitante, até 500 autores e 500 curvas.
+- PUT é uma **união aditiva e idempotente**, não uma substituição. Corpo até 512 KiB:
+  `{ "authors": ["<public-author-id>"], "curves": ["<lineage-id>"], "labels": { "authors": { "<public-author-id>": "Ana" }, "curves": { "<lineage-id>": "Rádio de madrugada" } } }`.
+  `authors` e `curves` são obrigatórios, com até 500 ids cada. `labels` é opcional; quando
+  presente, exige os dois mapas, com até 500 entradas cada. Rótulos são texto simples,
+  de 1 a 80 caracteres, sem controles; são cache do nome no momento de ocultar, não identidade.
+  Repetir um alvo preserva `createdAt`; um rótulo novo substitui seu cache, e a ausência de
+  rótulo preserva o anterior. Rótulos sem alvo no lote não são gravados.
+- DELETE remove só o alvo informado, de forma idempotente. Corpo até 1 KiB:
+  `{ "targetType": "curve", "targetId": "<lineage-id>" }` ou tipo `author`.
+- IDs de autor são `author.id` dos cards e `profile.authorId` do perfil: 32 dígitos hexadecimais
+  aleatórios, estáveis quando o apelido muda, nunca o id de autenticação. O formato de entrada
+  aceita `[a-z0-9._-]{1,64}` para compatibilidade com cards antigos; curvas aceitam
+  `[A-Za-z0-9_-]{1,64}`. Ocultar uma curva abrange toda a linhagem e suas versões.
+- Não há consulta de existência do alvo: a preferência continua reversível após remoção do
+  conteúdo. Não revela conteúdo privado, nem altera visibilidade ou contagens globais.
+- Erros: 401 `AUTH_REQUIRED`, 403 `BAD_ORIGIN`/`BANNED`, 400 `INVALID_BODY`,
+  415 `UNSUPPORTED_MEDIA_TYPE`, 413 `PAYLOAD_TOO_LARGE`, 429 `RATE_LIMITED`.
+  Ultrapassar 500 alvos distintos por tipo resulta em 409 `QUOTA_EXCEEDED`; o lote inteiro
+  é revertido, inclusive sob concorrência. É possível liberar espaço com DELETE.
+
+**Filtragem no cliente para todos os leitores:** feeds públicos continuam cacheáveis e não
+são personalizados no servidor. As superfícies da aplicação filtram a lista local/sincronizada
+antes de renderizar feeds, rankings, listas e buscas, e aguardam seu carregamento para não exibir
+conteúdo oculto por um instante. Isso não é controle de acesso: URLs e a API pública continuam
+legíveis. Visitantes persistem a lista em `oa.hidden.v1`; ao entrar, PUT une a lista local à
+conta e só então a cópia local é removida. Falha ou limite excedido preserva a cópia local.
+Os dados entram na seção `hiddenItems` da exportação da conta e são apagados em ambos os modos
+de encerramento, além do `ON DELETE CASCADE`. Migração: `0014_hidden_items.sql`.
 
 ### `POST /api/v1/reports`
 

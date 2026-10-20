@@ -23,6 +23,10 @@
 	import { curveClassification } from '#lib/gate-verdicts.ts';
 	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
+	import HideActions from '#lib/components/social/HideActions.svelte';
+	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
 
 	type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -41,6 +45,8 @@
 	} = $props();
 
 	const id = $props.id();
+	const hidden = getHiddenStore();
+	const contentHidden = $derived(isHidden($hidden, shared.lineageId, authorHiddenId(shared.author)));
 	const locale = $derived(getLocale());
 	const DESCRIPTION_META_MAX = 200;
 
@@ -131,6 +137,9 @@
 		busy = false;
 	}
 	onDestroy(stopListening);
+	$effect(() => {
+		if (!$hidden.ready || contentHidden) stopListening();
+	});
 
 	async function listen() {
 		if (listening) {
@@ -280,6 +289,10 @@
 
 <div class="room">
 	<div class="window" aria-hidden="true"></div>
+	{#if !$hidden.ready || contentHidden}
+		<p role="status">{$hidden.ready ? m.hidden_content() : m.hidden_loading()}</p>
+		<HiddenItems />
+	{:else}
 	<article class="sheet" aria-labelledby="{id}-title">
 		{#if sharedYolo}
 			<YoloCurveNotice
@@ -343,6 +356,7 @@
 			as on the Biblioteca sheet's listen panel, never on the light paper itself.
 		-->
 		<div class="deck">
+			<HideActions lineageId={shared.lineageId} author={authorHiddenId(shared.author)} curveName={shared.name} authorName={shared.author?.displayUsername} />
 			<div class="actions">
 				<Button loading={busy} aria-pressed={listening} onclick={listen}
 					>{listening ? m.shared_curve_stop() : m.shared_curve_listen()}</Button
@@ -385,6 +399,7 @@
 			</div>{/if}
 		<div class="notice" role="status">{notice}</div>
 	</article>
+	{/if}
 </div>
 
 <style>

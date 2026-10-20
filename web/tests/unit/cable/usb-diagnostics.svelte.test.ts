@@ -14,9 +14,7 @@ import { NativeHIDDevice, type OpenAuriUsbPlugin } from '#lib/cable/native/hid.t
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import {
-	ANDROID_PLAY_LIVE,
 	ANDROID_PLAY_URL,
-	ANDROID_RELEASES_URL,
 	ANDROID_REPORT_URL
 } from '#lib/cable/android-links.ts';
 
@@ -217,7 +215,7 @@ test.each<NativeCableStatus>([
 			if (status.kind === 'native-outdated' || status.kind === 'native-write-disabled') {
 				await expect
 					.element(page.getByRole('link', { name: m.android_update_app() }))
-					.toHaveAttribute('href', ANDROID_PLAY_LIVE ? ANDROID_PLAY_URL : ANDROID_RELEASES_URL);
+					.toHaveAttribute('href', ANDROID_PLAY_URL);
 			}
 			if (status.kind !== 'native') {
 				await expect

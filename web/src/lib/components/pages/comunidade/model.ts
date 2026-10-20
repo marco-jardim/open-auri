@@ -39,6 +39,7 @@ export interface DecodedCurve {
 }
 
 export interface Author {
+	id?: string;
 	username: string;
 	displayUsername: string;
 }
@@ -161,9 +162,7 @@ export function channelOf(item: FeedItem): Channel {
 		description: lineage.head.description,
 		license: isLicense(lineage.head.license) ? lineage.head.license : 'CC-BY-4.0',
 		lang: lineage.head.lang,
-		author: lineage.author
-			? { username: lineage.author.username, displayUsername: lineage.author.displayUsername }
-			: null,
+		author: lineage.author ? { ...lineage.author } : null,
 		rank: item.rank,
 		score: item.score,
 		curve: decodeCurve(lineage.curve.s1),

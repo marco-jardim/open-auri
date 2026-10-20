@@ -5,8 +5,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { ANDROID_WRITE_VALIDATED } from '#lib/cable/android-status.ts';
+import { ANDROID_PLAY_URL } from '#lib/cable/android-links.ts';
 import { buildSearchIndex, searchSections } from '#lib/components/pages/docs/search.ts';
-import { docsContent } from '#lib/content/docs/index.ts';
+import { docsContent as sourceContent } from '#lib/content/docs/index.ts';
 import type { DocSection, DocsLocale } from '#lib/content/docs/types.ts';
 
 const web = new URL('../../../', import.meta.url);
@@ -19,6 +20,7 @@ const sources: Record<DocsLocale, string> = {
 	'en-US': readFileSync(new URL('src/lib/content/docs/en-US.ts', web), 'utf8')
 };
 const locales = ['pt-BR', 'en-US'] as const;
+const docsContent = (locale: DocsLocale, inApp = false) => sourceContent(locale, inApp);
 
 /** Exact Anexo G.1 title and text. The first test also finds them verbatim in the plan. */
 const G1: Record<DocsLocale, { title: string; text: string }> = {
@@ -109,6 +111,18 @@ test('both languages have the same Android anchors, contiguous, unique and fragm
 for (const locale of locales) {
 	describe(locale, () => {
 		const en = locale === 'en-US';
+		test('app projection keeps anchors but never offers a GitHub APK or switching sources', () => {
+			const app = docsContent(locale, true);
+			expect(app.sections.map((entry) => entry.id)).toEqual(docsContent(locale).sections.map((entry) => entry.id));
+			expect(app.sections.flatMap((entry) => entry.links ?? []).some((link) => link.href === RELEASES_URL)).toBe(false);
+			expect(app.sections.find((entry) => entry.id === 'android')?.links?.map((link) => link.href)).toEqual([ANDROID_PLAY_URL]);
+			const text = JSON.stringify(app);
+			expect(text).not.toContain('GitHub Releases');
+			expect(text).not.toContain('apksigner');
+			expect(text).not.toContain('without uninstalling');
+			expect(text).not.toContain('sem desinstalar');
+			expect(searchSections(buildSearchIndex(app), 'apksigner')).toEqual([]);
+		});
 
 		test('the validation state is the exact G.1 notice while writing is not validated', () => {
 			const validation = section(locale, VALIDATION_ANCHOR);

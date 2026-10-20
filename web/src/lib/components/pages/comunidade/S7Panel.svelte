@@ -12,6 +12,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import type { LibraryItem, SocialApi, TradeDto } from '#lib/social/index.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import type { Listener } from './listener.svelte.ts';
 	import {
 		decodeCurve,
@@ -42,6 +43,13 @@
 	} = $props();
 
 	const id = $props.id();
+	const hidden = getHiddenStore();
+	// Blind partners have no public identity until both score. Do not bypass a viewer's
+	// preferences through anonymous audio: pause trades while their targets cannot be checked.
+	const contentAllowed = $derived($hidden.ready && !$hidden.authors.length && !$hidden.curves.length);
+	$effect(() => {
+		if (!contentAllowed && listener.owner === 's7') listener.stop();
+	});
 	let trades = $state.raw<TradeDto[]>([]);
 	let choice = $state('');
 	let busy = $state(false);
@@ -215,7 +223,9 @@
 				>
 			{/if}
 		</div>
-		{#if trades.length === 0}
+		{#if !contentAllowed}
+			<p class="note">{m.hidden_content()}</p>
+		{:else if trades.length === 0}
 			<p class="note">{m.comunidade_s7_none()}</p>
 		{:else}
 			<ul class="trades" aria-label={m.comunidade_s7_title()}>

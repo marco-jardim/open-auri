@@ -3,6 +3,8 @@
 	import MiniCurve from '#lib/charts/MiniCurve.svelte';
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
+	import HideActions from '#lib/components/social/HideActions.svelte';
+	import { authorHiddenId } from '#lib/social/hidden.ts';
 	import { formatDate, formatLevel, previewCurve, type LineageCard } from './model.ts';
 
 	let {
@@ -111,6 +113,7 @@
 			<span class="muted">{m.perfil_preview_unavailable()}</span>
 		{/if}
 	</footer>
+	<HideActions lineageId={item.id} author={authorHiddenId(item.author)} curveName={item.name} authorName={item.author?.displayUsername} />
 </article>
 
 <style>

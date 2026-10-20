@@ -7,6 +7,7 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { all, first, sql } from '../db.ts';
 import { listAcceptances } from '../legal/acceptance.ts';
 import { socialSection } from '../social/export.ts';
+import { readHidden } from '../social/hidden.ts';
 import { readDeletionRequest } from './deletion.ts';
 import { pendingEmailChange } from './email-change.ts';
 import { listNicknameHolds } from './nickname.ts';
@@ -166,7 +167,8 @@ export const ACCOUNT_EXPORT_SECTIONS: readonly ExportSection[] = [
 	policyAcceptancesSection,
 	sessionsSection,
 	pendingRequestsSection,
-	socialSection
+	socialSection,
+	{ key: 'hiddenItems', collect: ({ db, userId }) => readHidden(db, userId) }
 ];
 
 export async function buildAccountExport(

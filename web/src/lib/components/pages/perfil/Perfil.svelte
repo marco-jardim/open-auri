@@ -14,6 +14,10 @@
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import ProfileRecord from './ProfileRecord.svelte';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
+	import HideActions from '#lib/components/social/HideActions.svelte';
+	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import {
 		LICENSE_OPTIONS,
@@ -51,7 +55,13 @@
 	let query = $state('');
 	let license = $state<License | 'all'>('all');
 	let sort = $state<CreationSort>('recent');
-	const shown = $derived(selectCreations(creations, { query, license, sort, locale }));
+	const hidden = getHiddenStore();
+	const profileAuthorId = $derived(profile.authorId ?? profile.username.toLowerCase());
+	const authorHidden = $derived($hidden.authors.includes(profileAuthorId));
+	const shown = $derived($hidden.ready ? selectCreations(creations.filter((item) =>
+		!isHidden($hidden, item.id, authorHiddenId(item.author))), { query, license, sort, locale }) : []);
+	const shownFavorites = $derived($hidden.ready ? favorites.filter((item) =>
+		!isHidden($hidden, item.lineage.id, authorHiddenId(item.lineage.author))) : []);
 	let loading = $state(false);
 	let notice = $state('');
 
@@ -105,6 +115,9 @@
 		busy = false;
 	}
 	onDestroy(stop);
+	$effect(() => {
+		if (playingId && (!$hidden.ready || authorHidden || isHidden($hidden, playingId, profileAuthorId))) stop();
+	});
 
 	$effect.pre(() => {
 		creations = libraryOpen ? (data.lineages?.items ?? []) : [];
@@ -242,6 +255,9 @@
 				{/each}
 			</div>
 		</section>
+	{:else if !$hidden.ready || authorHidden}
+		<p role="status">{$hidden.ready ? m.hidden_content() : m.hidden_loading()}</p>
+		<HiddenItems />
 	{:else}
 		<section class="hero" aria-labelledby="{id}-title">
 			<div class="caps">{m.perfil_eyebrow()}</div>
@@ -250,6 +266,7 @@
 				<path d="M4 21C43 4 86 6 139 11S208 18 234 5M76 21C125 15 174 17 218 23" />
 			</svg>
 			<p class="handle">@{profile.username}</p>
+			<HideActions author={profileAuthorId} authorName={profile.displayUsername} />
 			{#if profile.bio}<p class="bio">{profile.bio}</p>{/if}
 			<dl class="counts">
 				<div>
@@ -389,13 +406,14 @@
 						<p class="empty" data-testid="favorites-empty">{m.perfil_favorites_empty()}</p>
 					{:else}
 						<ul>
-							{#each favorites as favorite (favorite.lineage.id)}
+							{#each shownFavorites as favorite (favorite.lineage.id)}
 								<li>
 									<strong lang={favorite.lineage.lang}>{favorite.lineage.name}</strong>
 									{#if favorite.lineage.author}<span
 											>{m.perfil_by()} {favorite.lineage.author.displayUsername}</span
 										>{/if}
 									<small>{formatDate(favorite.at, locale)}</small>
+									<HideActions lineageId={favorite.lineage.id} author={authorHiddenId(favorite.lineage.author)} curveName={favorite.lineage.name} authorName={favorite.lineage.author?.displayUsername} />
 								</li>
 							{/each}
 						</ul>

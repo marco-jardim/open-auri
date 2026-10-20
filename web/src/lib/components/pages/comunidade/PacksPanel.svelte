@@ -8,6 +8,8 @@
 	import Button from '#lib/components/primitives/Button.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { LibraryItem, SocialApi } from '#lib/social/index.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
 	import {
 		DESCRIPTION_MAX,
 		NAME_MAX,
@@ -27,6 +29,9 @@
 
 	const id = $props.id();
 	let favorites = $state.raw<LibraryItem[]>([]);
+	const hidden = getHiddenStore();
+	const shownFavorites = $derived($hidden.ready ? favorites.filter((item) =>
+		!isHidden($hidden, item.id, authorHiddenId(item.author))) : []);
 	let packs = $state.raw<PackRow[]>([]);
 	let chosen = $state<string[]>([]);
 	let name = $state('');
@@ -75,7 +80,8 @@
 		busy = true;
 		message = '';
 		try {
-			const pack = await api.createPack({ name, description, visibility, items: [...chosen] });
+			const pack = await api.createPack({ name, description, visibility,
+				items: chosen.filter((id) => shownFavorites.some((item) => item.id === id)) });
 			packs = [{ id: pack.id, name: pack.name, description: pack.description }, ...packs];
 			chosen = [];
 			name = '';
@@ -115,10 +121,10 @@
 				</select>
 				<fieldset>
 					<legend class="fld-lbl">{m.comunidade_packs_from_favorites()}</legend>
-					{#if favorites.length === 0}
+					{#if shownFavorites.length === 0}
 						<p class="note">{m.comunidade_packs_no_favorites()}</p>
 					{:else}
-						{#each favorites as item (item.id)}
+						{#each shownFavorites as item (item.id)}
 							<label class="check">
 								<input type="checkbox" value={item.id} bind:group={chosen} />
 								<span>{item.head.name}</span>

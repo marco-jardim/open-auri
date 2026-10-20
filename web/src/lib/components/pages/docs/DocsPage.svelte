@@ -8,6 +8,8 @@
 	// Only `creditSources` (no prose) from the index; the locale prose arrives as `content` (L7).
 	import { creditSources } from '#lib/content/docs/credits.ts';
 	import type { DocsContent } from '#lib/content/docs/types.ts';
+	import { docsForEnvironment } from '#lib/content/docs/environment.ts';
+	import { getNativeCableState, isNativeAndroid } from '#lib/app/context.svelte.ts';
 	import { autoEqMitNotice } from '#lib/content/docs/mit.ts';
 	import { activeSection, isSearchShortcut } from './search.ts';
 	import { auriPreset, softRangeRows, tapeHex, thresholdRows } from './model.ts';
@@ -22,7 +24,7 @@
 
 	type NotifyTone = 'success' | 'error';
 	let {
-		content,
+		content: sourceContent,
 		ui,
 		githubUrl,
 		clearDisabled = false,
@@ -45,6 +47,10 @@
 		notify?: (message: string, tone: NotifyTone) => boolean;
 		getBackends?: () => LocalDataBackends;
 	} = $props();
+	const nativeCable = getNativeCableState();
+	const nativeAtLoad = isNativeAndroid();
+	const content = $derived(docsForEnvironment(sourceContent,
+		nativeAtLoad || nativeCable.result.kind !== 'none'));
 	const glossaryTerms = $derived(glossaryEntries());
 	let progress = $state(0);
 	let showTop = $state(false);

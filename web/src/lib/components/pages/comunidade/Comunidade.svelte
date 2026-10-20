@@ -30,6 +30,9 @@
 
 <script lang="ts">
 	import './comunidade.css';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
+	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
 	import { onDestroy, untrack } from 'svelte';
 	import { OFFICIAL_PRESETS } from 'open-auri/catalog';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
@@ -175,7 +178,10 @@
 	 * two lists never mix: the main feed and the rankings stay standard-only on the server.
 	 */
 	let yoloOnly = $state(false);
-	let channels = $state.raw<Channel[]>([]);
+	const hidden = getHiddenStore();
+	let allChannels = $state.raw<Channel[]>([]);
+	const channels = $derived($hidden.ready ? allChannels.filter((channel) =>
+		!isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))) : []);
 	let cursor = $state<string | null>(null);
 	let feedStatus = $state<'loading' | 'ready' | 'offline' | 'error'>('loading');
 	let feedError = $state('');
@@ -206,7 +212,7 @@
 			);
 			if (token !== generation) return;
 			const fresh = page.items.map(channelOf);
-			channels = after === null ? fresh : [...channels, ...fresh];
+			allChannels = after === null ? fresh : [...allChannels, ...fresh];
 			cursor = page.nextCursor;
 			feedStatus = 'ready';
 		} catch (error) {
@@ -333,6 +339,17 @@
 	// ---- Selection (SEL → master scope) -----------------------------------------------------------
 
 	let selected = $state.raw<Channel[]>([]);
+	$effect(() => {
+		const visible = selected.filter((channel) => $hidden.ready &&
+			!isHidden($hidden, channel.lineageId, authorHiddenId(channel.author)));
+		if (visible.length !== selected.length) {
+			selected = visible;
+			listener.stop();
+		}
+		if (allChannels.some((channel) =>
+			(!$hidden.ready || isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))) &&
+			listener.isPlaying(channel.lineageId))) listener.stop();
+	});
 	const target = $derived(selected[0] ?? null);
 
 	function toggleSelect(channel: Channel) {
@@ -508,6 +525,7 @@
 	</section>
 
 	<div class="desk">
+		<HiddenItems />
 		{#if !online}
 			<p class="offline-banner" role="status">{m.comunidade_offline()}</p>
 		{/if}
@@ -558,7 +576,9 @@
 				>
 			</div>
 			<div class="bank-wrap">
-				{#if feedStatus === 'loading' && channels.length === 0}
+				{#if !$hidden.ready}
+					<p class="bank-state" role="status">{m.hidden_loading()}</p>
+				{:else if feedStatus === 'loading' && channels.length === 0}
 					<div class="bank skel-bank" role="status" aria-busy="true" data-testid="feed-loading">
 						<span class="sr-only">{m.comunidade_loading()}</span>
 						{#each SKELETON_SLOTS as slot (slot)}

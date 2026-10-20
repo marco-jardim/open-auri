@@ -458,6 +458,7 @@ interface CurveCols {
 }
 
 interface AuthorCols {
+	u_public_id: string | null;
 	u_username: string | null;
 	u_display: string | null;
 }
@@ -477,7 +478,7 @@ const CURVE_COLUMNS =
 	'c.id AS c_id, c.s1 AS c_s1, c.canon_key AS c_canon, c.gate_ver AS c_gate_ver, ' +
 	'c.gate_ok AS c_gate_ok, c.gate_yolo AS c_gate_yolo, c.gate_reasons AS c_gate_reasons, ' +
 	'c.level_db AS c_level, c.created_at AS c_created';
-const SUMMARY_COLUMNS = `${LINEAGE_COLUMNS}, ${VERSION_COLUMNS}, ${CURVE_COLUMNS}, u."username" AS u_username, u."displayUsername" AS u_display`;
+const SUMMARY_COLUMNS = `${LINEAGE_COLUMNS}, ${VERSION_COLUMNS}, ${CURVE_COLUMNS}, u.public_author_id AS u_public_id, u."username" AS u_username, u."displayUsername" AS u_display`;
 /** Joins from `lineages l` to its head version, head curve and author. */
 const SUMMARY_JOINS =
 	'JOIN versions v ON v.id = l.head_version JOIN curves c ON c.id = v.curve_id ' +
@@ -568,7 +569,7 @@ function toCurve(row: CurveCols): CurveRecord {
 
 function toAuthor(row: AuthorCols): AuthorCredit | null {
 	if (row.u_username === null) return null;
-	return { username: row.u_username, displayUsername: row.u_display ?? row.u_username };
+	return { ...(row.u_public_id ? { id: row.u_public_id } : {}), username: row.u_username, displayUsername: row.u_display ?? row.u_username };
 }
 
 function toSummary(row: SummaryRow): LineageSummary {
@@ -2508,7 +2509,7 @@ export async function getPackForViewer(
 	const pack = await first<PackRow & AuthorCols>(
 		sql(
 			db,
-			`SELECT ${PACK_COLUMNS}, u."username" AS u_username, u."displayUsername" AS u_display ` +
+			`SELECT ${PACK_COLUMNS}, u.public_author_id AS u_public_id, u."username" AS u_username, u."displayUsername" AS u_display ` +
 				'FROM packs p LEFT JOIN "user" u ON u."id" = p.owner_user_id ' +
 				`WHERE p.id = ? AND ${readable.text}`,
 			packId,
@@ -3317,6 +3318,7 @@ export async function getPublicProfile(
 	username: string
 ): Promise<PublicProfile | null> {
 	const row = await first<{
+		authorId: string;
 		id: string;
 		username: string;
 		displayUsername: string | null;
@@ -3328,7 +3330,7 @@ export async function getPublicProfile(
 	}>(
 		sql(
 			db,
-			'SELECT pu."id" AS id, pu."username" AS username, pu."displayUsername" AS "displayUsername", ' +
+			'SELECT pu.public_author_id AS authorId, pu."id" AS id, pu."username" AS username, pu."displayUsername" AS "displayUsername", ' +
 				'pu."bio" AS bio, pu."library_visibility" AS library_visibility, ' +
 				'pu."activity_visibility" AS activity_visibility, ' +
 				`(SELECT count(*) FROM lineages l WHERE l.owner_user_id = pu."id" AND ${publicLineageSql('l')}) AS lineages, ` +
@@ -3340,6 +3342,7 @@ export async function getPublicProfile(
 	if (!row) return null;
 	return {
 		userId: row.id,
+		authorId: row.authorId,
 		username: row.username,
 		displayUsername: row.displayUsername ?? row.username,
 		bio: row.bio,

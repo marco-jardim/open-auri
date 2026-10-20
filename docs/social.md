@@ -105,6 +105,7 @@ predicados de visibilidade estão em
 | `shares`, `share_events`, `share_event_users` | Compartilhamento, contador anônimo diário e eventos atribuídos. |
 | `packs`, `pack_items` | Packs com licença copiada da versão head. |
 | `reports` | Denúncias, uma por alvo e denunciante. |
+| `hidden_items` | Preferências privadas por leitor, tipo e id público do alvo; nome em cache e data. Limite de 500 autores e 500 curvas por leitor. |
 | `rankings`, `ranking_state` | Rankings materializados por métrica e janela. |
 | `s6_batches`, `s6_pairs` | Lotes anônimos S6: hash do recibo, versão do consentimento, dia. |
 | `trades` | Trocas S7; no máximo uma `waiting` ou `matched` por usuário. |
@@ -500,6 +501,47 @@ ideia circular.
 ---
 
 ## Moderação e rankings (resumo)
+
+### Ocultar conteúdo para si
+
+- **Ocultar este autor** remove o conteúdo desse autor das superfícies de comunidade para
+  aquele leitor; **Ocultar esta curva** remove a linhagem específica, incluindo suas versões.
+  Há controles nos cards, nas páginas de curva e no perfil. Não exige conta e não substitui
+  o botão de denúncia: não gera relatório de moderação, aviso ao autor ou mudança global.
+- Visitantes guardam ids e rótulos em `localStorage`, chave `oa.hidden.v1`, até 500 por tipo.
+  Os rótulos são o apelido/nome em texto simples no momento de ocultar, usados para reconhecer
+  o item na gestão mesmo se o conteúdo deixar de existir. Sem nome em cache, mostra-se o tipo,
+  nunca um id técnico como nome. Em **Itens ocultos**, na comunidade, é possível voltar a mostrar.
+- Contas sincronizam pela API `GET/PUT/DELETE /api/v1/me/hidden` e também têm a gestão em `/conta`.
+  Ao entrar, a lista local é unida atomicamente à da conta, sem substituir escolhas de outro
+  aparelho, e a cópia local só é apagada após confirmação. Falhas mantêm a lista local para
+  nova tentativa. Ao sair ou trocar de conta, a aplicação descarta a lista anterior da memória;
+  nunca grava preferências da conta em armazenamento anônimo.
+  Se a união ultrapassar o limite, o painel mantém as duas listas para permitir desocultar
+  alvos e liberar espaço antes de repetir a união; o conteúdo continua fechado nesse estado.
+- **Decisão de implementação:** a filtragem é no cliente tanto para visitantes quanto para
+  contas. A lista sincronizada é carregada antes de renderizar conteúdo comunitário. Feed,
+  rankings e seletores/buscas de comparação e teste cego filtram antes de exibir; perfil filtra
+  criações e favoritos e esconde o perfil inteiro quando o autor foi ocultado. A página direta
+  da curva oferece uma mensagem e a gestão para desfazer a escolha. Seleções ocultadas deixam
+  a mesa e sua reprodução é interrompida. Os números de posição dos rankings não são recalculados.
+- O agregado S6 não identifica autor/linhagem. Quando há itens ocultos, **Comunidade prefere**
+  só mostra curvas reconhecidas na página carregada e não ocultas; ids desconhecidos ficam de
+  fora para não reapresentar conteúdo oculto por outra superfície.
+- O parceiro do S7 é anônimo antes da avaliação. Para não contornar a escolha por áudio cego,
+  as trocas ficam sem conteúdo enquanto houver itens ocultos que não podem ser conferidos
+  contra essa identidade; a gestão permite desfazer as ocultações para retomar. Favoritos
+  nos seletores de packs e nas prateleiras da conta também respeitam a lista.
+- A API pública permanece pública e cacheável: isto é uma preferência de apresentação, não uma
+  permissão de acesso nem uma exclusão dos dados recebidos pela rede. Se o carregamento das
+  preferências falhar, a aplicação mostra a falha e permite tentar novamente sem expor os cards.
+- A migração `0014_hidden_items.sql` cria `hidden_items`, com unicidade por usuário/tipo/alvo,
+  gatilho de limite e exclusão em cascata. `user.public_author_id` é um id público aleatório
+  distinto do id de autenticação e estável após mudança de apelido; ele viaja nos créditos dos
+  cards (`author.id`) e no perfil (`authorId`). Curvas usam o id de linhagem. A exportação LGPD
+  inclui `hiddenItems`, e ambos os modos de encerramento removem esses dados privados.
+
+### Denúncias e ordenação pública
 
 - **Denúncias** de curva, pack ou perfil por usuários verificados, com Turnstile.
   Perfis são denunciados pelo apelido público, nunca pelo id interno da conta.

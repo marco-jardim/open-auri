@@ -140,7 +140,7 @@ export function feedLineageCard(summary: LineageSummary): FeedLineageCard {
 		author:
 			author === null
 				? null
-				: { username: author.username, displayUsername: author.displayUsername },
+				: { ...author },
 		createdAt: summary.createdAt,
 		updatedAt: summary.updatedAt,
 		head: {

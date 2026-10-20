@@ -219,6 +219,8 @@ export interface LineageRecord {
 
 /** Public credit of an author: the nickname only, null for "autor removido". */
 export interface AuthorCredit {
+	/** Stable public identifier, unrelated to the private authentication id. */
+	id?: string;
 	username: string;
 	displayUsername: string;
 }
@@ -448,6 +450,7 @@ export type PairResult = { status: 'matched'; matchId: string } | { status: 'wai
 // ---- Profiles -------------------------------------------------------------------------------
 
 export interface PublicProfile {
+	authorId?: string;
 	/** Internal id, for the follow-up library queries; never part of an API response. */
 	userId: string;
 	username: string;

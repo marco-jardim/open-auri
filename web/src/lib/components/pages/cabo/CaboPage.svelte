@@ -29,11 +29,7 @@
 	import type { JournalEntry } from '#lib/cable/types.ts';
 	import { getNativeCableState, isNativeAndroid } from '#lib/app/context.svelte.ts';
 	import type { NativeHIDDevice } from '#lib/cable/native/index.ts';
-	import {
-		ANDROID_PLAY_LIVE,
-		ANDROID_PLAY_URL,
-		ANDROID_RELEASES_URL
-	} from '#lib/cable/android-links.ts';
+	import { ANDROID_PLAY_URL } from '#lib/cable/android-links.ts';
 	import AndroidAppCallout from '#lib/components/cable/AndroidAppCallout.svelte';
 	import AndroidUntestedNotice from '#lib/components/cable/AndroidUntestedNotice.svelte';
 	import UsbDiagnostics from './UsbDiagnostics.svelte';
@@ -88,8 +84,9 @@
 	const cable = $derived(app?.cableState ?? null);
 	const nativeCable = getNativeCableState();
 	const native = $derived(nativeCable.result);
-	const inApp = $derived(native.kind !== 'none');
-	const updateUrl = ANDROID_PLAY_LIVE ? ANDROID_PLAY_URL : ANDROID_RELEASES_URL;
+	const inApp = $derived(native.kind !== 'none' || isNativeAndroid());
+	// This link is in the native bridge warning, never an invitation to sideload an APK.
+	const updateUrl = ANDROID_PLAY_URL;
 	// Cabo previously had no layer-specific controls. Reuse Curva's URL layer, not a new setting.
 	const engineering = $derived(
 		inApp && browser && parseLayer(page.url?.searchParams.get(LAYER_PARAM)) === 'engenharia'

@@ -347,7 +347,7 @@ export async function loadSharedCurve(
 			license: version.license,
 			lang: version.lang,
 			author: lineage.author
-				? { username: lineage.author.username, displayUsername: lineage.author.displayUsername }
+				? { ...lineage.author }
 				: null,
 			s1: curve.s1,
 			// Filter labels of the shown version (page only; never the OG image or meta tags).

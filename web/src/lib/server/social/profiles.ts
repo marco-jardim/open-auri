@@ -72,6 +72,7 @@ export interface FavoriteCard {
 }
 
 export interface ProfileDto {
+	authorId?: string;
 	username: string;
 	displayUsername: string;
 	bio: string | null;
@@ -124,6 +125,7 @@ export function packCard(pack: PackRecord): PackCard {
 
 export function profileDto(profile: PublicProfile): ProfileDto {
 	return {
+		...(profile.authorId ? { authorId: profile.authorId } : {}),
 		username: profile.username,
 		displayUsername: profile.displayUsername,
 		bio: profile.bio,

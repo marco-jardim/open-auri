@@ -37,6 +37,8 @@ import type {
 import type { S6Preferences as S6PreferencesDocument } from '#lib/server/social/s6.ts';
 import type { CreateShareInput, CreatedShare, ShareFunnel } from '#lib/server/social/shares.ts';
 import type { TradeDto } from '#lib/server/social/trades.ts';
+import type { HiddenItem } from '#lib/server/social/hidden.ts';
+import type { HiddenList, HiddenTarget } from './hidden.ts';
 import type {
 	ActivityKind,
 	ActivityRecord,
@@ -503,6 +505,12 @@ export function createSocialApi(options: SocialApiOptions = {}) {
 			call<{ audience: Audience }>('GET', `/curves/${seg(lineageId)}/audience`, opts),
 
 		// The caller's own data.
+		myHidden: (opts: RequestOptions = {}) =>
+			call<{ items: HiddenItem[] }>('GET', '/me/hidden', opts),
+		putHidden: (body: HiddenList, opts: RequestOptions = {}) =>
+			call<{ items: HiddenItem[] }>('PUT', '/me/hidden', { ...opts, body }),
+		deleteHidden: (body: HiddenTarget, opts: RequestOptions = {}) =>
+			call<{ items: HiddenItem[] }>('DELETE', '/me/hidden', { ...opts, body }),
 		myActivity: (query: PageQuery = {}, opts: RequestOptions = {}) =>
 			call<Page<ActivityRecord>>('GET', `/me/activity${queryString({ ...query })}`, opts),
 		deleteMyActivity: (filter: MyActivityDeleteFilter = {}, opts: RequestOptions = {}) =>
