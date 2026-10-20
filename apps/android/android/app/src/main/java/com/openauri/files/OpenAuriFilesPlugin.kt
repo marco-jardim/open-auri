@@ -32,7 +32,8 @@ internal class FilesException(val code: String, message: String, cause: Throwabl
 internal object FileNames {
     private val unsafe = Regex("[/\\\\\\p{Cc}\\p{Cf}]")
     private val dots = Regex("\\.{2,}")
-    private val whitespace = Regex("(?U)\\s+")
+    // Android's ICU regex rejects the (?U) flag; \p{Z} gives the same Unicode coverage on JVM and ICU.
+    private val whitespace = Regex("[\\s\\p{Z}]+")
 
     fun sanitize(name: String): String {
         val clean = name.replace(unsafe, "").replace(dots, "").replace(whitespace, " ")
