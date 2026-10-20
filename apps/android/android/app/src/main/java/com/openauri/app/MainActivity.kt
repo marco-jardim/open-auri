@@ -34,6 +34,9 @@ class MainActivity : BridgeActivity() {
     private var activePackageName = WebViewCompatGate.DEFAULT_WEBVIEW_PACKAGE
     private var downloads: DownloadBridge? = null
 
+    /** Set once a passing gate created the bridge and onCreate wired it; deep links load only then. */
+    private var deepLinksReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val injectedGate = gateForTesting
         gateResult = if (injectedGate != null) {
@@ -59,6 +62,11 @@ class MainActivity : BridgeActivity() {
         if (gateResult == WebViewCompatGate.Result.Ok) {
             bridge?.let { it.setWebViewClient(OfflineAwareWebViewClient(it)) }
             attachDownloads()
+            if (bridge != null) {
+                deepLinksReady = true
+                // Supersedes the start URL that Bridge.loadWebView() is already loading.
+                openDeepLink(intent)
+            }
         } else {
             val screen = findViewById<View>(R.id.webview_update_screen)
             ViewCompat.setAccessibilityHeading(findViewById(R.id.webview_update_title), true)
@@ -88,10 +96,29 @@ class MainActivity : BridgeActivity() {
         super.load()
     }
 
+    /**
+     * Warm start (singleTask): an App Link for the running activity arrives here, on the main
+     * thread. BridgeActivity.load() also calls this with the launch intent while onCreate is still
+     * running; [deepLinksReady] is false then, and onCreate opens that intent itself once the
+     * bridge is fully wired, so the page is loaded once. With a failing gate nothing is loaded.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (deepLinksReady) openDeepLink(intent)
+    }
+
     override fun onDestroy() {
         downloads?.close()
         downloads = null
         super.onDestroy()
+    }
+
+    /** Loads the page [intent] links to when [DeepLinks.targetFor] accepts it; otherwise keeps the page. */
+    private fun openDeepLink(intent: Intent) {
+        val activeBridge = bridge ?: return
+        val target = DeepLinks.targetFor(intent.action, intent.dataString, activeBridge.serverUrl) ?: return
+        activeBridge.webView.loadUrl(target)
     }
 
     /**
@@ -140,6 +167,37 @@ class MainActivity : BridgeActivity() {
         /** Test-only injection, set before ActivityScenario launch and cleared after each test. */
         @Volatile
         internal var gateForTesting: (() -> WebViewCompatGate.Result)? = null
+    }
+}
+
+/**
+ * Maps a launch or new intent to the page the WebView should open, e.g. a verified App Link to
+ * `https://open-auri.com/c/<id>`. Capacitor keeps the intent data but always loads its start URL.
+ *
+ * MainActivity is exported, so any app can send it a VIEW intent with arbitrary data, not only
+ * verified links. Only an https URL without user info whose origin equals the origin of the
+ * bridge's server URL is accepted (compared with [OriginGuard.originOf]); anything else yields null
+ * and the WebView keeps its page (fail closed). A server URL over http (debug or e2e builds)
+ * therefore never deep-links.
+ *
+ * The target is rebuilt as the normalized server origin plus the link's path, query and fragment,
+ * so the WebView navigates to exactly the authority that was compared, not to raw authority text
+ * another URL parser could read differently.
+ */
+internal object DeepLinks {
+    private const val HTTPS_PREFIX = "https://"
+    private const val SCHEME_SEPARATOR = "://"
+    private val AUTHORITY_END = charArrayOf('/', '?', '#')
+
+    /** The URL to load for an intent with [action] and [data] (`Intent.getDataString()`), or null. */
+    internal fun targetFor(action: String?, data: String?, serverUrl: String?): String? {
+        if (action != Intent.ACTION_VIEW || data == null) return null
+        val origin = OriginGuard.originOf(data) ?: return null
+        if (!origin.startsWith(HTTPS_PREFIX) || origin != OriginGuard.originOf(serverUrl)) return null
+        // originOf accepted data, so it contains the scheme separator; same authority split as there.
+        val authorityStart = data.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length
+        val authorityEnd = data.indexOfAny(AUTHORITY_END, authorityStart)
+        return if (authorityEnd < 0) origin else origin + data.substring(authorityEnd)
     }
 }
 
