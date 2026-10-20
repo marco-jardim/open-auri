@@ -33,9 +33,11 @@ Contas pessoais criadas depois de 2023-11-13 precisam de teste fechado com 12 te
 
 | Campo | Valor |
 |---|---|
-| Estado da conta | pendente (aguardando o mantenedor) |
-| Data de criação | pendente |
-| Tipo | pendente |
-| Identidade verificada | pendente |
-| Aviso de inatividade | pendente |
-| Caminho da P7 | pendente (isento ou teste fechado) |
+| Estado da conta | ativa (informado pelo mantenedor em 2026-10-20) |
+| Data de criação | anterior a 2023-11-13 ("conta muito antiga") |
+| Tipo | pessoal |
+| Identidade verificada | não; publicação bloqueada pelo Console até concluir a verificação |
+| Aviso de inatividade | nenhum informado |
+| Caminho da P7 | isento de teste fechado (conta pessoal anterior a 2023-11-13); envio direto para produção depois do teste interno |
+
+**Próximo passo do mantenedor:** concluir a verificação de identidade no Play Console (passo 5 acima). Enquanto ela não terminar, a P5 (criar o app e preencher a ficha) pode ser feita como rascunho, mas nenhuma versão pode ser enviada.
