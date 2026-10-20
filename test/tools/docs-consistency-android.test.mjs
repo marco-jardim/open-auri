@@ -30,7 +30,10 @@ test('all npm run scripts cited by Android development and release docs exist', 
   const sources = new Map([
     ['docs/android.md', android],
     ['docs/android/captura-usb.md', read('docs/android/captura-usb.md')],
-    ['CONTRIBUTING.md (Android)', section(read('CONTRIBUTING.md'), '## Executar e testar o Android')],
+    [
+      'CONTRIBUTING.md (Android)',
+      section(read('CONTRIBUTING.md'), '## Executar e testar o Android'),
+    ],
     [runbook, read(runbook)],
   ]);
   let count = 0;
@@ -72,9 +75,13 @@ test('G.5 is verbatim in README, the Play listing and generated release notes', 
   const en = quoted(g5, /^- en-US: "([^"]+)"$/gm);
   assert.equal(quoted(read('README.md'), /^> (Aviso: [^\n]+)$/gm), pt);
   const listing = read('docs/android/play-listing.md');
-  for (const [language, notice] of [['pt-BR', pt], ['en-US', en]]) {
-    const full = section(listing, `## ${language}`)
-      .match(/### Full description\n\n```text\n([^\n]+)/);
+  for (const [language, notice] of [
+    ['pt-BR', pt],
+    ['en-US', en],
+  ]) {
+    const full = section(listing, `## ${language}`).match(
+      /### Full description\n\n```text\n([^\n]+)/,
+    );
     assert.ok(full, `${language}: missing full description`);
     assert.equal(full[1], notice, `${language}: Play notice differs from G.5`);
   }
