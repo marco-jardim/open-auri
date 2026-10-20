@@ -22,6 +22,7 @@
 
 <script lang="ts">
 	import { onDestroy, type Snippet } from 'svelte';
+	import { registerNativeBack } from '#lib/components/chrome/native-back.ts';
 
 	interface Props {
 		text: string;
@@ -46,6 +47,12 @@
 		placement = 'bottom',
 		children
 	}: Props = $props();
+
+	// Callers can pin this open on touch too (e.g. Button's unavailable-action reason).
+	$effect(() => {
+		if (!open) return;
+		return registerNativeBack({ canDismiss: () => true, dismiss: hide });
+	});
 
 	const GAP = 8;
 	const MARGIN = 8;

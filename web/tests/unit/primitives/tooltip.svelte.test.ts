@@ -1,16 +1,60 @@
 // Tooltip (FUX.1, spec §2.6): 400 ms hover delay, opens on keyboard focus, Escape closes,
 // described-by wiring, top layer (never clipped by the scrolling bar).
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
+import { NATIVE_BACK_EVENT } from '#lib/components/chrome/native-back.ts';
 import TooltipFixture from './TooltipFixture.svelte';
+import PinnedTooltipFixture from './PinnedTooltipFixture.svelte';
 import './design-system.ts';
 
 afterEach(async () => {
 	await cleanup();
+	vi.unstubAllGlobals();
 });
 
 const TEXT = 'Q é a largura do filtro.';
+
+function pressBack(): boolean {
+	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
+
+test('Android Back closes a Tooltip pinned by an unavailable button touch press and unregisters', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	await render(PinnedTooltipFixture, { text: TEXT });
+	const trigger = page.getByRole('button', { name: 'Unavailable' }).element() as HTMLButtonElement;
+	const tooltip = page.getByRole('tooltip', { includeHidden: true });
+	const touch = { bubbles: true, pointerType: 'touch' };
+	trigger.dispatchEvent(new PointerEvent('pointerdown', touch));
+	trigger.dispatchEvent(new PointerEvent('pointerup', touch));
+	// Button explicitly pins its unavailable-action reason on click, even without focus/hover.
+	trigger.click();
+	await expect.element(tooltip).toBeVisible();
+	expect(pressBack()).toBe(true);
+	await expect.element(tooltip).not.toBeVisible();
+	expect(pressBack()).toBe(false);
+	trigger.click();
+	await expect.element(tooltip).toBeVisible();
+	expect(pressBack()).toBe(true);
+	await expect.element(tooltip).not.toBeVisible();
+	trigger.click();
+	await expect.element(tooltip).toBeVisible();
+	await cleanup();
+	expect(pressBack()).toBe(false);
+});
+
+test('outside Android a focused Tooltip does not register Back', async () => {
+	vi.stubGlobal('Capacitor', undefined);
+	await render(TooltipFixture, { text: TEXT });
+	page.getByRole('button', { name: 'Q' }).element().focus();
+	const tooltip = page.getByRole('tooltip', { includeHidden: true });
+	await expect.element(tooltip).toBeVisible();
+	expect(pressBack()).toBe(false);
+	await expect.element(tooltip).toBeVisible();
+});
 
 test('the trigger is described by the tooltip text, closed at first', async () => {
 	await render(TooltipFixture, { text: TEXT });

@@ -10,6 +10,8 @@ import Explainer from '#lib/components/comprehension/Explainer.svelte';
 import GlossaryLink from '#lib/components/comprehension/GlossaryLink.svelte';
 import Tour from '#lib/components/comprehension/Tour.svelte';
 import Fixture from './ComprehensionFixture.svelte';
+import ConfirmDialog from '#lib/components/chrome/ConfirmDialog.svelte';
+import { NATIVE_BACK_EVENT } from '#lib/components/chrome/native-back.ts';
 
 beforeEach(async () => {
 	localStorage.removeItem(TOUR_STORAGE_KEY);
@@ -19,12 +21,105 @@ beforeEach(async () => {
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	localStorage.removeItem(TOUR_STORAGE_KEY);
 	await setLocale('pt-BR', { reload: false });
 });
 
 const controller = (desktop = false) =>
 	createTour({ storage: () => undefined, isDesktop: () => desktop });
+
+function pressBack(): boolean {
+	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
+
+test('Android Back closes Tour, records dismissal and unregisters on reopen and unmount', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const state = controller();
+	await render(Fixture, { controller: state });
+	const trigger = page.getByRole('button', { name: 'Como funciona esta página' });
+	for (let opening = 0; opening < 2; opening += 1) {
+		await trigger.click();
+		await expect.element(page.getByRole('dialog')).toBeVisible();
+		expect(pressBack()).toBe(true);
+		await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+		expect(state.history.curva).toBe('dispensado');
+		await expect.element(trigger).toHaveFocus();
+		expect(pressBack()).toBe(false);
+	}
+	await trigger.click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	await cleanup();
+	expect(pressBack()).toBe(false);
+});
+
+test('Android Back closes an Explainer above a Tour first, then the Tour, one per press', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const state = controller();
+	state.open('biblioteca');
+	await render(Tour, { page: 'biblioteca', controller: state, autoOpen: false });
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	await render(Explainer, { term: 'q' });
+	const trigger = page.getByRole('button', { name: /^O que é isso\?/ });
+	await trigger.click();
+	const explanation = page.getByRole('dialog', { name: explainers.q.title() });
+	await expect.element(explanation).toBeVisible();
+	expect(pressBack()).toBe(true);
+	await expect.element(explanation).not.toBeInTheDocument();
+	await expect.element(trigger).toHaveFocus();
+	expect(state.activePage).toBe('biblioteca');
+	expect(pressBack()).toBe(true);
+	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+	expect(state.activePage).toBeNull();
+	expect(pressBack()).toBe(false);
+	await trigger.click();
+	await expect.element(explanation).toBeVisible();
+	await cleanup();
+	expect(pressBack()).toBe(false);
+});
+
+test('Android Back closes a modal above the Tour before dismissing the Tour', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const state = controller();
+	state.open('biblioteca');
+	await render(Tour, { page: 'biblioteca', controller: state, autoOpen: false });
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	const onResult = vi.fn();
+	await render(ConfirmDialog, { open: true, title: 'Above Tour', onResult });
+	await expect.element(page.getByRole('dialog', { name: 'Above Tour' })).toBeVisible();
+	expect(pressBack()).toBe(true);
+	await expect.element(page.getByRole('dialog', { name: 'Above Tour' })).not.toBeInTheDocument();
+	expect(onResult).toHaveBeenCalledExactlyOnceWith(false);
+	expect(state.activePage).toBe('biblioteca');
+	expect(pressBack()).toBe(true);
+	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+	expect(pressBack()).toBe(false);
+});
+
+test('outside Android Tour and Explainer do not register Back', async () => {
+	vi.stubGlobal('Capacitor', undefined);
+	const state = controller();
+	state.open('biblioteca');
+	await render(Tour, { page: 'biblioteca', controller: state, autoOpen: false });
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	expect(pressBack()).toBe(false);
+	expect(state.activePage).toBe('biblioteca');
+	await render(Explainer, { term: 'q' });
+	await page.getByRole('button', { name: /^O que é isso\?/ }).click();
+	const explanation = page.getByRole('dialog', { name: explainers.q.title() });
+	await expect.element(explanation).toBeVisible();
+	expect(pressBack()).toBe(false);
+	await expect.element(explanation).toBeVisible();
+});
 
 test('tour manages keyboard focus, next/back, counter, Escape, reopen and skip', async () => {
 	const state = controller();

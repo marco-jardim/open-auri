@@ -13,6 +13,8 @@ import {
 	type SocialFetch
 } from '#lib/social/index.ts';
 import { m } from '#lib/paraglide/messages.js';
+import { setLocale } from '#lib/paraglide/runtime.js';
+import { NATIVE_BACK_EVENT } from '#lib/components/chrome/native-back.ts';
 import SocialActions from '#lib/components/pages/curva/SocialActions.svelte';
 import { curvaSocialApi, serverGateMessages } from '#lib/components/pages/curva/social.ts';
 import { fakeAppOptions } from '../../app/fakes.ts';
@@ -31,7 +33,13 @@ afterEach(async () => {
 	for (const app of apps.splice(0)) app.dispose();
 	localStorage.removeItem(ORIGINS_KEY);
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+	await setLocale('pt-BR', { reload: false });
 });
+
+function pressBack(): boolean {
+	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
 
 async function setup(
 	respond: SocialFetch = async () => json({ items: [], nextCursor: null }),
@@ -58,6 +66,75 @@ async function setup(
 	});
 	return { app, fetcher, session, clipboard, screen };
 }
+
+test.each(['save', 'publish'] as const)(
+	'Android Back closes the Curva %s dialog and unregisters on reopen and unmount',
+	async (mode) => {
+		vi.stubGlobal('Capacitor', {
+			isNativePlatform: () => true,
+			getPlatform: () => 'android'
+		});
+		await setLocale('pt-BR', { reload: false });
+		const { fetcher } = await setup();
+		const trigger = page.getByRole('button', {
+			name: mode === 'save' ? m.curva_social_save() : m.curva_social_publish(),
+			exact: true
+		});
+		await trigger.click();
+		const dialog = page.getByRole('dialog');
+		await expect.element(dialog).toBeVisible();
+		await dialog.getByRole('textbox', { name: m.curva_social_description() }).fill('Rascunho');
+		expect(pressBack()).toBe(true);
+		// A closed <dialog> leaves the accessibility tree, so its role locator finds nothing.
+		await expect.poll(() => document.querySelector('dialog[open]')).toBeNull();
+		expect(pressBack()).toBe(false);
+		expect(fetcher).not.toHaveBeenCalled();
+		await trigger.click();
+		await expect.element(dialog).toBeVisible();
+		expect(pressBack()).toBe(true);
+		// A closed <dialog> leaves the accessibility tree, so its role locator finds nothing.
+		await expect.poll(() => document.querySelector('dialog[open]')).toBeNull();
+		await trigger.click();
+		await expect.element(dialog).toBeVisible();
+		await cleanup();
+		expect(pressBack()).toBe(false);
+	}
+);
+
+test('a busy Curva dialog consumes Android Back and keeps its draft until the request settles', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	await setLocale('pt-BR', { reload: false });
+	let finish: (response: Response) => void = () => undefined;
+	const response = new Promise<Response>((resolve) => (finish = resolve));
+	await setup(() => response);
+	await page.getByRole('button', { name: m.curva_social_save() }).click();
+	const dialog = page.getByRole('dialog');
+	const description = dialog.getByRole('textbox', { name: m.curva_social_description() });
+	await description.fill('Rascunho ocupado');
+	await dialog.getByRole('button', { name: m.cvedit_save_confirm(), exact: true }).click();
+	await expect.element(description).toBeDisabled();
+	for (let press = 0; press < 3; press += 1) expect(pressBack()).toBe(true);
+	await expect.element(dialog).toBeVisible();
+	await expect.element(description).toHaveValue('Rascunho ocupado');
+	finish(json({ error: { code: 'INVALID_CURVE' } }, 422));
+	await expect.element(description).not.toBeDisabled();
+	expect(pressBack()).toBe(true);
+	// A closed <dialog> leaves the accessibility tree, so its role locator finds nothing.
+	await expect.poll(() => document.querySelector('dialog[open]')).toBeNull();
+	expect(pressBack()).toBe(false);
+});
+
+test('outside Android the Curva dialog does not register Back', async () => {
+	vi.stubGlobal('Capacitor', undefined);
+	await setup();
+	await page.getByRole('button', { name: m.curva_social_save() }).click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	expect(pressBack()).toBe(false);
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+});
 
 test('account save asks for the text, is private and never edits or writes the cable', async () => {
 	const { app, fetcher } = await setup(async () =>

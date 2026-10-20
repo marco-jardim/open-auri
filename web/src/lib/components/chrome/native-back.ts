@@ -12,6 +12,8 @@ export interface NativeBackOverlay {
 	/** Rechecked on each Back press (e.g. a write in progress, an unacknowledged notice). */
 	canDismiss: () => boolean;
 	dismiss: () => void;
+	/** Defaults to true. A mandatory notice may let Back leave without acknowledging it. */
+	consumeWhenBlocked?: boolean;
 }
 
 /** Open overlays, in opening order: the last one is the topmost. */
@@ -20,10 +22,12 @@ const overlays: NativeBackOverlay[] = [];
 function onNativeBack(event: Event): void {
 	const top = overlays.at(-1);
 	if (!top) return;
-	// An open overlay always consumes Back: one that may not close yet keeps the user here
-	// rather than letting Back leave the page or the app behind it.
+	// Only the topmost overlay answers. Busy writes keep Back; a mandatory notice may let
+	// the app leave without dismissing or acknowledging it (nor reaching an overlay below).
+	const canDismiss = top.canDismiss();
+	if (!canDismiss && top.consumeWhenBlocked === false) return;
 	event.preventDefault();
-	if (top.canDismiss()) top.dismiss();
+	if (canDismiss) top.dismiss();
 }
 
 if (typeof window !== 'undefined') window.addEventListener(NATIVE_BACK_EVENT, onNativeBack);
@@ -35,10 +39,34 @@ if (typeof window !== 'undefined') window.addEventListener(NATIVE_BACK_EVENT, on
 export function registerNativeBack(overlay: NativeBackOverlay): () => void {
 	if (!isNativeAndroid()) return () => undefined;
 	// Own entry, so registering the same callbacks twice keeps two independent stack slots.
-	const entry: NativeBackOverlay = { canDismiss: overlay.canDismiss, dismiss: overlay.dismiss };
+	const entry: NativeBackOverlay = {
+		canDismiss: overlay.canDismiss,
+		dismiss: overlay.dismiss,
+		get consumeWhenBlocked() {
+			return overlay.consumeWhenBlocked;
+		}
+	};
 	overlays.push(entry);
 	return () => {
 		const index = overlays.indexOf(entry);
 		if (index !== -1) overlays.splice(index, 1);
+	};
+}
+
+/** Attachment for native popovers: light dismiss, Escape and Back share the same open state. */
+export function nativeBackPopover(node: HTMLElement): () => void {
+	let releaseBack: (() => void) | undefined;
+	const beforeToggle = (event: Event) => {
+		if (!('newState' in event)) return;
+		releaseBack?.();
+		releaseBack =
+			event.newState === 'open'
+				? registerNativeBack({ canDismiss: () => true, dismiss: () => node.hidePopover() })
+				: undefined;
+	};
+	node.addEventListener('beforetoggle', beforeToggle);
+	return () => {
+		node.removeEventListener('beforetoggle', beforeToggle);
+		releaseBack?.();
 	};
 }

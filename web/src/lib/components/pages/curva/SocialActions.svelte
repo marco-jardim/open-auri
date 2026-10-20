@@ -23,6 +23,7 @@
 	import { classOf, exitRefusal, exitRefusalText } from './yolo.ts';
 	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import YoloPublishAck from '#lib/components/yolo/YoloPublishAck.svelte';
+	import { registerNativeBack } from '#lib/components/chrome/native-back.ts';
 	import {
 		ackWaived,
 		needsYoloAck,
@@ -113,6 +114,16 @@
 	const activity = new PreviewActivity();
 	let dialog = $state<HTMLDialogElement | null>(null);
 	let dialogOpen = $state(false);
+	$effect(() => {
+		if (!dialogOpen) return;
+		return registerNativeBack({
+			canDismiss: () => !busy,
+			dismiss: () => {
+				dialog?.close();
+				dialogOpen = false;
+			}
+		});
+	});
 	/** "Salvar" asks for the text of a private copy; "Publicar" also picks license and visibility. */
 	let mode = $state<'publish' | 'save'>('publish');
 	let nameField = $state<HTMLInputElement | null>(null);

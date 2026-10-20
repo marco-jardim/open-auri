@@ -12,6 +12,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { explainerHeadings, type ExplainerId } from '#lib/comprehension/explainer-titles.ts';
 	import { explainerPanel } from './panels.ts';
+	import { registerNativeBack } from '#lib/components/chrome/native-back.ts';
 
 	let {
 		term,
@@ -26,6 +27,10 @@
 	} = $props();
 	const id = $props.id();
 	let open = $state(false);
+	$effect(() => {
+		if (!open) return;
+		return registerNativeBack({ canDismiss: () => true, dismiss: close });
+	});
 	let trigger: HTMLButtonElement | undefined = $state();
 	const heading = $derived(explainerHeadings[term]);
 

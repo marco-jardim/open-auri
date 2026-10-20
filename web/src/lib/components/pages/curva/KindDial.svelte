@@ -20,6 +20,7 @@
 	import { onDestroy, untrack } from 'svelte';
 	import { isExperimentalKind } from 'open-auri/safety';
 	import { m } from '#lib/paraglide/messages.js';
+	import { registerNativeBack } from '#lib/components/chrome/native-back.ts';
 	import { isLockedKind, kindsForLayer, type Layer } from './layers.ts';
 	import type { BandKind } from './model.ts';
 
@@ -292,6 +293,16 @@
 	let trigger: HTMLElement | undefined = $state();
 	let tip: HTMLElement | undefined = $state();
 	let tipOpen = $state(false);
+	$effect(() => {
+		if (!tipOpen) return;
+		return registerNativeBack({
+			canDismiss: () => true,
+			dismiss: () => {
+				cancelPending(true);
+				hideTip();
+			}
+		});
+	});
 	let tipPos = $state<{ top: number; left: number } | null>(null);
 	let openTimer: ReturnType<typeof setTimeout> | undefined;
 	let closeTimer: ReturnType<typeof setTimeout> | undefined;

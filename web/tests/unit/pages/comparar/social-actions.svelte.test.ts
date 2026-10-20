@@ -10,14 +10,20 @@ import { createCurveSocial } from '#lib/components/pages/comparar/social.svelte.
 import CompararPage from '#lib/components/pages/comparar/CompararPage.svelte';
 import SocialSources from '#lib/components/pages/comparar/SocialSources.svelte';
 import SocialPublish from '#lib/components/pages/comparar/SocialPublish.svelte';
+import { NATIVE_BACK_EVENT } from '#lib/components/chrome/native-back.ts';
 
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	// Remembered origins live in localStorage, shared with other files in the same browser run.
 	localStorage.removeItem(ORIGINS_KEY);
 	await setLocale('pt-BR', { reload: false });
 });
+
+function pressBack(): boolean {
+	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
 
 function fixture(signedIn = true) {
 	const curve = { ...neutralCurve(), name: 'Community tone' };
@@ -49,6 +55,75 @@ function fixture(signedIn = true) {
 		social: createCurveSocial(createSocialApi({ fetch: fetcher }), session)
 	};
 }
+
+test.each(['save', 'publish'] as const)(
+	'Android Back closes the Comparar %s dialog and unregisters on reopen and unmount',
+	async (mode) => {
+		vi.stubGlobal('Capacitor', {
+			isNativePlatform: () => true,
+			getPlatform: () => 'android'
+		});
+		const { social, fetcher, curve } = fixture();
+		await render(SocialPublish, { social, curve, path: '/comparar' });
+		const trigger = page.getByRole('button', {
+			name: mode === 'save' ? m.curve_social_save() : m.curve_social_publish(),
+			exact: true
+		});
+		await trigger.click();
+		const dialog = page.getByRole('dialog');
+		await expect.element(dialog).toBeVisible();
+		expect(pressBack()).toBe(true);
+		// A closed <dialog> leaves the accessibility tree, so its role locator finds nothing.
+		await expect.poll(() => document.querySelector('dialog[open]')).toBeNull();
+		expect(pressBack()).toBe(false);
+		expect(fetcher).not.toHaveBeenCalled();
+		await trigger.click();
+		await expect.element(dialog).toBeVisible();
+		expect(pressBack()).toBe(true);
+		// A closed <dialog> leaves the accessibility tree, so its role locator finds nothing.
+		await expect.poll(() => document.querySelector('dialog[open]')).toBeNull();
+		await trigger.click();
+		await expect.element(dialog).toBeVisible();
+		await cleanup();
+		expect(pressBack()).toBe(false);
+	}
+);
+
+test('a busy Comparar dialog consumes Android Back and keeps its draft until the request settles', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const { social, fetcher, curve } = fixture();
+	let finish: (response: Response) => void = () => undefined;
+	fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => (finish = resolve)));
+	await render(SocialPublish, { social, curve, path: '/comparar' });
+	await page.getByRole('button', { name: m.curve_social_save() }).click();
+	const dialog = page.getByRole('dialog');
+	const description = dialog.getByRole('textbox', { name: m.curve_social_description() });
+	await description.fill('Rascunho ocupado');
+	await dialog.getByRole('button', { name: m.curve_social_submit() }).click();
+	await expect.element(description).toBeDisabled();
+	for (let press = 0; press < 3; press += 1) expect(pressBack()).toBe(true);
+	await expect.element(dialog).toBeVisible();
+	await expect.element(description).toHaveValue('Rascunho ocupado');
+	finish(Response.json({ error: { code: 'INVALID_CURVE' } }, { status: 422 }));
+	await expect.element(description).not.toBeDisabled();
+	expect(pressBack()).toBe(true);
+	// A closed <dialog> leaves the accessibility tree, so its role locator finds nothing.
+	await expect.poll(() => document.querySelector('dialog[open]')).toBeNull();
+	expect(pressBack()).toBe(false);
+});
+
+test('outside Android the Comparar dialog does not register Back', async () => {
+	vi.stubGlobal('Capacitor', undefined);
+	const { social, curve } = fixture();
+	await render(SocialPublish, { social, curve, path: '/comparar' });
+	await page.getByRole('button', { name: m.curve_social_save() }).click();
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	expect(pressBack()).toBe(false);
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+});
 
 test('feed, rankings and private account library load exact curves and remember their origin', async () => {
 	await setLocale('en-US', { reload: false });
