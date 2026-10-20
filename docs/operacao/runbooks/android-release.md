@@ -31,8 +31,8 @@ Em diretório privado **fora do repositório**, numa máquina offline, rode sepa
 ```powershell
 keytool -genkeypair -keystore open-auri-app.p12 -storetype PKCS12 -alias open-auri-app -keyalg RSA -keysize 4096 -sigalg SHA256withRSA -validity 10000 -dname "CN=open-auri app, O=open-auri, C=BR"
 keytool -genkeypair -keystore open-auri-upload.p12 -storetype PKCS12 -alias open-auri-upload -keyalg RSA -keysize 4096 -sigalg SHA256withRSA -validity 10000 -dname "CN=open-auri upload, O=open-auri, C=BR"
-keytool -J-Duser.language=en -list -v -keystore open-auri-app.p12 -storetype PKCS12 -alias open-auri-app
-keytool -J-Duser.language=en -list -v -keystore open-auri-upload.p12 -storetype PKCS12 -alias open-auri-upload
+keytool '-J-Duser.language=en' -list -v -keystore open-auri-app.p12 -storetype PKCS12 -alias open-auri-app
+keytool '-J-Duser.language=en' -list -v -keystore open-auri-upload.p12 -storetype PKCS12 -alias open-auri-upload
 keytool -exportcert -rfc -keystore open-auri-upload.p12 -storetype PKCS12 -alias open-auri-upload -file open-auri-upload-cert.pem
 ```
 
@@ -78,7 +78,7 @@ Configurar também os dois fingerprints públicos esperados no Environment:
 
 Para cada nome, o workflow usa **variable do Environment ou secret**, exatamente `vars.ANDROID_APP_CERT_SHA256 || secrets.ANDROID_APP_CERT_SHA256` e `vars.ANDROID_UPLOAD_CERT_SHA256 || secrets.ANDROID_UPLOAD_CERT_SHA256`: a variable não vazia tem precedência; se estiver vazia/ausente, usa o secret. Escolher uma única fonte, ou manter ambas idênticas para não mascarar um secret corrigido com variable antiga. Ambos são obrigatórios no job de assinatura e aceitam **64 dígitos hexadecimais, com ou sem dois-pontos, em maiúsculas ou minúsculas**, conforme `tools/android-artifacts.mjs`.
 
-Para obter o fingerprint de upload, rode `keytool -list -v -keystore upload.jks -alias <alias>` em ambiente privado e copie o valor da linha **SHA256** do certificado. Substitua arquivo/alias pelos da chave de upload criada na etapa 1; se necessário, use `-J-Duser.language=en` para obter esse rótulo. Não usar o hash do arquivo do keystore. Após um **upload-key reset** confirmado pela Play, atualizar `ANDROID_UPLOAD_CERT_SHA256` com o certificado novo junto dos secrets de upload.
+Para obter o fingerprint de upload, rode `keytool -list -v -keystore upload.jks -alias <alias>` em ambiente privado e copie o valor da linha **SHA256** do certificado. Substitua arquivo/alias pelos da chave de upload criada na etapa 1; se necessário, use `'-J-Duser.language=en'` (entre aspas simples no PowerShell, que senão quebra o argumento no ponto) para obter esse rótulo. Não usar o hash do arquivo do keystore. Após um **upload-key reset** confirmado pela Play, atualizar `ANDROID_UPLOAD_CERT_SHA256` com o certificado novo junto dos secrets de upload.
 
 Nomes e isolamento conferíveis em `.github/workflows/android-release.yml`: `build` não recebe chaves; `sign-and-publish` usa o Environment e só roda no push de tag `android-v*`. O material decodificado é temporário e removido em `always()`. O nome temporário `.jks` não converte o PKCS12. O dispatch manual é **somente dry-run**, com duas chaves efêmeras e sem release, sem acesso às chaves protegidas. O revisor deve conferir commit, diff do workflow e scripts executados antes de liberar secrets: o Environment não torna código hostil seguro.
 
