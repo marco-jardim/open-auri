@@ -332,9 +332,8 @@ de assets estão em
 
 ## Scripts disponíveis na raiz
 
-Fonte: [`D:\git\open-auri\package.json`](../package.json). Os comandos abaixo
-existem agora; a tabela não antecipa aliases ainda não integrados da Fase 3.
-Todos são executados a partir da raiz.
+Fonte: [`D:\git\open-auri\package.json`](../package.json). Todos os comandos
+abaixo são executados a partir da raiz.
 
 | Comando | Finalidade |
 | --- | --- |
@@ -345,10 +344,14 @@ Todos são executados a partir da raiz.
 | `npm run build:android:staging` | Sync do alvo staging e debug; exige `STAGING_ORIGIN` |
 | `npm run build:android:release` | Sync de produção, `:app:verifyCapacitorConfig`, bundle e APK de release |
 | `npm run test:android` | Testes JVM `:app:testDebugUnitTest` e cobertura `:app:koverVerifyDebug` |
+| `npm run test:android:release` | Ensaio local de assinatura de APK/AAB com chaves efêmeras distintas e verificação dos metadados de release; exige JDK 21 e SDK |
 | `npm run lint:android` | Android Lint na variante debug |
 | `npm run test:android:device` | Testes instrumentados em emulador/aparelho conectado |
 | `npm run typecheck:android` | TypeScript do workspace Android |
 | `npm run icons:android` | Regenerar ícones e splash nativos |
+| `npm run notices:android` | Executar o gerador Node de avisos de licenças a partir de um relatório Licensee existente, após `npm run build:android:release`; não executa Gradle |
+| `npm run usb:golden` | Validar capturas USB e comparar wire logs com o golden, offline; exige argumentos conforme o guia de captura |
+| `npm run play:assets` | Regenerar PNGs da loja a partir da arte e screenshots existentes; `-- --check` valida sem escrever |
 | `npm run test:transport` | Regressão do transporte compartilhado |
 | `npm run test:tools` | Testes das ferramentas Node, incluindo tooling Android |
 | `npm run test:web:unit` | Testes web unitários e de componentes |
@@ -357,6 +360,11 @@ Todos são executados a partir da raiz.
 | `npm run test:web:e2e -- --grep android-bridge` | E2E da ponte, filtrados pelo nome da suíte |
 | `npm run check:all` | Lint e checagens de tipos do núcleo, Android e web |
 | `npm run check:sensitive` | Verificação de conteúdo sensível antes de compartilhar alterações |
+
+Para atualizar os avisos Android, execute `npm run build:android:release` e
+depois `npm run notices:android`. O segundo comando executa apenas o gerador Node
+[`D:\git\open-auri\tools\android-notices.mjs`](../tools/android-notices.mjs): lê o relatório Licensee já gerado no build
+e atualiza os avisos; não gera o relatório nem dispara outro build Gradle.
 
 ## Testes por camada
 

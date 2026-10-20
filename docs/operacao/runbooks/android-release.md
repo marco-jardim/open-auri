@@ -16,6 +16,11 @@ Referências: [plano Android](../../plans/2026-10-18-android-capacitor-plano.md)
 3. Commit exato revisado; testes direcionados e gates da fase verdes, QA PASS sem FX aberto, CI verde no HEAD do PR e `npm run check:sensitive` verde antes do merge. Documentar hash do commit e URLs das execuções. Para publicar, conferir também os checks do commit que receberá a tag.
 4. Pendências humanas de publicação (P6/P7) resolvidas. O passo a passo de Console/PEPK será registrado em `docs/android/play-assinatura.md` pela P6; se esse documento ainda não existir ou H-KEY/H-ENV não estiver confirmado, não publicar. Validar a declaração Data safety e as pendências de fornecedores antes de assiná-la no Console.
 5. Não confundir estado do código com configuração já aplicada na conta GitHub: o operador deve conferir Environment, revisores e ruleset no painel. Ter apenas `environment: android-release` no YAML não cria essas proteções.
+6. Conferir se a label **`android-cable-report`** existe no repositório antes de divulgar o formulário `.github/ISSUE_TEMPLATE/android-cable-report.yml`. O GitHub descarta labels desconhecidas nos issue forms; o YAML não as cria. Se faltar, o mantenedor deve criá-la na raiz do checkout com GitHub CLI autenticado e autorização para administrar labels:
+
+   ```powershell
+   gh label create android-cable-report --description "Relatos de gravação no cabo pelo app Android" --color 0E8A16
+   ```
 
 ## Procedimento
 
@@ -56,6 +61,14 @@ Em Settings > Environments, criar **`android-release`**:
 | `ANDROID_UPLOAD_KEY_ALIAS` | Alias da chave de upload |
 | `ANDROID_UPLOAD_KEY_PASSWORD` | Senha da entrada de upload (igual à do respectivo keystore PKCS12) |
 
+No Windows/PowerShell, gere base64 puro em diretório privado fora do repositório. Neste exemplo, substitua `app.jks` pelo caminho do PKCS12 criado na etapa 1 e escolha um arquivo de saída privado; repita separadamente para a chave de upload:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('app.jks')) | Set-Content -NoNewline app.jks.b64
+```
+
+Copie o conteúdo para o secret correspondente pelo painel seguro e remova os arquivos `.b64` temporários. `certutil -encode` adiciona linhas de cabeçalho e rodapé; sua saída não é base64 puro e não deve ser copiada integralmente para esses secrets.
+
 Configurar também **`ANDROID_APP_CERT_SHA256`**, fingerprint público esperado do certificado do app: o workflow aceita **variable do Environment ou secret**, com precedência da variable. Escolher uma única fonte, ou manter ambas idênticas para não mascarar um secret corrigido com variable antiga. Não usar o certificado de upload.
 
 Nomes e isolamento conferíveis em `.github/workflows/android-release.yml`: `build` não recebe chaves; `sign-and-publish` usa o Environment e só roda no push de tag `android-v*`. O material decodificado é temporário e removido em `always()`. O nome temporário `.jks` não converte o PKCS12. O dispatch manual é **somente dry-run**, com duas chaves efêmeras e sem release, sem acesso às chaves protegidas. O revisor deve conferir commit, diff do workflow e scripts executados antes de liberar secrets: o Environment não torna código hostil seguro.
@@ -65,7 +78,7 @@ Nomes e isolamento conferíveis em `.github/workflows/android-release.yml`: `bui
 1. Publicar o fingerprint público **da chave do app** em `PUBLIC_ANDROID_CERT_SHA256` pelo fluxo de configuração/deploy do site, com `PUBLIC_ANDROID_APP_ID=com.openauri.app`. São valores públicos, não chaves privadas. `web/src/lib/server/android/app-links.ts` aceita fingerprints múltiplos separados por vírgula para transições legítimas. Conferir `/.well-known/assetlinks.json` após o deploy; fingerprint vazio/inválido desativa App Links. Não incluir o certificado de upload nessa lista.
 2. Fazer merge/deploy do site pelo procedimento 0.21 abaixo, sem contornar a aprovação humana de produção. Mudanças na política exigem `POLICY_VERSION`, linhas de versão nas duas políticas, `PUBLIC_POLICY_EFFECTIVE_DATE` de publicação e testes coerentes; a versão 2026-10-20 inclui o canal Android e reapresenta o aviso de confirmação aos usuários com versão anterior.
 3. Em Actions, executar `android-release.yml` por `workflow_dispatch` com `dry_run=true`, conferir verificação de configuração, assinatura com chaves efêmeras e artifacts de ensaio. Não distribuir esses artifacts aos usuários e não cadastrar seu fingerprint no site/Play.
-4. Preparar versão em `apps/android/package.json` e tag exata `android-v<versão>`, por exemplo `android-v1.0.0`. O workflow exige correspondência e `versionCode` crescente, derivado de `major*10000 + minor*100 + patch` (minor/patch até 99). A checagem automática consulta os manifestos das releases Android publicadas; comparar também com o maior código já enviado à Play e com o histórico de releases retiradas, que não é recuperável pela listagem de releases atuais.
+4. Preparar versão em `apps/android/package.json` e tag exata `android-v<versão>`, por exemplo `android-v1.0.0`. O workflow exige correspondência e `versionCode` crescente, derivado de `major*10000 + minor*100 + patch` (minor/patch até 99). A checagem automática de histórico não substitui a comparação com o maior código já enviado à Play nem a conferência do histórico de releases retiradas; não depender apenas da listagem de releases atuais.
 5. O mantenedor autorizado cria e envia a tag no commit aprovado, de acordo com o ruleset. Conferir o build sem assinatura e, na solicitação de aprovação de `android-release`, conferir tag/commit, resultados e proveniência do artifact. Só então aprovar humanamente a assinatura.
 6. A release recebe `open-auri-<versão>.apk`, `.aab`, `SHA256SUMS.txt`, `release-manifest.json` e notas. APK: chave do app, esquemas v2/v3 e fingerprint esperado verificado. AAB: chave de upload distinta, verificação por jarsigner. Upload à Play é **manual**, seguindo P6/P7; o workflow não publica na Play.
 
@@ -89,7 +102,7 @@ Se a validade física voltar a ser incerta ou o texto precisar de novo reconheci
 
 #### Frescor da página e operação offline
 
-`web/src/lib/cable/native-freshness.ts:28-61`, chamado por `service.ts` em `exclusive`, consulta **`/_app/version.json` antes de iniciar cada escrita/fila nativa**, com `cache: no-store`, cabeçalho `no-cache` e limite de 3 s, comparando com a versão do site carregada. Não reaproveita sucesso anterior.
+`web/src/lib/cable/native-freshness.ts:28-65`, chamado por `service.ts` em `exclusive`, consulta **`/_app/version.json` antes de iniciar cada escrita/fila nativa**, com `cache: no-store`, cabeçalho `no-cache` e limite de 3 s, comparando com a versão do site carregada. Não reaproveita sucesso anterior.
 
 - Página aberta antes de um deploy recusa a próxima escrita/fila até **Recarregar**, carregando então a política nova. Qualquer deploy de site pode disparar isso, não só o que muda `android-status.ts`.
 - Offline, timeout, erro HTTP, JSON inválido ou resposta sem versão: **recusa**, sem tentar gravar com a política antiga. Ferramentas locais podem funcionar offline; gravação nativa requer conexão e página atual.

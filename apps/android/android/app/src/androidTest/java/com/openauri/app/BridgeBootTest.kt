@@ -23,6 +23,10 @@ class BridgeBootTest {
         WebAppScenario.launch().use { app ->
             assertEquals(E2E_ORIGIN, app.evaluate("location.origin"))
             app.awaitJs("window.Capacitor?.isNativePlatform() === true", "native Capacitor bridge")
+            // Check Java bridge objects in the main frame, not the similarly named JS plugins.
+            assertEquals("undefined", app.evaluate("typeof window.CapacitorHttpAndroidInterface"))
+            assertEquals("undefined", app.evaluate("typeof window.CapacitorCookiesAndroidInterface"))
+            assertEquals("object", app.evaluate("typeof window.androidBridge"))
             assertEquals(true, app.evaluate("Capacitor.isPluginAvailable('OpenAuriUsb')"))
             assertEquals(true, app.evaluate("Capacitor.isPluginAvailable('OpenAuriFiles')"))
             val info = app.promise("Capacitor.Plugins.OpenAuriUsb.getInfo()") as JSONObject
