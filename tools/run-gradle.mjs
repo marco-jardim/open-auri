@@ -10,11 +10,11 @@ const USAGE =
 
 // Only observational flags and execution/cache controls are forwarded. In particular,
 // properties, init/settings scripts, project relocation and task exclusions are not.
+// Debug logging is also forbidden because it can expose credentials and other secrets.
 const GRADLE_OPTIONS = new Set([
   '--stacktrace',
   '--full-stacktrace',
   '--info',
-  '--debug',
   '--warn',
   '--quiet',
   '--no-daemon',
@@ -44,14 +44,12 @@ export function validateGradleArgs(args, maintainerMetadata = false) {
       if (args[++index] !== 'sha256') {
         throw new Error('Maintainer metadata requires --write-verification-metadata sha256.');
       }
-    } else if (
-      !(
-        /^:?[A-Za-z][A-Za-z0-9_-]*(?::[A-Za-z][A-Za-z0-9_-]*)*$/.test(arg) ||
-        GRADLE_OPTIONS.has(arg) ||
-        /^--console=(plain|auto|rich)$/.test(arg) ||
-        /^--max-workers=[1-9][0-9]*$/.test(arg)
-      )
-    ) {
+    } else if (!(
+      /^:?[A-Za-z][A-Za-z0-9_-]*(?::[A-Za-z][A-Za-z0-9_-]*)*$/.test(arg) ||
+      GRADLE_OPTIONS.has(arg) ||
+      /^--console=(plain|auto|rich)$/.test(arg) ||
+      /^--max-workers=[1-9][0-9]*$/.test(arg)
+    )) {
       throw new Error(`Unsupported Gradle argument: ${arg}. ${USAGE}`);
     }
   }
@@ -202,15 +200,7 @@ export async function main(
   const android = join(ROOT, 'apps', 'android');
   const childEnv = { ...env, OA_ANDROID_TARGET: parsed.target };
   if (!parsed.noSync) {
-    const code = await runChild(
-      platform,
-      'sync',
-      [],
-      android,
-      childEnv,
-      spawnChild,
-      error,
-    );
+    const code = await runChild(platform, 'sync', [], android, childEnv, spawnChild, error);
     if (code !== 0) return code;
   }
   if (parsed.syncOnly) return 0;

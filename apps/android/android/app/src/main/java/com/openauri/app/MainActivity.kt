@@ -3,8 +3,10 @@ package com.openauri.app
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.webkit.WebView
 import android.widget.Button
 import android.widget.Toast
 import androidx.core.net.toUri
@@ -14,6 +16,8 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.getcapacitor.BridgeActivity
 import com.getcapacitor.OfflineAwareWebViewClient
+import com.getcapacitor.Plugin
+import com.getcapacitor.annotation.CapacitorPlugin
 import com.openauri.files.DownloadBridge
 import com.openauri.files.OpenAuriFilesPlugin
 import com.openauri.usb.OpenAuriUsbPlugin
@@ -77,7 +81,11 @@ class MainActivity : BridgeActivity() {
     }
 
     override fun load() {
-        if (gateResult == WebViewCompatGate.Result.Ok) super.load()
+        if (gateResult != WebViewCompatGate.Result.Ok) return
+        // Plugin instances load synchronously after the core plugins, before Bridge.loadWebView().
+        // Waiting until super.load() returns would be too late: it already calls WebView.loadUrl().
+        bridgeBuilder.addPluginInstance(BridgeHardening())
+        super.load()
     }
 
     override fun onDestroy() {
@@ -132,5 +140,33 @@ class MainActivity : BridgeActivity() {
         /** Test-only injection, set before ActivityScenario launch and cleared after each test. */
         @Volatile
         internal var gateForTesting: (() -> WebViewCompatGate.Result)? = null
+    }
+}
+
+/**
+ * Native-only initialization hook. It adds no methods of its own; the standard Plugin methods it
+ * inherits (addListener, checkPermissions...) are reachable only through the origin-pinned bridge.
+ */
+@CapacitorPlugin(name = "OpenAuriBridgeHardening")
+internal class BridgeHardening : Plugin() {
+    override fun load() {
+        harden(bridge.webView)
+    }
+
+    companion object {
+        /**
+         * Core Plugin.load() adds the all-frame interfaces before this hook runs. Removal is
+         * synchronous on the UI thread and precedes the first loadUrl, so it takes effect on
+         * the very first document, without a reload or an exposed initial navigation.
+         * The site uses browser cookies/fetch, not these native cookie/HTTP interfaces.
+         */
+        internal fun harden(webView: WebView) {
+            check(Looper.myLooper() == Looper.getMainLooper()) { "Bridge hardening requires the UI thread" }
+            webView.removeJavascriptInterface("CapacitorCookies")
+            webView.removeJavascriptInterface("CapacitorHttp")
+            // Actual names in the pinned Capacitor version; also remove the plugin-name aliases above.
+            webView.removeJavascriptInterface("CapacitorCookiesAndroidInterface")
+            webView.removeJavascriptInterface("CapacitorHttpAndroidInterface")
+        }
     }
 }

@@ -185,6 +185,7 @@ test('rejects options that can bypass release guards or replace the build before
     ['--dependency-verification=off'],
     ['--write-verification-metadata', 'sha256'],
     ['--dry-run'],
+    ['--debug'],
     ['-m'],
     ['--'],
     ['--unknown'],
@@ -201,8 +202,13 @@ test('rejects options that can bypass release guards or replace the build before
     const direct = runner();
     assert.equal(
       await runChild(
-        'win32', 'gradle', args, root, {},
-        direct.dependencies.spawn, direct.dependencies.error,
+        'win32',
+        'gradle',
+        args,
+        root,
+        {},
+        direct.dependencies.spawn,
+        direct.dependencies.error,
       ),
       1,
     );
@@ -235,8 +241,13 @@ test('every argument at the spawn boundary passed validateArg and shell is alway
     const rejected = runner();
     assert.equal(
       await runChild(
-        platform, 'gradle', ['task&evil'], root, {},
-        rejected.dependencies.spawn, rejected.dependencies.error,
+        platform,
+        'gradle',
+        ['task&evil'],
+        root,
+        {},
+        rejected.dependencies.spawn,
+        rejected.dependencies.error,
       ),
       1,
     );
@@ -329,6 +340,7 @@ test('the CLI exits 2 with a clear message for unknown targets or unsafe argumen
     [['--target', 'unknown'], /Invalid --target/],
     [['--target'], /Invalid --target/],
     [['--no-sync', 'task&another'], /Invalid Gradle argument/],
+    [['--no-sync', 'assembleDebug', '--debug'], /Unsupported Gradle argument: --debug/],
   ]) {
     const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
     assert.equal(result.status, 2, result.stderr);

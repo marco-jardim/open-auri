@@ -71,7 +71,20 @@ export function releaseViolations(config) {
   if (record.useLegacyBridge) {
     violations.push('useLegacyBridge must not be enabled');
   }
-  if (asRecord(asRecord(record.plugins)?.CapacitorHttp)?.enabled === true) {
+  // CapConfig falls back to these top-level values. Reject unsafe overrides at either scope,
+  // even when a safe android value currently masks them.
+  if (record.loggingBehavior !== undefined && record.loggingBehavior !== 'none') {
+    violations.push('loggingBehavior must be "none" or absent');
+  }
+  if (record.allowMixedContent !== undefined && record.allowMixedContent !== false) {
+    violations.push('allowMixedContent must be false');
+  }
+  const nativeHttp = asRecord(asRecord(record.plugins)?.CapacitorHttp)?.enabled;
+  // org.json getBoolean also enables the plugin for a case-insensitive string "true".
+  if (
+    nativeHttp === true ||
+    (typeof nativeHttp === 'string' && nativeHttp.toLowerCase() === 'true')
+  ) {
     violations.push('plugins.CapacitorHttp.enabled must not be true');
   }
   return violations;

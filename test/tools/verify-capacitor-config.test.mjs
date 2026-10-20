@@ -61,6 +61,53 @@ test('release allows only absent or none Android logging and disables native HTT
   assert.deepEqual(releaseViolations(config), []);
 });
 
+for (const key of ['useLegacyBridge', 'allowMixedContent', 'webContentsDebuggingEnabled']) {
+  for (const scope of ['android', 'top-level']) {
+    test(`release rejects boolean and string true for ${scope} ${key}`, () => {
+      for (const value of [true, 'true', 'TRUE', 'TrUe']) {
+        const config = prodConfig();
+        (scope === 'android' ? config.android : config)[key] = value;
+        assert.match(releaseViolations(config).join('; '), new RegExp(key));
+      }
+    });
+  }
+}
+
+test('release rejects native HTTP enabled by boolean or case-insensitive string true', () => {
+  for (const enabled of [true, 'true', 'TRUE', 'TrUe']) {
+    const config = prodConfig();
+    config.plugins = { CapacitorHttp: { enabled } };
+    assert.match(releaseViolations(config).join('; '), /plugins\.CapacitorHttp\.enabled/);
+  }
+});
+
+test('release allows only absent or none logging at both scopes', () => {
+  for (const scope of ['android', 'top-level']) {
+    for (const value of ['debug', 'production', '', true, null, 'NONE']) {
+      const config = prodConfig();
+      (scope === 'android' ? config.android : config).loggingBehavior = value;
+      assert.match(releaseViolations(config).join('; '), /loggingBehavior/);
+    }
+    const config = prodConfig();
+    (scope === 'android' ? config.android : config).loggingBehavior = 'none';
+    assert.deepEqual(releaseViolations(config), []);
+  }
+});
+
+test('release rejects unsafe top-level fallback keys with or without Android overrides', () => {
+  for (const android of [undefined, {}, { loggingBehavior: 'none', allowMixedContent: false }]) {
+    for (const [key, value] of [
+      ['loggingBehavior', 'production'],
+      ['allowMixedContent', 'TrUe'],
+    ]) {
+      const config = prodConfig();
+      config.android = android;
+      config[key] = value;
+      assert.match(releaseViolations(config).join('; '), new RegExp(key));
+    }
+  }
+});
+
 test('rejects a non-object config', () => {
   for (const value of [null, [], 'x', 42]) {
     assert.deepEqual(releaseViolations(value), ['capacitor.config.json is not a JSON object']);
