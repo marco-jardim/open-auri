@@ -29,7 +29,7 @@
 // decision as the hook), and env.production and env.staging set `assets.run_worker_first` to the
 // page routes: every path except what is a static file and never needs the 301, i.e. the hashed
 // `/_app/*` files, the top-level entries of web/static (art, data, fonts, icons, og-font,
-// lang-boot.js, manifest.webmanifest, robots.txt, third-party-licenses.txt) and the generated
+// lang-boot.js, manifest.webmanifest, robots.txt, third-party-licenses.txt, third-party-licenses-android.txt) and the generated
 // service-worker.js. Those still answer 200 on workers.dev (static files, not pages); keep the
 // list in sync with web/static (test/tools/render-wrangler.test.mjs checks it). A new page route
 // needs no entry. Cost: every page request there is a Worker invocation (the wrapper then serves
@@ -109,7 +109,8 @@
 					"!/manifest.webmanifest",
 					"!/robots.txt",
 					"!/service-worker.js",
-					"!/third-party-licenses.txt"
+					"!/third-party-licenses.txt",
+					"!/third-party-licenses-android.txt"
 				]
 			},
 			"observability": {
@@ -169,7 +170,8 @@
 					"!/manifest.webmanifest",
 					"!/robots.txt",
 					"!/service-worker.js",
-					"!/third-party-licenses.txt"
+					"!/third-party-licenses.txt",
+					"!/third-party-licenses-android.txt"
 				]
 			},
 			"observability": {

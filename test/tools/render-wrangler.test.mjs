@@ -377,6 +377,7 @@ const RUN_WORKER_FIRST = [
   '!/robots.txt',
   '!/service-worker.js',
   '!/third-party-licenses.txt',
+  '!/third-party-licenses-android.txt',
 ];
 
 /** The run_worker_first exclusion for each top-level entry of web/static (dir/* or the file). */
