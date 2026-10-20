@@ -346,9 +346,14 @@ test('footer links both native Android and web notices with both locale messages
   };
   for (const [locale, labels] of Object.entries(expected)) {
     const staged = join(root, `web/messages/_staging/T3.3.${locale}.json`);
-    const messages = JSON.parse(
-      readFileSync(existsSync(staged) ? staged : join(root, `web/messages/${locale}.json`), 'utf8'),
-    );
+    let source;
+    try {
+      source = readFileSync(staged, 'utf8');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      source = readFileSync(join(root, `web/messages/${locale}.json`), 'utf8');
+    }
+    const messages = JSON.parse(source);
     assert.equal(messages.chrome_android_licenses_link, labels[0]);
     assert.equal(messages.chrome_third_party_licenses_link, labels[1]);
   }
