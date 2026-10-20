@@ -235,6 +235,98 @@ jobs:
             web/test-results
           retention-days: 7
 
+  android-emulator:
+    name: Android emulator
+    needs: changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    env:
+      OA_NO_AUTOEQ: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
+      # Avoid setup-gradle's init script, which is not covered by dependency verification.
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/android/**/*.gradle', 'apps/android/android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - run: npm ci
+      - name: Render wrangler.jsonc and .dev.vars (fictitious values)
+        run: |
+          npm run -w web gen
+          npm run -w web dev-vars
+      - name: Build the real web preview (production CSP)
+        run: npm run -w web build
+      - name: Start preview on the emulator's host
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          npm run -w web preview > "$RUNNER_TEMP/android-preview.log" 2>&1 &
+          PREVIEW_PID=$!
+          for attempt in {1..90}; do
+            if curl --fail --silent --connect-timeout 1 --max-time 2 http://127.0.0.1:4173/ > /dev/null; then
+              printf 'Android preview ready (attempt %s/90)\n' "$attempt"
+              exit 0
+            fi
+            if ! kill -0 "$PREVIEW_PID" 2>/dev/null; then
+              echo '::error::Android preview exited before becoming ready'
+              cat "$RUNNER_TEMP/android-preview.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo '::error::Android preview was not ready after 90 bounded attempts'
+          cat "$RUNNER_TEMP/android-preview.log"
+          exit 1
+      - name: Build Android for the local preview
+        run: npm run build:android:e2e
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Instrumented tests against the real preview
+        # HTTP is not a secure context: service workers and HTTPS DownloadBridge attachment
+        # still need a separate HTTPS device run (Q2 m3).
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          # The wrapper syncs before testing; retain the e2e target instead of its prod default.
+          script: npm run test:android:device -- --target e2e
+      - name: Upload Android instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-emulator-reports
+          path: |
+            apps/android/android/app/build/reports/androidTests/
+            apps/android/android/app/build/outputs/androidTest-results/
+            ${{ runner.temp }}/android-preview.log
+          retention-days: 7
+
   android:
     name: Android
     needs: changes
