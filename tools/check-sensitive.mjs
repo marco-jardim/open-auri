@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -167,6 +167,32 @@ function lineAt(starts, offset) {
 }
 
 /**
+ * Reads a tracked regular file through one open handle, so the bytes scanned are the file that
+ * was checked. Missing files, directories and symlinks return null; oversized files return no bytes.
+ * @param {string} absolute
+ * @param {number} maxFileSize
+ * @returns {{ bytes: Buffer | null } | null}
+ */
+function readTrackedFile(absolute, maxFileSize) {
+  let fd;
+  try {
+    fd = openSync(absolute, 'r');
+  } catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    const stat = fstatSync(fd);
+    const link = lstatSync(absolute);
+    if (!stat.isFile() || !link.isFile() || stat.ino !== link.ino || stat.dev !== link.dev) {
+      return null;
+    }
+    return { bytes: stat.size > maxFileSize ? null : readFileSync(fd) };
+  } finally {
+    closeSync(fd);
+  }
+}
+/**
  * @param {string} root
  * @param {boolean} useEnv false (--no-env) scans filenames, generic shapes and the profile path
  */
@@ -183,22 +209,15 @@ function scan(root, useEnv) {
     .filter(Boolean);
   const findings = [];
   for (const path of new Set(files)) {
-    const absolute = resolve(root, path);
-    let stat;
-    try {
-      stat = lstatSync(absolute);
-    } catch (error) {
-      if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') continue;
-      throw error;
-    }
-    if (!stat.isFile()) continue;
+    const file = readTrackedFile(resolve(root, path), maxFileSize);
+    if (!file) continue;
     const blockedName = androidFilePatterns.find(({ pattern }) => pattern.test(path));
     if (blockedName) {
       findings.push({ path, line: 1, label: blockedName.label });
       continue;
     }
-    if (stat.size > maxFileSize) continue;
-    const bytes = readFileSync(absolute);
+    const { bytes } = file;
+    if (!bytes) continue;
     if (bytes.includes(0)) continue;
     const original = bytes.toString('utf8');
     const text = original.toLowerCase();

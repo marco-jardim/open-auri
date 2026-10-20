@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -264,7 +264,7 @@ test('CLI generates notices and --check detects drift or missing output without 
   const repo = fixture(t);
   const missing = repo.run('--check');
   assert.equal(missing.status, 1);
-  assert.equal(existsSync(repo.output), false);
+  assert.throws(() => readFileSync(repo.output), { code: 'ENOENT' });
   const generated = repo.run();
   assert.equal(generated.status, 0, generated.stderr);
   assert.equal(readFileSync(repo.output, 'utf8'), renderNotices(sample, repo.projects()));
