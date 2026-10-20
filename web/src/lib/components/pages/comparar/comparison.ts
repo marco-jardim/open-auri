@@ -2,8 +2,20 @@ import { GRID, curveResponseDb, distance, levelDb, snapshotBands } from 'open-au
 import { OFFICIAL_PRESETS, NEUTRO } from 'open-auri/catalog';
 import { matchGains, type PreviewCurve } from '#lib/audio/engine.ts';
 import type { CurveData } from '#lib/state/model.ts';
+import { isHidden, type HiddenList } from '#lib/social/hidden.ts';
 
 export type NamedCurve = CurveData;
+
+/** Older saved community curves retain a source id even without transient author provenance. */
+export function communityHidden(
+	curve: { source?: string; community?: NamedCurve['community'] },
+	hidden: HiddenList
+): boolean {
+	const lineageId =
+		curve.community?.lineageId ??
+		(curve.source?.startsWith('community:') ? curve.source.slice(10) : null);
+	return !!lineageId && isHidden(hidden, lineageId, curve.community?.author);
+}
 
 export interface Track {
 	id: number;

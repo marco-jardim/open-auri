@@ -49,13 +49,13 @@ export function createSocialSession(options: SocialSessionOptions = {}) {
 			account = summary;
 			known = true;
 		},
-		/** Reads the session again; any failure reads as signed out (see `fetchAccount`). */
-		async refresh(signal?: AbortSignal): Promise<AccountSummary | null> {
+		/** A failed probe stays unknown; it must not turn an account into a visitor. */
+		async refresh(signal?: AbortSignal): Promise<AccountSummary | null | undefined> {
 			const token = ++generation;
 			const summary = await fetchAccount(fetcher, signal);
 			if (token === generation) {
-				account = summary;
-				known = true;
+				if (summary !== undefined) account = summary;
+				known = summary !== undefined;
 			}
 			return summary;
 		}

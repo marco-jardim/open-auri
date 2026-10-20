@@ -14,6 +14,7 @@ export interface Candidate extends PreviewCurve {
 	accepted: boolean;
 	reasons: string[];
 	level: number;
+	community?: { lineageId: string; author: string | null };
 }
 
 /** No Math.random fallback: a blind order requires a cryptographic source. */
@@ -87,7 +88,7 @@ export interface Session {
 export function candidate(
 	id: string,
 	name: string,
-	curve: PreviewCurve,
+	curve: PreviewCurve & Pick<Candidate, 'community'>,
 	official = false,
 	description?: string
 ): Candidate {
@@ -99,6 +100,7 @@ export function candidate(
 		name,
 		bands,
 		preampDb: curve.preampDb,
+		...(curve.community ? { community: curve.community } : {}),
 		official,
 		description,
 		experimental,

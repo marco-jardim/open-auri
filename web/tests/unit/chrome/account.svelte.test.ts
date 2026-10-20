@@ -164,7 +164,7 @@ test('prerendered pages probe the session and show the answer', async () => {
 	await expect.poll(() => probe.mock.calls.length).toBe(2);
 });
 
-test('a failed probe reads as anonymous', async () => {
+test('a failed probe stays unknown rather than marking the visitor signed out', async () => {
 	const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 	await render(AccountSessionFixture, {
 		user: null,
@@ -174,7 +174,7 @@ test('a failed probe reads as anonymous', async () => {
 			throw new Error('boom');
 		}
 	});
-	await expect.element(page.getByRole('link', { name: 'Entrar' })).toBeVisible();
-	await expect.poll(() => document.querySelector('output')?.dataset.known).toBe('true');
+	await expect.poll(() => warn.mock.calls.length).toBe(1);
+	expect(document.querySelector('output')?.dataset.known).toBe('false');
 	warn.mockRestore();
 });

@@ -6,7 +6,6 @@
 -->
 <script lang="ts">
 	import Button from '#lib/components/primitives/Button.svelte';
-	import ReportAction from '#lib/components/social/ReportAction.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { LibraryItem, SocialApi } from '#lib/social/index.ts';
 	import { getHiddenStore } from '#lib/social/hidden-context.ts';
@@ -157,13 +156,6 @@
 							<li>
 								<span class="vca-plate">VCA</span>
 								<span class="pack-name">{pack.name}</span>
-								<ReportAction
-									subject={{ kind: 'pack', id: pack.id }}
-									name={pack.name}
-									{api}
-									{session}
-									{online}
-								/>
 								{#if pack.description}<span class="pack-desc">{pack.description}</span>{/if}
 							</li>
 						{/each}

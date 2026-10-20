@@ -31,6 +31,7 @@
 	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
 	import { appShortcuts, playbackShortcut } from '#lib/components/chrome/shortcuts.ts';
 	import { createToastStore } from '#lib/components/chrome/toast.ts';
+	import { nativeBackPopover } from '#lib/components/chrome/native-back.ts';
 	import AudioLoader from '#lib/components/audio/AudioLoader.svelte';
 	// Direct files, not the primitives barrel: every route loads the layout first (FUX.NAV budgets).
 	import IconButton from '#lib/components/primitives/IconButton.svelte';
@@ -43,6 +44,7 @@
 	import type { SocialOutbox, SocialSession, SocialApi } from '#lib/social/index.ts';
 	import type { LayoutProps } from './$types';
 	import { setHiddenStore } from '#lib/social/hidden-context.ts';
+	import { createAccountHiddenStore } from '#lib/social/account-hidden.svelte.ts';
 	import { setReportSiteKey } from '#lib/social/report-context.ts';
 
 	let { children, data }: LayoutProps = $props();
@@ -73,11 +75,8 @@
 	const toasts = createToastStore();
 	const context = setAppContext();
 	const nativeCable = setNativeCableState();
-	const hidden = setHiddenStore();
+	setHiddenStore(createAccountHiddenStore(accountSession));
 	setReportSiteKey(PUBLIC_TURNSTILE_SITE_KEY);
-	$effect(() => {
-		if (accountSession.known) void hidden.setUser(accountSession.current?.id ?? null);
-	});
 	const app = $derived(context.client);
 	const meta = $derived(getPageMeta(page.route.id ?? page.url.pathname));
 	const homage = $derived(getFooterHonoree(meta));
@@ -646,6 +645,7 @@
 		style:right={statusPos ? 'auto' : null}
 		style:max-height={statusPos ? `${statusPos.maxHeight}px` : null}
 		{@attach statusPopover}
+		{@attach nativeBackPopover}
 	>
 		{#if app && cableStatus.current}
 			{@const CableStatus = cableStatus.current}

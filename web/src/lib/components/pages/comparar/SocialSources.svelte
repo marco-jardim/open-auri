@@ -8,6 +8,8 @@
 	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
 	import ReportAction from '#lib/components/social/ReportAction.svelte';
+	import HideActions from '#lib/components/social/HideActions.svelte';
+	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
 
 	let {
 		social,
@@ -18,7 +20,14 @@
 		path: string;
 		onload: (curve: CurveData) => void;
 	} = $props();
-	type Row = { id: string; versionId: string; name: string; author: string | null };
+	type Row = {
+		id: string;
+		versionId: string;
+		name: string;
+		author: string | null;
+		authorName?: string;
+		username?: string;
+	};
 	const hidden = getHiddenStore();
 	let source = $state('feed');
 	let shelf = $state<'created' | 'favorites' | 'installed'>('created');
@@ -40,6 +49,9 @@
 				)
 			: []
 	);
+	$effect(() => {
+		if (selected && !filtered.some((row) => row.id === selected)) selected = '';
+	});
 	function reset() {
 		generation++;
 		abort?.abort();
@@ -74,7 +86,9 @@
 					id: lineage.id,
 					versionId: lineage.head.id,
 					name: lineage.head.name,
-					author: authorHiddenId(lineage.author)
+					author: authorHiddenId(lineage.author),
+					authorName: lineage.author?.displayUsername,
+					username: lineage.author?.username
 				};
 			});
 			rows = more ? [...rows, ...items] : items;
@@ -106,12 +120,13 @@
 				lineageId: result.lineage.id,
 				versionId: result.version.id
 			});
-			if (token !== generation) return;
+			if (token !== generation || !hidden.visible(row.id, row.author)) return;
 			onload({
 				bands: curve.bands,
 				preampDb: curve.preampDb,
 				name: result.version.name,
 				source: `community:${result.lineage.id}`,
+				community: { lineageId: result.lineage.id, author: row.author },
 				// The version's filter labels (detail read; never from list cards).
 				labels: result.version.labels
 			});
@@ -125,6 +140,7 @@
 
 <fieldset class="social-sources">
 	<legend>{m.curve_social_sources()}</legend>
+	<HiddenItems />
 	<label
 		>{m.curve_social_sources()}
 		<select bind:value={source} onchange={reset}>
@@ -160,9 +176,16 @@
 			>{m.curve_social_add()}</button
 		>
 		{#each filtered.filter((row) => row.id === selected) as row (row.id)}
+			<HideActions
+				lineageId={row.id}
+				author={row.author}
+				curveName={row.name}
+				authorName={row.authorName}
+			/>
 			<ReportAction
 				subject={{ kind: 'lineage', id: row.id }}
 				name={row.name}
+				author={row.username}
 				api={social.api}
 				session={social.session}
 				online={!social.unavailable}

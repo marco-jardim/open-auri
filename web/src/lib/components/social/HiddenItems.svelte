@@ -13,16 +13,18 @@
 	}
 </script>
 
-<details class="hidden-items" id="itens-ocultos">
-	<summary>{m.hidden_title()}</summary>
-	<p>{$hidden.signedIn ? m.hidden_account_hint() : m.hidden_local_hint()}</p>
-	{#if $hidden.error}
-		<p role="alert">{m.hidden_error()}</p>
+{#if $hidden.error}
+	<div class="hidden-error" role="alert">
+		<p>{m.hidden_error()}</p>
 		<Button size="sm" loading={$hidden.busy} onclick={() => hidden.retry()}
 			>{m.hidden_retry()}</Button
 		>
-	{/if}
-	{#if !$hidden.ready}<p role="status">{m.hidden_loading()}</p>{/if}
+	</div>
+{/if}
+<details class="hidden-items" id="itens-ocultos">
+	<summary>{m.hidden_title()}</summary>
+	<p>{$hidden.signedIn ? m.hidden_account_hint() : m.hidden_local_hint()}</p>
+	{#if !$hidden.ready && !$hidden.error}<p role="status">{m.hidden_loading()}</p>{/if}
 	{#if !$hidden.authors.length && !$hidden.curves.length}
 		{#if $hidden.ready}<p>{m.hidden_empty()}</p>{/if}
 	{:else}

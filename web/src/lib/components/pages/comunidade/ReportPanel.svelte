@@ -10,6 +10,8 @@
 -->
 <script lang="ts">
 	import Button from '#lib/components/primitives/Button.svelte';
+	import { page } from '$app/state';
+	import { signInHref } from '#lib/components/chrome/account.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi } from '#lib/social/index.ts';
 	import type { ReportReason, ReportTargetKind } from '#lib/server/social/types.ts';
@@ -83,6 +85,7 @@
 
 	let Turnstile = $state.raw<TurnstileComponent | null>(null);
 	let turnstileFailed = $state(false);
+	let checkAttempt = $state(0);
 
 	$effect(() => {
 		if (!formShown || !siteKey || Turnstile || turnstileFailed) return;
@@ -132,6 +135,7 @@
 			message = errorText(error);
 		} finally {
 			token = '';
+			checkAttempt++;
 			busy = false;
 		}
 	}
@@ -147,8 +151,14 @@
 	{#if !subject}
 		<p class="note">{m.comunidade_select_first()}</p>
 	{:else if !session.verified}
-		<p>{m.fxpc_report_account()}</p>
-		<a href="/entrar">{m.shared_curve_login()}</a>
+		{#if session.signedIn}
+			<p>{m.comunidade_verify_prompt()}</p>
+		{:else}
+			<p>{m.fxpc_report_account()}</p>
+			<a href={signInHref(page.url.pathname + page.url.search + page.url.hash)}
+				>{m.shared_curve_login()}</a
+			>
+		{/if}
 		<div class="row-btns">
 			<Button variant="danger" disabledReason={sendReason}>{m.comunidade_report_send()}</Button>
 		</div>
@@ -170,7 +180,9 @@
 			{#if !siteKey || turnstileFailed}
 				<p class="note">{m.comunidade_turnstile_unavailable()}</p>
 			{:else if Turnstile}
-				<Turnstile {siteKey} action={TURNSTILE_REPORT_ACTION} bind:token />
+				{#key checkAttempt}
+					<Turnstile {siteKey} action={TURNSTILE_REPORT_ACTION} bind:token />
+				{/key}
 			{:else}
 				<div class="turnstile-wait" role="status" aria-busy="true">
 					<span class="skeleton" aria-hidden="true"></span>

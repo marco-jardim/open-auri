@@ -2560,6 +2560,8 @@
 	"transport_toggle_resume": "Resume the preview",
 	"transport_toggle_unsupported": "This browser has no Web Audio.",
 	"transport_valuetext": "{elapsed} of {total}",
+	"w4_hidden_track_notice": "A source was hidden. Tracks already loaded were kept in your comparison; the source will no longer be offered. Replace the track’s source if you wish.",
+	"w4_privacy": "Privacy",
 	"yolo_bar": "Waived: gain and Q ranges, boosts above 16 kHz, preamp range and extra sections. Hardware locks kept. Keep the volume low.",
 	"yolo_bar_free_preview": "Unlimited preview: listening only, behind a limiter. Writing is off.",
 	"yolo_bar_free_preview_short": "Preview only, writing off",

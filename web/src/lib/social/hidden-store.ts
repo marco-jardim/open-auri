@@ -18,6 +18,8 @@ export interface HiddenState extends HiddenList {
 	ready: boolean;
 	busy: boolean;
 	error: boolean;
+	/** A failed list/session load, not a failed hide/unhide write. */
+	loadError: boolean;
 	signedIn: boolean;
 }
 type HiddenApi = Pick<SocialApi, 'myHidden' | 'putHidden' | 'deleteHidden'>;
@@ -46,7 +48,9 @@ function fromItems(
 /** Per-layout, never a process singleton. Account data is never written to localStorage. */
 export function createHiddenStore(
 	api: HiddenApi,
-	storage: () => Storage | null = () => (typeof window === 'undefined' ? null : window.localStorage)
+	storage: () => Storage | null = () =>
+		typeof window === 'undefined' ? null : window.localStorage,
+	retrySession?: () => void
 ) {
 	let state: HiddenState = {
 		authors: [],
@@ -55,10 +59,12 @@ export function createHiddenStore(
 		ready: false,
 		busy: false,
 		error: false,
+		loadError: false,
 		signedIn: false
 	};
 	const store = writable(state);
 	let actor: string | null | undefined;
+	let initialized = false;
 	let generation = 0;
 	let queue = Promise.resolve();
 	function update(next: Partial<HiddenState>) {
@@ -77,11 +83,17 @@ export function createHiddenStore(
 	}
 	async function sync() {
 		const ticket = generation;
-		update({ busy: true, error: false });
+		update({ busy: true, error: false, loadError: false });
 		let pending: HiddenList | undefined;
 		try {
 			pending = local();
-			if (actor == null) {
+			if (actor === undefined) {
+				// Unknown is not anonymous: retain local preferences without exposing UGC
+				// before the account's preferences can be checked.
+				update({ ...pending, ready: false, error: true, loadError: true });
+				return;
+			}
+			if (actor === null) {
 				update({ ...pending, ready: true });
 				return;
 			}
@@ -96,7 +108,17 @@ export function createHiddenStore(
 			update({ ...fromItems(result.items), ready: true });
 		} catch (error) {
 			if (ticket === generation) {
-				update({ error: true });
+				update({
+					authors: [...new Set([...state.authors, ...(pending?.authors ?? [])])],
+					curves: [...new Set([...state.curves, ...(pending?.curves ?? [])])],
+					labels: {
+						authors: { ...state.labels.authors, ...pending?.labels?.authors },
+						curves: { ...state.labels.curves, ...pending?.labels?.curves }
+					},
+					error: true,
+					loadError: true,
+					ready: false
+				});
 				// A full account plus a local list must still be manageable. Keep UGC closed,
 				// but show both lists (at most 1000 per type) so the reader can free a slot.
 				if (pending && actor != null) {
@@ -122,8 +144,9 @@ export function createHiddenStore(
 			if (ticket === generation) update({ busy: false });
 		}
 	}
-	function setUser(userId: string | null) {
-		if (actor === userId) return queue;
+	function setUser(userId: string | null | undefined) {
+		if (initialized && actor === userId) return queue;
+		initialized = true;
 		actor = userId;
 		generation++;
 		update({
@@ -133,7 +156,8 @@ export function createHiddenStore(
 			ready: false,
 			busy: false,
 			error: false,
-			signedIn: userId !== null
+			loadError: false,
+			signedIn: userId != null
 		});
 		queue = sync();
 		return queue;
@@ -186,7 +210,7 @@ export function createHiddenStore(
 							storage()?.setItem(HIDDEN_STORAGE_KEY, JSON.stringify(remaining));
 							await sync();
 						} else {
-							update({ ...fromItems(result.items), ready: true });
+							update({ ...fromItems(result.items), ready: true, loadError: false });
 						}
 					}
 				} else {
@@ -209,6 +233,7 @@ export function createHiddenStore(
 		subscribe: store.subscribe,
 		setUser,
 		retry: () => {
+			if (actor === undefined) retrySession?.();
 			queue = queue.then(sync);
 			return queue;
 		},

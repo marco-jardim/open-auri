@@ -10,6 +10,7 @@
 
 	let {
 		item,
+		author,
 		index,
 		locale,
 		side = null,
@@ -19,6 +20,7 @@
 		onStop
 	}: {
 		item: LineageCard;
+		author?: string;
 		index: number;
 		locale: string;
 		side?: 'A' | 'B' | null;
@@ -120,7 +122,11 @@
 		curveName={item.name}
 		authorName={item.author?.displayUsername}
 	/>
-	<ReportAction subject={{ kind: 'lineage', id: item.id }} name={item.name} />
+	<ReportAction
+		subject={{ kind: 'lineage', id: item.id }}
+		name={item.name}
+		author={author ?? item.author?.username}
+	/>
 </article>
 
 <style>

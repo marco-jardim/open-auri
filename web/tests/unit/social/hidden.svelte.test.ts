@@ -24,6 +24,98 @@ import {
 } from '../pages/comunidade/fixtures.ts';
 
 const cleanups: (() => Promise<void>)[] = [];
+
+for (const surface of ['community', 'curve', 'profile'] as const) {
+	test(`${surface}: failed hidden-list loads show Retry outside collapsed management, not a permanent spinner`, async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		let offline = true;
+		const store = createHiddenStore({
+			...remote(),
+			myHidden: async () => {
+				if (offline) throw new Error('offline');
+				return {
+					items: [{ targetType: 'curve' as const, targetId: 'blocked', createdAt: 1, label: null }]
+				};
+			}
+		});
+		await store.setUser('me');
+		let target: HTMLElement;
+		if (surface === 'community')
+			target = show(
+				Comunidade,
+				{
+					api: apiWith(
+						fakeFetch(() => json(feedPage([feedItem({ id: 'blocked', name: 'Blocked' })])))
+					),
+					session: ANONYMOUS,
+					storage: null,
+					tourController: createTour({ storage: () => undefined, isDesktop: () => false })
+				},
+				store
+			);
+		else if (surface === 'curve')
+			target = show(
+				SharedCurve,
+				{
+					curve: {
+						lineageId: 'blocked',
+						versionId: 'v1',
+						isHead: true,
+						name: 'Blocked',
+						description: '',
+						license: 'CC0-1.0',
+						lang: 'pt-BR',
+						author: null,
+						s1: S1_NEUTRAL,
+						visibility: 'public',
+						shareId: null
+					},
+					meta: {
+						canonical: 'https://example.test/c/blocked',
+						image: 'https://example.test/og/v1.png',
+						indexable: true
+					},
+					signedIn: false
+				},
+				store
+			);
+		else
+			target = show(
+				Perfil,
+				{
+					data: {
+						profile: {
+							username: 'ana',
+							displayUsername: 'Ana',
+							bio: null,
+							library: 'public',
+							activity: 'public',
+							counts: { lineages: 0, packs: 0 }
+						},
+						lineages: { items: [], nextCursor: null },
+						packs: { items: [], nextCursor: null },
+						favorites: { items: [], nextCursor: null }
+					}
+				},
+				store
+			);
+		const retry = page.getByRole('button', { name: m.hidden_retry(), exact: true });
+		await expect.element(retry).toBeVisible();
+		expect(retry.element().closest('details')).toBeNull();
+		expect(target.querySelector<HTMLDetailsElement>('.hidden-items')?.open).toBe(false);
+		expect(
+			[...target.querySelectorAll('[role="status"]')].some(
+				(node) => node.textContent === m.hidden_loading()
+			)
+		).toBe(false);
+		expect(target.querySelector('h1')?.textContent).not.toBe('Blocked');
+		offline = false;
+		await retry.click();
+		await expect.element(retry).not.toBeInTheDocument();
+		expect(target.querySelector('h1')?.textContent).not.toBe('Blocked');
+		expect(page.getByRole('link', { name: 'Blocked', exact: true }).elements()).toHaveLength(0);
+	});
+}
 function show<Props extends Record<string, unknown>>(
 	component: Component<Props>,
 	props: Props,

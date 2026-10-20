@@ -46,7 +46,7 @@
 	const hidden = getHiddenStore();
 	// Signed-in preferences are enforced on pairing and every partner read by the server.
 	// Wait for browser preferences to finish syncing before requesting blind audio.
-	const contentAllowed = $derived($hidden.ready && !$hidden.busy && !$hidden.error);
+	const contentAllowed = $derived($hidden.ready && !$hidden.busy && !$hidden.loadError);
 	const hiddenKey = $derived(JSON.stringify([$hidden.authors, $hidden.curves]));
 	let loadedFor = $state<string | null>(null);
 	const partnerAllowed = $derived(contentAllowed && loadedFor === hiddenKey);
@@ -57,6 +57,9 @@
 	let choice = $state('');
 	let busy = $state(false);
 	let message = $state('');
+	let listFailed = $state(false);
+	let listBusy = $state(false);
+	let listGeneration = 0;
 	let scores = $state<Record<string, number>>({});
 	let listeningTo = $state('');
 
@@ -73,7 +76,7 @@
 			: !online
 				? m.comunidade_offline()
 				: !contentAllowed
-					? $hidden.error
+					? $hidden.loadError
 						? m.hidden_error()
 						: m.hidden_loading()
 					: busy
@@ -97,13 +100,21 @@
 	});
 
 	async function refresh(key: string) {
+		const request = ++listGeneration;
+		listBusy = true;
+		listFailed = false;
+		message = '';
 		try {
 			const page = await api.myTrades({ limit: 20 });
-			if (key !== hiddenKey || !contentAllowed) return;
+			if (request !== listGeneration || key !== hiddenKey || !contentAllowed) return;
 			trades = page.items;
 			loadedFor = key;
 		} catch (error) {
+			if (request !== listGeneration) return;
+			listFailed = true;
 			message = errorText(error);
+		} finally {
+			if (request === listGeneration) listBusy = false;
 		}
 	}
 
@@ -159,7 +170,7 @@
 
 	async function score(trade: TradeDto) {
 		const value = scores[trade.id] ?? 1;
-		if (!isScore(value) || busy) return;
+		if (!partnerAllowed || !isScore(value) || busy) return;
 		busy = true;
 		message = '';
 		try {
@@ -236,7 +247,13 @@
 				>
 			{/if}
 		</div>
-		{#if !contentAllowed}<p class="note">{m.hidden_loading()}</p>{/if}
+		{#if $hidden.loadError}
+			<p class="note" role="alert">{m.hidden_error()}</p>
+			<Button loading={$hidden.busy} onclick={() => hidden.retry()}>{m.hidden_retry()}</Button>
+		{:else if !contentAllowed}<p class="note">{m.hidden_loading()}</p>{/if}
+		{#if listFailed}
+			<Button loading={listBusy} onclick={() => refresh(hiddenKey)}>{m.hidden_retry()}</Button>
+		{/if}
 		{#if trades.length === 0}
 			<p class="note">{m.comunidade_s7_none()}</p>
 		{:else}

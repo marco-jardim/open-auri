@@ -3,6 +3,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { saveFileErrorMessage } from '#lib/files/save.ts';
 	import SocialSources from './SocialSources.svelte';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import { createCurveSocial, type CurveSocial } from './social.svelte.ts';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { curveResponseDb } from 'open-auri/dsp';
@@ -19,6 +20,7 @@
 	import { copy } from './copy.ts';
 	import {
 		initialTracks,
+		communityHidden,
 		visibleTracks,
 		compareCurves,
 		patchBay,
@@ -48,6 +50,9 @@
 	onMount(() => social.mount());
 	const t = $derived(copy(locale));
 	let tracks = $state.raw(initialTracks());
+	const hidden = getHiddenStore();
+	// Loaded tracks belong to the user: keep them intact and explain the hidden source.
+	const hiddenTracks = $derived(tracks.filter((track) => communityHidden(track.curve, $hidden)));
 	let selected = $state(1);
 	let pairA = $state(1);
 	let pairB = $state(2);
@@ -187,6 +192,13 @@
 			error = t.failed;
 			return;
 		}
+		if (
+			communityHidden(curve, $hidden) ||
+			(curve.source.startsWith('community:') && !$hidden.ready)
+		) {
+			error = m.hidden_content();
+			return;
+		}
 		const snapshot = curve;
 		try {
 			let gate = loadGates.get(id);
@@ -196,6 +208,10 @@
 			}
 			const { verdict } = await gate.commit({ ...snapshot, experimental: true });
 			if (disposed || loadTokens.get(id) !== token) return;
+			if (communityHidden(snapshot, $hidden)) {
+				error = m.hidden_content();
+				return;
+			}
 			if (!verdict.ok) {
 				error = `${t.invalidCurve} ${verdict.reasons.map((reason) => reason.code).join(', ')}`;
 				return;
@@ -301,10 +317,12 @@
 			<span class="screw {corner}" aria-hidden="true"></span>
 		{/each}
 		<header class="intro">
-			<p class="kicker">{t.kicker}</p>
+			<div class="intro-top">
+				<p class="kicker">{t.kicker}</p>
+				<div class="intro-help"><TourTrigger page="comparar" /></div>
+			</div>
 			<h1>{t.titleOne} <em>{t.titleTwo}</em></h1>
 			<p class="lede">{t.lede}</p>
-			<div class="intro-help"><TourTrigger page="comparar" /></div>
 		</header>
 		<Tour page="comparar" />
 		<div class="deck">
@@ -367,6 +385,7 @@
 				</select></label
 			>
 			<SocialSources {social} path="/comparar" onload={(curve) => bounce(socialTrack, curve)} />
+			{#if hiddenTracks.length}<p class="notice" role="status">{m.w4_hidden_track_notice()}</p>{/if}
 			<div class="lanes">
 				{#each tracks as track (track.id)}
 					{@const level = laneTrim(track.id)}
@@ -671,13 +690,19 @@
 		position: relative;
 		isolation: isolate;
 	}
-	.intro {
-		position: relative;
+	.intro-top {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		margin-bottom: 4px;
+	}
+	.intro-top .kicker {
+		margin: 0;
 	}
 	.intro-help {
-		position: absolute;
-		top: 0;
-		right: 0;
+		flex: 0 0 auto;
 	}
 	.counter {
 		display: inline-flex;

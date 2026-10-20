@@ -60,6 +60,7 @@
 			>{sales.after}
 		</p>
 		<div class="footer-links">
+			<a href="/privacidade">{m.w4_privacy()}</a>
 			<a href="/docs#aviso-legal">{m.chrome_legal_link()}</a>
 			<a href={githubUrl}>{m.chrome_github_link()}</a>
 			<span>{m.chrome_license()}</span>

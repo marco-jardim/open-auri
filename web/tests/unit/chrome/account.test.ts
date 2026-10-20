@@ -112,15 +112,15 @@ describe('fetchAccount', () => {
 		);
 	});
 
-	test('any failure reads as signed out', async () => {
-		expect(await fetchAccount(async () => json({ error: 'x' }, 503))).toBeNull();
+	test('failed probes stay unknown and only a successful empty session is signed out', async () => {
+		expect(await fetchAccount(async () => json({ error: 'x' }, 503))).toBeUndefined();
 		expect(await fetchAccount(async () => json(null))).toBeNull();
-		expect(await fetchAccount(async () => new Response('not json'))).toBeNull();
+		expect(await fetchAccount(async () => new Response('not json'))).toBeUndefined();
 		expect(
 			await fetchAccount(async () => {
 				throw new TypeError('offline');
 			})
-		).toBeNull();
+		).toBeUndefined();
 	});
 
 	test('aborts propagate so a newer probe wins', async () => {

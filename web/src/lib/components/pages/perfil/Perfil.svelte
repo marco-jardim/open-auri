@@ -272,7 +272,11 @@
 			</div>
 		</section>
 	{:else if !$hidden.ready || authorHidden}
-		<p role="status">{$hidden.ready ? m.hidden_content() : m.hidden_loading()}</p>
+		{#if $hidden.ready}
+			<p role="status">{m.hidden_content()}</p>
+		{:else if !$hidden.error}
+			<p role="status">{m.hidden_loading()}</p>
+		{/if}
 		<HiddenItems />
 	{:else}
 		<section class="hero" aria-labelledby="{id}-title">
@@ -379,6 +383,7 @@
 						{#each shown as item, index (item.id)}
 							<ProfileRecord
 								{item}
+								author={profile.username}
 								{index}
 								{locale}
 								side={playingId === item.id ? side : null}
@@ -406,7 +411,11 @@
 						{#each packs as pack (pack.id)}
 							<li>
 								<strong>{pack.name}</strong>
-								<ReportAction subject={{ kind: 'pack', id: pack.id }} name={pack.name} />
+								<ReportAction
+									subject={{ kind: 'pack', id: pack.id }}
+									name={pack.name}
+									author={profile.username}
+								/>
 								{#if pack.description}<span class="pack-description">{pack.description}</span>{/if}
 								<small>{formatDate(pack.updatedAt, locale)}</small>
 							</li>
@@ -429,16 +438,29 @@
 						<ul>
 							{#each shownFavorites as favorite (favorite.lineage.id)}
 								<li>
-									<strong lang={favorite.lineage.lang}>{favorite.lineage.name}</strong>
-									{#if favorite.lineage.author}<span
-											>{m.perfil_by()} {favorite.lineage.author.displayUsername}</span
-										>{/if}
+									<a
+										href="/c/{encodeURIComponent(favorite.lineage.id)}"
+										lang={favorite.lineage.lang}>{favorite.lineage.name}</a
+									>
+									{#if favorite.lineage.author}
+										<span
+											>{m.perfil_by()}
+											<a href="/u/{encodeURIComponent(favorite.lineage.author.username)}"
+												>{favorite.lineage.author.displayUsername}</a
+											>
+										</span>
+									{/if}
 									<small>{formatDate(favorite.at, locale)}</small>
 									<HideActions
 										lineageId={favorite.lineage.id}
 										author={authorHiddenId(favorite.lineage.author)}
 										curveName={favorite.lineage.name}
 										authorName={favorite.lineage.author?.displayUsername}
+									/>
+									<ReportAction
+										subject={{ kind: 'lineage', id: favorite.lineage.id }}
+										name={favorite.lineage.name}
+										author={favorite.lineage.author?.username}
 									/>
 								</li>
 							{/each}

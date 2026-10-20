@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import DocsPage from '#lib/components/pages/docs/DocsPage.svelte';
+import EnvironmentExtras from '#lib/components/pages/docs/EnvironmentExtras.svelte';
 import { docsContent } from '#lib/content/docs/index.ts';
 import { docsUi } from '#lib/components/pages/docs/ui.ts';
 import { setLocale } from '#lib/paraglide/runtime.js';
@@ -35,8 +36,8 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				.poll(() => target.querySelector('#android a[href^="https://"]')?.getAttribute('href'))
 				.toBe(ANDROID_PLAY_URL);
 			expect(target.querySelector(`a[href="${ANDROID_RELEASES_URL}"]`)).toBeNull();
-			expect(target.querySelector('#android')?.textContent).not.toContain('GitHub Releases');
-			expect(target.querySelector('#android-assinatura')?.textContent).not.toContain('apksigner');
+			expect(target.querySelector<HTMLElement>('#android')?.innerText).not.toContain('GitHub Releases');
+			expect(target.querySelector<HTMLElement>('#android-assinatura')?.innerText).not.toContain('apksigner');
 			await page.getByRole('button', { name: ui.search, exact: true }).click();
 			await page.getByRole('searchbox', { name: ui.searchInput }).fill('apksigner');
 			await expect.element(page.getByText(ui.noResults, { exact: true })).toBeVisible();
@@ -62,3 +63,19 @@ test('synchronous Capacitor detection hides APK links before native detection fi
 	});
 	expect(screen.container.querySelector(`a[href="${ANDROID_RELEASES_URL}"]`)).toBeNull();
 });
+
+for (const inApp of [false, true]) {
+	test(`docs environment slots reserve their prerender size without APK links before hydration (app=${inApp})`, async () => {
+		const section = docsContent('pt-BR').sections.find((item) => item.id === 'android')!;
+		const screen = await render(EnvironmentExtras, { section, inApp, hydrated: false });
+		const slot = screen.container.querySelector('.environment-extras')!;
+		const before = slot.getBoundingClientRect().height;
+		expect(screen.container.querySelector('a')).toBeNull();
+		expect(before).toBeGreaterThan(0);
+		await screen.rerender({ hydrated: true });
+		expect(slot.getBoundingClientRect().height).toBe(before);
+		expect(screen.container.querySelector(`a[href="${ANDROID_RELEASES_URL}"]`) !== null).toBe(!inApp);
+		await screen.rerender({ inApp: !inApp });
+		expect(slot.getBoundingClientRect().height).toBe(before);
+	});
+}

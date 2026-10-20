@@ -97,15 +97,18 @@ export async function probeAccount(
 
 /**
  * Session probe for prerendered pages (their layout data is built without a session).
- * Any failure (offline, no auth service in dev, non-JSON) reads as signed out; use
- * `probeAccount` to tell a failure from a definitive signed-out answer.
+ * Undefined means unknown (offline, HTTP failure, non-JSON); only null means signed out.
  */
 export async function fetchAccount(
 	fetcher: FetchLike = (input, init) => fetch(input, init),
 	signal?: AbortSignal
-): Promise<AccountSummary | null> {
+): Promise<AccountSummary | null | undefined> {
 	const result = await probeAccount(fetcher, signal);
-	return result.status === 'signed-in' ? result.account : null;
+	return result.status === 'signed-in'
+		? result.account
+		: result.status === 'signed-out'
+			? null
+			: undefined;
 }
 
 function isAuthPage(pathname: string): boolean {

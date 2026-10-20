@@ -17,6 +17,7 @@
 	import type { DocsUi } from './ui.ts';
 	import SearchDialog from './SearchDialog.svelte';
 	import ProtocolWidgets from './ProtocolWidgets.svelte';
+	import EnvironmentExtras from './EnvironmentExtras.svelte';
 	import { keyboardScroll } from './keyboard-scroll.ts';
 	import { glossaryEntries } from './glossary-entries.ts';
 	import { traceOnce } from './trace.ts';
@@ -49,9 +50,12 @@
 	} = $props();
 	const nativeCable = getNativeCableState();
 	const nativeAtLoad = isNativeAndroid();
-	const content = $derived(
-		docsForEnvironment(sourceContent, nativeAtLoad || nativeCable.result.kind !== 'none')
-	);
+	let hydrated = $state(false);
+	onMount(() => {
+		hydrated = true;
+	});
+	const inApp = $derived(nativeAtLoad || nativeCable.result.kind !== 'none');
+	const content = $derived(docsForEnvironment(sourceContent, inApp));
 	const glossaryTerms = $derived(glossaryEntries());
 	let progress = $state(0);
 	let showTop = $state(false);
@@ -460,7 +464,7 @@
 				</aside>
 			</div>
 			<article bind:this={article} aria-label={content.subtitle}>
-				{#each content.sections as section, index (section.id)}
+				{#each sourceContent.sections as section, index (section.id)}
 					<section
 						class="chapter"
 						id={section.id}
@@ -493,6 +497,9 @@
 									{#each section.items as item (item)}<li>{item}</li>{/each}
 								</ul>{/if}
 						</div>
+						{#if section.browserOnly || section.appOnly}
+							<EnvironmentExtras {section} {inApp} {hydrated} />
+						{/if}
 						{#if section.id === 'envelope'}
 							<p class="inset"><strong>{content.safetyCaveat}</strong></p>
 							<div class="table-scroll" role="region" use:keyboardScroll aria-label={ui.thresholds}>

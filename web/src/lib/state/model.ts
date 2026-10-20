@@ -19,6 +19,8 @@ export interface CurveData {
 	readonly bands: Bands;
 	/** Absent or null: every filter keeps its automatic name. */
 	readonly labels?: CurveLabels | null;
+	/** Transient provenance for hiding loaded comparison/blind-test sources. */
+	readonly community?: { lineageId: string; author: string | null };
 }
 export interface CurrentCurve extends CurveData {
 	readonly schema: 1;

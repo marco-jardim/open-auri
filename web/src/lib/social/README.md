@@ -91,7 +91,7 @@ messages by code; never show `details` verbatim.
 
 ```ts
 const session = createSocialSession({ initial: data.account }); // or undefined, then:
-void session.refresh(); // reuses fetchAccount (GET /api/auth/get-session), failures = signed out
+void session.refresh(); // reuses fetchAccount (GET /api/auth/get-session), failures stay unknown
 // Rune-backed getters: session.signedIn, session.verified, session.accountId, session.nickname.
 const href = requireLoginHref(page.url.pathname + page.url.search); // "Entrar" that comes back
 ```
@@ -128,7 +128,8 @@ await outbox.purge(); // on sign-out (removes all) or account switch (keeps the 
   (`#lib/components/chrome/account.ts`), which returns `signed-out` only when the auth API answered
   successfully without a session and `error` for any failure (offline, HTTP error, bad body). On
   `error` the queue is kept and the probe is retried when the tab comes back online or visible.
-  `fetchAccount` keeps its old behaviour (any failure reads as signed out) for the other consumers.
+  `fetchAccount` also distinguishes failure (`undefined`, unknown) from a definitive sign-out
+  (`null`); hidden preferences stay closed and offer a retry while the session is unknown.
 - **The server binds the batch too (FX4.10).** Every POST carries `actor` = the owner of its items.
   When the session cookie belongs to someone else (another tab switched account while a flush or a
   stale tab was running), the server answers 409 `CONFLICT` with

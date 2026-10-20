@@ -30,6 +30,7 @@
 		name: string;
 		author: string | null;
 		authorName?: string;
+		username?: string;
 	};
 	const hidden = getHiddenStore();
 	const uid = $props.id();
@@ -109,7 +110,8 @@
 					versionId: lineage.head.id,
 					name: lineage.head.name,
 					author: authorHiddenId(lineage.author),
-					authorName: lineage.author?.displayUsername
+					authorName: lineage.author?.displayUsername,
+					username: lineage.author?.username
 				};
 			});
 			rows = more ? [...rows, ...items] : items;
@@ -147,11 +149,15 @@
 				lineageId: result.lineage.id,
 				versionId: result.version.id
 			});
-			if (token !== generation) return;
+			if (token !== generation || !hidden.visible(row.id, row.author)) return;
 			const value = candidate(`community:${result.version.id}`, result.version.name, {
 				bands: curve.bands,
 				preampDb: curve.preampDb
 			});
+			value.community = {
+				lineageId: result.lineage.id,
+				author: row.author
+			};
 			onadd(value);
 			message = value.accepted ? m.cegocom_added({ name: value.name }) : m.cegocom_rejected();
 		} catch (cause) {
@@ -202,7 +208,11 @@
 					{#each filtered as row (row.id)}
 						<li>
 							<span>{row.name}</span>
-							<ReportAction subject={{ kind: 'lineage', id: row.id }} name={row.name} />
+							<ReportAction
+								subject={{ kind: 'lineage', id: row.id }}
+								name={row.name}
+								author={row.username}
+							/>
 							<HideActions
 								lineageId={row.id}
 								author={row.author}
