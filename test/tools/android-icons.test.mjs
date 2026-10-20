@@ -127,14 +127,17 @@ test('legacy icons have rounded corners and an 8% margin; round icons have circu
     assert.equal(alphaAt(legacy, legacy.width / 2, legacy.height / 2), 255);
     const backgroundIndex =
       (Math.floor(legacy.height * 0.15) * legacy.width + legacy.width / 2) * 4;
-    assert.deepEqual([...legacy.pixels.subarray(backgroundIndex, backgroundIndex + 4)], [
-      0x17, 0x17, 0x15, 255,
-    ]);
+    assert.deepEqual(
+      [...legacy.pixels.subarray(backgroundIndex, backgroundIndex + 4)],
+      [0x17, 0x17, 0x15, 255],
+    );
     for (let y = 0; y < legacy.height; y++) {
       for (let x = 0; x < legacy.width; x++) {
         if (
-          x + 1 <= legacy.width * 0.08 || x >= legacy.width * 0.92 ||
-          y + 1 <= legacy.height * 0.08 || y >= legacy.height * 0.92
+          x + 1 <= legacy.width * 0.08 ||
+          x >= legacy.width * 0.92 ||
+          y + 1 <= legacy.height * 0.08 ||
+          y >= legacy.height * 0.92
         ) {
           assert.equal(alphaAt(legacy, x, y), 0, `${density}: transparent legacy margin`);
         }

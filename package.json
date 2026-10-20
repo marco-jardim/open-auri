@@ -95,7 +95,10 @@
     "lint:android": "node tools/run-gradle.mjs :app:lintDebug",
     "test:android:device": "node tools/run-gradle.mjs :app:connectedDebugAndroidTest",
     "typecheck:android": "tsc -p apps/android/tsconfig.json --noEmit",
-    "icons:android": "node tools/android-icons.mjs"
+    "icons:android": "node tools/android-icons.mjs",
+    "notices:android": "node tools/android-notices.mjs",
+    "usb:golden": "node tools/usb-golden.mjs",
+    "play:assets": "node tools/play-assets.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

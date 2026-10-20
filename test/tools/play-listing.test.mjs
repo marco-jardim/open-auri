@@ -100,7 +100,10 @@ test('full descriptions start with the exact G.5 notices, also pinned to the pla
   assert.ok(section, 'Missing G.5 section in the plan');
   for (const [language, fields] of parseListing(listing)) {
     const notice = notices[language];
-    assert.ok(section[1].includes(`- ${language}: "${notice}"`), `${language}: plan notice changed`);
+    assert.ok(
+      section[1].includes(`- ${language}: "${notice}"`),
+      `${language}: plan notice changed`,
+    );
     assert.ok(
       fields.get('Full description').startsWith(`${notice}\n\n`),
       `${language}: full description must open with the verbatim G.5 paragraph`,
@@ -142,7 +145,9 @@ test('shared fields contain category, tags, public contact placeholder and websi
 
 test('the entire listing has no U+2014 or branding forbidden by CONTRIBUTING', () => {
   assert.doesNotMatch(listing, /\u2014/u);
-  const rule = contributing.match(/\*\*Marcas proibidas como branding:\*\* ([\s\S]*?)\.\s+Os nomes/);
+  const rule = contributing.match(
+    /\*\*Marcas proibidas como branding:\*\* ([\s\S]*?)\.\s+Os nomes/,
+  );
   assert.ok(rule, 'Missing forbidden branding rule');
   const brands = rule[1]
     .replace(/\([^)]*\)/g, '')

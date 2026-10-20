@@ -69,7 +69,10 @@ test('bundled HTML scanner handles script end-tag whitespace, attributes, quotes
   const html =
     `<!-- <script>ignored</script> --><script data-note=">">one</ScRiPt \n>` +
     `<script>two</script data-note=">">`;
-  assert.deepEqual(bundledTags(html).map(({ body }) => body), ['one', 'two']);
+  assert.deepEqual(
+    bundledTags(html).map(({ body }) => body),
+    ['one', 'two'],
+  );
   assert.deepEqual(
     bundledTags('<style>"<script>"</style><script>İthree</script>')
       .filter(({ name }) => name === 'script')
