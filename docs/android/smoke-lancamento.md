@@ -27,7 +27,7 @@ Release `android-v1.0.1` (commit `202a194`, versionCode 10001), instalada a part
 | 4 | Página do cabo | OK | faixa do aviso visível; "Conectar pelo USB do Android" sem cabo acende "Sem cabo"; sem Diagnóstico USB; "Relatar resultado" abre o issue form no Chrome |
 | 5 | Áudio de teste e arquivo próprio | OK | "Tocar arquivo" toca o sinal de teste (player AAudio `started` no uid do app); "Carregar MP3…" abre o seletor do sistema |
 | 6 | Exportar JSON pelo SAF | OK | "JSON open-auri (preset)" abre o seletor do sistema, salva `neutro.json` com `open-auri/preset@1` (arquivo de teste apagado depois) |
-| 7 | Entrar na conta (Turnstile) e sair | pendente | precisa da conta do mantenedor |
+| 7   | Entrar na conta (Turnstile) e sair | OK | o mantenedor entrou e saiu pelo menu do app (2026-10-20) |
 | 8 | Link externo (Kuba) no navegador do sistema | OK | `kuba.audio` abre no Chrome |
 | 9 | App Links | OK | `dumpsys package d`: `open-auri.com` com status `always` (verificado; o Android 10 não tem `pm get-app-links`); `/c/<id>` e `/u/<apelido>?x=1#f` abrem a página certa, com o app fechado e aberto |
 | 10 | Modo avião | OK | sem o service worker (primeira abertura) aparece "Sem conexão" e Voltar sai do app; com o service worker, o editor abre da cópia salva |
