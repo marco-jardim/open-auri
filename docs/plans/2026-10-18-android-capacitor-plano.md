@@ -2557,6 +2557,7 @@ Os achados viram FXGH.k (0.5).
 | 2026-10-20 | Verificação r3, FX3.3 | PASS; concluído | `42c600a`, `5825394` | critical/major do r2 confirmados resolvidos; CodeQL `js/file-system-race` corrigido; nickname de teste que caía na blocklist por acaso (0,4%) |
 | 2026-10-20 | F3 (DoD) | concluído | HEAD `5825394` | Q3 e QP sem critical/major aberto; CI do PR #55 verde no HEAD (Tests, E2E, Android, Android emulator, release dry run, lint, build, CodeQL); GitGuardian 38436941 é falso positivo (nome de variável) e aguarda o mantenedor marcar no painel |
 | 2026-10-20 | PF4 (parcial) | em andamento | HEAD `00c82fc` | itens 1, 3, 4 e 5 OK (ver "PF4" abaixo); item 2 (H-KEY, H-ENV, P1/P5, H-SMOKE) aguardando o mantenedor |
+| 2026-10-20 | H-KEY (parcial) | chaves criadas | - | certificados públicos, RSA 4096, válidos até 2054-03-07: app `FB:46:E3:4F:03:FD:6F:59:5B:4B:70:36:74:8F:92:83:08:FA:BF:31:C1:55:BF:E2:C5:0E:B1:B4:43:FF:61:D0`, upload `59:1A:0A:1B:CC:E8:A5:39:AF:2F:25:60:DE:1D:D7:92:82:F0:42:BA:40:62:82:31:F3:E4:35:E3:A6:CD:04:16`; backup offline a confirmar |
 | 2026-10-20 | P1 | parcial | `f370205` | conta pessoal ativa, anterior a 2023-11-13 (isenta do teste fechado); verificação de identidade pendente, publicação bloqueada até concluir |
 
 **PF4 (2026-10-20):**
