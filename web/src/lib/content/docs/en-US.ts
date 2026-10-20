@@ -307,7 +307,7 @@ export const enUS: DocsContent = {
 			paragraphs: [
 				'On the cable page, Connect lists the Auri cables attached to the phone (VID 0x3302, PID 0x8902) and Android asks whether open-auri may access the USB device. Without that permission, nothing is sent. With more than one cable, an app picker takes the place of the WebHID picker.',
 				'What stays the same: the same gate v2, the same checklist and the same journal as the site, with the same codec and the same bytes. Nothing is written without your gesture on Write to cable, and disconnecting during a write interrupts it with no commit.',
-				'What changes: only the final stretch, from the site to USB, runs through the app’s native code, with an extra guard that checks every sequence before the commit. Downloads open the Android file picker, and external links open in the system browser. The app asks only for internet access and, when you connect the cable, for USB.'
+				'What changes: only the final stretch, from the site to USB, runs through the app’s native code, with an extra guard that checks every sequence before the commit. Downloads open the Android file picker, and external links open in the system browser. The app asks only for internet access and, when you connect the cable, for USB. Before each write, the app checks the published site version with the server. With no connection, the write goes ahead on the last confirmation of this same version, and the app shows its date; with no confirmation at all, or once the server has reported a newer version, the write is refused.'
 			]
 		},
 		{

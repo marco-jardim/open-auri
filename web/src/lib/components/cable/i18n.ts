@@ -130,8 +130,29 @@ export function reloadWhenSafe(reload: () => void = () => window.location.reload
 	if (typeof window !== 'undefined' && mayApplyUpdate(window.__oaWriteInProgress)) reload();
 }
 
-/** Human-readable outcome of a write or a queue. */
+/**
+ * Short, non-blocking notice for a native write that went ahead offline on the last live
+ * confirmation of this build (with its date); null otherwise.
+ */
+export function lastGoodNotice(outcome: WriteOutcome | QueueOutcome): string | null {
+	if (outcome.status === 'refused') return null;
+	const freshness = outcome.freshness;
+	if (freshness?.basis !== 'last-good') return null;
+	const date = new Intl.DateTimeFormat(getLocale(), {
+		dateStyle: 'short',
+		timeStyle: 'short'
+	}).format(freshness.checkedAt);
+	return m.cable_native_last_good({ date });
+}
+
+/** Human-readable outcome of a write or a queue, followed by the offline last-good notice. */
 export function describeOutcome(outcome: WriteOutcome | QueueOutcome): string {
+	const text = outcomeText(outcome);
+	const notice = lastGoodNotice(outcome);
+	return notice === null ? text : `${text} ${notice}`;
+}
+
+function outcomeText(outcome: WriteOutcome | QueueOutcome): string {
 	if (outcome.status === 'refused') {
 		if (outcome.error instanceof NativeFreshnessError) {
 			return outcome.error.reason === 'newer'

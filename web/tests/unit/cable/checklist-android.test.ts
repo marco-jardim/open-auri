@@ -4,9 +4,17 @@ import { createFakeClock } from 'open-auri/transport';
 import { evaluateChecklist } from '#lib/cable/checklist.ts';
 import { createCableService, NEUTRAL_CURVE } from '#lib/cable/service.ts';
 import { NativeHID, type OpenAuriUsbPlugin } from '#lib/cable/native/hid.ts';
-import { NativeFreshnessError } from '#lib/cable/native-freshness.ts';
+import { NATIVE_LAST_GOOD_KEY, NativeFreshnessError } from '#lib/cable/native-freshness.ts';
 import type { Band, ChecklistContext, ChecklistInput, JournalEntry } from '#lib/cable/types.ts';
-import { CONFIRMED, T0, TRUSTED_CLICK, memoryFlash, memoryJournal, padrao } from './harness.ts';
+import {
+	CONFIRMED,
+	T0,
+	TRUSTED_CLICK,
+	memoryFlash,
+	memoryJournal,
+	memoryStorage,
+	padrao
+} from './harness.ts';
 
 const YOLO_BANDS: Band[] = [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }, ...NEUTRAL_BANDS.slice(1)];
 const SHELF_BANDS: Band[] = [
@@ -124,8 +132,11 @@ afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-/** Real NativeHID and service authorization, with a fake plugin that only records I/O. */
-async function nativeService(count = 1, interrupted = false) {
+/**
+ * Real NativeHID and service authorization, with a fake plugin that only records I/O. Each
+ * service has its own last-good storage (empty unless given).
+ */
+async function nativeService(count = 1, interrupted = false, storage = memoryStorage()) {
 	const devices = Array.from({ length: count }, (_, index) => ({
 		key: `cable-${index}`,
 		vendorId: USB_VID,
@@ -168,7 +179,9 @@ async function nativeService(count = 1, interrupted = false) {
 	const service = createCableService({
 		nativeFreshness: {
 			version: 'current',
-			fetch: freshnessFetch
+			fetch: freshnessFetch,
+			storage,
+			now: () => T0 + clock.now()
 		},
 		hid,
 		clock,
@@ -191,7 +204,7 @@ async function nativeService(count = 1, interrupted = false) {
 	const first = service.getState().devices[0];
 	if (first === undefined) throw new Error('Missing native test cable');
 	service.selectDevice(first);
-	return { service, open, sendReport, flash, journal, freshnessFetch, clock };
+	return { service, open, sendReport, flash, journal, freshnessFetch, clock, storage };
 }
 
 describe('Native service enforces acknowledgement before any write I/O', () => {
@@ -268,7 +281,7 @@ describe('Native service enforces acknowledgement before any write I/O', () => {
 
 describe('Native service requires a fresh deployed policy on every write path', () => {
 	test.each(['single', 'rescue', 'queue', 'yolo'] as const)(
-		'%s refuses a newer deploy or offline cached build before any write I/O',
+		'%s refuses a newer deploy, or offline without a last-good record, before any write I/O',
 		async (path) => {
 			for (const reason of ['newer', 'unavailable'] as const) {
 				const h = await nativeService(path === 'queue' ? 2 : 1, path === 'rescue');
@@ -312,7 +325,7 @@ describe('Native service requires a fresh deployed policy on every write path', 
 		}
 	);
 
-	test('an already-open page cannot reuse an earlier successful policy check', async () => {
+	test('an already-open page cannot reuse an earlier successful check against a newer deploy', async () => {
 		const h = await nativeService();
 		const write = () =>
 			h.service.write({
@@ -329,5 +342,94 @@ describe('Native service requires a fresh deployed policy on every write path', 
 		expect(h.open).not.toHaveBeenCalled();
 		expect(h.sendReport).not.toHaveBeenCalled();
 		expect(h.flash.records).toHaveLength(1);
+	});
+});
+
+describe('Native service offline on the last-good confirmation of this build', () => {
+	const DAY_AGO = T0 - 86_400_000;
+	const PATHS = ['single', 'rescue', 'queue', 'yolo'] as const;
+
+	function lastGood(value: unknown) {
+		return memoryStorage({ [NATIVE_LAST_GOOD_KEY]: JSON.stringify(value) });
+	}
+
+	function writeVia(h: Awaited<ReturnType<typeof nativeService>>, path: (typeof PATHS)[number]) {
+		const request = {
+			...input({
+				...(path === 'rescue' ? NEUTRAL_CURVE : {}),
+				...(path === 'yolo'
+					? { bands: YOLO_BANDS, preampDb: -0.5, experimental: true, profile: 'yolo' as const }
+					: {}),
+				confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true, androidUntested: true }
+			}),
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		};
+		return path === 'queue'
+			? h.service.writeQueue({ ...request, devices: h.service.getState().devices })
+			: h.service.write(request);
+	}
+
+	test.each(PATHS)('%s live: records last-good and reports the live basis', async (path) => {
+		const h = await nativeService(path === 'queue' ? 2 : 1, path === 'rescue');
+		const outcome = await writeVia(h, path);
+		expect(outcome.status).toBe(path === 'queue' ? 'done' : 'ok');
+		if (outcome.status === 'refused') return;
+		expect(outcome.freshness).toEqual({ basis: 'live', checkedAt: expect.any(Number) });
+		expect(outcome.freshness?.checkedAt).toBeGreaterThanOrEqual(T0);
+		expect(JSON.parse(h.storage.items.get(NATIVE_LAST_GOOD_KEY) ?? 'null')).toEqual({
+			version: 'current',
+			checkedAt: outcome.freshness?.checkedAt
+		});
+	});
+
+	test.each(PATHS)('%s offline: proceeds on a matching record and reports it', async (path) => {
+		const storage = lastGood({ version: 'current', checkedAt: DAY_AGO });
+		const h = await nativeService(path === 'queue' ? 2 : 1, path === 'rescue', storage);
+		h.freshnessFetch.mockRejectedValue(new TypeError('offline'));
+		const outcome = await writeVia(h, path);
+		expect(outcome.status).toBe(path === 'queue' ? 'done' : 'ok');
+		expect(outcome).toMatchObject({ freshness: { basis: 'last-good', checkedAt: DAY_AGO } });
+		expect(h.freshnessFetch).toHaveBeenCalledOnce();
+		expect(h.sendReport).toHaveBeenCalled();
+		expect(h.journal.entries.filter((entry) => entry.status === 'ok')).toHaveLength(
+			path === 'queue' ? 2 : 1
+		);
+		if (path !== 'queue') expect(h.service.getState().lastOutcome).toBe(outcome);
+	});
+
+	test.each([
+		['another build', { version: 'older', checkedAt: DAY_AGO }],
+		['a malformed record', { version: 'current', checkedAt: 'yesterday' }],
+		['no record', null]
+	] as const)('offline refuses with %s before any write I/O', async (_label, record) => {
+		const h = await nativeService(1, false, record === null ? memoryStorage() : lastGood(record));
+		h.freshnessFetch.mockRejectedValue(new TypeError('offline'));
+		const result = await writeVia(h, 'single');
+		expect(result).toMatchObject({ status: 'refused', reason: 'error' });
+		if (result.status === 'refused') {
+			expect(result.error).toBeInstanceOf(NativeFreshnessError);
+			expect(result.error).toMatchObject({ reason: 'unavailable' });
+		}
+		expect(h.open).not.toHaveBeenCalled();
+		expect(h.sendReport).not.toHaveBeenCalled();
+		expect(h.flash.records).toEqual([]);
+	});
+
+	test('a newer deploy clears the record, so this page then refuses offline', async () => {
+		const h = await nativeService(1, false, lastGood({ version: 'current', checkedAt: DAY_AGO }));
+		h.freshnessFetch.mockResolvedValue(new Response(JSON.stringify({ version: 'disabled' })));
+		expect(await writeVia(h, 'single')).toMatchObject({
+			status: 'refused',
+			error: { reason: 'newer' }
+		});
+		expect(h.storage.items.has(NATIVE_LAST_GOOD_KEY)).toBe(false);
+		h.freshnessFetch.mockRejectedValue(new TypeError('offline'));
+		expect(await writeVia(h, 'single')).toMatchObject({
+			status: 'refused',
+			error: { reason: 'unavailable' }
+		});
+		expect(h.open).not.toHaveBeenCalled();
+		expect(h.sendReport).not.toHaveBeenCalled();
+		expect(h.flash.records).toEqual([]);
 	});
 });

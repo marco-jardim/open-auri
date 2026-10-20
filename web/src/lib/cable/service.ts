@@ -4,8 +4,8 @@
  *
  * Every write goes through, in this order: a fresh single-use gesture token, the
  * checklist (gate on a snapshot, confirmations, 2 s spacing), the cross-tab write lock
- * (Web Locks `oa-cable-write`, `ifAvailable`), a bounded live deploy check for native writes,
- * the checklist again with fresh flash state, then `writeCurve` / `writeMany` from
+ * (Web Locks `oa-cable-write`, `ifAvailable`), a bounded live deploy check for native writes
+ * (offline: only the last live confirmation of this same build), the checklist again with fresh flash state, then `writeCurve` / `writeMany` from
  * `open-auri/transport`, which run `gateForWrite`
  * again on that snapshot. Nothing is ever retried or written automatically; the lock and
  * the in-flight marker only ever refuse or record.
@@ -44,7 +44,11 @@ import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
 import { gateForWrite, isWaivable } from 'open-auri/safety';
 import { evaluateChecklist, flashCountersOf } from './checklist.ts';
 import { isNativeHid } from './native/brand.ts';
-import { assertNativeWriteFresh, type NativeFreshnessDeps } from './native-freshness.ts';
+import {
+	assertNativeWriteFresh,
+	type NativeFreshnessDeps,
+	type NativeWriteFreshness
+} from './native-freshness.ts';
 import { consumeGestureToken, createGestureToken, type GestureEventLike } from './gesture.ts';
 import { withWriteFlag } from './write-flag.ts';
 import type {
@@ -346,7 +350,7 @@ function gateReasonsOf(error: unknown): Refused['gateReasons'] {
 }
 
 export function createCableService(
-	/** Native freshness fetch/version overrides are for tests; desktop never reads them. */
+	/** Freshness overrides (fetch, version, storage, now) are for tests; desktop ignores them. */
 	deps: CableServiceDeps & { nativeFreshness?: NativeFreshnessDeps }
 ) {
 	const detected = detectCableSupport() === 'real' ? navigatorHid() : null;
@@ -896,18 +900,20 @@ export function createCableService(
 	 * lock is released, so "marker present and lock free" always means the writing tab is gone.
 	 */
 	async function exclusive<T extends WriteOutcome | QueueOutcome>(
-		run: () => Promise<T | Refused>
+		run: (freshness: NativeWriteFreshness | null) => Promise<T | Refused>
 	): Promise<T | Refused> {
 		const guarded = async (): Promise<T | Refused> => {
 			try {
+				// Null for desktop and simulated writes, which never check the deployed policy.
+				let freshness: NativeWriteFreshness | null = null;
 				if (native) {
 					try {
-						await assertNativeWriteFresh(deps.nativeFreshness);
+						freshness = await assertNativeWriteFresh(deps.nativeFreshness);
 					} catch (cause) {
 						return refuse('error', { error: cause });
 					}
 				}
-				return await run();
+				return await run(freshness);
 			} finally {
 				unmark();
 			}
@@ -1259,7 +1265,7 @@ export function createCableService(
 			if ('status' in prepared) return prepared;
 			const abort = reserve();
 			try {
-				return await exclusive<WriteOutcome>(async () => {
+				return await exclusive<WriteOutcome>(async (freshness) => {
 					const guard = crossTabGuard();
 					if (guard !== null) return guard;
 					const authorized = authorize(prepared);
@@ -1291,7 +1297,8 @@ export function createCableService(
 							error: cause
 						});
 					}
-					const outcome = settle(result, label, authorized);
+					const written = settle(result, label, authorized);
+					const outcome: Written = freshness === null ? written : { ...written, freshness };
 					lastOutcome = outcome;
 					return outcome;
 				});
@@ -1344,7 +1351,7 @@ export function createCableService(
 			queue = { running: true, items };
 			const abort = reserve();
 			try {
-				return await exclusive<QueueOutcome>(async () => {
+				return await exclusive<QueueOutcome>(async (freshness) => {
 					const guard = crossTabGuard();
 					if (guard !== null) return guard;
 					const authorized = authorize(prepared);
@@ -1449,7 +1456,8 @@ export function createCableService(
 					return {
 						status: 'done',
 						simulated: mode === 'simulated',
-						items: items.map((item) => ({ ...item }))
+						items: items.map((item) => ({ ...item })),
+						...(freshness === null ? {} : { freshness })
 					};
 				});
 			} catch (cause) {

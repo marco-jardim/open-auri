@@ -96,6 +96,23 @@ export function memoryFlash(initial: Partial<FlashState> = {}) {
 	};
 }
 
+/** In-memory `localStorage` stand-in (only the methods the cable code uses). */
+export function memoryStorage(initial: Record<string, string> = {}) {
+	const items = new Map(Object.entries(initial));
+	return {
+		items,
+		getItem(key: string): string | null {
+			return items.get(key) ?? null;
+		},
+		setItem(key: string, value: string) {
+			items.set(key, String(value));
+		},
+		removeItem(key: string) {
+			items.delete(key);
+		}
+	};
+}
+
 export interface SetupOptions {
 	deviceOptions?: ConstructorParameters<typeof FakeHIDDevice>[0];
 	flash?: Partial<FlashState>;

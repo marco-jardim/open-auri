@@ -5,6 +5,7 @@
 import type { writeCurve, writeMany } from 'open-auri/transport';
 import type { gateForWrite } from 'open-auri/safety';
 import type { canWriteNow, lastEntry, loudnessWarning } from 'open-auri/policy';
+import type { NativeWriteFreshness } from './native-freshness.ts';
 
 export type WriteOptions = NonNullable<Parameters<typeof writeCurve>[3]>;
 export type CableDevice = Parameters<typeof writeCurve>[0];
@@ -375,6 +376,8 @@ export interface Written {
 	crc: number;
 	/** `levelDb` of the written curve (the journal entry of an `ok` write carries it implicitly). */
 	levelDb: number | null;
+	/** Native writes only: whether the deploy check was live or the offline last-good record. */
+	freshness?: NativeWriteFreshness;
 }
 
 export type WriteOutcome = Refused | Written;
@@ -402,7 +405,15 @@ export interface QueueState {
 	items: QueueItem[];
 }
 
-export type QueueOutcome = Refused | { status: 'done'; simulated: boolean; items: QueueItem[] };
+export type QueueOutcome =
+	| Refused
+	| {
+			status: 'done';
+			simulated: boolean;
+			items: QueueItem[];
+			/** Native queues only, as `Written.freshness`. */
+			freshness?: NativeWriteFreshness;
+	  };
 
 export interface RescueState {
 	at: number;
