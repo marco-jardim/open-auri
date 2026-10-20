@@ -35,6 +35,19 @@ test('accepts the production config', () => {
   assert.deepEqual(releaseViolations(prodConfig()), []);
 });
 
+test('appStartPath must be absent or start with a slash', () => {
+  for (const value of ['@evil.example', 'evil', '', null, true, 1]) {
+    const config = prodConfig();
+    config.server.appStartPath = value;
+    assert.match(releaseViolations(config).join('; '), /server\.appStartPath/);
+  }
+  for (const value of ['/', '/app', '/@evil.example']) {
+    const config = prodConfig();
+    config.server.appStartPath = value;
+    assert.deepEqual(releaseViolations(config), []);
+  }
+});
+
 test('release rejects every truthy legacy bridge override at either scope', () => {
   for (const value of [true, 'true', 'false', 1, {}, []]) {
     for (const scope of ['android', 'top-level']) {

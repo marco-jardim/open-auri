@@ -374,6 +374,8 @@ jobs:
         run: npm run build:android
       - name: Android release build
         run: npm run build:android:release
+      - name: Check Android notices against the release report
+        run: npm run notices:android -- --check
       - name: Android release dry run (two ephemeral signing keys)
         run: npm run test:android:release
       - name: Upload Android debug APK

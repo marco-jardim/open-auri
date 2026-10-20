@@ -21,6 +21,7 @@ import {
   normalizeFingerprint,
   parseApkCertificate,
   sha256,
+  verifyUploadCertificate,
 } from '../../tools/android-artifacts.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -226,6 +227,8 @@ test(
       };
     }
     assert.notEqual(keys.APP.fingerprint, keys.UPLOAD.fingerprint);
+    env.ANDROID_APP_CERT_SHA256 = keys.APP.fingerprint;
+    env.ANDROID_UPLOAD_CERT_SHA256 = keys.UPLOAD.fingerprint;
 
     const pkg = JSON.parse(read(join(root, 'apps/android/package.json')));
     const out = join(temp, 'release');
@@ -283,6 +286,11 @@ test(
     );
     assert.equal(aabCert, keys.UPLOAD.fingerprint);
     assert.notEqual(aabCert, keys.APP.fingerprint);
+    verifyUploadCertificate(aabCert, env.ANDROID_UPLOAD_CERT_SHA256, env.ANDROID_APP_CERT_SHA256);
+    assert.throws(
+      () => verifyUploadCertificate(aabCert, keys.APP.fingerprint, keys.APP.fingerprint),
+      /expected upload certificate/,
+    );
 
     const nodeArgs = [];
     if (batchSigner) {

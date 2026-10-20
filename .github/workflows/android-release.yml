@@ -8,7 +8,18 @@ on:
     paths:
       - .github/workflows/android-release.yml
       - tools/android-artifacts.mjs
-      - apps/android/android/app/build.gradle
+      - tools/android-notices.mjs
+      - tools/verify-capacitor-config.mjs
+      - tools/run-gradle.mjs
+      - test/tools/android-*.test.mjs
+      - test/tools/verify-capacitor-config.test.mjs
+      - test/android-release/dryrun.mjs
+      - apps/android/package.json
+      - apps/android/capacitor.targets.mjs
+      - apps/android/capacitor.config.ts
+      - package.json
+      - package-lock.json
+      - apps/android/android/**
   workflow_dispatch:
     inputs:
       dry_run:
@@ -36,9 +47,10 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       version_code: ${{ steps.version.outputs.version_code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Reject non-dry dispatch
         if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
         run: |
@@ -48,24 +60,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
-      # setup-gradle's init script breaks dependency verification. Cache without adding plugins.
-      - name: Gradle cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/android/**/*.gradle', 'apps/android/android/gradle/**') }}
-          restore-keys: gradle-${{ runner.os }}-
+      # Releases use cold Gradle state, strict dependency verification and no build cache.
       - run: npm ci
-      - name: Read all published Android manifests
+      - name: Read all published Android manifests and existing tags
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -81,9 +85,13 @@ jobs:
           const pages = JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', `${repo}/releases?per_page=100`], {
             encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
           }));
+          // The triggering tag is the candidate, not a prior release. Its published manifest,
+          // if any, still blocks republishing. All other tags count even without a release.
+          const tags = execFileSync('git', ['tag', '--list', 'android-v*'], { encoding: 'utf8' })
+            .trim().split(/\r?\n/).filter((tag) => tag && !(process.env.GITHUB_REF_TYPE === 'tag' && tag === process.env.GITHUB_REF_NAME));
           const previous = getPreviousAndroidVersionCode(pages.flat(), (assetId) => JSON.parse(execFileSync('gh', [
             'api', '-H', 'Accept: application/octet-stream', `${repo}/releases/assets/${assetId}`,
-          ], { encoding: 'utf8' })));
+          ], { encoding: 'utf8' })), tags);
           writeFileSync(join(process.env.RUNNER_TEMP, 'previous-release-manifest.json'), JSON.stringify({ versionCode: previous }));
           NODE
       - name: Validate version and monotonic versionCode
@@ -92,11 +100,11 @@ jobs:
         run: |
           set -euo pipefail
           # Deterministic code = major*10000 + minor*100 + patch (minor/patch <= 99).
-          # Rebuilding a version produces the same code; already published versions cannot be reused.
+          # Rebuilds keep the same code; only publishing tags must advance the release/tag floor.
           node --input-type=module <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
           import { join } from 'node:path';
-          import { deriveVersionCode } from './tools/android-artifacts.mjs';
+          import { versionCodeForRun } from './tools/android-artifacts.mjs';
           const { version } = JSON.parse(readFileSync('apps/android/package.json', 'utf8'));
           if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== `android-v${version}`) {
             throw new Error('Tag must equal android-v<apps/android/package.json version>');
@@ -105,12 +113,12 @@ jobs:
           if (!Number.isInteger(previous.versionCode) || previous.versionCode < 0) {
             throw new Error('Previous Android versionCode baseline is invalid');
           }
-          const code = deriveVersionCode(version, previous.versionCode);
+          const code = versionCodeForRun(version, previous.versionCode, process.env.GITHUB_REF_TYPE);
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nversion_code=${code}\n`);
           appendFileSync(process.env.GITHUB_ENV, `ORG_GRADLE_PROJECT_versionCode=${code}\n`);
           NODE
       - name: Build unsigned APK and AAB with release config verification
-        run: npm run build:android:release
+        run: npm run build:android:release -- --no-build-cache
       - name: Upload unsigned release
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -134,14 +142,14 @@ jobs:
       VERSION: ${{ needs.build.outputs.version }}
       VERSION_CODE: ${{ needs.build.outputs.version_code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
@@ -194,6 +202,7 @@ jobs:
           ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
           ANDROID_APP_CERT_SHA256: ${{ vars.ANDROID_APP_CERT_SHA256 || secrets.ANDROID_APP_CERT_SHA256 }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 || secrets.ANDROID_UPLOAD_CERT_SHA256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -226,10 +235,7 @@ jobs:
           grep -q '^jar verified\.$' "$RUNNER_TEMP/aab-verification.txt"
           keytool -J-Duser.language=en -printcert -jarfile "$AAB" > "$RUNNER_TEMP/aab-certificate.txt"
           AAB_CERT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/aab-certificate.txt" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          if [[ ! "$AAB_CERT" =~ ^[0-9a-f]{64}$ || "$AAB_CERT" == "$EXPECTED" ]]; then
-            echo 'AAB must have one upload certificate distinct from the app certificate' >&2
-            exit 1
-          fi
+          AAB_CERT="$AAB_CERT" node --input-type=module -e 'import { verifyUploadCertificate } from "./tools/android-artifacts.mjs"; verifyUploadCertificate(process.env.AAB_CERT, process.env.ANDROID_UPLOAD_CERT_SHA256 || "", process.env.ANDROID_APP_CERT_SHA256 || "");'
           node tools/android-artifacts.mjs --apk "$APK" --aab "$AAB" \
             --expected-app-cert-sha256 "$EXPECTED" --commit "$GITHUB_SHA" \
             --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --version "$VERSION" \
@@ -262,14 +268,14 @@ jobs:
       VERSION: ${{ needs.build.outputs.version }}
       VERSION_CODE: ${{ needs.build.outputs.version_code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
@@ -298,14 +304,17 @@ jobs:
               echo "ANDROID_${ROLE}_KEY_ALIAS=$KEY_ALIAS"
             } >> "$GITHUB_ENV"
           done
-      - name: Read ephemeral app fingerprint
+      - name: Read ephemeral app and upload fingerprints
         shell: bash
         run: |
           set -euo pipefail
-          keytool -J-Duser.language=en -list -v -keystore "$RUNNER_TEMP/android-app.jks" \
-            -storepass:env ANDROID_APP_KEYSTORE_PASSWORD -alias "$ANDROID_APP_KEY_ALIAS" > "$RUNNER_TEMP/app-certificate.txt"
-          FINGERPRINT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/app-certificate.txt")"
-          echo "ANDROID_APP_CERT_SHA256=$FINGERPRINT" >> "$GITHUB_ENV"
+          for ROLE in APP UPLOAD; do
+            KEY_ALIAS="ANDROID_${ROLE}_KEY_ALIAS"
+            keytool -J-Duser.language=en -list -v -keystore "$RUNNER_TEMP/android-${ROLE,,}.jks" \
+              -storepass:env "ANDROID_${ROLE}_KEYSTORE_PASSWORD" -alias "${!KEY_ALIAS}" > "$RUNNER_TEMP/${ROLE,,}-certificate.txt"
+            FINGERPRINT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/${ROLE,,}-certificate.txt")"
+            echo "ANDROID_${ROLE}_CERT_SHA256=$FINGERPRINT" >> "$GITHUB_ENV"
+          done
       # Kept byte-identical to the protected signing script; tested by android-artifacts.test.mjs.
       - name: Sign and verify both artifacts
         shell: bash
@@ -340,10 +349,7 @@ jobs:
           grep -q '^jar verified\.$' "$RUNNER_TEMP/aab-verification.txt"
           keytool -J-Duser.language=en -printcert -jarfile "$AAB" > "$RUNNER_TEMP/aab-certificate.txt"
           AAB_CERT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/aab-certificate.txt" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          if [[ ! "$AAB_CERT" =~ ^[0-9a-f]{64}$ || "$AAB_CERT" == "$EXPECTED" ]]; then
-            echo 'AAB must have one upload certificate distinct from the app certificate' >&2
-            exit 1
-          fi
+          AAB_CERT="$AAB_CERT" node --input-type=module -e 'import { verifyUploadCertificate } from "./tools/android-artifacts.mjs"; verifyUploadCertificate(process.env.AAB_CERT, process.env.ANDROID_UPLOAD_CERT_SHA256 || "", process.env.ANDROID_APP_CERT_SHA256 || "");'
           node tools/android-artifacts.mjs --apk "$APK" --aab "$AAB" \
             --expected-app-cert-sha256 "$EXPECTED" --commit "$GITHUB_SHA" \
             --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --version "$VERSION" \

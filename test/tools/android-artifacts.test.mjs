@@ -16,6 +16,8 @@ import {
   parseApkCertificate,
   parseHardwareValidated,
   sha256,
+  verifyUploadCertificate,
+  versionCodeForRun,
 } from '../../tools/android-artifacts.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -151,6 +153,20 @@ test('a valid but different actual APK certificate is rejected', () => {
   );
 });
 
+test('AAB certificate must match the configured upload key and differ from the app key', () => {
+  const upload = 'cd'.repeat(32);
+  verifyUploadCertificate(upload, upload.match(/../g).join(':').toUpperCase(), fingerprint);
+  assert.throws(
+    () => verifyUploadCertificate(upload, 'ef'.repeat(32), fingerprint),
+    /expected upload certificate/,
+  );
+  assert.throws(() => verifyUploadCertificate(fingerprint, fingerprint, fingerprint), /distinct/);
+  for (const invalid of ['', 'bad', `${upload}\n${upload}`]) {
+    assert.throws(() => verifyUploadCertificate(invalid, upload, fingerprint), /Malformed/);
+    assert.throws(() => verifyUploadCertificate(upload, invalid, fingerprint), /Malformed/);
+  }
+});
+
 test('apksigner output requires one signer and a well-formed certificate digest', () => {
   const line = `Signer #1 certificate SHA-256 digest: ${fingerprint}\n`;
   assert.equal(
@@ -211,6 +227,31 @@ test('deterministic versionCode is monotonic, bounded and collision-free within 
   assert.throws(() => createArtifacts({ ...input, versionCode: 1 }, metadata), /versionCode/);
 });
 
+test('PR and dispatch dry runs warn on a reused or lower versionCode, while tags fail closed', () => {
+  for (const previous of [10000, 20000]) {
+    for (const refType of ['branch', undefined]) {
+      const warnings = [];
+      assert.equal(
+        versionCodeForRun('1.0.0', previous, refType, (warning) => warnings.push(warning)),
+        10000,
+      );
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0], /^::warning::.*10000.*maximum/);
+    }
+    assert.throws(() => versionCodeForRun('1.0.0', previous, 'tag'), /greater than/);
+  }
+  for (const refType of ['tag', 'branch', undefined]) {
+    assert.equal(
+      versionCodeForRun('1.0.1', 10000, refType, () => assert.fail('Unexpected warning')),
+      10001,
+    );
+    for (const previous of [-1, 1.5, NaN, 2100000001]) {
+      assert.throws(() => versionCodeForRun('1.0.0', previous, refType), /baseline is invalid/);
+    }
+    assert.throws(() => versionCodeForRun('invalid', 0, refType), /Version must/);
+  }
+});
+
 const androidRelease = (id, extra = {}) => ({
   tag_name: `android-v1.0.${id}`,
   draft: false,
@@ -251,6 +292,27 @@ test('previous versionCode is zero only when no published Android releases exist
     ),
     0,
   );
+});
+
+test('existing Android tags keep the floor even if their releases were deleted', () => {
+  const read = () => ({ versionCode: 10001 });
+  const tags = ['web-v9.0.0', 'android-v1.0.2', 'android-v2.0.0', 'android-v1.1.0'];
+  assert.equal(getPreviousAndroidVersionCode([androidRelease(1)], read, tags), 20000);
+  assert.equal(
+    getPreviousAndroidVersionCode([], () => assert.fail('No releases to read'), tags),
+    20000,
+  );
+  assert.equal(
+    getPreviousAndroidVersionCode([androidRelease(1)], () => ({ versionCode: 30000 }), tags),
+    30000,
+  );
+  assert.throws(
+    () => deriveVersionCode('1.9.9', getPreviousAndroidVersionCode([], read, tags)),
+    /greater than/,
+  );
+  for (const tag of ['android-vbad', 'android-v1.100.0', 'android-v01.0.0']) {
+    assert.throws(() => getPreviousAndroidVersionCode([], read, [tag]));
+  }
 });
 
 test('any published Android release without exactly one manifest fails with its tag', () => {
@@ -422,7 +484,17 @@ test('workflow isolates secrets, restricts publishing to tags and shares identic
   assert.match(build, /getPreviousAndroidVersionCode\(pages\.flat\(\)/);
   assert.ok(!build.includes('/releases/latest'));
   assert.ok(!workflow.includes('SOURCE_DATE_EPOCH'));
-  assert.match(build, /run: npm run build:android:release\n/);
+  assert.match(build, /run: npm run build:android:release -- --no-build-cache\n/);
+  assert.doesNotMatch(build, /actions\/cache@|setup-gradle|~\/\.gradle|restore-keys:/);
+  assert.match(build, /fetch-depth: 0/);
+  assert.ok(build.includes("['tag', '--list', 'android-v*']"));
+  assert.ok(
+    build.includes("process.env.GITHUB_REF_TYPE === 'tag' && tag === process.env.GITHUB_REF_NAME"),
+  );
+  assert.ok(build.includes("], { encoding: 'utf8' })), tags)"));
+  assert.ok(
+    build.includes('versionCodeForRun(version, previous.versionCode, process.env.GITHUB_REF_TYPE)'),
+  );
   assert.ok(!build.includes('gradle/actions/setup-gradle'));
   for (const role of ['APP', 'UPLOAD']) {
     for (const suffix of ['KEYSTORE_B64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD']) {
@@ -454,10 +526,48 @@ test('workflow isolates secrets, restricts publishing to tags and shares identic
   );
   assert.match(signingScript(publish), /--ks-pass env:ANDROID_APP_KEYSTORE_PASSWORD/);
   assert.match(signingScript(publish), /-storepass:env ANDROID_UPLOAD_KEYSTORE_PASSWORD/);
-  assert.match(signingScript(publish), /"\$AAB_CERT" == "\$EXPECTED"/);
+  assert.match(
+    signingScript(publish),
+    /verifyUploadCertificate\(process\.env\.AAB_CERT, process\.env\.ANDROID_UPLOAD_CERT_SHA256/,
+  );
+  assert.match(
+    publish,
+    /ANDROID_UPLOAD_CERT_SHA256: \$\{\{ vars\.ANDROID_UPLOAD_CERT_SHA256 \|\| secrets\.ANDROID_UPLOAD_CERT_SHA256 \}\}/,
+  );
+  assert.ok(dryRun.includes('echo "ANDROID_${ROLE}_CERT_SHA256=$FINGERPRINT" >> "$GITHUB_ENV"'));
   for (const job of [publish, dryRun]) {
     assert.match(job, /- name: Delete signing material\n {8}if: always\(\)/);
     assert.ok(!job.includes('set -x'));
   }
   assert.ok(!workflow.includes('\u2014'));
+});
+
+test('all release jobs pin checkout and setup-node with version comments', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/android-release.yml'), 'utf8');
+  for (const [action, sha] of [
+    ['checkout', '11d5960a326750d5838078e36cf38b85af677262'],
+    ['setup-node', '49933ea5288caeca8642d1e84afbd3f7d6820020'],
+  ]) {
+    const uses = workflow.split('\n').filter((line) => line.includes(`uses: actions/${action}@`));
+    assert.equal(uses.length, 3);
+    for (const line of uses) assert.ok(line.endsWith(`actions/${action}@${sha} # v4.4.0`));
+  }
+});
+
+test('release PR paths cover every release build/config input and tooling regression tests', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/android-release.yml'), 'utf8');
+  const paths = workflow.split('  pull_request:\n')[1].split('  workflow_dispatch:')[0];
+  for (const path of [
+    'tools/android-artifacts.mjs',
+    'tools/verify-capacitor-config.mjs',
+    'tools/run-gradle.mjs',
+    'apps/android/package.json',
+    'apps/android/capacitor.targets.mjs',
+    'apps/android/capacitor.config.ts',
+    'package.json',
+    'package-lock.json',
+    'apps/android/android/**',
+  ]) {
+    assert.ok(paths.includes(`      - ${path}\n`), `Missing release PR path: ${path}`);
+  }
 });

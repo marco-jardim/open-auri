@@ -29,6 +29,17 @@ export function parseApkCertificate(output) {
   return normalizeFingerprint(matches[0][1]);
 }
 
+/** @param {string} actual @param {string} expected @param {string} appCertificate */
+export function verifyUploadCertificate(actual, expected, appCertificate) {
+  const upload = normalizeFingerprint(actual);
+  if (upload !== normalizeFingerprint(expected)) {
+    throw new Error('AAB certificate does not match the expected upload certificate');
+  }
+  if (upload === normalizeFingerprint(appCertificate)) {
+    throw new Error('AAB upload certificate must be distinct from the app certificate');
+  }
+}
+
 /** @param {string} source android-status.ts, not a guessed or environment-controlled flag */
 export function parseHardwareValidated(source) {
   const matches = [
@@ -44,9 +55,15 @@ export function parseHardwareValidated(source) {
  * Read every published Android manifest, ignoring other releases and drafts.
  * @param {{ tag_name: string, draft: boolean, assets: { id: number, name: string }[] }[]} releases
  * @param {(assetId: number) => unknown} readManifest
+ * @param {string[]} [tags] existing tags, excluding only the tag triggering this release
  */
-export function getPreviousAndroidVersionCode(releases, readManifest) {
+export function getPreviousAndroidVersionCode(releases, readManifest, tags = []) {
   let previous = 0;
+  for (const tag of tags) {
+    if (tag.startsWith('android-v')) {
+      previous = Math.max(previous, deriveVersionCode(tag.slice('android-v'.length)));
+    }
+  }
   for (const release of releases) {
     if (release.draft || !release.tag_name.startsWith('android-v')) continue;
     const assets = release.assets.filter((asset) => asset.name === 'release-manifest.json');
@@ -92,6 +109,24 @@ export function deriveVersionCode(version, previous = 0) {
   }
   if (!Number.isInteger(previous) || previous < 0 || previous > 2100000000 || code <= previous) {
     throw new Error('versionCode must be greater than the previous release versionCode');
+  }
+  return code;
+}
+
+/**
+ * Only publishing tags must advance the floor; PR/dispatch dry runs can rebuild a released version.
+ * @param {string} version
+ * @param {number} previous
+ * @param {string | undefined} refType
+ * @param {(message: string) => void} [warn]
+ */
+export function versionCodeForRun(version, previous, refType, warn = console.warn) {
+  if (!Number.isInteger(previous) || previous < 0 || previous > 2100000000) {
+    throw new Error('Previous Android versionCode baseline is invalid');
+  }
+  const code = deriveVersionCode(version, refType === 'tag' ? previous : 0);
+  if (refType !== 'tag' && code <= previous) {
+    warn(`::warning::Dry-run versionCode ${code} is not above the published/tag maximum ${previous}`);
   }
   return code;
 }

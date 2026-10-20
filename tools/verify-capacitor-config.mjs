@@ -34,6 +34,13 @@ export function releaseViolations(config) {
     if (server.cleartext !== undefined && server.cleartext !== false) {
       violations.push('server.cleartext must be false');
     }
+    // Bridge appends this directly to server.url, so a missing slash can change the authority.
+    if (
+      server.appStartPath !== undefined &&
+      !(typeof server.appStartPath === 'string' && server.appStartPath.startsWith('/'))
+    ) {
+      violations.push('server.appStartPath must be absent or start with /');
+    }
     if (
       server.allowNavigation !== undefined &&
       !(Array.isArray(server.allowNavigation) && server.allowNavigation.length === 0)
