@@ -151,6 +151,33 @@ class DeepLinksTest {
         }
     }
 
+    @Test fun backIsOfferedToThePageBeforeHistoryAndLeavingTheApp() {
+        passingGate()
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        try {
+            controller.setup()
+            val activity = controller.get()
+            val web = org.robolectric.Shadows.shadowOf(activity.bridge.webView)
+            fun back(pageAnswer: String) {
+                activity.onBackPressedDispatcher.onBackPressed()
+                assertEquals(MainActivity.NATIVE_BACK_SCRIPT, web.lastEvaluatedJavascript)
+                web.lastEvaluatedJavascriptCallback.onReceiveValue(pageAnswer)
+            }
+            web.setCanGoBack(true)
+            back("true") // An open overlay consumed Back.
+            assertEquals(0, web.goBackInvocations)
+            assertTrue(!activity.isFinishing)
+            back("false") // No overlay: previous page.
+            assertEquals(1, web.goBackInvocations)
+            assertTrue(!activity.isFinishing)
+            web.setCanGoBack(false)
+            back("null") // No overlay and no history (or a page without the handler): leave.
+            assertEquals(1, web.goBackInvocations)
+            assertTrue(activity.isFinishing)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
     private fun passingGate() {
         MainActivity.gateForTesting = { WebViewCompatGate.Result.Ok }
         ShadowWebView.setCurrentWebViewPackage(PackageInfo().apply {

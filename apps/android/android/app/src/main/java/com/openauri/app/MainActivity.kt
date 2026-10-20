@@ -9,6 +9,7 @@ import android.view.View
 import android.webkit.WebView
 import android.widget.Button
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -63,6 +64,7 @@ class MainActivity : BridgeActivity() {
             bridge?.let { it.setWebViewClient(OfflineAwareWebViewClient(it)) }
             attachDownloads()
             if (bridge != null) {
+                onBackPressedDispatcher.addCallback(this, webViewBack)
                 deepLinksReady = true
                 // Supersedes the start URL that Bridge.loadWebView() is already loading.
                 openDeepLink(intent)
@@ -79,6 +81,29 @@ class MainActivity : BridgeActivity() {
             }
             ViewCompat.requestApplyInsets(screen)
             findViewById<Button>(R.id.webview_update_button).setOnClickListener { openWebViewStore() }
+        }
+    }
+
+    /**
+     * Without Capacitor's App plugin, Back finished the activity even with a sheet or menu open.
+     * Back is offered to the page first as a cancelable `oa:native-back` event: the site cancels
+     * it while an overlay is open (closing the topmost one, or keeping a guarded one such as the
+     * first-run notice). An uncanceled event (no overlay, the offline page, a script error) walks
+     * the WebView history, and with no history left the system default runs (leave the app).
+     */
+    private val webViewBack = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            val webView = bridge?.webView ?: return leaveApp()
+            webView.evaluateJavascript(NATIVE_BACK_SCRIPT) { consumed ->
+                if (consumed == "true") return@evaluateJavascript
+                if (webView.canGoBack()) webView.goBack() else leaveApp()
+            }
+        }
+
+        private fun leaveApp() {
+            isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+            isEnabled = true
         }
     }
 
@@ -163,6 +188,10 @@ class MainActivity : BridgeActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val FILES_PLUGIN = "OpenAuriFiles"
+
+        /** Must match NATIVE_BACK_EVENT in web/src/lib/components/chrome (the site's Back handler). */
+        internal const val NATIVE_BACK_SCRIPT =
+            "!window.dispatchEvent(new CustomEvent('oa:native-back', { cancelable: true }))"
 
         /** Test-only injection, set before ActivityScenario launch and cleared after each test. */
         @Volatile

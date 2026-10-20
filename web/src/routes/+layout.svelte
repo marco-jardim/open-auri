@@ -31,9 +31,6 @@
 	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
 	import { appShortcuts, playbackShortcut } from '#lib/components/chrome/shortcuts.ts';
 	import { createToastStore } from '#lib/components/chrome/toast.ts';
-	// Static on purpose: installs the Android Back fence's popstate listener during hydration,
-	// before SvelteKit's router adds its own (the fence must run first to stop it).
-	import '#lib/components/chrome/native-modal-history.ts';
 	import AudioLoader from '#lib/components/audio/AudioLoader.svelte';
 	// Direct files, not the primitives barrel: every route loads the layout first (FUX.NAV budgets).
 	import IconButton from '#lib/components/primitives/IconButton.svelte';

@@ -1,4 +1,4 @@
-import { nativeModalHistory } from './native-modal-history.ts';
+import { registerNativeBack } from './native-back.ts';
 
 interface ModalOptions {
 	open: boolean;
@@ -12,16 +12,16 @@ interface ModalOptions {
 export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 	let current = options;
 	let previousFocus: HTMLElement | null = null;
-	let releaseHistory: (() => void) | undefined;
+	let releaseBack: (() => void) | undefined;
 	const canDismiss = () => current.canDismiss?.() ?? true;
 
 	function focusInitial() {
 		if (current.initialFocus) node.querySelector<HTMLElement>(current.initialFocus)?.focus();
 	}
 
-	function clearHistory() {
-		releaseHistory?.();
-		releaseHistory = undefined;
+	function clearBack() {
+		releaseBack?.();
+		releaseBack = undefined;
 	}
 
 	function restoreFocus() {
@@ -38,10 +38,11 @@ export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 			node.close();
 			restoreFocus();
 		}
-		if (current.open && !releaseHistory) {
-			releaseHistory = nativeModalHistory({ canDismiss, dismiss: () => current.onDismiss() });
+		// Android app: system Back closes the topmost open modal, like Escape (native-back.ts).
+		if (current.open && !releaseBack) {
+			releaseBack = registerNativeBack({ canDismiss, dismiss: () => current.onDismiss() });
 		} else if (!current.open) {
-			clearHistory();
+			clearBack();
 		}
 	}
 
@@ -52,8 +53,8 @@ export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 
 	function close() {
 		if (!node.open) {
-			// Chromium can close after repeated Esc/Back without a cancelable cancel event.
-			// Keep the page inert and the history fence until the close guard permits dismissal.
+			// Chromium can close after repeated Esc without a cancelable cancel event. Keep the
+			// page inert and the Back registration until the close guard permits dismissal.
 			if (current.open && !canDismiss()) {
 				queueMicrotask(() => {
 					if (current.open && node.isConnected && !node.open) {
@@ -63,7 +64,7 @@ export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 				});
 				return;
 			}
-			clearHistory();
+			clearBack();
 			restoreFocus();
 			if (current.open) current.onDismiss();
 		}
@@ -113,7 +114,7 @@ export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 			node.removeEventListener('cancel', cancel);
 			node.removeEventListener('close', close);
 			node.removeEventListener('keydown', trapTab);
-			clearHistory();
+			clearBack();
 			if (node.open) node.close();
 			restoreFocus();
 		}

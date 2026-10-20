@@ -4,46 +4,37 @@ import { cleanup, render } from 'vitest-browser-svelte';
 import NativeModalFixture from './NativeModalFixture.svelte';
 import ConfirmDialog from '#lib/components/chrome/ConfirmDialog.svelte';
 import AndroidUntestedNotice from '#lib/components/cable/AndroidUntestedNotice.svelte';
+import { NATIVE_BACK_EVENT, registerNativeBack } from '#lib/components/chrome/native-back.ts';
 import { cableUi } from '../cable/ui-fake.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import '../primitives/design-system.ts';
 
-const KEY = 'oa.nativeModal';
-/**
- * Stands in for SvelteKit's router: a plain (non-capture) `popstate` listener on `window`,
- * added after the app's modules are evaluated, as `_start_router()` adds it after hydration
- * (the root layout imports the fence module statically). Back on a fence must never reach it.
- */
-const navigation = vi.fn();
-let originalState: unknown;
-let originalUrl: string;
+/** Exactly what MainActivity evaluates on Back: true means the page consumed it. */
+function pressBack(): boolean {
+	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
+
+/** Lets any Svelte update or dialog event caused by the press land before asserting. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(async () => {
 	await setLocale('pt-BR', { reload: false });
+	// At 360 px the bar shows its menu button (FUX.NAV): the phone layout.
 	await page.viewport(360, 760);
 	vi.stubGlobal('Capacitor', {
 		isNativePlatform: () => true,
 		getPlatform: () => 'android'
 	});
-	originalState = history.state;
-	originalUrl = location.href;
-	// A real previous entry, but same URL so a failed assertion cannot unload the runner.
-	history.replaceState({ testPage: 'previous' }, '', originalUrl);
-	history.pushState({ testPage: 'base', routerData: { preserved: true } }, '', originalUrl);
-	navigation.mockClear();
-	window.addEventListener('popstate', navigation);
 	localStorage.removeItem('oa.androidDisclaimerAck');
 });
 
 afterEach(async () => {
 	try {
 		await cleanup();
-		// UI close/unmount consumes its history fence asynchronously, before the next test.
-		await expect.poll(() => history.state?.[KEY]).toBeUndefined();
+		// Every unmounted modal unregistered: Back is the app's again (history, else exit).
+		expect(pressBack()).toBe(false);
 	} finally {
-		window.removeEventListener('popstate', navigation);
-		history.replaceState(originalState, '', originalUrl);
 		localStorage.removeItem('oa.androidDisclaimerAck');
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
@@ -59,28 +50,28 @@ async function openChecklist() {
 	const trigger = page.getByRole('button', { name: m.chrome_write(), exact: true });
 	await trigger.click();
 	await expect.element(page.getByRole('dialog', { name: m.cable_checklist_title() })).toBeVisible();
-	expect(history.state?.[KEY]).toEqual(expect.any(String));
 	return { fake, onclose, trigger };
 }
 
-test('Android Back closes the header write sheet, returns focus and never reaches the router', async () => {
+test('Back closes the header write sheet, is consumed and returns focus, without touching history', async () => {
+	const push = vi.spyOn(history, 'pushState');
+	const back = vi.spyOn(history, 'back');
+	const length = history.length;
 	const { onclose, trigger } = await openChecklist();
-	expect(history.state.routerData).toEqual({ preserved: true });
-	history.back();
+	expect(pressBack()).toBe(true);
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(onclose).toHaveBeenCalledOnce();
 	await expect.element(trigger).toHaveFocus();
-	expect(history.state).toEqual({ testPage: 'base', routerData: { preserved: true } });
-	expect(location.href).toBe(originalUrl);
-	expect(navigation).not.toHaveBeenCalled();
-	// With no overlay the next Back is ordinary page navigation, not another phantom sheet.
-	history.back();
-	await expect.poll(() => history.state?.testPage).toBe('previous');
-	expect(navigation).toHaveBeenCalledOnce();
+	// Nothing open: the press is left to the app (WebView history, else leave the app).
+	expect(pressBack()).toBe(false);
+	expect(onclose).toHaveBeenCalledOnce();
+	expect(push).not.toHaveBeenCalled();
+	expect(back).not.toHaveBeenCalled();
+	expect(history.length).toBe(length);
 });
 
 test.each(['button', 'Escape'] as const)(
-	'%s close consumes the entry; reopen needs only one Back',
+	'after a %s close the stack is empty; reopening registers again',
 	async (method) => {
 		const { onclose, trigger } = await openChecklist();
 		if (method === 'button') {
@@ -88,124 +79,155 @@ test.each(['button', 'Escape'] as const)(
 		} else {
 			await userEvent.keyboard('{Escape}');
 		}
-		await expect.poll(() => history.state?.[KEY]).toBeUndefined();
-		expect(history.state.testPage).toBe('base');
+		await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 		expect(onclose).toHaveBeenCalledOnce();
-		expect(navigation).not.toHaveBeenCalled();
+		expect(pressBack()).toBe(false);
 		await trigger.click();
 		await expect.element(page.getByRole('dialog')).toBeVisible();
-		history.back();
+		expect(pressBack()).toBe(true);
 		await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 		expect(onclose).toHaveBeenCalledTimes(2);
-		expect(history.state.testPage).toBe('base');
-		history.back();
-		await expect.poll(() => history.state?.testPage).toBe('previous');
+		await expect.element(trigger).toHaveFocus();
 	}
 );
 
-test('Back closes only the topmost dialog, then closes the underlying sheet', async () => {
+test('stacked dialogs close topmost first, one per Back', async () => {
 	const { onclose } = await openChecklist();
 	const onResult = vi.fn();
 	await render(ConfirmDialog, { open: true, title: 'Topmost', onResult });
 	await expect.element(page.getByRole('dialog', { name: 'Topmost' })).toBeVisible();
-	history.back();
+	expect(pressBack()).toBe(true);
 	await expect.element(page.getByRole('dialog', { name: 'Topmost' })).not.toBeInTheDocument();
 	expect(onResult).toHaveBeenCalledExactlyOnceWith(false);
 	expect(onclose).not.toHaveBeenCalled();
 	await expect.element(page.getByRole('dialog', { name: m.cable_checklist_title() })).toBeVisible();
-	expect(history.state?.[KEY]).toEqual(expect.any(String));
-	history.back();
+	expect(pressBack()).toBe(true);
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(onclose).toHaveBeenCalledOnce();
-	expect(history.state.testPage).toBe('base');
-	expect(navigation).not.toHaveBeenCalled();
+	expect(pressBack()).toBe(false);
 });
 
-test('the menu drawer closes on Back and a menu-to-dialog handoff survives pending cleanup', async () => {
+test('the menu drawer closes on Back and returns focus; a dialog opened from it is the next Back', async () => {
 	await render(NativeModalFixture, { service: cableUi().service, onclose: vi.fn() });
 	const menu = page.getByRole('button', { name: m.fuxnav_menu_open(), exact: true });
 	await menu.click();
 	await expect.element(page.getByRole('dialog', { name: m.fuxnav_sheet_title() })).toBeVisible();
-	history.back();
+	expect(pressBack()).toBe(true);
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	await expect.element(menu).toHaveFocus();
-	expect(history.state.testPage).toBe('base');
+	expect(pressBack()).toBe(false);
+	// The sheet closes first, then its action opens a dialog: only that dialog is on the stack.
 	await menu.click();
 	await page.getByRole('button', { name: m.chrome_help_open(), exact: true }).click();
 	await expect.element(page.getByRole('dialog', { name: 'Help confirmation' })).toBeVisible();
-	await expect.poll(() => history.state?.[KEY]).toEqual(expect.any(String));
-	history.back();
+	expect(page.getByRole('dialog', { name: m.fuxnav_sheet_title() }).elements()).toHaveLength(0);
+	expect(pressBack()).toBe(true);
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
-	expect(history.state.testPage).toBe('base');
-	expect(navigation).not.toHaveBeenCalled();
+	expect(pressBack()).toBe(false);
 });
 
-test('Back and forced native close cannot dismiss a write in progress', async () => {
+test('a write in progress consumes Back without closing; after the write Back closes the sheet', async () => {
 	const { fake, onclose } = await openChecklist();
 	fake.publish({ writing: true });
 	const dialog = page.getByRole('dialog').element() as HTMLDialogElement;
 	await expect.element(dialog).toHaveAttribute('closedby', 'none');
-	const fence = history.state[KEY];
-	history.back();
-	await expect.poll(() => history.state?.[KEY]).not.toBe(fence);
-	expect(history.state?.[KEY]).toEqual(expect.any(String));
-	expect(dialog.open).toBe(true);
+	for (let press = 0; press < 3; press += 1) {
+		expect(pressBack()).toBe(true);
+		await settle();
+		expect(dialog.matches(':modal')).toBe(true);
+	}
 	expect(onclose).not.toHaveBeenCalled();
+	// A forced native close (repeated Esc) reopens at once and keeps Back registered.
 	dialog.close();
 	await expect.poll(() => dialog.matches(':modal')).toBe(true);
+	expect(pressBack()).toBe(true);
+	await settle();
+	expect(dialog.matches(':modal')).toBe(true);
 	expect(onclose).not.toHaveBeenCalled();
 	fake.publish({ writing: false });
-	history.back();
+	await expect.element(dialog).toHaveAttribute('closedby', 'closerequest');
+	expect(pressBack()).toBe(true);
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(onclose).toHaveBeenCalledOnce();
-	expect(navigation).not.toHaveBeenCalled();
+	expect(pressBack()).toBe(false);
 });
 
-test('the notice resists repeated Back and forced close until Entendi, without acknowledging', async () => {
+test('the first-run notice consumes Back without closing or acknowledging until Entendi', async () => {
 	await render(AndroidUntestedNotice, { kind: 'native', validated: false, version: 1 });
+	await expect.element(page.getByRole('dialog')).toBeVisible();
 	const dialog = page.getByRole('dialog').element() as HTMLDialogElement;
+	const ack = page.getByRole('button', { name: m.android_untested_ack() });
 	for (let press = 0; press < 3; press += 1) {
-		const fence = history.state[KEY];
-		history.back();
-		await expect.poll(() => history.state?.[KEY]).not.toBe(fence);
-		expect(history.state?.[KEY]).toEqual(expect.any(String));
+		expect(pressBack()).toBe(true);
+		await settle();
 		expect(dialog.matches(':modal')).toBe(true);
 		expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
 	}
+	await expect.element(ack).toHaveFocus();
+	// A forced close reopens with focus on Entendi; Back is still consumed.
 	dialog.close();
 	await expect.poll(() => dialog.matches(':modal')).toBe(true);
-	await expect.element(page.getByRole('button', { name: m.android_untested_ack() })).toHaveFocus();
-	await page.getByRole('button', { name: m.android_untested_ack() }).click();
-	await expect.poll(() => history.state?.[KEY]).toBeUndefined();
-	expect(history.state.testPage).toBe('base');
+	await expect.element(ack).toHaveFocus();
+	expect(pressBack()).toBe(true);
+	await ack.click();
+	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBe('1');
-	expect(navigation).not.toHaveBeenCalled();
+	expect(pressBack()).toBe(false);
 });
 
-test('switching the notice to the recovery banner removes the fence without acknowledging', async () => {
+test('switching the notice to the recovery banner unregisters it; back to the modal registers again', async () => {
 	const screen = await render(AndroidUntestedNotice, { kind: 'native', validated: false });
 	await expect.element(page.getByRole('dialog')).toBeVisible();
+	expect(pressBack()).toBe(true);
 	await screen.rerender({ presentation: 'banner' });
 	await expect.element(page.getByRole('complementary')).toBeVisible();
-	await expect.poll(() => history.state?.[KEY]).toBeUndefined();
-	expect(history.state.testPage).toBe('base');
-	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+	expect(pressBack()).toBe(false);
 	await screen.rerender({ presentation: 'modal' });
 	await expect.element(page.getByRole('dialog')).toBeVisible();
-	expect(history.state?.[KEY]).toEqual(expect.any(String));
+	expect(pressBack()).toBe(true);
 	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
-	expect(navigation).not.toHaveBeenCalled();
 });
 
-test('desktop/browser modals do not push or traverse history', async () => {
+test('the stack: topmost first, a guarded top consumes Back without reaching the one below', () => {
+	let guarded = true;
+	const below = { canDismiss: vi.fn(() => true), dismiss: vi.fn() };
+	const top = { canDismiss: vi.fn(() => !guarded), dismiss: vi.fn() };
+	const releaseBelow = registerNativeBack(below);
+	const releaseTop = registerNativeBack(top);
+	expect(pressBack()).toBe(true);
+	expect(top.canDismiss).toHaveBeenCalledOnce();
+	expect(top.dismiss).not.toHaveBeenCalled();
+	expect(below.canDismiss).not.toHaveBeenCalled();
+	expect(below.dismiss).not.toHaveBeenCalled();
+	guarded = false;
+	expect(pressBack()).toBe(true);
+	expect(top.dismiss).toHaveBeenCalledOnce();
+	expect(below.dismiss).not.toHaveBeenCalled();
+	// Unregistering is the owner's job (and idempotent); then the one below is topmost.
+	releaseTop();
+	releaseTop();
+	expect(pressBack()).toBe(true);
+	expect(below.dismiss).toHaveBeenCalledOnce();
+	releaseBelow();
+	expect(pressBack()).toBe(false);
+});
+
+test('outside the Android app nothing registers and Back is never consumed', async () => {
 	vi.stubGlobal('Capacitor', undefined);
+	const dismiss = vi.fn();
+	const release = registerNativeBack({ canDismiss: () => true, dismiss });
+	expect(pressBack()).toBe(false);
+	expect(dismiss).not.toHaveBeenCalled();
+	release();
 	const push = vi.spyOn(history, 'pushState');
-	const back = vi.spyOn(history, 'back');
 	await render(NativeModalFixture, { service: cableUi().service, onclose: vi.fn() });
 	await page.getByRole('button', { name: m.chrome_write(), exact: true }).click();
-	await expect.element(page.getByRole('dialog')).toBeVisible();
+	const sheet = page.getByRole('dialog', { name: m.cable_checklist_title() });
+	await expect.element(sheet).toBeVisible();
+	expect(pressBack()).toBe(false);
+	await settle();
+	await expect.element(sheet).toBeVisible();
 	await page.getByRole('button', { name: m.cable_close(), exact: true }).click();
+	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(push).not.toHaveBeenCalled();
-	expect(back).not.toHaveBeenCalled();
-	expect(history.state.testPage).toBe('base');
 });
