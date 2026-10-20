@@ -110,6 +110,8 @@ jobs:
           PUBLIC_LGPD_DPO_NAME: ${{ secrets.PUBLIC_LGPD_DPO_NAME }}
           PUBLIC_POLICY_EFFECTIVE_DATE: ${{ secrets.PUBLIC_POLICY_EFFECTIVE_DATE }}
           PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.PUBLIC_TURNSTILE_SITE_KEY }}
+          # Optional override (key rotation); empty uses the app certificate in render-wrangler.mjs.
+          PUBLIC_ANDROID_CERT_SHA256: ${{ vars.PUBLIC_ANDROID_CERT_SHA256 }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM: ${{ secrets.RESEND_FROM }}

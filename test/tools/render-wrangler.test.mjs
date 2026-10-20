@@ -16,6 +16,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULTS, SECRETS, renderTemplate } from '../../tools/render-wrangler.mjs';
 
+// Public SHA-256 of the app signing certificate (H-KEY, 2026-10-20); never the upload key.
+const APP_CERT =
+  'FB:46:E3:4F:03:FD:6F:59:5B:4B:70:36:74:8F:92:83:08:FA:BF:31:C1:55:BF:E2:C5:0E:B1:B4:43:FF:61:D0';
+
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 
 function fixture(t, dotenv) {
@@ -115,7 +119,7 @@ test('EMAIL_TRANSPORT defaults to resend when missing or empty; an explicit valu
   assert.deepEqual(DEFAULTS, {
     EMAIL_TRANSPORT: 'resend',
     PUBLIC_ANDROID_APP_ID: 'com.openauri.app',
-    PUBLIC_ANDROID_CERT_SHA256: '',
+    PUBLIC_ANDROID_CERT_SHA256: APP_CERT,
   });
   for (const [env, expected] of [
     [{}, 'resend'],
@@ -155,7 +159,7 @@ test('invalid dotenv syntax never echoes its contents', (t) => {
   }
 });
 
-test('public Android defaults render with an empty certificate list and explicit values win', (t) => {
+test('public Android defaults render the app signing certificate and explicit values win', (t) => {
   const repo = fixture(t);
   const template = join(repo.root, 'web', 'template.jsonc');
   writeFileSync(
@@ -171,7 +175,7 @@ test('public Android defaults render with an empty certificate list and explicit
   ]) {
     renderTemplate(template, repo.output, values);
     const output = readFileSync(repo.output, 'utf8').split('\n').slice(1).join('\n');
-    assert.deepEqual(JSON.parse(output), { appId: 'com.openauri.app', certificates: '' });
+    assert.deepEqual(JSON.parse(output), { appId: 'com.openauri.app', certificates: APP_CERT });
   }
   const fingerprint = Array(32).fill('AB').join(':');
   renderTemplate(
