@@ -8,6 +8,7 @@
 	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
 	import HideActions from '#lib/components/social/HideActions.svelte';
+	import ReportAction from '#lib/components/social/ReportAction.svelte';
 
 	let {
 		api = null,
@@ -201,6 +202,7 @@
 					{#each filtered as row (row.id)}
 						<li>
 							<span>{row.name}</span>
+							<ReportAction subject={{ kind: 'lineage', id: row.id }} name={row.name} />
 							<HideActions
 								lineageId={row.id}
 								author={row.author}

@@ -55,6 +55,17 @@ afterEach(async () => {
 });
 
 describe('Teste cego: candidates from the Comunidade', () => {
+	test('each blind-test candidate offers reporting without adding or loading its audio', async () => {
+		const { api, typed } = fakeApi();
+		vi.spyOn(globalThis, 'fetch').mockImplementation(
+			async () => new Response('null', { headers: { 'content-type': 'application/json' } })
+		);
+		await render(CommunityCandidates, { api: typed, onadd: vi.fn() });
+		await page.getByRole('button', { name: m.cegocom_load(), exact: true }).click();
+		await page.getByText(m.fxpc_report_item({ name: NAME }), { exact: true }).click();
+		await expect.element(page.getByText(m.fxpc_report_account(), { exact: true })).toBeVisible();
+		expect(api.getCurve).not.toHaveBeenCalled();
+	});
 	test('rankings paginate, trim the search and explain already-added and running-test controls', async () => {
 		const { api, typed } = fakeApi();
 		api.rankings.mockResolvedValueOnce({

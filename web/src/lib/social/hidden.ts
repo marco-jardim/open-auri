@@ -18,14 +18,14 @@ export interface HiddenList {
 }
 
 export function hiddenLabelText(value: string): string {
-	return Array.from(value)
+	const text = Array.from(value)
 		.filter((char) => {
 			const code = char.codePointAt(0) ?? 0;
 			return code >= 0x20 && code !== 0x7f;
 		})
 		.join('')
-		.trim()
-		.slice(0, 80);
+		.trim();
+	return Array.from(text).slice(0, 80).join('');
 }
 
 export function hiddenLabel(list: HiddenList, type: HiddenType, id: string): string | null {

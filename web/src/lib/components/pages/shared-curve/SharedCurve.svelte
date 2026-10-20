@@ -27,6 +27,7 @@
 	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
 	import HideActions from '#lib/components/social/HideActions.svelte';
 	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
+	import ReportAction from '#lib/components/social/ReportAction.svelte';
 
 	type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -358,6 +359,7 @@
 			as on the Biblioteca sheet's listen panel, never on the light paper itself.
 		-->
 			<div class="deck">
+				<ReportAction subject={{ kind: 'lineage', id: shared.lineageId }} name={shared.name} />
 				<HideActions
 					lineageId={shared.lineageId}
 					author={authorHiddenId(shared.author)}

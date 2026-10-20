@@ -11,7 +11,7 @@ const Label = z
 	.string()
 	.trim()
 	.min(1)
-	.max(80)
+	.refine((value) => Array.from(value).length <= 80)
 	.refine((value) => hiddenLabelText(value) === value);
 const Labels = z
 	.object({

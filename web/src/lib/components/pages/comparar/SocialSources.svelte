@@ -7,6 +7,7 @@
 	import type { CurveSocial } from './social.svelte.ts';
 	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
+	import ReportAction from '#lib/components/social/ReportAction.svelte';
 
 	let {
 		social,
@@ -158,6 +159,15 @@
 		<button type="button" disabled={!selected || busy || social.unavailable} onclick={use}
 			>{m.curve_social_add()}</button
 		>
+		{#each filtered.filter((row) => row.id === selected) as row (row.id)}
+			<ReportAction
+				subject={{ kind: 'lineage', id: row.id }}
+				name={row.name}
+				api={social.api}
+				session={social.session}
+				online={!social.unavailable}
+			/>
+		{/each}
 		{#if cursor}<button
 				type="button"
 				disabled={busy || social.unavailable}

@@ -18,6 +18,7 @@
 	import { authorHiddenId, isHidden } from '#lib/social/hidden.ts';
 	import HideActions from '#lib/components/social/HideActions.svelte';
 	import HiddenItems from '#lib/components/social/HiddenItems.svelte';
+	import ReportAction from '#lib/components/social/ReportAction.svelte';
 	import LazyArt from '#lib/components/art/LazyArt.svelte';
 	import {
 		LICENSE_OPTIONS,
@@ -282,6 +283,10 @@
 			</svg>
 			<p class="handle">@{profile.username}</p>
 			<HideActions author={profileAuthorId} authorName={profile.displayUsername} />
+			<ReportAction
+				subject={{ kind: 'user', id: profile.username }}
+				name={profile.displayUsername}
+			/>
 			{#if profile.bio}<p class="bio">{profile.bio}</p>{/if}
 			<dl class="counts">
 				<div>
@@ -401,6 +406,7 @@
 						{#each packs as pack (pack.id)}
 							<li>
 								<strong>{pack.name}</strong>
+								<ReportAction subject={{ kind: 'pack', id: pack.id }} name={pack.name} />
 								{#if pack.description}<span class="pack-description">{pack.description}</span>{/if}
 								<small>{formatDate(pack.updatedAt, locale)}</small>
 							</li>

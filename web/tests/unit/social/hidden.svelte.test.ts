@@ -6,6 +6,7 @@ import SharedCurve from '#lib/components/pages/shared-curve/SharedCurve.svelte';
 import Perfil from '#lib/components/pages/perfil/Perfil.svelte';
 import type { ProfileView } from '#lib/components/pages/perfil/model.ts';
 import HiddenItems from '#lib/components/social/HiddenItems.svelte';
+import HideActions from '#lib/components/social/HideActions.svelte';
 import { createHiddenStore, type HiddenStore } from '#lib/social/hidden-store.ts';
 import { HIDDEN_CONTEXT } from '#lib/social/hidden-context.ts';
 import { HIDDEN_STORAGE_KEY } from '#lib/social/hidden.ts';
@@ -56,6 +57,43 @@ afterEach(async () => {
 	await setLocale('pt-BR', { reload: false });
 });
 
+test('hide actions have unique names and only the initiating item announces a failed hide', async () => {
+	const store = createHiddenStore(remote(), () => null);
+	await store.setUser(null);
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	show(
+		HideActions,
+		{ lineageId: 'curve-a', curveName: 'Alpha', author: 'ana', authorName: 'Ana' },
+		store
+	);
+	show(
+		HideActions,
+		{ lineageId: 'curve-b', curveName: 'Beta', author: 'ana', authorName: 'Ana' },
+		store
+	);
+	await expect
+		.element(
+			page.getByRole('button', {
+				name: m.fxpc_hide_author({ name: 'Ana', item: 'Alpha' }),
+				exact: true
+			})
+		)
+		.toBeVisible();
+	await expect
+		.element(
+			page.getByRole('button', {
+				name: m.fxpc_hide_author({ name: 'Ana', item: 'Beta' }),
+				exact: true
+			})
+		)
+		.toBeVisible();
+	await page
+		.getByRole('button', { name: m.fxpc_hide_curve({ name: 'Alpha' }), exact: true })
+		.click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(m.hidden_error());
+	expect(page.getByRole('alert').elements()).toHaveLength(1);
+});
+
 for (const locale of ['pt-BR', 'en-US'] as const) {
 	test(`community curve/author hide actions and human-labelled management work in ${locale}`, async () => {
 		await setLocale(locale, { reload: false });
@@ -86,7 +124,9 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect
 			.element(page.getByRole('link', { name: 'Night radio', exact: true }))
 			.toBeVisible();
-		await page.getByRole('button', { name: m.hidden_hide_curve(), exact: true }).first().click();
+		await page
+			.getByRole('button', { name: m.fxpc_hide_curve({ name: 'Night radio' }), exact: true })
+			.click();
 		await expect
 			.element(page.getByRole('link', { name: 'Night radio', exact: true }))
 			.not.toBeInTheDocument();
@@ -104,7 +144,12 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect
 			.element(page.getByRole('link', { name: 'Night radio', exact: true }))
 			.toBeVisible();
-		await page.getByRole('button', { name: m.hidden_hide_author(), exact: true }).first().click();
+		await page
+			.getByRole('button', {
+				name: m.fxpc_hide_author({ name: 'Geoff', item: 'Night radio' }),
+				exact: true
+			})
+			.click();
 		await expect
 			.element(page.getByRole('link', { name: 'Night radio', exact: true }))
 			.not.toBeInTheDocument();
@@ -147,7 +192,9 @@ test('direct curve page hides content and offers unhide without reloading', asyn
 		},
 		store
 	);
-	await page.getByRole('button', { name: m.hidden_hide_curve(), exact: true }).click();
+	await page
+		.getByRole('button', { name: m.fxpc_hide_curve({ name: 'Warm vocal' }), exact: true })
+		.click();
 	await expect
 		.element(page.getByRole('heading', { name: 'Warm vocal', exact: true }))
 		.not.toBeInTheDocument();
@@ -179,7 +226,9 @@ test('profile author hiding removes bio, creations, packs and favorites until un
 		favorites: { items: [], nextCursor: null }
 	};
 	const target = show(Perfil, { data }, store);
-	await page.getByRole('button', { name: m.hidden_hide_author(), exact: true }).click();
+	await page
+		.getByRole('button', { name: m.fxpc_hide_author({ name: 'Ana', item: 'Ana' }), exact: true })
+		.click();
 	await expect
 		.element(page.getByRole('heading', { name: 'Ana', exact: true }))
 		.not.toBeInTheDocument();

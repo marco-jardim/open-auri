@@ -809,7 +809,14 @@
 				{#if reportOpen}
 					{#if reportPanel.current}
 						{@const ReportPanel = reportPanel.current}
-						<ReportPanel {api} {session} channel={target} {siteKey} {online} />
+						<ReportPanel
+							{api}
+							{session}
+							subject={target ? { kind: 'lineage', id: target.lineageId } : null}
+							targetName={target?.name}
+							{siteKey}
+							{online}
+						/>
 					{:else}
 						<Skeleton width="100%" height="12rem" />
 					{/if}

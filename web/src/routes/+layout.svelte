@@ -5,7 +5,7 @@
 	import { browser, dev } from '$app/env';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale, getTextDirection } from '#lib/paraglide/runtime.js';
-	import { PUBLIC_GITHUB_URL } from '#lib/config/public.ts';
+	import { PUBLIC_GITHUB_URL, PUBLIC_TURNSTILE_SITE_KEY } from '#lib/config/public.ts';
 	// FUX.2: no static import of the runtime (#lib/app/index.ts re-exports createClientApp).
 	import { setAppContext, mountNativeCable, setNativeCableState } from '#lib/app/context.svelte.ts';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
@@ -43,6 +43,7 @@
 	import type { SocialOutbox, SocialSession, SocialApi } from '#lib/social/index.ts';
 	import type { LayoutProps } from './$types';
 	import { setHiddenStore } from '#lib/social/hidden-context.ts';
+	import { setReportSiteKey } from '#lib/social/report-context.ts';
 
 	let { children, data }: LayoutProps = $props();
 	const accountSession = new AccountSession(() => ({
@@ -73,6 +74,7 @@
 	const context = setAppContext();
 	const nativeCable = setNativeCableState();
 	const hidden = setHiddenStore();
+	setReportSiteKey(PUBLIC_TURNSTILE_SITE_KEY);
 	$effect(() => {
 		if (accountSession.known) void hidden.setUser(accountSession.current?.id ?? null);
 	});

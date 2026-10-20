@@ -91,6 +91,21 @@ describe('POST /api/v1/reports: guards', () => {
 		await expectErrorResponse(await report(apiLocals(user), body), 403, 'TURNSTILE_FAILED');
 		expect(await reportCount('lineage', lineageId)).toBe(0);
 	});
+	it('keeps verified-account authorization for every reusable report target kind', async () => {
+		const user = await reporter({ verified: false });
+		turnstile(true);
+		for (const targetKind of ['lineage', 'pack', 'user']) {
+			await expectErrorResponse(
+				await report(apiLocals(user, false), {
+					targetKind,
+					targetId: 'public-target',
+					reason: 'spam'
+				}),
+				403,
+				'EMAIL_NOT_VERIFIED'
+			);
+		}
+	});
 
 	it('400 INVALID_BODY for unknown kinds, reasons, fields and long notes', async () => {
 		const { lineageId } = await target();

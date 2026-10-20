@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createHiddenStore } from '#lib/social/hidden-store.ts';
 import {
 	authorHiddenId,
+	hiddenLabelText,
 	HIDDEN_LIMIT,
 	HIDDEN_STORAGE_KEY,
 	isHidden,
@@ -33,6 +34,10 @@ function api() {
 afterEach(() => vi.restoreAllMocks());
 
 describe('hidden preferences format', () => {
+	test('labels truncate at 80 code points without splitting supplementary characters', () => {
+		expect(hiddenLabelText(` \n${'🎧'.repeat(81)}\t `)).toBe('🎧'.repeat(80));
+		expect(hiddenLabelText(`${'a'.repeat(79)}🎧z`)).toBe(`${'a'.repeat(79)}🎧`);
+	});
 	test('validates, deduplicates, bounds each type, and keeps only associated plain-text labels', () => {
 		const list = normalizeHidden({
 			authors: [

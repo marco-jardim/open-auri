@@ -114,6 +114,33 @@ describe('hidden preferences API in workerd', () => {
 			expect.arrayContaining(['author1', 'curve2'])
 		);
 	});
+	test('accepts the client-normalized 80-code-point label, including emoji', async () => {
+		const user = await member();
+		const label = '🎧'.repeat(80);
+		const result = await PUT(
+			event('PUT', signedIn(user), {
+				authors: [],
+				curves: ['emoji'],
+				labels: { authors: {}, curves: { emoji: label } }
+			})
+		);
+		expect(result.status).toBe(200);
+		expect(await readHidden(env.DB, user.id)).toMatchObject({
+			items: [{ targetId: 'emoji', label }]
+		});
+		expect(
+			await errorCode(
+				await PUT(
+					event('PUT', signedIn(user), {
+						authors: [],
+						curves: ['long'],
+						labels: { authors: {}, curves: { long: `${label}🎧` } }
+					})
+				),
+				400
+			)
+		).toMatchObject({ code: 'INVALID_BODY' });
+	});
 	test('the D1 cap is atomic, including concurrent merges, and never drops previous preferences', async () => {
 		const user = await member();
 		await putHidden(

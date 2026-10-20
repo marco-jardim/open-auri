@@ -9,6 +9,28 @@ import { VERIFIED, apiError, apiWith, fakeFetch, feedItem, headerOf, json } from
 
 const channel = channelOf(feedItem() as unknown as FeedItem);
 const send = () => page.getByRole('button', { name: m.comunidade_report_send() });
+
+for (const kind of ['lineage', 'pack', 'user'] as const) {
+	test(`reports a ${kind} using its API target, not its display name`, async () => {
+		const { props, fetch } = setup();
+		const target = { kind, id: kind === 'user' ? 'ana.public' : 'opaque-id' };
+		await render(ReportPanel, { ...props, subject: target, targetName: 'Display name' });
+		await send().click();
+		expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({
+			targetKind: kind,
+			targetId: target.id
+		});
+	});
+}
+
+test('different target kinds sharing an id are not treated as an already sent report', async () => {
+	const { props } = setup();
+	const screen = await render(ReportPanel, { ...props, subject: { kind: 'lineage', id: 'same' } });
+	await send().click();
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_v2_reason_report_sent());
+	await screen.rerender({ subject: { kind: 'pack', id: 'same' }, token: 'fresh' });
+	await expect.element(send()).not.toHaveAttribute('aria-disabled');
+});
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
@@ -21,7 +43,8 @@ function setup() {
 		props: {
 			api: apiWith(fetch),
 			session: VERIFIED,
-			channel,
+			subject: { kind: 'lineage' as const, id: channel.lineageId },
+			targetName: channel.name,
 			siteKey: '',
 			online: true,
 			token: 'token'
@@ -68,7 +91,7 @@ test('every reason is available; maximum private note is preserved and success l
 	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_v2_reason_report_sent());
 	(send().element() as HTMLElement).click();
 	expect(fetch).toHaveBeenCalledOnce();
-	await screen.rerender({ channel: { ...channel, lineageId: 'lin-second' }, token: 'fresh' });
+	await screen.rerender({ subject: { kind: 'lineage', id: 'lin-second' }, token: 'fresh' });
 	await expect.element(send()).not.toHaveAttribute('aria-disabled');
 	await note.fill('   ');
 	await send().click();
@@ -133,7 +156,10 @@ test('a report marks the submitted channel, even when the selection changes in f
 	const screen = await render(ReportPanel, props);
 	await send().click();
 	await expect.element(send()).toHaveAttribute('aria-busy', 'true');
-	await screen.rerender({ channel: { ...channel, lineageId: 'lin-second', name: 'Outra curva' } });
+	await screen.rerender({
+		subject: { kind: 'lineage', id: 'lin-second' },
+		targetName: 'Outra curva'
+	});
 	resolve({ reported: true });
 	await expect.element(send()).not.toHaveAttribute('aria-busy');
 	await expect.element(page.getByRole('status')).toHaveTextContent('');
@@ -146,7 +172,7 @@ test('a report marks the submitted channel, even when the selection changes in f
 	await screen.rerender({ token: 'fresh' });
 	await expect.element(send()).not.toHaveAttribute('aria-disabled');
 	// The submitted channel is the one marked as reported.
-	await screen.rerender({ channel });
+	await screen.rerender({ subject: { kind: 'lineage', id: channel.lineageId } });
 	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_v2_reason_report_sent());
 });
 
@@ -163,7 +189,10 @@ test('a report completing for the previous channel preserves the new note withou
 	await note.fill('Evidence for the original channel');
 	await send().click();
 	await expect.element(send()).toHaveAttribute('aria-busy', 'true');
-	await screen.rerender({ channel: { ...channel, lineageId: 'lin-second', name: 'Outra curva' } });
+	await screen.rerender({
+		subject: { kind: 'lineage', id: 'lin-second' },
+		targetName: 'Outra curva'
+	});
 	await note.fill('Evidence for the new channel');
 	resolve({ reported: true });
 	await expect.element(send()).not.toHaveAttribute('aria-busy');

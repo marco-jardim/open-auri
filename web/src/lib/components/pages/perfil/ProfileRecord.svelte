@@ -4,6 +4,7 @@
 	import { Button } from '#lib/components/primitives/index.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import HideActions from '#lib/components/social/HideActions.svelte';
+	import ReportAction from '#lib/components/social/ReportAction.svelte';
 	import { authorHiddenId } from '#lib/social/hidden.ts';
 	import { formatDate, formatLevel, previewCurve, type LineageCard } from './model.ts';
 
@@ -119,6 +120,7 @@
 		curveName={item.name}
 		authorName={item.author?.displayUsername}
 	/>
+	<ReportAction subject={{ kind: 'lineage', id: item.id }} name={item.name} />
 </article>
 
 <style>
