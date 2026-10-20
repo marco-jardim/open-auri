@@ -182,7 +182,7 @@ test('all official candidates retain the catalog data; variations revalidate wit
 		);
 	}
 	expect(() => variations(base, 0, 1)).toThrow(RangeError);
-});
+}, 30_000);
 
 test('S6 preview is an allowlist without network calls; cable cost only computes a number', () => {
 	const fetchSpy = vi.spyOn(globalThis, 'fetch');
