@@ -1,6 +1,6 @@
 # Segurança do open-auri web
 
-Modelo de ameaças, mitigações e verificações da aplicação web (`web/`) e do Worker de jobs (`workers/jobs/`). Complementa o §3.8 do plano e os runbooks de `docs/operacao/runbooks/`. Nenhum ID, domínio de e-mail ou valor do `.env` aparece aqui.
+Modelo de ameaças, mitigações e verificações da aplicação web (`web/`), do app Android (`apps/android/`) e do Worker de jobs (`workers/jobs/`). Complementa o §3.8 do plano web, RS1 a RS8 e 0.12/0.21 do plano Android e os runbooks de `docs/operacao/runbooks/`. Nenhum ID, domínio de e-mail ou valor do `.env` aparece aqui.
 
 ## 1. Ativos
 
@@ -12,8 +12,10 @@ Modelo de ameaças, mitigações e verificações da aplicação web (`web/`) e 
 | Registro de acesso (Marco Civil)       | Fila e R2 (`access-log/`), cifrado           | IP e horário de acesso: dado pessoal com dever de guarda  |
 | Sais diários e pimenta de IP           | KV `CONFIG` (`salt:*`) e segredo do Worker   | Permitiriam reverter os hashes de IP dos limites          |
 | Segredos do Worker                     | `wrangler secret` (nunca no repositório)     | Chaves de auth, Turnstile, Resend, chaveiro do access log |
-| Dispositivo de áudio do usuário (cabo) | Navegador, via WebHID                        | Escrita indevida no hardware                              |
+| Dispositivo de áudio do usuário (cabo) | Navegador via WebHID ou app Android via USB  | Escrita indevida, desgaste da flash e risco à audição     |
 | Chave do modo somente leitura          | KV `CONFIG`, `mode:read-only`                | Interruptor de emergência                                 |
+| Chaves Android do app e de upload | Cópias offline e secrets do Environment `android-release` | Identidade do APK, continuidade das atualizações e envio à Play |
+| Política de gravação Android e versão do site | `android-status.ts`, deploy e `/_app/version.json` | Desligamento/bloqueio remoto e recusa de página antiga |
 
 ## 2. Atores
 
@@ -22,7 +24,9 @@ Modelo de ameaças, mitigações e verificações da aplicação web (`web/`) e 
 - **Administrador:** modera, liga o modo somente leitura; exige segundo fator (`ADMIN_2FA_REQUIRED`).
 - **Atacante remoto:** sem credenciais, tenta XSS, CSRF, enumeração, força bruta, abuso de API e de recursos.
 - **Página de terceiros:** tenta enquadrar o site (clickjacking) ou ler respostas entre origens.
-- **Cadeia de suprimentos:** dependência npm comprometida ou com licença incompatível.
+- **App Android:** shell Capacitor do mesmo site, com ponte USB/arquivos privilegiada, permissão USB do Android e seletor de salvamento; a página não recebe confiança irrestrita por estar no app.
+- **Cadeia de suprimentos:** dependência npm/Maven/Gradle comprometida ou com licença incompatível; distribuidor de APK reempacotado.
+- **Operador e orquestrador de release/deploy:** podem publicar código, tags ou versões indevidas se as proteções forem burladas; assinatura continua dependendo de aprovação humana.
 
 ## 3. Fronteiras de confiança
 
@@ -32,6 +36,9 @@ Modelo de ameaças, mitigações e verificações da aplicação web (`web/`) e 
 4. Página ↔ dispositivo HID (permissão explícita do usuário, `hid=(self)` no Permissions-Policy).
 5. Worker de jobs ↔ fila do access log e R2 (só mensagens já cifradas atravessam a fila).
 6. Operador ↔ conta Cloudflare (wrangler com OAuth local; segredos só em variável de processo).
+7. Página ↔ ponte nativa do app Android: regras de origem do Capacitor, `OriginGuard`, guarda da WebView e validação nativa de reports antes do USB; permissão USB não substitui gate/checklist.
+8. CI ↔ chaves de assinatura ↔ distribuição: build sem chaves, assinatura em Environment protegido e APK do GitHub com chave do app, AAB com chave de upload. Play App Signing recebe a chave do app via PEPK.
+9. Página já aberta ↔ política do site implantado: antes da sequência de escrita nativa, confirmar a versão online, sem confiar só na política carregada em memória.
 
 ## 4. Ameaças por superfície (STRIDE)
 
@@ -56,6 +63,16 @@ S = falsificação, T = adulteração, R = repúdio, I = divulgação, D = nega�
 | Logs          | Dado pessoal em log                                           | I      | Logs só com códigos e contagens; IP só no access log cifrado                                                                                                                                                                                             | `web/src/lib/server/security/README.md`                                                   |
 | Logs          | Segredo ou dado do `.env` versionado                          | I      | `tools/check-sensitive.mjs` antes de cada commit (§9)                                                                                                                                                                                                    | `tools/check-sensitive.mjs`                                                               |
 | Todas         | Incidente em andamento (abuso, falha de dados)                | D, T   | Modo somente leitura (§7)                                                                                                                                                                                                                                | `web/src/lib/server/admin/read-only.ts`                                                   |
+| Ponte Android | Outra origem chama a ponte USB/arquivos | S, T, I, E | Origem fixada nas regras de mensagens do Capacitor e conferida de novo no plugin por `OriginGuard`, falhando fechada; `allowNavigation` vazio no release. Uma XSS na origem permitida continua sendo risco, mitigado por CSP e gate, não pela comparação de origem | `apps/android/android/app/src/main/java/com/openauri/usb/OriginGuard.kt`, `tools/verify-capacitor-config.mjs` |
+| Rede Android | MITM altera a página com acesso à ponte | S, T, I, E | HTTPS na origem de produção, cleartext e conteúdo misto recusados no release; trust anchors do sistema, sem promessa de certificate pinning. O alvo HTTP de emulador nunca é distribuído | `apps/android/android/app/src/main/res/xml/network_security_config.xml`, `tools/verify-capacitor-config.mjs` |
+| Distribuição Android | APK reempacotado troca origem, guardas ou código | S, T, E | Release verifica configuração de produção; APK assinado v2/v3, fingerprint esperado conferido e hashes/manifesto publicados. Instalar só de fontes oficiais e conferir assinatura; não impede alguém de oferecer um APK hostil com outra chave | `.github/workflows/android-release.yml`, `tools/verify-capacitor-config.mjs`, `docs/operacao/runbooks/android-release.md` |
+| Assinatura Android | Chave do app ou de upload roubada | S, T, E | Duas chaves distintas, criadas offline, backups em dois locais, secrets só no Environment `android-release` com revisor obrigatório e política de tags, ruleset de tags. Perda/comprometimento exige resposta humana: reset da upload key na Play, avaliação da chave do app e bloqueio/revogação da release; copiar a chave do app para CI é risco residual | `.github/workflows/android-release.yml`, `docs/operacao/runbooks/android-release.md` |
+| Dependências Android | Artefato ou wrapper adulterado; licença incompatível | T, E | Verificação SHA-256 do Gradle e do wrapper; Licensee com lista permitida no build. Revisar mudanças dos hashes e licenças, não regenerar metadados para silenciar uma falha | `apps/android/android/gradle/verification-metadata.xml`, `apps/android/android/gradle/wrapper/gradle-wrapper.properties`, `apps/android/android/app/build.gradle` (Licensee) |
+| USB Android | Gasto de flash ou sequência malformada | T, D | Mesmo gate/checklist e `writeCurve`/`writeMany` do desktop; contadores e espaçamento JS. `FrameGuard` valida report ID 0xCB, 31 bytes, ordem, preâmbulo, CRC, padding e 9 reports antes do commit, com pelo menos 2000 ms entre commits por identidade física; não substitui validação da curva nem é limite diário persistente nativo | `apps/android/android/app/src/main/java/com/openauri/usb/FrameGuard.kt`, `web/src/lib/cable/checklist.ts`, `src/transport/webhid.mjs` |
+| WebView Android | WebView antiga não suporta a segurança da ponte ou o site | T, E, D | `WebViewCompatGate` recusa versão abaixo da baseline 111, versão desconhecida ou ausência de `DOCUMENT_START_SCRIPT`/`WEB_MESSAGE_LISTENER`, pedindo atualização; evita fallback da ponte exposto a todos os frames | `apps/android/android/app/src/main/java/com/openauri/app/WebViewCompatGate.kt` |
+| Gravação Android | Usuário grava antes da validação física do app | T, D | Estado não validado explícito, modal versionado, banner e item obrigatório `android-untested` em cada checklist, inclusive resgate/fila. Política permite desligar ou bloquear versões por deploy. Testes de bytes não provam o caminho físico; só a F5 humana encerra o aviso | `web/src/lib/cable/android-status.ts`, `web/src/lib/cable/checklist.ts`, `docs/plans/2026-10-18-android-capacitor-plano.md` (0.12, RF14/RF15, F5) |
+| Política Android | Página aberta fica antiga após deploy de bloqueio | T, D, E | Antes de iniciar escrita nativa ou fila, buscar `/_app/version.json` com `no-store`/`no-cache`: diferença exige Recarregar; offline, HTTP/JSON inválido ou timeout de 3 s recusam escrita (fail closed). Uma checagem por operação/fila, não por cabo nem report; deploy durante uma operação já iniciada não a revoga retroativamente. Documentar limite de páginas anteriores à guarda | `web/src/lib/cable/native-freshness.ts`, `web/src/lib/cable/service.ts`, `docs/operacao/runbooks/android-release.md` |
+| Merge/deploy | Automação publica commit sem aprovação técnica ou usa bypass | T, R, E | Plano 0.21: CI verde no HEAD do PR, QA PASS sem FX, varredura de segredos verde; merge sem squash/rebase forçado nem `--admin`. Staging, e2e, produção, smoke, rollback imediato se falhar. Revisores humanos dos Environments continuam obrigatórios; registrar evidências e não contornar proteções | `docs/plans/2026-10-18-android-capacitor-plano.md` (0.21), `docs/deploy.md` (Rollback), `docs/operacao/runbooks/android-release.md` |
 
 ## 5. Cabeçalhos
 
