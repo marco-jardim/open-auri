@@ -134,7 +134,9 @@ USB nativo para gravar no cabo CB5100. O Chrome Android não oferece WebHID; o a
 o checklist e o diário do site, sem gravação automática.
 
 - **Google Play, quando público:** https://play.google.com/store/apps/details?id=com.openauri.app
-- **APK no GitHub Releases:** https://github.com/marco-jardim/open-auri/releases
+- **APK no GitHub Releases:** https://github.com/marco-jardim/open-auri/releases/latest
+- **Certificado do app (SHA-256):**
+  `FB:46:E3:4F:03:FD:6F:59:5B:4B:70:36:74:8F:92:83:08:FA:BF:31:C1:55:BF:E2:C5:0E:B1:B4:43:FF:61:D0`
 - **Requisitos:** Android 8.0 ou superior, Android System WebView atualizado, aparelho com USB
   host (OTG), conexão USB-C/OTG de dados e cabo Auri compatível (VID `0x3302`, PID `0x8902`).
   Gravar pelo app exige conexão com a internet e a página atual. Após um deploy, use
