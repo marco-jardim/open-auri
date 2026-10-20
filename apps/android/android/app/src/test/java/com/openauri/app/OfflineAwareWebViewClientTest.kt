@@ -96,16 +96,92 @@ class OfflineAwareWebViewClientTest {
         assertEquals("https://localhost/offline.html", shadowOf(view).lastLoadedUrl)
     }
 
+    private val OFFLINE = "https://localhost/offline.html"
+    private val STATE = OfflineAwareWebViewClient.PageState.entries
+
+    private fun idlePastSettle() = shadowOf(Looper.getMainLooper()).idleFor(
+        java.time.Duration.ofMillis(OfflineAwareWebViewClient.SETTLE_TIMEOUT_MS + 1),
+    )
+
     @Test fun onlyMainFrameNetworkErrorsLoadTheBundledOfflinePage() {
         val url = "https://staging.open-auri.com/c/example"
+        var probes = 0
+        client.siteProbe = { _, result -> probes++; result(OfflineAwareWebViewClient.PageState.OTHER) }
         view.loadUrl(url)
         client.receivedError(view, false, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        client.onPageFinished(view, url)
         assertEquals(url, shadowOf(view).lastLoadedUrl)
+        assertEquals(0, probes)
         client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
-        assertEquals("https://localhost/offline.html", shadowOf(view).lastLoadedUrl)
+        // The decision waits for the page to settle: a service worker may still answer it.
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        client.onPageFinished(view, url)
+        assertEquals(OFFLINE, shadowOf(view).lastLoadedUrl)
+        assertEquals(1, probes)
         assertEquals(2, networkErrors)
+        idlePastSettle()
+        assertEquals(1, probes)
     }
 
+    @Test fun anInterimBlankPageWaitsAndTheCachedSiteDocumentIsKept() {
+        val url = "https://staging.open-auri.com/biblioteca"
+        val states = ArrayDeque(listOf(STATE[1], STATE[0]))
+        client.siteProbe = { _, result -> result(states.removeFirst()) }
+        view.loadUrl(url)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        client.onPageFinished(view, "about:blank")
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        client.onPageFinished(view, url)
+        idlePastSettle()
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        assertTrue(states.isEmpty())
+    }
+
+    @Test fun aBlankPageThatNeverCommitsIsJudgedAfterTheSettleTimeout() {
+        val url = "https://staging.open-auri.com/"
+        var probes = 0
+        client.siteProbe = { _, result -> probes++; result(OfflineAwareWebViewClient.PageState.BLANK) }
+        view.loadUrl(url)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        client.onPageFinished(view, "about:blank")
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+        idlePastSettle()
+        assertEquals(OFFLINE, shadowOf(view).lastLoadedUrl)
+        assertEquals(2, probes)
+        // Nothing is pending afterwards: a later finish probes nothing.
+        client.onPageFinished(view, OFFLINE)
+        assertEquals(2, probes)
+    }
+
+    @Test fun theSiteShownAtTheTimeoutKeepsIt() {
+        val url = "https://staging.open-auri.com/docs"
+        client.siteProbe = { _, result -> result(OfflineAwareWebViewClient.PageState.SITE) }
+        view.loadUrl(url)
+        client.receivedError(view, true, OfflineAwareWebViewClient.ErrorKind.NETWORK)
+        idlePastSettle()
+        assertEquals(url, shadowOf(view).lastLoadedUrl)
+    }
+
+    @Test fun theProductionProbeMapsTheEvaluatedValue() {
+        assertTrue(OfflineAwareWebViewClient.SITE_DOCUMENT_PROBE.contains("manifest.webmanifest"))
+        assertEquals(STATE[0], OfflineAwareWebViewClient.pageStateOf("\"site\""))
+        assertEquals(STATE[1], OfflineAwareWebViewClient.pageStateOf("\"blank\""))
+        for (value in listOf("\"other\"", "null", null, "site", "")) {
+            assertEquals(OfflineAwareWebViewClient.PageState.OTHER, OfflineAwareWebViewClient.pageStateOf(value))
+        }
+        var evaluated: String? = null
+        val probingView = object : WebView(controller.get()) {
+            override fun evaluateJavascript(script: String, resultCallback: android.webkit.ValueCallback<String>?) {
+                evaluated = script
+                resultCallback?.onReceiveValue("\"blank\"")
+            }
+        }
+        var shown: OfflineAwareWebViewClient.PageState? = null
+        OfflineAwareWebViewClient(controller.get().bridge).siteProbe(probingView) { shown = it }
+        assertEquals(OfflineAwareWebViewClient.SITE_DOCUMENT_PROBE, evaluated)
+        assertEquals(OfflineAwareWebViewClient.PageState.BLANK, shown)
+    }
     @Test fun offlineDecisionIsLimitedToMainFrameNetworkErrors() {
         for (main in listOf(true, false)) for (kind in OfflineAwareWebViewClient.ErrorKind.entries) {
             assertEquals(main && kind == OfflineAwareWebViewClient.ErrorKind.NETWORK,
