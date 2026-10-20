@@ -127,6 +127,37 @@ a pedido em [`docs/autoeq-data.md`](docs/autoeq-data.md). Os presets e descriç�
 com "licença: a confirmar". As curvas publicadas pelos usuários ficam sob a licença escolhida por
 eles (CC0 1.0 ou CC BY 4.0).
 
+## App Android
+
+O app `open-auri` (`com.openauri.app`) abre o mesmo site em uma WebView e acrescenta o transporte
+USB nativo para gravar no cabo CB5100. O Chrome Android não oferece WebHID; o app mantém o gate,
+o checklist e o diário do site, sem gravação automática.
+
+- **Google Play, quando público:** https://play.google.com/store/apps/details?id=com.openauri.app
+- **APK no GitHub Releases:** https://github.com/marco-jardim/open-auri/releases
+- **Requisitos:** Android 8.0 ou superior, Android System WebView atualizado, aparelho com USB
+  host (OTG), conexão USB-C/OTG de dados e cabo Auri compatível (VID `0x3302`, PID `0x8902`).
+  Gravar pelo app exige conexão com a internet e a página atual. Após um deploy, use
+  **Recarregar** se o app pedir; offline não permite gravação nativa.
+
+Para verificar um APK baixado, compare o SHA-256 do arquivo com a entrada correspondente no
+`SHA256SUMS.txt` da mesma release. Depois execute `apksigner verify --print-certs` e compare o
+fingerprint SHA-256 do certificado com o publicado pelo projeto, não com o hash do APK:
+
+```pwsh
+$apk = Read-Host 'Caminho do APK baixado'
+Get-FileHash -Algorithm SHA256 -LiteralPath $apk
+apksigner verify --print-certs $apk
+```
+
+O `apksigner` faz parte do Android SDK Build-Tools e precisa estar no `PATH`. Se a verificação
+falhar ou um dos valores divergir, não instale. A distribuição prevê a mesma chave de assinatura
+na Play e no GitHub, para permitir atualização entre fontes; confira o certificado publicado
+antes de trocar. Instruções técnicas e estado de validação em
+[`D:\git\open-auri\docs\android.md`](docs/android.md).
+
+> Aviso: a gravação pelo app ainda não foi testada num cabo Auri real. O app usa o mesmo protocolo e envia os mesmos bytes que o site no computador (conferido por testes automáticos); em teoria o resultado é o mesmo, mas não há garantia. Relate o resultado em https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+
 ## Aviso legal
 
 open-auri não é oficial nem endossado pela Kuba, pela TTGK, pela Savitech ou por qualquer fabricante. Tudo aqui foi obtido por estudo do protocolo para fins de interoperabilidade. Use por sua conta e risco: não nos responsabilizamos por danos ao cabo, ao fone ou à sua audição.

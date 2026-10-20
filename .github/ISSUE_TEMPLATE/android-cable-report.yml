@@ -1,0 +1,102 @@
+name: Resultado de gravação no cabo pelo Android
+description: Relate o resultado no seu aparelho, inclusive falhas antes de gravar.
+title: "[Android USB] "
+labels: [android-cable-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por ajudar a validar o caminho USB do app Android.
+        Use somente o fluxo normal de gravação, com gate e checklist. Não repita gravações só para preencher este relato.
+        Esta issue é pública: não cole nomes, e-mails, números de série, IDs de conta, caminhos pessoais, dados de recuperação ou outros dados pessoais. Revise o JSON antes de enviar.
+        Se o som ficou estranho, grave o Neutro; se não resolver, use o site no computador (Chrome ou Edge).
+  - type: input
+    id: device
+    attributes:
+      label: Aparelho e fabricante
+      description: Informe o modelo e a marca, sem número de série ou IMEI.
+      placeholder: Modelo do celular, fabricante
+    validations:
+      required: true
+  - type: input
+    id: android-version
+    attributes:
+      label: Versão do Android
+      placeholder: Android 16
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: Versão do app
+      description: Consulte as informações do app ou o Diagnóstico USB.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: webview-version
+    attributes:
+      label: Versão da WebView
+      description: Informe a versão do Android System WebView ou do provedor ativo. Se não conseguir consultar, escreva "não disponível".
+    validations:
+      required: true
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Origem da instalação
+      options:
+        - Play
+        - GitHub
+    validations:
+      required: true
+  - type: textarea
+    id: usb-diagnostics
+    attributes:
+      label: JSON do Diagnóstico USB
+      description: Na página do cabo, abra a camada Engenharia e copie o Diagnóstico USB. Revise os dados antes de colar. Se a falha impedir o diagnóstico, explique nas observações.
+      render: json
+  - type: input
+    id: curve
+    attributes:
+      label: Curva gravada
+      description: Informe o preset ou Neutro. Se nenhuma gravação começou, informe a curva que tentou gravar.
+      placeholder: Padrão, Basshead, Neutro ou nome da curva
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Resultado
+      options:
+        - funcionou
+        - não funcionou
+        - parcial
+    validations:
+      required: true
+  - type: dropdown
+    id: sound-changed
+    attributes:
+      label: O som mudou como esperado?
+      options:
+        - "sim"
+        - "não"
+        - não sei
+        - não se aplica (não houve gravação)
+    validations:
+      required: true
+  - type: dropdown
+    id: audio-cut
+    attributes:
+      label: O áudio cortou?
+      options:
+        - "sim"
+        - "não"
+        - não sei
+        - não havia áudio tocando
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Observações
+      description: Descreva mensagens de erro, adaptador OTG, interrupções, duração do corte e eventual resgate com Neutro. Não inclua dados pessoais.
