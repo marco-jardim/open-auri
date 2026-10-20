@@ -12,6 +12,25 @@ Textos para copiar no Play Console. Os identificadores dos três campos seguem e
 
 O contato é um placeholder para preenchimento no Console, não um endereço a publicar neste arquivo. Confirme as tags disponíveis no Console antes do envio.
 
+## Capturas e regeneração (P3)
+
+São 7 capturas por idioma (`pt-BR` e `en-US`): editor, Cabo sem conexão, Comparar, Soe como X, Comunidade, Teste cego e Cabo com USB nativo conectado. Com ícone e feature graphic, o conjunto mantém 16 PNGs. `3-comparar` deve mostrar o botão Como funciona / How it works sem sobrepor o texto acima do título. `7-native-connect` deve mostrar o painel USB Android e o estado Conectado / Connected, mantendo o aviso de gravação ainda não testada visível, não o diálogo de confirmações. O dispositivo dessa captura é falso, ligado pelo bridge Capacitor real; a imagem não comprova conexão ou gravação em hardware real.
+
+Regenerar a partir da raiz do repositório, em PowerShell, sem `STAGING_ORIGIN` definido:
+
+```powershell
+$env:CI = '1'
+$env:PLAY_SCREENSHOTS = '1'
+$env:NODE_OPTIONS = '--max-old-space-size=6144'
+npm run -w web test:e2e -- tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1
+if ($LASTEXITCODE -ne 0) { throw 'Falha na captura Playwright' }
+npm run play:assets
+if ($LASTEXITCODE -ne 0) { throw 'Falha na normalização das artes' }
+npm run test:tools
+```
+
+O primeiro comando npm captura as telas em `docs/android/play-assets/screenshots/<locale>/`; `play:assets` renderiza ícone/feature graphic e normaliza as capturas existentes, não abre o app para recapturá-las. Aprovar visualmente os dois idiomas após a execução. Para o fluxo do revisor e os caminhos exatos de denúncia/ocultação, usar [play-conteudo.md](./play-conteudo.md#2-acesso-ao-app); a captura USB simulada não substitui a conta de revisão nem o vídeo obrigatório.
+
 ## pt-BR
 
 ### Title

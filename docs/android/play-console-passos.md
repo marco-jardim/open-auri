@@ -19,17 +19,17 @@ Roteiro do mantenedor baseado no Anexo H.2 do plano (`docs/plans/2026-10-18-andr
 
 - [ ] Copiar título, descrição curta e completa de [play-listing.md](./play-listing.md), pt-BR e en-US, somente os blocos de texto. Manter aviso inicial, USB nativo e identificação de projeto não oficial/independente.
 - [ ] Preencher categoria Música e áudio, tags disponíveis, site e contato público diretamente no Console; não registrar dados do mantenedor no repositório.
-- [ ] Adicionar as artes aprovadas de P3, com **7 capturas por idioma** após a regeneração coordenada. A spec é opt-in (`PLAY_SCREENSHOTS=1`), e a captura nativa usa dispositivo falso: não é prova de teste em hardware.
-- [ ] **Pendência visual para o orquestrador:** rever a sobreposição de elementos em `3-comparar` nos dois idiomas antes de aprovar/regenerar os PNGs. Esta correção documental/spec não regenera imagens.
+- [ ] Regenerar e aprovar as artes de P3, com **7 capturas por idioma**, ícone e feature graphic, **16 PNGs ao todo**. Seguir os comandos em [play-listing.md](./play-listing.md#capturas-e-regeneração-p3). Conferir `3-comparar` sem sobreposição entre o botão de ajuda e o texto acima do título nos dois idiomas.
+- [ ] Conferir `7-native-connect`: página Cabo com painel USB Android conectado, lâmpada Conectado acesa e aviso de gravação ainda não testada visível, sem abrir o checklist. A spec é opt-in (`PLAY_SCREENSHOTS=1`) e usa dispositivo falso pelo bridge nativo: não é prova de teste em hardware nem substitui o vídeo obrigatório.
 
 ## 3. Conteúdo do app, na ordem
 
 Usar [play-conteudo.md](./play-conteudo.md) e [data-safety.md](./data-safety.md), sem copiar marcadores internos.
 
 - [ ] Política de privacidade: https://open-auri.com/privacidade, acessível sem login.
-- [ ] Acesso ao app: declarar partes restritas, colar as instruções em inglês e fornecer conta de revisão e vídeo obrigatórios nos campos apropriados. Conferir Menu > Cabo > Conectar, seletor Android, mensagem sem dispositivo e Diagnóstico USB com cabo.
+- [ ] Acesso ao app: declarar partes restritas, colar as instruções em inglês e fornecer conta de revisão e vídeo obrigatórios nos campos apropriados. Conferir Menu > Cabo > Conectar pelo USB do Android, seletor Android, mensagem sem dispositivo e Diagnóstico USB com cabo. Testar página de curva > `Denunciar <nome>` / Ocultar esta curva; apelido do autor > perfil > `Denunciar <apelido>` / Ocultar este autor; Comunidade > selecionar curva > Mais da mesa > gaveta Denunciar.
 - [ ] Anúncios: não.
-- [ ] IARC: ferramenta de música/áudio, não jogo; classificar conteúdo do desenvolvedor e declarar UGC em "usuários interagem". Confirmar denúncia, moderação e "Ocultar este autor/esta curva" nesta release (local para visitantes, sincronizado para contas).
+- [ ] IARC: ferramenta de música/áudio, não jogo; classificar conteúdo do desenvolvedor e declarar UGC em "usuários interagem". Confirmar denúncia na página de curva, perfil, criações, packs, favoritos do perfil, fontes de comparação, candidatos do teste cego e Comunidade. Confirmar moderação e "Ocultar este autor/esta curva" nesta release (local para visitantes, sincronizado para contas).
 - [ ] Público-alvo: **somente 18 anos ou mais**, inclusive uso sem conta; não direcionado a menores e não inscrito como app infantil/Families. Não confundir público-alvo com resultado IARC ou alegar verificação etária inexistente.
 - [ ] Data safety: declarar coleta, incluindo a WebView; **localização aproximada coletada e compartilhada com Simple Analytics para Analytics**, país derivado do fuso horário, não requisito de conta. Conferir toda a matriz, criptografia, exclusão e retenções, sem marcar todos os fluxos como efêmeros.
 - [ ] ID de publicidade: não; conferir também manifesto mesclado do AAB final.
