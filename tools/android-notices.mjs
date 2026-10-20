@@ -1,4 +1,8 @@
 // Usage: node tools/android-notices.mjs [--input artifacts.json] [--output notices.txt] [--check]
+//
+// Apache-2.0 section 4(d) NOTICE files: checked 2026-10-20 for all 49 Apache-2.0 artifacts of the
+// release (incl. org.apache.cordova:framework:14.0.1 and the classes.jar inside each AAR); none ships
+// a NOTICE, so only license texts are reproduced. Re-check when the dependency set changes.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -157,6 +161,19 @@ function filesIn(directory) {
 }
 
 /**
+ * The generated Cordova manifest declares no components: exactly one <application> element with
+ * no child content. Attributes are tolerated because `cap sync` writes them without bundling
+ * code: an e2e sync (server.cleartext) emits <application android:usesCleartextTraffic="true">.
+ * @param {string} manifest
+ */
+export function isEmptyCordovaManifest(manifest) {
+  return (
+    (manifest.match(/<application\b/g) ?? []).length === 1 &&
+    /<application\b[^>]*>\s*<\/application\s*>|<application\b[^>]*\/>/.test(manifest)
+  );
+}
+
+/**
  * Resolve every non-app Gradle project to its backing npm package. Only the checked-empty,
  * generated Cordova container is exempt; new local projects or bundled code fail closed.
  * @param {string} [root]
@@ -194,7 +211,7 @@ export function readBundledProjects(root = ROOT) {
               path !== join(directory, 'src/main/AndroidManifest.xml'),
           );
         const manifest = readFileSync(join(directory, 'src/main/AndroidManifest.xml'), 'utf8');
-        if (bundledFiles.length || !/<application\s*>\s*<\/application>/.test(manifest)) {
+        if (bundledFiles.length || !isEmptyCordovaManifest(manifest)) {
           throw new Error(
             `Bundled Cordova code needs explicit package license attribution: ${project}`,
           );

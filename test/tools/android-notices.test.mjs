@@ -6,6 +6,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   ALLOWED_SPDX,
+  isEmptyCordovaManifest,
   parseArgs,
   readBundledProjects,
   renderNotices,
@@ -459,6 +460,60 @@ test('new local projects and nonempty generated Cordova code fail closed', (t) =
   assert.throws(repo.projects, /Missing Gradle projectDir/);
 });
 
+// Exactly what @capacitor/cli writeCordovaAndroidManifest emits with no Cordova plugins.
+const cordovaManifest = (attributes) => `<?xml version='1.0' encoding='utf-8'?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+xmlns:amazon="http://schemas.amazon.com/apk/res/android">
+<application ${attributes}>
+
+</application>
+
+</manifest>`;
+
+test('n9: the empty Cordova container is accepted after prod and e2e syncs, and the CLI still runs', (t) => {
+  for (const manifest of [
+    cordovaManifest(' '),
+    cordovaManifest(' android:usesCleartextTraffic="true"'),
+    '<manifest><application></application></manifest>',
+    '<manifest><application android:usesCleartextTraffic="true" /></manifest>',
+  ]) {
+    assert.ok(isEmptyCordovaManifest(manifest), manifest);
+  }
+  const repo = fixture(t);
+  repo.write(
+    'apps/android/android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml',
+    cordovaManifest(' android:usesCleartextTraffic="true"'),
+  );
+  assert.deepEqual(repo.projects()[1], {
+    project: ':capacitor-cordova-android-plugins',
+    empty: true,
+  });
+  const generated = repo.run();
+  assert.equal(generated.status, 0, generated.stderr);
+  assert.match(readFileSync(repo.output, 'utf8'), /Generated empty Cordova container/);
+});
+
+test('n9: a Cordova manifest declaring components or a second application still fails closed', (t) => {
+  for (const manifest of [
+    cordovaManifest(' android:usesCleartextTraffic="true"').replace(
+      '\n\n</application>',
+      '\n<activity android:name="org.example.Plugin" />\n</application>',
+    ),
+    '<manifest><application><service android:name="x" /></application></manifest>',
+    '<manifest><application></application><application></application></manifest>',
+    '<manifest><application><!-- --></application></manifest>',
+    '<manifest></manifest>',
+  ]) {
+    assert.equal(isEmptyCordovaManifest(manifest), false, manifest);
+  }
+  const repo = fixture(t);
+  repo.write(
+    'apps/android/android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml',
+    '<manifest><application android:usesCleartextTraffic="true"><receiver android:name="x" /></application></manifest>',
+  );
+  assert.throws(repo.projects, /Bundled Cordova code needs explicit package license attribution/);
+});
+
 test('every real non-app Gradle project is listed in committed notices with the full Capacitor MIT license', () => {
   const text = readFileSync(committedOutput, 'utf8');
   const settings = ['settings.gradle', 'capacitor.settings.gradle']
@@ -486,4 +541,18 @@ test('CI checks notices against the actual report after building the release', (
     android,
     /run: npm run build:android:release\n {6}- name: Check Android notices against the release report\n {8}run: npm run notices:android -- --check/,
   );
+});
+
+test('n4: CI runs the Android job when the committed notices file changes', () => {
+  const filter = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')
+    .replaceAll('\r\n', '\n')
+    .split('\n  changes:')[1]
+    .split('\n  static:')[0];
+  for (const path of [
+    'web/static/third-party-licenses-android.txt',
+    'tools/android-*.mjs',
+    'test/tools/android-*.test.mjs',
+  ]) {
+    assert.ok(filter.includes(`              - '${path}'\n`), `Missing CI Android path: ${path}`);
+  }
 });

@@ -98,6 +98,7 @@ jobs:
               - 'test/tools/android-*.test.mjs'
               - 'test/tools/run-gradle.test.mjs'
               - 'test/tools/verify-capacitor-config.test.mjs'
+              - 'web/static/third-party-licenses-android.txt'
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
