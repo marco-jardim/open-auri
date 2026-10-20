@@ -188,6 +188,26 @@ function markerWaived(value: unknown): ReasonCode[] | null {
 	return codes;
 }
 
+/** The `freshness` key of a journal entry or marker: a copy, or nothing when null. */
+function journalFreshness(freshness: NativeWriteFreshness | null): Pick<JournalEntry, 'freshness'> {
+	return freshness === null
+		? {}
+		: { freshness: { basis: freshness.basis, checkedAt: freshness.checkedAt } };
+}
+
+/**
+ * The deploy check of a persisted marker, checked like the journal checks an entry's; null
+ * when absent or not valid (the recovered entry then names none).
+ */
+function markerFreshness(value: unknown): NativeWriteFreshness | null {
+	if (typeof value !== 'object' || value === null) return null;
+	const { basis, checkedAt } = value as Partial<Record<keyof NativeWriteFreshness, unknown>>;
+	if (basis !== 'live' && basis !== 'last-good') return null;
+	if (!Number.isSafeInteger(checkedAt) || (checkedAt as number) < 0) return null;
+	if ((checkedAt as number) > 8.64e15) return null;
+	return { basis, checkedAt: checkedAt as number };
+}
+
 /**
  * Parses a persisted marker; null when it is unreadable or malformed. A marker without
  * `profile: 'yolo'` (a standard write, or one persisted before markers carried a profile) is
@@ -223,6 +243,8 @@ export function parseInflightMarker(raw: string): InflightMarker | null {
 		const waived = markerWaived(candidate.waived);
 		if (waived !== null) marker.waived = waived;
 	}
+	const freshness = markerFreshness(candidate.freshness);
+	if (freshness !== null) marker.freshness = freshness;
 	return marker;
 }
 
@@ -319,6 +341,8 @@ interface Authorized {
 	name: string;
 	/** CRC-16 of the gated payload. */
 	crc: number;
+	/** Native writes: the deploy check that cleared it (journaled); null otherwise. */
+	freshness: NativeWriteFreshness | null;
 }
 
 /** What the synchronous first phase captured: the request read once and its gate verdict. */
@@ -580,7 +604,9 @@ export function createCableService(
 							profile: 'yolo' as const,
 							...(marker.waived === undefined ? {} : { waived: [...marker.waived] })
 						}
-					: {})
+					: {}),
+				// A marker without it (desktop, or persisted before it existed) journals none.
+				...journalFreshness(marker.freshness ?? null)
 			};
 			try {
 				deps.journal.append(entry);
@@ -747,7 +773,9 @@ export function createCableService(
 			// Modo YOLO: what the journal entry would carry, so a recovered interruption keeps it.
 			...(authorized.profile === 'yolo'
 				? { profile: 'yolo' as const, waived: [...authorized.checklist.waived] }
-				: {})
+				: {}),
+			// Likewise the native deploy check that cleared the write.
+			...journalFreshness(authorized.freshness)
 		};
 		ownMarker = marker;
 		if (inflight.write(JSON.stringify(marker))) return true;
@@ -1017,9 +1045,13 @@ export function createCableService(
 
 	/**
 	 * Second phase, holding the cross-tab lock: the checklist again on the same gate verdict
-	 * with fresh flash/journal state (another tab may have written meanwhile).
+	 * with fresh flash/journal state (another tab may have written meanwhile). `freshness`: the
+	 * native deploy check that cleared this write (null for desktop and simulated writes).
 	 */
-	function authorize(prepared: Prepared): Authorized | Refused {
+	function authorize(
+		prepared: Prepared,
+		freshness: NativeWriteFreshness | null
+	): Authorized | Refused {
 		deps.flash.sync?.(nowMs());
 		const checklist = evaluateChecklist(prepared.captured, context(), prepared.verdict);
 		if (!checklist.canWrite || checklist.snapshot === null || checklist.crc === null) {
@@ -1032,7 +1064,8 @@ export function createCableService(
 			experimental: prepared.captured.experimental,
 			profile: prepared.captured.profile === 'yolo' ? 'yolo' : 'standard',
 			name: prepared.name,
-			crc: checklist.crc
+			crc: checklist.crc,
+			freshness
 		};
 	}
 
@@ -1065,7 +1098,7 @@ export function createCableService(
 		label: string,
 		authorized: Authorized
 	): { status: Written['status']; entry: JournalEntry | null } {
-		const { checklist, snapshot, preampDb, name, profile } = authorized;
+		const { checklist, snapshot, preampDb, name, profile, freshness } = authorized;
 		const yolo = profile === 'yolo';
 		const simulated = mode === 'simulated';
 		const at = nowMs();
@@ -1086,7 +1119,9 @@ export function createCableService(
 				status,
 				device: truncate(label, 64),
 				// Modo YOLO: the entry is marked, with the class-2 codes the write waived.
-				...(yolo ? { profile: 'yolo' as const, waived: [...checklist.waived] } : {})
+				...(yolo ? { profile: 'yolo' as const, waived: [...checklist.waived] } : {}),
+				// Android app: whether a live check or the last-good record cleared the write.
+				...journalFreshness(freshness)
 			};
 			try {
 				deps.journal.append(entry);
@@ -1268,7 +1303,7 @@ export function createCableService(
 				return await exclusive<WriteOutcome>(async (freshness) => {
 					const guard = crossTabGuard();
 					if (guard !== null) return guard;
-					const authorized = authorize(prepared);
+					const authorized = authorize(prepared, freshness);
 					if ('status' in authorized) return authorized;
 					const { checklist, snapshot, preampDb, experimental, profile } = authorized;
 					const device = primary;
@@ -1354,7 +1389,7 @@ export function createCableService(
 				return await exclusive<QueueOutcome>(async (freshness) => {
 					const guard = crossTabGuard();
 					if (guard !== null) return guard;
-					const authorized = authorize(prepared);
+					const authorized = authorize(prepared, freshness);
 					if ('status' in authorized) return authorized;
 					const { checklist, snapshot, preampDb, experimental } = authorized;
 					// A cable may have been unplugged while waiting for the lock.

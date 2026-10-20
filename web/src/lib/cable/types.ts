@@ -132,6 +132,11 @@ export interface InflightMarker {
 	 * `JOURNAL_WAIVED_MAX`, waivable codes only), copied into the recovered entry.
 	 */
 	waived?: ReasonCode[];
+	/**
+	 * Native writes: the deploy check that cleared it (`live` or the offline `last-good`
+	 * record), copied into the recovered entry. Absent on desktop and on older markers.
+	 */
+	freshness?: NativeWriteFreshness;
 }
 
 export interface CableServiceDeps {

@@ -22,7 +22,7 @@ export class NativeFreshnessError extends Error {
 
 /** What cleared a native write. */
 export interface NativeWriteFreshness {
-	/** `live`: the server confirmed this build now; `last-good`: offline, on its last confirmation. */
+	/** `live`: confirmed now; `last-good`: the check failed, so on its last confirmation. */
 	basis: 'live' | 'last-good';
 	/** When the server last confirmed this build (epoch ms). */
 	checkedAt: number;
@@ -62,17 +62,28 @@ function browserStorage(): NativeLastGoodStorage | null {
 	return null;
 }
 
-/** The stored record; null when absent, unreadable or not exactly `{ version, checkedAt }`. */
-function readLastGood(storage: NativeLastGoodStorage | null): LastGood | null {
+/** Largest valid `Date` value (epoch ms): a later `checkedAt` is no time at all. */
+const MAX_EPOCH_MS = 8.64e15;
+
+/** The stored string; null when absent or unreadable (a read failure only warns). */
+function readRaw(storage: NativeLastGoodStorage | null): string | null {
 	if (storage === null) return null;
-	let raw: string | null;
 	try {
-		raw = storage.getItem(NATIVE_LAST_GOOD_KEY);
+		const raw = storage.getItem(NATIVE_LAST_GOOD_KEY);
+		return typeof raw === 'string' ? raw : null;
 	} catch (cause) {
 		console.warn('native last-good read failed', cause);
 		return null;
 	}
-	if (typeof raw !== 'string') return null;
+}
+
+/** The stored record; null when absent, unreadable or not exactly `{ version, checkedAt }`. */
+function readLastGood(storage: NativeLastGoodStorage | null): LastGood | null {
+	const raw = readRaw(storage);
+	return raw === null ? null : parseLastGood(raw);
+}
+
+function parseLastGood(raw: string): LastGood | null {
 	let value: unknown;
 	try {
 		value = JSON.parse(raw);
@@ -86,7 +97,12 @@ function readLastGood(storage: NativeLastGoodStorage | null): LastGood | null {
 	const stored = record.version;
 	const checkedAt = record.checkedAt;
 	if (typeof stored !== 'string' || stored.length === 0) return null;
-	if (typeof checkedAt !== 'number' || !Number.isSafeInteger(checkedAt) || checkedAt < 0) {
+	if (
+		typeof checkedAt !== 'number' ||
+		!Number.isSafeInteger(checkedAt) ||
+		checkedAt < 0 ||
+		checkedAt > MAX_EPOCH_MS
+	) {
 		return null;
 	}
 	return { version: stored, checkedAt };
@@ -101,6 +117,31 @@ function writeLastGood(storage: NativeLastGoodStorage | null, record: LastGood |
 	} catch (cause) {
 		console.warn('native last-good write failed', cause);
 	}
+}
+
+/**
+ * Forgets the last-good record: this device has seen that native writes are disabled or that
+ * a newer deploy exists, so no page may write offline on an older confirmation. Never throws.
+ */
+export function forgetNativeLastGood(
+	storage: NativeLastGoodStorage | null = browserStorage()
+): void {
+	writeLastGood(storage, null);
+}
+
+/**
+ * At page start in the app: keeps the record only when it is a valid confirmation of this very
+ * build (`build`), else removes it. A page the service worker serves offline can be older than
+ * the last page this device ran; it must never write on another build's confirmation. Never
+ * throws.
+ */
+export function reconcileNativeLastGood(
+	build: string = version,
+	storage: NativeLastGoodStorage | null = browserStorage()
+): void {
+	const raw = readRaw(storage);
+	if (raw === null) return;
+	if (parseLastGood(raw)?.version !== build) writeLastGood(storage, null);
 }
 
 /** One bounded live check of the deployed version; throws only `NativeFreshnessError`. */
@@ -150,11 +191,14 @@ async function checkLive(fetcher: typeof globalThis.fetch, build: string): Promi
  *
  * Every native write asks the server first. A live match clears it and is remembered as the
  * last-good confirmation of this build (`NATIVE_LAST_GOOD_KEY`). A different deployed version
- * refuses (`newer`) and forgets that record, so a device that saw a newer deploy never writes
- * offline from an older page. When the check is unavailable (network, timeout, HTTP, malformed
- * data), the write proceeds optimistically, with no expiry, only on a valid last-good record of
- * this same build; otherwise it refuses (`unavailable`). So a remote change to the write policy
- * reaches an offline device only once it reconnects.
+ * refuses (`newer`) and forgets that record. The record is also forgotten whenever this device
+ * sees a newer deploy or disabled native writes by other means (`forgetNativeLastGood`: Kit's
+ * `updated`, detection) and, at page start, when it names another build
+ * (`reconcileNativeLastGood`), so a device that saw a newer deploy never writes offline from an
+ * older page. When the check is unavailable (offline, a blocked `version.json`, timeout, HTTP
+ * error, malformed data), the write proceeds optimistically, with no expiry, only on a valid
+ * last-good record of this same build; otherwise it refuses (`unavailable`). So a remote change
+ * to the write policy reaches such a device only once its check succeeds again.
  */
 export async function assertNativeWriteFresh(
 	deps: NativeFreshnessDeps = {}

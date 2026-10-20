@@ -5,6 +5,8 @@ import {
 	NATIVE_LAST_GOOD_KEY,
 	NativeFreshnessError,
 	assertNativeWriteFresh,
+	forgetNativeLastGood,
+	reconcileNativeLastGood,
 	type NativeLastGoodStorage
 } from '#lib/cable/native-freshness.ts';
 import { createCableService } from '#lib/cable/service.ts';
@@ -218,6 +220,7 @@ describe('offline writes on the last-good confirmation', () => {
 		['a negative checkedAt', JSON.stringify({ version: 'current', checkedAt: -1 })],
 		['a fractional checkedAt', JSON.stringify({ version: 'current', checkedAt: 1.5 })],
 		['an unsafe checkedAt', JSON.stringify({ version: 'current', checkedAt: 2 ** 53 })],
+		['a checkedAt after 8.64e15', JSON.stringify({ version: 'current', checkedAt: 8.64e15 + 1 })],
 		['an extra field', JSON.stringify({ version: 'current', checkedAt: T0, extra: true })]
 	])('offline refuses with %s as the record', async (_label, raw) => {
 		storage = memoryStorage({ [NATIVE_LAST_GOOD_KEY]: raw });
@@ -304,6 +307,84 @@ describe('offline writes on the last-good confirmation', () => {
 	});
 });
 
+describe('forgetting the last-good record outside a write', () => {
+	test('a record at the last valid Date still counts', async () => {
+		storage = memoryStorage(lastGood({ version: 'current', checkedAt: 8.64e15 }));
+		await expect(assertNativeWriteFresh({ fetch: offline(), storage })).resolves.toEqual({
+			basis: 'last-good',
+			checkedAt: 8.64e15
+		});
+	});
+
+	test('forgetNativeLastGood removes the record and never throws', () => {
+		storage = memoryStorage(lastGood({ version: 'current', checkedAt: T0 }));
+		forgetNativeLastGood(storage);
+		expect(storage.items.has(NATIVE_LAST_GOOD_KEY)).toBe(false);
+		forgetNativeLastGood(storage);
+		forgetNativeLastGood(null);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const broken = {
+			...memoryStorage(),
+			removeItem: () => {
+				throw new DOMException('denied', 'SecurityError');
+			}
+		};
+		expect(() => forgetNativeLastGood(broken)).not.toThrow();
+		expect(warn).toHaveBeenCalledOnce();
+	});
+
+	test('reconcileNativeLastGood keeps only a valid record of this build', () => {
+		const same = JSON.stringify({ version: 'current', checkedAt: T0 });
+		storage = memoryStorage({ [NATIVE_LAST_GOOD_KEY]: same });
+		reconcileNativeLastGood('current', storage);
+		expect(storage.items.get(NATIVE_LAST_GOOD_KEY)).toBe(same);
+		for (const raw of [
+			JSON.stringify({ version: 'older', checkedAt: T0 }),
+			JSON.stringify({ version: 'newer', checkedAt: T0 }),
+			JSON.stringify({ version: 'current', checkedAt: 8.64e15 + 1 }),
+			JSON.stringify({ version: 'current', checkedAt: T0, extra: 1 }),
+			'not JSON'
+		]) {
+			storage = memoryStorage({ [NATIVE_LAST_GOOD_KEY]: raw });
+			reconcileNativeLastGood('current', storage);
+			expect(storage.items.has(NATIVE_LAST_GOOD_KEY), raw).toBe(false);
+		}
+		// Nothing stored, or no storage: nothing to do.
+		storage = memoryStorage();
+		reconcileNativeLastGood('current', storage);
+		expect(storage.items.size).toBe(0);
+		expect(() => reconcileNativeLastGood('current', null)).not.toThrow();
+	});
+
+	test('reconcile defaults to this build and localStorage, and tolerates a throwing one', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const local = memoryStorage(lastGood({ version: 'cached', checkedAt: T0 }));
+		vi.stubGlobal('localStorage', local);
+		try {
+			reconcileNativeLastGood();
+			expect(local.items.has(NATIVE_LAST_GOOD_KEY)).toBe(false);
+			local.items.set(NATIVE_LAST_GOOD_KEY, JSON.stringify({ version: 'current', checkedAt: T0 }));
+			reconcileNativeLastGood();
+			expect(local.items.has(NATIVE_LAST_GOOD_KEY)).toBe(true);
+			forgetNativeLastGood();
+			expect(local.items.has(NATIVE_LAST_GOOD_KEY)).toBe(false);
+			expect(warn).not.toHaveBeenCalled();
+
+			vi.stubGlobal('localStorage', {
+				getItem: () => {
+					throw new DOMException('denied', 'SecurityError');
+				},
+				setItem: () => undefined,
+				removeItem: () => undefined
+			});
+			expect(() => reconcileNativeLastGood()).not.toThrow();
+			expect(warn).toHaveBeenCalledOnce();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
 describe('desktop and simulation are independent of remote native policy', () => {
 	test.each(['real', 'simulated'] as const)('%s never checks freshness', async (mode) => {
 		const fetch = vi
@@ -311,11 +392,12 @@ describe('desktop and simulation are independent of remote native policy', () =>
 			.mockRejectedValue(new NativeFreshnessError('newer'));
 		const clock = createFakeClock(0, { autoAdvance: true });
 		const hid = new FakeHID({ devices: [new FakeHIDDevice({ clock })] });
+		const journal = memoryJournal();
 		const service = createCableService({
 			hid: mode === 'real' ? hid : null,
 			nativeFreshness: { fetch, version: 'cached', storage },
 			clock,
-			journal: memoryJournal(),
+			journal,
 			flash: memoryFlash(),
 			now: () => T0 + clock.now(),
 			lastWrittenLevelDb: () => null,
@@ -336,6 +418,9 @@ describe('desktop and simulation are independent of remote native policy', () =>
 			});
 			expect(result.status).toBe(mode === 'real' ? 'ok' : 'simulated');
 			expect(result).not.toHaveProperty('freshness');
+			// Desktop and simulated journal entries keep their old shape.
+			expect(journal.entries).toHaveLength(1);
+			expect(journal.entries[0]).not.toHaveProperty('freshness');
 			expect(fetch).not.toHaveBeenCalled();
 			expect(storage.items.size).toBe(0);
 		} finally {

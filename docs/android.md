@@ -277,8 +277,17 @@ SvelteKit no build, não um arquivo fonte do repositório. A implementação est
   confirmação válida para a mesma versão da página. O resultado mostra um
   aviso com a data dessa confirmação. Sem registro, com registro de outra
   versão ou malformado, a recusa é `unavailable`, inclusive para o Neutro.
-- Por isso, mudanças remotas em `ANDROID_WRITE_POLICY` só chegam a um
-  aparelho offline quando ele reconecta e recarrega a página.
+- O registro também é apagado ao iniciar uma página de outra versão, quando a
+  detecção dá `native-write-disabled` e quando o Kit avisa que há deploy mais
+  novo (banner do app). Cada gravação nativa grava no diário `freshness`
+  (`live` ou `last-good`, com o horário da confirmação).
+- Risco residual: mudanças remotas em `ANDROID_WRITE_POLICY` só chegam a um
+  aparelho cuja checagem falha (offline, `/_app/version.json` bloqueado, erro
+  do servidor) quando ela volta a funcionar e ele carrega o deploy novo. A
+  página que grava pode ser o shell que o service worker serve offline,
+  possivelmente mais antigo que a última página que o aparelho rodou; a
+  limpeza acima limita isso a páginas da mesma versão da última confirmação,
+  de um aparelho que não viu deploy mais novo.
 - A recusa oferece o botão **Recarregar**. Só no app, um banner também
   avisa quando há nova versão do site. A recarga fica bloqueada enquanto
   uma gravação está em andamento e não é agendada para depois; tente de

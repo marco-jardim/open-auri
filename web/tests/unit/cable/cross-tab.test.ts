@@ -545,6 +545,27 @@ describe('an interrupted Modo YOLO write keeps its profile and waived codes', ()
 		}
 	});
 
+	test('a native marker keeps its deploy check, and the recovered entry journals it', async () => {
+		const freshness = { basis: 'last-good' as const, checkedAt: T0 - 86_400_000 };
+		const closed = marker({ freshness });
+		expect(parseInflightMarker(JSON.stringify(closed))).toEqual(closed);
+		const h = await tab({ inflight: memoryInflight(JSON.stringify(closed)), connect: false });
+		expect(h.journal.last()).toEqual({ ...interruptedEntry(closed), freshness });
+		// Invalid checks are dropped, like invalid waived lists: the entry then names none.
+		const invalid: unknown[] = [
+			null,
+			'last-good',
+			{ basis: 'stale', checkedAt: 0 },
+			{ basis: 'live' },
+			{ basis: 'live', checkedAt: -1 },
+			{ basis: 'live', checkedAt: 1.5 },
+			{ basis: 'live', checkedAt: 8.64e15 + 1 }
+		];
+		for (const bad of invalid) {
+			expect(parseInflightMarker(JSON.stringify({ ...closed, freshness: bad }))).toEqual(marker());
+		}
+	});
+
 	test('the waived codes are checked like the journal checks them; invalid lists are dropped', async () => {
 		const valid = marker({ profile: 'yolo', waived: ['k:kind-not-allowed', 'g:preamp'] });
 		expect(parseInflightMarker(JSON.stringify(valid))).toEqual(valid);

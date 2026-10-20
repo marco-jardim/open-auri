@@ -1,10 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { m } from '#lib/paraglide/messages.js';
 import { getLocale, overwriteServerAsyncLocalStorage } from '#lib/paraglide/runtime.js';
 import {
 	describeOutcome,
 	describeReason,
+	formatCheckedAt,
 	formatCrc,
 	formatNumber,
 	lampLabel,
@@ -114,10 +115,10 @@ test.each(['pt-BR', 'en-US'] as const)(
 );
 
 test.each([
-	['pt-BR', 'Sem conexão: usando a última confirmação do servidor ('],
-	['en-US', "No connection: using the server's last confirmation ("]
+	['pt-BR', 'Servidor indisponível: usando a última confirmação desta versão ('],
+	['en-US', "Server unavailable: using this version's last confirmation ("]
 ] as const)(
-	'a native write on the offline last-good confirmation adds a dated notice in %s',
+	'a native write on the last-good confirmation adds a neutral, dated notice in %s',
 	(locale, prefix) =>
 		requestLocale.run({ locale }, () => {
 			const checkedAt = Date.UTC(2026, 9, 1, 12, 0, 0);
@@ -125,9 +126,12 @@ test.each([
 				dateStyle: 'short',
 				timeStyle: 'short'
 			}).format(checkedAt);
-			const notice = m.cable_native_last_good({ date });
+			expect(formatCheckedAt(checkedAt)).toBe(date);
+			const notice = m.cable_native_last_good_dated({ date });
 			expect(notice.startsWith(prefix)).toBe(true);
 			expect(notice).toContain(date);
+			// It no longer claims there is no connection: a server error or a timeout shows it too.
+			expect(notice).not.toMatch(/conexão|connection/i);
 			const offline = { basis: 'last-good' as const, checkedAt };
 			const written = { ...writtenOutcome('ok'), freshness: offline };
 			expect(lastGoodNotice(written)).toBe(notice);
@@ -141,6 +145,43 @@ test.each([
 			expect(describeOutcome(live)).toBe(m.cable_result_ok({ crc: '0x4FFF' }));
 			expect(lastGoodNotice(writtenOutcome('ok'))).toBeNull();
 			expect(lastGoodNotice({ status: 'refused', reason: 'error' })).toBeNull();
+		})
+);
+
+test.each(['pt-BR', 'en-US'] as const)(
+	'the last-good notice never throws on a date Intl cannot format in %s',
+	(locale) =>
+		requestLocale.run({ locale }, () => {
+			// Intl fails: the ISO form is shown instead.
+			const iso = new Date(Date.UTC(2026, 9, 1, 12, 0, 0));
+			const format = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function () {
+				throw new RangeError('Incorrect locale information provided');
+			});
+			try {
+				expect(formatCheckedAt(iso.getTime())).toBe(iso.toISOString());
+				const written = {
+					...writtenOutcome('ok'),
+					freshness: { basis: 'last-good' as const, checkedAt: iso.getTime() }
+				};
+				expect(lastGoodNotice(written)).toBe(
+					m.cable_native_last_good_dated({ date: iso.toISOString() })
+				);
+			} finally {
+				format.mockRestore();
+			}
+			// No date at all (past the last valid Date, or not a number): the notice omits it.
+			for (const checkedAt of [8.64e15 + 1, Number.NaN, Number.POSITIVE_INFINITY]) {
+				expect(formatCheckedAt(checkedAt)).toBeNull();
+				const written = {
+					...writtenOutcome('ok'),
+					freshness: { basis: 'last-good' as const, checkedAt }
+				};
+				expect(() => describeOutcome(written)).not.toThrow();
+				expect(lastGoodNotice(written)).toBe(m.cable_native_last_good_undated());
+				expect(describeOutcome(written)).toBe(
+					`${m.cable_result_ok({ crc: '0x4FFF' })} ${m.cable_native_last_good_undated()}`
+				);
+			}
 		})
 );
 

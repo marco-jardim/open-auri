@@ -380,6 +380,10 @@ describe('Native service offline on the last-good confirmation of this build', (
 			version: 'current',
 			checkedAt: outcome.freshness?.checkedAt
 		});
+		// The journal says how the write was cleared, for incident review.
+		const journaled = h.journal.entries.filter((entry) => entry.status === 'ok');
+		expect(journaled).toHaveLength(path === 'queue' ? 2 : 1);
+		for (const entry of journaled) expect(entry.freshness).toEqual(outcome.freshness);
 	});
 
 	test.each(PATHS)('%s offline: proceeds on a matching record and reports it', async (path) => {
@@ -391,9 +395,12 @@ describe('Native service offline on the last-good confirmation of this build', (
 		expect(outcome).toMatchObject({ freshness: { basis: 'last-good', checkedAt: DAY_AGO } });
 		expect(h.freshnessFetch).toHaveBeenCalledOnce();
 		expect(h.sendReport).toHaveBeenCalled();
-		expect(h.journal.entries.filter((entry) => entry.status === 'ok')).toHaveLength(
-			path === 'queue' ? 2 : 1
-		);
+		const journaled = h.journal.entries.filter((entry) => entry.status === 'ok');
+		expect(journaled).toHaveLength(path === 'queue' ? 2 : 1);
+		// The journal records that the write relied on the last-good record, and from when.
+		for (const entry of journaled) {
+			expect(entry.freshness).toEqual({ basis: 'last-good', checkedAt: DAY_AGO });
+		}
 		if (path !== 'queue') expect(h.service.getState().lastOutcome).toBe(outcome);
 	});
 

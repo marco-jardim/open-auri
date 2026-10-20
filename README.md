@@ -140,9 +140,10 @@ o checklist e o diário do site, sem gravação automática.
 - **Requisitos:** Android 8.0 ou superior, Android System WebView atualizado, aparelho com USB
   host (OTG), conexão USB-C/OTG de dados e cabo Auri compatível (VID `0x3302`, PID `0x8902`).
   Cada gravação pelo app confirma com o servidor que a página é a do deploy atual. Após um
-  deploy, use **Recarregar** se o app pedir. Sem conexão, o app só grava com a última
-  confirmação do servidor para esta mesma versão da página (e avisa a data dela); sem nenhuma
-  confirmação, ou depois de ver um deploy mais novo, recusa a gravação nativa.
+  deploy, use **Recarregar** se o app pedir. Se a confirmação falhar (sem conexão ou servidor
+  indisponível), o app só grava com a última confirmação do servidor para esta mesma versão da
+  página (e avisa a data dela); sem nenhuma confirmação, ou depois de ver um deploy mais novo
+  ou a gravação desligada, recusa a gravação nativa.
 
 Para verificar um APK baixado, compare o SHA-256 do arquivo com a entrada correspondente no
 `SHA256SUMS.txt` da mesma release. Depois execute `apksigner verify --print-certs` e compare o

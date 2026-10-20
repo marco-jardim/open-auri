@@ -6,7 +6,8 @@ import { updated } from '$app/state';
 import { NEUTRO } from 'open-auri/catalog';
 import { FakeHIDDevice } from 'open-auri/transport';
 import { evaluateChecklist } from '#lib/cable/checklist.ts';
-import { NativeFreshnessError } from '#lib/cable/native-freshness.ts';
+import { tick } from 'svelte';
+import { NATIVE_LAST_GOOD_KEY, NativeFreshnessError } from '#lib/cable/native-freshness.ts';
 import { withWriteFlag } from '#lib/cable/write-flag.ts';
 import type { NativeCableStatus } from '#lib/app/context.svelte.ts';
 import AndroidUpdateBanner from '#lib/components/cable/AndroidUpdateBanner.svelte';
@@ -199,6 +200,35 @@ test.each(appKinds)(
 		expect(reload).toHaveBeenCalledOnce();
 	}
 );
+
+test('(c) once Kit sees a newer deploy, the app forgets the offline last-good record', async () => {
+	const record = JSON.stringify({ version: 'this-build', checkedAt: 1_792_108_800_000 });
+	localStorage.setItem(NATIVE_LAST_GOOD_KEY, record);
+	try {
+		await render(AndroidUpdateBanner, { kind: 'native', reload: vi.fn() });
+		await tick();
+		expect(localStorage.getItem(NATIVE_LAST_GOOD_KEY)).toBe(record);
+		kit.newer = true;
+		await updated.check();
+		await expect.poll(() => localStorage.getItem(NATIVE_LAST_GOOD_KEY)).toBeNull();
+	} finally {
+		localStorage.removeItem(NATIVE_LAST_GOOD_KEY);
+	}
+});
+
+test('(c) desktop never touches the last-good record, even when Kit reports an update', async () => {
+	const record = JSON.stringify({ version: 'this-build', checkedAt: 1_792_108_800_000 });
+	localStorage.setItem(NATIVE_LAST_GOOD_KEY, record);
+	try {
+		kit.newer = true;
+		await updated.check();
+		await render(AndroidUpdateBanner, { kind: 'none', reload: vi.fn() });
+		await tick();
+		expect(localStorage.getItem(NATIVE_LAST_GOOD_KEY)).toBe(record);
+	} finally {
+		localStorage.removeItem(NATIVE_LAST_GOOD_KEY);
+	}
+});
 
 test('desktop never shows the banner or reload even when Kit reports an update', async () => {
 	kit.newer = true;
