@@ -75,7 +75,9 @@ for (const copy of locales) {
 	test(`footer and menu sheet link directly to privacy in ${copy.locale}`, async () => {
 		await setLocale(copy.locale, { reload: false });
 		await render(Footer, { honoree });
-		await expect.element(page.getByRole('link', { name: m.w4_privacy(), exact: true })).toHaveAttribute('href', '/privacidade');
+		await expect
+			.element(page.getByRole('link', { name: m.w4_privacy(), exact: true }))
+			.toHaveAttribute('href', '/privacidade');
 		await cleanup();
 		const onclose = vi.fn();
 		await render(BarSheet, { currentPath: '/comparar', tools: false, editorReason: '', onclose });

@@ -81,7 +81,13 @@ describe('hidden store', () => {
 		const retrySession = vi.fn();
 		const store = createHiddenStore(remote, () => storage, retrySession);
 		await store.setUser(undefined);
-		expect(get(store)).toMatchObject({ authors: ['ana'], curves: ['blocked'], ready: false, error: true, loadError: true });
+		expect(get(store)).toMatchObject({
+			authors: ['ana'],
+			curves: ['blocked'],
+			ready: false,
+			error: true,
+			loadError: true
+		});
 		expect(store.visible('anything')).toBe(false);
 		await store.retry();
 		expect(retrySession).toHaveBeenCalledOnce();
@@ -98,7 +104,9 @@ describe('hidden store', () => {
 		remote.putHidden.mockRejectedValueOnce(new Error('write failed'));
 		await expect(store.hide('curve', 'blocked')).rejects.toThrow('write failed');
 		expect(get(store)).toMatchObject({ ready: true, error: true, loadError: false });
-		remote.myHidden.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'));
+		remote.myHidden
+			.mockRejectedValueOnce(new Error('offline'))
+			.mockRejectedValueOnce(new Error('offline'));
 		await store.retry();
 		expect(get(store)).toMatchObject({ ready: false, error: true, loadError: true });
 		await store.retry();

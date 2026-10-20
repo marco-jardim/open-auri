@@ -45,7 +45,9 @@ test('own packs of every visibility reload via myPacks, even without a public ni
 	await expect.element(page.getByText('Pack unlisted', { exact: true })).toBeVisible();
 	await expect.element(page.getByText('Pack public', { exact: true })).toBeVisible();
 	for (const name of ['Pack private', 'Pack unlisted', 'Pack public']) {
-		expect(page.getByText(m.fxpc_report_item({ name }), { exact: true }).elements()).toHaveLength(0);
+		expect(page.getByText(m.fxpc_report_item({ name }), { exact: true }).elements()).toHaveLength(
+			0
+		);
 	}
 	await first.unmount();
 	await render(PacksPanel, props);

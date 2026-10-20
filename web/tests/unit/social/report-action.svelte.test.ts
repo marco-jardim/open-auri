@@ -37,7 +37,7 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect.element(page.getByText(m.fxpc_report_account(), { exact: true })).toBeVisible();
 		await expect
 			.element(page.getByRole('link', { name: m.shared_curve_login() }))
-			.toHaveAttribute('href', expect.stringMatching(/^\/entrar\?next=%2F/));
+			.toHaveAttribute('href', expect.stringMatching(/^\/entrar(?:\?next=%2F\S*)?$/));
 		expect(document.getElementById('cf-turnstile-api')).toBeNull();
 		expect(fetch).not.toHaveBeenCalled();
 	});

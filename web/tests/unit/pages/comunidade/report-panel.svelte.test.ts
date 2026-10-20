@@ -57,7 +57,9 @@ test('unverified and offline users cannot send even with a token', async () => {
 	const screen = await render(ReportPanel, { ...props, session: { ...VERIFIED, verified: false } });
 	await expect.element(send()).toHaveAttribute('aria-disabled', 'true');
 	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_verify_prompt());
-	await expect.element(page.getByText(m.comunidade_verify_prompt(), { exact: true }).first()).toBeVisible();
+	await expect
+		.element(page.getByText(m.comunidade_verify_prompt(), { exact: true }).first())
+		.toBeVisible();
 	expect(page.getByRole('link', { name: m.shared_curve_login() }).elements()).toHaveLength(0);
 	(send().element() as HTMLElement).click();
 	expect(page.getByRole('textbox').elements()).toHaveLength(0);

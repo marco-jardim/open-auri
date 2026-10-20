@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { ANDROID_RELEASES_URL } from '../../src/lib/cable/android-links.ts';
 
-test('prerendered docs contain no APK download anchors before hydration; browser hydration reveals them', async ({ request, page }) => {
+test('prerendered docs contain no APK download anchors before hydration; browser hydration reveals them', async ({
+	request,
+	page
+}) => {
 	const response = await request.get('/docs');
 	expect(response.ok()).toBe(true);
 	const html = await response.text();

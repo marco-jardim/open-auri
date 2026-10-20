@@ -36,8 +36,12 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				.poll(() => target.querySelector('#android a[href^="https://"]')?.getAttribute('href'))
 				.toBe(ANDROID_PLAY_URL);
 			expect(target.querySelector(`a[href="${ANDROID_RELEASES_URL}"]`)).toBeNull();
-			expect(target.querySelector<HTMLElement>('#android')?.innerText).not.toContain('GitHub Releases');
-			expect(target.querySelector<HTMLElement>('#android-assinatura')?.innerText).not.toContain('apksigner');
+			expect(target.querySelector<HTMLElement>('#android')?.innerText).not.toContain(
+				'GitHub Releases'
+			);
+			expect(target.querySelector<HTMLElement>('#android-assinatura')?.innerText).not.toContain(
+				'apksigner'
+			);
 			await page.getByRole('button', { name: ui.search, exact: true }).click();
 			await page.getByRole('searchbox', { name: ui.searchInput }).fill('apksigner');
 			await expect.element(page.getByText(ui.noResults, { exact: true })).toBeVisible();
@@ -74,7 +78,9 @@ for (const inApp of [false, true]) {
 		expect(before).toBeGreaterThan(0);
 		await screen.rerender({ hydrated: true });
 		expect(slot.getBoundingClientRect().height).toBe(before);
-		expect(screen.container.querySelector(`a[href="${ANDROID_RELEASES_URL}"]`) !== null).toBe(!inApp);
+		expect(screen.container.querySelector(`a[href="${ANDROID_RELEASES_URL}"]`) !== null).toBe(
+			!inApp
+		);
 		await screen.rerender({ inApp: !inApp });
 		expect(slot.getBoundingClientRect().height).toBe(before);
 	});
