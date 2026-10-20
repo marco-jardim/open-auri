@@ -9,6 +9,7 @@ import type { setupNetwork } from '@msw/cloudflare';
 import { env } from 'cloudflare:workers';
 import { http, HttpResponse } from 'msw';
 import { createAuth, type Auth, type CreateAuthOptions } from '#lib/server/auth.ts';
+import { checkUsername } from '#lib/server/auth/username.ts';
 import { RESEND_ENDPOINT } from '#lib/server/email/index.ts';
 import { getServerEnv, type ServerEnv } from '#lib/server/env.ts';
 import { AUTH_POLICIES, isAuthGuardedPath } from '#lib/server/security/ratelimit.ts';
@@ -66,7 +67,12 @@ export function uniqueEmail(prefix = 'user'): string {
 }
 
 export function uniqueUsername(prefix = 'u'): string {
-	return `${prefix}${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+	// Random hex can fold into a blocked token (e.g. digits read as letters), which sign-up answers
+	// as "taken"; draw again so tests never depend on the blocklist by chance.
+	for (;;) {
+		const name = `${prefix}${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+		if (checkUsername(name) === null) return name;
+	}
 }
 
 function randomIp(): string {
