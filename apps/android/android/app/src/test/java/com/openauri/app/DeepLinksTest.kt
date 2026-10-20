@@ -293,24 +293,47 @@ class DeepLinksTest {
                 assertEquals(MainActivity.NATIVE_BACK_SCRIPT, web.lastEvaluatedJavascript)
                 web.lastEvaluatedJavascriptCallback.onReceiveValue(pageAnswer)
             }
-            back("true") // An open overlay consumed Back.
+            back("\"consumed\"") // An open overlay consumed Back.
             assertEquals(0, web.goBackInvocations)
             assertTrue(!activity.isFinishing)
-            back("false") // No overlay: previous page.
+            back("\"history\"") // No overlay: previous page.
             assertEquals(1, web.goBackInvocations)
             assertTrue(!activity.isFinishing)
             history = listOf("$origin/", "https://localhost/offline.html", "$origin/") to 2
-            back("false") // After a retry: skip the offline page (two steps back).
+            back("\"history\"") // After a retry: skip the offline page (two steps back).
             assertEquals(3, web.goBackInvocations)
             assertTrue(!activity.isFinishing)
+            history = listOf("$origin/docs", "$origin/") to 1
+            back("null") // An older page without the contract: history as before.
+            assertEquals(4, web.goBackInvocations)
+            assertTrue(!activity.isFinishing)
             history = listOf("$origin/") to 0
-            back("false") // No history on the site: leave.
+            back("\"history\"") // No history on the site: leave.
             assertTrue(activity.isFinishing)
         } finally {
             controller.pause().stop().destroy()
         }
     }
 
+    @Test fun theFirstRunNoticeLetsBackLeaveWithoutWalkingHistory() {
+        passingGate()
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        try {
+            controller.setup()
+            val activity = controller.get()
+            httpsServerOrigin(activity.bridge.serverUrl)
+            val web = org.robolectric.Shadows.shadowOf(activity.bridge.webView)
+            web.setCanGoBack(true)
+            MainActivity.historyForTesting = { listOf("https://open-auri.com/docs", "https://open-auri.com/") to 1 }
+            activity.onBackPressedDispatcher.onBackPressed()
+            assertTrue(web.lastEvaluatedJavascript.contains("__oaWriteInProgress"))
+            web.lastEvaluatedJavascriptCallback.onReceiveValue("\"leave\"")
+            assertEquals(0, web.goBackInvocations)
+            assertTrue(activity.isFinishing)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
     @Test fun backOnTheOfflinePageLeavesWithoutAskingThePage() {
         passingGate()
         val controller = Robolectric.buildActivity(MainActivity::class.java)

@@ -107,8 +107,10 @@ class MainActivity : BridgeActivity() {
             // The bundled offline page (and anything off the site) has no handler: leave, never
             // walk back into the failed load that would show the offline page again.
             if (serverOrigin == null || OriginGuard.originOf(webView.url) != serverOrigin) return leaveApp()
-            webView.evaluateJavascript(NATIVE_BACK_SCRIPT) { consumed ->
-                if (isDestroyed || consumed == "true") return@evaluateJavascript
+            webView.evaluateJavascript(NATIVE_BACK_SCRIPT) { answer ->
+                if (isDestroyed || answer == BACK_CONSUMED) return@evaluateJavascript
+                // The first-run notice lets Back leave without walking history behind it.
+                if (answer == BACK_LEAVE) return@evaluateJavascript leaveApp()
                 val (urls, current) = historyForTesting?.invoke(webView) ?: webView.copyBackForwardList().let { list ->
                     (0 until list.size).map { list.getItemAtIndex(it)?.url } to list.currentIndex
                 }
@@ -230,9 +232,17 @@ class MainActivity : BridgeActivity() {
         private const val TAG = "MainActivity"
         private const val FILES_PLUGIN = "OpenAuriFiles"
 
-        /** Must match NATIVE_BACK_EVENT in web/src/lib/components/chrome (the site's Back handler). */
+        /**
+         * Back contract with the site (web/src/lib/components/chrome/native-back.ts): a canceled
+         * oa:native-back event, or a cable write in progress, consumes Back; __oaBackLeaves asks
+         * to leave the app directly; anything else (older pages, the offline page) walks history.
+         */
         internal const val NATIVE_BACK_SCRIPT =
-            "!window.dispatchEvent(new CustomEvent('oa:native-back', { cancelable: true }))"
+            "(window.__oaWriteInProgress === true || " +
+                "!window.dispatchEvent(new CustomEvent('oa:native-back', { cancelable: true }))) ? 'consumed' : " +
+                "(window.__oaBackLeaves === true ? 'leave' : 'history')"
+        internal const val BACK_CONSUMED = "\"consumed\""
+        internal const val BACK_LEAVE = "\"leave\""
 
         /** True while the site writes to a cable (public contract, web/src/lib/cable/write-flag.ts). */
         internal const val WRITE_IN_PROGRESS_SCRIPT = "window.__oaWriteInProgress === true"
