@@ -31,7 +31,9 @@ const requiredPhrases = {
     'comunidade',
     'Android 8 ou mais recente',
     'Android System WebView atualizado',
-    'O app não coleta dados além dos já coletados pelo próprio site.',
+    'Segurança dos dados (Data safety)',
+    'dados coletados e compartilhados',
+    '18 anos ou mais',
   ],
   'en-US': [
     'is not official or endorsed by Kuba',
@@ -42,7 +44,9 @@ const requiredPhrases = {
     'community',
     'Android 8 or newer',
     'up-to-date Android System WebView',
-    'The app collects no data beyond what the website itself already collects.',
+    'Data safety section of this listing',
+    'collected and shared data',
+    '18 or over',
   ],
 };
 const urls = [
@@ -125,6 +129,20 @@ test('full descriptions retain legal, native USB, privacy, requirements and sour
     }
     const foundUrls = new Set(full.match(/https:\/\/[^\s]+/g));
     for (const url of urls) assert.ok(foundUrls.has(url), `${language}: missing URL ${url}`);
+  }
+});
+
+test('short descriptions say unofficial and full descriptions lead with Android USB and independence', () => {
+  const openings = {
+    'pt-BR': ['Conecte o cabo Kuba Auri por USB-C/OTG', 'Projeto independente:'],
+    'en-US': ['Connect the Kuba Auri cable through USB-C/OTG', 'Independent project:'],
+  };
+  for (const [language, fields] of parseListing(listing)) {
+    assert.match(fields.get('Short description'), language === 'pt-BR' ? /não oficial/ : /unofficial/i);
+    const paragraphs = fields.get('Full description').split('\n\n');
+    assert.ok(paragraphs[1].startsWith(openings[language][0]), `${language}: native USB first`);
+    assert.ok(paragraphs[2].startsWith(openings[language][1]), `${language}: independence prominent`);
+    assert.doesNotMatch(fields.get('Full description'), /não coleta dados além|collects no data beyond/i);
   }
 });
 

@@ -277,6 +277,15 @@ describe('required fields and validation', () => {
 });
 
 describe('versioned content', () => {
+	test('rendered privacy pages contain no draft legal disclaimer in either locale', () => {
+		for (const values of [config, withoutOptional]) {
+			const page = renderLegalPage('privacy', values, noop);
+			for (const locale of ['pt-BR', 'en-US'] as const) {
+				expect(texts(page.documents[locale]).join('\n')).not.toMatch(/advogado|lawyer|Q-LEGAL/i);
+			}
+		}
+	});
+
 	test('both privacy locales describe Android and the corrected retention limits', () => {
 		const fragments = {
 			'pt-BR': [
@@ -291,7 +300,12 @@ describe('versioned content', () => {
 				'rate_limit_counters',
 				'12 meses da primeira inserção',
 				'Não é um limite de 12 semanas exatas.',
-				'não uma verificação técnica de idade'
+				'não uma verificação técnica de idade',
+				'não é direcionado a menores de idade',
+				'país aproximado a partir do fuso horário do navegador',
+				'Ocultar este autor',
+				'Ocultar esta curva',
+				'guardada e sincronizada como preferência da conta'
 			],
 			'en-US': [
 				'open-auri Android app',
@@ -305,7 +319,12 @@ describe('versioned content', () => {
 				'rate_limit_counters',
 				'12 months from first insertion',
 				'This is not an exact 12-week limit.',
-				'not technical age verification'
+				'not technical age verification',
+				'not directed to minors',
+				"approximate country from the browser's timezone",
+				'Hide this author',
+				'Hide this curve',
+				'stored and synced as an account preference'
 			]
 		};
 		for (const locale of ['pt-BR', 'en-US'] as const) {

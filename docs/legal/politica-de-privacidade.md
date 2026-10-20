@@ -43,7 +43,7 @@ Somos um agente de tratamento de pequeno porte, nos termos da Resolução CD/ANP
 
 ## 2. Dados locais, com ou sem conta
 
-As ferramentas locais do open-auri funcionam no navegador ou na WebView do app Android. Curvas locais, diário e áudio ficam no próprio aparelho (localStorage, sessionStorage e IndexedDB), sem envio automático para nós. O idioma também pode acompanhar requisições pelo cookie essencial; a biblioteca é sincronizada se você entrar na conta, e ações sociais da fila são enviadas quando a conexão volta:
+As ferramentas locais do open-auri funcionam no navegador ou na WebView do app Android. Curvas locais, diário, preferências de ocultação sem conta e áudio ficam no próprio aparelho (localStorage, sessionStorage e IndexedDB), sem envio automático para nós. O idioma também pode acompanhar requisições pelo cookie essencial; a biblioteca é sincronizada se você entrar na conta, e ações sociais da fila são enviadas quando a conexão volta:
 
 | O que                                                 | Para quê                                                                            |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -82,7 +82,7 @@ A criação de conta pode ficar temporariamente indisponível enquanto o domíni
 | Bio (opcional, até 280 caracteres)                        | Apresentar seu perfil, se você quiser                                                                                                                                                                                                                                                                                   |
 | Registros de sessão                                       | Manter você conectado e permitir que veja e encerre sessões. Guardamos o navegador e o sistema (reduzidos a partir do user-agent) e as datas de criação, última atividade e expiração. A sessão não guarda seu IP: o sistema de autenticação roda com o rastreio de IP desligado                                        |
 | Tokens de verificação de e-mail e de redefinição de senha | Confirmar que o e-mail é seu e permitir trocar a senha com segurança                                                                                                                                                                                                                                                    |
-| Preferências da conta                                     | Idioma, visibilidade da atividade (privada ou pública, padrão privada) e biblioteca pública (ligada ou desligada, padrão desligada)                                                                                                                                                                                     |
+| Preferências da conta                                     | Idioma, visibilidade da atividade (privada ou pública, padrão privada), biblioteca pública (ligada ou desligada, padrão desligada) e autores/curvas que você escolhe ocultar da sua visualização |
 | Aceites da política (versão e data)                       | Registrar que você viu a versão atual desta política e dos termos, para não repetir o aviso de mudança                                                                                                                                                                                                                  |
 
 Ao entrar na conta, o app mescla a biblioteca local do navegador com a biblioteca da conta, sem duplicar curvas. A partir daí, essas curvas ficam guardadas também no servidor.
@@ -136,7 +136,7 @@ Você pode ver e apagar sua própria atividade a qualquer momento na sua conta.
 
 ## 7. Denúncias e moderação
 
-Pessoas com conta verificada podem denunciar conteúdo. Guardamos o alvo, o motivo, uma nota opcional, quem denunciou, a data e a decisão.
+Pessoas com conta verificada podem denunciar conteúdo. Guardamos o alvo, o motivo, uma nota opcional, quem denunciou, a data e a decisão. Nesta release, você também pode escolher "Ocultar este autor" ou "Ocultar esta curva": sem conta, a preferência fica no aparelho; com conta, é guardada e sincronizada como preferência da conta. Essa escolha altera só a sua visualização, não remove o conteúdo para outras pessoas e pode ser desfeita.
 
 Uma curva é ocultada automaticamente quando 3 contas verificadas diferentes, com 3 dias ou mais de existência, a denunciam; uma curva cuja versão atual é YOLO é ocultada já com 2 dessas contas. Essa ocultação é revista pela moderação, que pode restaurar o conteúdo. Se você foi afetado, pode pedir a revisão dessa decisão automatizada (art. 20) pelo canal {{PUBLIC_LGPD_CONTACT_EMAIL}}.
 
@@ -225,6 +225,8 @@ Não usamos cookies de análise, de publicidade nem de terceiros para rastreamen
 
 **Contagem de visitas (Simple Analytics).** No site de produção (`open-auri.com`), as páginas carregam o script do Simple Analytics, um serviço de estatísticas focado em privacidade, que conta as visitas às páginas. Segundo o fornecedor, ele não usa cookies, não coleta dados pessoais e não usa impressão digital do navegador (fingerprinting). O script é carregado direto do Simple Analytics e envia a contagem para os servidores dele. Ambientes de teste e de desenvolvimento não carregam o script. As contagens são públicas: o link "Estatísticas públicas", no rodapé de todas as páginas, abre o [painel do open-auri no Simple Analytics](https://dashboard.simpleanalytics.com/open-auri.com). O que o serviço registra está na [documentação do Simple Analytics](https://docs.simpleanalytics.com/what-we-collect), e as regras do próprio serviço estão na [política de privacidade do Simple Analytics](https://simpleanalytics.com/privacy-policy).
 
+O provedor de análise pode derivar um país aproximado a partir do fuso horário do navegador, para estatísticas de visitas, sem exigir conta.
+
 Essas descrições de privacidade são alegações do fornecedor: não auditamos aqui a versão remota do script nem todos os sinais do Turnstile. Carregar scripts e enviar contagens envolve conexões que expõem tecnicamente o IP ao destinatário; ausência de cookies não significa ausência de transmissão. O app Android usa essas mesmas páginas e acrescenta o marcador de app/versão ao user-agent das requisições, um sinal técnico, não um serviço extra de telemetria nativa.
 
 O armazenamento local do navegador está descrito na seção 2. O app também guarda uma cópia de si mesmo (service worker) para funcionar offline. Essa cópia não contém dados pessoais.
@@ -310,7 +312,7 @@ Lembre que a licença CC de versões publicadas é irrevogável: cópias e forks
 
 ## 18. Menores de idade
 
-Contas são para pessoas com **18 anos ou mais**. Esse é um requisito de uso, não uma verificação técnica de idade: o cadastro atual não pede data de nascimento nem comprovação etária. O utilitário sem conta é aberto a todos; suas ferramentas locais ficam no aparelho, mas requisições, estatísticas e o envio opcional do S6 seguem esta política. A classificação de público do utilitário na loja não autoriza contas para menores de 18 anos.
+O app é destinado a pessoas com **18 anos ou mais**, inclusive no uso sem conta, e não é direcionado a menores de idade. Contas também exigem 18 anos ou mais. Esse é um requisito de uso, não uma verificação técnica de idade: o cadastro atual não pede data de nascimento nem comprovação etária. Sem conta, as ferramentas locais ficam no aparelho, mas requisições, estatísticas e o envio opcional do S6 seguem esta política.
 
 ## 19. Como protegemos os dados
 
@@ -343,7 +345,3 @@ Esta política tem versão e data de vigência. Quando houver mudança relevante
 ## 23. Lei aplicável
 
 Esta política segue a lei brasileira, em especial a Lei nº 13.709/2018 (LGPD) e a Lei nº 12.965/2014 (Marco Civil da Internet).
-
----
-
-Este documento não é aconselhamento jurídico e deve ser revisado por um advogado antes da publicação. (Q-LEGAL)

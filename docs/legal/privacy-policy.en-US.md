@@ -43,7 +43,7 @@ We are a small-size processing agent under ANPD Resolution CD/ANPD No. 2/2022. E
 
 ## 2. Local data, with or without an account
 
-The local open-auri tools run in the browser or the Android app's WebView. Local curves, the journal and audio stay on your device (localStorage, sessionStorage and IndexedDB), without automatic upload to us. Language may also accompany requests in the essential cookie; the library is synced if you sign in, and queued social actions are sent when connectivity returns:
+The local open-auri tools run in the browser or the Android app's WebView. Local curves, the journal, account-free hiding preferences and audio stay on your device (localStorage, sessionStorage and IndexedDB), without automatic upload to us. Language may also accompany requests in the essential cookie; the library is synced if you sign in, and queued social actions are sent when connectivity returns:
 
 | What                                            | Why                                                                               |
 | ----------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -82,7 +82,7 @@ Account creation may be temporarily unavailable while the domain used for transa
 | Bio (optional, up to 280 characters)         | Present your profile, if you want                                                                                                                                                                                                                                                       |
 | Session records                              | Keep you signed in and let you see and end sessions. We store the browser and operating system (reduced from the user-agent) and the creation, last-activity and expiry times. The session does not store your IP: the authentication system runs with IP tracking turned off           |
 | Email verification and password-reset tokens | Confirm the email is yours and let you change the password safely                                                                                                                                                                                                                       |
-| Account preferences                          | Language, activity visibility (private or public, private by default) and public library (on or off, off by default)                                                                                                                                                                    |
+| Account preferences                          | Language, activity visibility (private or public, private by default), public library (on or off, off by default), and authors/curves you choose to hide from your view |
 | Policy acknowledgements (version and date)   | Record that you saw the current version of this policy and of the terms, so the change notice is not repeated                                                                                                                                                                           |
 
 When you sign in, the app merges the browser's local library into your account library without duplicating curves. From then on those curves are also stored on the server.
@@ -136,7 +136,7 @@ You can see and delete your own activity at any time in your account.
 
 ## 7. Reports and moderation
 
-People with a verified account can report content. We store the target, the reason, an optional note, who reported, the date and the outcome.
+People with a verified account can report content. We store the target, the reason, an optional note, who reported, the date and the outcome. In this release you can also choose "Hide this author" or "Hide this curve": without an account the preference stays on your device; with an account it is stored and synced as an account preference. This only changes your view, does not remove content for others and can be undone.
 
 A curve is hidden automatically when 3 different verified accounts, each at least 3 days old, report it; a curve whose current version is YOLO is hidden with just 2 such accounts. This hiding is reviewed by moderators, who can restore the content. If you are affected, you can request a review of this automated decision (art. 20) at {{PUBLIC_LGPD_CONTACT_EMAIL}}.
 
@@ -225,6 +225,8 @@ We use no analytics, advertising or third-party tracking cookies. That is why we
 
 **Page-view counts (Simple Analytics).** On the production site (`open-auri.com`), pages load the Simple Analytics script, a privacy-first analytics service that counts page views. According to the provider, it uses no cookies, collects no personal data and does no browser fingerprinting. The script is loaded directly from Simple Analytics and sends the count to its servers. Test and development environments do not load the script. The counts are public: the "Public statistics" link, in the footer of every page, opens the [open-auri dashboard on Simple Analytics](https://dashboard.simpleanalytics.com/open-auri.com). What the service records is described in the [Simple Analytics documentation](https://docs.simpleanalytics.com/what-we-collect), and the service's own rules are in the [Simple Analytics privacy policy](https://simpleanalytics.com/privacy-policy).
 
+The analytics provider may derive an approximate country from the browser's timezone for page-view statistics, without requiring an account.
+
 These privacy descriptions are provider claims: we have not audited the remote script version or every Turnstile signal here. Loading scripts and sending counts involves connections that technically expose the IP to the recipient; no cookies does not mean no transmission. The Android app uses these same pages and adds an app/version marker to the request user-agent, a technical signal, not an extra native telemetry service.
 
 Browser local storage is described in section 2. The app also keeps a copy of itself (service worker) to work offline. That copy contains no personal data.
@@ -310,7 +312,7 @@ Remember that the CC licence of published versions is irrevocable: copies and fo
 
 ## 18. Minors
 
-Accounts are for people aged **18 or over**. This is a usage requirement, not technical age verification: current sign-up requests neither a birth date nor proof of age. The account-free utility is open to everyone; its local tools stay on the device, but requests, statistics and optional S6 submission follow this policy. The utility's audience classification in the store does not authorize accounts for under-18s.
+The app is intended for people aged **18 or over**, including use without an account, and is not directed to minors. Accounts also require users to be 18 or over. This is a usage requirement, not technical age verification: current sign-up requests neither a birth date nor proof of age. Without an account, local tools stay on the device, but requests, statistics and optional S6 submission follow this policy.
 
 ## 19. How we protect data
 
@@ -343,7 +345,3 @@ This policy has a version and an effective date. When there is a relevant change
 ## 23. Governing law
 
 This policy is governed by Brazilian law, in particular Law No. 13,709/2018 (LGPD) and Law No. 12,965/2014 (Marco Civil da Internet).
-
----
-
-Este documento não é aconselhamento jurídico e deve ser revisado por um advogado antes da publicação. (Q-LEGAL)
