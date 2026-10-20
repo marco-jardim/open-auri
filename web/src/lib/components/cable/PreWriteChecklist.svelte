@@ -27,6 +27,7 @@
 		WriteProfile
 	} from '#lib/cable/types.ts';
 	import { Button, Lamp } from '#lib/components/primitives/index.ts';
+	import { modalDialog } from '#lib/components/chrome/modal.ts';
 	import Explainer from '#lib/components/comprehension/Explainer.svelte';
 	import MultiCableQueue from './MultiCableQueue.svelte';
 	import LevelGauge from './LevelGauge.svelte';
@@ -105,7 +106,6 @@
 	);
 
 	const id = $props.id();
-	let dialog = $state<HTMLDialogElement>();
 	/** Re-evaluates the time-dependent items (2 s spacing countdown). */
 	let tick = $state(0);
 	let message = $state<string | null>(null);
@@ -168,17 +168,12 @@
 	});
 
 	$effect(() => {
-		if (dialog === undefined) return;
-		if (open && !dialog.open) {
-			untrack(() => {
-				confirmations = { ...UNCONFIRMED };
-				message = null;
-				reloadOffered = false;
-			});
-			dialog.showModal();
-		} else if (!open && dialog.open) {
-			dialog.close();
-		}
+		if (!open) return;
+		untrack(() => {
+			confirmations = { ...UNCONFIRMED };
+			message = null;
+			reloadOffered = false;
+		});
 	});
 
 	/** Index of the write target in `devices`, or '' when none is chosen (explicit choice needed). */
@@ -226,29 +221,6 @@
 		if (device !== undefined) service.selectDevice(device);
 	}
 
-	function onCancel(event: Event) {
-		// Never close the dialog in the middle of a write.
-		if (service.getState().writing) event.preventDefault();
-	}
-
-	/**
-	 * `cancel` is not always cancelable (Chromium's close watcher: a second Esc or Android back
-	 * without fresh user activation closes the modal anyway). Closed mid-write, the dialog is
-	 * shown again at once: the page stays inert, the outcome is shown here, and the parent's
-	 * checklist state is released only by a close after the write.
-	 */
-	function onDialogClose() {
-		if (open && service.getState().writing) {
-			queueMicrotask(() => {
-				if (open && dialog !== undefined && dialog.isConnected && !dialog.open) {
-					dialog.showModal();
-				}
-			});
-			return;
-		}
-		onclose();
-	}
-
 	function finish(outcome: WriteOutcome | QueueOutcome) {
 		message = describeOutcome(outcome);
 		reloadOffered = isFreshnessRefusal(outcome);
@@ -274,12 +246,10 @@
 </script>
 
 <dialog
-	bind:this={dialog}
 	aria-labelledby={`${id}-title`}
 	closedby={cable.writing ? 'none' : 'closerequest'}
 	class="checklist"
-	oncancel={onCancel}
-	onclose={onDialogClose}
+	use:modalDialog={{ open, onDismiss: onclose, canDismiss: () => !service.getState().writing }}
 >
 	{#if checklist !== null}
 		<div class="unit">

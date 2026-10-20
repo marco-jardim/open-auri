@@ -18,6 +18,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	await cleanup();
+	await setLocale('pt-BR', { reload: false });
 });
 
 async function confirm() {
@@ -418,7 +419,7 @@ test('diagnostics show failed/unknown lamps, loudness, experimental consent and 
 	await tick();
 	const allowed = new Event('cancel', { cancelable: true });
 	dialog.dispatchEvent(allowed);
-	expect(allowed.defaultPrevented).toBe(false);
-	dialog.close();
+	// The shared modal action handles cancellation through the controlled parent callback.
+	expect(allowed.defaultPrevented).toBe(true);
 	await expect.poll(() => onclose.mock.calls.length).toBe(1);
 });
