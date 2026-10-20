@@ -4,6 +4,12 @@ apply plugin: 'org.jetbrains.kotlinx.kover'
 apply plugin: 'app.cash.licensee'
 
 def appPackage = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json'))
+// CI supplies ORG_GRADLE_PROJECT_versionCode; local unsigned builds keep the default.
+def appVersionCode = providers.gradleProperty('versionCode').getOrElse('1')
+if (!(appVersionCode ==~ /[1-9][0-9]*/) ||
+        new BigInteger(appVersionCode) > 2100000000) {
+    throw new GradleException('versionCode must be a positive integer no greater than 2100000000')
+}
 
 // Resolve the test SDK through Gradle so dependency verification covers it too.
 def robolectricSdk = configurations.create('robolectricSdk') {
@@ -24,7 +30,7 @@ android {
         applicationId "com.openauri.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode Integer.parseInt(appVersionCode)
         versionName appPackage.version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

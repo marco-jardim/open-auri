@@ -1,0 +1,355 @@
+name: Android release
+
+on:
+  push:
+    tags: ['android-v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run only; false is rejected. Publishing requires an android-v* tag push.'
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  build:
+    name: Build unsigned release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_code: ${{ steps.version.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Reject non-dry dispatch
+        if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
+        run: |
+          echo 'workflow_dispatch is dry-run only; publish by pushing an android-v* tag.' >&2
+          exit 1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.1.0" "platform-tools"
+      # setup-gradle's init script breaks dependency verification. Cache without adding plugins.
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/android/android/**/*.gradle', 'apps/android/android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - run: npm ci
+      - name: Read all published Android manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { getPreviousAndroidVersionCode } from './tools/android-artifacts.mjs';
+          const repo = `repos/${process.env.GITHUB_REPOSITORY}`;
+          // Paginate all releases, including prereleases. API/download/manifest errors fail closed.
+          const pages = JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', `${repo}/releases?per_page=100`], {
+            encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+          }));
+          const previous = getPreviousAndroidVersionCode(pages.flat(), (assetId) => JSON.parse(execFileSync('gh', [
+            'api', '-H', 'Accept: application/octet-stream', `${repo}/releases/assets/${assetId}`,
+          ], { encoding: 'utf8' })));
+          writeFileSync(join(process.env.RUNNER_TEMP, 'previous-release-manifest.json'), JSON.stringify({ versionCode: previous }));
+          NODE
+      - name: Validate version and monotonic versionCode
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deterministic code = major*10000 + minor*100 + patch (minor/patch <= 99).
+          # Rebuilding a version produces the same code; already published versions cannot be reused.
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { deriveVersionCode } from './tools/android-artifacts.mjs';
+          const { version } = JSON.parse(readFileSync('apps/android/package.json', 'utf8'));
+          if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== `android-v${version}`) {
+            throw new Error('Tag must equal android-v<apps/android/package.json version>');
+          }
+          const previous = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'previous-release-manifest.json'), 'utf8'));
+          if (!Number.isInteger(previous.versionCode) || previous.versionCode < 0) {
+            throw new Error('Previous Android versionCode baseline is invalid');
+          }
+          const code = deriveVersionCode(version, previous.versionCode);
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nversion_code=${code}\n`);
+          appendFileSync(process.env.GITHUB_ENV, `ORG_GRADLE_PROJECT_versionCode=${code}\n`);
+          NODE
+      - name: Build unsigned APK and AAB with release config verification
+        run: npm run build:android:release
+      - name: Upload unsigned release
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-release-unsigned
+          path: |
+            apps/android/android/app/build/outputs/apk/release/app-release-unsigned.apk
+            apps/android/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-and-publish:
+    name: Sign with protected keys and publish
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: android-release
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      VERSION_CODE: ${{ needs.build.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - run: sdkmanager "build-tools;36.1.0"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-release-unsigned
+          path: ${{ runner.temp }}/unsigned
+      - name: Decode protected keystores
+        env:
+          ANDROID_APP_KEYSTORE_B64: ${{ secrets.ANDROID_APP_KEYSTORE_B64 }}
+          ANDROID_UPLOAD_KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_B64 }}
+          ANDROID_APP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_APP_KEYSTORE_PASSWORD }}
+          ANDROID_APP_KEY_ALIAS: ${{ secrets.ANDROID_APP_KEY_ALIAS }}
+          ANDROID_APP_KEY_PASSWORD: ${{ secrets.ANDROID_APP_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          for ROLE in APP UPLOAD; do
+            for SUFFIX in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+              SECRET="ANDROID_${ROLE}_${SUFFIX}"
+              if [[ -z "${!SECRET:-}" ]]; then
+                echo "Missing required keystore secret: $SECRET" >&2
+                exit 1
+              fi
+            done
+          done
+          for ROLE in APP UPLOAD; do
+            SECRET="ANDROID_${ROLE}_KEYSTORE_B64"
+            KEYSTORE="$RUNNER_TEMP/android-${ROLE,,}.jks"
+            if ! printf '%s' "${!SECRET}" | base64 --decode > "$KEYSTORE"; then
+              echo "Keystore secret $SECRET is not valid base64" >&2
+              exit 1
+            fi
+            if [[ ! -s "$KEYSTORE" ]]; then
+              echo "Decoded keystore is empty: $SECRET" >&2
+              exit 1
+            fi
+          done
+      - name: Sign and verify both artifacts
+        env:
+          ANDROID_APP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_APP_KEYSTORE_PASSWORD }}
+          ANDROID_APP_KEY_ALIAS: ${{ secrets.ANDROID_APP_KEY_ALIAS }}
+          ANDROID_APP_KEY_PASSWORD: ${{ secrets.ANDROID_APP_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          ANDROID_APP_CERT_SHA256: ${{ vars.ANDROID_APP_CERT_SHA256 || secrets.ANDROID_APP_CERT_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          OUT="$GITHUB_WORKSPACE/dist/android-release"
+          mkdir -p "$OUT"
+          APK="$OUT/open-auri-$VERSION.apk"
+          AAB="$OUT/open-auri-$VERSION.aab"
+          export APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          ZIPALIGN="$ANDROID_HOME/build-tools/36.1.0/zipalign"
+          EXPECTED="$(node --input-type=module -e 'import { normalizeFingerprint } from "./tools/android-artifacts.mjs"; console.log(normalizeFingerprint(process.env.ANDROID_APP_CERT_SHA256 || ""));')"
+          "$ZIPALIGN" -p -f 4 "$RUNNER_TEMP/unsigned/apk/release/app-release-unsigned.apk" "$RUNNER_TEMP/aligned.apk"
+          "$APKSIGNER" sign --ks "$RUNNER_TEMP/android-app.jks" \
+            --ks-key-alias "$ANDROID_APP_KEY_ALIAS" \
+            --ks-pass env:ANDROID_APP_KEYSTORE_PASSWORD --key-pass env:ANDROID_APP_KEY_PASSWORD \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
+            --out "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-verification.txt"
+          ACTUAL="$(node --input-type=module -e 'import { readFileSync } from "node:fs"; import { parseApkCertificate } from "./tools/android-artifacts.mjs"; console.log(parseApkCertificate(readFileSync(process.env.RUNNER_TEMP + "/apk-verification.txt", "utf8")));')"
+          if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+            echo 'APK app certificate mismatch' >&2
+            exit 1
+          fi
+          "$ZIPALIGN" -c -p 4 "$APK"
+          jarsigner -keystore "$RUNNER_TEMP/android-upload.jks" \
+            -storepass:env ANDROID_UPLOAD_KEYSTORE_PASSWORD -keypass:env ANDROID_UPLOAD_KEY_PASSWORD \
+            -sigalg SHA256withRSA -digestalg SHA-256 -signedjar "$AAB" \
+            "$RUNNER_TEMP/unsigned/bundle/release/app-release.aab" "$ANDROID_UPLOAD_KEY_ALIAS"
+          jarsigner -J-Duser.language=en -verify "$AAB" | tee "$RUNNER_TEMP/aab-verification.txt"
+          grep -q '^jar verified\.$' "$RUNNER_TEMP/aab-verification.txt"
+          keytool -J-Duser.language=en -printcert -jarfile "$AAB" > "$RUNNER_TEMP/aab-certificate.txt"
+          AAB_CERT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/aab-certificate.txt" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$AAB_CERT" =~ ^[0-9a-f]{64}$ || "$AAB_CERT" == "$EXPECTED" ]]; then
+            echo 'AAB must have one upload certificate distinct from the app certificate' >&2
+            exit 1
+          fi
+          node tools/android-artifacts.mjs --apk "$APK" --aab "$AAB" \
+            --expected-app-cert-sha256 "$EXPECTED" --commit "$GITHUB_SHA" \
+            --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --version "$VERSION" \
+            --version-code "$VERSION_CODE" --out-dir "$OUT"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/dist/android-release"
+          gh release create "$GITHUB_REF_NAME" \
+            "$OUT/open-auri-$VERSION.apk" "$OUT/open-auri-$VERSION.aab" \
+            "$OUT/SHA256SUMS.txt" "$OUT/release-manifest.json" "$OUT/RELEASE_NOTES.md" \
+            --repo "$GITHUB_REPOSITORY" --notes-file "$OUT/RELEASE_NOTES.md" --verify-tag
+      - name: Delete signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/android-app.jks" "$RUNNER_TEMP/android-upload.jks" "$RUNNER_TEMP/aligned.apk"
+
+  dry-run:
+    name: Sign with two ephemeral keys (no release)
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      VERSION_CODE: ${{ needs.build.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - run: sdkmanager "build-tools;36.1.0"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-release-unsigned
+          path: ${{ runner.temp }}/unsigned
+      - name: Generate two ephemeral signing keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          for ROLE in APP UPLOAD; do
+            PASSWORD="$(openssl rand -hex 24)"
+            echo "::add-mask::$PASSWORD"
+            export EPHEMERAL_PASSWORD="$PASSWORD"
+            KEY_ALIAS="android-ci-${ROLE,,}"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/android-${ROLE,,}.jks" \
+              -storetype JKS -storepass:env EPHEMERAL_PASSWORD -keypass:env EPHEMERAL_PASSWORD \
+              -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 2 \
+              -dname "CN=Android CI $ROLE, O=Open Auri, C=BR" -noprompt
+            {
+              echo "ANDROID_${ROLE}_KEYSTORE_PASSWORD=$PASSWORD"
+              echo "ANDROID_${ROLE}_KEY_PASSWORD=$PASSWORD"
+              echo "ANDROID_${ROLE}_KEY_ALIAS=$KEY_ALIAS"
+            } >> "$GITHUB_ENV"
+          done
+      - name: Read ephemeral app fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -J-Duser.language=en -list -v -keystore "$RUNNER_TEMP/android-app.jks" \
+            -storepass:env ANDROID_APP_KEYSTORE_PASSWORD -alias "$ANDROID_APP_KEY_ALIAS" > "$RUNNER_TEMP/app-certificate.txt"
+          FINGERPRINT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/app-certificate.txt")"
+          echo "ANDROID_APP_CERT_SHA256=$FINGERPRINT" >> "$GITHUB_ENV"
+      # Kept byte-identical to the protected signing script; tested by android-artifacts.test.mjs.
+      - name: Sign and verify both artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          OUT="$GITHUB_WORKSPACE/dist/android-release"
+          mkdir -p "$OUT"
+          APK="$OUT/open-auri-$VERSION.apk"
+          AAB="$OUT/open-auri-$VERSION.aab"
+          export APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          ZIPALIGN="$ANDROID_HOME/build-tools/36.1.0/zipalign"
+          EXPECTED="$(node --input-type=module -e 'import { normalizeFingerprint } from "./tools/android-artifacts.mjs"; console.log(normalizeFingerprint(process.env.ANDROID_APP_CERT_SHA256 || ""));')"
+          "$ZIPALIGN" -p -f 4 "$RUNNER_TEMP/unsigned/apk/release/app-release-unsigned.apk" "$RUNNER_TEMP/aligned.apk"
+          "$APKSIGNER" sign --ks "$RUNNER_TEMP/android-app.jks" \
+            --ks-key-alias "$ANDROID_APP_KEY_ALIAS" \
+            --ks-pass env:ANDROID_APP_KEYSTORE_PASSWORD --key-pass env:ANDROID_APP_KEY_PASSWORD \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
+            --out "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-verification.txt"
+          ACTUAL="$(node --input-type=module -e 'import { readFileSync } from "node:fs"; import { parseApkCertificate } from "./tools/android-artifacts.mjs"; console.log(parseApkCertificate(readFileSync(process.env.RUNNER_TEMP + "/apk-verification.txt", "utf8")));')"
+          if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+            echo 'APK app certificate mismatch' >&2
+            exit 1
+          fi
+          "$ZIPALIGN" -c -p 4 "$APK"
+          jarsigner -keystore "$RUNNER_TEMP/android-upload.jks" \
+            -storepass:env ANDROID_UPLOAD_KEYSTORE_PASSWORD -keypass:env ANDROID_UPLOAD_KEY_PASSWORD \
+            -sigalg SHA256withRSA -digestalg SHA-256 -signedjar "$AAB" \
+            "$RUNNER_TEMP/unsigned/bundle/release/app-release.aab" "$ANDROID_UPLOAD_KEY_ALIAS"
+          jarsigner -J-Duser.language=en -verify "$AAB" | tee "$RUNNER_TEMP/aab-verification.txt"
+          grep -q '^jar verified\.$' "$RUNNER_TEMP/aab-verification.txt"
+          keytool -J-Duser.language=en -printcert -jarfile "$AAB" > "$RUNNER_TEMP/aab-certificate.txt"
+          AAB_CERT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/aab-certificate.txt" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$AAB_CERT" =~ ^[0-9a-f]{64}$ || "$AAB_CERT" == "$EXPECTED" ]]; then
+            echo 'AAB must have one upload certificate distinct from the app certificate' >&2
+            exit 1
+          fi
+          node tools/android-artifacts.mjs --apk "$APK" --aab "$AAB" \
+            --expected-app-cert-sha256 "$EXPECTED" --commit "$GITHUB_SHA" \
+            --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --version "$VERSION" \
+            --version-code "$VERSION_CODE" --out-dir "$OUT"
+      - name: Upload dry-run release outputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-release-dry-run
+          path: dist/android-release/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Delete signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/android-app.jks" "$RUNNER_TEMP/android-upload.jks" "$RUNNER_TEMP/aligned.apk"
