@@ -101,10 +101,23 @@ class MainActivity : BridgeActivity() {
      */
     private val webViewBack = object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
-            val webView = bridge?.webView ?: return leaveApp()
+            val activeBridge = bridge ?: return leaveApp()
+            val webView = activeBridge.webView
+            val serverOrigin = OriginGuard.originOf(activeBridge.serverUrl)
+            // The bundled offline page (and anything off the site) has no handler: leave, never
+            // walk back into the failed load that would show the offline page again.
+            if (serverOrigin == null || OriginGuard.originOf(webView.url) != serverOrigin) return leaveApp()
             webView.evaluateJavascript(NATIVE_BACK_SCRIPT) { consumed ->
-                if (consumed == "true") return@evaluateJavascript
-                if (webView.canGoBack()) webView.goBack() else leaveApp()
+                if (isDestroyed || consumed == "true") return@evaluateJavascript
+                val (urls, current) = historyForTesting?.invoke(webView) ?: webView.copyBackForwardList().let { list ->
+                    (0 until list.size).map { list.getItemAtIndex(it)?.url } to list.currentIndex
+                }
+                val steps = BackNavigation.stepsBack(urls, current, serverOrigin)
+                when (steps) {
+                    0 -> leaveApp()
+                    1 -> webView.goBack()
+                    else -> webView.goBackOrForward(-steps)
+                }
             }
         }
 
@@ -231,6 +244,10 @@ class MainActivity : BridgeActivity() {
         internal fun isFreshLaunch(savedInstanceState: Bundle?, intent: Intent): Boolean =
             savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
 
+        /** Test-only: Robolectric's WebView keeps no back/forward list. Cleared after each test. */
+        @Volatile
+        internal var historyForTesting: ((WebView) -> Pair<List<String?>, Int>)? = null
+
         /** Test-only injection, set before ActivityScenario launch and cleared after each test. */
         @Volatile
         internal var gateForTesting: (() -> WebViewCompatGate.Result)? = null
@@ -330,5 +347,19 @@ internal class BridgeHardening : Plugin() {
             webView.removeJavascriptInterface("CapacitorCookiesAndroidInterface")
             webView.removeJavascriptInterface("CapacitorHttpAndroidInterface")
         }
+    }
+}
+
+/** Back history that skips entries off the site, such as the bundled offline page. */
+internal object BackNavigation {
+    /**
+     * Steps back from [current] in the WebView history [urls] to the nearest entry on
+     * [serverOrigin]; 0 when there is none (leave the app).
+     */
+    internal fun stepsBack(urls: List<String?>, current: Int, serverOrigin: String): Int {
+        for (index in (current - 1) downTo 0) {
+            if (OriginGuard.originOf(urls.getOrNull(index)) == serverOrigin) return current - index
+        }
+        return 0
     }
 }

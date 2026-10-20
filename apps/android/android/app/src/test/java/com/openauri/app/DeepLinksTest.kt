@@ -33,6 +33,7 @@ import org.robolectric.shadows.ShadowWebView
 class DeepLinksTest {
     @After fun clearOverrides() {
         MainActivity.gateForTesting = null
+        MainActivity.historyForTesting = null
         MainActivityBridgeHardeningTest.RecordingWebViewShadow.events.clear()
     }
 
@@ -281,26 +282,61 @@ class DeepLinksTest {
         try {
             controller.setup()
             val activity = controller.get()
-            val web = org.robolectric.Shadows.shadowOf(activity.bridge.webView)
+            val webView = activity.bridge.webView
+            val origin = httpsServerOrigin(activity.bridge.serverUrl)
+            val web = org.robolectric.Shadows.shadowOf(webView)
+            var history = listOf("$origin/docs", "$origin/c/abc") to 1
+            MainActivity.historyForTesting = { history }
+            web.setCanGoBack(true) // Robolectric counts goBack() only when it may go back.
             fun back(pageAnswer: String) {
                 activity.onBackPressedDispatcher.onBackPressed()
                 assertEquals(MainActivity.NATIVE_BACK_SCRIPT, web.lastEvaluatedJavascript)
                 web.lastEvaluatedJavascriptCallback.onReceiveValue(pageAnswer)
             }
-            web.setCanGoBack(true)
             back("true") // An open overlay consumed Back.
             assertEquals(0, web.goBackInvocations)
             assertTrue(!activity.isFinishing)
             back("false") // No overlay: previous page.
             assertEquals(1, web.goBackInvocations)
             assertTrue(!activity.isFinishing)
-            web.setCanGoBack(false)
-            back("null") // No overlay and no history (or a page without the handler): leave.
-            assertEquals(1, web.goBackInvocations)
+            history = listOf("$origin/", "https://localhost/offline.html", "$origin/") to 2
+            back("false") // After a retry: skip the offline page (two steps back).
+            assertEquals(3, web.goBackInvocations)
+            assertTrue(!activity.isFinishing)
+            history = listOf("$origin/") to 0
+            back("false") // No history on the site: leave.
             assertTrue(activity.isFinishing)
         } finally {
             controller.pause().stop().destroy()
         }
+    }
+
+    @Test fun backOnTheOfflinePageLeavesWithoutAskingThePage() {
+        passingGate()
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        try {
+            controller.setup()
+            val activity = controller.get()
+            httpsServerOrigin(activity.bridge.serverUrl)
+            val web = org.robolectric.Shadows.shadowOf(activity.bridge.webView)
+            activity.bridge.webView.loadUrl("https://localhost/offline.html")
+            activity.onBackPressedDispatcher.onBackPressed()
+            assertTrue(web.lastEvaluatedJavascript != MainActivity.NATIVE_BACK_SCRIPT)
+            assertTrue(activity.isFinishing)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test fun backHistorySkipsEntriesOffTheSite() {
+        val s = SERVER
+        val offline = "https://localhost/offline.html"
+        assertEquals(2, BackNavigation.stepsBack(listOf("$s/", offline, "$s/"), 2, s))
+        assertEquals(1, BackNavigation.stepsBack(listOf("$s/", "$s/docs"), 1, s))
+        assertEquals(0, BackNavigation.stepsBack(listOf(offline, "$s/"), 1, s))
+        assertEquals(0, BackNavigation.stepsBack(listOf("$s/"), 0, s))
+        assertEquals(0, BackNavigation.stepsBack(listOf(null, "https://evil.example/", "$s/x"), 2, s))
+        assertEquals(1, BackNavigation.stepsBack(listOf("$s:443/a", "$s/b"), 1, s))
     }
     private fun passingGate() {
         MainActivity.gateForTesting = { WebViewCompatGate.Result.Ok }
