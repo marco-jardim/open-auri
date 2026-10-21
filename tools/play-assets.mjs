@@ -2,6 +2,7 @@
 // Render: node tools/play-assets.mjs
 // Capture: from web, set CI=1 and PLAY_SCREENSHOTS=1, then run
 // npx playwright test tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1
+// Captures phone, tablet-7, tablet-10 and desktop in both locales; --grep selects one set.
 // Validate without writing: node tools/play-assets.mjs --check
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,6 +12,21 @@ import { renderPng, SOURCE_SVG } from './android-icons.mjs';
 
 export const PLAY_ASSETS = fileURLToPath(new URL('../docs/android/play-assets/', import.meta.url));
 export const LOCALES = ['pt-BR', 'en-US'];
+const BROWSING_SHOTS = [
+  '1-editor.png',
+  '2-cabo.png',
+  '3-comparar.png',
+  '4-soe-como-x.png',
+  '5-comunidade.png',
+  '6-teste-cego.png',
+];
+const APP_SHOTS = [...BROWSING_SHOTS, '7-native-connect.png'];
+export const SCREENSHOT_SETS = [
+  { name: 'phone', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: APP_SHOTS },
+  { name: 'tablet-7', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: APP_SHOTS },
+  { name: 'tablet-10', width: 1440, height: 2560, minSide: 1080, maxSide: 7680, files: APP_SHOTS },
+  { name: 'desktop', width: 1920, height: 1080, minSide: 1080, maxSide: 7680, files: BROWSING_SHOTS },
+];
 const FEATURE_SVG = new URL('../design/play/feature-graphic.svg', import.meta.url);
 const FONT = new URL('../web/static/og-font/InstrumentSerif-Regular.ttf', import.meta.url);
 const SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -47,7 +63,7 @@ export function decodePng(png) {
   const width = png.readUInt32BE(16);
   const height = png.readUInt32BE(20);
   const colorType = png[25];
-  if (!width || !height || width > 3840 || height > 3840) throw new Error('Invalid PNG dimensions');
+  if (!width || !height || width > 7680 || height > 7680) throw new Error('Invalid PNG dimensions');
   if (png[24] !== 8 || ![2, 6].includes(colorType) || png[26] || png[27] || png[28]) {
     throw new Error('Expected non-interlaced 8-bit RGB or RGBA PNG');
   }
@@ -158,6 +174,9 @@ export async function renderPlayArt() {
 
 /** @param {Buffer} png @param {string} name */
 export function validateAsset(png, name) {
+  if (name !== 'icon-512.png' && png.length > 8 * 1024 * 1024) {
+    throw new Error(`${name}: PNG must be at most 8 MB`);
+  }
   const image = decodePng(png);
   const { width, height, colorType } = image;
   if (name === 'icon-512.png') {
@@ -168,30 +187,60 @@ export function validateAsset(png, name) {
     if (colorType !== 2) throw new Error(`${name}: expected 24-bit RGB PNG without alpha`);
     if (name === 'feature-1024x500.png') {
       if (width !== 1024 || height !== 500) throw new Error(`${name}: expected 1024x500`);
-    } else if (
-      Math.min(width, height) < 320 ||
-      Math.max(width, height) > 2 * Math.min(width, height)
-    ) {
-      throw new Error(`${name}: screenshot sides must be 320..3840 px, aspect at most 2:1`);
+    } else {
+      // Accept bare filenames for legacy phone callers, and repository-relative paths on any OS.
+      const path = name.replaceAll('\\', '/');
+      const match = path.match(
+        /^(?:screenshots\/(pt-BR|en-US)\/)?(?:(tablet-7|tablet-10|desktop)\/)?([^/]+)$/,
+      );
+      const set = SCREENSHOT_SETS.find((entry) => entry.name === (match?.[2] ?? 'phone'));
+      if (!match || !set || !set.files.includes(match[3])) {
+        throw new Error(`${name}: unknown screenshot path or scene`);
+      }
+      if (Math.min(width, height) < set.minSide || Math.max(width, height) > set.maxSide) {
+        throw new Error(`${name}: screenshot sides must be ${set.minSide}..${set.maxSide} px`);
+      }
+      if (width * 16 !== height * 9 && width * 9 !== height * 16) {
+        throw new Error(`${name}: screenshot aspect must be exactly 16:9 or 9:16`);
+      }
+      if (width !== set.width || height !== set.height) {
+        throw new Error(`${name}: expected ${set.width}x${set.height} for ${set.name}`);
+      }
     }
   }
   return image;
 }
 
-/** @param {string} directory @param {string} locale */
-async function screenshotNames(directory, locale) {
-  const folder = join(directory, 'screenshots', locale);
+/** @param {string} directory @param {string} locale @param {(typeof SCREENSHOT_SETS)[number]} set */
+async function screenshotNames(directory, locale, set) {
+  const relative = join('screenshots', locale, ...(set.name === 'phone' ? [] : [set.name]));
+  const folder = join(directory, relative);
   let names;
   try {
-    names = (await readdir(folder)).filter((name) => name.endsWith('.png')).sort();
+    names = (await readdir(folder)).filter((name) => /\.(png|jpe?g)$/i.test(name)).sort();
   } catch (error) {
-    throw new Error(`Missing screenshots for ${locale}; run the opt-in Playwright capture`, {
-      cause: error,
-    });
+    throw new Error(
+      `Missing screenshots for ${locale}/${set.name}; run the opt-in Playwright capture`,
+      { cause: error },
+    );
   }
-  if (names.length < 2 || names.length > 8)
-    throw new Error(`${locale}: expected 2..8 phone screenshots`);
-  return names.map((name) => join('screenshots', locale, name));
+  if (names.length !== set.files.length || names.some((name, index) => name !== set.files[index])) {
+    throw new Error(
+      `${locale}/${set.name}: expected exactly ${set.files.length} screenshots: ${set.files.join(', ')}`,
+    );
+  }
+  return names.map((name) => join(relative, name));
+}
+
+/** Check the complete manifest before decoding any captures.
+ * @param {string} directory
+ */
+async function allScreenshotNames(directory) {
+  const names = [];
+  for (const locale of LOCALES) {
+    for (const set of SCREENSHOT_SETS) names.push(...(await screenshotNames(directory, locale, set)));
+  }
+  return names;
 }
 
 /** Check specs and stale artwork without changing files.
@@ -207,11 +256,9 @@ export async function checkPlayAssets(directory = PLAY_ASSETS) {
       throw new Error(`${name}: stale artwork; run node tools/play-assets.mjs`);
     count++;
   }
-  for (const locale of LOCALES) {
-    for (const name of await screenshotNames(directory, locale)) {
-      validateAsset(await readFile(join(directory, name)), name);
-      count++;
-    }
+  for (const name of await allScreenshotNames(directory)) {
+    validateAsset(await readFile(join(directory, name)), name);
+    count++;
   }
   return count;
 }
@@ -221,10 +268,10 @@ export async function checkPlayAssets(directory = PLAY_ASSETS) {
  */
 export async function writePlayAssets(directory = PLAY_ASSETS) {
   const files = await renderPlayArt();
-  for (const locale of LOCALES) {
-    for (const name of await screenshotNames(directory, locale)) {
-      files.set(name, rgbPng(await readFile(join(directory, name))));
-    }
+  for (const name of await allScreenshotNames(directory)) {
+    const png = await readFile(join(directory, name));
+    if (png.length > 8 * 1024 * 1024) throw new Error(`${name}: PNG must be at most 8 MB`);
+    files.set(name, rgbPng(png));
   }
   // Validate everything before writing, so a malformed capture leaves assets untouched.
   for (const [name, data] of files) validateAsset(data, name);

@@ -14,22 +14,45 @@ O contato é um placeholder para preenchimento no Console, não um endereço a p
 
 ## Capturas e regeneração (P3)
 
-São 7 capturas por idioma (`pt-BR` e `en-US`): editor, Cabo sem conexão, Comparar, Soe como X, Comunidade, Teste cego e Cabo com USB nativo conectado. Com ícone e feature graphic, o conjunto mantém 16 PNGs. `3-comparar` deve mostrar o botão Como funciona / How it works sem sobrepor o texto acima do título. `7-native-connect` deve mostrar o painel USB Android e o estado Conectado / Connected, mantendo o aviso de gravação ainda não testada visível, não o diálogo de confirmações. O dispositivo dessa captura é falso, ligado pelo bridge Capacitor real; a imagem não comprova conexão ou gravação em hardware real.
+Os dois idiomas (`pt-BR` e `en-US`) têm quatro conjuntos, totalizando **56 PNGs** com ícone e feature graphic:
 
-Regenerar a partir da raiz do repositório, em PowerShell, sem `STAGING_ORIGIN` definido:
+| Conjunto | Capturas por idioma | Viewport CSS e DPR | PNG | Pasta dentro de `screenshots/<locale>/` |
+| --- | --- | --- | --- | --- |
+| Telefone | 7 | 360x640, DPR 3; USB conectado: 540x960, DPR 2 | 1080x1920 | a própria pasta, sem subpasta |
+| Tablet de 7 polegadas | 7 | 720x1280, DPR 1,5 | 1080x1920 | `tablet-7/` |
+| Tablet de 10 polegadas | 7 | 900x1600, DPR 1,6 | 1440x2560 | `tablet-10/` |
+| Desktop / telas grandes | 6 | 1280x720, DPR 1,5 | 1920x1080 | `desktop/` |
+
+As seis cenas de navegação são editor, Cabo sem conexão, Comparar, Soe como X, Comunidade e Teste cego (`1-editor` a `6-teste-cego`). Telefone e tablets também incluem `7-native-connect`, com USB nativo Android conectado. Desktop usa o navegador com WebHID na cena `2-cabo`, sem bridge Android e sem a cena nativa. As capturas largas enquadram os instrumentos, gráficos e controles por rolagem real, sem esconder ou reposicionar a interface. Em Soe como X, os conjuntos largos importam um CSV de exemplo pela interface e executam o solver real, para mostrar resultados em vez de gráficos vazios; não é uma medição de hardware real. Os arquivos de telefone e seus caminhos continuam iguais.
+
+Todas as capturas são PNG RGB sem alpha, até 8 MB, com proporção exata 9:16 (telefone/tablets) ou 16:9 (desktop). Os lados do tablet de 7 polegadas ficam entre 320 e 3840 px; os de 10 polegadas e desktop, entre 1080 e 7680 px. O validador exige os tamanhos e nomes exatos da tabela, 7 cenas por conjunto Android e 6 no desktop (dentro do limite de 4 a 8).
+
+`3-comparar` deve manter o botão Como funciona / How it works sem sobrepor o texto acima do título; nos layouts largos o enquadramento privilegia as pistas e o gráfico, após conferir o cabeçalho. `7-native-connect` deve mostrar o painel USB Android e o estado Conectado / Connected, mantendo o aviso de gravação ainda não testada visível, não o diálogo de confirmações. O dispositivo dessa captura é falso, ligado pelo bridge Capacitor real; a imagem não comprova conexão ou gravação em hardware real.
+
+Regenerar a partir da raiz do repositório, em PowerShell. Os comandos abaixo capturam cada conjunto nos dois idiomas; `--grep` permite repetir somente o conjunto desejado. Sem `--grep`, a spec captura todos os quatro conjuntos no projeto `mobile`, mas usa emulação de desktop (sem touch/UA Android) no conjunto desktop. Não precisa alterar a configuração dos projetos.
 
 ```powershell
 $env:CI = '1'
 $env:PLAY_SCREENSHOTS = '1'
 $env:NODE_OPTIONS = '--max-old-space-size=6144'
-npm run -w web test:e2e -- tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1
-if ($LASTEXITCODE -ne 0) { throw 'Falha na captura Playwright' }
+Remove-Item Env:STAGING_ORIGIN -ErrorAction SilentlyContinue
+npm run -w web test:e2e -- tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1 --grep 'phone'
+if ($LASTEXITCODE -ne 0) { throw 'Falha na captura de telefone' }
+npm run -w web test:e2e -- tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1 --grep 'tablet-7'
+if ($LASTEXITCODE -ne 0) { throw 'Falha na captura de tablet de 7 polegadas' }
+npm run -w web test:e2e -- tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1 --grep 'tablet-10'
+if ($LASTEXITCODE -ne 0) { throw 'Falha na captura de tablet de 10 polegadas' }
+npm run -w web test:e2e -- tests/e2e/play-screenshots.spec.ts --project=mobile --workers=1 --grep 'desktop'
+if ($LASTEXITCODE -ne 0) { throw 'Falha na captura de desktop' }
 npm run play:assets
 if ($LASTEXITCODE -ne 0) { throw 'Falha na normalização das artes' }
+node tools/play-assets.mjs --check
+if ($LASTEXITCODE -ne 0) { throw 'Falha na validação das artes' }
 npm run test:tools
+if ($LASTEXITCODE -ne 0) { throw 'Falha nos testes das ferramentas' }
 ```
 
-O primeiro comando npm captura as telas em `docs/android/play-assets/screenshots/<locale>/`; `play:assets` renderiza ícone/feature graphic e normaliza as capturas existentes, não abre o app para recapturá-las. Aprovar visualmente os dois idiomas após a execução. Para o fluxo do revisor e os caminhos exatos de denúncia/ocultação, usar [play-conteudo.md](./play-conteudo.md#2-acesso-ao-app); a captura USB simulada não substitui a conta de revisão nem o vídeo obrigatório.
+As capturas ficam em `docs/android/play-assets/screenshots/<locale>/`, nas subpastas da tabela; `play:assets` renderiza ícone/feature graphic e normaliza as capturas existentes, não abre o app para recapturá-las. Todos os conjuntos são obrigatórios para normalizar/validar; uma pasta ausente ou um nome extra falha sem criar placeholders. Aprovar visualmente os quatro conjuntos nos dois idiomas após a execução, inclusive os controles e gráficos nas telas largas. Para o fluxo do revisor e os caminhos exatos de denúncia/ocultação, usar [play-conteudo.md](./play-conteudo.md#2-acesso-ao-app); a captura USB simulada não substitui a conta de revisão nem o vídeo obrigatório.
 
 ## pt-BR
 
