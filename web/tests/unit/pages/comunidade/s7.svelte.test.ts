@@ -273,8 +273,13 @@ test('S7: a failed hidden-list load has a visible retry that restores matched Li
 	});
 	try {
 		await expect.element(joinButton()).toHaveAccessibleDescription(m.hidden_error());
-		const retry = page.getByRole('button', { name: m.hidden_retry(), exact: true });
+		const retry = page.getByRole('button', { name: m.w4r1_s7_retry_preferences(), exact: true });
 		await expect.element(retry).toBeVisible();
+		// The page-level hidden-items box announces the failed load; the panel does not repeat it.
+		expect(target.querySelector('[role="alert"]')).toBeNull();
+		expect(
+			page.getByRole('button', { name: m.w4r1_s7_retry_trades(), exact: true }).elements()
+		).toHaveLength(0);
 		expect(fetch).not.toHaveBeenCalled();
 		offline = false;
 		await retry.click();
@@ -291,9 +296,12 @@ test('S7: retrying a failed trade-list load enables an already matched trade wit
 	fetch.mockResolvedValueOnce(apiError('RATE_LIMITED', 429));
 	await render(S7Panel, s7Props(fetch));
 	await expect
-		.element(page.getByRole('button', { name: m.hidden_retry(), exact: true }))
+		.element(page.getByRole('button', { name: m.w4r1_s7_retry_trades(), exact: true }))
 		.toBeVisible();
-	await page.getByRole('button', { name: m.hidden_retry(), exact: true }).click();
+	expect(
+		page.getByRole('button', { name: m.w4r1_s7_retry_preferences(), exact: true }).elements()
+	).toHaveLength(0);
+	await page.getByRole('button', { name: m.w4r1_s7_retry_trades(), exact: true }).click();
 	await expect.element(listenButton()).toBeVisible();
 	await expect.element(sendScore()).toBeVisible();
 });

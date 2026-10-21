@@ -9,6 +9,7 @@
 	error can appear.
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import { page } from '$app/state';
 	import { signInHref } from '#lib/components/chrome/account.ts';
@@ -130,15 +131,31 @@
 			if (targetKey === submittedKey) {
 				note = '';
 				message = m.comunidade_report_sent();
+			} else {
+				// The selection changed in flight: the target now on screen needs a fresh check.
+				checkAttempt++;
 			}
 		} catch (error) {
 			message = errorText(error);
+			// The failed check is spent: a fresh widget for the retry, without closing the panel.
+			checkAttempt++;
 		} finally {
 			token = '';
-			checkAttempt++;
 			busy = false;
 		}
 	}
+
+	// A sent report keeps its solved widget: no new check is requested for a target that cannot be
+	// sent again. Only when another target is on screen does it need a fresh one.
+	let checkedTarget: string | null = null;
+	$effect(() => {
+		const current = targetKey;
+		untrack(() => {
+			if (current === checkedTarget) return;
+			checkedTarget = current;
+			if (sentFor !== '' && current !== sentFor && token === '' && !busy) checkAttempt++;
+		});
+	});
 </script>
 
 <svelte:head>

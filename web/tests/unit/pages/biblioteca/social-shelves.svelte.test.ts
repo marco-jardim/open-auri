@@ -486,6 +486,28 @@ test('unknown session waits without requests, then the signed-out invite preserv
 	expect(calls).toEqual([]);
 });
 
+test('offline before the session was read: the offline state, not a spinner, until the network is back', async () => {
+	const { api, calls } = emptyServer();
+	const unknown = { signedIn: false, verified: false, nickname: null, account: null, known: false };
+	const screen = await render(MinhaBiblioteca, { ...mineProps(api), session: unknown });
+	window.dispatchEvent(new Event('offline'));
+	await expect
+		.element(page.getByText(m.biblioteca_social_offline()))
+		.toHaveAttribute('role', 'status');
+	expect(page.getByText(m.biblioteca_social_loading()).elements()).toHaveLength(0);
+	expect(
+		page.getByRole('link', { name: m.biblioteca_social_signin_link() }).elements()
+	).toHaveLength(0);
+	window.dispatchEvent(new Event('online'));
+	await expect
+		.element(page.getByText(m.biblioteca_social_loading()))
+		.toHaveAttribute('aria-busy', 'true');
+	expect(page.getByText(m.biblioteca_social_offline()).elements()).toHaveLength(0);
+	await screen.rerender({ session: signedIn() });
+	await expect.element(page.getByRole('tab').first()).toBeVisible();
+	expect(calls.length).toBeGreaterThan(0);
+});
+
 test('all four empty shelves have their own copy and keyboard tabs wrap in both directions', async () => {
 	const { api } = emptyServer();
 	await render(MinhaBiblioteca, mineProps(api));

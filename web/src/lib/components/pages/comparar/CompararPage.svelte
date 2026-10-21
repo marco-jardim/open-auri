@@ -21,6 +21,7 @@
 	import {
 		initialTracks,
 		communityHidden,
+		communitySourced,
 		visibleTracks,
 		compareCurves,
 		patchBay,
@@ -53,6 +54,10 @@
 	const hidden = getHiddenStore();
 	// Loaded tracks belong to the user: keep them intact and explain the hidden source.
 	const hiddenTracks = $derived(tracks.filter((track) => communityHidden(track.curve, $hidden)));
+	/** Community tracks the reader's preferences could not check yet (offline, API down). */
+	const uncheckedTracks = $derived(
+		$hidden.ready ? [] : tracks.filter((track) => communitySourced(track.curve))
+	);
 	let selected = $state(1);
 	let pairA = $state(1);
 	let pairB = $state(2);
@@ -192,10 +197,10 @@
 			error = t.failed;
 			return;
 		}
-		if (
-			communityHidden(curve, $hidden) ||
-			(curve.source.startsWith('community:') && !$hidden.ready)
-		) {
+		// Every source here is already local (the editor curve, the browser library, a preset): it is
+		// never refused because the hidden list is not ready. Once it is, `hiddenTracks` re-checks the
+		// loaded track and explains a hidden source; meanwhile `uncheckedTracks` says why.
+		if (communityHidden(curve, $hidden)) {
 			error = m.hidden_content();
 			return;
 		}
@@ -317,12 +322,10 @@
 			<span class="screw {corner}" aria-hidden="true"></span>
 		{/each}
 		<header class="intro">
-			<div class="intro-top">
-				<p class="kicker">{t.kicker}</p>
-				<div class="intro-help"><TourTrigger page="comparar" /></div>
-			</div>
+			<p class="kicker">{t.kicker}</p>
 			<h1>{t.titleOne} <em>{t.titleTwo}</em></h1>
 			<p class="lede">{t.lede}</p>
+			<div class="intro-help"><TourTrigger page="comparar" /></div>
 		</header>
 		<Tour page="comparar" />
 		<div class="deck">
@@ -386,6 +389,16 @@
 			>
 			<SocialSources {social} path="/comparar" onload={(curve) => bounce(socialTrack, curve)} />
 			{#if hiddenTracks.length}<p class="notice" role="status">{m.w4_hidden_track_notice()}</p>{/if}
+			{#if uncheckedTracks.length}
+				<div class="unchecked">
+					<p class="notice" role="status">{m.w4r1_hidden_unavailable()}</p>
+					{#if $hidden.loadError}
+						<Button size="sm" loading={$hidden.busy} onclick={() => hidden.retry()}
+							>{m.w4r1_hidden_check_again()}</Button
+						>
+					{/if}
+				</div>
+			{/if}
 			<div class="lanes">
 				{#each tracks as track (track.id)}
 					{@const level = laneTrim(track.id)}
@@ -690,19 +703,52 @@
 		position: relative;
 		isolation: isolate;
 	}
-	.intro-top {
+	.unchecked {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		justify-content: space-between;
 		gap: 8px;
-		margin-bottom: 4px;
 	}
-	.intro-top .kicker {
-		margin: 0;
+	/* The help follows the title and lede in the DOM (the heading comes first in reading and tab
+	   order); the grid only places it. Desktop: beside the eyebrow and title, top-right, so the
+	   title keeps its place. Narrow: on the eyebrow's row, never over it, with the title below. */
+	.intro {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas:
+			'kicker help'
+			'title help'
+			'lede lede';
+		column-gap: 12px;
+		align-items: start;
+	}
+	.intro > .kicker {
+		grid-area: kicker;
+	}
+	.intro > h1 {
+		grid-area: title;
+	}
+	.intro > .lede {
+		grid-area: lede;
 	}
 	.intro-help {
-		flex: 0 0 auto;
+		grid-area: help;
+		justify-self: end;
+	}
+	@media (max-width: 640px) {
+		.intro {
+			grid-template-areas:
+				'kicker help'
+				'title title'
+				'lede lede';
+			align-items: center;
+		}
+		.intro > .kicker {
+			margin: 0;
+		}
+		.intro > h1 {
+			margin-top: 4px;
+		}
 	}
 	.counter {
 		display: inline-flex;

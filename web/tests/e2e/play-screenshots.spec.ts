@@ -12,7 +12,10 @@ import { rgbPng, validateAsset } from '../../../tools/play-assets.mjs';
 // Follow with node tools/play-assets.mjs from the repository root.
 test.skip(process.env.PLAY_SCREENSHOTS !== '1', 'Store capture requires PLAY_SCREENSHOTS=1');
 test.beforeEach(() => {
-	test.skip(test.info().project.name !== 'mobile', 'Store capture runs once, in the mobile project');
+	test.skip(
+		test.info().project.name !== 'mobile',
+		'Store capture runs once, in the mobile project'
+	);
 });
 test.use({
 	reducedMotion: 'reduce',
@@ -117,9 +120,9 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 						).toBeVisible();
 					} else {
 						await expect(page.getByText('OA-01 · WebHID', { exact: true })).toBeVisible();
-						await expect(
-							page.getByRole('complementary', { name: title, exact: true })
-						).toHaveCount(0);
+						await expect(page.getByRole('complementary', { name: title, exact: true })).toHaveCount(
+							0
+						);
 					}
 				}
 				await settleRendering(page);
@@ -133,22 +136,34 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 					const kicker = await page.locator('.comparar .kicker').boundingBox();
 					const heading = await page.getByRole('heading', { level: 1 }).boundingBox();
 					if (!help || !kicker || !heading) throw new Error('Missing comparison header');
-					expect(
-						help.x >= kicker.x + kicker.width ||
-							kicker.x >= help.x + help.width ||
-							help.y >= kicker.y + kicker.height ||
-							kicker.y >= help.y + help.height,
-						'Comparison help must not overlap the eyebrow'
-					).toBe(true);
-					expect(heading.y).toBeGreaterThanOrEqual(help.y + help.height);
+					type Box = NonNullable<typeof help>;
+					const apart = (a: Box, b: Box) =>
+						a.x >= b.x + b.width ||
+						b.x >= a.x + a.width ||
+						a.y >= b.y + b.height ||
+						b.y >= a.y + a.height;
+					expect(apart(help, kicker), 'Comparison help must not overlap the eyebrow').toBe(true);
+					expect(apart(help, heading), 'Comparison help must not overlap the title').toBe(true);
+					// The heading precedes the help in reading and tab order.
+					const order = page.locator('.comparar .intro h1 ~ .intro-help');
+					expect(await order.count(), 'Comparison help must follow the title').toBe(1);
+					// Narrow layouts put the help on the eyebrow's row, above the title; wide layouts
+					// keep it beside the title, right under the eyebrow (not pushed down by the help).
+					if (set.name === 'phone') {
+						expect(heading.y).toBeGreaterThanOrEqual(help.y + help.height);
+					} else {
+						expect(heading.y - (kicker.y + kicker.height)).toBeLessThanOrEqual(8);
+					}
 				}
 				if (set.name !== 'phone') {
 					if (route === '/soe-como-x') {
 						// A real imported example and solver result fill the wide workstation, not blank plots.
 						await page.locator('#soe-input-file + .zone + .actions button').click();
-						await page.locator('#soe-input-text').fill(
-							'frequency,raw\n20,4\n100,3\n300,1\n1000,0\n3000,2\n6000,-3\n10000,1\n20000,-6'
-						);
+						await page
+							.locator('#soe-input-text')
+							.fill(
+								'frequency,raw\n20,4\n100,3\n300,1\n1000,0\n3000,2\n6000,-3\n10000,1\n20000,-6'
+							);
 						await page.locator('#soe-input-paste button').click();
 						await page.locator('#soe-target-kind').selectOption('preset');
 						await page.locator('.correction .solve').click();

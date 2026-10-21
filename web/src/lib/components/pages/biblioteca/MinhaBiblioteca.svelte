@@ -600,7 +600,11 @@
 		<h2 id="{id}-title">{m.biblioteca_social_title()}</h2>
 		{#if signedIn}<p>{m.biblioteca_social_note()}</p>{/if}
 	</div>
-	{#if !session.known}
+	{#if !session.known && !online}
+		<!-- Offline before the session was read: not a spinner forever; the page reads it again
+		     when the network is back. -->
+		<p class="offline" role="status">{m.biblioteca_social_offline()}</p>
+	{:else if !session.known}
 		<p aria-busy="true">{m.biblioteca_social_loading()}</p>
 	{:else if !signedIn}
 		<p class="invite">

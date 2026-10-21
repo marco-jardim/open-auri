@@ -93,6 +93,34 @@ test('failed report sends reset the live widget and accept a fresh check without
 	expect(headerOf(fetch.mock.calls[1]?.[1], 'x-turnstile-token')).toBe('fresh-check');
 });
 
+test('a successful send keeps its solved widget; only another target asks for a fresh check', async () => {
+	const { props, fetch } = setup();
+	let options: TurnstileRenderOptions | undefined;
+	let widgetNumber = 0;
+	const renderWidget = vi.fn((_container: HTMLElement, next: TurnstileRenderOptions) => {
+		options = next;
+		return `widget-${++widgetNumber}`;
+	});
+	const remove = vi.fn();
+	Reflect.set(window, 'turnstile', { render: renderWidget, remove, reset: vi.fn() });
+	const screen = await render(ReportPanel, { ...props, siteKey: 'site-key', token: '' });
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(1);
+	options?.callback?.('only-check');
+	await send().click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.comunidade_report_sent());
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_v2_reason_report_sent());
+	expect(fetch).toHaveBeenCalledOnce();
+	// No new challenge for a target that cannot be reported again.
+	expect(renderWidget).toHaveBeenCalledOnce();
+	expect(remove).not.toHaveBeenCalled();
+	await screen.rerender({ subject: { kind: 'lineage', id: 'lin-second' } });
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(2);
+	expect(remove).toHaveBeenCalledWith('widget-1');
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_report_needs_check());
+	options?.callback?.('second-check');
+	await expect.element(send()).not.toHaveAttribute('aria-disabled');
+});
+
 test('every reason is available; maximum private note is preserved and success locks only that target', async () => {
 	const { props, fetch } = setup();
 	const screen = await render(ReportPanel, props);

@@ -493,13 +493,13 @@
 						</div>
 						<div class="columns">
 							{#each section.paragraphs as paragraph (paragraph)}<p>{paragraph}</p>{/each}
+							{#if section.browserOnly || section.appOnly}
+								<EnvironmentExtras {section} {inApp} {hydrated} part="paragraphs" />
+							{/if}
 							{#if section.items}<ul>
 									{#each section.items as item (item)}<li>{item}</li>{/each}
 								</ul>{/if}
 						</div>
-						{#if section.browserOnly || section.appOnly}
-							<EnvironmentExtras {section} {inApp} {hydrated} />
-						{/if}
 						{#if section.id === 'envelope'}
 							<p class="inset"><strong>{content.safetyCaveat}</strong></p>
 							<div class="table-scroll" role="region" use:keyboardScroll aria-label={ui.thresholds}>
@@ -615,6 +615,9 @@
 								{#each section.links as link (link.href)}<a href={link.href}>{link.label} ↗</a
 									>{/each}
 							</div>{/if}
+						{#if section.browserOnly?.links || section.appOnly?.links}
+							<EnvironmentExtras {section} {inApp} {hydrated} part="links" />
+						{/if}
 					</section>
 				{/each}
 			</article>

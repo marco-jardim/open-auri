@@ -46,6 +46,7 @@
 	import { setHiddenStore } from '#lib/social/hidden-context.ts';
 	import { createAccountHiddenStore } from '#lib/social/account-hidden.svelte.ts';
 	import { setReportSiteKey } from '#lib/social/report-context.ts';
+	import { setViewer } from '#lib/social/viewer-context.ts';
 
 	let { children, data }: LayoutProps = $props();
 	const accountSession = new AccountSession(() => ({
@@ -76,6 +77,7 @@
 	const context = setAppContext();
 	const nativeCable = setNativeCableState();
 	setHiddenStore(createAccountHiddenStore(accountSession));
+	setViewer(accountSession);
 	setReportSiteKey(PUBLIC_TURNSTILE_SITE_KEY);
 	const app = $derived(context.client);
 	const meta = $derived(getPageMeta(page.route.id ?? page.url.pathname));

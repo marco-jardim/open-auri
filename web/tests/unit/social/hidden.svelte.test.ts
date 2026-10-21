@@ -186,6 +186,23 @@ test('hide actions have unique names and only the initiating item announces a fa
 	expect(page.getByRole('alert').elements()).toHaveLength(1);
 });
 
+test('a failed hide is announced once, by its action, not again by the page-level hidden list', async () => {
+	const store = createHiddenStore(remote(), () => null);
+	await store.setUser(null);
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	const list = show(HiddenItems, {}, store);
+	show(HideActions, { lineageId: 'curve-a', curveName: 'Alpha' }, store);
+	await page
+		.getByRole('button', { name: m.fxpc_hide_curve({ name: 'Alpha' }), exact: true })
+		.click();
+	await expect.element(page.getByRole('alert')).toHaveTextContent(m.hidden_error());
+	expect(page.getByRole('alert').elements()).toHaveLength(1);
+	expect(list.querySelector('[role="alert"]')).toBeNull();
+	expect(page.getByRole('button', { name: m.hidden_retry(), exact: true }).elements()).toHaveLength(
+		0
+	);
+});
+
 for (const locale of ['pt-BR', 'en-US'] as const) {
 	test(`community curve/author hide actions and human-labelled management work in ${locale}`, async () => {
 		await setLocale(locale, { reload: false });

@@ -74,7 +74,9 @@ test('Back closes the write sheet and restored unsaved-tooltip focus does not co
 	expect(onclose).toHaveBeenCalledOnce();
 	await expect.element(trigger).toHaveFocus();
 	await expect
-		.element(page.getByRole('tooltip', { includeHidden: true }).filter({ hasText: m.chrome_unsaved() }))
+		.element(
+			page.getByRole('tooltip', { includeHidden: true }).filter({ hasText: m.chrome_unsaved() })
+		)
 		.toBeVisible();
 	// Only a passive tooltip is open: Back is left to the app (history, else leave).
 	expect(pressBack()).toBe(false);

@@ -247,12 +247,18 @@
 				>
 			{/if}
 		</div>
+		<!-- The page's hidden-items box already announces a failed list load (role=alert): this note
+		     only explains the blocked trades. Each retry names what it reloads. -->
 		{#if $hidden.loadError}
-			<p class="note" role="alert">{m.hidden_error()}</p>
-			<Button loading={$hidden.busy} onclick={() => hidden.retry()}>{m.hidden_retry()}</Button>
+			<p class="note">{m.hidden_error()}</p>
+			<Button loading={$hidden.busy} onclick={() => hidden.retry()}
+				>{m.w4r1_s7_retry_preferences()}</Button
+			>
 		{:else if !contentAllowed}<p class="note">{m.hidden_loading()}</p>{/if}
 		{#if listFailed}
-			<Button loading={listBusy} onclick={() => refresh(hiddenKey)}>{m.hidden_retry()}</Button>
+			<Button loading={listBusy} onclick={() => refresh(hiddenKey)}
+				>{m.w4r1_s7_retry_trades()}</Button
+			>
 		{/if}
 		{#if trades.length === 0}
 			<p class="note">{m.comunidade_s7_none()}</p>

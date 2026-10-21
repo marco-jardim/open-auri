@@ -104,13 +104,13 @@ test('pressing an already focus-open unavailable reason pins it for Android Back
 	trigger.element().focus();
 	await expect.element(tooltip).toBeVisible();
 	expect(pressBack()).toBe(false);
-	trigger.element().click();
+	(trigger.element() as HTMLElement).click();
 	await tick();
 	expect(pressBack()).toBe(true);
 	await expect.element(tooltip).not.toBeVisible();
 	expect(pressBack()).toBe(false);
 	// Blur also clears a pin; restoring focus afterward must remain passive.
-	trigger.element().click();
+	(trigger.element() as HTMLElement).click();
 	await tick();
 	trigger.element().blur();
 	await expect.element(tooltip).not.toBeVisible();

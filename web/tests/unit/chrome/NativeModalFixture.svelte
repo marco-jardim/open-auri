@@ -14,7 +14,11 @@
 	let confirmationOpen = $state(false);
 </script>
 
-<CableBar {unsaved} onWrite={() => (checklistOpen = true)} onHelp={() => (confirmationOpen = true)} />
+<CableBar
+	{unsaved}
+	onWrite={() => (checklistOpen = true)}
+	onHelp={() => (confirmationOpen = true)}
+/>
 <PreWriteChecklist
 	{service}
 	open={checklistOpen}

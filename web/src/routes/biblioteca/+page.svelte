@@ -36,10 +36,16 @@
 			// Sign-in or sign-out in another tab: read the session again when the tab comes back.
 			if (document.visibilityState === 'visible') void session?.refresh(controller.signal);
 		};
+		const online = () => {
+			// A check that failed offline leaves the shelves unknown: read it again with the network.
+			if (session && !session.known) void session.refresh(controller.signal);
+		};
 		document.addEventListener('visibilitychange', visible);
+		window.addEventListener('online', online);
 		return () => {
 			controller.abort();
 			document.removeEventListener('visibilitychange', visible);
+			window.removeEventListener('online', online);
 		};
 	});
 </script>

@@ -6,14 +6,23 @@ import { isHidden, type HiddenList } from '#lib/social/hidden.ts';
 
 export type NamedCurve = CurveData;
 
+type CommunityProvenance = { source?: string; community?: NamedCurve['community'] };
+
 /** Older saved community curves retain a source id even without transient author provenance. */
-export function communityHidden(
-	curve: { source?: string; community?: NamedCurve['community'] },
-	hidden: HiddenList
-): boolean {
-	const lineageId =
+function communityLineage(curve: CommunityProvenance): string | null {
+	return (
 		curve.community?.lineageId ??
-		(curve.source?.startsWith('community:') ? curve.source.slice(10) : null);
+		(curve.source?.startsWith('community:') ? curve.source.slice(10) : null)
+	);
+}
+
+/** The curve came from the community (its hidden state depends on the reader's preferences). */
+export function communitySourced(curve: CommunityProvenance): boolean {
+	return !!communityLineage(curve);
+}
+
+export function communityHidden(curve: CommunityProvenance, hidden: HiddenList): boolean {
+	const lineageId = communityLineage(curve);
 	return !!lineageId && isHidden(hidden, lineageId, curve.community?.author);
 }
 

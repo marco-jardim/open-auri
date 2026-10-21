@@ -12,9 +12,15 @@
 	const hidden = setHiddenStore(createAccountHiddenStore(account));
 </script>
 
-<output data-known={account.known} data-ready={$hidden.ready} data-curves={$hidden.curves.join(',')}
+<output
+	data-known={account.known}
+	data-ready={$hidden.ready}
+	data-signed-in={$hidden.signedIn}
+	data-curves={$hidden.curves.join(',')}
 ></output>
+<!-- Stands in for a navigation or the chrome's retry: the layout probes the session again. -->
+<button type="button" data-testid="probe-again" onclick={() => account.retry()}>probe</button>
 <HiddenItems />
-{#each ['local-blocked', 'remote-blocked', 'allowed'] as id (id)}
+{#each ['local-blocked', 'remote-blocked', 'zoe-blocked', 'allowed'] as id (id)}
 	{#if $hidden.ready && !isHidden($hidden, id)}<p data-source={id}>{id}</p>{/if}
 {/each}
