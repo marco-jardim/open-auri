@@ -275,6 +275,9 @@ function artifactIdentity(applicationId, versionCode, versionName, source) {
 
 /** @param {string} output output of `aapt2 dump badging <apk>` */
 export function parseApkBadging(output) {
+  if (/^package:.*\bversionCodeMajor\s*=/m.test(output)) {
+    throw new Error('APK manifest must not declare android:versionCodeMajor');
+  }
   const matches = [
     ...output.matchAll(/^package: name='([^']*)' versionCode='([^']*)' versionName='([^']*)'/gm),
   ];
@@ -336,6 +339,8 @@ export function readZipEntry(bytes, name) {
   const crc = zip.readUInt32LE(entry + 16);
   const compressedSize = zip.readUInt32LE(entry + 20);
   const uncompressedSize = zip.readUInt32LE(entry + 24);
+  const maxEntrySize = 1024 * 1024;
+  if (uncompressedSize > maxEntrySize) throw new Error(`ZIP entry ${name} exceeds 1 MiB`);
   const local = zip.readUInt32LE(entry + 42);
   if (zip.readUInt16LE(entry + 8) & 1) throw new Error(`Encrypted ZIP entry: ${name}`);
   if ([compressedSize, uncompressedSize, local].includes(0xffffffff)) {
@@ -353,7 +358,7 @@ export function readZipEntry(bytes, name) {
   let content = raw;
   if (method === 8) {
     try {
-      content = inflateRawSync(raw, { maxOutputLength: Math.max(1, uncompressedSize) });
+      content = inflateRawSync(raw, { maxOutputLength: maxEntrySize });
     } catch {
       throw corrupt();
     }
@@ -499,6 +504,11 @@ export function readAabManifest(aab) {
     return matches[0];
   };
   const android = 'http://schemas.android.com/apk/res/android';
+  if (
+    attributes.some((item) => item.namespaceUri === android && item.name === 'versionCodeMajor')
+  ) {
+    throw new Error('AAB manifest must not declare android:versionCodeMajor');
+  }
   const code = attribute(android, 'versionCode');
   const versionName = attribute(android, 'versionName');
   let versionCode = code.value;

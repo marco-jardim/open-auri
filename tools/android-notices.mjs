@@ -162,14 +162,18 @@ function filesIn(directory) {
 
 /**
  * The generated Cordova manifest declares no components: exactly one <application> element with
- * no child content. Attributes are tolerated because `cap sync` writes them without bundling
- * code: an e2e sync (server.cleartext) emits <application android:usesCleartextTraffic="true">.
+ * no child content. Only android:usesCleartextTraffic is tolerated: an e2e `cap sync`
+ * (server.cleartext) emits it without bundling code. Other attributes can reference code.
  * @param {string} manifest
  */
 export function isEmptyCordovaManifest(manifest) {
+  const application = manifest.match(/<application\b([^>]*?)(?:>\s*<\/application\s*>|\/>)/);
   return (
     (manifest.match(/<application\b/g) ?? []).length === 1 &&
-    /<application\b[^>]*>\s*<\/application\s*>|<application\b[^>]*\/>/.test(manifest)
+    application !== null &&
+    /^(?:\s+android:usesCleartextTraffic\s*=\s*(?:"(?:true|false)"|'(?:true|false)'))?\s*$/.test(
+      application[1],
+    )
   );
 }
 

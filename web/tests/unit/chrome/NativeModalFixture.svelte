@@ -5,12 +5,16 @@
 	import ConfirmDialog from '#lib/components/chrome/ConfirmDialog.svelte';
 	import PreWriteChecklist from '#lib/components/cable/PreWriteChecklist.svelte';
 
-	let { service, onclose }: { service: CableService; onclose: () => void } = $props();
+	let {
+		service,
+		onclose,
+		unsaved = false
+	}: { service: CableService; onclose: () => void; unsaved?: boolean } = $props();
 	let checklistOpen = $state(false);
 	let confirmationOpen = $state(false);
 </script>
 
-<CableBar onWrite={() => (checklistOpen = true)} onHelp={() => (confirmationOpen = true)} />
+<CableBar {unsaved} onWrite={() => (checklistOpen = true)} onHelp={() => (confirmationOpen = true)} />
 <PreWriteChecklist
 	{service}
 	open={checklistOpen}

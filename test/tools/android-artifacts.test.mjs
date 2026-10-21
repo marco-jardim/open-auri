@@ -624,6 +624,52 @@ test('n5: APK identity comes from exactly one aapt2 badging package line', () =>
   }
 });
 
+test('APK and AAB identities reject android:versionCodeMajor, including zero and compiled-only values', () => {
+  for (const major of [0, 1]) {
+    assert.throws(
+      () =>
+        parseApkBadging(
+          badging().replace(
+            ' platformBuildVersionName=',
+            ` versionCodeMajor='${major}' platformBuildVersionName=`,
+          ),
+        ),
+      /APK manifest must not declare android:versionCodeMajor/,
+    );
+    for (const value of [String(major), '']) {
+      assert.throws(
+        () =>
+          readAabManifest(
+            fakeAab(
+              protoManifest({
+                extra: [xmlAttribute(ANDROID_NS, 'versionCodeMajor', value, compiledInt(major))],
+              }),
+            ),
+          ),
+        /AAB manifest must not declare android:versionCodeMajor/,
+      );
+    }
+  }
+});
+
+test('AAB manifest ZIP entries are capped at 1 MiB even when the declared size lies', () => {
+  const limit = 1024 * 1024;
+  for (const method of [0, 8]) {
+    const content = Buffer.alloc(limit);
+    assert.deepEqual(readZipEntry(zip([[AAB_MANIFEST, content, method]]), AAB_MANIFEST), content);
+    assert.throws(
+      () => readZipEntry(zip([[AAB_MANIFEST, Buffer.alloc(limit + 1), method]]), AAB_MANIFEST),
+      /exceeds 1 MiB/,
+    );
+  }
+  const forged = zip([[AAB_MANIFEST, Buffer.alloc(limit + 1)]]);
+  const directory = forged.readUInt32LE(forged.length - 22 + 16);
+  forged.writeUInt32LE(1, 22);
+  forged.writeUInt32LE(1, directory + 24);
+  // This fails during inflation, not only the size/CRC check after allocating the output.
+  assert.throws(() => readZipEntry(forged, AAB_MANIFEST), /Corrupt ZIP archive/);
+});
+
 test('n5: AAB identity is read offline from the protobuf base manifest, stored or deflated', () => {
   assert.deepEqual(readAabManifest(fakeAab()), identity);
   assert.deepEqual(readAabManifest(zip([[AAB_MANIFEST, protoManifest(), 0]])), identity);

@@ -31,6 +31,8 @@
 		/** Trigger element when the caller renders it (instead of the snippet). */
 		anchor?: HTMLElement | null;
 		open?: boolean;
+		/** Explicit touch/press pin: unlike focus/hover, this consumes Android Back. */
+		pinned?: boolean;
 		/** Hover delay in ms (spec: 400). Keyboard focus opens at once. */
 		delay?: number;
 		placement?: 'top' | 'bottom';
@@ -43,14 +45,17 @@
 		id = `${generatedId}-tip`,
 		anchor = null,
 		open = $bindable(false),
+		pinned = $bindable(false),
 		delay = 400,
 		placement = 'bottom',
 		children
 	}: Props = $props();
 
-	// Callers can pin this open on touch too (e.g. Button's unavailable-action reason).
+	const visible = $derived(open || pinned);
+
+	// Passive focus/hover (including restored modal focus) must not intercept Android Back.
 	$effect(() => {
-		if (!open) return;
+		if (!pinned) return;
 		return registerNativeBack({ canDismiss: () => true, dismiss: hide });
 	});
 
@@ -79,12 +84,13 @@
 	function hide(): void {
 		clearTimers();
 		open = false;
+		pinned = false;
 	}
 
 	function scheduleOpen(): void {
 		clearTimeout(closeTimer);
 		closeTimer = undefined;
-		if (open || openTimer !== undefined) return;
+		if (visible || openTimer !== undefined) return;
 		openTimer = setTimeout(() => {
 			openTimer = undefined;
 			open = true;
@@ -97,7 +103,7 @@
 		clearTimeout(closeTimer);
 		closeTimer = setTimeout(() => {
 			closeTimer = undefined;
-			open = false;
+			hide();
 		}, CLOSE_GRACE);
 	}
 
@@ -173,7 +179,7 @@
 	$effect(() => {
 		const element = tip;
 		if (!element) return;
-		if (!open) {
+		if (!visible) {
 			if (element.matches(':popover-open')) element.hidePopover();
 			pos = null;
 			return;

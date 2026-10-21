@@ -476,6 +476,7 @@ test('n9: the empty Cordova container is accepted after prod and e2e syncs, and 
     cordovaManifest(' android:usesCleartextTraffic="true"'),
     '<manifest><application></application></manifest>',
     '<manifest><application android:usesCleartextTraffic="true" /></manifest>',
+    "<manifest><application android:usesCleartextTraffic = 'false'/></manifest>",
   ]) {
     assert.ok(isEmptyCordovaManifest(manifest), manifest);
   }
@@ -512,6 +513,33 @@ test('n9: a Cordova manifest declaring components or a second application still 
     '<manifest><application android:usesCleartextTraffic="true"><receiver android:name="x" /></application></manifest>',
   );
   assert.throws(repo.projects, /Bundled Cordova code needs explicit package license attribution/);
+});
+
+test('an otherwise empty Cordova application rejects attributes other than the e2e cleartext flag', (t) => {
+  const repo = fixture(t);
+  for (const attributes of [
+    'android:name="org.example.PluginApplication"',
+    'android:appComponentFactory="org.example.PluginFactory"',
+    'android:usesCleartextTraffic="true" android:name="org.example.PluginApplication"',
+    'android:label="Plugin"',
+    'android:usesCleartextTraffic="@bool/plugin_flag"',
+    'android:usesCleartextTraffic="true" android:usesCleartextTraffic="false"',
+  ]) {
+    for (const manifest of [
+      cordovaManifest(attributes),
+      `<manifest><application ${attributes}/></manifest>`,
+    ]) {
+      assert.equal(isEmptyCordovaManifest(manifest), false, manifest);
+      repo.write(
+        'apps/android/android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml',
+        manifest,
+      );
+      assert.throws(
+        repo.projects,
+        /Bundled Cordova code needs explicit package license attribution/,
+      );
+    }
+  }
 });
 
 test('every real non-app Gradle project is listed in committed notices with the full Capacitor MIT license', () => {
