@@ -91,6 +91,7 @@ for (const copy of locales) {
 	test(`renders the chrome and literal notices in ${copy.locale}`, async () => {
 		await setLocale(copy.locale, { reload: false });
 		await render(CableBar);
+		expect(page.getByRole('link', { name: m.chrome_get_android_app() }).elements()).toHaveLength(0);
 		await render(Footer, { honoree });
 		await render(EmBreve);
 		await expect.element(page.getByRole('link', { name: copy.curve, exact: true })).toBeVisible();

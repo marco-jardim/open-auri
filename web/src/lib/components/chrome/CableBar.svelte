@@ -31,6 +31,7 @@
 	import LazyMenu from './LazyMenu.svelte';
 	import Nav from './Nav.svelte';
 	import LanguageToggle from './LanguageToggle.svelte';
+	import PlayStoreLink from './PlayStoreLink.svelte';
 	import { togglePreview, type PlaybackEngine, type PlaybackErrorHandler } from './playback.ts';
 
 	interface Props {
@@ -410,6 +411,7 @@
 			</div>
 			<div class="bar-meta bar-compact">
 				{#if account}<span class="meta-account">{@render account()}</span>{/if}
+				<PlayStoreLink />
 				<span class="meta-lang"><LanguageToggle /></span>
 				{#if help}<span class="meta-help">{@render help()}</span>{/if}
 				<IconButton

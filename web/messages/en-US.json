@@ -979,6 +979,7 @@
 	"chrome_close": "Close",
 	"chrome_confirm": "Confirm",
 	"chrome_default_auri": "Auri default",
+	"chrome_get_android_app": "Get the Android app on Google Play",
 	"chrome_github_link": "Source code on GitHub",
 	"chrome_help_hint": "Press ? to open help and Escape to close it.",
 	"chrome_help_open": "Help and keyboard shortcuts",
