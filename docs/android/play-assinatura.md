@@ -39,6 +39,6 @@ Preenchido pelo agente com o que o Console mostrar.
 
 | Conferência | Resultado |
 |---|---|
-| SHA-256 de assinatura do app no Console | pendente |
-| SHA-256 de upload no Console | pendente |
+| SHA-256 de assinatura do app no Console | `FB:46:E3:…:61:D0`, conferido em 2026-10-21 (página App signing, app `com.openauri.app`) |
+| SHA-256 de upload no Console | o Console registrou a chave do app como upload; redefinição pedida em 2026-10-21 com `open-auri-upload-cert.pem` (`59:1A:0A:…:04:16`), pendente de aprovação (cerca de 48 h) |
 | `com.openauri.app` na verificação de desenvolvedor | pendente |
