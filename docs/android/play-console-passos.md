@@ -1,5 +1,7 @@
 # Checklist do Play Console (P5)
 
+Folha de preenchimento campo a campo, com os valores para copiar: [play-console-preenchimento.md](./play-console-preenchimento.md).
+
 Roteiro do mantenedor baseado no Anexo H.2 do plano (`docs/plans/2026-10-18-android-capacitor-plano.md:2824-2828`), depois de P2 e P4. Não contém credenciais, dados pessoais nem comprovação de submissão. Preencher dados privados somente no Console.
 
 ## Antes de preencher
