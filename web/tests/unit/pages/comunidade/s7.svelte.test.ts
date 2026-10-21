@@ -222,6 +222,90 @@ test('S7: hidden items do not remove own status/cancel or prevent joining after 
 
 // ---- Who can join ------------------------------------------------------------------------------
 
+test('S7: an unrelated failed hide does not disable Join or matched listening/scoring', async () => {
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	const hidden = createHiddenStore({
+		myHidden: async () => ({ items: [] }),
+		putHidden: async () => {
+			throw new Error('write failed');
+		},
+		deleteHidden: async () => ({ items: [] })
+	});
+	await hidden.setUser('me');
+	const target = document.createElement('div');
+	document.body.append(target);
+	const instance = mount(S7Panel, {
+		target,
+		props: s7Props(tradesApi([trade('matched', 'matched', { partner: BLIND })])),
+		context: new Map([[HIDDEN_CONTEXT, hidden]])
+	});
+	try {
+		await expect.element(listenButton()).toBeVisible();
+		await expect(hidden.hide('curve', 'unrelated')).rejects.toThrow('write failed');
+		await expect.element(joinButton()).not.toHaveAttribute('aria-disabled');
+		await expect.element(listenButton()).toBeVisible();
+		await expect.element(sendScore()).toBeVisible();
+	} finally {
+		await unmount(instance);
+		target.remove();
+	}
+});
+
+test('S7: a failed hidden-list load has a visible retry that restores matched Listen and Score', async () => {
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	let offline = true;
+	const hidden = createHiddenStore({
+		myHidden: async () => {
+			if (offline) throw new Error('offline');
+			return { items: [] };
+		},
+		putHidden: async () => ({ items: [] }),
+		deleteHidden: async () => ({ items: [] })
+	});
+	await hidden.setUser('me');
+	const fetch = tradesApi([trade('matched', 'matched', { partner: BLIND })]);
+	const target = document.createElement('div');
+	document.body.append(target);
+	const instance = mount(S7Panel, {
+		target,
+		props: s7Props(fetch),
+		context: new Map([[HIDDEN_CONTEXT, hidden]])
+	});
+	try {
+		await expect.element(joinButton()).toHaveAccessibleDescription(m.hidden_error());
+		const retry = page.getByRole('button', { name: m.w4r1_s7_retry_preferences(), exact: true });
+		await expect.element(retry).toBeVisible();
+		// The page-level hidden-items box announces the failed load; the panel does not repeat it.
+		expect(target.querySelector('[role="alert"]')).toBeNull();
+		expect(
+			page.getByRole('button', { name: m.w4r1_s7_retry_trades(), exact: true }).elements()
+		).toHaveLength(0);
+		expect(fetch).not.toHaveBeenCalled();
+		offline = false;
+		await retry.click();
+		await expect.element(listenButton()).toBeVisible();
+		await expect.element(sendScore()).toBeVisible();
+	} finally {
+		await unmount(instance);
+		target.remove();
+	}
+});
+
+test('S7: retrying a failed trade-list load enables an already matched trade without another navigation', async () => {
+	const fetch = tradesApi([trade('matched', 'matched', { partner: BLIND })]);
+	fetch.mockResolvedValueOnce(apiError('RATE_LIMITED', 429));
+	await render(S7Panel, s7Props(fetch));
+	await expect
+		.element(page.getByRole('button', { name: m.w4r1_s7_retry_trades(), exact: true }))
+		.toBeVisible();
+	expect(
+		page.getByRole('button', { name: m.w4r1_s7_retry_preferences(), exact: true }).elements()
+	).toHaveLength(0);
+	await page.getByRole('button', { name: m.w4r1_s7_retry_trades(), exact: true }).click();
+	await expect.element(listenButton()).toBeVisible();
+	await expect.element(sendScore()).toBeVisible();
+});
+
 test('S7: visitors get one unavailable join action that says an account is needed', async () => {
 	const fetch = tradesApi([]);
 	await render(S7Panel, s7Props(fetch, { session: ANONYMOUS }));

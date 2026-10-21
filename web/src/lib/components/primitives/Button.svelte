@@ -64,14 +64,14 @@
 	const describedBy = $derived(
 		[rest['aria-describedby'], reason ? tipId : null].filter(Boolean).join(' ') || undefined
 	);
-	let tipOpen = $state(false);
+	let tipPinned = $state(false);
 
 	function handleClick(event: MouseEvent & { currentTarget: EventTarget & HTMLButtonElement }) {
 		if (reason || loading) {
 			event.preventDefault();
 			event.stopImmediatePropagation();
 			// Touch and mouse users get the reason too, not only hover and keyboard users.
-			if (reason) tipOpen = true;
+			if (reason) tipPinned = true;
 			return;
 		}
 		onclick?.(event);
@@ -100,5 +100,5 @@
 	{#if loading}<span class="btn__spinner" aria-hidden="true"></span>{/if}
 </button>
 {#if reason}
-	<Tooltip id={tipId} text={reason} anchor={element} bind:open={tipOpen} />
+	<Tooltip id={tipId} text={reason} anchor={element} bind:pinned={tipPinned} />
 {/if}

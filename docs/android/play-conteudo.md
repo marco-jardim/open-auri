@@ -28,11 +28,11 @@ gate runs before the app content loads; it is not a sign-in or subscription scre
 
 Writing equalization to hardware requires a compatible Kuba Auri USB-C cable,
 connected to the Android device through USB-C/USB OTG. Open Menu > Cabo (Cable) >
-Conectar (Connect over Android USB) to open the native Android device picker and
-grant USB permission locally. Without a cable, the app reports that no compatible
-device was found. With a cable connected, the Engineering layer on the Cable page
-shows USB Diagnostics. Without a cable, all non-hardware functionality can still
-be evaluated; the USB write itself cannot.
+Conectar pelo USB do Android (Connect over Android USB) to open the native Android
+device picker and grant USB permission locally. Without a cable, the app reports
+that no compatible device was found. With a cable connected, the Engineering layer
+on the Cable page shows USB Diagnostics. Without a cable, all non-hardware
+functionality can still be evaluated; the USB write itself cannot.
 The notice that writing has not yet been validated on a real cable is intentional.
 Do not treat that notice as a sign-in failure or a request to bypass a safety check.
 
@@ -42,9 +42,20 @@ be temporarily disabled; this does not prevent reviewing the main utility.
 For account-only features, sign in using the verified, reusable review account
 provided in the private Play Console access fields. No administrator access,
 new account, email inbox access or code from the maintainer is needed.
-From community content, verified users can report inappropriate content.
-Hide this author / Hide this curve is available in this release: hiding is local
-for visitors and synced for signed-in accounts.
+To find the moderation controls (English labels, with Portuguese labels in parentheses):
+- Menu > Comunidade (Community) > open a curve's page: expand Report <curve name>
+  (Denunciar <nome>) to report it, or choose Hide this curve (Ocultar esta curva).
+- Open the author's nickname to visit their profile: expand Report <nickname>
+  (Denunciar <apelido>) to report the author, or choose Hide this author
+  (Ocultar este autor).
+- On a profile, creations, packs and public favorites each have Report <item name>
+  (Denunciar <nome>); comparison sources and blind-test candidates have it too.
+- On Comunidade (Community), select a curve, then scroll to More from the desk
+  (Mais da mesa) > Report (Denunciar) and expand that drawer. Hide this curve /
+  Hide this author (Ocultar esta curva / Ocultar este autor) are on the curve's channel.
+To submit a report, use the verified review account, choose a reason, complete
+the security check and press Send report (Enviar denúncia). Hiding needs no
+verified account: it is local for visitors and synced for signed-in accounts.
 
 The required hardware demonstration video is provided in the Console's review
 materials. It demonstrates native USB connection and the guarded write flow.
@@ -79,7 +90,7 @@ Selecionar **app de utilidade/ferramenta de música e áudio, não jogo**. Preen
 | Permite interação, troca ou compartilhamento de conteúdo entre usuários | **Sim.** Publicação de curvas, versões, forks e packs, perfis e troca S7. A ausência de chat não elimina UGC (`web/migrations/0004_social.sql:44-79`, `web/migrations/0004_social.sql:203-234`, `web/migrations/0005_s6_s7.sql:32-53`). |
 | Contém conteúdo gerado por usuários acessível a outros | **Sim.** Apelidos, bio e textos de curvas/packs; conteúdo pode ser público, não listado ou privado. Não classificar o serviço como inteiramente fechado/offline. |
 | Chat, mensagens privadas ou comentários livres entre usuários | **Não.** Não há esse recurso no schema social. S7 troca curvas e notas numéricas, não mensagens; nota da denúncia só chega à moderação (`web/src/routes/api/v1/reports/+server.ts:1-3`). |
-| Usuário pode denunciar conteúdo e perfis inadequados | **Sim, com conta e e-mail verificado, a partir de todas as superfícies de UGC.** Denúncia de curvas (alvo `lineage`, abrangendo a linhagem), packs (`pack`) e usuários (`user`); motivo e nota de até 500 caracteres. Há Turnstile e cota de 30/dia (`web/migrations/0004_social.sql:240-250`, `web/src/routes/api/v1/reports/+server.ts:16-41`). Conferir esses três alvos em cada superfície de UGC na release antes do envio. |
+| Usuário pode denunciar conteúdo e perfis inadequados | **Sim, com conta e e-mail verificado, a partir de todas as superfícies de UGC:** página de curva, perfil, criações do perfil, packs, favoritos do perfil, fontes de comparação, candidatos do teste cego e Comunidade. Denúncia de curvas (alvo `lineage`, abrangendo a linhagem), packs (`pack`) e usuários (`user`); motivo e nota de até 500 caracteres. Há Turnstile e cota de 30/dia (`web/migrations/0004_social.sql:240-250`, `web/src/routes/api/v1/reports/+server.ts:16-41`). Conferir cada superfície e seu alvo correspondente na release antes do envio, inclusive a ação de denúncia nos favoritos do perfil. |
 | Há moderação e remoção de conteúdo abusivo | **Sim.** Ocultação automática por 3 contas elegíveis (2 se a curva atual é YOLO), com idade mínima de 3 dias, seguida de fila e decisão administrativa; ocultar, restaurar, remover, dispensar ou banir autor (`web/src/lib/server/social/moderation.ts:48-63`, `web/src/lib/server/social/moderation.ts:219-242`, `web/src/lib/server/social/moderation.ts:331-415`). |
 | Conteúdo é todo aprovado antes de aparecer / filtro garante ausência de material impróprio | **Não.** Existe moderação por denúncia, não aprovação editorial prévia de toda publicação. Gate de segurança da curva não é filtro semântico universal. |
 | Usuário pode ocultar autores e curvas individualmente | **Sim, nesta release.** "Ocultar este autor" / "Ocultar esta curva" ficam disponíveis no app: a ocultação é local para visitantes e sincronizada para contas. É controle de visibilidade do próprio usuário, não banimento administrativo nem bloqueio de comunicação (não há chat/DM). Conferir ambos os fluxos na release antes do envio. |

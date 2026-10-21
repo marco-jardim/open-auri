@@ -20,6 +20,8 @@ on:
       - package.json
       - package-lock.json
       - apps/android/android/**
+      - apps/android/www/**
+      - web/src/lib/cable/android-status.ts
   workflow_dispatch:
     inputs:
       dry_run:
@@ -79,16 +81,18 @@ jobs:
           import { execFileSync } from 'node:child_process';
           import { writeFileSync } from 'node:fs';
           import { join } from 'node:path';
-          import { getPreviousAndroidVersionCode } from './tools/android-artifacts.mjs';
+          import { getPreviousAndroidVersionCode, isTagPush } from './tools/android-artifacts.mjs';
           const repo = `repos/${process.env.GITHUB_REPOSITORY}`;
+          const publishing = isTagPush(process.env.GITHUB_EVENT_NAME, process.env.GITHUB_REF_TYPE);
           // Paginate all releases, including prereleases. API/download/manifest errors fail closed.
           const pages = JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', `${repo}/releases?per_page=100`], {
             encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
           }));
-          // The triggering tag is the candidate, not a prior release. Its published manifest,
-          // if any, still blocks republishing. All other tags count even without a release.
+          // A pushed tag is the candidate, not a prior release. Its published manifest, if any,
+          // still blocks republishing. All other tags count even without a release; malformed
+          // android-v* tags (such as android-v1.0.1-rc1) are skipped with a warning.
           const tags = execFileSync('git', ['tag', '--list', 'android-v*'], { encoding: 'utf8' })
-            .trim().split(/\r?\n/).filter((tag) => tag && !(process.env.GITHUB_REF_TYPE === 'tag' && tag === process.env.GITHUB_REF_NAME));
+            .trim().split(/\r?\n/).filter((tag) => tag && !(publishing && tag === process.env.GITHUB_REF_NAME));
           const previous = getPreviousAndroidVersionCode(pages.flat(), (assetId) => JSON.parse(execFileSync('gh', [
             'api', '-H', 'Accept: application/octet-stream', `${repo}/releases/assets/${assetId}`,
           ], { encoding: 'utf8' })), tags);
@@ -100,20 +104,22 @@ jobs:
         run: |
           set -euo pipefail
           # Deterministic code = major*10000 + minor*100 + patch (minor/patch <= 99).
-          # Rebuilds keep the same code; only publishing tags must advance the release/tag floor.
+          # Rebuilds keep the same code; only a publishing tag push must advance the release/tag
+          # floor. A workflow_dispatch dry run started from a tag ref (GITHUB_REF_TYPE=tag) only warns.
           node --input-type=module <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
           import { join } from 'node:path';
-          import { versionCodeForRun } from './tools/android-artifacts.mjs';
+          import { isTagPush, versionCodeForRun } from './tools/android-artifacts.mjs';
           const { version } = JSON.parse(readFileSync('apps/android/package.json', 'utf8'));
-          if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== `android-v${version}`) {
+          const publishing = isTagPush(process.env.GITHUB_EVENT_NAME, process.env.GITHUB_REF_TYPE);
+          if (publishing && process.env.GITHUB_REF_NAME !== `android-v${version}`) {
             throw new Error('Tag must equal android-v<apps/android/package.json version>');
           }
           const previous = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'previous-release-manifest.json'), 'utf8'));
           if (!Number.isInteger(previous.versionCode) || previous.versionCode < 0) {
             throw new Error('Previous Android versionCode baseline is invalid');
           }
-          const code = versionCodeForRun(version, previous.versionCode, process.env.GITHUB_REF_TYPE);
+          const code = versionCodeForRun(version, previous.versionCode, publishing);
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nversion_code=${code}\n`);
           appendFileSync(process.env.GITHUB_ENV, `ORG_GRADLE_PROJECT_versionCode=${code}\n`);
           NODE
@@ -212,6 +218,7 @@ jobs:
           APK="$OUT/open-auri-$VERSION.apk"
           AAB="$OUT/open-auri-$VERSION.aab"
           export APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          export AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
           ZIPALIGN="$ANDROID_HOME/build-tools/36.1.0/zipalign"
           EXPECTED="$(node --input-type=module -e 'import { normalizeFingerprint } from "./tools/android-artifacts.mjs"; console.log(normalizeFingerprint(process.env.ANDROID_APP_CERT_SHA256 || ""));')"
           "$ZIPALIGN" -p -f 4 "$RUNNER_TEMP/unsigned/apk/release/app-release-unsigned.apk" "$RUNNER_TEMP/aligned.apk"
@@ -236,6 +243,8 @@ jobs:
           keytool -J-Duser.language=en -printcert -jarfile "$AAB" > "$RUNNER_TEMP/aab-certificate.txt"
           AAB_CERT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/aab-certificate.txt" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           AAB_CERT="$AAB_CERT" node --input-type=module -e 'import { verifyUploadCertificate } from "./tools/android-artifacts.mjs"; verifyUploadCertificate(process.env.AAB_CERT, process.env.ANDROID_UPLOAD_CERT_SHA256 || "", process.env.ANDROID_APP_CERT_SHA256 || "");'
+          # Fails closed, writing nothing, unless the APK (aapt2 dump badging) and the AAB
+          # (base/manifest/AndroidManifest.xml) carry the manifest's applicationId/versionCode/versionName.
           node tools/android-artifacts.mjs --apk "$APK" --aab "$AAB" \
             --expected-app-cert-sha256 "$EXPECTED" --commit "$GITHUB_SHA" \
             --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --version "$VERSION" \
@@ -250,7 +259,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "$OUT/open-auri-$VERSION.apk" "$OUT/open-auri-$VERSION.aab" \
             "$OUT/SHA256SUMS.txt" "$OUT/release-manifest.json" "$OUT/RELEASE_NOTES.md" \
-            --repo "$GITHUB_REPOSITORY" --notes-file "$OUT/RELEASE_NOTES.md" --verify-tag
+            --repo "$GITHUB_REPOSITORY" --title "open-auri Android $VERSION" \
+            --notes-file "$OUT/RELEASE_NOTES.md" --verify-tag
       - name: Delete signing material
         if: always()
         shell: bash
@@ -326,6 +336,7 @@ jobs:
           APK="$OUT/open-auri-$VERSION.apk"
           AAB="$OUT/open-auri-$VERSION.aab"
           export APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          export AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
           ZIPALIGN="$ANDROID_HOME/build-tools/36.1.0/zipalign"
           EXPECTED="$(node --input-type=module -e 'import { normalizeFingerprint } from "./tools/android-artifacts.mjs"; console.log(normalizeFingerprint(process.env.ANDROID_APP_CERT_SHA256 || ""));')"
           "$ZIPALIGN" -p -f 4 "$RUNNER_TEMP/unsigned/apk/release/app-release-unsigned.apk" "$RUNNER_TEMP/aligned.apk"
@@ -350,6 +361,8 @@ jobs:
           keytool -J-Duser.language=en -printcert -jarfile "$AAB" > "$RUNNER_TEMP/aab-certificate.txt"
           AAB_CERT="$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/aab-certificate.txt" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           AAB_CERT="$AAB_CERT" node --input-type=module -e 'import { verifyUploadCertificate } from "./tools/android-artifacts.mjs"; verifyUploadCertificate(process.env.AAB_CERT, process.env.ANDROID_UPLOAD_CERT_SHA256 || "", process.env.ANDROID_APP_CERT_SHA256 || "");'
+          # Fails closed, writing nothing, unless the APK (aapt2 dump badging) and the AAB
+          # (base/manifest/AndroidManifest.xml) carry the manifest's applicationId/versionCode/versionName.
           node tools/android-artifacts.mjs --apk "$APK" --aab "$AAB" \
             --expected-app-cert-sha256 "$EXPECTED" --commit "$GITHUB_SHA" \
             --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --version "$VERSION" \

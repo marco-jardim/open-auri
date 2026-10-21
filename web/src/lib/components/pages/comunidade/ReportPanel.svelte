@@ -9,7 +9,10 @@
 	error can appear.
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Button from '#lib/components/primitives/Button.svelte';
+	import { page } from '$app/state';
+	import { signInHref } from '#lib/components/chrome/account.ts';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { SocialApi } from '#lib/social/index.ts';
 	import type { ReportReason, ReportTargetKind } from '#lib/server/social/types.ts';
@@ -83,6 +86,7 @@
 
 	let Turnstile = $state.raw<TurnstileComponent | null>(null);
 	let turnstileFailed = $state(false);
+	let checkAttempt = $state(0);
 
 	$effect(() => {
 		if (!formShown || !siteKey || Turnstile || turnstileFailed) return;
@@ -127,14 +131,31 @@
 			if (targetKey === submittedKey) {
 				note = '';
 				message = m.comunidade_report_sent();
+			} else {
+				// The selection changed in flight: the target now on screen needs a fresh check.
+				checkAttempt++;
 			}
 		} catch (error) {
 			message = errorText(error);
+			// The failed check is spent: a fresh widget for the retry, without closing the panel.
+			checkAttempt++;
 		} finally {
 			token = '';
 			busy = false;
 		}
 	}
+
+	// A sent report keeps its solved widget: no new check is requested for a target that cannot be
+	// sent again. Only when another target is on screen does it need a fresh one.
+	let checkedTarget: string | null = null;
+	$effect(() => {
+		const current = targetKey;
+		untrack(() => {
+			if (current === checkedTarget) return;
+			checkedTarget = current;
+			if (sentFor !== '' && current !== sentFor && token === '' && !busy) checkAttempt++;
+		});
+	});
 </script>
 
 <svelte:head>
@@ -147,8 +168,14 @@
 	{#if !subject}
 		<p class="note">{m.comunidade_select_first()}</p>
 	{:else if !session.verified}
-		<p>{m.fxpc_report_account()}</p>
-		<a href="/entrar">{m.shared_curve_login()}</a>
+		{#if session.signedIn}
+			<p>{m.comunidade_verify_prompt()}</p>
+		{:else}
+			<p>{m.fxpc_report_account()}</p>
+			<a href={signInHref(page.url.pathname + page.url.search + page.url.hash)}
+				>{m.shared_curve_login()}</a
+			>
+		{/if}
 		<div class="row-btns">
 			<Button variant="danger" disabledReason={sendReason}>{m.comunidade_report_send()}</Button>
 		</div>
@@ -170,7 +197,9 @@
 			{#if !siteKey || turnstileFailed}
 				<p class="note">{m.comunidade_turnstile_unavailable()}</p>
 			{:else if Turnstile}
-				<Turnstile {siteKey} action={TURNSTILE_REPORT_ACTION} bind:token />
+				{#key checkAttempt}
+					<Turnstile {siteKey} action={TURNSTILE_REPORT_ACTION} bind:token />
+				{/key}
 			{:else}
 				<div class="turnstile-wait" role="status" aria-busy="true">
 					<span class="skeleton" aria-hidden="true"></span>

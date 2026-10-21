@@ -30,6 +30,8 @@
 	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { SocialApi } from '#lib/social/index.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
+	import { isHidden } from '#lib/social/hidden.ts';
 	import ListeningRoom from './ListeningRoom.svelte';
 	import CandidateMeter from './CandidateMeter.svelte';
 	import {
@@ -64,7 +66,7 @@
 		cable
 	}: {
 		audio?: AudioEngine | null;
-		current?: (PreviewCurve & { name: string }) | null;
+		current?: (PreviewCurve & { name: string; community?: Candidate['community'] }) | null;
 		onopen?: (value: Candidate) => boolean;
 		reducedMotion?: boolean;
 		/** Social client (T4.16): Comunidade candidates and the S6 submission; null = local only. */
@@ -84,13 +86,26 @@
 	);
 	let generated = $state.raw<Candidate[]>([]);
 	let community = $state.raw<Candidate[]>([]);
-	const allCandidates = $derived([
-		...official,
-		...(currentCandidate ? [currentCandidate] : []),
-		...community,
-		...generated
-	]);
+	const hidden = getHiddenStore();
+	function candidateVisible(item: Candidate) {
+		return (
+			!item.community ||
+			($hidden.ready && !isHidden($hidden, item.community.lineageId, item.community.author))
+		);
+	}
+	const allCandidates = $derived(
+		[
+			...official,
+			...(currentCandidate ? [currentCandidate] : []),
+			...community,
+			...generated
+		].filter(candidateVisible)
+	);
 	let selected = $state<string[]>([]);
+	$effect(() => {
+		const kept = selected.filter((id) => allCandidates.some((item) => item.id === id));
+		if (kept.length !== selected.length) selected = kept;
+	});
 	const chosen = $derived(allCandidates.filter((c) => selected.includes(c.id)));
 	let baseId = $state(official[0]?.id ?? '');
 	let spread = $state(2);
@@ -171,6 +186,12 @@
 	let notes = $state('');
 	let labSwitch = $state(false);
 	let message = $state('');
+	$effect(() => {
+		if (active && session?.candidates.some((item) => !candidateVisible(item))) {
+			reset();
+			message = m.hidden_content();
+		}
+	});
 	let announcement = $state('');
 	let fileInput: HTMLInputElement | undefined = $state();
 	let loadingFile = $state(false);
@@ -440,7 +461,11 @@
 			message = m.cego_confirmation_required();
 			return;
 		}
-		if (candidates.length < 2 || candidates.length > 3 || candidates.some((c) => !c.accepted)) {
+		if (
+			candidates.length < 2 ||
+			candidates.length > 3 ||
+			candidates.some((c) => !c.accepted || !candidateVisible(c))
+		) {
 			message = m.cego_candidates_required();
 			return;
 		}

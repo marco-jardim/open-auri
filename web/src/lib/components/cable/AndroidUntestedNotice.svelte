@@ -65,6 +65,7 @@
 			open,
 			onDismiss: () => undefined,
 			canDismiss: () => false,
+			consumeWhenBlocked: false,
 			initialFocus: '[data-ack]'
 		}}
 	>

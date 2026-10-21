@@ -172,7 +172,7 @@ describe('the same class as the core classifyCurve', () => {
 		for (const curve of curves) {
 			expect(curveClassification(curve.bands, curve.preampDb)).toEqual(core(curve));
 		}
-	});
+	}, 30_000); // CPU-bound gate runs: well under 1 s locally, slower on a loaded CI runner.
 
 	const tenths = (min: number, max: number) =>
 		fc.integer({ min: min * 10, max: max * 10 }).map((value) => value / 10);

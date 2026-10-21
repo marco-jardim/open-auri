@@ -13,6 +13,7 @@
 	import { curveClassification } from '#lib/gate-verdicts.ts';
 	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import YoloPublishAck from '#lib/components/yolo/YoloPublishAck.svelte';
+	import { registerNativeBack } from '#lib/components/chrome/native-back.ts';
 	import {
 		ackWaived,
 		needsYoloAck,
@@ -65,6 +66,11 @@
 	/** The YOLO acknowledgement step (waived criteria as text), or null. */
 	let ackStep = $state.raw<{ waived: string[] } | null>(null);
 	const showAck = $derived(ackStep !== null && visibility !== 'private');
+
+	$effect(() => {
+		if (!opened) return;
+		return registerNativeBack({ canDismiss: () => !busy, dismiss: close });
+	});
 
 	function open(publish: boolean) {
 		if (!dialog || social.unavailable || !social.session.verified) return;

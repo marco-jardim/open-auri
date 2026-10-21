@@ -3,6 +3,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { saveFileErrorMessage } from '#lib/files/save.ts';
 	import SocialSources from './SocialSources.svelte';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import { createCurveSocial, type CurveSocial } from './social.svelte.ts';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { curveResponseDb } from 'open-auri/dsp';
@@ -19,6 +20,8 @@
 	import { copy } from './copy.ts';
 	import {
 		initialTracks,
+		communityHidden,
+		communitySourced,
 		visibleTracks,
 		compareCurves,
 		patchBay,
@@ -48,6 +51,13 @@
 	onMount(() => social.mount());
 	const t = $derived(copy(locale));
 	let tracks = $state.raw(initialTracks());
+	const hidden = getHiddenStore();
+	// Loaded tracks belong to the user: keep them intact and explain the hidden source.
+	const hiddenTracks = $derived(tracks.filter((track) => communityHidden(track.curve, $hidden)));
+	/** Community tracks the reader's preferences could not check yet (offline, API down). */
+	const uncheckedTracks = $derived(
+		$hidden.ready ? [] : tracks.filter((track) => communitySourced(track.curve))
+	);
 	let selected = $state(1);
 	let pairA = $state(1);
 	let pairB = $state(2);
@@ -187,6 +197,13 @@
 			error = t.failed;
 			return;
 		}
+		// Every source here is already local (the editor curve, the browser library, a preset): it is
+		// never refused because the hidden list is not ready. Once it is, `hiddenTracks` re-checks the
+		// loaded track and explains a hidden source; meanwhile `uncheckedTracks` says why.
+		if (communityHidden(curve, $hidden)) {
+			error = m.hidden_content();
+			return;
+		}
 		const snapshot = curve;
 		try {
 			let gate = loadGates.get(id);
@@ -196,6 +213,10 @@
 			}
 			const { verdict } = await gate.commit({ ...snapshot, experimental: true });
 			if (disposed || loadTokens.get(id) !== token) return;
+			if (communityHidden(snapshot, $hidden)) {
+				error = m.hidden_content();
+				return;
+			}
 			if (!verdict.ok) {
 				error = `${t.invalidCurve} ${verdict.reasons.map((reason) => reason.code).join(', ')}`;
 				return;
@@ -367,6 +388,17 @@
 				</select></label
 			>
 			<SocialSources {social} path="/comparar" onload={(curve) => bounce(socialTrack, curve)} />
+			{#if hiddenTracks.length}<p class="notice" role="status">{m.w4_hidden_track_notice()}</p>{/if}
+			{#if uncheckedTracks.length}
+				<div class="unchecked">
+					<p class="notice" role="status">{m.w4r1_hidden_unavailable()}</p>
+					{#if $hidden.loadError}
+						<Button size="sm" loading={$hidden.busy} onclick={() => hidden.retry()}
+							>{m.w4r1_hidden_check_again()}</Button
+						>
+					{/if}
+				</div>
+			{/if}
 			<div class="lanes">
 				{#each tracks as track (track.id)}
 					{@const level = laneTrim(track.id)}
@@ -671,13 +703,52 @@
 		position: relative;
 		isolation: isolate;
 	}
+	.unchecked {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+	}
+	/* The help follows the title and lede in the DOM (the heading comes first in reading and tab
+	   order); the grid only places it. Desktop: beside the eyebrow and title, top-right, so the
+	   title keeps its place. Narrow: on the eyebrow's row, never over it, with the title below. */
 	.intro {
-		position: relative;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas:
+			'kicker help'
+			'title help'
+			'lede lede';
+		column-gap: 12px;
+		align-items: start;
+	}
+	.intro > .kicker {
+		grid-area: kicker;
+	}
+	.intro > h1 {
+		grid-area: title;
+	}
+	.intro > .lede {
+		grid-area: lede;
 	}
 	.intro-help {
-		position: absolute;
-		top: 0;
-		right: 0;
+		grid-area: help;
+		justify-self: end;
+	}
+	@media (max-width: 640px) {
+		.intro {
+			grid-template-areas:
+				'kicker help'
+				'title title'
+				'lede lede';
+			align-items: center;
+		}
+		.intro > .kicker {
+			margin: 0;
+		}
+		.intro > h1 {
+			margin-top: 4px;
+		}
 	}
 	.counter {
 		display: inline-flex;

@@ -16,6 +16,7 @@ import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import { AUDIO_SOURCE_KEY } from '#lib/audio/preview-sources.ts';
 import previewManifest from '../../../static/audio/preview/manifest.json';
+import { NATIVE_BACK_EVENT } from '#lib/components/chrome/native-back.ts';
 
 vi.mock(import('#lib/audio/engine.ts'), async (original) => ({
 	...(await original()),
@@ -89,8 +90,50 @@ beforeEach(async () => {
 afterEach(async () => {
 	await cleanup();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	localStorage.removeItem(AUDIO_SOURCE_KEY);
 	await setLocale('pt-BR', { reload: false });
+});
+
+function pressBack(): boolean {
+	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
+
+test('Android Back closes AudioPanel, returns focus and unregisters across reopen and unmount', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const fake = audioUi();
+	await render(AudioLoader, { engine: fake.engine });
+	const trigger = page.getByRole('button', { name: m.audio_button_aria({ name: m.audio_none() }) });
+	const dialog = page.getByRole('dialog', { name: m.audio_title(), exact: true });
+	expect(pressBack()).toBe(false);
+	for (let opening = 0; opening < 2; opening += 1) {
+		await trigger.click();
+		await expect.element(dialog).toBeVisible();
+		expect(pressBack()).toBe(true);
+		// Closed, the panel leaves the accessibility tree: its role locator finds nothing.
+		await expect.poll(() => dialog.query()).toBeNull();
+		await expect.element(trigger).toHaveFocus();
+		expect(pressBack()).toBe(false);
+	}
+	await trigger.click();
+	await expect.element(dialog).toBeVisible();
+	await cleanup();
+	expect(pressBack()).toBe(false);
+	expect(fake.engine.start).not.toHaveBeenCalled();
+	expect(fake.engine.dispose).not.toHaveBeenCalled();
+});
+
+test('outside Android AudioPanel does not register Back', async () => {
+	vi.stubGlobal('Capacitor', undefined);
+	await render(AudioLoader, { engine: audioUi().engine });
+	await page.getByRole('button', { name: m.audio_button_aria({ name: m.audio_none() }) }).click();
+	const dialog = page.getByRole('dialog', { name: m.audio_title(), exact: true });
+	await expect.element(dialog).toBeVisible();
+	expect(pressBack()).toBe(false);
+	await expect.element(dialog).toBeVisible();
 });
 
 test('opens and closes the idle popover without starting audio, and unsubscribes without disposing the shared engine', async () => {

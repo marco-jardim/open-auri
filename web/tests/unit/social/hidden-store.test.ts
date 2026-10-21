@@ -74,6 +74,44 @@ describe('hidden preferences format', () => {
 });
 
 describe('hidden store', () => {
+	test('unknown sessions retain local hides and request a session retry without treating them as anonymous', async () => {
+		const storage = memory();
+		storage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify({ authors: ['ana'], curves: ['blocked'] }));
+		const remote = api();
+		const retrySession = vi.fn();
+		const store = createHiddenStore(remote, () => storage, retrySession);
+		await store.setUser(undefined);
+		expect(get(store)).toMatchObject({
+			authors: ['ana'],
+			curves: ['blocked'],
+			ready: false,
+			error: true,
+			loadError: true
+		});
+		expect(store.visible('anything')).toBe(false);
+		await store.retry();
+		expect(retrySession).toHaveBeenCalledOnce();
+		expect(remote.myHidden).not.toHaveBeenCalled();
+		await store.setUser(null);
+		expect(store.visible('anything')).toBe(true);
+		expect(store.visible('blocked')).toBe(false);
+	});
+	test('list-load errors are separate from failed writes and clear after a successful retry', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const remote = api();
+		const store = createHiddenStore(remote, () => memory());
+		await store.setUser('me');
+		remote.putHidden.mockRejectedValueOnce(new Error('write failed'));
+		await expect(store.hide('curve', 'blocked')).rejects.toThrow('write failed');
+		expect(get(store)).toMatchObject({ ready: true, error: true, loadError: false });
+		remote.myHidden
+			.mockRejectedValueOnce(new Error('offline'))
+			.mockRejectedValueOnce(new Error('offline'));
+		await store.retry();
+		expect(get(store)).toMatchObject({ ready: false, error: true, loadError: true });
+		await store.retry();
+		expect(get(store)).toMatchObject({ ready: true, error: false, loadError: false });
+	});
 	test('visitors persist labels with ids, restore across mounts and unhide without an API request', async () => {
 		const storage = memory();
 		const remote = api();

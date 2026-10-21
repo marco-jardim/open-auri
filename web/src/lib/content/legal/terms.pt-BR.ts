@@ -6,7 +6,6 @@ const paragraph = (text: string) => ({ kind: 'paragraph' as const, text });
 const heading = (text: string) => ({ kind: 'heading' as const, text });
 const list = (items: string[]) => ({ kind: 'list' as const, items });
 
-// TODO(Q-LEGAL): revisão jurídica dos termos antes da publicação.
 export const termsPtBR: LegalDocument = {
 	locale: 'pt-BR',
 	title: 'Termos de uso do open-auri',

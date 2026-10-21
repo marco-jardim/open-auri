@@ -36,7 +36,7 @@ Contas pessoais criadas depois de 2023-11-13 precisam de teste fechado com 12 te
 | Estado da conta | ativa (informado pelo mantenedor em 2026-10-20) |
 | Data de criação | anterior a 2023-11-13 ("conta muito antiga") |
 | Tipo | pessoal |
-| Identidade verificada | não; publicação bloqueada pelo Console até concluir a verificação |
+| Identidade verificada | sim (informado pelo mantenedor em 2026-10-21) |
 | Aviso de inatividade | nenhum informado |
 | Caminho da P7 | isento de teste fechado (conta pessoal anterior a 2023-11-13); envio direto para produção depois do teste interno |
 

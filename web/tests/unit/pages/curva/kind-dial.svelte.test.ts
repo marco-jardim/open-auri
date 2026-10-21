@@ -8,6 +8,7 @@ import type { Layer } from '#lib/components/pages/curva/layers.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import { blockRealPointerHover, pointerClick } from './real-pointer.ts';
+import { NATIVE_BACK_EVENT } from '#lib/components/chrome/native-back.ts';
 
 const refusal = 'The full-curve gate refused this candidate.';
 /** Hover is driven by dispatched events only: the runner's real mouse must not pause a dial. */
@@ -22,6 +23,7 @@ afterEach(async () => {
 	await cleanup();
 	restorePointer();
 	vi.useRealTimers();
+	vi.unstubAllGlobals();
 	await setLocale('pt-BR', { reload: false });
 });
 
@@ -47,6 +49,56 @@ async function key(dial: HTMLElement, name: string) {
 	dial.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
 	await tick();
 }
+
+function pressBack(): boolean {
+	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
+
+test('Android Back closes the KindDial legend and reverts a pending kind without applying it', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const { screen, dial, value, onkind } = await setup('PK', 'ajustar', ['LS']);
+	dial.focus();
+	await tick();
+	await key(dial, 'ArrowRight');
+	const legend = screen.container.querySelector('[role="tooltip"]');
+	expect(legend?.matches(':popover-open')).toBe(true);
+	expect(value()).toBe('LS ✕');
+	expect(pressBack()).toBe(true);
+	await tick();
+	expect(legend?.matches(':popover-open')).toBe(false);
+	expect(value()).toBe('PK');
+	expect(onkind).not.toHaveBeenCalled();
+	expect(document.activeElement).toBe(dial);
+	expect(pressBack()).toBe(false);
+	// Focus-out/in is the normal way to reopen a dismissed legend.
+	dial.blur();
+	await tick();
+	dial.focus();
+	await tick();
+	expect(legend?.matches(':popover-open')).toBe(true);
+	expect(pressBack()).toBe(true);
+	await tick();
+	dial.blur();
+	await tick();
+	dial.focus();
+	await tick();
+	await cleanup();
+	expect(pressBack()).toBe(false);
+});
+
+test('outside Android the KindDial legend does not register Back', async () => {
+	vi.stubGlobal('Capacitor', undefined);
+	const { screen, dial } = await setup();
+	dial.focus();
+	await tick();
+	const legend = screen.container.querySelector('[role="tooltip"]');
+	expect(legend?.matches(':popover-open')).toBe(true);
+	expect(pressBack()).toBe(false);
+	expect(legend?.matches(':popover-open')).toBe(true);
+});
 
 test.each([
 	['ajustar', ['LS', 'OFF', 'PK']],

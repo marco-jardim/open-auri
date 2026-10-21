@@ -157,6 +157,7 @@
 		{/if}
 
 		<div class="sheet-section sheet-prefs">
+			<a class="sheet-link" href="/privacidade" onclick={onclose}>{m.w4_privacy()}</a>
 			<div class="sheet-pref">
 				<span class="sheet-eyebrow" aria-hidden="true">{m.fuxnav_sheet_language()}</span>
 				<LanguageToggle variant="full" />

@@ -139,6 +139,26 @@ function contentType(response: Response): string {
 }
 
 /**
+ * Adds `no-transform` to the Cache-Control of an HTML response. Cloudflare then injects nothing
+ * into the page at the edge (JavaScript Detections of Bot Fight Mode, Web Analytics): the site's
+ * CSP blocks such inline/third-party scripts anyway, so they only produced violations. Bot Fight
+ * Mode keeps challenging bots on its other signals. Non-HTML responses are returned unchanged.
+ */
+export function withNoTransform(response: Response): Response {
+	if (!contentType(response).startsWith('text/html')) return response;
+	const current = response.headers.get('cache-control') ?? '';
+	if (/(^|,)\s*no-transform\s*(,|$)/i.test(current)) return response;
+	const value = current.trim() ? `${current}, no-transform` : 'no-transform';
+	try {
+		response.headers.set('cache-control', value);
+		return response;
+	} catch {
+		const copy = new Response(response.body, response);
+		copy.headers.set('cache-control', value);
+		return copy;
+	}
+}
+/**
  * Adds the security headers to `response` (headers already set by a route win, e.g. a CORP
  * override) and makes sure framing is denied by the CSP. Returns the same response when its
  * headers are mutable, otherwise a copy.
@@ -167,7 +187,7 @@ export function applySecurityHeaders(response: Response, options: { origin: stri
 	} else if (!isScript) {
 		headers.set('content-security-policy', isHtml ? FRAME_ANCESTORS_POLICY : NON_HTML_CSP);
 	}
-	return target;
+	return withNoTransform(target);
 }
 
 /**

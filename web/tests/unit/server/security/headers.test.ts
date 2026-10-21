@@ -10,6 +10,7 @@ import {
 	renderCsp,
 	renderStaticHeadersFile,
 	securityHeaders,
+	withNoTransform,
 	STATIC_DOCUMENT_CSP,
 	STATIC_DOCUMENT_CSP_DIRECTIVES
 } from '#lib/server/security/headers.ts';
@@ -164,5 +165,44 @@ describe('securityHeaders (plan §3.8)', () => {
 		expect(readFileSync(STATIC_HEADERS, 'utf8').replaceAll('\r\n', '\n')).toBe(
 			renderStaticHeadersFile()
 		);
+	});
+});
+
+describe('withNoTransform', () => {
+	const html = (headers: Record<string, string> = {}) =>
+		new Response('<!doctype html>', {
+			headers: { 'content-type': 'text/html; charset=utf-8', ...headers }
+		});
+
+	it('adds no-transform to HTML so Cloudflare injects nothing at the edge', () => {
+		expect(withNoTransform(html()).headers.get('cache-control')).toBe('no-transform');
+		expect(
+			withNoTransform(html({ 'cache-control': 'public, max-age=0, must-revalidate' })).headers.get(
+				'cache-control'
+			)
+		).toBe('public, max-age=0, must-revalidate, no-transform');
+		expect(
+			withNoTransform(html({ 'cache-control': 'private, no-transform' })).headers.get(
+				'cache-control'
+			)
+		).toBe('private, no-transform');
+	});
+
+	it('leaves non-HTML untouched and copies immutable responses', async () => {
+		const js = new Response('x', {
+			headers: {
+				'content-type': 'text/javascript',
+				'cache-control': 'public, max-age=31536000, immutable'
+			}
+		});
+		expect(withNoTransform(js).headers.get('cache-control')).toBe(
+			'public, max-age=31536000, immutable'
+		);
+		const frozen = Response.redirect('https://example.org/', 302);
+		expect(withNoTransform(frozen)).toBe(frozen);
+		const upstream = await fetch('data:text/html,<p>x</p>');
+		const result = withNoTransform(upstream);
+		expect(result.headers.get('cache-control')).toBe('no-transform');
+		expect(await result.text()).toBe('<p>x</p>');
 	});
 });

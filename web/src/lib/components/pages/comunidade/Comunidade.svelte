@@ -590,7 +590,7 @@
 			</div>
 			<div class="bank-wrap">
 				{#if !$hidden.ready}
-					<p class="bank-state" role="status">{m.hidden_loading()}</p>
+					{#if !$hidden.error}<p class="bank-state" role="status">{m.hidden_loading()}</p>{/if}
 				{:else if feedStatus === 'loading' && channels.length === 0}
 					<div class="bank skel-bank" role="status" aria-busy="true" data-testid="feed-loading">
 						<span class="sr-only">{m.comunidade_loading()}</span>
@@ -795,33 +795,37 @@
 					{/if}
 				{/if}
 			</details>
-			<details
-				class="drawer disclosure"
-				bind:open={reportOpen}
-				data-testid="drawer-report"
-				ontoggle={(event) => event.currentTarget.open && reportPanel.request(drawerFailed)}
-			>
-				<summary onpointerenter={() => reportPanel.request()} onfocus={() => reportPanel.request()}
-					><span class="drawer-title">{m.comunidade_report_title()}</span><span class="drawer-lede"
-						>{m.comunidade_report_lede()}</span
-					></summary
+			{#if !preferredRecall}
+				<details
+					class="drawer disclosure"
+					bind:open={reportOpen}
+					data-testid="drawer-report"
+					ontoggle={(event) => event.currentTarget.open && reportPanel.request(drawerFailed)}
 				>
-				{#if reportOpen}
-					{#if reportPanel.current}
-						{@const ReportPanel = reportPanel.current}
-						<ReportPanel
-							{api}
-							{session}
-							subject={target ? { kind: 'lineage', id: target.lineageId } : null}
-							targetName={target?.name}
-							{siteKey}
-							{online}
-						/>
-					{:else}
-						<Skeleton width="100%" height="12rem" />
+					<summary
+						onpointerenter={() => reportPanel.request()}
+						onfocus={() => reportPanel.request()}
+						><span class="drawer-title">{m.comunidade_report_title()}</span><span
+							class="drawer-lede">{m.comunidade_report_lede()}</span
+						></summary
+					>
+					{#if reportOpen}
+						{#if reportPanel.current}
+							{@const ReportPanel = reportPanel.current}
+							<ReportPanel
+								{api}
+								{session}
+								subject={target ? { kind: 'lineage', id: target.lineageId } : null}
+								targetName={target?.name}
+								{siteKey}
+								{online}
+							/>
+						{:else}
+							<Skeleton width="100%" height="12rem" />
+						{/if}
 					{/if}
-				{/if}
-			</details>
+				</details>
+			{/if}
 		</section>
 	</div>
 </div>

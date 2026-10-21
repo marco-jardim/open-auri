@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
 import NativeModalFixture from './NativeModalFixture.svelte';
+import NativePopoverFixture from './NativePopoverFixture.svelte';
 import ConfirmDialog from '#lib/components/chrome/ConfirmDialog.svelte';
 import AndroidUntestedNotice from '#lib/components/cable/AndroidUntestedNotice.svelte';
 import { NATIVE_BACK_EVENT, registerNativeBack } from '#lib/components/chrome/native-back.ts';
@@ -10,9 +11,18 @@ import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import '../primitives/design-system.ts';
 
-/** Exactly what MainActivity evaluates on Back: true means the page consumed it. */
+/** The cancelable event portion of MainActivity.NATIVE_BACK_SCRIPT. */
 function pressBack(): boolean {
 	return !window.dispatchEvent(new CustomEvent(NATIVE_BACK_EVENT, { cancelable: true }));
+}
+
+/** The full native script result, before MainActivity performs history/leave navigation. */
+function nativeBackAction(): 'consumed' | 'leave' | 'history' {
+	return window.__oaWriteInProgress === true || pressBack()
+		? 'consumed'
+		: window.__oaBackLeaves === true
+			? 'leave'
+			: 'history';
 }
 
 /** Lets any Svelte update or dialog event caused by the press land before asserting. */
@@ -33,6 +43,7 @@ afterEach(async () => {
 	try {
 		await cleanup();
 		// Every unmounted modal unregistered: Back is the app's again (history, else exit).
+		expect(window.__oaBackLeaves).toBe(false);
 		expect(pressBack()).toBe(false);
 	} finally {
 		localStorage.removeItem('oa.androidDisclaimerAck');
@@ -43,26 +54,31 @@ afterEach(async () => {
 	}
 });
 
-async function openChecklist() {
+async function openChecklist(unsaved = false) {
 	const fake = cableUi();
 	const onclose = vi.fn();
-	await render(NativeModalFixture, { service: fake.service, onclose });
+	await render(NativeModalFixture, { service: fake.service, onclose, unsaved });
 	const trigger = page.getByRole('button', { name: m.chrome_write(), exact: true });
 	await trigger.click();
 	await expect.element(page.getByRole('dialog', { name: m.cable_checklist_title() })).toBeVisible();
 	return { fake, onclose, trigger };
 }
 
-test('Back closes the header write sheet, is consumed and returns focus, without touching history', async () => {
+test('Back closes the write sheet and restored unsaved-tooltip focus does not consume the next Back', async () => {
 	const push = vi.spyOn(history, 'pushState');
 	const back = vi.spyOn(history, 'back');
 	const length = history.length;
-	const { onclose, trigger } = await openChecklist();
+	const { onclose, trigger } = await openChecklist(true);
 	expect(pressBack()).toBe(true);
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(onclose).toHaveBeenCalledOnce();
 	await expect.element(trigger).toHaveFocus();
-	// Nothing open: the press is left to the app (WebView history, else leave the app).
+	await expect
+		.element(
+			page.getByRole('tooltip', { includeHidden: true }).filter({ hasText: m.chrome_unsaved() })
+		)
+		.toBeVisible();
+	// Only a passive tooltip is open: Back is left to the app (history, else leave).
 	expect(pressBack()).toBe(false);
 	expect(onclose).toHaveBeenCalledOnce();
 	expect(push).not.toHaveBeenCalled();
@@ -152,40 +168,94 @@ test('a write in progress consumes Back without closing; after the write Back cl
 	expect(pressBack()).toBe(false);
 });
 
-test('the first-run notice consumes Back without closing or acknowledging until Entendi', async () => {
+// Outside and trigger dismissal are the popover's own behaviour (covered with the real layout);
+// in this fixture the top-layer popover covers both targets.
+test.each(['Back', 'Escape'] as const)(
+	'the cable status popover closes on %s, unregisters, and Back works again after reopening',
+	async (method) => {
+		const fake = cableUi();
+		const screen = await render(NativePopoverFixture, { service: fake.service });
+		const trigger = page.getByRole('button', { name: 'Cable status', exact: true });
+		const popover = screen.container.querySelector<HTMLElement>('[data-chrome="status"]')!;
+		expect(pressBack()).toBe(false);
+		await trigger.click();
+		await expect.element(popover).toBeVisible();
+		if (method === 'Back') expect(pressBack()).toBe(true);
+		else await userEvent.keyboard('{Escape}');
+		await expect.element(popover).not.toBeVisible();
+		expect(pressBack()).toBe(false);
+		await trigger.click();
+		await expect.element(popover).toBeVisible();
+		expect(pressBack()).toBe(true);
+		await expect.element(popover).not.toBeVisible();
+		expect(pressBack()).toBe(false);
+		await trigger.click();
+		await expect.element(popover).toBeVisible();
+		await cleanup();
+		expect(pressBack()).toBe(false);
+		expect(fake.connect).not.toHaveBeenCalled();
+		expect(fake.disconnect).not.toHaveBeenCalled();
+	}
+);
+
+test('outside Android the cable status popover does not register Back', async () => {
+	vi.stubGlobal('Capacitor', undefined);
+	const screen = await render(NativePopoverFixture, { service: cableUi().service });
+	await page.getByRole('button', { name: 'Cable status', exact: true }).click();
+	const popover = screen.container.querySelector<HTMLElement>('[data-chrome="status"]')!;
+	await expect.element(popover).toBeVisible();
+	expect(pressBack()).toBe(false);
+	await expect.element(popover).toBeVisible();
+});
+
+test('the first-run notice lets Back leave without closing or acknowledging until Entendi', async () => {
 	await render(AndroidUntestedNotice, { kind: 'native', validated: false, version: 1 });
 	await expect.element(page.getByRole('dialog')).toBeVisible();
 	const dialog = page.getByRole('dialog').element() as HTMLDialogElement;
 	const ack = page.getByRole('button', { name: m.android_untested_ack() });
+	expect(window.__oaBackLeaves).toBe(true);
 	for (let press = 0; press < 3; press += 1) {
-		expect(pressBack()).toBe(true);
+		expect(nativeBackAction()).toBe('leave');
 		await settle();
 		expect(dialog.matches(':modal')).toBe(true);
 		expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
 	}
 	await expect.element(ack).toHaveFocus();
-	// A forced close reopens with focus on Entendi; Back is still consumed.
+	// A forced close reopens with focus on Entendi; Back still lets the app leave.
 	dialog.close();
 	await expect.poll(() => dialog.matches(':modal')).toBe(true);
 	await expect.element(ack).toHaveFocus();
-	expect(pressBack()).toBe(true);
+	expect(pressBack()).toBe(false);
 	await ack.click();
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBe('1');
-	expect(pressBack()).toBe(false);
+	expect(window.__oaBackLeaves).toBe(false);
+	expect(nativeBackAction()).toBe('history');
 });
 
 test('switching the notice to the recovery banner unregisters it; back to the modal registers again', async () => {
-	const screen = await render(AndroidUntestedNotice, { kind: 'native', validated: false });
-	await expect.element(page.getByRole('dialog')).toBeVisible();
-	expect(pressBack()).toBe(true);
-	await screen.rerender({ presentation: 'banner' });
-	await expect.element(page.getByRole('complementary')).toBeVisible();
-	expect(pressBack()).toBe(false);
-	await screen.rerender({ presentation: 'modal' });
-	await expect.element(page.getByRole('dialog')).toBeVisible();
-	expect(pressBack()).toBe(true);
-	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+	const dismissBelow = vi.fn();
+	const releaseBelow = registerNativeBack({ canDismiss: () => true, dismiss: dismissBelow });
+	try {
+		const screen = await render(AndroidUntestedNotice, { kind: 'native', validated: false });
+		await expect.element(page.getByRole('dialog')).toBeVisible();
+		expect(window.__oaBackLeaves).toBe(true);
+		expect(pressBack()).toBe(false);
+		expect(dismissBelow).not.toHaveBeenCalled();
+		await screen.rerender({ presentation: 'banner' });
+		await expect.element(page.getByRole('complementary')).toBeVisible();
+		expect(window.__oaBackLeaves).toBe(false);
+		expect(pressBack()).toBe(true);
+		expect(dismissBelow).toHaveBeenCalledOnce();
+		await screen.rerender({ presentation: 'modal' });
+		await expect.element(page.getByRole('dialog')).toBeVisible();
+		expect(window.__oaBackLeaves).toBe(true);
+		expect(pressBack()).toBe(false);
+		expect(dismissBelow).toHaveBeenCalledOnce();
+		expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+	} finally {
+		releaseBelow();
+	}
 });
 
 test('the stack: topmost first, a guarded top consumes Back without reaching the one below', () => {
@@ -212,6 +282,22 @@ test('the stack: topmost first, a guarded top consumes Back without reaching the
 	expect(pressBack()).toBe(false);
 });
 
+test('a blocked notice on top lets Back through without dismissing the overlay below', async () => {
+	const onResult = vi.fn();
+	await render(ConfirmDialog, { open: true, title: 'Below the notice', onResult });
+	await render(AndroidUntestedNotice, { kind: 'native', validated: false });
+	const notice = page.getByRole('dialog', { name: m.android_untested_title() });
+	await expect.element(notice).toBeVisible();
+	expect(pressBack()).toBe(false);
+	expect(onResult).not.toHaveBeenCalled();
+	expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+	await notice.getByRole('button', { name: m.android_untested_ack() }).click();
+	await expect.element(notice).not.toBeInTheDocument();
+	expect(pressBack()).toBe(true);
+	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+	expect(onResult).toHaveBeenCalledExactlyOnceWith(false);
+});
+
 test('outside the Android app nothing registers and Back is never consumed', async () => {
 	vi.stubGlobal('Capacitor', undefined);
 	const dismiss = vi.fn();
@@ -230,4 +316,84 @@ test('outside the Android app nothing registers and Back is never consumed', asy
 	await page.getByRole('button', { name: m.cable_close(), exact: true }).click();
 	await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
 	expect(push).not.toHaveBeenCalled();
+});
+
+test('a notice lets Back leave unless any lower consuming overlay is busy; stack changes refresh the leave flag', () => {
+	let busy = true;
+	const dismissBusy = vi.fn();
+	const dismissMiddle = vi.fn();
+	const dismissNotice = vi.fn();
+	const dismissAbove = vi.fn();
+	const releaseBusy = registerNativeBack({ canDismiss: () => !busy, dismiss: dismissBusy });
+	const releaseMiddle = registerNativeBack({ canDismiss: () => true, dismiss: dismissMiddle });
+	const releaseNotice = registerNativeBack({
+		canDismiss: () => false,
+		dismiss: dismissNotice,
+		consumeWhenBlocked: false
+	});
+	let releaseAbove: () => void = () => undefined;
+	try {
+		expect(window.__oaBackLeaves).toBe(true);
+		expect(nativeBackAction()).toBe('consumed');
+		expect(dismissBusy).not.toHaveBeenCalled();
+		expect(dismissMiddle).not.toHaveBeenCalled();
+		expect(dismissNotice).not.toHaveBeenCalled();
+		busy = false;
+		expect(nativeBackAction()).toBe('leave');
+		releaseAbove = registerNativeBack({ canDismiss: () => true, dismiss: dismissAbove });
+		expect(window.__oaBackLeaves).toBe(false);
+		expect(nativeBackAction()).toBe('consumed');
+		expect(dismissAbove).toHaveBeenCalledOnce();
+		releaseAbove();
+		expect(window.__oaBackLeaves).toBe(true);
+		// Removing non-top entries must not clear the notice's leave flag.
+		releaseBusy();
+		releaseMiddle();
+		expect(window.__oaBackLeaves).toBe(true);
+		releaseNotice();
+		expect(window.__oaBackLeaves).toBe(false);
+		releaseNotice();
+		expect(window.__oaBackLeaves).toBe(false);
+		expect(nativeBackAction()).toBe('history');
+	} finally {
+		releaseAbove();
+		releaseNotice();
+		releaseMiddle();
+		releaseBusy();
+	}
+});
+
+test('a non-consuming overlay that becomes dismissible clears the leave flag on Back', () => {
+	let blocked = true;
+	const dismiss = vi.fn();
+	const release = registerNativeBack({
+		canDismiss: () => !blocked,
+		dismiss,
+		consumeWhenBlocked: false
+	});
+	try {
+		expect(window.__oaBackLeaves).toBe(true);
+		blocked = false;
+		expect(nativeBackAction()).toBe('consumed');
+		expect(window.__oaBackLeaves).toBe(false);
+		expect(dismiss).toHaveBeenCalledOnce();
+	} finally {
+		release();
+	}
+});
+
+test('the native write flag consumes Back before dispatch even when the notice requests leave', async () => {
+	await render(AndroidUntestedNotice, { kind: 'native', validated: false });
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	const dispatched = vi.fn();
+	window.addEventListener(NATIVE_BACK_EVENT, dispatched);
+	try {
+		vi.stubGlobal('__oaWriteInProgress', true);
+		expect(window.__oaBackLeaves).toBe(true);
+		expect(nativeBackAction()).toBe('consumed');
+		expect(dispatched).not.toHaveBeenCalled();
+		expect(localStorage.getItem('oa.androidDisclaimerAck')).toBeNull();
+	} finally {
+		window.removeEventListener(NATIVE_BACK_EVENT, dispatched);
+	}
 });

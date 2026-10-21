@@ -6,7 +6,8 @@
 	import VuMeter from '#lib/components/meters/VuMeter.svelte';
 	import type { MeterSource, MeterUpdate } from '#lib/audio/meters.ts';
 	import { numberLabel } from '#lib/charts/scales.ts';
-	import type { Track } from './comparison.ts';
+	import { communityHidden, type NamedCurve, type Track } from './comparison.ts';
+	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import type { Copy } from './copy.ts';
 	interface Props {
 		track: Track;
@@ -16,7 +17,12 @@
 		/** This page's own audition is running; only then can a meter be live. */
 		playing: boolean;
 		meter?: MeterSource | null;
-		library: readonly { id: string; name: string }[];
+		library: readonly {
+			id: string;
+			name: string;
+			source?: string;
+			community?: NamedCurve['community'];
+		}[];
 		/** A or B when this lane is in the level-matched pair, otherwise null. */
 		pairTag?: 'A' | 'B' | null;
 		/** Attenuation applied to this lane by level matching, in dB (never positive). */
@@ -44,6 +50,9 @@
 		onToggle,
 		onSelect
 	}: Props = $props();
+	const hidden = getHiddenStore();
+	const hiddenSource = $derived(communityHidden(track.curve, $hidden));
+	const shownLibrary = $derived(library.filter((curve) => !communityHidden(curve, $hidden)));
 	/** Trim fader travel: 12 dB, the widest attenuation the level match can need in practice. */
 	const TRIM_TRAVEL_DB = 12;
 	let update = $state<MeterUpdate>({ mode: 'data', frame: null });
@@ -95,8 +104,9 @@
 				onSource(value);
 			}}
 		>
-			{#if !track.curve.source.startsWith('preset:')}<option value={track.curve.source}
-					>{track.curve.name}</option
+			{#if !track.curve.source.startsWith('preset:')}<option
+					value={track.curve.source}
+					disabled={hiddenSource}>{track.curve.name}</option
 				>{/if}
 			<option value="current">{t.current}</option>
 			<option value="preset:neutro">{t.neutral}</option>
@@ -106,7 +116,7 @@
 					>{/each}</optgroup
 			>
 			<optgroup label={t.library}
-				>{#each library as choice (choice.id)}<option value="library:{choice.id}"
+				>{#each shownLibrary as choice (choice.id)}<option value="library:{choice.id}"
 						>{choice.name}</option
 					>{/each}</optgroup
 			>

@@ -159,9 +159,10 @@
 		const result = await ask();
 		if (destroyed || lastOwner !== null || session.signedIn) return;
 		if (result?.status === 'signed-out') purgeAll();
-		// The signed-out read was wrong (a failed `session.refresh` reads as signed out): nothing
-		// is purged and the session follows the probe at once, so the outbox flushes again
-		// instead of refusing events until the tab next turns visible (#26).
+		// The signed-out read was wrong (an AUTH_REQUIRED answer or layout data older than a sign-in
+		// in another tab; a failed `session.refresh` leaves the session unknown and never reads as
+		// signed out): nothing is purged and the session follows the probe at once, so the outbox
+		// flushes again instead of refusing events until the tab next turns visible (#26).
 		else if (result?.status === 'signed-in') session.set(result.account);
 		else unconfirmed = true;
 	}
@@ -201,8 +202,9 @@
 				purgeQueue(owner);
 			} else if (owner === null && previous !== null) {
 				// Read as signed out: stop using the account's origins now, but purge only once the
-				// auth API confirms nobody is signed in (a failed probe also reads as signed out; the
-				// flush only ever sends the events of the account signed in at that time).
+				// auth API confirms nobody is signed in (the read may be stale; a failed probe never
+				// gets here, it leaves the session unknown; the flush only ever sends the events of the
+				// account signed in at that time).
 				lastOwner = null;
 				setOriginsActor(null);
 				void confirmSignOut();

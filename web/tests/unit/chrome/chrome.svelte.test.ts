@@ -5,6 +5,7 @@ import { createRawSnippet } from 'svelte';
 import { m } from '#lib/paraglide/messages.js';
 import { getLocale, overwriteSetLocale, setLocale } from '#lib/paraglide/runtime.js';
 import { DEFAULT_GITHUB_URL } from '#lib/components/chrome/Footer.svelte';
+import BarSheet from '#lib/components/chrome/BarSheet.svelte';
 import {
 	CableBar,
 	EmBreve,
@@ -71,9 +72,26 @@ afterEach(async () => {
 });
 
 for (const copy of locales) {
+	test(`footer and menu sheet link directly to privacy in ${copy.locale}`, async () => {
+		await setLocale(copy.locale, { reload: false });
+		await render(Footer, { honoree });
+		await expect
+			.element(page.getByRole('link', { name: m.w4_privacy(), exact: true }))
+			.toHaveAttribute('href', '/privacidade');
+		await cleanup();
+		const onclose = vi.fn();
+		await render(BarSheet, { currentPath: '/comparar', tools: false, editorReason: '', onclose });
+		const privacy = page.getByRole('link', { name: m.w4_privacy(), exact: true });
+		await expect.element(privacy).toHaveAttribute('href', '/privacidade');
+		// Test close without navigating the browser test runner.
+		privacy.element().addEventListener('click', (event) => event.preventDefault());
+		await privacy.click();
+		expect(onclose).toHaveBeenCalledOnce();
+	});
 	test(`renders the chrome and literal notices in ${copy.locale}`, async () => {
 		await setLocale(copy.locale, { reload: false });
 		await render(CableBar);
+		expect(page.getByRole('link', { name: m.chrome_get_android_app() }).elements()).toHaveLength(0);
 		await render(Footer, { honoree });
 		await render(EmBreve);
 		await expect.element(page.getByRole('link', { name: copy.curve, exact: true })).toBeVisible();

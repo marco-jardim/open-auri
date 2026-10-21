@@ -53,7 +53,9 @@ export function precacheUrls(entries: ReadonlyArray<{ path: string }>, scope: st
 			!isApi(path) &&
 			!isAutoEq(path) &&
 			!isPreviewAudio(path) &&
-			!isPrivatePath(path)
+			!isPrivatePath(path) &&
+			// The native write freshness check must always reach the live deploy (Q2 m3).
+			path !== '/_app/version.json'
 		);
 	});
 }

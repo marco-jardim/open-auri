@@ -592,6 +592,10 @@
 		background: radial-gradient(ellipse at 15% 0, #22302e, #0d0f0f 55%, #060707);
 		font: 400 var(--fs-ui, 14px) / 1.5 var(--face-body, 'Geist', sans-serif);
 	}
+	.room > :global(.banner) {
+		/* Keep the native safety notice below the fixed app bar while browsing the rack. */
+		top: var(--bar-h, 52px);
+	}
 	.intro {
 		max-width: 1380px;
 		margin: 0 auto 24px;

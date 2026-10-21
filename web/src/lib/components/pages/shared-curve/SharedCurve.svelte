@@ -293,7 +293,11 @@
 <div class="room">
 	<div class="window" aria-hidden="true"></div>
 	{#if !$hidden.ready || contentHidden}
-		<p role="status">{$hidden.ready ? m.hidden_content() : m.hidden_loading()}</p>
+		{#if $hidden.ready}
+			<p role="status">{m.hidden_content()}</p>
+		{:else if !$hidden.error}
+			<p role="status">{m.hidden_loading()}</p>
+		{/if}
 		<HiddenItems />
 	{:else}
 		<article class="sheet" aria-labelledby="{id}-title">
@@ -359,7 +363,11 @@
 			as on the Biblioteca sheet's listen panel, never on the light paper itself.
 		-->
 			<div class="deck">
-				<ReportAction subject={{ kind: 'lineage', id: shared.lineageId }} name={shared.name} />
+				<ReportAction
+					subject={{ kind: 'lineage', id: shared.lineageId }}
+					name={shared.name}
+					author={shared.author?.username}
+				/>
 				<HideActions
 					lineageId={shared.lineageId}
 					author={authorHiddenId(shared.author)}

@@ -195,3 +195,29 @@ describe('publicOriginOf', () => {
 		for (const env of unset) expect(publicOriginOf(env)).toBe('');
 	});
 });
+
+describe('edge HTML injection', () => {
+	it('pages served past the hook carry no-transform; other files are untouched', async () => {
+		const page = withCanonicalHost({
+			fetch: () =>
+				new Response('<!doctype html>', {
+					headers: {
+						'content-type': 'text/html',
+						'cache-control': 'public, max-age=0, must-revalidate'
+					}
+				})
+		});
+		const response = await call(page, new Request(`${CANONICAL}/docs`), PRODUCTION);
+		expect(response.headers.get('cache-control')).toBe(
+			'public, max-age=0, must-revalidate, no-transform'
+		);
+		const asset = withCanonicalHost({
+			fetch: () =>
+				new Response('x', {
+					headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=3600' }
+				})
+		});
+		const file = await call(asset, new Request(`${CANONICAL}/art/x.svg`), PRODUCTION);
+		expect(file.headers.get('cache-control')).toBe('public, max-age=3600');
+	});
+});

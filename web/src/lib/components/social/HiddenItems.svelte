@@ -4,25 +4,37 @@
 	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import { hiddenLabel, type HiddenType } from '#lib/social/hidden.ts';
 	const hidden = getHiddenStore();
+	/** A failed "Show again" from this list, announced next to it. */
+	let unhideFailed = $state(false);
+	$effect(() => {
+		if (!$hidden.error) unhideFailed = false;
+	});
 	async function unhide(type: HiddenType, id: string) {
+		unhideFailed = false;
 		try {
 			await hidden.unhide(type, id);
 		} catch (error) {
+			unhideFailed = true;
 			console.warn('Could not unhide item', error);
 		}
 	}
 </script>
 
-<details class="hidden-items" id="itens-ocultos">
-	<summary>{m.hidden_title()}</summary>
-	<p>{$hidden.signedIn ? m.hidden_account_hint() : m.hidden_local_hint()}</p>
-	{#if $hidden.error}
-		<p role="alert">{m.hidden_error()}</p>
+<!-- Only a failed list load is announced here: a failed hide/unhide is announced once, by the
+	 action that started it (HideActions), never a second time at page level. -->
+{#if $hidden.loadError}
+	<div class="hidden-error" role="alert">
+		<p>{m.hidden_error()}</p>
 		<Button size="sm" loading={$hidden.busy} onclick={() => hidden.retry()}
 			>{m.hidden_retry()}</Button
 		>
-	{/if}
-	{#if !$hidden.ready}<p role="status">{m.hidden_loading()}</p>{/if}
+	</div>
+{/if}
+<details class="hidden-items" id="itens-ocultos">
+	<summary>{m.hidden_title()}</summary>
+	<p>{$hidden.signedIn ? m.hidden_account_hint() : m.hidden_local_hint()}</p>
+	{#if !$hidden.ready && !$hidden.loadError}<p role="status">{m.hidden_loading()}</p>{/if}
+	{#if unhideFailed && !$hidden.loadError}<p role="alert">{m.hidden_error()}</p>{/if}
 	{#if !$hidden.authors.length && !$hidden.curves.length}
 		{#if $hidden.ready}<p>{m.hidden_empty()}</p>{/if}
 	{:else}

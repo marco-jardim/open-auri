@@ -199,9 +199,9 @@ test('a failed probe that turns out signed in keeps the queue and purges nothing
 	expect(outbox.purge.mock.calls.every(([keep]) => keep === 'user-ana')).toBe(true);
 });
 
-test('a failed session read confirmed signed in restores the session at once (#26)', async () => {
+test('a failed session read never turns the signed-in account into a visitor (#26)', async () => {
 	const outbox = fakeOutbox();
-	// The session's own read fails (offline blip, 5xx): `refresh` reads that as signed out.
+	// The session's own read fails (offline blip, 5xx): the session stays unknown, not signed out.
 	const failing = vi.fn(async (): Promise<Response> => {
 		throw new TypeError('network');
 	});
@@ -214,16 +214,13 @@ test('a failed session read confirmed signed in restores the session at once (#2
 	await vi.waitFor(() => expect(outbox.purge).toHaveBeenCalledWith('user-ana'));
 	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(1));
 
-	await expect(session.refresh()).resolves.toBeNull();
+	await expect(session.refresh()).resolves.toBeUndefined();
 	expect(failing).toHaveBeenCalledOnce();
 	flushSync();
-	await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
-	// The probe says the account is still signed in: the session follows it without waiting
-	// for a visibility change, and the outbox flushes for it again.
-	await vi.waitFor(() => expect(session.accountId).toBe('user-ana'));
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	expect(session.accountId).toBe('user-ana');
 	expect(session.signedIn).toBe(true);
 	expect(session.verified).toBe(true);
-	await vi.waitFor(() => expect(outbox.flush).toHaveBeenCalledTimes(3));
 	expect(outbox.purge).not.toHaveBeenCalledWith(null);
 	expect(failing).toHaveBeenCalledOnce();
 });

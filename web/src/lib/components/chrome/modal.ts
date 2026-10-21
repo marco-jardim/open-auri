@@ -6,6 +6,8 @@ interface ModalOptions {
 	initialFocus?: string;
 	/** Rechecked at the close request, not just when props last updated (e.g. USB writing). */
 	canDismiss?: () => boolean;
+	/** Let Back leave an unacknowledged notice, but keep busy operations consuming it. */
+	consumeWhenBlocked?: boolean;
 }
 
 /** Native modal semantics, with deterministic tab wrapping and focus restoration. */
@@ -40,7 +42,13 @@ export function modalDialog(node: HTMLDialogElement, options: ModalOptions) {
 		}
 		// Android app: system Back closes the topmost open modal, like Escape (native-back.ts).
 		if (current.open && !releaseBack) {
-			releaseBack = registerNativeBack({ canDismiss, dismiss: () => current.onDismiss() });
+			releaseBack = registerNativeBack({
+				canDismiss,
+				dismiss: () => current.onDismiss(),
+				get consumeWhenBlocked() {
+					return current.consumeWhenBlocked;
+				}
+			});
 		} else if (!current.open) {
 			clearBack();
 		}

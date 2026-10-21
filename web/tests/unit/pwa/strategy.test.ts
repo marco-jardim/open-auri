@@ -67,6 +67,30 @@ describe('build-versioned precache', () => {
 		]);
 	});
 
+	test('never intercepts or precaches /_app/version.json (the native write freshness check)', () => {
+		// Q2 m3: native writes ask the live deploy version; the worker must stay out of that path.
+		const url = `${scope}_app/version.json`;
+		expect(
+			precacheUrls([{ path: '_app/version.json' }, { path: '/_app/version.json' }], scope)
+		).not.toContain(url);
+		for (const mode of ['cors', 'same-origin', 'no-cors'] as const) {
+			expect(
+				requestStrategy(
+					{
+						...new Request(url),
+						mode,
+						method: 'GET',
+						url,
+						headers: new Headers({ 'cache-control': 'no-cache' })
+					},
+					scope,
+					shell
+				)
+			).toBe('network-only');
+		}
+		// Even a precache list that somehow contained it would not make it 'navigation'/'api'.
+		expect(requestStrategy(new Request(url), scope, new Set([...shell]))).toBe('network-only');
+	});
 	test('rejects other origins and adjacent base paths', () => {
 		expect(scopedPath(new URL(`${scope}api/me`), scope)).toBe('/api/me');
 		expect(scopedPath(new URL('https://open-auri.test/application/a'), scope)).toBeNull();

@@ -7,6 +7,7 @@
 	import type { TourPage } from '#lib/comprehension/steps.ts';
 	import { tour, type TourController } from '#lib/comprehension/tour.svelte.ts';
 	import { tourPanel } from './panels.ts';
+	import { registerNativeBack } from '#lib/components/chrome/native-back.ts';
 
 	let {
 		page,
@@ -18,6 +19,10 @@
 		autoOpen?: boolean;
 	} = $props();
 	const visible = $derived(controller.activePage === page);
+	$effect(() => {
+		if (!visible) return;
+		return registerNativeBack({ canDismiss: () => true, dismiss: () => controller.dismiss(page) });
+	});
 
 	onMount(() => {
 		if (autoOpen && controller.shouldAutoOpen(page)) controller.open(page);

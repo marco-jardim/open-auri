@@ -1,4 +1,4 @@
-import { tick } from 'svelte';
+import { mount, tick, unmount } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
@@ -11,6 +11,9 @@ import { createAudioEngine } from '#lib/audio/engine.ts';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import type { MeterListener } from '#lib/audio/meters.ts';
 import { numberLabel } from '#lib/charts/scales.ts';
+import { createHiddenStore } from '#lib/social/hidden-store.ts';
+import { HIDDEN_CONTEXT } from '#lib/social/hidden-context.ts';
+import { m } from '#lib/paraglide/messages.js';
 
 const { commit, dispose } = vi.hoisted(() => ({ commit: vi.fn(), dispose: vi.fn() }));
 vi.mock('#lib/workers/gate-client.ts', () => ({
@@ -113,6 +116,68 @@ test('editor and library are snapshots; failed playback reports an error and sto
 	// The refused start opened no session: nothing plays and no other session is ended.
 	expect(app.audio.state()).toMatchObject({ playing: false, session: null });
 	expect(stop).not.toHaveBeenCalled();
+});
+
+test('a local community curve loads while hidden preferences are unavailable, then is re-checked', async () => {
+	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+	app = createClientApp({
+		storage: { local: null, session: null, indexedDB: null, channel: null },
+		audio: createAudioEngine({ indexedDB: null })
+	});
+	await app.state.ready;
+	const saved = await app.state.library.save({
+		...app.state.curve.current,
+		name: 'Saved community curve',
+		source: 'community:lin-x'
+	});
+	if (!saved) throw new Error('Could not prepare local community curve');
+	commit.mockResolvedValue({ verdict: { ok: true, reasons: [] } });
+	let offline = true;
+	const hidden = createHiddenStore(
+		{
+			myHidden: vi.fn(async () => {
+				if (offline) throw new Error('offline');
+				return {
+					items: [{ targetType: 'curve' as const, targetId: 'lin-x', createdAt: 1, label: null }]
+				};
+			}),
+			putHidden: vi.fn(async () => ({ items: [] })),
+			deleteHidden: vi.fn(async () => ({ items: [] }))
+		},
+		() => null
+	);
+	// A signed-in account whose preferences cannot load: not ready, with a load error.
+	await hidden.setUser('me');
+	const target = document.createElement('div');
+	document.body.append(target);
+	const instance = mount(CompararPage, {
+		target,
+		props: { app, locale: 'en-US' },
+		context: new Map([[HIDDEN_CONTEXT, hidden]])
+	});
+	const select = () => document.getElementById('comparar-source-1') as HTMLSelectElement;
+	try {
+		await source(`library:${saved.id}`);
+		// Already in this browser: loaded, never refused as hidden content.
+		await expect.poll(() => select().value).toBe('community:lin-x');
+		expect(page.getByText(m.hidden_content()).elements()).toHaveLength(0);
+		await expect
+			.element(page.getByText(m.w4r1_hidden_unavailable(), { exact: true }))
+			.toHaveAttribute('role', 'status');
+		// The preferences come back: the loaded track is kept and its hidden source explained.
+		offline = false;
+		await page.getByRole('button', { name: m.w4r1_hidden_check_again(), exact: true }).click();
+		await expect.element(page.getByText(m.w4_hidden_track_notice(), { exact: true })).toBeVisible();
+		expect(page.getByText(m.w4r1_hidden_unavailable()).elements()).toHaveLength(0);
+		expect(select().value).toBe('community:lin-x');
+		// …and it is no longer offered from the library.
+		expect([...select().options].some((option) => option.value === `library:${saved.id}`)).toBe(
+			false
+		);
+	} finally {
+		await unmount(instance);
+		target.remove();
+	}
 });
 
 test('custom experimental lane delegates source/toggles and never selects a disarmed track', async () => {

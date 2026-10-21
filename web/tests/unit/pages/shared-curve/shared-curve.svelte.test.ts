@@ -59,7 +59,7 @@ test('direct unlisted links expose reporting and explain verified sign-in to vis
 	await expect.element(page.getByText(m.fxpc_report_account(), { exact: true })).toBeVisible();
 	await expect
 		.element(page.getByRole('link', { name: m.shared_curve_login() }))
-		.toHaveAttribute('href', '/entrar');
+		.toHaveAttribute('href', expect.stringMatching(/^\/entrar(?:\?next=%2F\S*)?$/));
 	expect(page.getByRole('textbox').elements()).toHaveLength(0);
 });
 

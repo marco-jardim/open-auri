@@ -8,6 +8,14 @@ export function createCurveSocial(
 	session: SocialSession = createSocialSession()
 ) {
 	let unavailable = $state(false);
+	let abort: AbortController | null = null;
+	/** Reads the session again while it is unknown (a failed probe never signs anybody out). */
+	function refreshSession() {
+		if (session.known || !abort) return;
+		void session.refresh(abort.signal).catch((error: unknown) => {
+			if (!(error instanceof DOMException && error.name === 'AbortError')) unavailable = true;
+		});
+	}
 	return {
 		api,
 		session,
@@ -16,24 +24,25 @@ export function createCurveSocial(
 		},
 		retry() {
 			unavailable = navigator.onLine === false;
+			if (!unavailable) refreshSession();
 		},
 		mount() {
+			const controller = new AbortController();
+			abort = controller;
 			const online = () => {
 				unavailable = false;
+				refreshSession();
 			};
 			const offline = () => {
 				unavailable = true;
 			};
 			unavailable = navigator.onLine === false;
-			const abort = new AbortController();
-			if (!session.known)
-				void session.refresh(abort.signal).catch((error: unknown) => {
-					if (!(error instanceof DOMException && error.name === 'AbortError')) unavailable = true;
-				});
+			refreshSession();
 			window.addEventListener('online', online);
 			window.addEventListener('offline', offline);
 			return () => {
-				abort.abort();
+				controller.abort();
+				if (abort === controller) abort = null;
 				window.removeEventListener('online', online);
 				window.removeEventListener('offline', offline);
 			};

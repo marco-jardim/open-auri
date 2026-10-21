@@ -11,10 +11,12 @@ export interface AccountInput {
 	path: string;
 }
 
-export type AccountProbe = (signal: AbortSignal) => Promise<AccountSummary | null>;
+export type AccountProbe = (signal: AbortSignal) => Promise<AccountSummary | null | undefined>;
 
 export class AccountSession {
 	#known = $state<AccountSummary | null | undefined>(undefined);
+	#failed = $state(false);
+	#attempt = $state(0);
 	readonly #input: () => AccountInput;
 	/** Path the session was last resolved or probed for (plain field, not reactive). */
 	lastPath = '';
@@ -26,22 +28,26 @@ export class AccountSession {
 	) {
 		this.#input = input;
 		$effect(() => {
+			void this.#attempt;
 			// Reading `path` makes every navigation re-run this effect.
 			const { user, resolved, path } = input();
 			this.lastPath = path;
 			if (resolved) {
 				this.#known = user;
+				this.#failed = false;
 				return;
 			}
 			const controller = new AbortController();
 			probe(controller.signal).then(
 				(summary) => {
-					this.#known = summary;
+					if (controller.signal.aborted) return;
+					this.#failed = summary === undefined;
+					if (summary !== undefined) this.#known = summary;
 				},
 				(error: unknown) => {
 					if (!controller.signal.aborted) {
 						console.warn('Account probe failed', error);
-						this.#known = null;
+						this.#failed = true;
 					}
 				}
 			);
@@ -57,6 +63,14 @@ export class AccountSession {
 
 	/** False until a prerendered page's probe answered for the first time. */
 	get known(): boolean {
-		return this.#input().resolved || this.#known !== undefined;
+		return this.#input().resolved || (!this.#failed && this.#known !== undefined);
+	}
+
+	get failed(): boolean {
+		return !this.#input().resolved && this.#failed;
+	}
+
+	retry(): void {
+		this.#attempt++;
 	}
 }

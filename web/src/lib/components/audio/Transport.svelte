@@ -86,8 +86,8 @@
 	let scrub = $state<number | null>(null);
 	let pointerId: number | null = null;
 	let busy = $state(false);
-	/** The unavailable seek bar's reason tooltip (hover, focus, or a press on the bar). */
-	let seekTipOpen = $state(false);
+	/** A press pins the unavailable seek bar's reason; hover/focus stays passive. */
+	let seekTipPinned = $state(false);
 
 	const total = $derived(s?.duration ?? null);
 	const noise = $derived(s?.source === 'noise');
@@ -106,7 +106,7 @@
 	});
 	// A reason that went away (the length arrived) leaves no open tooltip to reappear later.
 	$effect(() => {
-		if (!seekReason) seekTipOpen = false;
+		if (!seekReason) seekTipPinned = false;
 	});
 
 	type PlayAction = 'pause' | 'resume' | 'start';
@@ -179,7 +179,7 @@
 		if (seekReason) {
 			// Touch and mouse users get the reason too, not only hover and keyboard users
 			// (same rule as Button's unavailable press).
-			seekTipOpen = true;
+			seekTipPinned = true;
 			return;
 		}
 		if (total === null) return;
@@ -290,7 +290,7 @@
 			</span>
 		</div>
 		{#if seekReason}
-			<Tooltip id={seekReasonId} text={seekReason} anchor={slider} bind:open={seekTipOpen} />
+			<Tooltip id={seekReasonId} text={seekReason} anchor={slider} bind:pinned={seekTipPinned} />
 		{/if}
 
 		{#if !noise}

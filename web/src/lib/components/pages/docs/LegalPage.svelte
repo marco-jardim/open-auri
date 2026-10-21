@@ -13,6 +13,8 @@
 		ui
 	}: { document: LegalDocument; values: PublicLegalValues; ui: LegalUi } = $props();
 	const document = $derived(resolveLegalDocument(template, values));
+	/** Numbered headings get a stable, language-independent anchor, e.g. /privacidade#secao-17. */
+	const sectionId = (text: string) => /^(\d+)\.\s/.exec(text)?.[1] ?? null;
 </script>
 
 <main class="legal-paper" data-surface="paper" lang={document.locale} aria-labelledby="legal-title">
@@ -26,7 +28,8 @@
 		<h1 id="legal-title">{document.title}</h1>
 	</header>
 	{#each document.blocks as block, index (index)}
-		{#if block.kind === 'heading'}<h2><InlineText text={block.text} /></h2>
+		{#if block.kind === 'heading'}{@const n = sectionId(block.text)}
+			<h2 id={n ? `secao-${n}` : undefined}><InlineText text={block.text} /></h2>
 		{:else if block.kind === 'paragraph'}<p><InlineText text={block.text} /></p>
 		{:else if block.kind === 'list'}<ul>
 				{#each block.items as item (item)}<li><InlineText text={item} /></li>{/each}

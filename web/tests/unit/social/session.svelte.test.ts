@@ -71,20 +71,21 @@ describe('createSocialSession', () => {
 		expect(session.accountId).toBeNull();
 	});
 
-	it('reads any failure as signed out', async () => {
+	it('failed probes stay unknown without destroying the last account summary', async () => {
 		const unauthorized = createSocialSession({
 			initial: { id: 'u1', username: 'ana', emailVerified: true },
 			fetch: sessionFetch(() => new Response('', { status: 401 })).fetch
 		});
 		await unauthorized.refresh();
-		expect(unauthorized.signedIn).toBe(false);
+		expect(unauthorized.known).toBe(false);
+		expect(unauthorized.accountId).toBe('u1');
 
 		const offline = createSocialSession({
 			initial: { id: 'u1', username: 'ana', emailVerified: true },
 			fetch: sessionFetch(() => Promise.reject(new TypeError('Failed to fetch'))).fetch
 		});
 		await offline.refresh();
-		expect([offline.known, offline.signedIn, offline.verified]).toEqual([true, false, false]);
+		expect([offline.known, offline.signedIn, offline.verified]).toEqual([false, true, true]);
 	});
 
 	it('lets set() win over a refresh still in flight', async () => {

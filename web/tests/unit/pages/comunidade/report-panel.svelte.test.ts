@@ -57,12 +57,68 @@ test('unverified and offline users cannot send even with a token', async () => {
 	const screen = await render(ReportPanel, { ...props, session: { ...VERIFIED, verified: false } });
 	await expect.element(send()).toHaveAttribute('aria-disabled', 'true');
 	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_verify_prompt());
+	await expect
+		.element(page.getByText(m.comunidade_verify_prompt(), { exact: true }).first())
+		.toBeVisible();
+	expect(page.getByRole('link', { name: m.shared_curve_login() }).elements()).toHaveLength(0);
 	(send().element() as HTMLElement).click();
 	expect(page.getByRole('textbox').elements()).toHaveLength(0);
 	await screen.rerender({ session: VERIFIED, online: false });
 	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_offline());
 	(send().element() as HTMLElement).click();
 	expect(fetch).not.toHaveBeenCalled();
+});
+
+test('failed report sends reset the live widget and accept a fresh check without closing the panel', async () => {
+	const { props, fetch } = setup();
+	fetch.mockResolvedValueOnce(apiError('TURNSTILE_FAILED', 403));
+	let options: TurnstileRenderOptions | undefined;
+	let widgetNumber = 0;
+	const renderWidget = vi.fn((_container: HTMLElement, next: TurnstileRenderOptions) => {
+		options = next;
+		return `widget-${++widgetNumber}`;
+	});
+	const remove = vi.fn();
+	Reflect.set(window, 'turnstile', { render: renderWidget, remove, reset: vi.fn() });
+	await render(ReportPanel, { ...props, siteKey: 'site-key', token: '' });
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(1);
+	options?.callback?.('first-check');
+	await send().click();
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(2);
+	expect(remove).toHaveBeenCalledWith('widget-1');
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_report_needs_check());
+	options?.callback?.('fresh-check');
+	await send().click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.comunidade_report_sent());
+	expect(headerOf(fetch.mock.calls[1]?.[1], 'x-turnstile-token')).toBe('fresh-check');
+});
+
+test('a successful send keeps its solved widget; only another target asks for a fresh check', async () => {
+	const { props, fetch } = setup();
+	let options: TurnstileRenderOptions | undefined;
+	let widgetNumber = 0;
+	const renderWidget = vi.fn((_container: HTMLElement, next: TurnstileRenderOptions) => {
+		options = next;
+		return `widget-${++widgetNumber}`;
+	});
+	const remove = vi.fn();
+	Reflect.set(window, 'turnstile', { render: renderWidget, remove, reset: vi.fn() });
+	const screen = await render(ReportPanel, { ...props, siteKey: 'site-key', token: '' });
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(1);
+	options?.callback?.('only-check');
+	await send().click();
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.comunidade_report_sent());
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_v2_reason_report_sent());
+	expect(fetch).toHaveBeenCalledOnce();
+	// No new challenge for a target that cannot be reported again.
+	expect(renderWidget).toHaveBeenCalledOnce();
+	expect(remove).not.toHaveBeenCalled();
+	await screen.rerender({ subject: { kind: 'lineage', id: 'lin-second' } });
+	await expect.poll(() => renderWidget.mock.calls.length).toBe(2);
+	expect(remove).toHaveBeenCalledWith('widget-1');
+	await expect.element(send()).toHaveAccessibleDescription(m.comunidade_report_needs_check());
+	options?.callback?.('second-check');
+	await expect.element(send()).not.toHaveAttribute('aria-disabled');
 });
 
 test('every reason is available; maximum private note is preserved and success locks only that target', async () => {

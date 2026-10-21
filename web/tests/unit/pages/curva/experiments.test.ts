@@ -97,7 +97,8 @@ describe('Experimentos: curated experimental curves', () => {
 			// Same verdict as the editor's own (memoized) status.
 			expect(experimentStatus(x).yolo.ok, x.id).toBe(true);
 		}
-	});
+		// CPU-bound (13 full gate runs): ~0.5 s locally, past the 5 s default on a loaded CI runner.
+	}, 30_000);
 
 	test('(ii) requiresYolo is computed: exactly "fails standard, passes YOLO"', () => {
 		for (const x of EXPERIMENTS) {

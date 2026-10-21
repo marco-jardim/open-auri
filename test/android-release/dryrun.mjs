@@ -17,11 +17,15 @@ import { basename, delimiter, join, posix, win32 } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { buildConfig } from '../../apps/android/capacitor.targets.mjs';
 import {
   deriveVersionCode,
   normalizeFingerprint,
+  parseApkBadging,
   parseApkCertificate,
+  readAabManifest,
   sha256,
+  verifyArtifactIdentity,
   verifyUploadCertificate,
 } from '../../tools/android-artifacts.mjs';
 
@@ -129,16 +133,19 @@ function findBuildTools() {
     for (const version of versions) {
       const dir = join(sdk, 'build-tools', version);
       const zipalign = join(dir, windows ? 'zipalign.exe' : 'zipalign');
+      const aapt2 = join(dir, windows ? 'aapt2.exe' : 'aapt2');
       const apksigner = (
         windows ? ['apksigner.exe', 'apksigner.bat', 'apksigner.cmd'] : ['apksigner']
       )
         .map((name) => join(dir, name))
         .find((path) => existsSync(path));
-      if (existsSync(zipalign) && apksigner) return { zipalign, apksigner, dir };
+      if (existsSync(zipalign) && existsSync(aapt2) && apksigner) {
+        return { zipalign, apksigner, aapt2, dir };
+      }
     }
   }
   throw new Error(
-    'Android build-tools 36.x zipalign/apksigner missing: set ANDROID_HOME or ANDROID_SDK_ROOT (CI uses 36.1.0).',
+    'Android build-tools 36.x zipalign/apksigner/aapt2 missing: set ANDROID_HOME or ANDROID_SDK_ROOT (CI uses 36.1.0).',
   );
 }
 
@@ -231,6 +238,7 @@ test(
       ANDROID_UPLOAD_KEYSTORE_PASSWORD: uploadPassword,
       ANDROID_UPLOAD_KEY_PASSWORD: uploadPassword,
       APKSIGNER: tools.apksigner,
+      AAPT2: tools.aapt2,
     };
     const redact = (text) =>
       String(text || '')
@@ -275,9 +283,33 @@ test(
         aab: find(join(outputs, 'bundle/release'), /\.aab$/),
       };
     };
+    const pkg = JSON.parse(read(join(root, 'apps/android/package.json')));
+    // n5: the identity release-manifest.json will publish. The workflow's build job passes the
+    // same deterministic code through ORG_GRADLE_PROJECT_versionCode.
+    const expected = {
+      applicationId: buildConfig({ OA_ANDROID_TARGET: 'prod' }, pkg.version).appId,
+      versionCode: deriveVersionCode(pkg.version),
+      versionName: pkg.version,
+    };
+    const identityOf = (apkPath, aabPath) => ({
+      apk: parseApkBadging(run(tools.aapt2, ['dump', 'badging', apkPath])),
+      aab: readAabManifest(readFileSync(aabPath)),
+    });
     let inputs = unsigned();
-    if (!inputs.apk.length || !inputs.aab.length) {
-      t.diagnostic('Unsigned outputs missing; running npm run build:android:release.');
+    let rebuild = !inputs.apk.length || !inputs.aab.length ? 'Unsigned outputs missing' : '';
+    if (!rebuild && inputs.apk.length === 1 && inputs.aab.length === 1) {
+      try {
+        verifyArtifactIdentity(identityOf(inputs.apk[0], inputs.aab[0]), expected);
+      } catch (error) {
+        // A plain build:android:release keeps build.gradle's default versionCode 1.
+        rebuild = `Unsigned outputs do not carry the release identity (${error.message})`;
+      }
+    }
+    if (rebuild) {
+      t.diagnostic(
+        `${rebuild}; running npm run build:android:release with ORG_GRADLE_PROJECT_versionCode=${expected.versionCode}.`,
+      );
+      env.ORG_GRADLE_PROJECT_versionCode = String(expected.versionCode);
       if (process.env.npm_execpath) {
         const paths = windows ? win32 : posix;
         const npm = join(
@@ -339,7 +371,6 @@ test(
     env.ANDROID_APP_CERT_SHA256 = keys.APP.fingerprint;
     env.ANDROID_UPLOAD_CERT_SHA256 = keys.UPLOAD.fingerprint;
 
-    const pkg = JSON.parse(read(join(root, 'apps/android/package.json')));
     const out = join(temp, 'release');
     mkdirSync(out);
     const apk = join(out, `open-auri-${pkg.version}.apk`);
@@ -453,13 +484,29 @@ syncBuiltinESMExports();
     assert.equal(manifest.hardwareValidated, false);
     assert.equal(manifest.apkSha256, sha256(readFileSync(apk)));
     assert.equal(manifest.aabSha256, sha256(readFileSync(aab)));
+    // n5: the signed APK (aapt2 dump badging) and AAB (protobuf base manifest) carry the
+    // published identity; the CLI above already failed closed otherwise.
+    const signed = identityOf(apk, aab);
+    assert.deepEqual(signed, { apk: expected, aab: expected });
+    assert.deepEqual(
+      {
+        applicationId: expected.applicationId,
+        versionCode: manifest.versionCode,
+        versionName: manifest.version,
+      },
+      expected,
+    );
+    assert.throws(
+      () => verifyArtifactIdentity(signed, { ...expected, versionCode: expected.versionCode + 1 }),
+      /APK versionCode/,
+    );
     const plan = read(join(root, 'docs/plans/2026-10-18-android-capacitor-plano.md'));
     const g5 = plan.split('**G.5 Notas da release, README e ficha da Play**')[1].split('**G.6')[0];
     const pt = g5.match(/- pt-BR: "([^"]+)"/)[1];
     const en = g5.match(/- en-US: "([^"]+)"/)[1];
     assert.ok(read(join(out, 'RELEASE_NOTES.md')).startsWith(`${pt}\n\n${en}\n\n`));
     t.diagnostic(
-      'Verified APK v2/v3 app certificate, distinct AAB upload certificate, checksums, manifest and G.5 notes.',
+      'Verified APK v2/v3 app certificate, distinct AAB upload certificate, APK/AAB applicationId/versionCode/versionName, checksums, manifest and G.5 notes.',
     );
   },
 );

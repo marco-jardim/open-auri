@@ -12,6 +12,7 @@
 	import type { AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
 	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
 	import { LazyModule } from '#lib/app/lazy.svelte.ts';
+	import { registerNativeBack } from '#lib/components/chrome/native-back.ts';
 	// Direct file: the barrel would pull every primitive into the bar's first load.
 	import Tooltip from '#lib/components/primitives/Tooltip.svelte';
 	import type { VuReferenceStore } from '#lib/components/meters/index.ts';
@@ -49,6 +50,13 @@
 	let engine = $state.raw<AudioEngine | null>(null);
 	let s = $state.raw<AudioEngineState | null>(null);
 	let open = $state(false);
+	$effect(() => {
+		if (!open) return;
+		return registerNativeBack({
+			canDismiss: () => true,
+			dismiss: () => void setOpen(false, true)
+		});
+	});
 	let root: HTMLDivElement | undefined = $state();
 	let button: HTMLButtonElement | undefined = $state();
 	let dialog: HTMLDivElement | undefined = $state();
