@@ -18,6 +18,7 @@
 // dev, preview, e2e, staging) and the canonical host itself pass through too. The hook stays: it
 // covers every environment and path the wrapper does not run for.
 import { canonicalHostResponse } from '../lib/server/security/canonical-host.ts';
+import { withNoTransform } from '../lib/server/security/headers.ts';
 
 /** The handler object a module Worker exports by default; only `fetch` is wrapped. */
 export interface WorkerHandler {
@@ -60,7 +61,9 @@ export function withCanonicalHost<H extends WorkerHandler>(handler: H): H {
 		fetch(request, env, ctx) {
 			const origin = publicOriginOf(env);
 			const response = origin ? canonicalHostResponse(request, origin) : null;
-			return response ?? inner.call(handler, request, env, ctx);
+			if (response) return response;
+			// Prerendered pages come straight from ASSETS, past the hook: no edge HTML injection.
+			return Promise.resolve(inner.call(handler, request, env, ctx)).then(withNoTransform);
 		}
 	};
 	return { ...handler, ...wrapped };
