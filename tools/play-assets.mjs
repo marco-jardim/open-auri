@@ -25,7 +25,14 @@ export const SCREENSHOT_SETS = [
   { name: 'phone', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: APP_SHOTS },
   { name: 'tablet-7', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: APP_SHOTS },
   { name: 'tablet-10', width: 1440, height: 2560, minSide: 1080, maxSide: 7680, files: APP_SHOTS },
-  { name: 'desktop', width: 1920, height: 1080, minSide: 1080, maxSide: 7680, files: BROWSING_SHOTS },
+  {
+    name: 'desktop',
+    width: 1920,
+    height: 1080,
+    minSide: 1080,
+    maxSide: 7680,
+    files: BROWSING_SHOTS,
+  },
 ];
 const FEATURE_SVG = new URL('../design/play/feature-graphic.svg', import.meta.url);
 const FONT = new URL('../web/static/og-font/InstrumentSerif-Regular.ttf', import.meta.url);
@@ -238,7 +245,8 @@ async function screenshotNames(directory, locale, set) {
 async function allScreenshotNames(directory) {
   const names = [];
   for (const locale of LOCALES) {
-    for (const set of SCREENSHOT_SETS) names.push(...(await screenshotNames(directory, locale, set)));
+    for (const set of SCREENSHOT_SETS)
+      names.push(...(await screenshotNames(directory, locale, set)));
   }
   return names;
 }

@@ -26,8 +26,22 @@ const expectedShots = [
 ];
 const expectedSets = [
   { name: 'phone', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: expectedShots },
-  { name: 'tablet-7', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: expectedShots },
-  { name: 'tablet-10', width: 1440, height: 2560, minSide: 1080, maxSide: 7680, files: expectedShots },
+  {
+    name: 'tablet-7',
+    width: 1080,
+    height: 1920,
+    minSide: 320,
+    maxSide: 3840,
+    files: expectedShots,
+  },
+  {
+    name: 'tablet-10',
+    width: 1440,
+    height: 2560,
+    minSide: 1080,
+    maxSide: 7680,
+    files: expectedShots,
+  },
   {
     name: 'desktop',
     width: 1920,
@@ -84,7 +98,11 @@ test('icon and feature graphic match fresh renders and two renders are byte-iden
 });
 
 test('each locale has seven phone/tablet and six desktop captures with exact Play specs', async () => {
-  assert.deepEqual(SCREENSHOT_SETS, expectedSets, 'pinned sizes, side limits, scene names and counts');
+  assert.deepEqual(
+    SCREENSHOT_SETS,
+    expectedSets,
+    'pinned sizes, side limits, scene names and counts',
+  );
   const locales = ['pt-BR', 'en-US'];
   for (const locale of locales) {
     for (const set of expectedSets) {
