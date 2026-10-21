@@ -45,3 +45,19 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		});
 	}
 }
+
+for (const locale of ['pt-BR', 'en-US'] as const) {
+	test(`privacy (${locale}): sections 16 and 17 have stable anchors for the Play deletion links`, async () => {
+		await setLocale(locale, { reload: false });
+		const data = renderLegalPage('privacy', config, () => undefined);
+		const screen = await render(LegalPage, {
+			document: data.documents[locale],
+			values: data.values,
+			ui: legalUi()
+		});
+		const rights = screen.container.querySelector('#secao-16');
+		const closing = screen.container.querySelector('#secao-17');
+		expect(rights?.textContent).toMatch(/^16\. /);
+		expect(closing?.textContent).toMatch(/^17\. /);
+	});
+}
