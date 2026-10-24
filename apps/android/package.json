@@ -1,6 +1,6 @@
 {
   "name": "open-auri-android",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "Android shell (Capacitor) for open-auri.com with native USB writing to the CB5100 cable",
