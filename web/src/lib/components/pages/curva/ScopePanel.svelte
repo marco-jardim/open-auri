@@ -130,6 +130,11 @@
 		 */
 		paused?: boolean;
 		side: ABSide;
+		/**
+		 * A live cable preview runs ("Ouvir no cabo"): the A/B lever switches the cable's curve,
+		 * so it works without the browser preview playing.
+		 */
+		abLive?: boolean;
 		referenceName: string;
 		previewError?: string | null;
 		previewDisabled?: boolean;
@@ -193,6 +198,7 @@
 		playing,
 		paused = false,
 		side,
+		abLive = false,
 		referenceName,
 		previewError = null,
 		previewDisabled = false,
@@ -680,7 +686,8 @@
 	);
 	// A/B needs this page's chains, which exist while playing and while paused (`select()` works
 	// on a paused preview); with no session there is nothing to switch, and the tabs say why.
-	const abReady = $derived(playing || paused);
+	// A live cable preview switches the cable's curve instead, with or without browser audio.
+	const abReady = $derived(playing || paused || abLive);
 	const leverLabel = $derived(
 		playing ? m.curva_preview_stop() : paused ? m.transport_toggle_resume() : m.curva_preview()
 	);

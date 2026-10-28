@@ -1883,6 +1883,14 @@ export function createCableService(
 			return evaluateChecklist(input(request), context(), gate);
 		},
 
+		/**
+		 * The `startLive` checklist for the current context (display only; read-only, like
+		 * `checklist`). `startLive` evaluates it again on its own.
+		 */
+		liveChecklist(request: ChecklistInput, gate?: GateResult): ChecklistResult {
+			return evaluateLiveChecklist(input(request), context(), gate);
+		},
+
 		/** Flash counters exactly as the checklist shows them (simulated: in-memory bookkeeping). */
 		counters(): ChecklistResult['counters'] {
 			const now = nowMs();

@@ -99,6 +99,9 @@
 	} from './model.ts';
 	import { parkedBand } from './parked.ts';
 	import { CurvaPreview } from './preview.svelte.ts';
+	import LivePanel from './LivePanel.svelte';
+	import { liveActive as isLiveActive } from '#lib/components/cable/live.ts';
+	import type { ABSide } from '#lib/audio/engine.ts';
 	import { provideBandLabelView } from './band-labels.svelte.ts';
 	import YoloToggle from '#lib/components/yolo/YoloToggle.svelte';
 	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
@@ -1190,9 +1193,53 @@
 		lastWritten ?? { bands: PADRAO_AURI.bands, preampDb: PADRAO_AURI.preampDb }
 	);
 	const referenceName = $derived(lastWritten ? m.curva_ab_ref_written() : PADRAO_AURI.label);
+
+	// --- "Ouvir no cabo": live (no-flash) preview on the cable (issue #69) ----------------------
+	//
+	// While a session runs, the cable applies the EQ: the browser preview must not add it again.
+	// Both A/B chains then play the flat Neutro curve (`heardReference`/`heardEditor`), so the
+	// browser keeps its session, Transport, meters and protection, but sounds raw (EQ off). The
+	// engine's 'raw' mode would take the session away from CurvaPreview (it treats raw playback
+	// as someone else's) and lose the A/B chains it resumes with when the session ends.
+	// The A/B lever then switches the cable: A = the saved curve, B = the editor; every editor
+	// change is queued to the cable (`queueLive`; the service debounces and coalesces).
+	const liveSession = $derived(app?.cableState.live ?? null);
+	const liveOn = $derived(isLiveActive(liveSession));
+	/** The cable's A/B side while a session runs (the browser's own A/B is `preview.side`). */
+	let liveSide = $state<ABSide>('B');
+	/** Signature of the last curve sent to the session (the start curve included). */
+	let liveQueued: string | null = null;
+	const heardReference = $derived(liveOn ? neutral : reference);
+	const heardEditor = $derived(liveOn ? neutral : curve);
 	$effect(() => {
-		const ref = reference;
-		const editor = curve;
+		const client = app;
+		if (!client || !liveOn) {
+			liveQueued = null;
+			liveSide = 'B';
+			return;
+		}
+		const target = liveSide === 'A' ? reference : curve;
+		const signatureNow = curveSignature(target);
+		untrack(() => {
+			if (signatureNow === liveQueued) return;
+			liveQueued = signatureNow;
+			client.cable.queueLive({ bands: target.bands, preampDb: target.preampDb });
+		});
+	});
+	/** The A/B lever: the cable's curve while live, the browser chains otherwise. */
+	function onSide(side: ABSide) {
+		if (liveOn) liveSide = side;
+		else preview?.select(side);
+	}
+	// Leaving the page stops following edits: the cable keeps the live curve until it is
+	// unplugged (the top bar's chip still says so); nothing is reverted without a gesture.
+	onDestroy(() => {
+		if (app && isLiveActive(app.cable.getState().live)) void app.cable.stopLive({ revert: false });
+	});
+
+	$effect(() => {
+		const ref = heardReference;
+		const editor = heardEditor;
 		// Turning YOLO on or off rebuilds the A/B with or without the preview protection.
 		void yoloOn;
 		untrack(() => preview?.update(ref, editor));
@@ -1228,7 +1275,7 @@
 		if (!instance) return;
 		// A second press while the engine is still starting cancels, like a stop.
 		if (instance.playing || instance.starting) instance.stop();
-		else void instance.start(reference, curve);
+		else void instance.start(heardReference, heardEditor);
 	}
 	/** Pointer or key down on the lever: create/resume the AudioContext before the click (W3). */
 	function onPreviewWarm() {
@@ -1312,6 +1359,17 @@
 		</section>
 	{/if}
 
+	<LivePanel
+		{app}
+		{curve}
+		{experimental}
+		profile={writeProfile}
+		saved={lastWritten}
+		blockedReason={loadingReason ?? yoloWriteReason}
+		{locale}
+		onbeforestart={(sent) => (liveQueued = curveSignature(sent))}
+	/>
+
 	<div class="instrument" aria-busy={app === null ? 'true' : 'false'}>
 		<div class="cheek" aria-hidden="true"></div>
 		<div class="rack">
@@ -1333,7 +1391,8 @@
 				analyser={preview?.analyser ?? null}
 				playing={preview?.playing ?? false}
 				paused={preview?.paused ?? false}
-				side={preview?.side ?? 'B'}
+				side={liveOn ? liveSide : (preview?.side ?? 'B')}
+				abLive={liveOn}
 				{referenceName}
 				{previewError}
 				previewDisabled={!preview}
@@ -1347,7 +1406,7 @@
 				{onlayer}
 				onpreview={onPreview}
 				onpreviewwarm={onPreviewWarm}
-				onside={(side) => preview?.select(side)}
+				onside={onSide}
 			/>
 			<!-- Ajustar and Engenharia: the bank hangs right under the scope, inside the rack. -->
 			{#if includesLayer(layer, 'ajustar')}

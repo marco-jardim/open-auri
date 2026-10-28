@@ -24,7 +24,10 @@ export interface ClientAppOptions {
 	now?: () => number;
 	/** Browser singleton by default; tests supply an isolated engine. */
 	audio?: AudioEngine;
-	cable?: Pick<CableServiceDeps, 'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId'>;
+	cable?: Pick<
+		CableServiceDeps,
+		'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId' | 'livePolicy'
+	>;
 	/**
 	 * Toast region store. The root layout creates it before the runtime chunk loads and injects
 	 * it, so the same region serves messages from before and after the mount (FUX.2).

@@ -26,6 +26,7 @@
 	import Toast from '#lib/components/chrome/Toast.svelte';
 	import YoloBar from '#lib/components/yolo/YoloBar.svelte';
 	import AndroidUpdateBanner from '#lib/components/cable/AndroidUpdateBanner.svelte';
+	import { liveUnsaved } from '#lib/components/cable/live.ts';
 	import { AccountSession } from '#lib/components/chrome/account.svelte.ts';
 	import { postPolicyAcceptance } from '#lib/components/chrome/account.ts';
 	import { revealLocale } from '#lib/components/chrome/lang-boot.ts';
@@ -540,6 +541,7 @@
 			currentPath={page.url.pathname}
 			connected={app?.cableState.connection === 'connected'}
 			unsaved={app?.state.curve.unsaved ?? false}
+			liveUnsaved={app ? liveUnsaved(app.cableState.live, app.state.curve.lastWritten) : false}
 			writeDisabled={!app || app.cableState.writing}
 			writeDisabledReason={app ? undefined : m.fux2_cable_runtime_loading()}
 			onNeutro={app ? () => loadEditor('neutral') : undefined}
