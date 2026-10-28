@@ -7,8 +7,22 @@
 // Hardware facts modelled: VID 0x3302, PID 0x8902, product "USB DSP Audio", a
 // single output report 0xCB of 31 bytes, write-only. The HID usage page and
 // usage of the real cable are not modelled (reported as 0).
+//
+// FakeFirmware models what the chip does with the delivered reports (B7, B12b):
+// the 9 data reports change the sound at once (RAM, `live`), but only when
+// report 8 arrives; a bad CRC is silently ignored; the commit copies `live` to
+// flash (`committed`); unplug + replug restores the committed curve.
 
-import { USB_VID, USB_PID, HID_REPORT_ID, REPORT_SIZE } from '../dsp/eq0xcb.mjs';
+import {
+  USB_VID,
+  USB_PID,
+  HID_REPORT_ID,
+  REPORT_SIZE,
+  REPORT_COUNT,
+  PAYLOAD_SIZE,
+  COMMIT_COMMAND,
+  crc16Ccitt,
+} from '../dsp/eq0xcb.mjs';
 
 export const FAKE_PRODUCT_NAME = 'USB DSP Audio';
 
@@ -36,8 +50,19 @@ export const FAKE_PRODUCT_NAME = 'USB DSP Audio';
  *   delivered), like a cable that stops responding.
  * @property {unknown} [openError] If set, open() rejects with it.
  * @property {number} [delayMs] Virtual time each delivered report takes to complete.
+ * @property {FakeFirmware} [firmware] Chip state fed with every delivered report; defaults to
+ *   a new factory FakeFirmware. Share one across devices to model replugs of the same cable.
  *
  * @typedef {{vendorId?: number, productId?: number}} FakeFilter
+ *
+ * @typedef {object} FakeFirmwareOptions
+ * @property {ArrayLike<number> | null} [committed] Payload already in flash (220 bytes, CRC not
+ *   checked); `null` (default) is the factory/unknown curve. It is also the initial `live`.
+ * @property {7 | 8} [applyOn] Index of the data report that makes the buffered curve take
+ *   effect (default 8, as measured in B12b; 7 models the alternative hypothesis).
+ *
+ * @typedef {'unknown-report' | 'commit-without-live'} FakeIgnoredReason
+ * @typedef {{bytes: Uint8Array, reason: FakeIgnoredReason}} FakeIgnoredReport
  */
 
 /**
@@ -143,6 +168,122 @@ function copyBytes(data) {
 
 const writeFailure = () => new DOMException('Failed to write the report.', 'NotAllowedError');
 
+const REPORT_DATA_SIZE = REPORT_SIZE - 1;
+
+/** @param {Uint8Array | null} payload */
+const copyPayload = (payload) => (payload === null ? null : payload.slice());
+
+/**
+ * The cable's chip, independent of any USB connection, so it survives replugs
+ * (share one instance between the FakeHIDDevice objects of the same cable).
+ *
+ * - Data report (byte 0 = index 0..8, bytes 1..30 = payload slice): stored in
+ *   its slot; missing bytes read as 0. The slots start zeroed and are kept
+ *   after an apply (a RAM buffer), so they only change when overwritten.
+ * - Report `applyOn` (default 8): the 9 slots are concatenated and the first
+ *   220 bytes taken as the payload (report 8 carries none of it). A good
+ *   CRC-16 makes it `live`; a bad one is ignored and counted, `live` unchanged.
+ * - Commit (`01 65 00 01 FF` prefix, padded or not): `committed = live`. With
+ *   no live curve (`live === null`) it is ignored and recorded.
+ * - Anything else (index > 8, empty report): ignored and recorded.
+ *
+ * The firmware never sends input reports.
+ */
+export class FakeFirmware {
+  /** @type {Uint8Array[]} */
+  #slots = [];
+  /** @type {Uint8Array | null} */
+  #live;
+  /** @type {Uint8Array | null} */
+  #committed;
+  /** @type {FakeIgnoredReport[]} */
+  #ignored = [];
+  /** Data sequences whose CRC was good (each one replaced `live`). */
+  appliedCount = 0;
+  /** Commits that copied `live` to `committed`. */
+  commitCount = 0;
+  /** Data sequences rejected for a bad CRC. */
+  rejectedCrcCount = 0;
+
+  /** @param {FakeFirmwareOptions} [options] */
+  constructor({ committed = null, applyOn = 8 } = {}) {
+    if (applyOn !== 7 && applyOn !== 8) throw new RangeError('applyOn must be 7 or 8');
+    if (committed !== null && committed.length !== PAYLOAD_SIZE) {
+      throw new RangeError(`committed must be ${PAYLOAD_SIZE} bytes`);
+    }
+    this.applyOn = applyOn;
+    this.#committed = committed === null ? null : Uint8Array.from(committed);
+    this.#live = copyPayload(this.#committed);
+    this.#resetSlots();
+  }
+
+  /** Curve the cable is playing (RAM); `null` = factory/unknown. @returns {Uint8Array | null} */
+  get live() {
+    return copyPayload(this.#live);
+  }
+
+  /** Curve stored in flash; `null` = factory/unknown. @returns {Uint8Array | null} */
+  get committed() {
+    return copyPayload(this.#committed);
+  }
+
+  /** Copy of the reports the firmware ignored, in order. @returns {FakeIgnoredReport[]} */
+  get ignored() {
+    return this.#ignored.map(({ bytes, reason }) => ({ bytes: bytes.slice(), reason }));
+  }
+
+  #resetSlots() {
+    this.#slots = Array.from({ length: REPORT_COUNT }, () => new Uint8Array(REPORT_DATA_SIZE));
+  }
+
+  /**
+   * Handles one delivered 0xCB report (the bytes after the report ID).
+   * @param {Uint8Array} bytes
+   */
+  receive(bytes) {
+    const isCommit =
+      bytes.length >= COMMIT_COMMAND.length &&
+      COMMIT_COMMAND.every((byte, index) => bytes[index] === byte);
+    if (isCommit) {
+      if (this.#live === null) {
+        this.#ignored.push({ bytes: bytes.slice(), reason: 'commit-without-live' });
+        return;
+      }
+      this.#committed = this.#live.slice();
+      this.commitCount++;
+      return;
+    }
+    const index = bytes[0];
+    if (bytes.length === 0 || index >= REPORT_COUNT) {
+      this.#ignored.push({ bytes: bytes.slice(), reason: 'unknown-report' });
+      return;
+    }
+    const slot = new Uint8Array(REPORT_DATA_SIZE);
+    slot.set(bytes.subarray(1, REPORT_SIZE));
+    this.#slots[index] = slot;
+    if (index === this.applyOn) this.#apply();
+  }
+
+  #apply() {
+    const buffer = new Uint8Array(REPORT_COUNT * REPORT_DATA_SIZE);
+    this.#slots.forEach((slot, index) => buffer.set(slot, index * REPORT_DATA_SIZE));
+    const payload = buffer.slice(0, PAYLOAD_SIZE);
+    const crc = payload[PAYLOAD_SIZE - 2] | (payload[PAYLOAD_SIZE - 1] << 8);
+    if (crc !== crc16Ccitt(payload.subarray(0, PAYLOAD_SIZE - 2))) {
+      this.rejectedCrcCount++;
+      return;
+    }
+    this.#live = payload;
+    this.appliedCount++;
+  }
+
+  /** Power cycle (unplug + replug): RAM is lost, `live = committed`, slots zeroed. */
+  powerCycle() {
+    this.#live = copyPayload(this.#committed);
+    this.#resetSlots();
+  }
+}
+
 /** A simulated cable: records every report it accepts, with its virtual timestamp. */
 export class FakeHIDDevice extends EventTarget {
   #opened = false;
@@ -163,9 +304,12 @@ export class FakeHIDDevice extends EventTarget {
     hangAtReport,
     openError,
     delayMs = 0,
+    firmware = new FakeFirmware(),
   } = {}) {
     super();
     this.clock = clock;
+    /** The cable's chip; receives every delivered report. */
+    this.firmware = firmware;
     this.vendorId = vendorId;
     this.productId = productId;
     this.productName = productName;
@@ -246,6 +390,7 @@ export class FakeHIDDevice extends EventTarget {
       return /** @type {Promise<void>} */ (new Promise(() => undefined));
     }
     this.#sent.push({ reportId, bytes, at: this.clock.now() });
+    this.firmware.receive(bytes.slice());
     if (this.faults.delayMs > 0) await this.clock.sleep(this.faults.delayMs);
   }
 
@@ -345,5 +490,32 @@ export class FakeHID extends EventTarget {
   /** Unplugs `device` (fires 'disconnect'). @param {FakeHIDDevice} device */
   disconnect(device) {
     device.disconnect();
+  }
+
+  /**
+   * Unplugs `device` exactly like {@link FakeHID.disconnect} (no-op if already
+   * unplugged), power-cycles its firmware (`live = committed`), then plugs in a
+   * new FakeHIDDevice sharing that firmware, clock and identity, and fires
+   * 'connect' for it. The new device starts closed, with no reports, attempts
+   * or faults (unless given in `options`), and inherits the old device's
+   * requestDevice grant.
+   * @param {FakeHIDDevice} device
+   * @param {Omit<FakeDeviceOptions, 'firmware'>} [options] Overrides for the new device.
+   * @returns {FakeHIDDevice} The new device.
+   */
+  replug(device, options = {}) {
+    device.disconnect();
+    device.firmware.powerCycle();
+    const fresh = new FakeHIDDevice({
+      clock: device.clock,
+      vendorId: device.vendorId,
+      productId: device.productId,
+      productName: device.productName,
+      ...options,
+      firmware: device.firmware,
+    });
+    if (this.#granted.has(device)) this.#granted.add(fresh);
+    this.addDevice(fresh);
+    return fresh;
   }
 }
