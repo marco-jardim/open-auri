@@ -13,9 +13,18 @@ Data: 2026-10-28. Origem: sonda B12 da Fase H (`docs/probing.md`, seção F).
   funciona normalmente. Logo, um envio interrompido antes do report 8 é ignorado pelo cabo.
 - O firmware valida o CRC: curva com CRC errado é ignorada em silêncio (B7 ✅). O cabo nunca
   responde (sem input reports). A troca de curva é suave, sem clique (B13 ✅).
-- **B12c (resistência):** 1000 aplicações ao vivo seguidas (ritmo de ~2,4/s) mais 50 sem a
-  espera de 150 ms; resultado registrado em `docs/probing.md`. A confirmação de que a curva
-  commitada continua intacta depende de um replug manual (pendente, ver §6).
+- **B12c ✅ (medições, 2026-10-28):** rodada 1 com 1000 prévias alternando Neutro/PK 2 kHz
+  (16 ms + 150 ms, ~2,4/s, 11 min) + 50 sem a espera, 0 erros de envio. Depois, prévias
+  pararam de mudar o som (5 alternadas + PK 5 kHz); escrita completa com commit ainda
+  aplicou imediatamente, mas não recuperou as prévias. Replug recuperou. Rodada 2: 1005
+  prévias normais em 5 lotes de ~200, todos verificados (Neutro −6,4…−9,9 vs PK
+  −18,3…−21,6 dB), mais 10 e 50 sem espera (última PK −18,7/−20,0 dB); prévias normais
+  depois também funcionaram. Curva ao vivo estável por 45 s (−19,05 → −19,0 dB).
+  Métrica: 2 kHz relativo à média de 7127/8000 Hz, mesmo método acústico da seção F.
+  **Estado travado não reproduzido em ≈1065 aplicações adicionais; gatilho desconhecido.**
+  Na rodada 1 houve fluxo ininterrupto de 11 min, sem áudio e com a aba oficial também
+  com o cabo aberto; causas não isoladas. A integridade da curva commitada segue pendente:
+  o commit de diagnóstico da rodada 1 a sobrescreveu. Detalhes em `docs/probing.md`.
 
 ## 2. Escopo
 
@@ -31,7 +40,8 @@ Cada fase: pré-flight (estado do repo, testes da área verdes), implementação
 atômicas, testes só do que a fatia toca, revisão QA sênior, correções, commit.
 
 ### Fase 0 — sondas (S0)
-- B12b ✅, B12c (resistência) ✅ envio; replug manual pendente.
+- B12b ✅; B12c ✅ com ressalva (estado travado uma vez, recuperado por replug);
+  integridade da curva commitada após muitas prévias pendente (§6).
 
 ### Fase 1 — núcleo
 - **S1 `applyCurve`** (`src/transport/webhid.mjs`): 9 reports, sem commit, `SETTLE_MS` dentro
@@ -90,11 +100,12 @@ atômicas, testes só do que a fatia toca, revisão QA sênior, correções, com
 | Risco | Mitigação |
 |---|---|
 | A via de dados desgastar a flash | Ritmo limitado, contador separado, chave de publicação, B12c |
-| Cadência mais rápida que a medida | Piso de ~300 ms por sequência |
+| Cadência mais rápida que a medida | Piso de 300 ms por sequência |
+| Estado travado observado uma vez (B12c), gatilho desconhecido | Sem ack: UI orienta desconectar/reconectar se a prévia parar de mudar o som; “Salvar” sempre envia os 9 reports + commit (funcionou travado); cadência ≥300 ms e contador de prévias |
 | Duas abas | Trava de sessão e recusa `'live-elsewhere'` |
 | `lastWritten` não é a verdade do cabo | "Voltar à curva salva" = última salva por este navegador; replug é o reset real |
 | Android sem validação de escrita | Confirmação "não testado" obrigatória |
 
 ## 6. Pendências manuais
 
-- Replug após o B12c para confirmar que a curva commitada (Neutro) sobreviveu.
+- Verificar a integridade da curva commitada após muitas prévias, sem commit de diagnóstico no meio.

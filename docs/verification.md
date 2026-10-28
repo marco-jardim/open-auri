@@ -151,7 +151,8 @@ distante em 6,3–8 kHz. A tentativa inicial com movimento foi descartada
 (dispersão ±15–25 dB): fixar o transdutor e não mudar o volume.
 
 Envio pelo console com frames do codec: 9 reports, 16 ms entre eles, 150 ms
-de espera e commit (exceto B12), 2,1 s entre escritas. PK 2000 e 5000 Hz,
+de espera e commit (exceto B12), 2,1 s entre escritas; B12b/B12c sem commit,
+com cadências detalhadas na seção F. PK 2000 e 5000 Hz,
 −12 dB Q3, pré-amp −0,5 dB, ambos `standard` em `src/safety/classify.mjs`;
 CRCs `0x3D48` e `0xBE68`. Números por frequência e detalhes em
 [`probing.md`, seção F](probing.md#medição-acústica-mesmo-dia).
@@ -163,11 +164,15 @@ CRCs `0x3D48` e `0xBE68`. Números por frequência e detalhes em
 | B7 | ✅ Com PK 2 kHz armazenado, PK 5 kHz com último byte do CRC `XOR 0xFF` (report 7 byte 10) não mudou a resposta, medida duas vezes; CRC correto aplicou normalmente. Validação pelo firmware, rejeição silenciosa sem input report |
 | B13 | ✅ com ressalva: Neutro → PK 2 kHz durante tom de 2 kHz, queda de ~10 dB em rampa suave de ~15 ms, sem energia de clique audível nem mute. Sensibilidade HF do microfone limita cliques muito curtos só em HF; ScriptProcessor perdeu ~17% dos frames, sem alinhamento temporal absoluto dentro da escrita |
 | B12 | ✅ Com PK 2 kHz commitado, 9 reports de Neutro sem `01 65 00 01 FF` aplicaram ao vivo (2 medições); replug restaurou PK 2 kHz (2000 Hz −12,8 dB vs referência, 3 passagens). Dados aplicam em RAM; commit persiste na flash. Bytes `01 FF` não variados |
+| B12b | ✅ Com Neutro commitado, PK 2 kHz só com reports 0..6 (−7,17 vs −6,95 dB neutro) ou 0..7 com CRC (−7,77 dB) não aplicou; 0..8 aplicou (−16,3 dB), inclusive após parcial. Efeito só ao chegar o report 8 |
+| B12c | ✅ com ressalva: após 1000 prévias normais + 50 sem espera, 0 erros de envio, mas prévias deixaram de mudar o som; escrita completa com commit ainda aplicou, sem recuperar as prévias; replug recuperou. Não reproduzido após replug em 1005 aplicações normais (5 lotes verificados) + 10 e 50 sem espera; aplicações normais posteriores funcionaram. Curva ao vivo estável por 45 s (−19,05 → −19,0 dB) |
 
+B12b/B12c usam o nível em 2 kHz relativo à média de 7127/8000 Hz:
+Neutro ≈ −6 a −10 dB, PK 2 kHz −12 dB Q3 ≈ −18 a −21 dB.
 B12 demonstra a viabilidade de modo sem flash, X2 no cabo e teste cego no
-cabo, **não a implementação**. Desgaste de hoje: ~12 escritas com commit na
-bancada + 13 na captura, além de 1 envio só de dados. Ao final, **Padrão Auri
-regravado com commit**, bytes oficiais, CRC `0x1970`.
+cabo, **não a implementação**. Antes de B12b/B12c: ~12 escritas com commit na
+bancada + 13 na captura, além de 1 envio só de dados; **Padrão Auri regravado
+com commit**, bytes oficiais, CRC `0x1970`.
 
 ## O que os testes **não** provam
 
@@ -181,6 +186,11 @@ regravado com commit**, bytes oficiais, CRC `0x1970`.
   a 48 kHz (B10)
 - Que nenhuma troca pode estalar: B13 tem limites de detecção em HF e de timing
 - Que variar `01 FF` seleciona RAM/flash: não testado; B12 omitiu o commit inteiro
+- O gatilho do estado travado observado uma vez em B12c: desconhecido, não
+  reproduzido em ≈1065 aplicações adicionais; fluxo contínuo de 11 min, ausência
+  de áudio e aba oficial também com o cabo aberto não foram isolados como causas
+- A integridade da curva commitada após muitas prévias: ainda não verificada;
+  o commit de diagnóstico da rodada 1 sobrescreveu a curva a conferir
 - Durabilidade da flash, comportamento em corte de energia e demais sondas
   B5, B6, B8, B9 e B11: ainda não medidos
 

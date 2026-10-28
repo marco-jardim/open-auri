@@ -217,6 +217,8 @@ interface HID `mi_03`. Windows 11, Edge 156 (Chromium) com WebHID; USBPcap
 | **B7** | ✅ feita | CRC corrompido rejeitado silenciosamente; CRC correto aplica a curva |
 | **B10** | ✅ feita | DSP a 96 kHz com stream do host a 48 kHz; resolução de 1/6 de oitava + simetria |
 | **B12** | ✅ feita | 9 reports sem commit aplicam só em RAM; replug restaura a curva persistida |
+| **B12b** | ✅ feita | Reports 0..6 ou 0..7 (com CRC) não aplicam; 0..8 aplica, inclusive após sequência parcial |
+| **B12c** | ✅ com ressalva | Estado sem reação a prévias observado uma vez após 1000 + 50 aplicações; replug recuperou. Não reproduzido em ≈1065 aplicações adicionais; gatilho desconhecido |
 | **B13** | ✅ com ressalva | Rampa suave de ~15 ms, sem energia de clique audível nem intervalo de mute no ensaio |
 | **B5, B6, B8, B9, B11** | não executadas | Permanecem pendentes |
 
@@ -235,7 +237,8 @@ abaixo de ~1 kHz, acoplamento acústico fraco demais (<30 dB).
 Alternância A/B ×3 (A = Neutro, B = curva de teste), comparando com bandas de
 referência distantes (6,3–8 kHz). Escritas pelo console do navegador com os
 mesmos frames do codec: 9 reports, intervalos de 16 ms, espera de 150 ms e
-commit; 2,1 s entre escritas, salvo a omissão do commit em B12. Curvas
+commit; 2,1 s entre escritas, salvo a omissão do commit em B12 e os ensaios
+B12b/B12c descritos abaixo. Curvas
 classificadas como `standard` por `src/safety/classify.mjs`: PK 2000 Hz −12 dB
 Q3, pré-amp −0,5 dB (CRC `0x3D48`), e PK 5000 Hz −12 dB Q3, mesmo pré-amp
 (CRC `0xBE68`). Uma tentativa inicial foi invalidada por movimento do conjunto
@@ -286,7 +289,46 @@ persiste na flash.** Não se variaram os bytes `01 FF` (desnecessário para essa
 conclusão). Viabiliza modo sem flash, X2 no cabo e teste cego no cabo;
 **viabilidade apenas, não implementados**.
 
-Desgaste de hoje: ~12 escritas com commit na bancada + 13 na captura, além de
-1 envio só de dados. Estado final: **Padrão Auri regravado com commit**, bytes
+Até esse ponto: ~12 escritas com commit na bancada + 13 na captura, além de
+1 envio só de dados. Estado então: **Padrão Auri regravado com commit**, bytes
 oficiais, CRC `0x1970`. Ainda não feitos: B3 (sem leitura `0xCB` documentada),
 B5, B6, B8, B9 e B11.
+
+### B12b/B12c: sequências parciais e resistência (mesmo dia)
+
+Mesmo cabo e método acústico (QuadCast S, senoides em degraus). Métrica:
+nível em 2 kHz relativo à média de 7127/8000 Hz; Neutro ≈ −6 a −10 dB,
+PK 2 kHz −12 dB Q3 ≈ −18 a −21 dB. Envios ao vivo **sem commit**.
+
+**B12b ✅:** com Neutro commitado, PK 2 kHz só com reports 0..6 não mudou
+o som (−7,17 dB vs −6,95 dB neutro); 0..7, incluindo CRC, também não
+(−7,77 dB). A sequência completa 0..8 aplicou (−16,3 dB nessa rodada),
+inclusive após uma parcial. **A curva só entra quando chega o report 8;
+uma sequência interrompida antes dele é ignorada.**
+
+**B12c — rodada 1 ✅:** 1000 aplicações alternando Neutro/PK 2 kHz, com
+intervalos de 16 ms + espera de 150 ms (~2,4/s, 11 min), mais 50 seguidas
+sem essa espera; **0 erros de envio**. Depois, o cabo parou de reagir às
+prévias: 5 aplicações alternando PK/Neutro e uma de PK 5 kHz não mudaram
+o som. Uma escrita completa **com commit** (Neutro) aplicou imediatamente,
+mas as prévias seguintes continuaram sem reação. Desconectar/reconectar
+restaurou o funcionamento. A checagem de integridade da curva commitada
+foi perdida: o commit de diagnóstico a sobrescreveu.
+
+**B12c — rodada 2 ✅ (após replug):** 1005 aplicações com timing normal em
+5 lotes de ~200; a checagem após cada lote confirmou prévias funcionando
+(Neutro −6,4…−9,9 dB vs PK −18,3…−21,6 dB, nos 5). Mais 10 e 50 aplicações
+seguidas sem a espera: continuou aplicando (última = PK, −18,7/−20,0 dB),
+assim como aplicações normais depois. Uma curva ao vivo permaneceu sem
+mudança após 45 s ocioso (−19,05 → −19,0 dB).
+
+**Limite:** o estado travado da rodada 1 **não foi reproduzido** em ≈1065
+aplicações adicionais, inclusive rápidas; gatilho desconhecido. Diferenças
+da rodada 1: fluxo ininterrupto de 11 min, sem áudio tocando durante ele,
+aba oficial da Kuba também com o dispositivo aberto; não se isolou a causa.
+A integridade da curva commitada após muitas prévias continua não verificada.
+
+**Mitigações adotadas no plano da funcionalidade:** como não há ack, a UI deve
+orientar a desconectar/reconectar se a prévia parar de mudar o som; “Salvar”
+sempre envia os 9 reports + commit (funcionou no estado travado); cadência
+de prévias ≥300 ms e contador próprio de aplicações ao vivo.
