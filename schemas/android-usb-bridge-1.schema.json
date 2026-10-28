@@ -95,6 +95,10 @@
           "description": "Version name of the active WebView provider, or unknown.",
           "type": "string",
           "minLength": 1
+        },
+        "liveApply": {
+          "description": "Optional; true when the native write guard accepts live (uncommitted) applies: in AwaitCommit, a valid data report 0 abandons the uncommitted sequence and starts the next one (plan Anexo D.3). Absent in older app versions, which must be treated as false.",
+          "type": "boolean"
         }
       }
     },

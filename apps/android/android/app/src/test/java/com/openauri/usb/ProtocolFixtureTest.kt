@@ -130,7 +130,9 @@ class ProtocolFixtureTest {
     @Test
     fun transportSendsTheReportIdApartAndFitsTheGuardTimeout() {
         requireMatch(transportSource, """device\.sendReport\(HID_REPORT_ID, report\)""")
-        requireMatch(transportSource, """device\.sendReport\(HID_REPORT_ID, commitReport\(\)\)""")
+        // The commit goes through the same `send` wrapper (fbda32d), so it too is sendReport(HID_REPORT_ID, ...).
+        requireMatch(transportSource, """const send = \(report\) =>\s+io\(\(\) => \{[^}]*device\.sendReport\(HID_REPORT_ID, report\);""")
+        requireMatch(transportSource, """await send\(commitReport\(\)\)""")
         // The longest gap of a real write (last data report to commit) must fit the guard's timeout.
         assertTrue(reportGapMs < FrameGuard.SEQUENCE_TIMEOUT_MS)
         assertTrue(reportGapMs + settleMs < FrameGuard.SEQUENCE_TIMEOUT_MS)

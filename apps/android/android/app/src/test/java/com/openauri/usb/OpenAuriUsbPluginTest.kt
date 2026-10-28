@@ -299,6 +299,7 @@ class OpenAuriUsbPluginTest {
             assertEquals(BuildConfig.VERSION_NAME, info.getString("appVersion"))
             assertEquals(feature, info.getBoolean("usbHost"))
             assertTrue(info.getString("webViewVersion").orEmpty().isNotBlank())
+            assertEquals(true, info.getBoolean("liveApply"))
         }
         val injected = UsbPluginHarness().call("getInfo").payload
         assertEquals("140.0.7339.0", injected?.getString("webViewVersion"))
@@ -644,7 +645,9 @@ class OpenAuriUsbPluginTest {
             Triple("bad preamble", 0, 0xCB to badPreamble),
             Triple("bad CRC", 7, 0xCB to badCrc),
             Triple("bad padding", 8, 0xCB to badPadding),
-            Triple("data instead of commit", 9, 0xCB to neutral.reports[0]),
+            Triple("data instead of commit", 9, 0xCB to neutral.reports[1]),
+            // A valid report 0 after the 9 data reports is a live apply; a bad one is still refused.
+            Triple("bad report 0 instead of commit", 9, 0xCB to badPreamble),
         )
         for ((name, valid, report) in cases) {
             val harness = UsbPluginHarness()

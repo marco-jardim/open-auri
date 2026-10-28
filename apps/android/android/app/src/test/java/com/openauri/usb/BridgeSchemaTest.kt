@@ -260,6 +260,8 @@ class BridgeSchemaTest {
         assertValid("NativeDeviceInfo", device)
         assertValid("ConnectEvent", """{"device":$device}""")
         assertValid("GetInfoResponse", """{"bridgeApi":1,"appVersion":"1.0.0","usbHost":true,"webViewVersion":"140.0"}""")
+        assertValid("GetInfoResponse", """{"bridgeApi":1,"appVersion":"1.0.0","usbHost":true,"webViewVersion":"140.0","liveApply":true}""")
+        assertValid("GetInfoResponse", """{"bridgeApi":1,"appVersion":"1.0.0","usbHost":true,"webViewVersion":"140.0","liveApply":false}""")
         assertValid("Error", """{"code":"USB_TIMEOUT","message":"timed out"}""")
         assertValid("OpenResponse", "null")
         assertValid("SendReportRequest", """{"key":"k","reportId":203,"data":"AQID"}""")
@@ -277,6 +279,7 @@ class BridgeSchemaTest {
                 """{"bridgeApi":2,"appVersion":"1","usbHost":true,"webViewVersion":"1"}""",
                 """{"bridgeApi":1,"appVersion":"","usbHost":true,"webViewVersion":"1"}""",
                 """{"bridgeApi":1,"appVersion":"1","usbHost":"yes","webViewVersion":"1"}""",
+                """{"bridgeApi":1,"appVersion":"1","usbHost":true,"webViewVersion":"1","liveApply":"yes"}""",
             ),
             "Error" to listOf(
                 """{"code":"USB_OTHER","message":"x"}""",

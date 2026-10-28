@@ -94,7 +94,7 @@ testes dos dois lados. O schema USB não descreve o plugin de arquivos.
 
 | Método de `OpenAuriUsb` | Entrada | Resposta |
 | --- | --- | --- |
-| `getInfo()` | Sem opções | `{ bridgeApi: 1, appVersion, usbHost, webViewVersion }` |
+| `getInfo()` | Sem opções | `{ bridgeApi: 1, appVersion, usbHost, webViewVersion, liveApply? }` |
 | `requestDevice({ filters })` | Lista de filtros com `vendorId` e/ou `productId` | `{ devices }`; vazio se cancelar, negar ou não houver cabo |
 | `getDevices()` | Sem opções | `{ devices }`, somente cabos conectados com permissão |
 | `open({ key })` | Chave da conexão | Sem payload |
@@ -184,8 +184,21 @@ Receiving(n) -> report n em ordem -> Receiving(n+1)
 Receiving(8) -> report 8 -> AwaitCommit
 AwaitCommit -> commit exato + payload/preâmbulo/CRC16 válidos
             + pelo menos 2000 ms desde o último commit -> Idle (envia)
+AwaitCommit -> report 0 válido -> Receiving(1) (envia; abandona a
+            sequência não commitada: aplicação ao vivo)
 Qualquer estado -> sequência inválida ou expirada -> Idle (recusa)
 ```
+
+Aplicação ao vivo: o cabo aplica a curva em RAM ao receber o report 8 e só
+grava na flash com o commit. Os nove reports sem commit são, portanto, uma
+aplicação ao vivo completa; em `AwaitCommit`, um report 0 válido (mesmas
+checagens de `Idle`) inicia a próxima, e um "Salvar" pode vir logo depois.
+Outros reports em `AwaitCommit` continuam recusados, e o espaçamento de
+2000 ms vale só entre commits. O app anuncia isso com `liveApply: true` em
+`getInfo()`, campo opcional do `bridgeApi: 1`. A prévia ao vivo ("Ouvir no
+cabo") dentro do app exige uma versão do app com `liveApply`; sem o campo
+(versões anteriores), o site o trata como `false` e a guarda antiga recusaria
+a segunda aplicação seguida.
 
 São recusados ID diferente de `0xCB`, dados com tamanho diferente de 31,
 índice fora de ordem, bytes inválidos ou mais de 2000 ms sem report.

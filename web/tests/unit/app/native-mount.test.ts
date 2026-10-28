@@ -52,7 +52,8 @@ test('native detection finishes and publishes metadata before mounting with its 
 		kind: 'native',
 		hid,
 		appVersion: '1.2.3',
-		webViewVersion: '141'
+		webViewVersion: '141',
+		liveApply: false
 	};
 	let finish: (result: NativeCableDetection) => void = () => {
 		throw new Error('No pending detection');
