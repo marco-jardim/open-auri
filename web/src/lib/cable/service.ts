@@ -18,10 +18,17 @@
  * (`oa-cable-alive:<tabId>`; only writers ever request the write lock). An X9 queue journals
  * each cable as it commits and, between cables, leaves a `between` marker that names no write.
  *
+ * Live preview (issues #67/#70): `startLive` / `queueLive` / `confirmLive` / `revertLive` /
+ * `stopLive` send curves to the cable's RAM with `applyCurve` (no commit). They are not writes:
+ * no flash bookkeeping, journal, `cable:written` or in-flight marker; see "Live (no-flash)
+ * preview" below. `write()` during a session is "Salvar" and waits for the apply in flight.
+ *
  * Create it in the browser only (never during SSR module evaluation).
  */
 import {
+	CommitCollisionError,
 	ConcurrentWriteError,
+	DeviceDisconnectedError,
 	DeviceUnusableError,
 	FAKE_PRODUCT_NAME,
 	FakeHID,
@@ -29,6 +36,7 @@ import {
 	GateRejectedError,
 	PRODUCT_NAME,
 	WRITE_SPACING_MS,
+	applyCurve,
 	requestCable,
 	systemClock,
 	writeCurve,
@@ -36,13 +44,24 @@ import {
 } from 'open-auri/transport';
 import {
 	JOURNAL_WAIVED_MAX,
+	LIVE_MAX_WAIT_MS,
+	LIVE_MIN_INTERVAL_MS,
 	MIN_INTERVAL_MS,
+	coalesce,
+	liveHold,
+	nextApplyDelay,
 	observeFlashState,
 	recordWrite
 } from 'open-auri/policy';
 import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
 import { gateForWrite, isWaivable } from 'open-auri/safety';
-import { evaluateChecklist, flashCountersOf } from './checklist.ts';
+import {
+	evaluateChecklist,
+	evaluateLiveChecklist,
+	flashCountersOf,
+	writtenLevelDb
+} from './checklist.ts';
+import { LIVE_APPLY_POLICY } from './live-policy.ts';
 import { isNativeHid } from './native/brand.ts';
 import {
 	assertNativeWriteFresh,
@@ -71,6 +90,20 @@ import type {
 	InflightPort,
 	JournalEntry,
 	JournalStatus,
+	LiveApplied,
+	LiveCurve,
+	LiveEndedReason,
+	LiveGestureRequest,
+	LiveHoldState,
+	LiveOutcome,
+	LiveRefusalReason,
+	LiveRefused,
+	LiveRevertRequest,
+	LiveSavedCurve,
+	LiveStartRequest,
+	LiveState,
+	LiveStatus,
+	LiveStopRequest,
 	ManyResult,
 	QueueItem,
 	QueueOutcome,
@@ -354,6 +387,66 @@ interface Prepared {
 	name: string;
 }
 
+/** A live curve read once and gated (session options) when it was queued. */
+interface LiveCaptured {
+	verdict: GateResult;
+	/** The gate's frozen snapshot (what an apply sends); null when the codec refused it. */
+	snapshot: readonly Readonly<Band>[] | null;
+	preampDb: number;
+	crc: number | null;
+	levelDb: number | null;
+	/**
+	 * Start, confirm, revert or a re-sent held curve: the user just confirmed this level, so no
+	 * debounce and no loudness / unknown-state hold (the gate always runs).
+	 */
+	confirmed: boolean;
+	/** Settles once this curve was applied, held, dropped, replaced or its session ended. */
+	settled: Promise<void>;
+	done: () => void;
+}
+
+/** One live preview session (one device; it never moves to another one). */
+interface LiveSession {
+	device: CableDevice;
+	label: string;
+	/** Gate options of every apply of the session (from the start curve and its checklist). */
+	experimental: boolean;
+	profile: WriteProfile;
+	/** Aborted when the session ends: an apply before report 8 stops there. */
+	abort: AbortController;
+	ended: LiveEndedReason | null;
+	/** The first apply attempt settled (`starting` until then). */
+	started: boolean;
+	applied: LiveApplied | null;
+	/** The newest edit not sent yet (one slot: newest wins). */
+	pending: LiveCaptured | null;
+	firstPendingEditMs: number;
+	lastEditMs: number;
+	/** The curve a hold stopped (what `confirmLive` sends). */
+	held: LiveCaptured | null;
+	hold: LiveHoldState | null;
+	/** Whether what the cable plays is known (false after report 8 went out unconfirmed). */
+	known: boolean;
+	ackLevelDb: number | null;
+	applies: number;
+	lastError: unknown;
+}
+
+/** How one live apply attempt went, from inside (or instead of) the cross-tab lock. */
+type LiveRun =
+	| { kind: 'busy' }
+	| { kind: 'skipped' }
+	| { kind: 'refused'; cause: unknown }
+	| { kind: 'done'; result: WriteResult };
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve: () => void = () => undefined;
+	const promise = new Promise<void>((settle) => {
+		resolve = settle;
+	});
+	return { promise, resolve };
+}
+
 function refusalFromError(error: unknown): RefusalReason {
 	if (error instanceof GateRejectedError) return 'gate';
 	if (error instanceof ConcurrentWriteError) return 'busy';
@@ -427,6 +520,29 @@ export function createCableService(
 	};
 	let simulatedLevelDb: number | null = null;
 
+	// Live (no-flash) preview. Times below are `clock.now()` (the transport's clock), not epoch.
+	const livePolicy = deps.livePolicy ?? LIVE_APPLY_POLICY;
+	/** The current (or last ended) live session. */
+	let live: LiveSession | null = null;
+	/** Successful live applies in this page, all sessions (memory only). */
+	let liveTotal = 0;
+	/** The live apply in flight (never rejects); null when none. */
+	let liveInFlight: Promise<void> | null = null;
+	/** The scheduler's pending wait, and the promise that settles after its handler ran. */
+	let liveTimer: AbortController | null = null;
+	let liveTimerDone: Promise<void> | null = null;
+	/** After a busy lock: no new attempt before this time. */
+	let liveNotBeforeMs: number | null = null;
+	let lastApplyStartMs: number | null = null;
+	/** End of the last write that sent (or may have sent) the commit: feeds LIVE_AFTER_COMMIT_MS. */
+	let lastCommitMs: number | null = null;
+	/** Writes in progress (`write()`): the scheduler never starts an apply meanwhile. */
+	let liveSuspended = 0;
+	/** The last curve this page committed (the default revert target). */
+	let lastCommitted: LiveSavedCurve | null = null;
+	/** Resolved at every emit (idle waiters re-check). */
+	let emitted = deferred();
+
 	const hid: HidLike = resolved ?? createSimulatedHid();
 
 	function createSimulatedHid(): HidLike {
@@ -475,6 +591,16 @@ export function createCableService(
 		}
 	}
 
+	/**
+	 * `levelDb` of what an active live session is playing, when known (S7): the loudness
+	 * comparison of a write then uses it instead of the last written level.
+	 */
+	function liveLevel(): Pick<ChecklistContext, 'liveLevelDb'> {
+		const s = live;
+		if (s === null || s.ended !== null || !s.known || s.applied === null) return {};
+		return s.applied.levelDb === null ? {} : { liveLevelDb: s.applied.levelDb };
+	}
+
 	function context(): ChecklistContext {
 		const now = nowMs();
 		if (mode === 'simulated') {
@@ -482,6 +608,7 @@ export function createCableService(
 				nowMs: now,
 				flash: currentFlash(now),
 				lastWrittenLevelDb: simulatedLevelDb,
+				...liveLevel(),
 				sessionWriteCount: simulatedFlash.session,
 				lastJournalStatus: null,
 				yoloSession: yoloSession()
@@ -492,6 +619,7 @@ export function createCableService(
 			nowMs: now,
 			flash: currentFlash(now),
 			lastWrittenLevelDb: deps.lastWrittenLevelDb(),
+			...liveLevel(),
 			sessionWriteCount: deps.sessionWriteCount(),
 			lastJournalStatus: deps.journal.last()?.status ?? null,
 			yoloSession: yoloSession()
@@ -520,11 +648,59 @@ export function createCableService(
 					? null
 					: { running: queue.running, items: queue.items.map((item) => ({ ...item })) },
 			lastOutcome,
-			error
+			error,
+			liveCapable: liveCapable(),
+			live: liveView()
+		};
+	}
+
+	/**
+	 * Live preview switch and transport support: WebHID and simulated mode always, the native
+	 * transport only when the app announced `liveApply` (`deps.nativeLiveApply`).
+	 */
+	function liveCapable(): boolean {
+		if (livePolicy.enabled !== true) return false;
+		// TODO(#72): `nativeLiveApply` must be passed from `detectNativeCable()` → `liveApply`
+		// where the native service is built; until then native is never live-capable.
+		return native ? deps.nativeLiveApply === true : true;
+	}
+
+	function liveStatusOf(s: LiveSession): LiveStatus {
+		if (s.ended !== null) return 'ended';
+		if (!s.known) return 'unknown';
+		if (s.hold !== null) return 'held';
+		if (liveInFlight !== null) return s.started ? 'applying' : 'starting';
+		return s.started ? 'live' : 'starting';
+	}
+
+	function liveView(): LiveState | null {
+		const s = live;
+		if (s === null) return null;
+		const hold: LiveHoldState | null =
+			s.hold === null
+				? null
+				: {
+						...s.hold,
+						...(s.hold.gateReasons === undefined ? {} : { gateReasons: [...s.hold.gateReasons] })
+					};
+		return {
+			deviceLabel: s.label,
+			status: liveStatusOf(s),
+			applied: s.applied === null ? null : { ...s.applied, bands: copyBands(s.applied.bands) },
+			pending: s.pending !== null,
+			ackLevelDb: s.ackLevelDb,
+			hold,
+			applies: s.applies,
+			total: liveTotal,
+			lastError: s.lastError,
+			...(s.ended === null ? {} : { endedReason: s.ended })
 		};
 	}
 
 	function emit() {
+		const woken = emitted;
+		emitted = deferred();
+		woken.resolve();
 		if (disposed) return;
 		const state = snapshotState();
 		for (const listener of listeners) listener(state);
@@ -567,6 +743,10 @@ export function createCableService(
 
 	function onDisconnect(event: Event) {
 		const device = deviceOf(event);
+		// Unplugged: the cable lost its RAM and plays the saved (committed) curve again. The
+		// session ends; nothing is re-applied when it comes back.
+		const s = live;
+		if (s !== null && s.ended === null && s.device === device) endLive(s, 'disconnected');
 		if (!devices.includes(device as CableDevice)) return;
 		removeDevice(device as CableDevice);
 		emit();
@@ -1179,6 +1359,422 @@ export function createCableService(
 		};
 	}
 
+	// --- Live (no-flash) preview ---------------------------------------------------------------
+	//
+	// A live apply sends the 9 data reports (`applyCurve`), never the commit: nothing reaches
+	// the flash, so it is not a write. It records no flash attempt (not through `observedHid`),
+	// no journal entry, no `cable:written` and no in-flight marker; it does take the cross-tab
+	// write lock (`ifAvailable`) and the page's write flag, and the transport gates it again.
+	// It is never retried after it started I/O; a busy lock (nothing sent) keeps the curve
+	// pending and the scheduler tries again, without a hold.
+
+	function liveRefuse(
+		reason: LiveRefusalReason,
+		extra: Omit<LiveRefused, 'status' | 'reason'> = {}
+	): LiveRefused {
+		return { status: 'refused', reason, ...extra };
+	}
+
+	function activeLive(): LiveSession | null {
+		const s = live;
+		return s !== null && s.ended === null && !disposed ? s : null;
+	}
+
+	function liveGateOptions(s: LiveSession) {
+		return s.profile === 'yolo'
+			? { experimental: s.experimental, profile: 'yolo' as const }
+			: { experimental: s.experimental };
+	}
+
+	/** Captures a curve from a gate verdict (the session's options) and its preamp. */
+	function capturedOf(verdict: GateResult, preampDb: number, confirmed: boolean): LiveCaptured {
+		const snapshot = verdict.metrics.bands ?? null;
+		const crc =
+			verdict.metrics.payloadCrc === undefined ? null : Number(verdict.metrics.payloadCrc);
+		const signal = deferred();
+		let finished = false;
+		return {
+			verdict,
+			snapshot,
+			preampDb,
+			crc: crc !== null && Number.isInteger(crc) ? crc : null,
+			levelDb: snapshot === null ? null : writtenLevelDb({ bands: copyBands(snapshot), preampDb }),
+			confirmed,
+			settled: signal.promise,
+			done() {
+				if (finished) return;
+				finished = true;
+				signal.resolve();
+			}
+		};
+	}
+
+	/** Reads `bands` and `preampDb` once and gates them with the session's options. */
+	function captureLive(
+		s: LiveSession,
+		bands: readonly Band[],
+		preampDb: number,
+		confirmed: boolean
+	): LiveCaptured {
+		return capturedOf(gateForWrite(bands, preampDb, liveGateOptions(s)), preampDb, confirmed);
+	}
+
+	/** The same curve with a fresh settle signal. */
+	function recaptured(curve: LiveCaptured, confirmed: boolean): LiveCaptured {
+		return capturedOf(curve.verdict, curve.preampDb, confirmed);
+	}
+
+	function cancelLiveTimer() {
+		const timer = liveTimer;
+		liveTimer = null;
+		liveTimerDone = null;
+		timer?.abort(new DOMException('live wait cancelled', 'AbortError'));
+	}
+
+	/** Puts `curve` in the single pending slot (newest wins; the replaced one is settled). */
+	function enqueueLive(s: LiveSession, curve: LiveCaptured) {
+		const now = clock.now();
+		const previous = s.pending;
+		if (previous === null) s.firstPendingEditMs = now;
+		s.pending = coalesce(previous, curve);
+		s.lastEditMs = Math.max(now, s.firstPendingEditMs);
+		if (previous !== null && previous !== s.pending) previous.done();
+		// A confirmed curve skips the debounce: a wait already running may be too long.
+		if (curve.confirmed) cancelLiveTimer();
+	}
+
+	/** Stops `curve` behind `hold` (no I/O); a newer pending edit, if any, is held instead. */
+	function holdLive(s: LiveSession, curve: LiveCaptured, hold: LiveHoldState) {
+		const newest = s.pending ?? curve;
+		if (newest !== curve) curve.done();
+		s.pending = null;
+		if (s.held !== null && s.held !== newest) s.held.done();
+		s.held = newest;
+		s.hold = hold;
+		newest.done();
+	}
+
+	/** Releases a hold without sending (a newer edit is evaluated again, or a save happened). */
+	function clearHold(s: LiveSession): LiveCaptured | null {
+		const held = s.held;
+		s.held = null;
+		s.hold = null;
+		held?.done();
+		return held;
+	}
+
+	function endLive(s: LiveSession, reason: LiveEndedReason) {
+		if (s.ended !== null) return;
+		s.ended = reason;
+		s.abort.abort(new DOMException('live session ended', 'AbortError'));
+		if (live === s) {
+			cancelLiveTimer();
+			liveNotBeforeMs = null;
+		}
+		s.pending?.done();
+		s.pending = null;
+		clearHold(s);
+		emit();
+	}
+
+	/**
+	 * Starts the pending curve when it is due (`nextApplyDelay`), otherwise waits on the clock.
+	 * Never while an apply is in flight or a write runs: they call it again when they end.
+	 */
+	function scheduleLive() {
+		const s = activeLive();
+		if (s === null || s !== live) return;
+		if (liveInFlight !== null || liveSuspended > 0 || writing || liveTimer !== null) return;
+		const next = s.pending;
+		if (next === null || s.hold !== null) return;
+		const now = clock.now();
+		let delay: number;
+		try {
+			// A confirmed curve has no edit wait; the start-to-start and after-commit floors stay.
+			const editAnchor = next.confirmed ? now - LIVE_MAX_WAIT_MS : null;
+			delay = nextApplyDelay({
+				nowMs: now,
+				lastEditMs: editAnchor ?? s.lastEditMs,
+				firstPendingEditMs: editAnchor ?? s.firstPendingEditMs,
+				lastApplyStartMs,
+				lastCommitMs
+			});
+		} catch (cause) {
+			console.error('cable live scheduling failed', cause);
+			delay = LIVE_MAX_WAIT_MS;
+		}
+		if (liveNotBeforeMs !== null) delay = Math.max(delay, liveNotBeforeMs - now);
+		if (delay <= 0) {
+			liveNotBeforeMs = null;
+			startLiveApply(s);
+			return;
+		}
+		const timer = new AbortController();
+		let sleeping: Promise<void>;
+		try {
+			sleeping = clock.sleep(delay, timer.signal);
+		} catch (cause) {
+			sleeping = Promise.reject(cause);
+		}
+		const fired = () => {
+			if (liveTimer !== timer) return;
+			liveTimer = null;
+			liveTimerDone = null;
+			scheduleLive();
+		};
+		liveTimer = timer;
+		liveTimerDone = sleeping.then(fired, (cause: unknown) => {
+			if (timer.signal.aborted) return;
+			console.error('cable live wait failed', cause);
+			// The injected clock failed: wait on a real timer instead, so the edit is not lost.
+			return systemClock.sleep(delay).then(fired);
+		});
+	}
+
+	/** Pre-checks (gate, Modo YOLO, loudness and state holds; no I/O), then the apply. */
+	function startLiveApply(s: LiveSession) {
+		const next = s.pending;
+		if (next === null) return;
+		s.pending = null;
+		const { verdict, snapshot, crc } = next;
+		if (!verdict.ok || snapshot === null || crc === null) {
+			holdLive(s, next, { reason: 'gate', gateReasons: [...verdict.reasons] });
+			emit();
+			return;
+		}
+		if (s.profile === 'yolo' && !yoloSession()) {
+			// Modo YOLO was turned off: a YOLO-gated curve is not sent any more.
+			holdLive(s, next, { reason: 'gate', gateReasons: [] });
+			emit();
+			return;
+		}
+		if (!next.confirmed) {
+			const hold = liveHold({
+				levelDb: next.levelDb ?? Number.NaN,
+				ackLevelDb: s.ackLevelDb,
+				state: s.known ? 'known' : 'unknown'
+			});
+			if (hold !== null) {
+				holdLive(
+					s,
+					next,
+					hold.reason === 'loudness'
+						? { reason: 'loudness', deltaDb: hold.deltaDb }
+						: { reason: 'unknown-state' }
+				);
+				emit();
+				return;
+			}
+		}
+		const run: Promise<void> = runLiveApply(s, next, snapshot, crc)
+			.catch((cause: unknown) => {
+				console.error('cable live apply failed', cause);
+				s.lastError = cause;
+			})
+			.finally(() => {
+				if (liveInFlight === run) liveInFlight = null;
+				if (s.pending !== next) next.done();
+				emit();
+				scheduleLive();
+			});
+		liveInFlight = run;
+		emit();
+	}
+
+	/** One apply attempt holding the cross-tab write lock (`ifAvailable`; busy: nothing sent). */
+	async function liveExclusive(
+		s: LiveSession,
+		snapshot: readonly Readonly<Band>[],
+		preampDb: number
+	): Promise<LiveRun> {
+		const body = async (): Promise<LiveRun> => {
+			if (s.ended !== null || disposed) return { kind: 'skipped' };
+			// Another tab's marker: a live writer (busy), or a dead one, recorded first like a write
+			// would (journal + rescue); this attempt then waits for the next tick.
+			const found = foreignMarker();
+			if (found !== null) {
+				const fresh =
+					found.marker !== null && Math.abs(nowMs() - found.marker.at) <= INFLIGHT_STALE_MS;
+				if (!(locks === null && fresh)) recoverMarker(found.raw, found.marker);
+				return { kind: 'busy' };
+			}
+			lastApplyStartMs = clock.now();
+			try {
+				const result = await withWriteFlag(() =>
+					applyCurve(s.device, snapshot, preampDb, {
+						experimental: s.experimental,
+						...(s.profile === 'yolo' ? { profile: 'yolo' as const } : {}),
+						signal: s.abort.signal,
+						clock,
+						// The real HID: a live apply records no flash attempt (no observedHid).
+						hid
+					})
+				);
+				return { kind: 'done', result };
+			} catch (cause) {
+				// applyCurve only throws before any I/O: nothing reached the cable.
+				return { kind: 'refused', cause };
+			}
+		};
+		if (locks === null) return body();
+		try {
+			return await locks.request(CABLE_WRITE_LOCK, { ifAvailable: true }, (lock) =>
+				lock === null ? Promise.resolve<LiveRun>({ kind: 'busy' }) : body()
+			);
+		} catch (cause) {
+			return { kind: 'refused', cause };
+		}
+	}
+
+	async function runLiveApply(
+		s: LiveSession,
+		next: LiveCaptured,
+		snapshot: readonly Readonly<Band>[],
+		crc: number
+	): Promise<void> {
+		const run = await liveExclusive(s, snapshot, next.preampDb);
+		if (s.ended !== null || disposed || run.kind === 'skipped') return;
+		if (
+			run.kind === 'busy' ||
+			(run.kind === 'refused' && run.cause instanceof ConcurrentWriteError)
+		) {
+			// Nothing was sent: keep it pending (unless a newer edit replaced it) and try again
+			// on the scheduler. No hold: the cable still plays what it played.
+			if (s.pending === null) s.pending = next;
+			liveNotBeforeMs = clock.now() + LIVE_MIN_INTERVAL_MS;
+			return;
+		}
+		if (run.kind === 'refused') {
+			const cause = run.cause;
+			if (cause instanceof GateRejectedError || cause instanceof CommitCollisionError) {
+				holdLive(s, next, {
+					reason: 'gate',
+					gateReasons: cause instanceof GateRejectedError ? gateReasonsOf(cause) ?? [] : []
+				});
+				return;
+			}
+			// Nothing was sent; never retried.
+			s.lastError = cause;
+			return;
+		}
+		const result = run.result;
+		s.started = true;
+		if (result.status === 'ok' && result.settleError === undefined) {
+			s.applied = {
+				crc,
+				bands: copyBands(snapshot),
+				preampDb: next.preampDb,
+				levelDb: next.levelDb,
+				at: nowMs(),
+				...(s.profile === 'yolo' ? { profile: 'yolo' as const } : {})
+			};
+			s.known = true;
+			s.applies += 1;
+			liveTotal += 1;
+			s.lastError = null;
+			return;
+		}
+		if (result.status === 'interrupted' && result.error instanceof DeviceDisconnectedError) {
+			// Unplugged during the apply: the cable is back on its saved curve.
+			endLive(s, 'disconnected');
+			return;
+		}
+		s.lastError = result.status === 'ok' ? result.settleError : result.error;
+		// No count from the transport: assume report 8 may have gone out.
+		const attempted = result.reportsAttempted ?? 9;
+		if (result.status === 'ok' || attempted >= 9) {
+			// Report 8 went out unconfirmed (or the settle failed): what the cable plays is unknown
+			// until the user confirms a curve again.
+			s.known = false;
+			holdLive(s, next, { reason: 'unknown-state' });
+		}
+		// Report 8 never attempted: the cable kept its previous live curve (B12b). Not retried.
+	}
+
+	/** The saved curve a revert applies: the caller's, else this page's last commit, else the journal. */
+	function savedCurve(given: LiveSavedCurve | null | undefined): LiveSavedCurve | null {
+		if (given !== null && given !== undefined) {
+			return { bands: given.bands, preampDb: given.preampDb };
+		}
+		if (lastCommitted !== null) return lastCommitted;
+		const entry = deps.journal.last();
+		if (entry === null) return null;
+		const committed = mode === 'simulated' ? entry.status === 'simulated' : entry.status === 'ok';
+		return committed ? { bands: entry.bands, preampDb: entry.preampDb } : null;
+	}
+
+	/**
+	 * After a write's sequence to `device` ended: records the commit time for the scheduler and
+	 * keeps an active session on that device consistent (the commit's 9 data reports also made
+	 * it the live curve).
+	 */
+	function liveAfterWrite(device: CableDevice, result: WriteResult, authorized: Authorized) {
+		const committed = result.status === 'ok';
+		if (committed || (result.reportsAttempted ?? 0) >= 10) lastCommitMs = clock.now();
+		if (committed) {
+			lastCommitted = { bands: copyBands(authorized.snapshot), preampDb: authorized.preampDb };
+		}
+		const s = activeLive();
+		if (s === null || s.device !== device) return;
+		if (committed) {
+			const levelDb = authorized.checklist.newLevelDb;
+			s.applied = {
+				crc: authorized.crc,
+				bands: copyBands(authorized.snapshot),
+				preampDb: authorized.preampDb,
+				levelDb,
+				at: nowMs(),
+				...(authorized.profile === 'yolo' ? { profile: 'yolo' as const } : {})
+			};
+			s.known = true;
+			s.started = true;
+			// The user lowered the volume for this save: it is the new confirmed level.
+			s.ackLevelDb = levelDb;
+			// A held edit is evaluated again against it (after LIVE_AFTER_COMMIT_MS).
+			const held = clearHold(s);
+			if (held !== null && s.pending === null) enqueueLive(s, recaptured(held, false));
+			return;
+		}
+		if ((result.reportsAttempted ?? 9) >= 9) {
+			s.known = false;
+			const curve = s.pending ?? s.held ?? captureLive(s, authorized.snapshot, authorized.preampDb, false);
+			s.pending = null;
+			holdLive(s, curve, { reason: 'unknown-state' });
+		}
+	}
+
+	/**
+	 * Applies the last saved curve live (fresh gesture); the session goes on. Pending edits
+	 * and holds are dropped; its level becomes the confirmed one.
+	 */
+	async function revertLive(request: LiveRevertRequest): Promise<LiveOutcome> {
+		if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
+		const s = activeLive();
+		if (s === null) return liveRefuse('no-session');
+		const saved = savedCurve(request.saved);
+		if (saved === null) return liveRefuse('no-saved-curve');
+		const curve = captureLive(s, saved.bands, saved.preampDb, true);
+		clearHold(s);
+		s.pending?.done();
+		s.pending = null;
+		s.ackLevelDb = curve.levelDb;
+		enqueueLive(s, curve);
+		emit();
+		scheduleLive();
+		await curve.settled;
+		return { status: 'accepted', live: liveView() };
+	}
+
+	function liveIdle(): boolean {
+		if (disposed) return true;
+		const s = live;
+		return (
+			liveInFlight === null &&
+			liveTimer === null &&
+			(s === null || s.ended !== null || s.pending === null)
+		);
+	}
+
 	// A marker left by a tab closed mid-write becomes an `interrupted` entry and the rescue notice.
 	const ready = recover();
 	// A marker another tab writes later: wait for that writer, so its death surfaces here too.
@@ -1266,6 +1862,9 @@ export function createCableService(
 		/** Forgets a device in this page (closes it when possible). Refused while writing. */
 		async disconnect(device: CableDevice | null = primary): Promise<boolean> {
 			if (device === null || writing || !devices.includes(device)) return false;
+			// Forgotten by the page, still plugged in: the cable keeps the live curve until unplugged.
+			const s = activeLive();
+			if (s !== null && s.device === device) endLive(s, 'forgotten');
 			removeDevice(device);
 			emit();
 			const closable = device as CableDevice & { close?: () => Promise<void> };
@@ -1301,7 +1900,12 @@ export function createCableService(
 			const prepared = prepare(request);
 			if ('status' in prepared) return prepared;
 			const abort = reserve();
+			// "Salvar" during a live session: no new live apply starts until the write ends, and
+			// the one in flight (holding the device and the write lock) is awaited first.
+			liveSuspended += 1;
+			cancelLiveTimer();
 			try {
+				if (liveInFlight !== null) await liveInFlight;
 				return await exclusive<WriteOutcome>(async (freshness) => {
 					const guard = crossTabGuard();
 					if (guard !== null) return guard;
@@ -1335,6 +1939,7 @@ export function createCableService(
 						});
 					}
 					const written = settle(result, label, authorized);
+					liveAfterWrite(device, result, authorized);
 					const outcome: Written = freshness === null ? written : { ...written, freshness };
 					lastOutcome = outcome;
 					return outcome;
@@ -1343,7 +1948,9 @@ export function createCableService(
 				// The lock manager failed: nothing was sent.
 				return refuse(refusalFromError(cause), { error: cause });
 			} finally {
+				liveSuspended -= 1;
 				release();
+				scheduleLive();
 			}
 		},
 
@@ -1370,6 +1977,8 @@ export function createCableService(
 			}
 			const prepared = prepare(request);
 			if ('status' in prepared) return prepared;
+			// One cable at a time while a live preview runs: stop it before an X9 queue.
+			if (activeLive() !== null) return refuse('busy', { checklist: prepared.checklist });
 			const valid = (): boolean =>
 				list.length > 0 &&
 				new Set(list).size === list.length &&
@@ -1507,6 +2116,166 @@ export function createCableService(
 			}
 		},
 
+		/**
+		 * Starts a live (no-flash) preview on the selected cable and applies `curve` at once
+		 * (after `LIVE_AFTER_COMMIT_MS` when a save just ended). Needs a fresh gesture and the
+		 * live checklist (gate, volume, experimental when required, the Modo YOLO items, the
+		 * Android acknowledgement on native; no spacing and no "keep connected"). Settles once
+		 * that first apply settled (or was held). The level of `curve` becomes the confirmed one.
+		 */
+		async startLive(request: LiveStartRequest): Promise<LiveOutcome> {
+			// The token is spent first, whatever happens next.
+			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
+			if (!liveCapable() || disposed) return liveRefuse('unavailable');
+			if (writing || activeLive() !== null) return liveRefuse('busy');
+			const device = primary;
+			if (device === null) return liveRefuse('no-device');
+			// Read once: the curve and the confirmations.
+			const curve = request.curve;
+			const bands = curve.bands;
+			const preampDb = curve.preampDb;
+			const experimental = curve.experimental === true;
+			const profile: unknown = curve.profile;
+			const confirmations = request.confirmations;
+			const captured = input({
+				bands,
+				preampDb,
+				experimental,
+				...(profile === 'yolo' ? { profile: 'yolo' as const } : {}),
+				confirmations: {
+					volumeLowered: confirmations?.volumeLowered === true,
+					// Not part of the live checklist (an unplug only reverts the cable).
+					keepConnected: false,
+					experimental: confirmations?.experimental === true,
+					yoloWrite: confirmations?.yoloWrite === true,
+					androidUntested: confirmations?.androidUntested === true
+				}
+			});
+			const verdict = gateForWrite(captured.bands, captured.preampDb, gateOptions(captured));
+			const checklist = evaluateLiveChecklist(captured, context(), verdict);
+			if (!checklist.canWrite) return liveRefuse('checklist', { checklist });
+			if (native) {
+				try {
+					await assertNativeWriteFresh(deps.nativeFreshness);
+				} catch (cause) {
+					return liveRefuse('error', { error: cause });
+				}
+				if (disposed) return liveRefuse('unavailable');
+				if (writing || activeLive() !== null) return liveRefuse('busy');
+				if (primary !== device) return liveRefuse('no-device');
+			}
+			const now = clock.now();
+			const s: LiveSession = {
+				device,
+				label: labelOf(device),
+				experimental: captured.experimental,
+				profile: captured.profile === 'yolo' ? 'yolo' : 'standard',
+				abort: new AbortController(),
+				ended: null,
+				started: false,
+				applied: null,
+				pending: null,
+				firstPendingEditMs: now,
+				lastEditMs: now,
+				held: null,
+				hold: null,
+				known: true,
+				ackLevelDb: checklist.newLevelDb,
+				applies: 0,
+				lastError: null
+			};
+			live = s;
+			const first = capturedOf(verdict, captured.preampDb, true);
+			enqueueLive(s, first);
+			emit();
+			scheduleLive();
+			await first.settled;
+			return { status: 'accepted', live: liveView() };
+		},
+
+		/**
+		 * Queues an edited curve for the active live session (no gesture). Read once and gated
+		 * now; applied by the scheduler (debounce, one apply in flight plus one pending, newest
+		 * wins), unless the gate or a hold stops it. False when no session is active.
+		 */
+		queueLive(curve: LiveCurve): boolean {
+			const s = activeLive();
+			if (s === null) return false;
+			const bands = curve.bands;
+			const preampDb = curve.preampDb;
+			const captured = captureLive(s, bands, preampDb, false);
+			if (s.hold?.reason === 'unknown-state') {
+				// Only a confirmation leaves an unknown state: the newest edit waits behind it.
+				if (s.held !== null) s.held.done();
+				s.held = captured;
+				captured.done();
+				emit();
+				return true;
+			}
+			// A loudness or gate hold is evaluated again on the newest edit.
+			if (s.hold !== null) clearHold(s);
+			enqueueLive(s, captured);
+			emit();
+			scheduleLive();
+			return true;
+		},
+
+		/**
+		 * Releases a loudness or unknown-state hold (fresh gesture): the held curve's level
+		 * becomes the confirmed one and the curve is applied. A gate hold is never confirmable.
+		 */
+		async confirmLive(request: LiveGestureRequest): Promise<LiveOutcome> {
+			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
+			const s = activeLive();
+			if (s === null) return liveRefuse('no-session');
+			const held = s.held;
+			if (s.hold === null || held === null) return liveRefuse('no-hold');
+			if (s.hold.reason === 'gate') return liveRefuse('gate');
+			clearHold(s);
+			s.ackLevelDb = held.levelDb;
+			const again = recaptured(held, true);
+			enqueueLive(s, again);
+			emit();
+			scheduleLive();
+			await again.settled;
+			return { status: 'accepted', live: liveView() };
+		},
+
+		/**
+		 * Applies the last saved curve live (fresh gesture); the session goes on. Pending edits
+		 * and holds are dropped; its level becomes the confirmed one.
+		 */
+		revertLive,
+
+		/**
+		 * Ends the live session. `revert: true` first applies the saved curve live (needs a
+		 * fresh gesture); otherwise the cable keeps playing the live curve until it is unplugged.
+		 * Nothing is reverted automatically (not on unload either).
+		 */
+		async stopLive(request: LiveStopRequest): Promise<LiveOutcome> {
+			const s = activeLive();
+			if (!request.revert) {
+				if (s === null) return liveRefuse('no-session');
+				endLive(s, 'stopped');
+				return { status: 'accepted', live: liveView() };
+			}
+			const reverted = await revertLive({
+				gesture: request.gesture,
+				...(request.saved === undefined ? {} : { saved: request.saved })
+			});
+			if (reverted.status === 'refused') return reverted;
+			if (s !== null) endLive(s, 'reverted');
+			return { status: 'accepted', live: liveView() };
+		},
+
+		/** Settles once no live apply is in flight or scheduled (tests, and a UI waiting to save). */
+		async whenLiveIdle(): Promise<void> {
+			while (!liveIdle()) {
+				const waitFor = liveInFlight ?? liveTimerDone ?? emitted.promise;
+				await waitFor;
+			}
+		},
+
 		/** Aborts the write in progress (it ends as `interrupted`; the commit is never sent). */
 		abort(): boolean {
 			if (controller === null) return false;
@@ -1535,6 +2304,12 @@ export function createCableService(
 			stopWatching?.();
 			listeners.clear();
 			disposed = true;
+			// Live preview: timers stop and an apply in flight is aborted (before report 8 it stops
+			// there; after it, it finishes and releases the lock). Never reverted here: an unload
+			// cannot finish an apply reliably, and an unplug reverts the cable anyway.
+			const session = live;
+			if (session !== null) endLive(session, 'stopped');
+			cancelLiveTimer();
 			// Stop waiting for another tab's liveness lock (the wait only ever records).
 			unwatch();
 			// Other tabs may now treat this tab as gone: a write still running holds the write

@@ -132,6 +132,8 @@ export interface SetupOptions {
 	wrapClock?: (clock: Clock) => Clock;
 	/** Modo YOLO on in this tab (`deps.yoloSession`); absent: no port, so YOLO is off. */
 	yoloSession?: boolean;
+	/** Live preview switch (`deps.livePolicy`); absent: `LIVE_APPLY_POLICY`. */
+	livePolicy?: { enabled: boolean };
 }
 
 export async function setup(options: SetupOptions = {}) {
@@ -161,7 +163,8 @@ export async function setup(options: SetupOptions = {}) {
 		tabId: options.tabId,
 		...(options.yoloSession === undefined
 			? {}
-			: { yoloSession: () => options.yoloSession === true })
+			: { yoloSession: () => options.yoloSession === true }),
+		...(options.livePolicy === undefined ? {} : { livePolicy: options.livePolicy })
 	};
 	const service = createCableService(deps);
 	const written: CableWrittenDetail[] = [];

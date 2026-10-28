@@ -258,7 +258,9 @@ test('U7 lists cables A, B and C with their real state; the list is read-only', 
 			]
 		},
 		lastOutcome: null,
-		error: null
+		error: null,
+		liveCapable: true,
+		live: null
 	};
 	const screen = await render(CableList, { cable });
 	const list = page.getByRole('list', { name: m.cabo_fux_cables_label(), exact: true });

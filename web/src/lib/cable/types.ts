@@ -178,6 +178,17 @@ export interface CableServiceDeps {
 	 * write is refused unless it returns true. Defaults to `() => false`.
 	 */
 	yoloSession?: () => boolean;
+	/**
+	 * Live preview switch; defaults to `LIVE_APPLY_POLICY` (`live-policy.ts`). Injectable for
+	 * tests.
+	 */
+	livePolicy?: { readonly enabled: boolean };
+	/**
+	 * Native (Android) transport only: whether the app's write guard accepts live applies
+	 * (`detectNativeCable()` → `liveApply`). Absent or false: native is not live-capable.
+	 * TODO(#72): pass `liveApply` from the native detection result where the service is built.
+	 */
+	nativeLiveApply?: boolean;
 }
 
 /** Gate profile of a write: only `'yolo'` (Modo YOLO) changes anything. */
@@ -224,6 +235,12 @@ export interface ChecklistContext {
 	nowMs: number;
 	flash: FlashState;
 	lastWrittenLevelDb: number | null;
+	/**
+	 * `levelDb` of the curve a live (no-flash) session is playing right now, when known. When
+	 * finite it replaces `lastWrittenLevelDb` in the loudness comparison: it is what the user is
+	 * actually hearing (S7, issue #70).
+	 */
+	liveLevelDb?: number | null;
 	sessionWriteCount: number;
 	lastJournalStatus: JournalStatus | null;
 	/** Modo YOLO is on in this tab, with the phrase typed (see `CableServiceDeps.yoloSession`). */
@@ -447,6 +464,130 @@ export interface CableState {
 	lastOutcome: WriteOutcome | null;
 	/** Last connection feedback/error code; request-empty is informational, not a failure. */
 	error: 'request-empty' | 'request-failed' | 'restore-failed' | 'journal-failed' | null;
+	/** Whether this transport may run a live (no-flash) preview session (`LIVE_APPLY_POLICY`). */
+	liveCapable: boolean;
+	/** The live preview session (the last one, `status: 'ended'`, until a new one starts). */
+	live: LiveState | null;
+}
+
+/** A curve for the live preview: read once when it is queued. */
+export interface LiveCurve {
+	bands: readonly Band[];
+	preampDb: number;
+	/** `startLive` only: lets the gate accept HS/LP/HP for the whole session. */
+	experimental?: boolean;
+	/** `startLive` only: gate profile of the whole session (`'yolo'` needs Modo YOLO on). */
+	profile?: WriteProfile;
+}
+
+/** The curve the cable is playing from RAM after a successful live apply (or a commit). */
+export interface LiveApplied {
+	crc: number;
+	bands: Band[];
+	preampDb: number;
+	levelDb: number | null;
+	/** Epoch ms. */
+	at: number;
+	profile?: 'yolo';
+}
+
+export type LiveStatus = 'starting' | 'applying' | 'live' | 'held' | 'unknown' | 'ended';
+
+export interface LiveHoldState {
+	/**
+	 * `loudness`: ≥ 3 dB above the confirmed level; `gate`: the newest curve fails the gate
+	 * (never confirmable); `unknown-state`: what the cable plays is not known.
+	 */
+	reason: 'loudness' | 'gate' | 'unknown-state';
+	deltaDb?: number;
+	gateReasons?: readonly GateReason[];
+}
+
+export type LiveEndedReason =
+	/** `stopLive({ revert: false })`: the cable keeps the live curve until it is unplugged. */
+	| 'stopped'
+	/** `stopLive({ revert: true })`: the last saved curve was applied live, then the session ended. */
+	| 'reverted'
+	/** The cable was unplugged: it went back to the saved (committed) curve. */
+	| 'disconnected'
+	/** The page forgot the device (`disconnect()`): the cable keeps the live curve. */
+	| 'forgotten';
+
+export interface LiveState {
+	deviceLabel: string;
+	status: LiveStatus;
+	/** What the cable plays (null until the first apply succeeds). */
+	applied: LiveApplied | null;
+	/** A newer curve waits for the scheduler. */
+	pending: boolean;
+	/** The level the user last confirmed (start, confirm, revert or a save). */
+	ackLevelDb: number | null;
+	hold: LiveHoldState | null;
+	/** Live applies in this session that reached report 8 successfully. */
+	applies: number;
+	/** Successful live applies in this page (all sessions; memory only). */
+	total: number;
+	/** Why the last live apply failed (it is never retried automatically); null after a success. */
+	lastError: unknown;
+	endedReason?: LiveEndedReason;
+}
+
+export type LiveRefusalReason =
+	| 'gesture'
+	| 'busy'
+	| 'no-device'
+	| 'checklist'
+	/** Live preview is off (`LIVE_APPLY_POLICY`) or not supported by this transport. */
+	| 'unavailable'
+	| 'no-session'
+	/** `confirmLive` without a confirmable hold. */
+	| 'no-hold'
+	/** `confirmLive` on a gate hold: a curve the gate refuses is never sent. */
+	| 'gate'
+	/** `revertLive` / `stopLive({ revert: true })` without a known saved curve. */
+	| 'no-saved-curve'
+	| 'error';
+
+export interface LiveRefused {
+	status: 'refused';
+	reason: LiveRefusalReason;
+	checklist?: ChecklistResult;
+	error?: unknown;
+}
+
+export type LiveOutcome = LiveRefused | { status: 'accepted'; live: LiveState | null };
+
+/** The last saved curve, for `revertLive` / `stopLive({ revert: true })`. */
+export interface LiveSavedCurve {
+	bands: readonly Band[];
+	preampDb: number;
+}
+
+export interface LiveStartRequest {
+	/** The curve to apply first; its `experimental`/`profile` hold for the whole session. */
+	curve: LiveCurve;
+	/** Same confirmations as a write, minus `keepConnected` (an unplug only reverts the cable). */
+	confirmations: Partial<Confirmations> | undefined;
+	gesture: GestureToken | null | undefined;
+}
+
+export interface LiveGestureRequest {
+	gesture: GestureToken | null | undefined;
+}
+
+export interface LiveRevertRequest extends LiveGestureRequest {
+	/**
+	 * The last saved curve; when absent, the last curve this page saved, else the last `ok`
+	 * journal entry (`simulated` in simulated mode). None: refused `no-saved-curve`.
+	 */
+	saved?: LiveSavedCurve | null;
+}
+
+export interface LiveStopRequest {
+	/** true: apply the saved curve live first (needs `gesture`), then end the session. */
+	revert: boolean;
+	gesture?: GestureToken | null;
+	saved?: LiveSavedCurve | null;
 }
 
 export interface CableWrittenDetail {
