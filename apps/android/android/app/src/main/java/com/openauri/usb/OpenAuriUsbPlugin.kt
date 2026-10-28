@@ -252,6 +252,7 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
                 interruptOut = session.interruptOut,
                 kernelDriverDetached = kernelDriverDetached,
                 wireLog = session.wireLog,
+                abandonedSequences = guards.abandonedSequences(attachment.key),
             ),
         )
     }

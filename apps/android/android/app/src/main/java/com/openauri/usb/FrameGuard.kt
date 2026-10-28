@@ -24,6 +24,7 @@ import com.openauri.usb.ProtocolConstants.WRITE_SPACING_MS
  * ```
  * Idle         --data report 0 ok-->           Receiving(1)
  * Receiving(n) --data report n ok, n < 8-->    Receiving(n + 1)
+ * Receiving(n) --data report 0 ok-->           Receiving(1) (partial sequence abandoned)
  * Receiving(8) --data report 8 ok-->           AwaitCommit
  * AwaitCommit  --exact commit, spacing ok-->   Idle (forwarded)
  * AwaitCommit  --data report 0 ok-->           Receiving(1) (uncommitted sequence abandoned)
@@ -33,9 +34,14 @@ import com.openauri.usb.ProtocolConstants.WRITE_SPACING_MS
  * Live apply: the cable applies the curve to RAM as soon as data report 8 arrives; only the
  * commit writes it to flash. So the 9 data reports alone are a complete live (uncommitted)
  * apply, and in AwaitCommit a valid data report 0 (same checks as from Idle: report ID, size,
- * padding, preamble) drops the uncommitted sequence and starts the next one, counted in
- * [abandonedSequences]. Any other report in AwaitCommit that is not the exact commit is still
- * rejected with [RejectReason.EXPECTED_COMMIT]. The commit spacing only applies to commits.
+ * preamble; report 0 carries 30 payload bytes and no padding) drops the uncommitted sequence
+ * and starts the next one. The same holds in Receiving(n): a live apply cut off part-way never
+ * reached report 8, so the cable ignored it, and a valid data report 0 drops it and starts the
+ * next preview or write. Each such restart is counted in [abandonedSequences]. A partial
+ * sequence can never be committed: the commit needs all 9 data reports of the current sequence.
+ * A data report 0 that fails a check is rejected with the reason of that check; any other
+ * report in AwaitCommit that is not the exact commit is rejected with
+ * [RejectReason.EXPECTED_COMMIT]. The commit spacing only applies to commits.
  *
  * Data reports are forwarded one by one, as they arrive, and each one is checked before it is
  * forwarded, as soon as the bytes it carries allow:
@@ -52,8 +58,9 @@ import com.openauri.usb.ProtocolConstants.WRITE_SPACING_MS
  * sequence, that sequence is dropped (it can no longer get its commit) and the late report is
  * judged as if the guard were idle: a valid data report 0 starts a new sequence and is
  * forwarded, the way a new write starts after an interrupted one; anything else is rejected
- * with [RejectReason.SEQUENCE_TIMEOUT]. Within the timeout, a data report 0 in the middle of a
- * sequence (Receiving) is out of order and rejected; in AwaitCommit it is a new live apply.
+ * with [RejectReason.SEQUENCE_TIMEOUT]. That restart drops an uncommitted sequence too, so it is
+ * counted in [abandonedSequences]. Within the timeout, a valid data report 0 in Receiving or
+ * AwaitCommit also starts a new sequence (see Live apply above).
  *
  * The commit report starts with 0x01, the index byte of data report 1, and whether the firmware
  * looks past the 5 command bytes is unverified (`docs/protocol-0xcb.md:152-155`). So any report
@@ -110,8 +117,8 @@ class FrameGuard(
         /** A report starting with the commit command came before the 9 data reports were forwarded. */
         COMMIT_WITHOUT_DATA("commit without the 9 data reports before it"),
 
-        /** After the 9 data reports, something other than the exact commit report came. */
-        EXPECTED_COMMIT("the 9 data reports must be followed by the exact commit report"),
+        /** After the 9 data reports, something other than the exact commit report or a data report 0 came. */
+        EXPECTED_COMMIT("after the 9 data reports only the exact commit report or a new data report 0 is accepted"),
 
         /** Less than [WRITE_SPACING_MS] since the previous forwarded commit (or the clock went back). */
         COMMIT_TOO_SOON("commit less than 2000 ms after the previous commit on this device"),
@@ -161,8 +168,9 @@ class FrameGuard(
         }
 
     /**
-     * Sequences dropped uncommitted in AwaitCommit because a valid data report 0 started the next
-     * one (live applies), for diagnostics and tests. Never reset.
+     * Sequences with data dropped uncommitted because a valid data report 0 started the next one:
+     * in Receiving or AwaitCommit (live applies, complete or cut off), or after the timeout. For
+     * diagnostics (`UsbDiagnostics.abandonedSequences`) and tests. Never reset.
      */
     var abandonedSequences: Int = 0
         @Synchronized get
@@ -193,21 +201,29 @@ class FrameGuard(
         if (reportId != HID_REPORT_ID) return reject(RejectReason.WRONG_REPORT_ID)
         if (data.size != REPORT_SIZE) return reject(RejectReason.WRONG_SIZE)
         if (received > 0 && nowMs - lastReportAtMs > SEQUENCE_TIMEOUT_MS) {
-            clearSequence()
-            val restart = acceptData(data, nowMs)
+            // The sequence in progress had data and no commit: a valid report 0 abandons it.
+            val restart = restart(data, nowMs)
             return if (restart is Decision.Forward) restart else reject(RejectReason.SEQUENCE_TIMEOUT)
         }
-        if (received == REPORT_COUNT) {
-            if (data[REPORT_INDEX_OFFSET].toInt() != 0) return acceptCommit(data, nowMs)
-            // A live apply: the 9 data reports already took effect in the cable's RAM, so a valid
-            // data report 0 drops the uncommitted sequence and starts the next one.
-            clearSequence()
-            val restart = acceptData(data, nowMs)
-            if (restart !is Decision.Forward) return reject(RejectReason.EXPECTED_COMMIT)
-            abandonedSequences++
-            return restart
+        if (received > 0 && data[REPORT_INDEX_OFFSET].toInt() == 0) {
+            // A new live apply or write. From AwaitCommit the 9 data reports already took effect in
+            // the cable's RAM; from Receiving(n) the sequence never reached report 8, so the cable
+            // ignored it. Either way it was never committed and can no longer be.
+            return restart(data, nowMs)
         }
+        if (received == REPORT_COUNT) return acceptCommit(data, nowMs)
         return acceptData(data, nowMs)
+    }
+
+    /**
+     * Drops the uncommitted sequence in progress and judges [data] as data report 0 of a new one,
+     * with the same checks as from Idle; counts the dropped sequence only when [data] passes.
+     */
+    private fun restart(data: ByteArray, nowMs: Long): Decision {
+        clearSequence()
+        val decision = acceptData(data, nowMs)
+        if (decision is Decision.Forward) abandonedSequences++
+        return decision
     }
 
     /** Data report [received] is expected; [data] is [REPORT_SIZE] bytes long. */
@@ -303,6 +319,10 @@ class FrameGuards(private val commits: CommitSpacingStore = CommitSpacingStore()
     fun reset(key: String) {
         guards[key]?.reset()
     }
+
+    /** [FrameGuard.abandonedSequences] of [key]; 0 for a key whose guard was never created. */
+    @Synchronized
+    fun abandonedSequences(key: String): Int = guards[key]?.abandonedSequences ?: 0
 }
 
 /** USB identity across reconnects; without a serial all cables of that VID:PID share spacing. */

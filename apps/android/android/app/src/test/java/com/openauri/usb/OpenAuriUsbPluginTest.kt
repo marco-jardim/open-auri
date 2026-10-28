@@ -646,8 +646,10 @@ class OpenAuriUsbPluginTest {
             Triple("bad CRC", 7, 0xCB to badCrc),
             Triple("bad padding", 8, 0xCB to badPadding),
             Triple("data instead of commit", 9, 0xCB to neutral.reports[1]),
-            // A valid report 0 after the 9 data reports is a live apply; a bad one is still refused.
+            // A valid report 0 after the 9 data reports, or part-way, is a new live apply; a bad
+            // one is still refused.
             Triple("bad report 0 instead of commit", 9, 0xCB to badPreamble),
+            Triple("bad report 0 part-way", 4, 0xCB to badPreamble),
         )
         for ((name, valid, report) in cases) {
             val harness = UsbPluginHarness()
@@ -665,6 +667,44 @@ class OpenAuriUsbPluginTest {
             assertEquals(name, ErrorCodes.USB_GUARD_REJECTED, harness.send(key, 0xCB, commit).code)
             assertEquals(name, calls, harness.fake.calls.size)
         }
+    }
+
+    @Test
+    fun aLiveApplyThenASalvarReachTheCableWithOnlyTheSecondSequenceCommitted() {
+        // "9 data, 9 data, commit" through send(): a live apply followed by a committed write.
+        val harness = UsbPluginHarness()
+        val key = harness.connectFirst()
+        val live = ProtocolFixtureTest.presets.last()
+        live.reports.forEach { report ->
+            assertTrue(harness.send(key, 0xCB, report).resolved)
+            harness.nowMs += ProtocolFixtureTest.reportGapMs
+        }
+        harness.nowMs += 300
+        harness.writeCurve(key, neutral).forEach { assertTrue(it.resolved) }
+        val expected = (live.reports + neutral.reports + listOf(commit)).map { UsbPluginHarness.wire(it) }
+        assertEquals(expected.size, harness.fake.sent.size)
+        expected.forEachIndexed { index, bytes -> assertArrayEquals("buffer $index", bytes, harness.fake.sent[index].bytes) }
+        assertEquals(1, harness.fake.sent.count { it.bytes.contentEquals(UsbPluginHarness.wire(commit)) })
+        assertEquals(1, harness.diagnostics(key).payload?.getInt("abandonedSequences"))
+    }
+
+    @Test
+    fun aLiveApplyCutOffPartWayDoesNotBlockTheNextOne() {
+        // The live apply stopped after report 4: the next preview starts at once, and the partial
+        // sequence can never be committed.
+        val harness = UsbPluginHarness()
+        val key = harness.connectFirst()
+        (0..4).forEach { assertTrue(harness.send(key, 0xCB, neutral.reports[it]).resolved) }
+        harness.nowMs += 50
+        val rejected = harness.send(key, 0xCB, commit)
+        assertEquals(ErrorCodes.USB_GUARD_REJECTED, rejected.code)
+        assertEquals(FrameGuard.RejectReason.COMMIT_WITHOUT_DATA.message, rejected.message)
+        (0..4).forEach { assertTrue(harness.send(key, 0xCB, neutral.reports[it]).resolved) }
+        harness.nowMs += 50
+        harness.writeCurve(key, neutral).forEach { assertTrue(it.resolved) }
+        assertEquals(5 + 5 + 10, harness.fake.sent.size)
+        assertArrayEquals(UsbPluginHarness.wire(commit), harness.fake.sent.last().bytes)
+        assertEquals(1, harness.diagnostics(key).payload?.getInt("abandonedSequences"))
     }
 
     @Test
@@ -987,6 +1027,7 @@ class OpenAuriUsbPluginTest {
         assertEquals("interrupt", report.getString("transfer"))
         assertEquals(32, report.getInt("paddedLength"))
         assertFalse(report.getBoolean("kernelDriverDetached"))
+        assertEquals(0, report.getInt("abandonedSequences"))
         // Diagnostics read the cache: no USB I/O.
         val calls = release.fake.calls.size
         release.diagnostics(key)

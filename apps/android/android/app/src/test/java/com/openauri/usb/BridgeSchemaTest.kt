@@ -316,6 +316,12 @@ class BridgeSchemaTest {
                 """"paddedLength":32,"kernelDriverDetached":false}""",
         )
         assertValid("UsbDiagnostics", base.toString())
+        // abandonedSequences is optional (absent in older apps) and never negative.
+        base.put("abandonedSequences", 3)
+        assertValid("UsbDiagnostics", base.toString())
+        base.put("abandonedSequences", -1)
+        assertTrue(BridgeSchema.errors("UsbDiagnostics", base.toString()).isNotEmpty())
+        base.remove("abandonedSequences")
         base.put("wireLog", JSArray().put(JSObject().put("atMs", 5).put("hex", "cb00")))
         assertValid("UsbDiagnostics", base.toString())
         base.put("wireLog", JSArray().put(JSObject().put("atMs", 5)))

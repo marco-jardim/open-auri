@@ -209,6 +209,11 @@
           "maximum": 65536
         },
         "kernelDriverDetached": { "type": "boolean" },
+        "abandonedSequences": {
+          "description": "Optional; uncommitted write sequences the native write guard dropped on this connection because a valid data report 0 started the next one (live applies, interrupted writes, timeouts). Absent in older app versions.",
+          "type": "integer",
+          "minimum": 0
+        },
         "wireLog": {
           "description": "Debug builds only: the last buffers sent, oldest first, with the monotonic time in ms.",
           "type": "array",
