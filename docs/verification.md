@@ -169,6 +169,16 @@ CRCs `0x3D48` e `0xBE68`. Números por frequência e detalhes em
 
 B12b/B12c usam o nível em 2 kHz relativo à média de 7127/8000 Hz:
 Neutro ≈ −6 a −10 dB, PK 2 kHz −12 dB Q3 ≈ −18 a −21 dB.
+
+**Integridade da curva commitada (B12c) ✅:** o Neutro salvo pelo commit de
+diagnóstico da rodada 1 sobreviveu a ≈1100 aplicações ao vivo da rodada 2 e
+testes posteriores (normais e seguidas sem espera), sem commit no intervalo.
+Após replug, 2 kHz relativo a 7127/8000 Hz, respectivamente: −1,95/−1,5 dB;
+Neutro ao vivo logo depois: −2,2/−1,35 e −1,55/−1,45 dB; PK 2 kHz −12 dB
+ao vivo: −13,6/−13,25 dB. O cabo voltou exatamente ao Neutro commitado.
+O conjunto acústico havia mudado desde os ensaios anteriores: valem as
+referências ao vivo da mesma sessão, não os valores absolutos da seção F.
+
 B12 demonstra a viabilidade de modo sem flash, X2 no cabo e teste cego no
 cabo, **não a implementação**. Antes de B12b/B12c: ~12 escritas com commit na
 bancada + 13 na captura, além de 1 envio só de dados; **Padrão Auri regravado
@@ -189,8 +199,6 @@ com commit**, bytes oficiais, CRC `0x1970`.
 - O gatilho do estado travado observado uma vez em B12c: desconhecido, não
   reproduzido em ≈1065 aplicações adicionais; fluxo contínuo de 11 min, ausência
   de áudio e aba oficial também com o cabo aberto não foram isolados como causas
-- A integridade da curva commitada após muitas prévias: ainda não verificada;
-  o commit de diagnóstico da rodada 1 sobrescreveu a curva a conferir
 - Durabilidade da flash, comportamento em corte de energia e demais sondas
   B5, B6, B8, B9 e B11: ainda não medidos
 

@@ -314,8 +314,8 @@ sem essa espera; **0 erros de envio**. Depois, o cabo parou de reagir às
 prévias: 5 aplicações alternando PK/Neutro e uma de PK 5 kHz não mudaram
 o som. Uma escrita completa **com commit** (Neutro) aplicou imediatamente,
 mas as prévias seguintes continuaram sem reação. Desconectar/reconectar
-restaurou o funcionamento. A checagem de integridade da curva commitada
-foi perdida: o commit de diagnóstico a sobrescreveu.
+restaurou o funcionamento. A checagem da curva commitada antes dessa rodada
+foi perdida: o commit de diagnóstico a sobrescreveu com Neutro.
 
 **B12c — rodada 2 ✅ (após replug):** 1005 aplicações com timing normal em
 5 lotes de ~200; a checagem após cada lote confirmou prévias funcionando
@@ -324,11 +324,20 @@ seguidas sem a espera: continuou aplicando (última = PK, −18,7/−20,0 dB),
 assim como aplicações normais depois. Uma curva ao vivo permaneceu sem
 mudança após 45 s ocioso (−19,05 → −19,0 dB).
 
+**B12c — integridade da curva commitada ✅:** após a rodada 2 e testes
+posteriores, ≈1100 aplicações ao vivo (normais e seguidas sem espera), **sem
+nenhum commit desde o Neutro de diagnóstico da rodada 1**, desconectar/reconectar
+restaurou exatamente esse Neutro. Nível em 2 kHz relativo a 7127/8000 Hz,
+respectivamente: após replug, −1,95/−1,5 dB; Neutro ao vivo logo depois,
+−2,2/−1,35 e −1,55/−1,45 dB; PK 2 kHz −12 dB ao vivo, −13,6/−13,25 dB.
+**A curva commitada sobreviveu às ≈1100 prévias.** O conjunto acústico havia
+mudado desde as medições anteriores desta seção: a comparação é com as
+referências ao vivo da mesma sessão, não com os valores absolutos anteriores.
+
 **Limite:** o estado travado da rodada 1 **não foi reproduzido** em ≈1065
 aplicações adicionais, inclusive rápidas; gatilho desconhecido. Diferenças
 da rodada 1: fluxo ininterrupto de 11 min, sem áudio tocando durante ele,
 aba oficial da Kuba também com o dispositivo aberto; não se isolou a causa.
-A integridade da curva commitada após muitas prévias continua não verificada.
 
 **Mitigações adotadas no plano da funcionalidade:** como não há ack, a UI deve
 orientar a desconectar/reconectar se a prévia parar de mudar o som; “Salvar”

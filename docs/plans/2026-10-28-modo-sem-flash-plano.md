@@ -24,8 +24,14 @@ Data: 2026-10-28. Origem: sonda B12 da Fase H (`docs/probing.md`, seção F).
   Métrica: 2 kHz relativo à média de 7127/8000 Hz, mesmo método acústico da seção F.
   **Estado travado não reproduzido em ≈1065 aplicações adicionais; gatilho desconhecido.**
   Na rodada 1 houve fluxo ininterrupto de 11 min, sem áudio e com a aba oficial também
-  com o cabo aberto; causas não isoladas. A integridade da curva commitada segue pendente:
-  o commit de diagnóstico da rodada 1 a sobrescreveu. Detalhes em `docs/probing.md`.
+  com o cabo aberto; causas não isoladas. Detalhes em `docs/probing.md`.
+- **Integridade da curva commitada ✅ (2026-10-28):** Neutro salvo pelo commit de diagnóstico
+  da rodada 1 sobreviveu a ≈1100 prévias da rodada 2 e testes posteriores (normais e seguidas
+  sem espera), sem commit no intervalo. Após replug, 2 kHz relativo a 7127/8000 Hz:
+  −1,95/−1,5 dB; Neutro ao vivo logo depois: −2,2/−1,35 e −1,55/−1,45 dB;
+  PK 2 kHz −12 dB ao vivo: −13,6/−13,25 dB. Voltou exatamente ao Neutro commitado.
+  O conjunto acústico havia mudado: comparação com referências ao vivo da mesma sessão,
+  não com os valores absolutos anteriores da seção F.
 
 ## 2. Escopo
 
@@ -42,7 +48,7 @@ atômicas, testes só do que a fatia toca, revisão QA sênior, correções, com
 
 ### Fase 0 — sondas (S0)
 - B12b ✅; B12c ✅ com ressalva (estado travado uma vez, recuperado por replug);
-  integridade da curva commitada após muitas prévias pendente (§6).
+  integridade da curva commitada após ≈1100 prévias ✅ (§6).
 
 ### Fase 1 — núcleo
 - **S1 `applyCurve`** (`src/transport/webhid.mjs`): 9 reports, sem commit, `SETTLE_MS` dentro
@@ -100,7 +106,7 @@ atômicas, testes só do que a fatia toca, revisão QA sênior, correções, com
 
 | Risco | Mitigação |
 |---|---|
-| A via de dados desgastar a flash | Ritmo limitado, contador separado, chave de publicação, B12c |
+| A via de dados desgastar a flash | B12c: curva commitada intacta após ≈1100 prévias sem commit; evidência de integridade, não prova de resistência ao desgaste. Ritmo limitado, contador separado e chave de publicação |
 | Cadência mais rápida que a medida | Piso de 300 ms por sequência |
 | Estado travado observado uma vez (B12c), gatilho desconhecido | Sem ack: UI orienta desconectar/reconectar se a prévia parar de mudar o som; “Salvar” sempre envia os 9 reports + commit (funcionou travado); cadência ≥300 ms e contador de prévias |
 | Duas abas | Trava de sessão e recusa `'live-elsewhere'` |
@@ -110,4 +116,5 @@ atômicas, testes só do que a fatia toca, revisão QA sênior, correções, com
 
 ## 6. Pendências manuais
 
-- Verificar a integridade da curva commitada após muitas prévias, sem commit de diagnóstico no meio.
+- ✅ Integridade da curva commitada verificada em 2026-10-28: Neutro restaurado após replug,
+  depois de ≈1100 prévias sem commit no intervalo (§1; `docs/probing.md`, seção F).
