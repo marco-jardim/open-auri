@@ -590,6 +590,11 @@ export interface LiveState {
 	 * journal, this page's saves); null when unknown. Absent: not reported.
 	 */
 	savedCrc?: number | null;
+	/**
+	 * The session's comparison set (`startComparison`). When blind, `applied`, `ackLevelDb`,
+	 * `hold` and `savedCrc` are redacted (null / absent) for the whole session.
+	 */
+	comparison?: LiveComparisonState;
 }
 
 export type LiveRefusalReason =
@@ -687,6 +692,149 @@ export interface LiveStopRequest {
 	revert: boolean;
 	gesture?: GestureToken | null;
 	saved?: LiveSavedCurve | null;
+}
+
+// --- Comparison on the cable (issues #73/#74) -------------------------------------------------
+
+/** A comparison candidate (read once). `profile: 'yolo'` is refused in the MVP. */
+export type ComparisonCurve = LiveCurve;
+
+export interface ComparisonOptions {
+	/** Lower the louder candidates' preamp to the quietest level (never boost). */
+	match: boolean;
+	/** Only `'standard'` in the MVP (`'yolo'` is refused `yolo-unsupported`). */
+	profile?: WriteProfile;
+	/** Gate option of every apply (HS/LP/HP); OR-ed with each candidate's own flag. */
+	experimental?: boolean;
+}
+
+export type ComparisonRefusalReason =
+	/** Fewer than two candidates. */
+	| 'too-few'
+	/** A candidate (as given, or once matched: `matched`) fails the gate. */
+	| 'gate'
+	/** A candidate's level cannot be computed. */
+	| 'level-unknown'
+	/** Matching would put a candidate's preamp below −25.5 dB (the quiet one is never boosted). */
+	| 'level-range'
+	/** A candidate (or the request) needs the Modo YOLO profile: not in the MVP. */
+	| 'yolo-unsupported'
+	/** `startComparison` with a `first` index outside the set. */
+	| 'bad-index';
+
+export interface ComparisonRefusal {
+	reason: ComparisonRefusalReason;
+	/** The candidate that refused the set. */
+	index?: number;
+	gateReasons?: readonly GateReason[];
+	/** The refusal is about the level-matched curve, not the one given. */
+	matched?: boolean;
+	/** `level-range`: the matched preamp that fell below the floor. */
+	preampDb?: number;
+}
+
+/** One pre-approved candidate: what is played (gated, level-matched) and the original. */
+export interface ComparisonItem {
+	index: number;
+	/** The gate's snapshot of the played curve. */
+	bands: Band[];
+	/** Matched preamp (the original one when not lowered). */
+	preampDb: number;
+	/** CRC-16 of the played payload (changes with the preamp). */
+	crc: number;
+	/** `levelDb` of the played curve. */
+	levelDb: number;
+	/** `levelDb − targetLevelDb` (≤ 0.1 dB in magnitude when matched). */
+	residualDb: number;
+	/** The preamp was lowered. */
+	matched: boolean;
+	/** HS/LP/HP or a band above 20 kHz. */
+	experimentalRequired: boolean;
+	/** The gate verdict of the played curve (session options). */
+	verdict: GateResult;
+	/** The candidate as given (gated snapshot), untouched: "Salvar esta" saves this one. */
+	original: { bands: Band[]; preampDb: number; crc: number; levelDb: number };
+}
+
+export interface ComparisonPlan {
+	items: ComparisonItem[];
+	/** The level confirmed for the set: the highest level played (null when refused). */
+	ackLevelDb: number | null;
+	/** The quietest original level (null when refused). */
+	targetLevelDb: number | null;
+	match: boolean;
+	/** Gate option of every apply. */
+	experimental: boolean;
+	/** Any candidate needs the experimental confirmation (OR). */
+	experimentalRequired: boolean;
+	profile: 'standard';
+	refusal?: ComparisonRefusal;
+}
+
+export interface ComparisonStartRequest {
+	curves: readonly ComparisonCurve[];
+	match: boolean;
+	/** Blind: the state never tells which candidate plays (nor its CRC, level or holds). */
+	blind: boolean;
+	/** Index applied first (default 0). */
+	first?: number;
+	/** Gate option of the session (OR-ed with each candidate's). */
+	experimental?: boolean;
+	profile?: WriteProfile;
+	confirmations: Partial<Confirmations> | undefined;
+	gesture: GestureToken | null | undefined;
+}
+
+/** Per-candidate summary returned by `startComparison` (never in the state when blind). */
+export interface ComparisonItemSummary {
+	index: number;
+	preampDb: number;
+	levelDb: number;
+	residualDb: number;
+	matched: boolean;
+}
+
+export interface ComparisonSummary {
+	items: ComparisonItemSummary[];
+	ackLevelDb: number;
+	targetLevelDb: number;
+	experimentalRequired: boolean;
+	blind: boolean;
+}
+
+export interface ComparisonRefused {
+	status: 'refused';
+	reason: 'comparison';
+	refusal: ComparisonRefusal;
+}
+
+export type ComparisonOutcome =
+	| LiveRefused
+	| ComparisonRefused
+	| { status: 'accepted'; live: LiveState | null; plan: ComparisonSummary };
+
+export type ComparisonSwitchStatus = 'applied' | 'unknown' | 'held' | 'busy' | 'ended' | 'error';
+
+export interface ComparisonEndRequest {
+	/** true: apply the saved curve live first (needs `gesture`), then end the session. */
+	revert: boolean;
+	gesture?: GestureToken | null;
+	saved?: LiveSavedCurve | null;
+}
+
+/** Coarse progress of a comparison (the only status a blind one exposes). */
+export type ComparisonStatus = 'applying' | 'ready' | 'failed';
+
+export interface LiveComparisonState {
+	/** The session is running and the comparison with it. */
+	active: boolean;
+	blind: boolean;
+	count: number;
+	status: ComparisonStatus;
+	/** Not blind only: the candidate playing (last applied). */
+	index?: number;
+	/** Not blind only: per-candidate matched preamp and level. */
+	items?: ComparisonItemSummary[];
 }
 
 export interface CableWrittenDetail {

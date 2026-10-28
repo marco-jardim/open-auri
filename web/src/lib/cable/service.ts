@@ -55,6 +55,8 @@ import {
 import { NEUTRAL_BANDS, USB_PID, USB_VID } from 'open-auri/dsp';
 import { gateForWrite, isWaivable } from 'open-auri/safety';
 import {
+	EXPERIMENTAL_CONFIRMATION_TEXT,
+	ULTRASONIC_CONFIRMATION_TEXT,
 	evaluateChecklist,
 	evaluateLiveChecklist,
 	flashCountersOf,
@@ -62,6 +64,7 @@ import {
 	hasUltrasonicBands,
 	writtenLevelDb
 } from './checklist.ts';
+import { planComparison } from './compare.ts';
 import { LIVE_APPLY_POLICY } from './live-policy.ts';
 import { isNativeHid } from './native/brand.ts';
 import {
@@ -82,6 +85,13 @@ import type {
 	ChecklistContext,
 	ChecklistInput,
 	ChecklistResult,
+	ComparisonEndRequest,
+	ComparisonItem,
+	ComparisonItemSummary,
+	ComparisonOutcome,
+	ComparisonStartRequest,
+	ComparisonStatus,
+	ComparisonSwitchStatus,
 	ConnectionState,
 	FlashState,
 	GateResult,
@@ -92,6 +102,7 @@ import type {
 	JournalEntry,
 	JournalStatus,
 	LiveApplied,
+	LiveComparisonState,
 	LiveCurve,
 	LiveEndedReason,
 	LiveGestureRequest,
@@ -496,6 +507,21 @@ interface LiveSession {
 	gated: boolean;
 	/** The newest edit queued while gated (it follows the start curve). */
 	gatedEdit: LiveCaptured | null;
+	/** The pre-approved comparison set (`startComparison`); null for a plain preview. */
+	comparison: LiveComparison | null;
+}
+
+/** A comparison set inside a live session (issues #73/#74). */
+interface LiveComparison {
+	/** Gated, level-matched candidates (and their untouched originals). */
+	items: readonly ComparisonItem[];
+	blind: boolean;
+	/** The candidate the last successful switch (or the start) applied; null before. */
+	index: number | null;
+	/** A switch (or the end's revert) is in progress: other switches are refused `busy`. */
+	switching: boolean;
+	/** The last switch did not leave the selected candidate playing. */
+	failed: boolean;
 }
 
 /** How one live apply attempt went, from inside (or instead of) the cross-tab lock. */
@@ -771,6 +797,24 @@ export function createCableService(
 	function liveView(): LiveState | null {
 		const s = live;
 		if (s === null) return null;
+		const comparison = s.comparison;
+		// A blind comparison: nothing that tells the candidates apart (CRC, bands, levels, holds,
+		// the saved curve's CRC), for the whole session.
+		if (comparison !== null && comparison.blind) {
+			return {
+				deviceLabel: s.label,
+				status: liveStatusOf(s),
+				applied: null,
+				pending: s.pending !== null || s.gatedEdit !== null,
+				ackLevelDb: null,
+				hold: null,
+				applies: s.applies,
+				total: liveTotal,
+				lastError: s.lastError,
+				...(s.ended === null ? {} : { endedReason: s.ended }),
+				comparison: comparisonView(s, comparison)
+			};
+		}
 		const hold: LiveHoldState | null =
 			s.hold === null
 				? null
@@ -789,7 +833,55 @@ export function createCableService(
 			total: liveTotal,
 			lastError: s.lastError,
 			...(s.ended === null ? {} : { endedReason: s.ended }),
-			savedCrc: savedCrcOf(s)
+			savedCrc: savedCrcOf(s),
+			...(comparison === null ? {} : { comparison: comparisonView(s, comparison) })
+		};
+	}
+
+	function comparisonSummary(item: ComparisonItem): ComparisonItemSummary {
+		return {
+			index: item.index,
+			preampDb: item.preampDb,
+			levelDb: item.levelDb,
+			residualDb: item.residualDb,
+			matched: item.matched
+		};
+	}
+
+	/** The candidate the cable plays now (known), or null. */
+	function comparisonPlaying(s: LiveSession, c: LiveComparison): number | null {
+		if (!s.known || s.applied === null) return null;
+		const crc = s.applied.crc;
+		if (c.index !== null && c.items[c.index]?.crc === crc) return c.index;
+		const found = c.items.findIndex((item) => item.crc === crc);
+		return found >= 0 ? found : null;
+	}
+
+	function comparisonStatusOf(s: LiveSession, c: LiveComparison): ComparisonStatus {
+		if (
+			c.switching ||
+			(s.ended === null && (!s.started || liveInFlight !== null || s.pending !== null))
+		) {
+			return 'applying';
+		}
+		if (c.failed || s.hold !== null || comparisonPlaying(s, c) === null) return 'failed';
+		return 'ready';
+	}
+
+	/** The comparison part of the state; index and levels only when not blind. */
+	function comparisonView(s: LiveSession, c: LiveComparison): LiveComparisonState {
+		const view: LiveComparisonState = {
+			active: s.ended === null && !disposed,
+			blind: c.blind,
+			count: c.items.length,
+			status: comparisonStatusOf(s, c)
+		};
+		if (c.blind) return view;
+		const playing = comparisonPlaying(s, c);
+		return {
+			...view,
+			...(playing === null ? {} : { index: playing }),
+			items: c.items.map(comparisonSummary)
 		};
 	}
 
@@ -2329,6 +2421,98 @@ export function createCableService(
 		return 'error';
 	}
 
+	/**
+	 * Makes `s` the live session, queues its confirmed start curve `first`, takes the session
+	 * lock (and, real mode, this tab's liveness lock) and waits for that first apply. A session
+	 * that never got going is abandoned (refused).
+	 */
+	async function launchLive(s: LiveSession, first: LiveCaptured): Promise<LiveOutcome> {
+		const previous = live;
+		live = s;
+		enqueueLive(s, first);
+		emit();
+		// S5: one live session across tabs (the session lock, held until the session ends), and
+		// this tab's liveness lock, so other tabs can tell an orphan preview from a live one.
+		const lock = await takeLiveLock();
+		if (lock === 'busy' || lock === 'error' || s.ended !== null || disposed) {
+			if (typeof lock === 'object') lock.release();
+			abandonLive(s, previous);
+			if (lock === 'busy') return liveRefuse('live-elsewhere');
+			return liveRefuse(lock === 'error' ? 'error' : 'unavailable');
+		}
+		s.releaseLock = lock.release;
+		if (mode === 'real') {
+			const alive = holdAlive(true);
+			if (alive !== true && !(await alive)) {
+				abandonLive(s, previous);
+				return liveRefuse('error');
+			}
+		}
+		if (s.ended !== null || disposed) {
+			abandonLive(s, previous);
+			return liveRefuse('unavailable');
+		}
+		s.gated = false;
+		scheduleLive();
+		// An edit made meanwhile follows the start curve (newest wins, like any pending edit).
+		const edit = s.gatedEdit;
+		s.gatedEdit = null;
+		if (edit !== null) {
+			enqueueLive(s, edit);
+			scheduleLive();
+		}
+		await first.settled;
+		if (first.busy && s.applied === null) {
+			// The write lock stayed busy: nothing was sent, the session did not start.
+			abandonLive(s, previous);
+			return liveRefuse('busy');
+		}
+		return { status: 'accepted', live: liveView() };
+	}
+
+	/**
+	 * The live checklist of a comparison (on the loudest played candidate), with the
+	 * experimental item required when any candidate needs it.
+	 */
+	function comparisonChecklist(
+		captured: ChecklistInput,
+		verdict: GateResult,
+		items: readonly ComparisonItem[]
+	): ChecklistResult {
+		const checklist = evaluateLiveChecklist(captured, context(), verdict);
+		const required = items.some((item) => item.experimentalRequired);
+		if (!required || checklist.experimentalRequired) return checklist;
+		const satisfied = captured.confirmations.experimental === true;
+		const ultrasonic = items.some((item) => {
+			try {
+				return hasUltrasonicBands(item.bands);
+			} catch {
+				return false;
+			}
+		});
+		const listed = checklist.items.map((item) =>
+			item.id === 'experimental' ? { ...item, required: true, satisfied } : item
+		);
+		const checklistItems = listed.some((item) => item.id === 'experimental')
+			? listed
+			: [...listed, { id: 'experimental' as const, required: true, satisfied }];
+		return {
+			...checklist,
+			experimentalRequired: true,
+			experimentalText: ultrasonic
+				? `${EXPERIMENTAL_CONFIRMATION_TEXT} ${ULTRASONIC_CONFIRMATION_TEXT}`
+				: EXPERIMENTAL_CONFIRMATION_TEXT,
+			items: checklistItems,
+			canWrite: checklistItems.every((item) => !item.required || item.satisfied)
+		};
+	}
+
+	/** Settles once the live apply in flight (if any) ran its bookkeeping (never rejects). */
+	async function liveRunSettled(): Promise<void> {
+		const run = liveInFlight;
+		if (run !== null) await run;
+	}
+
 	function liveIdle(): boolean {
 		if (disposed) return true;
 		const s = live;
@@ -2807,60 +2991,236 @@ export function createCableService(
 				busyAttempts: 0,
 				releaseLock: () => undefined,
 				gated: true,
-				gatedEdit: null
+				gatedEdit: null,
+				comparison: null
 			};
-			const previous = live;
-			live = s;
-			const first = capturedOf(verdict, captured.preampDb, true);
-			enqueueLive(s, first);
-			emit();
-			// S5: one live session across tabs (the session lock, held until the session ends), and
-			// this tab's liveness lock, so other tabs can tell an orphan preview from a live one.
-			const lock = await takeLiveLock();
-			if (lock === 'busy' || lock === 'error' || s.ended !== null || disposed) {
-				if (typeof lock === 'object') lock.release();
-				abandonLive(s, previous);
-				if (lock === 'busy') return liveRefuse('live-elsewhere');
-				return liveRefuse(lock === 'error' ? 'error' : 'unavailable');
+			return launchLive(s, capturedOf(verdict, captured.preampDb, true));
+		},
+
+		/**
+		 * Starts a live session that compares a pre-approved set of curves (issues #73/#74). Needs
+		 * a fresh gesture. Every candidate is gated and, with `match`, level-matched by lowering
+		 * the louder ones' preamp (`planComparison`); the live checklist runs once, on the loudest
+		 * played candidate, with the experimental item required when any candidate needs it. Its
+		 * level is the confirmed one, so no switch can hit the loudness hold. Standard profile
+		 * only. Applies candidate `first` (default 0) and settles once that apply settled.
+		 */
+		async startComparison(request: ComparisonStartRequest): Promise<ComparisonOutcome> {
+			// The token is spent first, whatever happens next.
+			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
+			if (!liveCapable() || disposed) return liveRefuse('unavailable');
+			if (writing || activeLive() !== null) return liveRefuse('busy');
+			const device = primary;
+			if (device === null) return liveRefuse('no-device');
+			// Read once.
+			const curves = request.curves;
+			const match = request.match === true;
+			const blind = request.blind === true;
+			const firstIndex: unknown = request.first ?? 0;
+			const requestedProfile: unknown = request.profile;
+			const confirmations = request.confirmations;
+			const plan = planComparison(curves, {
+				match,
+				experimental: request.experimental === true,
+				...(requestedProfile === 'yolo' ? { profile: 'yolo' as const } : {})
+			});
+			if (plan.refusal !== undefined) {
+				return { status: 'refused', reason: 'comparison', refusal: plan.refusal };
 			}
-			s.releaseLock = lock.release;
-			if (mode === 'real') {
-				const alive = holdAlive(true);
-				if (alive !== true && !(await alive)) {
-					abandonLive(s, previous);
-					return liveRefuse('error');
+			const items = plan.items;
+			if (
+				typeof firstIndex !== 'number' ||
+				!Number.isInteger(firstIndex) ||
+				firstIndex < 0 ||
+				firstIndex >= items.length
+			) {
+				return { status: 'refused', reason: 'comparison', refusal: { reason: 'bad-index' } };
+			}
+			const firstItem = items[firstIndex];
+			// The loudest played candidate: its level is the plan's `ackLevelDb`.
+			const loudest = items.reduce<ComparisonItem | undefined>(
+				(best, item) => (best === undefined || item.levelDb > best.levelDb ? item : best),
+				undefined
+			);
+			if (firstItem === undefined || loudest === undefined || plan.ackLevelDb === null) {
+				return liveRefuse('error');
+			}
+			const captured = input({
+				bands: loudest.bands,
+				preampDb: loudest.preampDb,
+				experimental: plan.experimental,
+				confirmations: {
+					volumeLowered: confirmations?.volumeLowered === true,
+					keepConnected: false,
+					experimental: confirmations?.experimental === true,
+					androidUntested: confirmations?.androidUntested === true
 				}
+			});
+			const checklist = comparisonChecklist(captured, loudest.verdict, items);
+			if (!checklist.canWrite) return liveRefuse('checklist', { checklist });
+			if (native) {
+				try {
+					await assertNativeWriteFresh(deps.nativeFreshness);
+				} catch (cause) {
+					return liveRefuse('error', { error: cause });
+				}
+				if (disposed) return liveRefuse('unavailable');
+				if (writing || activeLive() !== null) return liveRefuse('busy');
+				if (primary !== device) return liveRefuse('no-device');
 			}
-			if (s.ended !== null || disposed) {
-				abandonLive(s, previous);
-				return liveRefuse('unavailable');
-			}
-			s.gated = false;
-			scheduleLive();
-			// An edit made meanwhile follows the start curve (newest wins, like any pending edit).
-			const edit = s.gatedEdit;
-			s.gatedEdit = null;
-			if (edit !== null) {
-				enqueueLive(s, edit);
+			const now = clock.now();
+			const comparison: LiveComparison = {
+				items,
+				blind,
+				index: null,
+				switching: false,
+				failed: false
+			};
+			const s: LiveSession = {
+				device,
+				label: labelOf(device),
+				experimental: plan.experimental,
+				profile: 'standard',
+				abort: new AbortController(),
+				ended: null,
+				started: false,
+				applied: null,
+				pending: null,
+				firstPendingEditMs: now,
+				lastEditMs: now,
+				held: null,
+				hold: null,
+				known: true,
+				// The loudest played candidate: every switch is at or below it.
+				ackLevelDb: plan.ackLevelDb,
+				applies: 0,
+				lastError: null,
+				experimentalConfirmed:
+					checklist.experimentalRequired && captured.confirmations.experimental === true,
+				busyAttempts: 0,
+				releaseLock: () => undefined,
+				gated: true,
+				gatedEdit: null,
+				comparison
+			};
+			const first = capturedOf(firstItem.verdict, firstItem.preampDb, true);
+			const outcome = await launchLive(s, first);
+			if (outcome.status === 'refused') return outcome;
+			await liveRunSettled();
+			if (revertFailure(s, first) === null) comparison.index = firstIndex;
+			else comparison.failed = true;
+			emit();
+			return {
+				status: 'accepted',
+				live: liveView(),
+				plan: {
+					items: items.map(comparisonSummary),
+					ackLevelDb: plan.ackLevelDb,
+					targetLevelDb: plan.targetLevelDb ?? plan.ackLevelDb,
+					experimentalRequired: plan.experimentalRequired,
+					blind
+				}
+			};
+		},
+
+		/**
+		 * Switches the active comparison to candidate `index` (no gesture: the set was approved at
+		 * the start). Refused up front without a comparison, while a switch runs, in an unknown
+		 * state or with a hold. The candidate is applied as confirmed (no debounce); settles once
+		 * that apply settled: `applied` only when the cable plays exactly that candidate.
+		 */
+		async switchComparison(index: number): Promise<{ status: ComparisonSwitchStatus }> {
+			const s = activeLive();
+			if (s === null) return { status: 'ended' };
+			const c = s.comparison;
+			if (c === null) return { status: 'error' };
+			const item = Number.isInteger(index) ? c.items[index] : undefined;
+			if (item === undefined) return { status: 'error' };
+			if (s.gated || c.switching || writing || liveSuspended > 0) return { status: 'busy' };
+			if (!s.known) return { status: 'unknown' };
+			if (s.hold !== null) return { status: 'held' };
+			const curve = capturedOf(item.verdict, item.preampDb, true);
+			c.switching = true;
+			try {
+				enqueueLive(s, curve);
+				emit();
 				scheduleLive();
+				await curve.settled;
+				// A hold settles the curve inside its apply: let that apply finish its bookkeeping.
+				await liveRunSettled();
+			} finally {
+				c.switching = false;
 			}
-			await first.settled;
-			if (first.busy && s.applied === null) {
-				// The write lock stayed busy: nothing was sent, the session did not start.
-				abandonLive(s, previous);
+			const failure = revertFailure(s, curve);
+			if (failure === null) {
+				c.index = index;
+				c.failed = false;
+			} else if (failure !== 'ended') {
+				c.failed = true;
+			}
+			emit();
+			return { status: failure ?? 'applied' };
+		},
+
+		/**
+		 * Ends the active comparison and its session, like `stopLive`: `revert: true` first applies
+		 * the saved curve live (fresh gesture). A revert that is held (the saved curve ≥ 3 dB above
+		 * the confirmed level), unknown, busy or failed is returned and the session goes on.
+		 */
+		async endComparison(request: ComparisonEndRequest): Promise<LiveOutcome> {
+			const s = activeLive();
+			const c = s?.comparison ?? null;
+			if (s === null || c === null) {
+				if (request.revert) consumeGestureToken(request.gesture, nowMs());
+				return liveRefuse('no-session');
+			}
+			if (!request.revert) {
+				endLive(s, 'stopped');
+				return { status: 'accepted', live: liveView() };
+			}
+			if (c.switching) {
+				consumeGestureToken(request.gesture, nowMs());
 				return liveRefuse('busy');
 			}
+			c.switching = true;
+			let reverted: LiveOutcome;
+			try {
+				reverted = await revertLive({
+					gesture: request.gesture,
+					...(request.saved === undefined ? {} : { saved: request.saved })
+				});
+			} finally {
+				c.switching = false;
+			}
+			if (reverted.status === 'refused') {
+				emit();
+				return reverted;
+			}
+			endLive(s, 'reverted');
 			return { status: 'accepted', live: liveView() };
+		},
+
+		/**
+		 * The original (not level-matched) curve of comparison candidate `index`, for "Salvar
+		 * esta" (the current or last ended session's set). Null without one. Read-only copy.
+		 */
+		comparisonOriginal(index: number): LiveSavedCurve | null {
+			const c = live?.comparison ?? null;
+			if (c === null || disposed || !Number.isInteger(index)) return null;
+			const item = c.items[index];
+			if (item === undefined) return null;
+			return { bands: copyBands(item.original.bands), preampDb: item.original.preampDb };
 		},
 
 		/**
 		 * Queues an edited curve for the active live session (no gesture). Read once and gated
 		 * now; applied by the scheduler (debounce, one apply in flight plus one pending, newest
-		 * wins), unless the gate or a hold stops it. False when no session is active.
+		 * wins), unless the gate or a hold stops it. False when no session is active, or while it
+		 * runs a comparison (only its pre-approved candidates are played).
 		 */
 		queueLive(curve: LiveCurve): boolean {
 			const s = activeLive();
-			if (s === null) return false;
+			if (s === null || s.comparison !== null) return false;
 			const bands = curve.bands;
 			const preampDb = curve.preampDb;
 			const captured = captureLive(s, bands, preampDb, false);
