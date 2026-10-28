@@ -286,8 +286,10 @@ impedindo medir o alinhamento temporal absoluto dentro da escrita.
 desconectar/reconectar, voltou PK 2 kHz (2000 Hz −12,8 dB contra a referência,
 3 passagens). **Os reports de dados aplicam ao vivo, de forma volátil; o commit
 persiste na flash.** Não se variaram os bytes `01 FF` (desnecessário para essa
-conclusão). Viabiliza modo sem flash, X2 no cabo e teste cego no cabo;
-**viabilidade apenas, não implementados**.
+conclusão). Viabiliza modo sem flash, X2 no cabo e teste cego no cabo. O modo
+sem flash está **implementado no app web: "Ouvir no cabo", #62** (plano
+`docs/plans/2026-10-28-modo-sem-flash-plano.md`); X2 e teste cego no cabo seguem
+não implementados.
 
 Até esse ponto: ~12 escritas com commit na bancada + 13 na captura, além de
 1 envio só de dados. Estado então: **Padrão Auri regravado com commit**, bytes

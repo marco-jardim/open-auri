@@ -788,7 +788,8 @@ export function createCableService(
 			applies: s.applies,
 			total: liveTotal,
 			lastError: s.lastError,
-			...(s.ended === null ? {} : { endedReason: s.ended })
+			...(s.ended === null ? {} : { endedReason: s.ended }),
+			savedCrc: savedCrcOf(s)
 		};
 	}
 
@@ -833,6 +834,9 @@ export function createCableService(
 		if (!isCableDevice(device)) return;
 		addDevice(device);
 		implyTarget();
+		// Plugged in (again): its RAM was lost while unplugged, so it plays its saved curve. A
+		// preview marker naming it (an orphan's, maybe unplugged while no tab watched) is moot (S5).
+		cableBackToSaved(labelOf(device));
 		emit();
 	}
 
@@ -841,11 +845,23 @@ export function createCableService(
 		// Unplugged: the cable lost its RAM and plays the saved (committed) curve again. The
 		// session ends; nothing is re-applied when it comes back.
 		const s = live;
-		if (s !== null && s.ended === null && s.device === device) endLive(s, 'disconnected');
-		// The preview marker of that cable (this tab's, or an orphan's) is moot now (S5).
-		if (s !== null && s.device === device) cableBackToSaved(s.label);
+		let changed = false;
+		if (s !== null && s.device === device) {
+			if (s.ended === null) {
+				endLive(s, 'disconnected');
+			} else if (s.ended === 'stopped' || s.ended === 'forgotten') {
+				// An ended session whose curve the cable kept: back on the saved curve now.
+				s.ended = 'disconnected';
+				changed = true;
+			}
+			// The preview marker of that cable (this tab's, or an orphan's) is moot now (S5).
+			cableBackToSaved(s.label);
+		}
 		if (devices.includes(device as CableDevice)) cableBackToSaved(labelOf(device as CableDevice));
-		if (!devices.includes(device as CableDevice)) return;
+		if (!devices.includes(device as CableDevice)) {
+			if (changed) emit();
+			return;
+		}
 		removeDevice(device as CableDevice);
 		emit();
 	}
@@ -1623,6 +1639,22 @@ export function createCableService(
 		emit();
 	}
 
+	/**
+	 * The loudness hold of a curve that passes the gate and is ≥ 3 dB above the level the user
+	 * confirmed (`liveHold`, the cable state taken as known); null otherwise (also when either
+	 * level is unknown). A revert curve is flagged as the saved curve.
+	 */
+	function loudnessHold(s: LiveSession, curve: LiveCaptured): LiveHoldState | null {
+		if (!curve.verdict.ok || curve.levelDb === null) return null;
+		const hold = liveHold({ levelDb: curve.levelDb, ackLevelDb: s.ackLevelDb, state: 'known' });
+		if (hold === null || hold.reason !== 'loudness') return null;
+		return {
+			reason: 'loudness',
+			deltaDb: hold.deltaDb,
+			...(curve.revert ? { curve: 'saved' as const } : {})
+		};
+	}
+
 	/** Holds `curve` behind `unknown-state` when what the cable plays is not known (and no hold is set). */
 	function reholdIfUnknown(s: LiveSession, curve: LiveCaptured) {
 		if (!s.known && s.hold === null && s.ended === null) {
@@ -2042,6 +2074,7 @@ export function createCableService(
 		s.started = true;
 		if (run.kind === 'foreign') {
 			s.known = false;
+			// "Reaplicar" (`confirmLive`) checks this curve's loudness again before sending it.
 			holdLive(s, next, { reason: 'unknown-state' });
 			return true;
 		}
@@ -2178,6 +2211,19 @@ export function createCableService(
 			crc: authorized.crc,
 			at: nowMs()
 		});
+		// An ended session on that cable (a curve kept until unplugged): the commit's data reports
+		// made the saved curve the live one, so the cable no longer plays something unsaved.
+		const s = live;
+		if (s !== null && s.ended !== null && s.device === device) {
+			s.applied = {
+				crc: authorized.crc,
+				bands: copyBands(authorized.snapshot),
+				preampDb: authorized.preampDb,
+				levelDb: authorized.checklist.newLevelDb,
+				at: nowMs(),
+				...(authorized.profile === 'yolo' ? { profile: 'yolo' as const } : {})
+			};
+		}
 		cableBackToSaved(label);
 	}
 
@@ -2231,7 +2277,8 @@ export function createCableService(
 
 	/**
 	 * Applies the last saved curve live (fresh gesture); the session goes on. Pending edits
-	 * and holds are dropped; its level becomes the confirmed one.
+	 * and holds are dropped; its level becomes the confirmed one. A saved curve ≥ 3 dB above the
+	 * confirmed level is held instead (refused `revert-failed`, `held`) until `confirmLive`.
 	 */
 	async function revertLive(request: LiveRevertRequest): Promise<LiveOutcome> {
 		if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
@@ -2243,6 +2290,14 @@ export function createCableService(
 		clearHold(s);
 		s.pending?.done();
 		s.pending = null;
+		// The saved curve ≥ 3 dB above the confirmed level: held like a louder edit, flagged as
+		// the saved curve; only `confirmLive` (a fresh gesture, volume lowered) sends it.
+		const loud = loudnessHold(s, curve);
+		if (loud !== null) {
+			holdLive(s, curve, loud);
+			emit();
+			return liveRefuse('revert-failed', { revertFailure: 'held', live: liveView() });
+		}
 		enqueueLive(s, curve);
 		emit();
 		scheduleLive();
@@ -2372,6 +2427,21 @@ export function createCableService(
 			if (!devices.includes(device) || writing) return false;
 			primary = device;
 			emit();
+			return true;
+		},
+
+		/**
+		 * "Salvar" of the live preview: makes the active session's cable the write target, so the
+		 * curve it plays is saved to that cable (the checklist names it). False without an active
+		 * session, mid-write, or when its cable is gone.
+		 */
+		selectLiveCable(): boolean {
+			const s = activeLive();
+			if (s === null || writing || !devices.includes(s.device)) return false;
+			if (primary !== s.device) {
+				primary = s.device;
+				emit();
+			}
 			return true;
 		},
 
@@ -2819,7 +2889,9 @@ export function createCableService(
 
 		/**
 		 * Releases a loudness or unknown-state hold (fresh gesture): the held curve's level
-		 * becomes the confirmed one and the curve is applied. A gate hold is never confirmable.
+		 * becomes the confirmed one and the curve is applied. A gate hold is never confirmable. An
+		 * unknown-state hold whose curve is ≥ 3 dB above the confirmed level becomes a loudness
+		 * hold instead (refused `loudness`, nothing sent).
 		 */
 		async confirmLive(request: LiveGestureRequest): Promise<LiveOutcome> {
 			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
@@ -2839,6 +2911,16 @@ export function createCableService(
 				clearHold(s);
 				again = recaptured(held, held.confirmed);
 			} else {
+				if (s.hold.reason === 'unknown-state') {
+					// "Reaplicar" confirms sending again, not a louder level: a held curve ≥ 3 dB above
+					// the confirmed one becomes a loudness hold (nothing sent; confirm again for it).
+					const loud = loudnessHold(s, held);
+					if (loud !== null) {
+						s.hold = loud;
+						emit();
+						return liveRefuse('loudness');
+					}
+				}
 				clearHold(s);
 				s.ackLevelDb = held.levelDb;
 				again = recaptured(held, true);
@@ -2853,9 +2935,49 @@ export function createCableService(
 
 		/**
 		 * Applies the last saved curve live (fresh gesture); the session goes on. Pending edits
-		 * and holds are dropped; its level becomes the confirmed one.
+		 * and holds are dropped; its level becomes the confirmed one. A saved curve ≥ 3 dB above
+		 * the confirmed level is held (refused `revert-failed`, `held`) until `confirmLive`.
 		 */
 		revertLive,
+
+		/**
+		 * The saved curve of the live session's cable (the current or last ended session), the
+		 * same one `revertLive` applies: the newest committed journal entry naming that cable, or
+		 * this page's last save to it when newer. Null without a session or when none is known.
+		 * Read-only.
+		 */
+		liveSavedCurve(): LiveSavedCurve | null {
+			const s = live;
+			if (s === null || disposed) return null;
+			const saved = cableSaved(s);
+			return saved === null ? null : { bands: copyBands(saved.bands), preampDb: saved.preampDb };
+		},
+
+		/**
+		 * Clears the orphan preview notice and its marker ("Já desconectei": the user unplugged
+		 * that cable while no tab watched). Only records; never touches the cable.
+		 */
+		dismissLiveOrphan(): void {
+			const orphan = liveOrphan;
+			if (orphan === null) return;
+			if (liveStore !== null) {
+				const raw = liveStore.read();
+				const marker = raw === null ? null : parseLiveMarker(raw);
+				// Only the orphan's own marker (never one a live tab wrote since).
+				if (
+					marker !== null &&
+					marker.tabId !== tabId &&
+					marker.device === orphan.deviceLabel &&
+					marker.crc === orphan.crc &&
+					marker.at === orphan.at &&
+					!liveStore.write(null)
+				) {
+					console.warn('cable live marker could not be removed');
+				}
+			}
+			liveOrphan = null;
+			emit();
+		},
 
 		/**
 		 * Ends the live session. `revert: true` first applies the saved curve live (needs a

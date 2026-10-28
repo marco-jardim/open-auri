@@ -295,15 +295,37 @@ test('a first apply that failed keeps the EQ chains (no level jump)', async () =
 });
 
 test('an orphan preview shows its notice and keeps the browser chains flat', async () => {
+	// The orphan names the connected cable (the fake's default label): flat only while it is plugged in.
 	localStorage.setItem(
 		CABLE_LIVE_KEY,
-		JSON.stringify({ tabId: 'gone-tab', device: 'Cabo', crc: 4660, at: 0 })
+		JSON.stringify({ tabId: 'gone-tab', device: 'USB DSP Audio', crc: 4660, at: 0 })
+	);
+	const update = vi.spyOn(CurvaPreview.prototype, 'update');
+	const { app } = await setup();
+	await vi.waitFor(() => expect(app.cableState.liveOrphan?.crc).toBe(4660));
+	expect(app.cableState.deviceLabels).toContain('USB DSP Audio');
+	await expect.element(page.getByText(m.cable_live_orphan())).toBeVisible();
+	await vi.waitFor(() => expectFlat(chains(update)));
+	// "Já desconectei": the notice and the marker go, the EQ'd chains come back.
+	await page.getByRole('button', { name: m.cable_live_orphan_dismiss() }).click();
+	await vi.waitFor(() => expect(app.cableState.liveOrphan ?? null).toBeNull());
+	expect(localStorage.getItem(CABLE_LIVE_KEY)).toBeNull();
+	await vi.waitFor(() => expect(chains(update)?.[1]?.preampDb).toBe(-12));
+});
+
+test('an orphan preview of a cable that is not connected keeps the EQ chains', async () => {
+	localStorage.setItem(
+		CABLE_LIVE_KEY,
+		JSON.stringify({ tabId: 'gone-tab', device: 'Outro cabo', crc: 4660, at: 0 })
 	);
 	const update = vi.spyOn(CurvaPreview.prototype, 'update');
 	const { app } = await setup();
 	await vi.waitFor(() => expect(app.cableState.liveOrphan?.crc).toBe(4660));
 	await expect.element(page.getByText(m.cable_live_orphan())).toBeVisible();
-	await vi.waitFor(() => expectFlat(chains(update)));
+	await tick();
+	await vi.waitFor(() => expect(chains(update)?.[1]?.preampDb).toBe(-12));
+	const [reference] = chains(update) ?? [];
+	expect(reference?.bands).toEqual(PADRAO_AURI.bands);
 });
 
 test('editing while live queues the new curve to the cable', async () => {

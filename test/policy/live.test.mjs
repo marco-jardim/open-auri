@@ -75,7 +75,12 @@ test('applies are spaced at least the minimum interval apart, start to start', (
   assert.equal(nextApplyDelay(pacing({ ...edit, nowMs: 1300 })), 0);
   // The interval also overrides an expired max-wait.
   assert.equal(
-    nextApplyDelay({ nowMs: 1600, lastEditMs: 1600, firstPendingEditMs: 1000, lastApplyStartMs: 1500 }),
+    nextApplyDelay({
+      nowMs: 1600,
+      lastEditMs: 1600,
+      firstPendingEditMs: 1000,
+      lastApplyStartMs: 1500,
+    }),
     200,
   );
   // An old apply does not delay a debounced edit.
@@ -101,23 +106,23 @@ test('anchors later than now restart a bounded wait instead of waiting for the c
 test('invalid clock values throw RangeError', () => {
   for (const value of [NaN, Infinity, -Infinity, '1000', undefined, null]) {
     for (const key of ['nowMs', 'lastEditMs', 'firstPendingEditMs']) {
-      assert.throws(
-        () => nextApplyDelay(/** @type {any} */ (pacing({ [key]: value }))),
-        { name: 'RangeError', message: `${key} must be a finite millisecond value` },
-      );
+      assert.throws(() => nextApplyDelay(/** @type {any} */ (pacing({ [key]: value }))), {
+        name: 'RangeError',
+        message: `${key} must be a finite millisecond value`,
+      });
     }
   }
   for (const lastApplyStartMs of [NaN, Infinity, -Infinity, '1000']) {
-    assert.throws(
-      () => nextApplyDelay(/** @type {any} */ (pacing({ lastApplyStartMs }))),
-      { name: 'RangeError', message: 'lastApplyStartMs must be a finite millisecond value' },
-    );
+    assert.throws(() => nextApplyDelay(/** @type {any} */ (pacing({ lastApplyStartMs }))), {
+      name: 'RangeError',
+      message: 'lastApplyStartMs must be a finite millisecond value',
+    });
   }
   for (const lastCommitMs of [NaN, Infinity, -Infinity, '1000', 1000n]) {
-    assert.throws(
-      () => nextApplyDelay(/** @type {any} */ (pacing({ lastCommitMs }))),
-      { name: 'RangeError', message: 'lastCommitMs must be a finite millisecond value' },
-    );
+    assert.throws(() => nextApplyDelay(/** @type {any} */ (pacing({ lastCommitMs }))), {
+      name: 'RangeError',
+      message: 'lastCommitMs must be a finite millisecond value',
+    });
   }
 });
 
@@ -289,10 +294,9 @@ test('missing or non-finite levels and overflowed differences hold as unknown-st
   for (const levelDb of [NaN, Infinity, -Infinity]) {
     assert.deepEqual(liveHold(hold({ levelDb })), { reason: 'unknown-state' });
   }
-  assert.deepEqual(
-    liveHold(hold({ levelDb: Number.MAX_VALUE, ackLevelDb: -Number.MAX_VALUE })),
-    { reason: 'unknown-state' },
-  );
+  assert.deepEqual(liveHold(hold({ levelDb: Number.MAX_VALUE, ackLevelDb: -Number.MAX_VALUE })), {
+    reason: 'unknown-state',
+  });
 });
 
 test('inputs remain untouched', () => {
@@ -301,5 +305,10 @@ test('inputs remain untouched', () => {
   assert.deepEqual(input, { levelDb: 5, ackLevelDb: 0, state: 'known' });
   const timing = Object.freeze(pacing({ lastApplyStartMs: 900 }));
   assert.equal(nextApplyDelay(timing), 200);
-  assert.deepEqual(timing, { nowMs: 1000, lastEditMs: 1000, firstPendingEditMs: 1000, lastApplyStartMs: 900 });
+  assert.deepEqual(timing, {
+    nowMs: 1000,
+    lastEditMs: 1000,
+    firstPendingEditMs: 1000,
+    lastApplyStartMs: 900,
+  });
 });

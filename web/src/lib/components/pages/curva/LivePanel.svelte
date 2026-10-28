@@ -16,7 +16,11 @@
 	- Holds (loudness, gate, unknown state, experimental) show a banner; a hold's appearance is
 	  announced once through a persistent alert region, and live / ended transitions once through a
 	  persistent polite region ("applying" is visual only).
-	- An orphan preview (another tab, or this one before a reload) says to unplug and replug.
+	- An orphan preview (another tab, or this one before a reload) says to unplug and replug;
+	  "Já desconectei" clears it (`dismissLiveOrphan`). A replug clears it on its own.
+	- "Salvar no cabo" shows only while a session runs (it makes the session's cable the target,
+	  `selectLiveCable`), or for a kept curve whose cable is still connected and is the write
+	  target (`liveSavable`).
 	Every service call that needs a gesture mints it synchronously in its click handler.
 -->
 <script lang="ts">
@@ -32,6 +36,7 @@
 		liveHoldText,
 		liveOutcomeText,
 		livePlaying,
+		liveSavable,
 		liveSaveLabel,
 		liveUnsaved,
 		type LiveHeldCurve
@@ -161,13 +166,15 @@
 	});
 	const endedText = $derived(dismissed ? null : endedMessage);
 
-	const holdText = $derived(hold === null ? '' : liveHoldText(hold, heldCurve));
+	/** Whose curve the hold stopped: the service flags a held revert; otherwise the page's side. */
+	const heldNow = $derived<LiveHeldCurve>(hold?.curve === 'saved' ? 'saved' : heldCurve);
+	const holdText = $derived(hold === null ? '' : liveHoldText(hold, heldNow));
 	const holdAction = $derived(hold === null ? null : liveHoldAction(hold));
 	const holdReason = $derived(
 		hold?.reason === 'gate' && hold.gateReasons !== undefined && hold.gateReasons.length > 0
 			? m.cable_live_hold_gate_reason({
 					reason: firstReasonText(hold.gateReasons, {
-						bands: heldCurve === 'saved' && saved !== null ? saved.bands : curve.bands,
+						bands: heldNow === 'saved' && saved !== null ? saved.bands : curve.bands,
 						locale
 					})
 				})
@@ -238,6 +245,16 @@
 		return null;
 	});
 	const saveLabel = $derived(liveSaveLabel(playing));
+	/**
+	 * Saving what the cable plays applies to a running session, or to a kept one whose cable is
+	 * still connected and is the write target (a save always goes to the target).
+	 */
+	const savable = $derived(liveSavable(cable));
+
+	/** "Já desconectei": the orphan's cable was unplugged while no tab watched. */
+	function onOrphanDismiss() {
+		app?.cable.dismissLiveOrphan();
+	}
 
 	function report(outcome: LiveOutcome): boolean {
 		message = liveOutcomeText(outcome);
@@ -360,7 +377,9 @@
 	 */
 	function onSave() {
 		const applied = live?.applied;
-		if (!app || !applied || saveReason !== null) return;
+		if (!app || !applied || !savable || saveReason !== null) return;
+		// A running session: the save goes to the cable that plays it (the target may have moved).
+		if (active && !app.cable.selectLiveCable()) return;
 		const current = app.state.curve.current;
 		const base =
 			playing === 'editor'
@@ -411,6 +430,9 @@
 		{#if orphan !== null}
 			<div class="orphan" data-live-orphan>
 				<p>{m.cable_live_orphan()}</p>
+				<Button variant="ghost" size="sm" onclick={onOrphanDismiss} data-live-orphan-dismiss
+					>{m.cable_live_orphan_dismiss()}</Button
+				>
 			</div>
 		{/if}
 
@@ -443,7 +465,7 @@
 		{/if}
 
 		{#if hold !== null}
-			<div class="hold" data-hold={hold.reason} data-held={heldCurve}>
+			<div class="hold" data-hold={hold.reason} data-held={heldNow}>
 				<p>{holdText}</p>
 				{#if holdReason !== null}<p class="hold-why">{holdReason}</p>{/if}
 				{#if holdAction === 'loudness'}
@@ -466,9 +488,11 @@
 			<div class="chip" data-live-chip>
 				<span class="chip-text"><span class="dot" aria-hidden="true"></span>{m.cable_live_chip()}</span>
 				<span class="actions">
-					<Button size="sm" disabledReason={saveReason} onclick={onSave} data-live-save
-						>{saveLabel}</Button
-					>
+					{#if savable}
+						<Button size="sm" disabledReason={saveReason} onclick={onSave} data-live-save
+							>{saveLabel}</Button
+						>
+					{/if}
 					{#if active}
 						<Button size="sm" loading={busy} onclick={onRevert}>{m.cable_live_revert()}</Button>
 					{:else}
@@ -593,7 +617,8 @@
 		border-left-color: var(--danger, #d04040);
 	}
 	.hold :global(.btn),
-	.ended :global(.btn) {
+	.ended :global(.btn),
+	.orphan :global(.btn) {
 		justify-self: start;
 	}
 	.actions {

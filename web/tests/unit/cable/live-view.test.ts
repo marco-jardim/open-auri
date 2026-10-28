@@ -11,6 +11,7 @@ import {
 	liveOutcomeText,
 	livePlaying,
 	liveRevertFailureText,
+	liveSavable,
 	liveSaveLabel,
 	liveUnsaved,
 	sameCurve
@@ -113,6 +114,48 @@ test('browserFlat: flat only once the cable is known to play a curve other than 
 	expect(browserFlat(cable(null, { crc: 9, at: 0, deviceLabel: 'Cabo' }), saved)).toBe(true);
 });
 
+test('browserFlat: an orphan preview only while its cable is connected', () => {
+	const orphan = { crc: 9, at: 0, deviceLabel: 'Cabo' };
+	const at = (deviceLabels: string[]) => ({ live: null, liveOrphan: orphan, deviceLabels });
+	expect(browserFlat(at([]), null)).toBe(false);
+	expect(browserFlat(at(['Outro']), null)).toBe(false);
+	expect(browserFlat(at(['Cabo']), null)).toBe(true);
+	// The marker keeps the first 64 code points of a longer label.
+	const long = 'C'.repeat(70);
+	const cut = { ...orphan, deviceLabel: 'C'.repeat(64) };
+	expect(browserFlat({ live: null, liveOrphan: cut, deviceLabels: [long] }, null)).toBe(true);
+});
+
+test("the service's savedCrc of the session cable decides what the saved curve is", () => {
+	const applied = state().applied;
+	if (applied === null) throw new Error('state() applies a curve');
+	// The page's `saved` equals the applied curve, but it was saved to another cable.
+	const sameAsApplied = { bands: applied.bands, preampDb: applied.preampDb };
+	expect(liveUnsaved(state({ savedCrc: 2 }), sameAsApplied)).toBe(true);
+	expect(liveUnsaved(state({ savedCrc: 1 }), { bands: [OFF], preampDb: 0 })).toBe(false);
+	expect(liveUnsaved(state({ savedCrc: null }), sameAsApplied)).toBe(false);
+	const kept = state({ status: 'ended', endedReason: 'stopped', savedCrc: 2 });
+	expect(browserFlat({ live: kept, liveOrphan: null }, sameAsApplied)).toBe(true);
+	const editor = { bands: [OFF], preampDb: 0 };
+	expect(livePlaying(state({ savedCrc: 1 }), null, editor)).toBe('saved');
+});
+
+test('liveSavable: a running session, or a kept curve on the connected write target', () => {
+	const at = (live: LiveState | null, deviceLabel: string | null) => ({ live, deviceLabel });
+	expect(liveSavable(null)).toBe(false);
+	expect(liveSavable(at(null, 'Cabo'))).toBe(false);
+	expect(liveSavable(at(state(), null))).toBe(true);
+	for (const endedReason of ['stopped', 'forgotten'] as const) {
+		const ended = state({ status: 'ended', endedReason });
+		expect(liveSavable(at(ended, 'Cabo'))).toBe(true);
+		expect(liveSavable(at(ended, 'Outro'))).toBe(false);
+		expect(liveSavable(at(ended, null))).toBe(false);
+	}
+	for (const endedReason of ['reverted', 'disconnected'] as const) {
+		expect(liveSavable(at(state({ status: 'ended', endedReason }), 'Cabo'))).toBe(false);
+	}
+});
+
 test('cableLiveUnsaved: the session differs from the saved curve, or an orphan preview', () => {
 	const saved = { bands: [PK, OFF], preampDb: -3 };
 	expect(cableLiveUnsaved(null, saved)).toBe(false);
@@ -182,6 +225,10 @@ test('a failed revert is never reported as a success, and says why', () => {
 	).toBe(m.cable_live_revert_failed_retry());
 	expect(liveOutcomeText({ status: 'refused', reason: 'live-elsewhere' })).toBe(
 		m.cable_live_refused_live_elsewhere()
+	);
+	// "Reaplicar" turned into a loudness hold: says why nothing was sent.
+	expect(liveOutcomeText({ status: 'refused', reason: 'loudness' })).toBe(
+		m.cable_live_refused_loudness()
 	);
 });
 

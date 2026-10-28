@@ -2779,6 +2779,7 @@ interface OpenAuriFilesPlugin {
 ```
 Idle --report[idx=0] ok--> Receiving(1)
 Receiving(n) --report[idx=n] ok, n<8--> Receiving(n+1)
+Receiving(n) --report[idx=0] ok (reportId, tamanho, preâmbulo)--> Receiving(1) (forward; sequência parcial abandonada)
 Receiving(8) --report[idx=8] ok--> AwaitCommit
 AwaitCommit --commit exato + payload remontado (preâmbulo e CRC16 OK) + >=2000 ms do último commit--> Idle (forward)
 AwaitCommit --report[idx=0] ok (reportId, tamanho, preâmbulo)--> Receiving(1) (forward; sequência não commitada abandonada)
@@ -2786,7 +2787,7 @@ qualquer estado --outro byte, idx fora de ordem, tamanho != 31, reportId != 0xCB
 ```
 - Reports de dados são encaminhados um a um, preservando o timing do transporte.
 - O commit só é encaminhado depois da validação completa.
-- Aplicação ao vivo (issue #72, plano `2026-10-28-modo-sem-flash-plano.md` Fase 4): o cabo aplica a curva em RAM ao receber o report 8; só o commit grava na flash. Por isso, em `AwaitCommit`, um report 0 válido (as mesmas checagens de `Idle`) abandona a sequência não commitada (contada em `FrameGuard.abandonedSequences`) e inicia a próxima. Isso permite aplicações ao vivo seguidas (o site espaça em ≥300 ms) e um "Salvar" logo depois de uma aplicação ao vivo. Qualquer outro report em `AwaitCommit` que não seja o commit exato continua recusado (`EXPECTED_COMMIT`); CRC no report 7, ordem, padding e o espaçamento de 2000 ms entre commits não mudam.
+- Aplicação ao vivo (issue #72, plano `2026-10-28-modo-sem-flash-plano.md` Fase 4): o cabo aplica a curva em RAM ao receber o report 8; só o commit grava na flash. Por isso, em `AwaitCommit`, um report 0 válido (as mesmas checagens de `Idle`) abandona a sequência não commitada (contada em `FrameGuard.abandonedSequences`) e inicia a próxima. Isso permite aplicações ao vivo seguidas (o site espaça em ≥300 ms) e um "Salvar" logo depois de uma aplicação ao vivo. O mesmo vale em `Receiving(n)`: uma aplicação cortada no meio (antes do report 8, que o cabo ignora, B12b) não trava a guarda; um report 0 válido recomeça a partir da sequência parcial (também contada em `abandonedSequences`). Qualquer outro report em `AwaitCommit` que não seja o commit exato continua recusado (`EXPECTED_COMMIT`); CRC no report 7, ordem, padding e o espaçamento de 2000 ms entre commits não mudam.
 - O app anuncia essa transição em `getInfo().liveApply: true`, campo opcional do bridgeApi 1 (sem mudar a versão do contrato). Sem o campo (versões anteriores do app), o site trata como `false`.
 
 ## Anexo E · Checklist de validação no aparelho (F5, por aparelho)

@@ -1876,8 +1876,14 @@ test('applyCurve: a clock sleep that never settles after report 8 holds the lock
   while (device.sent.length < 9) await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + REPORT_GAP_MS + 20));
   assert.equal(settled, false);
-  await assert.rejects(applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }), ConcurrentWriteError);
-  await assert.rejects(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }), ConcurrentWriteError);
+  await assert.rejects(
+    applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }),
+    ConcurrentWriteError,
+  );
+  await assert.rejects(
+    writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }),
+    ConcurrentWriteError,
+  );
   assert.equal(device.sent.length, 9);
 });
 
@@ -2025,7 +2031,10 @@ test('a curve whose data report 1 looks like the commit is refused before any I/
   assert.equal(gateForWrite(bands, PRE).ok, true, 'the gate itself approves it');
   const report1 = [...reportsFromPayload(encodePayload(bands, PRE))[1]];
   assert.deepEqual(report1.slice(0, 5), COMMIT.slice(0, 5));
-  assert.ok(report1.slice(5).some((byte) => byte !== 0), 'a non-zero tail: still data');
+  assert.ok(
+    report1.slice(5).some((byte) => byte !== 0),
+    'a non-zero tail: still data',
+  );
   for (const call of [writeCurve, applyCurve]) {
     const { clock, device, hid } = setup();
     const { gate, calls } = countingGate();

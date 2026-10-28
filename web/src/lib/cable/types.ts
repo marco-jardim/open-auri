@@ -509,7 +509,8 @@ export interface CableState {
 	/**
 	 * A live marker left by a tab that is gone (S5): the cable may still play an unsaved preview
 	 * ("desconecte e reconecte"). The loudness of a write is then compared with an unknown state.
-	 * Cleared when that cable is unplugged, saved or reverted. Absent or null: none.
+	 * Cleared when that cable is unplugged, plugged in again (its RAM was lost), saved or
+	 * reverted, or by `dismissLiveOrphan` ("Já desconectei"). Absent or null: none.
 	 */
 	liveOrphan?: LiveOrphan | null;
 }
@@ -547,6 +548,11 @@ export interface LiveHoldState {
 	reason: 'loudness' | 'gate' | 'unknown-state' | 'experimental';
 	deltaDb?: number;
 	gateReasons?: readonly GateReason[];
+	/**
+	 * `'saved'`: the held curve is the cable's saved curve (a revert held for loudness, or an
+	 * unknown-state revert turned into one); `confirmLive` applies it. Absent: an edit.
+	 */
+	curve?: 'saved';
 }
 
 export type LiveEndedReason =
@@ -554,7 +560,10 @@ export type LiveEndedReason =
 	| 'stopped'
 	/** `stopLive({ revert: true })`: the last saved curve was applied live, then the session ended. */
 	| 'reverted'
-	/** The cable was unplugged: it went back to the saved (committed) curve. */
+	/**
+	 * The cable was unplugged: it went back to the saved (committed) curve. Also set on a
+	 * `stopped` or `forgotten` session when its cable is unplugged later.
+	 */
 	| 'disconnected'
 	/** The page forgot the device (`disconnect()`): the cable keeps the live curve. */
 	| 'forgotten';
@@ -576,6 +585,11 @@ export interface LiveState {
 	/** Why the last live apply failed (it is never retried automatically); null after a success. */
 	lastError: unknown;
 	endedReason?: LiveEndedReason;
+	/**
+	 * CRC-16 of the curve the session's cable holds in flash, as the service knows it (shared
+	 * journal, this page's saves); null when unknown. Absent: not reported.
+	 */
+	savedCrc?: number | null;
 }
 
 export type LiveRefusalReason =
@@ -590,6 +604,11 @@ export type LiveRefusalReason =
 	| 'no-hold'
 	/** `confirmLive` on a gate hold: a curve the gate refuses is never sent. */
 	| 'gate'
+	/**
+	 * `confirmLive` on an unknown-state hold whose curve is ≥ 3 dB above the confirmed level:
+	 * nothing was sent, the hold became a loudness hold (confirm again to send it).
+	 */
+	| 'loudness'
 	/** `revertLive` / `stopLive({ revert: true })` without a known saved curve. */
 	| 'no-saved-curve'
 	/**
@@ -603,7 +622,10 @@ export type LiveRefusalReason =
 
 /** Why a revert did not leave the cable on the saved curve. */
 export type LiveRevertFailure =
-	/** A hold stopped it (gate, experimental, unknown state): see `LiveState.hold`. */
+	/**
+	 * A hold stopped it (gate, experimental, unknown state, or loudness: the saved curve is ≥ 3 dB
+	 * above the confirmed level and waits for `confirmLive`): see `LiveState.hold`.
+	 */
 	| 'held'
 	/** What the cable plays is unknown (report 8 went out unconfirmed). */
 	| 'unknown'

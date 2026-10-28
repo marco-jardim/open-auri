@@ -39,8 +39,11 @@
 		{#if cable.rescue.reportsSent !== null}
 			<p class="text-sm">{m.cable_rescue_reports({ count: String(cable.rescue.reportsSent) })}</p>
 		{/if}
-		<!-- B12: the data reports reach the cable before the commit, so it may already play them. -->
-		<p class="text-sm">{m.cable_rescue_live()}</p>
+		<!-- B12: the data reports reach the cable before the commit, so it may already play them;
+		     B12b: only once report 8 went out. Unknown count (restored from the journal): said too. -->
+		{#if cable.rescue.reportsSent === null || cable.rescue.reportsSent >= 8}
+			<p class="text-sm">{m.cable_rescue_live()}</p>
+		{/if}
 		{#if cable.rescue.deviceLabel !== null}
 			<p class="text-sm">{m.cable_rescue_device({ device: cable.rescue.deviceLabel })}</p>
 		{/if}

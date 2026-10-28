@@ -1221,7 +1221,22 @@
 		void lastWritten;
 		untrack(() => (liveSavedCrc = null));
 	});
-	const liveFlat = $derived(browserFlat(app?.cableState ?? null, lastWritten, liveSavedCrc));
+	/**
+	 * The saved curve of the session's cable (the service's: shared journal, this page's saves),
+	 * while there is a session (also an ended one). A save to another cable is not it.
+	 */
+	const sessionSaved = $derived.by<Curve | null>(() => {
+		const client = app;
+		// Read again on every cable state change and every save.
+		const session = client?.cableState.live ?? null;
+		void lastWritten;
+		if (!client || session === null) return null;
+		const saved = untrack(() => client.cable.liveSavedCurve());
+		return saved === null ? null : { bands: saved.bands, preampDb: saved.preampDb };
+	});
+	/** What the live preview calls the saved curve (A): the session cable's own, else the last written. */
+	const liveSaved = $derived(liveSession === null ? lastWritten : sessionSaved);
+	const liveFlat = $derived(browserFlat(app?.cableState ?? null, liveSaved, liveSavedCrc));
 	/** The side the page last sent to the cable while a session runs (the browser's is `preview.side`). */
 	let liveSide = $state<ABSide>('B');
 	/** Signature of the last curve sent to the session (the start curve included). */
@@ -1229,7 +1244,7 @@
 	/** The lever shows what the cable actually plays (A: saved, B: editor), else the side sent. */
 	const livePlays = $derived(
 		liveOn
-			? livePlaying(liveSession, lastWritten, curve, {
+			? livePlaying(liveSession, liveSaved, curve, {
 					savedCrc: liveSavedCrc,
 					prefer: liveSide === 'A' ? 'saved' : 'editor'
 				})
@@ -1239,12 +1254,18 @@
 		livePlays === 'saved' ? 'A' : livePlays === 'editor' ? 'B' : liveSide
 	);
 	/** No known saved curve: A would send the Padrão Auri reference, not what the cable saved. */
-	const liveAReason = $derived(liveOn && lastWritten === null ? m.cable_live_a_no_saved() : null);
+	const liveAReason = $derived(liveOn && liveSaved === null ? m.cable_live_a_no_saved() : null);
+	/** The curve A sends while live: the session cable's saved curve (else the reference). */
+	const liveReference = $derived<Curve>(liveSaved ?? reference);
+	/** The A label: while live, it names the session cable's saved curve. */
+	const abReferenceName = $derived(
+		liveOn ? (liveSaved ? m.curva_ab_ref_written() : PADRAO_AURI.label) : referenceName
+	);
 	const heardReference = $derived(liveFlat ? neutral : reference);
 	const heardEditor = $derived(liveFlat ? neutral : curve);
 	/** Sends `side`'s curve to the session unless it is what was sent last. */
 	function sendLive(client: NonNullable<typeof app>, side: ABSide) {
-		const target = side === 'A' ? reference : curve;
+		const target = side === 'A' ? liveReference : curve;
 		const signatureNow = curveSignature(target);
 		if (signatureNow === liveQueued) return;
 		liveQueued = signatureNow;
@@ -1261,7 +1282,7 @@
 		if (freePreview) return;
 		const side = liveSide;
 		// Tracked: the target curve of that side.
-		void (side === 'A' ? reference : curve);
+		void (side === 'A' ? liveReference : curve);
 		untrack(() => sendLive(client, side));
 	});
 	/** The A/B lever: the cable's curve while live, the browser chains otherwise. */
@@ -1279,7 +1300,7 @@
 	/** A revert ended: accepted, the cable plays the saved curve (A); failed, A is held or lost. */
 	function onLiveRevert(outcome: LiveOutcome) {
 		liveSide = 'A';
-		liveQueued = curveSignature(reference);
+		liveQueued = curveSignature(liveReference);
 		if (outcome.status === 'accepted') liveSavedCrc = outcome.live?.applied?.crc ?? null;
 	}
 	// Leaving the page stops following edits: the cable keeps the live curve until it is
@@ -1415,7 +1436,7 @@
 		{curve}
 		{experimental}
 		profile={writeProfile}
-		saved={lastWritten}
+		saved={liveSaved}
 		savedCrc={liveSavedCrc}
 		heldCurve={liveSide === 'A' ? 'saved' : 'editor'}
 		followPaused={liveOn && freePreview}
@@ -1452,7 +1473,7 @@
 				side={liveOn ? liveShownSide : (preview?.side ?? 'B')}
 				abLive={liveOn}
 				aReason={liveAReason}
-				{referenceName}
+				referenceName={abReferenceName}
 				{previewError}
 				previewDisabled={!preview}
 				previewReason={m.curva_v2_preview_unavailable()}

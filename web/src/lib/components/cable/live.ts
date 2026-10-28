@@ -49,8 +49,10 @@ function keptAfterEnd(live: LiveState): boolean {
 }
 
 /**
- * The applied curve is the saved one: equal to `saved`, or the curve an accepted revert left on
- * the cable (`savedCrc`, for a revert to the service's own saved curve).
+ * The applied curve is the saved one. When the service knows the session cable's own saved curve
+ * (`live.savedCrc`), that decides: a save to another cable (the page's `saved`) never counts.
+ * Otherwise: equal to `saved`, or the curve an accepted revert left on the cable (`savedCrc`, for a
+ * revert to the service's own saved curve).
  */
 function playsSaved(
 	live: LiveState,
@@ -59,8 +61,38 @@ function playsSaved(
 ): boolean {
 	const applied = live.applied;
 	if (applied === null) return false;
+	const own = live.savedCrc;
+	if (typeof own === 'number') return applied.crc === own;
 	if (savedCrc !== null && savedCrc !== undefined && applied.crc === savedCrc) return true;
 	return saved !== null && saved !== undefined && sameCurve(applied, saved);
+}
+
+/** The orphan preview's cable is connected (`deviceLabels` absent: unknown, taken as connected). */
+function orphanConnected(
+	cable: Pick<CableState, 'liveOrphan'> & Partial<Pick<CableState, 'deviceLabels'>>
+): boolean {
+	const orphan = cable.liveOrphan ?? null;
+	if (orphan === null) return false;
+	const labels = cable.deviceLabels;
+	if (labels === undefined) return true;
+	// The marker keeps at most 64 code points of the label.
+	return labels.some(
+		(label) => label === orphan.deviceLabel || [...label].slice(0, 64).join('') === orphan.deviceLabel
+	);
+}
+
+/**
+ * "Salvar a curva que está tocando" applies: a running session, or an ended one whose curve the
+ * cable kept (`stopped`, `forgotten`) while that cable is still connected and is the write target
+ * (a save goes to the target, so it must be the cable that plays the curve).
+ */
+export function liveSavable(
+	cable: Pick<CableState, 'live' | 'deviceLabel'> | null | undefined
+): boolean {
+	const live = cable?.live ?? null;
+	if (cable === null || cable === undefined || live === null) return false;
+	if (live.status !== 'ended') return true;
+	return keptAfterEnd(live) && cable.deviceLabel !== null && cable.deviceLabel === live.deviceLabel;
 }
 
 /**
@@ -104,15 +136,19 @@ export function cableLiveUnsaved(
  * play the live curve (`applied` set, state known): while a session starts, or after a first apply
  * that failed, the cable still plays its saved curve and the EQ'd chains keep the level. After the
  * session: a curve kept on the cable (stopped, forgotten) that differs from the saved one. And an
- * orphan preview of another tab or of this one before a reload.
+ * orphan preview of another tab or of this one before a reload, while its cable is connected
+ * (`deviceLabels`; when absent, taken as connected).
  */
 export function browserFlat(
-	cable: Pick<CableState, 'live' | 'liveOrphan'> | null | undefined,
+	cable:
+		| (Pick<CableState, 'live' | 'liveOrphan'> & Partial<Pick<CableState, 'deviceLabels'>>)
+		| null
+		| undefined,
 	saved: LiveCurveView | null | undefined,
 	savedCrc?: number | null
 ): boolean {
 	if (cable === null || cable === undefined) return false;
-	if ((cable.liveOrphan ?? null) !== null) return true;
+	if (orphanConnected(cable)) return true;
 	const live = cable.live;
 	if (live === null || live === undefined || live.applied === null) return false;
 	if (live.status === 'ended') return keptAfterEnd(live) && !playsSaved(live, saved, savedCrc);
@@ -242,6 +278,7 @@ export const liveRefusalText: Record<LiveRefusalReason, () => string> = {
 	'no-session': () => m.cable_live_refused_no_session(),
 	'no-hold': () => m.cable_live_refused_no_hold(),
 	gate: () => m.cable_live_refused_gate(),
+	loudness: () => m.cable_live_refused_loudness(),
 	'no-saved-curve': () => m.cable_live_refused_no_saved_curve(),
 	'revert-failed': () => m.cable_live_refused_revert_failed(),
 	'live-elsewhere': () => m.cable_live_refused_live_elsewhere(),

@@ -238,6 +238,20 @@ test('rescue is opt-in, shows zero sent reports, and hides missing journal metad
 	expect(fake.unsubscribe).toHaveBeenCalledOnce();
 });
 
+test('the B12 line shows only when report 8 may have gone out (or the count is unknown)', async () => {
+	const fake = cableUi();
+	await render(RescueNotice, { service: fake.service, onrescue: vi.fn() });
+	const live = () => page.getByText(m.cable_rescue_live(), { exact: true }).elements();
+	fake.publish({ rescue: { at: 1, reportsSent: 3, deviceLabel: null } });
+	await expect.element(page.getByText(m.cable_rescue_reports({ count: '3' }))).toBeVisible();
+	// B12b: before report 8 the cable ignores the partial curve.
+	expect(live()).toHaveLength(0);
+	fake.publish({ rescue: { at: 1, reportsSent: 8, deviceLabel: null } });
+	await expect.element(page.getByText(m.cable_rescue_live(), { exact: true })).toBeVisible();
+	fake.publish({ rescue: { at: 1, reportsSent: null, deviceLabel: null } });
+	await expect.element(page.getByText(m.cable_rescue_live(), { exact: true })).toBeVisible();
+});
+
 test('an interruption restored from the journal on load is a polite region, not an alert (R2-12)', async () => {
 	const fake = cableUi({ rescue: { at: 1, reportsSent: null, deviceLabel: 'Old cable' } });
 	await render(RescueNotice, { service: fake.service, onrescue: vi.fn() });

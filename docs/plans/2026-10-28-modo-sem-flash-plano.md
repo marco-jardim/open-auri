@@ -12,7 +12,8 @@ Data: 2026-10-28. Origem: sonda B12 da Fase H (`docs/probing.md`, seção F).
   curva só entra quando o report 8 chega. Uma sequência completa enviada depois de uma parcial
   funciona normalmente. Logo, um envio interrompido antes do report 8 é ignorado pelo cabo.
 - O firmware valida o CRC: curva com CRC errado é ignorada em silêncio (B7 ✅). O cabo nunca
-  responde (sem input reports). A troca de curva é suave, sem clique (B13 ✅).
+  responde (sem input reports). A troca de curva é suave, sem clique (B13 ✅ com ressalva:
+  limites do microfone em HF e de alinhamento temporal; ver `docs/probing.md`).
 - **B12c ✅ (medições, 2026-10-28):** rodada 1 com 1000 prévias alternando Neutro/PK 2 kHz
   (16 ms + 150 ms, ~2,4/s, 11 min) + 50 sem a espera, 0 erros de envio. Depois, prévias
   pararam de mudar o som (5 alternadas + PK 5 kHz); escrita completa com commit ainda
@@ -105,6 +106,7 @@ atômicas, testes só do que a fatia toca, revisão QA sênior, correções, com
 | Duas abas | Trava de sessão e recusa `'live-elsewhere'` |
 | `lastWritten` não é a verdade do cabo | "Voltar à curva salva" = última salva por este navegador; replug é o reset real |
 | Android sem validação de escrita | Confirmação "não testado" obrigatória |
+| Cabo identificado pelo rótulo (nome do produto + `#n`), não por um ID físico (pré-existente) | Marcador `oa.cable.live`, órfã e curva salva por cabo usam o rótulo; dois cabos iguais trocados de porta podem trocar de rótulo. Mitigação: o replug limpa o marcador do cabo, "Já desconectei" limpa a órfã, e o replug é o reset real |
 
 ## 6. Pendências manuais
 
