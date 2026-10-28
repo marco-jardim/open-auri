@@ -156,8 +156,28 @@ firmware distingue os dois casos é 🟡.
 
 **Desgaste.** Cada commit é uma gravação na flash, cuja durabilidade é
 desconhecida, e um corte de energia no meio da gravação tem efeito desconhecido.
-Não existe, até onde se sabe, um modo "só RAM" no `0xCB` (o `0x4B` tem
-`TEMP_WRITE`). Os bytes `01 FF` no fim do APPLY são candidatos a flags 🟡.
+Omitir o commit evita a flash (ver abaixo). Os bytes `01 FF` no fim do APPLY são
+candidatos a flags 🟡; B12 omitiu o commit inteiro, sem variá-los.
+
+## Dados = RAM, commit = flash
+
+Medido no cabo (sondas B12 e B12b, `docs/probing.md`, seção F):
+
+| Fato | Sonda | Confiança |
+|---|---|---|
+| Os 9 reports de dados **sem** o commit mudam o som na hora (RAM) | B12 | ✅ |
+| Depois de desconectar e reconectar, o cabo volta à última curva **commitada** (flash) | B12 | ✅ |
+| Só os reports `0..6`, ou só `0..7` (com o CRC), **não** mudam o som: a curva entra quando o report `8` chega | B12b | ✅ |
+| Uma sequência completa enviada depois de uma parcial funciona normalmente | B12b | ✅ |
+| Curva com CRC errado é ignorada em silêncio | B7 | ✅ |
+| O cabo nunca responde (sem input reports) | — | ✅ |
+
+No transporte (`src/transport/webhid.mjs`), `applyCurve` envia os 9 reports com
+as mesmas pausas e o mesmo settle de 150 ms, **sem** o commit (prévia ao vivo,
+sem flash); `writeCurve` envia os 9 reports e o commit (persistir). Uma
+sequência interrompida antes de o report `8` sair deixa o cabo na curva
+anterior; interrompida depois dele, o cabo pode já soar como a curva nova até
+ser reconectado.
 
 ## Parentesco com o `0x4B`
 

@@ -2,18 +2,26 @@
 //
 // Spec: ../../docs/protocol-0xcb.md ("Sequência de gravação").
 //
-// The cable (VID 0x3302, PID 0x8902, "USB DSP Audio") is write-only and every
-// commit is persisted to the chip's flash, which cannot be read back. Hence:
-// - writeCurve() always runs the real safety gate (gateForWrite from
-//   src/safety/gate.mjs) itself, immediately before sending; a caller-supplied
-//   `gate` is only an additional check (both must approve). Nothing is sent
-//   unless the gate approves;
+// The cable (VID 0x3302, PID 0x8902, "USB DSP Audio") is write-only and never
+// answers. Data = RAM, commit = flash (B12, docs/protocol-0xcb.md): the 9 data
+// reports alone change the sound at once, but only when report 8 arrives
+// (reports 0..7 alone are ignored, B12b), and a replug restores the last
+// committed curve; every commit is persisted to the chip's flash, which cannot
+// be read back. applyCurve() is the live, no-flash path (9 reports, no commit);
+// writeCurve() persists (9 reports, then the commit). Hence:
+// - writeCurve() and applyCurve() always run the real safety gate (gateForWrite
+//   from src/safety/gate.mjs) themselves, immediately before sending; a
+//   caller-supplied `gate` is only an additional check (both must approve).
+//   Nothing is sent unless the gate approves. Below, "write" means either;
 // - the gate reads the caller's bands exactly once (one snapshot) and returns
 //   the payload bytes it evaluated; those bytes, split into reports, are what
 //   is sent. Nothing is ever re-encoded from the caller's objects;
 // - writes are never retried;
 // - after any interruption (disconnect, abort, I/O failure) the commit is never
-//   sent, so the chip keeps its previous preset in flash;
+//   sent, so the chip keeps its previous preset in flash. A sequence interrupted
+//   before report 8 was ever sent (always so when `reportsSent` < 8) leaves the
+//   cable on its previous curve (B12b); one interrupted after report 8 was sent
+//   (pending or accepted) may already sound like the new curve until a replug;
 // - the per-device lock is taken before the bands are read. Only the reads of
 //   the options (their getters, and `navigator.hid` when no `hid` is given),
 //   the type check of `gate` and `signal.throwIfAborted()` run before it; a
@@ -23,7 +31,10 @@
 //   started from inside another write's gating on the same device is refused
 //   (ConcurrentWriteError) and sends nothing;
 // - an abort is honoured up to the last moment: after gating, before the first
-//   I/O and right before the commit;
+//   I/O and right before each report (the commit included). Once applyCurve()'s
+//   report 8 is accepted nothing is left to stop: its last pause and the settle
+//   run in full under the lock (an abort or disconnect does not shorten them),
+//   so another sequence never follows report 8 sooner than the commit would;
 // - a device whose open()/sendReport() had to be abandoned while still pending
 //   (hung, then aborted or unplugged) is refused (DeviceUnusableError) until
 //   that operation settles, or until the page obtains it again through
@@ -94,7 +105,8 @@ import { gateForWrite, gateProfile } from '../safety/gate.mjs';
  *   call threw).
  * @property {number} reportsSent Data reports (0..9) the device accepted; the commit is not
  *   counted.
- * @property {boolean} committed Whether the commit report was confirmed as accepted.
+ * @property {boolean} committed Whether the commit report was confirmed as accepted (always
+ *   false for applyCurve, which never sends it).
  * @property {unknown} [error] Why the write was interrupted (only when status is 'interrupted').
  *
  * @typedef {(WriteResult & {device: CableDevice})
@@ -109,7 +121,10 @@ export const PRODUCT_NAME = 'USB DSP Audio';
 /** Pause after each of the 9 data reports. */
 export const REPORT_GAP_MS = 16;
 
-/** Settle time after the last data report's pause, before the commit. */
+/**
+ * Settle time after the last data report's pause, before the commit (writeCurve)
+ * or before the lock is released (applyCurve).
+ */
 export const SETTLE_MS = 150;
 
 /** Flash policy: at least this long between the end of one write and the start of the next. */
@@ -345,7 +360,44 @@ export async function requestCable(hid = navigatorHid()) {
  * @param {WriteOptions} [options]
  * @returns {Promise<WriteResult>}
  */
-export async function writeCurve(device, bands, preampDb, options) {
+export function writeCurve(device, bands, preampDb, options) {
+  return transfer(device, bands, preampDb, options, true);
+}
+
+/**
+ * Applies a curve live, without touching the flash: the same 9 data reports
+ * 16 ms apart as {@link writeCurve}, then 150 ms of settle, and no commit. The
+ * cable plays the curve from RAM once report 8 arrives; a replug restores the
+ * last committed curve (docs/protocol-0xcb.md, "Dados = RAM, commit = flash").
+ *
+ * Gate, snapshot, options, lock, abort, abandon (DeviceUnusableError) and error
+ * rules are exactly those of {@link writeCurve}; nothing is ever retried. The
+ * result has `committed: false`. Its status is 'ok' once all 9 reports were
+ * accepted: the last pause and the settle then run in full while the lock is
+ * held (an abort, a disconnect or a clock error in them is ignored), so another
+ * write or apply on this device is refused until they end. Before that, an
+ * interruption is returned as `status: 'interrupted'`; if it came before report
+ * 8 was sent, the cable keeps its previous curve (B12b).
+ * @param {CableDevice} device
+ * @param {readonly Band[]} bands
+ * @param {number} preampDb
+ * @param {WriteOptions} [options]
+ * @returns {Promise<WriteResult>}
+ */
+export function applyCurve(device, bands, preampDb, options) {
+  return transfer(device, bands, preampDb, options, false);
+}
+
+/**
+ * Shared body of {@link writeCurve} (`commit` true) and {@link applyCurve}.
+ * @param {CableDevice} device
+ * @param {readonly Band[]} bands
+ * @param {number} preampDb
+ * @param {WriteOptions | undefined} options
+ * @param {boolean} commit
+ * @returns {Promise<WriteResult>}
+ */
+async function transfer(device, bands, preampDb, options, commit) {
   // Read first, as a descriptor: a `profile` getter is never called.
   const profile = gateProfile(options);
   const {
@@ -365,7 +417,7 @@ export async function writeCurve(device, bands, preampDb, options) {
     const { payload, crc } = approve(bands, preampDb, experimental === true, profile, gate);
     signal?.throwIfAborted(); // aborted while gating: nothing is sent
     const reports = reportsFromPayload(payload);
-    return await sendSequence(device, reports, crc, { signal, clock, hid });
+    return await sendSequence(device, reports, crc, { signal, clock, hid, commit });
   } finally {
     release();
   }
@@ -431,13 +483,35 @@ function guardIo(device, operation, stop) {
 }
 
 /**
+ * The data-only path's last report pause and settle, run while the caller still
+ * holds the lock. The curve is live once report 8 is accepted and nothing is
+ * left to send, so no stop signal shortens them and a clock error is dropped:
+ * another sequence never follows report 8 sooner than writeCurve's commit would.
+ * @param {Clock} clock
+ * @returns {Promise<void>}
+ */
+async function holdAfterData(clock) {
+  try {
+    await clock.sleep(REPORT_GAP_MS);
+    await clock.sleep(SETTLE_MS);
+  } catch {
+    // Dropped: the 9 reports were accepted; a broken clock cannot undo that.
+  }
+}
+
+/**
  * @param {CableDevice} device
  * @param {Uint8Array[]} reports
  * @param {number} crc
- * @param {{signal: AbortSignal | undefined, clock: Clock, hid: CableHID | undefined}} context
+ * @param {{
+ *   signal: AbortSignal | undefined,
+ *   clock: Clock,
+ *   hid: CableHID | undefined,
+ *   commit: boolean,
+ * }} context `commit` false: data reports only (applyCurve).
  * @returns {Promise<WriteResult>}
  */
-async function sendSequence(device, reports, crc, { signal, clock, hid }) {
+async function sendSequence(device, reports, crc, { signal, clock, hid, commit }) {
   const startedAt = clock.now();
   let reportsSent = 0;
   let committed = false;
@@ -496,19 +570,25 @@ async function sendSequence(device, reports, crc, { signal, clock, hid }) {
         ensureLive();
         await io(() => device.sendReport(HID_REPORT_ID, report));
         reportsSent += 1;
+        // Data only: the pauses after the last report run below, outside the catch.
+        if (!commit && reportsSent === reports.length) break;
         await clock.sleep(REPORT_GAP_MS, stop.signal);
       }
-      await clock.sleep(SETTLE_MS, stop.signal);
-      ensureLive();
-      await io(() => device.sendReport(HID_REPORT_ID, commitReport()));
-      committed = true;
+      if (commit) {
+        await clock.sleep(SETTLE_MS, stop.signal);
+        ensureLive();
+        await io(() => device.sendReport(HID_REPORT_ID, commitReport()));
+        committed = true;
+      }
     } catch (error) {
       // Programming errors surface only while the device holds none of this curve;
       // once a report was accepted the caller must learn how far the write got.
       if (error instanceof TypeError && reportsSent === 0) throw error;
       return { ...result('interrupted'), error };
     }
-    // Outside the catch: once the commit is accepted, nothing can make it 'interrupted'.
+    if (!commit) await holdAfterData(clock);
+    // Outside the catch: once the commit (data only: report 8) is accepted,
+    // nothing can make it 'interrupted'.
     return result('ok');
   } finally {
     // The signal and the hid may be caller objects: an error thrown by either

@@ -12,11 +12,13 @@ export {
   systemClock,
   requestCable,
   writeCurve,
+  applyCurve,
   writeMany,
 } from './webhid.mjs';
 export {
   FAKE_PRODUCT_NAME,
   createFakeClock,
+  FakeFirmware,
   FakeHIDDevice,
   FakeHIDConnectionEvent,
   FakeHID,

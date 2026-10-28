@@ -15,9 +15,11 @@ export function requestCable(hid?: CableHID): Promise<CableDevice | null>;
  * are built from the exact payload it approved. `options.gate`, if given, must
  * also approve (it receives the frozen snapshot).
  *
- * The device's lock is taken before the gates (or any other caller code) run
- * and is released only by this call, so a nested write to the same device
- * started from a band getter, a Proxy trap or the extra gate is refused.
+ * The device's lock is taken before the bands are read and the gates run; only
+ * the reads of `options` (getters included, and `navigator.hid` when `hid` is
+ * not given), the type check of `gate` and `signal.throwIfAborted()` come
+ * first. The lock is released only by this call, so a nested write to the same
+ * device started from a band getter, a Proxy trap or the extra gate is refused.
  *
  * Throws, before any I/O, when a gate rejects (GateRejectedError), when
  * `options.gate` is not a function or returns a non-object (TypeError), when
@@ -38,6 +40,27 @@ export function requestCable(hid?: CableHID): Promise<CableDevice | null>;
  * @returns {Promise<WriteResult>}
  */
 export function writeCurve(device: CableDevice, bands: readonly Band[], preampDb: number, options?: WriteOptions): Promise<WriteResult>;
+/**
+ * Applies a curve live, without touching the flash: the same 9 data reports
+ * 16 ms apart as {@link writeCurve}, then 150 ms of settle, and no commit. The
+ * cable plays the curve from RAM once report 8 arrives; a replug restores the
+ * last committed curve (docs/protocol-0xcb.md, "Dados = RAM, commit = flash").
+ *
+ * Gate, snapshot, options, lock, abort, abandon (DeviceUnusableError) and error
+ * rules are exactly those of {@link writeCurve}; nothing is ever retried. The
+ * result has `committed: false`. Its status is 'ok' once all 9 reports were
+ * accepted: the last pause and the settle then run in full while the lock is
+ * held (an abort, a disconnect or a clock error in them is ignored), so another
+ * write or apply on this device is refused until they end. Before that, an
+ * interruption is returned as `status: 'interrupted'`; if it came before report
+ * 8 was sent, the cable keeps its previous curve (B12b).
+ * @param {CableDevice} device
+ * @param {readonly Band[]} bands
+ * @param {number} preampDb
+ * @param {WriteOptions} [options]
+ * @returns {Promise<WriteResult>}
+ */
+export function applyCurve(device: CableDevice, bands: readonly Band[], preampDb: number, options?: WriteOptions): Promise<WriteResult>;
 /**
  * Writes the same curve to several cables, one at a time, waiting at least
  * {@link WRITE_SPACING_MS} between the end of one write and the start of the
@@ -91,13 +114,17 @@ export function writeMany(devices: readonly CableDevice[], bands: readonly Band[
  * @typedef {(
  *   bands: readonly Band[],
  *   preampDb: number,
- *   options: {experimental: boolean},
+ *   options: {experimental: boolean, profile?: 'yolo'},
  * ) => GateVerdict} Gate
  *
  * @typedef {object} WriteOptions
  * @property {Gate} [gate] Optional additional check, called with the gate's frozen
  *   snapshot of the bands after `gateForWrite` approved them; it can only refuse.
  * @property {boolean} [experimental] Passed to the gates; only `true` enables it.
+ * @property {'yolo'} [profile] Gate profile for `gateForWrite` (Modo YOLO: class-2
+ *   reasons waived, class 1 and `d:prefix-peak-full` still block). Read like
+ *   `gateProfile` does: only an own data property equal to `'yolo'` selects it, a
+ *   getter is never called. `writeMany` refuses it (one cable at a time).
  * @property {AbortSignal} [signal]
  * @property {Clock} [clock] Defaults to {@link systemClock}.
  * @property {CableHID} [hid] Source of 'disconnect' events; defaults to `navigator.hid`.
@@ -106,10 +133,12 @@ export function writeMany(devices: readonly CableDevice[], bands: readonly Band[
  * @property {'ok' | 'interrupted'} status
  * @property {number} crc Payload CRC-16 (payload bytes 218..219, little-endian).
  * @property {number} startedAt `clock.now()` when the I/O started.
- * @property {number} finishedAt `clock.now()` when the write ended.
+ * @property {number} finishedAt `clock.now()` when the write ended (`startedAt` if that
+ *   call threw).
  * @property {number} reportsSent Data reports (0..9) the device accepted; the commit is not
  *   counted.
- * @property {boolean} committed Whether the commit report was confirmed as accepted.
+ * @property {boolean} committed Whether the commit report was confirmed as accepted (always
+ *   false for applyCurve, which never sends it).
  * @property {unknown} [error] Why the write was interrupted (only when status is 'interrupted').
  *
  * @typedef {(WriteResult & {device: CableDevice})
@@ -121,7 +150,10 @@ export function writeMany(devices: readonly CableDevice[], bands: readonly Band[
 export const PRODUCT_NAME: "USB DSP Audio";
 /** Pause after each of the 9 data reports. */
 export const REPORT_GAP_MS: 16;
-/** Settle time after the last data report's pause, before the commit. */
+/**
+ * Settle time after the last data report's pause, before the commit (writeCurve)
+ * or before the lock is released (applyCurve).
+ */
 export const SETTLE_MS: 150;
 /** Flash policy: at least this long between the end of one write and the start of the next. */
 export const WRITE_SPACING_MS: 2000;
@@ -144,7 +176,8 @@ export class DeviceDisconnectedError extends Error {
  * A previous write had to abandon a pending open()/sendReport() on this device
  * (it hung, then the write was aborted or the device disconnected). The pending
  * operation may still complete at any time, so the device is refused, before
- * any I/O, until the page obtains it again with {@link requestCable}.
+ * any I/O, until that operation settles (either way) or until the page obtains
+ * it again with {@link requestCable}, whichever comes first.
  */
 export class DeviceUnusableError extends Error {
     constructor();
@@ -211,8 +244,10 @@ export type WriteOptions = {
      */
     experimental?: boolean | undefined;
     /**
-     * Gate profile for `gateForWrite` (Modo YOLO). Only an own data property equal
-     * to `'yolo'` selects it; `writeMany` refuses it.
+     * Gate profile for `gateForWrite` (Modo YOLO: class-2
+     * reasons waived, class 1 and `d:prefix-peak-full` still block). Read like
+     * `gateProfile` does: only an own data property equal to `'yolo'` selects it, a
+     * getter is never called. `writeMany` refuses it (one cable at a time).
      */
     profile?: "yolo" | undefined;
     signal?: AbortSignal | undefined;
@@ -236,7 +271,8 @@ export type WriteResult = {
      */
     startedAt: number;
     /**
-     * `clock.now()` when the write ended.
+     * `clock.now()` when the write ended (`startedAt` if that
+     * call threw).
      */
     finishedAt: number;
     /**
@@ -245,7 +281,8 @@ export type WriteResult = {
      */
     reportsSent: number;
     /**
-     * Whether the commit report was confirmed as accepted.
+     * Whether the commit report was confirmed as accepted (always
+     * false for applyCurve, which never sends it).
      */
     committed: boolean;
     /**
