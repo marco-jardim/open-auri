@@ -85,6 +85,7 @@ import type {
 	ChecklistContext,
 	ChecklistInput,
 	ChecklistResult,
+	ComparisonCancelHoldStatus,
 	ComparisonEndRequest,
 	ComparisonItem,
 	ComparisonItemSummary,
@@ -166,6 +167,11 @@ export const INFLIGHT_STALE_MS = 10_000;
 export const CABLE_LIVE_LOCK = 'oa-cable-live';
 /** `localStorage` key of the persisted live preview marker (S5). */
 export const CABLE_LIVE_KEY = 'oa.cable.live';
+/**
+ * The `crc` a blind comparison stores in the live marker instead of the playing candidate's
+ * (outside the CRC-16 range: never a real curve). Orphan detection only needs the marker.
+ */
+export const LIVE_MARKER_BLIND_CRC = -1;
 /** First wait after a busy write lock (nothing sent); doubled on each busy attempt. */
 export const LIVE_BUSY_BACKOFF_MS = 300;
 /** Busy attempts of one live apply before the edit is dropped (`lastError: 'busy'`). */
@@ -518,6 +524,11 @@ interface LiveComparison {
 	blind: boolean;
 	/** The candidate the last successful switch (or the start) applied; null before. */
 	index: number | null;
+	/**
+	 * The candidate the user chose last (the start's `first`, or the last switch that may have
+	 * reached the cable): what "Reaplicar" (`confirmLive` on an unknown state) sends again.
+	 */
+	selected: number;
 	/** A switch (or the end's revert) is in progress: other switches are refused `busy`. */
 	switching: boolean;
 	/** The last switch did not leave the selected candidate playing. */
@@ -798,8 +809,9 @@ export function createCableService(
 		const s = live;
 		if (s === null) return null;
 		const comparison = s.comparison;
-		// A blind comparison: nothing that tells the candidates apart (CRC, bands, levels, holds,
-		// the saved curve's CRC), for the whole session.
+		// A blind comparison: nothing that tells the candidates apart (CRC, bands, levels, hold
+		// details, error details, the saved curve's CRC), for the whole session and after it.
+		// The non-identifying flags (unsaved, cable EQ, the hold's reason) stay truthful.
 		if (comparison !== null && comparison.blind) {
 			return {
 				deviceLabel: s.label,
@@ -807,11 +819,19 @@ export function createCableService(
 				applied: null,
 				pending: s.pending !== null || s.gatedEdit !== null,
 				ackLevelDb: null,
-				hold: null,
+				hold:
+					s.hold === null
+						? null
+						: {
+								reason: s.hold.reason,
+								...(s.hold.curve === undefined ? {} : { curve: s.hold.curve })
+							},
 				applies: s.applies,
 				total: liveTotal,
-				lastError: s.lastError,
+				lastError: blindError(s.lastError),
 				...(s.ended === null ? {} : { endedReason: s.ended }),
+				playsUnsaved: playsUnsavedOf(s),
+				cableEq: cableEqOf(s),
 				comparison: comparisonView(s, comparison)
 			};
 		}
@@ -834,8 +854,59 @@ export function createCableService(
 			lastError: s.lastError,
 			...(s.ended === null ? {} : { endedReason: s.ended }),
 			savedCrc: savedCrcOf(s),
+			playsUnsaved: playsUnsavedOf(s),
+			cableEq: cableEqOf(s),
 			...(comparison === null ? {} : { comparison: comparisonView(s, comparison) })
 		};
+	}
+
+	/** An ended session whose curve the cable still plays (kept until unplugged). */
+	function keptAfterEnd(s: LiveSession): boolean {
+		return s.ended === 'stopped' || s.ended === 'forgotten';
+	}
+
+	/**
+	 * The cable plays something other than its saved curve: an unknown state, or an applied
+	 * curve that is not the saved one (any applied curve when the saved one is unknown). After
+	 * the session: only a curve kept on the cable (stopped, forgotten).
+	 */
+	function playsUnsavedOf(s: LiveSession): boolean {
+		if (s.ended !== null) {
+			if (!keptAfterEnd(s)) return false;
+		} else if (!s.known) {
+			return true;
+		}
+		if (s.applied === null) return false;
+		const saved = savedCrcOf(s);
+		return saved === null || s.applied.crc !== saved;
+	}
+
+	/**
+	 * The cable is known to apply a live curve (the browser preview must stay flat): a running
+	 * session with an applied curve and a known state, or a kept curve that is not the saved one.
+	 */
+	function cableEqOf(s: LiveSession): boolean {
+		if (s.applied === null) return false;
+		if (s.ended !== null) return playsUnsavedOf(s);
+		return s.known;
+	}
+
+	/** A blind comparison's `lastError`: a code only (an error may carry curve details). */
+	function blindError(cause: unknown): 'busy' | 'error' | null {
+		if (cause === null || cause === undefined) return null;
+		return cause === 'busy' ? 'busy' : 'error';
+	}
+
+	/** A blind comparison runs (or ran) on `s`. */
+	function blindOf(s: LiveSession): boolean {
+		return s.comparison?.blind === true;
+	}
+
+	/** The higher of two levels (a comparison never lowers its confirmed level). */
+	function maxLevel(a: number | null, b: number | null): number | null {
+		if (a === null) return b;
+		if (b === null) return a;
+		return Math.max(a, b);
 	}
 
 	function comparisonSummary(item: ComparisonItem): ComparisonItemSummary {
@@ -1422,6 +1493,9 @@ export function createCableService(
 		const gesture = request.gesture;
 		if (!consumeGestureToken(gesture, nowMs())) return refuse('gesture');
 		if (writing) return refuse('busy');
+		// A blind comparison: no save until it ends (what a save does would tell candidates apart).
+		const session = activeLive();
+		if (session !== null && blindOf(session)) return refuse('blind');
 		const captured = input(request);
 		const rawName: unknown = request.name;
 		const verdict = gateForWrite(captured.bands, captured.preampDb, gateOptions(captured));
@@ -1788,7 +1862,13 @@ export function createCableService(
 	/** Persists the live marker before an apply of `crc` that differs from the saved curve. */
 	function writeLiveMarker(s: LiveSession, crc: number) {
 		if (mode !== 'real' || liveStore === null) return;
-		const marker: LiveMarker = { tabId, device: truncate(s.label, 64), crc, at: nowMs() };
+		const marker: LiveMarker = {
+			tabId,
+			device: truncate(s.label, 64),
+			// A blind comparison stores an opaque constant, never the candidate's CRC.
+			crc: blindOf(s) ? LIVE_MARKER_BLIND_CRC : crc,
+			at: nowMs()
+		};
 		if (!liveStore.write(JSON.stringify(marker))) {
 			console.warn('cable live marker could not be persisted');
 		}
@@ -2045,6 +2125,15 @@ export function createCableService(
 				emit();
 				return;
 			}
+		} else if (s.comparison !== null) {
+			// A comparison never plays a curve ≥ 3 dB above the confirmed level, confirmed or not
+			// (switches, "Reaplicar", the end's revert): checked again right before sending.
+			const loud = loudnessHold(s, next);
+			if (loud !== null) {
+				holdLive(s, next, loud);
+				emit();
+				return;
+			}
 		}
 		// A retry after a busy lock is not announced again (the status stays "applying").
 		const retry = s.busyAttempts > 0;
@@ -2087,8 +2176,9 @@ export function createCableService(
 				return { kind: 'foreign' };
 			}
 			// S5: before a curve other than the saved one reaches the cable, leave a marker, so a
-			// reload or another tab can tell the cable may play an unsaved preview.
-			if (crc !== savedCrcOf(s)) writeLiveMarker(s, crc);
+			// reload or another tab can tell the cable may play an unsaved preview. A blind
+			// comparison always leaves it (whether a candidate is the saved curve stays hidden).
+			if (blindOf(s) || crc !== savedCrcOf(s)) writeLiveMarker(s, crc);
 			lastApplyStartMs = clock.now();
 			try {
 				const result = await withWriteFlag(() =>
@@ -2201,8 +2291,9 @@ export function createCableService(
 			liveTotal += 1;
 			s.lastError = null;
 			// The saved curve plays again: the preview marker is moot (S5). Only the cable's own
-			// saved curve (shared journal), never another curve, even one sent as a revert.
-			if (crc === savedCrcOf(s)) cableBackToSaved(s.label);
+			// saved curve (shared journal), never another curve, even one sent as a revert. A blind
+			// comparison keeps it until the session reverts or the cable is unplugged or saved.
+			if (crc === savedCrcOf(s) && !blindOf(s)) cableBackToSaved(s.label);
 			return true;
 		}
 		if (result.status === 'interrupted' && result.error instanceof DeviceDisconnectedError) {
@@ -2349,8 +2440,10 @@ export function createCableService(
 			};
 			s.known = true;
 			s.started = true;
-			// The user lowered the volume for this save: it is the new confirmed level.
-			s.ackLevelDb = levelDb;
+			// The user lowered the volume for this save: it is the new confirmed level. A comparison
+			// keeps the higher one: its candidates were approved at the set's level, and a quieter
+			// save must not let the next switch play ≥ 3 dB above what was just confirmed.
+			s.ackLevelDb = s.comparison === null ? levelDb : maxLevel(s.ackLevelDb, levelDb);
 			// A held edit is evaluated again against it (after LIVE_AFTER_COMMIT_MS), unless it is
 			// the curve just saved.
 			const held = clearHold(s);
@@ -2374,11 +2467,23 @@ export function createCableService(
 	 */
 	async function revertLive(request: LiveRevertRequest): Promise<LiveOutcome> {
 		if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
+		const saved = request.saved;
 		const s = activeLive();
 		if (s === null) return liveRefuse('no-session');
+		// A comparison is reverted only by its end (`endComparison`): a revert that goes on with
+		// the comparison would leave the saved curve's level as the confirmed one mid-set.
+		if (s.comparison !== null) return liveRefuse('comparison-active');
+		return revertSession(s, saved);
+	}
+
+	/** `revertLive` once the gesture was spent (also the revert of `endComparison`). */
+	async function revertSession(
+		s: LiveSession,
+		saved: LiveSavedCurve | null | undefined
+	): Promise<LiveOutcome> {
 		const target = cableSaved(s);
 		if (target === null) return liveRefuse('no-saved-curve');
-		const curve = revertCurve(s, request.saved, target);
+		const curve = revertCurve(s, saved, target);
 		clearHold(s);
 		s.pending?.done();
 		s.pending = null;
@@ -2404,8 +2509,10 @@ export function createCableService(
 				...(s.lastError === null || s.lastError === undefined ? {} : { error: s.lastError })
 			});
 		}
-		// Only now: the saved curve plays, its level is the confirmed one.
-		s.ackLevelDb = curve.levelDb;
+		// Only now: the saved curve plays, its level is the confirmed one (a comparison, which
+		// ends right after its revert, never lowers it).
+		s.ackLevelDb =
+			s.comparison === null ? curve.levelDb : maxLevel(s.ackLevelDb, curve.levelDb);
 		cableBackToSaved(s.label);
 		emit();
 		return { status: 'accepted', live: liveView() };
@@ -3002,26 +3109,35 @@ export function createCableService(
 		 * a fresh gesture. Every candidate is gated and, with `match`, level-matched by lowering
 		 * the louder ones' preamp (`planComparison`); the live checklist runs once, on the loudest
 		 * played candidate, with the experimental item required when any candidate needs it. Its
-		 * level is the confirmed one, so no switch can hit the loudness hold. Standard profile
-		 * only. Applies candidate `first` (default 0) and settles once that apply settled.
+		 * level is the confirmed one, and nothing in the comparison lowers it, so no switch can
+		 * play ≥ 3 dB above it (each switch is checked anyway). Standard profile only; a blind
+		 * comparison needs `match`. The request is validated (`planComparison`, `first`, blind
+		 * without match) before the gesture token is spent: such a refusal leaves it unspent.
+		 * Applies candidate `first` (default 0) and settles once that apply settled.
 		 */
 		async startComparison(request: ComparisonStartRequest): Promise<ComparisonOutcome> {
-			// The token is spent first, whatever happens next.
-			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
-			if (!liveCapable() || disposed) return liveRefuse('unavailable');
-			if (writing || activeLive() !== null) return liveRefuse('busy');
-			const device = primary;
-			if (device === null) return liveRefuse('no-device');
 			// Read once.
+			const gesture = request.gesture;
 			const curves = request.curves;
 			const match = request.match === true;
 			const blind = request.blind === true;
 			const firstIndex: unknown = request.first ?? 0;
+			const experimental = request.experimental === true;
 			const requestedProfile: unknown = request.profile;
 			const confirmations = request.confirmations;
+			// The request itself is validated first (pure: no I/O, no state): a refused set does not
+			// spend the gesture token, so the user can fix it and start with the same click.
+			// A blind comparison is level-matched: an audible level step would name the candidate.
+			if (blind && !match) {
+				return {
+					status: 'refused',
+					reason: 'comparison',
+					refusal: { reason: 'blind-needs-match' }
+				};
+			}
 			const plan = planComparison(curves, {
 				match,
-				experimental: request.experimental === true,
+				experimental,
 				...(requestedProfile === 'yolo' ? { profile: 'yolo' as const } : {})
 			});
 			if (plan.refusal !== undefined) {
@@ -3036,6 +3152,12 @@ export function createCableService(
 			) {
 				return { status: 'refused', reason: 'comparison', refusal: { reason: 'bad-index' } };
 			}
+			// From here on, the token is spent first, whatever happens next.
+			if (!consumeGestureToken(gesture, nowMs())) return liveRefuse('gesture');
+			if (!liveCapable() || disposed) return liveRefuse('unavailable');
+			if (writing || activeLive() !== null) return liveRefuse('busy');
+			const device = primary;
+			if (device === null) return liveRefuse('no-device');
 			const firstItem = items[firstIndex];
 			// The loudest played candidate: its level is the plan's `ackLevelDb`.
 			const loudest = items.reduce<ComparisonItem | undefined>(
@@ -3073,6 +3195,7 @@ export function createCableService(
 				items,
 				blind,
 				index: null,
+				selected: firstIndex,
 				switching: false,
 				failed: false
 			};
@@ -3126,8 +3249,11 @@ export function createCableService(
 		/**
 		 * Switches the active comparison to candidate `index` (no gesture: the set was approved at
 		 * the start). Refused up front without a comparison, while a switch runs, in an unknown
-		 * state or with a hold. The candidate is applied as confirmed (no debounce); settles once
-		 * that apply settled: `applied` only when the cable plays exactly that candidate.
+		 * state or with a hold. A candidate ≥ 3 dB above the confirmed level is held (loudness,
+		 * nothing sent; `held`) — checked here and again right before sending. Otherwise it is
+		 * applied without the debounce; settles once that apply settled: `applied` only when the
+		 * service's applied CRC is that candidate's, recorded after the transport reported the
+		 * apply ok (no read-back from the cable: it cannot report what it plays).
 		 */
 		async switchComparison(index: number): Promise<{ status: ComparisonSwitchStatus }> {
 			const s = activeLive();
@@ -3139,7 +3265,16 @@ export function createCableService(
 			if (s.gated || c.switching || writing || liveSuspended > 0) return { status: 'busy' };
 			if (!s.known) return { status: 'unknown' };
 			if (s.hold !== null) return { status: 'held' };
+			// Confirmed: no debounce (the loudness check below and at send time still runs).
 			const curve = capturedOf(item.verdict, item.preampDb, true);
+			const loud = loudnessHold(s, curve);
+			if (loud !== null) {
+				holdLive(s, curve, loud);
+				emit();
+				return { status: 'held' };
+			}
+			const previous = c.selected;
+			c.selected = index;
 			c.switching = true;
 			try {
 				enqueueLive(s, curve);
@@ -3157,15 +3292,44 @@ export function createCableService(
 				c.failed = false;
 			} else if (failure !== 'ended') {
 				c.failed = true;
+				// Nothing reached the cable (busy, held, stopped before report 8): the previous
+				// choice is still the one "Reaplicar" would send again.
+				if (failure !== 'unknown') c.selected = previous;
 			}
 			emit();
 			return { status: failure ?? 'applied' };
 		},
 
 		/**
+		 * Clears a hold of the active comparison (a held revert of `endComparison`, a loudness or
+		 * other hold) without any I/O: the cable keeps the candidate it plays, so the user can
+		 * keep comparing or end without playing the held (louder) curve. An unknown state is not
+		 * cleared here (`unknown`): "Reaplicar" (`confirmLive`) re-applies the current candidate.
+		 */
+		cancelHold(): { status: ComparisonCancelHoldStatus } {
+			const s = activeLive();
+			if (s === null) return { status: 'ended' };
+			const c = s.comparison;
+			if (c === null) return { status: 'error' };
+			if (c.switching) return { status: 'busy' };
+			if (s.hold === null) return { status: 'no-hold' };
+			if (!s.known) return { status: 'unknown' };
+			clearHold(s);
+			const playing = comparisonPlaying(s, c);
+			if (playing !== null) {
+				c.index = playing;
+				c.selected = playing;
+			}
+			c.failed = playing === null;
+			emit();
+			return { status: 'cleared' };
+		},
+
+		/**
 		 * Ends the active comparison and its session, like `stopLive`: `revert: true` first applies
 		 * the saved curve live (fresh gesture). A revert that is held (the saved curve ≥ 3 dB above
-		 * the confirmed level), unknown, busy or failed is returned and the session goes on.
+		 * the confirmed level), unknown, busy or failed is returned and the session goes on (a
+		 * held one can be dropped with `cancelHold`). `revertLive` is refused during a comparison.
 		 */
 		async endComparison(request: ComparisonEndRequest): Promise<LiveOutcome> {
 			const s = activeLive();
@@ -3178,17 +3342,14 @@ export function createCableService(
 				endLive(s, 'stopped');
 				return { status: 'accepted', live: liveView() };
 			}
-			if (c.switching) {
-				consumeGestureToken(request.gesture, nowMs());
-				return liveRefuse('busy');
-			}
+			// Read once; the token is spent first, whatever happens next.
+			const saved = request.saved;
+			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
+			if (c.switching) return liveRefuse('busy');
 			c.switching = true;
 			let reverted: LiveOutcome;
 			try {
-				reverted = await revertLive({
-					gesture: request.gesture,
-					...(request.saved === undefined ? {} : { saved: request.saved })
-				});
+				reverted = await revertSession(s, saved);
 			} finally {
 				c.switching = false;
 			}
@@ -3251,7 +3412,9 @@ export function createCableService(
 		 * Releases a loudness or unknown-state hold (fresh gesture): the held curve's level
 		 * becomes the confirmed one and the curve is applied. A gate hold is never confirmable. An
 		 * unknown-state hold whose curve is ≥ 3 dB above the confirmed level becomes a loudness
-		 * hold instead (refused `loudness`, nothing sent).
+		 * hold instead (refused `loudness`, nothing sent). In a comparison, an unknown state
+		 * re-applies the current candidate (the last one chosen), and the confirmed level is never
+		 * lowered (the higher of the two is kept).
 		 */
 		async confirmLive(request: LiveGestureRequest): Promise<LiveOutcome> {
 			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
@@ -3262,8 +3425,26 @@ export function createCableService(
 			const held = s.held;
 			if (s.hold === null || held === null) return liveRefuse('no-hold');
 			if (s.hold.reason === 'gate') return liveRefuse('gate');
+			const c = s.comparison;
+			if (c !== null && c.switching) return liveRefuse('busy');
 			let again: LiveCaptured;
-			if (s.hold.reason === 'experimental') {
+			if (c !== null && s.hold.reason === 'unknown-state') {
+				// A comparison: "Reaplicar" sends the current candidate again (not the held curve,
+				// which may be a saved curve or another one), and never lowers the confirmed level.
+				const item = c.items[c.selected];
+				if (item === undefined) return liveRefuse('error');
+				const curve = capturedOf(item.verdict, item.preampDb, true);
+				const loud = loudnessHold(s, curve);
+				if (loud !== null) {
+					clearHold(s);
+					holdLive(s, curve, loud);
+					emit();
+					return liveRefuse('loudness');
+				}
+				clearHold(s);
+				s.ackLevelDb = maxLevel(s.ackLevelDb, item.levelDb);
+				again = curve;
+			} else if (s.hold.reason === 'experimental') {
 				// Experimental filters need their own confirmation (it then holds for the session).
 				// The level is not confirmed by it: an edit still goes through the loudness hold.
 				if (!experimentalConfirmed) return liveRefuse('checklist');
@@ -3282,13 +3463,27 @@ export function createCableService(
 					}
 				}
 				clearHold(s);
-				s.ackLevelDb = held.levelDb;
+				// A comparison never lowers its confirmed level (this one only raises it).
+				s.ackLevelDb = c === null ? held.levelDb : maxLevel(s.ackLevelDb, held.levelDb);
 				again = recaptured(held, true);
 			}
 			enqueueLive(s, again);
 			emit();
 			scheduleLive();
 			await again.settled;
+			if (c !== null) {
+				// Let the apply finish its bookkeeping, then record which candidate plays.
+				await liveRunSettled();
+				const playing = comparisonPlaying(s, c);
+				if (revertFailure(s, again) === null && playing !== null) {
+					c.index = playing;
+					c.selected = playing;
+					c.failed = false;
+				} else if (s.ended === null) {
+					c.failed = true;
+				}
+				emit();
+			}
 			if (again.busy) return liveRefuse('busy');
 			return { status: 'accepted', live: liveView() };
 		},
@@ -3297,6 +3492,7 @@ export function createCableService(
 		 * Applies the last saved curve live (fresh gesture); the session goes on. Pending edits
 		 * and holds are dropped; its level becomes the confirmed one. A saved curve ≥ 3 dB above
 		 * the confirmed level is held (refused `revert-failed`, `held`) until `confirmLive`.
+		 * Refused `comparison-active` while a comparison runs (`endComparison` reverts it).
 		 */
 		revertLive,
 

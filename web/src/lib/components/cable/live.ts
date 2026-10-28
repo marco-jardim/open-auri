@@ -49,6 +49,16 @@ function keptAfterEnd(live: LiveState): boolean {
 }
 
 /**
+ * The service's own flag (`playsUnsaved`, `cableEq`), when it decides: the applied curve is
+ * redacted (a blind comparison) or absent, or the service knows the cable's saved curve
+ * (`savedCrc`). Null: not reported, or the page's saved curve may know better.
+ */
+function serviceFlag(live: LiveState, flag: boolean | undefined): boolean | null {
+	if (typeof flag !== 'boolean') return null;
+	return live.applied === null || typeof live.savedCrc === 'number' ? flag : null;
+}
+
+/**
  * The applied curve is the saved one. When the service knows the session cable's own saved curve
  * (`live.savedCrc`), that decides: a save to another cable (the page's `saved`) never counts.
  * Otherwise: equal to `saved`, or the curve an accepted revert left on the cable (`savedCrc`, for a
@@ -92,6 +102,8 @@ export function liveSavable(
 	const live = cable?.live ?? null;
 	if (cable === null || cable === undefined || live === null) return false;
 	if (live.status !== 'ended') return true;
+	// The service says the kept curve is the saved one (or none is kept): nothing to save.
+	if (live.playsUnsaved === false) return false;
 	return keptAfterEnd(live) && cable.deviceLabel !== null && cable.deviceLabel === live.deviceLabel;
 }
 
@@ -109,6 +121,8 @@ export function liveUnsaved(
 	savedCrc?: number | null
 ): boolean {
 	if (live === null || live === undefined) return false;
+	const flag = serviceFlag(live, live.playsUnsaved);
+	if (flag !== null) return flag;
 	if (live.status === 'ended') {
 		if (!keptAfterEnd(live)) return false;
 	} else if (live.status === 'unknown') {
@@ -150,7 +164,10 @@ export function browserFlat(
 	if (cable === null || cable === undefined) return false;
 	if (orphanConnected(cable)) return true;
 	const live = cable.live;
-	if (live === null || live === undefined || live.applied === null) return false;
+	if (live === null || live === undefined) return false;
+	const flag = serviceFlag(live, live.cableEq);
+	if (flag !== null) return flag;
+	if (live.applied === null) return false;
 	if (live.status === 'ended') return keptAfterEnd(live) && !playsSaved(live, saved, savedCrc);
 	return live.status !== 'unknown';
 }
@@ -282,5 +299,6 @@ export const liveRefusalText: Record<LiveRefusalReason, () => string> = {
 	'no-saved-curve': () => m.cable_live_refused_no_saved_curve(),
 	'revert-failed': () => m.cable_live_refused_revert_failed(),
 	'live-elsewhere': () => m.cable_live_refused_live_elsewhere(),
+	'comparison-active': () => m.cable_live_refused_comparison_active(),
 	error: () => m.cable_live_refused_error()
 };

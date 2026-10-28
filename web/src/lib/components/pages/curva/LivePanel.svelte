@@ -11,8 +11,9 @@
 	- The amber chip "No cabo: prévia não salva" shows while the cable plays something other than
 	  the saved curve: "Salvar no cabo" opens the normal write checklist on the applied curve (its
 	  label says which curve; another curve than the editor's is saved under a neutral name),
-	  locked while the cable is still changing or a hold waits; "Voltar à curva salva" calls
-	  `revertLive` (gesture).
+	  locked while the cable is still changing or a hold waits, and during and after a blind
+	  comparison (the playing curve is hidden; it says why); "Voltar à curva salva" calls
+	  `revertLive` (gesture; refused while a comparison runs: it ends from the comparison).
 	- Holds (loudness, gate, unknown state, experimental) show a banner; a hold's appearance is
 	  announced once through a persistent alert region, and live / ended transitions once through a
 	  persistent polite region ("applying" is visual only).
@@ -237,6 +238,11 @@
 	/** Why saving the applied curve is not possible right now, or null. */
 	const saveReason = $derived.by<string | null>(() => {
 		if (cable?.writing) return m.cable_live_reason_writing();
+		// A blind comparison hides the playing curve (and refuses saves while it runs): the
+		// candidate is saved from the comparison's result ("Salvar esta") once it ended.
+		if (live?.comparison?.blind === true) {
+			return active ? m.cable_live_save_blind() : m.cable_live_save_blind_ended();
+		}
 		if (live === null || live.applied === null) return m.cable_live_save_wait();
 		if (active && (live.pending || live.status === 'starting' || live.status === 'applying')) {
 			return m.cable_live_save_wait();

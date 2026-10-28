@@ -416,6 +416,11 @@ export type RefusalReason =
 	| 'yolo-queue'
 	/** Another tab runs a live preview session (S5): its cable may be playing an unsaved curve. */
 	| 'live-elsewhere'
+	/**
+	 * A blind comparison runs: nothing is saved until it ends (a save would tell the candidates
+	 * apart). "Salvar esta" saves a candidate's original once the comparison ended.
+	 */
+	| 'blind'
 	| 'error';
 
 export interface Refused {
@@ -591,10 +596,23 @@ export interface LiveState {
 	 */
 	savedCrc?: number | null;
 	/**
-	 * The session's comparison set (`startComparison`). When blind, `applied`, `ackLevelDb`,
-	 * `hold` and `savedCrc` are redacted (null / absent) for the whole session.
+	 * The session's comparison set (`startComparison`). When blind, `applied`, `ackLevelDb` and
+	 * `savedCrc` are redacted (null / absent) for the whole session (also once it ended); a hold
+	 * keeps only its `reason` (and `curve`), and `lastError` is only `'busy'` or `'error'`.
 	 */
 	comparison?: LiveComparisonState;
+	/**
+	 * The cable plays something other than its saved curve (a running session's curve that is
+	 * not the saved one or is unknown; an ended session's curve kept on the cable). Set by the
+	 * service in every state, blind included (it never tells candidates apart). When the service
+	 * does not know the saved curve (`savedCrc` null), any applied curve counts as unsaved.
+	 */
+	playsUnsaved?: boolean;
+	/**
+	 * The cable applies a live EQ curve: the browser preview must stay flat (no EQ on top). Set by
+	 * the service in every state, blind included.
+	 */
+	cableEq?: boolean;
 }
 
 export type LiveRefusalReason =
@@ -623,6 +641,11 @@ export type LiveRefusalReason =
 	| 'revert-failed'
 	/** Another tab runs a live preview session (S5). */
 	| 'live-elsewhere'
+	/**
+	 * `revertLive` / `stopLive({ revert: true })` while a comparison runs: end it with
+	 * `endComparison({ revert: true })` instead (the session goes on, nothing sent).
+	 */
+	| 'comparison-active'
 	| 'error';
 
 /** Why a revert did not leave the cable on the saved curve. */
@@ -720,7 +743,11 @@ export type ComparisonRefusalReason =
 	/** A candidate (or the request) needs the Modo YOLO profile: not in the MVP. */
 	| 'yolo-unsupported'
 	/** `startComparison` with a `first` index outside the set. */
-	| 'bad-index';
+	| 'bad-index'
+	/** A candidate is missing or not an object (`index`). */
+	| 'invalid'
+	/** A blind comparison needs `match: true` (a level difference would tell candidates apart). */
+	| 'blind-needs-match';
 
 export interface ComparisonRefusal {
 	reason: ComparisonRefusalReason;
@@ -774,7 +801,10 @@ export interface ComparisonPlan {
 export interface ComparisonStartRequest {
 	curves: readonly ComparisonCurve[];
 	match: boolean;
-	/** Blind: the state never tells which candidate plays (nor its CRC, level or holds). */
+	/**
+	 * Blind: the state never tells which candidate plays (nor its CRC, level or hold details).
+	 * Needs `match: true` (refused `blind-needs-match`); saves are refused `blind` meanwhile.
+	 */
 	blind: boolean;
 	/** Index applied first (default 0). */
 	first?: number;
@@ -814,6 +844,19 @@ export type ComparisonOutcome =
 	| { status: 'accepted'; live: LiveState | null; plan: ComparisonSummary };
 
 export type ComparisonSwitchStatus = 'applied' | 'unknown' | 'held' | 'busy' | 'ended' | 'error';
+
+/**
+ * `cancelHold`: `cleared` (the hold is gone, the cable keeps what it plays), `no-hold`,
+ * `unknown` (what the cable plays is not known: "Reaplicar" / `confirmLive` re-applies the
+ * current candidate), `busy` (a switch or the end's revert runs), `ended`, `error` (no comparison).
+ */
+export type ComparisonCancelHoldStatus =
+	| 'cleared'
+	| 'no-hold'
+	| 'unknown'
+	| 'busy'
+	| 'ended'
+	| 'error';
 
 export interface ComparisonEndRequest {
 	/** true: apply the saved curve live first (needs `gesture`), then end the session. */

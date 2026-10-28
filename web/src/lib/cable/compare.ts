@@ -104,28 +104,38 @@ export function planComparison(
 	curves: readonly ComparisonCurve[],
 	options: ComparisonOptions
 ): ComparisonPlan {
+	// Read once: the options, the list and each curve's fields.
 	const match = options.match === true;
-	// Read once: the list and each curve's fields.
-	const list: ComparisonCurve[] = [];
+	const sessionExperimental = options.experimental === true;
+	const profile: unknown = options.profile;
+	const entries: unknown[] = [];
 	if (Array.isArray(curves)) {
 		const length = curves.length;
-		for (let index = 0; index < length; index++) {
-			const curve = curves[index] as ComparisonCurve;
-			list.push({
-				bands: curve.bands,
-				preampDb: curve.preampDb,
-				experimental: curve.experimental === true,
-				...(curve.profile === undefined ? {} : { profile: curve.profile })
-			});
-		}
+		for (let index = 0; index < length; index++) entries.push(curves[index]);
+	}
+	// A missing or non-object entry refuses the set before any candidate's getter runs.
+	const invalid = entries.findIndex((entry) => typeof entry !== 'object' || entry === null);
+	if (invalid >= 0) {
+		return refused({ reason: 'invalid', index: invalid }, sessionExperimental, match);
+	}
+	const list: ComparisonCurve[] = [];
+	for (const entry of entries as ComparisonCurve[]) {
+		const bands = entry.bands;
+		const preampDb = entry.preampDb;
+		const experimental = entry.experimental === true;
+		const curveProfile = entry.profile;
+		list.push({
+			bands,
+			preampDb,
+			experimental,
+			...(curveProfile === undefined ? {} : { profile: curveProfile })
+		});
 	}
 	// The gate option of every apply: the session's (one for the whole set).
-	const experimental =
-		options.experimental === true || list.some((curve) => curve.experimental === true);
+	const experimental = sessionExperimental || list.some((curve) => curve.experimental === true);
 	if (list.length < COMPARISON_MIN_CURVES) {
 		return refused({ reason: 'too-few' }, experimental, match);
 	}
-	const profile: unknown = options.profile;
 	if (profile === 'yolo') return refused({ reason: 'yolo-unsupported' }, experimental, match);
 	const yoloCurve = list.findIndex((curve) => (curve.profile as unknown) === 'yolo');
 	if (yoloCurve >= 0) {

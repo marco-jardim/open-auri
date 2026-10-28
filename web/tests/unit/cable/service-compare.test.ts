@@ -7,7 +7,11 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import type { FakeFirmware } from 'open-auri/transport';
 import { gateForWrite } from 'open-auri/safety';
-import { CABLE_WRITE_LOCK, LIVE_BUSY_MAX_ATTEMPTS } from '../../../src/lib/cable/service.ts';
+import {
+	CABLE_WRITE_LOCK,
+	LIVE_BUSY_MAX_ATTEMPTS,
+	LIVE_MARKER_BLIND_CRC
+} from '../../../src/lib/cable/service.ts';
 import { planComparison } from '../../../src/lib/cable/compare.ts';
 import type {
 	Band,
@@ -17,7 +21,7 @@ import type {
 	JournalEntry,
 	LiveCurve
 } from '../../../src/lib/cable/types.ts';
-import { T0, TRUSTED_CLICK, off, setup } from './harness.ts';
+import { CONFIRMED, T0, TRUSTED_CLICK, off, setup } from './harness.ts';
 import type { MemoryLocks } from './locks-fake.ts';
 
 type Harness = Awaited<ReturnType<typeof setup>>;
@@ -239,9 +243,10 @@ describe('switchComparison', () => {
 		const h = await harness();
 		await compare(h);
 		const expected = crcs();
+		// 31-bit LCG on 32-bit integer arithmetic (Math.imul): the state never leaves 2^31.
 		let seed = 1;
 		for (let i = 0; i < 200; i++) {
-			seed = (seed * 1103515245 + 12345) % 2 ** 31;
+			seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
 			const index = seed % CURVES.length;
 			const result = await h.service.switchComparison(index);
 			expect(result).toEqual({ status: 'applied' });
@@ -425,7 +430,13 @@ describe('blind comparison', () => {
 		if (live === null) return;
 		expect(live.applied).toBeNull();
 		expect(live.ackLevelDb).toBeNull();
-		expect(live.hold).toBeNull();
+		// A hold keeps its reason only (never the delta, gate reasons or anything per candidate).
+		if (live.hold !== null) {
+			expect(Object.keys(live.hold).filter((key) => key !== 'curve')).toEqual(['reason']);
+		}
+		expect([null, 'busy', 'error']).toContain(live.lastError);
+		expect(typeof live.playsUnsaved).toBe('boolean');
+		expect(typeof live.cableEq).toBe('boolean');
 		expect(live).not.toHaveProperty('savedCrc');
 		if (live.comparison !== undefined) {
 			expect(Object.keys(live.comparison).sort()).toEqual(['active', 'blind', 'count', 'status']);
@@ -449,6 +460,8 @@ describe('blind comparison', () => {
 			h.device.faults.throwAtReport = h.device.attempts + 8;
 			expect(await h.service.switchComparison(0)).toEqual({ status: 'unknown' });
 			expect(h.service.getState().live?.comparison?.status).toBe('failed');
+			// The hold says why (unknown state), never which candidate.
+			expect(h.service.getState().live?.hold).toEqual({ reason: 'unknown-state' });
 		} finally {
 			stop();
 		}
@@ -456,5 +469,339 @@ describe('blind comparison', () => {
 		expect(live.length).toBeGreaterThan(5);
 		for (const state of states) expectRedacted(state);
 		expectNoWriteBookkeeping(h, journal);
+	});
+
+	test('non-identifying flags stay truthful (unsaved, cable EQ), also after the end', async () => {
+		const journal = [savedEntry(offCurve(-14))];
+		const h = await harness({ journal });
+		await compare(h, { blind: true });
+		expect(h.service.getState().live).toMatchObject({
+			status: 'live',
+			applied: null,
+			playsUnsaved: true,
+			cableEq: true
+		});
+		expect(await h.service.switchComparison(1)).toEqual({ status: 'applied' });
+		expect(h.service.getState().live).toMatchObject({ playsUnsaved: true, cableEq: true });
+		// Report 8 unconfirmed: unknown, so unsaved but not known to apply the EQ.
+		h.device.faults.throwAtReport = h.device.attempts + 8;
+		expect(await h.service.switchComparison(2)).toEqual({ status: 'unknown' });
+		const unknown = h.service.getState().live;
+		expect(unknown).toMatchObject({
+			status: 'unknown',
+			hold: { reason: 'unknown-state' },
+			playsUnsaved: true,
+			cableEq: false,
+			lastError: 'error'
+		});
+		expectRedacted(h.service.getState());
+		// "Reaplicar" re-applies the current candidate (no detail exposed either way).
+		const reapplied = await h.service.confirmLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(reapplied.status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(crcs()[2]);
+		expect(h.service.getState().live).toMatchObject({ hold: null, cableEq: true });
+		// Ended, the candidate kept on the cable: still redacted, flags still truthful.
+		expect((await h.service.endComparison({ revert: false })).status).toBe('accepted');
+		const ended = h.service.getState();
+		expect(ended.live).toMatchObject({
+			status: 'ended',
+			endedReason: 'stopped',
+			applied: null,
+			playsUnsaved: true,
+			cableEq: true
+		});
+		expectRedacted(ended);
+	});
+
+	test('needs match: refused before any I/O', async () => {
+		const h = await harness();
+		const outcome = await compare(h, { blind: true, match: false });
+		expect(outcome).toEqual({
+			status: 'refused',
+			reason: 'comparison',
+			refusal: { reason: 'blind-needs-match' }
+		});
+		expect(h.device.attempts).toBe(0);
+		expect(h.service.getState().live).toBeNull();
+	});
+
+	test('saves are refused while it runs (nothing sent), and allowed once it ended', async () => {
+		const journal = [savedEntry(offCurve(-14))];
+		const h = await harness({ journal });
+		await compare(h, { blind: true });
+		await h.service.switchComparison(1);
+		const attempts = h.device.attempts;
+		const refused = await h.service.write({
+			bands: OFF_BANDS,
+			preampDb: -12,
+			experimental: false,
+			confirmations: CONFIRMED,
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			name: 'Salvo'
+		});
+		expect(refused).toMatchObject({ status: 'refused', reason: 'blind' });
+		expect(h.device.attempts).toBe(attempts);
+		expectNoWriteBookkeeping(h, journal);
+		expect((await h.service.endComparison({ revert: false })).status).toBe('accepted');
+		const original = h.service.comparisonOriginal(1);
+		if (original === null) throw new Error('expected the original');
+		const saved = await h.service.write({
+			...original,
+			experimental: false,
+			confirmations: CONFIRMED,
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			name: 'Salvo'
+		});
+		expect(saved.status).toBe('ok');
+	});
+
+	test('the live marker never stores the playing CRC, even for the saved curve', async () => {
+		// Candidate 1 (the quietest, never lowered) is the cable's saved curve.
+		const journal = [savedEntry(offCurve(-12))];
+		const h = await harness({ journal });
+		const marker = () => (h.liveMarker.value === null ? null : JSON.parse(h.liveMarker.value));
+		await compare(h, { blind: true });
+		expect(marker()).toMatchObject({ device: 'USB DSP Audio', crc: LIVE_MARKER_BLIND_CRC });
+		for (const index of [1, 2, 1, 0]) {
+			expect(await h.service.switchComparison(index)).toEqual({ status: 'applied' });
+			// Kept (and opaque) even while the saved curve plays: its presence names nothing.
+			expect(marker()).toMatchObject({ crc: LIVE_MARKER_BLIND_CRC });
+		}
+		// Reverted at the end: the saved curve plays, the marker is gone.
+		const ended = await h.service.endComparison({
+			revert: true,
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(ended.status).toBe('accepted');
+		expect(h.liveMarker.value).toBeNull();
+	});
+});
+
+describe('the confirmed level is never lowered during a comparison', () => {
+	/** Match off: the candidates are 6 dB apart; the set's level is the loudest one's. */
+	const plan = planComparison(CURVES, { match: false });
+	const levels = plan.items.map((item) => item.levelDb);
+	const loudest = levels.indexOf(Math.max(...levels));
+	const quietest = levels.indexOf(Math.min(...levels));
+
+	/** Switches to `index`: it is applied below the confirmed level + 3 dB, or held. */
+	async function switchSafely(h: Harness, index: number) {
+		const confirmed = h.service.getState().live?.ackLevelDb ?? null;
+		if (confirmed === null) throw new Error('expected a confirmed level');
+		const result = await h.service.switchComparison(index);
+		if (result.status === 'held') {
+			expect(h.service.getState().live?.hold).toMatchObject({ reason: 'loudness' });
+			return result;
+		}
+		expect(result).toEqual({ status: 'applied' });
+		expect(levels[index]).toBeLessThan(confirmed + 3);
+		expect(liveCrc(h.device.firmware)).toBe(plan.items[index]?.crc);
+		return result;
+	}
+
+	test('the set spans more than 3 dB (the cases below would otherwise play louder)', () => {
+		expect(plan.refusal).toBeUndefined();
+		expect((levels[loudest] ?? 0) - (levels[quietest] ?? 0)).toBeGreaterThan(3);
+	});
+
+	test('after "Salvar" of a quiet curve', async () => {
+		const h = await harness();
+		await compare(h, { match: false, first: quietest });
+		const saved = await h.service.write({
+			bands: OFF_BANDS,
+			preampDb: -20,
+			experimental: false,
+			confirmations: CONFIRMED,
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			name: 'Salvo'
+		});
+		expect(saved.status).toBe('ok');
+		expect(h.service.getState().live).toMatchObject({
+			ackLevelDb: plan.ackLevelDb,
+			playsUnsaved: false,
+			cableEq: true
+		});
+		expect((await switchSafely(h, loudest)).status).toBe('applied');
+		expect(h.service.getState().live).toMatchObject({ playsUnsaved: true });
+		for (const index of [quietest, loudest, 2, loudest]) await switchSafely(h, index);
+	});
+
+	test('revertLive is refused (the comparison ends with endComparison)', async () => {
+		const quiet = offCurve(-20);
+		const journal = [savedEntry(quiet)];
+		const h = await harness({ journal });
+		await compare(h, { match: false });
+		const attempts = h.device.attempts;
+		expect(
+			await h.service.revertLive({ gesture: h.service.createGesture(TRUSTED_CLICK), saved: quiet })
+		).toMatchObject({ status: 'refused', reason: 'comparison-active' });
+		expect(
+			await h.service.stopLive({
+				revert: true,
+				gesture: h.service.createGesture(TRUSTED_CLICK),
+				saved: quiet
+			})
+		).toMatchObject({ status: 'refused', reason: 'comparison-active' });
+		expect(h.device.attempts).toBe(attempts);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'live',
+			ackLevelDb: plan.ackLevelDb,
+			comparison: { active: true }
+		});
+		await switchSafely(h, quietest);
+		expect((await switchSafely(h, loudest)).status).toBe('applied');
+		expectNoWriteBookkeeping(h, journal);
+	});
+
+	test('after "Reaplicar" of an unknown state (match off)', async () => {
+		const h = await harness();
+		await compare(h, { match: false, first: loudest });
+		// The switch to the quietest goes out unconfirmed.
+		h.device.faults.throwAtReport = h.device.attempts + 8;
+		expect(await h.service.switchComparison(quietest)).toEqual({ status: 'unknown' });
+		const reapplied = await h.service.confirmLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(reapplied.status).toBe('accepted');
+		// The current candidate (the quietest) plays again; the confirmed level stays the set's.
+		expect(liveCrc(h.device.firmware)).toBe(plan.items[quietest]?.crc);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'live',
+			hold: null,
+			ackLevelDb: plan.ackLevelDb,
+			comparison: { index: quietest, status: 'ready' }
+		});
+		expect((await switchSafely(h, loudest)).status).toBe('applied');
+	});
+
+	test('"Reaplicar" after a save went out unconfirmed re-applies the candidate, not the save', async () => {
+		const h = await harness();
+		await compare(h, { match: false, first: quietest });
+		// Report 8 of the save's data reports fails: the cable state is unknown.
+		h.device.faults.throwAtReport = h.device.attempts + 8;
+		const saved = await h.service.write({
+			bands: OFF_BANDS,
+			preampDb: -20,
+			experimental: false,
+			confirmations: CONFIRMED,
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			name: 'Salvo'
+		});
+		expect(saved.status).not.toBe('ok');
+		expect(h.service.getState().live).toMatchObject({
+			status: 'unknown',
+			hold: { reason: 'unknown-state' }
+		});
+		const reapplied = await h.service.confirmLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(reapplied.status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(plan.items[quietest]?.crc);
+		expect(h.service.getState().live?.ackLevelDb).toBe(plan.ackLevelDb);
+		expect((await switchSafely(h, loudest)).status).toBe('applied');
+	});
+});
+
+describe('cancelHold', () => {
+	test('drops a held revert without I/O; the candidate keeps playing and switches go on', async () => {
+		const h = await harness({ journal: [savedEntry(offCurve(-3))] });
+		await compare(h);
+		const ended = await h.service.endComparison({
+			revert: true,
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(ended).toMatchObject({ reason: 'revert-failed', revertFailure: 'held' });
+		expect(h.service.getState().live?.hold).toMatchObject({ reason: 'loudness', curve: 'saved' });
+		const attempts = h.device.attempts;
+		expect(h.service.cancelHold()).toEqual({ status: 'cleared' });
+		expect(h.device.attempts).toBe(attempts);
+		expect(liveCrc(h.device.firmware)).toBe(crcs()[0]);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'live',
+			hold: null,
+			comparison: { active: true, status: 'ready', index: 0 }
+		});
+		expect(h.service.cancelHold()).toEqual({ status: 'no-hold' });
+		expect(await h.service.switchComparison(2)).toEqual({ status: 'applied' });
+		expect(liveCrc(h.device.firmware)).toBe(crcs()[2]);
+		expect((await h.service.endComparison({ revert: false })).status).toBe('accepted');
+		expect(h.service.cancelHold()).toEqual({ status: 'ended' });
+	});
+
+	test('a blind comparison too (nothing about the candidate is exposed)', async () => {
+		const h = await harness({ journal: [savedEntry(offCurve(-3))] });
+		await compare(h, { blind: true });
+		await h.service.endComparison({
+			revert: true,
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(h.service.getState().live?.hold).toEqual({ reason: 'loudness', curve: 'saved' });
+		expect(h.service.cancelHold()).toEqual({ status: 'cleared' });
+		expect(h.service.getState().live).toMatchObject({
+			status: 'live',
+			hold: null,
+			comparison: { status: 'ready' }
+		});
+		expect(liveCrc(h.device.firmware)).toBe(crcs()[0]);
+	});
+
+	test('an unknown state is not cleared: "Reaplicar" re-applies the current candidate', async () => {
+		const h = await harness();
+		await compare(h);
+		h.device.faults.throwAtReport = h.device.attempts + 8;
+		expect(await h.service.switchComparison(1)).toEqual({ status: 'unknown' });
+		const attempts = h.device.attempts;
+		expect(h.service.cancelHold()).toEqual({ status: 'unknown' });
+		expect(h.device.attempts).toBe(attempts);
+		expect(h.service.getState().live?.status).toBe('unknown');
+	});
+
+	test('a plain live session has no comparison hold to cancel', async () => {
+		const h = await harness();
+		expect(h.service.cancelHold()).toEqual({ status: 'ended' });
+		await h.service.startLive({
+			curve: offCurve(-12),
+			confirmations: { volumeLowered: true },
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(h.service.cancelHold()).toEqual({ status: 'error' });
+	});
+});
+
+describe('startComparison validation', () => {
+	test('a missing or non-object candidate is refused before any I/O', async () => {
+		const h = await harness();
+		const curves = [offCurve(-12), null] as unknown as ComparisonCurve[];
+		expect(await compare(h, { curves })).toEqual({
+			status: 'refused',
+			reason: 'comparison',
+			refusal: { reason: 'invalid', index: 1 }
+		});
+		expect(h.device.attempts).toBe(0);
+		expect(h.service.getState().live).toBeNull();
+	});
+
+	test('a refused set leaves the gesture token unspent', async () => {
+		const h = await harness();
+		const gesture = h.service.createGesture(TRUSTED_CLICK);
+		const request = {
+			curves: CURVES,
+			match: true,
+			blind: false,
+			confirmations: { volumeLowered: true },
+			gesture
+		};
+		expect(await h.service.startComparison({ ...request, first: 7 })).toMatchObject({
+			refusal: { reason: 'bad-index' }
+		});
+		expect((await h.service.startComparison(request)).status).toBe('accepted');
+		// Spent now: it cannot start another one.
+		await h.service.endComparison({ revert: false });
+		expect(await h.service.startComparison(request)).toMatchObject({
+			status: 'refused',
+			reason: 'gesture'
+		});
 	});
 });

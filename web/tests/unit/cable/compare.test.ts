@@ -85,25 +85,72 @@ describe('planComparison', () => {
 	});
 
 	test('random sets: never louder, residual ≤ 0.1 dB', () => {
+		// 31-bit LCG on 32-bit integer arithmetic (Math.imul): the state never leaves 2^31.
 		let seed = 7;
 		const random = () => {
-			seed = (seed * 1103515245 + 12345) % 2 ** 31;
+			seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
 			return seed / 2 ** 31;
 		};
-		for (let round = 0; round < 40; round++) {
-			const curves = Array.from({ length: 2 + Math.floor(random() * 3) }, () =>
-				random() < 0.5
-					? offCurve(-Math.round(10 + random() * 150) / 10)
-					: pkCurve(-Math.round(60 + random() * 100) / 10, Math.round(random() * 40) / 10)
-			);
+		let offGrid = 0;
+		for (let round = 0; round < 300; round++) {
+			const curves = Array.from({ length: 2 + Math.floor(random() * 4) }, () => {
+				const pick = random();
+				if (pick < 0.3) return offCurve(-Math.round(10 + random() * 150) / 10);
+				if (pick < 0.6) {
+					return pkCurve(-Math.round(60 + random() * 100) / 10, Math.round(random() * 40) / 10);
+				}
+				// Off the 0.1 dB grid (any float in range).
+				offGrid += 1;
+				return random() < 0.5
+					? offCurve(-(1 + random() * 15))
+					: pkCurve(-(6 + random() * 10), Math.round(random() * 40) / 10);
+			});
 			const plan = planComparison(curves, { match: true });
 			expect(plan.refusal).toBeUndefined();
+			const target = Math.min(...curves.map(levelOf));
 			for (const item of plan.items) {
 				const original = curves[item.index] as ComparisonCurve;
+				expect(item.preampDb).toBeLessThanOrEqual(original.preampDb);
 				expect(item.levelDb).toBeLessThanOrEqual(levelOf(original) + 1e-9);
+				expect(item.levelDb).toBeLessThanOrEqual(target + 1e-3);
 				expect(Math.abs(item.residualDb)).toBeLessThanOrEqual(0.1 + 1e-9);
+				if (item.matched) expect(Math.round(item.preampDb * 10) / 10).toBe(item.preampDb);
 			}
+			expect(plan.ackLevelDb).toBe(Math.max(...plan.items.map((item) => item.levelDb)));
 		}
+		expect(offGrid).toBeGreaterThan(100);
+	});
+
+	test('a missing or non-object candidate is refused before any getter runs', () => {
+		let reads = 0;
+		const watched = {
+			get bands() {
+				reads += 1;
+				return OFF_BANDS;
+			},
+			get preampDb() {
+				reads += 1;
+				return -12;
+			}
+		};
+		const bad: unknown[] = [null, 3, 'curve', undefined];
+		for (const entry of bad) {
+			const curves = [watched, entry] as unknown as ComparisonCurve[];
+			const plan = planComparison(curves, { match: true });
+			expect(plan.refusal).toEqual({ reason: 'invalid', index: 1 });
+			expect(plan.items).toEqual([]);
+		}
+		// A hole in a sparse array is a missing candidate too.
+		const sparse: ComparisonCurve[] = [];
+		sparse[1] = offCurve(-12);
+		expect(planComparison(sparse, { match: true }).refusal).toEqual({
+			reason: 'invalid',
+			index: 0
+		});
+		expect(reads).toBe(0);
+		// Each field of a valid candidate is read once.
+		expect(planComparison([watched, offCurve(-13)], { match: true }).refusal).toBeUndefined();
+		expect(reads).toBe(2);
 	});
 
 	test('the quietest candidate keeps its preamp and CRC', () => {
