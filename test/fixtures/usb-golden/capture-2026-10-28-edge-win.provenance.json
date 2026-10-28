@@ -1,0 +1,46 @@
+{
+  "kind": "REAL hardware capture (not synthetic)",
+  "capturedOn": "2026-10-28",
+  "source": "test/fixtures/usb-golden/capture-2026-10-28-edge-win.raw.json",
+  "os": "Windows 11",
+  "browser": "Edge 156 (Chromium), WebHID",
+  "tools": { "USBPcap": "1.5.4.0", "Wireshark/tshark": "4.6.9" },
+  "device": {
+    "product": "Kuba Auri",
+    "vid": "0x3302",
+    "pid": "0x8902",
+    "serial": "33028902260831",
+    "interface": "mi_03",
+    "captureDevice": "\\\\.\\USBPcap1",
+    "deviceAddress": 21,
+    "endpoint": "0x05",
+    "transferType": "0x01 (interrupt OUT)"
+  },
+  "captureMethod": "USBPcap; reviewed extraction of the last 32 bytes of each host-to-device HID interrupt OUT submission, in capture order. frame = original frame number; t = relative seconds; hex = report ID CB + all 31 report bytes. No SET_REPORT data transfers; no interrupt IN from the cable. Isochronous endpoint 0x02 is audio and excluded.",
+  "writeOrder": [
+    { "writer": "https://equalizador.kuba.audio/", "curve": "padrao", "uiName": "Auri" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "pref6", "uiName": "Natural" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "emv", "uiName": "Em V" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "basshead", "uiName": "Basshead" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "energico", "uiName": "Enérgico" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "musical", "uiName": "Musical" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "analitico", "uiName": "Analítico" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "referencia", "uiName": "JM-1" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "harman", "uiName": "Harman IE 2019" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "vdsf", "uiName": "VDSF" },
+    { "writer": "https://equalizador.kuba.audio/", "curve": "etymotic", "uiName": "Etymotic" },
+    { "writer": "open-auri", "curve": "padrao", "uiName": "Padrão Auri", "crc": "0x1970" },
+    { "writer": "open-auri", "curve": "neutro", "uiName": "Neutro", "preampDb": -0.5, "crc": "0x4FFF" }
+  ],
+  "results": {
+    "officialReferenceMatches": "11/11 (reports 0..8)",
+    "openAuriPadrao": "Identical to official padrao, all 10 reports including commit",
+    "openAuriNeutro": "Identical to encodeReports(NEUTRAL_BANDS, -0.5)",
+    "recomputedCrc": "13/13 OK",
+    "commit": "cb01650001ff + 26 zero bytes; reference 5-byte and open-auri 31-byte commands indistinguishable on wire",
+    "officialTimingMs": { "interReportApprox": [18, 32], "typical": 24, "lastDataToCommit": [176, 195] },
+    "openAuriTimingMs": { "interReportApprox": [18, 33], "lastDataToCommit": [175, 178] },
+    "scope": "Writes accepted without error; acoustic effect, firmware CRC rejection and persistence not measured. No ack/response observed.",
+    "expectedToolWarning": "out-of-order curve: padrao (count 1). Write 12 is open-auri padrao repeated after etymotic on purpose; write 13 is neutro."
+  }
+}

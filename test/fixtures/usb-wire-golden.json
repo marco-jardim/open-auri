@@ -1,0 +1,327 @@
+{
+  "_provenance": {
+    "kind": "REAL hardware capture (not synthetic)",
+    "capturedOn": "2026-10-28",
+    "source": "test/fixtures/usb-golden/capture-2026-10-28-edge-win.raw.json",
+    "os": "Windows 11",
+    "browser": "Edge 156 (Chromium), WebHID",
+    "tools": {
+      "USBPcap": "1.5.4.0",
+      "Wireshark/tshark": "4.6.9"
+    },
+    "device": {
+      "product": "Kuba Auri",
+      "vid": "0x3302",
+      "pid": "0x8902",
+      "serial": "33028902260831",
+      "interface": "mi_03",
+      "captureDevice": "\\\\.\\USBPcap1",
+      "deviceAddress": 21,
+      "endpoint": "0x05",
+      "transferType": "0x01 (interrupt OUT)"
+    },
+    "captureMethod": "USBPcap; reviewed extraction of the last 32 bytes of each host-to-device HID interrupt OUT submission, in capture order. frame = original frame number; t = relative seconds; hex = report ID CB + all 31 report bytes. No SET_REPORT data transfers; no interrupt IN from the cable. Isochronous endpoint 0x02 is audio and excluded.",
+    "writeOrder": [
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "padrao",
+        "uiName": "Auri"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "pref6",
+        "uiName": "Natural"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "emv",
+        "uiName": "Em V"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "basshead",
+        "uiName": "Basshead"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "energico",
+        "uiName": "Enérgico"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "musical",
+        "uiName": "Musical"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "analitico",
+        "uiName": "Analítico"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "referencia",
+        "uiName": "JM-1"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "harman",
+        "uiName": "Harman IE 2019"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "vdsf",
+        "uiName": "VDSF"
+      },
+      {
+        "writer": "https://equalizador.kuba.audio/",
+        "curve": "etymotic",
+        "uiName": "Etymotic"
+      },
+      {
+        "writer": "open-auri",
+        "curve": "padrao",
+        "uiName": "Padrão Auri",
+        "crc": "0x1970"
+      },
+      {
+        "writer": "open-auri",
+        "curve": "neutro",
+        "uiName": "Neutro",
+        "preampDb": -0.5,
+        "crc": "0x4FFF"
+      }
+    ],
+    "results": {
+      "officialReferenceMatches": "11/11 (reports 0..8)",
+      "openAuriPadrao": "Identical to official padrao, all 10 reports including commit",
+      "openAuriNeutro": "Identical to encodeReports(NEUTRAL_BANDS, -0.5)",
+      "recomputedCrc": "13/13 OK",
+      "commit": "cb01650001ff + 26 zero bytes; reference 5-byte and open-auri 31-byte commands indistinguishable on wire",
+      "officialTimingMs": {
+        "interReportApprox": [
+          18,
+          32
+        ],
+        "typical": 24,
+        "lastDataToCommit": [
+          176,
+          195
+        ]
+      },
+      "openAuriTimingMs": {
+        "interReportApprox": [
+          18,
+          33
+        ],
+        "lastDataToCommit": [
+          175,
+          178
+        ]
+      },
+      "scope": "Writes accepted without error; acoustic effect, firmware CRC rejection and persistence not measured. No ack/response observed.",
+      "expectedToolWarning": "out-of-order curve: padrao (count 1). Write 12 is open-auri padrao repeated after etymotic on purpose; write 13 is neutro."
+    }
+  },
+  "capturedOn": "2026-10-28",
+  "os": "Windows11",
+  "browser": "Edge156",
+  "transfer": "interrupt",
+  "paddedLength": 32,
+  "writes": [
+    {
+      "curve": "padrao",
+      "reports": [
+        "cb0045513123d600000a0405010a000051ba5c00a47cff0792d9f407d054f40f",
+        "cb0130ab0bf0c9a90bf838fcfa0766ace2078276dd0f7e8922f0625722f83406",
+        "cb028a0708e71c07a7cb7e0e593481f1c41259f91897bf070a1841070137660e",
+        "cb03ffc899f1dd50fff8f52b930760260b07ab02db0d55fd24f2abad61f90756",
+        "cb045a07e61ac106d02c940c30d36bf3138fe4f9892e1a077d9c450653d0040a",
+        "cb05ad2ffbf5fa34a0fa012b0f08ee19aa0732f0b60fce0f49f010bb46f83fad",
+        "cb0655089e94f106f4c9f90e0c3606f123beb8f83770ce081ccdd303dd73ac0b",
+        "cb07238c53f4adc25dfb70190000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "pref6",
+      "reports": [
+        "cb0045513123d600000a0405010a0000f89d5a001c09ff070e96f707c39df60f",
+        "cb013d6209f0d76009f8eed3f00707b3d3073c49c40fc4b63bf00a793bf847d3",
+        "cb0273072665ba060962fb0df79d04f292c7d1f90265b70731595707f053490e",
+        "cb0310acb6f1ce41f1f840e2a40779270807be6cc90c429336f347f652f99d9a",
+        "cb0488076926b206b5f65e0a4b09a1f5fa3ec5f94e0d0008edf8f607de62f60f",
+        "cb05229d09f0c6f908f8ab4c1a08d7818e07c467a70f3c9858f07e3157f81fcb",
+        "cb063508775a730780a75f0f8058a0f06ada56f8cd1a1e083532890728673c0f",
+        "cb07d898c3f0ffb258f8b8850000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "emv",
+      "reports": [
+        "cb0045513123d600000a0405010a000009253400c6f8fc07dd1cd0077fe8c20f",
+        "cb0181173df05dea32f8cd81f4072c809607074e6b0ff9b194f007fe74f84e83",
+        "cb02b707919f57071f3ee20ee1c11df121ddf0f8c1c29d070fce1b070c871a0e",
+        "cb03f478e5f1306f46f90eb79b072f285906dd3c0a0d23c3f5f2c2200bfa204d",
+        "cb048507d332c7061dd29b0ce32d64f30d80b3f900260108e27be3075888e40f",
+        "cb05a8771bf01e5e1bf8361c1108865d83077f90920f816f6df044866bf8ebee",
+        "cb06f908d8ada7057041330d90beccf23d635ef910b9a808f8147806e46ba70c",
+        "cb071c9458f3f931dff8a9140000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "basshead",
+      "reports": [
+        "cb0045513123d600000a0405010a00000a6842006a545d07bf31f00644e7a70d",
+        "cb01bc1858f2d879b2f9a71a6607fddafe0683373d0e7dc8c2f15c0a9bf9b8d0",
+        "cb026e07c308ab0656abbf0caa5440f38526e6f90044f3070e48aa07f2c5920f",
+        "cb030e3a6df0f27362f839506407468e32066d939d0a936c62f5822169fa2824",
+        "cb04fe075a5df9079d80f70f637f08f07e7e08f8fdf1f507b869db074cedd00f",
+        "cb05b4122ff04ba42ef8caa01708f4ae5a0756c21c0faa3de3f042b08df838c5",
+        "cb067f0a4714d902d109120d2ff6edf28126a7fa354d130820a0ad07f223c00f",
+        "cb07a23440f03f6b3ff82b930000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "energico",
+      "reports": [
+        "cb0045513123d600000a0405010a00006b8a5700cdccfe074934f907affff70f",
+        "cb01510008f0eafe07f81577fe07fbe9ec070a4ceb0ff6b314f0f09e14f83ac4",
+        "cb026307ca179506b728cb0d49d734f2fd2307fab246a4076ff02a07105e1b0e",
+        "cb03f0a1e4f1dfc830f9be4780077a53d706d56be50c2b941af3c864a8f99af1",
+        "cb04e7069f787505510f7d08aff082f7c795a2fb60524a0834b0f606edc9240f",
+        "cb051336dbf06dfdbef8f9a22508f0786b071058490ff0a7b6f017e46ef80dba",
+        "cb06210859435f0785590f0f7ba6f0f09a027ff86efbc4089c703606f360c90c",
+        "cb070d9f36f3f69304f94ebe0000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "musical",
+      "reports": [
+        "cb0045513123d600000a0405010a0000e7386200a518fa07bc96df0719aed90f",
+        "cb01e75126f09f5026f8c9c3af0726a04507b4f1ca0e4c0e35f1109c0af9ff5a",
+        "cb028f07e9e41b073836030ec8c9fcf119c054f98004b307587a9a0613b4380d",
+        "cb03ed4bc7f22781b2f91779cb0732a1df06b99a130d4765ecf2b7e554f9de38",
+        "cb04170715cc4d067be9460a8516b9f50dfb9afac0220908017ab707fa84ba0f",
+        "cb05067b45f03f633ff843610b080bb89c07c273970f3e8c68f0b3e657f8c0c5",
+        "cb0608088e4675079214260f6eebd9f0b2f381f84da94d08a07d970577251907",
+        "cb0789dae6f812d91afaa67e0000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "analitico",
+      "reports": [
+        "cb0045513123d600000a0405010a0000c5bc74003e2df6073987da07cf8fd00f",
+        "cb01405e2ff097392ff8da1153078e3898068b187b0c75e784f398b514fa37c6",
+        "cb02f7072c9fd6077135ce0f8fca31f09e9a31f8e8eb5e079fdaf206eda6af0d",
+        "cb03135950f27939aef90bac7307ad8615073dc2620ec33d9df148cd76f9588f",
+        "cb04ff078ce2ec078ee0eb0f721f14f01c8e13f87d7c2c0706b00906eaebc309",
+        "cb0516143cf67dd3c9fa0d26ed0742bc8507cfc4680f313b97f0b11d8df88015",
+        "cb06a30970543803c151920c3fae6df3119624fb102b1008186763072025260f",
+        "cb07e0dad9f0d86d8cf86c830000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "referencia",
+      "reports": [
+        "cb0045513123d600000a0405010a000036c35000b62bfb079430cf070595c90f",
+        "cb01784436f0347d35f85d5c7e07aff01e06053b2c0afbc4d3f5f5b262fac850",
+        "cb02f907c879bb0722b6ab0fde4954f070354bf80d05ff07c533fb07ed37fa0f",
+        "cb0313c805f02ec705f8628fb7070293af069dffe40c63001bf39cdd98f90955",
+        "cb049607a58c0a07c34ef90d3db106f2521e5ff978c0b50728315707fec7e40e",
+        "cb0502381bf1600ef3f83b1a2508a55c4507e778670f198798f0208995f84ccd",
+        "cb064d08fa580607ab5c010f55a3fef0bad9abf8df79040859716407818c1b0f",
+        "cb077f73e4f0c81497f819ec0000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "harman",
+      "reports": [
+        "cb0045513123d600000a0405010a0000fdd678001c63fb073c6ee3078174de0f",
+        "cb01906e21f0b91121f8215cfd075f2bdf071225db0feeda24f0807823f88b5b",
+        "cb029b0703391607d01a880e30e577f1726b4ef9a8e7f8078a15e207586bda0f",
+        "cb03a89425f0ce0225f86744d90583d9c502a6fd95075a026af816e260ffa740",
+        "cb04a507cb720c077bf1030e850efcf18e4c4ef9e4435d0879db4e066620200c",
+        "cb059adfdff3a3e053f9ff81930819b1a1064ac2d90eb63d26f1e8cccaf87389",
+        "cb066108b116d1066ec1200e923edff1dc5fcdf8bbf21208535cd4069e77930e",
+        "cb0762886cf1f1b018f938c70000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "vdsf",
+      "reports": [
+        "cb0045513123d600000a0405010a0000115c6300c5cffc070598f8076366f50f",
+        "cb019d990af036980af8c005fa075aa9ea07d3a0e40f2d5f1bf0e6501bf8b9ed",
+        "cb02fb07ed7adc079006d80f70f927f05a9727f80d65d50787c47d072c46450f",
+        "cb03d4b9baf06cd6acf85f62be0727c25c0713c8fa0eed3705f17bdbe4f82b07",
+        "cb04d807804b7b07f404240f0cfbdbf055adacf8482bce07b7584307b0ce730e",
+        "cb0550318cf1007ceef8d34aba0793362e071c282b0ee4d7d4f19a7e17f935fa",
+        "cb06810779cbcd06dec3ba0c223c45f3523ab0f910b8cc08e6772406f907d90e",
+        "cb0707f826f10ad00ef96a5c0000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "etymotic",
+      "reports": [
+        "cb0045513123d600000a0405010a0000115c6300bc5afe07772dfc07cc86fa0f",
+        "cb01347905f0cd7705f8d245fa0749b2f20794f3ec0f6c0c13f0e50713f8d886",
+        "cb02f707ee5ee3073dcdda0fc33225f0391a25f87d56fd0733e5de07fac9db0f",
+        "cb03063624f051c423f8a42ca307436128079ab6a40e66495bf1197234f9df27",
+        "cb04cc0788ed460753f07c0ead0f83f19aeaecf890d0ab07f1612907fdb8170e",
+        "cb050347e8f17ecd2af9ea4f8f075f90d106d718c90c29e736f3b71f9ff9a690",
+        "cb06070898bab607c6f9b80f3a0647f0c2b441f80c4d93089f1f640679d1a70e",
+        "cb07872e58f1559308f98eb60000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "padrao",
+      "reports": [
+        "cb0045513123d600000a0405010a000051ba5c00a47cff0792d9f407d054f40f",
+        "cb0130ab0bf0c9a90bf838fcfa0766ace2078276dd0f7e8922f0625722f83406",
+        "cb028a0708e71c07a7cb7e0e593481f1c41259f91897bf070a1841070137660e",
+        "cb03ffc899f1dd50fff8f52b930760260b07ab02db0d55fd24f2abad61f90756",
+        "cb045a07e61ac106d02c940c30d36bf3138fe4f9892e1a077d9c450653d0040a",
+        "cb05ad2ffbf5fa34a0fa012b0f08ee19aa0732f0b60fce0f49f010bb46f83fad",
+        "cb0655089e94f106f4c9f90e0c3606f123beb8f83770ce081ccdd303dd73ac0b",
+        "cb07238c53f4adc25dfb70190000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "curve": "neutro",
+      "reports": [
+        "cb0045513123d600000a0405010a0000fdd67800000000080000000000000000",
+        "cb01000000000000000000000008000000000000000000000000000000000000",
+        "cb02000800000000000000000000000000000000000000080000000000000000",
+        "cb03000000000000000000000008000000000000000000000000000000000000",
+        "cb04000800000000000000000000000000000000000000080000000000000000",
+        "cb05000000000000000000000008000000000000000000000000000000000000",
+        "cb06000800000000000000000000000000000000000000080000000000000000",
+        "cb070000000000000000ff4f0000000000000000000000000000000000000000",
+        "cb08000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "commit": "cb01650001ff0000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

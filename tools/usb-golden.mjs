@@ -8,6 +8,10 @@
  * Numeric USB fields must be decimal or 0x-prefixed integers. Payload hex may
  * have colons/spaces or no separators. USBPcap transfer types are 1 (interrupt)
  * and 2 (control), not the endpoint descriptor's bmAttributes values.
+ * Alternatively --input-format interrupt-out-raw accepts a reviewed extraction
+ * [{frame, t, hex}]: frame number, relative seconds, last 32 on-wire bytes.
+ * This mode asserts the source was filtered to HID interrupt OUT submissions;
+ * it cannot infer device/endpoint ownership from the reduced data itself.
  *
  * Golden hex contains the entire on-wire buffer, including CB and zero padding.
  * Only validation strips CB and padding to the codec's 31 data bytes. Android's
@@ -33,7 +37,7 @@ import { NEUTRO } from '../src/catalog/presets.mjs';
  * @typedef {{capturedOn: string, os: string, browser: string, transfer: Transfer,
  *   paddedLength: number, writes: GoldenWrite[]}} Golden
  * @typedef {{address?: string, interface?: number, capturedOn: string, os: string,
- *   browser: string}} CaptureOptions
+ *   browser: string, inputFormat?: string}} CaptureOptions
  * @typedef {Map<string, unknown[]>} Fields
  * @typedef {{requestType?: number, request?: number, value?: number, index?: number}} Setup
  * @typedef {{bytes: Uint8Array, transfer: Transfer, stream: string, packet: number}} Report
@@ -407,6 +411,40 @@ function extractReports(capture, options, warn) {
   return reports;
 }
 
+/**
+ * Strict reduced Windows/Chromium capture, not an auto-detected tshark shape.
+ * Preserve capture order and bytes; never synthesize reports from the codec.
+ * @param {unknown} capture
+ * @returns {Report[]}
+ */
+function extractInterruptOutRaw(capture) {
+  if (!Array.isArray(capture)) throw new Error('Raw capture must be a JSON array');
+  let previousFrame = 0;
+  let previousTime = -1;
+  return capture.map((entry) => {
+    const { frame, t, hex: value } = object(entry);
+    const packet = integer(frame);
+    const bytes = hexBytes(value);
+    if (
+      packet === undefined ||
+      packet <= previousFrame ||
+      typeof t !== 'number' ||
+      !Number.isFinite(t) ||
+      t < 0 ||
+      t < previousTime ||
+      bytes.length !== REPORT_SIZE + 1 ||
+      bytes[0] !== HID_REPORT_ID
+    ) {
+      throw new Error(
+        'Invalid interrupt-out-raw entry: ordered frame/t and CB + 31 bytes required',
+      );
+    }
+    previousFrame = packet;
+    previousTime = t;
+    return { bytes, transfer: 'interrupt', stream: 'interrupt-out-raw', packet };
+  });
+}
+
 /** @returns {Map<string, string[]>} */
 function referenceCurves() {
   const fixture = JSON.parse(
@@ -436,7 +474,12 @@ export function captureGolden(capture, options) {
   const counts = new Map();
   /** @param {string} message */
   const warn = (message) => counts.set(message, (counts.get(message) ?? 0) + 1);
-  const reports = extractReports(capture, options, warn);
+  if (options.inputFormat && !['tshark', 'interrupt-out-raw'].includes(options.inputFormat))
+    throw new Error('Invalid input format');
+  const reports =
+    options.inputFormat === 'interrupt-out-raw'
+      ? extractInterruptOutRaw(capture)
+      : extractReports(capture, options, warn);
   const curves = referenceCurves();
   const order = [...curves.keys()];
   const commit = hex(commitReport());
@@ -614,11 +657,15 @@ export function compareWireLog(input, goldenInput) {
 export const USAGE = `Usage:
   node tools/usb-golden.mjs <tshark.json> --captured-on <date> --os <os> --browser <browser>
     [--address <bus.dev>] [--interface <number>] [--out <file>]
+    [--input-format tshark|interrupt-out-raw] [--provenance <metadata.json>]
   node tools/usb-golden.mjs --compare <wire-log.json> [--golden <golden.json>]
 
 Default output/golden: test/fixtures/usb-wire-golden.json
 Capture all enumeration descriptors; do not filter away setup/configuration packets.
 Use --address when enumeration is absent or multiple matching devices are present.
+interrupt-out-raw: reviewed [{frame, t, hex}] extraction of HID interrupt OUT
+submissions (relative seconds, CB + 31 bytes); cannot use --address/--interface.
+--provenance copies a reviewed metadata object to the golden's _provenance.
 Curve IDs follow eq0xcb.reference.json, then neutro (ten OFF sections, -0.5 dB).
 Golden hex retains CB and padding. Mixed routes/lengths and unknown curves fail.
 Warnings count skipped packets/incomplete writes; partial captures are not F5 12/12 proof.
@@ -638,6 +685,8 @@ export function parseArgs(args) {
     '--out',
     '--compare',
     '--golden',
+    '--input-format',
+    '--provenance',
   ];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -662,6 +711,13 @@ export function parseArgs(args) {
     )
       throw new Error(USAGE);
     if (flags['--address']) parseAddress(flags['--address']);
+    if (
+      (flags['--input-format'] &&
+        !['tshark', 'interrupt-out-raw'].includes(flags['--input-format'])) ||
+      (flags['--input-format'] === 'interrupt-out-raw' &&
+        (flags['--address'] !== undefined || flags['--interface'] !== undefined))
+    )
+      throw new Error(USAGE);
     if (flags['--interface'] !== undefined) {
       const id = integer(flags['--interface']);
       if (id === undefined || id < 0 || id > 255) throw new Error('Invalid --interface');
@@ -699,12 +755,19 @@ export function main(args) {
     browser: flags['--browser'],
     address: flags['--address'],
     interface: integer(flags['--interface']),
+    inputFormat: flags['--input-format'],
   });
+  const provenance = flags['--provenance'] ? readJson(flags['--provenance']) : undefined;
+  if (provenance !== undefined && Object.keys(object(provenance)).length === 0)
+    throw new Error('Provenance must be a nonempty metadata object');
   for (const { message, count } of warnings) console.error(`Warning (${count}): ${message}`);
   const out = flags['--out'] ?? defaultGolden;
-  writeFileSync(out, `${JSON.stringify(golden, null, 2)}\n`);
+  writeFileSync(
+    out,
+    `${JSON.stringify(provenance === undefined ? golden : { _provenance: provenance, ...golden }, null, 2)}\n`,
+  );
   console.log(
-    `Validated ${golden.writes.length}/12 writes, ${golden.transfer}, ${golden.paddedLength} bytes -> ${out}`,
+    `Validated ${golden.writes.length} writes, ${golden.transfer}, ${golden.paddedLength} bytes -> ${out}`,
   );
   return 0;
 }
