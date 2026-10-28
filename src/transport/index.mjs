@@ -6,6 +6,7 @@ export {
   SETTLE_MS,
   WRITE_SPACING_MS,
   GateRejectedError,
+  CommitCollisionError,
   ConcurrentWriteError,
   DeviceDisconnectedError,
   DeviceUnusableError,

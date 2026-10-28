@@ -24,6 +24,7 @@
  * @property {number} [delayMs] Virtual time each delivered report takes to complete.
  * @property {FakeFirmware} [firmware] Chip state fed with every delivered report; defaults to
  *   a new factory FakeFirmware. Share one across devices to model replugs of the same cable.
+ *   Anything but a FakeFirmware (null included) makes the constructor throw a TypeError.
  *
  * @typedef {{vendorId?: number, productId?: number}} FakeFilter
  *
@@ -59,8 +60,10 @@ export const FAKE_PRODUCT_NAME: "USB DSP Audio";
  * - Report `applyOn` (default 8): the 9 slots are concatenated and the first
  *   220 bytes taken as the payload (report 8 carries none of it). A good
  *   CRC-16 makes it `live`; a bad one is ignored and counted, `live` unchanged.
- * - Commit (`01 65 00 01 FF` prefix, padded or not): `committed = live`. With
- *   no live curve (`live === null`) it is ignored and recorded.
+ * - Commit (`01 65 00 01 FF`, exactly 5 bytes or zero-padded to the full 31):
+ *   `committed = live`. With no live curve (`live === null`) it is ignored and
+ *   recorded. A report with that prefix but another length or a non-zero tail
+ *   is data report 1 (the transport refuses to send such a curve anyway).
  * - Anything else (index > 8, empty report): ignored and recorded.
  *
  * The firmware never sends input reports.
@@ -261,6 +264,7 @@ export type FakeDeviceOptions = {
     /**
      * Chip state fed with every delivered report; defaults to
      * a new factory FakeFirmware. Share one across devices to model replugs of the same cable.
+     * Anything but a FakeFirmware (null included) makes the constructor throw a TypeError.
      */
     firmware?: FakeFirmware | undefined;
 };

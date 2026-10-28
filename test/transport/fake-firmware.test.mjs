@@ -92,6 +92,52 @@ test('the unpadded 5-byte commit is recognised too', () => {
   assert.equal(firmware.commitCount, 1);
 });
 
+test('a data report 1 starting like the commit is data unless it is the exact commit', () => {
+  // Report 1 = index 01 + payload bytes 30..59; give it the commit's prefix.
+  const lookalike = new Uint8Array(31);
+  lookalike.set(COMMIT_COMMAND);
+  lookalike[30] = 0x42; // non-zero tail: data
+  const firmware = new FakeFirmware({ committed: PEAK });
+  firmware.receive(lookalike);
+  assert.equal(firmware.commitCount, 0);
+  assert.deepEqual(firmware.committed, PEAK);
+  assert.deepEqual(firmware.ignored, []);
+  // It went into slot 1: with the rest of a sequence, its bytes reach the payload.
+  const reports = neutralReports();
+  for (const report of [reports[0], lookalike, ...reports.slice(2)]) firmware.receive(report);
+  assert.equal(firmware.commitCount, 0);
+  assert.equal(firmware.rejectedCrcCount, 1); // the slot really held the look-alike
+  assert.deepEqual(firmware.live, PEAK);
+  // Other lengths with the prefix are data too, padded or not.
+  for (const length of [6, 30]) {
+    const other = new FakeFirmware({ committed: PEAK });
+    for (const report of peakReports()) other.receive(report);
+    const bytes = new Uint8Array(length);
+    bytes.set(COMMIT_COMMAND);
+    other.receive(bytes);
+    assert.equal(other.commitCount, 0, `length ${length}`);
+  }
+  // Exactly 5 bytes or the 31-byte zero-padded report are commits.
+  for (const commit of [Uint8Array.from(COMMIT_COMMAND), commitReport()]) {
+    const other = new FakeFirmware();
+    for (const report of peakReports()) other.receive(report);
+    other.receive(commit);
+    assert.equal(other.commitCount, 1, `length ${commit.length}`);
+    assert.deepEqual(other.committed, PEAK);
+  }
+});
+
+test('FakeHIDDevice validates its firmware option in the constructor', () => {
+  for (const firmware of [null, {}, { receive() {} }, 'chip', 0]) {
+    assert.throws(() => new FakeHIDDevice(/** @type {any} */ ({ firmware })), {
+      name: 'TypeError',
+      message: /firmware must be a FakeFirmware/,
+    });
+  }
+  // Omitted or undefined: a new factory firmware.
+  assert.ok(new FakeHIDDevice({ firmware: undefined }).firmware instanceof FakeFirmware);
+});
+
 test('a commit with no live curve is ignored and recorded', () => {
   const firmware = new FakeFirmware();
   firmware.receive(commitReport());

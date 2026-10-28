@@ -21,7 +21,8 @@ export function requestCable(hid?: CableHID): Promise<CableDevice | null>;
  * first. The lock is released only by this call, so a nested write to the same
  * device started from a band getter, a Proxy trap or the extra gate is refused.
  *
- * Throws, before any I/O, when a gate rejects (GateRejectedError), when
+ * Throws, before any I/O, when a gate rejects (GateRejectedError), when the
+ * curve's data report 1 would look like the commit (CommitCollisionError), when
  * `options.gate` is not a function or returns a non-object (TypeError), when
  * `signal` is aborted before or during gating, when the device is busy
  * (ConcurrentWriteError) or refused after an abandoned operation
@@ -48,12 +49,21 @@ export function writeCurve(device: CableDevice, bands: readonly Band[], preampDb
  *
  * Gate, snapshot, options, lock, abort, abandon (DeviceUnusableError) and error
  * rules are exactly those of {@link writeCurve}; nothing is ever retried. The
- * result has `committed: false`. Its status is 'ok' once all 9 reports were
- * accepted: the last pause and the settle then run in full while the lock is
- * held (an abort, a disconnect or a clock error in them is ignored), so another
- * write or apply on this device is refused until they end. Before that, an
- * interruption is returned as `status: 'interrupted'`; if it came before report
- * 8 was sent, the cable keeps its previous curve (B12b).
+ * result has `committed: false`. Once all 9 reports were accepted, the last
+ * pause and the settle run in full while the lock is held, so another write or
+ * apply on this device is refused until they end:
+ * - an abort during them is ignored (nothing is left to stop; the curve already
+ *   plays) and the status is 'ok';
+ * - a disconnect during them does not shorten them either, but the status is
+ *   then 'interrupted' with a DeviceDisconnectedError and `reportsSent: 9`: the
+ *   unplug lost the RAM, so the cable is back on its committed curve;
+ * - a clock that throws or rejects in them is replaced by a real timer for the
+ *   rest of the wait (`settleError` records it; the status is unchanged). A
+ *   clock whose sleep never settles holds the lock forever, as it would in any
+ *   other pause.
+ * Before report 8 was accepted, an interruption is returned as `status:
+ * 'interrupted'`; if report 8 was never attempted (`reportsAttempted` < 9),
+ * the cable keeps its previous curve (B12b).
  * @param {CableDevice} device
  * @param {readonly Band[]} bands
  * @param {number} preampDb
@@ -74,9 +84,10 @@ export function applyCurve(device: CableDevice, bands: readonly Band[], preampDb
  * writeCurve, under that device's lock), so the caller's bands are read only
  * once.
  *
- * Only that up-front phase throws (invalid arguments, gate rejection, signal
- * already aborted). Once the first device write has started, writeMany never
- * throws, so results of devices already committed are never lost: anything a
+ * Only that up-front phase throws (invalid arguments, gate rejection, a curve
+ * whose data report 1 looks like the commit, signal already aborted). Once the
+ * first device write has started, writeMany never throws, so results of
+ * devices already committed are never lost: anything a
  * device write or the spacing sleep throws (busy or unusable device, abort,
  * TypeError, a broken clock) is that device's `{status: 'failed', error}`, and
  * the remaining devices are 'skipped'.
@@ -137,9 +148,19 @@ export function writeMany(devices: readonly CableDevice[], bands: readonly Band[
  *   call threw).
  * @property {number} reportsSent Data reports (0..9) the device accepted; the commit is not
  *   counted.
+ * @property {number} [reportsAttempted] sendReport calls started (0..10), whether they were
+ *   accepted, failed or hung; unlike `reportsSent` the commit is counted, so a writeCurve that
+ *   attempted it reports 10. With `reportsSent` it tells "report 8 never attempted"
+ *   (`reportsAttempted` < 9: the cable keeps its previous curve, B12b) from "report 8 attempted
+ *   but not confirmed" (`reportsAttempted` >= 9 and `reportsSent` < 9: the live curve is
+ *   unknown until a replug). Always set by writeCurve and applyCurve; optional in the type only
+ *   so results built by hand (UI fixtures, other bridges) stay valid.
  * @property {boolean} committed Whether the commit report was confirmed as accepted (always
  *   false for applyCurve, which never sends it).
  * @property {unknown} [error] Why the write was interrupted (only when status is 'interrupted').
+ * @property {unknown} [settleError] applyCurve only, present only when the injected clock
+ *   failed (threw or rejected) in the pauses after report 8. The rest of that wait then ran on
+ *   a real timer (setTimeout), so the lock was never released early; the status is unchanged.
  *
  * @typedef {(WriteResult & {device: CableDevice})
  *   | {device: CableDevice, status: 'failed', error: unknown}
@@ -166,6 +187,15 @@ export class GateRejectedError extends Error {
 }
 /** Another write to the same device is in progress; nothing was sent. */
 export class ConcurrentWriteError extends Error {
+    constructor();
+}
+/**
+ * The curve's data report 1 starts with the commit command (`01 65 00 01 FF`:
+ * report index 1, then payload bytes 30..33 = `65 00 01 FF`), so the firmware
+ * could take it for a commit and write flash. Thrown by writeCurve, applyCurve
+ * and writeMany before any I/O, like GateRejectedError; nothing was sent.
+ */
+export class CommitCollisionError extends Error {
     constructor();
 }
 /** The device disconnected or was closed during the write sequence. */
@@ -281,6 +311,16 @@ export type WriteResult = {
      */
     reportsSent: number;
     /**
+     * sendReport calls started (0..10), whether they were
+     * accepted, failed or hung; unlike `reportsSent` the commit is counted, so a writeCurve that
+     * attempted it reports 10. With `reportsSent` it tells "report 8 never attempted"
+     * (`reportsAttempted` < 9: the cable keeps its previous curve, B12b) from "report 8 attempted
+     * but not confirmed" (`reportsAttempted` >= 9 and `reportsSent` < 9: the live curve is
+     * unknown until a replug). Always set by writeCurve and applyCurve; optional in the type only
+     * so results built by hand (UI fixtures, other bridges) stay valid.
+     */
+    reportsAttempted?: number | undefined;
+    /**
      * Whether the commit report was confirmed as accepted (always
      * false for applyCurve, which never sends it).
      */
@@ -289,6 +329,12 @@ export type WriteResult = {
      * Why the write was interrupted (only when status is 'interrupted').
      */
     error?: unknown;
+    /**
+     * applyCurve only, present only when the injected clock
+     * failed (threw or rejected) in the pauses after report 8. The rest of that wait then ran on
+     * a real timer (setTimeout), so the lock was never released early; the status is unchanged.
+     */
+    settleError?: unknown;
 };
 export type ManyResult = (WriteResult & {
     device: CableDevice;

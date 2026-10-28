@@ -13,6 +13,7 @@ import {
 } from '../../src/dsp/eq0xcb.mjs';
 import { gateForWrite } from '../../src/safety/gate.mjs';
 import {
+  CommitCollisionError,
   ConcurrentWriteError,
   DeviceDisconnectedError,
   DeviceUnusableError,
@@ -77,6 +78,7 @@ test('sends the fixture reports plus the commit for the 11 official presets', as
     const result = await writeCurve(device, eqBands, preampDb, { gate: approve, clock, hid });
     assert.equal(result.status, 'ok', id);
     assert.equal(result.reportsSent, 9, id);
+    assert.equal(result.reportsAttempted, 10, id); // the commit included
     assert.equal(result.committed, true, id);
     assert.equal(result.crc, payload[218] | (payload[219] << 8), id);
     assert.equal(result.error, undefined, id);
@@ -423,6 +425,8 @@ test('disconnect at each report 0..9 interrupts without committing', async () =>
     assert.equal(result.status, 'interrupted', `at ${at}`);
     assert.equal(result.committed, false, `at ${at}`);
     assert.equal(result.reportsSent, at, `at ${at}`);
+    // The failed call counts as attempted; at 9 that is the commit itself.
+    assert.equal(result.reportsAttempted, at + 1, `at ${at}`);
     assert.equal(device.attempts, at + 1, `at ${at}`);
     assert.equal(device.sent.length, at, `at ${at}`);
     assert.ok(!bytesOf(device).some(isCommit), `at ${at}`);
@@ -1547,6 +1551,7 @@ test('applyCurve: exactly the 9 fixture reports, ids 0..8, never the commit', as
         startedAt: 0,
         finishedAt: LIVE_MS,
         reportsSent: 9,
+        reportsAttempted: 9,
         committed: false,
       },
       id,
@@ -1743,7 +1748,9 @@ test('applyCurve: a nested call from a band getter is refused; one stream is sen
   assert.deepEqual(sentPayload(device), encodePayload(CUT, -4));
 });
 
-test('applyCurve: the settle runs under the lock, even after an abort or a disconnect', async () => {
+test('applyCurve: the settle runs in full under the lock, even after an abort or a disconnect', async () => {
+  // An abort in the settle is ignored ('ok'); a disconnect keeps the settle but
+  // makes the apply 'interrupted': the unplug lost the RAM (back to committed).
   for (const stop of ['none', 'abort', 'disconnect']) {
     const { clock, device, hid } = setup({}, { autoAdvance: false });
     const controller = new AbortController();
@@ -1775,18 +1782,26 @@ test('applyCurve: the settle runs under the lock, even after an abort or a disco
     );
     await clock.advance(1);
     const { value: result } = await done;
+    const { error, ...rest } = result;
     assert.deepEqual(
-      { ...result, crc: undefined },
+      { ...rest, crc: undefined },
       {
-        status: 'ok',
+        status: stop === 'disconnect' ? 'interrupted' : 'ok',
         crc: undefined,
         startedAt: 0,
         finishedAt: LIVE_MS,
         reportsSent: 9,
+        reportsAttempted: 9,
         committed: false,
       },
       stop,
     );
+    if (stop === 'disconnect') {
+      assert.ok(error instanceof DeviceDisconnectedError, stop);
+      assert.match(error.message, /reverted to the committed curve/, stop);
+    } else {
+      assert.equal('error' in result, false, stop);
+    }
     assert.equal(clock.pending(), 0, stop);
     assert.equal(device.attempts, 9, stop);
     assert.equal(commits(device), 0, stop);
@@ -1799,21 +1814,71 @@ test('applyCurve: the settle runs under the lock, even after an abort or a disco
   }
 });
 
-test('applyCurve: a clock that fails after report 8 keeps the apply ok', async () => {
-  const { clock, device, hid } = setup();
+test('applyCurve: a clock failing after report 8 falls back to a real timer, lock held', async () => {
   const failure = new Error('clock broke');
-  const fragileClock = {
+  // [failing sleep, real wait expected]: the failed sleep in full plus any not started.
+  for (const [failAt, realMs] of [
+    [REPORT_GAP_MS, REPORT_GAP_MS + SETTLE_MS],
+    [SETTLE_MS, SETTLE_MS],
+  ]) {
+    for (const how of ['reject', 'throw']) {
+      const label = `${how} at ${failAt}`;
+      const { clock, device, hid } = setup();
+      const fragileClock = {
+        now: () => clock.now(),
+        // The last pause and the settle run without a signal.
+        sleep: (ms, signal) => {
+          if (signal || ms !== failAt) return clock.sleep(ms, signal);
+          if (how === 'throw') throw failure;
+          return Promise.reject(failure);
+        },
+      };
+      const before = performance.now();
+      const pending = applyCurve(device, NEUTRAL_BANDS, PRE, { clock: fragileClock, hid });
+      // Wait (real time) until the 9 reports are out and the fallback timer runs.
+      while (device.sent.length < 9) await new Promise((resolve) => setTimeout(resolve, 0));
+      await assert.rejects(
+        applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }),
+        ConcurrentWriteError,
+        label,
+      );
+      const result = await pending;
+      const elapsed = performance.now() - before;
+      // Timers may fire up to ~1 ms early on some platforms.
+      assert.ok(elapsed >= realMs - 2, `${label}: lock held ${elapsed} ms, expected ${realMs}`);
+      assert.equal(result.status, 'ok', label);
+      assert.equal(result.settleError, failure, label);
+      assert.equal(result.reportsSent, 9, label);
+      assert.equal(result.reportsAttempted, 9, label);
+      assert.equal(result.committed, false, label);
+      assert.equal('error' in result, false, label);
+      assert.equal(device.sent.length, 9, label);
+      assert.equal((await applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid })).status, 'ok');
+    }
+  }
+  // A working clock leaves no settleError.
+  const { clock, device, hid } = setup();
+  const fine = await applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid });
+  assert.equal('settleError' in fine, false);
+});
+
+test('applyCurve: a clock sleep that never settles after report 8 holds the lock', async () => {
+  const { clock, device, hid } = setup();
+  const stuckClock = {
     now: () => clock.now(),
-    // The last pause and the settle run without a signal.
-    sleep: (ms, signal) => (signal ? clock.sleep(ms, signal) : Promise.reject(failure)),
+    sleep: (ms, signal) => (signal ? clock.sleep(ms, signal) : new Promise(() => undefined)),
   };
-  const result = await applyCurve(device, NEUTRAL_BANDS, PRE, { clock: fragileClock, hid });
-  assert.equal(result.status, 'ok');
-  assert.equal(result.reportsSent, 9);
-  assert.equal(result.committed, false);
-  assert.equal(result.error, undefined);
+  let settled = false;
+  applyCurve(device, NEUTRAL_BANDS, PRE, { clock: stuckClock, hid }).then(
+    () => (settled = true),
+    () => (settled = true),
+  );
+  while (device.sent.length < 9) await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + REPORT_GAP_MS + 20));
+  assert.equal(settled, false);
+  await assert.rejects(applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }), ConcurrentWriteError);
+  await assert.rejects(writeCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }), ConcurrentWriteError);
   assert.equal(device.sent.length, 9);
-  assert.equal((await applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid })).status, 'ok');
 });
 
 test('applyCurve: a disconnect at reports 0..8 interrupts, never retries, no commit', async () => {
@@ -1823,6 +1888,7 @@ test('applyCurve: a disconnect at reports 0..8 interrupts, never retries, no com
     assert.equal(result.status, 'interrupted', `at ${at}`);
     assert.equal(result.committed, false, `at ${at}`);
     assert.equal(result.reportsSent, at, `at ${at}`);
+    assert.equal(result.reportsAttempted, at + 1, `at ${at}`);
     assert.equal(device.attempts, at + 1, `at ${at}`); // the failed report is not retried
     assert.equal(device.sent.length, at, `at ${at}`);
     assert.equal(commits(device), 0, `at ${at}`);
@@ -1849,6 +1915,9 @@ test('applyCurve: abort, send failures and TypeErrors mid-sequence, like writeCu
     assert.equal(result.status, 'interrupted');
     assert.equal(result.error.name, 'AbortError');
     assert.equal(result.reportsSent, expectedSent);
+    // Report 8 was never attempted: the cable keeps its previous curve (B12b).
+    assert.equal(result.reportsAttempted, expectedSent);
+    assert.ok(result.reportsAttempted < 9);
     assert.equal(device.attempts, expectedSent);
     assert.equal(clock.pending(), 0);
     const next = applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid });
@@ -1860,8 +1929,17 @@ test('applyCurve: abort, send failures and TypeErrors mid-sequence, like writeCu
   const failed = await applyCurve(failing.device, NEUTRAL_BANDS, PRE, failing);
   assert.equal(failed.status, 'interrupted');
   assert.equal(failed.reportsSent, 3);
+  assert.equal(failed.reportsAttempted, 4);
   assert.equal(failing.device.attempts, 4);
   assert.ok(failed.error instanceof DOMException);
+  // Report 8 attempted and failed: reportsSent 8 but reportsAttempted 9, so the
+  // caller knows the live curve is unknown (not "previous curve kept").
+  const lastFails = setup({ throwAtReport: 8 });
+  const lastFailed = await applyCurve(lastFails.device, NEUTRAL_BANDS, PRE, lastFails);
+  assert.equal(lastFailed.status, 'interrupted');
+  assert.equal(lastFailed.reportsSent, 8);
+  assert.equal(lastFailed.reportsAttempted, 9);
+  assert.ok(lastFailed.error instanceof DOMException);
   // A TypeError: thrown before any report was accepted, returned after.
   const bug = new TypeError('bad argument');
   const early = setup({ throwAtReport: 0, throwError: bug });
@@ -1891,6 +1969,7 @@ test('applyCurve: a hung send is abandoned; the device is refused until re-reque
     assert.equal(result.status, 'interrupted');
     assert.equal(result.error.name, 'AbortError');
     assert.equal(result.reportsSent, hangAtReport);
+    assert.equal(result.reportsAttempted, hangAtReport + 1); // the hung one was started
     assert.equal(result.committed, false);
     assert.equal(clock.pending(), 0);
     for (const call of [applyCurve, writeCurve]) {
@@ -1911,6 +1990,63 @@ test('applyCurve: a hung send is abandoned; the device is refused until re-reque
   hid.disconnect(device);
   assert.ok((await pending).error instanceof DeviceDisconnectedError);
   await assert.rejects(applyCurve(device, NEUTRAL_BANDS, PRE, { clock, hid }), DeviceUnusableError);
+});
+
+// --- Commit-shaped data report 1 ---------------------------------------------
+
+/**
+ * A gate-approved curve whose data report 1 starts like the commit: report 1
+ * bytes 1..4 are payload bytes 30..33, band 0's b1 word (int32 LE). A PK cut
+ * just under 24 kHz (allowed: it never amplifies) puts b1 near 0; bisect the
+ * frequency until that word is exactly 65 00 01 FF.
+ */
+function collidingBands() {
+  const target = new DataView(Uint8Array.from(COMMIT.slice(1, 5)).buffer).getInt32(0, true);
+  const bandsAt = (freqHz) => [{ kind: 'PK', freqHz, gainDb: -3, qFactor: 1 }, ...offTail()];
+  const word = (freqHz) => {
+    const bytes = Uint8Array.from(encodePayload(bandsAt(freqHz), PRE).slice(30, 34));
+    return new DataView(bytes.buffer).getInt32(0, true);
+  };
+  let low = 20000;
+  let high = 24000;
+  assert.ok(word(low) < target && target < word(high));
+  for (let step = 0; step < 200; step++) {
+    const mid = (low + high) / 2;
+    const value = word(mid);
+    if (value === target) return bandsAt(mid);
+    if (value < target) low = mid;
+    else high = mid;
+  }
+  throw new Error('no colliding frequency found');
+}
+
+test('a curve whose data report 1 looks like the commit is refused before any I/O', async () => {
+  const bands = collidingBands();
+  assert.equal(gateForWrite(bands, PRE).ok, true, 'the gate itself approves it');
+  const report1 = [...reportsFromPayload(encodePayload(bands, PRE))[1]];
+  assert.deepEqual(report1.slice(0, 5), COMMIT.slice(0, 5));
+  assert.ok(report1.slice(5).some((byte) => byte !== 0), 'a non-zero tail: still data');
+  for (const call of [writeCurve, applyCurve]) {
+    const { clock, device, hid } = setup();
+    const { gate, calls } = countingGate();
+    await assert.rejects(call(device, bands, PRE, { gate, clock, hid }), (error) => {
+      assert.ok(error instanceof CommitCollisionError, call.name);
+      assert.equal(error.name, 'CommitCollisionError');
+      assert.match(error.message, /nothing was sent/);
+      return true;
+    });
+    assert.equal(calls.length, 1, call.name); // refused after the gates, before the I/O
+    assert.equal(device.opened, false, call.name);
+    assert.equal(device.attempts, 0, call.name);
+    assert.equal(device.firmware.commitCount, 0, call.name);
+    // The lock was released: a normal curve goes through.
+    assert.equal((await call(device, CUT, -4, { clock, hid })).status, 'ok', call.name);
+  }
+  // writeMany refuses it up front: no device is touched.
+  const { clock, devices } = manyDevices(2);
+  await assert.rejects(writeMany(devices, bands, PRE, { clock }), CommitCollisionError);
+  for (const device of devices) assert.equal(device.attempts, 0);
+  assert.equal(transportIndex.CommitCollisionError, CommitCollisionError);
 });
 
 test('writeMany with no devices returns an empty list', async () => {

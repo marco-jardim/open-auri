@@ -52,6 +52,7 @@ export const FAKE_PRODUCT_NAME = 'USB DSP Audio';
  * @property {number} [delayMs] Virtual time each delivered report takes to complete.
  * @property {FakeFirmware} [firmware] Chip state fed with every delivered report; defaults to
  *   a new factory FakeFirmware. Share one across devices to model replugs of the same cable.
+ *   Anything but a FakeFirmware (null included) makes the constructor throw a TypeError.
  *
  * @typedef {{vendorId?: number, productId?: number}} FakeFilter
  *
@@ -174,6 +175,18 @@ const REPORT_DATA_SIZE = REPORT_SIZE - 1;
 const copyPayload = (payload) => (payload === null ? null : payload.slice());
 
 /**
+ * The commit exactly as hosts send it: the 5 command bytes alone, or padded with
+ * zeros to the full 31-byte report. Data report 1 also starts with 01, so a
+ * report with the command's prefix but any other length or a non-zero tail is
+ * data, never a commit.
+ * @param {Uint8Array} bytes
+ */
+function isCommitReport(bytes) {
+  if (bytes.length !== COMMIT_COMMAND.length && bytes.length !== REPORT_SIZE) return false;
+  return bytes.every((byte, index) => byte === (COMMIT_COMMAND[index] ?? 0));
+}
+
+/**
  * The cable's chip, independent of any USB connection, so it survives replugs
  * (share one instance between the FakeHIDDevice objects of the same cable).
  *
@@ -183,8 +196,10 @@ const copyPayload = (payload) => (payload === null ? null : payload.slice());
  * - Report `applyOn` (default 8): the 9 slots are concatenated and the first
  *   220 bytes taken as the payload (report 8 carries none of it). A good
  *   CRC-16 makes it `live`; a bad one is ignored and counted, `live` unchanged.
- * - Commit (`01 65 00 01 FF` prefix, padded or not): `committed = live`. With
- *   no live curve (`live === null`) it is ignored and recorded.
+ * - Commit (`01 65 00 01 FF`, exactly 5 bytes or zero-padded to the full 31):
+ *   `committed = live`. With no live curve (`live === null`) it is ignored and
+ *   recorded. A report with that prefix but another length or a non-zero tail
+ *   is data report 1 (the transport refuses to send such a curve anyway).
  * - Anything else (index > 8, empty report): ignored and recorded.
  *
  * The firmware never sends input reports.
@@ -241,10 +256,7 @@ export class FakeFirmware {
    * @param {Uint8Array} bytes
    */
   receive(bytes) {
-    const isCommit =
-      bytes.length >= COMMIT_COMMAND.length &&
-      COMMIT_COMMAND.every((byte, index) => bytes[index] === byte);
-    if (isCommit) {
+    if (isCommitReport(bytes)) {
       if (this.#live === null) {
         this.#ignored.push({ bytes: bytes.slice(), reason: 'commit-without-live' });
         return;
@@ -307,6 +319,10 @@ export class FakeHIDDevice extends EventTarget {
     firmware = new FakeFirmware(),
   } = {}) {
     super();
+    // Checked here, not on the first report: a bad option fails where it is passed.
+    if (!(firmware instanceof FakeFirmware)) {
+      throw new TypeError('firmware must be a FakeFirmware (omit it for a new factory one)');
+    }
     this.clock = clock;
     /** The cable's chip; receives every delivered report. */
     this.firmware = firmware;

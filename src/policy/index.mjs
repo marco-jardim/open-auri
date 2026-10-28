@@ -23,6 +23,7 @@ export {
   LIVE_DEBOUNCE_MS,
   LIVE_MAX_WAIT_MS,
   LIVE_MIN_INTERVAL_MS,
+  LIVE_AFTER_COMMIT_MS,
   LIVE_MAX_PENDING,
   nextApplyDelay,
   coalesce,

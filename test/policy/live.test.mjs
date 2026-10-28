@@ -4,11 +4,13 @@ import {
   LIVE_DEBOUNCE_MS,
   LIVE_MAX_WAIT_MS,
   LIVE_MIN_INTERVAL_MS,
+  LIVE_AFTER_COMMIT_MS,
   LIVE_MAX_PENDING,
   nextApplyDelay,
   coalesce,
   liveHold,
 } from '../../src/policy/live.mjs';
+import { MIN_INTERVAL_MS } from '../../src/policy/flash.mjs';
 import * as policy from '../../src/policy/index.mjs';
 
 /**
@@ -26,6 +28,9 @@ test('live pacing constants match the plan and cover one full apply sequence', (
   assert.equal(LIVE_MAX_PENDING, 1);
   assert.ok(LIVE_MIN_INTERVAL_MS >= 9 * 16 + 150);
   assert.ok(LIVE_DEBOUNCE_MS < LIVE_MAX_WAIT_MS);
+  // The wait after a commit is the flash policy's own spacing, not a copy of it.
+  assert.equal(LIVE_AFTER_COMMIT_MS, MIN_INTERVAL_MS);
+  assert.equal(LIVE_AFTER_COMMIT_MS, 2000);
 });
 
 test('the policy index re-exports the live module', () => {
@@ -35,6 +40,7 @@ test('the policy index re-exports the live module', () => {
   assert.equal(policy.LIVE_DEBOUNCE_MS, LIVE_DEBOUNCE_MS);
   assert.equal(policy.LIVE_MAX_WAIT_MS, LIVE_MAX_WAIT_MS);
   assert.equal(policy.LIVE_MIN_INTERVAL_MS, LIVE_MIN_INTERVAL_MS);
+  assert.equal(policy.LIVE_AFTER_COMMIT_MS, LIVE_AFTER_COMMIT_MS);
   assert.equal(policy.LIVE_MAX_PENDING, LIVE_MAX_PENDING);
 });
 
@@ -107,6 +113,59 @@ test('invalid clock values throw RangeError', () => {
       { name: 'RangeError', message: 'lastApplyStartMs must be a finite millisecond value' },
     );
   }
+  for (const lastCommitMs of [NaN, Infinity, -Infinity, '1000', 1000n]) {
+    assert.throws(
+      () => nextApplyDelay(/** @type {any} */ (pacing({ lastCommitMs }))),
+      { name: 'RangeError', message: 'lastCommitMs must be a finite millisecond value' },
+    );
+  }
+});
+
+test('a missing or non-object input throws RangeError', () => {
+  for (const input of [undefined, null, 1000, 'now']) {
+    assert.throws(() => nextApplyDelay(/** @type {any} */ (input)), {
+      name: 'RangeError',
+      message: 'nextApplyDelay needs an input object',
+    });
+  }
+});
+
+test('a last edit earlier than the first pending edit throws RangeError', () => {
+  assert.throws(() => nextApplyDelay(pacing({ lastEditMs: 999, firstPendingEditMs: 1000 })), {
+    name: 'RangeError',
+    message: 'lastEditMs must not be earlier than firstPendingEditMs',
+  });
+  // Equal is the single-edit case and is valid.
+  assert.equal(nextApplyDelay(pacing({ lastEditMs: 1000, firstPendingEditMs: 1000 })), 200);
+});
+
+test('a live apply never starts sooner than LIVE_AFTER_COMMIT_MS after the last commit', () => {
+  // Debounce long expired, no apply in flight: only the commit holds it back.
+  const base = { lastEditMs: 0, firstPendingEditMs: 0, lastCommitMs: 1000 };
+  assert.equal(nextApplyDelay({ ...base, nowMs: 1000 }), LIVE_AFTER_COMMIT_MS);
+  assert.equal(nextApplyDelay({ ...base, nowMs: 1500 }), 1500);
+  assert.equal(nextApplyDelay({ ...base, nowMs: 2999 }), 1);
+  assert.equal(nextApplyDelay({ ...base, nowMs: 3000 }), 0);
+  // It wins over the debounce, the max-wait and the apply interval.
+  assert.equal(
+    nextApplyDelay({
+      nowMs: 1100,
+      lastEditMs: 1100,
+      firstPendingEditMs: 1100,
+      lastApplyStartMs: 1000,
+      lastCommitMs: 1000,
+    }),
+    1900,
+  );
+  // An old commit does not delay anything.
+  assert.equal(nextApplyDelay(pacing({ nowMs: 1200, lastCommitMs: -800 })), 0);
+  assert.equal(nextApplyDelay(pacing({ nowMs: 1200, lastCommitMs: 0 })), 800);
+  // Null or omitted: no commit to wait for.
+  for (const lastCommitMs of [null, undefined]) {
+    assert.equal(nextApplyDelay(pacing({ nowMs: 1200, lastCommitMs })), 0);
+  }
+  // A commit stamped in the future restarts a bounded full wait.
+  assert.equal(nextApplyDelay(pacing({ nowMs: 1200, lastCommitMs: 10_000_000 })), 2000);
 });
 
 test('coalesce keeps only the newest edit', () => {
@@ -151,9 +210,8 @@ test('small steps cannot creep past the threshold: each is measured from the sam
   /** @type {(ReturnType<typeof liveHold>)[]} */
   const results = [];
   for (let step = 1; step <= 3; step += 1) {
+    // Relative to the previous apply every step is 2.9 dB, below 3 dB...
     const levelDb = previous + 2.9;
-    // Relative to the previous apply every step is below 3 dB...
-    assert.ok(levelDb - previous < 3);
     results.push(liveHold(hold({ levelDb, ackLevelDb })));
     previous = levelDb;
   }
@@ -175,16 +233,52 @@ test('equal or lower levels never hold when the state is known', () => {
   for (const levelDb of [0, -0.5, -3, -100]) {
     assert.equal(liveHold(hold({ levelDb })), null);
   }
-  for (const state of ['known', 'live', 'committed', null, undefined]) {
-    assert.equal(liveHold(hold({ state })), null);
-  }
-  assert.equal(liveHold({ levelDb: -1, ackLevelDb: 0 }), null);
+  assert.equal(liveHold(hold({ state: 'known' })), null);
 });
 
-test('an unknown state holds regardless of the level, before loudness', () => {
-  for (const levelDb of [-100, 0, 10]) {
-    assert.deepEqual(liveHold(hold({ levelDb, state: 'unknown' })), { reason: 'unknown-state' });
+test('fail safe: only the known state sends; anything else holds as unknown-state', () => {
+  const states = ['unknown', 'live', 'committed', 'Known', 'known ', 'knwon', '', null, undefined];
+  for (const state of states) {
+    for (const levelDb of [-100, 0, 10]) {
+      assert.deepEqual(
+        liveHold(hold({ levelDb, state })),
+        { reason: 'unknown-state' },
+        `${String(state)} at ${levelDb}`,
+      );
+    }
   }
+  // Omitted state.
+  assert.deepEqual(liveHold({ levelDb: -1, ackLevelDb: 0 }), { reason: 'unknown-state' });
+  // Non-string states are never compared loosely.
+  for (const state of [0, 1, true, {}, ['known'], { toString: () => 'known' }]) {
+    assert.deepEqual(liveHold(hold(/** @type {any} */ ({ state }))), { reason: 'unknown-state' });
+  }
+  // A missing or non-object input holds instead of throwing.
+  for (const input of [undefined, null, 0, 'known']) {
+    assert.deepEqual(liveHold(/** @type {any} */ (input)), { reason: 'unknown-state' });
+  }
+});
+
+test('levels are type-checked before any arithmetic: no BigInt, no valueOf', () => {
+  let valueOfCalls = 0;
+  const sneaky = {
+    valueOf() {
+      valueOfCalls += 1;
+      return 0;
+    },
+  };
+  for (const bad of [1n, 0n, sneaky, '0', true, [0]]) {
+    for (const key of ['levelDb', 'ackLevelDb']) {
+      assert.deepEqual(liveHold(hold(/** @type {any} */ ({ [key]: bad }))), {
+        reason: 'unknown-state',
+      });
+    }
+  }
+  // Both BigInts would subtract without throwing; they must hold all the same.
+  assert.deepEqual(liveHold(hold(/** @type {any} */ ({ levelDb: 10n, ackLevelDb: 0n }))), {
+    reason: 'unknown-state',
+  });
+  assert.equal(valueOfCalls, 0);
 });
 
 test('missing or non-finite levels and overflowed differences hold as unknown-state', () => {
