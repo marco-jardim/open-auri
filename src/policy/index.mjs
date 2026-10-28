@@ -1,4 +1,4 @@
-/** Pure flash-write pacing, loudness warnings and local journal serialization. @module */
+/** Pure flash-write pacing, loudness warnings, live-preview pacing and local journal serialization. @module */
 
 export {
   FLASH_STORAGE_KEYS,
@@ -19,6 +19,15 @@ export {
   LOUDNESS_WARNING_TEXT,
   loudnessWarning,
 } from './loudness.mjs';
+export {
+  LIVE_DEBOUNCE_MS,
+  LIVE_MAX_WAIT_MS,
+  LIVE_MIN_INTERVAL_MS,
+  LIVE_MAX_PENDING,
+  nextApplyDelay,
+  coalesce,
+  liveHold,
+} from './live.mjs';
 export {
   JOURNAL_STORAGE_KEY,
   JOURNAL_MAX,

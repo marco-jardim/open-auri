@@ -33,7 +33,7 @@ const areas = {
   solver: { api: solver, members: ['peq'], duplicates: {} },
   catalog: { api: catalog, members: ['presets'], duplicates: {} },
   transport: { api: transport, members: ['webhid', 'fake-device'], duplicates: {} },
-  policy: { api: policy, members: ['flash', 'loudness', 'journal'], duplicates: {} },
+  policy: { api: policy, members: ['flash', 'loudness', 'live', 'journal'], duplicates: {} },
   meter: {
     api: meter,
     members: ['ballistics', 'truepeak', 'loudness', 'correlation', 'common'],
