@@ -1219,6 +1219,8 @@ export function createCableService(
 				if (device !== null && isCableDevice(device)) {
 					addDevice(device);
 					primary = device;
+				} else if (device === null) {
+					error = 'request-empty';
 				}
 				return device;
 			} catch (cause) {

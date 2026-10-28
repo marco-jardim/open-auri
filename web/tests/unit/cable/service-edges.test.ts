@@ -55,7 +55,7 @@ test('picker rejection and restore rejection leave the service disconnected with
 	expect(h.device.attempts).toBe(0);
 });
 
-test('a pending picker is not opened again and cancellation does not create a connection error', async () => {
+test('a pending picker is not opened again; cancellation gives feedback cleared by a successful connect', async () => {
 	const h = await harness({ connect: false });
 	let resolve!: (devices: FakeHIDDevice[]) => void;
 	vi.spyOn(h.hid, 'requestDevice').mockImplementationOnce(
@@ -70,7 +70,10 @@ test('a pending picker is not opened again and cancellation does not create a co
 	resolve([]);
 	expect(await first).toBeNull();
 	expect(h.hid.requestDevice).toHaveBeenCalledOnce();
-	expect(h.service.getState()).toMatchObject({ connection: 'disconnected', error: null });
+	expect(h.service.getState()).toMatchObject({ connection: 'disconnected', error: 'request-empty' });
+	expect(h.device.attempts).toBe(0);
+	expect(await h.service.connect()).toBe(h.device);
+	expect(h.service.getState()).toMatchObject({ connection: 'connected', error: null });
 });
 
 test('selection/disconnection reject strangers; closing a permitted cable can fail without losing state cleanup', async () => {

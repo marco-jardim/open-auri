@@ -50,6 +50,10 @@ test.each(['pt-BR', 'en-US'] as const)(
 	'all cable status and refusal lookups have localized copy in %s',
 	(locale) =>
 		requestLocale.run({ locale }, () => {
+			for (const key of ['cable_connect_hint', 'cable_connect_no_selection'] as const) {
+				expect(m[key]().trim().length).toBeGreaterThan(0);
+				expect(m[key]()).not.toBe(key);
+			}
 			for (const [lookup, prefix] of [
 				[lampLabel, ''],
 				[lampState, 'cable_lamp_state_'],

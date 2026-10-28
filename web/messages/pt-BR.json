@@ -512,6 +512,8 @@
 	"cable_confirm_volume": "Abaixei o volume",
 	"cable_confirmations_heading": "Confirmações",
 	"cable_connect": "Conectar cabo",
+	"cable_connect_hint": "Clique em Conectar cabo e escolha Kuba Auri na lista do navegador. Só assim ele reconhece o cabo. Basta autorizar uma vez; depois, a reconexão é automática.",
+	"cable_connect_no_selection": "Nenhum cabo escolhido. Se o Kuba Auri não apareceu na lista, confira o cabo USB (alguns só carregam) e tente outra porta.",
 	"cable_counter_day": "hoje",
 	"cable_counter_session": "nesta sessão",
 	"cable_counter_total": "no total",

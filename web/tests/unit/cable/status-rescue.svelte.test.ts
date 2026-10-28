@@ -15,6 +15,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	await cleanup();
+	vi.unstubAllGlobals();
 });
 
 /**
@@ -32,11 +33,47 @@ async function expectRefused(control: Locator, reason: string) {
 	await userEvent.keyboard('{Enter}');
 }
 
+test('real disconnected status explains browser recognition and empty selection is polite feedback', async () => {
+	const fake = cableUi({ mode: 'real' });
+	await render(CableStatus, { service: fake.service });
+	await expect.element(page.getByText(m.cable_connect_hint(), { exact: true })).toBeVisible();
+	fake.publish({ error: 'request-empty' });
+	await expect
+		.element(page.getByText(m.cable_connect_no_selection(), { exact: true }))
+		.toHaveAttribute('role', 'status');
+	expect(page.getByRole('alert').elements()).toHaveLength(0);
+	const device = new FakeHIDDevice();
+	fake.publish({
+		connection: 'connected',
+		device,
+		deviceLabel: 'Kuba Auri',
+		devices: [device],
+		deviceLabels: ['Kuba Auri'],
+		error: null
+	});
+	await tick();
+	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
+	expect(page.getByText(m.cable_connect_no_selection(), { exact: true }).elements()).toHaveLength(0);
+});
+
+test('native Android status does not give WebHID browser permission instructions', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const fake = cableUi({ mode: 'real' });
+	await render(CableStatus, { service: fake.service });
+	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
+	await page.getByRole('button', { name: m.cable_connect(), exact: true }).click();
+	expect(fake.connect).toHaveBeenCalledExactlyOnceWith();
+});
+
 test('status reflects connection, mode and errors without connecting automatically', async () => {
 	const fake = cableUi();
 	await render(CableStatus, { service: fake.service });
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_status_disconnected());
 	await expect.element(page.getByText(m.cable_simulated_hint())).toBeVisible();
+	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
 	expect(fake.connect).not.toHaveBeenCalled();
 	await page.getByRole('button', { name: m.cable_connect(), exact: true }).click();
 	expect(fake.connect).toHaveBeenCalledExactlyOnceWith();

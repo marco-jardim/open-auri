@@ -382,6 +382,9 @@
 			</div>
 			{#if !inApp}<p class="note interface-note">{m.cabo_support()}</p>{/if}
 			<UsbDiagnostics {engineering} {inApp} device={nativeDevice} />
+			{#if cable?.error === 'request-empty'}
+				<p role="status" aria-live="polite">{m.cable_connect_no_selection()}</p>
+			{/if}
 			{#if cable?.error === 'request-failed' || cable?.error === 'restore-failed'}<p role="status">
 					{m.cabo_connection_error()}
 				</p>{/if}

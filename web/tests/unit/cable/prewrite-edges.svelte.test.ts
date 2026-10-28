@@ -18,6 +18,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	await cleanup();
+	vi.unstubAllGlobals();
 	await setLocale('pt-BR', { reload: false });
 });
 
@@ -35,6 +36,69 @@ async function expectLocked(button: Locator, reason: string) {
 async function expectArmed(button: Locator) {
 	await expect.element(button).not.toHaveAttribute('aria-disabled');
 }
+
+test('without a cable the checklist explains recognition and connects directly, respecting busy gates', async () => {
+	const fake = cableUi({ mode: 'real' });
+	await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose: vi.fn()
+	});
+	const connect = page.getByRole('button', { name: m.cable_connect(), exact: true });
+	await expect.element(page.getByText(m.cable_connect_hint(), { exact: true })).toBeVisible();
+	await connect.click();
+	expect(fake.connect).toHaveBeenCalledExactlyOnceWith();
+	fake.publish({ connection: 'connecting' });
+	await expectLocked(connect, m.cabo_fux_connecting());
+	(connect.element() as HTMLButtonElement).click();
+	expect(fake.connect).toHaveBeenCalledOnce();
+	fake.publish({ writing: true });
+	await expectLocked(connect, m.cabo_fux_busy_writing());
+	(connect.element() as HTMLButtonElement).click();
+	expect(fake.connect).toHaveBeenCalledOnce();
+	fake.publish({ writing: false, connection: 'disconnected', error: 'request-empty' });
+	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_connect_no_selection());
+	expect(page.getByRole('alert').elements()).toHaveLength(0);
+	const device = new FakeHIDDevice();
+	fake.publish({ device, devices: [device], deviceLabels: ['Kuba Auri'], error: null });
+	await tick();
+	expect(connect.elements()).toHaveLength(0);
+	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
+	expect(page.getByRole('status').elements()).toHaveLength(0);
+});
+
+test('simulated checklist offers a simulated connection, not browser permission instructions', async () => {
+	const fake = cableUi();
+	await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose: vi.fn()
+	});
+	await expect.element(page.getByText(m.cable_simulated_hint(), { exact: true })).toBeVisible();
+	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
+	await page.getByRole('button', { name: m.cable_connect(), exact: true }).click();
+	expect(fake.connect).toHaveBeenCalledExactlyOnceWith();
+});
+
+test('native Android checklist uses native connection instructions, never browser permission copy', async () => {
+	vi.stubGlobal('Capacitor', {
+		isNativePlatform: () => true,
+		getPlatform: () => 'android'
+	});
+	const fake = cableUi({ mode: 'real' });
+	await render(PreWriteChecklist, {
+		service: fake.service,
+		open: true,
+		...NEUTRO,
+		onclose: vi.fn()
+	});
+	await expect.element(page.getByText(m.android_native_picker_hint(), { exact: true })).toBeVisible();
+	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
+	await page.getByRole('button', { name: m.cable_connect(), exact: true }).click();
+	expect(fake.connect).toHaveBeenCalledExactlyOnceWith();
+});
 
 test('refusal preserves confirmations, success clears them, and closing/reopening starts fresh', async () => {
 	const device = new FakeHIDDevice();

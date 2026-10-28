@@ -445,8 +445,8 @@ export interface CableState {
 	rescue: RescueState | null;
 	queue: QueueState | null;
 	lastOutcome: WriteOutcome | null;
-	/** Last connection error code, if any. */
-	error: 'request-failed' | 'restore-failed' | 'journal-failed' | null;
+	/** Last connection feedback/error code; request-empty is informational, not a failure. */
+	error: 'request-empty' | 'request-failed' | 'restore-failed' | 'journal-failed' | null;
 }
 
 export interface CableWrittenDetail {
