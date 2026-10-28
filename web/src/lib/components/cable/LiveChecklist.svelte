@@ -171,7 +171,7 @@
 	closedby="closerequest"
 	class="live-checklist"
 	data-live-checklist
-	use:modalDialog={{ open, onDismiss: onclose }}
+	use:modalDialog={{ open, onDismiss: onclose, canDismiss: () => !starting }}
 >
 	{#if checklist !== null}
 		<div class="body">
@@ -237,7 +237,10 @@
 			{/if}
 
 			<footer class="foot">
-				<Button variant="plate" onclick={() => onclose()}>{m.cable_live_cancel()}</Button>
+				<!-- While "Começar" runs, the outcome must reach the page: no closing meanwhile. -->
+				<Button variant="plate" loading={starting} onclick={() => onclose()}
+					>{m.cable_live_cancel()}</Button
+				>
 				<Button
 					variant="primary"
 					disabledReason={startReason}

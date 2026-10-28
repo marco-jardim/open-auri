@@ -26,7 +26,7 @@ export interface ClientAppOptions {
 	audio?: AudioEngine;
 	cable?: Pick<
 		CableServiceDeps,
-		'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId' | 'livePolicy'
+		'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId' | 'livePolicy' | 'nativeLiveApply'
 	>;
 	/**
 	 * Toast region store. The root layout creates it before the runtime chunk loads and injects
@@ -73,7 +73,11 @@ export function createClientApp(options: ClientAppOptions = {}) {
 			append(entry) {
 				if (!state.journal.append(entry)) throw new Error('Could not persist cable journal');
 			},
-			last: () => state.journal.entries.at(-1) ?? null
+			last: () => state.journal.entries.at(-1) ?? null,
+			// Shared across tabs (storage events): each cable's saved curve for the live preview.
+			get entries() {
+				return state.journal.entries;
+			}
 		},
 		flash: {
 			get() {

@@ -243,6 +243,8 @@ test('an interruption restored from the journal on load is a polite region, not 
 	await render(RescueNotice, { service: fake.service, onrescue: vi.fn() });
 	await expect.element(page.getByRole('region', { name: m.cable_rescue_title() })).toBeVisible();
 	await expect.element(page.getByRole('status')).toHaveTextContent(m.cable_rescue_body());
+	// B12: the data reaches the cable before the save command, so it may already play it.
+	await expect.element(page.getByText(m.cable_rescue_live(), { exact: true })).toBeVisible();
 	expect(page.getByRole('alert').elements()).toHaveLength(0);
 	await expect
 		.element(page.getByRole('button', { name: m.cable_rescue_action() }))

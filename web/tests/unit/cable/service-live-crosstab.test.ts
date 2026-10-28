@@ -9,8 +9,8 @@ import {
 	cableAliveLock,
 	parseLiveMarker
 } from '../../../src/lib/cable/service.ts';
-import type { Band, LiveCurve } from '../../../src/lib/cable/types.ts';
-import { CONFIRMED, TRUSTED_CLICK, off, setup, type SetupOptions } from './harness.ts';
+import type { Band, JournalEntry, LiveCurve } from '../../../src/lib/cable/types.ts';
+import { CONFIRMED, T0, TRUSTED_CLICK, off, setup, type SetupOptions } from './harness.ts';
 import { memoryInflight, memoryLocks, type MemoryInflight } from './locks-fake.ts';
 
 type Harness = Awaited<ReturnType<typeof setup>>;
@@ -23,6 +23,20 @@ function curve(preampDb: number): LiveCurve {
 
 function crcOf(preampDb: number): number {
 	return Number(gateForWrite(OFF_BANDS, preampDb, { experimental: false }).metrics.payloadCrc);
+}
+
+/** An `ok` journal entry: the default cable holds `preampDb` (flat) in flash. */
+function savedEntry(preampDb: number): JournalEntry {
+	return {
+		schema: 1,
+		at: T0 - 60_000,
+		name: 'Salvo',
+		crc: crcOf(preampDb),
+		preampDb,
+		bands: OFF_BANDS,
+		status: 'ok',
+		device: 'USB DSP Audio'
+	};
 }
 
 const macrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -112,7 +126,7 @@ describe('one live session per origin', () => {
 describe('live marker', () => {
 	test('written before the first apply, removed after a successful revert', async () => {
 		const o = origin();
-		const a = await o.tab('tab-a');
+		const a = await o.tab('tab-a', { journal: [savedEntry(-14)] });
 		await start(a, -12);
 		const marker = o.liveMarker.value === null ? null : parseLiveMarker(o.liveMarker.value);
 		expect(marker).toMatchObject({ tabId: 'tab-a', device: 'USB DSP Audio', crc: crcOf(-12) });
@@ -169,6 +183,57 @@ describe('live marker', () => {
 		a.service.dispose();
 		await macrotask();
 		expect(b.service.getState().liveOrphan).toMatchObject({ crc: crcOf(-12) });
+	});
+
+	test("another tab's newer save is the saved curve: the marker follows it, not this tab's", async () => {
+		const o = origin();
+		const a = await o.tab('tab-a');
+		const b = await o.tab('tab-b');
+		// This tab saved X (-14); later another tab saved Y (-13) to the same cable.
+		expect((await save(a, -14)).status).toBe('ok');
+		b.time.value += 5_000;
+		a.time.value += 5_000;
+		expect((await save(b, -13)).status).toBe('ok');
+		const y = b.journal.entries.at(-1);
+		if (y === undefined) throw new Error('tab B journaled nothing');
+		// The shared journal reaches tab A (storage event).
+		a.journal.append(y);
+		// Previewing X is a preview now (the flash holds Y): marker written.
+		await start(a, -14);
+		const marker = () => (o.liveMarker.value === null ? null : parseLiveMarker(o.liveMarker.value));
+		expect(marker()).toMatchObject({ tabId: 'tab-a', crc: crcOf(-14) });
+		// Y plays again: the marker goes.
+		a.service.queueLive(curve(-13));
+		await a.service.whenLiveIdle();
+		expect(a.service.getState().live?.applied?.crc).toBe(crcOf(-13));
+		expect(o.liveMarker.value).toBeNull();
+		// A revert targets Y, even when this tab offers X.
+		a.service.queueLive(curve(-13.5));
+		await a.service.whenLiveIdle();
+		expect(marker()).toMatchObject({ crc: crcOf(-13.5) });
+		const reverted = await a.service.revertLive({
+			gesture: a.service.createGesture(TRUSTED_CLICK),
+			saved: curve(-14)
+		});
+		expect(reverted.status).toBe('accepted');
+		expect(a.service.getState().live?.applied?.crc).toBe(crcOf(-13));
+		expect(o.liveMarker.value).toBeNull();
+	});
+
+	test('a preview of the stale per-tab save is not reverted: its marker stays', async () => {
+		const o = origin();
+		const a = await o.tab('tab-a');
+		expect((await save(a, -14)).status).toBe('ok');
+		a.time.value += 5_000;
+		// Another tab's newer save of the same cable (Y, -13), arrived through storage.
+		a.journal.append({ ...savedEntry(-13), at: a.time.value });
+		await start(a, -12);
+		a.service.queueLive(curve(-14));
+		await a.service.whenLiveIdle();
+		expect(a.service.getState().live?.applied?.crc).toBe(crcOf(-14));
+		// X is not what the flash holds: the marker names it.
+		const marker = o.liveMarker.value === null ? null : parseLiveMarker(o.liveMarker.value);
+		expect(marker).toMatchObject({ tabId: 'tab-a', crc: crcOf(-14) });
 	});
 
 	test('the live tab itself never reports its own marker as an orphan', async () => {

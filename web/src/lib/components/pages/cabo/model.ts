@@ -77,6 +77,15 @@ export function lastWritten(cable: CableState | null): boolean {
 }
 
 /**
+ * Live previews (no flash write) this page applied to a cable, all sessions (`LiveState.total`,
+ * memory only). 0 before the first session; never part of the flash counters.
+ */
+export function livePreviewCount(cable: CableState | null): number {
+	const total = cable?.live?.total;
+	return typeof total === 'number' && Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
+}
+
+/**
  * Live progress of a write, if the service reports it (`cable:progress` on `service.events`,
  * detail `{ reportsSent, committed }`). Until the service dispatches it, nothing is invented:
  * the tape shows the real result when the write ends.

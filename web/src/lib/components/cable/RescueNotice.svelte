@@ -39,6 +39,8 @@
 		{#if cable.rescue.reportsSent !== null}
 			<p class="text-sm">{m.cable_rescue_reports({ count: String(cable.rescue.reportsSent) })}</p>
 		{/if}
+		<!-- B12: the data reports reach the cable before the commit, so it may already play them. -->
+		<p class="text-sm">{m.cable_rescue_live()}</p>
 		{#if cable.rescue.deviceLabel !== null}
 			<p class="text-sm">{m.cable_rescue_device({ device: cable.rescue.deviceLabel })}</p>
 		{/if}

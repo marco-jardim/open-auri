@@ -42,6 +42,11 @@ export interface HidLike {
 export interface JournalPort {
 	append(entry: JournalEntry): void;
 	last(): JournalEntry | null;
+	/**
+	 * Optional: every entry, oldest first, as persisted (shared by every tab). The live preview
+	 * reads each cable's saved curve from it; without it only `last()` is consulted.
+	 */
+	readonly entries?: readonly JournalEntry[];
 }
 
 /**
@@ -185,8 +190,8 @@ export interface CableServiceDeps {
 	livePolicy?: { readonly enabled: boolean };
 	/**
 	 * Native (Android) transport only: whether the app's write guard accepts live applies
-	 * (`detectNativeCable()` → `liveApply`). Absent or false: native is not live-capable.
-	 * TODO(#72): pass `liveApply` from the native detection result where the service is built.
+	 * (`detectNativeCable()` → `liveApply`, passed by `mountNativeCable`). Absent or false:
+	 * native is not live-capable.
 	 */
 	nativeLiveApply?: boolean;
 	/**
@@ -647,8 +652,10 @@ export interface LiveGestureRequest {
 
 export interface LiveRevertRequest extends LiveGestureRequest {
 	/**
-	 * The last saved curve; when absent, the last curve this page saved, else the last `ok`
-	 * journal entry (`simulated` in simulated mode). None: refused `no-saved-curve`.
+	 * The last saved curve, used only when its payload CRC equals the session cable's saved
+	 * curve: the newest `ok` journal entry naming that cable (`simulated` in simulated mode),
+	 * or the last curve this page committed to it when that is newer. Otherwise that saved curve
+	 * is applied instead; none known: refused `no-saved-curve`.
 	 */
 	saved?: LiveSavedCurve | null;
 }

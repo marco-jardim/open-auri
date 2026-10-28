@@ -16,7 +16,7 @@ import {
 } from '../../../src/lib/cable/service.ts';
 import { NATIVE_HID_BRAND } from '../../../src/lib/cable/native/brand.ts';
 import { onWriteProgress } from '../../../src/lib/cable/write-flag.ts';
-import type { Band, LiveCurve, Written } from '../../../src/lib/cable/types.ts';
+import type { Band, JournalEntry, LiveCurve, Written } from '../../../src/lib/cable/types.ts';
 import {
 	CONFIRMED,
 	T0,
@@ -75,9 +75,28 @@ function save(h: Harness, preampDb: number) {
 	});
 }
 
-/** Nothing a live apply must never touch was touched. */
-function expectNoWriteBookkeeping(h: Harness) {
-	expect(h.journal.entries).toEqual([]);
+/** An `ok` journal entry: the cable `device` holds `saved` in flash (written before T0). */
+function savedEntry(
+	saved: LiveCurve,
+	device = 'USB DSP Audio',
+	experimental = false
+): JournalEntry {
+	const verdict = gateForWrite(saved.bands, saved.preampDb, { experimental });
+	return {
+		schema: 1,
+		at: T0 - 60_000,
+		name: 'Salvo',
+		crc: Number(verdict.metrics.payloadCrc),
+		preampDb: saved.preampDb,
+		bands: [...saved.bands],
+		status: 'ok',
+		device
+	};
+}
+
+/** Nothing a live apply must never touch was touched (`journal`: the seeded entries). */
+function expectNoWriteBookkeeping(h: Harness, journal: JournalEntry[] = []) {
+	expect(h.journal.entries).toEqual(journal);
 	expect(h.flash.records).toEqual([]);
 	expect(h.flash.touches).toEqual([]);
 	expect(h.written).toEqual([]);
@@ -289,7 +308,7 @@ describe('queueLive pacing', () => {
 	});
 
 	test('a lock that stays busy: capped, the edit is dropped with lastError busy', async () => {
-		const h = await live();
+		const h = await live({ journal: [savedEntry(curve(-14))] });
 		await start(h, -12);
 		const busy = busyWrites(h, Number.POSITIVE_INFINITY);
 		h.service.queueLive(curve(-11));
@@ -492,7 +511,8 @@ describe('end of a session', () => {
 	});
 
 	test('stopLive without revert leaves the live curve; with revert applies the saved one', async () => {
-		const h = await live();
+		const journal = [savedEntry(curve(-14))];
+		const h = await live({ journal });
 		await start(h, -12);
 		const stopped = await h.service.stopLive({ revert: false });
 		expect(stopped.status).toBe('accepted');
@@ -509,7 +529,7 @@ describe('end of a session', () => {
 		expect(reverted.status).toBe('accepted');
 		expect(liveCrc(h.device.firmware)).toBe(crcOf(-14));
 		expect(h.service.getState().live).toMatchObject({ status: 'ended', endedReason: 'reverted' });
-		expectNoWriteBookkeeping(h);
+		expectNoWriteBookkeeping(h, journal);
 	});
 
 	test('revertLive: refused without a saved curve, else applies the last save', async () => {
@@ -649,7 +669,7 @@ describe('capability', () => {
 		expect(h.journal.entries).toEqual([]);
 	});
 
-	function nativeService(extra: { nativeLiveApply?: boolean } = {}) {
+	function nativeService(extra: { nativeLiveApply?: boolean; locks?: null } = {}) {
 		const hid = new FakeHID({ devices: [new FakeHIDDevice()] });
 		Object.defineProperty(hid, NATIVE_HID_BRAND, { value: true });
 		const service = createCableService({
@@ -682,6 +702,15 @@ describe('capability', () => {
 
 	test('native with the capability is live-capable', () => {
 		expect(nativeService({ nativeLiveApply: true }).getState().liveCapable).toBe(true);
+	});
+
+	test('#72: native liveApply false or absent is not live-capable; true needs Web Locks', () => {
+		expect(nativeService({ nativeLiveApply: false }).getState().liveCapable).toBe(false);
+		expect(nativeService().getState().liveCapable).toBe(false);
+		expect(nativeService({ nativeLiveApply: true }).getState().liveCapable).toBe(true);
+		expect(nativeService({ nativeLiveApply: true, locks: null }).getState().liveCapable).toBe(
+			false
+		);
 	});
 
 	test('a real cable without Web Locks is not live-capable (S5)', async () => {
@@ -746,7 +775,7 @@ describe('QA fixes (#67/#70)', () => {
 	});
 
 	test('2: stopLive with a held revert is not "reverted": the session goes on', async () => {
-		const h = await live();
+		const h = await live({ journal: [savedEntry(hsCurve(), 'USB DSP Audio', true)] });
 		await start(h, -12);
 		// The saved curve fails the session's gate (HS without the experimental option): held.
 		const outcome = await h.service.stopLive({
@@ -767,7 +796,7 @@ describe('QA fixes (#67/#70)', () => {
 	});
 
 	test('2: a revert whose report 8 failed is "unknown", not reverted; ack level unchanged', async () => {
-		const h = await live();
+		const h = await live({ journal: [savedEntry(curve(-14))] });
 		await start(h, -12);
 		h.device.faults.throwAtReport = 17;
 		const outcome = await h.service.stopLive({
@@ -959,5 +988,80 @@ describe('QA fixes (#67/#70)', () => {
 			await h.service.revertLive({ gesture: h.service.createGesture(TRUSTED_CLICK) })
 		).toMatchObject({ status: 'refused', reason: 'no-saved-curve' });
 		expect(liveCrc(h.device.firmware)).toBe(crcOf(-12));
+		// Not with the other cable's curve as `saved` either: nothing is sent.
+		const attempts = h.device.attempts;
+		expect(
+			await h.service.revertLive({
+				gesture: h.service.createGesture(TRUSTED_CLICK),
+				saved: curve(-13)
+			})
+		).toMatchObject({ status: 'refused', reason: 'no-saved-curve' });
+		expect(h.device.attempts).toBe(attempts);
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-12));
+	});
+
+	test("11: two cables: a revert given the other cable's curve applies this cable's own", async () => {
+		const h = await live();
+		const other = new FakeHIDDevice({ clock: h.clock, productName: 'Outro cabo' });
+		h.hid.addDevice(other);
+		await h.service.restore();
+		// Cable 1 saved -14, then cable 2 saved -13 (the newest journal entry, `lastWritten`).
+		expect((await save(h, -14)).status).toBe('ok');
+		h.time.value += 5_000;
+		expect(h.service.selectDevice(other)).toBe(true);
+		expect((await save(h, -13)).status).toBe('ok');
+		expect(h.journal.entries.at(-1)).toMatchObject({ device: 'Outro cabo', crc: crcOf(-13) });
+		expect(h.service.selectDevice(h.device)).toBe(true);
+		await start(h, -12);
+		const marker = () => (h.liveMarker.value === null ? null : JSON.parse(h.liveMarker.value));
+		expect(marker()).toMatchObject({ device: 'USB DSP Audio', crc: crcOf(-12) });
+		const reverted = await h.service.revertLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			saved: curve(-13)
+		});
+		// Cable 1 plays its own saved curve, never cable 2's.
+		expect(reverted.status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-14));
+		expect(liveCrc(other.firmware)).toBe(crcOf(-13));
+		expect(h.service.getState().live?.ackLevelDb).toBeCloseTo(levelOf(-14), 9);
+		expect(h.liveMarker.value).toBeNull();
+		// Cable 2's curve on cable 1 is a preview: the marker names it and stays.
+		h.service.queueLive(curve(-13.5));
+		h.service.queueLive(curve(-13));
+		await h.service.whenLiveIdle();
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-13));
+		expect(marker()).toMatchObject({ device: 'USB DSP Audio', crc: crcOf(-13) });
+	});
+
+	test('11: a louder curve given as `saved` never bypasses the loudness hold', async () => {
+		const h = await live({ journal: [savedEntry(curve(-14))] });
+		await start(h, -12);
+		const reverted = await h.service.revertLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			saved: curve(-2)
+		});
+		// The cable's saved curve was applied instead; -2 never reached the cable.
+		expect(reverted.status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-14));
+		expect(h.service.getState().live?.ackLevelDb).toBeCloseTo(levelOf(-14), 9);
+		// Sent as an ordinary edit, the louder curve is held for loudness.
+		const applies = h.device.firmware.appliedCount;
+		h.service.queueLive(curve(-2));
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live?.hold).toMatchObject({ reason: 'loudness' });
+		expect(h.device.firmware.appliedCount).toBe(applies);
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-14));
+	});
+
+	test('11: `saved` matching the cable\'s saved CRC is accepted as given', async () => {
+		const h = await live({ journal: [savedEntry(curve(-14))] });
+		await start(h, -12);
+		const reverted = await h.service.revertLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			saved: curve(-14)
+		});
+		expect(reverted.status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-14));
+		expect(h.liveMarker.value).toBeNull();
 	});
 });

@@ -135,6 +135,11 @@
 		 * so it works without the browser preview playing.
 		 */
 		abLive?: boolean;
+		/**
+		 * Why side A is unavailable right now (a live cable preview with no known saved curve), or
+		 * null. A stays focusable (aria-disabled) and says why.
+		 */
+		aReason?: string | null;
 		referenceName: string;
 		previewError?: string | null;
 		previewDisabled?: boolean;
@@ -199,6 +204,7 @@
 		paused = false,
 		side,
 		abLive = false,
+		aReason = null,
 		referenceName,
 		previewError = null,
 		previewDisabled = false,
@@ -694,6 +700,7 @@
 	function chooseSide(next: ABSide): void {
 		// aria-disabled keeps the tab focusable: a click, Enter or Space must still do nothing.
 		if (!abReady) return;
+		if (next === 'A' && aReason !== null) return;
 		onside(next);
 	}
 
@@ -1228,8 +1235,12 @@
 						role="radio"
 						class="tab"
 						aria-checked={side === 'A'}
-						aria-disabled={abReady ? undefined : 'true'}
-						aria-describedby={abReady ? undefined : `${legendId}-ab`}
+						aria-disabled={abReady && aReason === null ? undefined : 'true'}
+						aria-describedby={!abReady
+							? `${legendId}-ab`
+							: aReason !== null
+								? `${legendId}-ab-a`
+								: undefined}
 						onclick={() => chooseSide('A')}>{m.curva_ab_a({ name: referenceName })}</button
 					>
 					<button
@@ -1246,6 +1257,8 @@
 		</div>
 		{#if !abReady}
 			<small class="ab-why" id="{legendId}-ab">{m.curva_v2_ab_unavailable()}</small>
+		{:else if aReason !== null}
+			<small class="ab-why" id="{legendId}-ab-a">{aReason}</small>
 		{/if}
 		<div class="transport">
 			<Transport

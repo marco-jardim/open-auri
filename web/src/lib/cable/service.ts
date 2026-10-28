@@ -452,9 +452,10 @@ interface LiveCaptured {
 	done: () => void;
 }
 
-/** The last curve this page committed to one cable (a revert target). */
+/** The curve one cable holds in flash (a revert target), and when it was committed (epoch ms). */
 interface SavedOnCable extends LiveSavedCurve {
 	crc: number;
+	at: number;
 }
 
 /** One live preview session (one device; it never moves to another one). */
@@ -754,8 +755,7 @@ export function createCableService(
 		if (livePolicy.enabled !== true) return false;
 		// A real cable needs Web Locks: the session lock is what keeps other tabs out (S5).
 		if (mode === 'real' && locks === null) return false;
-		// TODO(#72): `nativeLiveApply` must be passed from `detectNativeCable()` → `liveApply`
-		// where the native service is built; until then native is never live-capable.
+		// `nativeLiveApply` comes from `detectNativeCable()` → `liveApply` (`mountNativeCable`).
 		return native ? deps.nativeLiveApply === true : true;
 	}
 
@@ -1964,7 +1964,7 @@ export function createCableService(
 			}
 			// S5: before a curve other than the saved one reaches the cable, leave a marker, so a
 			// reload or another tab can tell the cable may play an unsaved preview.
-			if (crc !== (savedByDevice.get(s.device)?.crc ?? null)) writeLiveMarker(s, crc);
+			if (crc !== savedCrcOf(s)) writeLiveMarker(s, crc);
 			lastApplyStartMs = clock.now();
 			try {
 				const result = await withWriteFlag(() =>
@@ -2075,10 +2075,9 @@ export function createCableService(
 			s.applies += 1;
 			liveTotal += 1;
 			s.lastError = null;
-			// The saved curve plays again: the preview marker is moot (S5).
-			if (next.revert || crc === (savedByDevice.get(s.device)?.crc ?? null)) {
-				cableBackToSaved(s.label);
-			}
+			// The saved curve plays again: the preview marker is moot (S5). Only the cable's own
+			// saved curve (shared journal), never another curve, even one sent as a revert.
+			if (crc === savedCrcOf(s)) cableBackToSaved(s.label);
 			return true;
 		}
 		if (result.status === 'interrupted' && result.error instanceof DeviceDisconnectedError) {
@@ -2104,23 +2103,71 @@ export function createCableService(
 	}
 
 	/**
-	 * The saved curve a revert on `s` applies: the caller's, else the last curve this page
-	 * committed to that cable, else the last journal entry when it names that cable. A save to
-	 * another cable is never a revert target.
+	 * The newest committed journal entry (`ok`; `simulated` in simulated mode) naming the cable
+	 * `device` (its truncated label). The journal is shared by every tab; a port without
+	 * `entries` only offers its last entry.
 	 */
-	function savedCurve(
-		given: LiveSavedCurve | null | undefined,
-		s: LiveSession
-	): LiveSavedCurve | null {
-		if (given !== null && given !== undefined) {
-			return { bands: given.bands, preampDb: given.preampDb };
+	function lastCommittedEntry(device: string): JournalEntry | null {
+		const status = mode === 'simulated' ? 'simulated' : 'ok';
+		let entries: readonly JournalEntry[];
+		try {
+			const all = deps.journal.entries;
+			if (all !== undefined) {
+				entries = all;
+			} else {
+				const last = deps.journal.last();
+				entries = last === null ? [] : [last];
+			}
+		} catch (cause) {
+			console.warn('cable journal unreadable for the saved curve', cause);
+			return null;
 		}
-		const own = savedByDevice.get(s.device);
-		if (own !== undefined) return { bands: own.bands, preampDb: own.preampDb };
-		const entry = deps.journal.last();
-		if (entry === null || entry.device !== truncate(s.label, 64)) return null;
-		const committed = mode === 'simulated' ? entry.status === 'simulated' : entry.status === 'ok';
-		return committed ? { bands: entry.bands, preampDb: entry.preampDb } : null;
+		for (let i = entries.length - 1; i >= 0; i -= 1) {
+			const entry = entries[i];
+			if (entry !== undefined && entry.status === status && entry.device === device) {
+				return entry;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The curve the session's cable holds in flash, from shared data: the newest committed
+	 * journal entry naming that cable (any tab's), or the last curve this page committed to it
+	 * when that one is newer (or the journal names none). A save to another cable never counts.
+	 * Null: unknown.
+	 */
+	function cableSaved(s: LiveSession): SavedOnCable | null {
+		const own = savedByDevice.get(s.device) ?? null;
+		const entry = lastCommittedEntry(truncate(s.label, 64));
+		if (entry !== null && (own === null || entry.at >= own.at)) {
+			return { bands: entry.bands, preampDb: entry.preampDb, crc: entry.crc, at: entry.at };
+		}
+		return own;
+	}
+
+	/** CRC of the session cable's saved curve (`cableSaved`), or null when unknown. */
+	function savedCrcOf(s: LiveSession): number | null {
+		return cableSaved(s)?.crc ?? null;
+	}
+
+	/**
+	 * The curve a revert on `s` applies (confirmed): the caller's `given` only when its gated
+	 * payload CRC is the cable's saved one, otherwise the cable's saved curve itself.
+	 */
+	function revertCurve(
+		s: LiveSession,
+		given: LiveSavedCurve | null | undefined,
+		target: SavedOnCable
+	): LiveCaptured {
+		if (given !== null && given !== undefined) {
+			const verdict = gateForWrite(given.bands, given.preampDb, liveGateOptions(s));
+			const crc = verdict.metrics.payloadCrc;
+			if (crc !== undefined && Number(crc) === target.crc) {
+				return capturedOf(verdict, given.preampDb, true, true);
+			}
+		}
+		return captureLive(s, target.bands, target.preampDb, true, true);
 	}
 
 	/** `device` committed `authorized`: its revert target, and its preview marker is moot. */
@@ -2128,7 +2175,8 @@ export function createCableService(
 		savedByDevice.set(device, {
 			bands: copyBands(authorized.snapshot),
 			preampDb: authorized.preampDb,
-			crc: authorized.crc
+			crc: authorized.crc,
+			at: nowMs()
 		});
 		cableBackToSaved(label);
 	}
@@ -2189,9 +2237,9 @@ export function createCableService(
 		if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
 		const s = activeLive();
 		if (s === null) return liveRefuse('no-session');
-		const saved = savedCurve(request.saved, s);
-		if (saved === null) return liveRefuse('no-saved-curve');
-		const curve = captureLive(s, saved.bands, saved.preampDb, true, true);
+		const target = cableSaved(s);
+		if (target === null) return liveRefuse('no-saved-curve');
+		const curve = revertCurve(s, request.saved, target);
 		clearHold(s);
 		s.pending?.done();
 		s.pending = null;
@@ -2199,7 +2247,9 @@ export function createCableService(
 		emit();
 		scheduleLive();
 		await curve.settled;
-		const failure = revertFailure(s, curve);
+		// Success only when the cable plays its saved curve now (another tab may have saved meanwhile).
+		const failure =
+			revertFailure(s, curve) ?? (curve.crc === savedCrcOf(s) ? null : ('error' as const));
 		if (failure !== null) {
 			return liveRefuse('revert-failed', {
 				revertFailure: failure,

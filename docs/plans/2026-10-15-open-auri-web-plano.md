@@ -246,11 +246,13 @@ Transformar os mocks aprovados (8 páginas com homenagens) em um produto real:
 | Versões | Sempre a última estável do upstream, verificada em cada PF (0.14). |
 | Rodapé | Link "Código-fonte no GitHub" (`https://github.com/marco-jardim/open-auri`) abaixo de "Aviso legal completo", em todas as páginas. |
 | Licenças | Presets e descrições da Kuba: o humano pede autorização após o lançamento (Q-KUBA-LIC); os mocks e o produto mostram "licença: a confirmar". Medições e alvos do AutoEq: **incluídos no produto** por decisão do usuário, com atribuição por fonte e processo de remoção a pedido (`D:\git\open-auri\docs\autoeq-data.md`). |
-| EM BREVE | Biquad cru, X2 no cabo, leitura do cabo (firmware, curva atual), modo sem flash (RAM), HP subsônico abaixo da fronteira do gate (≈28,6 Hz em Q 0,5). |
+| EM BREVE | Biquad cru, X2 no cabo, leitura do cabo (firmware, curva atual), HP subsônico abaixo da fronteira do gate (≈28,6 Hz em Q 0,5). Modo sem flash (RAM): **implementado** no app web como "Ouvir no cabo" na Curva (#62), não é mais EM BREVE. |
 
 **2026-10-28 · FH/B12:** os 9 reports de dados sem commit aplicam ao vivo em
-RAM; replug restaura a curva commitada. Modo sem flash e X2/teste cego no cabo
-são viáveis, mas **não implementados**; permanecem EM BREVE. Ver
+RAM; replug restaura a curva commitada. O modo sem flash está **implementado** no
+app web como "Ouvir no cabo" na Curva (#62); a página Cabo mostra as prévias numa
+contagem própria, fora dos contadores da flash. X2/teste cego no cabo é viável,
+mas **não implementado**; permanece EM BREVE. Ver
 [`probing.md`, seção F](../probing.md#medição-acústica-mesmo-dia).
 
 ### 3.2 Verdade do hardware (nunca contradizer)
@@ -1488,7 +1490,7 @@ Regras comuns a todas as páginas:
   - **Candidatos:** oficiais, curva atual, variações.
   - **Rodadas:** ordem sorteada, notas de 0 a 10.
   - **Resultado:** IC de 95% (t de Student) e chave de torneio.
-  - **Cabo:** "Teste no cabo" EM BREVE. Nota de 2026-10-28: B12 mostrou envio sem commit viável para evitar flash; não implementado.
+  - **Cabo:** "Teste no cabo" EM BREVE. Nota de 2026-10-28: B12 mostrou envio sem commit viável para evitar flash; o envio sem commit está implementado como "Ouvir no cabo" na Curva (#62), mas o teste cego no cabo continua não implementado.
   - **S6:** painel de consentimento pronto; o envio é ligado na F4 (T4.16).
   - **Medidores:** nível por candidato ao vivo.
 
@@ -1500,8 +1502,8 @@ Regras comuns a todas as páginas:
   - **Calibração:** VU do checklist com chaves com tampa; o checklist da T2.7 é embutido.
   - **Transporte:** fita dos 9 reports + commit em tempo real e câmera lenta ×10.
   - **Diário, contadores mecânicos e vários cabos.**
-  - **EM BREVE:** ler cabo, firmware, modo RAM, teste cego no cabo.
-  - **2026-10-28 · B12:** modo sem flash viável via 9 reports sem commit; modo RAM e teste cego no cabo continuam EM BREVE, não implementados.
+  - **EM BREVE:** ler cabo, firmware, teste cego no cabo.
+  - **2026-10-28 · B12:** modo sem flash via 9 reports sem commit **implementado** no app web como "Ouvir no cabo" na Curva (#62); o encaixe "Modo sem flash (RAM)" do U8 aponta para ele e o U6 conta as prévias no cabo (sem gravação). Ler cabo, firmware e teste cego no cabo continuam EM BREVE, não implementados.
 
 **T2.16 · Docs `/docs` (Harry Nyquist)**
 - `[route class=implement risk=medium scope=multi needs=edit,shell]` · `implementer`
@@ -2443,7 +2445,7 @@ Inicia por pedido do humano.
 
 - **Ferramenta de bancada** separada (não pública): sondas B1 → B4 → B7, depois B10, B12, B13.
 - **Regras de segurança** de `D:\git\open-auri\docs\probing.md`.
-- **Resultado esperado:** liberar ou ajustar os itens EM BREVE (leitura, RAM, X2 no cabo, biquad cru) e calibrar o gate com medições reais.
+- **Resultado esperado:** liberar ou ajustar os itens EM BREVE (leitura, X2 no cabo, biquad cru; o modo RAM já saiu como "Ouvir no cabo", #62) e calibrar o gate com medições reais.
 - **Ciclo:** PF, testes, QA heavy e DoD próprios, no mesmo formato das fases.
 
 ---

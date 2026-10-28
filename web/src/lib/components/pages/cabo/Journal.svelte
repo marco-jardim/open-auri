@@ -44,6 +44,10 @@
 </script>
 
 <p class="note">{m.cabo_journal_note()}</p>
+{#if entries.some((entry) => entry.status === 'interrupted')}
+	<!-- B12: an interrupted write's data reports may already play until the cable is replugged. -->
+	<p class="note" data-testid="cabo-interrupted-live">{m.cabo_interrupted_live()}</p>
+{/if}
 <div class="tray">
 	{#if entries.length === 0}
 		<EmptyState title={m.empty_journal_title()} why={m.empty_journal_body()} class="journal-empty">

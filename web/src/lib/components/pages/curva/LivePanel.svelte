@@ -3,25 +3,39 @@
 	- The switch shows only when the transport is live-capable and a cable is connected (or a
 	  session still runs); other blocks (loading, a write, no target, the free preview) say why.
 	  On: the live checklist (LiveChecklist; its "Começar" mints the gesture and calls
-	  `startLive`). Off: "Voltar à curva salva" (default; gesture, `stopLive({ revert: true })`)
-	  or "Manter até desconectar" (`stopLive({ revert: false })`).
+	  `startLive`; another tab's session is refused there with `live-elsewhere`). Off: a group
+	  (Escape cancels; focus goes back to the switch) with "Voltar à curva salva" (default;
+	  gesture, `stopLive({ revert: true })`) or "Manter até desconectar" (`stopLive({ revert:
+	  false })`). A failed revert keeps the group open and says why.
 	- Edits and the A/B lever reach the cable through the page (`queueLive`), not here.
 	- The amber chip "No cabo: prévia não salva" shows while the cable plays something other than
-	  the saved curve: "Salvar no cabo" opens the normal write checklist on the applied curve,
-	  "Voltar à curva salva" calls `revertLive` (gesture).
-	- Holds (loudness, gate, unknown state) are announced as alerts; confirmable ones confirm with
-	  a gesture (`confirmLive`). Status changes and the end of a session are announced politely.
+	  the saved curve: "Salvar no cabo" opens the normal write checklist on the applied curve (its
+	  label says which curve; another curve than the editor's is saved under a neutral name),
+	  locked while the cable is still changing or a hold waits; "Voltar à curva salva" calls
+	  `revertLive` (gesture).
+	- Holds (loudness, gate, unknown state, experimental) show a banner; a hold's appearance is
+	  announced once through a persistent alert region, and live / ended transitions once through a
+	  persistent polite region ("applying" is visual only).
+	- An orphan preview (another tab, or this one before a reload) says to unplug and replug.
 	Every service call that needs a gesture mints it synchronously in its click handler.
 -->
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { ClientApp } from '#lib/app/index.ts';
 	import type { CableState, LiveOutcome } from '#lib/cable/types.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import LiveChecklist from '#lib/components/cable/LiveChecklist.svelte';
-	import { formatNumber } from '#lib/components/cable/i18n.ts';
-	import { liveActive, liveRefusalText, liveUnsaved } from '#lib/components/cable/live.ts';
+	import {
+		liveActive,
+		liveHoldAction,
+		liveHoldText,
+		liveOutcomeText,
+		livePlaying,
+		liveSaveLabel,
+		liveUnsaved,
+		type LiveHeldCurve
+	} from '#lib/components/cable/live.ts';
 	import type { Curve } from './model.ts';
 	import { firstReasonText } from './reasons.ts';
 
@@ -35,11 +49,19 @@
 		profile: 'standard' | 'yolo';
 		/** The last saved (written) curve, or null when this browser never wrote one. */
 		saved: Curve | null;
+		/** CRC-16 an accepted revert left on the cable (the saved curve), or null. */
+		savedCrc?: number | null;
+		/** Whose curve the page last sent to the cable (a hold describes it). */
+		heldCurve?: LiveHeldCurve;
+		/** The free preview is on: edits do not reach the cable until it is off. */
+		followPaused?: boolean;
 		/** Why the page itself blocks starting (loading, the free preview), or null. */
 		blockedReason: string | null;
 		locale: string;
 		/** Called in the "Começar" click, right before `startLive`, with the curve it sends. */
 		onbeforestart?: (curve: Curve) => void;
+		/** A revert ended (accepted, or `revert-failed`): what the cable should play now is A. */
+		onrevert?: (outcome: LiveOutcome) => void;
 	}
 
 	let {
@@ -48,9 +70,13 @@
 		experimental,
 		profile,
 		saved,
+		savedCrc = null,
+		heldCurve = 'editor',
+		followPaused = false,
 		blockedReason,
 		locale,
-		onbeforestart
+		onbeforestart,
+		onrevert
 	}: Props = $props();
 
 	const id = $props.id();
@@ -58,9 +84,18 @@
 	const live = $derived(cable?.live ?? null);
 	const active = $derived(liveActive(live));
 	const connected = $derived(cable?.connection === 'connected');
-	const unsaved = $derived(liveUnsaved(live, saved));
+	const orphan = $derived(cable?.liveOrphan ?? null);
+	const unsaved = $derived(liveUnsaved(live, saved, savedCrc));
 	const hold = $derived(active ? (live?.hold ?? null) : null);
-	const shown = $derived(cable !== null && cable.liveCapable && (connected || live !== null));
+	const capable = $derived(cable !== null && cable.liveCapable && (connected || live !== null));
+	const shown = $derived(capable || orphan !== null);
+	/** Which curve the cable plays: the saved one (A), the editor's (B) or another one. */
+	const playing = $derived(
+		livePlaying(live, saved, curve, {
+			savedCrc,
+			prefer: heldCurve === 'saved' ? 'saved' : 'editor'
+		})
+	);
 
 	let checklistOpen = $state(false);
 	let offAsk = $state(false);
@@ -68,6 +103,7 @@
 	let message = $state<string | null>(null);
 	let dismissed = $state(false);
 	let offFirst = $state<HTMLButtonElement | undefined>();
+	let switchElement = $state<HTMLButtonElement | undefined>();
 
 	// A new session: the previous end message and refusals no longer apply.
 	let wasActive = false;
@@ -102,12 +138,14 @@
 			case 'unknown':
 				return m.cable_live_status_unknown();
 			default:
-				return m.cable_live_status_live({ device: live.deviceLabel });
+				return playing === 'saved'
+					? m.cable_live_status_saved({ device: live.deviceLabel })
+					: m.cable_live_status_live({ device: live.deviceLabel });
 		}
 	});
 
-	const endedText = $derived.by(() => {
-		if (live === null || live.status !== 'ended' || dismissed) return null;
+	const endedMessage = $derived.by(() => {
+		if (live === null || live.status !== 'ended') return null;
 		switch (live.endedReason) {
 			case 'disconnected':
 				return m.cable_live_ended_disconnected();
@@ -115,35 +153,100 @@
 				return m.cable_live_ended_reverted();
 			case 'stopped':
 				return m.cable_live_ended_stopped();
+			case 'forgotten':
+				return m.cable_live_ended_forgotten();
 			default:
 				return null;
 		}
 	});
+	const endedText = $derived(dismissed ? null : endedMessage);
 
-	const holdText = $derived.by(() => {
-		if (hold === null) return '';
-		if (hold.reason === 'loudness') {
-			return m.cable_live_hold_loudness({ delta: formatNumber(hold.deltaDb ?? 0, 1) });
-		}
-		if (hold.reason === 'unknown-state') return m.cable_live_hold_unknown();
-		if (hold.reason === 'experimental') return m.cable_live_hold_experimental();
-		return m.cable_live_hold_gate();
-	});
+	const holdText = $derived(hold === null ? '' : liveHoldText(hold, heldCurve));
+	const holdAction = $derived(hold === null ? null : liveHoldAction(hold));
 	const holdReason = $derived(
 		hold?.reason === 'gate' && hold.gateReasons !== undefined && hold.gateReasons.length > 0
 			? m.cable_live_hold_gate_reason({
-					reason: firstReasonText(hold.gateReasons, { bands: curve.bands, locale })
+					reason: firstReasonText(hold.gateReasons, {
+						bands: heldCurve === 'saved' && saved !== null ? saved.bands : curve.bands,
+						locale
+					})
 				})
 			: null
 	);
 
-	function report(outcome: LiveOutcome): boolean {
-		if (outcome.status === 'refused') {
-			message = liveRefusalText[outcome.reason]();
-			return false;
+	// --- announcements (persistent regions, updated by text) ------------------------------------
+	/** Polite: the session plays (the saved curve or a preview), its state is unknown, it ended. */
+	let announcement = $state('');
+	let announcedKey: string | null = null;
+	$effect(() => {
+		const session = live;
+		const status = session?.status ?? null;
+		const savedNow = playing === 'saved';
+		const text = statusText;
+		const ended = endedMessage;
+		untrack(() => {
+			if (session === null) {
+				announcedKey = null;
+				return;
+			}
+			// Starting and applying are visual only; a hold has its own (alert) announcement.
+			if (status === 'starting' || status === 'applying' || status === 'held') return;
+			const key =
+				status === 'ended'
+					? `ended:${session.endedReason ?? ''}`
+					: status === 'unknown'
+						? 'unknown'
+						: `live:${savedNow ? 'saved' : 'preview'}`;
+			if (key === announcedKey) return;
+			announcedKey = key;
+			announcement = status === 'ended' ? (ended ?? '') : text;
+		});
+	});
+
+	/** Assertive: a hold appeared (once per reason until the cable plays cleanly again). */
+	let holdAlert = $state('');
+	let alertedReason: string | null = null;
+	$effect(() => {
+		const current = hold;
+		const status = live?.status ?? null;
+		const pending = live?.pending ?? false;
+		const text = holdText;
+		untrack(() => {
+			if (current === null) {
+				// Between edits (pending, applying) the same hold may come back: not announced again.
+				if (status !== 'starting' && status !== 'applying' && !pending) {
+					alertedReason = null;
+					holdAlert = '';
+				}
+				return;
+			}
+			if (current.reason === alertedReason) return;
+			alertedReason = current.reason;
+			holdAlert = text;
+		});
+	});
+
+	// --- "Salvar no cabo" -----------------------------------------------------------------------
+	/** Why saving the applied curve is not possible right now, or null. */
+	const saveReason = $derived.by<string | null>(() => {
+		if (cable?.writing) return m.cable_live_reason_writing();
+		if (live === null || live.applied === null) return m.cable_live_save_wait();
+		if (active && (live.pending || live.status === 'starting' || live.status === 'applying')) {
+			return m.cable_live_save_wait();
 		}
-		message = null;
-		return true;
+		if (hold !== null) return m.cable_live_save_held();
+		return null;
+	});
+	const saveLabel = $derived(liveSaveLabel(playing));
+
+	function report(outcome: LiveOutcome): boolean {
+		message = liveOutcomeText(outcome);
+		return outcome.status === 'accepted';
+	}
+
+	/** A revert result for the page (accepted or failed: the page's target is A now). */
+	function reverted(outcome: LiveOutcome) {
+		if (outcome.status === 'accepted' || outcome.reason === 'revert-failed') onrevert?.(outcome);
 	}
 
 	/** The saved curve the revert applies (else the service's own: this page's last save, the journal). */
@@ -151,9 +254,18 @@
 		return saved === null ? {} : { saved: { bands: saved.bands, preampDb: saved.preampDb } };
 	}
 
+	async function focusSwitch() {
+		await tick();
+		switchElement?.focus();
+	}
+
 	async function onSwitch() {
 		if (!app) return;
 		if (active) {
+			if (offAsk) {
+				cancelOff();
+				return;
+			}
 			offAsk = true;
 			await tick();
 			offFirst?.focus();
@@ -164,13 +276,29 @@
 		checklistOpen = true;
 	}
 
+	function cancelOff() {
+		offAsk = false;
+		void focusSwitch();
+	}
+
+	function onOffKey(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		event.preventDefault();
+		event.stopPropagation();
+		cancelOff();
+	}
+
 	async function onOffRevert(event: MouseEvent) {
 		if (!app || busy) return;
 		const gesture = app.cable.createGesture(event);
 		busy = true;
 		try {
-			if (report(await app.cable.stopLive({ revert: true, gesture, ...savedCurve() }))) {
+			const outcome = await app.cable.stopLive({ revert: true, gesture, ...savedCurve() });
+			reverted(outcome);
+			// A failed revert keeps the choice open (the session goes on).
+			if (report(outcome)) {
 				offAsk = false;
+				void focusSwitch();
 			}
 		} finally {
 			busy = false;
@@ -181,7 +309,10 @@
 		if (!app || busy) return;
 		busy = true;
 		try {
-			if (report(await app.cable.stopLive({ revert: false }))) offAsk = false;
+			if (report(await app.cable.stopLive({ revert: false }))) {
+				offAsk = false;
+				void focusSwitch();
+			}
 		} finally {
 			busy = false;
 		}
@@ -192,7 +323,9 @@
 		const gesture = app.cable.createGesture(event);
 		busy = true;
 		try {
-			report(await app.cable.revertLive({ gesture, ...savedCurve() }));
+			const outcome = await app.cable.revertLive({ gesture, ...savedCurve() });
+			reverted(outcome);
+			report(outcome);
 		} finally {
 			busy = false;
 		}
@@ -221,12 +354,26 @@
 		}
 	}
 
-	/** "Salvar no cabo": the normal write checklist, on the curve the cable plays now. */
+	/**
+	 * "Salvar no cabo": the normal write checklist, on the curve the cable plays now. The editor's
+	 * name and filter labels go with it only when it is the editor's curve.
+	 */
 	function onSave() {
 		const applied = live?.applied;
-		if (!app || !applied) return;
+		if (!app || !applied || saveReason !== null) return;
+		const current = app.state.curve.current;
+		const base =
+			playing === 'editor'
+				? current
+				: {
+						schema: current.schema,
+						updatedAt: current.updatedAt,
+						name: m.cable_live_save_name(),
+						source: 'custom' as const,
+						labels: null
+					};
 		app.requestWrite(
-			{ ...app.state.curve.current, bands: applied.bands, preampDb: applied.preampDb },
+			{ ...base, bands: applied.bands, preampDb: applied.preampDb },
 			applied.profile === 'yolo' ? { profile: 'yolo' } : {}
 		);
 	}
@@ -234,15 +381,18 @@
 
 {#if shown}
 	<section class="live" aria-label={m.cable_live_switch()} data-live-panel>
-		{#if connected || active}
+		{#if capable && (connected || active)}
 			<div class="switch-row">
 				<Button
 					variant="plate"
 					size="sm"
 					role="switch"
 					aria-checked={active}
+					aria-expanded={active ? offAsk : undefined}
+					aria-controls={active ? `${id}-off-group` : undefined}
 					aria-describedby={`${id}-hint`}
 					class="live-switch"
+					bind:element={switchElement}
 					disabledReason={switchReason}
 					onclick={onSwitch}
 				>
@@ -253,10 +403,25 @@
 			</div>
 		{/if}
 
-		<p class="status" role="status">{statusText}</p>
+		<!-- Visual status; screen readers get the transitions once, from the regions below. -->
+		<p class="status" data-live-status>{statusText}</p>
+		<p class="sr-only" role="status" data-live-announce>{announcement}</p>
+		<div class="sr-only" role="alert" data-live-alert>{holdAlert}</div>
+
+		{#if orphan !== null}
+			<div class="orphan" data-live-orphan>
+				<p>{m.cable_live_orphan()}</p>
+			</div>
+		{/if}
 
 		{#if offAsk && active}
-			<div class="off-ask" role="group" aria-labelledby={`${id}-off`}>
+			<div
+				id={`${id}-off-group`}
+				class="off-ask"
+				role="group"
+				aria-labelledby={`${id}-off`}
+				data-live-off
+			>
 				<p id={`${id}-off`}>{m.cable_live_off_question()}</p>
 				<div class="actions">
 					<Button
@@ -264,10 +429,13 @@
 						size="sm"
 						bind:element={offFirst}
 						loading={busy}
+						onkeydown={onOffKey}
 						onclick={onOffRevert}>{m.cable_live_revert()}</Button
 					>
-					<Button size="sm" loading={busy} onclick={onOffKeep}>{m.cable_live_off_keep()}</Button>
-					<Button variant="ghost" size="sm" onclick={() => (offAsk = false)}
+					<Button size="sm" loading={busy} onkeydown={onOffKey} onclick={onOffKeep}
+						>{m.cable_live_off_keep()}</Button
+					>
+					<Button variant="ghost" size="sm" onkeydown={onOffKey} onclick={cancelOff}
 						>{m.cable_live_cancel()}</Button
 					>
 				</div>
@@ -275,18 +443,18 @@
 		{/if}
 
 		{#if hold !== null}
-			<div class="hold" role="alert" data-hold={hold.reason}>
+			<div class="hold" data-hold={hold.reason} data-held={heldCurve}>
 				<p>{holdText}</p>
 				{#if holdReason !== null}<p class="hold-why">{holdReason}</p>{/if}
-				{#if hold.reason === 'loudness'}
+				{#if holdAction === 'loudness'}
 					<Button variant="primary" size="sm" loading={busy} onclick={onConfirm}
 						>{m.cable_live_hold_loudness_confirm()}</Button
 					>
-				{:else if hold.reason === 'unknown-state'}
+				{:else if holdAction === 'reapply'}
 					<Button variant="primary" size="sm" loading={busy} onclick={onConfirm}
 						>{m.cable_live_reapply()}</Button
 					>
-				{:else if hold.reason === 'experimental'}
+				{:else if holdAction === 'experimental'}
 					<Button variant="primary" size="sm" loading={busy} onclick={onConfirmExperimental}
 						>{m.cable_live_hold_experimental_confirm()}</Button
 					>
@@ -298,10 +466,8 @@
 			<div class="chip" data-live-chip>
 				<span class="chip-text"><span class="dot" aria-hidden="true"></span>{m.cable_live_chip()}</span>
 				<span class="actions">
-					<Button
-						size="sm"
-						disabledReason={cable?.writing ? m.cable_live_reason_writing() : null}
-						onclick={onSave}>{m.cable_live_save()}</Button
+					<Button size="sm" disabledReason={saveReason} onclick={onSave} data-live-save
+						>{saveLabel}</Button
 					>
 					{#if active}
 						<Button size="sm" loading={busy} onclick={onRevert}>{m.cable_live_revert()}</Button>
@@ -317,6 +483,9 @@
 				<li>{m.cable_live_ab_note()}</li>
 				<li>{m.cable_live_browser_flat()}</li>
 				<li>{m.cable_live_stuck_note()}</li>
+				{#if followPaused}
+					<li class="warn" data-live-paused>{m.cable_live_follow_paused()}</li>
+				{/if}
 				{#if live?.lastError !== null && live?.lastError !== undefined}
 					<li class="warn">{m.cable_live_error()}</li>
 				{/if}
@@ -324,7 +493,7 @@
 		{/if}
 
 		{#if endedText !== null}
-			<div class="ended" role="status" data-live-ended={live?.endedReason}>
+			<div class="ended" data-live-ended={live?.endedReason}>
 				<p>{endedText}</p>
 				<Button variant="ghost" size="sm" onclick={() => (dismissed = true)}
 					>{m.cable_live_dismiss()}</Button
@@ -332,9 +501,7 @@
 			</div>
 		{/if}
 
-		{#if message !== null}
-			<p class="message" role="status">{message}</p>
-		{/if}
+		<p class="message" role="status" data-live-message>{message ?? ''}</p>
 	</section>
 {/if}
 
@@ -396,26 +563,30 @@
 	.track[data-on='true'] .knob {
 		transform: translateX(12px);
 	}
-	.status:empty {
+	.status:empty,
+	.message:empty {
 		display: none;
 	}
 	.status,
 	.off-ask p,
 	.hold p,
 	.ended p,
+	.orphan p,
 	.message {
 		margin: 0;
 	}
 	.off-ask,
 	.hold,
-	.ended {
+	.ended,
+	.orphan {
 		display: grid;
 		gap: var(--space-2, 8px);
 		padding: var(--space-2, 8px) var(--space-3, 12px);
 		border-radius: var(--rad-sm, 4px);
 		background: color-mix(in srgb, var(--text) 6%, transparent);
 	}
-	.hold {
+	.hold,
+	.orphan {
 		border-left: 3px solid var(--warn, #e0a030);
 	}
 	.hold[data-hold='gate'] {
