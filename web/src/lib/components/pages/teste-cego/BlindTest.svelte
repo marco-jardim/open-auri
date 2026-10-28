@@ -8,7 +8,7 @@
 </script>
 
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { whenIdle } from '#lib/app/runtime.ts';
 	import { getAppContext, type AppContext } from '#lib/app/context.svelte.ts';
@@ -24,7 +24,8 @@
 	import { tap, type MeterSource } from '#lib/audio/meters.ts';
 	import { warmAudio } from '#lib/audio/warm.ts';
 	import TesteCegoArt from '#lib/components/art/TesteCegoArt.svelte';
-	import EmBreve from '#lib/components/chrome/EmBreve.svelte';
+	import type { ClientApp } from '#lib/app/client.svelte.ts';
+	import type { CableService } from '#lib/cable/service.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import Lamp from '#lib/components/primitives/Lamp.svelte';
 	import { Transport } from '#lib/components/audio/index.ts';
@@ -34,22 +35,31 @@
 	import { isHidden } from '#lib/social/hidden.ts';
 	import ListeningRoom from './ListeningRoom.svelte';
 	import CandidateMeter from './CandidateMeter.svelte';
+	import CableBlind from './CableBlind.svelte';
 	import {
 		bracketStage,
 		candidate,
-		estimatedWrites,
 		nextSpread,
 		officialCandidates,
 		recordRound,
+		shuffle,
 		startSession,
 		variations,
 		type BracketStage,
 		type Candidate,
 		type OutputConfirmation,
+		type Round,
 		type Session
 	} from './experiment.ts';
-	import { createBlindPreview } from './preview.ts';
+	import { createBlindPreview, createFlatPreview } from './preview.ts';
 	import { autoOutput, cableConnected, lastWriteNotNeutral, type CableView } from './output.ts';
+	import {
+		IDLE_VIEW,
+		createCableRound,
+		s6Session,
+		type CableRoundPort,
+		type CableRoundView
+	} from './cable-round.ts';
 
 	type BlindSocialApi = Pick<
 		SocialApi,
@@ -63,7 +73,8 @@
 		reducedMotion,
 		api = null,
 		siteKey = '',
-		cable
+		cable,
+		client: clientProp
 	}: {
 		audio?: AudioEngine | null;
 		current?: (PreviewCurve & { name: string; community?: Candidate['community'] }) | null;
@@ -78,6 +89,11 @@
 		 * service and journal (none when BlindTest renders without the app, e.g. in a preview).
 		 */
 		cable?: CableView | null;
+		/**
+		 * The app whose cable service runs the test on the cable (issue #74). Omitted: the app
+		 * context's (none when BlindTest renders without the app).
+		 */
+		client?: ClientApp | null;
 	} = $props();
 	const uid = $props.id();
 	const official = officialCandidates();
@@ -120,22 +136,27 @@
 		}
 	}
 	const appContext = optionalAppContext();
+	const client = $derived(clientProp !== undefined ? clientProp : (appContext?.client ?? null));
 	/** No last-real accessor: scan once per journal change, never once per cable-state update. */
 	const appLastRealWrite = $derived.by(() => {
 		if (cable !== undefined) return null;
-		const entries = appContext?.client?.state.journal.entries ?? [];
+		const entries = client?.state.journal.entries ?? [];
 		for (let index = entries.length - 1; index >= 0; index--) {
 			const entry = entries[index];
 			if (entry && entry.status !== 'simulated') return entry;
 		}
 		return null;
 	});
-	/** Read only: the live connection and the journal. This page never talks to the cable. */
+	/**
+	 * Read only: the live connection and the journal, for the output choice. The browser test never
+	 * talks to the cable; the test on the cable does it only through `cable-round.ts` and
+	 * CableBlind (issue #74).
+	 */
 	const cableView = $derived.by((): CableView | null => {
 		if (cable !== undefined) return cable;
-		const client = appContext?.client;
-		return client
-			? { state: client.cableState, journal: appLastRealWrite ? [appLastRealWrite] : [] }
+		const app = client;
+		return app
+			? { state: app.cableState, journal: appLastRealWrite ? [appLastRealWrite] : [] }
 			: null;
 	});
 	/** Chosen by hand in Preparo: from then on the cable state never changes the output. */
@@ -177,7 +198,45 @@
 	let session = $state.raw<Session | null>(null);
 	let history = $state.raw<BracketStage[]>([]);
 	const last = $derived(history.at(-1) ?? null);
-	let preview = $state.raw<ReturnType<typeof createBlindPreview> | null>(null);
+	let preview = $state.raw<
+		ReturnType<typeof createBlindPreview> | ReturnType<typeof createFlatPreview> | null
+	>(null);
+	// --- the test on the cable (issue #74) -----------------------------------------------------
+	/** This session plays on the cable (one flat browser chain; the cable switches candidates). */
+	let onCable = $state(false);
+	let roundView = $state.raw<CableRoundView>(IDLE_VIEW);
+	/** Rounds heard on the cable: never sent to S6 (`s6Session`). */
+	const cableRounds = new WeakSet<Round>();
+	/** The session prepared by "Começar no cabo", until its change check starts. */
+	let pendingCable: Session | null = null;
+	function cableService(): CableService {
+		const service = client?.cable;
+		if (!service) throw new Error('no cable service');
+		return service;
+	}
+	/** The cable service, read at each call (the app may load after this page). */
+	const port: CableRoundPort = {
+		getState: () => cableService().getState(),
+		startComparison: (request) => cableService().startComparison(request),
+		switchComparison: (index) => cableService().switchComparison(index),
+		cancelHold: () => cableService().cancelHold(),
+		endComparison: (request) => cableService().endComparison(request),
+		confirmLive: (request) => cableService().confirmLive(request)
+	};
+	const cableRound = createCableRound({
+		port,
+		output: () => (onCable && preview !== null && 'unmute' in preview ? preview : null),
+		onchange: (view) => {
+			roundView = view;
+		},
+		onvoid: () => cableVoided()
+	});
+	/** Unplugged, ended elsewhere, another tab's preview: the round in play is voided. */
+	$effect(() => {
+		const state = client?.cableState;
+		if (!state || !onCable) return;
+		untrack(() => cableRound.observe(state));
+	});
 	let active = $state(false);
 	let moving = $state(false);
 	let position = $state(0);
@@ -297,10 +356,26 @@
 	const roundLcd = $derived(session ? `${pad(roundNumber)}/${pad(session.planned)}` : '−−/−−');
 	// The DSP rate is the AudioContext's own rate; before a context exists there is no rate yet.
 	const rateLcd = $derived(audioState.ready ? `${rateLabel} kHz` : '−− kHz');
-	const playReason = $derived(
-		!active ? m.cego_fux_reason_play_idle() : moving ? m.cego_fux_reason_moving() : null
+	/** Rounds stop while the cable check runs or the test is paused (why, for every control). */
+	const cableReason = $derived(
+		!onCable || !active || roundView.phase === 'blind'
+			? null
+			: roundView.phase === 'checking'
+				? m.cable_blind_reason_check()
+				: m.cable_blind_reason_paused()
 	);
-	const movingReason = $derived(moving ? m.cego_fux_reason_moving() : null);
+	/** A test on the cable is still open (the blind set may still play): end it first. */
+	const cableOpen = $derived(onCable && roundView.phase !== 'idle' && roundView.phase !== 'ended');
+	const playReason = $derived(
+		!active
+			? m.cego_fux_reason_play_idle()
+			: moving
+				? m.cego_fux_reason_moving()
+				: roundView.phase === 'checking'
+					? null
+					: cableReason
+	);
+	const movingReason = $derived(moving ? m.cego_fux_reason_moving() : cableReason);
 	const levelText = $derived(
 		preview
 			? m.cego_fux_level_active()
@@ -310,7 +385,9 @@
 	);
 	const lockText = $derived(
 		moving
-			? m.cego_shuffling()
+			? onCable
+				? m.cable_blind_switching()
+				: m.cego_shuffling()
 			: active
 				? m.cego_position({ number: position + 1 })
 				: m.cego_closed()
@@ -326,6 +403,7 @@
 	function positionReason(index: number) {
 		if (!active) return m.cego_fux_reason_idle();
 		if (moving) return m.cego_fux_reason_moving();
+		if (cableReason !== null) return cableReason;
 		if (index >= (session?.order.length ?? 0)) return m.cego_fux_reason_no_position();
 		return null;
 	}
@@ -339,8 +417,9 @@
 	});
 	// Audible (not shuffling) at a position means it was heard, however playback got there: the
 	// Play key, or the Transport and navbar resuming the round.
+	// On the cable: only once that position's switch window ended in this round.
 	$effect(() => {
-		if (playing && !moving) heard[position] = true;
+		if (playing && !moving && (!onCable || roundView.ready === position)) heard[position] = true;
 	});
 
 	function number(value: number, digits = 1) {
@@ -366,7 +445,15 @@
 		}
 		moving = false;
 	}
-	onDestroy(releasePreview);
+	/** A comparison of this page's test runs on the cable. */
+	function cableRunning(): boolean {
+		return onCable && client !== null && cableRound.running();
+	}
+	onDestroy(() => {
+		// Leaving the page: the test on the cable ends; the cable keeps its curve until unplugged.
+		if (cableRunning()) void cableRound.endKeep();
+		releasePreview();
+	});
 
 	/** Direct source picker: the same shared engine as ♪ Áudio; the file never leaves the browser. */
 	async function pickFile(event: Event & { currentTarget: HTMLInputElement }) {
@@ -457,6 +544,10 @@
 	}
 	function start(candidates = chosen, keepHistory = false) {
 		message = '';
+		if (cableOpen) {
+			message = m.cable_blind_reason_end_first();
+			return;
+		}
 		if (output === null) {
 			message = m.cego_confirmation_required();
 			return;
@@ -489,12 +580,147 @@
 			return;
 		}
 		session = next;
+		onCable = false;
 		if (!keepHistory) history = [];
 		active = true;
 		tab = 2;
 		prepareRound();
 	}
+
+	// --- the test on the cable ------------------------------------------------------------------
+	/**
+	 * "Começar no cabo" (CableBlind, in its click): a new session with ONE flat browser chain.
+	 * Nothing is active until the change check starts (`begunCable`). The candidates' order is the
+	 * plan order: plan index = candidate index; the per-round order stays in this page's memory.
+	 */
+	function beginCable(): readonly Candidate[] | null {
+		message = '';
+		const candidates = chosen;
+		if (
+			candidates.length < 2 ||
+			candidates.length > 3 ||
+			candidates.some((c) => !c.accepted || !candidateVisible(c))
+		) {
+			message = m.cego_candidates_required();
+			return null;
+		}
+		if (!audio) {
+			message = m.cego_audio_error();
+			return null;
+		}
+		let next: Session;
+		try {
+			// The output declaration is moot here: the cable itself plays the candidates.
+			next = startSession(candidates, rounds, 'other');
+		} catch {
+			message = m.cego_random_error();
+			return null;
+		}
+		releasePreview();
+		audio.stop();
+		try {
+			preview = createFlatPreview(audio);
+		} catch {
+			message = m.cego_audio_error();
+			return null;
+		}
+		onCable = true;
+		pendingCable = next;
+		return next.candidates;
+	}
+	/** The change check started (the test opens on Escuta), or was refused (all released). */
+	function begunCable(accepted: boolean) {
+		const next = pendingCable;
+		pendingCable = null;
+		if (!accepted || next === null) {
+			releasePreview();
+			onCable = false;
+			return;
+		}
+		session = next;
+		history = [];
+		active = true;
+		tab = 2;
+		prepareCableRound();
+	}
+	/** A new round on the cable: no position is ready until its first switch. */
+	function prepareCableRound() {
+		if (!session) return;
+		clearTimer();
+		roundStarted = false;
+		position = 0;
+		ratings = session.order.map(() => null);
+		heard = session.order.map(() => false);
+		notes = '';
+		moving = false;
+		cableRound.newRound();
+		announcement = m.cego_round({
+			number: session.completed.length + 1,
+			total: session.planned
+		});
+	}
+	/** A voided round: not scored, played again later in a new order (completed rounds stay). */
+	function cableVoided() {
+		if (audio && owned(audio)) audio.stop();
+		moving = false;
+		if (!session) return;
+		try {
+			session = { ...session, order: shuffle(session.candidates.map((c) => c.id)) };
+		} catch {
+			message = m.cego_random_error();
+		}
+		prepareCableRound();
+	}
+	/**
+	 * Every position change on the cable, the same position and the round's first play included:
+	 * muted, switched, unmuted after the same window for every candidate, then announced.
+	 */
+	async function cableSelect(index: number) {
+		if (!session || roundView.phase !== 'blind' || moving) return;
+		const id = session.order[index];
+		const planIndex = session.candidates.findIndex((c) => c.id === id);
+		if (planIndex < 0) return;
+		position = index;
+		moving = true;
+		announcement = '';
+		const result = await cableRound.select(index, planIndex);
+		moving = false;
+		if (result === 'ready') announcement = m.cable_blind_position_ready({ number: index + 1 });
+	}
+	async function playCable() {
+		const engine = audio;
+		if (!engine || !session) return;
+		const phase = roundView.phase;
+		if (phase !== 'checking' && phase !== 'blind') return;
+		if (playing) {
+			engine.pause();
+			return;
+		}
+		// The round's first play switches first (muted until the window ends).
+		if (phase === 'blind' && roundView.ready !== position) void cableSelect(position);
+		const playingSession = session;
+		try {
+			if (paused && roundStarted && (await engine.resume())) {
+				message = '';
+				return;
+			}
+			await engine.start('chains', { startAt: 'random', session: BLIND_SESSION });
+			if (!active || !onCable || session?.candidates !== playingSession.candidates) {
+				if (owned(engine)) engine.stop();
+				return;
+			}
+			roundStarted = true;
+			message = '';
+		} catch {
+			message = m.cego_audio_error();
+		}
+	}
+
 	async function play() {
+		if (onCable) {
+			if (active && !moving) await playCable();
+			return;
+		}
 		if (!active || moving || !audio || !session || !preview) return;
 		if (playing) {
 			// A pause, not a stop: the round keeps its position, chains and trims.
@@ -534,6 +760,10 @@
 	}
 	function selectPosition(index: number) {
 		if (!active || moving || !session || index >= session.order.length) return;
+		if (onCable) {
+			void cableSelect(index);
+			return;
+		}
 		const always = labSwitch && position !== index;
 		// A blind swap keeps the musical moment: never a restart, and the shuffle's muted seconds
 		// are given back, so every candidate is compared on the same passage.
@@ -551,7 +781,7 @@
 			value !== null && Number.isFinite(value) && value >= 0 && value <= 10 ? value : null;
 	}
 	function finishRound(reveal = false) {
-		if (!session || moving) return;
+		if (!session || moving || cableReason !== null) return;
 		if (ratings.some((v) => v === null) || heard.some((value) => !value)) {
 			message = m.cego_ratings_required();
 			return;
@@ -562,20 +792,32 @@
 			message = m.cego_random_error();
 			return;
 		}
+		const finished = reveal || session.completed.length === session.planned;
+		if (onCable) {
+			// Heard on the cable: kept for the result, never sent to S6.
+			const recorded = session.completed.at(-1);
+			if (recorded) cableRounds.add(recorded);
+			cableRound.roundRecorded(finished);
+		}
 		// The trial is over: its session ends; the next one starts at its own random point.
 		roundStarted = false;
 		if (audio && owned(audio)) audio.stop();
 		message = '';
-		if (reveal || session.completed.length === session.planned) {
+		if (finished) {
 			const stage = bracketStage(session, spread);
 			history = [...history, stage];
 			active = false;
 			releasePreview();
 			tab = 3;
 			announcement = m.cego_revealed();
-		} else prepareRound();
+		} else if (onCable) prepareCableRound();
+		else prepareRound();
 	}
 	function reset() {
+		// The cable keeps its curve until unplugged ("Encerrar" is the way back to the saved one).
+		if (cableRunning()) void cableRound.endKeep();
+		if (onCable && !cableRunning()) cableRound.reset();
+		onCable = false;
 		releasePreview();
 		active = false;
 		session = null;
@@ -994,7 +1236,7 @@
 										<p class="lede">{m.cego_listen_lede()}</p>
 										<Button
 											aria-pressed={playing}
-											disabledReason={movingReason}
+											disabledReason={playReason}
 											onpointerdown={warm}
 											onkeydown={warm}
 											onclick={play}>{playing ? m.cego_pause() : m.cego_play()}</Button
@@ -1012,16 +1254,30 @@
 															number: index + 1
 														})}</Button
 													>
-													<CandidateMeter
-														chain={preview?.chains[
-															session.candidates.findIndex((c) => c.id === id)
-														] ?? null}
-														enabled={playing && position === index && !moving}
-														label={m.cego_position({ number: index + 1 })}
-													/>
+													<!-- On the cable: no per-candidate meter (one flat browser chain). -->
+													{#if !onCable}
+														<CandidateMeter
+															chain={preview?.chains[
+																session.candidates.findIndex((c) => c.id === id)
+															] ?? null}
+															enabled={playing && position === index && !moving}
+															label={m.cego_position({ number: index + 1 })}
+														/>
+													{/if}
 												</div>
 											{/each}
 										</div>
+										{#if onCable}
+											<CableBlind
+												app={client}
+												round={cableRound}
+												view={roundView}
+												mode="listen"
+												candidates={[]}
+												onblind={prepareCableRound}
+												onended={reset}
+											/>
+										{/if}
 										<div class="card">
 											<!-- The score faders live on the stage, under each bay: nobody has to
 											     scroll away from it to rate. -->
@@ -1043,7 +1299,9 @@
 												onclick={() => finishRound()}>{m.cego_next()}</Button
 											><Button disabledReason={movingReason} onclick={() => finishRound(true)}
 												>{m.cego_finish()}</Button
-											><Button variant="ghost" onclick={reset}>{m.cego_cancel()}</Button>
+											>{#if !onCable}<Button variant="ghost" onclick={reset}
+													>{m.cego_cancel()}</Button
+												>{/if}
 										</div>
 									{:else}<h2>{m.cego_listen()}</h2>
 										<p class="empty">{m.cego_empty_listen()}</p>{/if}
@@ -1145,31 +1403,47 @@
 											</ol>
 											<p class="note">{m.cego_bracket_note()}</p>
 										</div>
+										{#if onCable && session}
+											<CableBlind
+												app={client}
+												round={cableRound}
+												view={roundView}
+												mode="results"
+												candidates={session.candidates}
+												winner={last.tied
+													? null
+													: session.candidates.findIndex((c) => c.id === last.winner.id)}
+											/>
+										{/if}
 										<div class="actions">
 											<a class="button accent" href="/" onclick={openWinner}>{m.cego_open()}</a
 											><Button
-												disabledReason={nextSpread(last) === null
-													? m.cego_fux_reason_no_stage()
-													: null}
+												disabledReason={cableOpen
+													? m.cable_blind_reason_end_first()
+													: nextSpread(last) === null
+														? m.cego_fux_reason_no_stage()
+														: null}
 												onclick={continueTournament}>{m.cego_continue()}</Button
-											><Button variant="ghost" onclick={reset}>{m.cego_new()}</Button>
+											><Button
+												variant="ghost"
+												disabledReason={cableOpen ? m.cable_blind_reason_end_first() : null}
+												onclick={reset}>{m.cego_new()}</Button
+											>
 										</div>
 									{:else}<p class="empty">{m.cego_empty_results()}</p>{/if}
 								{:else if tab === 4}
 									<h2>{m.cego_cable_title()}</h2>
 									<p class="lede">{m.cego_cable_note()}</p>
-									<EmBreve title={m.cego_cable_title()} />
-									<div class="card">
-										<p class="cost">
-											{m.cego_writes({
-												count: estimatedWrites(
-													session?.planned ?? rounds,
-													session?.candidates.length ?? Math.max(2, chosen.length)
-												)
-											})}
-										</p>
-										<p class="note">{m.cego_cost_note()}</p>
-									</div>
+									<CableBlind
+										app={client}
+										round={cableRound}
+										view={roundView}
+										mode="setup"
+										candidates={chosen}
+										blocked={cableOpen ? m.cable_blind_reason_end_first() : null}
+										onbegin={beginCable}
+										onbegun={begunCable}
+									/>
 								{:else}
 									<div class="card-head">
 										<h2>{m.cego_share_title()}</h2>
@@ -1178,7 +1452,12 @@
 									<p class="lede">{m.cego_share_note()}</p>
 									<Deferred module={s6Send} height="10rem">
 										{#snippet children(S6Send)}
-											<S6Send session={!active ? session : null} {api} {siteKey} />
+											<!-- Rounds heard on the cable never reach S6 (cable-round.ts). -->
+											<S6Send
+												session={!active ? s6Session(session, cableRounds) : null}
+												{api}
+												{siteKey}
+											/>
 										{/snippet}
 									</Deferred>
 								{/if}
@@ -1760,10 +2039,6 @@
 	}
 	.bracket ul {
 		padding-left: 16px;
-	}
-	.cost {
-		font: var(--fs-display-m) var(--face-display);
-		color: var(--accent);
 	}
 	@media (max-width: 1100px) {
 		.grid3 {

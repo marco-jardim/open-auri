@@ -27,6 +27,18 @@ export function liveActive(live: LiveState | null | undefined): live is LiveStat
 	return live !== null && live !== undefined && live.status !== 'ended';
 }
 
+/**
+ * A blind comparison runs (the blind test on the cable, issue #74): the chrome shows one constant
+ * "Teste cego em andamento" instead of anything that could vary with the playing candidate (the
+ * unsaved chip, the status, holds, levels). Read only from `comparison`, never from the flags.
+ */
+export function liveBlind(live: LiveState | null | undefined): boolean {
+	const comparison = live?.comparison;
+	return (
+		liveActive(live) && comparison !== undefined && comparison.blind && comparison.active === true
+	);
+}
+
 function field(band: object, key: string): unknown {
 	return (band as Record<string, unknown>)[key];
 }

@@ -17,6 +17,8 @@
 	- Holds (loudness, gate, unknown state, experimental) show a banner; a hold's appearance is
 	  announced once through a persistent alert region, and live / ended transitions once through a
 	  persistent polite region ("applying" is visual only).
+	- A blind test on the cable (issue #74): one constant line, "Teste cego em andamento", replaces
+	  the status, holds, errors and the chip; the switch is locked (the test ends on its own page).
 	- An orphan preview (another tab, or this one before a reload) says to unplug and replug;
 	  "Já desconectei" clears it (`dismissLiveOrphan`). A replug clears it on its own.
 	- "Salvar no cabo" shows only while a session runs (it makes the session's cable the target,
@@ -39,6 +41,7 @@
 		livePlaying,
 		liveSavable,
 		liveSaveLabel,
+		liveBlind,
 		liveUnsaved,
 		type LiveHeldCurve
 	} from '#lib/components/cable/live.ts';
@@ -89,10 +92,15 @@
 	const cable = $derived<CableState | null>(app?.cableState ?? null);
 	const live = $derived(cable?.live ?? null);
 	const active = $derived(liveActive(live));
+	/**
+	 * A blind test runs on the cable (issue #74): one constant line replaces the status, holds,
+	 * errors and the unsaved chip, so nothing here changes with the playing candidate.
+	 */
+	const blind = $derived(liveBlind(live));
 	const connected = $derived(cable?.connection === 'connected');
 	const orphan = $derived(cable?.liveOrphan ?? null);
-	const unsaved = $derived(liveUnsaved(live, saved, savedCrc));
-	const hold = $derived(active ? (live?.hold ?? null) : null);
+	const unsaved = $derived(!blind && liveUnsaved(live, saved, savedCrc));
+	const hold = $derived(active && !blind ? (live?.hold ?? null) : null);
 	const capable = $derived(cable !== null && cable.liveCapable && (connected || live !== null));
 	const shown = $derived(capable || orphan !== null);
 	/** Which curve the cable plays: the saved one (A), the editor's (B) or another one. */
@@ -124,6 +132,8 @@
 	});
 
 	const switchReason = $derived.by<string | null>(() => {
+		// The blind test owns the session: it ends there (Encerrar), never from here.
+		if (blind) return m.cable_blind_panel_reason();
 		if (active) return null;
 		if (blockedReason !== null) return blockedReason;
 		if (cable === null) return m.curva_v2_loading_reason();
@@ -134,6 +144,7 @@
 
 	const statusText = $derived.by(() => {
 		if (!active || live === null) return '';
+		if (blind) return m.cable_blind_chrome();
 		switch (live.status) {
 			case 'starting':
 				return m.cable_live_status_starting();
@@ -192,9 +203,18 @@
 		const savedNow = playing === 'saved';
 		const text = statusText;
 		const ended = endedMessage;
+		const blindNow = blind;
 		untrack(() => {
 			if (session === null) {
 				announcedKey = null;
+				return;
+			}
+			// A blind test: one constant announcement for the whole run, whatever the status.
+			if (blindNow) {
+				if (announcedKey !== 'blind') {
+					announcedKey = 'blind';
+					announcement = text;
+				}
 				return;
 			}
 			// Starting and applying are visual only; a hold has its own (alert) announcement.
@@ -283,7 +303,7 @@
 	}
 
 	async function onSwitch() {
-		if (!app) return;
+		if (!app || blind) return;
 		if (active) {
 			if (offAsk) {
 				cancelOff();
@@ -442,7 +462,7 @@
 			</div>
 		{/if}
 
-		{#if offAsk && active}
+		{#if offAsk && active && !blind}
 			<div
 				id={`${id}-off-group`}
 				class="off-ask"
@@ -508,7 +528,9 @@
 			</div>
 		{/if}
 
-		{#if active}
+		{#if blind}
+			<p class="notes" data-live-blind>{m.cable_blind_panel_reason()}</p>
+		{:else if active}
 			<ul class="notes">
 				<li>{m.cable_live_ab_note()}</li>
 				<li>{m.cable_live_browser_flat()}</li>

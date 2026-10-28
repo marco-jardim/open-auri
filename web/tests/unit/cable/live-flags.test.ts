@@ -4,7 +4,7 @@
  * whether the cable plays something unsaved or whether the browser must stay flat.
  */
 import { expect, test } from 'vitest';
-import { browserFlat, liveSavable, liveUnsaved } from '#lib/components/cable/live.ts';
+import { browserFlat, liveBlind, liveSavable, liveUnsaved } from '#lib/components/cable/live.ts';
 import type { Band, LiveState } from '#lib/cable/types.ts';
 
 const OFF: Band = { kind: 'OFF' };
@@ -82,6 +82,22 @@ test('saved curve unknown to the service: the page saved curve refines the flag'
 	const live = state({ savedCrc: null, playsUnsaved: true, cableEq: true });
 	expect(liveUnsaved(live, SAVED)).toBe(false);
 	expect(liveUnsaved(live, { bands: [OFF, OFF], preampDb: -3 })).toBe(true);
+});
+
+test('liveBlind: only a running blind comparison (never the flags) turns the chrome constant', () => {
+	expect(liveBlind(blind())).toBe(true);
+	// The flags may vary (a candidate equal to the saved curve): liveBlind does not.
+	expect(liveBlind(blind({ playsUnsaved: false, cableEq: false }))).toBe(true);
+	expect(liveBlind(blind({ status: 'unknown' }))).toBe(true);
+	expect(liveBlind(blind({ status: 'ended', endedReason: 'stopped' }))).toBe(false);
+	expect(
+		liveBlind(blind({ comparison: { active: false, blind: true, count: 2, status: 'ready' } }))
+	).toBe(false);
+	expect(
+		liveBlind(state({ comparison: { active: true, blind: false, count: 2, status: 'ready' } }))
+	).toBe(false);
+	expect(liveBlind(state())).toBe(false);
+	expect(liveBlind(null)).toBe(false);
 });
 
 test('an orphan preview still makes the browser flat whatever the flags say', () => {

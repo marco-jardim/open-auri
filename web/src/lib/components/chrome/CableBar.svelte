@@ -53,6 +53,11 @@
 		 * amber chip beside the status, linking to the Curva page (where Salvar/Voltar live).
 		 */
 		liveUnsaved?: boolean;
+		/**
+		 * A blind test runs on the cable: one constant chip ("Teste cego em andamento") replaces the
+		 * unsaved chip, whatever `liveUnsaved` says (it could change with the playing candidate).
+		 */
+		liveBlind?: boolean;
 		writeDisabled?: boolean;
 		/** Why "Gravar no cabo" is unavailable; defaults explain loading or a write in progress. */
 		writeDisabledReason?: string;
@@ -84,6 +89,7 @@
 		unsaved = false,
 		unsavedCount,
 		liveUnsaved = false,
+		liveBlind = false,
 		writeDisabled = false,
 		writeDisabledReason,
 		onNeutro,
@@ -305,7 +311,14 @@
 				</div>
 				<!-- "No cabo: prévia não salva": announced when it appears; opens the Curva page. -->
 				<div class="live-slot" aria-live="polite">
-					{#if liveUnsaved}
+					{#if liveBlind}
+						<!-- Constant while the blind test runs: nothing here varies with the candidate. -->
+						<span class="live-chip" title={m.cable_blind_chrome()} data-live-chip="blind">
+							<span class="live-dot" aria-hidden="true"></span>
+							<span class="live-short" aria-hidden="true">{m.cable_blind_chrome_short()}</span>
+							<span class="sr-only">{m.cable_blind_chrome()}</span>
+						</span>
+					{:else if liveUnsaved}
 						<a class="live-chip" href="/" title={m.cable_live_chip()} data-live-chip="bar">
 							<span class="live-dot" aria-hidden="true"></span>
 							<span class="live-short" aria-hidden="true">{m.cable_live_chip_short()}</span>
