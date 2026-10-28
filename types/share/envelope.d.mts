@@ -97,6 +97,12 @@ export type Measurement = {
     name: string;
     sha256?: string;
 };
+/**
+ * Filter labels (`open-auri/preset@2` only): exactly LABEL_COUNT entries by wire
+ * index, each 1–LABEL_MAX normalized code points or null (automatic name). An
+ * all-null list is omitted. Labels are presentation only: never part of S1,
+ * curveId, canonKey or the safety gate.
+ */
 export type Recipe = {
     measurement?: Measurement;
     target?: {
@@ -110,20 +116,18 @@ export type Recipe = {
     params?: Record<string, Primitive>;
 };
 /**
- * Filter labels (`open-auri/preset@2` only): exactly LABEL_COUNT entries by wire
- * index, each 1–LABEL_MAX normalized code points or null (automatic name). An
- * all-null list is omitted. Labels are presentation only: never part of S1,
- * curveId, canonKey or the safety gate.
- */
-export type Labels = (string | null)[];
-/**
  * `open-auri/preset@1`: S1 v1, bands up to 20000 Hz, no labels. `open-auri/preset@2`:
  * `@1` plus optional labels, bands up to 32000 Hz and an S1 v1 or v2 code. Writers
  * emit the lowest format that fits (envelopeFormat).
  */
-export type EnvelopeFormat = "open-auri/preset@1" | "open-auri/preset@2";
+export type Labels = (string | null)[];
 /**
  * Fields shared by every envelope format.
+ */
+export type EnvelopeFormat = "open-auri/preset@1" | "open-auri/preset@2";
+/**
+ * `open-auri/preset@1`: an S1 v1 code, bands up to 20000 Hz, never labels (a
+ * `labels` key is env:extra).
  */
 export type EnvelopeFields = {
     name: string;
@@ -139,24 +143,20 @@ export type EnvelopeFields = {
     createdAt: string;
 };
 /**
- * `open-auri/preset@1`: an S1 v1 code, bands up to 20000 Hz, never labels (a
- * `labels` key is env:extra).
+ * `open-auri/preset@2`: an S1 v1 or v2 code, bands up to 32000 Hz and optional
+ * filter labels (omitted when every entry is null).
  */
 export type EnvelopeV1 = EnvelopeFields & {
     format: "open-auri/preset@1";
     labels?: never;
 };
 /**
- * `open-auri/preset@2`: an S1 v1 or v2 code, bands up to 32000 Hz and optional
- * filter labels (omitted when every entry is null).
+ * A validated envelope, discriminated by `format`.
  */
 export type EnvelopeV2 = EnvelopeFields & {
     format: "open-auri/preset@2";
     labels?: Labels;
 };
-/**
- * A validated envelope, discriminated by `format`.
- */
 export type Envelope = EnvelopeV1 | EnvelopeV2;
 export type EnvelopeErrorCode = "env:type" | "env:required" | "env:extra" | "env:length" | "env:enum" | "env:pattern" | "env:range" | "env:url" | "env:url-like" | "env:code-mismatch" | "env:s1" | "env:bands" | "env:labels" | "env:json" | "env:size";
 export type EnvelopeIssue = {
