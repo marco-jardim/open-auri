@@ -515,6 +515,49 @@ describe('blind comparison', () => {
 		expectRedacted(ended);
 	});
 
+	test('the flags never single out the candidate that is the saved curve, also after a stop', async () => {
+		// Candidate 1 (the quietest, never lowered) is the cable's saved curve.
+		const journal = [savedEntry(offCurve(-12))];
+		const h = await harness({ journal });
+		expect(crcs()[1]).toBe(journal[0]?.crc);
+		await compare(h, { blind: true });
+		const flags = () => {
+			const live = h.service.getState().live;
+			return { playsUnsaved: live?.playsUnsaved, cableEq: live?.cableEq };
+		};
+		const seen: ReturnType<typeof flags>[] = [];
+		for (const index of [1, 2, 1, 0, 1]) {
+			expect(await h.service.switchComparison(index)).toEqual({ status: 'applied' });
+			expect(liveCrc(h.device.firmware)).toBe(crcs()[index]);
+			seen.push(flags());
+		}
+		for (const entry of seen) expect(entry).toEqual({ playsUnsaved: true, cableEq: true });
+		// Stopped on the saved-curve candidate: the same flags as on any other one.
+		expect((await h.service.endComparison({ revert: false })).status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(crcs()[1]);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'ended',
+			endedReason: 'stopped',
+			playsUnsaved: true,
+			cableEq: true
+		});
+		expectRedacted(h.service.getState());
+	});
+
+	test('the flags after a stop on another candidate match the saved-curve one', async () => {
+		const journal = [savedEntry(offCurve(-12))];
+		const h = await harness({ journal });
+		await compare(h, { blind: true });
+		expect(await h.service.switchComparison(2)).toEqual({ status: 'applied' });
+		expect((await h.service.endComparison({ revert: false })).status).toBe('accepted');
+		expect(h.service.getState().live).toMatchObject({
+			status: 'ended',
+			endedReason: 'stopped',
+			playsUnsaved: true,
+			cableEq: true
+		});
+	});
+
 	test('needs match: refused before any I/O', async () => {
 		const h = await harness();
 		const outcome = await compare(h, { blind: true, match: false });

@@ -6,7 +6,6 @@
 	import VuMeter from '#lib/components/meters/VuMeter.svelte';
 	import type { MeterSource, MeterUpdate } from '#lib/audio/meters.ts';
 	import { numberLabel } from '#lib/charts/scales.ts';
-	import { m } from '#lib/paraglide/messages.js';
 	import {
 		CABLE_SAVED_SOURCE,
 		communityHidden,
@@ -118,7 +117,7 @@
 					disabled={hiddenSource}>{track.curve.name}</option
 				>{/if}
 			<option value="current">{t.current}</option>
-			{#if cableSaved}<option value={CABLE_SAVED_SOURCE}>{m.cable_x2_source_saved()}</option>{/if}
+			{#if cableSaved}<option value={CABLE_SAVED_SOURCE}>{t.cableSaved}</option>{/if}
 			<option value="preset:neutro">{t.neutral}</option>
 			<optgroup label={t.presets}
 				>{#each OFFICIAL_PRESETS as choice (choice.id)}<option value="preset:{choice.id}"

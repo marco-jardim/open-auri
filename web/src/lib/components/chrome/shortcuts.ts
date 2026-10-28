@@ -40,7 +40,9 @@ export function playbackShortcut(
  * - k: the root layout's existing-preview playback handler;
  * - Ctrl/⌘+Z and Ctrl/⌘+Shift+Z: the root layout's undo/redo handler;
  * - 1/2/3: Curva layer keys (`isLayerKeyEvent`/`layerFromKey` in pages/curva/layers.ts);
- * - Ctrl/⌘+K: Docs search (`isSearchShortcut` in pages/docs/search.ts).
+ * - Ctrl/⌘+K: Docs search (`isSearchShortcut` in pages/docs/search.ts);
+ * - A / B / Space: the Comparar page's "Comparar no cabo" lever while it runs
+ *   (`onKeydown` in pages/comparar/CableAB.svelte).
  */
 export function appShortcuts(): Shortcut[] {
 	return [
@@ -50,6 +52,7 @@ export function appShortcuts(): Shortcut[] {
 		{ keys: 'Ctrl / ⌘ + Z', description: m.layout_shortcut_undo() },
 		{ keys: 'Ctrl / ⌘ + Shift + Z', description: m.layout_shortcut_redo() },
 		{ keys: '1 / 2 / 3', description: m.layout_shortcut_layers() },
-		{ keys: 'Ctrl / ⌘ + K', description: m.layout_shortcut_search() }
+		{ keys: 'Ctrl / ⌘ + K', description: m.layout_shortcut_search() },
+		{ keys: m.cable_x2_shortcut_keys(), description: m.cable_x2_shortcut_lever() }
 	];
 }

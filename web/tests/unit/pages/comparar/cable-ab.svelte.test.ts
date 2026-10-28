@@ -498,3 +498,229 @@ test('"Salvo no cabo" loads the cable\'s saved curve into a lane', async () => {
 		)
 		.toBe(true);
 });
+
+/** Same pair as the held-revert test: the saved curve (−3 dB) is far above the set's level. */
+const QUIET_PAIR: ComparisonCurve[] = [
+	{ bands: OFF_BANDS, preampDb: -12 },
+	{ bands: OFF_BANDS, preampDb: -13 }
+];
+
+async function quietPair(app: ClientApp) {
+	const [first, second] = QUIET_PAIR;
+	if (first === undefined || second === undefined) throw new Error('expected two curves');
+	await laneCurve(app, 1, 'Baixa', first);
+	await laneCurve(app, 2, 'Mais baixa', second);
+}
+
+test('a session ended elsewhere (cable forgotten) never ends the next comparison', async () => {
+	const { app } = await setup();
+	await startComparison(app);
+	expect(await app.cable.disconnect()).toBe(true);
+	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('forgotten'));
+	expect(await app.cable.connect()).not.toBeNull();
+	await vi.waitFor(() => expect(app.cableState.connection).toBe('connected'));
+	// A new set: the first one's signature must not count against it.
+	await laneSource(2, 'preset:pref6');
+	await startComparison(app);
+	await expect.element(radio('B', 'Natural')).toBeVisible();
+	await tick();
+	await app.cable.whenLiveIdle();
+	expect(app.cableState.live).toMatchObject({ status: 'live', comparison: { active: true } });
+	expect(text('[data-cable-ab-ended]')).toBe('');
+	// And it still switches.
+	await radio('B', 'Natural').click();
+	await vi.waitFor(() =>
+		expect(app.cableState.live?.comparison).toMatchObject({ index: 1, status: 'ready' })
+	);
+});
+
+test('a held revert offers "Continuar comparando": the hold is dropped, the comparison goes on', async () => {
+	const { app, fake } = await setup({ savedPreampDb: -3 });
+	const [itemA, itemB] = planComparison(QUIET_PAIR, { match: true }).items;
+	await quietPair(app);
+	await startComparison(app);
+	await page.getByRole('button', { name: m.cable_x2_end(), exact: true }).click();
+	await vi.waitFor(() =>
+		expect(app.cableState.live?.hold).toMatchObject({ reason: 'loudness', curve: 'saved' })
+	);
+	const keepComparing = page.getByRole('button', { name: m.cable_x2_continue() });
+	await expect.element(keepComparing).toBeVisible();
+	// Never the editor's wording for a comparison hold.
+	expect(text('[data-cable-ab-hold-text]')).not.toBe('');
+	expect(text('[data-cable-ab-hold-text]')).not.toContain('editor');
+
+	// Every other status says what happened; the hold stays.
+	const cancel = vi.spyOn(app.cable, 'cancelHold');
+	const statuses = [
+		['no-hold', m.cable_x2_continue_no_hold()],
+		['unknown', m.cable_x2_switch_unknown()],
+		['busy', m.cable_x2_continue_busy()],
+		['ended', m.cable_live_refused_no_session()],
+		['error', m.cable_live_refused_error()]
+	] as const;
+	for (const [status, expected] of statuses) {
+		cancel.mockReturnValueOnce({ status });
+		await keepComparing.click();
+		await expect.poll(() => text('[data-cable-ab-message]')).toBe(expected);
+		expect(app.cableState.live?.hold).not.toBeNull();
+	}
+
+	// The real one: no I/O, the candidate keeps playing.
+	const attempts = fake.device.attempts;
+	await keepComparing.click();
+	await vi.waitFor(() => expect(app.cableState.live?.hold).toBeNull());
+	expect(cancel).toHaveBeenCalledTimes(statuses.length + 1);
+	expect(fake.device.attempts).toBe(attempts);
+	await expect.poll(() => text('[data-cable-ab-message]')).toBe(m.cable_x2_continue_cleared());
+	expect(app.cableState.live?.comparison).toMatchObject({ active: true, status: 'ready', index: 0 });
+	expect(playingCrc(fake)).toBe(itemA?.crc);
+	expect(document.querySelector('[data-cable-ab-hold]')).toBeNull();
+	await expect.element(radio('A', 'Baixa')).toHaveFocus();
+	// Switches go on.
+	await radio('B', 'Mais baixa').click();
+	await vi.waitFor(() => expect(playingCrc(fake)).toBe(itemB?.crc));
+	expect(app.cableState.live?.hold).toBeNull();
+});
+
+test('an unknown state offers "Reaplicar": the current candidate plays again', async () => {
+	const { app, fake, gestures } = await setup();
+	const [, itemB] = planComparison(defaultCurves(), { match: true }).items;
+	await startComparison(app);
+	// Report 8 of the switch fails: what the cable plays is not known.
+	fake.device.faults.throwAtReport = fake.device.attempts + 8;
+	await radio('B', 'Auri').click();
+	await vi.waitFor(() => expect(app.cableState.live?.status).toBe('unknown'));
+	await expect.poll(() => text('[data-cable-ab-message]')).toBe(m.cable_x2_switch_unknown());
+	expect(text('[data-cable-ab-hold-text]')).toBe(m.cable_x2_hold_unknown());
+	expect(page.getByRole('button', { name: m.cable_x2_continue() }).all()).toHaveLength(0);
+
+	const before = gestures.mock.calls.length;
+	await page.getByRole('button', { name: m.cable_live_reapply() }).click();
+	await vi.waitFor(() =>
+		expect(app.cableState.live?.comparison).toMatchObject({ status: 'ready', index: 1 })
+	);
+	expect(app.cableState.live?.hold).toBeNull();
+	expect(playingCrc(fake)).toBe(itemB?.crc);
+	expect(gestures.mock.calls.length).toBe(before + 1);
+	await expect.poll(() => text('[data-cable-ab-message]')).toBe('');
+	expect(document.querySelector('[data-cable-ab-hold]')).toBeNull();
+	await expect.element(radio('B', 'Auri')).toHaveFocus();
+});
+
+test('"Salvar esta" of the level-lowered side: once written, the comparison ends saying so', async () => {
+	const { app, fake } = await setup();
+	const plan = planComparison(defaultCurves(), { match: true });
+	const loweredIndex = plan.items.findIndex((item) => item.matched);
+	const item = plan.items[loweredIndex];
+	const lane = initialTracks()[loweredIndex];
+	if (item === undefined || lane === undefined) throw new Error('expected a lowered side');
+	// The lowered candidate is not the original curve the save writes.
+	expect(item.crc).not.toBe(item.original.crc);
+	await startComparison(app);
+	if (loweredIndex === 1) {
+		await radio('B', 'Auri').click();
+		await vi.waitFor(() =>
+			expect(app.cableState.live?.comparison).toMatchObject({ index: 1, status: 'ready' })
+		);
+	}
+	await page.getByRole('button', { name: m.cable_x2_save() }).click();
+	await vi.waitFor(() => expect(app.pendingWrite).not.toBeNull());
+	const pending = app.pendingWrite;
+	if (pending === null) throw new Error('expected the write checklist');
+	// Still comparing while the checklist is open.
+	expect(app.cableState.live?.comparison?.active).toBe(true);
+
+	// The write checklist's own path: a confirmed write with a fresh gesture.
+	const outcome = await app.cable.write({
+		...pending,
+		experimental: false,
+		confirmations: { volumeLowered: true, keepConnected: true, experimental: false },
+		gesture: app.cable.createGesture({ isTrusted: true, type: 'click' })
+	});
+	app.onWriteResult(outcome);
+	expect(outcome.status).toBe('ok');
+	expect(fake.device.firmware.commitCount).toBe(1);
+
+	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('stopped'));
+	expect(playingCrc(fake)).toBe(item.original.crc);
+	await expect
+		.poll(() => text('[data-cable-ab-ended]'))
+		.toBe(m.cable_x2_saved({ name: lane.curve.name }));
+	// No failure shown: the lever and its "not confirmed" status are gone.
+	expect(document.querySelector('[data-cable-ab-status]')).toBeNull();
+	expect(text('[data-cable-ab-message]')).toBe('');
+	expect(text('[data-cable-ab-announce]')).toBe(m.cable_x2_saved({ name: lane.curve.name }));
+});
+
+test('"Encerrar" is locked without a known saved curve, pointing to "Encerrar sem voltar"', async () => {
+	const { app } = await setup();
+	await startComparison(app);
+	expect(app.cable.liveSavedCurve()).toBeNull();
+	const end = page.getByRole('button', { name: m.cable_x2_end(), exact: true });
+	await expect.element(end).toHaveAttribute('aria-disabled', 'true');
+	const described = end.element().getAttribute('aria-describedby') ?? '';
+	expect(document.getElementById(described)?.textContent).toContain(m.cable_x2_end_no_saved());
+	const locked = end.element();
+	if (locked instanceof HTMLElement) locked.click();
+	await tick();
+	await app.cable.whenLiveIdle();
+	expect(app.cableState.live?.comparison?.active).toBe(true);
+	const keep = page.getByRole('button', { name: m.cable_x2_end_keep() });
+	await expect.element(keep).not.toHaveAttribute('aria-disabled', 'true');
+	await keep.click();
+	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('stopped'));
+});
+
+test('a lane change during a switch: the end note stands, focus goes back to the start button', async () => {
+	const { app } = await setup();
+	await startComparison(app);
+	const side = radio('B', 'Auri').element();
+	if (!(side instanceof HTMLElement)) throw new Error('expected the B radio');
+	side.focus();
+	side.click();
+	await laneSource(2, 'preset:pref6');
+	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('stopped'));
+	await app.cable.whenLiveIdle();
+	await expect.poll(() => text('[data-cable-ab-ended]')).toBe(m.cable_x2_lanes_changed());
+	await tick();
+	expect(text('[data-cable-ab-message]')).toBe('');
+	await expect.element(startButton()).toHaveFocus();
+});
+
+test('A and B are ignored while a menu or listbox popup is open', async () => {
+	const { app, fake } = await setup();
+	const [itemA, itemB] = planComparison(defaultCurves(), { match: true }).items;
+	await startComparison(app);
+	(document.activeElement as HTMLElement | null)?.blur();
+	for (const role of ['menu', 'listbox']) {
+		const popup = document.createElement('div');
+		popup.setAttribute('role', role);
+		popup.textContent = role;
+		document.body.append(popup);
+		try {
+			document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }));
+			await tick();
+			await app.cable.whenLiveIdle();
+			expect(playingCrc(fake)).toBe(itemA?.crc);
+			expect(app.cableState.live?.comparison?.index).toBe(0);
+		} finally {
+			popup.remove();
+		}
+	}
+	await userEvent.keyboard('b');
+	await vi.waitFor(() => expect(playingCrc(fake)).toBe(itemB?.crc));
+});
+
+test('the start button controls the checklist only while it exists; the empty status region stays', async () => {
+	const { app } = await setup();
+	expect(startButton().element().hasAttribute('aria-controls')).toBe(false);
+	await openChecklist();
+	const controls = startButton().element().getAttribute('aria-controls') ?? '';
+	expect(document.getElementById(controls)?.hasAttribute('data-cable-ab-checklist')).toBe(true);
+	const region = document.querySelector('[data-cable-ab-message]');
+	if (!(region instanceof HTMLElement)) throw new Error('expected the status region');
+	expect(region.getAttribute('role')).toBe('status');
+	expect(region.classList.contains('sr-only')).toBe(true);
+	expect(getComputedStyle(region).display).not.toBe('none');
+	expect(app.cableState.live).toBeNull();
+});

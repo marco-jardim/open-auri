@@ -830,8 +830,8 @@ export function createCableService(
 				total: liveTotal,
 				lastError: blindError(s.lastError),
 				...(s.ended === null ? {} : { endedReason: s.ended }),
-				playsUnsaved: playsUnsavedOf(s),
-				cableEq: cableEqOf(s),
+				playsUnsaved: blindPlaysUnsavedOf(s),
+				cableEq: blindCableEqOf(s),
 				comparison: comparisonView(s, comparison)
 			};
 		}
@@ -888,6 +888,23 @@ export function createCableService(
 	function cableEqOf(s: LiveSession): boolean {
 		if (s.applied === null) return false;
 		if (s.ended !== null) return playsUnsavedOf(s);
+		return s.known;
+	}
+
+	/**
+	 * `playsUnsaved` of a blind comparison: true whenever a candidate plays (or the state is
+	 * unknown), never compared with the saved curve's CRC — that comparison would name the
+	 * candidate that is the saved curve. After the session: only a curve kept on the cable.
+	 */
+	function blindPlaysUnsavedOf(s: LiveSession): boolean {
+		if (s.ended !== null && !keptAfterEnd(s)) return false;
+		return !s.known || s.applied !== null;
+	}
+
+	/** `cableEq` of a blind comparison: true while a candidate is known to play (or is kept). */
+	function blindCableEqOf(s: LiveSession): boolean {
+		if (s.applied === null) return false;
+		if (s.ended !== null) return keptAfterEnd(s);
 		return s.known;
 	}
 

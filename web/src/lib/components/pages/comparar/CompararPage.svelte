@@ -158,7 +158,9 @@
 		if (!client || client.cableState.connection !== 'connected') return null;
 		const label = client.cableState.deviceLabel;
 		if (label === null) return null;
-		const name = m.cable_x2_source_saved();
+		const name = t.cableSaved;
+		// The journal stores the label cut to 64 code points (the service's `truncate`).
+		const journalLabel = [...label].slice(0, 64).join('');
 		const session = client.cableState.live;
 		if (session !== null && session.deviceLabel === label) {
 			const saved = untrack(() => client.cable.liveSavedCurve());
@@ -169,7 +171,7 @@
 		const entries = client.state.journal.entries;
 		for (let index = entries.length - 1; index >= 0; index--) {
 			const entry = entries[index];
-			if (entry === undefined || entry.status !== 'ok' || entry.device !== label) continue;
+			if (entry === undefined || entry.status !== 'ok' || entry.device !== journalLabel) continue;
 			return { name, source: 'custom', preampDb: entry.preampDb, bands: snapshotBands(entry.bands) };
 		}
 		return null;
@@ -602,7 +604,7 @@
 					</div>
 				</div>
 			{:else}<p class="note">{t.empty}</p>{/if}
-			{#if app}<CableAB {app} {a} {b} {matched} />{/if}
+			{#if app}<CableAB {app} {a} {b} {matched} flat={cableFlat} />{/if}
 		</section>
 		<section class="panel patch-bay-panel" aria-labelledby="comparar-bay-title">
 			<h2 class="plate" id="comparar-bay-title">{t.bay}</h2>

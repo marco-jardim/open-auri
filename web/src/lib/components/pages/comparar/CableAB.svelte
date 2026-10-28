@@ -15,8 +15,13 @@
 	  applying → live, and the last switch's latency is shown.
 	- "Salvar esta" makes the session's cable the write target and opens the normal write
 	  checklist on the ORIGINAL curve of the side that plays (`comparisonOriginal`), named after
-	  its lane. "Encerrar" reverts (gesture; a held revert offers the volume confirmation, then
-	  ends there); "Encerrar sem voltar" ends with the cable keeping the curve.
+	  its lane. Once that write reached the cable (its saved curve is the original and plays), the
+	  comparison ends there, saying so. "Encerrar" reverts (gesture; a held revert offers the
+	  volume confirmation, then ends there; locked while a switch runs or when the saved curve is
+	  not known); "Encerrar sem voltar" ends with the cable keeping the curve.
+	- A hold shows its banner: an unknown state offers "Reaplicar" (`confirmLive`, the current
+	  candidate again), any other hold "Continuar comparando" (`cancelHold`: the cable keeps the
+	  candidate it plays).
 	- A change of A or B (curve, lane or the match toggle) ends the comparison: a stale set is
 	  never switched. Leaving the page ends it without reverting.
 	Read-only use of the service otherwise; the comparison semantics live in the service.
@@ -33,11 +38,13 @@
 		Band,
 		ChecklistItemId,
 		ChecklistResult,
+		ComparisonCancelHoldStatus,
 		ComparisonCurve,
 		ComparisonItem,
 		ComparisonOutcome,
 		ComparisonRefusal,
-		ComparisonSwitchStatus
+		ComparisonSwitchStatus,
+		LiveHoldState
 	} from '#lib/cable/types.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import Lamp, { type LampTone } from '#lib/components/primitives/Lamp.svelte';
@@ -59,9 +66,11 @@
 		b: Track | undefined;
 		/** The page's level-match toggle: the comparison's `match`. */
 		matched: boolean;
+		/** The browser lanes play flat (the cable applies the EQ). */
+		flat?: boolean;
 	}
 
-	let { app, a, b, matched }: Props = $props();
+	let { app, a, b, matched, flat = false }: Props = $props();
 
 	type Side = 'A' | 'B';
 	const SIDES: readonly Side[] = ['A', 'B'];
@@ -152,6 +161,42 @@
 				return m.cable_live_refused_no_session();
 			case 'error':
 				return m.cable_x2_switch_error();
+			default:
+				return status satisfies never;
+		}
+	}
+
+	/** A comparison hold's banner: the saved curve (a held revert) or a comparison candidate. */
+	function holdText(hold: LiveHoldState): string {
+		if (hold.reason === 'unknown-state') return m.cable_x2_hold_unknown();
+		if (hold.curve === 'saved') return liveHoldText(hold, 'saved');
+		switch (hold.reason) {
+			case 'loudness':
+				return m.cable_x2_hold_loudness({ delta: formatNumber(Math.abs(hold.deltaDb ?? 0), 1) });
+			case 'gate':
+				return m.cable_x2_hold_gate();
+			case 'experimental':
+				return m.cable_x2_hold_experimental();
+			default:
+				return hold.reason satisfies never;
+		}
+	}
+
+	/** "Continuar comparando" (`cancelHold`): what happened, for every status. */
+	function continueText(status: ComparisonCancelHoldStatus): string {
+		switch (status) {
+			case 'cleared':
+				return m.cable_x2_continue_cleared();
+			case 'no-hold':
+				return m.cable_x2_continue_no_hold();
+			case 'unknown':
+				return m.cable_x2_switch_unknown();
+			case 'busy':
+				return m.cable_x2_continue_busy();
+			case 'ended':
+				return m.cable_live_refused_no_session();
+			case 'error':
+				return m.cable_live_refused_error();
 			default:
 				return status satisfies never;
 		}
@@ -268,6 +313,8 @@
 	/** The lanes the running set was started with (names, "Salvar esta"). */
 	let startedTracks = $state.raw<readonly [Track, Track] | null>(null);
 	let startedMatch = $state(true);
+	/** CRC of each candidate's original curve (what "Salvar esta" writes; plain, never rendered). */
+	let startedOriginals: readonly number[] = [];
 	/** Signature of the running set (plain: compared, never rendered). */
 	let startedSignature: string | null = null;
 	/** A switch in flight: its target index. */
@@ -276,6 +323,12 @@
 	let busy = $state(false);
 	/** Why this page ended the comparison (lanes changed, a confirmed revert), else null. */
 	let endNote = $state<string | null>(null);
+	/**
+	 * Bumped whenever this page ends the comparison on its own (stale set, save): a switch that
+	 * was in flight then must not report its own (later) refusal over the end's note.
+	 */
+	let endEpoch = 0;
+	let section = $state<HTMLElement | undefined>();
 	const radios: (HTMLButtonElement | undefined)[] = $state([]);
 
 	const items = $derived(running ? (comparison?.items ?? []) : []);
@@ -324,6 +377,20 @@
 		return null;
 	});
 
+	/** The revert needs the cable's saved curve (re-read on every state change). */
+	const savedKnown = $derived.by(() => {
+		void cable;
+		return running && untrack(() => app.cable.liveSavedCurve()) !== null;
+	});
+	/** Why "Encerrar" (revert) is locked, or null. */
+	const endReason = $derived.by<string | null>(() => {
+		if (switching !== null) return m.cable_x2_end_wait();
+		if (!savedKnown) return m.cable_x2_end_no_saved();
+		return null;
+	});
+	/** Why "Encerrar sem voltar" is locked, or null. */
+	const keepReason = $derived(switching !== null ? m.cable_x2_end_wait() : null);
+
 	async function focusLever() {
 		await tick();
 		radios[selectedIndex ?? 0]?.focus();
@@ -334,9 +401,32 @@
 		startButton?.focus();
 	}
 
+	/**
+	 * After the page ended the comparison on its own: the start button takes the focus when the
+	 * focus was in this panel (the lever is gone) or nowhere; never away from another control.
+	 */
+	async function restoreFocus() {
+		await tick();
+		const active = document.activeElement;
+		if (active === null || active === document.body || section?.contains(active) === true) {
+			startButton?.focus();
+		}
+	}
+
+	// A session that ended (unplugged, forgotten, a stop from elsewhere) leaves no set behind:
+	// a leftover signature would end the next comparison as soon as it starts.
+	$effect(() => {
+		if (running) return;
+		untrack(() => {
+			startedSignature = null;
+			stopSaveWatch();
+		});
+	});
+
 	// The gesture token is minted synchronously, inside this click.
 	async function onGo(event: MouseEvent) {
 		if (starting || goReason !== null || curves === null || pair === null) return;
+		startedSignature = null;
 		const gesture = app.cable.createGesture(event);
 		const sent = curves;
 		const tracks = pair;
@@ -358,6 +448,8 @@
 			starting = false;
 		}
 		if (outcome.status === 'accepted') {
+			// The originals' CRCs (the same pure plan the service made): "Salvar esta" writes one.
+			startedOriginals = planComparison(sent, { match }).items.map((item) => item.original.crc);
 			startedTracks = tracks;
 			startedMatch = match;
 			startedSignature = signatureNow;
@@ -390,6 +482,7 @@
 		if (index === playingIndex && comparison?.status === 'ready') return;
 		switching = index;
 		message = null;
+		const epoch = endEpoch;
 		const begin = performance.now();
 		let status: ComparisonSwitchStatus;
 		try {
@@ -397,6 +490,8 @@
 		} finally {
 			switching = null;
 		}
+		// The page ended the comparison meanwhile (lanes changed): its note stands.
+		if (epoch !== endEpoch) return;
 		if (status === 'applied') latency = Math.max(0, Math.round(performance.now() - begin));
 		else message = switchText(status);
 	}
@@ -409,7 +504,24 @@
 		void choose(next);
 	}
 
-	/** A and B choose, Space toggles: never inside form fields, other controls or dialogs. */
+	const POPUPS = '[role="menu"], [role="menubar"], [role="listbox"]';
+
+	/** A menu or listbox popup is open somewhere on the page. */
+	function popupOpen(): boolean {
+		if (
+			document.querySelector(
+				'[aria-haspopup]:not([aria-haspopup="false"])[aria-expanded="true"], [role="combobox"][aria-expanded="true"]'
+			)
+		) {
+			return true;
+		}
+		for (const popup of document.querySelectorAll<HTMLElement>('[role="menu"], [role="listbox"]')) {
+			if (!popup.hidden && popup.getClientRects().length > 0) return true;
+		}
+		return false;
+	}
+
+	/** A and B choose, Space toggles: never inside form fields, other controls, dialogs or popups. */
 	function onKeydown(event: KeyboardEvent) {
 		if (
 			!running ||
@@ -443,6 +555,9 @@
 			return;
 		}
 		if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+		// A menu or listbox popup (open) keeps its letter and Space keys.
+		if (target instanceof Element && target.closest(POPUPS)) return;
+		if (popupOpen()) return;
 		event.preventDefault();
 		const index = key === ' ' ? (selectedIndex === 0 ? 1 : 0) : lower === 'a' ? 0 : 1;
 		void choose(index);
@@ -467,6 +582,64 @@
 			bands: snapshotBands(original.bands),
 			preampDb: original.preampDb
 		});
+		const crc = startedOriginals[index];
+		if (crc !== undefined) watchSave(crc, track.curve.name);
+	}
+
+	/** The running "Salvar esta" watch (unsubscribes), or null. */
+	let saveWatch: (() => void) | null = null;
+
+	function stopSaveWatch() {
+		const stop = saveWatch;
+		saveWatch = null;
+		stop?.();
+	}
+
+	/**
+	 * After "Salvar esta": once a write ran and the session's cable has the original as its saved
+	 * curve and plays it (the level-lowered candidate is gone from the cable), the comparison ends
+	 * there, saying so. A write that fails or never starts changes nothing.
+	 */
+	function watchSave(crc: number, name: string) {
+		stopSaveWatch();
+		let wrote = false;
+		let done = false;
+		const stop = app.cable.subscribe((state) => {
+			if (done) return;
+			if (state.writing) {
+				wrote = true;
+				return;
+			}
+			const now = state.live;
+			if (!wrote || now === null) return;
+			if (now.comparison?.active !== true || now.comparison.blind) {
+				done = true;
+				queueMicrotask(stopSaveWatch);
+				return;
+			}
+			if (now.savedCrc === crc && now.applied?.crc === crc && now.playsUnsaved === false) {
+				done = true;
+				// Outside the service's emit (ending emits again).
+				queueMicrotask(() => void endSaved(name));
+			}
+		});
+		saveWatch = stop;
+	}
+
+	async function endSaved(name: string) {
+		stopSaveWatch();
+		const state = app.cable.getState().live;
+		if (state?.comparison?.active !== true || state.comparison.blind) return;
+		endEpoch += 1;
+		startedSignature = null;
+		const outcome = await app.cable.endComparison({ revert: false });
+		if (outcome.status === 'accepted') {
+			endNote = m.cable_x2_saved({ name });
+			message = null;
+			await restoreFocus();
+			return;
+		}
+		message = liveOutcomeText(outcome);
 	}
 
 	async function ended() {
@@ -474,8 +647,34 @@
 		await focusStart();
 	}
 
+	/** "Continuar comparando": drops the hold (no I/O), the cable keeps the candidate it plays. */
+	async function onContinue() {
+		if (busy) return;
+		const { status } = app.cable.cancelHold();
+		message = continueText(status);
+		if (status === 'cleared') await focusLever();
+	}
+
+	/** "Reaplicar" an unknown state: the current candidate again (gesture in this click). */
+	async function onReapply(event: MouseEvent) {
+		if (busy) return;
+		const gesture = app.cable.createGesture(event);
+		busy = true;
+		message = null;
+		try {
+			const outcome = await app.cable.confirmLive({ gesture });
+			if (outcome.status === 'accepted') {
+				await focusLever();
+				return;
+			}
+			message = liveOutcomeText(outcome);
+		} finally {
+			busy = false;
+		}
+	}
+
 	async function onEnd(event: MouseEvent) {
-		if (busy || switching !== null) return;
+		if (busy || endReason !== null) return;
 		const gesture = app.cable.createGesture(event);
 		busy = true;
 		message = null;
@@ -553,9 +752,12 @@
 		startedSignature = null;
 		const state = app.cable.getState().live;
 		if (state?.comparison?.active !== true || state.comparison.blind) return;
+		endEpoch += 1;
+		stopSaveWatch();
 		const outcome = await app.cable.endComparison({ revert: false });
 		endNote = m.cable_x2_lanes_changed();
 		message = outcome.status === 'accepted' ? null : liveOutcomeText(outcome);
+		await restoreFocus();
 	}
 
 	$effect(() => {
@@ -568,6 +770,7 @@
 
 	// Leaving the page: the comparison ends, the cable keeps its curve until unplugged.
 	onDestroy(() => {
+		stopSaveWatch();
 		const state = app.cable.getState().live;
 		if (state?.comparison?.active === true && !state.comparison.blind) {
 			void app.cable.endComparison({ revert: false });
@@ -610,7 +813,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#if shown}
-	<section class="cable-ab" aria-labelledby={`${id}-title`} data-cable-ab>
+	<section class="cable-ab" aria-labelledby={`${id}-title`} bind:this={section} data-cable-ab>
 		<h3 id={`${id}-title`} class="title">{m.cable_x2_title()}</h3>
 		{#if running}
 			<div class="lever-row">
@@ -651,12 +854,31 @@
 
 			{#if hold !== null}
 				<div class="hold" data-cable-ab-hold={hold.reason}>
-					<p>{liveHoldText(hold, hold.curve === 'saved' ? 'saved' : 'editor')}</p>
-					{#if hold.reason === 'loudness' && hold.curve === 'saved'}
-						<Button variant="primary" size="sm" loading={busy} onclick={onConfirmRevert}
-							>{m.cable_live_hold_loudness_confirm()}</Button
-						>
-					{/if}
+					<p data-cable-ab-hold-text>{holdText(hold)}</p>
+					<div class="actions">
+						{#if hold.reason === 'unknown-state'}
+							<Button
+								variant="primary"
+								size="sm"
+								loading={busy}
+								onclick={onReapply}
+								data-cable-ab-reapply>{m.cable_live_reapply()}</Button
+							>
+						{:else}
+							{#if hold.reason === 'loudness' && hold.curve === 'saved'}
+								<Button variant="primary" size="sm" loading={busy} onclick={onConfirmRevert}
+									>{m.cable_live_hold_loudness_confirm()}</Button
+								>
+							{/if}
+							<Button
+								variant="plate"
+								size="sm"
+								loading={busy}
+								onclick={() => void onContinue()}
+								data-cable-ab-continue>{m.cable_x2_continue()}</Button
+							>
+						{/if}
+					</div>
 				</div>
 			{/if}
 
@@ -664,16 +886,26 @@
 				<Button size="sm" disabledReason={saveReason} onclick={onSave} data-cable-ab-save
 					>{m.cable_x2_save()}</Button
 				>
-				<Button variant="primary" size="sm" loading={busy} onclick={onEnd} data-cable-ab-end
-					>{m.cable_x2_end()}</Button
+				<Button
+					variant="primary"
+					size="sm"
+					loading={busy}
+					disabledReason={endReason}
+					onclick={onEnd}
+					data-cable-ab-end>{m.cable_x2_end()}</Button
 				>
-				<Button variant="ghost" size="sm" loading={busy} onclick={onEndKeep} data-cable-ab-keep
-					>{m.cable_x2_end_keep()}</Button
+				<Button
+					variant="ghost"
+					size="sm"
+					loading={busy}
+					disabledReason={keepReason}
+					onclick={onEndKeep}
+					data-cable-ab-keep>{m.cable_x2_end_keep()}</Button
 				>
 			</div>
 			<ul class="notes">
 				<li>{m.cable_x2_end_hint()}</li>
-				<li>{m.cable_x2_browser_flat()}</li>
+				{#if flat}<li data-cable-ab-flat>{m.cable_x2_browser_flat()}</li>{/if}
 				<li>{m.cable_live_stuck_note()}</li>
 			</ul>
 		{:else}
@@ -683,7 +915,7 @@
 					size="sm"
 					bind:element={startButton}
 					aria-expanded={asking}
-					aria-controls={`${id}-check`}
+					aria-controls={asking ? `${id}-check` : undefined}
 					disabledReason={startReason}
 					onclick={() => void openAsk()}
 					data-cable-ab-start>{m.cable_x2_start()}</Button
@@ -773,7 +1005,10 @@
 			<p class="ended" data-cable-ab-ended={live?.endedReason}>{endedText}</p>
 		{/if}
 		<p class="sr-only" role="status" data-cable-ab-announce>{announcement}</p>
-		<p class="message" role="status" data-cable-ab-message>{message ?? ''}</p>
+		<!-- Always in the accessibility tree (a live region must exist before it speaks). -->
+		<p class="message" class:sr-only={!message} role="status" data-cable-ab-message>
+			{message ?? ''}
+		</p>
 	</section>
 {/if}
 
@@ -888,8 +1123,5 @@
 	}
 	.levers :global(.lever-cell) {
 		flex: 1 1 140px;
-	}
-	.message:empty {
-		display: none;
 	}
 </style>
