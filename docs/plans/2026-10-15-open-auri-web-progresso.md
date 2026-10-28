@@ -2,10 +2,11 @@
 
 ## Estado
 
+- 2026-10-28: **FH em andamento.** B1, B2, byte-stream no fio e sondas acústicas B4, B7, B10, B12 e B13 feitas (B13 com ressalvas; ver "FH: progresso"). Ainda não feitas: B3, B5, B6, B8, B9 e B11.
 - 2026-10-18: **v1.0.0 lançada e em produção** (https://open-auri.com). F1 a F5 e FUX concluídas; QG PASS na rodada 2. Falta só a FH (validação em hardware), que espera a chegada do cabo (issue #6). Ver "Resumo final (v1.0.0)" no fim deste arquivo.
 - 2026-10-16: **F4 concluída** (Q4 PASS em 3 rodadas). Próximo: PF5 e F5.
 
-Fase atual: FH (aguarda o cabo) · Etapa: v1.0.0 lançada (tag `v1.0.0`) · F1 a F5 e FUX concluídas
+Fase atual: FH (em andamento desde 2026-10-28) · Etapa: v1.0.0 lançada (tag `v1.0.0`) · F1 a F5 e FUX concluídas
 
 ## Locks ativos
 
@@ -385,8 +386,26 @@ Resumo pedido pelo plano (§0.13 e §9).
 
 ### O que falta
 
-- **FH:** validação em hardware quando o cabo chegar (issue #6).
+- **FH:** validação em hardware quando o cabo chegar (issue #6). Iniciada em 2026-10-28: ver "FH: progresso".
 - Issue #7 (acompanhamento do plano) segue aberta; a #5 é fechada com o lançamento.
+
+## FH: progresso
+
+- **2026-10-28 · FH iniciada; o cabo chegou.** Kuba Auri, VID `0x3302` / PID `0x8902`, interface HID `mi_03`; Windows 11, Edge 156 (WebHID), USBPcap 1.5.4.0, tshark 4.6.9. Detalhes em `docs/probing.md` (seção F) e `docs/verification.md`.
+  - **B1** ✅: uma collection Consumer Control; input report `1` (botões), input e output `0xCB` de 31 bytes (usos vendor `0xFF000003` / `0xFF000002`); nenhum feature report; **nenhum report `0x4B`**.
+  - **B2** ✅: `receiveFeatureReport(0/1/0xCB)` rejeitam com `NotAllowedError`; escuta passiva de 10 s sem input reports.
+  - **Byte-stream no fio** ✅: 13 gravações capturadas (11 pela página oficial na ordem do fixture, depois `padrao` e Neutro pelo open-auri), 130 transferências interrupt OUT no endpoint `0x05`, nenhuma SET_REPORT com dados, nenhum interrupt IN. 11/11 iguais ao `eq0xcb.reference.json`; `padrao` do open-auri igual ao oficial nos 10 reports; Neutro igual ao `encodeReports`; CRC 13/13; commit de 5 e de 31 bytes idênticos no fio. Intervalos: oficial 18–32 ms (típico 24) e 176–195 ms antes do commit; open-auri 18–33 ms e 175–178 ms.
+  - `tools/usb-golden.mjs` ganhou o modo `--input-format interrupt-out-raw` e `--provenance`; golden real em `test/fixtures/usb-wire-golden.json`, testes em `test/tools/usb-golden-real.test.mjs`.
+  - **B3** não executada: falta decisão (nenhum comando de leitura documentado para o `0xCB`; os do `0x4B` não se aplicam, porque o cabo não tem esse report).
+  - **Medição acústica:** fone Kuba Auri → HyperX QuadCast S, concha fixada contra o mic, volume constante ~40–50%; WebAudio a 48 kHz no Windows, `echoCancellation`/`noiseSuppression`/`autoGainControl` desligados. Senoides de 707 Hz a 8 kHz, 1/6 de oitava, 2 passagens/ponto, pico na FFT de 32768; SNR 40–60 dB a partir de 1 kHz (<30 dB abaixo de ~1 kHz, acoplamento fraco). A/B ×3 (Neutro/curva), referência distante 6,3–8 kHz. Tentativa inicial invalidada por movimento (±15–25 dB): fixar transdutor e manter volume.
+  - **Envio acústico:** console do navegador, mesmos frames do codec (9 reports, 16 ms, 150 ms de espera, commit), 2,1 s entre escritas; B12 sem commit. PK 2000/5000 Hz −12 dB Q3, pré-amp −0,5 dB, `standard` por `src/safety/classify.mjs`, CRCs `0x3D48`/`0xBE68`. Tabela completa de medições em `docs/probing.md`, seção F.
+  - **B4** ✅: PK 2 kHz concorda com `magnitudeDb` em ~0,5 dB na média dos 3 ciclos (2000 Hz −12,4 dB vs −12,0 previstos); efeito imediato (≤ ~1,5 s), sem replug. Neutro reproduzível em ±0,5 dB entre 4 medições.
+  - **B10** ✅: vales em 2000/5040 Hz e simetria dos vizinhos (−7,7/−7,5 dB) confirmam DSP a 96 kHz com host a 48 kHz, resolução de 1/6 de oitava + simetria. PK 5 kHz válido: 5040 −12,4; 4490 −7,5; 5657 −7,4; 4000 −4,2 dB (previstos: 5657 −7,4; 4000 −4,4).
+  - **B7** ✅: PK 5 kHz com CRC corrompido (último byte `XOR 0xFF`, report 7 byte 10) manteve PK 2 kHz armazenado, medido duas vezes; CRC correto aplicou. Firmware valida CRC; rejeição silenciosa, sem input report.
+  - **B13** ✅ com ressalva: Neutro → PK 2 kHz com tom de 2 kHz, queda de ~10 dB em rampa suave de ~15 ms, sem energia de clique audível nem mute. Limite de sensibilidade HF do mic para cliques muito curtos só em HF; ScriptProcessor perdeu ~17% dos frames, impedindo alinhar o tempo absoluto dentro da escrita.
+  - **B12** ✅: PK 2 kHz commitado → 9 reports de Neutro sem `01 65 00 01 FF`: som neutro ao vivo (2 medições); replug restaurou PK 2 kHz (2000 Hz −12,8 dB vs referência, 3 passagens). Dados aplicam em RAM; commit persiste na flash. Bytes `01 FF` não variados. Modo sem flash, X2 no cabo e teste cego no cabo são viáveis, **não implementados**; continuam EM BREVE.
+  - **Desgaste de hoje:** ~12 escritas com commit na bancada + 13 na captura; mais 1 envio só de dados. **Estado final:** Padrão Auri, bytes oficiais, CRC `0x1970`, regravado com commit.
+  - **Ainda não feitas:** B3 (sem comando de leitura `0xCB` documentado), B5, B6, B8, B9 e B11.
 
 ## Bloqueios e perguntas ao humano
 

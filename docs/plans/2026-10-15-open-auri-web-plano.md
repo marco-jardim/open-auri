@@ -217,7 +217,7 @@ Transformar os mocks aprovados (8 páginas com homenagens) em um produto real:
 | Docs | `D:\git\open-auri\docs\*.md` (pt-BR): protocolo, hardware, ideias, social, ecossistema, perguntas abertas, sondagem, verificação. |
 | Pacote | `D:\git\open-auri\package.json`: ESM, `"test": "node --test"` (hoje também descobre `design\analysis\gate.test.mjs`). Sem dependências. |
 | Licença | AGPL-3.0. AutoEq (MIT) atribuído em `D:\git\open-auri\THIRD_PARTY_NOTICES.md`. |
-| Hardware | Cabo ainda não recebido. Nada foi validado em hardware. A página oficial só oferece presets (UI decodificada). |
+| Hardware | Atualização 2026-10-28: cabo recebido; B1, B2, byte-stream no fio e B4/B7/B10/B12/B13 medidos (B13 com ressalvas). Ver "FH: progresso" no registro de progresso e seção F de `docs/probing.md`. |
 
 ---
 
@@ -248,11 +248,16 @@ Transformar os mocks aprovados (8 páginas com homenagens) em um produto real:
 | Licenças | Presets e descrições da Kuba: o humano pede autorização após o lançamento (Q-KUBA-LIC); os mocks e o produto mostram "licença: a confirmar". Medições e alvos do AutoEq: **incluídos no produto** por decisão do usuário, com atribuição por fonte e processo de remoção a pedido (`D:\git\open-auri\docs\autoeq-data.md`). |
 | EM BREVE | Biquad cru, X2 no cabo, leitura do cabo (firmware, curva atual), modo sem flash (RAM), HP subsônico abaixo da fronteira do gate (≈28,6 Hz em Q 0,5). |
 
+**2026-10-28 · FH/B12:** os 9 reports de dados sem commit aplicam ao vivo em
+RAM; replug restaura a curva commitada. Modo sem flash e X2/teste cego no cabo
+são viáveis, mas **não implementados**; permanecem EM BREVE. Ver
+[`probing.md`, seção F](../probing.md#medição-acústica-mesmo-dia).
+
 ### 3.2 Verdade do hardware (nunca contradizer)
 
 - **Dispositivo:** cabo DSP do fone Auri ("Cabo USB-C com DSP"), chip CB5100, VID 0x3302, PID 0x8902, produto "USB DSP Audio".
 - **Transporte:** WebHID (Chrome/Edge desktop, HTTPS, gesto do usuário), report 0xCB, reports de 31 B.
-- **Escrita:** só escrita, sem leitura de volta. Cada gravação vai para a flash, com vida útil desconhecida.
+- **Escrita:** sem leitura de volta documentada. Os dados aplicam em RAM; o commit persiste na flash, com vida útil desconhecida (B12, 2026-10-28). O envio atual do app inclui commit.
 - **Processamento:** uma curva para os dois canais. DSP a 96 kHz (0 < f < 48 kHz).
 - **Payload de 220 B:**
   - cabeçalho de 14 B: `45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00`;
@@ -1483,7 +1488,7 @@ Regras comuns a todas as páginas:
   - **Candidatos:** oficiais, curva atual, variações.
   - **Rodadas:** ordem sorteada, notas de 0 a 10.
   - **Resultado:** IC de 95% (t de Student) e chave de torneio.
-  - **Cabo:** "Teste no cabo" EM BREVE, com o custo em gravações.
+  - **Cabo:** "Teste no cabo" EM BREVE. Nota de 2026-10-28: B12 mostrou envio sem commit viável para evitar flash; não implementado.
   - **S6:** painel de consentimento pronto; o envio é ligado na F4 (T4.16).
   - **Medidores:** nível por candidato ao vivo.
 
@@ -1496,6 +1501,7 @@ Regras comuns a todas as páginas:
   - **Transporte:** fita dos 9 reports + commit em tempo real e câmera lenta ×10.
   - **Diário, contadores mecânicos e vários cabos.**
   - **EM BREVE:** ler cabo, firmware, modo RAM, teste cego no cabo.
+  - **2026-10-28 · B12:** modo sem flash viável via 9 reports sem commit; modo RAM e teste cego no cabo continuam EM BREVE, não implementados.
 
 **T2.16 · Docs `/docs` (Harry Nyquist)**
 - `[route class=implement risk=medium scope=multi needs=edit,shell]` · `implementer`

@@ -110,12 +110,78 @@ Feita em 2026-10-15, contra a versão anterior do codec (a que seguia a referên
 
 As tolerâncias dos testes não foram alteradas.
 
+## Validação no fio com o cabo real
+
+Feita em 2026-10-28 com um cabo "Kuba Auri" real (VID `0x3302`, PID `0x8902`),
+Windows 11, Edge 156 (WebHID), USBPcap 1.5.4.0 e tshark 4.6.9. É a primeira
+evidência física; os fixtures `synthetic-*.json` continuam sendo só testes da
+ferramenta.
+
+| Arquivo | Conteúdo |
+|---|---|
+| `test/fixtures/usb-golden/capture-2026-10-28-edge-win.raw.json` | fonte: 130 buffers interrupt OUT `{frame, t, hex}` na ordem da captura |
+| `test/fixtures/usb-golden/capture-2026-10-28-edge-win.provenance.json` | proveniência: sistema, navegador, ferramentas, série do cabo, método e ordem das gravações |
+| `test/fixtures/usb-wire-golden.json` | golden gerado por `tools/usb-golden.mjs --input-format interrupt-out-raw --provenance …` |
+| `test/tools/usb-golden-real.test.mjs` | testes abaixo |
+
+| Verificação | Resultado |
+|---|---|
+| gravações 1–11 (página oficial) contra `eq0xcb.reference.json` | ✅ **11/11** idênticas (reports 0–8) |
+| gravação 12 (`padrao` do open-auri) | ✅ igual a `encodeReports` e à gravação oficial nos 10 reports, commit incluso |
+| gravação 13 (Neutro do open-auri) | ✅ igual a `encodeReports(NEUTRAL_BANDS, -0.5)` |
+| CRC recalculado | ✅ 13/13 |
+| commit no fio | ✅ `cb 01 65 00 01 ff` + 26 zeros nas 13 (`cb` + `commitReport()`) |
+| regenerar o golden pela CLI | ✅ idêntico byte a byte |
+
+A ferramenta emite um aviso esperado: `out-of-order curve: padrao` (a gravação
+12 repete o `padrao` depois do `etymotic`). O teste exige exatamente esse aviso.
+
+Intervalos observados: página oficial ≈ 18–32 ms entre reports (típico 24) e
+176–195 ms antes do commit; open-auri 18–33 ms e 175–178 ms.
+
+## Validação acústica com o cabo real
+
+Feita em 2026-10-28. Saída do fone Kuba Auri → HyperX QuadCast S, concha
+fixada contra o microfone e volume constante (~40–50%). WebAudio a 48 kHz no
+Windows, com `echoCancellation`, `noiseSuppression` e `autoGainControl`
+desligados. Senoides de 707 Hz a 8 kHz em passos de 1/6 de oitava, 2 passagens
+por ponto, pico na FFT de 32768; SNR 40–60 dB de 1 kHz para cima, <30 dB
+abaixo de ~1 kHz por acoplamento fraco. A/B ×3 (Neutro/curva), referência
+distante em 6,3–8 kHz. A tentativa inicial com movimento foi descartada
+(dispersão ±15–25 dB): fixar o transdutor e não mudar o volume.
+
+Envio pelo console com frames do codec: 9 reports, 16 ms entre eles, 150 ms
+de espera e commit (exceto B12), 2,1 s entre escritas. PK 2000 e 5000 Hz,
+−12 dB Q3, pré-amp −0,5 dB, ambos `standard` em `src/safety/classify.mjs`;
+CRCs `0x3D48` e `0xBE68`. Números por frequência e detalhes em
+[`probing.md`, seção F](probing.md#medição-acústica-mesmo-dia).
+
+| Sonda | Resultado medido |
+|---|---|
+| B4 | ✅ PK 2 kHz: B−A médio de 3 ciclos concorda com `magnitudeDb` em ~0,5 dB (2000 Hz: −12,4 dB vs −12,0 previstos). Efeito imediato (≤ ~1,5 s), sem replug; Neutro reproduzível em ±0,5 dB entre 4 medições |
+| B10 | ✅ Vales em 2000 e 5040 Hz, como projetados a `SAMPLE_RATE = 96000`; vizinhos −7,7/−7,5 dB no PK 2 kHz. DSP a 96 kHz com host a 48 kHz, resolução de 1/6 de oitava + simetria. PK 5 kHz válido: 5040 −12,4; 4490 −7,5; 5657 −7,4; 4000 −4,2 dB (previstos: 5657 −7,4 e 4000 −4,4) |
+| B7 | ✅ Com PK 2 kHz armazenado, PK 5 kHz com último byte do CRC `XOR 0xFF` (report 7 byte 10) não mudou a resposta, medida duas vezes; CRC correto aplicou normalmente. Validação pelo firmware, rejeição silenciosa sem input report |
+| B13 | ✅ com ressalva: Neutro → PK 2 kHz durante tom de 2 kHz, queda de ~10 dB em rampa suave de ~15 ms, sem energia de clique audível nem mute. Sensibilidade HF do microfone limita cliques muito curtos só em HF; ScriptProcessor perdeu ~17% dos frames, sem alinhamento temporal absoluto dentro da escrita |
+| B12 | ✅ Com PK 2 kHz commitado, 9 reports de Neutro sem `01 65 00 01 FF` aplicaram ao vivo (2 medições); replug restaurou PK 2 kHz (2000 Hz −12,8 dB vs referência, 3 passagens). Dados aplicam em RAM; commit persiste na flash. Bytes `01 FF` não variados |
+
+B12 demonstra a viabilidade de modo sem flash, X2 no cabo e teste cego no
+cabo, **não a implementação**. Desgaste de hoje: ~12 escritas com commit na
+bancada + 13 na captura, além de 1 envio só de dados. Ao final, **Padrão Auri
+regravado com commit**, bytes oficiais, CRC `0x1970`.
+
 ## O que os testes **não** provam
 
-- Que o firmware **aceita** esses bytes (não houve transmissão): ❌
-- Que existe leitura / pull / verify no `0xCB`: ❌
+- Que todas as curvas têm o **efeito acústico** esperado: B4 validou os PK
+  ensaiados por diferença contra Neutro, não os 11 presets nem a planicidade
+  acústica absoluta do fone; abaixo de ~1 kHz o acoplamento foi insuficiente
+- Que existe leitura / pull / verify no `0xCB`: ❌ (sem feature reports; o input
+  report `0xCB` existe e é o canal candidato)
 - Que o firmware aceita biquads fora de PK/LS (HS/LP/HP/notch): 🟡
-- Que o `FS` do chip é 96 kHz: 🟡 (três implementações concordam)
-- Que o firmware valida o CRC: 🟡 (sonda B7)
+- Que o DSP mantém 96 kHz em outras taxas de stream: confirmado só com host
+  a 48 kHz (B10)
+- Que nenhuma troca pode estalar: B13 tem limites de detecção em HF e de timing
+- Que variar `01 FF` seleciona RAM/flash: não testado; B12 omitiu o commit inteiro
+- Durabilidade da flash, comportamento em corte de energia e demais sondas
+  B5, B6, B8, B9 e B11: ainda não medidos
 
 Ver [`open-questions.md`](open-questions.md) e [`probing.md`](probing.md).

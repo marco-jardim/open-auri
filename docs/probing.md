@@ -16,7 +16,8 @@ Revisado em 2026-10-15 com medições: veja a errata em
 > - volume **no mínimo**;
 > - fone **fora da orelha** (idealmente nem conectado: use a saída de linha para um ADC);
 > - a saída do cabo para um line-in precisa de **atenuador**, senão clipa o ADC;
-> - **toda sonda que grava apaga o preset atual**, e ele não pode ser lido de volta.
+> - **toda sonda que envia dados substitui a curva ativa**; com commit, sobrescreve
+>   o preset persistido, que não pode ser lido de volta.
 >   Para voltar ao de fábrica, regrave o `padrao` (os bytes estão no fixture) 🟡;
 > - B3, B5, B9 e B11 são as mais arriscadas: trate como ensaio com instrumento, não com ouvido.
 
@@ -30,7 +31,7 @@ Marca de confiança: ✅ confirmado · 🟡 hipótese/inferência · ❌ só com
 |---|---|---|---|
 | **A1** | **Minerar as ferramentas web dos fabricantes procurando `0xCB`** | Se qualquer tool web (EPZ Web Tuning, FiiO, ODM) suportar esse firmware, o bundle **contém o protocolo em claro**, inclusive os **comandos de leitura**, que são a maior lacuna do projeto | 🟡 |
 | **A2** | **Extrair a imagem de OTA do app WalkPlay** | Fonte definitiva: mapa de registradores, existência de leitura, semântica do header, word length interna | 🟡 |
-| **A3** | **Captura USB do app oficial** (USBPcap/Wireshark) | Mostra exatamente o que o vendor manda. Precisa do cabo | ❌ |
+| **A3** | **Captura USB do app oficial** (USBPcap/Wireshark) | Mostra exatamente o que o vendor manda. Precisa do cabo | ✅ (feita da página oficial em 2026-10-28; ver F) |
 
 **A1 é o melhor ROI sem hardware.** Já temos prova de que a técnica funciona: o
 AuraPEQ expõe a tabela de VID/PID e os comandos `0x4B` no bundle.
@@ -42,18 +43,18 @@ AuraPEQ expõe a tabela de VID/PID e os comandos `0x4B` no bundle.
 | ID | Sonda | O que revela | Risco | Confiança |
 |---|---|---|---|---|
 | **B1** | **Ler `HIDDevice.collections`** | Quais reports existem (input, output, feature) e seus tamanhos. Responde "existe canal de leitura?" e **"o cabo expõe também o report `0x4B`?"** | nenhum | ✅ |
-| **B2** | **`receiveFeatureReport()`** nos reports que o B1 listar | Canal **nunca explorado** em nenhum projeto que encontramos | baixo | ❌ |
+| **B2** | **`receiveFeatureReport()`** nos reports que o B1 listar | Canal **nunca explorado** em nenhum projeto que encontramos | baixo | ✅ (feito: sem feature reports) |
 | **B3** | **Comandos de leitura no padrão `0x4B`** | Enviar só comandos da classe leitura (`0x80 …`, ex. `VERSION 0x0C`) e escutar `inputreport`. **Não varrer o espaço de comandos às cegas**: um byte qualquer num report de escrita pode ser reset, DFU ou apagamento | **alto** se às cegas | 🟡 |
-| **B4** | **Probe neutro** | Gravar `NEUTRAL_BANDS` (identidade exata) + pré-amp 0 e **medir**. Se a saída não for plana, o chip impõe processamento próprio. **Experimento de controle** | baixo | ✅ |
+| **B4** | **Probe neutro** | Medir `NEUTRAL_BANDS` (identidade exata) + pré-amp −0,5 dB como controle e comparar com PK. Reprodutibilidade e resposta diferencial medidas; planicidade absoluta não medida (ver F) | baixo | ✅ |
 | **B5** | **Hipóteses do header** | Testar as leituras do header ([`protocol-0xcb.md`](protocol-0xcb.md#header-14-bytes)), **recalculando o CRC** a cada mudança: comprimento coerente com outra contagem de seções; byte 10 = 2 com 20 seções (EQ por canal?) | **alto** (comprimento inconsistente pode estourar buffer) | 🟡 |
 | **B6** | **Mapeamento do quadro** | 8 em vez de 9 pacotes (o 9º vai vazio), fora de ordem, índice duplicado. Mostra se o firmware acumula-e-commita ou escreve incremental | médio | 🟡 |
-| **B7** | **CRC como oráculo** | Gravar a curva **A** válida; depois uma curva **B ≠ A** com CRC errado. Se o som continua A, o firmware **valida** o CRC; se vira B, o CRC é decorativo | baixo | 🟡 |
+| **B7** | **CRC como oráculo** | Gravar a curva **A** válida; depois uma curva **B ≠ A** com CRC errado. Se o som continua A, o firmware **valida** o CRC; se vira B, o CRC é decorativo | baixo | ✅ |
 | **B8** | **Precisão interna** | Perturbar uma seção sensível (baixa frequência, Q alto) por 2^k LSB, com k crescente, até a saída mudar de forma mensurável: o limiar revela truncamento interno. **Baixa prioridade**: a quantização Q27 em si é irrelevante (≤ 0,017 dB, medido) | baixo | 🟡 |
 | **B9** | **Faixa / pré-amp positivo** | Empurrar \|coef\| rumo a 16 e pré-amp acima de 0 dB. Revela **clamp vs wrap vs rejeição** e o headroom interno. O codec recusa pré-amp positivo: essa parte exige montar o blob à mão, fora do codec | **alto** | 🟡 |
-| **B10** | **Sonda do notch → o `FS` real** | Ver abaixo | baixo | 🟡 |
+| **B10** | **Sonda do notch → o `FS` real** | Ver abaixo; medida com PK negativo (seção F) | baixo | ✅ (96 kHz com stream a 48 kHz) |
 | **B11** | **Varredura de timing** | Reduzir os 16 ms/150 ms até quebrar. Mapeia o buffer e acelera a escrita; quebra = gravação parcial | **alto** | 🟡 |
-| **B12** | **Modo só-RAM** | Variar os bytes `01 FF` do APPLY (e procurar um análogo de `TEMP_WRITE`). Um modo sem flash destrava o teste cego (X2) sem desgaste | médio | 🟡 |
-| **B13** | **Comportamento na troca** | Gravar durante a reprodução e ouvir/medir: há estalo, mute ou transiente? Importa para o teste cego (um estalo denuncia A/B) | baixo | ❌ |
+| **B12** | **Modo só-RAM** | Omitir o commit: os 9 reports aplicam ao vivo, sem persistir. Variação de `01 FF` não testada | médio | ✅ |
+| **B13** | **Comportamento na troca** | Gravar durante a reprodução e ouvir/medir: há estalo, mute ou transiente? Importa para o teste cego (um estalo denuncia A/B) | baixo | ✅ (com ressalva; ver F) |
 
 ## B10 em detalhe: a sonda do `FS`
 
@@ -95,6 +96,9 @@ frost-tune). Um núcleo que seguisse o stream deslocaria a curva por 2,18× a
 44,1 kHz, algo difícil de passar despercebido. Fixo em 96 kHz é a hipótese mais
 provável. B10 continua valendo como confirmação, mas deixou de ser o "item nº 1".
 
+**Atualização 2026-10-28:** B10 confirmou 96 kHz com stream a 48 kHz por PK
+negativo (ver F). A repetição em outras taxas de stream continua não executada.
+
 ### Receita
 
 1. notch RBJ em, por exemplo, 1 kHz com Q moderado;
@@ -124,7 +128,9 @@ ruído próprios. Por isso o B4 vem antes, como calibração.
 
 **A ferramenta é o operador cego.** Como a escrita leva ~0,3 s, o próprio
 software sorteia A/B, aplica e é o único que sabe: duplo-cego sem segundo humano.
-**Dois cuidados:** cada troca grava na flash (B12) e pode estalar (B13).
+**Dois cuidados:** usar envio sem commit para evitar flash (B12, viabilidade
+medida; ainda não implementado) e respeitar os limites da medição de transientes
+(B13; ver F).
 
 ---
 
@@ -190,3 +196,97 @@ pico acumulado mínimo, calculado pelo gêmeo digital (D8).
 | 10 | **C1–C3** | validação cega |
 
 **Se só der para fazer uma coisa:** `B1 → B4 → B7`, nessa ordem.
+
+---
+
+# F. Registro de resultados com o cabo
+
+## 2026-10-28: primeiro cabo real
+
+Cabo "Kuba Auri", VID `0x3302` / PID `0x8902`, série `33028902260831`,
+interface HID `mi_03`. Windows 11, Edge 156 (Chromium) com WebHID; USBPcap
+1.5.4.0 e Wireshark/tshark 4.6.9.
+
+| Sonda | Situação | Resultado |
+|---|---|---|
+| **B1** | ✅ feita | Uma collection: usage page `0x0C`, usage `0x01` (Consumer Control). Input report `1`: botões de consumo (Play/Pause `0x0C00CD`, Vol+ `0x0C00E9`, Vol− `0x0C00EA`, `0x0C00CF`, Menu `0x0C0040`, Próxima `0x0C00B5`, Anterior `0x0C00B6`, Mudo `0x0C00E2`, Flash de telefonia `0x0B0021`) e padding. Input report `0xCB`: 31 bytes, uso vendor `0xFF000003`. Output report `0xCB`: 31 bytes, uso vendor `0xFF000002`. **Nenhum feature report. Nenhum report `0x4B`** |
+| **B2** | ✅ feita | `receiveFeatureReport(0)`, `(1)` e `(0xCB)` rejeitam com `NotAllowedError`. Escuta passiva de 10 s: nenhum input report |
+| Wire format | ✅ feita | 13 gravações (11 pela página oficial, `padrao` e Neutro pelo open-auri) capturadas no fio e comparadas byte a byte. Ver [`verification.md`](verification.md#validação-no-fio-com-o-cabo-real) |
+| **B3** | não executada | Decisão pendente: não há comando de leitura documentado para o `0xCB`. Os comandos de leitura do `0x4B` (devicePEQ, AuraPEQ) existem, mas este cabo não expõe o report `0x4B` |
+| **B4** | ✅ feita | Neutro reproduzível; PK medido concorda com `magnitudeDb` em ~0,5 dB (abaixo) |
+| **B7** | ✅ feita | CRC corrompido rejeitado silenciosamente; CRC correto aplica a curva |
+| **B10** | ✅ feita | DSP a 96 kHz com stream do host a 48 kHz; resolução de 1/6 de oitava + simetria |
+| **B12** | ✅ feita | 9 reports sem commit aplicam só em RAM; replug restaura a curva persistida |
+| **B13** | ✅ com ressalva | Rampa suave de ~15 ms, sem energia de clique audível nem intervalo de mute no ensaio |
+| **B5, B6, B8, B9, B11** | não executadas | Permanecem pendentes |
+
+O input report `0xCB` (uso `0xFF000003`) é o único candidato a canal de
+leitura. Nada chegou por ele durante as gravações nem na escuta passiva.
+
+### Medição acústica (mesmo dia)
+
+**Método:** saída do fone Kuba Auri → microfone HyperX QuadCast S, concha
+fixada contra o microfone, volume ~40–50%. WebAudio no navegador a 48 kHz no
+Windows, com `echoCancellation`, `noiseSuppression` e `autoGainControl`
+desligados. Senoides em degraus de 1/6 de oitava, de 707 Hz a 8 kHz, 2 passagens
+por ponto; pico do tom na FFT de 32768. SNR de 40–60 dB a partir de 1 kHz;
+abaixo de ~1 kHz, acoplamento acústico fraco demais (<30 dB).
+
+Alternância A/B ×3 (A = Neutro, B = curva de teste), comparando com bandas de
+referência distantes (6,3–8 kHz). Escritas pelo console do navegador com os
+mesmos frames do codec: 9 reports, intervalos de 16 ms, espera de 150 ms e
+commit; 2,1 s entre escritas, salvo a omissão do commit em B12. Curvas
+classificadas como `standard` por `src/safety/classify.mjs`: PK 2000 Hz −12 dB
+Q3, pré-amp −0,5 dB (CRC `0x3D48`), e PK 5000 Hz −12 dB Q3, mesmo pré-amp
+(CRC `0xBE68`). Uma tentativa inicial foi invalidada por movimento do conjunto
+fone/mic (dispersão de ±15–25 dB nas repetições). **Lição: fixar o transdutor e
+manter o volume constante.**
+
+**B4:** B−A para PK 2 kHz, média dos 3 ciclos:
+
+| Hz | Medido (dB) | `magnitudeDb` (dB) |
+|---|---|---|
+| 1000 | −0,8 | −0,7 |
+| 1414 | −2,5 | −2,5 |
+| 1782 | −7,7 | ≈−7,5 |
+| 2000 | −12,4 | −12,0 |
+| 2245 | −7,5 | ≈−7,5 |
+| 2828 | −2,5 | −2,5 |
+| 4000 | −0,5 | −0,7 |
+| 5657 | −0,1 | −0,3 |
+| 8000 | −0,1 | −0,1 |
+
+Concordância em ~0,5 dB. A curva entra em efeito imediatamente (≤ ~1,5 s,
+sem replug). Neutro reproduzível em ±0,5 dB entre 4 medições; trata-se de
+resposta diferencial, não de planicidade acústica absoluta do fone.
+
+**B10:** vales centrados em 2000 Hz e 5040 Hz, onde projetados com
+`SAMPLE_RATE = 96000`; vizinhos simétricos no PK 2 kHz (−7,7/−7,5 dB).
+Confirma DSP a 96 kHz com host a 48 kHz, na resolução de 1/6 de oitava +
+simetria. PK 5 kHz com CRC correto: 5040 Hz −12,4 dB; 4490 Hz −7,5 dB;
+5657 Hz −7,4 dB; 4000 Hz −4,2 dB contra a linha de base (previstos:
+4000 Hz −4,4 dB e 5657 Hz −7,4 dB).
+
+**B7:** com PK 2 kHz armazenado, enviou-se PK 5 kHz com o último byte do CRC
+corrompido (`XOR 0xFF`, report 7 byte 10). A resposta permaneceu PK 2 kHz,
+medida duas vezes; a mesma curva com CRC correto aplicou normalmente.
+**O firmware valida o CRC; a rejeição é silenciosa**, sem input report.
+
+**B13:** troca Neutro → PK 2 kHz durante tom de 2 kHz: queda de ~10 dB numa
+rampa suave de ~15 ms, sem energia de clique audível e sem intervalo de mute.
+Ressalvas: a sensibilidade do microfone em altas frequências limita a detecção
+de cliques muito curtos só em HF; o ScriptProcessor perdeu ~17% dos frames,
+impedindo medir o alinhamento temporal absoluto dentro da escrita.
+
+**B12:** com PK 2 kHz já commitado, os 9 reports de Neutro **sem** o commit
+`01 65 00 01 FF` tornaram o som neutro imediatamente (2 medições). Após
+desconectar/reconectar, voltou PK 2 kHz (2000 Hz −12,8 dB contra a referência,
+3 passagens). **Os reports de dados aplicam ao vivo, de forma volátil; o commit
+persiste na flash.** Não se variaram os bytes `01 FF` (desnecessário para essa
+conclusão). Viabiliza modo sem flash, X2 no cabo e teste cego no cabo;
+**viabilidade apenas, não implementados**.
+
+Desgaste de hoje: ~12 escritas com commit na bancada + 13 na captura, além de
+1 envio só de dados. Estado final: **Padrão Auri regravado com commit**, bytes
+oficiais, CRC `0x1970`. Ainda não feitos: B3 (sem leitura `0xCB` documentada),
+B5, B6, B8, B9 e B11.
