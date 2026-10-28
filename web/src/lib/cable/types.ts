@@ -189,6 +189,37 @@ export interface CableServiceDeps {
 	 * TODO(#72): pass `liveApply` from the native detection result where the service is built.
 	 */
 	nativeLiveApply?: boolean;
+	/**
+	 * Live preview marker storage (S5). `undefined`: `localStorage` key `oa.cable.live` in a
+	 * browser window (none elsewhere). `null`: no marker (no orphan detection).
+	 */
+	liveMarker?: InflightPort | null;
+}
+
+/**
+ * Persisted live preview marker (`oa.cable.live`, S5): written before the first live apply that
+ * differs from the saved curve, removed once the cable plays the saved curve again (a revert, a
+ * save) or is unplugged. Left behind by a tab that is gone, it means the cable may still play an
+ * unsaved preview.
+ */
+export interface LiveMarker {
+	/** Service instance (tab/page load) that applied the preview. */
+	tabId: string;
+	/** Label of the device playing the preview. */
+	device: string;
+	/** CRC-16 of the last live curve sent. */
+	crc: number;
+	/** Epoch ms of the last update. */
+	at: number;
+}
+
+/** A live marker whose tab is gone: the cable may still play an unsaved preview. */
+export interface LiveOrphan {
+	crc: number;
+	/** Epoch ms of the orphan preview's last apply. */
+	at: number;
+	/** Label of the cable it was applied to. */
+	deviceLabel: string;
 }
 
 /** Gate profile of a write: only `'yolo'` (Modo YOLO) changes anything. */
@@ -378,6 +409,8 @@ export type RefusalReason =
 	| 'interrupted-elsewhere'
 	/** Modo YOLO writes one cable at a time: the X9 queue refuses a YOLO request. */
 	| 'yolo-queue'
+	/** Another tab runs a live preview session (S5): its cable may be playing an unsaved curve. */
+	| 'live-elsewhere'
 	| 'error';
 
 export interface Refused {
@@ -468,6 +501,12 @@ export interface CableState {
 	liveCapable: boolean;
 	/** The live preview session (the last one, `status: 'ended'`, until a new one starts). */
 	live: LiveState | null;
+	/**
+	 * A live marker left by a tab that is gone (S5): the cable may still play an unsaved preview
+	 * ("desconecte e reconecte"). The loudness of a write is then compared with an unknown state.
+	 * Cleared when that cable is unplugged, saved or reverted. Absent or null: none.
+	 */
+	liveOrphan?: LiveOrphan | null;
 }
 
 /** A curve for the live preview: read once when it is queued. */
@@ -496,9 +535,11 @@ export type LiveStatus = 'starting' | 'applying' | 'live' | 'held' | 'unknown' |
 export interface LiveHoldState {
 	/**
 	 * `loudness`: ≥ 3 dB above the confirmed level; `gate`: the newest curve fails the gate
-	 * (never confirmable); `unknown-state`: what the cable plays is not known.
+	 * (never confirmable); `unknown-state`: what the cable plays is not known; `experimental`:
+	 * the curve has HS/LP/HP or a band above 20 kHz and the session's start checklist did not
+	 * confirm experimental filters (`confirmLive` with `confirmations.experimental`).
 	 */
-	reason: 'loudness' | 'gate' | 'unknown-state';
+	reason: 'loudness' | 'gate' | 'unknown-state' | 'experimental';
 	deltaDb?: number;
 	gateReasons?: readonly GateReason[];
 }
@@ -546,13 +587,37 @@ export type LiveRefusalReason =
 	| 'gate'
 	/** `revertLive` / `stopLive({ revert: true })` without a known saved curve. */
 	| 'no-saved-curve'
+	/**
+	 * `revertLive` / `stopLive({ revert: true })`: the saved curve is not what the cable plays
+	 * afterwards (`revertFailure` says why). `stopLive` keeps the session.
+	 */
+	| 'revert-failed'
+	/** Another tab runs a live preview session (S5). */
+	| 'live-elsewhere'
 	| 'error';
+
+/** Why a revert did not leave the cable on the saved curve. */
+export type LiveRevertFailure =
+	/** A hold stopped it (gate, experimental, unknown state): see `LiveState.hold`. */
+	| 'held'
+	/** What the cable plays is unknown (report 8 went out unconfirmed). */
+	| 'unknown'
+	/** The apply stopped before report 8 (the cable kept the previous curve), or failed. */
+	| 'error'
+	/** The cross-tab write lock stayed busy: nothing was sent. */
+	| 'busy'
+	/** The session ended meanwhile (unplugged, disposed). */
+	| 'ended';
 
 export interface LiveRefused {
 	status: 'refused';
 	reason: LiveRefusalReason;
 	checklist?: ChecklistResult;
 	error?: unknown;
+	/** `revert-failed` only. */
+	revertFailure?: LiveRevertFailure;
+	/** `revert-failed` only: the session as it is after the attempt. */
+	live?: LiveState | null;
 }
 
 export type LiveOutcome = LiveRefused | { status: 'accepted'; live: LiveState | null };
@@ -573,6 +638,11 @@ export interface LiveStartRequest {
 
 export interface LiveGestureRequest {
 	gesture: GestureToken | null | undefined;
+	/**
+	 * `confirmLive` on an `experimental` hold: `experimental: true` is required (it then holds
+	 * for the rest of the session). Ignored elsewhere.
+	 */
+	confirmations?: Partial<Pick<Confirmations, 'experimental'>>;
 }
 
 export interface LiveRevertRequest extends LiveGestureRequest {

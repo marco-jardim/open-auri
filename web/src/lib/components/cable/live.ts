@@ -67,5 +67,7 @@ export const liveRefusalText: Record<LiveRefusalReason, () => string> = {
 	'no-hold': () => m.cable_live_refused_no_hold(),
 	gate: () => m.cable_live_refused_gate(),
 	'no-saved-curve': () => m.cable_live_refused_no_saved_curve(),
+	'revert-failed': () => m.cable_live_refused_revert_failed(),
+	'live-elsewhere': () => m.cable_live_refused_live_elsewhere(),
 	error: () => m.cable_live_refused_error()
 };

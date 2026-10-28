@@ -125,6 +125,8 @@ export interface SetupOptions {
 	locks?: MemoryLocks | null;
 	/** In-flight marker storage (default: a fresh one). */
 	inflight?: MemoryInflight;
+	/** Live preview marker storage (`deps.liveMarker`; default: a fresh one). */
+	liveMarker?: MemoryInflight;
 	tabId?: string;
 	/** Initial epoch ms (default T0). */
 	now?: number;
@@ -144,6 +146,7 @@ export async function setup(options: SetupOptions = {}) {
 	const flash = memoryFlash(options.flash);
 	const locks = options.locks === undefined ? memoryLocks() : options.locks;
 	const inflight = options.inflight ?? memoryInflight();
+	const liveMarker = options.liveMarker ?? memoryInflight();
 	const time = { value: options.now ?? T0 };
 	const levels = {
 		lastWrittenLevelDb: options.lastWrittenLevelDb ?? null,
@@ -160,6 +163,7 @@ export async function setup(options: SetupOptions = {}) {
 		userActivation: () => ({ isActive: true }),
 		locks,
 		inflight,
+		liveMarker,
 		tabId: options.tabId,
 		...(options.yoloSession === undefined
 			? {}
@@ -173,7 +177,20 @@ export async function setup(options: SetupOptions = {}) {
 	});
 	await service.ready;
 	if (options.connect !== false) await service.connect();
-	return { clock, device, hid, journal, flash, time, levels, service, written, locks, inflight };
+	return {
+		clock,
+		device,
+		hid,
+		journal,
+		flash,
+		time,
+		levels,
+		service,
+		written,
+		locks,
+		inflight,
+		liveMarker
+	};
 }
 
 export function bytesOf(device: FakeHIDDevice): number[][] {

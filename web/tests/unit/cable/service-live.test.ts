@@ -7,7 +7,13 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { FakeHID, FakeHIDDevice, type FakeFirmware } from 'open-auri/transport';
 import { gateForWrite, levelDb } from 'open-auri/safety';
 import { LIVE_AFTER_COMMIT_MS, LIVE_DEBOUNCE_MS, LIVE_MIN_INTERVAL_MS } from 'open-auri/policy';
-import { CABLE_WRITE_LOCK, createCableService } from '../../../src/lib/cable/service.ts';
+import {
+	CABLE_LIVE_LOCK,
+	CABLE_WRITE_LOCK,
+	LIVE_BUSY_BACKOFF_MS,
+	LIVE_BUSY_MAX_ATTEMPTS,
+	createCableService
+} from '../../../src/lib/cable/service.ts';
 import { NATIVE_HID_BRAND } from '../../../src/lib/cable/native/brand.ts';
 import { onWriteProgress } from '../../../src/lib/cable/write-flag.ts';
 import type { Band, LiveCurve, Written } from '../../../src/lib/cable/types.ts';
@@ -20,7 +26,7 @@ import {
 	off,
 	setup
 } from './harness.ts';
-import { memoryInflight, memoryLocks } from './locks-fake.ts';
+import { memoryInflight, memoryLocks, type MemoryLocks } from './locks-fake.ts';
 
 type Harness = Awaited<ReturnType<typeof setup>>;
 
@@ -82,6 +88,27 @@ function expectNoWriteBookkeeping(h: Harness) {
 function locksOf(h: Harness) {
 	if (h.locks === null) throw new Error('the harness has Web Locks by default');
 	return h.locks;
+}
+
+/**
+ * The next `times` write-lock requests find it busy (another tab holds it); records when each
+ * busy attempt happened on the transport clock.
+ */
+function busyWrites(h: Harness, times: number) {
+	const base = locksOf(h);
+	const original = base.request.bind(base);
+	const at: number[] = [];
+	let left = times;
+	const request: MemoryLocks['request'] = (name, options, callback) => {
+		if (name === CABLE_WRITE_LOCK && options.ifAvailable === true && left > 0) {
+			left -= 1;
+			at.push(h.clock.now());
+			return callback(null);
+		}
+		return original(name, options, callback);
+	};
+	Object.assign(base, { request });
+	return { at };
 }
 
 const macrotask = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -161,8 +188,14 @@ describe('startLive', () => {
 		expect(h.device.firmware.committed).toBeNull();
 		expect(h.device.firmware.appliedCount).toBe(1);
 		expectNoWriteBookkeeping(h);
-		expect(locksOf(h).requests).toEqual([{ name: CABLE_WRITE_LOCK, granted: true }]);
-		expect(locksOf(h).held.size).toBe(0);
+		// S5: the session lock and this tab's liveness lock, then the write lock for the apply.
+		expect(locksOf(h).requests).toEqual([
+			{ name: CABLE_LIVE_LOCK, granted: true },
+			{ name: expect.stringMatching(/^oa-cable-alive:/) as unknown as string, granted: true },
+			{ name: CABLE_WRITE_LOCK, granted: true }
+		]);
+		expect(locksOf(h).held.has(CABLE_WRITE_LOCK)).toBe(false);
+		expect(locksOf(h).held.has(CABLE_LIVE_LOCK)).toBe(true);
 		const state = h.service.getState();
 		expect(state.liveCapable).toBe(true);
 		expect(state.writing).toBe(false);
@@ -232,18 +265,62 @@ describe('queueLive pacing', () => {
 		expect((h.device.sent[9]?.at ?? 0) - before).toBeGreaterThanOrEqual(LIVE_DEBOUNCE_MS);
 	});
 
-	test('a busy write lock keeps the edit pending (no hold) and it is applied once free', async () => {
+	test('a busy write lock keeps the edit pending (no hold), backs off and applies once free', async () => {
 		const h = await live();
 		await start(h, -12);
-		locksOf(h).held.add(CABLE_WRITE_LOCK);
+		const busy = busyWrites(h, 2);
+		const statuses: string[] = [];
+		const stop = h.service.subscribe((state) => statuses.push(state.live?.status ?? 'none'));
 		h.service.queueLive(curve(-11));
-		await macrotask(20);
-		expect(h.device.attempts).toBe(9);
-		expect(h.service.getState().live).toMatchObject({ pending: true, hold: null });
-		locksOf(h).held.delete(CABLE_WRITE_LOCK);
 		await h.service.whenLiveIdle();
+		stop();
+		expect(busy.at).toHaveLength(2);
+		const third = h.device.sent[9]?.at ?? 0;
+		// 300 ms after the first busy attempt, then 600 ms after the second.
+		expect((busy.at[1] ?? 0) - (busy.at[0] ?? 0)).toBeGreaterThanOrEqual(LIVE_BUSY_BACKOFF_MS);
+		expect(third - (busy.at[1] ?? 0)).toBeGreaterThanOrEqual(2 * LIVE_BUSY_BACKOFF_MS);
 		expect(liveCrc(h.device.firmware)).toBe(crcOf(-11));
-		expect(h.service.getState().live?.applies).toBe(2);
+		expect(h.service.getState().live).toMatchObject({ applies: 2, hold: null, lastError: null });
+		// No "live" flicker between the attempts: it stays "applying" until the apply settled.
+		const firstApplying = statuses.indexOf('applying');
+		expect(firstApplying).toBeGreaterThanOrEqual(0);
+		expect(statuses.slice(firstApplying, -1)).not.toContain('live');
+		expect(statuses.at(-1)).toBe('live');
+	});
+
+	test('a lock that stays busy: capped, the edit is dropped with lastError busy', async () => {
+		const h = await live();
+		await start(h, -12);
+		const busy = busyWrites(h, Number.POSITIVE_INFINITY);
+		h.service.queueLive(curve(-11));
+		await h.service.whenLiveIdle();
+		expect(busy.at).toHaveLength(LIVE_BUSY_MAX_ATTEMPTS);
+		expect(h.device.attempts).toBe(9);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'live',
+			pending: false,
+			hold: null,
+			lastError: 'busy'
+		});
+		// A confirmed curve's promise settles as refused busy instead of hanging.
+		const reverted = await h.service.revertLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			saved: curve(-14)
+		});
+		expect(reverted).toMatchObject({
+			status: 'refused',
+			reason: 'revert-failed',
+			revertFailure: 'busy'
+		});
+	});
+
+	test('startLive on a lock that stays busy settles refused busy; the session never started', async () => {
+		const h = await live();
+		busyWrites(h, Number.POSITIVE_INFINITY);
+		expect(await start(h, -12)).toMatchObject({ status: 'refused', reason: 'busy' });
+		expect(h.service.getState().live).toBeNull();
+		expect(locksOf(h).held.has(CABLE_LIVE_LOCK)).toBe(false);
+		expect(h.device.attempts).toBe(0);
 	});
 });
 
@@ -462,8 +539,12 @@ describe('end of a session', () => {
 		await starting;
 		await macrotask(20);
 		expect(locksOf(h).held.has(CABLE_WRITE_LOCK)).toBe(false);
+		expect(locksOf(h).held.has(CABLE_LIVE_LOCK)).toBe(false);
 		expect(h.clock.pending()).toBe(0);
 		expect(h.device.firmware.appliedCount).toBeLessThanOrEqual(1);
+		// The -11 edit was never sent: at most the start curve's 9 reports.
+		expect(h.device.sent.length).toBeLessThanOrEqual(9);
+		expect(liveCrc(h.device.firmware)).not.toBe(crcOf(-11));
 	});
 });
 
@@ -601,5 +682,282 @@ describe('capability', () => {
 
 	test('native with the capability is live-capable', () => {
 		expect(nativeService({ nativeLiveApply: true }).getState().liveCapable).toBe(true);
+	});
+
+	test('a real cable without Web Locks is not live-capable (S5)', async () => {
+		const h = await live({ locks: null });
+		expect(h.service.mode).toBe('real');
+		expect(h.service.getState().liveCapable).toBe(false);
+		expect(await start(h)).toMatchObject({ status: 'refused', reason: 'unavailable' });
+		expect(h.device.attempts).toBe(0);
+	});
+});
+
+function hsCurve(preampDb = -12): LiveCurve {
+	return {
+		bands: [{ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 }, ...OFF_BANDS.slice(1)],
+		preampDb
+	};
+}
+
+describe('QA fixes (#67/#70)', () => {
+	test('1: an experimental edit is held unless the start checklist confirmed it', async () => {
+		const h = await live();
+		// Experimental gate option on, but the start curve needs no experimental confirmation.
+		const started = await h.service.startLive({
+			curve: { ...curve(-12), experimental: true },
+			confirmations: { volumeLowered: true },
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(started.status).toBe('accepted');
+		h.service.queueLive(hsCurve());
+		await h.service.whenLiveIdle();
+		expect(h.device.attempts).toBe(9);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'held',
+			hold: { reason: 'experimental' }
+		});
+		// The confirmation must come with it.
+		expect(
+			await h.service.confirmLive({ gesture: h.service.createGesture(TRUSTED_CLICK) })
+		).toMatchObject({ status: 'refused', reason: 'checklist' });
+		expect(h.device.attempts).toBe(9);
+		const confirmed = await h.service.confirmLive({
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			confirmations: { experimental: true }
+		});
+		expect(confirmed.status).toBe('accepted');
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live).toMatchObject({ status: 'live', hold: null, applies: 2 });
+		const expected = gateForWrite(hsCurve().bands, -12, { experimental: true });
+		expect(liveCrc(h.device.firmware)).toBe(Number(expected.metrics.payloadCrc));
+	});
+
+	test('1: a start checklist that confirmed experimental filters lets later ones through', async () => {
+		const h = await live();
+		await h.service.startLive({
+			curve: { ...hsCurve(), experimental: true },
+			confirmations: { volumeLowered: true, experimental: true },
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		h.service.queueLive(hsCurve(-12.5));
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live).toMatchObject({ status: 'live', hold: null, applies: 2 });
+	});
+
+	test('2: stopLive with a held revert is not "reverted": the session goes on', async () => {
+		const h = await live();
+		await start(h, -12);
+		// The saved curve fails the session's gate (HS without the experimental option): held.
+		const outcome = await h.service.stopLive({
+			revert: true,
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			saved: hsCurve()
+		});
+		expect(outcome).toMatchObject({
+			status: 'refused',
+			reason: 'revert-failed',
+			revertFailure: 'held'
+		});
+		const state = h.service.getState().live;
+		expect(state?.status).toBe('held');
+		expect(state?.endedReason).toBeUndefined();
+		expect(state?.ackLevelDb).toBeCloseTo(levelOf(-12), 9);
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-12));
+	});
+
+	test('2: a revert whose report 8 failed is "unknown", not reverted; ack level unchanged', async () => {
+		const h = await live();
+		await start(h, -12);
+		h.device.faults.throwAtReport = 17;
+		const outcome = await h.service.stopLive({
+			revert: true,
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			saved: curve(-14)
+		});
+		expect(outcome).toMatchObject({ reason: 'revert-failed', revertFailure: 'unknown' });
+		expect(h.service.getState().live).toMatchObject({ status: 'unknown' });
+		expect(h.service.getState().live?.ackLevelDb).toBeCloseTo(levelOf(-12), 9);
+	});
+
+	test('3: after an X9 queue (or another tab\'s write) the first apply waits 2 s', async () => {
+		const h = await live();
+		const queued = await h.service.writeQueue({
+			bands: OFF_BANDS,
+			preampDb: -13,
+			experimental: false,
+			confirmations: CONFIRMED,
+			gesture: h.service.createGesture(TRUSTED_CLICK),
+			devices: [h.device]
+		});
+		expect(queued.status).toBe('done');
+		const ended = h.clock.now();
+		await start(h, -12);
+		expect((h.device.sent[10]?.at ?? 0) - ended).toBeGreaterThanOrEqual(LIVE_AFTER_COMMIT_MS);
+	});
+
+	test('3: the shared flash state of another tab delays the apply too', async () => {
+		const h = await live();
+		// Another tab's write sequence just ended (shared flash bookkeeping).
+		h.flash.touch(T0);
+		const before = h.clock.now();
+		await start(h, -12);
+		expect((h.device.sent[0]?.at ?? 0) - before).toBeGreaterThanOrEqual(LIVE_AFTER_COMMIT_MS);
+	});
+
+	test('4: S7 uses the live level only for the cable a write would go to', async () => {
+		const h = await live({ lastWrittenLevelDb: -30, sessionWriteCount: 1 });
+		await start(h, -12);
+		const other = new FakeHIDDevice({ clock: h.clock, productName: 'Outro cabo' });
+		h.hid.addDevice(other);
+		await h.service.restore();
+		const request = { bands: OFF_BANDS, preampDb: -11, experimental: false, confirmations: CONFIRMED };
+		expect(h.service.checklist(request).loudness.deltaDb).toBeCloseTo(
+			levelOf(-11) - levelOf(-12),
+			9
+		);
+		expect(h.service.selectDevice(other)).toBe(true);
+		expect(h.service.checklist(request).loudness.deltaDb).toBeCloseTo(levelOf(-11) + 30, 9);
+	});
+
+	test('settle error: the state becomes unknown and is held', async () => {
+		const flags = { failSettle: false };
+		const h = await live({
+			wrapClock: (clock) => ({
+				now: () => clock.now(),
+				sleep: (ms, signal) =>
+					flags.failSettle && signal === undefined
+						? Promise.reject(new Error('clock broke'))
+						: clock.sleep(ms, signal)
+			})
+		});
+		await start(h, -12);
+		flags.failSettle = true;
+		h.service.queueLive(curve(-11));
+		await h.service.whenLiveIdle();
+		flags.failSettle = false;
+		const state = h.service.getState().live;
+		expect(state).toMatchObject({ status: 'unknown', hold: { reason: 'unknown-state' } });
+		expect(state?.lastError).toBeInstanceOf(Error);
+	});
+
+	test('disconnect during the settle ends the session and removes the marker', async () => {
+		const flags = { unplug: false };
+		let h: Harness | null = null;
+		h = await live({
+			wrapClock: (clock) => ({
+				now: () => clock.now(),
+				sleep: (ms, signal) => {
+					if (flags.unplug && signal === undefined && h !== null) {
+						flags.unplug = false;
+						h.hid.disconnect(h.device);
+					}
+					return clock.sleep(ms, signal);
+				}
+			})
+		});
+		await start(h, -12);
+		expect(h.liveMarker.value).not.toBeNull();
+		flags.unplug = true;
+		h.service.queueLive(curve(-11));
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live).toMatchObject({
+			status: 'ended',
+			endedReason: 'disconnected'
+		});
+		expect(h.liveMarker.value).toBeNull();
+	});
+
+	test('Salvar interrupted after report 8: the live state becomes unknown', async () => {
+		const h = await live();
+		await start(h, -12);
+		// Attempts 9..17 are the save's data reports, 18 its commit.
+		h.device.faults.throwAtReport = 18;
+		const saved = await save(h, -12.5);
+		expect(saved.status).toBe('interrupted');
+		expect(h.service.getState().live).toMatchObject({
+			status: 'unknown',
+			hold: { reason: 'unknown-state' }
+		});
+	});
+
+	test('10: a held edit is evaluated again after Salvar, unless it is the saved curve', async () => {
+		const h = await live();
+		await start(h, -12);
+		h.service.queueLive(curve(-8));
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live?.hold?.reason).toBe('loudness');
+		// Saved something else: the held -8 is queued again and held against the new level.
+		expect((await save(h, -12.5)).status).toBe('ok');
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live?.hold?.reason).toBe('loudness');
+
+		// Saved the held curve itself (after the flash spacing): nothing to re-apply.
+		h.time.value += 5_000;
+		expect((await save(h, -8)).status).toBe('ok');
+		const sent = h.device.sent.length;
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live).toMatchObject({ status: 'live', hold: null });
+		expect(h.device.sent).toHaveLength(sent);
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-8));
+	});
+
+	test('Modo YOLO turned off mid-session: the next YOLO curve is held (gate)', async () => {
+		const options = { yoloSession: true };
+		const h = await live(options);
+		const started = await h.service.startLive({
+			curve: { ...curve(-12), profile: 'yolo' },
+			confirmations: { volumeLowered: true, yoloWrite: true },
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(started.status).toBe('accepted');
+		options.yoloSession = false;
+		h.service.queueLive(curve(-11));
+		await h.service.whenLiveIdle();
+		expect(h.device.attempts).toBe(9);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'held',
+			hold: { reason: 'gate', gateReasons: [] }
+		});
+	});
+
+	test('8: a first attempt that fails before report 8 leaves "starting"', async () => {
+		const h = await live();
+		h.device.faults.throwAtReport = 3;
+		const outcome = await start(h, -12);
+		expect(outcome.status).toBe('accepted');
+		expect(h.service.getState().live).toMatchObject({ status: 'live', applied: null });
+		expect(h.service.getState().live?.lastError).toBeInstanceOf(DOMException);
+	});
+
+	test('8: an unknown state stays unknown after a confirmed apply that failed early', async () => {
+		const h = await live();
+		await start(h, -12);
+		h.device.faults.throwAtReport = 17;
+		h.service.queueLive(curve(-11));
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live?.status).toBe('unknown');
+		h.device.faults.throwAtReport = 20;
+		await h.service.confirmLive({ gesture: h.service.createGesture(TRUSTED_CLICK) });
+		await h.service.whenLiveIdle();
+		expect(h.service.getState().live).toMatchObject({
+			status: 'unknown',
+			hold: { reason: 'unknown-state' }
+		});
+	});
+
+	test('11: the revert target is per cable; a save to another cable is not one', async () => {
+		const h = await live();
+		const other = new FakeHIDDevice({ clock: h.clock, productName: 'Outro cabo' });
+		h.hid.addDevice(other);
+		await h.service.restore();
+		expect(h.service.selectDevice(other)).toBe(true);
+		expect((await save(h, -13)).status).toBe('ok');
+		expect(h.service.selectDevice(h.device)).toBe(true);
+		await start(h, -12);
+		expect(
+			await h.service.revertLive({ gesture: h.service.createGesture(TRUSTED_CLICK) })
+		).toMatchObject({ status: 'refused', reason: 'no-saved-curve' });
+		expect(liveCrc(h.device.firmware)).toBe(crcOf(-12));
 	});
 });

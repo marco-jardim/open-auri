@@ -126,6 +126,7 @@
 			return m.cable_live_hold_loudness({ delta: formatNumber(hold.deltaDb ?? 0, 1) });
 		}
 		if (hold.reason === 'unknown-state') return m.cable_live_hold_unknown();
+		if (hold.reason === 'experimental') return m.cable_live_hold_experimental();
 		return m.cable_live_hold_gate();
 	});
 	const holdReason = $derived(
@@ -208,6 +209,18 @@
 		}
 	}
 
+	/** The experimental hold: this click is the experimental confirmation for the session. */
+	async function onConfirmExperimental(event: MouseEvent) {
+		if (!app || busy) return;
+		const gesture = app.cable.createGesture(event);
+		busy = true;
+		try {
+			report(await app.cable.confirmLive({ gesture, confirmations: { experimental: true } }));
+		} finally {
+			busy = false;
+		}
+	}
+
 	/** "Salvar no cabo": the normal write checklist, on the curve the cable plays now. */
 	function onSave() {
 		const applied = live?.applied;
@@ -272,6 +285,10 @@
 				{:else if hold.reason === 'unknown-state'}
 					<Button variant="primary" size="sm" loading={busy} onclick={onConfirm}
 						>{m.cable_live_reapply()}</Button
+					>
+				{:else if hold.reason === 'experimental'}
+					<Button variant="primary" size="sm" loading={busy} onclick={onConfirmExperimental}
+						>{m.cable_live_hold_experimental_confirm()}</Button
 					>
 				{/if}
 			</div>
