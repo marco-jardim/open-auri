@@ -8,11 +8,11 @@ import { closeChecklist, confirmBasics, connectCable, openChecklist } from './he
 test.use({ locale: 'pt-BR', reducedMotion: 'reduce' });
 test.setTimeout(60_000);
 
-const TITLE = 'Gravação pelo app ainda não testada num cabo';
+const TITLE = 'Gravação pelo app: teste em um celular';
 const BANNER =
-	'Gravação pelo app ainda não testada num cabo real. Em teoria funciona igual ao computador.';
+	'Gravação testada num Kuba Auri com Galaxy A70 (Android 11). Faltam outros fabricantes e a validação completa.';
 const ANDROID_CONFIRM =
-	'Entendo que a gravação pelo app Android ainda não foi testada num cabo real.';
+	'Entendo que a gravação pelo app foi testada apenas no Galaxy A70 e ainda não tem validação completa.';
 const SIMULATED = 'SIMULADO · nenhum report é enviado ao cabo real';
 const POLICY =
 	'A gravação pelo app está desligada no momento. Use o site no computador (Chrome ou Edge) ou atualize o app.';
@@ -87,10 +87,12 @@ test('first use: G.1 consent persists after reload; G.2 banner remains on Cabo',
 }) => {
 	await page.goto('/cabo');
 	await expect(notice(page)).toBeVisible();
-	await expect(notice(page)).toContainText('Só muda o caminho até o USB.');
+	await expect(notice(page)).toContainText(
+		'Ainda não foi testado em celulares de outros fabricantes'
+	);
 	await acknowledge(page);
 	await expect(page.getByRole('complementary', { name: TITLE, exact: true })).toHaveText(
-		new RegExp(BANNER.replaceAll('.', '\\.'))
+		new RegExp(BANNER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 	);
 	await page.reload();
 	await expect(page.getByText('App Android v1.0.0, USB host OK', { exact: true })).toBeVisible();

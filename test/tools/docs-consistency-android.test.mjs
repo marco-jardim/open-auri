@@ -132,12 +132,47 @@ test('G.1 matches the Android doc and both site message locales exactly', () => 
     const messages = JSON.parse(read(`web/messages/${language}.json`));
     assert.equal(messages.android_untested_body, text, `${language}: site G.1 notice`);
     if (language === 'pt-BR') {
-      const notice = section(android, '## Estado de validação: ainda não validado em hardware');
+      const notice = section(android, '## Estado de validação: teste parcial em hardware');
       assert.equal(quoted(notice, /^> (O app Android [^\n]+)$/gm), text);
       const title = quoted(g1, /^- \*\*Título:\*\* "([^"]+)"$/gm);
       assert.equal(quoted(notice, /^> \*\*([^\n]+)\*\*$/gm), title);
     }
   }
+});
+
+test('partial hardware report records the real setup, acoustic results and outstanding F5 evidence', () => {
+  const report = read('docs/android/validacao-hardware.md');
+  for (const detail of [
+    '29/10/2026',
+    '1 de 2 fabricantes',
+    'SM-A705MN',
+    'Android 11',
+    '155.0.8059.43',
+    'versionName `1.0.2`',
+    'open-auri.com',
+    'USB_TRANSFER_FAILED',
+    'claim forçado',
+    'usbhid',
+    'HyperX QuadCast S',
+    'Q27',
+    'Q23',
+    '2 a 10 kHz',
+    '0,88 dB',
+    '0,82 dB',
+    '0,16 dB',
+    '9/9',
+    'logcat',
+    'wireLog',
+    'calibração absoluta de SPL',
+    'segundo celular',
+    'relatório assinado',
+  ]) {
+    assert.ok(report.includes(detail), `Hardware report missing: ${detail}`);
+  }
+  assert.match(report, /não a aprovação completa da F5/);
+  assert.match(report, /não numa captura\s+USB no fio no Android/);
+  assert.doesNotMatch(report, /\]\([^)]*_qa[/\\]/);
+  assert.ok(android.includes('(android/validacao-hardware.md)'));
 });
 
 function textFiles(path) {

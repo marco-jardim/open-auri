@@ -445,9 +445,111 @@ class OpenAuriUsbPluginTest {
     fun openReadsAndParsesTheDescriptorOnceAndIsIdempotent() {
         val harness = UsbPluginHarness()
         val key = harness.connectFirst()
-        assertEquals(listOf("open", "rawDescriptors", "hidReportDescriptor 2"), harness.fake.calls)
+        assertEquals(listOf("open", "rawDescriptors", "claim 2 force=false", "hidReportDescriptor 2"), harness.fake.calls)
         assertTrue(harness.open(key).resolved)
-        assertEquals(3, harness.fake.calls.size)
+        assertEquals(4, harness.fake.calls.size)
+    }
+
+    @Test
+    fun openClaimsTheRealAuriHidBeforeReadingItsDescriptorAndReleasesWhenIdle() {
+        val cable = FakeUsbBackend.cable()
+        val auri = UsbDeviceInfo(
+            cable.key, cable.vendorId, cable.productId, cable.productName, cable.manufacturerName,
+            listOf(
+                cable.interfaces[0],
+                cable.interfaces[1],
+                UsbInterfaceInfo(1, 1, UsbBackend.CLASS_AUDIO, 2, 0, emptyList()),
+                UsbInterfaceInfo(1, 2, UsbBackend.CLASS_AUDIO, 2, 0, emptyList()),
+                UsbInterfaceInfo(2, 0, UsbBackend.CLASS_AUDIO, 2, 0, emptyList()),
+                UsbInterfaceInfo(
+                    3, 0, UsbBackend.CLASS_HID, 0, 0,
+                    listOf(UsbEndpointInfo(0x85, 3, 32, 1), UsbEndpointInfo(0x05, 3, 32, 10)),
+                ),
+            ),
+        )
+        val harness = UsbPluginHarness(devices = listOf(auri))
+        harness.fake.faults.kernelDriverBound = true
+        harness.fake.faults.requireInterfaceClaim = true
+        val key = harness.requestDevice().deviceKeys().single()
+        assertTrue(harness.fake.calls.isEmpty())
+        val opened = harness.open(key)
+        assertTrue("${opened.code}: ${opened.message}", opened.resolved)
+        assertEquals(
+            listOf("open", "rawDescriptors", "claim 3 force=false", "claim 3 force=true", "hidReportDescriptor 3"),
+            harness.fake.calls,
+        )
+        val state = harness.claims.diagnostics().single()
+        assertEquals(3, state.interfaceId)
+        assertTrue(state.claimed)
+        assertTrue(state.kernelDriverDetached)
+        assertEquals(1, state.claims)
+        assertEquals(1, harness.scheduler.delayed.size)
+        assertTrue(harness.diagnostics(key).payload?.getBoolean("kernelDriverDetached") == true)
+        val connection = harness.fake.open(auri)
+        assertTrue(harness.fake.isClaimed(connection, 3))
+        harness.scheduler.delayed.single().run()
+        assertEquals("release 3", harness.fake.calls.last())
+        assertFalse(harness.fake.isClaimed(connection, 3))
+        assertFalse(harness.claims.diagnostics().single().claimed)
+        assertEquals(ClaimManager.ReleaseReason.IDLE, harness.claims.diagnostics().single().lastRelease)
+        assertTrue(harness.fake.isOpen(connection))
+        assertTrue(harness.send(key, 0xCB, neutral.reports[0]).resolved)
+        assertEquals(listOf("claim 3 force=false", "INTERRUPT"), harness.fake.calls.takeLast(2))
+        assertEquals(0x05, harness.fake.sent.single().endpointAddress)
+        assertTrue(harness.close(key).resolved)
+        assertFalse(harness.fake.isClaimed(connection, 3))
+        assertFalse(harness.fake.isOpen(connection))
+        assertEquals(ClaimManager.ReleaseReason.CLOSED, harness.claims.diagnostics().single().lastRelease)
+        assertTrue(harness.scheduler.delayed.isEmpty())
+    }
+
+    @Test
+    fun descriptorTransferAndParseFailuresCloseAndForgetTheClaim() {
+        for (transferFails in listOf(true, false)) {
+            lateinit var handle: UsbConnectionHandle
+            val harness = UsbPluginHarness(wrap = { fake ->
+                object : UsbBackend by fake {
+                    override fun hidReportDescriptor(connection: UsbConnectionHandle, interfaceId: Int, length: Int): ByteArray {
+                        handle = connection
+                        assertTrue(fake.isClaimed(connection, interfaceId))
+                        val descriptor = fake.hidReportDescriptor(connection, interfaceId, length)
+                        if (transferFails) throw UsbFailure.TransferFailed(connection.device.key, -1, "controlTransfer failed")
+                        return descriptor
+                    }
+                }
+            })
+            harness.fake.faults.requireInterfaceClaim = true
+            harness.fake.faults.kernelDriverBound = true
+            if (!transferFails) harness.fake.faults.reportDescriptor = byteArrayOf(0xA1.toByte(), 0x01)
+            val key = harness.requestDevice().deviceKeys().single()
+            val failed = harness.open(key)
+            assertEquals(ErrorCodes.USB_TRANSFER_FAILED, failed.code)
+            assertTrue(failed.message.orEmpty().contains(if (transferFails) "controlTransfer failed" else "malformed HID report descriptor"))
+            assertEquals(
+                listOf("open", "rawDescriptors", "claim 2 force=false", "claim 2 force=true", "hidReportDescriptor 2", "close"),
+                harness.fake.calls,
+            )
+            assertFalse(harness.fake.isOpen(handle))
+            assertFalse(harness.fake.isClaimed(handle, 2))
+            val state = harness.claims.diagnostics().single()
+            assertFalse(state.claimed)
+            assertTrue(state.kernelDriverDetached)
+            assertEquals(ClaimManager.ReleaseReason.CLOSED, state.lastRelease)
+            assertTrue(harness.scheduler.delayed.isEmpty())
+            assertEquals(ErrorCodes.USB_NOT_OPEN, harness.diagnostics(key).code)
+        }
+    }
+
+    @Test
+    fun openWithABusyHidClosesWithoutReadingTheReportDescriptor() {
+        val harness = UsbPluginHarness()
+        harness.fake.faults.claimBusy = true
+        val key = harness.requestDevice().deviceKeys().single()
+        assertEquals(ErrorCodes.USB_BUSY, harness.open(key).code)
+        assertEquals(listOf("open", "rawDescriptors", "claim 2 force=false", "claim 2 force=true", "close"), harness.fake.calls)
+        assertFalse(harness.claims.diagnostics().single().claimed)
+        assertEquals(ClaimManager.ReleaseReason.CLOSED, harness.claims.diagnostics().single().lastRelease)
+        assertTrue(harness.scheduler.delayed.isEmpty())
     }
 
     @Test
@@ -830,6 +932,7 @@ class OpenAuriUsbPluginTest {
             val opened = harness.open(key)
             UsbTestSupport.eventually("open on real worker") { opened.completed }
             assertTrue(opened.resolved)
+            harness.claims.releaseAll()
             (harness.backend as ScriptedBackend).beforeClaim = {
                 entered.countDown()
                 check(proceed.await(UsbTestSupport.WAIT_SECONDS, TimeUnit.SECONDS))
@@ -908,6 +1011,7 @@ class OpenAuriUsbPluginTest {
 
         val busy = UsbPluginHarness()
         val busyKey = busy.connectFirst()
+        busy.claims.releaseAll()
         busy.fake.faults.claimBusy = true
         assertEquals(ErrorCodes.USB_BUSY, busy.send(busyKey, 0xCB, neutral.reports[0]).code)
         assertEquals(0, busy.fake.attempts)
@@ -1038,8 +1142,8 @@ class OpenAuriUsbPluginTest {
     @Test
     fun debugBuildsKeepAWireLogOfTheBuffersSent() {
         val debug = UsbPluginHarness(isDebug = true)
-        val key = debug.connectFirst()
         debug.fake.faults.kernelDriverBound = true
+        val key = debug.connectFirst()
         val start = debug.nowMs
         debug.writeCurve(key, neutral).forEach { assertTrue(it.resolved) }
         val report = checkNotNull(debug.diagnostics(key).payload)

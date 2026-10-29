@@ -27,7 +27,7 @@ As seis cenas de navegação são editor, Cabo sem conexão, Comparar, Soe como 
 
 Todas as capturas são PNG RGB sem alpha, até 8 MB, com proporção exata 9:16 (telefone/tablets) ou 16:9 (desktop). Os lados do tablet de 7 polegadas ficam entre 320 e 3840 px; os de 10 polegadas e desktop, entre 1080 e 7680 px. O validador exige os tamanhos e nomes exatos da tabela, 7 cenas por conjunto Android e 6 no desktop (dentro do limite de 4 a 8).
 
-`3-comparar` deve manter o botão Como funciona / How it works sem sobrepor o texto acima do título; nos layouts largos o enquadramento privilegia as pistas e o gráfico, após conferir o cabeçalho. `7-native-connect` deve mostrar o painel USB Android e o estado Conectado / Connected, mantendo o aviso de gravação ainda não testada visível, não o diálogo de confirmações. O dispositivo dessa captura é falso, ligado pelo bridge Capacitor real; a imagem não comprova conexão ou gravação em hardware real.
+`3-comparar` deve manter o botão Como funciona / How it works sem sobrepor o texto acima do título; nos layouts largos o enquadramento privilegia as pistas e o gráfico, após conferir o cabeçalho. `7-native-connect` deve mostrar o painel USB Android e o estado Conectado / Connected, mantendo o aviso de teste limitado a um celular visível, não o diálogo de confirmações. O dispositivo dessa captura é falso, ligado pelo bridge Capacitor real; a imagem não comprova conexão ou gravação em hardware real.
 
 Regenerar a partir da raiz do repositório, em PowerShell. Os comandos abaixo capturam cada conjunto nos dois idiomas; `--grep` permite repetir somente o conjunto desejado. Sem `--grep`, a spec captura todos os quatro conjuntos no projeto `mobile`, mas usa emulação de desktop (sem touch/UA Android) no conjunto desktop. Não precisa alterar a configuração dos projetos.
 
@@ -65,15 +65,15 @@ open-auri
 ### Short description
 
 ```text
-App não oficial para o cabo Auri, com equalização e USB nativo em teste.
+App não oficial Auri: EQ e USB testados no Galaxy A70, sem validação plena.
 ```
 
 ### Full description
 
 ```text
-Aviso: a gravação pelo app ainda não foi testada num cabo Auri real. O app usa o mesmo protocolo e envia os mesmos bytes que o site no computador (conferido por testes automáticos); em teoria o resultado é o mesmo, mas não há garantia. Relate o resultado em https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
 
-Conecte o cabo Kuba Auri por USB-C/OTG e grave curvas de equalização pela camada USB nativa do Android, que o navegador do celular não oferece. O transporte USB nativo permite selecionar o cabo e pedir permissão ao Android. O protocolo e os bytes enviados são os mesmos da versão para computador; o caminho físico USB do app ainda não foi validado. A gravação depende de uma ação sua e do checklist, nunca é automática. Há também Diagnóstico USB e exportação de arquivos pelo seletor do sistema.
+Conecte o cabo Kuba Auri por USB-C/OTG e grave curvas de equalização pela camada USB nativa do Android, que o navegador do celular não oferece. O transporte USB nativo permite selecionar o cabo e pedir permissão ao Android. O teste acústico e a comparação de bytes na ponte nativa se limitam ao Galaxy A70; faltam outro fabricante e paridade USB no fio. A gravação depende de uma ação sua e do checklist, nunca é automática. Há também Diagnóstico USB e exportação de arquivos pelo seletor do sistema.
 
 Projeto independente: open-auri não é oficial nem endossado pela Kuba e não tem afiliação com ela ou qualquer fabricante. Crie, explore e compare curvas de equalização. Acesse a biblioteca de curvas e presets, compare respostas e participe da comunidade.
 
@@ -105,15 +105,15 @@ open-auri
 ### Short description
 
 ```text
-Unofficial Auri cable app with EQ curves and native USB under testing.
+Unofficial Auri EQ app: USB tested on Galaxy A70, not fully validated.
 ```
 
 ### Full description
 
 ```text
-Notice: writing from the app has not been tested on a real Auri cable yet. The app uses the same protocol and sends the same bytes as the desktop site (checked by automated tests); in theory the result is the same, but it is not guaranteed. Report your result at https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+Notice: writing tested on a Kuba Auri with Galaxy A70 (Android 11), not other manufacturers. Preview, writing and Padrão Auri restoration confirmed acoustically; native bridge bytes match the desktop site. Full validation pending. Sound off? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
 
-Connect the Kuba Auri cable through USB-C/OTG and write EQ curves through Android's native USB layer, which the phone browser does not provide. The native USB transport lets you select the cable and request Android permission. The protocol and transmitted bytes are the same as the computer version; the app's physical USB path has not been validated yet. Writing requires your action and the checklist, and is never automatic. USB Diagnostics and file exports through the system picker are also available.
+Connect the Kuba Auri cable through USB-C/OTG and write EQ curves through Android's native USB layer, which the phone browser does not provide. The native USB transport lets you select the cable and request Android permission. Acoustic testing and native bridge byte comparisons are limited to the Galaxy A70; another manufacturer and on-wire USB parity are still pending. Writing requires your action and the checklist, and is never automatic. USB Diagnostics and file exports through the system picker are also available.
 
 Independent project: open-auri is not official or endorsed by Kuba and is not affiliated with Kuba or any manufacturer. Create, explore and compare EQ curves. Browse the curve and preset library, compare responses and take part in the community.
 

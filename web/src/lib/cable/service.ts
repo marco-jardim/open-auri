@@ -1876,9 +1876,11 @@ export function createCableService(
 		}
 	}
 
-	/** Persists the live marker before an apply of `crc` that differs from the saved curve. */
-	function writeLiveMarker(s: LiveSession, crc: number) {
-		if (mode !== 'real' || liveStore === null) return;
+	/** Persists the live marker; returns an undo for this attempt only (zero reports attempted). */
+	function writeLiveMarker(s: LiveSession, crc: number): (() => void) | null {
+		if (mode !== 'real' || liveStore === null) return null;
+		const store = liveStore;
+		const previous = store.read();
 		const marker: LiveMarker = {
 			tabId,
 			device: truncate(s.label, 64),
@@ -1886,9 +1888,17 @@ export function createCableService(
 			crc: blindOf(s) ? LIVE_MARKER_BLIND_CRC : crc,
 			at: nowMs()
 		};
-		if (!liveStore.write(JSON.stringify(marker))) {
+		const raw = JSON.stringify(marker);
+		if (!store.write(raw)) {
 			console.warn('cable live marker could not be persisted');
+			return null;
 		}
+		return () => {
+			// Never erase an earlier preview or a marker replaced while the transport was opening.
+			if (store.read() === raw && !store.write(previous)) {
+				console.warn('cable live marker could not be restored');
+			}
+		};
 	}
 
 	/**
@@ -2195,7 +2205,7 @@ export function createCableService(
 			// S5: before a curve other than the saved one reaches the cable, leave a marker, so a
 			// reload or another tab can tell the cable may play an unsaved preview. A blind
 			// comparison always leaves it (whether a candidate is the saved curve stays hidden).
-			if (blindOf(s) || crc !== savedCrcOf(s)) writeLiveMarker(s, crc);
+			const undoMarker = blindOf(s) || crc !== savedCrcOf(s) ? writeLiveMarker(s, crc) : null;
 			lastApplyStartMs = clock.now();
 			try {
 				const result = await withWriteFlag(() =>
@@ -2208,9 +2218,24 @@ export function createCableService(
 						hid
 					})
 				);
+				// A failed open can return an interruption without ever calling sendReport. Accepted
+				// reports alone are insufficient: a failed/pending send may still reach the cable.
+				// Keep evidence on abort, timeout or tab disposal, and when the count is unavailable.
+				if (
+					result.status === 'interrupted' &&
+					result.reportsAttempted === 0 &&
+					!s.abort.signal.aborted &&
+					!disposed &&
+					!(
+						result.error instanceof Error &&
+						(result.error.name === 'TimeoutError' || result.error.name === 'AbortError')
+					)
+				) {
+					undoMarker?.();
+				}
 				return { kind: 'done', result };
 			} catch (cause) {
-				// applyCurve only throws before any I/O: nothing reached the cable.
+				// No progress count (e.g. a TypeError from the first send): keep the marker.
 				return { kind: 'refused', cause };
 			}
 		};

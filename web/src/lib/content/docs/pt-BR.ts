@@ -8,10 +8,10 @@ import type { DocsContent } from './types.ts';
 // text of docs/plans/2026-10-18-android-capacitor-plano.md. At F5, replace this whole block
 // with the Anexo G.6 text (date, number of devices and report). en-US.ts has the twin block.
 const androidValidationState: readonly string[] = [
-	'Gravação pelo app ainda não testada num cabo',
-	'O app Android ainda não foi testado num cabo Auri de verdade, então não dá para garantir que a gravação funcione. Ele usa o mesmo protocolo e envia os mesmos bytes que o site no computador e a página oficial da Kuba (testes automáticos conferem isso byte a byte). Só muda o caminho até o USB. Em teoria, o resultado deve ser o mesmo. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).',
+	'Gravação pelo app: teste em um celular',
+	'O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).',
 	'O que os testes garantem: para cada curva, o app monta os mesmos nove reports de dados e o mesmo commit, byte a byte, que o site no computador e a página oficial enviam. Testes automáticos comparam esses bytes com a referência dos 11 presets oficiais, e antes do commit o app ainda confere cada sequência com uma guarda extra.',
-	'O que ainda não foi verificado: o caminho físico até o USB. O driver do Android, a conexão OTG, a energia do celular e a forma como o cabo recebe os reports por esse caminho só se confirmam gravando e medindo um cabo real. Até lá, cada gravação pelo app pede um item a mais no checklist.'
+	'O que ainda falta: segundo fabricante, paridade no fio e relatório assinado para encerrar a F5. Temos 1 de 2 fabricantes testados (Samsung). Os bytes foram conferidos na entrada da ponte nativa pelo logcat, não numa captura USB no fio. O wireLog ficou vazio porque a navegação ao Diagnóstico reabriu a sessão. Cada gravação pelo app continua pedindo um item a mais no checklist.'
 ];
 // END Android validation state --------------------------------------------------------------
 
@@ -331,7 +331,13 @@ export const ptBR: DocsContent = {
 			id: 'android-validacao',
 			title: 'Estado de validação do app',
 			paragraphs: androidValidationState,
-			links: [{ label: 'Relatar resultado', href: androidReportHref }]
+			links: [
+				{ label: 'Relatar resultado', href: androidReportHref },
+				{
+					label: 'Relatório do teste em hardware',
+					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/android/validacao-hardware.md'
+				}
+			]
 		},
 		{
 			id: 'android-resgate',

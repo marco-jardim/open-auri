@@ -12,9 +12,10 @@ import { setLocale } from '#lib/paraglide/runtime.js';
 import { cableUi } from './ui-fake.ts';
 import { writtenOutcome } from './outcomes.ts';
 
-const PT = 'Entendo que a gravação pelo app Android ainda não foi testada num cabo real.';
+const PT =
+	'Entendo que a gravação pelo app foi testada apenas no Galaxy A70 e ainda não tem validação completa.';
 const EN =
-	'I understand that writing from the Android app has not been tested on a real cable yet.';
+	'I understand that writing from the app was tested only on the Galaxy A70 and is not fully validated yet.';
 
 beforeEach(async () => {
 	await setLocale('pt-BR', { reload: false });

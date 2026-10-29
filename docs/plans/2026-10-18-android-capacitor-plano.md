@@ -2825,31 +2825,39 @@ qualquer estado --outro byte, idx fora de ordem, tamanho != 31, reportId != 0xCB
 
 ## Anexo G · Textos do aviso (exatos; sem U+2014)
 
+Revisão de 29/10/2026: teste parcial em um Samsung Galaxy A70 registrado em
+[relatório de hardware](../android/validacao-hardware.md). Não encerra a F5 nem
+autoriza `ANDROID_WRITE_VALIDATED = true`. O aviso passa à versão 2 para novo
+reconhecimento, conforme o runbook. As menções anteriores a cabo ainda não testado
+descrevem o estado inicial; os textos vigentes são os deste anexo. G.6 só se aplica
+depois dos critérios completos, inclusive segundo fabricante, paridade no fio e
+relatório assinado.
+
 **G.1 Modal e banner (pt-BR)**
-- **Título:** "Gravação pelo app ainda não testada num cabo"
-- **Texto:** "O app Android ainda não foi testado num cabo Auri de verdade, então não dá para garantir que a gravação funcione. Ele usa o mesmo protocolo e envia os mesmos bytes que o site no computador e a página oficial da Kuba (testes automáticos conferem isso byte a byte). Só muda o caminho até o USB. Em teoria, o resultado deve ser o mesmo. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge)."
+- **Título:** "Gravação pelo app: teste em um celular"
+- **Texto:** "O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge)."
 - **Botões e links:** "Entendi" · "Relatar resultado" · "Como resgatar"
 
 **G.1 Modal e banner (en-US)**
-- **Título:** "Writing from the app has not been tested on a cable yet"
-- **Texto:** "The Android app has not been tested with a real Auri cable yet, so writing is not guaranteed to work. It uses the same protocol and sends the same bytes as the desktop site and Kuba's official page (automated tests check this byte by byte). Only the path to USB is different. In theory, the result should be the same. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge)."
+- **Título:** "Writing from the app: tested on one phone"
+- **Texto:** "The Android app was tested on a real Kuba Auri cable with one Samsung Galaxy A70 (Android 11). Preview without saving, persistent writing and restoring Padrão Auri were confirmed acoustically, and packets logged at the native bridge input match the desktop site byte for byte. Phones from other manufacturers have not been tested; full write validation is still pending. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge)."
 - **Botões e links:** "Got it" · "Report result" · "How to recover"
 
 **G.2 Banner curto (página do cabo)**
-- pt-BR: "Gravação pelo app ainda não testada num cabo real. Em teoria funciona igual ao computador."
-- en-US: "Writing from the app has not been tested on a real cable yet. In theory it works the same as on a computer."
+- pt-BR: "Gravação testada num Kuba Auri com Galaxy A70 (Android 11). Faltam outros fabricantes e a validação completa."
+- en-US: "Writing tested on a Kuba Auri with a Galaxy A70 (Android 11). Other manufacturers and full validation are still pending."
 
 **G.3 Item do checklist**
-- pt-BR: "Entendo que a gravação pelo app Android ainda não foi testada num cabo real."
-- en-US: "I understand that writing from the Android app has not been tested on a real cable yet."
+- pt-BR: "Entendo que a gravação pelo app foi testada apenas no Galaxy A70 e ainda não tem validação completa."
+- en-US: "I understand that writing from the app was tested only on the Galaxy A70 and is not fully validated yet."
 
 **G.4 Gravação pelo app desligada (política remota)**
 - pt-BR: "A gravação pelo app está desligada no momento. Use o site no computador (Chrome ou Edge) ou atualize o app."
 - en-US: "Writing from the app is turned off for now. Use the site on a computer (Chrome or Edge) or update the app."
 
 **G.5 Notas da release, README e ficha da Play**
-- pt-BR: "Aviso: a gravação pelo app ainda não foi testada num cabo Auri real. O app usa o mesmo protocolo e envia os mesmos bytes que o site no computador (conferido por testes automáticos); em teoria o resultado é o mesmo, mas não há garantia. Relate o resultado em https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml"
-- en-US: "Notice: writing from the app has not been tested on a real Auri cable yet. The app uses the same protocol and sends the same bytes as the desktop site (checked by automated tests); in theory the result is the same, but it is not guaranteed. Report your result at https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml"
+- pt-BR: "Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml"
+- en-US: "Notice: writing tested on a Kuba Auri with Galaxy A70 (Android 11), not other manufacturers. Preview, writing and Padrão Auri restoration confirmed acoustically; native bridge bytes match the desktop site. Full validation pending. Sound off? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml"
 
 **G.6 Depois da validação (F5)**
 - pt-BR: "Gravação pelo app validada em cabo real em <data>, em <n> aparelhos. Relatório: docs/android/validacao-hardware.md"

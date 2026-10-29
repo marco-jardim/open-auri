@@ -25,12 +25,12 @@ const docsContent = (locale: DocsLocale, inApp = false) => sourceContent(locale,
 /** Exact Anexo G.1 title and text. The first test also finds them verbatim in the plan. */
 const G1: Record<DocsLocale, { title: string; text: string }> = {
 	'pt-BR': {
-		title: 'Gravação pelo app ainda não testada num cabo',
-		text: 'O app Android ainda não foi testado num cabo Auri de verdade, então não dá para garantir que a gravação funcione. Ele usa o mesmo protocolo e envia os mesmos bytes que o site no computador e a página oficial da Kuba (testes automáticos conferem isso byte a byte). Só muda o caminho até o USB. Em teoria, o resultado deve ser o mesmo. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).'
+		title: 'Gravação pelo app: teste em um celular',
+		text: 'O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).'
 	},
 	'en-US': {
-		title: 'Writing from the app has not been tested on a cable yet',
-		text: "The Android app has not been tested with a real Auri cable yet, so writing is not guaranteed to work. It uses the same protocol and sends the same bytes as the desktop site and Kuba's official page (automated tests check this byte by byte). Only the path to USB is different. In theory, the result should be the same. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge)."
+		title: 'Writing from the app: tested on one phone',
+		text: 'The Android app was tested on a real Kuba Auri cable with one Samsung Galaxy A70 (Android 11). Preview without saving, persistent writing and restoring Padrão Auri were confirmed acoustically, and packets logged at the native bridge input match the desktop site byte for byte. Phones from other manufacturers have not been tested; full write validation is still pending. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge).'
 	}
 };
 
@@ -51,6 +51,8 @@ const VALIDATION_ANCHOR = 'android-validacao';
 const REPORT_URL =
 	'https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml';
 const RELEASES_URL = 'https://github.com/marco-jardim/open-auri/releases/latest';
+const HARDWARE_REPORT_URL =
+	'https://github.com/marco-jardim/open-auri/blob/main/docs/android/validacao-hardware.md';
 
 const isAndroid = (section: DocSection) =>
 	section.id === 'android' || section.id.startsWith('android-');
@@ -145,8 +147,8 @@ for (const locale of locales) {
 				);
 				expect(sectionText(validation)).toMatch(
 					en
-						? /What has not been verified yet: the physical path to USB\./
-						: /O que ainda não foi verificado: o caminho físico até o USB\./
+						? /What is still pending: a second manufacturer, on-wire parity and a signed report.*1 of 2 manufacturers \(Samsung\)/
+						: /O que ainda falta: segundo fabricante, paridade no fio e relatório assinado.*1 de 2 fabricantes testados \(Samsung\)/
 				);
 			} else {
 				// F5 swaps the delimited block for Anexo G.6 (date, devices and report).
@@ -156,7 +158,7 @@ for (const locale of locales) {
 				);
 				expect(sectionText(validation)).toContain('docs/android/validacao-hardware.md');
 			}
-			expect(validation.links?.map((link) => link.href)).toEqual([REPORT_URL]);
+			expect(validation.links?.map((link) => link.href)).toEqual([REPORT_URL, HARDWARE_REPORT_URL]);
 		});
 
 		test('the validation text lives in one delimited block of the content file', () => {
@@ -260,7 +262,9 @@ for (const locale of locales) {
 				for (const link of entry.links ?? []) expect(link.label.trim(), link.href).not.toBe('');
 			}
 			const all = androidSections(locale).flatMap((entry) => entry.links ?? []);
-			expect(new Set(all.map((link) => link.href))).toEqual(new Set([RELEASES_URL, REPORT_URL]));
+			expect(new Set(all.map((link) => link.href))).toEqual(
+				new Set([RELEASES_URL, REPORT_URL, HARDWARE_REPORT_URL])
+			);
 		});
 
 		test('search finds the Android chapters', () => {
