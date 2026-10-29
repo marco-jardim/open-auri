@@ -127,9 +127,7 @@ test('the Cabo page shows the live preview total from the cable state', async ()
 			{ timeout: 10000 }
 		)
 		.toBe('7');
-	await expect
-		.element(page.getByText(m.cabo_live_previews(), { exact: true }))
-		.toBeVisible();
+	await expect.element(page.getByText(m.cabo_live_previews(), { exact: true })).toBeVisible();
 });
 
 for (const copy of [

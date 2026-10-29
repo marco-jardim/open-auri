@@ -75,7 +75,10 @@ test('a pending picker is not opened again; cancellation gives feedback cleared 
 	resolve([]);
 	expect(await first).toBeNull();
 	expect(h.hid.requestDevice).toHaveBeenCalledOnce();
-	expect(h.service.getState()).toMatchObject({ connection: 'disconnected', error: 'request-empty' });
+	expect(h.service.getState()).toMatchObject({
+		connection: 'disconnected',
+		error: 'request-empty'
+	});
 	expect(h.device.attempts).toBe(0);
 	expect(await h.service.connect()).toBe(h.device);
 	expect(h.service.getState()).toMatchObject({ connection: 'connected', error: null });

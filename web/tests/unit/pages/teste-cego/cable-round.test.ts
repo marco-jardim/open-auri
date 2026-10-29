@@ -185,7 +185,10 @@ function fakeCable(clock: ReturnType<typeof fakeTimer>) {
 			...live,
 			status: 'ended',
 			endedReason: reason,
-			comparison: { ...(live.comparison ?? { blind: true, count: 2, status: 'ready' }), active: false }
+			comparison: {
+				...(live.comparison ?? { blind: true, count: 2, status: 'ready' }),
+				active: false
+			}
 		});
 	}
 	return {
@@ -546,7 +549,11 @@ describe('the end', () => {
 			const h = setup();
 			await startBlind(h);
 			if (done) h.round.roundRecorded(true);
-			h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+			h.cable.options.endOutcome = {
+				status: 'refused',
+				reason: 'revert-failed',
+				revertFailure: 'held'
+			};
 			h.cable.options.hold = { reason: 'loudness', curve: 'saved' };
 			h.cable.options.confirmOutcome = failed;
 			const gesture = { kind: 'cable-gesture' } as const;
@@ -569,7 +576,11 @@ describe('the end', () => {
 	test('a refused confirmation that sent nothing keeps the held revert', async () => {
 		const h = setup();
 		await startBlind(h);
-		h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+		h.cable.options.endOutcome = {
+			status: 'refused',
+			reason: 'revert-failed',
+			revertFailure: 'held'
+		};
 		h.cable.options.hold = { reason: 'loudness', curve: 'saved' };
 		await h.round.end({ gesture: { kind: 'cable-gesture' } });
 		h.cable.port.confirmEndComparison.mockImplementationOnce(async () => ({
@@ -583,7 +594,11 @@ describe('the end', () => {
 	test('a failed "Encerrar" during a round pauses and drops the round in play', async () => {
 		const h = setup();
 		await startBlind(h);
-		h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'error' };
+		h.cable.options.endOutcome = {
+			status: 'refused',
+			reason: 'revert-failed',
+			revertFailure: 'error'
+		};
 		await h.round.end({ gesture: { kind: 'cable-gesture' } });
 		expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'end-failed' });
 		expect(h.onvoid).toHaveBeenCalledWith('end-failed');
@@ -639,7 +654,11 @@ describe('the end', () => {
 		const h = setup();
 		await startBlind(h);
 		// The saved curve gets a gate hold: never confirmable, so never `end-held`.
-		h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+		h.cable.options.endOutcome = {
+			status: 'refused',
+			reason: 'revert-failed',
+			revertFailure: 'held'
+		};
 		h.cable.options.hold = { reason: 'gate', curve: 'saved' };
 		const gesture = { kind: 'cable-gesture' } as const;
 		await h.round.end({ gesture });
@@ -687,7 +706,11 @@ describe('the end', () => {
 			const h = setup();
 			await startBlind(h);
 			if (done) h.round.roundRecorded(true);
-			h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+			h.cable.options.endOutcome = {
+				status: 'refused',
+				reason: 'revert-failed',
+				revertFailure: 'held'
+			};
 			h.cable.options.hold = { reason: 'loudness', curve: 'saved' };
 			const gesture = { kind: 'cable-gesture' } as const;
 			await h.round.end({ gesture });
@@ -736,9 +759,9 @@ describe('an old preview on the cable (liveOrphan)', () => {
 		await h.round.voidRound('stuck');
 		h.cable.state = { ...h.cable.state, liveOrphan: ORPHAN };
 		const calls = h.cable.port.startComparison.mock.calls.length;
-		expect(
-			await h.round.resume({ gesture: { kind: 'cable-gesture' }, confirmations: {} })
-		).toEqual({ status: 'refused', reason: 'live-elsewhere' });
+		expect(await h.round.resume({ gesture: { kind: 'cable-gesture' }, confirmations: {} })).toEqual(
+			{ status: 'refused', reason: 'live-elsewhere' }
+		);
 		expect(h.cable.port.startComparison).toHaveBeenCalledTimes(calls);
 		expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'stuck' });
 	});
@@ -896,7 +919,8 @@ describe('telemetry', () => {
 		expect(filtered?.completed).toEqual([browserRound]);
 		const pairs = await buildPairs(filtered);
 		expect(pairs).toHaveLength(1);
-		for (const pair of pairs) expect(Object.keys(pair)).toEqual(['a', 'b', 'choice', 'levelMatched']);
+		for (const pair of pairs)
+			expect(Object.keys(pair)).toEqual(['a', 'b', 'choice', 'levelMatched']);
 		// Only cable rounds: nothing at all is sent.
 		const onlyCable = new WeakSet<Round>(session.completed);
 		expect(await buildPairs(s6Session(session, onlyCable))).toEqual([]);

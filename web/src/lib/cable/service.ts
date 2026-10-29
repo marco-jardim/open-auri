@@ -2265,8 +2265,7 @@ export function createCableService(
 				s.firstPendingEditMs = now;
 				s.lastEditMs = now;
 			}
-			liveNotBeforeMs =
-				clock.now() + LIVE_BUSY_BACKOFF_MS * 2 ** (s.busyAttempts - 1);
+			liveNotBeforeMs = clock.now() + LIVE_BUSY_BACKOFF_MS * 2 ** (s.busyAttempts - 1);
 			return false;
 		}
 		s.busyAttempts = 0;
@@ -2284,7 +2283,7 @@ export function createCableService(
 				if (s.pending !== null) return true;
 				holdLive(s, next, {
 					reason: 'gate',
-					gateReasons: cause instanceof GateRejectedError ? gateReasonsOf(cause) ?? [] : []
+					gateReasons: cause instanceof GateRejectedError ? (gateReasonsOf(cause) ?? []) : []
 				});
 				return true;
 			}
@@ -2471,7 +2470,8 @@ export function createCableService(
 		}
 		if ((result.reportsAttempted ?? 9) >= 9) {
 			s.known = false;
-			const curve = s.pending ?? s.held ?? captureLive(s, authorized.snapshot, authorized.preampDb, false);
+			const curve =
+				s.pending ?? s.held ?? captureLive(s, authorized.snapshot, authorized.preampDb, false);
 			s.pending = null;
 			holdLive(s, curve, { reason: 'unknown-state' });
 		}
@@ -2528,8 +2528,7 @@ export function createCableService(
 		}
 		// Only now: the saved curve plays, its level is the confirmed one (a comparison, which
 		// ends right after its revert, never lowers it).
-		s.ackLevelDb =
-			s.comparison === null ? curve.levelDb : maxLevel(s.ackLevelDb, curve.levelDb);
+		s.ackLevelDb = s.comparison === null ? curve.levelDb : maxLevel(s.ackLevelDb, curve.levelDb);
 		cableBackToSaved(s.label);
 		emit();
 		return { status: 'accepted', live: liveView() };

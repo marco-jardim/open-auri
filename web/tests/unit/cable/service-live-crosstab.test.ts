@@ -162,7 +162,12 @@ describe('live marker', () => {
 		const c = await o.tab('tab-c', { lastWrittenLevelDb: -30, sessionWriteCount: 1 });
 		const orphan = c.service.getState().liveOrphan;
 		expect(orphan).toMatchObject({ crc: crcOf(-12), deviceLabel: 'USB DSP Audio' });
-		const request = { bands: OFF_BANDS, preampDb: -11, experimental: false, confirmations: CONFIRMED };
+		const request = {
+			bands: OFF_BANDS,
+			preampDb: -11,
+			experimental: false,
+			confirmations: CONFIRMED
+		};
 		const loudness = c.service.checklist(request).loudness;
 		expect(loudness.deltaDb).toBeNull();
 		expect(loudness.reasons).toContain('unknown-state');

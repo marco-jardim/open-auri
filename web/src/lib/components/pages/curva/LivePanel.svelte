@@ -512,7 +512,9 @@
 
 		{#if unsaved}
 			<div class="chip" data-live-chip>
-				<span class="chip-text"><span class="dot" aria-hidden="true"></span>{m.cable_live_chip()}</span>
+				<span class="chip-text"
+					><span class="dot" aria-hidden="true"></span>{m.cable_live_chip()}</span
+				>
 				<span class="actions">
 					{#if savable}
 						<Button size="sm" disabledReason={saveReason} onclick={onSave} data-live-save

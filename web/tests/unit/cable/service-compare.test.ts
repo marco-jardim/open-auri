@@ -110,10 +110,7 @@ async function harness(options: Parameters<typeof setup>[0] = {}): Promise<Harne
 	return h;
 }
 
-function compare(
-	h: Harness,
-	extra: Partial<Omit<ComparisonStartRequest, 'gesture'>> = {}
-) {
+function compare(h: Harness, extra: Partial<Omit<ComparisonStartRequest, 'gesture'>> = {}) {
 	return h.service.startComparison({
 		curves: CURVES,
 		match: true,

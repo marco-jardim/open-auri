@@ -112,7 +112,9 @@
 	const required = (item: ChecklistItemId) =>
 		checklist?.items.some((entry) => entry.id === item && entry.required) ?? false;
 	const yoloText = $derived(
-		checklist === null ? '' : m.yolo_confirm_write({ criteria: waivedCriteriaText(checklist.waived) })
+		checklist === null
+			? ''
+			: m.yolo_confirm_write({ criteria: waivedCriteriaText(checklist.waived) })
 	);
 
 	/** Why "Começar" is locked, or null when it may act (first unmet item only). */
@@ -218,7 +220,11 @@
 					/>
 				{/if}
 				{#if yolo}
-					<ConfirmLever bind:checked={confirmations.yoloWrite} label={yoloText} confirmation="yolo" />
+					<ConfirmLever
+						bind:checked={confirmations.yoloWrite}
+						label={yoloText}
+						confirmation="yolo"
+					/>
 				{/if}
 				{#if required('android-untested')}
 					<ConfirmLever

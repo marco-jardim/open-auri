@@ -330,9 +330,9 @@ test('a level the match cannot reach is refused before starting, naming the loud
 	});
 	expect(expected).toContain('−25,5 dB');
 	await expect.poll(() => text('[data-cable-ab-refusal] .gate-line')).toBe(expected);
-	expect(document.querySelector('[data-cable-ab-refusal]')?.getAttribute('data-cable-ab-refusal')).toBe(
-		'level-range'
-	);
+	expect(
+		document.querySelector('[data-cable-ab-refusal]')?.getAttribute('data-cable-ab-refusal')
+	).toBe('level-range');
 	await group.getByRole('checkbox', { name: m.cable_confirm_volume() }).click();
 	await expect
 		.element(group.getByRole('button', { name: m.cable_live_start() }))
@@ -378,9 +378,7 @@ test('"Salvar esta" opens the write checklist with the original curve of the sid
 
 test('"Encerrar" reverts to the saved curve; the browser chains play flat only meanwhile', async () => {
 	const { app, fake, build } = await setup({ savedPreampDb: -12 });
-	const savedCrc = Number(
-		gateForWrite(OFF_BANDS, -12, { experimental: false }).metrics.payloadCrc
-	);
+	const savedCrc = Number(gateForWrite(OFF_BANDS, -12, { experimental: false }).metrics.payloadCrc);
 	const auri = initialTracks()[1]?.curve;
 	if (auri === undefined) throw new Error('expected lane 2');
 	// The page's own audition: lane 2 (Auri) is built with its EQ.
@@ -608,7 +606,11 @@ test('a held revert offers "Continuar comparando": the hold is dropped, the comp
 	expect(cancel).toHaveBeenCalledTimes(statuses.length + 1);
 	expect(fake.device.attempts).toBe(attempts);
 	await expect.poll(() => text('[data-cable-ab-message]')).toBe(m.cable_x2_continue_cleared());
-	expect(app.cableState.live?.comparison).toMatchObject({ active: true, status: 'ready', index: 0 });
+	expect(app.cableState.live?.comparison).toMatchObject({
+		active: true,
+		status: 'ready',
+		index: 0
+	});
 	expect(playingCrc(fake)).toBe(itemA?.crc);
 	expect(document.querySelector('[data-cable-ab-hold]')).toBeNull();
 	await expect.element(radio('A', 'Baixa')).toHaveFocus();

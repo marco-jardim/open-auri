@@ -16,13 +16,7 @@ import {
 	liveUnsaved,
 	sameCurve
 } from '#lib/components/cable/live.ts';
-import type {
-	Band,
-	CableState,
-	GateReason,
-	LiveHoldState,
-	LiveState
-} from '#lib/cable/types.ts';
+import type { Band, CableState, GateReason, LiveHoldState, LiveState } from '#lib/cable/types.ts';
 
 const OFF: Band = { kind: 'OFF' };
 const PK: Band = { kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 };
@@ -44,9 +38,9 @@ function state(partial: Partial<LiveState> = {}): LiveState {
 
 test('sameCurve compares the values the cable reads, not key order', () => {
 	const reordered = { qFactor: 1, gainDb: -3, freqHz: 1000, kind: 'PK' } as const;
-	expect(sameCurve({ bands: [PK, OFF], preampDb: -3 }, { bands: [reordered, OFF], preampDb: -3 })).toBe(
-		true
-	);
+	expect(
+		sameCurve({ bands: [PK, OFF], preampDb: -3 }, { bands: [reordered, OFF], preampDb: -3 })
+	).toBe(true);
 	expect(sameCurve({ bands: [PK, OFF], preampDb: -3 }, { bands: [PK, OFF], preampDb: -2.5 })).toBe(
 		false
 	);
@@ -233,7 +227,10 @@ test('a failed revert is never reported as a success, and says why', () => {
 });
 
 test('the top bar chip is wired to the cable state and the saved curve (layout)', () => {
-	const layout = readFileSync(new URL('../../../src/routes/+layout.svelte', import.meta.url), 'utf8');
+	const layout = readFileSync(
+		new URL('../../../src/routes/+layout.svelte', import.meta.url),
+		'utf8'
+	);
 	expect(layout).toMatch(
 		/liveUnsaved=\{app \? cableLiveUnsaved\(app\.cableState, app\.state\.curve\.lastWritten\) : false\}/
 	);

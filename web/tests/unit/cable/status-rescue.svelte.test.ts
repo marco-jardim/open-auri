@@ -53,7 +53,9 @@ test('real disconnected status explains browser recognition and empty selection 
 	});
 	await tick();
 	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
-	expect(page.getByText(m.cable_connect_no_selection(), { exact: true }).elements()).toHaveLength(0);
+	expect(page.getByText(m.cable_connect_no_selection(), { exact: true }).elements()).toHaveLength(
+		0
+	);
 });
 
 test('native Android status does not give WebHID browser permission instructions', async () => {

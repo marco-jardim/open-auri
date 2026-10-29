@@ -99,7 +99,8 @@ function orphanConnected(
 	if (labels === undefined) return true;
 	// The marker keeps at most 64 code points of the label.
 	return labels.some(
-		(label) => label === orphan.deviceLabel || [...label].slice(0, 64).join('') === orphan.deviceLabel
+		(label) =>
+			label === orphan.deviceLabel || [...label].slice(0, 64).join('') === orphan.deviceLabel
 	);
 }
 

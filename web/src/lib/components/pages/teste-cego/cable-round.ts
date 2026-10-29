@@ -375,7 +375,9 @@ export function createCableRound(deps: CableRoundDeps) {
 		const at = epoch;
 		set({ switching: true });
 		mute();
-		const { status } = await port.switchComparison(index).catch(() => ({ status: 'error' as const }));
+		const { status } = await port
+			.switchComparison(index)
+			.catch(() => ({ status: 'error' as const }));
 		if (at !== epoch || view.phase !== 'checking') return status;
 		if (status !== 'applied') {
 			set({ switching: false });
@@ -392,7 +394,10 @@ export function createCableRound(deps: CableRoundDeps) {
 	 * The check's answer. "Ouvi mudar" (`changed`, both items heard) ends the check and starts the
 	 * blind set with this click's gesture; "Não mudou" pauses (replug, then Retomar).
 	 */
-	async function answerCheck(changed: boolean, request: Gesture): Promise<ComparisonOutcome | null> {
+	async function answerCheck(
+		changed: boolean,
+		request: Gesture
+	): Promise<ComparisonOutcome | null> {
 		if (view.phase !== 'checking' || view.switching) return busy();
 		if (changed && !(view.checkHeard[0] && view.checkHeard[1])) return busy();
 		const target = blindSet;

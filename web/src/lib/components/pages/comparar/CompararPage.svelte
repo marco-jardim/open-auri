@@ -161,14 +161,24 @@
 		if (session !== null && session.deviceLabel === label) {
 			const saved = untrack(() => client.cable.liveSavedCurve());
 			if (saved !== null) {
-				return { name, source: 'custom', preampDb: saved.preampDb, bands: snapshotBands(saved.bands) };
+				return {
+					name,
+					source: 'custom',
+					preampDb: saved.preampDb,
+					bands: snapshotBands(saved.bands)
+				};
 			}
 		}
 		const entries = client.state.journal.entries;
 		for (let index = entries.length - 1; index >= 0; index--) {
 			const entry = entries[index];
 			if (entry === undefined || entry.status !== 'ok' || entry.device !== journalLabel) continue;
-			return { name, source: 'custom', preampDb: entry.preampDb, bands: snapshotBands(entry.bands) };
+			return {
+				name,
+				source: 'custom',
+				preampDb: entry.preampDb,
+				bands: snapshotBands(entry.bands)
+			};
 		}
 		return null;
 	});

@@ -17,15 +17,7 @@ import {
 import { NATIVE_HID_BRAND } from '../../../src/lib/cable/native/brand.ts';
 import { onWriteProgress } from '../../../src/lib/cable/write-flag.ts';
 import type { Band, JournalEntry, LiveCurve, Written } from '../../../src/lib/cable/types.ts';
-import {
-	CONFIRMED,
-	T0,
-	TRUSTED_CLICK,
-	memoryFlash,
-	memoryJournal,
-	off,
-	setup
-} from './harness.ts';
+import { CONFIRMED, T0, TRUSTED_CLICK, memoryFlash, memoryJournal, off, setup } from './harness.ts';
 import { memoryInflight, memoryLocks, type MemoryLocks } from './locks-fake.ts';
 
 type Harness = Awaited<ReturnType<typeof setup>>;
@@ -809,7 +801,7 @@ describe('QA fixes (#67/#70)', () => {
 		expect(h.service.getState().live?.ackLevelDb).toBeCloseTo(levelOf(-12), 9);
 	});
 
-	test('3: after an X9 queue (or another tab\'s write) the first apply waits 2 s', async () => {
+	test("3: after an X9 queue (or another tab's write) the first apply waits 2 s", async () => {
 		const h = await live();
 		const queued = await h.service.writeQueue({
 			bands: OFF_BANDS,
@@ -840,7 +832,12 @@ describe('QA fixes (#67/#70)', () => {
 		const other = new FakeHIDDevice({ clock: h.clock, productName: 'Outro cabo' });
 		h.hid.addDevice(other);
 		await h.service.restore();
-		const request = { bands: OFF_BANDS, preampDb: -11, experimental: false, confirmations: CONFIRMED };
+		const request = {
+			bands: OFF_BANDS,
+			preampDb: -11,
+			experimental: false,
+			confirmations: CONFIRMED
+		};
 		expect(h.service.checklist(request).loudness.deltaDb).toBeCloseTo(
 			levelOf(-11) - levelOf(-12),
 			9
@@ -1053,7 +1050,7 @@ describe('QA fixes (#67/#70)', () => {
 		expect(liveCrc(h.device.firmware)).toBe(crcOf(-14));
 	});
 
-	test('11: `saved` matching the cable\'s saved CRC is accepted as given', async () => {
+	test("11: `saved` matching the cable's saved CRC is accepted as given", async () => {
 		const h = await live({ journal: [savedEntry(curve(-14))] });
 		await start(h, -12);
 		const reverted = await h.service.revertLive({

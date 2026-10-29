@@ -851,12 +851,7 @@ export type ComparisonSwitchStatus = 'applied' | 'unknown' | 'held' | 'busy' | '
  * current candidate), `busy` (a switch or the end's revert runs), `ended`, `error` (no comparison).
  */
 export type ComparisonCancelHoldStatus =
-	| 'cleared'
-	| 'no-hold'
-	| 'unknown'
-	| 'busy'
-	| 'ended'
-	| 'error';
+	'cleared' | 'no-hold' | 'unknown' | 'busy' | 'ended' | 'error';
 
 export interface ComparisonEndRequest {
 	/** true: apply the saved curve live first (needs `gesture`), then end the session. */

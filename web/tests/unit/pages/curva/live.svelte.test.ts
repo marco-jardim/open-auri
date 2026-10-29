@@ -91,8 +91,8 @@ async function setup(options: SetupOptions = {}) {
 		expect(set(options.savedPreampDb)).toBe(true);
 		expect(app.state.curve.markWritten()).toBe(true);
 		// The cable's own saved curve (the service reads it from the shared journal).
-		const savedCrc = gateForWrite(OFF_BANDS, options.savedPreampDb, { experimental: false })
-			.metrics.payloadCrc;
+		const savedCrc = gateForWrite(OFF_BANDS, options.savedPreampDb, { experimental: false }).metrics
+			.payloadCrc;
 		const device = app.cable.getState().deviceLabel;
 		expect(device).not.toBeNull();
 		expect(
@@ -559,7 +559,9 @@ test('a louder edit is held with a banner; its alert is announced once; confirmi
 	await page.getByRole('button', { name: m.cable_live_hold_loudness_confirm() }).click();
 	await vi.waitFor(() => expect(app.cableState.live?.applied?.preampDb).toBe(-5));
 	expect(app.cableState.live?.hold).toBeNull();
-	await expect.element(page.getByRole('button', { name: m.cable_live_hold_loudness_confirm() })).not.toBeInTheDocument();
+	await expect
+		.element(page.getByRole('button', { name: m.cable_live_hold_loudness_confirm() }))
+		.not.toBeInTheDocument();
 });
 
 test('status announcements: applying stays visual, live and ended are announced once', async () => {

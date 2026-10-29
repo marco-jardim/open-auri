@@ -94,7 +94,9 @@ test('native Android checklist uses native connection instructions, never browse
 		...NEUTRO,
 		onclose: vi.fn()
 	});
-	await expect.element(page.getByText(m.android_native_picker_hint(), { exact: true })).toBeVisible();
+	await expect
+		.element(page.getByText(m.android_native_picker_hint(), { exact: true }))
+		.toBeVisible();
 	expect(page.getByText(m.cable_connect_hint(), { exact: true }).elements()).toHaveLength(0);
 	await page.getByRole('button', { name: m.cable_connect(), exact: true }).click();
 	expect(fake.connect).toHaveBeenCalledExactlyOnceWith();

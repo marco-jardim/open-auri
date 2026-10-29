@@ -148,7 +148,9 @@ test('start → check → rounds on the cable, no identity in the DOM, reveal an
 		await expect.element(changed).toHaveAttribute('aria-disabled', 'true');
 		// The audio plays: Neutro, then Telefone, are heard.
 		await panel.getByRole('button', { name: m.cego_play(), exact: true }).click();
-		await expect.element(panel.getByRole('button', { name: m.cego_pause(), exact: true })).toBeVisible();
+		await expect
+			.element(panel.getByRole('button', { name: m.cego_pause(), exact: true }))
+			.toBeVisible();
 		await page.getByRole('button', { name: m.cable_blind_check_phone() }).click();
 		await vi.waitFor(() => expect(playingCrc(fake)).toBe(checkPlan.items[1]?.crc));
 		await expect.element(changed).not.toHaveAttribute('aria-disabled');
@@ -228,9 +230,7 @@ test('start → check → rounds on the cable, no identity in the DOM, reveal an
 				for (const value of forbidden) expect(attribute.value).not.toContain(value);
 				for (const crc of crcs) {
 					expect(attribute.value).not.toMatch(new RegExp(`\\b${crc}\\b`));
-					expect(attribute.value.toLowerCase()).not.toContain(
-						crc.toString(16).padStart(4, '0')
-					);
+					expect(attribute.value.toLowerCase()).not.toContain(crc.toString(16).padStart(4, '0'));
 				}
 			}
 		}
@@ -245,13 +245,11 @@ test('start → check → rounds on the cable, no identity in the DOM, reveal an
 			// "O som parou de mudar": the round is voided (the completed one stays), the cable keeps
 			// the set; "Retomar" (levers and a gesture again) runs the check, then the set again.
 			await panel.getByRole('button', { name: m.cable_blind_stuck() }).click();
-			await expect
-				.element(page.getByText(m.cable_blind_void_stuck()))
-				.toBeVisible();
+			await expect.element(page.getByText(m.cable_blind_void_stuck())).toBeVisible();
 			// The pause marker is constant: no failure kind (which could follow a candidate) in the DOM.
-			expect(document.querySelector('[data-cable-blind-pause]')?.getAttribute('data-cable-blind-pause')).toBe(
-				''
-			);
+			expect(
+				document.querySelector('[data-cable-blind-pause]')?.getAttribute('data-cable-blind-pause')
+			).toBe('');
 			expect(app.cableState.live?.comparison).toMatchObject({ blind: true, active: true });
 			const resume = page.getByRole('button', { name: m.cable_blind_resume() });
 			await expect.element(resume).toHaveAttribute('aria-disabled', 'true');
@@ -271,25 +269,38 @@ test('start → check → rounds on the cable, no identity in the DOM, reveal an
 		const play = panel.getByRole('button', { name: m.cego_play(), exact: true });
 		await expect.element(play).not.toHaveAttribute('aria-disabled');
 		await play.click();
-		await vi.waitFor(() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 1 })), {
-			timeout: 4000
-		});
+		await vi.waitFor(
+			() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 1 })),
+			{
+				timeout: 4000
+			}
+		);
 		expect(playingCrc(fake)).toBe(itemSecond.crc);
 		await snapBar();
 		noLeak();
-		await panel.getByRole('button', { name: new RegExp(`${m.cego_position({ number: 2 })}`) }).click();
-		await vi.waitFor(() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 2 })), {
-			timeout: 4000
-		});
+		await panel
+			.getByRole('button', { name: new RegExp(`${m.cego_position({ number: 2 })}`) })
+			.click();
+		await vi.waitFor(
+			() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 2 })),
+			{
+				timeout: 4000
+			}
+		);
 		expect(playingCrc(fake)).toBe(itemFirst.crc);
 		await snapBar();
 		noLeak();
 		// The same position again switches again (same window, same announcement).
-		await panel.getByRole('button', { name: new RegExp(`${m.cego_position({ number: 2 })}`) }).click();
+		await panel
+			.getByRole('button', { name: new RegExp(`${m.cego_position({ number: 2 })}`) })
+			.click();
 		await vi.waitFor(() => expect(switches.mock.calls.length).toBe(calls + 3));
-		await vi.waitFor(() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 2 })), {
-			timeout: 4000
-		});
+		await vi.waitFor(
+			() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 2 })),
+			{
+				timeout: 4000
+			}
+		);
 		await expect.element(score(1)).toBeEnabled();
 		await expect.element(score(2)).toBeEnabled();
 		await rate(1, '{End}');
@@ -305,9 +316,7 @@ test('start → check → rounds on the cable, no identity in the DOM, reveal an
 	expect(barSlots[0]).toContain(m.cable_blind_chrome());
 
 	// The reveal: the mapping and the scores; the second candidate won.
-	await expect
-		.element(page.getByText(m.cego_winner({ name: second.name })).first())
-		.toBeVisible();
+	await expect.element(page.getByText(m.cego_winner({ name: second.name })).first()).toBeVisible();
 	expect(screen.container.textContent).toContain(first.name);
 	// Still blind on the cable until saved or ended: saving waits for the end.
 	expect(app.cableState.live?.comparison).toMatchObject({ blind: true, active: true });
@@ -401,35 +410,38 @@ test.each([
 	['disconnected', () => m.cable_live_ended_disconnected()],
 	['stopped', () => m.cable_blind_ended_gone()],
 	['forgotten', () => m.cable_blind_ended_gone()]
-] as const)('a test ended without the page (%s) says what the cable plays now', async (reason, text) => {
-	const live: LiveState = {
-		deviceLabel: 'Cabo',
-		status: 'ended',
-		applied: null,
-		pending: false,
-		ackLevelDb: null,
-		hold: null,
-		applies: 3,
-		total: 3,
-		lastError: null,
-		endedReason: reason,
-		comparison: { active: false, blind: true, count: 2, status: 'ready' }
-	};
-	const fake = standInApp(cableFixture({ live }));
-	await render(CableBlind, {
-		app: fake.app,
-		round: fake.round,
-		view: { ...IDLE_VIEW, phase: 'ended', endedReason: 'gone' },
-		mode: 'results',
-		candidates: pair(),
-		winner: 0
-	});
-	const ended = document.querySelector('[data-cable-blind-ended]');
-	expect(ended?.textContent?.trim()).toBe(text());
-	if (reason !== 'disconnected') {
-		expect(ended?.textContent).not.toContain(m.cable_live_ended_disconnected());
+] as const)(
+	'a test ended without the page (%s) says what the cable plays now',
+	async (reason, text) => {
+		const live: LiveState = {
+			deviceLabel: 'Cabo',
+			status: 'ended',
+			applied: null,
+			pending: false,
+			ackLevelDb: null,
+			hold: null,
+			applies: 3,
+			total: 3,
+			lastError: null,
+			endedReason: reason,
+			comparison: { active: false, blind: true, count: 2, status: 'ready' }
+		};
+		const fake = standInApp(cableFixture({ live }));
+		await render(CableBlind, {
+			app: fake.app,
+			round: fake.round,
+			view: { ...IDLE_VIEW, phase: 'ended', endedReason: 'gone' },
+			mode: 'results',
+			candidates: pair(),
+			winner: 0
+		});
+		const ended = document.querySelector('[data-cable-blind-ended]');
+		expect(ended?.textContent?.trim()).toBe(text());
+		if (reason !== 'disconnected') {
+			expect(ended?.textContent).not.toContain(m.cable_live_ended_disconnected());
+		}
 	}
-});
+);
 
 /** The saved curve's preamp: the floor, quieter than any test curve (its revert is never held). */
 const SAVED_PREAMP_DB = THRESHOLDS.preampMinDb;
@@ -507,7 +519,9 @@ async function passCheck(app: ClientApp) {
 	await expect.element(page.getByText(m.cable_blind_check_title())).toBeVisible();
 	const changed = page.getByRole('button', { name: m.cable_blind_check_changed() });
 	await panel.getByRole('button', { name: m.cego_play(), exact: true }).click();
-	await expect.element(panel.getByRole('button', { name: m.cego_pause(), exact: true })).toBeVisible();
+	await expect
+		.element(panel.getByRole('button', { name: m.cego_pause(), exact: true }))
+		.toBeVisible();
 	await page.getByRole('button', { name: m.cable_blind_check_phone() }).click();
 	await expect.element(changed).not.toHaveAttribute('aria-disabled');
 	await panel.getByRole('button', { name: m.cego_pause(), exact: true }).click();
@@ -522,7 +536,9 @@ async function scoreRound() {
 	await vi.waitFor(() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 1 })), {
 		timeout: 4000
 	});
-	await panel.getByRole('button', { name: new RegExp(`${m.cego_position({ number: 2 })}`) }).click();
+	await panel
+		.getByRole('button', { name: new RegExp(`${m.cego_position({ number: 2 })}`) })
+		.click();
 	await vi.waitFor(() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 2 })), {
 		timeout: 4000
 	});
@@ -555,9 +571,7 @@ test('"Encerrar" during the change check after scored rounds: the reveal saves t
 	await end.click();
 	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('reverted'));
 	// The completed round is revealed.
-	await expect
-		.element(page.getByText(m.cego_winner({ name: second.name })).first())
-		.toBeVisible();
+	await expect.element(page.getByText(m.cego_winner({ name: second.name })).first()).toBeVisible();
 	const save = page.getByRole('button', { name: m.cable_blind_save_winner() });
 	await expect.element(save).not.toHaveAttribute('aria-disabled');
 	await save.click();
@@ -596,11 +610,11 @@ test('without a known saved curve "Encerrar" is locked with why; "Encerrar sem v
 	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('stopped'));
 	// The cable keeps its curve; the completed round is revealed, saying so.
 	expect(playingCrc(fake)).toBe(playing);
+	await expect.element(page.getByText(m.cego_winner({ name: second.name })).first()).toBeVisible();
 	await expect
-		.element(page.getByText(m.cego_winner({ name: second.name })).first())
-		.toBeVisible();
-	await expect
-		.poll(() => document.querySelector('[data-cable-blind-ended]')?.getAttribute('data-cable-blind-ended'))
+		.poll(() =>
+			document.querySelector('[data-cable-blind-ended]')?.getAttribute('data-cable-blind-ended')
+		)
 		.toBe('kept');
 	expect(document.querySelector('[data-cable-blind-ended]')?.textContent?.trim()).toBe(
 		m.cable_blind_ended_kept()
