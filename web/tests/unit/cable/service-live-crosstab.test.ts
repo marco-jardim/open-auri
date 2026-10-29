@@ -2,7 +2,7 @@
  * Live preview across tabs (issue #68, S5): the session lock `oa-cable-live`, `live-elsewhere`
  * refusals, the `oa.cable.live` marker and orphan previews left by a tab that is gone.
  */
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { gateForWrite } from 'open-auri/safety';
 import {
 	CABLE_LIVE_LOCK,
@@ -124,6 +124,105 @@ describe('one live session per origin', () => {
 });
 
 describe('live marker', () => {
+	test('failed open sends zero reports and leaves no orphan preview after reload', async () => {
+		const o = origin();
+		const error = new Error('controlTransfer failed (-1)');
+		const a = await o.tab('tab-a', { deviceOptions: { openError: error } });
+		await start(a);
+		expect(a.service.getState().live?.lastError).toBe(error);
+		expect(a.device.attempts).toBe(0);
+		expect(a.device.sent).toHaveLength(0);
+		expect(o.liveMarker.writes.some((raw) => raw !== null)).toBe(true);
+		a.service.dispose();
+		await macrotask();
+		const reloaded = await o.tab('tab-reloaded');
+		expect(reloaded.service.getState().liveOrphan).toBeNull();
+		expect(o.liveMarker.value).toBeNull();
+	});
+
+	test.each(['tab-a', 'previous-tab'])(
+		'failed open preserves a previous marker owned by %s',
+		async (owner) => {
+			const o = origin();
+			const previous = JSON.stringify({
+				tabId: owner,
+				device: 'USB DSP Audio',
+				crc: crcOf(-13),
+				at: T0 - 1_000
+			});
+			o.liveMarker.value = previous;
+			const a = await o.tab('tab-a', {
+				deviceOptions: { openError: new Error('open failed') }
+			});
+			await start(a);
+			expect(a.device.attempts).toBe(0);
+			expect(o.liveMarker.value).toBe(previous);
+			a.service.dispose();
+			await macrotask();
+			const reloaded = await o.tab('tab-reloaded');
+			expect(reloaded.service.getState().liveOrphan).toMatchObject({ crc: crcOf(-13) });
+		}
+	);
+
+	test('failed open never removes a marker replaced during the attempt', async () => {
+		const o = origin();
+		const a = await o.tab('tab-a');
+		const newer = JSON.stringify({
+			tabId: 'other-tab',
+			device: 'USB DSP Audio',
+			crc: crcOf(-13),
+			at: T0 + 1
+		});
+		vi.spyOn(a.device, 'open').mockImplementation(async () => {
+			o.liveMarker.value = newer;
+			throw new Error('open failed');
+		});
+		await start(a);
+		expect(a.device.attempts).toBe(0);
+		expect(o.liveMarker.value).toBe(newer);
+	});
+
+	test.each([
+		['first report unconfirmed', 0, new Error('send failed')],
+		['first report TypeError', 0, new TypeError('send failed')],
+		['failure after first report', 1, new Error('send failed')],
+		['timeout after first report', 1, new DOMException('transfer timed out', 'TimeoutError')],
+		[
+			'connection lost without confirmed unplug',
+			1,
+			new DOMException('connection lost', 'NetworkError')
+		]
+	] as const)('%s keeps the marker and orphan warning', async (_name, report, error) => {
+		const o = origin();
+		const a = await o.tab('tab-a', {
+			deviceOptions: { throwAtReport: report, throwError: error }
+		});
+		await start(a);
+		expect(a.device.attempts).toBe(report + 1);
+		expect(a.device.sent).toHaveLength(report);
+		expect(o.liveMarker.value).not.toBeNull();
+		a.service.dispose();
+		await macrotask();
+		const reloaded = await o.tab('tab-reloaded');
+		expect(reloaded.service.getState().liveOrphan).toMatchObject({ crc: crcOf(-12) });
+	});
+
+	test.each(['stop', 'tab death'])('%s during a pending report keeps the marker', async (end) => {
+		const o = origin();
+		const a = await o.tab('tab-a', { deviceOptions: { hangAtReport: 1 } });
+		const starting = start(a);
+		await vi.waitFor(() => expect(a.device.attempts).toBe(2));
+		expect(a.device.sent).toHaveLength(1);
+		expect(o.liveMarker.value).not.toBeNull();
+		if (end === 'stop') await a.service.stopLive({ revert: false });
+		a.service.dispose();
+		await starting;
+		await macrotask();
+		expect(o.liveMarker.value).not.toBeNull();
+		const reloaded = await o.tab('tab-reloaded');
+		expect(reloaded.service.getState().liveOrphan).toMatchObject({ crc: crcOf(-12) });
+	});
+
 	test('written before the first apply, removed after a successful revert', async () => {
 		const o = origin();
 		const a = await o.tab('tab-a', { journal: [savedEntry(-14)] });
