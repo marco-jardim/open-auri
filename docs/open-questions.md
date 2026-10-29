@@ -42,6 +42,7 @@
 | O app oficial WalkPlay ([`peq.szwalkplay.com`](https://peq.szwalkplay.com/), espelho [`Ircama/walkplay`](https://github.com/Ircama/walkplay)) contém uma classe `"CB1100AU"` (fora do caminho principal do app, que cria a classe genérica `"CB"` pelo report `0x4B`) com o mesmo frame: `REPORT_ID 0xCB`, 9 pacotes de 30 bytes, Q27/Q23, `"EQ1#"`, CRC-16/CCITT-FALSE | código do app (2026-10-28); [`protocol-0xcb.md`](protocol-0xcb.md#confirmação-pelo-app-oficial-walkplay) |
 | Bytes 4–5 do header = comprimento `14 + 20·n`; bytes 7 e 11 = `n`, nº de filtros ativos | `buildEqBuffer` do app oficial |
 | Comando final: `01 <tag> 00 01 FF` salva na flash (`saveEqInfo`); `01 <tag> 00 00 FF` aplica sem salvar (`setEqInfo`) | app oficial |
+| `01 65 00 00 FF` após os 9 reports é acusticamente equivalente a só dados (Neutro e PK 2 kHz −12 dB); tag sempre `80 65`, sem resposta aos dados/apply. Não persiste: após replug o cabo voltou à curva commitada | Kuba Auri real, QuadCast S (2026-10-28); registro em `probing.md`, seção F |
 | **Existe leitura no `0xCB`, só da tag de EQ**: `80 00 00 00 FF` ⇒ input report `80 <tag> …`; no Kuba Auri a tag é `0x65` (101) | app oficial (`readEqTagId`); medido no cabo real (2026-10-28) |
 | **Versão de firmware e curva gravada não podem ser lidas**: o app marca `readDeviceVersion`, `readFilterInfo` e outras como "芯片不支持" (o chip não suporta) para esta classe | app oficial |
 | Troca Neutro → PK 2 kHz com tom de 2 kHz: queda de ~10 dB em rampa de ~15 ms, sem energia de clique audível nem mute no ensaio; limite de HF do microfone e ~17% de frames perdidos impedem excluir cliques só em HF e alinhar o tempo absoluto da escrita | B13, com ressalvas |
@@ -67,13 +68,22 @@
 | Significado das outras tags (além de `0x65`) | o app só lê a tag e a repete no comando final; não sabemos que valores existem nem o que mudam |
 | Significado da flag interna que **nega o pré-amp** no app oficial | vista no código do app; a origem da flag não foi identificada |
 | Frames com `n < 10` neste cabo | o app oficial envia só os filtros ativos; a página do kuba e o open-auri sempre enviam 10; não testado no cabo |
-| Comando oficial de aplicar `01 65 00 00 FF` × só os dados | B12 mostrou que os dados sozinhos já aplicam ao vivo; o efeito acústico do `setEqInfo` não foi medido |
+| Persistência do comando oficial de aplicar `01 65 00 00 FF` | comparação acústica com só dados **resolvida**: equivalentes no ensaio de 2026-10-28. Falta checar após replug se o apply persiste; “sem salvar” é a declaração do app |
 | Significado dos bytes 6 e 12–13 do header | sem padrão aparente; o app oficial escreve `00` / `00 00` |
 | Durabilidade da flash e efeito de corte de energia durante a gravação | desconhecidos |
 | Comportamento de troca fora do ensaio B13; cliques muito curtos só em HF | limites do microfone e perda de frames; B13 não cobre todas as curvas |
 | B3, B5, B6, B8, B9 e B11 | ainda não executadas; ver registro em `probing.md` |
 
 Plano de sondagem para fechar cada linha, com prioridade e receita: [`probing.md`](probing.md).
+
+### Tentativa de obter firmware (2026-10-28)
+
+Não foi possível baixar firmware da classe genérica **CB (`0x4B`)**. Os caminhos
+do app oficial `/api/v3-1/common/getFirmwareInfoListByPidAndVid` e
+`checkFirmwareVersion` responderam **405** em `peq.szwalkplay.com` e **404** em
+`www.szwalkplay.com`. A base real da API está ofuscada no bundle; o app ao vivo
+exige um login que o usuário não consegue concluir. Investigação encerrada sem
+firmware obtido; não se prosseguiu.
 
 ## Divergência conhecida e ainda não explicada
 

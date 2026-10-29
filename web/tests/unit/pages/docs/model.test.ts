@@ -104,6 +104,7 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				'moderacao',
 				's6',
 				's7',
+				'windows-volume',
 				'android',
 				'android-validacao',
 				'android-resgate',

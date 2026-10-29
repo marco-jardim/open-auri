@@ -53,7 +53,7 @@ AuraPEQ expõe a tabela de VID/PID e os comandos `0x4B` no bundle.
 | **B9** | **Faixa / pré-amp positivo** | Empurrar \|coef\| rumo a 16 e pré-amp acima de 0 dB. Revela **clamp vs wrap vs rejeição** e o headroom interno. O codec recusa pré-amp positivo: essa parte exige montar o blob à mão, fora do codec | **alto** | 🟡 |
 | **B10** | **Sonda do notch → o `FS` real** | Ver abaixo; medida com PK negativo (seção F) | baixo | ✅ (96 kHz com stream a 48 kHz) |
 | **B11** | **Varredura de timing** | Reduzir os 16 ms/150 ms até quebrar. Mapeia o buffer e acelera a escrita; quebra = gravação parcial | **alto** | 🟡 |
-| **B12** | **Modo só-RAM** | Omitir o commit: os 9 reports aplicam ao vivo, sem persistir. Variação de `01 FF` não testada | médio | ✅ |
+| **B12** | **Modo só-RAM** | Omitir o commit: os 9 reports aplicam ao vivo, sem persistir. Apply oficial acusticamente equivalente e também volátil (ver F) | médio | ✅ |
 | **B13** | **Comportamento na troca** | Gravar durante a reprodução e ouvir/medir: há estalo, mute ou transiente? Importa para o teste cego (um estalo denuncia A/B) | baixo | ✅ (com ressalva; ver F) |
 
 ## B10 em detalhe: a sonda do `FS`
@@ -219,6 +219,7 @@ interface HID `mi_03`. Windows 11, Edge 156 (Chromium) com WebHID; USBPcap
 | **B12** | ✅ feita | 9 reports sem commit aplicam só em RAM; replug restaura a curva persistida |
 | **B12b** | ✅ feita | Reports 0..6 ou 0..7 (com CRC) não aplicam; 0..8 aplica, inclusive após sequência parcial |
 | **B12c** | ✅ com ressalva | Estado sem reação a prévias observado uma vez após 1000 + 50 aplicações; replug recuperou. Não reproduzido em ≈1065 aplicações adicionais; gatilho desconhecido |
+| Apply oficial | ✅ | `01 65 00 00 FF` após os 9 reports soa igual a só dados e não persiste: após replug o cabo voltou ao Padrão Auri commitado (abaixo) |
 | **B13** | ✅ com ressalva | Rampa suave de ~15 ms, sem energia de clique audível nem intervalo de mute no ensaio |
 | **B5, B6, B8, B9, B11** | não executadas | Permanecem pendentes |
 
@@ -244,6 +245,19 @@ Q3, pré-amp −0,5 dB (CRC `0x3D48`), e PK 5000 Hz −12 dB Q3, mesmo pré-amp
 (CRC `0xBE68`). Uma tentativa inicial foi invalidada por movimento do conjunto
 fone/mic (dispersão de ±15–25 dB nas repetições). **Lição: fixar o transdutor e
 manter o volume constante.**
+
+**Incidente de volume do Windows (2026-10-28):** o controle deixou de afetar
+somente o Kuba Auri: 28% → 10% → 50%, sem mudança mensurável na saída do cabo.
+Outro headset USB no mesmo root hub funcionava; no celular, o volume do cabo
+também funcionava. Regravar Padrão Auri pela página oficial da Kuba (escrita
+completa) e desconectar/reconectar **não** resolveu. Reiniciar os serviços
+`Audiosrv` + `AudioEndpointBuilder` resolveu: de 10% a 50%, aumento medido de
+**+23,5…+24,6 dB** (Windows informa −32,6 → −10,2 dB). Conclusão: estado travado
+dos serviços de áudio do Windows para esse endpoint, **não defeito do cabo**.
+Gatilho suspeito, **não confirmado**: muitas sessões WebAudio curtas diretamente
+no cabo (`setSinkId`, 48 kHz), com captura simultânea do microfone, e muitos
+replugs. Só a bancada de medição abria essas sessões; o open-auri não faz isso.
+Para usuários: reiniciar o serviço **Áudio do Windows** ou o PC.
 
 **B4:** B−A para PK 2 kHz, média dos 3 ciclos:
 
@@ -285,9 +299,9 @@ impedindo medir o alinhamento temporal absoluto dentro da escrita.
 `01 65 00 01 FF` tornaram o som neutro imediatamente (2 medições). Após
 desconectar/reconectar, voltou PK 2 kHz (2000 Hz −12,8 dB contra a referência,
 3 passagens). **Os reports de dados aplicam ao vivo, de forma volátil; o commit
-persiste na flash.** Não se variaram os bytes `01 FF` (desnecessário para essa
-conclusão). Viabiliza modo sem flash, X2 no cabo e teste cego no cabo. O modo
-sem flash está **implementado no app web: "Ouvir no cabo", #62** (plano
+persiste na flash.** Nesta sonda não se variaram os bytes `01 FF`; o apply
+oficial foi medido depois (abaixo). Viabiliza modo sem flash, X2 no cabo e teste
+cego no cabo. O modo sem flash está **implementado no app web: "Ouvir no cabo", #62** (plano
 `docs/plans/2026-10-28-modo-sem-flash-plano.md`); X2 no cabo ("Comparar no cabo",
 #73) e teste cego no cabo (aba "No cabo" do Teste cego, #74) também estão
 **implementados** (plano `docs/plans/2026-10-28-x2-e-teste-cego-no-cabo-plano.md`).
@@ -344,3 +358,26 @@ aba oficial da Kuba também com o dispositivo aberto; não se isolou a causa.
 orientar a desconectar/reconectar se a prévia parar de mudar o som; “Salvar”
 sempre envia os 9 reports + commit (funcionou no estado travado); cadência
 de prévias ≥300 ms e contador próprio de aplicações ao vivo.
+
+### Apply oficial × só dados (mesmo dia)
+
+Kuba Auri real, microfone QuadCast S. Comando `setEqInfo` da classe `CB1100AU`
+do app oficial WalkPlay: `01 65 00 00 FF`, enviado após os 9 reports de dados.
+Métrica: nível em 2 kHz relativo à média de 7127/8000 Hz; duas medições por envio,
+em dB, na ordem do ensaio:
+
+| Curva | Envio | Medições (dB) |
+|---|---|---|
+| Padrão Auri (base commitada) | escrita completa | +1,0 / +1,3 |
+| Neutro | só dados | −1,9 / −1,5 |
+| PK 2 kHz −12 dB | só dados | −13,5 / −14,0 |
+| Neutro | dados + apply | −1,1 / −0,8 |
+| PK 2 kHz −12 dB | dados + apply | −12,9 / −13,1 |
+| Neutro | dados + apply | −1,3 / −1,2 |
+| PK 2 kHz −12 dB | dados + apply | −15,3 / −13,5 |
+
+**Resultado:** acusticamente, dados + apply e só dados são equivalentes neste
+ensaio; os dados já aplicam a curva. Após cada envio, a leitura de tag
+`80 00 00 00 FF` respondeu sempre `80 65`. Não houve resposta aos dados nem ao
+apply. **`01 65 00 00 FF` não persiste ✅**: após replug, o cabo voltou ao Padrão Auri commitado (+2,35/+1,92 dB em 2 kHz relativo, contra −15,3/−13,5 dB com o PK aplicado),
+confirmando a semântica “sem salvar” declarada pelo app.

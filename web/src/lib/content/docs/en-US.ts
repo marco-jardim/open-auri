@@ -292,6 +292,13 @@ export const enUS: DocsContent = {
 			links: [{ label: 'Community', href: '/comunidade' }]
 		},
 		{
+			id: 'windows-volume',
+			title: 'Windows volume does not change the headphones',
+			paragraphs: [
+				'If the Windows level changes but the Auri stays just as loud, restart the “Windows Audio” service in the Services app or restart the PC. Lower the volume before testing again. On the bench, this was a stuck audio-service state for that device, not a cable fault; rewriting the curve and reconnecting the cable did not fix it.'
+			]
+		},
+		{
 			id: 'android',
 			title: 'Android app',
 			paragraphs: [

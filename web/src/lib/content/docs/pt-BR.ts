@@ -289,6 +289,13 @@ export const ptBR: DocsContent = {
 			links: [{ label: 'Comunidade', href: '/comunidade' }]
 		},
 		{
+			id: 'windows-volume',
+			title: 'O volume do Windows não muda o fone',
+			paragraphs: [
+				'Se o nível muda no Windows, mas o volume do Auri continua igual, reinicie o serviço “Áudio do Windows” pelo aplicativo Serviços ou reinicie o PC. Abaixe o volume antes de testar de novo. Na bancada, era um estado travado dos serviços de áudio para esse dispositivo, não defeito do cabo; regravar a curva e reconectar o cabo não resolveu.'
+			]
+		},
+		{
 			id: 'android',
 			title: 'App Android',
 			paragraphs: [

@@ -258,10 +258,17 @@ Com a tag `0x65`, `saveEqInfo` é exatamente o commit da página do kuba
 (`01 65 00 01 FF`). Os dois comandos só diferem no byte `3` (`01` salva,
 `00` não salva).
 
-Não verificado no hardware: o efeito acústico de `01 65 00 00 FF` comparado com
-enviar só os dados. A B12 mostrou que os 9 reports de dados **sozinhos** já
-aplicam ao vivo; o open-auri usa esse caminho (sem comando final) para a prévia
-no cabo.
+Medido no Kuba Auri real em 2026-10-28 (QuadCast S): os 9 reports seguidos de
+`01 65 00 00 FF` são **acusticamente equivalentes a enviar só os dados**, para
+Neutro e PK 2 kHz −12 dB. Métrica e valores em
+[`probing.md`](probing.md#apply-oficial--só-dados-mesmo-dia). Após cada envio,
+a leitura de tag respondeu `80 65`; dados e apply não geraram resposta.
+**O apply não salva ✅**: com o Padrão Auri commitado, um PK 2 kHz enviado com
+`01 65 00 00 FF` tocou ao vivo (−15,3/−13,5 dB em 2 kHz relativo) e, após
+desconectar e reconectar, o cabo voltou ao Padrão Auri (+2,35/+1,92 dB, contra
++1,0/+1,3 medidos antes).
+A B12 mostrou que os dados **sozinhos** já aplicam ao vivo e são voláteis;
+o open-auri usa esse caminho (sem comando final) para a prévia no cabo.
 
 ### Leitura da tag de EQ
 
