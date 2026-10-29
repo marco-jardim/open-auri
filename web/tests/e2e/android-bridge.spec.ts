@@ -87,10 +87,12 @@ test('first use: G.1 consent persists after reload; G.2 banner remains on Cabo',
 }) => {
 	await page.goto('/cabo');
 	await expect(notice(page)).toBeVisible();
-	await expect(notice(page)).toContainText('Só muda o caminho até o USB.');
+	await expect(notice(page)).toContainText(
+		'Ainda não foi testado em celulares de outros fabricantes'
+	);
 	await acknowledge(page);
 	await expect(page.getByRole('complementary', { name: TITLE, exact: true })).toHaveText(
-		new RegExp(BANNER.replaceAll('.', '\\.'))
+		new RegExp(BANNER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 	);
 	await page.reload();
 	await expect(page.getByText('App Android v1.0.0, USB host OK', { exact: true })).toBeVisible();
