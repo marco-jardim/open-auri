@@ -9,12 +9,13 @@ import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { cleanup, render } from 'vitest-browser-svelte';
+import { THRESHOLDS, gateForWrite } from 'open-auri/safety';
 import { createClientApp, type ClientApp } from '#lib/app/index.ts';
 import { createAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
 import { createGestureToken } from '#lib/cable/gesture.ts';
 import { CABLE_LIVE_KEY } from '#lib/cable/service.ts';
 import { planComparison } from '#lib/cable/compare.ts';
-import type { CableState, LiveState } from '#lib/cable/types.ts';
+import type { Band, CableState, LiveState } from '#lib/cable/types.ts';
 import { formatNumber } from '#lib/components/cable/i18n.ts';
 import { cableLiveUnsaved, liveBlind } from '#lib/components/cable/live.ts';
 import CableBar from '#lib/components/chrome/CableBar.svelte';
@@ -247,8 +248,9 @@ test('start → check → rounds on the cable, no identity in the DOM, reveal an
 			await expect
 				.element(page.getByText(m.cable_blind_void_stuck()))
 				.toBeVisible();
+			// The pause marker is constant: no failure kind (which could follow a candidate) in the DOM.
 			expect(document.querySelector('[data-cable-blind-pause]')?.getAttribute('data-cable-blind-pause')).toBe(
-				'stuck'
+				''
 			);
 			expect(app.cableState.live?.comparison).toMatchObject({ blind: true, active: true });
 			const resume = page.getByRole('button', { name: m.cable_blind_resume() });
@@ -428,6 +430,182 @@ test.each([
 		expect(ended?.textContent).not.toContain(m.cable_live_ended_disconnected());
 	}
 });
+
+/** The saved curve's preamp: the floor, quieter than any test curve (its revert is never held). */
+const SAVED_PREAMP_DB = THRESHOLDS.preampMinDb;
+
+/**
+ * A real app with a FakeHID cable, rendered BlindTest with Auri and Natural chosen (three rounds),
+ * and "Começar no cabo" clicked. `saved`: the cable's saved curve (journal) is known, all filters
+ * off at `SAVED_PREAMP_DB`.
+ */
+async function startOnCable(saved: boolean) {
+	// Every random word is 0: the order of every round is [second, first] (Fisher–Yates).
+	vi.spyOn(crypto, 'getRandomValues').mockImplementation((array) => array);
+	const fake = fakeAppOptions();
+	const app = createClientApp(fake.options);
+	apps.push(app);
+	await app.start();
+	expect(await app.cable.connect()).not.toBeNull();
+	if (saved) {
+		const device = app.cable.getState().deviceLabel;
+		if (device === null) throw new Error('expected a cable label');
+		const bands = Array.from({ length: 10 }, (): Band => ({ kind: 'OFF' }));
+		const crc = gateForWrite(bands, SAVED_PREAMP_DB, { experimental: false }).metrics.payloadCrc;
+		expect(
+			app.state.journal.append({
+				schema: 1,
+				at: fake.time.value,
+				name: 'Salva',
+				crc: Number(crc),
+				preampDb: SAVED_PREAMP_DB,
+				bands,
+				status: 'ok',
+				device
+			})
+		).toBe(true);
+	}
+	vi.spyOn(app.cable, 'createGesture').mockImplementation(() =>
+		createGestureToken(
+			{ isTrusted: true, type: 'click' },
+			{ now: () => fake.time.value, userActivation: null }
+		)
+	);
+	const audio = createAudioEngine({ indexedDB: null, hasUserActivation: () => true });
+	audio.setVolume(-40);
+	engines.push(audio);
+	const [first, second] = officialCandidates().filter((c) => /^(Auri|Natural)\b/.test(c.name));
+	if (first === undefined || second === undefined) throw new Error('expected two presets');
+	const plan = planComparison(
+		[first, second].map((c) => ({ bands: c.bands, preampDb: c.preampDb })),
+		{ match: true }
+	);
+	const screen = await render(BlindTest, { audio, client: app, reducedMotion: true });
+	await page.getByRole('tab', { name: new RegExp(m.cego_candidates()) }).click();
+	await page.getByRole('checkbox', { name: /^Auri\b/ }).click();
+	await page.getByRole('checkbox', { name: /^Natural\b/ }).click();
+	const roundsInput = document.querySelector<HTMLInputElement>('input[id$="-rounds"]');
+	if (roundsInput === null) throw new Error('Missing rounds');
+	roundsInput.value = '3';
+	roundsInput.dispatchEvent(new Event('input', { bubbles: true }));
+	await page.getByRole('tab', { name: new RegExp(m.cego_cable()) }).click();
+	await levers();
+	await page.getByRole('button', { name: m.cable_blind_start() }).click();
+	return { fake, app, first, second, plan, screen };
+}
+
+/** The levers of a start or of "Retomar" (volume, and experimental when asked). */
+async function levers() {
+	await page.getByRole('checkbox', { name: m.cable_confirm_volume() }).click();
+	const experimental = page.getByRole('checkbox', { name: m.cable_confirm_experimental() });
+	if (experimental.elements().length > 0) await experimental.click();
+}
+
+/** The change check: both items heard with the audio playing, then "Ouvi mudar". */
+async function passCheck(app: ClientApp) {
+	const panel = page.getByRole('tabpanel');
+	await expect.element(page.getByText(m.cable_blind_check_title())).toBeVisible();
+	const changed = page.getByRole('button', { name: m.cable_blind_check_changed() });
+	await panel.getByRole('button', { name: m.cego_play(), exact: true }).click();
+	await expect.element(panel.getByRole('button', { name: m.cego_pause(), exact: true })).toBeVisible();
+	await page.getByRole('button', { name: m.cable_blind_check_phone() }).click();
+	await expect.element(changed).not.toHaveAttribute('aria-disabled');
+	await panel.getByRole('button', { name: m.cego_pause(), exact: true }).click();
+	await changed.click();
+	await vi.waitFor(() => expect(app.cableState.live?.comparison).toMatchObject({ blind: true }));
+}
+
+/** One scored round: position 1 (the second candidate) gets 10, position 2 (the first) 0. */
+async function scoreRound() {
+	const panel = page.getByRole('tabpanel');
+	await panel.getByRole('button', { name: m.cego_play(), exact: true }).click();
+	await vi.waitFor(() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 1 })), {
+		timeout: 4000
+	});
+	await panel.getByRole('button', { name: new RegExp(`${m.cego_position({ number: 2 })}`) }).click();
+	await vi.waitFor(() => expect(announcement()).toBe(m.cable_blind_position_ready({ number: 2 })), {
+		timeout: 4000
+	});
+	await rate(1, '{End}');
+	await rate(2, '{Home}');
+	const next = panel.getByRole('button', { name: m.cego_next(), exact: true });
+	await expect.element(next).not.toHaveAttribute('aria-disabled');
+	await next.click();
+}
+
+test('"Encerrar" during the change check after scored rounds: the reveal saves the winner\'s original curve', async () => {
+	const { app, second, plan } = await startOnCable(true);
+	const winner = plan.items[1];
+	if (winner === undefined) throw new Error('expected two items');
+	await passCheck(app);
+	// Two scored rounds (of three): enough for a winner.
+	await scoreRound();
+	await scoreRound();
+	// "O som parou de mudar", then "Retomar": the change check runs again (its own set).
+	const panel = page.getByRole('tabpanel');
+	await panel.getByRole('button', { name: m.cable_blind_stuck() }).click();
+	await levers();
+	await page.getByRole('button', { name: m.cable_blind_resume() }).click();
+	await expect.element(page.getByText(m.cable_blind_check_title())).toBeVisible();
+	expect(app.cableState.live?.comparison).toMatchObject({ blind: false, active: true });
+
+	// "Encerrar" while the check (Neutro / telefone) plays: back to the saved curve.
+	const end = page.getByRole('button', { name: m.cable_blind_end(), exact: true });
+	await expect.element(end).not.toHaveAttribute('aria-disabled');
+	await end.click();
+	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('reverted'));
+	// The completed round is revealed.
+	await expect
+		.element(page.getByText(m.cego_winner({ name: second.name })).first())
+		.toBeVisible();
+	const save = page.getByRole('button', { name: m.cable_blind_save_winner() });
+	await expect.element(save).not.toHaveAttribute('aria-disabled');
+	await save.click();
+	await vi.waitFor(() => expect(app.pendingWrite).not.toBeNull());
+	const pending = app.pendingWrite;
+	// The winner's own original curve, never the check's item at the same index.
+	expect(pending?.name).toBe(second.name);
+	expect(pending?.preampDb).toBe(winner.original.preampDb);
+	expect(pending?.bands).toEqual(winner.original.bands);
+	const phone = planComparison(checkCurves(), { match: true }).items[1];
+	expect(pending?.bands).not.toEqual(phone?.original.bands);
+}, 60000);
+
+test('without a known saved curve "Encerrar" is locked with why; "Encerrar sem voltar" reveals the scored rounds', async () => {
+	const { app, fake, second } = await startOnCable(false);
+	await passCheck(app);
+	// Two scored rounds (of three): enough for a winner.
+	await scoreRound();
+	await scoreRound();
+	expect(app.cable.liveSavedCurve()).toBeNull();
+	const end = page.getByRole('button', { name: m.cable_blind_end(), exact: true });
+	await expect.element(end).toHaveAttribute('aria-disabled', 'true');
+	const described = end.element().getAttribute('aria-describedby') ?? '';
+	expect(document.getElementById(described)?.textContent).toContain(m.cable_x2_end_no_saved());
+	// A locked button only says why: nothing reaches the cable.
+	const locked = end.element();
+	if (locked instanceof HTMLElement) locked.click();
+	await tick();
+	await app.cable.whenLiveIdle();
+	expect(app.cableState.live?.comparison).toMatchObject({ blind: true, active: true });
+
+	const playing = playingCrc(fake);
+	const keep = page.getByRole('button', { name: m.cable_blind_end_keep(), exact: true });
+	await expect.element(keep).not.toHaveAttribute('aria-disabled');
+	await keep.click();
+	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('stopped'));
+	// The cable keeps its curve; the completed round is revealed, saying so.
+	expect(playingCrc(fake)).toBe(playing);
+	await expect
+		.element(page.getByText(m.cego_winner({ name: second.name })).first())
+		.toBeVisible();
+	await expect
+		.poll(() => document.querySelector('[data-cable-blind-ended]')?.getAttribute('data-cable-blind-ended'))
+		.toBe('kept');
+	expect(document.querySelector('[data-cable-blind-ended]')?.textContent?.trim()).toBe(
+		m.cable_blind_ended_kept()
+	);
+}, 60000);
 
 test('without a live-capable cable the tab says why and nothing starts', async () => {
 	await render(BlindTest, { reducedMotion: true });

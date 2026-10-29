@@ -16,7 +16,9 @@
  *   switch slower than `CABLE_SWITCH_LIMIT_MS`, an unplugged cable, the comparison ending on its
  *   own, another tab's preview appearing after the start, or "O som parou de mudar". Every other
  *   pause that interrupts a round (a failed "Encerrar", a cancelled held revert, the check due)
- *   drops it too (`onvoid`: the page reshuffles it). "Retomar" needs a new start (gesture).
+ *   drops it too (`onvoid`: the page reshuffles it), once: a failed end tried again from the pause
+ *   only says why. "Retomar" needs a new start (gesture); "Encerrar sem voltar" (`endKeep`) always
+ *   ends it with the cable keeping its curve.
  * - A start (the check, the blind set) is refused (`live-elsewhere`, nothing sent) while the
  *   cable may still play an old preview (`liveOrphan`): unplug and replug, or "Já desconectei".
  * - Audible change check: before the blind set starts, and again every `CABLE_CHECK_EVERY`
@@ -522,10 +524,20 @@ export function createCableRound(deps: CableRoundDeps) {
 		}
 	}
 
-	/** After a failed end: back to `done`, or paused (the round in play is dropped). */
+	/**
+	 * Pauses after a failed end: a round in play is dropped once; from a pause (nothing in play,
+	 * already dropped) only the reason changes, so a failed end tried again never reshuffles.
+	 */
+	function stopAfterEnd(pause: CablePause) {
+		if (beforeEnd === 'paused') {
+			set({ phase: 'paused', pause, switching: false, ready: null, checkPlaying: null });
+		} else pauseWith(pause);
+	}
+
+	/** After a failed end: back to `done`, or paused (the round in play is dropped once). */
 	function backFromEnd(pause: CablePause) {
 		if (beforeEnd === 'done') set({ phase: 'done', pause: null });
-		else pauseWith(pause);
+		else stopAfterEnd(pause);
 	}
 
 	/**
@@ -569,6 +581,8 @@ export function createCableRound(deps: CableRoundDeps) {
 	async function confirmHeld(request: Gesture): Promise<LiveOutcome> {
 		if (view.phase !== 'end-held') return { status: 'refused', reason: 'no-hold' };
 		const at = ++epoch;
+		// In flight: the session ending under this call is its own success, never `gone`.
+		set({ phase: 'starting' });
 		const outcome = await port.confirmEndComparison({ gesture: request.gesture });
 		if (at !== epoch) return outcome;
 		if (outcome.status === 'accepted') {
@@ -581,7 +595,10 @@ export function createCableRound(deps: CableRoundDeps) {
 		}
 		const hold = port.getState().live?.hold ?? null;
 		// Nothing sent (a stale click): still held, the confirmation can be given again.
-		if (hold?.reason === 'loudness' && hold.curve === 'saved') return outcome;
+		if (hold?.reason === 'loudness' && hold.curve === 'saved') {
+			set({ phase: 'end-held' });
+			return outcome;
+		}
 		backFromEnd('end-failed');
 		return outcome;
 	}
@@ -603,19 +620,23 @@ export function createCableRound(deps: CableRoundDeps) {
 				set({ phase: 'ended', endedReason: 'gone', pause: null });
 				break;
 			default:
-				pauseWith('cancel-failed');
+				stopAfterEnd('cancel-failed');
 		}
 		return status;
 	}
 
-	/** Ends the blind set with the cable keeping its curve (before "Salvar esta", or leaving). */
+	/**
+	 * Ends the blind set with the cable keeping its curve ("Encerrar sem voltar", before "Salvar
+	 * a vencedora", or leaving). A reset meanwhile wins: the view stays idle.
+	 */
 	async function endKeep(): Promise<void> {
-		epoch++;
+		const at = ++epoch;
 		mute();
 		const from = view.phase;
 		if (from === 'idle' || from === 'ended') return;
 		set({ phase: 'starting', switching: false, ready: null });
 		await endKept();
+		if (at !== epoch) return;
 		set({ phase: 'ended', endedReason: 'kept', pause: null });
 	}
 

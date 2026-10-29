@@ -154,11 +154,32 @@ for (const copy of [
 		const link = slot?.querySelector('a');
 		expect(link?.getAttribute('href')).toBe('/');
 		expect(link?.textContent?.trim()).toBe(m.cabo_ram_live_link());
-		// Read cable, firmware and blind test on the cable stay EM BREVE.
+		// Read cable and firmware stay EM BREVE; the blind test on the cable shipped (#74).
 		const soon = [...screen.container.querySelectorAll('.slots .soon strong')].map(
 			(node) => node.textContent
 		);
-		expect(soon).toEqual([m.cabo_read(), m.cabo_firmware(), m.cabo_blind()]);
+		expect(soon).toEqual([m.cabo_read(), m.cabo_firmware()]);
+	});
+}
+
+for (const copy of [
+	{ locale: 'pt-BR', badge: 'EM BREVE', blind: 'Teste cego no cabo', tab: 'No cabo' },
+	{ locale: 'en-US', badge: 'COMING SOON', blind: 'Blind test on the cable', tab: 'On the cable' }
+] as const) {
+	test(`the blind test slot points to the Teste cego page's "No cabo" tab, no EM BREVE, in ${copy.locale}`, async () => {
+		await setLocale(copy.locale, { reload: false });
+		active = createClientApp(fakeAppOptions().options);
+		const screen = await render(CaboPage, { app: active, tourAutoOpen: false });
+		const slot = screen.container.querySelector('[data-testid="cabo-blind-live"]');
+		expect(slot).not.toBeNull();
+		expect(slot?.textContent).toContain(copy.blind);
+		expect(slot?.textContent).toContain(copy.tab);
+		expect(slot?.textContent).toContain(m.cego_cable());
+		expect(slot?.textContent).not.toContain(copy.badge);
+		expect(slot?.closest('.soon')).toBeNull();
+		const link = slot?.querySelector('a');
+		expect(link?.getAttribute('href')).toBe('/teste-cego');
+		expect(link?.textContent?.trim()).toBe(m.cabo_blind_live_link());
 	});
 }
 

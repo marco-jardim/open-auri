@@ -586,7 +586,12 @@
 					<p>{m.cabo_ram_live()}</p>
 					<a class="editor-link" href="/">{m.cabo_ram_live_link()}</a>
 				</aside>
-				<EmBreve title={m.cabo_blind()} />
+				<!-- The blind test on the cable shipped as the Teste cego page's "No cabo" tab (#74). -->
+				<aside class="shipped" data-testid="cabo-blind-live">
+					<strong>{m.cabo_blind()}</strong>
+					<p>{m.cabo_blind_live()}</p>
+					<a class="editor-link" href="/teste-cego">{m.cabo_blind_live_link()}</a>
+				</aside>
 			</div>
 		</RackUnit>
 	</div>

@@ -23,6 +23,20 @@ aguardáveis e têm o mesmo tempo para qualquer curva.
 
 MVP de #73: fatias 1–3. #74 só sai com 4 e 5 juntas.
 
+### Estado (2026-10-28): fatias 1–6 feitas
+
+| # | Commits |
+|---|---|
+| 1 | `7a7a658` |
+| 2 | `7a7a658`, `be31b43` (retenção de volume em toda troca, `cancelHold`) |
+| 3 | `d63df6f`, `53915e7` (achados de QA do X2) |
+| 4 | `be31b43`, `53915e7`, `ff5ae4b` (barra superior e painel da Curva constantes) |
+| 5 | `ff5ae4b`, `328f4b0` e o commit desta fatia 6 (achados finais de QA: "Salvar a vencedora" grava a curva original da própria candidata; "Encerrar" travado sem curva salva conhecida; "Encerrar sem voltar" na Escuta; fim que falha não sorteia a rodada de novo) |
+| 6 | o commit desta fatia (estas docs; encaixe "Teste cego no cabo" da página Cabo aponta para a aba "No cabo") |
+
+Pendente: telemetria S6 com saída "cabo" (exige mudança no servidor); por ora as rodadas
+ouvidas no cabo não vão para o S6.
+
 ## 3. Riscos
 
 - O cabo não confirma nada: travamento silencioso invalidaria um teste cego. Mitigação: checagem

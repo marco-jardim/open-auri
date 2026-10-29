@@ -706,8 +706,8 @@
 		prepareCableRound();
 	}
 	/**
-	 * "Encerrar" on Escuta ended the test on the cable: the completed rounds are kept and
-	 * revealed (the round in play is dropped); with none, the page starts over.
+	 * "Encerrar" or "Encerrar sem voltar" on Escuta ended the test on the cable: the completed
+	 * rounds are kept and revealed (the round in play is dropped); with none, the page starts over.
 	 */
 	function endedOnCable() {
 		if (!session || session.completed.length === 0) {
@@ -869,8 +869,9 @@
 	}
 	function reset() {
 		// The cable keeps its curve until unplugged ("Encerrar" is the way back to the saved one).
+		// The end goes on in the cable service; this page's controller is back to idle now.
 		if (cableRunning()) void cableRound.endKeep();
-		if (onCable && !cableRunning()) cableRound.reset();
+		if (onCable) cableRound.reset();
 		onCable = false;
 		releasePreview();
 		active = false;

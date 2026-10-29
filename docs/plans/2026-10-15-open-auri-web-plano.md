@@ -230,7 +230,7 @@ Transformar os mocks aprovados (8 páginas com homenagens) em um produto real:
 | Design | Direção editorial com homenagens intensas por página (equipamento = UI). Modelo de camadas B na Curva: Ouvir ⊂ Ajustar ⊂ Engenharia, estado na URL `?camada=`. |
 | Idiomas | pt-BR padrão + en-US. Anglicismos comuns da indústria mantidos. Sem travessão (—) no texto pt-BR. |
 | Curvas | C1 Soe como X, C2 desenhar, C3 delta, C4 `.txt`, C5 loudness ISO 226 estática, C6 (só via HS/LP/HP experimentais na Engenharia; biquad cru EM BREVE), C8 WYSIWYG. C7 descartada. |
-| Usos | X1 exportar bytes, X2-web (teste cego no navegador), X3 prévia exata, X4 resgate + diário, X5 headroom, X8 curadoria, X9 vários cabos em sequência. X2 no cabo: EM BREVE. X6: removido. X7 e sondas: fora da UI pública (FH). |
+| Usos | X1 exportar bytes, X2-web (teste cego no navegador), X3 prévia exata, X4 resgate + diário, X5 headroom, X8 curadoria, X9 vários cabos em sequência. X2 no cabo: **implementado** (#73, "Comparar no cabo" na Comparar: A e B nivelados tocam na RAM do cabo, sem flash). Teste cego no cabo: **implementado** (#74, aba "No cabo" do Teste cego: os candidatos tocam às cegas na RAM do cabo, com checagem audível). X6: removido. X7 e sondas: fora da UI pública (FH). |
 | Proteções | D1 (cortes antes de reforços como ordem padrão; quem decide é o gate), D2, D4, D5, D6, D7 (sem reforço PK acima de 16 kHz; Q ≤ 4 em reforços; cortes com Q maior se o gate aprovar), D8, D10 (OFF identidade). |
 | Ideias novas | N1 macros Grave/Corpo/Presença/Brilho, N2 cuidado com a flash (sem limite rígido, 1 gravação a cada 2 s, contadores, aviso informativo a partir de 50/dia), N3 checklist + aviso de loudness (≥ +3 dB ou estado do cabo desconhecido). |
 | Limites | Gate v2 "envelope observado" (3.3). PK, LS e OFF liberados. HS, LP e HP liberados como experimentais só na Engenharia. |
@@ -246,13 +246,14 @@ Transformar os mocks aprovados (8 páginas com homenagens) em um produto real:
 | Versões | Sempre a última estável do upstream, verificada em cada PF (0.14). |
 | Rodapé | Link "Código-fonte no GitHub" (`https://github.com/marco-jardim/open-auri`) abaixo de "Aviso legal completo", em todas as páginas. |
 | Licenças | Presets e descrições da Kuba: o humano pede autorização após o lançamento (Q-KUBA-LIC); os mocks e o produto mostram "licença: a confirmar". Medições e alvos do AutoEq: **incluídos no produto** por decisão do usuário, com atribuição por fonte e processo de remoção a pedido (`D:\git\open-auri\docs\autoeq-data.md`). |
-| EM BREVE | Biquad cru, X2 no cabo, leitura do cabo (firmware, curva atual), HP subsônico abaixo da fronteira do gate (≈28,6 Hz em Q 0,5). Modo sem flash (RAM): **implementado** no app web como "Ouvir no cabo" na Curva (#62), não é mais EM BREVE. |
+| EM BREVE | Biquad cru, leitura do cabo (firmware, curva atual), HP subsônico abaixo da fronteira do gate (≈28,6 Hz em Q 0,5). Pesquisa de 2026-10-28: nenhum protocolo público lê o 0xCB; a página oficial só escreve. Modo sem flash (RAM): **implementado** no app web como "Ouvir no cabo" na Curva (#62). X2 no cabo (#73, "Comparar no cabo" na Comparar) e teste cego no cabo (#74, aba "No cabo" do Teste cego): **implementados**, não são mais EM BREVE. |
 
 **2026-10-28 · FH/B12:** os 9 reports de dados sem commit aplicam ao vivo em
 RAM; replug restaura a curva commitada. O modo sem flash está **implementado** no
 app web como "Ouvir no cabo" na Curva (#62); a página Cabo mostra as prévias numa
-contagem própria, fora dos contadores da flash. X2/teste cego no cabo é viável,
-mas **não implementado**; permanece EM BREVE. Ver
+contagem própria, fora dos contadores da flash. X2 no cabo (#73, "Comparar no
+cabo" na Comparar) e teste cego no cabo (#74, aba "No cabo" do Teste cego) estão
+**implementados** sobre a mesma prévia em RAM. Ver
 [`probing.md`, seção F](../probing.md#medição-acústica-mesmo-dia).
 
 ### 3.2 Verdade do hardware (nunca contradizer)
@@ -1490,7 +1491,7 @@ Regras comuns a todas as páginas:
   - **Candidatos:** oficiais, curva atual, variações.
   - **Rodadas:** ordem sorteada, notas de 0 a 10.
   - **Resultado:** IC de 95% (t de Student) e chave de torneio.
-  - **Cabo:** "Teste no cabo" EM BREVE. Nota de 2026-10-28: B12 mostrou envio sem commit viável para evitar flash; o envio sem commit está implementado como "Ouvir no cabo" na Curva (#62), mas o teste cego no cabo continua não implementado.
+  - **Cabo:** teste cego no cabo **implementado** (#74) na aba "No cabo": os candidatos tocam às cegas e nivelados na RAM do cabo (sem flash), o navegador toca uma cadeia plana, há checagem audível antes e a cada 4 rodadas, e as rodadas no cabo não vão para o S6. Base: o envio sem commit de B12, implementado como "Ouvir no cabo" na Curva (#62).
   - **S6:** painel de consentimento pronto; o envio é ligado na F4 (T4.16).
   - **Medidores:** nível por candidato ao vivo.
 
@@ -1502,8 +1503,9 @@ Regras comuns a todas as páginas:
   - **Calibração:** VU do checklist com chaves com tampa; o checklist da T2.7 é embutido.
   - **Transporte:** fita dos 9 reports + commit em tempo real e câmera lenta ×10.
   - **Diário, contadores mecânicos e vários cabos.**
-  - **EM BREVE:** ler cabo, firmware, teste cego no cabo.
-  - **2026-10-28 · B12:** modo sem flash via 9 reports sem commit **implementado** no app web como "Ouvir no cabo" na Curva (#62); o encaixe "Modo sem flash (RAM)" do U8 aponta para ele e o U6 conta as prévias no cabo (sem gravação). Ler cabo, firmware e teste cego no cabo continuam EM BREVE, não implementados.
+  - **EM BREVE:** ler cabo, firmware. Pesquisa de 2026-10-28: nenhum protocolo público lê o 0xCB; a página oficial só escreve.
+  - **2026-10-28 · B12:** modo sem flash via 9 reports sem commit **implementado** no app web como "Ouvir no cabo" na Curva (#62); o encaixe "Modo sem flash (RAM)" do U8 aponta para ele e o U6 conta as prévias no cabo (sem gravação). Ler cabo e firmware continuam EM BREVE, não implementados.
+  - **2026-10-28 · #73/#74:** X2 no cabo **implementado** como "Comparar no cabo" na Comparar (A e B nivelados na RAM do cabo); teste cego no cabo **implementado** na aba "No cabo" do Teste cego. O encaixe "Teste cego no cabo" do U8 deixou de ser EM BREVE e aponta para essa aba.
 
 **T2.16 · Docs `/docs` (Harry Nyquist)**
 - `[route class=implement risk=medium scope=multi needs=edit,shell]` · `implementer`
@@ -2445,7 +2447,7 @@ Inicia por pedido do humano.
 
 - **Ferramenta de bancada** separada (não pública): sondas B1 → B4 → B7, depois B10, B12, B13.
 - **Regras de segurança** de `D:\git\open-auri\docs\probing.md`.
-- **Resultado esperado:** liberar ou ajustar os itens EM BREVE (leitura, X2 no cabo, biquad cru; o modo RAM já saiu como "Ouvir no cabo", #62) e calibrar o gate com medições reais.
+- **Resultado esperado:** liberar ou ajustar os itens EM BREVE (leitura, biquad cru; o modo RAM já saiu como "Ouvir no cabo", #62, e o X2 e o teste cego no cabo, #73 e #74) e calibrar o gate com medições reais.
 - **Ciclo:** PF, testes, QA heavy e DoD próprios, no mesmo formato das fases.
 
 ---
@@ -2527,7 +2529,7 @@ Achados viram FXG.k e o QG roda de novo conforme 0.5.
 | Risco | Impacto | Mitigação |
 |---|---|---|
 | O gate v2 é semelhança, não prova | Curva aceita que o firmware trate mal | Ressalva na UI e na Docs; gate conservador; FH calibra com medição; interruptor para endurecer limites no servidor (`gate_ver`) |
-| Vida útil da flash desconhecida | Desgaste | N2 (espera de 2 s, contadores, aviso); nunca gravar automaticamente; X2 no cabo EM BREVE |
+| Vida útil da flash desconhecida | Desgaste | N2 (espera de 2 s, contadores, aviso); nunca gravar automaticamente; X2 e teste cego no cabo só na RAM (#73, #74) |
 | D1 sem transações | Atomicidade em reset e trocas | Ordem segura de operações; testes de corrida; documentação |
 | CPU do hash ou do gate no Worker | Latência e custo | Medição no PF3/PF4; `node:crypto`; gate cacheado por `curve_id` |
 | Resend com 100/dia no plano grátis | Falha de verificação em picos | Monitorar; plano pago quando necessário; idempotência; fila de nova tentativa |

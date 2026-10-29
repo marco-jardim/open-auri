@@ -8,15 +8,18 @@
 	  experimental / Android levers when needed), "Começar no cabo".
 	- `listen` (Escuta, while the test runs): the change check (Neutro / Telefone, "Ouvi mudar",
 	  "Não mudou"), "O som parou de mudar", a pause with "Retomar" (fresh levers and gesture) and
-	  "Encerrar" (back to the saved curve; a held revert asks for the volume confirmation).
-	- `results` (Resultado): "Salvar a vencedora no cabo" (the ORIGINAL curve, `comparisonOriginal`,
-	  once the blind set ended), "Encerrar", "Encerrar sem voltar".
+	  "Encerrar" (back to the saved curve; a held revert asks for the volume confirmation; locked
+	  with why while the cable's saved curve is not known) and "Encerrar sem voltar" (the cable
+	  keeps its curve; the completed rounds are revealed).
+	- `results` (Resultado): "Salvar a vencedora no cabo" (the winner's ORIGINAL curve, from the
+	  page's own candidate, once the blind set ended), "Encerrar", "Encerrar sem voltar".
 	While the cable may still play an old preview (`liveOrphan`), every start waits: unplug and
 	replug, or "Já desconectei" (`dismissLiveOrphan`). A test that ended without this page says
 	whether the cable went back to its saved curve (unplugged) or keeps the test's curve.
 	Nothing rendered here varies with the playing candidate.
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { snapshotBands } from 'open-auri/dsp';
 	import { THRESHOLDS } from 'open-auri/safety';
 	import { m } from '#lib/paraglide/messages.js';
@@ -315,7 +318,7 @@
 	}
 
 	async function onEnd(event: MouseEvent) {
-		if (busy || app === null) return;
+		if (busy || app === null || endReason !== null) return;
 		const gesture = app.cable.createGesture(event);
 		busy = true;
 		message = null;
@@ -334,6 +337,7 @@
 		message = null;
 		try {
 			await round.endKeep();
+			if (round.view.phase === 'ended' && mode === 'listen') onended?.();
 		} finally {
 			busy = false;
 		}
@@ -356,31 +360,33 @@
 		round.cancelHeld();
 	}
 
-	/** "Salvar a vencedora": the blind set ends first (saving is refused while it runs). */
+	/**
+	 * "Salvar a vencedora": the blind set ends first (saving is refused while it runs). The write
+	 * is the winner's own original curve, from this page's candidate (never the last session's
+	 * set: after an end during the change check, that is the check's Neutro / telefone).
+	 */
 	async function onSave() {
 		const index = winner;
 		if (busy || app === null || index === null || saveReason !== null) return;
 		const candidate = candidates[index];
 		if (candidate === undefined) return;
+		const bands = snapshotBands(candidate.bands);
+		const preampDb = candidate.preampDb;
+		const name = candidate.name;
 		busy = true;
 		message = null;
 		try {
 			// The save goes to the cable that plays the test (the target may have moved).
 			app.cable.selectLiveCable();
 			await round.endKeep();
-			const original = app.cable.comparisonOriginal(index);
-			if (original === null) {
-				message = m.cable_live_refused_error();
-				return;
-			}
 			app.requestWrite({
 				schema: 1,
 				updatedAt: Date.now(),
-				name: candidate.name,
+				name,
 				source: 'custom',
 				labels: null,
-				bands: snapshotBands(original.bands),
-				preampDb: original.preampDb
+				bands,
+				preampDb
 			});
 		} finally {
 			busy = false;
@@ -393,6 +399,16 @@
 		if (phase === 'end-held') return m.cable_live_save_held();
 		if (phase === 'starting') return m.cable_live_save_wait();
 		return null;
+	});
+
+	/**
+	 * Why "Encerrar" (back to the saved curve) is locked, or null: while the comparison runs it
+	 * needs the cable's saved curve (re-read on every state change); "Encerrar sem voltar" stays.
+	 */
+	const endReason = $derived.by<string | null>(() => {
+		void cable;
+		if (app === null || cable?.live?.comparison?.active !== true) return null;
+		return untrack(() => app.cable.liveSavedCurve()) === null ? m.cable_x2_end_no_saved() : null;
 	});
 
 	const resumeReason = $derived.by<string | null>(() => {
@@ -607,7 +623,7 @@
 				<Button size="sm" onclick={onStuck} data-cable-blind-stuck>{m.cable_blind_stuck()}</Button>
 			</div>
 		{:else if phase === 'paused' && view.pause !== null}
-			<p class="pause" role="status" data-cable-blind-pause={view.pause}>
+			<p class="pause" role="status" data-cable-blind-pause>
 				{pauseText(view.pause)}
 			</p>
 			<p class="note">{m.cable_blind_resume_hint()}</p>
@@ -631,8 +647,20 @@
 		{/if}
 		{#if phase !== 'end-held' && phase !== 'ended'}
 			<div class="actions">
-				<Button variant="ghost" size="sm" loading={busy} onclick={onEnd} data-cable-blind-end
-					>{m.cable_blind_end()}</Button
+				<Button
+					variant="ghost"
+					size="sm"
+					loading={busy}
+					disabledReason={endReason}
+					onclick={onEnd}
+					data-cable-blind-end>{m.cable_blind_end()}</Button
+				>
+				<Button
+					variant="ghost"
+					size="sm"
+					loading={busy}
+					onclick={() => void onEndKeep()}
+					data-cable-blind-end-keep>{m.cable_blind_end_keep()}</Button
 				>
 			</div>
 		{/if}
@@ -640,7 +668,7 @@
 		<h3 id={`${id}-title`}>{m.cable_blind_title()}</h3>
 		{#if phase === 'end-held'}{@render held()}{/if}
 		{#if phase === 'paused' && view.pause !== null}
-			<p class="pause" role="status" data-cable-blind-pause={view.pause}>
+			<p class="pause" role="status" data-cable-blind-pause>
 				{pauseText(view.pause)}
 			</p>
 		{/if}
@@ -657,11 +685,19 @@
 				data-cable-blind-save>{m.cable_blind_save_winner()}</Button
 			>
 			{#if phase !== 'ended' && phase !== 'end-held' && phase !== 'idle'}
-				<Button size="sm" loading={busy} onclick={onEnd} data-cable-blind-end
-					>{m.cable_blind_end()}</Button
+				<Button
+					size="sm"
+					loading={busy}
+					disabledReason={endReason}
+					onclick={onEnd}
+					data-cable-blind-end>{m.cable_blind_end()}</Button
 				>
-				<Button variant="ghost" size="sm" loading={busy} onclick={() => void onEndKeep()}
-					>{m.cable_blind_end_keep()}</Button
+				<Button
+					variant="ghost"
+					size="sm"
+					loading={busy}
+					onclick={() => void onEndKeep()}
+					data-cable-blind-end-keep>{m.cable_blind_end_keep()}</Button
 				>
 			{/if}
 		</div>

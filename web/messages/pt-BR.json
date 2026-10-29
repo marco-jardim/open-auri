@@ -783,6 +783,8 @@
 	"cabo_accepted": "Aceito pelo transporte",
 	"cabo_add": "Adicionar outro cabo",
 	"cabo_blind": "Teste cego no cabo",
+	"cabo_blind_live": "Disponível: use a aba “No cabo” da página Teste cego para ouvir os candidatos no próprio cabo, sem gravar na memória dele.",
+	"cabo_blind_live_link": "Ir para o Teste cego",
 	"cabo_byte_description": "Cabeçalho 0–13, preamp Q23 14–17, coeficientes Q27 18–217, CRC 218–219. Ordem no fio: b0, b2, −a1, b1, −a2.",
 	"cabo_byte_map": "Mapa dos 220 bytes do payload",
 	"cabo_calibration": "Calibração",

@@ -123,23 +123,19 @@
 	const cableB = $derived(b ? armed.findIndex((track) => track.id === b.id) : -1);
 
 	// --- "Comparar no cabo" (issue #73) ----------------------------------------------------------
-	// While a comparison on the cable plays its A or B, the cable applies the EQ: the browser
-	// lanes must not add it again. Every lane then plays the flat Neutro curve (same rule as the
-	// Curva page's `browserFlat`: only once the cable is known to play a candidate; after the
-	// session, while the cable keeps one), so the browser keeps its session, meters and protection
-	// but sounds raw. Back to the lanes' EQ once the cable is back on its saved curve.
-	/** The saved curve of the comparison session's cable (read again on every state change). */
-	const comparisonSaved = $derived.by(() => {
+	// While the cable plays a live curve that is not its saved one (this page's comparison, the
+	// Curva preview, the blind test's set, or one kept after its session or left by another tab),
+	// the cable applies the EQ: the browser lanes must not add it again. Every lane then plays the
+	// flat Neutro curve (the Curva page's rule, `browserFlat`, on the service's `cableEq` flag:
+	// only once the cable is known to play it), so the browser keeps its session, meters and
+	// protection but sounds raw. Back to the lanes' EQ once the cable is back on its saved curve.
+	/** The saved curve of the live session's cable (read again on every state change). */
+	const liveSaved = $derived.by(() => {
 		const client = app;
-		const session = client?.cableState.live ?? null;
-		if (!client || session === null || session.comparison === undefined) return null;
+		if (!client || client.cableState.live === null) return null;
 		return untrack(() => client.cable.liveSavedCurve());
 	});
-	const cableFlat = $derived(
-		!!app &&
-			app.cableState.live?.comparison !== undefined &&
-			browserFlat(app.cableState, comparisonSaved)
-	);
+	const cableFlat = $derived(!!app && browserFlat(app.cableState, liveSaved));
 	/** The lanes as the browser plays them: flat while the cable applies the EQ. */
 	const heardTracks = $derived(
 		cableFlat

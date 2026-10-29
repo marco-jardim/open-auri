@@ -421,9 +421,19 @@ test('a held revert offers the volume confirmation, then ends on the saved curve
 	expect(document.querySelector('[data-cable-ab-hold]')?.getAttribute('data-cable-ab-hold')).toBe(
 		'loudness'
 	);
+	const confirmEnd = vi.spyOn(app.cable, 'confirmEndComparison');
+	const confirmLive = vi.spyOn(app.cable, 'confirmLive');
 	await page.getByRole('button', { name: m.cable_live_hold_loudness_confirm() }).click();
 	await vi.waitFor(() => expect(app.cableState.live?.status).toBe('ended'));
 	expect(playingCrc(fake)).toBe(savedCrc);
+	// The session itself ends as reverted (not stopped): the cable is back on its saved curve.
+	expect(app.cableState.live).toMatchObject({
+		endedReason: 'reverted',
+		playsUnsaved: false,
+		comparison: { active: false }
+	});
+	expect(confirmEnd).toHaveBeenCalledTimes(1);
+	expect(confirmLive).not.toHaveBeenCalled();
 	await expect.poll(() => text('[data-cable-ab-ended]')).toBe(m.cable_live_ended_reverted());
 });
 
@@ -485,6 +495,32 @@ test('locked while the Curva preview runs, with the reason', async () => {
 	if (locked instanceof HTMLElement) locked.click();
 	await tick();
 	expect(document.querySelector('[data-cable-ab-checklist]')).toBeNull();
+});
+
+test('a Curva preview that is not the saved curve flattens the lanes too (no comparison)', async () => {
+	const { app, fake, build } = await setup();
+	const auri = initialTracks()[1]?.curve;
+	if (auri === undefined) throw new Error('expected lane 2');
+	await page.getByRole('button', { name: t.play, exact: true }).click();
+	await expect.poll(() => lastChain(build, 2)?.[0]).toEqual(auri.bands);
+	const outcome = await app.cable.startLive({
+		curve: {
+			bands: [{ kind: 'PK', freqHz: 1000, gainDb: -3, qFactor: 1 }, ...OFF_BANDS.slice(1)],
+			preampDb: -6
+		},
+		confirmations: { volumeLowered: true },
+		gesture: createGestureToken(
+			{ isTrusted: true, type: 'click' },
+			{ now: () => fake.time.value, userActivation: null }
+		)
+	});
+	expect(outcome.status).toBe('accepted');
+	await vi.waitFor(() => expect(app.cableState.live?.cableEq).toBe(true));
+	expect(app.cableState.live?.comparison).toBeUndefined();
+	// The cable applies an EQ already: every lane plays the flat Neutro curve.
+	const flat = snapshotBands(NEUTRO.bands);
+	await expect.poll(() => lastChain(build, 2)?.[0]).toEqual(flat);
+	expect(lastChain(build, 2)?.[1]).toBe(NEUTRO.preampDb);
 });
 
 test('"Salvo no cabo" loads the cable\'s saved curve into a lane', async () => {

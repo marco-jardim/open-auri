@@ -52,9 +52,11 @@ test('only the shared app checklist can authorize page writes; connection remain
 	expect(page).toContain('<span class="fn">requestDevice</span');
 	expect(all).not.toMatch(/\.(?:write|writeQueue|createGesture|sendReport|requestDevice)\s*\(/);
 	expect(all).not.toMatch(/\b(?:writeCurve|writeMany|createCableService|createClientApp)\s*\(/);
-	// Read cable, firmware and blind test on the cable; the RAM slot points to "Ouvir no cabo".
-	expect(page.match(/<EmBreve\s/g)).toHaveLength(3);
+	// Read cable and firmware; the RAM slot points to "Ouvir no cabo" and the blind test slot
+	// to the Teste cego page's "No cabo" tab.
+	expect(page.match(/<EmBreve\s/g)).toHaveLength(2);
 	expect(page).not.toContain('<EmBreve title={m.cabo_ram()}');
+	expect(page).not.toContain('<EmBreve title={m.cabo_blind()}');
 	expect(all).not.toContain('{@html');
 	expect(all).not.toMatch(/double.?d|duplo.?d|(?:logo|brand|symbol)[^\n]*Dolby/i);
 });

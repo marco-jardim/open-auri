@@ -634,6 +634,74 @@ describe('the end', () => {
 		await kept.round.endKeep();
 		expect(kept.round.view).toMatchObject({ phase: 'ended', endedReason: 'kept' });
 	});
+
+	test('a failed "Encerrar" tried again from the pause only says why; "Encerrar sem voltar" ends it', async () => {
+		const h = setup();
+		await startBlind(h);
+		// The saved curve gets a gate hold: never confirmable, so never `end-held`.
+		h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+		h.cable.options.hold = { reason: 'gate', curve: 'saved' };
+		const gesture = { kind: 'cable-gesture' } as const;
+		await h.round.end({ gesture });
+		expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'end-failed' });
+		// The round in play is dropped once.
+		expect(h.onvoid).toHaveBeenCalledTimes(1);
+		expect(h.onvoid).toHaveBeenCalledWith('end-failed');
+		for (let attempt = 0; attempt < 3; attempt++) {
+			await h.round.end({ gesture });
+			expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'end-failed' });
+			expect(h.round.running()).toBe(true);
+		}
+		// Tried again from the pause: no new drop, no reshuffle.
+		expect(h.onvoid).toHaveBeenCalledTimes(1);
+		await h.round.endKeep();
+		expect(h.cable.port.endComparison).toHaveBeenLastCalledWith({ revert: false });
+		expect(h.round.view).toMatchObject({ phase: 'ended', endedReason: 'kept' });
+		expect(h.cable.state.live?.comparison?.active).toBe(false);
+		expect(h.onvoid).toHaveBeenCalledTimes(1);
+	});
+
+	test('a reset while "Encerrar sem voltar" is in flight ends idle', async () => {
+		const h = setup();
+		await startBlind(h);
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		h.cable.port.endComparison.mockImplementationOnce(async () => {
+			await gate;
+			h.cable.end();
+			return { status: 'accepted', live: null };
+		});
+		const keeping = h.round.endKeep();
+		expect(h.round.view.phase).toBe('starting');
+		h.round.reset();
+		release();
+		await keeping;
+		expect(h.cable.state.live?.comparison?.active).toBe(false);
+		expect(h.round.view).toMatchObject({ phase: 'idle', endedReason: null, pause: null });
+	});
+
+	test('a confirmed held revert is reverted even when the state watcher sees the end first', async () => {
+		for (const done of [true, false]) {
+			const h = setup();
+			await startBlind(h);
+			if (done) h.round.roundRecorded(true);
+			h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+			h.cable.options.hold = { reason: 'loudness', curve: 'saved' };
+			const gesture = { kind: 'cable-gesture' } as const;
+			await h.round.end({ gesture });
+			expect(h.round.view.phase).toBe('end-held');
+			h.cable.port.confirmEndComparison.mockImplementationOnce(async () => {
+				h.cable.end('reverted');
+				// The page's watcher runs on the state change before the call returns.
+				h.round.observe(h.cable.state);
+				return { status: 'accepted', live: h.cable.state.live };
+			});
+			expect((await h.round.confirmHeld({ gesture })).status).toBe('accepted');
+			expect(h.round.view).toMatchObject({ phase: 'ended', endedReason: 'reverted' });
+		}
+	});
 });
 
 describe('an old preview on the cable (liveOrphan)', () => {

@@ -711,7 +711,8 @@
 
 	/**
 	 * The held revert ("Abaixei o volume, aplicar"): this click confirms the saved curve's level;
-	 * once the cable plays it, the comparison ends there.
+	 * once the cable is known to play it, the comparison ends there as `reverted`
+	 * (`confirmEndComparison`); anything else is refused and the comparison goes on.
 	 */
 	async function onConfirmRevert(event: MouseEvent) {
 		if (busy) return;
@@ -719,29 +720,13 @@
 		busy = true;
 		message = null;
 		try {
-			const outcome = await app.cable.confirmLive({ gesture });
-			if (outcome.status !== 'accepted') {
-				message = liveOutcomeText(outcome);
-				return;
-			}
-			const now = app.cable.getState().live;
-			const savedCrc = now?.savedCrc;
-			if (
-				now === null ||
-				now.hold !== null ||
-				now.applied === null ||
-				(typeof savedCrc === 'number' && now.applied.crc !== savedCrc)
-			) {
-				message = m.cable_live_refused_revert_failed();
-				return;
-			}
-			const end = await app.cable.endComparison({ revert: false });
-			if (end.status === 'accepted') {
+			const outcome = await app.cable.confirmEndComparison({ gesture });
+			if (outcome.status === 'accepted') {
 				endNote = m.cable_live_ended_reverted();
 				await ended();
 				return;
 			}
-			message = liveOutcomeText(end);
+			message = liveOutcomeText(outcome) ?? m.cable_live_refused_revert_failed();
 		} finally {
 			busy = false;
 		}

@@ -288,8 +288,9 @@ desconectar/reconectar, voltou PK 2 kHz (2000 Hz −12,8 dB contra a referência
 persiste na flash.** Não se variaram os bytes `01 FF` (desnecessário para essa
 conclusão). Viabiliza modo sem flash, X2 no cabo e teste cego no cabo. O modo
 sem flash está **implementado no app web: "Ouvir no cabo", #62** (plano
-`docs/plans/2026-10-28-modo-sem-flash-plano.md`); X2 e teste cego no cabo seguem
-não implementados.
+`docs/plans/2026-10-28-modo-sem-flash-plano.md`); X2 no cabo ("Comparar no cabo",
+#73) e teste cego no cabo (aba "No cabo" do Teste cego, #74) também estão
+**implementados** (plano `docs/plans/2026-10-28-x2-e-teste-cego-no-cabo-plano.md`).
 
 Até esse ponto: ~12 escritas com commit na bancada + 13 na captura, além de
 1 envio só de dados. Estado então: **Padrão Auri regravado com commit**, bytes

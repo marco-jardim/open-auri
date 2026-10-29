@@ -783,6 +783,8 @@
 	"cabo_accepted": "Accepted by transport",
 	"cabo_add": "Add another cable",
 	"cabo_blind": "Blind test on the cable",
+	"cabo_blind_live": "Available: use the “On the cable” tab of the Blind test page to hear the candidates on the cable itself, without saving them to its memory.",
+	"cabo_blind_live_link": "Go to the Blind test",
 	"cabo_byte_description": "Header 0–13, Q23 preamp 14–17, Q27 coefficients 18–217, CRC 218–219. Wire order: b0, b2, −a1, b1, −a2.",
 	"cabo_byte_map": "Map of the 220 payload bytes",
 	"cabo_calibration": "Calibration",
@@ -2875,6 +2877,6 @@
 	"cable_blind_ended_kept": "Test ended: the cable keeps the last curve until it is unplugged.",
 	"cable_blind_ended_gone": "The comparison on the cable ended: the cable keeps the test's curve until you unplug it.",
 	"cable_blind_reason_orphan": "The cable may be playing an old preview: unplug and replug it, or use 'I already unplugged it'.",
-	"cable_blind_reason_browser": "A test is running in the browser. Finish or cancel it in Listening before starting on the cable.",
+	"cable_blind_reason_browser": "A test is running in the browser. Finish or cancel it in Listen before starting on the cable.",
 	"cable_blind_cancel_failed": "Could not cancel going back to the saved curve right now: the cable is busy or its state is unknown. Try End again, or unplug and replug the cable."
 }
