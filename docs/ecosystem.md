@@ -83,6 +83,56 @@ framing diferentes.
 Ganho global: o `0x4B` grava **dB inteiro** num registrador, e alguns aparelhos
 têm um **buffer de hardware** (ex.: `-5 dB` no CrinEar Protocol Micro) somado a ele.
 
+## Servidor de firmware da WalkPlay
+
+Extraído do app oficial em 2026-10-28 (endereço e chave estavam ofuscados no
+bundle; abaixo, já decodificados). Responde sem login.
+
+- **Base:** `https://walkplay-api.szwalkplay.com`
+- **Cabeçalhos:** `Content-Type: application/json`, `client: PC`,
+  `domain: peq.szwalkplay.com`
+- **Corpo:** `pid` e `vid` em hexa com prefixo `0x` (ex.: `"0x8902"`,
+  `"0x3302"`); sem o prefixo, o servidor responde "信息不存在" (não existe).
+- **Resposta:** string Base64 cujos bytes passam por XOR com a chave ASCII
+  `d2Fsa3BsYXlAMjAyNS4uLw==` (os 24 caracteres, repetidos); o resultado é JSON.
+
+| Rota (POST) | Corpo | Retorno |
+|---|---|---|
+| `/api/v3-1/common/checkFirmwareVersion` | `{"pid":"0x43CC","vid":"0x3302","version":"0.0"}` | firmware mais recente (`data.url`, `name`, `deviceType`, `schemeNo`, `version`) ou "已经是最新版本" (já é a mais recente) |
+| `/api/v3-1/common/getFirmwareInfoListByPidAndVid` | `{"pid":"0x43CC","vid":"0x3302"}` | lista (vazia para todos os PIDs testados) |
+
+Exemplo em PowerShell:
+
+```powershell
+$key = [Text.Encoding]::UTF8.GetBytes('d2Fsa3BsYXlAMjAyNS4uLw==')
+$r = Invoke-WebRequest -Method Post -ContentType 'application/json' `
+  -Uri 'https://walkplay-api.szwalkplay.com/api/v3-1/common/checkFirmwareVersion' `
+  -Headers @{ client = 'PC'; domain = 'peq.szwalkplay.com' } `
+  -Body '{"pid":"0x43CC","vid":"0x3302","version":"0.0"}'
+$raw = [Convert]::FromBase64String($r.Content.Trim('"'))
+[Text.Encoding]::UTF8.GetString([byte[]](0..($raw.Length - 1) | % { $raw[$_] -bxor $key[$_ % $key.Length] }))
+```
+
+**Kuba Auri (`0x3302:0x8902`):** o PID existe no cadastro (a lista responde
+sucesso e a checagem "já é a mais recente"), mas **não há firmware publicado**.
+
+### Firmwares publicados (VID `0x3302`, consultados em 2026-10-28)
+
+Links diretos de download (GET, sem login). Só para análise: **gravar firmware
+de outro aparelho no cabo pode inutilizá-lo**.
+
+| PID | Chip | Nome | Esquema (`schemeNo`) | Versão | Download |
+|---|---|---|---|---|---|
+| `0x43CC` | CB5100 | `CB5100_PID43CC_V1.4_251219` | 16 (10 filtros no app) | 1.4 | <https://walkplay-api.szwalkplay.com/api/common/download/202602021611340fb8190cd6499b42f9.bin> |
+| `0x43CD` | CB5100 | `CB5100_PID43CD_V0.4_260228` | 16 | 0.4 | <https://walkplay-api.szwalkplay.com/api/common/download/20260228154932c11768a31e9000f5f9.bin> |
+| `0xC20F` | CB1200 | `CB1200_C20F_V0.2_260709` | 11 | 0.2 | <https://walkplay-api.szwalkplay.com/api/common/download/202607091523497e0b255de074326bb6.bin> |
+| `0x1233` | CB1200 | `CB1200_1233_V0.2_260920_LRFIX_EQFIX` | 11 | 0.2 | <https://walkplay-api.szwalkplay.com/api/common/download/20260920151619ba5e7009eedffe9e1a.bin> |
+| `0x1237` | CB1200 | `CB1200_0x1237_v0.5_uac12` | 11 | 0.5 | <https://walkplay-api.szwalkplay.com/api/common/download/202610141046545aa0863bc02a3f7ef3.bin> |
+| `0x123F` | CB1200 | `CB1200_0x123F_V0.7` | 11 | 0.7 | <https://walkplay-api.szwalkplay.com/api/common/download/202610131606034db6691ed26a976e65.bin> |
+
+A varredura cobriu os PIDs `0x1200–0x12FF`, `0x2900–0x29FF`, `0x33C0–0x33CF`,
+`0x4300–0x43FF`, `0x8900–0x89FF` e `0xC200–0xC2FF`; a tabela pode crescer.
+
 ## Implementações abertas
 
 | Projeto | O que é | Protocolo | Licença |

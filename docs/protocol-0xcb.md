@@ -194,6 +194,10 @@ dispositivo que fala exatamente este protocolo: grupo `"CB"`, prefixo de log
 `public/assets/index-BEOfvcHi.js`. É uma segunda implementação, independente
 da página do kuba.
 
+O servidor de firmware que o app usa, com endereço e chave já decodificados e
+os links diretos dos firmwares publicados, está em
+[`ecosystem.md`](ecosystem.md#servidor-de-firmware-da-walkplay).
+
 Ressalvas sobre o app:
 
 - **O caminho principal do app não usa essa classe.** A fábrica de classes
