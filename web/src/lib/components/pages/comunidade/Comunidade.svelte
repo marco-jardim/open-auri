@@ -38,6 +38,9 @@
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { MeterTap, TapOptions } from '#lib/audio/meters.ts';
 	import ComunidadeArt from '#lib/components/art/ComunidadeArt.svelte';
+	import CableCompare, { type CableCompareSide } from '#lib/components/cable/CableCompare.svelte';
+	import CableSumNotice from '#lib/components/cable/CableSumNotice.svelte';
+	import { appBrowserFlat, liveComparing } from '#lib/components/cable/flat.ts';
 	import {
 		Tour,
 		TourTrigger,
@@ -287,8 +290,15 @@
 	const editorS1 = $derived(editor ? encodeCurve(editor) : null);
 	let onAirS1 = $state<string | null>(null);
 
+	// Cable (issue #89): while the cable plays a live curve that is not its saved one, it applies
+	// the EQ, so the page's non-blind previews play flat (no second curve on top) and that time is
+	// not counted as listening; the running pair is rebuilt in place when this changes. The blind
+	// rounds (S6, S7) never go flat: they stay browser-only and say what the cable adds.
+	const cableFlat = $derived(appBrowserFlat(app));
+
 	const listener = createListener({
 		engine: () => app?.audio ?? null,
+		flat: () => cableFlat,
 		onPreviewed: (lineageId, durationMs) => {
 			// Only a signed-in, verified listener's preview is activity; anonymous listening is never
 			// stored for a later account (the outbox refuses it as well).
@@ -303,6 +313,10 @@
 		}
 	});
 	onDestroy(() => listener.stop());
+	$effect(() => {
+		void cableFlat;
+		untrack(() => listener.refresh());
+	});
 
 	function recordOrigin(channel: Channel) {
 		void remember({
@@ -358,7 +372,7 @@
 				(channel) =>
 					(!$hidden.ready ||
 						isHidden($hidden, channel.lineageId, authorHiddenId(channel.author))) &&
-					listener.isPlaying(channel.lineageId)
+					listener.isAudible(channel.lineageId)
 			)
 		)
 			listener.stop();
@@ -413,6 +427,63 @@
 			bands: curve.bands
 		});
 		notice = m.comunidade_used({ name: channel.name });
+	}
+
+	// ---- "Comparar no cabo" on the scope pair (issue #89) ----------------------------------------
+
+	/** The scope's B: 'editor' or the lineage id of another selected strip (MasterScope binds it). */
+	let scopeB = $state('editor');
+	const scopeBChannel = $derived(
+		selected.slice(1).find((channel) => channel.lineageId === scopeB && channel.curve !== null) ??
+			null
+	);
+
+	function channelSide(channel: Channel | null): CableCompareSide | undefined {
+		if (!channel) return undefined;
+		const curve = curveOf(channel);
+		return curve ? { key: `channel:${channel.lineageId}`, name: channel.name, curve } : undefined;
+	}
+
+	/** A: the scope target (its curve carries `community:<id>`, the provenance a save keeps). */
+	const cableA = $derived(channelSide(target));
+	/** B: the chosen B channel, else the editor curve. */
+	const cableB = $derived.by<CableCompareSide | undefined>(() => {
+		if (scopeBChannel) return channelSide(scopeBChannel);
+		if (!editorCurve) return undefined;
+		return {
+			key: 'editor',
+			name: editorCurve.name || m.comunidade_scope_your_curve(),
+			curve: editorCurve
+		};
+	});
+	let cableCompare = $state<CableCompare | undefined>();
+	/** The cable starts on the side the scope plays (A otherwise). */
+	const cableFirst = $derived<0 | 1>(listener.owner === 'scope' && listener.side === 'B' ? 1 : 0);
+
+	/**
+	 * "Salvar esta": the saved side's channel (its started `key`, `channel:<lineageId>`, never the
+	 * scope's current selection) is the origin; 'editor' has none. The write opens the normal
+	 * checklist.
+	 */
+	function saveCable(curve: CurrentCurve, _index: number, key: string) {
+		if (!app) return;
+		const prefix = 'channel:';
+		if (key.startsWith(prefix)) {
+			const lineageId = key.slice(prefix.length);
+			const channel =
+				selected.find((item) => item.lineageId === lineageId) ??
+				allChannels.find((item) => item.lineageId === lineageId) ??
+				null;
+			if (channel) recordOrigin(channel);
+		}
+		app.requestWrite(curve);
+	}
+
+	/** The cable side changed from the comparison's own lever or keys: the scope's A/B follows. */
+	function followCable(index: 0 | 1) {
+		if (listener.owner !== 'scope') return;
+		const side = index === 0 ? 'A' : 'B';
+		if (listener.side !== side) listener.select(side);
 	}
 
 	/** Modo YOLO is on in this tab (Engenharia) and allows a write (not the free preview). */
@@ -674,6 +745,9 @@
 			<span class="leds-note">{m.comunidade_leds_note()}</span>
 		</div>
 		<p class="page-notice" role="status">{notice}</p>
+		<div class="cable-notice" data-testid="cable-sum-notice">
+			<CableSumNotice {app} flat={cableFlat} comparing={liveComparing(app?.cableState?.live)} />
+		</div>
 
 		<section class="centre" aria-label={m.comunidade_centre_label()}>
 			<div class="centre-grid">
@@ -688,7 +762,28 @@
 					oninstall={install}
 					onopen={recordOrigin}
 					{yoloReady}
-				/>
+					bind:bChoice={scopeB}
+					flat={cableFlat}
+					onside={(side) => void cableCompare?.choose(side === 'A' ? 0 : 1)}
+				>
+					{#snippet cable()}
+						{#if app?.cableState}
+							<CableCompare
+								bind:this={cableCompare}
+								{app}
+								a={cableA}
+								b={cableB}
+								match={true}
+								flat={cableFlat}
+								first={cableFirst}
+								pairReason={m.comunidade_v2_reason_ab_select()}
+								ownEndedOnly
+								onsave={saveCable}
+								onchoose={followCable}
+							/>
+						{/if}
+					{/snippet}
+				</MasterScope>
 				{#if session.signedIn}
 					<TotalRecall
 						{api}
@@ -724,6 +819,13 @@
 
 		<div class="blind" data-tour="comunidade-blind">
 			<p class="eyebrow blind-eyebrow">{m.comunidade_v2_blind_eyebrow()}</p>
+			<!-- The blind rounds stay browser-only (never flat): say what a connected cable adds. The
+			     orphan prompt already shows above, once. -->
+			{#if !app?.cableState?.liveOrphan}
+				<div class="cable-notice" data-testid="cable-blind-notice">
+					<CableSumNotice {app} flat={false} comparing={false} variant="blind" />
+				</div>
+			{/if}
 			<S6Panel
 				{api}
 				channels={selected}
@@ -1096,6 +1198,17 @@
 	}
 	.page-notice:empty {
 		display: none;
+	}
+	.cable-notice {
+		margin: var(--space-2) 4px 0;
+		color: #f6dcae;
+		font: var(--fs-caption) / var(--lh-small) var(--face-body);
+	}
+	.cable-notice:empty {
+		display: none;
+	}
+	.cable-notice :global(p) {
+		margin: 0;
 	}
 	.centre {
 		margin-top: var(--space-5);

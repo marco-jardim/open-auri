@@ -8,6 +8,7 @@
 	import { numberLabel } from '#lib/charts/scales.ts';
 	// Direct chart imports (FUX.B): the charts barrel would bring every chart into the page.
 	import WiggleTrace from '#lib/charts/WiggleTrace.svelte';
+	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { AudioEngine } from '#lib/audio/engine.ts';
 	import type { VuReference } from '#lib/audio/meters.ts';
 	import type { CurveData } from '#lib/state/model.ts';
@@ -52,6 +53,7 @@
 		dispose(): void;
 	}
 	let {
+		app = null,
 		current = null,
 		audio = null,
 		reference = -18,
@@ -61,6 +63,7 @@
 		social = createCurveSocial(),
 		warmers = sharedWarmers
 	}: {
+		app?: ClientApp | null;
 		current?: CurveData | null;
 		audio?: AudioEngine | null;
 		reference?: VuReference;
@@ -797,7 +800,7 @@
 						{stopLabels[station.result.stopReason]}
 					</p>
 					<div data-tour="soe-ab">
-						<Preview {audio} {current} {candidate} {reference} />
+						<Preview {app} {audio} {current} {candidate} {reference} />
 					</div>
 					<div class="use" data-tour="soe-editor">
 						<Button

@@ -18,6 +18,7 @@
 </svelte:head>
 
 <Workstation
+	{app}
 	current={app?.state.curve.current ?? null}
 	audio={app?.audio ?? null}
 	reference={app?.state.meterRef.value ?? -18}
