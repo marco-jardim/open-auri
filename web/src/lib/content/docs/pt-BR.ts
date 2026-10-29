@@ -94,10 +94,38 @@ export const ptBR: DocsContent = {
 			title: 'Protocolo 0xCB',
 			paragraphs: [
 				'Uma curva vira 220 B: header de 14 B, preamp int32 little-endian Q23 de 4 B, dez biquads de 20 B e CRC de 2 B. Cada seção leva cinco int32 Q27 na ordem [b0, b2, −a1, b1, −a2], com a0 = 1 implícito. Não há byte de tipo de filtro.',
-				'Header confirmado: 45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00. “EQ1#” é ASCII; interpretar D6 00 como comprimento é hipótese. Os bytes 6 e 12–13 permanecem desconhecidos.',
+				'Header confirmado: 45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00. “EQ1#” é ASCII; D6 00 é o comprimento 14 + 20 × 10 = 214 e os dois 0A são o número de seções, como o app oficial WalkPlay calcula. Os bytes 6 e 12–13 permanecem desconhecidos.',
 				'WebHID usa report ID 0xCB e dados de 31 B (o ID fica fora deles). Reports 0 a 6 levam índice + 30 B; report 7 leva 10 B e padding zero; report 8 leva só o índice e zeros. Há 16 ms após cada report, depois 150 ms e commit 01 65 00 01 FF completado com zeros até 31 B: 294 ms nominais mais overhead. A equivalência do padding do commit no firmware ainda exige teste.',
 				'Q23 guarda ganho linear: round(10^(dB/20) × 2²³). Q27 usa round(coef × 2²⁷). O CRC16-CCITT-FALSE cobre os primeiros 218 B: poly 0x1021, init 0xFFFF, sem reflexão ou XOR final, anexado little-endian. Integridade não prova autenticidade ou segurança.',
 				'A amostragem ilustrada é a 96 kHz, com dobra em 48 kHz. Para 48 < f < 96 kHz, f_alias = 96 − f. O desenho não mede o clock real nem a entrada analógica. Os widgets são exemplos locais do codec, nunca autorização para gravar.'
+			]
+		},
+		{
+			id: 'protocolo-cabo',
+			title: 'Protocolo do cabo',
+			paragraphs: [
+				'O app oficial de PEQ da WalkPlay contém uma classe de dispositivo (grupo CB, log CB1100AU) que fala exatamente este protocolo e confirma o formato da seção anterior: report 0xCB, 9 pacotes com índice + 30 B, coeficientes Q27, preamp Q23, magic EQ1# e CRC-16/CCITT-FALSE (init 0xFFFF, poly 0x1021) sobre os bytes anteriores, anexado little-endian. O caminho principal do app, porém, cria a classe genérica CB pelo report 0x4B, que o Auri não expõe; a classe CB1100AU fica fora desse caminho. Ela declara 48 kHz, mas calcula os filtros com π·f/48000, o mesmo que 2π·f/96000: o projeto efetivo é a 96 kHz, como na página do kuba e no open-auri.',
+				'Frame: 45 51 31 23, comprimento u16 LE = 14 + 20 × n, depois 00 n 04 05 01 n 00 00, o preamp e n seções [b0, b2, −a1, b1, −a2]. O app oficial envia só os n filtros ativos; a página da Kuba e o open-auri sempre enviam 10, com as bandas desligadas como identidade. Frames com menos de 10 seções não foram testados neste cabo.',
+				'Depois dos dados vem o comando final: 01 tag 00 01 FF salva na flash; 01 tag 00 00 FF aplica sem salvar. Com a tag 0x65, salvar é exatamente o commit da página da Kuba (01 65 00 01 FF). Os dados sozinhos já aplicam ao vivo (medido no cabo); o efeito do comando oficial de aplicar sem salvar ainda não foi medido.',
+				'O protocolo tem uma só leitura: a tag de EQ. O pedido 80 00 00 00 FF, no report 0xCB, recebe a resposta 80 tag. No Auri real a resposta foi 80 65 00 00 FF, ou seja, tag 0x65 (101).',
+				'Versão de firmware e curva gravada não podem ser lidas deste cabo: o app oficial marca essas funções como não suportadas pelo chip, junto com modos e balanço do DAC, offsets de microfone e reset. Por isso a última curva conhecida é a registrada neste aparelho, não uma leitura do cabo.',
+				'O brief TTGK TT39510B01 descreve o bridge de áudio USB CB5100, com DSP e EQ integrados ao app Walk Play, mas não traz o protocolo HID. Se o Auri usa exatamente esse chip ou uma variante CB1100AU não está confirmado.'
+			],
+			links: [
+				{ label: 'App oficial WalkPlay PEQ', href: 'https://peq.szwalkplay.com/' },
+				{ label: 'Espelho offline do app (Ircama/walkplay)', href: 'https://github.com/Ircama/walkplay' },
+				{
+					label: 'Brief do chip TT39510B01 (PDF)',
+					href: 'https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf'
+				},
+				{
+					label: 'CB5100PRO na TTGK',
+					href: 'https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html'
+				},
+				{
+					label: 'docs/protocol-0xcb.md no GitHub',
+					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/protocol-0xcb.md'
+				}
 			]
 		},
 		{
@@ -105,7 +133,7 @@ export const ptBR: DocsContent = {
 			title: 'Limites físicos',
 			paragraphs: [
 				'O formato conhecido oferece 10 seções, uma curva para os dois canais e taxa de projeto de 96 kHz (0 < f < 48 kHz). Não oferece EQ L/R independente, crossfeed, compressor, reverb, volume do cabo ou seletor do filtro do DAC.',
-				'O caminho é somente escrita: não há read-back, verify, pull ou rollback confirmado. Journal, snapshot e localStorage registram o envio no host, não o estado atual do cabo. Clock fixo e realização interna do DSP ainda não foram medidos.'
+				'O cabo só informa a tag de EQ: não há read-back da curva nem da versão de firmware, verify, pull ou rollback. Journal, snapshot e localStorage registram o envio no host, não o estado atual do cabo. Clock fixo e realização interna do DSP ainda não foram medidos.'
 			]
 		},
 		{
@@ -157,7 +185,8 @@ export const ptBR: DocsContent = {
 			title: 'O que não sabemos',
 			paragraphs: ['Nenhum teste de software substitui gravar, ouvir e medir o cabo real.'],
 			items: [
-				'Existe read-back, aplicação só em RAM ou verificação do CRC no firmware?',
+				'Existe aplicação só em RAM ou verificação do CRC no firmware? Read-back da curva não existe: o cabo só informa a tag de EQ.',
+				'O que significam outras tags além de 0x65 e a flag que nega o preamp no app oficial? O cabo aceita frames com menos de 10 seções? Aplicar sem salvar (01 65 00 00 FF) muda algo em relação a enviar só os dados?',
 				'Qual é o tipo de flash, endurance, estratégia de apagamento e efeito de perder energia no commit?',
 				'Há click, estalo, mute ou transiente ao trocar durante áudio?',
 				'O clock é sempre 96 kHz? Qual é a precisão interna, realização, guard bits e comportamento de limit cycles?',

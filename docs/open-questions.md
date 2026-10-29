@@ -39,6 +39,11 @@
 | O DSP roda a **96 kHz com stream do host a 48 kHz**: vales em 2000 e 5040 Hz, resolução de 1/6 de oitava + simetria | B10 |
 | O firmware **valida o CRC**: PK 5 kHz com CRC corrompido mantém PK 2 kHz (2 medições); CRC correto aplica. Rejeição silenciosa, sem input report | B7 |
 | Existe modo **só-RAM**: 9 reports de dados sem commit aplicam ao vivo; replug restaura o PK 2 kHz commitado. O commit persiste na flash; bytes `01 FF` não variados | B12 |
+| O app oficial WalkPlay ([`peq.szwalkplay.com`](https://peq.szwalkplay.com/), espelho [`Ircama/walkplay`](https://github.com/Ircama/walkplay)) contém uma classe `"CB1100AU"` (fora do caminho principal do app, que cria a classe genérica `"CB"` pelo report `0x4B`) com o mesmo frame: `REPORT_ID 0xCB`, 9 pacotes de 30 bytes, Q27/Q23, `"EQ1#"`, CRC-16/CCITT-FALSE | código do app (2026-10-28); [`protocol-0xcb.md`](protocol-0xcb.md#confirmação-pelo-app-oficial-walkplay) |
+| Bytes 4–5 do header = comprimento `14 + 20·n`; bytes 7 e 11 = `n`, nº de filtros ativos | `buildEqBuffer` do app oficial |
+| Comando final: `01 <tag> 00 01 FF` salva na flash (`saveEqInfo`); `01 <tag> 00 00 FF` aplica sem salvar (`setEqInfo`) | app oficial |
+| **Existe leitura no `0xCB`, só da tag de EQ**: `80 00 00 00 FF` ⇒ input report `80 <tag> …`; no Kuba Auri a tag é `0x65` (101) | app oficial (`readEqTagId`); medido no cabo real (2026-10-28) |
+| **Versão de firmware e curva gravada não podem ser lidas**: o app marca `readDeviceVersion`, `readFilterInfo` e outras como "芯片不支持" (o chip não suporta) para esta classe | app oficial |
 | Troca Neutro → PK 2 kHz com tom de 2 kHz: queda de ~10 dB em rampa de ~15 ms, sem energia de clique audível nem mute no ensaio; limite de HF do microfone e ~17% de frames perdidos impedem excluir cliques só em HF e alinhar o tempo absoluto da escrita | B13, com ressalvas |
 
 ## Hipótese 🟡
@@ -48,8 +53,7 @@
 | O fabricante do CB5100 é a **Savitech** | **uma fonte só**, secundária (AuraPEQ, projeto de hobby); a TTGK nunca nomeia o fabricante | foto da marcação do chip; A2 |
 | O núcleo do DSP mantém **96 kHz em outras taxas de stream** | B10 confirmou 96 kHz com host a 48 kHz | repetir em 44,1 / 96 / 192 kHz |
 | O firmware do cabo **aceita qualquer biquad** (não só PK/LS) | não há byte de tipo; só 5 coeficientes | B4 + ensaio com HS/LP/HP |
-| Bytes 4–5 do header = **comprimento** (u16 LE 214 = 220 − 6) | bate exatamente | B5 |
-| Bytes 7–11 do header = geometria (10 seções, 4 bytes, 5 coef., 1 canal?, 10) | padrão dos valores | B5 |
+| Bytes 8–10 do header (`04 05 01`) = geometria (4 bytes, 5 coef., 1 canal?) | padrão dos valores; o app oficial os escreve como constantes, sem nome (bytes 4–5 e 7/11 já confirmados acima) | B5 |
 | Pode existir **EQ por canal** (se o byte 10 for nº de canais) | hipótese acima | B5 |
 | `0xCB` e `0x4B` vêm do mesmo SDK | `0xCB = 0x4B \| 0x80`; commit contém `0x65 = 101 = FILTER_SLOT` do `0x4B` | A2 (o B1 mostrou que este cabo não expõe o `0x4B`) |
 | O `padrao` é o preset de fábrica do Auri | "a assinatura do Auri" na referência | comparar com o cabo novo de fábrica |
@@ -59,8 +63,12 @@
 
 | Pendência | Por quê |
 |---|---|
-| **Existência de leitura** no `0xCB` (pull/verify/rollback) | desconhecida: a página nunca lê; nenhum projeto aberto documenta. Sem feature reports e sem resposta às gravações; o input report `0xCB` (uso `0xFF000003`) existe e é o canal candidato |
-| Significado dos bytes 6 e 12–13 do header | sem padrão aparente |
+| ~~Existência de leitura no `0xCB`~~ | **resolvido**: só a tag de EQ (`80 00 00 00 FF` ⇒ `80 <tag>`), ver Confirmado. Pull/verify/rollback da curva e versão de firmware: não suportados, segundo o app oficial. A página do kuba continua sem ler nada |
+| Significado das outras tags (além de `0x65`) | o app só lê a tag e a repete no comando final; não sabemos que valores existem nem o que mudam |
+| Significado da flag interna que **nega o pré-amp** no app oficial | vista no código do app; a origem da flag não foi identificada |
+| Frames com `n < 10` neste cabo | o app oficial envia só os filtros ativos; a página do kuba e o open-auri sempre enviam 10; não testado no cabo |
+| Comando oficial de aplicar `01 65 00 00 FF` × só os dados | B12 mostrou que os dados sozinhos já aplicam ao vivo; o efeito acústico do `setEqInfo` não foi medido |
+| Significado dos bytes 6 e 12–13 do header | sem padrão aparente; o app oficial escreve `00` / `00 00` |
 | Durabilidade da flash e efeito de corte de energia durante a gravação | desconhecidos |
 | Comportamento de troca fora do ensaio B13; cliques muito curtos só em HF | limites do microfone e perda de frames; B13 não cobre todas as curvas |
 | B3, B5, B6, B8, B9 e B11 | ainda não executadas; ver registro em `probing.md` |
@@ -93,11 +101,14 @@ parentesco) / ❌ (a causa)
   byte-stream; o resto é hipótese.
 - **Escrita parcial corrompe.** O codec valida tudo antes de gerar o 1º relatório;
   o transporte ainda precisa tratar desconexão no meio do envio.
-- **Leitura desconhecida ⇒ sem undo garantido.** Mitigar com snapshot local do
-  último envio e com o preset neutro (`NEUTRAL_BANDS`).
+- **Sem leitura da curva ⇒ sem undo garantido.** O cabo só informa a tag de EQ;
+  a curva gravada não pode ser lida. Mitigar com snapshot local do último envio
+  e com o preset neutro (`NEUTRAL_BANDS`).
 - **Desgaste da flash.** Cada commit grava; o teste cego e a gravação em lote
-  multiplicam as gravações. B12 confirmou envio só-RAM sem commit; modo sem
-  flash e X2 no cabo são viáveis, mas ainda não implementados.
+  multiplicam as gravações. B12 confirmou envio só-RAM sem commit; o modo sem
+  flash ("Ouvir no cabo", #62), o X2 no cabo ("Comparar no cabo", #73) e o
+  teste cego no cabo (aba "No cabo" do Teste cego, #74) estão implementados e
+  tocam só na RAM, sem commit.
 - **Licenças.** `eqloader` sem licença e `equalizer.js` proprietário: nada deles
   foi usado. O codec porta o projeto de PK/LS/HS do AutoEq (**MIT**, aviso em
   `THIRD_PARTY_NOTICES.md`) e não contém código nem nomes da referência do kuba.
@@ -136,6 +147,9 @@ Acessadas em 2026-10-14 e 2026-10-15.
 
 - Página analisada: `https://equalizador.kuba.audio/` (sha256 do template em `test/fixtures/`)
 - TTGK: `https://www.szttgk.com/en` (briefs de módulo em PDF)
+- TTGK `TT39510B01` (brief do CB5100, 2024-06-14): `https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf`
+- TTGK CB5100PRO: `https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html`
+- App oficial WalkPlay PEQ: `https://peq.szwalkplay.com/` (espelho offline `https://github.com/Ircama/walkplay`, `public/assets/index-BEOfvcHi.js`; acessado em 2026-10-28)
 - AuraPEQ: `https://github.com/mandy321/Audiocular-Aura` (protocolo em `dist/assets/index.js`)
 - frost-tune: `https://github.com/Bukutsu/frost-tune` (`src/hardware/devices/walkplay_protocol.rs`)
 - eqloader: `https://github.com/devilAPI/walkplay-eqloader` (+ `eqloader.py` na branch `legacy-tkinter`)

@@ -94,10 +94,38 @@ export const enUS: DocsContent = {
 			title: 'Protocol 0xCB',
 			paragraphs: [
 				'A curve becomes 220 B: a 14 B header, a 4 B int32 little-endian Q23 preamp, ten 20 B biquads and a 2 B CRC. Each section contains five int32 Q27 values in wire order [b0, b2, −a1, b1, −a2], with implicit a0 = 1. There is no filter-type byte.',
-				'Confirmed header: 45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00. “EQ1#” is ASCII; interpreting D6 00 as length is a hypothesis. Bytes 6 and 12–13 remain unknown.',
+				'Confirmed header: 45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00. “EQ1#” is ASCII; D6 00 is the length 14 + 20 × 10 = 214 and both 0A bytes are the section count, as the official WalkPlay app computes them. Bytes 6 and 12–13 remain unknown.',
 				'WebHID uses report ID 0xCB and 31 B of data (the ID is separate). Reports 0 to 6 carry an index + 30 B; report 7 carries 10 B and zero padding; report 8 carries only the index and zeros. Wait 16 ms after each report, then 150 ms and commit 01 65 00 01 FF padded to 31 B: nominally 294 ms plus overhead. Equivalence of commit padding in firmware still needs testing.',
 				'Q23 stores linear gain: round(10^(dB/20) × 2²³). Q27 uses round(coef × 2²⁷). CRC16-CCITT-FALSE covers the first 218 B: poly 0x1021, init 0xFFFF, no reflection or final XOR, appended little-endian. Integrity is not authenticity or safety.',
 				'The sampling illustration uses 96 kHz, folding at 48 kHz. For 48 < f < 96 kHz, f_alias = 96 − f. This does not measure the real clock or analog input. The widgets are local codec examples, never write authorization.'
+			]
+		},
+		{
+			id: 'protocolo-cabo',
+			title: 'Cable protocol',
+			paragraphs: [
+				'The official WalkPlay PEQ app contains a device class (group CB, log CB1100AU) that speaks exactly this protocol and confirms the format of the previous section: report 0xCB, 9 packets of index + 30 B, Q27 coefficients, Q23 preamp, EQ1# magic and CRC-16/CCITT-FALSE (init 0xFFFF, poly 0x1021) over the preceding bytes, appended little-endian. The app’s main path, however, creates the generic CB class over report 0x4B, which the Auri does not expose; the CB1100AU class sits outside that path. It declares 48 kHz but designs filters with π·f/48000, the same angle as 2π·f/96000: the effective design is 96 kHz, as on the kuba page and in open-auri.',
+				'Frame: 45 51 31 23, u16 LE length = 14 + 20 × n, then 00 n 04 05 01 n 00 00, the preamp and n sections [b0, b2, −a1, b1, −a2]. The official app sends only the n active filters; the Kuba page and open-auri always send 10, with disabled bands as identity. Frames with fewer than 10 sections have not been tested on this cable.',
+				'A final command follows the data: 01 tag 00 01 FF saves to flash; 01 tag 00 00 FF applies without saving. With tag 0x65, saving is exactly the Kuba page commit (01 65 00 01 FF). Data reports alone already apply live (measured on the cable); the effect of the official apply-without-saving command has not been measured yet.',
+				'The protocol has a single read: the EQ tag. The request 80 00 00 00 FF, on report 0xCB, gets the answer 80 tag. On a real Auri the answer was 80 65 00 00 FF, that is, tag 0x65 (101).',
+				'Firmware version and the stored curve cannot be read from this cable: the official app marks those functions as not supported by the chip, along with DAC modes and balance, microphone offsets and reset. So the last known curve is the one recorded on this device, not a reading from the cable.',
+				'The TTGK brief TT39510B01 describes the CB5100 USB audio bridge, with DSP and EQ integrated with the Walk Play app, but contains no HID protocol. Whether the Auri uses exactly that chip or a CB1100AU variant is not confirmed.'
+			],
+			links: [
+				{ label: 'Official WalkPlay PEQ app', href: 'https://peq.szwalkplay.com/' },
+				{ label: 'Offline mirror of the app (Ircama/walkplay)', href: 'https://github.com/Ircama/walkplay' },
+				{
+					label: 'Chip brief TT39510B01 (PDF)',
+					href: 'https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf'
+				},
+				{
+					label: 'CB5100PRO at TTGK',
+					href: 'https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html'
+				},
+				{
+					label: 'docs/protocol-0xcb.md on GitHub',
+					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/protocol-0xcb.md'
+				}
 			]
 		},
 		{
@@ -105,7 +133,7 @@ export const enUS: DocsContent = {
 			title: 'Physical limits',
 			paragraphs: [
 				'The known format offers 10 sections, one curve for both channels and a 96 kHz design rate (0 < f < 48 kHz). It does not offer independent L/R EQ, crossfeed, compression, reverb, cable volume or a DAC filter selector.',
-				'The path is write-only: no confirmed read-back, verify, pull or rollback. The journal, snapshot and localStorage record the host transmission, not the current cable state. Fixed clock and internal DSP realization have not been measured.'
+				'The cable only reports its EQ tag: there is no read-back of the curve or firmware version, no verify, pull or rollback. The journal, snapshot and localStorage record the host transmission, not the current cable state. Fixed clock and internal DSP realization have not been measured.'
 			]
 		},
 		{
@@ -157,7 +185,8 @@ export const enUS: DocsContent = {
 			title: 'What we do not know',
 			paragraphs: ['No software test replaces writing, listening and measuring the real cable.'],
 			items: [
-				'Does firmware support read-back, RAM-only application or CRC verification?',
+				'Does firmware support RAM-only application or CRC verification? Curve read-back does not exist: the cable only reports its EQ tag.',
+				'What do tags other than 0x65 and the flag that negates the preamp in the official app mean? Does the cable accept frames with fewer than 10 sections? Does applying without saving (01 65 00 00 FF) change anything compared to sending data only?',
 				'What flash type, endurance and erase strategy are used, and what happens on power loss during commit?',
 				'Are there clicks, pops, muting or transients when switching during audio?',
 				'Is the clock always 96 kHz? What internal precision, realization, guard bits and limit-cycle behavior are used?',

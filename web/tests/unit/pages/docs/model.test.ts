@@ -88,6 +88,7 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				'camadas',
 				'envelope',
 				'protocolo',
+				'protocolo-cabo',
 				'limites',
 				'memoria',
 				'previa',
@@ -119,6 +120,31 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				expect(JSON.stringify(section)).not.toMatch(/próxima fase|next phase/);
 			}
 			if (locale === 'pt-BR') expect(JSON.stringify(content)).not.toContain('—');
+		});
+		test('cable protocol section documents the official app findings with its sources', () => {
+			const section = content.sections.find((entry) => entry.id === 'protocolo-cabo');
+			const text = section?.paragraphs.join(' ') ?? '';
+			for (const fact of [
+				'CB1100AU',
+				'14 + 20 × n',
+				'01 tag 00 01 FF',
+				'01 tag 00 00 FF',
+				'80 00 00 00 FF',
+				'0x65',
+				'TT39510B01'
+			])
+				expect(text).toContain(fact);
+			expect(section?.links?.map((link) => link.href)).toEqual([
+				'https://peq.szwalkplay.com/',
+				'https://github.com/Ircama/walkplay',
+				'https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf',
+				'https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html',
+				'https://github.com/marco-jardim/open-auri/blob/main/docs/protocol-0xcb.md'
+			]);
+			const index = buildSearchIndex(content);
+			expect(searchSections(index, 'CB1100AU').map((result) => result.id)).toEqual([
+				'protocolo-cabo'
+			]);
 		});
 		test('search indexes every section, glossary, credits and exact threshold values locally', () => {
 			const index = buildSearchIndex(content);

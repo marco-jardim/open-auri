@@ -177,7 +177,7 @@ test('TOC follows scrolling and direct navigation without writing to a cable', a
 		)
 	);
 	const toc = page.getByRole('navigation', { name: docsUi().contents });
-	await toc.getByRole('link', { name: '12 Aviso legal', exact: true }).click();
+	await toc.getByRole('link', { name: '13 Aviso legal', exact: true }).click();
 	await vi.waitFor(() =>
 		expect(screen.container.querySelector('a[aria-current="location"]')?.getAttribute('href')).toBe(
 			'#aviso-legal'

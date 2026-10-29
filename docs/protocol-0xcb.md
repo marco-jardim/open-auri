@@ -187,12 +187,25 @@ ser reconectado.
 ## Confirmação pelo app oficial (WalkPlay)
 
 Analisado em 2026-10-28. O app web oficial de PEQ da WalkPlay
-([`peq.szwalkplay.com`](https://peq.szwalkplay.com/)) trata este cabo numa
-classe de dispositivo própria, com grupo `"CB"` e prefixo de log `"CB1100AU"`.
-O código lido é o do espelho offline
+([`peq.szwalkplay.com`](https://peq.szwalkplay.com/)) contém uma classe de
+dispositivo que fala exatamente este protocolo: grupo `"CB"`, prefixo de log
+`"CB1100AU"`. O código lido é o do espelho offline
 [`Ircama/walkplay`](https://github.com/Ircama/walkplay), arquivo
 `public/assets/index-BEOfvcHi.js`. É uma segunda implementação, independente
 da página do kuba.
+
+Ressalvas sobre o app:
+
+- **O caminho principal do app não usa essa classe.** A fábrica de classes
+  mapeia `CB → t2` e `CB1100AU → m2`, mas a inicialização passa sempre o tipo
+  `'CB'`, que cria a classe genérica `t2`: report `0x4B` (75), registros de
+  36 bytes por banda, leitura de versão `80 0C`. O Kuba Auri não expõe o
+  report `0x4B`, então o app, como publicado, provavelmente não controla este
+  cabo. A classe `CB1100AU` aparece só no mapa da fábrica e nos logs.
+- **Taxa de amostragem.** A classe `CB1100AU` declara `sampleRate = 48000`,
+  mas o cálculo dos biquads usa `π·f/48000`, o mesmo ângulo de `2π·f/96000`.
+  O projeto efetivo é a **96 kHz**, igual à página do kuba, ao open-auri e à
+  medição B10.
 
 > **"A página nunca lê" continua valendo para a página do kuba.** O protocolo,
 > porém, tem **exatamente uma leitura**: a tag de EQ (abaixo). Versão de
