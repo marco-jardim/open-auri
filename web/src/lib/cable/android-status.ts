@@ -8,7 +8,7 @@
 export const ANDROID_WRITE_VALIDATED: boolean = false;
 
 /** Runbook: docs/operacao/runbooks/android-release.md ("Reabrir o aviso"). */
-export const ANDROID_DISCLAIMER_VERSION = 1;
+export const ANDROID_DISCLAIMER_VERSION = 2;
 
 /** Runbook: docs/operacao/runbooks/android-release.md ("Desligar ou restringir a gravação"). */
 export const ANDROID_WRITE_POLICY: AndroidWritePolicy = {

@@ -73,8 +73,8 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 	);
 	const title =
 		locale === 'pt-BR'
-			? 'Gravação pelo app ainda não testada num cabo'
-			: 'Writing from the app has not been tested on a cable yet';
+			? 'Gravação pelo app: teste em um celular'
+			: 'Writing from the app: tested on one phone';
 	test.describe(locale, () => {
 		test.use({ locale });
 		test.beforeEach(async ({ context, baseURL }) => {
@@ -113,7 +113,7 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 					await expect(notice).not.toBeVisible();
 				}
 				if (route === '/cabo') {
-					// Preserve the real app's untested-writing banner, not a browser-only view.
+					// Preserve the real app's partial-validation banner, not a browser-only view.
 					if (set.name !== 'desktop') {
 						await expect(
 							page.getByRole('complementary', { name: title, exact: true })

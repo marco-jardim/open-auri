@@ -8,10 +8,10 @@ import type { DocsContent } from './types.ts';
 // text of docs/plans/2026-10-18-android-capacitor-plano.md. At F5, replace this whole block
 // with the Anexo G.6 text (date, number of devices and report). pt-BR.ts has the twin block.
 const androidValidationState: readonly string[] = [
-	'Writing from the app has not been tested on a cable yet',
-	"The Android app has not been tested with a real Auri cable yet, so writing is not guaranteed to work. It uses the same protocol and sends the same bytes as the desktop site and Kuba's official page (automated tests check this byte by byte). Only the path to USB is different. In theory, the result should be the same. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge).",
+	'Writing from the app: tested on one phone',
+	'The Android app was tested on a real Kuba Auri cable with one Samsung Galaxy A70 (Android 11). Preview without saving, persistent writing and restoring Padrão Auri were confirmed acoustically, and packets logged at the native bridge input match the desktop site byte for byte. Phones from other manufacturers have not been tested; full write validation is still pending. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge).',
 	'What the tests guarantee: for each curve, the app builds the same nine data reports and the same commit, byte for byte, that the desktop site and the official page send. Automated tests compare those bytes with the reference for the 11 official presets, and before the commit the app also checks every sequence with an extra guard.',
-	'What has not been verified yet: the physical path to USB. The Android driver, the OTG connection, the phone’s power and how the cable receives reports along this path are only confirmed by writing to and measuring a real cable. Until then, every write from the app asks for one more checklist item.'
+	'What is still pending: a second manufacturer, on-wire parity and a signed report to close F5. We have tested 1 of 2 manufacturers (Samsung). Bytes were checked at the native bridge input through logcat, not in an on-wire USB capture. The wireLog was empty because navigating to Diagnostics reopened the session. Every write from the app still asks for one more checklist item.'
 ];
 // END Android validation state --------------------------------------------------------------
 
@@ -334,7 +334,13 @@ export const enUS: DocsContent = {
 			id: 'android-validacao',
 			title: 'App validation state',
 			paragraphs: androidValidationState,
-			links: [{ label: 'Report result', href: androidReportHref }]
+			links: [
+				{ label: 'Report result', href: androidReportHref },
+				{
+					label: 'Hardware test report',
+					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/android/validacao-hardware.md'
+				}
+			]
 		},
 		{
 			id: 'android-resgate',

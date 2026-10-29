@@ -54,21 +54,28 @@ não apenas a configuração fonte. Não há cleartext em produção, backup do
 conteúdo da WebView ou depuração da WebView no release. A detecção JS serve
 à UI, não é uma fronteira de segurança: as guardas efetivas são nativas.
 
-## Estado de validação: ainda não validado em hardware
+## Estado de validação: teste parcial em hardware
+
+Em 29/10/2026, **1 de 2 fabricantes** testado: Samsung, com um Galaxy A70
+(SM-A705MN, Android 11). Prévia sem flash, gravação persistente e restauração
+do Padrão Auri confirmadas nesta bancada. Consulte o
+[relatório de validação de hardware](android/validacao-hardware.md) para método,
+resultados e limitações. A validação completa da gravação Android segue pendente.
 
 Texto exato do Anexo G.1 em pt-BR:
 
-> **Gravação pelo app ainda não testada num cabo**
+> **Gravação pelo app: teste em um celular**
 >
-> O app Android ainda não foi testado num cabo Auri de verdade, então não dá para garantir que a gravação funcione. Ele usa o mesmo protocolo e envia os mesmos bytes que o site no computador e a página oficial da Kuba (testes automáticos conferem isso byte a byte). Só muda o caminho até o USB. Em teoria, o resultado deve ser o mesmo. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).
+> O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).
 >
 > Botões e links: **Entendi** · **Relatar resultado** · **Como resgatar**
 
 Os testes comparam os reports de dados dos 11 presets, byte a byte, com a
 referência oficial; também comparam desktop e transporte nativo para esses
-presets e o Neutro. Isso prova a paridade do protocolo e dos dados, não o
-funcionamento físico do USB do celular, do OTG, do descritor real, da rota
-de transferência nem da continuidade do áudio.
+presets e o Neutro. Isso prova a paridade do protocolo e dos dados, não por si
+só o funcionamento físico do USB. O teste no A70 acrescenta evidência acústica
+e paridade na entrada da ponte nativa (logcat), mas não captura Android no fio
+nem evidência em outros fabricantes.
 
 O framing usa a política `WINDOWS_MAX_OUTPUT` do Anexo D.2: prefixo `0xCB`,
 31 bytes de dados e zeros até o maior output report do descritor mais um
@@ -280,7 +287,7 @@ deploy do site, seguindo o runbook de operação.
 | Controle | Estado atual | Efeito |
 | --- | --- | --- |
 | `ANDROID_WRITE_VALIDATED` | `false` | Mantém modal, banner e aceite de gravação não validada; só encerrar depois da F5 aprovada |
-| `ANDROID_DISCLAIMER_VERSION` | `1` | Incrementar reabre o modal mesmo para quem já aceitou uma versão anterior |
+| `ANDROID_DISCLAIMER_VERSION` | `2` | Incrementar reabre o modal mesmo para quem já aceitou uma versão anterior |
 | `ANDROID_WRITE_POLICY.enabled` | `true` | `false` desliga a gravação pelo app, mantendo uso simulado |
 | `ANDROID_WRITE_POLICY.blockedAppVersions` | `[]` | Bloqueia versões específicas ou inferiores a um limite, sem bloquear o desktop |
 

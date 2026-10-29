@@ -16,9 +16,9 @@ function semver(value: string) {
 }
 
 describe('launch state', () => {
-	test('writing is not validated on a cable, the disclaimer is v1 and the policy allows every version', () => {
+	test('writing is not fully validated, the disclaimer is v2 and the policy allows every version', () => {
 		expect(ANDROID_WRITE_VALIDATED).toBe(false);
-		expect(ANDROID_DISCLAIMER_VERSION).toBe(1);
+		expect(ANDROID_DISCLAIMER_VERSION).toBe(2);
 		expect(ANDROID_WRITE_POLICY).toEqual({ enabled: true, blockedAppVersions: [] });
 	});
 

@@ -17,8 +17,8 @@ class DisclaimerTest {
             app.awaitJs("document.querySelector('dialog[open] [data-ack]') != null", "first-use untested-cable modal")
             val title = app.evaluate("document.querySelector('dialog[open] h2').textContent.trim()")
             assertTrue("The modal must use the G.1 title: $title", title in listOf(
-                "Gravação pelo app ainda não testada num cabo",
-                "Writing from the app has not been tested on a cable yet",
+                "Gravação pelo app: teste em um celular",
+                "Writing from the app: tested on one phone",
             ))
             app.evaluate("document.querySelector('dialog[open] [data-ack]').click()")
             app.awaitJs("document.querySelector('dialog[open] [data-ack]') == null && localStorage.getItem('oa.androidDisclaimerAck') != null", "persisted acknowledgement")
