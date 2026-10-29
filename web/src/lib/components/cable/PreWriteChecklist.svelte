@@ -11,6 +11,7 @@
 	import { untrack } from 'svelte';
 	import { gateForWrite } from 'open-auri/safety';
 	import { m } from '#lib/paraglide/messages.js';
+	import { getNativeCableState, isNativeAndroid } from '#lib/app/context.svelte.ts';
 	import { hasUltrasonicBands } from '#lib/cable/checklist.ts';
 	import type { CableService } from '#lib/cable/service.ts';
 	import { isWriteInProgress, onWriteProgress } from '#lib/cable/write-flag.ts';
@@ -106,6 +107,22 @@
 	);
 
 	const id = $props.id();
+	const nativeCable = getNativeCableState();
+	const webHid = $derived(
+		cable.mode === 'real' && nativeCable.result.kind === 'none' && !isNativeAndroid()
+	);
+	// Same connect gate as CableStatus; call directly to preserve the picker user gesture.
+	const connectReason = $derived(
+		cable.writing
+			? m.cabo_fux_busy_writing()
+			: cable.connection === 'connecting'
+				? m.cabo_fux_connecting()
+				: null
+	);
+	function onConnect() {
+		if (connectReason !== null) return;
+		void service.connect();
+	}
 	/** Re-evaluates the time-dependent items (2 s spacing countdown). */
 	let tick = $state(0);
 	let message = $state<string | null>(null);
@@ -434,6 +451,16 @@
 				<h3 id={`${id}-target`} class="engrave">{m.cable_target_heading()}</h3>
 				{#if cable.devices.length === 0}
 					<p>{m.cable_refused_no_device()}</p>
+					<p>
+						{webHid
+							? m.cable_connect_hint()
+							: cable.mode === 'simulated'
+								? m.cable_simulated_hint()
+								: m.android_native_picker_hint()}
+					</p>
+					<Button variant="plate" disabledReason={connectReason} onclick={onConnect}>
+						{nativeCable.result.kind === 'native' ? m.android_native_connect() : m.cable_connect()}
+					</Button>
 				{:else}
 					{#if targetLabel !== null}
 						<p class="lcd" data-target-device>
@@ -464,6 +491,9 @@
 							<p id={`${id}-target-why`}>{m.cabo_fux_busy_writing()}</p>
 						{/if}
 					{/if}
+				{/if}
+				{#if cable.error === 'request-empty'}
+					<p role="status" aria-live="polite">{m.cable_connect_no_selection()}</p>
 				{/if}
 			</section>
 

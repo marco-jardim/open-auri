@@ -45,7 +45,7 @@ for (const copy of [
 		badge: 'COMING SOON'
 	}
 ] as const) {
-	test(`complete rack and four reserved features, accessible at desktop and mobile in ${copy.locale}`, async () => {
+	test(`complete rack, two reserved features and the shipped RAM and blind test slots, accessible at desktop and mobile in ${copy.locale}`, async () => {
 		await setLocale(copy.locale, { reload: false });
 		active = createClientApp(fakeAppOptions().options);
 		const screen = await render(CaboPage, { app: active, tourAutoOpen: false });
@@ -56,7 +56,9 @@ for (const copy of [
 		for (const title of [copy.read, copy.firmware, copy.ram, copy.blind]) {
 			await expect.element(page.getByText(title, { exact: true }).last()).toBeVisible();
 		}
-		expect(page.getByText(copy.badge, { exact: true }).elements()).toHaveLength(4);
+		// Flash-free mode (RAM) shipped as "Ouvir no cabo" (#62) and the blind test on the cable as
+		// the Teste cego page's "No cabo" tab (#74): only two slots stay EM BREVE.
+		expect(page.getByText(copy.badge, { exact: true }).elements()).toHaveLength(2);
 		for (const width of [1440, 390]) {
 			await page.viewport(width, 1000);
 			const { violations } = await axe.run(screen.container);

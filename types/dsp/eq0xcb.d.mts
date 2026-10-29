@@ -147,8 +147,10 @@ export function reportsFromPayload(payload: ArrayLike<number>): Uint8Array[];
 export function encodeReports(eqBands: readonly Band[], preampDb?: number): Uint8Array<ArrayBufferLike>[];
 /**
  * The commit command zero-padded to the 31-byte report size, so every transport
- * sends the same bytes. The reference sends the bare 5 bytes; whether the
- * firmware distinguishes the two is unverified.
+ * sends the same bytes. The reference passes only 5 bytes to WebHID, but the
+ * real Kuba Auri capture (2026-10-28, Windows 11 / Edge 156) shows WebHID pads
+ * them to 31: both commits are identical on the wire (CB + 31 bytes).
+ * See test/fixtures/usb-wire-golden.json; other host stacks are not measured.
  */
 export function commitReport(): Uint8Array<ArrayBuffer>;
 /**

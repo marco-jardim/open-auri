@@ -25,7 +25,7 @@ produtos sem afetar o protocolo.
 | PID do produto analisado | `0x8902` | string USB "USB DSP Audio" | ✅ |
 | VID registrado da Savitech | `0x262A` | aparece no `usb.ids` | ✅ |
 | PID do TRN Black Pearl | `0x43E8` (VID `0x3302`) | mesmo chipset CB5100 + CS43131 | ✅ |
-| Registrante do `0x3302` | (desconhecido) | **não confirmado** em nenhuma lista pública | 🟡 |
+| Registrante do `0x3302` | (desconhecido) | **não confirmado** em nenhuma lista pública; compartilhado por aparelhos com módulos TTGK (Moondrop e outros, ver o [banco de USB IDs do the-sz.com](https://the-sz.com/products/usbid/index.php?v=0x3302)) | 🟡 |
 
 O `0x3302` **não** é o VID registrado da Savitech (`0x262A`); é um VID
 compartilhado pela família Walkplay. Quem o registrou não foi identificado.
@@ -58,6 +58,24 @@ Trecho (tradução): *"bridge USB de áudio de alta performance **CB5100** … D
 de alta performance integrado, suporta configuração flexível de EQ de 8 seções …
 suporta **EQ do app WALK PLAY**"*.
 Fontes: `szttgk.com` (PDFs de produto, busca de 2026-10-14).
+
+Também o brief `TT39510B01` (2024-06-14,
+[PDF](https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf))
+descreve o **CB5100** como bridge de áudio USB com DSP/ADC/PGA e EQ,
+*"支持WALK PLAY APP EQ联动"* (integração de EQ com o app Walk Play). Página do
+produto: [CB5100PRO](https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html).
+Nenhum dos dois traz o protocolo HID.
+
+### 1b. App oficial WalkPlay
+
+O app web oficial de PEQ ([`peq.szwalkplay.com`](https://peq.szwalkplay.com/);
+espelho offline [`Ircama/walkplay`](https://github.com/Ircama/walkplay)) contém
+uma classe com prefixo de log **`"CB1100AU"`** que fala o protocolo deste cabo
+(o caminho principal do app cria a classe genérica `"CB"` pelo report `0x4B`,
+que o Auri não expõe), e declara para ela que versão de firmware, leitura da curva, modos do DAC e reset são
+"芯片不支持" (o chip não suporta). Se o chip do Auri é o CB5100 ou uma variante
+"CB1100AU" **não está confirmado** 🟡. Protocolo:
+[`protocol-0xcb.md`](protocol-0xcb.md#confirmação-pelo-app-oficial-walkplay).
 
 ### 2. Tabela de dispositivos do AuraPEQ (código-fonte público)
 
@@ -104,7 +122,7 @@ só valeria se houvesse versão com Bluetooth.
 |---|---|
 | Datasheets dos controladores USB **antigos** da Savitech: `SA9312L`, `SA9137` | O mapa de registradores / guia de programação do **PEQ** |
 | Briefs de módulo da TTGK (feature-level) | Datasheet do **CB5100** |
-| A implementação do protocolo (ver [`ecosystem.md`](ecosystem.md)) | Qualquer doc oficial do protocolo HID do CB5100 |
+| A implementação do protocolo (ver [`ecosystem.md`](ecosystem.md)), incluindo o app oficial WalkPlay | Qualquer doc oficial do protocolo HID do CB5100 |
 
 A Savitech é notoriamente fechada; o guia de programação é **gated por NDA**
 (relato da comunidade: *"requires NDA to get FW USB programming app"*).

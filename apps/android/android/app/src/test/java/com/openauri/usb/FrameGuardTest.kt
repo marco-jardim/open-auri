@@ -160,7 +160,8 @@ class FrameGuardTest {
 
     @Test
     fun repeatedIndexIsRejected() {
-        for (repeated in 0 until REPORT_COUNT) {
+        // A repeated report 0 is a new sequence, not a repeat (see the restart tests).
+        for (repeated in 1 until REPORT_COUNT) {
             val wire = Wire()
             for (index in 0..repeated) wire.assertForward(reports[index], index * gap)
             val reason = if (repeated == REPORT_COUNT - 1) EXPECTED_COMMIT else UNEXPECTED_REPORT
@@ -195,22 +196,180 @@ class FrameGuardTest {
     }
 
     @Test
-    fun aNewSequenceStartingInTheMiddleOfAnotherIsRejected() {
+    fun aValidReportZeroInTheMiddleOfASequenceStartsANewOne() {
+        // A live apply cut off part-way never reached report 8, so the cable ignored it: the next
+        // preview or "Salvar" starts at once instead of being refused until the timeout.
         val other = ProtocolFixtureTest.presets.last().reports
         for (sent in 1 until REPORT_COUNT) {
-            for (restart in listOf(reports[0], other[0])) {
+            for (restart in listOf(reports, other)) {
                 val wire = Wire()
                 for (index in 0 until sent) wire.assertForward(reports[index], index * gap)
-                wire.assertReject(UNEXPECTED_REPORT, restart, sent * gap)
-                // The rejection reset the guard: the same report 0 now starts a clean write.
-                wire.writeReports(other, sent * gap + 1)
+                wire.writeReports(restart, sent * gap)
+                assertEquals(1, wire.guard.abandonedSequences)
+                assertCable(restart + listOf(commit), wire.cable.takeLast(REPORT_COUNT + 1), "restart after $sent")
                 assertEquals(sent + REPORT_COUNT + 1, wire.cable.size)
             }
         }
-        // After all nine data reports, a report 0 is not the commit.
+        // After all nine data reports, a valid report 0 is a new live apply (see the Live apply tests).
         val wire = Wire()
         val due = wire.sendData(reports, 0)
-        wire.assertReject(EXPECTED_COMMIT, other[0], due)
+        wire.assertForward(other[0], due)
+        assertReceiving(wire.guard, 1)
+    }
+
+    @Test
+    fun aPartialSequenceCanNeverBeCommitted() {
+        for (sent in 1 until REPORT_COUNT) {
+            val wire = Wire()
+            for (index in 0 until sent) wire.assertForward(reports[index], index * gap)
+            wire.assertReject(COMMIT_WITHOUT_DATA, commit, sent * gap)
+            assertEquals(sent, wire.cable.size)
+            // A restart then a partial sequence again: still no commit.
+            wire.assertForward(reports[0], sent * gap + 1)
+            wire.assertForward(reports[1], sent * gap + 2)
+            wire.assertForward(reports[0], sent * gap + 3)
+            assertEquals(1, wire.guard.abandonedSequences)
+            wire.assertReject(COMMIT_WITHOUT_DATA, commit, sent * gap + 4)
+            assertTrue(wire.cable.none { it.contentEquals(commit) })
+        }
+    }
+
+    @Test
+    fun aBadReportZeroInTheMiddleOfASequenceIsRejectedWithItsReason() {
+        val badPreamble = reports[0].with(REPORT_DATA_OFFSET, reports[0][REPORT_DATA_OFFSET].toInt() xor 0x01)
+        for (sent in 1 until REPORT_COUNT) {
+            val wire = Wire()
+            for (index in 0 until sent) wire.assertForward(reports[index], index * gap)
+            wire.assertReject(BAD_PREAMBLE, badPreamble, sent * gap)
+            assertEquals(0, wire.guard.abandonedSequences)
+            // The partial sequence is gone: its next report is no longer accepted.
+            wire.assertReject(UNEXPECTED_REPORT, reports[sent], sent * gap + 1)
+            assertEquals(sent, wire.cable.size)
+        }
+        // Wrong report ID or size on a report 0 in the middle: rejected first, as in every state.
+        val wire = Wire()
+        for (index in 0..3) wire.assertForward(reports[index], index * gap)
+        wire.assertReject(WRONG_REPORT_ID, reports[0], 4 * gap, 0xCA)
+        for (index in 0..3) wire.assertForward(reports[index], 5 * gap + index)
+        wire.assertReject(WRONG_SIZE, reports[0].copyOf(30), 6 * gap)
+        assertEquals(0, wire.guard.abandonedSequences)
+    }
+
+    // --- Live apply (9 data reports without the commit) --------------------------------------
+
+    @Test
+    fun liveAppliesBackToBackWithinTheTimeoutPass() {
+        // The web paces live applies at >= 300 ms; the cable applies each one when report 8 arrives.
+        val other = ProtocolFixtureTest.presets.last().reports
+        val wire = Wire()
+        var start = 0L
+        repeat(10) { round ->
+            val curve = if (round % 2 == 0) reports else other
+            wire.sendData(curve, start)
+            assertAwaitCommit(wire.guard)
+            assertEquals(round, wire.guard.abandonedSequences)
+            start += 300
+        }
+        // Back to back, no pause at all between report 8 and the next report 0.
+        val lastReport = start - 300 + (REPORT_COUNT - 1) * gap
+        wire.sendData(reports, lastReport)
+        assertEquals(10, wire.guard.abandonedSequences)
+        assertEquals(11 * REPORT_COUNT, wire.cable.size)
+        assertTrue(wire.cable.none { it.contentEquals(commit) })
+    }
+
+    @Test
+    fun aLiveApplyCanBeFollowedByACommittedWrite() {
+        val wire = Wire()
+        wire.sendData(ProtocolFixtureTest.presets.last().reports, 0)
+        // "Salvar" right after a live apply: a full write, within the 2000 ms timeout.
+        val committedAt = wire.writeReports(reports, 300)
+        assertEquals(1, wire.guard.abandonedSequences)
+        // The committed write is the last 10 reports on the cable.
+        assertCable(reports + listOf(commit), wire.cable.takeLast(REPORT_COUNT + 1), "live then commit")
+        // A live apply after the commit, then another commit: still subject to the commit spacing.
+        wire.sendData(reports, committedAt + 300)
+        wire.assertForward(reports[0], committedAt + 600)
+        val due = wire.sendData(reports.drop(1), committedAt + 600 + gap, firstIndex = 1)
+        assertTrue(due - committedAt < WRITE_SPACING_MS)
+        wire.assertReject(COMMIT_TOO_SOON, commit, due)
+        wire.sendData(reports, committedAt + WRITE_SPACING_MS - (REPORT_COUNT * gap + settle))
+        wire.assertForward(commit, committedAt + WRITE_SPACING_MS)
+    }
+
+    @Test
+    fun aLiveApplyDoesNotMoveTheCommitSpacing() {
+        assertEquals(2000L, WRITE_SPACING_MS)
+        val wire = Wire()
+        val t0 = wire.writeReports(reports, 0)
+        // A live apply ending at t0 + 1500: if it reset the spacing, the commit below would be refused.
+        val liveEnd = t0 + 1500
+        wire.sendData(ProtocolFixtureTest.presets.last().reports, liveEnd - (REPORT_COUNT - 1) * gap)
+        assertTrue(wire.cable.last().contentEquals(ProtocolFixtureTest.presets.last().reports.last()))
+        // "Salvar" whose commit lands at exactly t0 + 2000, the spacing of the first commit.
+        val saveStart = t0 + WRITE_SPACING_MS - (REPORT_COUNT * gap + settle)
+        assertTrue(saveStart > liveEnd)
+        val due = wire.sendData(reports, saveStart)
+        assertEquals(t0 + 2000, due)
+        wire.assertForward(commit, due)
+        assertEquals(1, wire.guard.abandonedSequences)
+        assertEquals(2, wire.cable.count { it.contentEquals(commit) })
+    }
+
+    @Test
+    fun aValidReportZeroThenTheCommitInAwaitCommitIsCommitWithoutData() {
+        val wire = Wire()
+        val due = wire.sendData(reports, 0)
+        wire.assertForward(reports[0], due)
+        assertEquals(1, wire.guard.abandonedSequences)
+        // The commit now follows only one data report of the new sequence.
+        wire.assertReject(COMMIT_WITHOUT_DATA, commit, due + 1)
+        assertEquals(REPORT_COUNT + 1, wire.cable.size)
+        assertTrue(wire.cable.none { it.contentEquals(commit) })
+    }
+
+    @Test
+    fun inAwaitCommitAnythingButAValidReportZeroOrTheCommitIsStillRejected() {
+        val random = Random(0x11FE)
+        val garbage = List(20) { random.nextBytes(REPORT_SIZE).also { bytes -> if (bytes[0].toInt() == 0) bytes[0] = 0x42 } }
+        // Report 0 carries 30 payload bytes and no padding: its only content check is the preamble.
+        val badPreamble = reports[0].with(REPORT_DATA_OFFSET, reports[0][REPORT_DATA_OFFSET].toInt() xor 0x01)
+        val zeroIndexGarbage = List(20) { random.nextBytes(REPORT_SIZE).also { bytes -> bytes[0] = 0 } }
+        // A report 0 that fails a check is rejected with the reason of that check.
+        val cases = (garbage + reports.drop(1) + listOf(commit.with(REPORT_SIZE - 1, 0x01))).map { it to EXPECTED_COMMIT } +
+            (listOf(badPreamble, commit.with(0, 0x00)) + zeroIndexGarbage).map { it to BAD_PREAMBLE }
+        for ((data, reason) in cases) {
+            val wire = Wire()
+            val due = wire.sendData(reports, 0)
+            wire.assertReject(reason, data, due)
+            assertEquals(0, wire.guard.abandonedSequences)
+            // The rejection reset the guard: the uncommitted sequence cannot be committed anymore.
+            wire.assertReject(COMMIT_WITHOUT_DATA, commit, due + 1)
+            assertEquals(REPORT_COUNT, wire.cable.size)
+        }
+        // A wrong report ID or size in AwaitCommit is rejected first, as in every state.
+        val wire = Wire()
+        val due = wire.sendData(reports, 0)
+        wire.assertReject(WRONG_REPORT_ID, reports[0], due, 0xCA)
+        val sized = Wire()
+        sized.sendData(reports, 0)
+        sized.assertReject(WRONG_SIZE, reports[0].copyOf(30), due)
+    }
+
+    @Test
+    fun aLiveRestartStillChecksEveryLaterReport() {
+        // The new sequence started in AwaitCommit gets the same checks: order, CRC and padding.
+        val flipped = ProtocolFixtureTest.presets.last().payload.copyOf()
+        flipped[100] = (flipped[100].toInt() xor 0x01).toByte()
+        val badCrc = ProtocolFixtureTest.reportsFromPayload(flipped)
+        val wire = Wire()
+        val due = wire.sendData(reports, 0)
+        for (index in 0 until 7) wire.assertForward(badCrc[index], due + index * gap)
+        wire.assertReject(BAD_CRC, badCrc[7], due + 7 * gap)
+        val order = Wire()
+        val next = order.sendData(reports, 0)
+        order.assertForward(reports[0], next)
+        order.assertReject(UNEXPECTED_REPORT, reports[2], next + gap)
     }
 
     // --- Commit ------------------------------------------------------------------------------
@@ -306,7 +465,9 @@ class FrameGuardTest {
                 val altered = commit.with(position, commit[position].toInt() xor value)
                 val wire = Wire()
                 val due = wire.sendData(reports, 0)
-                wire.assertReject(EXPECTED_COMMIT, altered, due)
+                // Clearing the leading 0x01 makes it a data report 0, judged (and refused) as one.
+                val reason = if (altered[0].toInt() == 0) BAD_PREAMBLE else EXPECTED_COMMIT
+                wire.assertReject(reason, altered, due)
                 assertTrue(wire.cable.none { it.contentEquals(altered) || it.contentEquals(commit) })
             }
         }
@@ -342,9 +503,21 @@ class FrameGuardTest {
         val restart = 4 * gap + timeout + 1
         wire.assertForward(reports[0], restart)
         assertReceiving(wire.guard, 1)
+        // The timed-out sequence had data and no commit: it counts as abandoned.
+        assertEquals(1, wire.guard.abandonedSequences)
         val due = wire.sendData(reports.drop(1), restart + gap, firstIndex = 1)
         wire.assertForward(commit, due)
         assertEquals(5 + REPORT_COUNT + 1, wire.cable.size)
+        // A late report 0 after AwaitCommit (a live apply long ago) counts too; after a commit it
+        // does not, since nothing uncommitted was dropped.
+        val live = Wire()
+        val liveDue = live.sendData(reports, 0)
+        live.assertForward(reports[0], liveDue + timeout + 1)
+        assertEquals(1, live.guard.abandonedSequences)
+        val committed = Wire()
+        val committedAt = committed.writeReports(reports, 0)
+        committed.assertForward(reports[0], committedAt + timeout + 1)
+        assertEquals(0, committed.guard.abandonedSequences)
     }
 
     @Test
@@ -354,6 +527,7 @@ class FrameGuardTest {
             val wire = Wire()
             for (index in 0..4) wire.assertForward(reports[index], index * gap)
             wire.assertReject(SEQUENCE_TIMEOUT, late, 4 * gap + timeout + 1)
+            assertEquals(0, wire.guard.abandonedSequences)
         }
     }
 
@@ -496,7 +670,7 @@ class FrameGuardTest {
         val a = "/dev/bus/usb/001/002#1002"
         val b = "/dev/bus/usb/001/003#1003"
         for (index in 0..3) assertSame(Decision.Forward, guards.onReport(a, HID_REPORT_ID, reports[index], index * gap))
-        // Report 0 would be out of order on A; on B it starts B's own write.
+        // Report 0 on B starts B's own write and leaves A's sequence alone.
         assertSame(Decision.Forward, guards.onReport(b, HID_REPORT_ID, reports[0], 4 * gap))
         assertReceiving(guards.guardFor(a), 4)
         assertReceiving(guards.guardFor(b), 1)

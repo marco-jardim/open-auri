@@ -68,6 +68,11 @@ Duas consequências, ambas a confirmar no cabo:
 
 O teste `preamble bytes 4..5 are a u16 LE length` fixa a parte verificável.
 
+O app oficial WalkPlay confirma parte disso: calcula os bytes 4–5 como
+`14 + 20·n` e escreve `n` (nº de filtros ativos) nos bytes 7 e 11; os demais são
+constantes no app. Ver
+[Confirmação pelo app oficial](#confirmação-pelo-app-oficial-walkplay).
+
 ### Pré-amp
 
 Ganho linear em Q23:
@@ -156,8 +161,171 @@ firmware distingue os dois casos é 🟡.
 
 **Desgaste.** Cada commit é uma gravação na flash, cuja durabilidade é
 desconhecida, e um corte de energia no meio da gravação tem efeito desconhecido.
-Não existe, até onde se sabe, um modo "só RAM" no `0xCB` (o `0x4B` tem
-`TEMP_WRITE`). Os bytes `01 FF` no fim do APPLY são candidatos a flags 🟡.
+Omitir o commit evita a flash (ver abaixo). Os bytes `01 FF` no fim do APPLY são
+candidatos a flags 🟡; B12 omitiu o commit inteiro, sem variá-los.
+
+## Dados = RAM, commit = flash
+
+Medido no cabo (sondas B12 e B12b, `docs/probing.md`, seção F):
+
+| Fato | Sonda | Confiança |
+|---|---|---|
+| Os 9 reports de dados **sem** o commit mudam o som na hora (RAM) | B12 | ✅ |
+| Depois de desconectar e reconectar, o cabo volta à última curva **commitada** (flash) | B12 | ✅ |
+| Só os reports `0..6`, ou só `0..7` (com o CRC), **não** mudam o som: a curva entra quando o report `8` chega | B12b | ✅ |
+| Uma sequência completa enviada depois de uma parcial funciona normalmente | B12b | ✅ |
+| Curva com CRC errado é ignorada em silêncio | B7 | ✅ |
+| O cabo não responde às gravações (sem input reports); só responde ao pedido de tag `80 00 00 00 FF` ([ver abaixo](#confirmação-pelo-app-oficial-walkplay)) | — / leitura de tag | ✅ |
+
+No transporte (`src/transport/webhid.mjs`), `applyCurve` envia os 9 reports com
+as mesmas pausas e o mesmo settle de 150 ms, **sem** o commit (prévia ao vivo,
+sem flash); `writeCurve` envia os 9 reports e o commit (persistir). Uma
+sequência interrompida antes de o report `8` sair deixa o cabo na curva
+anterior; interrompida depois dele, o cabo pode já soar como a curva nova até
+ser reconectado.
+
+## Confirmação pelo app oficial (WalkPlay)
+
+Analisado em 2026-10-28. O app web oficial de PEQ da WalkPlay
+([`peq.szwalkplay.com`](https://peq.szwalkplay.com/)) contém uma classe de
+dispositivo que fala exatamente este protocolo: grupo `"CB"`, prefixo de log
+`"CB1100AU"`. O código lido é o do espelho offline
+[`Ircama/walkplay`](https://github.com/Ircama/walkplay), arquivo
+`public/assets/index-BEOfvcHi.js`. É uma segunda implementação, independente
+da página do kuba.
+
+O servidor de firmware que o app usa, com endereço e chave já decodificados e
+os links diretos dos firmwares publicados, está em
+[`ecosystem.md`](ecosystem.md#servidor-de-firmware-da-walkplay).
+
+A [análise do firmware](firmware-analysis.md) registra a decriptação externa
+AES validada localmente nos 10 firmwares guardados (os 3 do guia e os 7 do
+[catálogo](firmware-catalog.md)) e um script Node reproduzível. O container
+obtido não prova decriptação completa do código, protocolo integral ou
+compatibilidade com o Auri; não foi enviado ao cabo.
+
+Ressalvas sobre o app:
+
+- **O caminho principal do app não usa essa classe.** A fábrica de classes
+  mapeia `CB → t2` e `CB1100AU → m2`, mas a inicialização passa sempre o tipo
+  `'CB'`, que cria a classe genérica `t2`: report `0x4B` (75), registros de
+  36 bytes por banda, leitura de versão `80 0C`. O Kuba Auri não expõe o
+  report `0x4B`, então o app, como publicado, provavelmente não controla este
+  cabo. A classe `CB1100AU` aparece só no mapa da fábrica e nos logs.
+- **Taxa de amostragem.** A classe `CB1100AU` declara `sampleRate = 48000`,
+  mas o cálculo dos biquads usa `π·f/48000`, o mesmo ângulo de `2π·f/96000`.
+  O projeto efetivo é a **96 kHz**, igual à página do kuba, ao open-auri e à
+  medição B10.
+
+> **"A página nunca lê" continua valendo para a página do kuba.** O protocolo,
+> porém, tem uma leitura validada: a tag de EQ (abaixo). Não temos leitura
+> validada da versão de firmware nem da curva gravada neste cabo. O app
+> declara essas funções não suportadas; isso não prova ausência no firmware.
+
+### Constantes da classe
+
+| Constante | Valor | Confere com |
+|---|---|---|
+| `REPORT_ID` | `203` (`0xCB`) | report ID da página do kuba ✅ |
+| `HID_PACKET_SIZE` | `32` (report ID + 31) | relatório de 31 bytes ✅ |
+| `HID_PACKET_PAYLOAD` | `30` | 30 bytes de dados por pacote ✅ |
+| `MAX_PACKETS` | `9` | 9 pacotes ✅ |
+| `COEFF_Q` | `1 << 27` | coeficientes Q27 ✅ |
+| `GAIN_Q` | `1 << 23` | pré-amp Q23 ✅ |
+| *magic* do frame | `"EQ1#"` | `45 51 31 23` ✅ |
+| Tipos de filtro | `{LS: 1, PK: 2, HS: 3, LP: 4, HP: 5}` | tipos de cálculo no app; o fio continua sem byte de tipo |
+
+### Frame (`buildEqBuffer`)
+
+```
+45 51 31 23                     "EQ1#"
+LL LL                           u16 LE = 14 + 20·n
+00 n 04 05 01 n 00 00           n = nº de filtros ATIVOS
+PP PP PP PP                     pré-amp int32 LE = round(10^(dB/20) · 2^23)
+n × [b0, b2, −a1, b1, −a2]      5 × int32 LE, Q27
+CC CC                           CRC-16/CCITT-FALSE (init 0xFFFF, poly 0x1021), LE,
+                                sobre todos os bytes anteriores
+```
+
+Dividido em 9 pacotes: byte `0` = índice, depois 30 bytes de dados.
+
+| Fato | Consequência para este documento |
+|---|---|
+| O comprimento é calculado como `14 + 20·n` | confirma a leitura dos bytes 4–5 como comprimento (`n = 10` ⇒ `214 = 0xD6`) |
+| Os bytes 7 e 11 recebem `n` | são a contagem de filtros; os bytes 6, 8–10 e 12–13 são constantes (`00`, `04 05 01`, `00 00`) cujo nome o app não revela |
+| O app envia **só os filtros ativos** (`n` variável) | a página do kuba e o open-auri sempre enviam `n = 10` (bandas `OFF` como identidade); frames com `n < 10` **não foram testados neste cabo** |
+| O pré-amp é **negado** quando uma flag interna está ligada | significado da flag não identificado |
+
+### Comando final: salvar × aplicar
+
+Depois dos pacotes, o app envia um de dois comandos:
+
+| Função no app | Bytes | Efeito declarado |
+|---|---|---|
+| `saveEqInfo` | `01 <tag> 00 01 FF` | aplicar e **persistir na flash** |
+| `setEqInfo` | `01 <tag> 00 00 FF` | aplicar **sem salvar** |
+
+Com a tag `0x65`, `saveEqInfo` é exatamente o commit da página do kuba
+(`01 65 00 01 FF`). Os dois comandos só diferem no byte `3` (`01` salva,
+`00` não salva).
+
+Medido no Kuba Auri real em 2026-10-28 (QuadCast S): os 9 reports seguidos de
+`01 65 00 00 FF` são **acusticamente equivalentes a enviar só os dados**, para
+Neutro e PK 2 kHz −12 dB. Métrica e valores em
+[`probing.md`](probing.md#apply-oficial--só-dados-mesmo-dia). Após cada envio,
+a leitura de tag respondeu `80 65`; dados e apply não geraram resposta.
+**O apply não salva ✅**: com o Padrão Auri commitado, um PK 2 kHz enviado com
+`01 65 00 00 FF` tocou ao vivo (−15,3/−13,5 dB em 2 kHz relativo) e, após
+desconectar e reconectar, o cabo voltou ao Padrão Auri (+2,35/+1,92 dB, contra
++1,0/+1,3 medidos antes).
+A B12 mostrou que os dados **sozinhos** já aplicam ao vivo e são voláteis;
+o open-auri usa esse caminho (sem comando final) para a prévia no cabo.
+
+### Leitura da tag de EQ
+
+A única leitura que a classe implementa é `readEqTagId`:
+
+| Direção | Report | Bytes |
+|---|---|---|
+| pedido (output) | `0xCB` | `80 00 00 00 FF` |
+| resposta (input) | `0xCB` | `80 <tag> …` (`handleInputReport`: se `e[0] == 0x80`, então `tag = e[1]`) |
+
+Medido no Kuba Auri real (2026-10-28): pedido `80 00 00 00 FF` ⇒ resposta
+`80 65 00 00 ff 00 …` (31 bytes) ⇒ tag **`0x65` (101)**, a mesma do commit.
+
+### O que o app declara não suportado
+
+Para esta classe, o app marca como `"芯片不支持"` ("o chip não suporta"):
+
+| Função | O que seria |
+|---|---|
+| `readDeviceVersion` | versão de firmware |
+| `readFilterInfo` | ler os filtros gravados (curva) |
+| `readEqOffset`, `readMicphoneOffset` | ler offsets de EQ / microfone |
+| `selectFilter` | selecionar filtro do DAC |
+| `setDacWorkMode`, `setDacOffsetMode`, `setDacBalance` | modo, offset e balanço do DAC |
+| `saveMicphoneOffset` | gravar offset do microfone |
+| `resetDevice` | reset |
+
+E também `getIsSupportNoiseReduction = false` e
+`getIsSupportDacFilterMode = false`.
+
+Consequência: **não temos leitura validada da versão de firmware nem da curva
+gravada neste cabo**; só da tag de EQ. A declaração do app não prova inexistência
+dessas funções no firmware. A última curva conhecida continua sendo a registrada
+no host, não uma leitura do cabo.
+
+### Chip
+
+O app chama a classe de `"CB1100AU"`. O brief de módulo da TTGK
+`TT39510B01` (2024-06-14,
+[PDF](https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf))
+descreve o bridge de áudio USB **CB5100** com DSP/ADC/PGA e EQ, e
+*"支持WALK PLAY APP EQ联动"* (integração de EQ com o app Walk Play); página do
+produto:
+[CB5100PRO](https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html).
+O brief **não traz protocolo HID**. Se o chip do Auri é o CB5100 ou uma variante
+"CB1100AU" **não está confirmado**.
 
 ## Parentesco com o `0x4B`
 

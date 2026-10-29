@@ -99,9 +99,15 @@
 	} from './model.ts';
 	import { parkedBand } from './parked.ts';
 	import { CurvaPreview } from './preview.svelte.ts';
+	import {
+		browserFlat,
+		liveActive as isLiveActive,
+		livePlaying
+	} from '#lib/components/cable/live.ts';
+	import type { LiveOutcome } from '#lib/cable/types.ts';
+	import type { ABSide } from '#lib/audio/engine.ts';
 	import { provideBandLabelView } from './band-labels.svelte.ts';
 	import YoloToggle from '#lib/components/yolo/YoloToggle.svelte';
-	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
 	import { withProfile } from './drag.ts';
 	import {
@@ -1190,9 +1196,134 @@
 		lastWritten ?? { bands: PADRAO_AURI.bands, preampDb: PADRAO_AURI.preampDb }
 	);
 	const referenceName = $derived(lastWritten ? m.curva_ab_ref_written() : PADRAO_AURI.label);
+
+	// --- "Ouvir no cabo": live (no-flash) preview on the cable (issue #69) ----------------------
+	//
+	// While the cable plays a curve other than the saved one (a session that applied a curve, a
+	// curve kept after the session, an orphan preview), the cable applies the EQ: the browser
+	// preview must not add it again. Both A/B chains then play the flat Neutro curve
+	// (`heardReference`/`heardEditor`), so the browser keeps its session, Transport, meters and
+	// protection, but sounds raw (EQ off). Not before the cable is known to play the live curve:
+	// while starting (or after a failed first apply) it still plays the saved curve, and the EQ'd
+	// chains keep the level (`browserFlat`). The engine's 'raw' mode would take the session away
+	// from CurvaPreview (it treats raw playback as someone else's) and lose the A/B chains it
+	// resumes with when the session ends.
+	// The A/B lever then switches the cable: A = the saved curve, B = the editor; every editor
+	// change is queued to the cable (`queueLive`; the service debounces and coalesces), except
+	// while the free preview is on (edits there are not the curve to hear on the cable).
+	const liveSession = $derived(app?.cableState.live ?? null);
+	// Load the cable-only UI when it can first be shown, not on every editor visit. Keep it
+	// mounted afterwards so ended-session announcements survive a disconnect. The service's
+	// startup/orphan detection and the browser's flat-EQ guard remain eager and independent.
+	let livePanelNeeded = $state(false);
 	$effect(() => {
-		const ref = reference;
-		const editor = curve;
+		const cable = app?.cableState;
+		if (
+			cable &&
+			((cable.liveCapable && (cable.connection === 'connected' || cable.live !== null)) ||
+				cable.liveOrphan !== null)
+		) {
+			livePanelNeeded = true;
+		}
+	});
+	const liveOn = $derived(isLiveActive(liveSession));
+	/** CRC-16 an accepted revert left on the cable (the service's saved curve); reset on a save. */
+	let liveSavedCrc = $state<number | null>(null);
+	$effect(() => {
+		void lastWritten;
+		untrack(() => (liveSavedCrc = null));
+	});
+	/**
+	 * The saved curve of the session's cable (the service's: shared journal, this page's saves),
+	 * while there is a session (also an ended one). A save to another cable is not it.
+	 */
+	const sessionSaved = $derived.by<Curve | null>(() => {
+		const client = app;
+		// Read again on every cable state change and every save.
+		const session = client?.cableState.live ?? null;
+		void lastWritten;
+		if (!client || session === null) return null;
+		const saved = untrack(() => client.cable.liveSavedCurve());
+		return saved === null ? null : { bands: saved.bands, preampDb: saved.preampDb };
+	});
+	/** What the live preview calls the saved curve (A): the session cable's own, else the last written. */
+	const liveSaved = $derived(liveSession === null ? lastWritten : sessionSaved);
+	const liveFlat = $derived(browserFlat(app?.cableState ?? null, liveSaved, liveSavedCrc));
+	/** The side the page last sent to the cable while a session runs (the browser's is `preview.side`). */
+	let liveSide = $state<ABSide>('B');
+	/** Signature of the last curve sent to the session (the start curve included). */
+	let liveQueued: string | null = null;
+	/** The lever shows what the cable actually plays (A: saved, B: editor), else the side sent. */
+	const livePlays = $derived(
+		liveOn
+			? livePlaying(liveSession, liveSaved, curve, {
+					savedCrc: liveSavedCrc,
+					prefer: liveSide === 'A' ? 'saved' : 'editor'
+				})
+			: null
+	);
+	const liveShownSide = $derived<ABSide>(
+		livePlays === 'saved' ? 'A' : livePlays === 'editor' ? 'B' : liveSide
+	);
+	/** No known saved curve: A would send the Padrão Auri reference, not what the cable saved. */
+	const liveAReason = $derived(liveOn && liveSaved === null ? m.cable_live_a_no_saved() : null);
+	/** The curve A sends while live: the session cable's saved curve (else the reference). */
+	const liveReference = $derived<Curve>(liveSaved ?? reference);
+	/** The A label: while live, it names the session cable's saved curve. */
+	const abReferenceName = $derived(
+		liveOn ? (liveSaved ? m.curva_ab_ref_written() : PADRAO_AURI.label) : referenceName
+	);
+	const heardReference = $derived(liveFlat ? neutral : reference);
+	const heardEditor = $derived(liveFlat ? neutral : curve);
+	/** Sends `side`'s curve to the session unless it is what was sent last. */
+	function sendLive(client: NonNullable<typeof app>, side: ABSide) {
+		const target = side === 'A' ? liveReference : curve;
+		const signatureNow = curveSignature(target);
+		if (signatureNow === liveQueued) return;
+		liveQueued = signatureNow;
+		client.cable.queueLive({ bands: target.bands, preampDb: target.preampDb });
+	}
+	$effect(() => {
+		const client = app;
+		if (!client || !liveOn) {
+			liveQueued = null;
+			liveSide = 'B';
+			return;
+		}
+		// The free preview pauses following; turning it off sends the current curve.
+		if (freePreview) return;
+		const side = liveSide;
+		// Tracked: the target curve of that side.
+		void (side === 'A' ? liveReference : curve);
+		untrack(() => sendLive(client, side));
+	});
+	/** The A/B lever: the cable's curve while live, the browser chains otherwise. */
+	function onSide(side: ABSide) {
+		if (!liveOn) {
+			preview?.select(side);
+			return;
+		}
+		const client = app;
+		// The cable does not play that side (a revert, a failed apply): send it again.
+		if (side !== liveShownSide) liveQueued = null;
+		liveSide = side;
+		if (client && !freePreview) sendLive(client, side);
+	}
+	/** A revert ended: accepted, the cable plays the saved curve (A); failed, A is held or lost. */
+	function onLiveRevert(outcome: LiveOutcome) {
+		liveSide = 'A';
+		liveQueued = curveSignature(liveReference);
+		if (outcome.status === 'accepted') liveSavedCrc = outcome.live?.applied?.crc ?? null;
+	}
+	// Leaving the page stops following edits: the cable keeps the live curve until it is
+	// unplugged (the top bar's chip still says so); nothing is reverted without a gesture.
+	onDestroy(() => {
+		if (app && isLiveActive(app.cable.getState().live)) void app.cable.stopLive({ revert: false });
+	});
+
+	$effect(() => {
+		const ref = heardReference;
+		const editor = heardEditor;
 		// Turning YOLO on or off rebuilds the A/B with or without the preview protection.
 		void yoloOn;
 		untrack(() => preview?.update(ref, editor));
@@ -1228,7 +1359,7 @@
 		if (!instance) return;
 		// A second press while the engine is still starting cancels, like a stop.
 		if (instance.playing || instance.starting) instance.stop();
-		else void instance.start(reference, curve);
+		else void instance.start(heardReference, heardEditor);
 	}
 	/** Pointer or key down on the lever: create/resume the AudioContext before the click (W3). */
 	function onPreviewWarm() {
@@ -1295,7 +1426,11 @@
 	{#if curveYolo}
 		<!-- A YOLO curve: marked wherever it is; with YOLO off, shown and previewed, not edited. -->
 		<section class="yolo-curve" data-yolo-locked={yoloLocked ? 'editor' : undefined}>
-			<YoloCurveNotice variant={noticeVariant} waived={waivedLabels(curveClass.waived)} />
+			{#await import('#lib/components/yolo/YoloCurveNotice.svelte') then { default: YoloCurveNotice }}
+				<YoloCurveNotice variant={noticeVariant} waived={waivedLabels(curveClass.waived)} />
+			{:catch}
+				<p role="alert">{m.layout_error_generic()}</p>
+			{/await}
 			{#if yoloLocked}
 				<p class="yolo-curve-why" role="status">{m.yolopub_editor_locked()}</p>
 				<div class="yolo-curve-actions">
@@ -1310,6 +1445,30 @@
 				</div>
 			{/if}
 		</section>
+	{/if}
+
+	{#if livePanelNeeded}
+		{#await import('./LivePanel.svelte') then { default: LivePanel }}
+			<LivePanel
+				{app}
+				{curve}
+				{experimental}
+				profile={writeProfile}
+				saved={liveSaved}
+				savedCrc={liveSavedCrc}
+				heldCurve={liveSide === 'A' ? 'saved' : 'editor'}
+				followPaused={liveOn && freePreview}
+				blockedReason={loadingReason ?? yoloWriteReason}
+				{locale}
+				onbeforestart={(sent) => {
+					liveQueued = curveSignature(sent);
+					liveSide = 'B';
+				}}
+				onrevert={onLiveRevert}
+			/>
+		{:catch}
+			<p role="alert">{m.layout_error_generic()}</p>
+		{/await}
 	{/if}
 
 	<div class="instrument" aria-busy={app === null ? 'true' : 'false'}>
@@ -1333,8 +1492,10 @@
 				analyser={preview?.analyser ?? null}
 				playing={preview?.playing ?? false}
 				paused={preview?.paused ?? false}
-				side={preview?.side ?? 'B'}
-				{referenceName}
+				side={liveOn ? liveShownSide : (preview?.side ?? 'B')}
+				abLive={liveOn}
+				aReason={liveAReason}
+				referenceName={abReferenceName}
 				{previewError}
 				previewDisabled={!preview}
 				previewReason={m.curva_v2_preview_unavailable()}
@@ -1347,7 +1508,7 @@
 				{onlayer}
 				onpreview={onPreview}
 				onpreviewwarm={onPreviewWarm}
-				onside={(side) => preview?.select(side)}
+				onside={onSide}
 			/>
 			<!-- Ajustar and Engenharia: the bank hangs right under the scope, inside the rack. -->
 			{#if includesLayer(layer, 'ajustar')}
@@ -1383,7 +1544,7 @@
 					{locale}
 					mode={preview?.playing ? preview.vu.mode : 'data'}
 					frame={preview?.playing ? preview.vu.frame : null}
-					side={preview?.side ?? 'B'}
+					side={liveOn ? liveShownSide : (preview?.side ?? 'B')}
 					onmaxclip={onMaxClip}
 					{maxClipMessage}
 					disabled={!app}

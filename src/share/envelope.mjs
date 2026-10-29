@@ -5,41 +5,66 @@ import { decodeS1, encodeS1, S1_FREQ_MAX } from './s1.mjs';
 
 /** @import { Band } from '../dsp/eq0xcb.mjs' */
 
+/** @typedef {string | number | boolean | null} Primitive */
+
+/** @typedef {{source: string, name: string, sha256?: string}} Measurement */
+
 /**
- * @typedef {string | number | boolean | null} Primitive
- * @typedef {{source: string, name: string, sha256?: string}} Measurement
  * Recipe limits (normalized code points): source/solver name 64, measurement or
  * target filename 120, solver SemVer version 32; at most 32 params with ASCII keys of 1–32
  * characters and primitive values (strings at most 128, numbers finite).
  * @typedef {{measurement?: Measurement, target?: {source: string, name: string},
  *   solver?: {name: string, version: string}, params?: Record<string, Primitive>}} Recipe
+ */
+
+/**
  * Filter labels (`open-auri/preset@2` only): exactly LABEL_COUNT entries by wire
  * index, each 1–LABEL_MAX normalized code points or null (automatic name). An
  * all-null list is omitted. Labels are presentation only: never part of S1,
  * curveId, canonKey or the safety gate.
  * @typedef {(string | null)[]} Labels
+ */
+
+/**
  * `open-auri/preset@1`: S1 v1, bands up to 20000 Hz, no labels. `open-auri/preset@2`:
  * `@1` plus optional labels, bands up to 32000 Hz and an S1 v1 or v2 code. Writers
  * emit the lowest format that fits (envelopeFormat).
  * @typedef {'open-auri/preset@1' | 'open-auri/preset@2'} EnvelopeFormat
+ */
+
+/**
  * Fields shared by every envelope format.
  * @typedef {{name: string, description: string, author?: string | null, source: string,
  *   license: 'CC0-1.0' | 'CC-BY-4.0', code: string, preampDb: number, bands: Band[],
  *   recipe?: Recipe, lang: 'pt-BR' | 'en-US', createdAt: string}} EnvelopeFields
+ */
+
+/**
  * `open-auri/preset@1`: an S1 v1 code, bands up to 20000 Hz, never labels (a
  * `labels` key is env:extra).
  * @typedef {EnvelopeFields & {format: 'open-auri/preset@1', labels?: never}} EnvelopeV1
+ */
+
+/**
  * `open-auri/preset@2`: an S1 v1 or v2 code, bands up to 32000 Hz and optional
  * filter labels (omitted when every entry is null).
  * @typedef {EnvelopeFields & {format: 'open-auri/preset@2', labels?: Labels}} EnvelopeV2
+ */
+
+/**
  * A validated envelope, discriminated by `format`.
  * @typedef {EnvelopeV1 | EnvelopeV2} Envelope
+ */
+
+/**
  * @typedef {'env:type' | 'env:required' | 'env:extra' | 'env:length' | 'env:enum'
  *   | 'env:pattern' | 'env:range' | 'env:url' | 'env:url-like' | 'env:code-mismatch' | 'env:s1'
  *   | 'env:bands' | 'env:labels' | 'env:json' | 'env:size'} EnvelopeErrorCode
- * @typedef {{path: string, code: EnvelopeErrorCode, message: string}} EnvelopeIssue
- * @typedef {{ok: true, value: Envelope} | {ok: false, errors: EnvelopeIssue[]}} EnvelopeResult
  */
+
+/** @typedef {{path: string, code: EnvelopeErrorCode, message: string}} EnvelopeIssue */
+
+/** @typedef {{ok: true, value: Envelope} | {ok: false, errors: EnvelopeIssue[]}} EnvelopeResult */
 
 const FORMAT_1 = 'open-auri/preset@1';
 const FORMAT_2 = 'open-auri/preset@2';

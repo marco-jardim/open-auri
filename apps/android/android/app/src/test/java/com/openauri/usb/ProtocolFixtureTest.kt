@@ -130,7 +130,12 @@ class ProtocolFixtureTest {
     @Test
     fun transportSendsTheReportIdApartAndFitsTheGuardTimeout() {
         requireMatch(transportSource, """device\.sendReport\(HID_REPORT_ID, report\)""")
-        requireMatch(transportSource, """device\.sendReport\(HID_REPORT_ID, commitReport\(\)\)""")
+        // The commit goes through the same `send` wrapper (fbda32d), so it too is sendReport(HID_REPORT_ID, ...):
+        // the wrapper's body (braces balanced, so nested blocks are fine) sends with HID_REPORT_ID,
+        // and the commit is awaited through it.
+        val sendBody = blockAfter(transportSource, """\bconst send = \(report\) =>""")
+        requireMatch(sendBody, """device\.sendReport\(HID_REPORT_ID, report\)""")
+        requireMatch(transportSource, """await send\(commitReport\(\)\)""")
         // The longest gap of a real write (last data report to commit) must fit the guard's timeout.
         assertTrue(reportGapMs < FrameGuard.SEQUENCE_TIMEOUT_MS)
         assertTrue(reportGapMs + settleMs < FrameGuard.SEQUENCE_TIMEOUT_MS)
@@ -296,5 +301,20 @@ class ProtocolFixtureTest {
         private fun requireMatch(source: String, pattern: String): MatchResult =
             Regex(pattern, RegexOption.DOT_MATCHES_ALL).find(source)
                 ?: throw AssertionError("the JavaScript no longer matches /$pattern/")
+
+        /** The `{...}` block that first opens after [header], braces balanced, both braces included. */
+        private fun blockAfter(source: String, header: String): String {
+            val start = requireMatch(source, header).range.last + 1
+            val open = source.indexOf('{', start)
+            check(open >= 0) { "no block after /$header/" }
+            var depth = 0
+            for (index in open until source.length) {
+                when (source[index]) {
+                    '{' -> depth++
+                    '}' -> if (--depth == 0) return source.substring(open, index + 1)
+                }
+            }
+            throw AssertionError("unbalanced block after /$header/")
+        }
     }
 }

@@ -30,7 +30,9 @@ const disconnected: CableState = {
 	rescue: null,
 	queue: null,
 	lastOutcome: null,
-	error: null
+	error: null,
+	liveCapable: true,
+	live: null
 };
 
 function outcome(status: Written['status'] = 'ok'): Written {

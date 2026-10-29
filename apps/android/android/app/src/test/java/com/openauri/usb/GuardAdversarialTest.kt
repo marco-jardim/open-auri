@@ -50,7 +50,15 @@ class GuardAdversarialTest {
 
     @Test
     fun duplicatingAnyOfTheNineReportsInvalidatesTheWholeSequence() {
-        for (duplicate in 0..8) {
+        // A repeated report 0 is not a duplicate but a new sequence (a live apply restarting), so
+        // the first one is dropped and only the second can lead to a commit.
+        val restarted = harness()
+        val restartKey = restarted.connectFirst()
+        assertTrue(restarted.send(restartKey, 0xCB, curve.reports[0]).resolved)
+        restarted.writeCurve(restartKey, curve).forEach { assertTrue(it.resolved) }
+        assertEquals(11, restarted.fake.sent.size)
+        assertEquals(1, restarted.fake.sent.count { isCommit(it) })
+        for (duplicate in 1..8) {
             val harness = harness()
             val key = harness.connectFirst()
             (0..duplicate).forEach { assertTrue(harness.send(key, 0xCB, curve.reports[it]).resolved) }

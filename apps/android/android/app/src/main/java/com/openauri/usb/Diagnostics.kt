@@ -157,6 +157,7 @@ object UsbDiagnostics {
         interruptOut: UsbEndpointInfo?,
         kernelDriverDetached: Boolean,
         wireLog: WireLog?,
+        abandonedSequences: Int? = null,
     ): JSObject {
         val endpoints = JSArray()
         hidInterface.endpoints.forEach { endpoint ->
@@ -186,6 +187,7 @@ object UsbDiagnostics {
             .put("transfer", if (interruptOut != null) TRANSFER_INTERRUPT else TRANSFER_CONTROL)
             .put("paddedLength", HidFraming.paddedLength(descriptor))
             .put("kernelDriverDetached", kernelDriverDetached)
+        if (abandonedSequences != null) result.put("abandonedSequences", abandonedSequences)
         if (wireLog != null) result.put("wireLog", wireLog.toJson())
         return result
     }

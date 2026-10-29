@@ -26,6 +26,9 @@ export function communityHidden(curve: CommunityProvenance, hidden: HiddenList):
 	return !!lineageId && isHidden(hidden, lineageId, curve.community?.author);
 }
 
+/** Lane source value of "Salvo no cabo": the connected cable's saved curve (issue #73). */
+export const CABLE_SAVED_SOURCE = 'cable-saved';
+
 export interface Track {
 	id: number;
 	curve: NamedCurve;

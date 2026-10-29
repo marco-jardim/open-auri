@@ -24,7 +24,10 @@ export interface ClientAppOptions {
 	now?: () => number;
 	/** Browser singleton by default; tests supply an isolated engine. */
 	audio?: AudioEngine;
-	cable?: Pick<CableServiceDeps, 'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId'>;
+	cable?: Pick<
+		CableServiceDeps,
+		'hid' | 'clock' | 'userActivation' | 'locks' | 'tabId' | 'livePolicy' | 'nativeLiveApply'
+	>;
 	/**
 	 * Toast region store. The root layout creates it before the runtime chunk loads and injects
 	 * it, so the same region serves messages from before and after the mount (FUX.2).
@@ -70,7 +73,11 @@ export function createClientApp(options: ClientAppOptions = {}) {
 			append(entry) {
 				if (!state.journal.append(entry)) throw new Error('Could not persist cable journal');
 			},
-			last: () => state.journal.entries.at(-1) ?? null
+			last: () => state.journal.entries.at(-1) ?? null,
+			// Shared across tabs (storage events): each cable's saved curve for the live preview.
+			get entries() {
+				return state.journal.entries;
+			}
 		},
 		flash: {
 			get() {

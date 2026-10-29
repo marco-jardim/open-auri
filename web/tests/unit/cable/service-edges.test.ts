@@ -1,6 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeHIDDevice } from 'open-auri/transport';
-import { CABLE_WRITE_LOCK, cableAliveLock, isCableDevice } from '#lib/cable/service.ts';
+import {
+	CABLE_LIVE_LOCK,
+	CABLE_WRITE_LOCK,
+	cableAliveLock,
+	isCableDevice
+} from '#lib/cable/service.ts';
 import { CONFIRMED, TRUSTED_CLICK, padrao, setup } from './harness.ts';
 import { memoryLocks } from './locks-fake.ts';
 
@@ -55,7 +60,7 @@ test('picker rejection and restore rejection leave the service disconnected with
 	expect(h.device.attempts).toBe(0);
 });
 
-test('a pending picker is not opened again and cancellation does not create a connection error', async () => {
+test('a pending picker is not opened again; cancellation gives feedback cleared by a successful connect', async () => {
 	const h = await harness({ connect: false });
 	let resolve!: (devices: FakeHIDDevice[]) => void;
 	vi.spyOn(h.hid, 'requestDevice').mockImplementationOnce(
@@ -70,7 +75,13 @@ test('a pending picker is not opened again and cancellation does not create a co
 	resolve([]);
 	expect(await first).toBeNull();
 	expect(h.hid.requestDevice).toHaveBeenCalledOnce();
-	expect(h.service.getState()).toMatchObject({ connection: 'disconnected', error: null });
+	expect(h.service.getState()).toMatchObject({
+		connection: 'disconnected',
+		error: 'request-empty'
+	});
+	expect(h.device.attempts).toBe(0);
+	expect(await h.service.connect()).toBe(h.device);
+	expect(h.service.getState()).toMatchObject({ connection: 'connected', error: null });
 });
 
 test('selection/disconnection reject strangers; closing a permitted cable can fail without losing state cleanup', async () => {
@@ -171,17 +182,23 @@ test('the liveness lock is taken before the first marker, kept, and released on 
 	expect(locks.held.has(CABLE_WRITE_LOCK)).toBe(false);
 	locks.held.delete(alive);
 	expect((await h.service.write(request(h))).status).toBe('ok');
+	// The liveness lock right after the write lock, before anything else; then the S5 probe of
+	// the live session lock (released at once), still before the first marker.
 	expect(locks.requests.map((entry) => entry.name)).toEqual([
 		CABLE_WRITE_LOCK,
 		alive,
 		CABLE_WRITE_LOCK,
-		alive
+		alive,
+		CABLE_LIVE_LOCK
 	]);
 	expect([...locks.held]).toEqual([alive]);
 	// Held, so the next write does not ask for it again.
 	h.time.value += 2_500;
 	expect((await h.service.write(request(h))).status).toBe('ok');
-	expect(locks.requests.map((entry) => entry.name).slice(4)).toEqual([CABLE_WRITE_LOCK]);
+	expect(locks.requests.map((entry) => entry.name).slice(5)).toEqual([
+		CABLE_WRITE_LOCK,
+		CABLE_LIVE_LOCK
+	]);
 	h.service.dispose();
 	await vi.waitFor(() => expect(locks.held.size).toBe(0));
 	// Never waited on anything: only `ifAvailable` requests.

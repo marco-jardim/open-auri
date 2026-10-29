@@ -52,7 +52,8 @@ test('native detection finishes and publishes metadata before mounting with its 
 		kind: 'native',
 		hid,
 		appVersion: '1.2.3',
-		webViewVersion: '141'
+		webViewVersion: '141',
+		liveApply: false
 	};
 	let finish: (result: NativeCableDetection) => void = () => {
 		throw new Error('No pending detection');
@@ -68,10 +69,36 @@ test('native detection finishes and publishes metadata before mounting with its 
 	finish(result);
 	await pending;
 	expect(detect).toHaveBeenCalledOnce();
-	expect(mount).toHaveBeenCalledExactlyOnceWith({ toasts, cable: { hid } });
+	expect(mount).toHaveBeenCalledExactlyOnceWith({
+		toasts,
+		cable: { hid, nativeLiveApply: false }
+	});
 	expect(state.result).toEqual({ kind: 'native', appVersion: '1.2.3' });
 	expect(state.result).not.toHaveProperty('hid');
+	expect(state.result).not.toHaveProperty('liveApply');
 });
+
+test.each([true, false])(
+	'#72: the native detection liveApply=%s reaches the cable service as nativeLiveApply',
+	async (liveApply) => {
+		const { toasts, state, mount } = setup();
+		const hid = {} as NativeHID;
+		await mountNativeCable(mount, toasts, state, {
+			isNative: () => true,
+			detect: async () => ({
+				kind: 'native',
+				hid,
+				appVersion: '1.2.3',
+				webViewVersion: '141',
+				liveApply
+			})
+		});
+		expect(mount).toHaveBeenCalledExactlyOnceWith({
+			toasts,
+			cable: { hid, nativeLiveApply: liveApply }
+		});
+	}
+);
 
 test.each<NativeCableDetection>([
 	{ kind: 'native-outdated', appVersion: null },

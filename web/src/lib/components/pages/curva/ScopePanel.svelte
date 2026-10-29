@@ -130,6 +130,16 @@
 		 */
 		paused?: boolean;
 		side: ABSide;
+		/**
+		 * A live cable preview runs ("Ouvir no cabo"): the A/B lever switches the cable's curve,
+		 * so it works without the browser preview playing.
+		 */
+		abLive?: boolean;
+		/**
+		 * Why side A is unavailable right now (a live cable preview with no known saved curve), or
+		 * null. A stays focusable (aria-disabled) and says why.
+		 */
+		aReason?: string | null;
 		referenceName: string;
 		previewError?: string | null;
 		previewDisabled?: boolean;
@@ -193,6 +203,8 @@
 		playing,
 		paused = false,
 		side,
+		abLive = false,
+		aReason = null,
 		referenceName,
 		previewError = null,
 		previewDisabled = false,
@@ -680,13 +692,15 @@
 	);
 	// A/B needs this page's chains, which exist while playing and while paused (`select()` works
 	// on a paused preview); with no session there is nothing to switch, and the tabs say why.
-	const abReady = $derived(playing || paused);
+	// A live cable preview switches the cable's curve instead, with or without browser audio.
+	const abReady = $derived(playing || paused || abLive);
 	const leverLabel = $derived(
 		playing ? m.curva_preview_stop() : paused ? m.transport_toggle_resume() : m.curva_preview()
 	);
 	function chooseSide(next: ABSide): void {
 		// aria-disabled keeps the tab focusable: a click, Enter or Space must still do nothing.
 		if (!abReady) return;
+		if (next === 'A' && aReason !== null) return;
 		onside(next);
 	}
 
@@ -1221,8 +1235,12 @@
 						role="radio"
 						class="tab"
 						aria-checked={side === 'A'}
-						aria-disabled={abReady ? undefined : 'true'}
-						aria-describedby={abReady ? undefined : `${legendId}-ab`}
+						aria-disabled={abReady && aReason === null ? undefined : 'true'}
+						aria-describedby={!abReady
+							? `${legendId}-ab`
+							: aReason !== null
+								? `${legendId}-ab-a`
+								: undefined}
 						onclick={() => chooseSide('A')}>{m.curva_ab_a({ name: referenceName })}</button
 					>
 					<button
@@ -1239,6 +1257,8 @@
 		</div>
 		{#if !abReady}
 			<small class="ab-why" id="{legendId}-ab">{m.curva_v2_ab_unavailable()}</small>
+		{:else if aReason !== null}
+			<small class="ab-why" id="{legendId}-ab-a">{aReason}</small>
 		{/if}
 		<div class="transport">
 			<Transport

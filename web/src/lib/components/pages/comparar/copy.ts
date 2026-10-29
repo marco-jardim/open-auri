@@ -20,6 +20,8 @@ export function copy(locale: 'pt-BR' | 'en-US') {
 		curveSource: m.comparar_curve_source({}, options),
 		current: m.comparar_current({}, options),
 		neutral: m.comparar_neutral({}, options),
+		/** "Salvo no cabo": a lane source and the name of the curve it loads (issue #73). */
+		cableSaved: m.cable_x2_source_saved({}, options),
 		presets: m.comparar_presets({}, options),
 		library: m.comparar_library({}, options),
 		descriptionCredit: m.comparar_description_credit({}, options),

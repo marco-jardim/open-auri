@@ -6,8 +6,10 @@
 	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import { createCurveSocial, type CurveSocial } from './social.svelte.ts';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { curveResponseDb } from 'open-auri/dsp';
-	import { getPreset } from 'open-auri/catalog';
+	import { curveResponseDb, snapshotBands } from 'open-auri/dsp';
+	import { NEUTRO, getPreset } from 'open-auri/catalog';
+	import { browserFlat } from '#lib/components/cable/live.ts';
+	import CableAB from './CableAB.svelte';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
 	import type { MeterSource } from '#lib/audio/meters.ts';
 	import { IDLE_STATE } from '#lib/audio/engine.ts';
@@ -26,6 +28,7 @@
 		compareCurves,
 		patchBay,
 		snapshotCurve,
+		CABLE_SAVED_SOURCE,
 		type NamedCurve
 	} from './comparison.ts';
 	import { createTrackChains } from './chains.ts';
@@ -119,6 +122,67 @@
 	const cableA = $derived(a ? armed.findIndex((track) => track.id === a.id) : -1);
 	const cableB = $derived(b ? armed.findIndex((track) => track.id === b.id) : -1);
 
+	// --- "Comparar no cabo" (issue #73) ----------------------------------------------------------
+	// While the cable plays a live curve that is not its saved one (this page's comparison, the
+	// Curva preview, the blind test's set, or one kept after its session or left by another tab),
+	// the cable applies the EQ: the browser lanes must not add it again. Every lane then plays the
+	// flat Neutro curve (the Curva page's rule, `browserFlat`, on the service's `cableEq` flag:
+	// only once the cable is known to play it), so the browser keeps its session, meters and
+	// protection but sounds raw. Back to the lanes' EQ once the cable is back on its saved curve.
+	/** The saved curve of the live session's cable (read again on every state change). */
+	const liveSaved = $derived.by(() => {
+		const client = app;
+		if (!client || client.cableState.live === null) return null;
+		return untrack(() => client.cable.liveSavedCurve());
+	});
+	const cableFlat = $derived(!!app && browserFlat(app.cableState, liveSaved));
+	/** The lanes as the browser plays them: flat while the cable applies the EQ. */
+	const heardTracks = $derived(
+		cableFlat
+			? tracks.map((track) => ({
+					...track,
+					curve: { ...track.curve, bands: snapshotBands(NEUTRO.bands), preampDb: NEUTRO.preampDb }
+				}))
+			: tracks
+	);
+	/**
+	 * "Salvo no cabo" as a lane source: the connected target cable's saved curve (the live
+	 * session's own when it runs on that cable, else the newest `ok` journal entry naming it).
+	 */
+	const cableSavedCurve = $derived.by<NamedCurve | null>(() => {
+		const client = app;
+		if (!client || client.cableState.connection !== 'connected') return null;
+		const label = client.cableState.deviceLabel;
+		if (label === null) return null;
+		const name = t.cableSaved;
+		// The journal stores the label cut to 64 code points (the service's `truncate`).
+		const journalLabel = [...label].slice(0, 64).join('');
+		const session = client.cableState.live;
+		if (session !== null && session.deviceLabel === label) {
+			const saved = untrack(() => client.cable.liveSavedCurve());
+			if (saved !== null) {
+				return {
+					name,
+					source: 'custom',
+					preampDb: saved.preampDb,
+					bands: snapshotBands(saved.bands)
+				};
+			}
+		}
+		const entries = client.state.journal.entries;
+		for (let index = entries.length - 1; index >= 0; index--) {
+			const entry = entries[index];
+			if (entry === undefined || entry.status !== 'ok' || entry.device !== journalLabel) continue;
+			return {
+				name,
+				source: 'custom',
+				preampDb: entry.preampDb,
+				bands: snapshotBands(entry.bands)
+			};
+		}
+		return null;
+	});
+
 	/** The trim the A/B really applies to a lane (graph, distances and audition share it). */
 	function laneTrim(id: number): { tag: 'A' | 'B' | null; trim: number | null } {
 		if (!comparison || !a || !b) return { tag: null, trim: null };
@@ -157,7 +221,8 @@
 		};
 	});
 	$effect(() => {
-		const nextTracks = tracks;
+		// Flat while the cable plays a comparison candidate (`heardTracks`).
+		const nextTracks = heardTracks;
 		const manager = chains;
 		// Only this page's own Play builds chains: the engine being left playing by another page
 		// (audioState.playing) must never make this page audible.
@@ -185,7 +250,9 @@
 		loadTokens.set(id, token);
 		let curve: NamedCurve | undefined;
 		if (value === 'current' && app) curve = snapshotCurve(app.state.curve.current);
-		else if (value.startsWith('library:')) {
+		else if (value === CABLE_SAVED_SOURCE) {
+			if (cableSavedCurve) curve = snapshotCurve(cableSavedCurve);
+		} else if (value.startsWith('library:')) {
 			const item = app?.state.library.items.find((item) => item.id === value.slice(8));
 			if (item) curve = snapshotCurve(item);
 		} else if (value.startsWith('preset:')) {
@@ -271,7 +338,7 @@
 			// The page's own Play is the only path that makes a lane audible.
 			manager.setAudible(true);
 			// Both calls run in the click before yielding, preserving browser user activation.
-			const ready = manager.sync(tracks);
+			const ready = manager.sync(heardTracks);
 			// A comparison starts at a random point of the file (SEEK.2); the file loops.
 			const started = engine.start('chains', { startAt: 'random', session: COMPARAR_SESSION });
 			startedBy = engine;
@@ -414,6 +481,7 @@
 						selected={selected === track.id}
 						meter={meters[track.id]}
 						library={app?.state.library.items ?? []}
+						cableSaved={cableSavedCurve !== null}
 						onSource={(value) => {
 							void source(track.id, value);
 						}}
@@ -542,6 +610,7 @@
 					</div>
 				</div>
 			{:else}<p class="note">{t.empty}</p>{/if}
+			{#if app}<CableAB {app} {a} {b} {matched} flat={cableFlat} />{/if}
 		</section>
 		<section class="panel patch-bay-panel" aria-labelledby="comparar-bay-title">
 			<h2 class="plate" id="comparar-bay-title">{t.bay}</h2>

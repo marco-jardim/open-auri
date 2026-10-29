@@ -94,10 +94,47 @@ export const ptBR: DocsContent = {
 			title: 'Protocolo 0xCB',
 			paragraphs: [
 				'Uma curva vira 220 B: header de 14 B, preamp int32 little-endian Q23 de 4 B, dez biquads de 20 B e CRC de 2 B. Cada seção leva cinco int32 Q27 na ordem [b0, b2, −a1, b1, −a2], com a0 = 1 implícito. Não há byte de tipo de filtro.',
-				'Header confirmado: 45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00. “EQ1#” é ASCII; interpretar D6 00 como comprimento é hipótese. Os bytes 6 e 12–13 permanecem desconhecidos.',
+				'Header confirmado: 45 51 31 23 D6 00 00 0A 04 05 01 0A 00 00. “EQ1#” é ASCII; D6 00 é o comprimento 14 + 20 × 10 = 214 e os dois 0A são o número de seções, como o app oficial WalkPlay calcula. Os bytes 6 e 12–13 permanecem desconhecidos.',
 				'WebHID usa report ID 0xCB e dados de 31 B (o ID fica fora deles). Reports 0 a 6 levam índice + 30 B; report 7 leva 10 B e padding zero; report 8 leva só o índice e zeros. Há 16 ms após cada report, depois 150 ms e commit 01 65 00 01 FF completado com zeros até 31 B: 294 ms nominais mais overhead. A equivalência do padding do commit no firmware ainda exige teste.',
 				'Q23 guarda ganho linear: round(10^(dB/20) × 2²³). Q27 usa round(coef × 2²⁷). O CRC16-CCITT-FALSE cobre os primeiros 218 B: poly 0x1021, init 0xFFFF, sem reflexão ou XOR final, anexado little-endian. Integridade não prova autenticidade ou segurança.',
 				'A amostragem ilustrada é a 96 kHz, com dobra em 48 kHz. Para 48 < f < 96 kHz, f_alias = 96 − f. O desenho não mede o clock real nem a entrada analógica. Os widgets são exemplos locais do codec, nunca autorização para gravar.'
+			]
+		},
+		{
+			id: 'protocolo-cabo',
+			title: 'Protocolo do cabo',
+			paragraphs: [
+				'O app oficial de PEQ da WalkPlay contém uma classe de dispositivo (grupo CB, log CB1100AU) que fala exatamente este protocolo e confirma o formato da seção anterior: report 0xCB, 9 pacotes com índice + 30 B, coeficientes Q27, preamp Q23, magic EQ1# e CRC-16/CCITT-FALSE (init 0xFFFF, poly 0x1021) sobre os bytes anteriores, anexado little-endian. O caminho principal do app, porém, cria a classe genérica CB pelo report 0x4B, que o Auri não expõe; a classe CB1100AU fica fora desse caminho. Ela declara 48 kHz, mas calcula os filtros com π·f/48000, o mesmo que 2π·f/96000: o projeto efetivo é a 96 kHz, como na página do kuba e no open-auri.',
+				'Frame: 45 51 31 23, comprimento u16 LE = 14 + 20 × n, depois 00 n 04 05 01 n 00 00, o preamp e n seções [b0, b2, −a1, b1, −a2]. O app oficial envia só os n filtros ativos; a página da Kuba e o open-auri sempre enviam 10, com as bandas desligadas como identidade. Frames com menos de 10 seções não foram testados neste cabo.',
+				'Depois dos dados vem o comando final: 01 tag 00 01 FF salva na flash; 01 tag 00 00 FF aplica sem salvar. Com a tag 0x65, salvar é exatamente o commit da página da Kuba (01 65 00 01 FF). Os dados sozinhos já aplicam ao vivo (medido no cabo); o efeito do comando oficial de aplicar sem salvar ainda não foi medido.',
+				'O protocolo tem uma só leitura: a tag de EQ. O pedido 80 00 00 00 FF, no report 0xCB, recebe a resposta 80 tag. No Auri real a resposta foi 80 65 00 00 FF, ou seja, tag 0x65 (101).',
+				'Não temos leitura validada da versão de firmware nem da curva gravada neste cabo. O app oficial marca essas funções como não suportadas; isso não prova inexistência no firmware. Também marca como não suportados modos e balanço do DAC, offsets de microfone e reset. A última curva conhecida é a registrada neste aparelho, não uma leitura do cabo.',
+				'O brief TTGK TT39510B01 descreve o bridge de áudio USB CB5100, com DSP e EQ integrados ao app Walk Play, mas não traz o protocolo HID. Se o Auri usa exatamente esse chip ou uma variante CB1100AU não está confirmado.',
+				'A decriptação externa de três downloads WalkPlay, para os PIDs 43CC, 43CD e C20F, foi validada localmente: AES-128-ECB, sem IV, com PKCS7 e chave textual UTF-8(MD5(code).hex.slice(0,16)), usando o campo value.code da UI. São 16 caracteres do digest como texto, não bytes decodificados de hex. Isso é separado do Base64 + XOR das respostas JSON, cuja chave ASCII literal é d2Fsa3BsYXlAMjAyNS4uLw==; não se aplica AES duas vezes.',
+				'Os três resultados têm container SPV@, cabeçalho de 32 B e quatro entradas CPU/MOD/PBK/EXT de 16 B. A validação cobre padding, tabela e limites das entradas não vazias; entradas vazias são apenas metadados e podem apontar além do fim do arquivo. Não foram validados checksum ou autenticidade. A região interna EncryptAddr/EncryptSize ainda está em estudo: não é decriptação completa do código nem reconstrução integral do protocolo, identificação da CPU ou prova de compatibilidade com o Auri. O guia técnico abaixo traz fontes, hashes e um script Node local que não sobrescreve arquivos; não executa firmware nem envia dados ao cabo.'
+			],
+			links: [
+				{ label: 'App oficial WalkPlay PEQ', href: 'https://peq.szwalkplay.com/' },
+				{
+					label: 'Espelho offline do app (Ircama/walkplay)',
+					href: 'https://github.com/Ircama/walkplay'
+				},
+				{
+					label: 'Brief do chip TT39510B01 (PDF)',
+					href: 'https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf'
+				},
+				{
+					label: 'CB5100PRO na TTGK',
+					href: 'https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html'
+				},
+				{
+					label: 'docs/protocol-0xcb.md no GitHub',
+					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/protocol-0xcb.md'
+				},
+				{
+					label: 'Guia de decriptação externa do firmware (Node local)',
+					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/firmware-analysis.md'
+				}
 			]
 		},
 		{
@@ -105,7 +142,7 @@ export const ptBR: DocsContent = {
 			title: 'Limites físicos',
 			paragraphs: [
 				'O formato conhecido oferece 10 seções, uma curva para os dois canais e taxa de projeto de 96 kHz (0 < f < 48 kHz). Não oferece EQ L/R independente, crossfeed, compressor, reverb, volume do cabo ou seletor do filtro do DAC.',
-				'O caminho é somente escrita: não há read-back, verify, pull ou rollback confirmado. Journal, snapshot e localStorage registram o envio no host, não o estado atual do cabo. Clock fixo e realização interna do DSP ainda não foram medidos.'
+				'A única leitura validada do cabo é a tag de EQ: não temos read-back validado da curva nem da versão de firmware, verify, pull ou rollback. Journal, snapshot e localStorage registram o envio no host, não o estado atual do cabo. Clock fixo e realização interna do DSP ainda não foram medidos.'
 			]
 		},
 		{
@@ -157,7 +194,8 @@ export const ptBR: DocsContent = {
 			title: 'O que não sabemos',
 			paragraphs: ['Nenhum teste de software substitui gravar, ouvir e medir o cabo real.'],
 			items: [
-				'Existe read-back, aplicação só em RAM ou verificação do CRC no firmware?',
+				'Existe aplicação só em RAM ou verificação do CRC no firmware? Read-back da curva não foi validado: a única leitura validada do cabo é a tag de EQ.',
+				'O que significam outras tags além de 0x65 e a flag que nega o preamp no app oficial? O cabo aceita frames com menos de 10 seções? Aplicar sem salvar (01 65 00 00 FF) muda algo em relação a enviar só os dados?',
 				'Qual é o tipo de flash, endurance, estratégia de apagamento e efeito de perder energia no commit?',
 				'Há click, estalo, mute ou transiente ao trocar durante áudio?',
 				'O clock é sempre 96 kHz? Qual é a precisão interna, realização, guard bits e comportamento de limit cycles?',
@@ -258,6 +296,13 @@ export const ptBR: DocsContent = {
 				'Quando os dois dão nota, a troca é revelada: você vê o apelido do parceiro, a curva dele quando ela abre por link e as duas notas. Trocas não reveladas expiram 72 h depois de entrar na fila ou do pareamento; enquanto espera, você pode cancelar.'
 			],
 			links: [{ label: 'Comunidade', href: '/comunidade' }]
+		},
+		{
+			id: 'windows-volume',
+			title: 'O volume do Windows não muda o fone',
+			paragraphs: [
+				'Se o nível muda no Windows, mas o volume do Auri continua igual, reinicie o serviço “Áudio do Windows” pelo aplicativo Serviços ou reinicie o PC. Abaixe o volume antes de testar de novo. Na bancada, era um estado travado dos serviços de áudio para esse dispositivo, não defeito do cabo; regravar a curva e reconectar o cabo não resolveu.'
+			]
 		},
 		{
 			id: 'android',

@@ -13,7 +13,8 @@
  * - the write policy refuses the app version: `native-write-disabled`, and no `NativeHID` is
  *   created, so no I/O call to the plugin is possible (0.12.10);
  * - no USB host on the phone: `native-no-usb-host`;
- * - otherwise `native`, with the `NativeHID` to give the cable service.
+ * - otherwise `native`, with the `NativeHID` to give the cable service and `liveApply` (the
+ *   optional `getInfo().liveApply` capability; false when the app does not send it).
  *
  * In the app, before the handshake (so before any cable service exists), the offline last-good
  * record is kept only when it confirms this build; `native-write-disabled` forgets it, so a
@@ -36,7 +37,18 @@ export interface NativeBridgeModule {
 }
 
 export type NativeCableDetection =
-	| { kind: 'native'; hid: NativeHID; appVersion: string; webViewVersion: string }
+	| {
+			kind: 'native';
+			hid: NativeHID;
+			appVersion: string;
+			webViewVersion: string;
+			/**
+			 * `getInfo().liveApply`: the app's write guard accepts live (uncommitted) applies, a
+			 * new data report 0 after the 9 data reports without the commit (plan Anexo D.3).
+			 * False when absent (app versions before it) or not exactly `true`.
+			 */
+			liveApply: boolean;
+	  }
 	/** `appVersion` is null when the handshake failed, timed out or did not name a version. */
 	| { kind: 'native-outdated'; appVersion: string | null }
 	| { kind: 'native-write-disabled'; appVersion: string }
@@ -138,6 +150,8 @@ export async function detectNativeCable(
 		kind: 'native',
 		hid: new NativeHID(plugin),
 		appVersion,
-		webViewVersion: info.webViewVersion
+		webViewVersion: info.webViewVersion,
+		// Optional capability of bridgeApi 1: an older app omits it and only accepts committed writes.
+		liveApply: info.liveApply === true
 	};
 }

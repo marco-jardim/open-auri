@@ -48,6 +48,16 @@
 		 * it the indicator stays a boolean ("Alterações não gravadas no cabo").
 		 */
 		unsavedCount?: number;
+		/**
+		 * The cable plays a live preview that is not the saved curve ("Ouvir no cabo"): a compact
+		 * amber chip beside the status, linking to the Curva page (where Salvar/Voltar live).
+		 */
+		liveUnsaved?: boolean;
+		/**
+		 * A blind test runs on the cable: one constant chip ("Teste cego em andamento") replaces the
+		 * unsaved chip, whatever `liveUnsaved` says (it could change with the playing candidate).
+		 */
+		liveBlind?: boolean;
 		writeDisabled?: boolean;
 		/** Why "Gravar no cabo" is unavailable; defaults explain loading or a write in progress. */
 		writeDisabledReason?: string;
@@ -78,6 +88,8 @@
 		connected = false,
 		unsaved = false,
 		unsavedCount,
+		liveUnsaved = false,
+		liveBlind = false,
 		writeDisabled = false,
 		writeDisabledReason,
 		onNeutro,
@@ -295,6 +307,23 @@
 							<span class="status-short" aria-hidden="true">{statusShort ?? statusText}</span>
 							<span class="sr-only">{statusText}</span>
 						</span>
+					{/if}
+				</div>
+				<!-- "No cabo: prévia não salva": announced when it appears; opens the Curva page. -->
+				<div class="live-slot" aria-live="polite">
+					{#if liveBlind}
+						<!-- Constant while the blind test runs: nothing here varies with the candidate. -->
+						<span class="live-chip" title={m.cable_blind_chrome()} data-live-chip="blind">
+							<span class="live-dot" aria-hidden="true"></span>
+							<span class="live-short" aria-hidden="true">{m.cable_blind_chrome_short()}</span>
+							<span class="sr-only">{m.cable_blind_chrome()}</span>
+						</span>
+					{:else if liveUnsaved}
+						<a class="live-chip" href="/" title={m.cable_live_chip()} data-live-chip="bar">
+							<span class="live-dot" aria-hidden="true"></span>
+							<span class="live-short" aria-hidden="true">{m.cable_live_chip_short()}</span>
+							<span class="sr-only">{m.cable_live_chip_open()}</span>
+						</a>
 					{/if}
 				</div>
 				<!-- Announced on change; seen as the dot (or count) on "Gravar no cabo". -->
@@ -590,6 +619,62 @@
 	.cable-state :global(.lamp) {
 		width: 8px;
 		height: 8px;
+	}
+
+	/* --- live preview chip (amber): the cable plays an unsaved preview ---------------------- */
+	.live-slot {
+		display: inline-flex;
+		align-items: center;
+	}
+
+	.live-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		box-sizing: border-box;
+		min-height: 28px;
+		padding: 0 8px;
+		border: 1px solid #e0a030;
+		border-radius: var(--rad-pill);
+		background: color-mix(in srgb, #e0a030 16%, transparent);
+		color: #f3c56a;
+		font: 500 var(--label-min) / var(--lh-caps) var(--face-body);
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.live-chip:focus-visible {
+		outline: var(--focus-width) solid var(--accent);
+		outline-offset: var(--focus-offset);
+	}
+
+	.live-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #e0a030;
+	}
+
+	/* Narrow rows keep the amber dot; the label stays in the tooltip and for screen readers. */
+	.cable-bar[data-squeeze~='1'] .live-short {
+		display: none;
+	}
+
+	@media (max-width: 1023px) {
+		.live-short {
+			display: none;
+		}
+	}
+
+	@media (max-width: 720px) {
+		.live-chip {
+			min-width: 44px;
+			min-height: 44px;
+			justify-content: center;
+			padding: 0;
+			border-color: transparent;
+			background: none;
+		}
 	}
 
 	/* The bar's plain snippet buttons keep the bar recipe (T1). */

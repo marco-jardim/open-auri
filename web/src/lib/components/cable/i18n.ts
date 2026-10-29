@@ -77,6 +77,8 @@ export const refusalText: Record<RefusalReason, () => string> = {
 	aborted: () => m.cable_refused_aborted(),
 	'interrupted-elsewhere': () => m.cable_refused_interrupted_elsewhere(),
 	'yolo-queue': () => m.yolo_queue_refused(),
+	'live-elsewhere': () => m.cable_refused_live_elsewhere(),
+	blind: () => m.cable_refused_blind(),
 	error: () => m.cable_refused_error()
 };
 

@@ -3,7 +3,14 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { counterDigits } from './model.ts';
 
-	let { counters }: { counters: { session: number; day: number; total: number } } = $props();
+	let {
+		counters,
+		previews = 0
+	}: {
+		counters: { session: number; day: number; total: number };
+		/** Live previews this page applied (no flash write; `livePreviewCount`). */
+		previews?: number;
+	} = $props();
 	const counts = $derived({
 		session: counters.session,
 		day: counters.day,
@@ -33,17 +40,35 @@
 </dl>
 <p>{m.cabo_counter_note()}</p>
 <p>{m.cabo_spacing()}</p>
+<!-- Live previews never reach the cable's memory: their own counter, outside the flash ones. -->
+<dl class="previews" data-testid="cabo-live-previews">
+	<div class="counter">
+		<dt>{m.cabo_live_previews()}</dt>
+		<dd>
+			<span class="live-drums" role="img" aria-label={String(previews)}>
+				{#each counterDigits(previews) as digit, index (index)}<b aria-hidden="true">{digit}</b
+					>{/each}
+			</span>
+		</dd>
+	</div>
+</dl>
+<p>{m.cabo_live_previews_scope()}</p>
+<p>{m.cabo_live_previews_note()}</p>
 <div class="plate"><p>{m.cabo_flash_notice()}</p></div>
 {#if counters.day >= DAILY_NOTICE_THRESHOLD}<p role="status" class="notice">
 		{m.cabo_daily_notice()}
 	</p>{/if}
 
 <style>
-	.counters {
+	.counters,
+	.previews {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 24px 32px;
 		margin: 0 0 18px;
+	}
+	.previews {
+		margin: 18px 0 0;
 	}
 	.counter {
 		display: flex;
@@ -63,7 +88,8 @@
 		max-width: 100%;
 		margin: 0;
 	}
-	.drums {
+	.drums,
+	.live-drums {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 2px;

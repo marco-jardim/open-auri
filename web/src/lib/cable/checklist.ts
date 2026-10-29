@@ -17,6 +17,7 @@ import type {
 	ChecklistContext,
 	ChecklistInput,
 	ChecklistItem,
+	ChecklistItemId,
 	ChecklistResult,
 	FlashState,
 	GateReason,
@@ -231,9 +232,11 @@ export function evaluateChecklist(
 	const crc = verdict.metrics.payloadCrc === undefined ? null : Number(verdict.metrics.payloadCrc);
 
 	const newLevelDb = safeLevelDb(verdict.metrics.bands, input.preampDb);
+	// S7: during a live session the reference is what the cable plays now, not the last save.
+	const liveLevelDb = finiteOrNull(context.liveLevelDb);
 	const loudness = loudnessWarning({
 		newLevelDb: newLevelDb ?? Number.NaN,
-		lastWrittenLevelDb: context.lastWrittenLevelDb,
+		lastWrittenLevelDb: liveLevelDb ?? context.lastWrittenLevelDb,
 		sessionWriteCount: context.sessionWriteCount,
 		lastJournalStatus: context.lastJournalStatus
 	});
@@ -297,6 +300,31 @@ export function evaluateChecklist(
 		spacing,
 		counters: flashCountersOf(context.flash, context.nowMs),
 		dailyNotice: { show: dailyNotice(context.flash, context.nowMs), text: FLASH_NOTICE_TEXT },
+		items,
+		canWrite: items.every((item) => !item.required || item.satisfied)
+	};
+}
+
+/**
+ * Items a live (no-flash) apply never needs: nothing is written to flash, so there is no
+ * spacing between flash writes, and an unplug only reverts the cable to its saved curve.
+ */
+const LIVE_EXCLUDED_ITEMS: ReadonlySet<ChecklistItemId> = new Set(['connection', 'spacing']);
+
+/**
+ * Checklist of `startLive`: the write checklist without `connection` and `spacing` (gate,
+ * volume, experimental when required, the YOLO items in Modo YOLO and `android-untested` on the
+ * native transport keep their exact rules). `canWrite` tells whether the session may start.
+ */
+export function evaluateLiveChecklist(
+	input: ChecklistInput,
+	context: ChecklistContext,
+	gate?: GateResult
+): ChecklistResult {
+	const result = evaluateChecklist(input, context, gate);
+	const items = result.items.filter((item) => !LIVE_EXCLUDED_ITEMS.has(item.id));
+	return {
+		...result,
 		items,
 		canWrite: items.every((item) => !item.required || item.satisfied)
 	};

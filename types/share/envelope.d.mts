@@ -87,16 +87,16 @@ export class EnvelopeError extends Error {
     errors: EnvelopeIssue[];
 }
 export type Primitive = string | number | boolean | null;
-/**
- * Recipe limits (normalized code points): source/solver name 64, measurement or
- * target filename 120, solver SemVer version 32; at most 32 params with ASCII keys of 1–32
- * characters and primitive values (strings at most 128, numbers finite).
- */
 export type Measurement = {
     source: string;
     name: string;
     sha256?: string;
 };
+/**
+ * Recipe limits (normalized code points): source/solver name 64, measurement or
+ * target filename 120, solver SemVer version 32; at most 32 params with ASCII keys of 1–32
+ * characters and primitive values (strings at most 128, numbers finite).
+ */
 export type Recipe = {
     measurement?: Measurement;
     target?: {

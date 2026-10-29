@@ -84,6 +84,29 @@ ou SET_REPORT de controle (`bmRequestType=0x21`, `bRequest=0x09`,
 seja o tamanho do output report. Não descarte a rota de controle só porque
 esperava encontrar interrupt OUT.
 
+### Rota medida no Windows/Chromium (2026-10-28)
+
+Na captura real (Windows 11, Edge 156, cabo Kuba Auri) os reports foram por
+**interrupt OUT**, não por SET_REPORT: 130 transferências OUT de 32 bytes
+(`0xCB` + 31), nenhuma SET_REPORT com dados e nenhum interrupt IN do cabo.
+Filtro que funcionou:
+
+```text
+usb.transfer_type == 0x01 && usb.src == "host" && usb.endpoint_address == 0x05
+```
+
+O endpoint (`0x05` nessa máquina) pode variar: confirme o endpoint OUT da
+interface HID nos descritores. O tráfego isócrono do endpoint `0x02` é áudio
+e não interessa.
+
+USBPcapCMD precisa de terminal **como administrador**, e a pasta `extcap` do
+Wireshark pode não ter o `USBPcapCMD.exe`. Nesse caso, capture direto:
+
+```powershell
+USBPcapCMD.exe --extcap-config --extcap-interface \\.\USBPcapN   # lista dispositivos e endereços
+USBPcapCMD.exe -d \\.\USBPcapN --devices <endereço> --inject-descriptors -o captura.pcap
+```
+
 ## 3. Gravar os 11 presets e o Neutro na ordem do fixture
 
 1. Abra <https://open-auri.com/cabo> no **Chrome desktop**, em contexto
@@ -174,6 +197,20 @@ prefixo e o padding no golden: justamente isso será comparado com o app.
 O resultado só é referência física se vier desta captura real. Fixtures
 sintéticos servem para testar a ferramenta e não devem ser apresentados
 como validação do cabo.
+
+Se o JSON do tshark não trouxer descritores ou campos HID suficientes, a
+ferramenta também aceita uma extração revisada só dos interrupt OUT do cabo,
+um array `{frame, t, hex}` (número do quadro, segundos relativos e os 32
+bytes finais do quadro, começando em `cb`), com metadados num JSON à parte:
+
+```powershell
+node tools/usb-golden.mjs <extração.json> --input-format interrupt-out-raw --captured-on <data> --os <sistema> --browser <navegador> --provenance <proveniência.json>
+```
+
+Esse modo não reconhece dispositivo nem endpoint por conta própria: o filtro
+da extração é responsabilidade de quem a revisou. Foi assim que se gerou o
+golden real de 2026-10-28 (`test/fixtures/usb-wire-golden.json`, fonte em
+`test/fixtures/usb-golden/capture-2026-10-28-edge-win.raw.json`).
 
 ## 6. Executar a sonda B1 e salvar collections
 

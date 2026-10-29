@@ -14,6 +14,7 @@ import {
 	queueStatus,
 	refusalText
 } from '#lib/components/cable/i18n.ts';
+import { liveRefusalText } from '#lib/components/cable/live.ts';
 import type { ReasonMessageKey, ReasonView } from '#lib/cable/types.ts';
 import { writtenOutcome } from './outcomes.ts';
 
@@ -50,11 +51,16 @@ test.each(['pt-BR', 'en-US'] as const)(
 	'all cable status and refusal lookups have localized copy in %s',
 	(locale) =>
 		requestLocale.run({ locale }, () => {
+			for (const key of ['cable_connect_hint', 'cable_connect_no_selection'] as const) {
+				expect(m[key]().trim().length).toBeGreaterThan(0);
+				expect(m[key]()).not.toBe(key);
+			}
 			for (const [lookup, prefix] of [
 				[lampLabel, ''],
 				[lampState, 'cable_lamp_state_'],
 				[queueStatus, 'cable_queue_status_'],
-				[refusalText, 'cable_refused_']
+				[refusalText, 'cable_refused_'],
+				[liveRefusalText, 'cable_live_refused_']
 			] as const) {
 				for (const [key, text] of Object.entries(lookup)) {
 					const messageKey = `${prefix}${key.replaceAll('-', '_')}`;

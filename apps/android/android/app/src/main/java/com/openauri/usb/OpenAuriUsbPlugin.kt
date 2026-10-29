@@ -137,7 +137,11 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
         )
     }
 
-    /** `{bridgeApi: 1, appVersion, usbHost, webViewVersion}`; `usbHost` is FEATURE_USB_HOST. */
+    /**
+     * `{bridgeApi: 1, appVersion, usbHost, webViewVersion, liveApply}`; `usbHost` is
+     * FEATURE_USB_HOST. `liveApply` (optional in the schema, absent before it existed) says the
+     * [FrameGuard] accepts live applies: a valid data report 0 in AwaitCommit starts a new write.
+     */
     @PluginMethod
     fun getInfo(call: PluginCall) = serve(call) {
         call.resolve(
@@ -145,7 +149,8 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
                 .put("bridgeApi", BRIDGE_API)
                 .put("appVersion", env.info.appVersion)
                 .put("usbHost", env.info.usbHost)
-                .put("webViewVersion", env.info.webViewVersion),
+                .put("webViewVersion", env.info.webViewVersion)
+                .put("liveApply", LIVE_APPLY),
         )
     }
 
@@ -247,6 +252,7 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
                 interruptOut = session.interruptOut,
                 kernelDriverDetached = kernelDriverDetached,
                 wireLog = session.wireLog,
+                abandonedSequences = guards.abandonedSequences(attachment.key),
             ),
         )
     }
@@ -566,6 +572,12 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
 
         /** Contract version of this bridge (plan 0.19). */
         const val BRIDGE_API: Int = 1
+
+        /**
+         * `getInfo().liveApply`: an optional bridgeApi 1 capability, not a version bump. True since
+         * [FrameGuard] accepts a valid data report 0 in AwaitCommit (plan Anexo D.3).
+         */
+        const val LIVE_APPLY: Boolean = true
 
         /** Event sent when a CB5100 is plugged in. */
         const val EVENT_CONNECT: String = "connect"

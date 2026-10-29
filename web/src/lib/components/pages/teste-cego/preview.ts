@@ -1,5 +1,31 @@
+import { NEUTRO } from 'open-auri/catalog';
+import { snapshotBands } from 'open-auri/dsp';
 import type { AudioEngine, PreviewChain } from '#lib/audio/engine.ts';
 import type { Candidate } from './experiment.ts';
+
+/**
+ * The blind test on the cable (issue #74): the cable plays the candidates, so the browser plays
+ * ONE flat chain (Neutro, trim 0) for all of them: no per-candidate chain, trim or protection to
+ * tell them apart. `select` never unmutes (the cable round's switch window does, with `unmute`).
+ */
+export function createFlatPreview(engine: AudioEngine) {
+	const chain = engine.buildChain(snapshotBands(NEUTRO.bands), NEUTRO.preampDb, {
+		gainDb: 0,
+		on: false
+	});
+	const chains: PreviewChain[] = [chain];
+	const trims: number[] = [0];
+	return {
+		chains,
+		trims,
+		mute: () => chain.setGain(0, false),
+		unmute: () => chain.setGain(0, true),
+		select(id: string) {
+			void id;
+		},
+		dispose: () => chain.dispose()
+	};
+}
 
 /**
  * Owns only this page's chains; the application owns the source and AudioContext.

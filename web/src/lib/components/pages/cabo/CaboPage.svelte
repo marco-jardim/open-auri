@@ -59,6 +59,7 @@
 		diagramNode,
 		encoderData,
 		lastWritten,
+		livePreviewCount,
 		parseProgress,
 		rackState,
 		type DiagramNode,
@@ -382,6 +383,9 @@
 			</div>
 			{#if !inApp}<p class="note interface-note">{m.cabo_support()}</p>{/if}
 			<UsbDiagnostics {engineering} {inApp} device={nativeDevice} />
+			{#if cable?.error === 'request-empty'}
+				<p role="status" aria-live="polite">{m.cable_connect_no_selection()}</p>
+			{/if}
 			{#if cable?.error === 'request-failed' || cable?.error === 'restore-failed'}<p role="status">
 					{m.cabo_connection_error()}
 				</p>{/if}
@@ -554,7 +558,7 @@
 			{#snippet aside()}<Explainer term="flash" />{/snippet}
 			<Deferred module={flashCounters} height="6rem">
 				{#snippet children(FlashCounters)}
-					<FlashCounters {counters} />
+					<FlashCounters {counters} previews={livePreviewCount(cable)} />
 				{/snippet}
 			</Deferred>
 		</RackUnit>
@@ -576,7 +580,18 @@
 		<RackUnit number="U8" title={m.cabo_soon()} model={m.cabo_reserved()} silver>
 			<div class="slots">
 				<EmBreve title={m.cabo_read()} /><EmBreve title={m.cabo_firmware()} />
-				<EmBreve title={m.cabo_ram()} /><EmBreve title={m.cabo_blind()} />
+				<!-- Flash-free mode shipped as "Ouvir no cabo" on the Curva page (#62): no longer reserved. -->
+				<aside class="shipped" data-testid="cabo-ram-live">
+					<strong>{m.cabo_ram()}</strong>
+					<p>{m.cabo_ram_live()}</p>
+					<a class="editor-link" href="/">{m.cabo_ram_live_link()}</a>
+				</aside>
+				<!-- The blind test on the cable shipped as the Teste cego page's "No cabo" tab (#74). -->
+				<aside class="shipped" data-testid="cabo-blind-live">
+					<strong>{m.cabo_blind()}</strong>
+					<p>{m.cabo_blind_live()}</p>
+					<a class="editor-link" href="/teste-cego">{m.cabo_blind_live_link()}</a>
+				</aside>
 			</div>
 		</RackUnit>
 	</div>
@@ -1106,6 +1121,19 @@
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
 		gap: 14px;
+	}
+	/* Same footprint as an EmBreve panel, but solid: this slot is in use. */
+	.shipped {
+		padding: 12px 16px;
+		border: 1px solid #4fd1c5;
+		border-radius: 3px;
+		background: #121211;
+		color: #ece7dd;
+		font: 400 var(--fs-small, 13px) / 1.4 var(--face-body, 'Geist', system-ui, sans-serif);
+	}
+	.shipped p {
+		margin: 8px 0;
+		color: #b5afa4;
 	}
 	@media (max-width: 1180px) {
 		.interface,

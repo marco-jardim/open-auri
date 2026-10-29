@@ -147,8 +147,11 @@ for (const copy of [
 		expect(audio.state().playing).toBe(false);
 		await accessible(screen.container);
 		await page.getByRole('tab', { name: new RegExp(copy.cable) }).click();
-		await expect.element(page.getByText(copy.soon, { exact: true })).toBeVisible();
-		expect(screen.container.textContent).toContain('13');
+		// No app (no cable service) here: the cable tab says why, and its start stays locked.
+		await expect
+			.element(page.getByText(m.cable_blind_unavailable(), { exact: true }).first())
+			.toBeVisible();
+		expect(screen.container.textContent).not.toContain(copy.soon);
 		await page.getByRole('tab', { name: new RegExp(copy.share) }).click();
 		const send = page.getByRole('button', { name: copy.send, exact: true });
 		await expect.element(send).toHaveAttribute('aria-disabled', 'true');

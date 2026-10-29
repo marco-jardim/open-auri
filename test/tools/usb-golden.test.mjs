@@ -412,7 +412,7 @@ test('CLI emits deterministic JSON with CLI provenance and counted warnings; com
   const input = f.json('capture.json', capture([...write(), ...write().slice(0, 2)]));
   const first = f.run([input, ...f.flags]);
   assert.equal(first.status, 0, first.stderr);
-  assert.match(first.stdout, /Validated 1\/12 writes, interrupt, 32 bytes/);
+  assert.match(first.stdout, /Validated 1 writes, interrupt, 32 bytes/);
   assert.match(first.stderr, /Warning \(1\): incomplete write discarded/);
   const bytes = readFileSync(f.out, 'utf8');
   const second = f.run([input, ...f.flags]);

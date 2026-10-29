@@ -125,6 +125,8 @@ export interface SetupOptions {
 	locks?: MemoryLocks | null;
 	/** In-flight marker storage (default: a fresh one). */
 	inflight?: MemoryInflight;
+	/** Live preview marker storage (`deps.liveMarker`; default: a fresh one). */
+	liveMarker?: MemoryInflight;
 	tabId?: string;
 	/** Initial epoch ms (default T0). */
 	now?: number;
@@ -132,6 +134,8 @@ export interface SetupOptions {
 	wrapClock?: (clock: Clock) => Clock;
 	/** Modo YOLO on in this tab (`deps.yoloSession`); absent: no port, so YOLO is off. */
 	yoloSession?: boolean;
+	/** Live preview switch (`deps.livePolicy`); absent: `LIVE_APPLY_POLICY`. */
+	livePolicy?: { enabled: boolean };
 }
 
 export async function setup(options: SetupOptions = {}) {
@@ -142,6 +146,7 @@ export async function setup(options: SetupOptions = {}) {
 	const flash = memoryFlash(options.flash);
 	const locks = options.locks === undefined ? memoryLocks() : options.locks;
 	const inflight = options.inflight ?? memoryInflight();
+	const liveMarker = options.liveMarker ?? memoryInflight();
 	const time = { value: options.now ?? T0 };
 	const levels = {
 		lastWrittenLevelDb: options.lastWrittenLevelDb ?? null,
@@ -158,10 +163,12 @@ export async function setup(options: SetupOptions = {}) {
 		userActivation: () => ({ isActive: true }),
 		locks,
 		inflight,
+		liveMarker,
 		tabId: options.tabId,
 		...(options.yoloSession === undefined
 			? {}
-			: { yoloSession: () => options.yoloSession === true })
+			: { yoloSession: () => options.yoloSession === true }),
+		...(options.livePolicy === undefined ? {} : { livePolicy: options.livePolicy })
 	};
 	const service = createCableService(deps);
 	const written: CableWrittenDetail[] = [];
@@ -170,7 +177,20 @@ export async function setup(options: SetupOptions = {}) {
 	});
 	await service.ready;
 	if (options.connect !== false) await service.connect();
-	return { clock, device, hid, journal, flash, time, levels, service, written, locks, inflight };
+	return {
+		clock,
+		device,
+		hid,
+		journal,
+		flash,
+		time,
+		levels,
+		service,
+		written,
+		locks,
+		inflight,
+		liveMarker
+	};
 }
 
 export function bytesOf(device: FakeHIDDevice): number[][] {

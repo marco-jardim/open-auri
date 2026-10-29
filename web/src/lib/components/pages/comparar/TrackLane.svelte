@@ -6,7 +6,12 @@
 	import VuMeter from '#lib/components/meters/VuMeter.svelte';
 	import type { MeterSource, MeterUpdate } from '#lib/audio/meters.ts';
 	import { numberLabel } from '#lib/charts/scales.ts';
-	import { communityHidden, type NamedCurve, type Track } from './comparison.ts';
+	import {
+		CABLE_SAVED_SOURCE,
+		communityHidden,
+		type NamedCurve,
+		type Track
+	} from './comparison.ts';
 	import { getHiddenStore } from '#lib/social/hidden-context.ts';
 	import type { Copy } from './copy.ts';
 	interface Props {
@@ -30,6 +35,8 @@
 		matched?: boolean;
 		/** Carries the tour anchor for the ARM step (one lane only). */
 		tourArm?: boolean;
+		/** Offer "Salvo no cabo" (the connected cable's saved curve is known). */
+		cableSaved?: boolean;
 		onSource: (source: string) => void;
 		onToggle: (key: 'armed' | 'mute' | 'solo') => void;
 		onSelect: () => void;
@@ -46,6 +53,7 @@
 		trimDb = null,
 		matched = true,
 		tourArm = false,
+		cableSaved = false,
 		onSource,
 		onToggle,
 		onSelect
@@ -109,6 +117,7 @@
 					disabled={hiddenSource}>{track.curve.name}</option
 				>{/if}
 			<option value="current">{t.current}</option>
+			{#if cableSaved}<option value={CABLE_SAVED_SOURCE}>{t.cableSaved}</option>{/if}
 			<option value="preset:neutro">{t.neutral}</option>
 			<optgroup label={t.presets}
 				>{#each OFFICIAL_PRESETS as choice (choice.id)}<option value="preset:{choice.id}"

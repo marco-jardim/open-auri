@@ -2568,6 +2568,8 @@ Os achados viram FXGH.k (0.5).
 | 2026-10-20 | T4.T (parcial) e follow-ups 1.0.2 | em andamento | `ba367f4`, `2410c86`, `b40da56`, `195c967`, `dca31de`, `90e4e9d`, `2588890` e capturas | decisões do mantenedor: sem `TODO(Q-LEGAL)` nos termos; travessões U+2014 pré-existentes (cabeçalho GENERATED do `render-wrangler` e um teste que verifica a ausência deles) registrados e mantidos; Cloudflare Web Analytics desligado no painel pelo mantenedor em 2026-10-21; a injeção de JavaScript Detections do Bot Fight Mode é evitada com `Cache-Control: no-transform` no HTML (`01b04ac`) (a injeção na borda fazia os testes de CSP de produção falharem). Smoke de produção no desktop: fluxos e gravação simulada OK. Q2 m3 fechado (`version.json` nunca no precache, teste). W1 a W4: capturas da Play, endurecimento da release, Voltar nos overlays restantes, minors de ocultar/denunciar |
 | 2026-10-20 | P1 | parcial | `f370205` | conta pessoal ativa, anterior a 2023-11-13 (isenta do teste fechado); verificação de identidade pendente, publicação bloqueada até concluir |
 | 2026-10-20 | FX4-C | decisão do mantenedor | `66bf188` (+ correções do Q4 r1) | Decisão do mantenedor: gravação nativa offline com last-good otimista (sem validade). Se a checagem de `/_app/version.json` falhar, a gravação segue só com a última confirmação ao vivo da mesma versão da página (`oa.cable.nativeLastGood.v1`), com aviso e registro no diário (`freshness`); o registro é apagado com deploy mais novo (checagem `newer` ou `updated` do Kit), com `native-write-disabled` e ao iniciar página de outra versão. Substitui o fail closed do Q2 m3; o controle remoto só alcança aparelho com checagem falhando quando ela volta a funcionar |
+| 2026-10-21 | P5 a P7 (Console) | concluído, falta o envio | Play Console | ficha pt-BR e en-US (textos, ícone, feature graphic, capturas de celular, tablet 7", tablet 10" e desktop, vídeo), Store settings, as 10 declarações de App content (Data safety com os 12 tipos e os links `#secao-16`/`#secao-17`; IARC: Livre/Everyone/PEGI 3, "Users Interact"), conta de revisão comum verificada sem 2FA (credenciais fora do repositório), testes automáticos da Google desligados, Production com 178 países, teste fechado "Closed testing - Alpha" com o Google Group `open-auri-beta@googlegroups.com` (entrada livre, membros visíveis só ao dono) |
+| 2026-10-24 | T4.1 (1.0.2) e P7 | concluído, falta o envio | merge `60bc1ed` (PR #59), `5f6ed61` (PR #60), tag `android-v1.0.2`, run 40102539165 | Q5 r2 PASS (0 major+); staging + e2e staging 37/38 (offline: o SW leva 25 a 30 s para instalar nesta rede e estoura os 30 s do teste; instalação conferida no Edge); produção (bookmark `00000603-00000000-0000510e-f62ca2be8c9da6cf34ceaa49ba8d6b2f`), CSP de produção sem falha do site (falhas locais: DNS do Mullvad bloqueia `scripts.simpleanalyticscdn.com`; Speed Brain da Cloudflare recusa com 503 o prefetch de `gate.worker`); chave de upload aprovada no Console (`59:1A:…:04:16`); AAB 10002 conferido (SHA-256, certificado de upload, sem `AD_ID`, `usb.host` opcional, 17.989 aparelhos) e anexado ao teste fechado e à Production; quick checks OK; Managed publishing ligado. "Submit 16 changes for review" fica para o mantenedor |
 
 **PF4 (2026-10-20):**
 - `doctor:android` OK (emulador e imagem opcionais ausentes na máquina local); release dry run verde local e no PR.
@@ -2733,7 +2735,7 @@ interface UsbDiagnostics {
   wireLog?: { atMs: number; hex: string }[]; // só em build de debug
 }
 interface OpenAuriUsbPlugin {
-  getInfo(): Promise<{ bridgeApi: 1; appVersion: string; usbHost: boolean; webViewVersion: string }>;
+  getInfo(): Promise<{ bridgeApi: 1; appVersion: string; usbHost: boolean; webViewVersion: string; liveApply?: boolean /* opcional, Anexo D.3 */ }>;
   requestDevice(o: { filters: { vendorId?: number; productId?: number }[] }): Promise<{ devices: NativeDeviceInfo[] }>;
   getDevices(): Promise<{ devices: NativeDeviceInfo[] }>;
   open(o: { key: string }): Promise<void>;
@@ -2777,12 +2779,16 @@ interface OpenAuriFilesPlugin {
 ```
 Idle --report[idx=0] ok--> Receiving(1)
 Receiving(n) --report[idx=n] ok, n<8--> Receiving(n+1)
+Receiving(n) --report[idx=0] ok (reportId, tamanho, preâmbulo)--> Receiving(1) (forward; sequência parcial abandonada)
 Receiving(8) --report[idx=8] ok--> AwaitCommit
 AwaitCommit --commit exato + payload remontado (preâmbulo e CRC16 OK) + >=2000 ms do último commit--> Idle (forward)
+AwaitCommit --report[idx=0] ok (reportId, tamanho, preâmbulo)--> Receiving(1) (forward; sequência não commitada abandonada)
 qualquer estado --outro byte, idx fora de ordem, tamanho != 31, reportId != 0xCB, >2000 ms sem report--> Idle (reject, nada enviado)
 ```
 - Reports de dados são encaminhados um a um, preservando o timing do transporte.
 - O commit só é encaminhado depois da validação completa.
+- Aplicação ao vivo (issue #72, plano `2026-10-28-modo-sem-flash-plano.md` Fase 4): o cabo aplica a curva em RAM ao receber o report 8; só o commit grava na flash. Por isso, em `AwaitCommit`, um report 0 válido (as mesmas checagens de `Idle`) abandona a sequência não commitada (contada em `FrameGuard.abandonedSequences`) e inicia a próxima. Isso permite aplicações ao vivo seguidas (o site espaça em ≥300 ms) e um "Salvar" logo depois de uma aplicação ao vivo. O mesmo vale em `Receiving(n)`: uma aplicação cortada no meio (antes do report 8, que o cabo ignora, B12b) não trava a guarda; um report 0 válido recomeça a partir da sequência parcial (também contada em `abandonedSequences`). Qualquer outro report em `AwaitCommit` que não seja o commit exato continua recusado (`EXPECTED_COMMIT`); CRC no report 7, ordem, padding e o espaçamento de 2000 ms entre commits não mudam.
+- O app anuncia essa transição em `getInfo().liveApply: true`, campo opcional do bridgeApi 1 (sem mudar a versão do contrato). Sem o campo (versões anteriores do app), o site trata como `false`.
 
 ## Anexo E · Checklist de validação no aparelho (F5, por aparelho)
 1. **Identificação:** modelo, fabricante, versão do Android, versão da WebView, versão do app, origem da instalação (Play ou GitHub).

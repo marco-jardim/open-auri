@@ -93,7 +93,7 @@ export interface NativeListenerHandle {
  * against the contract (schemas/android-usb-bridge-1.schema.json) before use.
  */
 export interface OpenAuriUsbPlugin {
-	/** `{ bridgeApi, appVersion, usbHost, webViewVersion }`. */
+	/** `{ bridgeApi, appVersion, usbHost, webViewVersion, liveApply? }`. */
 	getInfo(): Promise<unknown>;
 	/** `{ devices: NativeDeviceInfo[] }`; empty when the user cancelled or denied. */
 	requestDevice(options: { filters: NativeUsbFilter[] }): Promise<unknown>;

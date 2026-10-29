@@ -202,7 +202,8 @@ describe('detectNativeCable in the app', () => {
 		expect(result).toMatchObject({
 			kind: 'native',
 			appVersion: '1.0.0',
-			webViewVersion: '141.0.7390.122'
+			webViewVersion: '141.0.7390.122',
+			liveApply: false
 		});
 		if (result.kind !== 'native') throw new Error('not native');
 		const hid: HidLike = result.hid;
@@ -218,6 +219,50 @@ describe('detectNativeCable in the app', () => {
 		const { loadBridge } = answering({ ...INFO, appVersion: '0.0.1-rc.1' });
 		const result = await detectNativeCable({ win: ANDROID, loadBridge });
 		expect(result.kind).toBe('native');
+	});
+
+	test('liveApply: true when the app announces it', async () => {
+		const info = { ...INFO, liveApply: true };
+		expect(conforms('GetInfoResponse', info)).toBe(true);
+		const { otherCalls, loadBridge } = answering(info);
+		const result = await detectNativeCable({ win: ANDROID, loadBridge });
+		expect(result).toMatchObject({ kind: 'native', appVersion: '1.0.0', liveApply: true });
+		expect(otherCalls()).toBe(0);
+	});
+
+	test.each<[string, unknown, boolean]>([
+		['absent (an app before liveApply)', undefined, true],
+		['false', false, true],
+		['a string', 'true', false],
+		['a number', 1, false],
+		['null', null, false]
+	])('liveApply %s: native, without live apply', async (_name, liveApply, valid) => {
+		const info = liveApply === undefined ? { ...INFO } : { ...INFO, liveApply };
+		expect(conforms('GetInfoResponse', info)).toBe(valid);
+		const { loadBridge } = answering(info);
+		const result = await detectNativeCable({ win: ANDROID, loadBridge });
+		expect(result).toMatchObject({ kind: 'native', appVersion: '1.0.0', liveApply: false });
+	});
+
+	test('liveApply never overrides the other checks', async () => {
+		const policy: AndroidWritePolicy = { enabled: false, blockedAppVersions: [] };
+		const disabled = await detectNativeCable({
+			win: ANDROID,
+			loadBridge: answering({ ...INFO, liveApply: true }).loadBridge,
+			policy
+		});
+		expect(disabled).toEqual({ kind: 'native-write-disabled', appVersion: '1.0.0' });
+		const noHost = await detectNativeCable({
+			win: ANDROID,
+			loadBridge: answering({ ...INFO, usbHost: false, liveApply: true }).loadBridge
+		});
+		expect(noHost).toEqual({ kind: 'native-no-usb-host', appVersion: '1.0.0' });
+		const outdated = await detectNativeCable({
+			win: ANDROID,
+			loadBridge: answering({ ...INFO, bridgeApi: 2, liveApply: true }).loadBridge,
+			policy
+		});
+		expect(outdated).toEqual({ kind: 'native-outdated', appVersion: '1.0.0' });
 	});
 
 	test.each([

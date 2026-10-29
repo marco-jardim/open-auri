@@ -102,13 +102,17 @@ const shortcutCopy = {
 		help: 'Atalhos de teclado',
 		layers: 'Curva: trocar a camada (Ouvir, Ajustar, Engenharia)',
 		search: 'Docs: abrir a busca no caderno',
-		playback: 'Pausar ou continuar a prévia atual'
+		playback: 'Pausar ou continuar a prévia atual',
+		leverKeys: 'A / B / Espaço',
+		lever: 'Comparar no cabo: escolher A ou B, alternar'
 	},
 	'en-US': {
 		help: 'Keyboard shortcuts',
 		layers: 'Curve: switch the layer (Listen, Adjust, Engineering)',
 		search: 'Docs: open the journal search',
-		playback: 'Pause or resume the current preview'
+		playback: 'Pause or resume the current preview',
+		leverKeys: 'A / B / Space',
+		lever: 'Compare on the cable: choose A or B, toggle'
 	}
 } as const;
 
@@ -123,7 +127,8 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 			'Ctrl / ⌘ + Z',
 			'Ctrl / ⌘ + Shift + Z',
 			'1 / 2 / 3',
-			'Ctrl / ⌘ + K'
+			'Ctrl / ⌘ + K',
+			shortcutCopy[locale].leverKeys
 		]);
 		await render(HelpOverlay, { shortcuts, open: true });
 		const dialog = page.getByRole('dialog', { name: shortcutCopy[locale].help });
@@ -139,6 +144,12 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 		await expect.element(dialog.getByText('Ctrl / ⌘ + K', { exact: true })).toBeVisible();
 		await expect
 			.element(dialog.getByText(shortcutCopy[locale].search, { exact: true }))
+			.toBeVisible();
+		await expect
+			.element(dialog.getByText(shortcutCopy[locale].leverKeys, { exact: true }))
+			.toBeVisible();
+		await expect
+			.element(dialog.getByText(shortcutCopy[locale].lever, { exact: true }))
 			.toBeVisible();
 	});
 }

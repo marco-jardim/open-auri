@@ -17,6 +17,18 @@
  */
 export function classifyWith(write: WriteGate, bands: readonly Band[], preampDb: number, experimental: boolean): Classification;
 /**
+ * @typedef {import('../dsp/eq0xcb.mjs').Band} Band
+ * @typedef {import('./gate.mjs').GateOptions} GateOptions
+ * @typedef {import('./gate.mjs').GateResult} GateResult
+ * @typedef {import('./gate.mjs').Reason} Reason
+ * @typedef {import('./gate.mjs').ReasonCode} ReasonCode
+ * @typedef {(
+ *   bands: readonly Band[], preampDb: number, options: GateOptions
+ * ) => GateResult} WriteGate
+ * @typedef {'standard' | 'yolo' | 'rejected'} CurveClass
+ * @typedef {{class: CurveClass, waived: ReasonCode[], reasons: ReasonCode[]}} Classification
+ */
+/**
  * Codes the classification waives for a `yolo` curve: the YOLO gate's class 2
  * (`YOLO_WAIVABLE`) except `k:kind-not-allowed`. Experimental kinds are decided
  * by the `experimental` flag alone, never waived. `g:preamp` is waived above

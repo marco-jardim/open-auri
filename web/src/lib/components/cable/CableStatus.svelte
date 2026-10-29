@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { m } from '#lib/paraglide/messages.js';
+	import { getNativeCableState, isNativeAndroid } from '#lib/app/context.svelte.ts';
 	import type { CableService } from '#lib/cable/service.ts';
 	import type { CableState } from '#lib/cable/types.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
@@ -16,6 +17,8 @@
 	$effect(() => service.subscribe((next) => (cable = next)));
 
 	const simulated = $derived(cable.mode === 'simulated');
+	const nativeCable = getNativeCableState();
+	const webHid = $derived(!simulated && nativeCable.result.kind === 'none' && !isNativeAndroid());
 	const statusText = $derived(
 		cable.writing
 			? m.cable_status_writing()
@@ -134,6 +137,12 @@
 		{/if}
 	</div>
 
+	{#if webHid && cable.devices.length === 0 && cable.connection !== 'connected'}
+		<p class="text-sm opacity-80">{m.cable_connect_hint()}</p>
+	{/if}
+	{#if cable.error === 'request-empty'}
+		<p role="status" aria-live="polite" class="text-sm">{m.cable_connect_no_selection()}</p>
+	{/if}
 	{#if errorText !== null}
 		<p role="alert" class="text-sm">{errorText}</p>
 	{/if}

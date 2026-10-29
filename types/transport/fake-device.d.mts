@@ -22,8 +22,20 @@
  *   delivered), like a cable that stops responding.
  * @property {unknown} [openError] If set, open() rejects with it.
  * @property {number} [delayMs] Virtual time each delivered report takes to complete.
+ * @property {FakeFirmware} [firmware] Chip state fed with every delivered report; defaults to
+ *   a new factory FakeFirmware. Share one across devices to model replugs of the same cable.
+ *   Anything but a FakeFirmware (null included) makes the constructor throw a TypeError.
  *
  * @typedef {{vendorId?: number, productId?: number}} FakeFilter
+ *
+ * @typedef {object} FakeFirmwareOptions
+ * @property {ArrayLike<number> | null} [committed] Payload already in flash (220 bytes, CRC not
+ *   checked); `null` (default) is the factory/unknown curve. It is also the initial `live`.
+ * @property {7 | 8} [applyOn] Index of the data report that makes the buffered curve take
+ *   effect (default 8, as measured in B12b; 7 models the alternative hypothesis).
+ *
+ * @typedef {'unknown-report' | 'commit-without-live'} FakeIgnoredReason
+ * @typedef {{bytes: Uint8Array, reason: FakeIgnoredReason}} FakeIgnoredReport
  */
 /**
  * Virtual clock. In manual mode time moves only through `await advance(ms)`.
@@ -38,11 +50,56 @@ export function createFakeClock(start?: number, { autoAdvance }?: {
     autoAdvance?: boolean;
 }): FakeClock;
 export const FAKE_PRODUCT_NAME: "USB DSP Audio";
+/**
+ * The cable's chip, independent of any USB connection, so it survives replugs
+ * (share one instance between the FakeHIDDevice objects of the same cable).
+ *
+ * - Data report (byte 0 = index 0..8, bytes 1..30 = payload slice): stored in
+ *   its slot; missing bytes read as 0. The slots start zeroed and are kept
+ *   after an apply (a RAM buffer), so they only change when overwritten.
+ * - Report `applyOn` (default 8): the 9 slots are concatenated and the first
+ *   220 bytes taken as the payload (report 8 carries none of it). A good
+ *   CRC-16 makes it `live`; a bad one is ignored and counted, `live` unchanged.
+ * - Commit (`01 65 00 01 FF`, exactly 5 bytes or zero-padded to the full 31):
+ *   `committed = live`. With no live curve (`live === null`) it is ignored and
+ *   recorded. A report with that prefix but another length or a non-zero tail
+ *   is data report 1 (the transport refuses to send such a curve anyway).
+ * - Anything else (index > 8, empty report): ignored and recorded.
+ *
+ * The firmware never sends input reports.
+ */
+export class FakeFirmware {
+    /** @param {FakeFirmwareOptions} [options] */
+    constructor({ committed, applyOn }?: FakeFirmwareOptions);
+    /** Data sequences whose CRC was good (each one replaced `live`). */
+    appliedCount: number;
+    /** Commits that copied `live` to `committed`. */
+    commitCount: number;
+    /** Data sequences rejected for a bad CRC. */
+    rejectedCrcCount: number;
+    applyOn: 8 | 7;
+    /** Curve the cable is playing (RAM); `null` = factory/unknown. @returns {Uint8Array | null} */
+    get live(): Uint8Array | null;
+    /** Curve stored in flash; `null` = factory/unknown. @returns {Uint8Array | null} */
+    get committed(): Uint8Array | null;
+    /** Copy of the reports the firmware ignored, in order. @returns {FakeIgnoredReport[]} */
+    get ignored(): FakeIgnoredReport[];
+    /**
+     * Handles one delivered 0xCB report (the bytes after the report ID).
+     * @param {Uint8Array} bytes
+     */
+    receive(bytes: Uint8Array): void;
+    /** Power cycle (unplug + replug): RAM is lost, `live = committed`, slots zeroed. */
+    powerCycle(): void;
+    #private;
+}
 /** A simulated cable: records every report it accepts, with its virtual timestamp. */
 export class FakeHIDDevice extends EventTarget {
     /** @param {FakeDeviceOptions} [options] */
-    constructor({ clock, vendorId, productId, productName, disconnectAtReport, throwAtReport, throwError, hangAtReport, openError, delayMs, }?: FakeDeviceOptions);
+    constructor({ clock, vendorId, productId, productName, disconnectAtReport, throwAtReport, throwError, hangAtReport, openError, delayMs, firmware, }?: FakeDeviceOptions);
     clock: FakeClock;
+    /** The cable's chip; receives every delivered report. */
+    firmware: FakeFirmware;
     vendorId: number;
     productId: number;
     productName: string;
@@ -131,6 +188,18 @@ export class FakeHID extends EventTarget {
     getDevices(): Promise<FakeHIDDevice[]>;
     /** Unplugs `device` (fires 'disconnect'). @param {FakeHIDDevice} device */
     disconnect(device: FakeHIDDevice): void;
+    /**
+     * Unplugs `device` exactly like {@link FakeHID.disconnect} (no-op if already
+     * unplugged), power-cycles its firmware (`live = committed`), then plugs in a
+     * new FakeHIDDevice sharing that firmware, clock and identity, and fires
+     * 'connect' for it. The new device starts closed, with no reports, attempts
+     * or faults (unless given in `options`), and inherits the old device's
+     * requestDevice grant.
+     * @param {FakeHIDDevice} device
+     * @param {Omit<FakeDeviceOptions, 'firmware'>} [options] Overrides for the new device.
+     * @returns {FakeHIDDevice} The new device.
+     */
+    replug(device: FakeHIDDevice, options?: Omit<FakeDeviceOptions, "firmware">): FakeHIDDevice;
     #private;
 }
 export type SentReport = {
@@ -192,8 +261,31 @@ export type FakeDeviceOptions = {
      * Virtual time each delivered report takes to complete.
      */
     delayMs?: number | undefined;
+    /**
+     * Chip state fed with every delivered report; defaults to
+     * a new factory FakeFirmware. Share one across devices to model replugs of the same cable.
+     * Anything but a FakeFirmware (null included) makes the constructor throw a TypeError.
+     */
+    firmware?: FakeFirmware | undefined;
 };
 export type FakeFilter = {
     vendorId?: number;
     productId?: number;
+};
+export type FakeFirmwareOptions = {
+    /**
+     * Payload already in flash (220 bytes, CRC not
+     * checked); `null` (default) is the factory/unknown curve. It is also the initial `live`.
+     */
+    committed?: ArrayLike<number> | null | undefined;
+    /**
+     * Index of the data report that makes the buffered curve take
+     * effect (default 8, as measured in B12b; 7 models the alternative hypothesis).
+     */
+    applyOn?: 8 | 7 | undefined;
+};
+export type FakeIgnoredReason = "unknown-report" | "commit-without-live";
+export type FakeIgnoredReport = {
+    bytes: Uint8Array;
+    reason: FakeIgnoredReason;
 };

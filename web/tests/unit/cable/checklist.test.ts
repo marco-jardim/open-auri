@@ -9,6 +9,7 @@ import {
 	REASON_MESSAGE_KEYS,
 	ULTRASONIC_CONFIRMATION_TEXT,
 	evaluateChecklist,
+	evaluateLiveChecklist,
 	hasExperimentalKinds,
 	hasUltrasonicBands,
 	lampOf
@@ -89,6 +90,70 @@ function withKind(kind: 'HS' | 'LP' | 'HP'): Band[] {
 			: { kind, freqHz: kind === 'LP' ? 18000 : 30, qFactor: 0.7 };
 	return [band, ...Array.from({ length: 9 }, off)];
 }
+
+describe('live preview (S4/S7)', () => {
+	const level = levelDb(padrao.eqBands, padrao.preampDb);
+
+	test('S7: a known live level replaces the last written level in the loudness comparison', () => {
+		const lastWritten = level - 10;
+		const without = evaluateChecklist(
+			input(),
+			context({ lastWrittenLevelDb: lastWritten, sessionWriteCount: 1, lastJournalStatus: 'ok' })
+		);
+		expect(without.loudness.deltaDb).toBeCloseTo(10, 9);
+		expect(without.loudness.reasons).toEqual(['jump']);
+		const withLive = evaluateChecklist(
+			input(),
+			context({
+				lastWrittenLevelDb: lastWritten,
+				liveLevelDb: level - 1,
+				sessionWriteCount: 1,
+				lastJournalStatus: 'ok'
+			})
+		);
+		expect(withLive.loudness.deltaDb).toBeCloseTo(1, 9);
+		expect(withLive.loudness.warn).toBe(false);
+		// Everything else is unchanged.
+		expect({ ...withLive, loudness: null }).toEqual({ ...without, loudness: null });
+	});
+
+	test('S7: a null or non-finite live level falls back to the last written level', () => {
+		for (const liveLevelDb of [null, Number.NaN]) {
+			const result = evaluateChecklist(
+				input(),
+				context({ lastWrittenLevelDb: level - 10, liveLevelDb, sessionWriteCount: 1 })
+			);
+			expect(result.loudness.deltaDb).toBeCloseTo(10, 9);
+		}
+	});
+
+	test('live checklist: no spacing or connection item; the others keep their rules', () => {
+		const ctx = context({ flash: flash({ lastWriteAt: T0 }) });
+		const confirmations = { ...CONFIRMED, keepConnected: false };
+		const write = evaluateChecklist(input({ confirmations }), ctx);
+		expect(write.canWrite).toBe(false);
+		const liveResult = evaluateLiveChecklist(input({ confirmations }), ctx);
+		expect(liveResult.items.map((item) => item.id)).toEqual([
+			'gate',
+			'volume',
+			'experimental',
+			'yolo-session',
+			'yolo-write'
+		]);
+		expect(liveResult.canWrite).toBe(true);
+		const quiet = evaluateLiveChecklist(
+			input({ confirmations: { ...confirmations, volumeLowered: false } }),
+			ctx
+		);
+		expect(quiet.canWrite).toBe(false);
+		const android = evaluateLiveChecklist(
+			input({ confirmations }),
+			context({ cableMode: 'native', androidWriteValidated: false })
+		);
+		expect(android.items.map((item) => item.id)).toContain('android-untested');
+		expect(android.canWrite).toBe(false);
+	});
+});
 
 describe('messages', () => {
 	test('every gate reason code has a message key present in both locales', () => {

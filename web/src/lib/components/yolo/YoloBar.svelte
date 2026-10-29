@@ -14,7 +14,6 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import Button from '#lib/components/primitives/Button.svelte';
 	import type { YoloState } from '#lib/state/yolo.svelte.ts';
-	import YoloDialog from './YoloDialog.svelte';
 	import YoloGlyph from './YoloGlyph.svelte';
 
 	interface Props {
@@ -64,21 +63,25 @@
 	</section>
 
 	{#if warningOpen}
-		<YoloDialog
-			title={m.yolo_warning_title()}
-			ondismiss={() => (warningOpen = false)}
-			initialFocus="[data-yolo-warning-close]"
-		>
-			{#snippet actions()}
-				<Button variant="plate" onclick={turnOff}>
-					{m.yolo_off()}
-					{m.yolo_tape()}
-				</Button>
-				<Button variant="primary" data-yolo-warning-close onclick={() => (warningOpen = false)}>
-					{m.chrome_close()}
-				</Button>
-			{/snippet}
-		</YoloDialog>
+		{#await import('./YoloDialog.svelte') then { default: YoloDialog }}
+			<YoloDialog
+				title={m.yolo_warning_title()}
+				ondismiss={() => (warningOpen = false)}
+				initialFocus="[data-yolo-warning-close]"
+			>
+				{#snippet actions()}
+					<Button variant="plate" onclick={turnOff}>
+						{m.yolo_off()}
+						{m.yolo_tape()}
+					</Button>
+					<Button variant="primary" data-yolo-warning-close onclick={() => (warningOpen = false)}>
+						{m.chrome_close()}
+					</Button>
+				{/snippet}
+			</YoloDialog>
+		{:catch}
+			<p role="alert">{m.layout_error_generic()}</p>
+		{/await}
 	{/if}
 {/if}
 

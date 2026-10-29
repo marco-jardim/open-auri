@@ -94,7 +94,7 @@ testes dos dois lados. O schema USB não descreve o plugin de arquivos.
 
 | Método de `OpenAuriUsb` | Entrada | Resposta |
 | --- | --- | --- |
-| `getInfo()` | Sem opções | `{ bridgeApi: 1, appVersion, usbHost, webViewVersion }` |
+| `getInfo()` | Sem opções | `{ bridgeApi: 1, appVersion, usbHost, webViewVersion, liveApply? }` |
 | `requestDevice({ filters })` | Lista de filtros com `vendorId` e/ou `productId` | `{ devices }`; vazio se cancelar, negar ou não houver cabo |
 | `getDevices()` | Sem opções | `{ devices }`, somente cabos conectados com permissão |
 | `open({ key })` | Chave da conexão | Sem payload |
@@ -113,7 +113,9 @@ rejeição das operações pendentes.
 `UsbDiagnostics` inclui dispositivo, versões do app/Android/WebView,
 `rawDescriptorsHex`, `hidInterfaceId`, `endpoints` (endereço, tipo, direção,
 `maxPacketSize`), `reportDescriptorHex`, `outputReports` (ID e bytes),
-`transfer`, `paddedLength` e `kernelDriverDetached`. `wireLog`, com
+`transfer`, `paddedLength` e `kernelDriverDetached`, além de
+`abandonedSequences` (opcional; sequências não commitadas que o FrameGuard
+abandonou nessa chave porque um report 0 válido iniciou a próxima). `wireLog`, com
 `{ atMs, hex }`, só aparece em builds de debug. Esses dados permitem
 investigar o framing sem presumir o descritor do cabo real.
 
@@ -184,8 +186,37 @@ Receiving(n) -> report n em ordem -> Receiving(n+1)
 Receiving(8) -> report 8 -> AwaitCommit
 AwaitCommit -> commit exato + payload/preâmbulo/CRC16 válidos
             + pelo menos 2000 ms desde o último commit -> Idle (envia)
+AwaitCommit -> report 0 válido -> Receiving(1) (envia; abandona a
+            sequência não commitada: aplicação ao vivo)
+Receiving(n) -> report 0 válido -> Receiving(1) (envia; abandona a
+            sequência parcial: aplicação ao vivo interrompida)
 Qualquer estado -> sequência inválida ou expirada -> Idle (recusa)
 ```
+
+Aplicação ao vivo: o cabo aplica a curva em RAM ao receber o report 8 e só
+grava na flash com o commit. Os nove reports sem commit são, portanto, uma
+aplicação ao vivo completa; em `AwaitCommit`, um report 0 válido (mesmas
+checagens de `Idle`: ID, tamanho, preâmbulo) inicia a próxima, e um
+"Salvar" pode vir logo depois. O mesmo vale em `Receiving(n)`: uma aplicação
+ao vivo cortada no meio nunca chegou ao report 8, então o cabo a ignorou, e
+a próxima prévia ou gravação começa na hora em vez de esperar o timeout de
+2000 ms. Uma sequência parcial nunca pode ser commitada: o commit exige os
+nove reports da sequência atual. Um report 0 inválido é recusado com o
+motivo da checagem que falhou (por exemplo, preâmbulo); outros reports em
+`AwaitCommit` continuam recusados, e o espaçamento de 2000 ms vale só entre
+commits. Cada sequência não commitada abandonada por um report 0 válido
+(inclusive depois do timeout) é contada em `abandonedSequences` de
+`diagnostics()`. O app anuncia isso com `liveApply: true` em
+`getInfo()`, campo opcional do `bridgeApi: 1`. A prévia ao vivo ("Ouvir no
+cabo") dentro do app exige uma versão do app com `liveApply`; sem o campo
+(versões anteriores), o site o trata como `false` e a guarda antiga recusaria
+a segunda aplicação seguida.
+
+Risco residual: a guarda não limita a taxa de aplicações ao vivo. Quem as
+espaça (pelo menos 300 ms entre uma e outra) é o site; a guarda só exige
+sequências bem formadas e o espaçamento de 2000 ms entre commits. Aplicações
+ao vivo não gravam na flash, mas um site que as enviasse sem pausa ocuparia
+o cabo continuamente.
 
 São recusados ID diferente de `0xCB`, dados com tamanho diferente de 31,
 índice fora de ordem, bytes inválidos ou mais de 2000 ms sem report.

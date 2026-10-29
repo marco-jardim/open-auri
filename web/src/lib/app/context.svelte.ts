@@ -79,7 +79,12 @@ export function mountNativeCable<T>(
 	return detect().then((result) => {
 		state.result =
 			result.kind === 'none' ? result : { kind: result.kind, appVersion: result.appVersion };
-		return mount(result.kind === 'native' ? { toasts, cable: { hid: result.hid } } : { toasts });
+		// The app's `liveApply` capability decides whether the native cable is live-capable (#72).
+		return mount(
+			result.kind === 'native'
+				? { toasts, cable: { hid: result.hid, nativeLiveApply: result.liveApply } }
+				: { toasts }
+		);
 	});
 }
 
