@@ -32,7 +32,6 @@
 	import type { ClientApp } from '#lib/app/index.ts';
 	import type { CableState, LiveOutcome } from '#lib/cable/types.ts';
 	import Button from '#lib/components/primitives/Button.svelte';
-	import LiveChecklist from '#lib/components/cable/LiveChecklist.svelte';
 	import {
 		liveActive,
 		liveHoldAction,
@@ -560,16 +559,20 @@
 {/if}
 
 {#if app && checklistOpen}
-	<LiveChecklist
-		service={app.cable}
-		open={true}
-		bands={curve.bands}
-		preampDb={curve.preampDb}
-		{experimental}
-		{profile}
-		onbeforestart={() => onbeforestart?.(curve)}
-		onclose={() => (checklistOpen = false)}
-	/>
+	{#await import('#lib/components/cable/LiveChecklist.svelte') then { default: LiveChecklist }}
+		<LiveChecklist
+			service={app.cable}
+			open={true}
+			bands={curve.bands}
+			preampDb={curve.preampDb}
+			{experimental}
+			{profile}
+			onbeforestart={() => onbeforestart?.(curve)}
+			onclose={() => (checklistOpen = false)}
+		/>
+	{:catch}
+		<p role="alert">{m.layout_error_generic()}</p>
+	{/await}
 {/if}
 
 <style>

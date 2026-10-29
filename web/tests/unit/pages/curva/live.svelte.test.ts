@@ -69,6 +69,8 @@ interface SetupOptions {
 	/** A saved (written) curve's preamp, marked as the last write before the editor changes. */
 	savedPreampDb?: number;
 	livePolicy?: { enabled: boolean };
+	/** Leave the cable ungranted until the test connects it after the page mounts. */
+	connect?: boolean;
 	layer?: 'ouvir' | 'engenharia';
 }
 
@@ -84,7 +86,7 @@ async function setup(options: SetupOptions = {}) {
 	apps.push(app);
 	await app.start();
 	// The fake picker grants the plugged-in cable (a restore only finds granted devices).
-	expect(await app.cable.connect()).not.toBeNull();
+	if (options.connect !== false) expect(await app.cable.connect()).not.toBeNull();
 	const set = (preampDb: number) =>
 		app.state.curve.set({ name: 'Teste', source: 'custom', preampDb, bands: OFF_BANDS });
 	if (options.savedPreampDb !== undefined) {
@@ -186,6 +188,34 @@ test('the switch shows with a connected live-capable cable, off', async () => {
 	await setup();
 	await expect.element(liveSwitch()).toBeVisible();
 	await expect.element(liveSwitch()).toHaveAttribute('aria-checked', 'false');
+});
+
+test('the deferred panel appears after connecting and preserves its announcement on unplug', async () => {
+	const { app, fake } = await setup({ connect: false });
+	expect(document.querySelector('[data-live-panel]')).toBeNull();
+	expect(await app.cable.connect()).not.toBeNull();
+	await expect.element(liveSwitch()).toBeVisible();
+	await startLive(app);
+	const region = document.querySelector('[data-live-announce]');
+	expect(region).not.toBeNull();
+	fake.hid.disconnect(fake.device);
+	await vi.waitFor(() => expect(app.cableState.live?.endedReason).toBe('disconnected'));
+	await vi.waitFor(() => expect(region?.textContent).toBe(m.cable_live_ended_disconnected()));
+	expect(document.querySelector('[data-live-announce]')).toBe(region);
+});
+
+test('an orphan is detected before any connection or preview click, even with live disabled', async () => {
+	localStorage.setItem(
+		CABLE_LIVE_KEY,
+		JSON.stringify({ tabId: 'gone-tab', device: 'USB DSP Audio', crc: 4660, at: 0 })
+	);
+	const { app } = await setup({ connect: false, livePolicy: { enabled: false } });
+	expect(app.cableState.liveCapable).toBe(false);
+	expect(app.cableState.liveOrphan?.crc).toBe(4660);
+	await expect.element(page.getByText(m.cable_live_orphan())).toBeVisible();
+	await page.getByRole('button', { name: m.cable_live_orphan_dismiss() }).click();
+	await vi.waitFor(() => expect(app.cableState.liveOrphan).toBeNull());
+	expect(localStorage.getItem(CABLE_LIVE_KEY)).toBeNull();
 });
 
 test('starting needs the live checklist and a gesture; then the cable plays the editor curve', async () => {

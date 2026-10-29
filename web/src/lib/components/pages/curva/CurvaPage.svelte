@@ -99,7 +99,6 @@
 	} from './model.ts';
 	import { parkedBand } from './parked.ts';
 	import { CurvaPreview } from './preview.svelte.ts';
-	import LivePanel from './LivePanel.svelte';
 	import {
 		browserFlat,
 		liveActive as isLiveActive,
@@ -109,7 +108,6 @@
 	import type { ABSide } from '#lib/audio/engine.ts';
 	import { provideBandLabelView } from './band-labels.svelte.ts';
 	import YoloToggle from '#lib/components/yolo/YoloToggle.svelte';
-	import YoloCurveNotice from '#lib/components/yolo/YoloCurveNotice.svelte';
 	import { waivedLabels } from '#lib/components/yolo/yolo-curve.ts';
 	import { withProfile } from './drag.ts';
 	import {
@@ -1214,6 +1212,20 @@
 	// change is queued to the cable (`queueLive`; the service debounces and coalesces), except
 	// while the free preview is on (edits there are not the curve to hear on the cable).
 	const liveSession = $derived(app?.cableState.live ?? null);
+	// Load the cable-only UI when it can first be shown, not on every editor visit. Keep it
+	// mounted afterwards so ended-session announcements survive a disconnect. The service's
+	// startup/orphan detection and the browser's flat-EQ guard remain eager and independent.
+	let livePanelNeeded = $state(false);
+	$effect(() => {
+		const cable = app?.cableState;
+		if (
+			cable &&
+			((cable.liveCapable && (cable.connection === 'connected' || cable.live !== null)) ||
+				cable.liveOrphan !== null)
+		) {
+			livePanelNeeded = true;
+		}
+	});
 	const liveOn = $derived(isLiveActive(liveSession));
 	/** CRC-16 an accepted revert left on the cable (the service's saved curve); reset on a save. */
 	let liveSavedCrc = $state<number | null>(null);
@@ -1414,7 +1426,11 @@
 	{#if curveYolo}
 		<!-- A YOLO curve: marked wherever it is; with YOLO off, shown and previewed, not edited. -->
 		<section class="yolo-curve" data-yolo-locked={yoloLocked ? 'editor' : undefined}>
-			<YoloCurveNotice variant={noticeVariant} waived={waivedLabels(curveClass.waived)} />
+			{#await import('#lib/components/yolo/YoloCurveNotice.svelte') then { default: YoloCurveNotice }}
+				<YoloCurveNotice variant={noticeVariant} waived={waivedLabels(curveClass.waived)} />
+			{:catch}
+				<p role="alert">{m.layout_error_generic()}</p>
+			{/await}
 			{#if yoloLocked}
 				<p class="yolo-curve-why" role="status">{m.yolopub_editor_locked()}</p>
 				<div class="yolo-curve-actions">
@@ -1431,23 +1447,29 @@
 		</section>
 	{/if}
 
-	<LivePanel
-		{app}
-		{curve}
-		{experimental}
-		profile={writeProfile}
-		saved={liveSaved}
-		savedCrc={liveSavedCrc}
-		heldCurve={liveSide === 'A' ? 'saved' : 'editor'}
-		followPaused={liveOn && freePreview}
-		blockedReason={loadingReason ?? yoloWriteReason}
-		{locale}
-		onbeforestart={(sent) => {
-			liveQueued = curveSignature(sent);
-			liveSide = 'B';
-		}}
-		onrevert={onLiveRevert}
-	/>
+	{#if livePanelNeeded}
+		{#await import('./LivePanel.svelte') then { default: LivePanel }}
+			<LivePanel
+				{app}
+				{curve}
+				{experimental}
+				profile={writeProfile}
+				saved={liveSaved}
+				savedCrc={liveSavedCrc}
+				heldCurve={liveSide === 'A' ? 'saved' : 'editor'}
+				followPaused={liveOn && freePreview}
+				blockedReason={loadingReason ?? yoloWriteReason}
+				{locale}
+				onbeforestart={(sent) => {
+					liveQueued = curveSignature(sent);
+					liveSide = 'B';
+				}}
+				onrevert={onLiveRevert}
+			/>
+		{:catch}
+			<p role="alert">{m.layout_error_generic()}</p>
+		{/await}
+	{/if}
 
 	<div class="instrument" aria-busy={app === null ? 'true' : 'false'}>
 		<div class="cheek" aria-hidden="true"></div>

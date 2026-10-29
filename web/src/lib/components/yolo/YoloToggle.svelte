@@ -22,7 +22,6 @@
 		YOLO_PHRASE,
 		type YoloState
 	} from '#lib/state/yolo.svelte.ts';
-	import YoloDialog from './YoloDialog.svelte';
 	import YoloGlyph from './YoloGlyph.svelte';
 
 	interface Props {
@@ -136,44 +135,48 @@
 </div>
 
 {#if consentOpen && !locked}
-	<YoloDialog
-		title={m.yolo_dialog_title()}
-		ondismiss={closeConsent}
-		initialFocus="[data-yolo-cancel]"
-		onsubmit={onSubmit}
-	>
-		<div class="yc-phrase" data-tone={phraseState}>
-			<label class="yc-label" for="{id}-phrase">{m.yolo_phrase_label()}</label>
-			<p class="yc-plate" aria-hidden="true">{YOLO_PHRASE}</p>
-			<p class="yc-note" id="{id}-note">{m.yolo_phrase_note()}</p>
-			<input
-				id="{id}-phrase"
-				class="yc-input"
-				type="text"
-				autocomplete="off"
-				autocapitalize="characters"
-				spellcheck="false"
-				bind:value={phrase}
-				aria-describedby="{id}-status {id}-note"
-				aria-invalid={phraseState === 'mismatch' ? 'true' : undefined}
-				data-yolo-phrase
-			/>
-			<p class="yc-status" id="{id}-status" aria-live="polite" data-yolo-phrase-status>
-				<span class="yc-dot" aria-hidden="true"></span>{phraseStatus}
-			</p>
-		</div>
-		{#snippet actions()}
-			<Button variant="plate" data-yolo-cancel onclick={closeConsent}>{m.yolo_cancel()}</Button>
-			<Button
-				type="submit"
-				variant="danger"
-				disabledReason={matches ? null : m.yolo_enable_locked()}
-				data-yolo-enable
-			>
-				{m.yolo_enable()}
-			</Button>
-		{/snippet}
-	</YoloDialog>
+	{#await import('./YoloDialog.svelte') then { default: YoloDialog }}
+		<YoloDialog
+			title={m.yolo_dialog_title()}
+			ondismiss={closeConsent}
+			initialFocus="[data-yolo-cancel]"
+			onsubmit={onSubmit}
+		>
+			<div class="yc-phrase" data-tone={phraseState}>
+				<label class="yc-label" for="{id}-phrase">{m.yolo_phrase_label()}</label>
+				<p class="yc-plate" aria-hidden="true">{YOLO_PHRASE}</p>
+				<p class="yc-note" id="{id}-note">{m.yolo_phrase_note()}</p>
+				<input
+					id="{id}-phrase"
+					class="yc-input"
+					type="text"
+					autocomplete="off"
+					autocapitalize="characters"
+					spellcheck="false"
+					bind:value={phrase}
+					aria-describedby="{id}-status {id}-note"
+					aria-invalid={phraseState === 'mismatch' ? 'true' : undefined}
+					data-yolo-phrase
+				/>
+				<p class="yc-status" id="{id}-status" aria-live="polite" data-yolo-phrase-status>
+					<span class="yc-dot" aria-hidden="true"></span>{phraseStatus}
+				</p>
+			</div>
+			{#snippet actions()}
+				<Button variant="plate" data-yolo-cancel onclick={closeConsent}>{m.yolo_cancel()}</Button>
+				<Button
+					type="submit"
+					variant="danger"
+					disabledReason={matches ? null : m.yolo_enable_locked()}
+					data-yolo-enable
+				>
+					{m.yolo_enable()}
+				</Button>
+			{/snippet}
+		</YoloDialog>
+	{:catch}
+		<p role="alert">{m.layout_error_generic()}</p>
+	{/await}
 {/if}
 
 <style>
