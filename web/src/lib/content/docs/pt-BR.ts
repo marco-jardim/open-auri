@@ -108,12 +108,17 @@ export const ptBR: DocsContent = {
 				'Frame: 45 51 31 23, comprimento u16 LE = 14 + 20 × n, depois 00 n 04 05 01 n 00 00, o preamp e n seções [b0, b2, −a1, b1, −a2]. O app oficial envia só os n filtros ativos; a página da Kuba e o open-auri sempre enviam 10, com as bandas desligadas como identidade. Frames com menos de 10 seções não foram testados neste cabo.',
 				'Depois dos dados vem o comando final: 01 tag 00 01 FF salva na flash; 01 tag 00 00 FF aplica sem salvar. Com a tag 0x65, salvar é exatamente o commit da página da Kuba (01 65 00 01 FF). Os dados sozinhos já aplicam ao vivo (medido no cabo); o efeito do comando oficial de aplicar sem salvar ainda não foi medido.',
 				'O protocolo tem uma só leitura: a tag de EQ. O pedido 80 00 00 00 FF, no report 0xCB, recebe a resposta 80 tag. No Auri real a resposta foi 80 65 00 00 FF, ou seja, tag 0x65 (101).',
-				'Versão de firmware e curva gravada não podem ser lidas deste cabo: o app oficial marca essas funções como não suportadas pelo chip, junto com modos e balanço do DAC, offsets de microfone e reset. Por isso a última curva conhecida é a registrada neste aparelho, não uma leitura do cabo.',
-				'O brief TTGK TT39510B01 descreve o bridge de áudio USB CB5100, com DSP e EQ integrados ao app Walk Play, mas não traz o protocolo HID. Se o Auri usa exatamente esse chip ou uma variante CB1100AU não está confirmado.'
+				'Não temos leitura validada da versão de firmware nem da curva gravada neste cabo. O app oficial marca essas funções como não suportadas; isso não prova inexistência no firmware. Também marca como não suportados modos e balanço do DAC, offsets de microfone e reset. A última curva conhecida é a registrada neste aparelho, não uma leitura do cabo.',
+				'O brief TTGK TT39510B01 descreve o bridge de áudio USB CB5100, com DSP e EQ integrados ao app Walk Play, mas não traz o protocolo HID. Se o Auri usa exatamente esse chip ou uma variante CB1100AU não está confirmado.',
+				'A decriptação externa de três downloads WalkPlay, para os PIDs 43CC, 43CD e C20F, foi validada localmente: AES-128-ECB, sem IV, com PKCS7 e chave textual UTF-8(MD5(code).hex.slice(0,16)), usando o campo value.code da UI. São 16 caracteres do digest como texto, não bytes decodificados de hex. Isso é separado do Base64 + XOR das respostas JSON, cuja chave ASCII literal é d2Fsa3BsYXlAMjAyNS4uLw==; não se aplica AES duas vezes.',
+				'Os três resultados têm container SPV@, cabeçalho de 32 B e quatro entradas CPU/MOD/PBK/EXT de 16 B. A validação cobre padding, tabela e limites das entradas não vazias; entradas vazias são apenas metadados e podem apontar além do fim do arquivo. Não foram validados checksum ou autenticidade. A região interna EncryptAddr/EncryptSize ainda está em estudo: não é decriptação completa do código nem reconstrução integral do protocolo, identificação da CPU ou prova de compatibilidade com o Auri. O guia técnico abaixo traz fontes, hashes e um script Node local que não sobrescreve arquivos; não executa firmware nem envia dados ao cabo.'
 			],
 			links: [
 				{ label: 'App oficial WalkPlay PEQ', href: 'https://peq.szwalkplay.com/' },
-				{ label: 'Espelho offline do app (Ircama/walkplay)', href: 'https://github.com/Ircama/walkplay' },
+				{
+					label: 'Espelho offline do app (Ircama/walkplay)',
+					href: 'https://github.com/Ircama/walkplay'
+				},
 				{
 					label: 'Brief do chip TT39510B01 (PDF)',
 					href: 'https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf'
@@ -125,6 +130,10 @@ export const ptBR: DocsContent = {
 				{
 					label: 'docs/protocol-0xcb.md no GitHub',
 					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/protocol-0xcb.md'
+				},
+				{
+					label: 'Guia de decriptação externa do firmware (Node local)',
+					href: 'https://github.com/marco-jardim/open-auri/blob/main/docs/firmware-analysis.md'
 				}
 			]
 		},
@@ -133,7 +142,7 @@ export const ptBR: DocsContent = {
 			title: 'Limites físicos',
 			paragraphs: [
 				'O formato conhecido oferece 10 seções, uma curva para os dois canais e taxa de projeto de 96 kHz (0 < f < 48 kHz). Não oferece EQ L/R independente, crossfeed, compressor, reverb, volume do cabo ou seletor do filtro do DAC.',
-				'O cabo só informa a tag de EQ: não há read-back da curva nem da versão de firmware, verify, pull ou rollback. Journal, snapshot e localStorage registram o envio no host, não o estado atual do cabo. Clock fixo e realização interna do DSP ainda não foram medidos.'
+				'A única leitura validada do cabo é a tag de EQ: não temos read-back validado da curva nem da versão de firmware, verify, pull ou rollback. Journal, snapshot e localStorage registram o envio no host, não o estado atual do cabo. Clock fixo e realização interna do DSP ainda não foram medidos.'
 			]
 		},
 		{
@@ -185,7 +194,7 @@ export const ptBR: DocsContent = {
 			title: 'O que não sabemos',
 			paragraphs: ['Nenhum teste de software substitui gravar, ouvir e medir o cabo real.'],
 			items: [
-				'Existe aplicação só em RAM ou verificação do CRC no firmware? Read-back da curva não existe: o cabo só informa a tag de EQ.',
+				'Existe aplicação só em RAM ou verificação do CRC no firmware? Read-back da curva não foi validado: a única leitura validada do cabo é a tag de EQ.',
 				'O que significam outras tags além de 0x65 e a flag que nega o preamp no app oficial? O cabo aceita frames com menos de 10 seções? Aplicar sem salvar (01 65 00 00 FF) muda algo em relação a enviar só os dados?',
 				'Qual é o tipo de flash, endurance, estratégia de apagamento e efeito de perder energia no commit?',
 				'Há click, estalo, mute ou transiente ao trocar durante áudio?',

@@ -85,6 +85,12 @@ têm um **buffer de hardware** (ex.: `-5 dB` no CrinEar Protocol Micro) somado a
 
 ## Servidor de firmware da WalkPlay
 
+A [nota de análise do firmware](firmware-analysis.md) documenta a decriptação
+externa AES validada nos 10 firmwares guardados (os 3 do guia e os 7 do
+[catálogo](firmware-catalog.md)), separada do XOR de JSON abaixo, com fontes,
+hashes e reprodução offline em Node. Não implementa transporte nem demonstra
+compatibilidade com o Auri.
+
 Extraído do app oficial em 2026-10-28 (endereço e chave estavam ofuscados no
 bundle; abaixo, já decodificados). Responde sem login.
 
@@ -129,6 +135,14 @@ de outro aparelho no cabo pode inutilizá-lo**.
 | `0x1233` | CB1200 | `CB1200_1233_V0.2_260920_LRFIX_EQFIX` | 11 | 0.2 | <https://walkplay-api.szwalkplay.com/api/common/download/20260920151619ba5e7009eedffe9e1a.bin> |
 | `0x1237` | CB1200 | `CB1200_0x1237_v0.5_uac12` | 11 | 0.5 | <https://walkplay-api.szwalkplay.com/api/common/download/202610141046545aa0863bc02a3f7ef3.bin> |
 | `0x123F` | CB1200 | `CB1200_0x123F_V0.7` | 11 | 0.7 | <https://walkplay-api.szwalkplay.com/api/common/download/202610131606034db6691ed26a976e65.bin> |
+| `0x4308` | CB5100 | `CB5100_PID4308_V0.2` | 15 | V0.2 | <https://walkplay-api.szwalkplay.com/api/common/download/202601121433098aaacd1d65fda411f2.bin> |
+| `0x43EE` | CB5100 | `CB5100_43EE_V1.0.1` | 15 | 1.0.1 | <https://walkplay-api.szwalkplay.com/api/common/download/20260904135007c3d6bd1c97306e42a1.bin> |
+| `0x431D` | CB5100 | `CB5100PRO_0x431D_V0.2` | 16 | 0.2 | <https://walkplay-api.szwalkplay.com/api/common/download/20260720182231c51d9e0f8b26523cce.bin> |
+| `0x4336` | CB5100 | `CB5100_V0.2_20261026_4336` | 16 | 0.2 | <https://walkplay-api.szwalkplay.com/api/common/download/20261026120741b4b52ee76f2deaadfc.bin> |
+
+O [catálogo dos dez arquivos guardados](firmware-catalog.md) registra os hashes,
+a proveniência e a comparação offline dos descritores HID em 2026-10-29.
+Chip e esquema são rótulos da API, não confirmação de hardware ou protocolo.
 
 A varredura cobriu os PIDs `0x1200–0x12FF`, `0x2900–0x29FF`, `0x33C0–0x33CF`,
 `0x4300–0x43FF`, `0x8900–0x89FF` e `0xC200–0xC2FF`; a tabela pode crescer.

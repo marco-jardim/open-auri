@@ -140,12 +140,73 @@ for (const locale of ['pt-BR', 'en-US'] as const) {
 				'https://github.com/Ircama/walkplay',
 				'https://szttgk.com/uploads/files/20240725/51fad44bb79a05a35046af38b0017de5.pdf',
 				'https://szttgk.com/en/product/HIFIhighfidelityaudiomodule/815.html',
-				'https://github.com/marco-jardim/open-auri/blob/main/docs/protocol-0xcb.md'
+				'https://github.com/marco-jardim/open-auri/blob/main/docs/protocol-0xcb.md',
+				'https://github.com/marco-jardim/open-auri/blob/main/docs/firmware-analysis.md'
 			]);
 			const index = buildSearchIndex(content);
 			expect(searchSections(index, 'CB1100AU').map((result) => result.id)).toEqual([
 				'protocolo-cabo'
 			]);
+		});
+		test('outer firmware decryption is reproducible and does not claim cable capabilities', () => {
+			const text = content.sections
+				.find((entry) => entry.id === 'protocolo-cabo')!
+				.paragraphs.join(' ');
+			for (const fact of [
+				'43CC',
+				'AES-128-ECB',
+				'PKCS7',
+				'UTF-8(MD5(code).hex.slice(0,16))',
+				'value.code',
+				'Base64 + XOR',
+				'd2Fsa3BsYXlAMjAyNS4uLw==',
+				'SPV@',
+				'CPU/MOD/PBK/EXT',
+				'EncryptAddr/EncryptSize',
+				'43CD',
+				'C20F'
+			])
+				expect(text).toContain(fact);
+			expect(text).toMatch(
+				locale === 'pt-BR'
+					? /16 caracteres.*não bytes decodificados de hex/
+					: /16 digest characters.*not hex-decoded bytes/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR' ? /separado do Base64 \+ XOR/ : /separate from Base64 \+ XOR/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR' ? /não se aplica AES duas vezes/ : /AES must not be applied twice/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR' ? /Não temos leitura validada/ : /no validated read-back/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR'
+					? /não prova inexistência no firmware/
+					: /does not prove their absence from firmware/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR'
+					? /não é decriptação completa.*prova de compatibilidade/
+					: /not complete code decryption.*proof of Auri compatibility/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR'
+					? /Não foram validados checksum ou autenticidade/
+					: /Neither checksum nor authenticity was validated/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR'
+					? /três downloads.*foi validada localmente/
+					: /three WalkPlay downloads.*was validated locally/
+			);
+			expect(text).toMatch(
+				locale === 'pt-BR'
+					? /entradas vazias são apenas metadados.*além do fim/
+					: /empty entries are metadata only.*beyond the end/
+			);
+			expect(text).not.toMatch(/pendente|pending|rejected/);
 		});
 		test('search indexes every section, glossary, credits and exact threshold values locally', () => {
 			const index = buildSearchIndex(content);

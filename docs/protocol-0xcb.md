@@ -198,6 +198,12 @@ O servidor de firmware que o app usa, com endereço e chave já decodificados e
 os links diretos dos firmwares publicados, está em
 [`ecosystem.md`](ecosystem.md#servidor-de-firmware-da-walkplay).
 
+A [análise do firmware](firmware-analysis.md) registra a decriptação externa
+AES validada localmente nos 10 firmwares guardados (os 3 do guia e os 7 do
+[catálogo](firmware-catalog.md)) e um script Node reproduzível. O container
+obtido não prova decriptação completa do código, protocolo integral ou
+compatibilidade com o Auri; não foi enviado ao cabo.
+
 Ressalvas sobre o app:
 
 - **O caminho principal do app não usa essa classe.** A fábrica de classes
@@ -212,8 +218,9 @@ Ressalvas sobre o app:
   medição B10.
 
 > **"A página nunca lê" continua valendo para a página do kuba.** O protocolo,
-> porém, tem **exatamente uma leitura**: a tag de EQ (abaixo). Versão de
-> firmware e curva gravada **não** podem ser lidas deste cabo.
+> porém, tem uma leitura validada: a tag de EQ (abaixo). Não temos leitura
+> validada da versão de firmware nem da curva gravada neste cabo. O app
+> declara essas funções não suportadas; isso não prova ausência no firmware.
 
 ### Constantes da classe
 
@@ -303,9 +310,10 @@ Para esta classe, o app marca como `"芯片不支持"` ("o chip não suporta"):
 E também `getIsSupportNoiseReduction = false` e
 `getIsSupportDacFilterMode = false`.
 
-Consequência: **versão de firmware e curva gravada não podem ser lidas deste
-cabo**; só a tag de EQ. Sem read-back, a última curva conhecida continua sendo
-a registrada no host.
+Consequência: **não temos leitura validada da versão de firmware nem da curva
+gravada neste cabo**; só da tag de EQ. A declaração do app não prova inexistência
+dessas funções no firmware. A última curva conhecida continua sendo a registrada
+no host, não uma leitura do cabo.
 
 ### Chip
 
