@@ -160,7 +160,7 @@ export const enUS: DocsContent = {
 			paragraphs: [
 				'Use ♪ Audio in the top bar to load an MP3 or other supported audio. The file stays on this device, in the open-auri IndexedDB audio store; it is never uploaded. Remove it in the loader or erase local data to delete it.',
 				'Preview uses streaming playback. Where possible it runs at 96 kHz, with exact Q27 IIR sections and Q23 preamp; at another rate coefficients are recalculated and the preview is labeled approximate. Without a file it uses local pink noise. Comparisons and browser blind tests match levels to the quietest candidate.',
-				'Preview volume affects only the browser. Internal chip arithmetic is unknown. Listening through the cable adds its persisted curve: use another output or explicitly write Neutral first. Browser blind tests never write to the cable.'
+				'Preview volume affects only the browser. Internal chip arithmetic is unknown. Listening through the cable adds its persisted curve. To hear only the curve, use Hear on the cable (Curve), Compare on the cable (Compare, Sound like X, Community and Library) or the On the cable tab (Blind test): the curve goes to the cable memory without saving, the browser plays without EQ and, once unplugged, the cable goes back to its saved curve. Or use another output, or explicitly write Neutral first. Browser blind tests never write to the cable.'
 			],
 			links: [
 				{ label: 'Compare curves', href: '/comparar' },

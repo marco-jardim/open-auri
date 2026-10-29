@@ -2,8 +2,12 @@
 	Master scope (S4): response overlay of the selected strips against your editor curve, the S4
 	distance of the scope target, and A/B listening on the shared audio engine (level matched by
 	`createAB`). "Gravar no cabo" only opens the layout's checklist through `requestWrite`.
+	The page may hand a `cable` snippet ("Comparar no cabo", rendered under the A/B row) and an
+	`onside` callback (the A/B keys mirrored to the cable). While the browser plays flat (the cable
+	applies the EQ), the level-match trims are not shown: the browser applies no curve then.
 -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { FREQUENCY_TICKS, dbTicks, frequencyLabel } from '#lib/charts/scales.ts';
 	import { formatNumber } from '#lib/components/cable/i18n.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
@@ -35,7 +39,11 @@
 		onuse,
 		oninstall,
 		onopen,
-		yoloReady = false
+		yoloReady = false,
+		bChoice = $bindable('editor'),
+		flat = false,
+		cable,
+		onside
 	}: {
 		selected: Channel[];
 		editor: DecodedCurve | null;
@@ -48,12 +56,18 @@
 		onopen: (channel: Channel) => void;
 		/** Modo YOLO is on (Engenharia, this tab) and may write: a YOLO curve can go to the cable. */
 		yoloReady?: boolean;
+		/** B side: 'editor' or the lineage id of another selected strip (bindable: the page's B). */
+		bChoice?: string;
+		/** The browser plays flat (the cable applies the EQ): no level-match trims to show. */
+		flat?: boolean;
+		/** Rendered under the A/B row (the page's "Comparar no cabo"). */
+		cable?: Snippet;
+		/** The scope's A/B keys chose a side while the scope plays. */
+		onside?: (side: 'A' | 'B') => void;
 	} = $props();
 
 	const id = $props.id();
 	let range = $state(12);
-	/** B side: 'editor' or the lineage id of another selected strip. */
-	let bChoice = $state('editor');
 	let bSelect = $state<HTMLSelectElement | undefined>();
 
 	const target = $derived(selected[0] ?? null);
@@ -128,7 +142,9 @@
 	}
 
 	function choose(side: 'A' | 'B') {
-		if (scopeListening) listener.select(side);
+		if (!scopeListening) return;
+		listener.select(side);
+		onside?.(side);
 	}
 
 	/** Transport play with nothing of the page paused: the scope's A/B (a stale one goes). */
@@ -289,17 +305,21 @@
 		{#if scopeListening}
 			<small class="ab-b-why" id="{id}-b-why">{m.fuxq1_scope_b_listening()}</small>
 		{/if}
-		<span class="ab-read" aria-live="polite">
-			{#if trims}
-				{m.comunidade_ab_matched({
-					a: formatNumber(trims[0], 1, true),
-					b: formatNumber(trims[1], 1, true)
-				})}
-			{:else}
-				{m.comunidade_ab_note()}
+		<span class="ab-read" aria-live="polite" data-testid="scope-ab-read">
+			<!-- Flat: the browser applies no curve, so there is no level match to report. -->
+			{#if !flat}
+				{#if trims}
+					{m.comunidade_ab_matched({
+						a: formatNumber(trims[0], 1, true),
+						b: formatNumber(trims[1], 1, true)
+					})}
+				{:else}
+					{m.comunidade_ab_note()}
+				{/if}
 			{/if}
 		</span>
 	</div>
+	{@render cable?.()}
 	<!-- The page's preview, whichever panel started it: pause keeps the pair, side and trims;
 	     with nothing paused, play is the scope's own A/B start. -->
 	<div class="scope-transport">

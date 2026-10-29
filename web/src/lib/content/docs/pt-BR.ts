@@ -160,7 +160,7 @@ export const ptBR: DocsContent = {
 			paragraphs: [
 				'Use ♪ Áudio na barra superior para carregar um MP3 ou outro áudio compatível. O arquivo fica apenas no IndexedDB open-auri, store audio, neste aparelho; nunca é enviado. Remover no carregador ou apagar dados locais o elimina.',
 				'A prévia toca por streaming. Quando possível, usa 96 kHz, seções IIR com coeficientes Q27 exatos e preamp Q23; em outra taxa recalcula os coeficientes e indica prévia aproximada. Sem arquivo, usa ruído rosa local. Comparações e teste cego no navegador igualam o nível pelo candidato mais baixo.',
-				'O volume da prévia é só no navegador. A aritmética interna do chip é desconhecida. Ouvir pela saída do próprio cabo soma a curva já persistida: use outra saída ou grave Neutro explicitamente antes. O teste cego no navegador não grava no cabo.'
+				'O volume da prévia é só no navegador. A aritmética interna do chip é desconhecida. Ouvir pela saída do próprio cabo soma a curva já persistida. Para ouvir só a curva, use Ouvir no cabo (Curva), Comparar no cabo (Comparar, Soe como X, Comunidade e Biblioteca) ou a aba No cabo (Teste cego): a curva vai para a memória do cabo, sem gravar, o navegador toca sem EQ e, ao desconectar, o cabo volta à curva salva. Ou use outra saída, ou grave Neutro explicitamente antes. O teste cego no navegador não grava no cabo.'
 			],
 			links: [
 				{ label: 'Comparar curvas', href: '/comparar' },

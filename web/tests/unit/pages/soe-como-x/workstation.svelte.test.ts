@@ -7,7 +7,10 @@ import { setLocale } from '#lib/paraglide/runtime.js';
 import { m } from '#lib/paraglide/messages.js';
 import { neutralCurve } from '#lib/state/model.ts';
 import Workstation from '#lib/components/pages/soe-como-x/Workstation.svelte';
+import { createClientApp } from '#lib/app/index.ts';
+import { CABLE_LIVE_KEY } from '#lib/cable/service.ts';
 import { CSV, fakeDataClient, fitResult, measurement } from './fixtures.ts';
+import { fakeAppOptions } from '../../app/fakes.ts';
 
 afterEach(async () => {
 	await cleanup();
@@ -298,3 +301,41 @@ test('missing Worker and factory failure are explicit and never expose a usable 
 	await expect.element(page.getByText(m.soe_worker_unavailable(), { exact: true })).toBeVisible();
 	await expect.element(page.getByRole('button', { name: m.soe_use() })).not.toBeInTheDocument();
 });
+
+test('the app prop reaches the preview: "Comparar no cabo" with a connected cable', async () => {
+	localStorage.removeItem(CABLE_LIVE_KEY);
+	const fake = fakeAppOptions();
+	const app = createClientApp(fake.options);
+	try {
+		await app.start();
+		expect(await app.cable.connect()).not.toBeNull();
+		const worker = {
+			solve: vi.fn(async () => ({ result: fitResult() })),
+			cancel: vi.fn(),
+			dispose: vi.fn()
+		};
+		const screen = await render(Workstation, {
+			app,
+			dataClient: fakeDataClient(),
+			solverFactory: () => worker,
+			current: neutralCurve()
+		});
+		await expect.poll(() => document.querySelectorAll('#soe-measurement option').length).toBe(2);
+		await select('soe-measurement', measurement.id);
+		await select('soe-target', 'target-0');
+		await solveButton().click();
+		await expect.element(page.getByText(m.soe_gate_pass(), { exact: true })).toBeVisible();
+		const preview = page.getByRole('region', { name: m.soe_preview() });
+		await expect
+			.element(preview.getByRole('button', { name: m.cable_x2_start(), exact: true }))
+			.toBeVisible();
+		expect(screen.container.querySelector('.preview [data-cable-ab]')).not.toBeNull();
+		await expect
+			.poll(() => document.querySelector('.preview [role="note"]')?.textContent)
+			.toContain(m.cable_sum_note());
+	} finally {
+		await cleanup();
+		app.dispose();
+		localStorage.removeItem(CABLE_LIVE_KEY);
+	}
+}, 20000);

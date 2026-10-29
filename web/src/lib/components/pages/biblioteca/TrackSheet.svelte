@@ -1,10 +1,19 @@
 <script lang="ts">
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { encodeS1 } from 'open-auri/share';
 	import type { ClientApp } from '#lib/app/client.svelte.ts';
-	import type { ABPreview, ABSide, AudioEngine, AudioEngineState } from '#lib/audio/engine.ts';
+	import type {
+		ABPreview,
+		ABSide,
+		AudioEngine,
+		AudioEngineState,
+		PreviewCurve
+	} from '#lib/audio/engine.ts';
 	import { LIVE_WINDOW_MS, tap, type MeterTap, type MeterUpdate } from '#lib/audio/meters.ts';
-	import type { CurveData } from '#lib/state/model.ts';
+	import type { CurrentCurve, CurveData } from '#lib/state/model.ts';
+	import CableCompare from '#lib/components/cable/CableCompare.svelte';
+	import CableSumNotice from '#lib/components/cable/CableSumNotice.svelte';
+	import { appBrowserFlat, flatCurve, liveComparing } from '#lib/components/cable/flat.ts';
 	import {
 		LIBRARY_DESCRIPTION_MAX,
 		LIBRARY_NAME_MAX,
@@ -86,6 +95,17 @@
 	const outputNode = $derived(
 		metering && audible ? (side === 'A' ? audible.a.output : audible.b.output) : null
 	);
+	// --- "Comparar no cabo" (issue #89) ---------------------------------------------------------
+	// While the cable plays a live curve that is not its saved one, the cable applies the EQ: the
+	// browser A/B plays the flat Neutro curve on both sides, so two curves are never summed.
+	const cableFlat = $derived(appBrowserFlat(app));
+	/** The selected tape as a plain copy (a deep $state proxy in the archive, R2-02). */
+	const tapeSnapshot = $derived($state.snapshot(tape));
+	let cableCompare: ReturnType<typeof CableCompare> | undefined = $state();
+	/** A curve as the browser plays it: flat while the cable applies the EQ. */
+	function heard<T extends PreviewCurve>(curve: T): T {
+		return cableFlat ? flatCurve(curve) : curve;
+	}
 	/** QR and link: in Engenharia for HS/LP/HP or a band above 20 kHz (`tapeShareUrl`). */
 	const share = $derived.by(() => {
 		try {
@@ -305,6 +325,33 @@
 		comparedTape = tape;
 	});
 	onDestroy(stop);
+	/**
+	 * The cable started or stopped applying the EQ: the running (or starting) audition is rebuilt
+	 * with the curves as heard now, same side, without stopping the engine session. The new A/B
+	 * exists before the old one goes; the Preamp tap follows `audible` to the new chain.
+	 */
+	function retune() {
+		const engine = app?.audio;
+		const previous = preview;
+		if (!engine || !previous) return;
+		if (!busy && !(startedBy === engine && owned(engine))) return;
+		let next: ABPreview;
+		try {
+			next = engine.createAB(heard(current), heard(tape), { experimental: true, initial: side });
+		} catch (error) {
+			stop();
+			onStatus(m.biblioteca_audio_error());
+			console.error('Biblioteca preview failed', error);
+			return;
+		}
+		preview = next;
+		if (audible === previous) audible = next;
+		previous.dispose();
+	}
+	$effect(() => {
+		void cableFlat;
+		untrack(retune);
+	});
 	// Preamp dial: the selected chain only, never the shared meter bus or the other side.
 	$effect(() => {
 		const node = outputNode;
@@ -359,6 +406,8 @@
 	async function listen(selected: ABSide) {
 		if (!app || busy) return;
 		const engine = app.audio;
+		// A running "Comparar no cabo" follows the same side on the cable (no-op otherwise).
+		void cableCompare?.choose(selected === 'A' ? 0 : 1);
 		try {
 			if (preview && startedBy === engine && owned(engine)) {
 				// Same comparison: switch sides at the same moment; a paused one continues.
@@ -370,7 +419,10 @@
 			stop();
 			const token = ++attempt;
 			busy = true;
-			preview = engine.createAB(current, tape, { experimental: true, initial: selected });
+			preview = engine.createAB(heard(current), heard(tape), {
+				experimental: true,
+				initial: selected
+			});
 			side = selected;
 			// A comparison starts at a random point of the file (SEEK.2); the file loops.
 			await engine.start('chains', { startAt: 'random', session: BIBLIOTECA_SESSION });
@@ -472,6 +524,26 @@
 			yolo ? { profile: 'yolo' } : {}
 		);
 		onClose();
+	}
+	/**
+	 * "Salvar esta" of the cable comparison: the normal write checklist on the original curve of
+	 * the side the cable plays (a comparison never carries a YOLO curve), then the sheet closes.
+	 * Closing unmounts the comparison, which ends there without reverting (the write checklist
+	 * then takes over): the page's status says so, since the sheet's own note goes with it.
+	 */
+	function saveFromCable(curve: CurrentCurve) {
+		if (!app) return;
+		stop();
+		app.requestWrite(curve);
+		onStatus(m.cable_x2_ended_stopped());
+		onClose();
+	}
+	/** The cable side changed from the comparison's own lever: the browser A/B follows it. */
+	function followCable(index: 0 | 1) {
+		const next: ABSide = index === 0 ? 'A' : 'B';
+		if (next === side) return;
+		side = next;
+		preview?.select(next);
 	}
 </script>
 
@@ -627,7 +699,25 @@
 				onplay={() => listen(side)}
 				playDisabledReason={audioReason}
 			/>
-			<p>{m.biblioteca_listen_note()}</p>
+			{#if app?.cableState}
+				<!-- A modal dialog: no window A/B/Space keys; closing ends it without reverting. -->
+				<CableCompare
+					bind:this={cableCompare}
+					{app}
+					a={{ key: 'editor', name: current.name, curve: current }}
+					b={{ key: tape.id, name: tape.name, curve: tapeSnapshot }}
+					match
+					flat={cableFlat}
+					first={side === 'A' ? 0 : 1}
+					keys={false}
+					ownEndedOnly
+					onsave={saveFromCable}
+					onchoose={followCable}
+				/>
+			{/if}
+			<!-- Flat on both sides, the level match says nothing: the sum notice explains it. -->
+			{#if !cableFlat}<p>{m.biblioteca_listen_note()}</p>{/if}
+			<CableSumNotice {app} flat={cableFlat} comparing={liveComparing(app?.cableState?.live)} />
 			{#if !audioState.exact}<p>{m.biblioteca_approximate()}</p>{/if}
 		</section>
 		<section class="paper" aria-label={m.biblioteca_sheet()}>

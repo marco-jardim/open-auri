@@ -7,6 +7,9 @@
 // (`startAt: 'random'`), tagged `COMUNIDADE_SESSION`; the file loops. A pause (Transport, navbar)
 // keeps the pair, the side and the trims and stops counting audible time; a resume counts again.
 // Only `stop` (a panel's own stop, a new preview, unmount) ends the session with `engine.stop()`.
+// Cable (issue #89): while the cable applies a live curve (`flat`), the non-blind previews play the
+// flat Neutro curve (the cable adds the EQ) and that time never counts as listening to a channel;
+// `refresh` swaps the pair in place when it changes. Blind rounds never go flat.
 import type {
 	ABPreview,
 	ABSide,
@@ -16,6 +19,7 @@ import type {
 	PreviewCurve
 } from '#lib/audio/engine.ts';
 import { PREVIEW_MIN_MS } from '#lib/social/index.ts';
+import { flatCurve } from '#lib/components/cable/flat.ts';
 import { createKeyedStore } from './keyed.ts';
 
 export interface ListenSide {
@@ -38,6 +42,11 @@ export interface ListenerOptions {
 	engine: () => AudioEngine | null;
 	/** Called once per lineage and page session when its audible preview reaches 10 s. */
 	onPreviewed?: (lineageId: string, durationMs: number) => void;
+	/**
+	 * The cable applies the EQ (a live curve that is not its saved one): non-blind previews play
+	 * flat and their time does not count as listening. Blind rounds ignore it.
+	 */
+	flat?: () => boolean;
 	now?: () => number;
 	setTimer?: (callback: () => void, ms: number) => unknown;
 	clearTimer?: (handle: unknown) => void;
@@ -65,6 +74,8 @@ export function createListener(options: ListenerOptions) {
 	let busy = $state(false);
 	/** The running preview is paused (resumable): nothing counts as audible meanwhile. */
 	let paused = $state(false);
+	/** The running pair was built flat (Neutro on both sides): what the browser really plays. */
+	let builtFlat = $state(false);
 	let engine: AudioEngine | null = null;
 	let unsubscribe: (() => void) | null = null;
 	let attempt = 0;
@@ -74,6 +85,24 @@ export function createListener(options: ListenerOptions) {
 	const reported = createKeyedStore<true>();
 	let segment: { lineageId: string; startedAt: number } | null = null;
 	let timer: unknown = null;
+
+	/** A non-blind preview while the cable applies the EQ: the browser adds none. */
+	function flatFor(request: ListenRequest): boolean {
+		return !request.blind && options.flat?.() === true;
+	}
+
+	/** The curve the browser plays for `request`: flat Neutro while the cable applies the EQ. */
+	function heard(request: ListenRequest, curve: PreviewCurve): PreviewCurve {
+		return flatFor(request) ? flatCurve(curve) : curve;
+	}
+
+	/**
+	 * The running non-blind preview is (or must now be) flat: the user hears the cable's curve,
+	 * not a channel's, so no channel claims to play.
+	 */
+	function flatNow(): boolean {
+		return !!active && !active.request.blind && (builtFlat || flatFor(active.request));
+	}
 
 	function audibleLineage(): string | null {
 		if (!active) return null;
@@ -96,6 +125,8 @@ export function createListener(options: ListenerOptions) {
 		closeSegment();
 		const lineageId = audibleLineage();
 		if (lineageId === null || !engine || !engine.state().playing) return;
+		// Flat (the cable plays its own curve): this is not listening to the channel.
+		if (active && flatFor(active.request)) return;
 		segment = { lineageId, startedAt: now() };
 		if (reported.has(lineageId)) return;
 		const remaining = Math.max(0, PREVIEW_MIN_MS - (totals.get(lineageId) ?? 0));
@@ -130,6 +161,7 @@ export function createListener(options: ListenerOptions) {
 		preview = null;
 		active = null;
 		paused = false;
+		builtFlat = false;
 		busy = false;
 	}
 
@@ -164,7 +196,10 @@ export function createListener(options: ListenerOptions) {
 		busy = true;
 		let created: ABPreview | null = null;
 		try {
-			created = target.createAB(request.a.curve, request.b.curve, {
+			const flatBuilt = flatFor(request);
+			const curveA = heard(request, request.a.curve);
+			const curveB = heard(request, request.b.curve);
+			created = target.createAB(curveA, curveB, {
 				experimental: true,
 				initial: request.initial
 			});
@@ -178,9 +213,12 @@ export function createListener(options: ListenerOptions) {
 			engine = target;
 			preview = created;
 			active = { request, side: request.initial };
+			builtFlat = flatBuilt;
 			paused = false;
 			unsubscribe = target.onChange(follow);
 			openSegment();
+			// The cable went flat (or back) while starting: a `refresh` meanwhile had no pair yet.
+			if (flatFor(request) !== builtFlat) refresh();
 		} catch (error) {
 			if (owned(target)) target.stop();
 			created?.dispose();
@@ -196,6 +234,41 @@ export function createListener(options: ListenerOptions) {
 		preview.select(side);
 		active = { ...active, side };
 		openSegment();
+	}
+
+	/**
+	 * Rebuilds the running non-blind pair in place (flat or not, per `options.flat`), on the same
+	 * side, without stopping the engine; the old pair is disposed. `chainOf` then returns the new
+	 * chains, so the LEDs follow. The audible segment is closed and reopened, so a flat period is
+	 * never counted. A pair that cannot be rebuilt ends the session (never a doubled EQ). A pair
+	 * already built as `options.flat` asks is left alone.
+	 */
+	function refresh() {
+		if (!active || !preview || !engine || active.request.blind) return;
+		const { request, side } = active;
+		const flat = flatFor(request);
+		if (flat === builtFlat) return;
+		closeSegment();
+		let next: ABPreview;
+		try {
+			const curveA = heard(request, request.a.curve);
+			const curveB = heard(request, request.b.curve);
+			next = engine.createAB(curveA, curveB, { experimental: true, initial: side });
+		} catch (error) {
+			console.warn(
+				JSON.stringify({
+					event: 'comunidade.refresh_failed',
+					error: error instanceof Error ? error.name : 'unknown'
+				})
+			);
+			release();
+			return;
+		}
+		const old = preview;
+		preview = next;
+		builtFlat = flat;
+		old.dispose();
+		if (!paused) openSegment();
 	}
 
 	/** Pauses the running preview (`engine.pause()`), keeping it resumable. */
@@ -234,21 +307,34 @@ export function createListener(options: ListenerOptions) {
 		get owner(): string | null {
 			return active?.request.owner ?? null;
 		},
-		/** True while `lineageId` is the audible side of a non-blind preview (not while paused). */
-		isPlaying(lineageId: string): boolean {
+		/**
+		 * True while `lineageId` is the side the running non-blind preview plays (not while paused),
+		 * flat or not: what a hidden channel's stop needs, never a "playing" mark.
+		 */
+		isAudible(lineageId: string): boolean {
 			return !!active && !paused && !active.request.blind && audibleLineage() === lineageId;
 		},
 		/**
+		 * True while `lineageId` is the audible side of a non-blind preview (not while paused, nor
+		 * while flat: the cable's curve plays then, not the channel's).
+		 */
+		isPlaying(lineageId: string): boolean {
+			return (
+				!!active && !paused && !active.request.blind && !flatNow() && audibleLineage() === lineageId
+			);
+		},
+		/**
 		 * The chain of `lineageId` while it is audible (its real output feeds the LEDs); null while
-		 * paused, so no LED lights without real frames.
+		 * paused or flat, so no LED lights without the channel's real frames.
 		 */
 		chainOf(lineageId: string): PreviewChain | null {
-			if (!active || !preview || paused || active.request.blind) return null;
+			if (!active || !preview || paused || active.request.blind || flatNow()) return null;
 			if (audibleLineage() !== lineageId) return null;
 			return active.side === 'A' ? preview.a : preview.b;
 		},
 		play,
 		select,
+		refresh,
 		pause,
 		resume,
 		stop: release,

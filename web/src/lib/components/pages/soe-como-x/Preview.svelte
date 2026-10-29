@@ -20,17 +20,28 @@
 	import { Transport } from '#lib/components/audio/index.ts';
 	import { Explainer } from '#lib/components/comprehension/index.ts';
 	import type { CurveData } from '#lib/state/model.ts';
+	import type { ClientApp } from '#lib/app/client.svelte.ts';
+	import CableCompare from '#lib/components/cable/CableCompare.svelte';
+	import CableSumNotice from '#lib/components/cable/CableSumNotice.svelte';
+	import { appBrowserFlat, flatCurve, liveComparing } from '#lib/components/cable/flat.ts';
 	let {
+		app = null,
 		audio,
 		current,
 		candidate,
 		reference = -18
 	}: {
+		/** The client app: the cable comparison ("Comparar no cabo") and its sum notice. */
+		app?: ClientApp | null;
 		audio: AudioEngine | null;
 		current: CurveData | null;
 		candidate: CurveData;
+		/** The VU meter reference (dBFS), not a curve. */
 		reference?: VuReference;
 	} = $props();
+	/** The cable plays a live curve: the browser chains play flat (no EQ on top of it). */
+	const cableFlat = $derived(appBrowserFlat(app));
+	let cableCompare = $state<CableCompare | undefined>();
 	let selected = $state<ABSide>('B');
 	let playing = $state(false);
 	let pending = $state(false);
@@ -45,7 +56,12 @@
 	let preview: ABPreview | null = null;
 	// Reactive so the reference effect also reaches taps attached after it last ran.
 	let taps = $state.raw<MeterTap[]>([]);
+	/** The engine subscription (kept across a rebuild). */
 	let stops: (() => void)[] = [];
+	/** The tap subscriptions (replaced on a rebuild). */
+	let tapStops: (() => void)[] = [];
+	/** Whether the playing chains were built flat (the cable applies the EQ). */
+	let builtFlat = false;
 	let spectrumNode: AudioNode | null = null;
 	let generation = 0;
 	/** The engine this preview put in chain mode; it stops it when the audition ends. */
@@ -71,12 +87,7 @@
 		stops = [];
 		// Whatever this preview made audible stops with it (page change, unmount, new snapshot).
 		release();
-		for (const handle of taps) handle.disconnect();
-		taps = [];
-		if (analyser && spectrumNode) spectrumNode.disconnect(analyser);
-		analyser?.disconnect();
-		analyser = null;
-		spectrumNode = null;
+		detach();
 		preview?.dispose();
 		preview = null;
 		// The shared source belongs to the chrome: it is stopped only if this preview started it.
@@ -105,11 +116,109 @@
 		spectrumNode = preview ? (selected === 'A' ? preview.a.output : preview.b.output) : null;
 		analyser = spectrumNode ? createSpectrumAnalyser(spectrumNode) : null;
 	}
-	function select(side: ABSide) {
+	/** The browser's A/B only (the cable is not told). */
+	function show(side: ABSide) {
 		selected = side;
 		preview?.select(side);
 		if (preview) spectrum();
 	}
+	function select(side: ABSide) {
+		show(side);
+		// The cable comparison follows the browser's A/B (a no-op unless it runs).
+		void cableCompare?.choose(side === 'A' ? 0 : 1);
+	}
+	/** The cable side changed from its own lever or keys: the browser's A/B follows it. */
+	function followCable(index: 0 | 1) {
+		const side: ABSide = index === 0 ? 'A' : 'B';
+		if (side !== selected) show(side);
+	}
+	/** The meter taps, their subscriptions and the spectrum go (the chains stay). */
+	function detach() {
+		for (const stop of tapStops) stop();
+		tapStops = [];
+		for (const handle of taps) handle.disconnect();
+		taps = [];
+		if (analyser && spectrumNode) spectrumNode.disconnect(analyser);
+		analyser?.disconnect();
+		analyser = null;
+		spectrumNode = null;
+	}
+	/**
+	 * Creates the level-matched A/B chains (editor, result) and checks they exist. While the
+	 * cable plays a live curve both play flat: the cable applies the EQ.
+	 */
+	function build(engine: AudioEngine, editor: CurveData) {
+		const flat = cableFlat;
+		const browser = (curve: CurveData) => (flat ? flatCurve(curve) : curve);
+		preview = engine.createAB(browser(editor), browser(candidate), {
+			initial: selected,
+			experimental: true
+		});
+		builtFlat = flat;
+		trims = preview.trims;
+		active = true;
+		if (!engine.getChainOutput(preview.a.id) || !engine.getChainOutput(preview.b.id)) {
+			throw new Error('preview:missing-chain');
+		}
+		exact = engine.state().exact;
+	}
+	/** Taps the chains' outputs (VU A and B) and the selected side's spectrum. */
+	async function attach(engine: AudioEngine, token: number) {
+		const built = preview;
+		const aNode = built ? engine.getChainOutput(built.a.id) : null;
+		const bNode = built ? engine.getChainOutput(built.b.id) : null;
+		if (!aNode || !bNode) throw new Error('preview:missing-chain');
+		const first = await tap(aNode, { kinds: ['vu'], reference });
+		if (token !== generation) {
+			first.disconnect();
+			return;
+		}
+		taps = [...taps, first];
+		const second = await tap(bNode, { kinds: ['vu'], reference });
+		if (token !== generation) {
+			second.disconnect();
+			return;
+		}
+		taps = [...taps, second];
+		tapStops.push(first.subscribe((update) => (a = update)));
+		tapStops.push(second.subscribe((update) => (b = update)));
+		spectrum();
+	}
+	/**
+	 * The cable's live state changed whether the browser plays flat: the chains are rebuilt in
+	 * place (side kept), without stopping the engine session. The new A/B exists before the old
+	 * one goes; the taps follow the new chains.
+	 */
+	function retune() {
+		const engine = audio;
+		const editor = current;
+		const old = preview;
+		if (!engine || !editor || !old || pending || builtFlat === cableFlat) return;
+		// Only this preview's own session is rebuilt (never another page's or a raw one).
+		if (startedBy !== engine || !ours(engine.state())) return;
+		const token = ++generation;
+		detach();
+		try {
+			build(engine, editor);
+		} catch (cause) {
+			if (preview !== old) old.dispose();
+			fail(cause);
+			return;
+		}
+		old.dispose();
+		attach(engine, token).catch((cause: unknown) => {
+			if (token === generation) fail(cause);
+		});
+	}
+	function fail(cause: unknown) {
+		console.warn('Soe como X preview unavailable', cause);
+		dispose();
+		error = true;
+	}
+	$effect(() => {
+		void cableFlat;
+		untrack(retune);
+	});
 	async function listen() {
 		if (!audio || !current || pending) return;
 		if (preview) {
@@ -124,13 +233,7 @@
 		const engine = audio;
 		const token = ++generation;
 		try {
-			preview = engine.createAB(current, candidate, { initial: selected, experimental: true });
-			trims = preview.trims;
-			active = true;
-			const aNode = engine.getChainOutput(preview.a.id);
-			const bNode = engine.getChainOutput(preview.b.id);
-			if (!aNode || !bNode) throw new Error('preview:missing-chain');
-			exact = engine.state().exact;
+			build(engine, current);
 			stops.push(
 				engine.onChange((state) => {
 					// Meters read live only while this audition plays (a pause shows DATA).
@@ -150,29 +253,15 @@
 				return;
 			}
 			startedBy = engine;
-			const first = await tap(aNode, { kinds: ['vu'], reference });
-			if (token !== generation) {
-				first.disconnect();
-				return;
-			}
-			taps = [...taps, first];
-			const second = await tap(bNode, { kinds: ['vu'], reference });
-			if (token !== generation) {
-				second.disconnect();
-				return;
-			}
-			taps = [...taps, second];
-			stops.push(first.subscribe((update) => (a = update)));
-			stops.push(second.subscribe((update) => (b = update)));
-			spectrum();
+			await attach(engine, token);
 		} catch (cause) {
-			if (token === generation) {
-				console.warn('Soe como X preview unavailable', cause);
-				dispose();
-				error = true;
-			}
+			if (token === generation) fail(cause);
 		} finally {
-			if (token === generation) pending = false;
+			if (token === generation) {
+				pending = false;
+				// The cable's state changed while starting: the chains follow it now.
+				retune();
+			}
 		}
 	}
 	/** Transport play with nothing of this audition paused: a fresh one (a stale one goes). */
@@ -242,6 +331,21 @@
 			onclick={() => select('B')}>B</Button
 		>
 	</div>
+	{#if app?.cableState}
+		<!-- The page has no window A/B/Space keys of its own: the comparison's keys stay on. -->
+		<CableCompare
+			bind:this={cableCompare}
+			{app}
+			a={current ? { key: 'editor', name: current.name, curve: current } : undefined}
+			b={{ key: 'result', name: candidate.name, curve: candidate }}
+			match
+			flat={cableFlat}
+			first={selected === 'A' ? 0 : 1}
+			pairReason={m.soe_fux_editor_loading()}
+			ownEndedOnly
+			onchoose={followCable}
+		/>
+	{/if}
 	<!-- Pause keeps the audition (side, trims, taps, position); "Parar prévia" ends it. -->
 	<Transport
 		engine={audio}
@@ -250,7 +354,7 @@
 		onplay={transportPlay}
 		playDisabledReason={listenReason}
 	/>
-	{#if trims}
+	{#if trims && !cableFlat}
 		<p class="level" role="status">{m.soe_fux_level({ a: db(trims[0]), b: db(trims[1]) })}</p>
 	{/if}
 	<div class="meters">
@@ -263,6 +367,7 @@
 	</div>
 	<MeterModeLabel {mode} />
 	<SpectrumOverlay {mode} {analyser} label={m.soe_spectrum()} />
+	<CableSumNotice {app} flat={cableFlat} comparing={liveComparing(app?.cableState?.live)} />
 	<p>{m.soe_preview_note()}</p>
 	{#if !exact}
 		<p role="status">{m.soe_approximate()}</p>
