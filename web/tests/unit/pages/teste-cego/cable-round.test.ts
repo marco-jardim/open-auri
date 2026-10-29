@@ -9,6 +9,7 @@ import { gateForWrite } from 'open-auri/safety';
 import { planComparison } from '#lib/cable/compare.ts';
 import type {
 	CableState,
+	ComparisonCancelHoldStatus,
 	ComparisonEndRequest,
 	ComparisonOutcome,
 	ComparisonStartRequest,
@@ -20,6 +21,8 @@ import type {
 } from '#lib/cable/types.ts';
 import {
 	CABLE_CHECK_EVERY,
+	CABLE_MUTE_FLOOR_MS,
+	CABLE_MUTE_MAX_MS,
 	CABLE_SWITCH_LIMIT_MS,
 	CABLE_SWITCH_WINDOW_MS,
 	checkCurves,
@@ -124,11 +127,18 @@ function fakeCable(clock: ReturnType<typeof fakeTimer>) {
 		},
 		status: 'applied' as ComparisonSwitchStatus,
 		endOutcome: { status: 'accepted', live: null } as LiveOutcome,
-		hold: null as LiveHoldState | null
+		hold: null as LiveHoldState | null,
+		/** `confirmEndComparison`: accepted (ended reverted) or this refusal (the session goes on). */
+		confirmOutcome: { status: 'accepted', live: null } as LiveOutcome,
+		/** `cancelHold`'s status. */
+		cancelStatus: 'cleared' as ComparisonCancelHoldStatus,
+		/** `startComparison` settles only once this resolves (null: at once). */
+		startGate: null as Promise<void> | null
 	};
 	const port = {
 		getState: vi.fn(() => state),
 		startComparison: vi.fn(async (request: ComparisonStartRequest): Promise<ComparisonOutcome> => {
+			if (options.startGate !== null) await options.startGate;
 			state = cableState(
 				liveState({
 					comparison: {
@@ -146,8 +156,11 @@ function fakeCable(clock: ReturnType<typeof fakeTimer>) {
 			return { status: options.status };
 		}),
 		cancelHold: vi.fn(() => {
-			if (state.live !== null) state = cableState({ ...state.live, hold: null });
-			return { status: 'cleared' as const };
+			const status = options.cancelStatus;
+			if (status === 'cleared' && state.live !== null) {
+				state = cableState({ ...state.live, hold: null });
+			}
+			return { status };
 		}),
 		endComparison: vi.fn(async (request: ComparisonEndRequest): Promise<LiveOutcome> => {
 			if (request.revert && options.endOutcome.status !== 'accepted') {
@@ -157,9 +170,11 @@ function fakeCable(clock: ReturnType<typeof fakeTimer>) {
 			end();
 			return { status: 'accepted', live: null };
 		}),
-		confirmLive: vi.fn(async (request: LiveGestureRequest): Promise<LiveOutcome> => {
+		confirmEndComparison: vi.fn(async (request: LiveGestureRequest): Promise<LiveOutcome> => {
 			void request;
 			if (state.live !== null) state = cableState({ ...state.live, hold: null });
+			if (options.confirmOutcome.status !== 'accepted') return options.confirmOutcome;
+			end('reverted');
 			return { status: 'accepted', live: state.live };
 		})
 	} satisfies CableRoundPort;
@@ -191,13 +206,14 @@ const CURVES = officialCandidates()
 	.slice(0, 3)
 	.map((c) => ({ bands: c.bands, preampDb: c.preampDb }));
 
-function setup() {
+function setup(quietMs?: number) {
 	const clock = fakeTimer();
 	const cable = fakeCable(clock);
 	const events: { at: number; kind: 'mute' | 'unmute' }[] = [];
 	const output = {
 		mute: () => events.push({ at: clock.now(), kind: 'mute' }),
-		unmute: () => events.push({ at: clock.now(), kind: 'unmute' })
+		unmute: () => events.push({ at: clock.now(), kind: 'unmute' }),
+		...(quietMs === undefined ? {} : { quietMs: () => quietMs })
 	};
 	const onvoid = vi.fn();
 	const round = createCableRound({
@@ -209,9 +225,10 @@ function setup() {
 	return { clock, cable, events, round, onvoid };
 }
 
-/** Starts the set: check (both items heard), then "Ouvi mudar". */
+/** Starts the set: check (both items heard, the audio playing), then "Ouvi mudar". */
 async function startBlind(h: ReturnType<typeof setup>) {
 	const gesture = { kind: 'cable-gesture' } as const;
+	h.round.audible(true);
 	expect(
 		(
 			await h.round.begin({
@@ -290,7 +307,53 @@ describe('identical timing', () => {
 			expect(await select(h, index, index)).toBe('ready');
 			windows.push((h.events.find((event) => event.kind === 'unmute')?.at ?? NaN) - began);
 		}
-		expect(windows).toEqual([2000, 2000, 2000]);
+		// The quiet wait (mute ramp + output latency) comes first, the same for every candidate.
+		const slow = CABLE_MUTE_FLOOR_MS + 2000;
+		expect(windows).toEqual([slow, slow, slow]);
+	});
+
+	test('the switch waits until the muted output is silent (ramp + latency), the same for all', async () => {
+		const h = setup(250);
+		await startBlind(h);
+		const starts: number[] = [];
+		for (const [position, index] of [
+			[0, 2],
+			[1, 0],
+			[2, 1]
+		] as const) {
+			const calls = h.cable.port.switchComparison.mock.calls.length;
+			const began = h.clock.now();
+			const result = h.round.select(position, index);
+			await h.clock.advance(249);
+			// Muted, not switched yet: the ramp and the output latency first.
+			expect(h.cable.port.switchComparison).toHaveBeenCalledTimes(calls);
+			await h.clock.advance(1);
+			expect(h.cable.port.switchComparison).toHaveBeenCalledTimes(calls + 1);
+			starts.push(h.clock.now() - began);
+			await h.clock.advance(CABLE_SWITCH_LIMIT_MS);
+			expect(await result).toBe('ready');
+		}
+		expect(starts).toEqual([250, 250, 250]);
+	});
+
+	test('without a reported latency the floor applies; a bogus one is capped', async () => {
+		for (const [quiet, expected] of [
+			[undefined, CABLE_MUTE_FLOOR_MS],
+			[0, CABLE_MUTE_FLOOR_MS],
+			[Number.NaN, CABLE_MUTE_FLOOR_MS],
+			[60_000, CABLE_MUTE_MAX_MS]
+		] as const) {
+			const h = setup(quiet);
+			await startBlind(h);
+			const calls = h.cable.port.switchComparison.mock.calls.length;
+			const result = h.round.select(0, 0);
+			await h.clock.advance(expected - 1);
+			expect(h.cable.port.switchComparison).toHaveBeenCalledTimes(calls);
+			await h.clock.advance(1);
+			expect(h.cable.port.switchComparison).toHaveBeenCalledTimes(calls + 1);
+			await h.clock.advance(CABLE_SWITCH_LIMIT_MS + CABLE_SWITCH_WINDOW_MS);
+			expect(await result).toBe('ready');
+		}
 	});
 
 	test('a switch slower than the limit voids the round and stays muted', async () => {
@@ -378,6 +441,7 @@ describe('the change check', () => {
 	test('a non-blind, labelled, level-matched check before the blind set', async () => {
 		const h = setup();
 		const gesture = { kind: 'cable-gesture' } as const;
+		h.round.audible(true);
 		await h.round.begin({
 			gesture,
 			confirmations: { volumeLowered: true },
@@ -427,9 +491,12 @@ describe('the change check', () => {
 			h.round.roundRecorded(false);
 			expect(h.round.view.phase).toBe('blind');
 		}
+		expect(h.onvoid).not.toHaveBeenCalled();
 		h.round.roundRecorded(false);
 		expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'check-due' });
-		expect(h.onvoid).not.toHaveBeenCalled();
+		// The next round (not heard yet) is reshuffled; the scored rounds stay.
+		expect(h.onvoid).toHaveBeenCalledTimes(1);
+		expect(h.onvoid).toHaveBeenCalledWith('check-due');
 
 		const other = setup();
 		await startBlind(other);
@@ -460,9 +527,96 @@ describe('the end', () => {
 
 		await h.round.end({ gesture });
 		expect(h.round.view.phase).toBe('end-held');
+		const ends = h.cable.port.endComparison.mock.calls.length;
 		expect((await h.round.confirmHeld({ gesture })).status).toBe('accepted');
-		expect(h.cable.port.endComparison).toHaveBeenLastCalledWith({ revert: false });
+		// One service call confirms the saved curve and ends the session there (reverted).
+		expect(h.cable.port.confirmEndComparison).toHaveBeenCalledWith({ gesture });
+		expect(h.cable.port.endComparison).toHaveBeenCalledTimes(ends);
+		expect(h.cable.state.live).toMatchObject({ status: 'ended', endedReason: 'reverted' });
 		expect(h.round.view).toMatchObject({ phase: 'ended', endedReason: 'reverted' });
+	});
+
+	test('a confirmed held revert that did not land is never reported as reverted', async () => {
+		const failed: LiveOutcome = {
+			status: 'refused',
+			reason: 'revert-failed',
+			revertFailure: 'unknown'
+		};
+		for (const done of [true, false]) {
+			const h = setup();
+			await startBlind(h);
+			if (done) h.round.roundRecorded(true);
+			h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+			h.cable.options.hold = { reason: 'loudness', curve: 'saved' };
+			h.cable.options.confirmOutcome = failed;
+			const gesture = { kind: 'cable-gesture' } as const;
+			await h.round.end({ gesture });
+			expect(h.round.view.phase).toBe('end-held');
+			expect(await h.round.confirmHeld({ gesture })).toEqual(failed);
+			expect(h.round.view.phase).not.toBe('ended');
+			expect(h.round.view.endedReason).toBeNull();
+			expect(h.round.running()).toBe(true);
+			if (done) {
+				expect(h.round.view.phase).toBe('done');
+				expect(h.onvoid).not.toHaveBeenCalled();
+			} else {
+				expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'end-failed' });
+				expect(h.onvoid).toHaveBeenCalledWith('end-failed');
+			}
+		}
+	});
+
+	test('a refused confirmation that sent nothing keeps the held revert', async () => {
+		const h = setup();
+		await startBlind(h);
+		h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'held' };
+		h.cable.options.hold = { reason: 'loudness', curve: 'saved' };
+		await h.round.end({ gesture: { kind: 'cable-gesture' } });
+		h.cable.port.confirmEndComparison.mockImplementationOnce(async () => ({
+			status: 'refused',
+			reason: 'gesture'
+		}));
+		expect(await h.round.confirmHeld({ gesture: null })).toMatchObject({ reason: 'gesture' });
+		expect(h.round.view.phase).toBe('end-held');
+	});
+
+	test('a failed "Encerrar" during a round pauses and drops the round in play', async () => {
+		const h = setup();
+		await startBlind(h);
+		h.cable.options.endOutcome = { status: 'refused', reason: 'revert-failed', revertFailure: 'error' };
+		await h.round.end({ gesture: { kind: 'cable-gesture' } });
+		expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'end-failed' });
+		expect(h.onvoid).toHaveBeenCalledWith('end-failed');
+	});
+
+	test('a cancelled held revert drops the round in play; a busy or unknown cable keeps it paused', async () => {
+		const held = async (status: ComparisonCancelHoldStatus) => {
+			const h = setup();
+			await startBlind(h);
+			h.cable.options.endOutcome = {
+				status: 'refused',
+				reason: 'revert-failed',
+				revertFailure: 'held'
+			};
+			h.cable.options.hold = { reason: 'loudness', curve: 'saved' };
+			h.cable.options.cancelStatus = status;
+			await h.round.end({ gesture: { kind: 'cable-gesture' } });
+			expect(h.round.view.phase).toBe('end-held');
+			expect(h.round.cancelHeld()).toBe(status);
+			return h;
+		};
+		const cleared = await held('cleared');
+		expect(cleared.round.view).toMatchObject({ phase: 'paused', pause: 'end-failed' });
+		expect(cleared.onvoid).toHaveBeenCalledWith('end-failed');
+		for (const status of ['busy', 'unknown'] as const) {
+			const h = await held(status);
+			expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'cancel-failed' });
+			expect(h.onvoid).toHaveBeenCalledWith('cancel-failed');
+			// Still on the cable: "Encerrar" or "Retomar" can go on from here.
+			expect(h.round.running()).toBe(true);
+		}
+		const gone = await held('ended');
+		expect(gone.round.view).toMatchObject({ phase: 'ended', endedReason: 'gone' });
 	});
 
 	test('"Encerrar" accepted ends there; "Encerrar sem voltar" keeps the curve', async () => {
@@ -479,6 +633,182 @@ describe('the end', () => {
 		await startBlind(kept);
 		await kept.round.endKeep();
 		expect(kept.round.view).toMatchObject({ phase: 'ended', endedReason: 'kept' });
+	});
+});
+
+describe('an old preview on the cable (liveOrphan)', () => {
+	const ORPHAN = { crc: -1, at: 5, deviceLabel: 'Cabo' };
+	const begin = (h: ReturnType<typeof setup>) =>
+		h.round.begin({
+			gesture: { kind: 'cable-gesture' },
+			confirmations: { volumeLowered: true },
+			curves: CURVES,
+			experimental: false
+		});
+
+	test('blocks the start (nothing sent); "Já desconectei" (cleared) unblocks it', async () => {
+		const h = setup();
+		h.cable.state = cableState(null, { liveOrphan: ORPHAN });
+		expect(await begin(h)).toEqual({ status: 'refused', reason: 'live-elsewhere' });
+		expect(h.cable.port.startComparison).not.toHaveBeenCalled();
+		expect(h.cable.port.endComparison).not.toHaveBeenCalled();
+		expect(h.round.view.phase).toBe('idle');
+		// Dismissed (or replugged): the service clears the notice.
+		h.cable.state = cableState(null, { liveOrphan: null });
+		expect((await begin(h)).status).toBe('accepted');
+		expect(h.round.view.phase).toBe('checking');
+		// A state seen at the start with no orphan: rounds are not voided by it.
+		h.round.observe(h.cable.state);
+		expect(h.round.view.phase).toBe('checking');
+	});
+
+	test('"Retomar" is blocked the same way', async () => {
+		const h = setup();
+		await startBlind(h);
+		await h.round.voidRound('stuck');
+		h.cable.state = { ...h.cable.state, liveOrphan: ORPHAN };
+		const calls = h.cable.port.startComparison.mock.calls.length;
+		expect(
+			await h.round.resume({ gesture: { kind: 'cable-gesture' }, confirmations: {} })
+		).toEqual({ status: 'refused', reason: 'live-elsewhere' });
+		expect(h.cable.port.startComparison).toHaveBeenCalledTimes(calls);
+		expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'stuck' });
+	});
+
+	test('an orphan appearing after the start voids the round in play', async () => {
+		const h = setup();
+		await startBlind(h);
+		h.round.observe(h.cable.state);
+		expect(h.round.view.phase).toBe('blind');
+		h.cable.state = { ...h.cable.state, liveOrphan: ORPHAN };
+		h.round.observe(h.cable.state);
+		expect(h.round.view).toMatchObject({ phase: 'paused', pause: 'elsewhere' });
+		expect(h.onvoid).toHaveBeenCalledWith('elsewhere');
+	});
+});
+
+describe('a start that outlives its run', () => {
+	function gate() {
+		let open = () => undefined as void;
+		const promise = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		return { promise, open };
+	}
+
+	test('the check start lands after a reset: ended at once, nothing changes here', async () => {
+		const h = setup();
+		const start = gate();
+		h.cable.options.startGate = start.promise;
+		const begun = h.round.begin({
+			gesture: { kind: 'cable-gesture' },
+			confirmations: { volumeLowered: true },
+			curves: CURVES,
+			experimental: false
+		});
+		await h.clock.flush();
+		expect(h.round.view.phase).toBe('starting');
+		h.round.reset();
+		start.open();
+		expect(await begun).toMatchObject({ status: 'refused', reason: 'busy' });
+		expect(h.cable.port.endComparison).toHaveBeenLastCalledWith({ revert: false });
+		expect(h.cable.state.live?.comparison?.active).toBe(false);
+		expect(h.round.view.phase).toBe('idle');
+	});
+
+	test('the blind start lands after the page went away (destroy): ended at once', async () => {
+		const h = setup();
+		h.round.audible(true);
+		await h.round.begin({
+			gesture: { kind: 'cable-gesture' },
+			confirmations: { volumeLowered: true },
+			curves: CURVES,
+			experimental: false
+		});
+		const heard = h.round.playCheck(1);
+		await h.clock.advance(300);
+		await heard;
+		const start = gate();
+		h.cable.options.startGate = start.promise;
+		const answered = h.round.answerCheck(true, { gesture: { kind: 'cable-gesture' } });
+		await h.clock.flush();
+		expect(h.round.view.phase).toBe('starting');
+		await h.round.destroy();
+		const ends = h.cable.port.endComparison.mock.calls.length;
+		start.open();
+		expect(await answered).toMatchObject({ status: 'refused', reason: 'busy' });
+		expect(h.cable.port.endComparison).toHaveBeenCalledTimes(ends + 1);
+		expect(h.cable.port.endComparison).toHaveBeenLastCalledWith({ revert: false });
+		expect(h.cable.state.live?.comparison).toMatchObject({ active: false, blind: true });
+		expect(h.round.view.phase).toBe('starting');
+		expect(h.round.view.phase).not.toBe('blind');
+	});
+
+	test('"Encerrar sem voltar" while the start runs: the late start is ended too', async () => {
+		const h = setup();
+		const start = gate();
+		h.cable.options.startGate = start.promise;
+		const begun = h.round.begin({
+			gesture: { kind: 'cable-gesture' },
+			confirmations: { volumeLowered: true },
+			curves: CURVES,
+			experimental: false
+		});
+		await h.clock.flush();
+		await h.round.endKeep();
+		expect(h.round.view).toMatchObject({ phase: 'ended', endedReason: 'kept' });
+		start.open();
+		expect((await begun).status).toBe('refused');
+		expect(h.cable.state.live?.comparison?.active).toBe(false);
+		expect(h.round.view).toMatchObject({ phase: 'ended', endedReason: 'kept' });
+	});
+});
+
+describe('the check counts an item heard only while the audio plays', () => {
+	test('switching items without audio hears nothing; "Ouvi mudar" stays locked', async () => {
+		const h = setup();
+		const gesture = { kind: 'cable-gesture' } as const;
+		await h.round.begin({
+			gesture,
+			confirmations: { volumeLowered: true },
+			curves: CURVES,
+			experimental: false
+		});
+		expect(h.round.view).toMatchObject({ checkPlaying: 0, checkHeard: [false, false] });
+		const phone = h.round.playCheck(1);
+		await h.clock.advance(300);
+		await phone;
+		expect(h.round.view.checkHeard).toEqual([false, false]);
+		expect(await h.round.answerCheck(true, { gesture })).toMatchObject({ reason: 'busy' });
+		// The audio plays with the telefone on the cable: heard.
+		h.round.audible(true);
+		expect(h.round.view.checkHeard).toEqual([false, true]);
+		h.round.audible(false);
+		const neutral = h.round.playCheck(0);
+		await h.clock.advance(300);
+		await neutral;
+		expect(h.round.view.checkHeard).toEqual([false, true]);
+		h.round.audible(true);
+		expect(h.round.view.checkHeard).toEqual([true, true]);
+		expect((await h.round.answerCheck(true, { gesture }))?.status).toBe('accepted');
+	});
+
+	test('the audio playing during a switch counts only once the item is on the cable', async () => {
+		const h = setup();
+		h.round.audible(true);
+		await h.round.begin({
+			gesture: { kind: 'cable-gesture' },
+			confirmations: { volumeLowered: true },
+			curves: CURVES,
+			experimental: false
+		});
+		expect(h.round.view.checkHeard).toEqual([true, false]);
+		const phone = h.round.playCheck(1);
+		await h.clock.advance(299);
+		expect(h.round.view.checkHeard).toEqual([true, false]);
+		await h.clock.advance(1);
+		await phone;
+		expect(h.round.view.checkHeard).toEqual([true, true]);
 	});
 });
 

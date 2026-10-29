@@ -8,20 +8,29 @@
  * the DOM. Pure apart from the injected port (the cable service), timer and browser output.
  *
  * - Identical timing: every position change (the same position again, and the first play of a
- *   round, included) mutes the browser output, calls `switchComparison` and unmutes at
- *   max(`CABLE_SWITCH_WINDOW_MS`, the switch's settle time), the same for every candidate.
+ *   round, included) mutes the browser output, waits until it is silent at the ears (the mute
+ *   ramp and the output latency, `quietMs`, at least `CABLE_MUTE_FLOOR_MS`), calls
+ *   `switchComparison` and unmutes at max(`CABLE_SWITCH_WINDOW_MS` from the mute, the switch's
+ *   settle time), the same for every candidate.
  * - A round is voided (not scored; completed rounds stay) on any switch status but `applied`, a
  *   switch slower than `CABLE_SWITCH_LIMIT_MS`, an unplugged cable, the comparison ending on its
- *   own, another tab's preview, or "O som parou de mudar". "Retomar" needs a new start (gesture).
+ *   own, another tab's preview appearing after the start, or "O som parou de mudar". Every other
+ *   pause that interrupts a round (a failed "Encerrar", a cancelled held revert, the check due)
+ *   drops it too (`onvoid`: the page reshuffles it). "Retomar" needs a new start (gesture).
+ * - A start (the check, the blind set) is refused (`live-elsewhere`, nothing sent) while the
+ *   cable may still play an old preview (`liveOrphan`): unplug and replug, or "Já desconectei".
  * - Audible change check: before the blind set starts, and again every `CABLE_CHECK_EVERY`
  *   rounds, a short NON-blind comparison of two labelled curves with an obvious contrast (Neutro
  *   and a band-limited "telefone"), level-matched. It is a separate comparison (ended before the
- *   blind set starts again), so it never takes part in the candidates' level matching. "Ouvi
- *   mudar" (its click is the gesture of the blind start) starts the blind set; "Não mudou" pauses
- *   and asks to replug.
+ *   blind set starts again), so it never takes part in the candidates' level matching. An item
+ *   counts as heard only while the audio plays with it on the cable (`audible`). "Ouvi mudar"
+ *   (its click is the gesture of the blind start) starts the blind set; "Não mudou" pauses and
+ *   asks to replug.
  * - Telemetry: rounds heard on the cable never reach S6 (`s6Session`).
  * - A void never ends the comparison by itself: the session stays, so "Encerrar" can still revert
  *   the cable to its saved curve (with a gesture), and "Retomar" ends it before the check.
+ * - A start that outlives its controller (reset, destroyed, ended meanwhile) is ended again
+ *   right away (`endComparison({ revert: false })`) and changes nothing here.
  */
 import { NEUTRO } from 'open-auri/catalog';
 import { snapshotBands } from 'open-auri/dsp';
@@ -30,6 +39,7 @@ import type { CableService } from '#lib/cable/service.ts';
 import type {
 	Band,
 	CableState,
+	ComparisonCancelHoldStatus,
 	ComparisonCurve,
 	ComparisonOutcome,
 	ComparisonSwitchStatus,
@@ -39,17 +49,26 @@ import type {
 } from '#lib/cable/types.ts';
 import type { Round, Session } from './experiment.ts';
 
-/** The fixed muted window of every switch (ms): longer than a live apply (~0.35 s). */
+/** The fixed muted window of every switch (ms, from the mute): longer than a live apply (~0.35 s). */
 export const CABLE_SWITCH_WINDOW_MS = 1200;
 /** A switch that has not settled after this long voids the round (ms). */
 export const CABLE_SWITCH_LIMIT_MS = 3000;
 /** The audible change check runs before the first round and again every this many rounds. */
 export const CABLE_CHECK_EVERY = 4;
+/** The least wait between the mute and the switch (ms): the mute ramp plus some output latency. */
+export const CABLE_MUTE_FLOOR_MS = 60;
+/** The most that wait can be (ms): a bogus output latency never stalls a switch. */
+export const CABLE_MUTE_MAX_MS = 400;
 
 /** The cable service calls this controller makes (the app's `CableService` satisfies it). */
 export type CableRoundPort = Pick<
 	CableService,
-	'getState' | 'startComparison' | 'switchComparison' | 'cancelHold' | 'endComparison' | 'confirmLive'
+	| 'getState'
+	| 'startComparison'
+	| 'switchComparison'
+	| 'cancelHold'
+	| 'endComparison'
+	| 'confirmEndComparison'
 >;
 
 /** Time source of the switch window (monotonic ms) and its waits. */
@@ -67,6 +86,11 @@ export const browserTimer: RoundTimer = {
 export interface BrowserOutput {
 	mute(): void;
 	unmute(): void;
+	/**
+	 * How long after `mute` the output is silent at the ears (ms): the mute ramp plus the
+	 * output latency. Never depends on the candidate.
+	 */
+	quietMs?(): number;
 }
 
 export type CableVoidReason =
@@ -74,7 +98,7 @@ export type CableVoidReason =
 	| 'disconnected'
 	/** The comparison ended without this page ending it. */
 	| 'ended'
-	/** Another tab's preview may be playing on a cable. */
+	/** Another tab's preview may be playing on a cable (it appeared after the start). */
 	| 'elsewhere'
 	/** "O som parou de mudar". */
 	| 'stuck'
@@ -84,14 +108,16 @@ export type CableVoidReason =
 
 export type CablePause =
 	| CableVoidReason
-	/** The check is due (every `CABLE_CHECK_EVERY` rounds): not a void. */
+	/** The check is due (every `CABLE_CHECK_EVERY` rounds). */
 	| 'check-due'
 	/** "Não mudou" in the check: replug, then Retomar. */
 	| 'no-change'
 	/** A start of the check or of the blind set was refused (the page shows why). */
 	| 'refused'
 	/** "Encerrar" did not leave the cable on its saved curve (the page shows why). */
-	| 'end-failed';
+	| 'end-failed'
+	/** The held revert could not be dropped (the cable is busy or its state unknown). */
+	| 'cancel-failed';
 
 export type CablePhase =
 	/** Nothing of this test on the cable. */
@@ -108,7 +134,7 @@ export type CablePhase =
 	| 'done'
 	/** "Encerrar": the saved curve is louder and waits for the volume confirmation. */
 	| 'end-held'
-	/** The blind set ended (`reverted`, `kept` or `gone`: unplugged meanwhile). */
+	/** The blind set ended (`reverted`, `kept` or `gone`: it ended without this page). */
 	| 'ended';
 
 export interface CableRoundView {
@@ -118,7 +144,10 @@ export interface CableRoundView {
 	readonly switching: boolean;
 	/** The position whose switch completed in this round (null: the next play switches first). */
 	readonly ready: number | null;
-	/** Check: the item playing (0 Neutro, 1 telefone), and the items heard at least once. */
+	/**
+	 * Check: the item on the cable (0 Neutro, 1 telefone), and the items heard: each counts once
+	 * the audio played while it was on the cable.
+	 */
 	readonly checkPlaying: 0 | 1 | null;
 	readonly checkHeard: readonly [boolean, boolean];
 	/** Rounds scored since the last check. */
@@ -172,6 +201,17 @@ export function s6Session(
 	return completed.length === session.completed.length ? session : { ...session, completed };
 }
 
+/** The cable may still play an old preview (another tab's, or this one's before a reload). */
+export function cableOrphan(state: CableState | null | undefined): boolean {
+	return (state?.liveOrphan ?? null) !== null;
+}
+
+/** An identity of the orphan notice (a new one differs from the one seen at the start). */
+function orphanKey(state: CableState): string | null {
+	const orphan = state.liveOrphan ?? null;
+	return orphan === null ? null : `${orphan.deviceLabel}\u0000${orphan.crc}\u0000${orphan.at}`;
+}
+
 /** Why a comparison-switch status voids the round. */
 function voidOf(status: ComparisonSwitchStatus | 'slow'): CableVoidReason | null {
 	return status === 'applied' ? null : status;
@@ -184,8 +224,11 @@ export interface CableRoundDeps {
 	timer?: RoundTimer;
 	/** Every view change. */
 	onchange?: (view: CableRoundView) => void;
-	/** A round was voided: the page drops its ratings (completed rounds stay). */
-	onvoid?: (reason: CableVoidReason) => void;
+	/**
+	 * The round in play was interrupted (a void, or a pause that stops it): the page drops its
+	 * ratings and plays it again later in a new order (completed rounds stay).
+	 */
+	onvoid?: (reason: CablePause) => void;
 }
 
 export interface CableStartRequest {
@@ -209,13 +252,17 @@ export function createCableRound(deps: CableRoundDeps) {
 	const { port } = deps;
 	const timer = deps.timer ?? browserTimer;
 	let view: CableRoundView = IDLE_VIEW;
-	/** Bumped by every void and end: a switch that outlived it changes nothing. */
+	/** Bumped by every void, end, reset and destroy: work that outlived it changes nothing. */
 	let epoch = 0;
 	/** The phase "Encerrar" started from (a cancelled held revert goes back to it). */
 	let beforeEnd: CablePhase = 'idle';
 	/** The blind set (`begin`) and the levers of the last start, reused by its blind start. */
 	let blindSet: { curves: readonly ComparisonCurve[]; experimental: boolean } | null = null;
 	let confirmations: Partial<Confirmations> = {};
+	/** The orphan notice seen at the last start (only a new one voids). */
+	let orphanAtStart: string | null = null;
+	/** The page's audio plays (the check counts an item heard only then). */
+	let audible = false;
 
 	function set(next: Partial<CableRoundView>) {
 		view = { ...view, ...next };
@@ -228,6 +275,18 @@ export function createCableRound(deps: CableRoundDeps) {
 
 	function unmute() {
 		deps.output()?.unmute();
+	}
+
+	/** The wait between the mute and the switch (ms): the same for every candidate. */
+	function quietMs(): number {
+		let raw: number;
+		try {
+			raw = deps.output()?.quietMs?.() ?? 0;
+		} catch {
+			raw = 0;
+		}
+		const value = Number.isFinite(raw) ? raw : 0;
+		return Math.min(CABLE_MUTE_MAX_MS, Math.max(CABLE_MUTE_FLOOR_MS, value));
 	}
 
 	/** A comparison (this test's, check or blind set) is running on the cable. */
@@ -243,19 +302,46 @@ export function createCableRound(deps: CableRoundDeps) {
 		return { status: 'refused', reason: 'busy' };
 	}
 
+	/** A start that outlived this run (reset, destroyed, ended meanwhile): ended again. */
+	async function dropStale(outcome: ComparisonOutcome): Promise<ComparisonOutcome> {
+		if (outcome.status === 'accepted') await port.endComparison({ revert: false });
+		return busy();
+	}
+
+	/** Pauses; a round that was in play (or about to be) is dropped by the page. */
+	function pauseWith(pause: CablePause) {
+		set({ phase: 'paused', pause, switching: false, ready: null, checkPlaying: null });
+		deps.onvoid?.(pause);
+	}
+
+	/** Check: the item on the cable counts as heard while the audio plays. */
+	function markHeard() {
+		const index = view.checkPlaying;
+		if (view.phase !== 'checking' || view.switching || !audible || index === null) return;
+		if (view.checkHeard[index]) return;
+		const heard: [boolean, boolean] = [view.checkHeard[0], view.checkHeard[1]];
+		heard[index] = true;
+		set({ checkHeard: heard });
+	}
+
 	/**
 	 * Starts (or, from a pause, restarts) with the change check: ends what this test left running,
-	 * then the non-blind check comparison, Neutro first.
+	 * then the non-blind check comparison, Neutro first. Refused while the cable may play an old
+	 * preview (`liveOrphan`).
 	 */
 	async function startCheck(request: CableStartRequest): Promise<ComparisonOutcome> {
 		const from = view.phase;
 		if (from !== 'idle' && from !== 'paused' && from !== 'ended') return busy();
 		if (blindSet === null) return { status: 'refused', reason: 'error' };
-		epoch++;
+		const orphan = orphanKey(port.getState());
+		if (orphan !== null) return { status: 'refused', reason: 'live-elsewhere' };
+		const at = ++epoch;
+		orphanAtStart = orphan;
 		confirmations = { ...request.confirmations };
 		set({ phase: 'starting', switching: false, ready: null });
 		mute();
 		await endKept();
+		if (at !== epoch) return busy();
 		const outcome = await port.startComparison({
 			curves: checkCurves(),
 			match: true,
@@ -264,6 +350,7 @@ export function createCableRound(deps: CableRoundDeps) {
 			confirmations: { ...confirmations },
 			gesture: request.gesture
 		});
+		if (at !== epoch) return dropStale(outcome);
 		if (outcome.status !== 'accepted') {
 			set({ phase: from === 'idle' || from === 'ended' ? from : 'paused' });
 			return outcome;
@@ -272,10 +359,11 @@ export function createCableRound(deps: CableRoundDeps) {
 			phase: 'checking',
 			pause: null,
 			checkPlaying: 0,
-			checkHeard: [true, false],
+			checkHeard: [false, false],
 			endedReason: null
 		});
 		unmute();
+		markHeard();
 		return outcome;
 	}
 
@@ -292,10 +380,9 @@ export function createCableRound(deps: CableRoundDeps) {
 			await voidRound(voidOf(status) ?? 'error');
 			return status;
 		}
-		const heard: [boolean, boolean] = [view.checkHeard[0], view.checkHeard[1]];
-		heard[index] = true;
-		set({ switching: false, checkPlaying: index, checkHeard: heard });
+		set({ switching: false, checkPlaying: index });
 		unmute();
+		markHeard();
 		return status;
 	}
 
@@ -308,14 +395,19 @@ export function createCableRound(deps: CableRoundDeps) {
 		if (changed && !(view.checkHeard[0] && view.checkHeard[1])) return busy();
 		const target = blindSet;
 		if (target === null) return { status: 'refused', reason: 'error' };
-		epoch++;
+		const at = ++epoch;
 		mute();
 		if (!changed) {
 			set({ phase: 'paused', pause: 'no-change', checkPlaying: null });
 			return null;
 		}
+		if (orphanKey(port.getState()) !== orphanAtStart) {
+			set({ phase: 'paused', pause: 'refused', checkPlaying: null });
+			return { status: 'refused', reason: 'live-elsewhere' };
+		}
 		set({ phase: 'starting', checkPlaying: null });
 		await endKept();
+		if (at !== epoch) return busy();
 		// First 0 for every round: the order lives in the page, and every play switches anyway.
 		const outcome = await port.startComparison({
 			curves: target.curves,
@@ -326,6 +418,7 @@ export function createCableRound(deps: CableRoundDeps) {
 			confirmations: { ...confirmations },
 			gesture: request.gesture
 		});
+		if (at !== epoch) return dropStale(outcome);
 		if (outcome.status !== 'accepted') {
 			set({ phase: 'paused', pause: 'refused' });
 			return outcome;
@@ -335,9 +428,9 @@ export function createCableRound(deps: CableRoundDeps) {
 	}
 
 	/**
-	 * Plays `position` (candidate `index` of the set): mute, switch, unmute at
-	 * max(`CABLE_SWITCH_WINDOW_MS`, settled). Any failure, or a switch slower than
-	 * `CABLE_SWITCH_LIMIT_MS`, voids the round (the output stays muted).
+	 * Plays `position` (candidate `index` of the set): mute, wait until silent (`quietMs`), switch,
+	 * unmute at max(`CABLE_SWITCH_WINDOW_MS` from the mute, settled). Any failure, or a switch
+	 * slower than `CABLE_SWITCH_LIMIT_MS`, voids the round (the output stays muted).
 	 */
 	async function select(position: number, index: number): Promise<CableSelectResult> {
 		if (view.phase !== 'blind' || view.switching) return 'busy';
@@ -345,6 +438,9 @@ export function createCableRound(deps: CableRoundDeps) {
 		set({ switching: true, ready: null });
 		mute();
 		const window = timer.sleep(CABLE_SWITCH_WINDOW_MS);
+		// The ramp and the output latency first: the switch itself is never heard.
+		await timer.sleep(quietMs());
+		if (at !== epoch || view.phase !== 'blind') return 'void';
 		const status = await Promise.race([
 			port.switchComparison(index).then(
 				(result) => result.status,
@@ -373,7 +469,7 @@ export function createCableRound(deps: CableRoundDeps) {
 
 	/**
 	 * A round was scored. `finished`: the last one (the blind set stays until Salvar/Encerrar).
-	 * Every `CABLE_CHECK_EVERY` rounds the check is due before the next one.
+	 * Every `CABLE_CHECK_EVERY` rounds the check is due before the next one (which is reshuffled).
 	 */
 	function roundRecorded(finished: boolean) {
 		if (view.phase !== 'blind') return;
@@ -385,7 +481,8 @@ export function createCableRound(deps: CableRoundDeps) {
 			return;
 		}
 		if (sinceCheck >= CABLE_CHECK_EVERY) {
-			set({ phase: 'paused', pause: 'check-due', ready: null, switching: false, sinceCheck });
+			set({ sinceCheck });
+			pauseWith('check-due');
 			return;
 		}
 		set({ ready: null, switching: false, sinceCheck });
@@ -396,16 +493,19 @@ export function createCableRound(deps: CableRoundDeps) {
 		if (view.phase !== 'blind' && view.phase !== 'checking') return;
 		epoch++;
 		mute();
-		set({ phase: 'paused', pause: reason, switching: false, ready: null, checkPlaying: null });
-		deps.onvoid?.(reason);
+		pauseWith(reason);
 	}
 
-	/** The cable state changed: unplugged, ended elsewhere or another tab's preview voids. */
+	/**
+	 * The cable state changed: unplugged, ended elsewhere or another tab's preview appearing
+	 * after the start voids.
+	 */
 	function observe(state: CableState) {
 		const phase = view.phase;
 		const active = comparisonActive(state);
 		if (phase === 'blind' || phase === 'checking') {
-			if ((state.liveOrphan ?? null) !== null) {
+			const orphan = orphanKey(state);
+			if (orphan !== null && orphan !== orphanAtStart) {
 				void voidRound('elsewhere');
 				return;
 			}
@@ -422,13 +522,19 @@ export function createCableRound(deps: CableRoundDeps) {
 		}
 	}
 
+	/** After a failed end: back to `done`, or paused (the round in play is dropped). */
+	function backFromEnd(pause: CablePause) {
+		if (beforeEnd === 'done') set({ phase: 'done', pause: null });
+		else pauseWith(pause);
+	}
+
 	/**
 	 * "Encerrar": back to the saved curve (gesture), then the session ends. A held revert (the
 	 * saved curve ≥ 3 dB louder) waits for `confirmHeld` or `cancelHeld`; another failure pauses.
 	 */
 	async function end(request: Gesture): Promise<LiveOutcome | null> {
 		const from = view.phase;
-		if (from === 'starting' || from === 'end-held') return null;
+		if (from === 'starting' || from === 'end-held' || from === 'ended') return null;
 		epoch++;
 		mute();
 		if (!comparisonActive()) {
@@ -452,30 +558,54 @@ export function createCableRound(deps: CableRoundDeps) {
 			set({ phase: 'ended', endedReason: 'gone', pause: null });
 			return outcome;
 		}
-		set(from === 'done' ? { phase: 'done' } : { phase: 'paused', pause: 'end-failed' });
+		backFromEnd('end-failed');
 		return outcome;
 	}
 
-	/** "Abaixei o volume, aplicar": the held saved curve plays, then the session ends there. */
+	/**
+	 * "Abaixei o volume, aplicar": the held saved curve plays and, only once the cable is known to
+	 * play it, the session ends there (`confirmEndComparison`: reverted, marker removed).
+	 */
 	async function confirmHeld(request: Gesture): Promise<LiveOutcome> {
 		if (view.phase !== 'end-held') return { status: 'refused', reason: 'no-hold' };
-		const outcome = await port.confirmLive({ gesture: request.gesture });
-		if (outcome.status !== 'accepted') return outcome;
-		const live = port.getState().live;
-		if (live === null || live.hold !== null || live.status === 'unknown') {
-			return { status: 'refused', reason: 'revert-failed' };
+		const at = ++epoch;
+		const outcome = await port.confirmEndComparison({ gesture: request.gesture });
+		if (at !== epoch) return outcome;
+		if (outcome.status === 'accepted') {
+			set({ phase: 'ended', endedReason: 'reverted', pause: null });
+			return outcome;
 		}
-		epoch++;
-		const ended = await port.endComparison({ revert: false });
-		set({ phase: 'ended', endedReason: 'reverted', pause: null });
-		return ended;
+		if (!comparisonActive()) {
+			set({ phase: 'ended', endedReason: 'gone', pause: null });
+			return outcome;
+		}
+		const hold = port.getState().live?.hold ?? null;
+		// Nothing sent (a stale click): still held, the confirmation can be given again.
+		if (hold?.reason === 'loudness' && hold.curve === 'saved') return outcome;
+		backFromEnd('end-failed');
+		return outcome;
 	}
 
-	/** Drops the held revert: the cable keeps the candidate, the set goes on (no I/O). */
-	function cancelHeld(): void {
-		if (view.phase !== 'end-held') return;
-		port.cancelHold();
-		set(beforeEnd === 'done' ? { phase: 'done' } : { phase: 'paused', pause: 'end-failed' });
+	/**
+	 * Drops the held revert (no I/O): the cable keeps the candidate, the set goes on (the round in
+	 * play is dropped). A busy or unknown cable keeps the hold: paused, with why.
+	 */
+	function cancelHeld(): ComparisonCancelHoldStatus | null {
+		if (view.phase !== 'end-held') return null;
+		epoch++;
+		const { status } = port.cancelHold();
+		switch (status) {
+			case 'cleared':
+			case 'no-hold':
+				backFromEnd('end-failed');
+				break;
+			case 'ended':
+				set({ phase: 'ended', endedReason: 'gone', pause: null });
+				break;
+			default:
+				pauseWith('cancel-failed');
+		}
+		return status;
 	}
 
 	/** Ends the blind set with the cable keeping its curve (before "Salvar esta", or leaving). */
@@ -505,6 +635,11 @@ export function createCableRound(deps: CableRoundDeps) {
 			if (view.phase !== 'paused') return Promise.resolve(busy());
 			return startCheck(request);
 		},
+		/** The page's audio plays (true) or not: the check's item on the cable counts as heard. */
+		audible(playing: boolean) {
+			audible = playing;
+			markHeard();
+		},
 		playCheck,
 		answerCheck,
 		select,
@@ -516,11 +651,21 @@ export function createCableRound(deps: CableRoundDeps) {
 		confirmHeld,
 		cancelHeld,
 		endKeep,
-		/** Back to idle (a new test); nothing on the cable changes. */
+		/** Back to idle (a new test); nothing on the cable changes (a start in flight is ended). */
 		reset() {
 			epoch++;
 			blindSet = null;
 			set({ ...IDLE_VIEW });
+		},
+		/**
+		 * The page goes away: nothing of this run changes the view any more, a start in flight is
+		 * ended when it lands, and a running comparison ends with the cable keeping its curve.
+		 */
+		destroy(): Promise<void> {
+			epoch++;
+			const phase = view.phase;
+			if (phase === 'idle' || phase === 'ended' || !comparisonActive()) return Promise.resolve();
+			return port.endComparison({ revert: false }).then(() => undefined);
 		},
 		/** The blind set needs the experimental confirmation (any candidate has HS/LP/HP). */
 		experimental(): boolean {

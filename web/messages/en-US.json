@@ -2872,5 +2872,9 @@
 	"cable_blind_save_winner": "Save the winner to the cable",
 	"cable_blind_save_hint": "Opens the checklist with the winner's original curve, without the test's level adjustment.",
 	"cable_blind_save_tied": "Tie: there is no winner to save.",
-	"cable_blind_ended_kept": "Test ended: the cable keeps the last curve until it is unplugged."
+	"cable_blind_ended_kept": "Test ended: the cable keeps the last curve until it is unplugged.",
+	"cable_blind_ended_gone": "The comparison on the cable ended: the cable keeps the test's curve until you unplug it.",
+	"cable_blind_reason_orphan": "The cable may be playing an old preview: unplug and replug it, or use 'I already unplugged it'.",
+	"cable_blind_reason_browser": "A test is running in the browser. Finish or cancel it in Listening before starting on the cable.",
+	"cable_blind_cancel_failed": "Could not cancel going back to the saved curve right now: the cable is busy or its state is unknown. Try End again, or unplug and replug the cable."
 }

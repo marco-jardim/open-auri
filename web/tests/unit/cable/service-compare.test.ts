@@ -813,6 +813,103 @@ describe('cancelHold', () => {
 	});
 });
 
+describe('confirmEndComparison', () => {
+	/** A comparison whose revert is held (the saved curve is much louder than the set). */
+	async function heldRevert(blind: boolean) {
+		const journal = [savedEntry(offCurve(-3))];
+		const h = await harness({ journal });
+		await compare(h, { blind });
+		const ended = await h.service.endComparison({
+			revert: true,
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(ended).toMatchObject({ reason: 'revert-failed', revertFailure: 'held' });
+		expect(h.service.getState().live?.hold).toMatchObject({ reason: 'loudness', curve: 'saved' });
+		return { h, journal };
+	}
+
+	test('blind: the held saved curve plays, the session ends reverted, flags and marker are back to saved', async () => {
+		const { h, journal } = await heldRevert(true);
+		expect(h.liveMarker.value).not.toBeNull();
+		const outcome = await h.service.confirmEndComparison({
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(outcome.status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(journal[0]?.crc);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'ended',
+			endedReason: 'reverted',
+			playsUnsaved: false,
+			cableEq: false,
+			comparison: { active: false }
+		});
+		// The saved curve plays again: no preview marker is left behind (blind too).
+		expect(h.liveMarker.value).toBeNull();
+		expectNoWriteBookkeeping(h, journal);
+	});
+
+	test('not blind: the same end (reverted, not stopped)', async () => {
+		const { h, journal } = await heldRevert(false);
+		const outcome = await h.service.confirmEndComparison({
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(outcome.status).toBe('accepted');
+		expect(liveCrc(h.device.firmware)).toBe(journal[0]?.crc);
+		expect(h.service.getState().live).toMatchObject({
+			status: 'ended',
+			endedReason: 'reverted',
+			playsUnsaved: false
+		});
+	});
+
+	test('an apply that did not land is not reported as reverted; the session goes on', async () => {
+		const { h, journal } = await heldRevert(true);
+		// Report 8 of the saved curve's apply goes out unconfirmed: what the cable plays is unknown.
+		h.device.faults.throwAtReport = h.device.attempts + 8;
+		const outcome = await h.service.confirmEndComparison({
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(outcome).toMatchObject({
+			status: 'refused',
+			reason: 'revert-failed',
+			revertFailure: 'unknown'
+		});
+		expect(h.service.getState().live).toMatchObject({
+			status: 'unknown',
+			playsUnsaved: true,
+			comparison: { active: true }
+		});
+		expect(h.service.getState().live?.endedReason).toBeUndefined();
+		// The marker stays: the cable may not play its saved curve.
+		expect(h.liveMarker.value).not.toBeNull();
+		expectNoWriteBookkeeping(h, journal);
+	});
+
+	test('refused without a held revert, and without a fresh gesture (nothing sent)', async () => {
+		const h = await harness({ journal: [savedEntry(offCurve(-3))] });
+		expect(
+			await h.service.confirmEndComparison({ gesture: h.service.createGesture(TRUSTED_CLICK) })
+		).toMatchObject({ reason: 'no-session' });
+		await compare(h, { blind: true });
+		const attempts = h.device.attempts;
+		expect(
+			await h.service.confirmEndComparison({ gesture: h.service.createGesture(TRUSTED_CLICK) })
+		).toMatchObject({ reason: 'no-hold' });
+		await h.service.endComparison({
+			revert: true,
+			gesture: h.service.createGesture(TRUSTED_CLICK)
+		});
+		expect(await h.service.confirmEndComparison({ gesture: null })).toMatchObject({
+			reason: 'gesture'
+		});
+		expect(h.device.attempts).toBe(attempts);
+		expect(h.service.getState().live).toMatchObject({
+			hold: { reason: 'loudness', curve: 'saved' },
+			comparison: { active: true }
+		});
+	});
+});
+
 describe('startComparison validation', () => {
 	test('a missing or non-object candidate is refused before any I/O', async () => {
 		const h = await harness();

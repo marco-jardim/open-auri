@@ -2872,5 +2872,9 @@
 	"cable_blind_save_winner": "Salvar a vencedora no cabo",
 	"cable_blind_save_hint": "Abre a lista de verificação com a curva original da vencedora, sem o ajuste de nível do teste.",
 	"cable_blind_save_tied": "Empate: não há vencedora para salvar.",
-	"cable_blind_ended_kept": "Teste encerrado: o cabo continua com a última curva até ser desconectado."
+	"cable_blind_ended_kept": "Teste encerrado: o cabo continua com a última curva até ser desconectado.",
+	"cable_blind_ended_gone": "A comparação no cabo terminou: o cabo continua com a curva do teste até você desconectar.",
+	"cable_blind_reason_orphan": "O cabo pode estar tocando uma prévia antiga: desconecte e reconecte, ou use 'Já desconectei'.",
+	"cable_blind_reason_browser": "Um teste está em andamento no navegador. Termine-o ou cancele-o em Escuta antes de começar no cabo.",
+	"cable_blind_cancel_failed": "Não deu para cancelar a volta à curva salva agora: o cabo está ocupado ou em estado desconhecido. Tente Encerrar de novo, ou desconecte e reconecte o cabo."
 }

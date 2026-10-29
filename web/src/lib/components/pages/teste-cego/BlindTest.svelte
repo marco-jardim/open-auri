@@ -16,6 +16,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { getLocale } from '#lib/paraglide/runtime.js';
 	import {
+		CROSSFADE_S,
 		IDLE_STATE,
 		type AudioEngine,
 		type AudioEngineState,
@@ -221,11 +222,26 @@
 		switchComparison: (index) => cableService().switchComparison(index),
 		cancelHold: () => cableService().cancelHold(),
 		endComparison: (request) => cableService().endComparison(request),
-		confirmLive: (request) => cableService().confirmLive(request)
+		confirmEndComparison: (request) => cableService().confirmEndComparison(request)
 	};
+	/** The flat chain's mute ramp plus the output latency (ms): the same for every candidate. */
+	function quietMs(): number {
+		let latencyS: number;
+		try {
+			const context = audio?.getContext();
+			latencyS = context?.outputLatency || context?.baseLatency || 0;
+		} catch {
+			latencyS = 0;
+		}
+		return (CROSSFADE_S + (Number.isFinite(latencyS) ? latencyS : 0)) * 1000;
+	}
 	const cableRound = createCableRound({
 		port,
-		output: () => (onCable && preview !== null && 'unmute' in preview ? preview : null),
+		output: () => {
+			const flat = preview;
+			if (!onCable || flat === null || !('unmute' in flat)) return null;
+			return { mute: flat.mute, unmute: flat.unmute, quietMs };
+		},
 		onchange: (view) => {
 			roundView = view;
 		},
@@ -272,6 +288,11 @@
 			audioState.mode === 'chains' &&
 			audioState.session === BLIND_SESSION
 	);
+	/** The change check counts an item heard only while the audio plays with it on the cable. */
+	$effect(() => {
+		const audible = onCable && playing;
+		untrack(() => cableRound.audible(audible));
+	});
 	/** This round is paused (Play, Transport or navbar): position, chains and trims kept. */
 	const paused = $derived(active && audioState.paused && audioState.session === BLIND_SESSION);
 	/**
@@ -366,6 +387,8 @@
 	);
 	/** A test on the cable is still open (the blind set may still play): end it first. */
 	const cableOpen = $derived(onCable && roundView.phase !== 'idle' && roundView.phase !== 'ended');
+	/** A test runs in the browser (not on the cable): a start on the cable would discard it. */
+	const browserRunning = $derived(active && !onCable);
 	const playReason = $derived(
 		!active
 			? m.cego_fux_reason_play_idle()
@@ -450,8 +473,9 @@
 		return onCable && client !== null && cableRound.running();
 	}
 	onDestroy(() => {
-		// Leaving the page: the test on the cable ends; the cable keeps its curve until unplugged.
-		if (cableRunning()) void cableRound.endKeep();
+		// Leaving the page: the test on the cable ends (a start in flight too, when it lands); the
+		// cable keeps its curve until unplugged.
+		if (onCable && client !== null) void cableRound.destroy();
 		releasePreview();
 	});
 
@@ -595,6 +619,15 @@
 	 */
 	function beginCable(): readonly Candidate[] | null {
 		message = '';
+		// A browser test in progress is never discarded by a start on the cable.
+		if (browserRunning) {
+			message = m.cable_blind_reason_browser();
+			return null;
+		}
+		if (cableOpen) {
+			message = m.cable_blind_reason_end_first();
+			return null;
+		}
 		const candidates = chosen;
 		if (
 			candidates.length < 2 ||
@@ -663,13 +696,34 @@
 	function cableVoided() {
 		if (audio && owned(audio)) audio.stop();
 		moving = false;
-		if (!session) return;
+		// Revealed already: no round is in play.
+		if (!session || !active) return;
 		try {
 			session = { ...session, order: shuffle(session.candidates.map((c) => c.id)) };
 		} catch {
 			message = m.cego_random_error();
 		}
 		prepareCableRound();
+	}
+	/**
+	 * "Encerrar" on Escuta ended the test on the cable: the completed rounds are kept and
+	 * revealed (the round in play is dropped); with none, the page starts over.
+	 */
+	function endedOnCable() {
+		if (!session || session.completed.length === 0) {
+			reset();
+			return;
+		}
+		clearTimer();
+		roundStarted = false;
+		if (audio && owned(audio)) audio.stop();
+		moving = false;
+		message = '';
+		history = [...history, bracketStage(session, spread)];
+		active = false;
+		releasePreview();
+		tab = 3;
+		announcement = m.cego_revealed();
 	}
 	/**
 	 * Every position change on the cable, the same position and the round's first play included:
@@ -1275,7 +1329,7 @@
 												mode="listen"
 												candidates={[]}
 												onblind={prepareCableRound}
-												onended={reset}
+												onended={endedOnCable}
 											/>
 										{/if}
 										<div class="card">
@@ -1440,7 +1494,11 @@
 										view={roundView}
 										mode="setup"
 										candidates={chosen}
-										blocked={cableOpen ? m.cable_blind_reason_end_first() : null}
+										blocked={cableOpen
+											? m.cable_blind_reason_end_first()
+											: browserRunning
+												? m.cable_blind_reason_browser()
+												: null}
 										onbegin={beginCable}
 										onbegun={begunCable}
 									/>

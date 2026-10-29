@@ -3379,6 +3379,62 @@ export function createCableService(
 		},
 
 		/**
+		 * Confirms the held revert of `endComparison` (the saved curve ≥ 3 dB above the confirmed
+		 * level; fresh gesture, volume lowered) and ends the comparison there: the held saved curve
+		 * is applied as confirmed and, only once the cable is known to play the saved curve (its CRC
+		 * is the saved one's), the session ends `reverted` and the preview marker is removed (a
+		 * blind comparison too). Anything else is refused (`no-hold` without that hold,
+		 * `revert-failed` with the failure when the apply did not land) and the session goes on.
+		 */
+		async confirmEndComparison(request: LiveGestureRequest): Promise<LiveOutcome> {
+			if (!consumeGestureToken(request.gesture, nowMs())) return liveRefuse('gesture');
+			const s = activeLive();
+			const c = s?.comparison ?? null;
+			if (s === null || c === null) return liveRefuse('no-session');
+			const held = s.held;
+			const hold = s.hold;
+			if (hold === null || held === null || hold.reason !== 'loudness' || hold.curve !== 'saved') {
+				return liveRefuse('no-hold');
+			}
+			if (c.switching) return liveRefuse('busy');
+			c.switching = true;
+			let curve: LiveCaptured;
+			try {
+				clearHold(s);
+				s.pending?.done();
+				s.pending = null;
+				// Like `confirmLive`: the confirmed level becomes the saved curve's (never lowered).
+				s.ackLevelDb = maxLevel(s.ackLevelDb, held.levelDb);
+				curve = recaptured(held, true);
+				enqueueLive(s, curve);
+				emit();
+				scheduleLive();
+				await curve.settled;
+				await liveRunSettled();
+			} finally {
+				c.switching = false;
+			}
+			const saved = savedCrcOf(s);
+			const failure =
+				revertFailure(s, curve) ??
+				(saved !== null && curve.crc === saved && s.applied?.crc === saved
+					? null
+					: ('error' as const));
+			if (failure !== null) {
+				if (s.ended === null) c.failed = true;
+				emit();
+				return liveRefuse('revert-failed', {
+					revertFailure: failure,
+					live: liveView(),
+					...(s.lastError === null || s.lastError === undefined ? {} : { error: s.lastError })
+				});
+			}
+			cableBackToSaved(s.label);
+			endLive(s, 'reverted');
+			return { status: 'accepted', live: liveView() };
+		},
+
+		/**
 		 * The original (not level-matched) curve of comparison candidate `index`, for "Salvar
 		 * esta" (the current or last ended session's set). Null without one. Read-only copy.
 		 */

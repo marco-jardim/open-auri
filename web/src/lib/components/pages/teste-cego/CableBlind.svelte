@@ -11,6 +11,9 @@
 	  "Encerrar" (back to the saved curve; a held revert asks for the volume confirmation).
 	- `results` (Resultado): "Salvar a vencedora no cabo" (the ORIGINAL curve, `comparisonOriginal`,
 	  once the blind set ended), "Encerrar", "Encerrar sem voltar".
+	While the cable may still play an old preview (`liveOrphan`), every start waits: unplug and
+	replug, or "Já desconectei" (`dismissLiveOrphan`). A test that ended without this page says
+	whether the cable went back to its saved curve (unplugged) or keeps the test's curve.
 	Nothing rendered here varies with the playing candidate.
 -->
 <script lang="ts">
@@ -35,6 +38,7 @@
 	import { describeReason, formatNumber } from '#lib/components/cable/i18n.ts';
 	import { liveActive, liveOutcomeText, liveRefusalText } from '#lib/components/cable/live.ts';
 	import {
+		cableOrphan,
 		checkCurves,
 		type CablePause,
 		type CableRound,
@@ -196,14 +200,23 @@
 		return liveOutcomeText(outcome) ?? liveRefusalText.error();
 	}
 
+	/** The cable may still play an old preview: every start waits for a replug or "Já desconectei". */
+	const orphan = $derived(cableOrphan(cable));
+
 	/** Why the cable cannot run the test right now (before the checklist), or null. */
 	const availability = $derived.by<string | null>(() => {
 		if (app === null || cable === null || !cable.liveCapable) return m.cable_blind_unavailable();
 		if (cable.connection !== 'connected' || cable.device === null) return m.cable_blind_connect();
 		if (cable.writing) return m.cable_live_reason_writing();
 		if (liveActive(cable.live) && !round.running()) return m.cable_blind_reason_live();
+		if (orphan) return m.cable_blind_reason_orphan();
 		return null;
 	});
+
+	/** "Já desconectei": clears the old preview's notice (only records; never touches the cable). */
+	function onDismissOrphan() {
+		app?.cable.dismissLiveOrphan();
+	}
 
 	/** Why "Começar no cabo" is locked (first unmet item), or null. */
 	const goReason = $derived.by<string | null>(() => {
@@ -385,6 +398,7 @@
 	const resumeReason = $derived.by<string | null>(() => {
 		if (app === null || cable === null || !cable.liveCapable) return m.cable_blind_unavailable();
 		if (cable.connection !== 'connected' || cable.device === null) return m.cable_blind_connect();
+		if (orphan) return m.cable_blind_reason_orphan();
 		return leverReason(checklist);
 	});
 
@@ -414,9 +428,24 @@
 				return m.cable_blind_refused_start();
 			case 'end-failed':
 				return m.cable_blind_end_failed();
+			case 'cancel-failed':
+				return m.cable_blind_cancel_failed();
 			default:
 				return pause satisfies never;
 		}
+	}
+
+	/**
+	 * Why the test ended without this page (`gone`): the session's own end reason. Only an unplug
+	 * puts the cable back on its saved curve; any other end leaves the test's curve on it.
+	 */
+	function goneText(): string {
+		const live = cable?.live ?? null;
+		if (live?.endedReason === 'disconnected' || cable?.connection !== 'connected') {
+			return m.cable_live_ended_disconnected();
+		}
+		if (live?.endedReason === 'reverted') return m.cable_live_ended_reverted();
+		return m.cable_blind_ended_gone();
 	}
 
 	const endedText = $derived.by<string | null>(() => {
@@ -427,7 +456,7 @@
 			case 'kept':
 				return m.cable_blind_ended_kept();
 			case 'gone':
-				return m.cable_live_ended_disconnected();
+				return goneText();
 			default:
 				return null;
 		}
@@ -459,6 +488,14 @@
 	</fieldset>
 {/snippet}
 
+{#snippet dismissOrphan()}
+	<div class="actions">
+		<Button size="sm" onclick={onDismissOrphan} data-cable-blind-orphan-dismiss
+			>{m.cable_live_orphan_dismiss()}</Button
+		>
+	</div>
+{/snippet}
+
 {#snippet held()}
 	<div class="hold" data-cable-blind-hold>
 		<p>{m.cable_blind_hold_saved()}</p>
@@ -477,6 +514,7 @@
 		<p class="note">{m.cable_blind_intro()}</p>
 		{#if availability !== null}
 			<p class="note" data-cable-blind-unavailable>{availability}</p>
+			{#if orphan}{@render dismissOrphan()}{/if}
 		{:else}
 			<p>{m.cable_blind_match()}</p>
 			{#if shownRefusal !== null}
@@ -573,6 +611,10 @@
 				{pauseText(view.pause)}
 			</p>
 			<p class="note">{m.cable_blind_resume_hint()}</p>
+			{#if orphan}
+				<p class="note" data-cable-blind-orphan>{m.cable_blind_reason_orphan()}</p>
+				{@render dismissOrphan()}
+			{/if}
 			{@render levers()}
 			<div class="actions">
 				<Button
@@ -597,6 +639,11 @@
 	{:else}
 		<h3 id={`${id}-title`}>{m.cable_blind_title()}</h3>
 		{#if phase === 'end-held'}{@render held()}{/if}
+		{#if phase === 'paused' && view.pause !== null}
+			<p class="pause" role="status" data-cable-blind-pause={view.pause}>
+				{pauseText(view.pause)}
+			</p>
+		{/if}
 		{#if endedText !== null}<p class="note" data-cable-blind-ended={view.endedReason}>
 				{endedText}
 			</p>{/if}
