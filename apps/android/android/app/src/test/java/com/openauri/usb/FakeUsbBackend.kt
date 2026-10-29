@@ -42,6 +42,9 @@ class FakeUsbBackend(
         /** A kernel driver holds the interfaces: only a forced claim succeeds, and it detaches the driver. */
         @Volatile var kernelDriverBound: Boolean = false
 
+        /** Like usbfs, reject interface-recipient control transfers unless this connection claimed it. */
+        @Volatile var requireInterfaceClaim: Boolean = false
+
         /** If set, [open] throws it. */
         @Volatile var openError: UsbFailure? = null
 
@@ -195,7 +198,10 @@ class FakeUsbBackend(
 
     override fun hidReportDescriptor(connection: UsbConnectionHandle, interfaceId: Int, length: Int): ByteArray {
         io("hidReportDescriptor $interfaceId")
-        synchronized(lock) { requireOpen(connection) }
+        synchronized(lock) {
+            requireOpen(connection)
+            requireControlClaim(connection, ControlSetup.hidReportDescriptor(interfaceId))
+        }
         val descriptor = faults.reportDescriptor
         return descriptor.copyOf(minOf(length, descriptor.size))
     }
@@ -275,6 +281,7 @@ class FakeUsbBackend(
         val key = connection.device.key
         val failure: UsbFailure? = synchronized(lock) {
             requireOpen(connection)
+            if (setup != null) requireControlClaim(connection, setup)
             when (attemptCount++) {
                 faults.detachAtReport -> UsbFailure.Detached(key)
                 faults.timeoutAtReport -> UsbFailure.Timeout(key, timeoutMs, null)
@@ -295,6 +302,15 @@ class FakeUsbBackend(
         if (isMainThread()) throw UsbFailure.MainThread(call)
         if (!hostSupported) throw UsbFailure.NoHost()
         synchronized(lock) { callLog += call }
+    }
+
+    /** Called with [lock] held. */
+    private fun requireControlClaim(connection: UsbConnectionHandle, setup: ControlSetup) {
+        if (faults.requireInterfaceClaim && (setup.requestType and 0x1F) == 0x01 &&
+            (connection.id to (setup.index and 0xFF)) !in claimed
+        ) {
+            throw UsbFailure.TransferFailed(connection.device.key, -1, "controlTransfer failed")
+        }
     }
 
     /** Called with [lock] held. */

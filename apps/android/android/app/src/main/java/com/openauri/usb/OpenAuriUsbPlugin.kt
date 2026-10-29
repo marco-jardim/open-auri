@@ -404,7 +404,10 @@ class OpenAuriUsbPlugin internal constructor(private val injected: Environment?)
             val raw = env.backend.rawDescriptors(connection)
             val length = UsbDescriptors.hidReportDescriptorLength(raw, hid.id, hid.alternateSetting)
                 ?: MAX_REPORT_DESCRIPTOR_BYTES
-            val reportDescriptor = env.backend.hidReportDescriptor(connection, hid.id, length)
+            // ClaimManager forces the claim if usbhid is bound; usbfs requires it before interface control I/O.
+            val reportDescriptor = env.claims.withClaim(connection, hid) {
+                env.backend.hidReportDescriptor(connection, hid.id, length)
+            }
             val parsed = try {
                 HidReportDescriptor.parse(reportDescriptor)
             } catch (malformed: HidDescriptorException) {
