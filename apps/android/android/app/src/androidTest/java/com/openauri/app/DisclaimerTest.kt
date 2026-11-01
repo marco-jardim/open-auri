@@ -29,8 +29,8 @@ class DisclaimerTest {
     }
 
     private fun awaitEditor(app: WebAppScenario) {
-        // The editor's loading status disappears only once the client app is ready.
-        app.awaitJs("window.Capacitor?.isNativePlatform() === true && document.querySelector('main.curva') != null && document.querySelector('main.curva > p.visually-hidden[role=\"status\"]') == null", "ready native curve editor")
+        // The lower instrument renders only once the client app has hydrated, as in DownloadFlowTest.
+        app.awaitJs("window.Capacitor?.isNativePlatform() === true && document.querySelector('main.curva .lower') != null", "ready native curve editor")
     }
 
     private fun assertNoDisclaimer(app: WebAppScenario) {

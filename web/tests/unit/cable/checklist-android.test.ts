@@ -205,7 +205,6 @@ describe('Native service writes with the desktop checklist only', () => {
 			if (path === 'rescue') expect(h.service.getState().rescue).toBeNull();
 		}
 	);
-
 });
 
 describe('Native service requires a fresh deployed policy on every write path', () => {
