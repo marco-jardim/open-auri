@@ -146,12 +146,10 @@ describe('live preview (S4/S7)', () => {
 			ctx
 		);
 		expect(quiet.canWrite).toBe(false);
-		const android = evaluateLiveChecklist(
-			input({ confirmations }),
-			context({ cableMode: 'native', androidWriteValidated: false })
-		);
-		expect(android.items.map((item) => item.id)).toContain('android-untested');
-		expect(android.canWrite).toBe(false);
+		// The native transport adds no Android item to either checklist.
+		const native: ChecklistContext = { ...ctx, cableMode: 'native' };
+		expect(evaluateLiveChecklist(input({ confirmations }), native).items).toEqual(liveResult.items);
+		expect(evaluateChecklist(input({ confirmations }), native).items).toEqual(write.items);
 	});
 });
 

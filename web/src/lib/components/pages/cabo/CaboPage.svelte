@@ -31,7 +31,6 @@
 	import type { NativeHIDDevice } from '#lib/cable/native/index.ts';
 	import { ANDROID_PLAY_URL } from '#lib/cable/android-links.ts';
 	import AndroidAppCallout from '#lib/components/cable/AndroidAppCallout.svelte';
-	import AndroidUntestedNotice from '#lib/components/cable/AndroidUntestedNotice.svelte';
 	import UsbDiagnostics from './UsbDiagnostics.svelte';
 	import { LAYER_PARAM, parseLayer } from '../curva/layers.ts';
 	import { caboProfile, loadDecision, type LoadedEntry } from './load-entry.ts';
@@ -260,7 +259,6 @@
 <Tour page="cabo" autoOpen={tourAutoOpen} />
 
 <div class="room">
-	<AndroidUntestedNotice kind={native.kind} presentation="banner" />
 	<AndroidAppCallout inApp={inApp || isNativeAndroid()} />
 	<LazyArt load={() => import('#lib/components/art/CaboArt.svelte')} />
 	<div class="intro">

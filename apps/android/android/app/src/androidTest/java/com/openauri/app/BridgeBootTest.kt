@@ -119,13 +119,6 @@ internal class WebAppScenario private constructor(val scenario: ActivityScenario
         awaitJs("location.href === ${JSONObject.quote(url)} && document.readyState === 'complete'", "navigation to $url")
     }
 
-    fun acceptDisclaimerIfPresent() {
-        // Native detection and this lazy island finish after document.readyState.
-        awaitJs("document.querySelector('dialog [data-ack]') != null || document.querySelector('aside.banner a[href=\"/docs#android-resgate\"]') != null", "Android untested-cable notice")
-        evaluate("document.querySelector('dialog[open] [data-ack]')?.click()")
-        awaitJs("document.querySelector('dialog[open] [data-ack]') == null", "disclaimer dismissal")
-    }
-
     fun assertNoCspViolations() {
         assertEquals(true, evaluate("window.__oaDocumentStart === true"))
         assertEquals("CSP violations: ${evaluate("JSON.stringify(window.__oaCspViolations)")}", 0, (evaluate("window.__oaCspViolations.length") as Number).toInt())

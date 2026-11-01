@@ -23,6 +23,7 @@ const expectedShots = [
   '5-comunidade.png',
   '6-teste-cego.png',
   '7-native-connect.png',
+  '8-cable-compare.png',
 ];
 const expectedSets = [
   { name: 'phone', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: expectedShots },
@@ -48,7 +49,7 @@ const expectedSets = [
     height: 1080,
     minSide: 1080,
     maxSide: 7680,
-    files: expectedShots.slice(0, 6),
+    files: [...expectedShots.slice(0, 6), '8-cable-compare.png'],
   },
 ];
 const setFolder = (locale, set) =>
@@ -97,7 +98,7 @@ test('icon and feature graphic match fresh renders and two renders are byte-iden
   }
 });
 
-test('each locale has seven phone/tablet and six desktop captures with exact Play specs', async () => {
+test('each locale has eight phone/tablet and seven desktop captures with exact Play specs', async () => {
   assert.deepEqual(
     SCREENSHOT_SETS,
     expectedSets,
@@ -212,7 +213,7 @@ test('validator enforces per-set bounds, exact aspect/resolution, 8 MB and known
 });
 
 test('--check validates committed assets without writing', async () => {
-  assert.equal(await checkPlayAssets(), 56);
+  assert.equal(await checkPlayAssets(), 64);
 });
 
 test('missing captures fail clearly instead of creating placeholder screenshots', async () => {
@@ -288,7 +289,9 @@ test('store screenshot spec is opt-in, single-project and distinguishes native f
   assert.match(spec, /project\.name !== 'mobile'/);
   assert.match(spec, /fixtures\/capacitor-bridge/);
   assert.match(spec, /name: 'oa_lang'/);
-  assert.match(spec, /getByRole\('complementary'/);
+  // The Android safety banner is gone; every capture must instead be free of any open modal.
+  assert.match(spec, /const MODAL = 'dialog\[open\], \[role="dialog"\]\[aria-modal="true"\]'/);
+  assert.match(spec, /page\.locator\(MODAL\)\.filter\(\{ visible: true \}\)\)\.toHaveCount\(0\)/);
   for (const set of expectedSets) assert.match(spec, new RegExp(`name: '${set.name}'`));
   assert.match(spec, /enabled: set\.name !== 'desktop'/);
   assert.match(spec, /isMobile: false,\s+hasTouch: false/);
@@ -298,7 +301,7 @@ test('store screenshot spec is opt-in, single-project and distinguishes native f
   for (const name of ['play-listing.md', 'play-console-passos.md']) {
     const doc = await readFile(new URL(`../../docs/android/${name}`, import.meta.url), 'utf8');
     assert.doesNotMatch(doc, /\u2014/u);
-    assert.match(doc, /56 PNGs/);
+    assert.match(doc, /64 PNGs/);
     for (const set of expectedSets.filter((entry) => entry.name !== 'phone'))
       assert.ok(doc.includes(set.name));
   }

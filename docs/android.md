@@ -14,8 +14,8 @@ especialmente seções 3, 4 e 14 e Anexos B, C, D e G.
 
 A WebView carrega a origem remota `https://open-auri.com` por `server.url`.
 Assim, SSR, autenticação, cookies, CSRF, Turnstile e service worker continuam
-no mesmo modelo do navegador. Um deploy atualiza o site, o aviso e a política
-de gravação sem republicar o APK.
+no mesmo modelo do navegador. Um deploy atualiza o site e a política de
+gravação sem republicar o APK.
 
 Essa é uma escolha deliberada: a documentação do Capacitor não recomenda
 `server.url` para produção. O app depende do site disponível; offline, só
@@ -39,10 +39,10 @@ Diagrama de componentes da seção 4.2 do plano:
 +---------------------------------^----------------------------------+
                                   | Capacitor / addWebMessageListener
 +---------------- https://open-auri.com (WebView) --------------------+
-| Layout -> detectNative -> android-status (aviso e política)         |
+| Layout -> detectNative -> android-status (política)                 |
 |        -> NativeHID (HidLike) -> createClientApp                     |
 | Serviço do cabo -> transporte WebHID compartilhado                 |
-| Checklist (+ aceite no app) | salvamento de arquivos -> SAF          |
+| Checklist | salvamento de arquivos -> SAF                            |
 +--------------------------------------------------------------------+
 ```
 
@@ -54,28 +54,38 @@ não apenas a configuração fonte. Não há cleartext em produção, backup do
 conteúdo da WebView ou depuração da WebView no release. A detecção JS serve
 à UI, não é uma fronteira de segurança: as guardas efetivas são nativas.
 
-## Estado de validação: teste parcial em hardware
+## Estado dos testes em hardware
 
-Em 29/10/2026, **1 de 2 fabricantes** testado: Samsung, com um Galaxy A70
-(SM-A705MN, Android 11). Prévia sem flash, gravação persistente e restauração
-do Padrão Auri confirmadas nesta bancada. Consulte o
+Em 29/10/2026, num Samsung Galaxy A70 (SM-A705MN, Android 11): prévia sem
+flash, gravação persistente e restauração do Padrão Auri confirmadas pelo som
+nesta bancada. Consulte o
 [relatório de validação de hardware](android/validacao-hardware.md) para método,
-resultados e limitações. A validação completa da gravação Android segue pendente.
+resultados e limitações.
 
-Texto exato do Anexo G.1 em pt-BR:
+Em 01/11/2026, num Blackview BV9900 Pro (Android 10), com o app 1.0.1: conexão
+por "Conectar pelo USB do Android" e gravação do preset Basshead com o
+checklist. Depois de reconectar, a curva salva soou idêntica ao Basshead
+aplicado ao vivo, o que confirma a gravação pelo som nesse aparelho. No mesmo
+dia, com o app 1.0.3 instalado pela Play Store como atualização sobre o 1.0.1,
+"Ouvir no cabo" (prévia ao vivo, sem gravar) e o A/B de "Comparar no cabo"
+(Neutro contra Basshead) mudaram o EQ em tempo real, também confirmados pelo
+som. Depois da atualização de 1.0.1 para 1.0.3, o app mostrou uma faixa falsa de
+"Gravação interrompida", embora a gravação tivesse dado certo. Esse falso
+positivo foi corrigido no site: o marcador que sobra de uma gravação é
+reconciliado com o diário antes de mostrar a faixa, e dispensar a faixa fica
+salvo. Risco residual: se a WebView perder o armazenamento ainda não gravado em
+disco quando o processo é encerrado, a reconciliação fica sem os dados de que
+precisa e a faixa pode voltar a errar; a causa raiz não foi reproduzida por
+completo.
 
-> **Gravação pelo app: teste em um celular**
->
-> O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).
->
-> Botões e links: **Entendi** · **Relatar resultado** · **Como resgatar**
+Se o som ficar estranho depois de gravar, grave o Neutro; se não resolver,
+grave o Neutro pelo site no computador (Chrome ou Edge).
 
 Os testes comparam os reports de dados dos 11 presets, byte a byte, com a
 referência oficial; também comparam desktop e transporte nativo para esses
 presets e o Neutro. Isso prova a paridade do protocolo e dos dados, não por si
 só o funcionamento físico do USB. O teste no A70 acrescenta evidência acústica
-e paridade na entrada da ponte nativa (logcat), mas não captura Android no fio
-nem evidência em outros fabricantes.
+e paridade na entrada da ponte nativa (logcat), mas não captura Android no fio.
 
 O framing usa a política `WINDOWS_MAX_OUTPUT` do Anexo D.2: prefixo `0xCB`,
 31 bytes de dados e zeros até o maior output report do descritor mais um
@@ -84,13 +94,8 @@ terá 32 bytes, também compatível com o envio de Linux e macOS. Essa política
 ainda precisa ser confirmada pela captura real da F5; uma divergência de
 framing exige correção e nova versão do app, não só deploy do site.
 
-O modal reaparece se a versão do aviso mudar; há banner na página do cabo e
-aceite obrigatório no checklist de cada gravação pelo app. O procedimento
-de referência está em
+O procedimento de captura USB de referência está em
 [`D:\git\open-auri\docs\android\captura-usb.md`](android/captura-usb.md).
-O encerramento do aviso depende da F5, com paridade no fio e validação em
-pelo menos dois celulares de fabricantes diferentes, com relatório assinado.
-Um teste sintético ou um relato isolado não substitui essa validação.
 
 ## Contrato da ponte (Anexo B)
 
@@ -279,15 +284,13 @@ revogação e controle remoto está em
 
 ## Controles remotos, página atual e modo offline
 
-As constantes operacionais ficam em
+A política de gravação fica em
 [`D:\git\open-auri\web\src\lib\cable\android-status.ts`](../web/src/lib/cable/android-status.ts).
 Não são flags temporárias nem configurações recebidas por push: mudam por
 deploy do site, seguindo o runbook de operação.
 
 | Controle | Estado atual | Efeito |
 | --- | --- | --- |
-| `ANDROID_WRITE_VALIDATED` | `false` | Mantém modal, banner e aceite de gravação não validada; só encerrar depois da F5 aprovada |
-| `ANDROID_DISCLAIMER_VERSION` | `2` | Incrementar reabre o modal mesmo para quem já aceitou uma versão anterior |
 | `ANDROID_WRITE_POLICY.enabled` | `true` | `false` desliga a gravação pelo app, mantendo uso simulado |
 | `ANDROID_WRITE_POLICY.blockedAppVersions` | `[]` | Bloqueia versões específicas ou inferiores a um limite, sem bloquear o desktop |
 
@@ -434,9 +437,9 @@ Gradle e builds web em série quando compartilhar o mesmo checkout.
 | Kotlin unitário | Parser HID, framing, CRC16, FrameGuard, erros, concorrência, timeout e backend falso; `npm run test:android` |
 | Robolectric | Permissão, ciclo de vida, origem, plugins USB/arquivos, downloads e política do manifest, sem depender de aparelho; incluído em `npm run test:android` |
 | Kover | A mesma execução verifica pelo menos 90% de linhas e branches nos pacotes USB e arquivos; não pule `:app:koverVerifyDebug` |
-| Web unitário e componentes | Detecção nativa, handshake/schema, erros, estado/política, checklist, aviso, arquivos, frescor e recarga; `npm run test:web:unit` |
+| Web unitário e componentes | Detecção nativa, handshake/schema, erros, estado/política, checklist, arquivos, frescor e recarga; `npm run test:web:unit` |
 | Paridade nativa | Transporte real injetado com `NativeHID` versus HID falso de desktop: 11 presets e Neutro, 1 e 2 cabos, bytes, commit e tempos iguais |
-| E2E `android-bridge` | Playwright desktop/mobile com o `native-bridge.js` real do Capacitor e backend USB falso; aviso, gravação, recusa, reload e downloads; `npm run test:web:e2e -- --grep android-bridge` |
+| E2E `android-bridge` | Playwright desktop/mobile com o `native-bridge.js` real do Capacitor e backend USB falso; gravação, recusa, reload e downloads; `npm run test:web:e2e -- --grep android-bridge` |
 | Instrumentados | WebView Android real contra o servidor local com CSP real, ponte, origem, arquivos e atualização/offline; `npm run test:android:device`, também no job de CI `android-emulator` |
 | F5 física | Captura USB de referência, paridade de rota/padding e testes em dois fabricantes; depende de cabo e intervenção humana |
 

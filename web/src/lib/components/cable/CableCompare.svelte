@@ -238,7 +238,7 @@
 	}
 
 	// --- start: the compact checklist ------------------------------------------------------------
-	const UNCONFIRMED = { volumeLowered: false, experimental: false, androidUntested: false };
+	const UNCONFIRMED = { volumeLowered: false, experimental: false };
 	let asking = $state(false);
 	let starting = $state(false);
 	let confirmations = $state({ ...UNCONFIRMED });
@@ -283,8 +283,6 @@
 	const experimentalRequired = $derived(
 		(checklist?.experimentalRequired ?? false) || (plan?.experimentalRequired ?? false)
 	);
-	const required = (item: ChecklistItemId) =>
-		checklist?.items.some((entry) => entry.id === item && entry.required) ?? false;
 	const shownRefusal = $derived(refusal ?? plan?.refusal ?? null);
 	const refusalReasons = $derived(
 		(shownRefusal?.gateReasons ?? []).map((reason) => describeReason(reasonView(reason)))
@@ -311,7 +309,6 @@
 		if (experimentalRequired && !confirmations.experimental) {
 			return m.cable_fux_lock_experimental();
 		}
-		if (unmet('android-untested')) return m.cable_lock_android_untested();
 		const other = checklist.items.some(
 			(entry) => entry.id !== 'experimental' && entry.required && !entry.satisfied
 		);
@@ -920,7 +917,7 @@
 				</div>
 				<span class="status" data-cable-ab-status>{statusText}</span>
 			</div>
-			<ul class="readout">
+			<ul class="ab-readout">
 				{#if levelsText !== null}<li data-cable-ab-levels>{levelsText}</li>{/if}
 				{#if preampsText !== null}<li data-cable-ab-preamps>{preampsText}</li>{/if}
 				{#if residualText !== null}<li data-cable-ab-residual>{residualText}</li>{/if}
@@ -933,7 +930,7 @@
 			{#if hold !== null}
 				<div class="hold" data-cable-ab-hold={hold.reason}>
 					<p data-cable-ab-hold-text>{holdText(hold)}</p>
-					<div class="actions">
+					<div class="ab-actions">
 						{#if hold.reason === 'unknown-state'}
 							<Button
 								variant="primary"
@@ -960,7 +957,7 @@
 				</div>
 			{/if}
 
-			<div class="actions">
+			<div class="ab-actions">
 				<Button size="sm" disabledReason={saveReason} onclick={onSave} data-cable-ab-save
 					>{m.cable_x2_save()}</Button
 				>
@@ -1004,7 +1001,7 @@
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<div
 					id={`${id}-check`}
-					class="check"
+					class="ab-check"
 					role="group"
 					aria-labelledby={`${id}-check-title`}
 					bind:this={checkGroup}
@@ -1019,7 +1016,7 @@
 								<Lamp on={true} tone="danger" /><span>{refusalText(shownRefusal)}</span>
 							</p>
 							{#if refusalReasons.length > 0}
-								<ul class="reasons">
+								<ul class="ab-reasons">
 									{#each refusalReasons as reason, index (index)}<li>{reason}</li>{/each}
 								</ul>
 							{/if}
@@ -1030,7 +1027,7 @@
 							<span>{checklist.gateOk ? m.cable_x2_gate_ok() : m.cable_live_gate_fail()}</span>
 						</p>
 						{#if !checklist.gateOk && checklist.reasons.length > 0}
-							<ul class="reasons">
+							<ul class="ab-reasons">
 								{#each checklist.reasons as reason, index (index)}
 									<li>{describeReason(reason)}</li>
 								{/each}
@@ -1054,15 +1051,8 @@
 								confirmation="experimental"
 							/>
 						{/if}
-						{#if required('android-untested')}
-							<ConfirmLever
-								bind:checked={confirmations.androidUntested}
-								label={m.cable_confirm_android_untested()}
-								confirmation="android-untested"
-							/>
-						{/if}
 					</fieldset>
-					<div class="actions">
+					<div class="ab-actions">
 						<Button variant="plate" size="sm" loading={starting} onclick={() => void cancelAsk()}
 							>{m.cable_live_cancel()}</Button
 						>
@@ -1108,9 +1098,12 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 	}
+	/* `ab-` prefixed (like `.ab-check` below): the host page's global, unlayered `.comparar
+	   .readout` (a black monospace box), `.comparar .actions` and `.comparar .reasons` (equal
+	   specificity) restyled this panel's own readout, buttons and gate reasons on /comparar. */
 	.lever-row,
 	.start-row,
-	.actions {
+	.ab-actions {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
@@ -1143,24 +1136,26 @@
 	.notes {
 		color: var(--text-2, #bbb);
 	}
-	.readout,
+	.ab-readout,
 	.notes,
-	.reasons {
+	.ab-reasons {
 		margin: 0;
 		padding-left: 1.2em;
 	}
-	.readout {
+	.ab-readout {
 		font-family: var(--face-data, monospace);
 		font-variant-numeric: tabular-nums;
 	}
 	.hint,
-	.check p,
+	.ab-check p,
 	.hold p,
 	.ended,
 	.message {
 		margin: 0;
 	}
-	.check,
+	/* Not `.check`: the host page's global `.comparar .check { display: flex }` (equal specificity)
+	   turned this stacked checklist into one unwrapped row, wider than a 360 px phone. */
+	.ab-check,
 	.hold,
 	.refusal {
 		display: grid;
@@ -1185,6 +1180,8 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 14px;
+		/* A fieldset defaults to min-inline-size: min-content; let it shrink inside the grid. */
+		min-width: 0;
 		margin: 0;
 		padding: 12px;
 		border: 0;

@@ -161,10 +161,24 @@ export const CABLE_INFLIGHT_KEY = 'oa.cable.inflight';
  */
 export const INFLIGHT_STALE_MS = 10_000;
 /**
+ * Longest delay between a marker and the `ok` journal entry of the same write for that entry
+ * to clear the marker (`journaledOk`). A write takes about 0.35 s; anything later is another
+ * write's entry, or a clock that moved.
+ */
+export const INFLIGHT_JOURNAL_MATCH_MS = 60_000;
+/** Removals tried by one `unmark` before the marker is kept as left over (retried later). */
+const UNMARK_ATTEMPTS = 2;
+/**
  * Web Locks name held by the tab running a live preview session, for the whole session (S5):
  * a second tab's `startLive` and other tabs' writes are refused (`live-elsewhere`) meanwhile.
  */
 export const CABLE_LIVE_LOCK = 'oa-cable-live';
+/**
+ * `localStorage` key of the dismissed rescue notice: `{ at, device }` of the interrupted
+ * journal entry the user dismissed, so a reload does not restore that notice. Kept outside the
+ * journal: its format (and older pages reading it) stays unchanged.
+ */
+export const CABLE_RESCUE_DISMISSED_KEY = 'oa.cable.rescue.dismissed';
 /** `localStorage` key of the persisted live preview marker (S5). */
 export const CABLE_LIVE_KEY = 'oa.cable.live';
 /**
@@ -388,6 +402,11 @@ function truncate(text: string, max: number): string {
 	return points.length > max ? points.slice(0, max).join('') : text;
 }
 
+/** A device label as the journal keeps it (64 code points): the rescue dismissal's key. */
+function dismissalDevice(label: string | null): string | null {
+	return label === null ? null : truncate(label, 64);
+}
+
 function copyBands(snapshot: readonly Readonly<Band>[]): Band[] {
 	return snapshot.map((band): Band => ({ ...band }));
 }
@@ -606,13 +625,54 @@ export function createCableService(
 	 * cable is refused before any I/O. Cleared when the write ends (`unmark`).
 	 */
 	let markerAdrift = false;
+	/**
+	 * This instance's marker of a write that already ended could not be removed (`unmark`):
+	 * every later `unmark` and `dispose` try again.
+	 */
+	let markerLeft = false;
 	/** Raw markers this instance already turned into a journal entry (never block twice on one). */
 	const recoveredMarkers = new Set<string>();
 	let recheck: ReturnType<typeof setTimeout> | null = null;
 
+	/** The interruption whose rescue notice the user dismissed ("Dispensar aviso"), persisted. */
+	const dismissedStore =
+		deps.rescueDismissed === undefined
+			? browserInflight(CABLE_RESCUE_DISMISSED_KEY)
+			: deps.rescueDismissed;
+
+	/**
+	 * Whether the user dismissed the rescue notice of the interruption at `at` on `device`.
+	 * Labels are compared as the journal keeps them (`dismissalDevice`): a notice dismissed from
+	 * a write in this page names the full label, the journal entry restored on reload its
+	 * truncated one (dismissals persisted with a full label still match).
+	 */
+	function rescueDismissed(at: number, device: string | null): boolean {
+		if (dismissedStore === null) return false;
+		const raw = dismissedStore.read();
+		if (raw === null) return false;
+		try {
+			const value: unknown = JSON.parse(raw);
+			if (typeof value !== 'object' || value === null) return false;
+			const stored = value as { at?: unknown; device?: unknown };
+			if (stored.at !== at) return false;
+			if (stored.device === null) return device === null;
+			return (
+				typeof stored.device === 'string' &&
+				dismissalDevice(stored.device) === dismissalDevice(device)
+			);
+		} catch {
+			return false;
+		}
+	}
+
 	const lastJournal = deps.journal.last();
 	// Restored from the journal: shown, but not announced as a new interruption (no `fresh`).
-	if (mode === 'real' && lastJournal?.status === 'interrupted') {
+	// Not when the user already dismissed that very interruption (an older page load did).
+	if (
+		mode === 'real' &&
+		lastJournal?.status === 'interrupted' &&
+		!rescueDismissed(lastJournal.at, lastJournal.device)
+	) {
 		rescue = { at: lastJournal.at, deviceLabel: lastJournal.device, reportsSent: null };
 	}
 
@@ -1049,15 +1109,44 @@ export function createCableService(
 	// --- In-flight marker -------------------------------------------------------------------
 
 	/**
+	 * Whether the newest journal entry is the `ok` commit of the write `marker` describes: same
+	 * cable, same payload CRC, journaled at or after the marker and at most
+	 * `INFLIGHT_JOURNAL_MATCH_MS` later. The write finished and was journaled; only the marker's
+	 * removal was lost (its tab died in between, or the removal failed). Any later write would
+	 * have replaced the marker, so a matching entry inside that window can only be this write's.
+	 * The window keeps an older `ok` entry for the same curve, made to look newer by a clock
+	 * that moved backward, from hiding a real interruption. An unreadable journal matches nothing.
+	 */
+	function journaledOk(marker: InflightMarker): boolean {
+		let last: JournalEntry | null;
+		try {
+			last = deps.journal.last();
+		} catch (cause) {
+			console.warn('cable journal unreadable for the in-flight marker', cause);
+			return false;
+		}
+		if (last === null) return false;
+		const delay = last.at - marker.at;
+		return (
+			last.status === 'ok' &&
+			last.crc === marker.crc &&
+			last.device === truncate(marker.device, 64) &&
+			delay >= 0 &&
+			delay <= INFLIGHT_JOURNAL_MATCH_MS
+		);
+	}
+
+	/**
 	 * Turns a marker left by a tab that is gone into an `interrupted` journal entry (and the
 	 * rescue state), then removes it. Does nothing if the stored marker changed meanwhile.
-	 * A `between` marker (X9 queue, between two cables) names no cable being written: it is
-	 * only removed. Returns whether an interruption was recorded.
+	 * A `between` marker (X9 queue, between two cables) names no cable being written, and a
+	 * marker whose write the journal already holds as `ok` (`journaledOk`) interrupted nothing:
+	 * both are only removed. Returns whether an interruption was recorded.
 	 */
 	function recoverMarker(raw: string, marker: InflightMarker | null): boolean {
 		if (inflight === null || inflight.read() !== raw) return false;
 		recoveredMarkers.add(raw);
-		if (marker?.between === true) {
+		if (marker?.between === true || (marker !== null && journaledOk(marker))) {
 			if (!inflight.write(null)) console.warn('cable in-flight marker could not be removed');
 			return false;
 		}
@@ -1258,17 +1347,27 @@ export function createCableService(
 		return locks !== null;
 	}
 
-	/** Removes this instance's marker (never another tab's). Runs in `finally` of every write. */
+	/**
+	 * Removes this instance's marker (never another tab's). Runs in `finally` of every write.
+	 * A removal that fails is retried at once; if it still fails, `markerLeft` keeps track of
+	 * it, so the next `unmark` (the write's `release`, a later write) and `dispose` try again
+	 * instead of leaving a marker that the next load would take for an interrupted write.
+	 */
 	function unmark() {
 		markerAdrift = false;
-		if (ownMarker === null) return;
+		if (ownMarker === null && !markerLeft) return;
 		ownMarker = null;
+		markerLeft = false;
 		if (inflight === null) return;
-		const raw = inflight.read();
-		if (raw === null) return;
-		const stored = parseInflightMarker(raw);
-		if (stored !== null && stored.tabId !== tabId) return;
-		if (!inflight.write(null)) console.warn('cable in-flight marker could not be removed');
+		for (let attempt = 0; attempt < UNMARK_ATTEMPTS; attempt += 1) {
+			const raw = inflight.read();
+			if (raw === null) return;
+			const stored = parseInflightMarker(raw);
+			if (stored !== null && stored.tabId !== tabId) return;
+			if (inflight.write(null)) return;
+		}
+		console.warn('cable in-flight marker could not be removed');
+		markerLeft = true;
 	}
 
 	/**
@@ -1450,11 +1549,6 @@ export function createCableService(
 		const volumeLowered = confirmations?.volumeLowered === true;
 		const keepConnected = confirmations?.keepConnected === true;
 		const experimentalConfirmed = confirmations?.experimental === true;
-		// Transport-owned context cannot be overridden by a write request. Capture once, just
-		// like the other confirmations, and leave desktop/simulated requests unchanged.
-		const androidConfirmation = native
-			? { androidUntested: confirmations?.androidUntested === true }
-			: {};
 		// Read once, compared without coercion: only the exact string selects YOLO.
 		const profile: unknown = request.profile;
 		if (profile !== 'yolo') {
@@ -1465,8 +1559,7 @@ export function createCableService(
 				confirmations: {
 					volumeLowered,
 					keepConnected,
-					experimental: experimentalConfirmed,
-					...androidConfirmation
+					experimental: experimentalConfirmed
 				}
 			};
 		}
@@ -1480,8 +1573,7 @@ export function createCableService(
 				volumeLowered,
 				keepConnected,
 				experimental: experimentalConfirmed,
-				yoloWrite,
-				...androidConfirmation
+				yoloWrite
 			}
 		};
 	}
@@ -3067,8 +3159,8 @@ export function createCableService(
 		/**
 		 * Starts a live (no-flash) preview on the selected cable and applies `curve` at once
 		 * (after `LIVE_AFTER_COMMIT_MS` when a save just ended). Needs a fresh gesture and the
-		 * live checklist (gate, volume, experimental when required, the Modo YOLO items, the
-		 * Android acknowledgement on native; no spacing and no "keep connected"). Settles once
+		 * live checklist (gate, volume, experimental when required, the Modo YOLO items; no
+		 * spacing and no "keep connected"). Settles once
 		 * that first apply settled (or was held). The level of `curve` becomes the confirmed one.
 		 */
 		async startLive(request: LiveStartRequest): Promise<LiveOutcome> {
@@ -3095,8 +3187,7 @@ export function createCableService(
 					// Not part of the live checklist (an unplug only reverts the cable).
 					keepConnected: false,
 					experimental: confirmations?.experimental === true,
-					yoloWrite: confirmations?.yoloWrite === true,
-					androidUntested: confirmations?.androidUntested === true
+					yoloWrite: confirmations?.yoloWrite === true
 				}
 			});
 			const verdict = gateForWrite(captured.bands, captured.preampDb, gateOptions(captured));
@@ -3215,8 +3306,7 @@ export function createCableService(
 				confirmations: {
 					volumeLowered: confirmations?.volumeLowered === true,
 					keepConnected: false,
-					experimental: confirmations?.experimental === true,
-					androidUntested: confirmations?.androidUntested === true
+					experimental: confirmations?.experimental === true
 				}
 			});
 			const checklist = comparisonChecklist(captured, loudest.verdict, items);
@@ -3669,9 +3759,21 @@ export function createCableService(
 			return true;
 		},
 
-		/** Hides the rescue notice (the journal keeps the interruption). */
+		/**
+		 * Hides the rescue notice (the journal keeps the interruption, and with it the checklist's
+		 * unknown-state warning). The dismissal is persisted for that interruption (its time and
+		 * cable), so a reload does not restore the notice; a later interruption raises it again.
+		 */
 		dismissRescue() {
+			const dismissed = rescue;
 			rescue = null;
+			if (dismissed !== null && dismissedStore !== null) {
+				// Keyed as the journal keeps the label, so the restored notice matches on reload.
+				const device = dismissalDevice(dismissed.deviceLabel);
+				if (!dismissedStore.write(JSON.stringify({ at: dismissed.at, device }))) {
+					console.warn('cable rescue dismissal could not be persisted');
+				}
+			}
 			emit();
 		},
 
@@ -3700,6 +3802,9 @@ export function createCableService(
 			cancelLiveTimer();
 			// Stop waiting for another tab's liveness lock (the wait only ever records).
 			unwatch();
+			// A marker of an ended write that could not be removed: one last try, before the
+			// liveness lock goes (a write still running removes its own when it ends).
+			if (markerLeft && !writing) unmark();
 			// Other tabs may now treat this tab as gone: a write still running holds the write
 			// lock, so they record nothing for it; later real writes are refused (holdAlive).
 			const drop = releaseAlive;

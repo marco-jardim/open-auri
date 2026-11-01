@@ -1,14 +1,7 @@
 /**
- * Operational state of writing from the Android app (plan 0.2, RF14, RF15). These are not
- * temporary flags: each one is changed only by a site deploy, following
- * docs/operacao/runbooks/android-release.md.
+ * Operational write policy of the Android app (plan RF15). Not a temporary flag: it is changed
+ * only by a site deploy, following docs/operacao/runbooks/android-release.md.
  */
-
-/** Runbook: docs/operacao/runbooks/android-release.md ("Encerrar o aviso"). */
-export const ANDROID_WRITE_VALIDATED: boolean = false;
-
-/** Runbook: docs/operacao/runbooks/android-release.md ("Reabrir o aviso"). */
-export const ANDROID_DISCLAIMER_VERSION = 2;
 
 /** Runbook: docs/operacao/runbooks/android-release.md ("Desligar ou restringir a gravação"). */
 export const ANDROID_WRITE_POLICY: AndroidWritePolicy = {

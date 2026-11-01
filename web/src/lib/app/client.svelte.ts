@@ -4,6 +4,7 @@ import { parseFlashState, serializeFlashState } from 'open-auri/policy';
 import { getAudioEngine, type AudioEngine } from '#lib/audio/engine.ts';
 import {
 	CABLE_INFLIGHT_KEY,
+	CABLE_RESCUE_DISMISSED_KEY,
 	CABLE_WRITTEN_EVENT,
 	NEUTRAL_CURVE,
 	createCableService,
@@ -113,6 +114,11 @@ export function createClientApp(options: ClientAppOptions = {}) {
 					if (event.area !== 'local') return;
 					if (event.key === CABLE_INFLIGHT_KEY || event.key === null) listener();
 				})
+		},
+		// "Dispensar aviso" survives a reload (same storage and failure reporting).
+		rescueDismissed: {
+			read: () => state.storage.readPersisted('local', CABLE_RESCUE_DISMISSED_KEY),
+			write: (value) => state.storage.write('local', CABLE_RESCUE_DISMISSED_KEY, value)
 		}
 	});
 	let cableState = $state.raw(cable.getState());

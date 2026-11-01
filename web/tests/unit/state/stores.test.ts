@@ -231,6 +231,23 @@ describe('core policies', () => {
 		expect(store.entries).toHaveLength(500);
 	});
 
+	it('journal append returns false when the entry could not be persisted (memory only)', () => {
+		const local = new MemoryStorage();
+		const store = own(createJournalStore({ storage: adapter(local) }));
+		const persistedAts = () =>
+			parseJournal(local.getItem('oa.journal')).entries.map((item) => item.at);
+		expect(store.append(entry(1))).toBe(true);
+		local.failure = Object.assign(new Error('full'), { name: 'QuotaExceededError' });
+		expect(store.append(entry(2))).toBe(false);
+		expect(store.error).toMatchObject({ kind: 'quota', operation: 'write:oa.journal' });
+		// This tab still shows it; what a reload would read does not have it.
+		expect(store.entries.map((item) => item.at)).toEqual([1, 2]);
+		expect(persistedAts()).toEqual([1]);
+		local.failure = null;
+		expect(store.append(entry(3))).toBe(true);
+		expect(persistedAts()).toEqual([1, 2, 3]);
+	});
+
 	it('exposes the newest ok entry (skipping interrupted/simulated) from persisted storage', () => {
 		const local = new MemoryStorage();
 		const store = own(createJournalStore({ storage: adapter(local) }));

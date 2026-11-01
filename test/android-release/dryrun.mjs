@@ -481,7 +481,7 @@ syncBuiltinESMExports();
     assert.equal(read(join(out, 'SHA256SUMS.txt')), sums);
     const manifest = JSON.parse(read(join(out, 'release-manifest.json')));
     assert.equal(manifest.apkCertSha256, keys.APP.fingerprint);
-    assert.equal(manifest.hardwareValidated, false);
+    assert.ok(!('hardwareValidated' in manifest));
     assert.equal(manifest.apkSha256, sha256(readFileSync(apk)));
     assert.equal(manifest.aabSha256, sha256(readFileSync(aab)));
     // n5: the signed APK (aapt2 dump badging) and AAB (protobuf base manifest) carry the
@@ -504,9 +504,11 @@ syncBuiltinESMExports();
     const g5 = plan.split('**G.5 Notas da release, README e ficha da Play**')[1].split('**G.6')[0];
     const pt = g5.match(/- pt-BR: "([^"]+)"/)[1];
     const en = g5.match(/- en-US: "([^"]+)"/)[1];
-    assert.ok(read(join(out, 'RELEASE_NOTES.md')).startsWith(`${pt}\n\n${en}\n\n`));
+    const notes = read(join(out, 'RELEASE_NOTES.md'));
+    assert.ok(notes.startsWith(`# Android ${pkg.version}\n`));
+    for (const notice of [pt, en]) assert.ok(!notes.includes(notice));
     t.diagnostic(
-      'Verified APK v2/v3 app certificate, distinct AAB upload certificate, APK/AAB applicationId/versionCode/versionName, checksums, manifest and G.5 notes.',
+      'Verified APK v2/v3 app certificate, distinct AAB upload certificate, APK/AAB applicationId/versionCode/versionName, checksums, manifest and notes without the G.5 notice.',
     );
   },
 );

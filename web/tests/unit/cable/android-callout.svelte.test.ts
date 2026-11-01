@@ -25,7 +25,9 @@ for (const clientNavigator of [
 	test(`Android browser offers releases without an unpublished Play listing: ${clientNavigator.userAgent}`, async () => {
 		await render(AndroidAppCallout, { clientNavigator, inApp: false, playLive: false });
 		await expect.element(page.getByRole('complementary')).toBeVisible();
-		await expect.element(page.getByText(m.android_app_callout_untested())).toBeVisible();
+		await expect.element(page.getByText(m.android_app_callout_body())).toBeVisible();
+		// The one-phone test notice was retired; the callout only offers the app.
+		expect(page.getByRole('complementary').element().textContent).not.toContain('Galaxy A70');
 		await expect
 			.element(page.getByRole('link', { name: m.android_download_github() }))
 			.toHaveAttribute('href', ANDROID_RELEASES_URL);

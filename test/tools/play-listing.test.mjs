@@ -15,12 +15,14 @@ const requirementLabels = {
   'Short description': 'Descrição curta',
   'Full description': 'Descrição completa',
 };
-const notices = {
-  'pt-BR':
-    'Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml',
-  'en-US':
-    'Notice: writing tested on a Kuba Auri with Galaxy A70 (Android 11), not other manufacturers. Preview, writing and Padrão Auri restoration confirmed acoustically; native bridge bytes match the desktop site. Full validation pending. Sound off? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml',
-};
+// The retired G.5 notice, read from the historical plan so it can be asserted absent.
+const g5Section = plan.match(/\*\*G\.5 [^\n]+\n([\s\S]*?)(?=\*\*G\.6 )/)?.[1] ?? '';
+const notices = Object.fromEntries(
+  languages.map((language) => [
+    language,
+    g5Section.match(new RegExp(`^- ${language}: "([^"]+)"$`, 'm'))?.[1] ?? '',
+  ]),
+);
 const requiredPhrases = {
   'pt-BR': [
     'não é oficial nem endossado pela Kuba',
@@ -34,6 +36,10 @@ const requiredPhrases = {
     'Segurança dos dados (Data safety)',
     'dados coletados e compartilhados',
     '18 anos ou mais',
+    'Ouvir no cabo',
+    'Comparar no cabo',
+    'sem gravar na memória flash',
+    'Ao desconectar, o cabo volta à curva salva',
   ],
   'en-US': [
     'is not official or endorsed by Kuba',
@@ -47,6 +53,10 @@ const requiredPhrases = {
     'Data safety section of this listing',
     'collected and shared data',
     '18 or over',
+    'Hear on the cable',
+    'Compare on the cable',
+    'without writing to flash',
+    'Unplugging restores the saved curve',
   ],
 };
 const urls = [
@@ -99,21 +109,27 @@ test('both listing languages have exactly three fields within the documented Pla
   for (const fields of fieldsByLanguage.values()) assert.equal(fields.get('Title'), 'open-auri');
 });
 
-test('full descriptions start with the exact G.5 notices, also pinned to the plan', () => {
-  const section = plan.match(/\*\*G\.5 [^\n]+\n([\s\S]*?)(?=\*\*G\.6 )/);
-  assert.ok(section, 'Missing G.5 section in the plan');
+// Neither description may carry the retired one-phone (G.5) notice or any "untested / not fully
+// validated" wording again.
+const oneTestPhone =
+  /Galaxy A70|não testad|not tested|untested|teste em um celular|tested on one phone|validação completa|validação plena|fully validated|full validation|Validação completa pendente/i;
+
+test('descriptions no longer carry the retired G.5 one-phone notice', () => {
+  assert.ok(g5Section, 'Missing G.5 section in the plan');
   for (const [language, fields] of parseListing(listing)) {
     const notice = notices[language];
-    assert.ok([...notice].length <= 500, `${language}: release notice exceeds Play limit`);
+    assert.ok(notice.length > 100, `${language}: G.5 notice not found in the plan`);
+    for (const field of ['Short description', 'Full description']) {
+      const value = fields.get(field);
+      assert.ok(!value.includes(notice), `${language} ${field}: G.5 notice must be absent`);
+      assert.doesNotMatch(value, oneTestPhone, `${language} ${field}: one-phone wording`);
+    }
     assert.ok(
-      section[1].includes(`- ${language}: "${notice}"`),
-      `${language}: plan notice changed`,
-    );
-    assert.ok(
-      fields.get('Full description').startsWith(`${notice}\n\n`),
-      `${language}: full description must open with the verbatim G.5 paragraph`,
+      !fields.get('Full description').startsWith(notice.slice(0, 20)),
+      `${language}: full description must not open with a notice`,
     );
   }
+  assert.doesNotMatch(listing, oneTestPhone, 'play-listing.md: one-phone wording');
 });
 
 test('full descriptions retain legal, native USB, privacy, requirements and source information', () => {
@@ -144,15 +160,39 @@ test('short descriptions say unofficial and full descriptions lead with Android 
       language === 'pt-BR' ? /não oficial/ : /unofficial/i,
     );
     const paragraphs = fields.get('Full description').split('\n\n');
-    assert.ok(paragraphs[1].startsWith(openings[language][0]), `${language}: native USB first`);
+    assert.ok(paragraphs[0].startsWith(openings[language][0]), `${language}: native USB first`);
     assert.ok(
-      paragraphs[2].startsWith(openings[language][1]),
+      paragraphs[1].startsWith(openings[language][1]),
       `${language}: independence prominent`,
     );
     assert.doesNotMatch(
       fields.get('Full description'),
       /não coleta dados além|collects no data beyond/i,
     );
+  }
+});
+
+test('Console copy mirrors both descriptions and no Play doc keeps the one-phone notice', () => {
+  const consoleCopy = read('../../docs/android/play-console-preenchimento.md');
+  for (const [language, fields] of parseListing(listing)) {
+    for (const field of ['Short description', 'Full description']) {
+      assert.ok(
+        consoleCopy.includes(`\x60\x60\x60text\n${fields.get(field)}\n\x60\x60\x60`),
+        `${language}: Console ${field} must mirror the listing`,
+      );
+    }
+  }
+  for (const path of [
+    'play-console-preenchimento.md',
+    'play-conteudo.md',
+    'play-console-passos.md',
+  ]) {
+    const doc = read(`../../docs/android/${path}`);
+    for (const notice of Object.values(notices)) {
+      assert.ok(!doc.includes(notice), `${path}: G.5 notice must be absent`);
+    }
+    assert.doesNotMatch(doc, oneTestPhone, `${path}: one-phone wording`);
+    assert.doesNotMatch(doc, /untested-cable notice|not yet been validated on a real cable/i);
   }
 });
 

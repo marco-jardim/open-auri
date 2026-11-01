@@ -49,7 +49,6 @@
 	<aside aria-label={m.android_app_callout_title()}>
 		<h2>{m.android_app_callout_title()}</h2>
 		<p>{m.android_app_callout_body()}</p>
-		<p>{m.android_app_callout_untested()}</p>
 		<div class="actions">
 			{#if playLive}<a href={ANDROID_PLAY_URL}>{m.android_download_play()}</a>{/if}
 			<a href={ANDROID_RELEASES_URL}>{m.android_download_github()}</a>

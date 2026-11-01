@@ -1,8 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import {
-	ANDROID_DISCLAIMER_VERSION,
 	ANDROID_WRITE_POLICY,
-	ANDROID_WRITE_VALIDATED,
 	canWriteFromApp,
 	compareSemVer,
 	isAppVersionBlocked,
@@ -16,10 +14,15 @@ function semver(value: string) {
 }
 
 describe('launch state', () => {
-	test('writing is not fully validated, the disclaimer is v2 and the policy allows every version', () => {
-		expect(ANDROID_WRITE_VALIDATED).toBe(false);
-		expect(ANDROID_DISCLAIMER_VERSION).toBe(2);
+	test('the policy allows every version and no disclaimer state is exported', async () => {
 		expect(ANDROID_WRITE_POLICY).toEqual({ enabled: true, blockedAppVersions: [] });
+		expect(Object.keys(await import('#lib/cable/android-status.ts')).sort()).toEqual([
+			'ANDROID_WRITE_POLICY',
+			'canWriteFromApp',
+			'compareSemVer',
+			'isAppVersionBlocked',
+			'parseSemVer'
+		]);
 	});
 
 	test('every shipped blocklist entry parses as an exact version or strict upper bound', () => {

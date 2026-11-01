@@ -21,7 +21,6 @@ on:
       - package-lock.json
       - apps/android/android/**
       - apps/android/www/**
-      - web/src/lib/cable/android-status.ts
   workflow_dispatch:
     inputs:
       dry_run:

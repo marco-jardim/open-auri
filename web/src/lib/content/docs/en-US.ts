@@ -3,15 +3,11 @@ import type { DocsContent } from './types.ts';
 
 // BEGIN Android validation state ------------------------------------------------------------
 // The only place in this file that says whether writing from the Android app was validated on
-// a real cable (section `android-validacao`). While ANDROID_WRITE_VALIDATED is false
-// (src/lib/cable/android-status.ts), the first two entries are the exact Anexo G.1 title and
-// text of docs/plans/2026-10-18-android-capacitor-plano.md. At F5, replace this whole block
-// with the Anexo G.6 text (date, number of devices and report). pt-BR.ts has the twin block.
+// a real cable (section `android-validacao`): the Anexo G.6 text (date, number of devices and
+// report) of docs/plans/2026-10-18-android-capacitor-plano.md. pt-BR.ts has the twin block.
 const androidValidationState: readonly string[] = [
-	'Writing from the app: tested on one phone',
-	'The Android app was tested on a real Kuba Auri cable with one Samsung Galaxy A70 (Android 11). Preview without saving, persistent writing and restoring Padrão Auri were confirmed acoustically, and packets logged at the native bridge input match the desktop site byte for byte. Phones from other manufacturers have not been tested; full write validation is still pending. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge).',
-	'What the tests guarantee: for each curve, the app builds the same nine data reports and the same commit, byte for byte, that the desktop site and the official page send. Automated tests compare those bytes with the reference for the 11 official presets, and before the commit the app also checks every sequence with an extra guard.',
-	'What is still pending: a second manufacturer, on-wire parity and a signed report to close F5. We have tested 1 of 2 manufacturers (Samsung). Bytes were checked at the native bridge input through logcat, not in an on-wire USB capture. The wireLog was empty because navigating to Diagnostics reopened the session. Every write from the app still asks for one more checklist item.'
+	'Writing from the app validated on a real cable on November 1, 2026, on 2 devices: Samsung Galaxy A70 (Android 11) and Blackview BV9900 Pro (Android 10). Report: docs/android/validacao-hardware.md',
+	'What the tests guarantee: for each curve, the app builds the same nine data reports and the same commit, byte for byte, that the desktop site and the official page send. Automated tests compare those bytes with the reference for the 11 official presets, and before the commit the app also checks every sequence with an extra guard.'
 ];
 // END Android validation state --------------------------------------------------------------
 

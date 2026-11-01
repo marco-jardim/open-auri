@@ -161,7 +161,9 @@ na Play e no GitHub, para permitir atualização entre fontes; confira o certifi
 antes de trocar. Instruções técnicas e estado de validação em
 [`D:\git\open-auri\docs\android.md`](docs/android.md).
 
-> Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+Som estranho depois de gravar pelo app? Grave o Neutro; se não resolver, pelo site no computador
+(Chrome ou Edge). Relate o resultado:
+https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
 
 ## Aviso legal
 

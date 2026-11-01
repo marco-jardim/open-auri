@@ -20,7 +20,8 @@ const BROWSING_SHOTS = [
   '5-comunidade.png',
   '6-teste-cego.png',
 ];
-const APP_SHOTS = [...BROWSING_SHOTS, '7-native-connect.png'];
+const COMPARE_SHOT = '8-cable-compare.png';
+const APP_SHOTS = [...BROWSING_SHOTS, '7-native-connect.png', COMPARE_SHOT];
 export const SCREENSHOT_SETS = [
   { name: 'phone', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: APP_SHOTS },
   { name: 'tablet-7', width: 1080, height: 1920, minSide: 320, maxSide: 3840, files: APP_SHOTS },
@@ -31,7 +32,7 @@ export const SCREENSHOT_SETS = [
     height: 1080,
     minSide: 1080,
     maxSide: 7680,
-    files: BROWSING_SHOTS,
+    files: [...BROWSING_SHOTS, COMPARE_SHOT],
   },
 ];
 const FEATURE_SVG = new URL('../design/play/feature-graphic.svg', import.meta.url);

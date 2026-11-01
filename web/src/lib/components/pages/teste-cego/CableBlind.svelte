@@ -5,7 +5,7 @@
 	never in the DOM).
 	- `setup` (the "No cabo" tab): the set's verdict (the pure `planComparison` the service makes;
 	  a refusal names the candidate, before the test starts), the volume lever (and the
-	  experimental / Android levers when needed), "Começar no cabo".
+	  experimental lever when needed), "Começar no cabo".
 	- `listen` (Escuta, while the test runs): the change check (Neutro / Telefone, "Ouvi mudar",
 	  "Não mudou"), "O som parou de mudar", a pause with "Retomar" (fresh levers and gesture) and
 	  "Encerrar" (back to the saved curve; a held revert asks for the volume confirmation; locked
@@ -105,7 +105,7 @@
 	const experimental = $derived(candidates.some(experimentalOf));
 
 	// --- levers (the start and "Retomar") ------------------------------------------------------
-	const UNCONFIRMED = { volumeLowered: false, experimental: false, androidUntested: false };
+	const UNCONFIRMED = { volumeLowered: false, experimental: false };
 	let confirmations = $state({ ...UNCONFIRMED });
 	let busy = $state(false);
 	let message = $state<string | null>(null);
@@ -157,9 +157,6 @@
 	/** The blind set needs it (also on "Retomar": the set starts again after the check). */
 	const experimentalRequired = $derived(
 		experimental || (plan?.experimentalRequired ?? false) || round.experimental()
-	);
-	const androidRequired = $derived(
-		checklist?.items.some((entry) => entry.id === 'android-untested' && entry.required) ?? false
 	);
 	const shownRefusal = $derived(refusal ?? plan?.refusal ?? null);
 	const refusalReasons = $derived(
@@ -234,17 +231,12 @@
 	function leverReason(result: ChecklistResult | null): string | null {
 		if (!confirmations.volumeLowered) return m.cable_live_lock_volume();
 		if (experimentalRequired && !confirmations.experimental) return m.cable_fux_lock_experimental();
-		if (androidRequired && !confirmations.androidUntested) return m.cable_lock_android_untested();
 		if (result === null) return null;
 		const unmet = (item: ChecklistItemId) =>
 			result.items.some((entry) => entry.id === item && entry.required && !entry.satisfied);
 		if (unmet('gate')) return m.cable_fux_lock_gate();
 		const other = result.items.some(
-			(entry) =>
-				entry.id !== 'experimental' &&
-				entry.id !== 'android-untested' &&
-				entry.required &&
-				!entry.satisfied
+			(entry) => entry.id !== 'experimental' && entry.required && !entry.satisfied
 		);
 		return other ? m.cable_fux_lock_other() : null;
 	}
@@ -492,13 +484,6 @@
 				bind:checked={confirmations.experimental}
 				label={m.cable_confirm_experimental()}
 				confirmation="experimental"
-			/>
-		{/if}
-		{#if androidRequired}
-			<ConfirmLever
-				bind:checked={confirmations.androidUntested}
-				label={m.cable_confirm_android_untested()}
-				confirmation="android-untested"
 			/>
 		{/if}
 	</fieldset>

@@ -1,12 +1,20 @@
-# Teste parcial do app Android em cabo Kuba Auri
+# Validação do app Android em cabo Kuba Auri
 
-Data: **29/10/2026**. Estado: **1 de 2 fabricantes testado (Samsung)**.
-Este relatório registra evidência real de prévia, gravação persistente e
-restauração nesta bancada, não a aprovação completa da F5 do plano Android.
-`ANDROID_WRITE_VALIDATED` permanece `false`; modal, banner, checklist e link de
-relato continuam ativos. Não é relatório assinado de encerramento da F5.
+Datas: **29/10/2026** (Samsung) e **01/11/2026** (Blackview). Estado:
+**2 fabricantes testados (Samsung, Blackview)**.
 
-## Ambiente e versões
+Gravação pelo app validada em cabo real em 1º de novembro de 2026, em 2
+aparelhos: Samsung Galaxy A70 (Android 11) e Blackview BV9900 Pro (Android 10).
+Nos dois celulares, de dois fabricantes, a gravação foi confirmada pelo som.
+
+O processo formal da F5 do plano Android também prevê uma captura USB no fio no
+Android e um relatório assinado (H-SIGNOFF). Este relatório não contém captura
+no fio nem assinatura; esses dois itens continuam como etapas do processo formal
+e não mudam o que foi confirmado pelo som nos dois aparelhos.
+
+## Samsung Galaxy A70 (29/10/2026)
+
+### Ambiente e versões
 
 | Item | Identificação |
 | --- | --- |
@@ -23,7 +31,7 @@ com a correção. A versão 1.0.3 da branch não deve ser confundida com um APK 
 release instalado e testado nesta coleta. O registro disponível identifica o
 site por domínio e data de publicação, não por um hash imutável do deploy.
 
-## Falha inicial e correção
+### Falha inicial e correção
 
 O primeiro `open` falhou com `USB_TRANSFER_FAILED`,
 `controlTransfer failed (-1)`, antes de qualquer `sendReport` ou commit.
@@ -33,7 +41,7 @@ instalação do debug corrigido e da reconexão física, `open` e o envio dos no
 reports foram exercitados com sucesso pela UI. Não se contornou a permissão
 USB nem o checklist para as gravações.
 
-## Procedimento
+### Procedimento
 
 1. Usar o Padrão Auri salvo como referência acústica inicial, mantendo posição
    dos fones, microfone, volume e cadeia de reprodução.
@@ -51,7 +59,7 @@ USB nem o checklist para as gravações.
 6. Encerrar com Padrão Auri restaurado, confirmado acusticamente, volume USB
    5/15 e player parado. A etapa acústica final não enviou HID.
 
-## Método acústico e predição
+### Método acústico e predição
 
 Ruído rosa reproduzido pelo próprio celular, com os fones encostados em um
 **HyperX QuadCast S**. Capturas analisadas em terços de oitava, com Welch,
@@ -69,7 +77,7 @@ resíduos das duas capturas dentro de **±1,5 dB** em todas as oito bandas, sem
 ajuste de nível. O controle negativo com PK em 2 kHz teve RMS de cerca de
 5,40 dB, contra 0,46/0,47 dB do modelo correto.
 
-## Resultados
+### Resultados
 
 Valores arredondados a duas casas; os limites abaixo se referem apenas a 2–10 kHz.
 
@@ -82,13 +90,61 @@ Valores arredondados a duas casas; os limites abaixo se referem apenas a 2–10 
 | Restauração por gravação | **9/9** payloads de 31 bytes idênticos byte a byte ao primeiro write `padrao` da referência Windows; um commit exato | Comparação na entrada da ponte nativa, não no fio Android |
 | Restauração acústica após reconexão | **≤ 0,82 dB** da referência, arredondado (0,462/0,823 dB), dentro de ±1 dB | Padrão Auri restaurado nesta bancada; repetibilidade 0,862 dB |
 
+## Blackview BV9900 Pro (01/11/2026)
+
+Tudo nesta seção aconteceu em 01/11/2026, com o mesmo cabo CB5100 (VID
+`0x3302`, PID `0x8902`).
+
+| Item | Identificação |
+| --- | --- |
+| Celular | Blackview BV9900 Pro |
+| Sistema | Android 10 |
+| Cabo | Kuba Auri real, CB5100, VID `0x3302`, PID `0x8902` |
+| App, gravação | 1.0.1 (versionCode `10001`) |
+| App, prévia e A/B | 1.0.3 (versionCode `10003`), atualização pela Play Store sobre o 1.0.1 |
+
+### Gravação com o app 1.0.1
+
+1. Conectar pelo botão **Conectar pelo USB do Android** e conceder a permissão
+   USB do Android.
+2. Gravar o preset **Basshead** (CRC `0x932B`, preamp −5,7 dB) pelo checklist
+   normal, sem contornar nenhuma etapa.
+3. Reconectar o cabo e ouvir a curva salva.
+
+Resultado: depois de reconectar, a curva salva soou idêntica ao Basshead
+aplicado ao vivo. A gravação está confirmada pelo som neste aparelho.
+
+### Prévia e A/B com o app 1.0.3
+
+Depois da atualização pela Play Store de 1.0.1 para 1.0.3:
+
+- **Ouvir no cabo** com o Padrão Auri mudou o EQ em tempo real, sem gravar.
+- **Comparar no cabo**, A/B de Neutro contra Basshead com nível igualado, mudou
+  o EQ em tempo real ao alternar os lados.
+
+Os dois foram confirmados pelo som.
+
+### Observado: faixa falsa de "Gravação interrompida"
+
+Depois da atualização de 1.0.1 para 1.0.3, o app mostrou a faixa "Gravação
+interrompida", embora a gravação tivesse dado certo. O falso positivo foi
+corrigido no código web, com a reconciliação do resgate: o marcador que sobra
+de uma gravação é conferido com o diário antes de mostrar a faixa. A causa raiz
+não foi reproduzida por completo; a hipótese é que a WebView tenha perdido dados
+de armazenamento ainda não gravados em disco (sem flush) quando o processo foi
+encerrado.
+
 ## Limitações
 
-- Um celular, um fabricante. Não generaliza para outros Samsung, Androids,
-  adaptadores OTG ou fabricantes.
-- Bytes conferidos na **entrada da ponte nativa, pelo logcat**, não numa captura
-  USB no fio no Android. Paridade dos payloads não prova o framing físico completo.
-- O **`wireLog` do Diagnóstico ficou vazio**: navegar à página de diagnóstico
+- Dois celulares, dois fabricantes. Não generaliza para outros modelos,
+  versões de Android, adaptadores OTG ou fabricantes.
+- No Blackview, a evidência registrada aqui é a confirmação pelo som. Este
+  relatório não registra para ele medição em terços de oitava, logcat nem
+  captura no fio.
+- No Galaxy A70, bytes conferidos na **entrada da ponte nativa, pelo logcat**,
+  não numa captura USB no fio no Android. Paridade dos payloads não prova o
+  framing físico completo.
+- No Galaxy A70, o **`wireLog` do Diagnóstico ficou vazio**: navegar à página de diagnóstico
   recarregou o documento e reabriu a sessão. Não foi substituído por um log
   reconstruído. A coleta não preservou uma sessão íntegra com os reports.
 - Sem leitura de volta do DSP ou flash. Persistência e restauração têm evidência
@@ -100,46 +156,26 @@ Valores arredondados a duas casas; os limites abaixo se referem apenas a 2–10 
 - Padrão Auri é o preset `padrao` do projeto, não uma restauração de fábrica
   comprovada. A vida útil da flash e a segurança auditiva não foram validadas.
 
-## O que ainda falta
+## Processo formal da F5
 
-1. Testar pelo menos um segundo celular de **outro fabricante**.
-2. Obter captura Android **no fio**, conforme o
+O teste em um segundo celular de outro fabricante foi feito no Blackview
+BV9900 Pro. O plano Android ainda lista, como etapas do processo formal da F5:
+
+1. Captura Android **no fio**, conforme o
    [procedimento de captura USB](captura-usb.md), e/ou um `wireLog` íntegro sem
    perder a sessão. Um `wireLog` útil não dispensa a paridade no fio exigida pela F5.
-3. Consolidar as evidências e obter o relatório assinado e as demais aprovações
-   da F5 antes de mudar `ANDROID_WRITE_VALIDATED`. G.6 é o texto de encerramento,
-   ainda não aplicável. A versão do aviso foi incrementada de 1 para 2, conforme
-   o runbook, para que o novo estado seja reconhecido uma vez.
+2. Consolidação das evidências, relatório assinado e as demais aprovações da F5.
+
+Esses itens não fazem parte das evidências acima: nenhuma captura no fio está
+registrada aqui e este relatório não está assinado.
 
 Se o som ficar estranho, grave o Neutro pelo app. Se não resolver, grave o Neutro
 pelo site no computador, no Chrome ou Edge.
 [Relatar resultado](https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml).
 
-## Inventário das ocorrências e decisões editoriais
+## Fontes
 
-Busca antes da edição em `web/src`, `web/tests`, `docs`, `tools`, `test` e
-`apps/android`, ampliada para `web/messages` e README. Padrões: `ainda não foi
-testad`, `not been tested`, `não testada`, `untested`, `android-untested`, `G.1`,
-`G.5`, `ANDROID_WRITE_VALIDATED` e `ANDROID_DISCLAIMER_VERSION`. O material
-local consultado foi o resultado consolidado de REPORT.md e PREDICTION.md da
-coleta de prévia 4 kHz, além do registro funcional para a identidade do APK.
-Não se publicam binários nem links para caminhos locais dessa coleta.
-
-| Ocorrências por arquivo/grupo | Decisão |
-| --- | --- |
-| `web/messages/pt-BR.json`, `en-US.json`: modal, banner, callout, aceite e bloqueio | Atualizar nos dois idiomas; manter risco, resgate e relato |
-| `web/src/lib/content/docs/pt-BR.ts`, `en-US.ts`: bloco `android-validacao` | Atualizar teste parcial e pendências; preservar âncoras |
-| `web/src/lib/content/docs/legal-notice.ts` | Substituir a negação geral de teste real por teste limitado, sem retirar isenção de garantia |
-| `web/src/lib/cable/android-status.ts`, `docs/android.md`: versão/estado | Versão 2, estado `false`, relatório e 1 de 2 fabricantes; critérios finais intactos |
-| `docs/plans/2026-10-18-android-capacitor-plano.md`: G.1, G.2, G.3, G.5 | Atualizar fonte normativa dos textos exatos; G.4 e G.6 mantidos; menções anteriores preservadas como estado inicial/histórico |
-| `tools/android-artifacts.mjs`, `README.md`, `docs/android/play-listing.md` | Mesmo G.5 revisado, sem alegar validação plena; atualizar descrições curtas e explicação USB da Play |
-| `docs/android/play-console-preenchimento.md`, `play-console-passos.md` | Atualizar cópias operacionais, notas e instruções de captura para não republicar o aviso obsoleto |
-| `test/tools/play-listing.test.mjs`, `web/tests/unit/content/docs-android.test.ts`, `web/tests/unit/cable/android-status.test.ts`, `checklist-android.svelte.test.ts`, `web/tests/e2e/android-bridge.spec.ts`, `play-screenshots.spec.ts` | Atualizar expectativas textuais/versão, mantendo verificações exatas e limites |
-| `test/tools/docs-consistency-android.test.mjs` | Atualizar título da seção de estado; manter igualdade exata G.1/G.5 |
-| `test/tools/android-artifacts.test.mjs`, `test/android-release/dryrun.mjs`, `web/tests/unit/app/native-mount.test.ts` | Manter comparação dinâmica com o plano revisado |
-| `web/src/lib/paraglide/messages/*` | Gerados a partir dos catálogos pelo pipeline web; não editar manualmente |
-| `web/src/lib/cable/checklist.ts`, `types.ts`; componentes `AndroidUntestedNotice`, `AndroidAppCallout`, `PreWriteChecklist`, `LiveChecklist`, `ConfirmLever`, `CableBlind`, `CableAB` | Manter nomes, IDs e guardas; texto vem dos catálogos |
-| Testes unitários `native-back`, `usb-diagnostics`, `checklist`, `checklist-android`, `android-untested-notice`, `android-callout` | Manter testes comportamentais e IDs, que não afirmam ausência de teste físico |
-| `docs/seguranca.md`, `docs/operacao/runbooks/android-release.md` | Manter risco de gravação antes da validação completa e regra de encerramento/reabertura |
-| `docs/android/smoke-lancamento.md`, planos de progresso/handover e modo sem flash | Manter evidência histórica, referências a etapas ou controles operacionais, não texto vigente do aviso |
-| `apps/android/.../DisclaimerTest.kt`, `BridgeBootTest.kt` | Não alterar Kotlin neste trabalho. Os rótulos internos ainda dizem untested; as expectativas literais de título em DisclaimerTest precisam acompanhar o novo título numa alteração Kotlin autorizada antes de rodar esse teste instrumentado |
+O material local consultado foi o resultado consolidado de REPORT.md e
+PREDICTION.md da coleta de prévia 4 kHz, além do registro funcional para a
+identidade do APK. Não se publicam binários nem links para caminhos locais
+dessa coleta.

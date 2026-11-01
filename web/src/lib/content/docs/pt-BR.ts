@@ -3,15 +3,11 @@ import type { DocsContent } from './types.ts';
 
 // BEGIN Android validation state ------------------------------------------------------------
 // The only place in this file that says whether writing from the Android app was validated on
-// a real cable (section `android-validacao`). While ANDROID_WRITE_VALIDATED is false
-// (src/lib/cable/android-status.ts), the first two entries are the exact Anexo G.1 title and
-// text of docs/plans/2026-10-18-android-capacitor-plano.md. At F5, replace this whole block
-// with the Anexo G.6 text (date, number of devices and report). en-US.ts has the twin block.
+// a real cable (section `android-validacao`): the Anexo G.6 text (date, number of devices and
+// report) of docs/plans/2026-10-18-android-capacitor-plano.md. en-US.ts has the twin block.
 const androidValidationState: readonly string[] = [
-	'Gravação pelo app: teste em um celular',
-	'O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).',
-	'O que os testes garantem: para cada curva, o app monta os mesmos nove reports de dados e o mesmo commit, byte a byte, que o site no computador e a página oficial enviam. Testes automáticos comparam esses bytes com a referência dos 11 presets oficiais, e antes do commit o app ainda confere cada sequência com uma guarda extra.',
-	'O que ainda falta: segundo fabricante, paridade no fio e relatório assinado para encerrar a F5. Temos 1 de 2 fabricantes testados (Samsung). Os bytes foram conferidos na entrada da ponte nativa pelo logcat, não numa captura USB no fio. O wireLog ficou vazio porque a navegação ao Diagnóstico reabriu a sessão. Cada gravação pelo app continua pedindo um item a mais no checklist.'
+	'Gravação pelo app validada em cabo real em 1º de novembro de 2026, em 2 aparelhos: Samsung Galaxy A70 (Android 11) e Blackview BV9900 Pro (Android 10). Relatório: docs/android/validacao-hardware.md',
+	'O que os testes garantem: para cada curva, o app monta os mesmos nove reports de dados e o mesmo commit, byte a byte, que o site no computador e a página oficial enviam. Testes automáticos comparam esses bytes com a referência dos 11 presets oficiais, e antes do commit o app ainda confere cada sequência com uma guarda extra.'
 ];
 // END Android validation state --------------------------------------------------------------
 

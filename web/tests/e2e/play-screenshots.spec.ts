@@ -1,8 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { devices, type Page } from '@playwright/test';
-import { test, expect, cableInfo } from './fixtures/capacitor-bridge';
+import { PADRAO_AURI } from 'open-auri/catalog';
+import { JOURNAL_STORAGE_KEY, serializeJournal, validateEntry } from 'open-auri/policy';
+import { gateForWrite } from 'open-auri/safety';
+import { test, expect, cableInfo, type NativeOptions } from './fixtures/capacitor-bridge';
 import { settleRendering, waitForApp } from './helpers/a-app';
+import { barNavLink } from './helpers/b-ui';
+import { hidLog, installHidStub } from './helpers/b-hid';
 import { rgbPng, validateAsset } from '../../../tools/play-assets.mjs';
 
 // Opt-in only. From web, set CI=1, PLAY_SCREENSHOTS=1 and
@@ -39,20 +44,78 @@ const sets = [
 	{ name: 'desktop', viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1.5 }
 ] as const;
 
+/** The set's fake Android app: the real Capacitor bridge on phone/tablet, none on desktop. */
+const nativeOptionsFor = (set: (typeof sets)[number]): NativeOptions => ({
+	enabled: set.name !== 'desktop',
+	devices: [],
+	appVersion: '1.0.0'
+});
+
+// Data report 1 also starts with 0x01; only the full command prefix identifies a flash commit.
+const isCommit = ({ bytes }: { bytes: number[] }) =>
+	bytes.slice(0, 5).join(',') === '1,101,0,1,255';
+
+/** Any open modal, as the app itself detects one (a tour panel is `aria-modal="false"`). */
+const MODAL = 'dialog[open], [role="dialog"][aria-modal="true"]';
+
+/**
+ * The fake cable's saved curve: one `ok` journal entry with the official Auri preset, naming the
+ * cable as the service does (its label: the product name, alone on the bus, truncated to 64 code
+ * points). Both the native fake and the WebHID stub report this product name. Without it the
+ * saved curve is unknown: the live footer says so and the comparison cannot revert ("Encerrar").
+ * An `ok` entry (never `interrupted`) and no in-flight marker: no rescue or interruption.
+ */
+const SAVED_DEVICE = 'USB DSP Audio';
+const savedJournal = (() => {
+	const bands = PADRAO_AURI.bands.map((band) => ({ ...band }));
+	const verdict = gateForWrite(bands, PADRAO_AURI.preampDb, { experimental: false });
+	if (!verdict.ok) throw new Error('The Auri preset must pass the write gate');
+	const entry = {
+		schema: 1 as const,
+		at: Date.UTC(2026, 9, 1, 12),
+		name: PADRAO_AURI.label,
+		crc: Number(verdict.metrics.payloadCrc),
+		preampDb: PADRAO_AURI.preampDb,
+		bands,
+		status: 'ok' as const,
+		device: SAVED_DEVICE
+	};
+	const { ok, errors } = validateEntry(entry);
+	if (!ok) throw new Error(`Invalid seeded journal entry: ${errors.join('; ')}`);
+	return serializeJournal([entry]);
+})();
+
+/** Seeds the saved curve before any app script runs (fresh context: no journal yet). */
+async function seedSavedCurve(page: Page) {
+	await page.addInitScript(
+		({ key, journal }) => {
+			if (localStorage.getItem(key) === null) localStorage.setItem(key, journal);
+		},
+		{ key: JOURNAL_STORAGE_KEY, journal: savedJournal }
+	);
+}
+
 /** Frame the actual instruments below fixed chrome, without altering the UI or capture size. */
 async function frameInstrument(page: Page, selector: string) {
 	const instrument = page.locator(selector);
 	await expect(instrument).toBeVisible();
 	await instrument.evaluate((element) => {
 		const bar = document.querySelector('[data-chrome="bar"]');
-		const banner = document.querySelector('.room > .banner');
 		if (!bar) throw new Error('Missing store capture app bar');
+		// `[data-chrome="bar"]` is only a wrapper: its in-flow child is a spacer that scrolls away
+		// (its bottom goes negative once the page is scrolled), the bar itself is `position: fixed`.
+		// Measure the fixed/sticky boxes, as DocsPage's chromeBottom() does; otherwise a page that
+		// Playwright already scrolled (actionability) is scrolled past the instrument by scrollY.
+		let chrome = 0;
+		for (const box of [bar, ...bar.children]) {
+			const { position } = getComputedStyle(box);
+			if (position === 'fixed' || position === 'sticky') {
+				chrome = Math.max(chrome, box.getBoundingClientRect().bottom);
+			}
+		}
+		if (chrome <= 0) chrome = Math.max(0, bar.getBoundingClientRect().bottom);
 		window.scrollBy({
-			top:
-				element.getBoundingClientRect().top -
-				bar.getBoundingClientRect().bottom -
-				(banner?.getBoundingClientRect().height ?? 0) -
-				12,
+			top: element.getBoundingClientRect().top - chrome - 12,
 			behavior: 'instant'
 		});
 	});
@@ -71,10 +134,6 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 	const directory = fileURLToPath(
 		new URL(`../../../docs/android/play-assets/${relative}`, import.meta.url)
 	);
-	const title =
-		locale === 'pt-BR'
-			? 'Gravação pelo app: teste em um celular'
-			: 'Writing from the app: tested on one phone';
 	test.describe(locale, () => {
 		test.use({ locale });
 		test.beforeEach(async ({ context, baseURL }) => {
@@ -104,26 +163,10 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 				expect(response?.status(), `${route} must return HTTP 200`).toBe(200);
 				await waitForApp(page);
 				await expect(page.locator('html')).toHaveAttribute('lang', locale);
-				if (route === '/' && set.name !== 'desktop') {
-					const notice = page.getByRole('dialog', { name: title, exact: true });
-					await expect(notice).toBeVisible();
-					await notice
-						.getByRole('button', { name: locale === 'pt-BR' ? 'Entendi' : 'Got it', exact: true })
-						.click();
-					await expect(notice).not.toBeVisible();
-				}
-				if (route === '/cabo') {
-					// Preserve the real app's partial-validation banner, not a browser-only view.
-					if (set.name !== 'desktop') {
-						await expect(
-							page.getByRole('complementary', { name: title, exact: true })
-						).toBeVisible();
-					} else {
-						await expect(page.getByText('OA-01 · WebHID', { exact: true })).toBeVisible();
-						await expect(page.getByRole('complementary', { name: title, exact: true })).toHaveCount(
-							0
-						);
-					}
+				// No capture shows a modal over the page.
+				await expect(page.locator(MODAL).filter({ visible: true })).toHaveCount(0);
+				if (route === '/cabo' && set.name === 'desktop') {
+					await expect(page.getByText('OA-01 · WebHID', { exact: true })).toBeVisible();
 				}
 				await settleRendering(page);
 				await page.evaluate(async () => {
@@ -202,26 +245,104 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 			if (set.name === 'desktop') expect(nativeBridge.calls).toEqual([]);
 		});
 
-		// Desktop has six browser scenes, never an Android-only USB capture.
+		// Desktop adds the same real comparison UI over the browser's fake WebHID boundary.
+		if (set.name === 'desktop') {
+			test('capture cable comparison', async ({ page }) => {
+				await installHidStub(page);
+				await seedSavedCurve(page);
+				await page.goto('/cabo');
+				await waitForApp(page);
+				const realMode = page.getByRole('switch');
+				if ((await realMode.getAttribute('aria-checked')) !== 'true') await realMode.click();
+				await expect(realMode).toHaveAttribute('aria-checked', 'true');
+				await page
+					.getByRole('button', {
+						name: locale === 'pt-BR' ? 'Conectar via WebHID real' : 'Connect via real WebHID',
+						exact: true
+					})
+					.click();
+				await expect(page.locator('[data-state="connected"]')).toHaveAttribute(
+					'aria-current',
+					'step'
+				);
+				await captureComparison(page);
+				expect((await hidLog(page)).reports.length).toBeGreaterThan(0);
+				expect((await hidLog(page)).reports.some(isCommit)).toBe(false);
+			});
+		}
+
+		async function captureComparison(page: Page) {
+			await (await barNavLink(page, locale === 'pt-BR' ? 'Comparar' : 'Compare')).click();
+			await expect(page).toHaveURL(/\/comparar(?:[?#]|$)/);
+			const comparison = page.locator('[data-cable-ab]');
+			await expect(
+				comparison.getByRole('heading', {
+					name: locale === 'pt-BR' ? 'Comparar no cabo' : 'Compare on the cable',
+					exact: true
+				})
+			).toBeVisible();
+			await expect(comparison).toContainText(
+				locale === 'pt-BR'
+					? 'A e B tocam no cabo, na memória, sem gravar. Ao desconectar, ele volta à curva salva.'
+					: 'A and B play on the cable, in memory, without saving. Unplugged, it goes back to its saved curve.'
+			);
+			await comparison.locator('[data-cable-ab-start]').click();
+			await comparison.locator('[data-confirmation="volume"] input').check();
+			await comparison.locator('[data-cable-ab-go]').click();
+			await expect(comparison.locator('[data-cable-ab-status]')).toHaveText(
+				locale === 'pt-BR' ? 'No cabo: A' : 'On the cable: A'
+			);
+			await expect(comparison.getByRole('radio')).toHaveCount(2);
+			// The seeded saved curve is known: the revert ("Encerrar") is available.
+			const end = comparison.locator('[data-cable-ab-end]');
+			await expect(end).toHaveText(locale === 'pt-BR' ? 'Encerrar' : 'End');
+			await expect(end).toBeEnabled();
+			await frameInstrument(page, '[data-cable-ab]');
+			// The whole section when it fits below the app bar; on a short layout, its framed top:
+			// the title, the A/B choice and the "No cabo" readout.
+			const box = await comparison.boundingBox();
+			const viewport = page.viewportSize();
+			if (!box || !viewport) throw new Error('Missing cable comparison bounds');
+			expect(box.y, 'Cable comparison must be framed below the app bar').toBeGreaterThan(0);
+			if (box.y + box.height <= viewport.height) {
+				await expect(comparison).toBeInViewport({ ratio: 1 });
+			} else {
+				await expect(comparison.getByRole('heading', { level: 3 })).toBeInViewport({ ratio: 1 });
+				await expect(comparison.getByRole('radiogroup')).toBeInViewport({ ratio: 1 });
+				await expect(comparison.locator('[data-cable-ab-status]')).toBeInViewport({ ratio: 1 });
+			}
+			const png = rgbPng(await page.screenshot({ animations: 'disabled', fullPage: false }));
+			validateAsset(png, `${relative}8-cable-compare.png`);
+			await writeFile(`${directory}8-cable-compare.png`, png);
+		}
+
+		// Desktop never captures the Android-only scene 7.
 		if (set.name === 'desktop') return;
 		test.describe('native USB', () => {
-			// More CSS room for U1 and the sticky notice, still a 1080x1920 phone PNG.
+			// An app with the liveApply capability (1.0.3+): without it the native cable is not
+			// live-capable, so neither the Ouvir no cabo switch (scene 7) nor the cable comparison
+			// (scene 8) is shown. Only these scenes announce it; the browsing captures keep the default.
+			test.use({ nativeOptions: { ...nativeOptionsFor(set), liveApply: true } });
+			// More CSS room for the live/compare controls, still a 1080x1920 phone PNG.
 			if (set.name === 'phone') {
 				test.use({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 2 });
 			}
 			test('capture connected Android USB', async ({ page, nativeBridge }) => {
 				// Real Capacitor bridge, fake cable. Connecting must never write any reports.
 				await nativeBridge.connect(cableInfo());
+				await seedSavedCurve(page);
 				const response = await page.goto('/cabo');
 				expect(response?.status()).toBe(200);
 				await waitForApp(page);
 				await expect(page.locator('html')).toHaveAttribute('lang', locale);
-				const notice = page.getByRole('dialog', { name: title, exact: true });
-				await expect(notice).toBeVisible();
-				await notice
-					.getByRole('button', { name: locale === 'pt-BR' ? 'Entendi' : 'Got it', exact: true })
-					.click();
-				await expect(notice).not.toBeVisible();
+				// The write checklist must never open in this scene. Checked after every step so a
+				// failure names the step that opened it.
+				const writeChecklist = page.getByRole('dialog', {
+					name: /^(Antes de gravar|Before writing)$/
+				});
+				const noWriteChecklist = (step: string) =>
+					expect(writeChecklist, `write checklist opened ${step}`).toHaveCount(0);
+				await noWriteChecklist('on load');
 				const usb = page.getByRole('region', { name: /^U1/ });
 				const model = usb.getByText(
 					locale === 'pt-BR' ? 'OA-01 · USB Android' : 'OA-01 · Android USB',
@@ -245,46 +366,68 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 				const connected = usb.locator('[data-state="connected"]');
 				await expect(connected).toHaveAttribute('aria-current', 'step');
 				await expect(connected).toHaveClass(/\bon\b/);
-				const banner = page.getByRole('complementary', { name: title, exact: true });
-				await expect(banner).toBeVisible();
 				await settleRendering(page);
-				// Scroll the actual page, without hiding/repositioning UI or opening the checklist.
-				await usb.evaluate((unit) => {
-					const notice = document.querySelector('.room > .banner');
-					const bar = document.querySelector('[data-chrome="bar"]');
-					if (!notice || !bar) throw new Error('Missing native capture framing elements');
-					window.scrollBy({
-						top:
-							unit.getBoundingClientRect().top -
-							bar.getBoundingClientRect().bottom -
-							notice.getBoundingClientRect().height -
-							12,
-						behavior: 'instant'
-					});
+				await expect(usb.locator('.tag-strip')).toContainText(SAVED_DEVICE);
+				// Connecting opens no modal over the Cabo panel.
+				await expect(page.locator(MODAL).filter({ visible: true })).toHaveCount(0);
+				await noWriteChecklist('after connecting on Cabo');
+				// The live switch is on Curva, not in U1. Navigate through the real UI to preserve
+				// the selected native cable/session.
+				expect(nativeBridge.reports).toEqual([]);
+				await (await barNavLink(page, locale === 'pt-BR' ? 'Curva' : 'Curve')).click();
+				await expect(page).toHaveURL(/\/(?:[?#].*)?$/);
+				await noWriteChecklist('after navigating to Curva');
+				const live = page.locator('[data-live-panel]');
+				const liveSwitch = live.getByRole('switch', {
+					name: locale === 'pt-BR' ? 'Ouvir no cabo' : 'Hear on the cable',
+					exact: true
 				});
-				await settleRendering(page);
-				await expect(banner).toBeInViewport({ ratio: 1 });
-				await expect(model).toBeInViewport({ ratio: 1 });
-				await expect(connected).toBeInViewport({ ratio: 1 });
-				await expect(usb.locator('.tag-strip')).toContainText('USB DSP Audio');
-				await expect(usb.locator('.tag-strip')).toBeInViewport({ ratio: 1 });
+				await liveSwitch.click();
+				const checklist = page.locator('[data-live-checklist]');
+				await expect(checklist).toBeVisible();
+				await noWriteChecklist('with the Ouvir no cabo switch');
+				await checklist.locator('[data-confirmation="volume"] input').check();
+				await checklist.locator('[data-live-start]').click();
+				await expect(checklist).not.toBeVisible();
+				await noWriteChecklist('after Começar / Start');
+				await expect(liveSwitch).toHaveAttribute('aria-checked', 'true');
+				await expect(live.locator('[data-live-status]')).toContainText(SAVED_DEVICE);
+				// The seeded saved curve is known: the footer never says it is unknown.
 				await expect(
-					page.getByRole('dialog', { name: /^(Antes de gravar|Before writing)$/ })
-				).not.toBeVisible();
+					page.getByText(
+						locale === 'pt-BR'
+							? 'Sem curva salva conhecida para este cabo'
+							: 'No known saved curve for this cable'
+					)
+				).toHaveCount(0);
+				const save = live.getByRole('button', {
+					name: locale === 'pt-BR' ? 'Salvar no cabo' : 'Save to cable',
+					exact: true
+				});
+				await expect(save).toBeEnabled();
+				await frameInstrument(page, '[data-live-panel]');
+				await expect(liveSwitch).toBeInViewport({ ratio: 1 });
+				await expect(save).toBeInViewport({ ratio: 1 });
+				await noWriteChecklist('before the capture');
 				const png = rgbPng(await page.screenshot({ animations: 'disabled', fullPage: false }));
 				validateAsset(png, `${relative}7-native-connect.png`);
 				await writeFile(`${directory}7-native-connect.png`, png);
 				expect(
 					nativeBridge.calls.filter(({ methodName }) => methodName === 'requestDevice')
 				).toHaveLength(1);
-				// Connecting only picks and authorizes the device; nothing opens it before a write.
-				expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'open')).toHaveLength(
-					0
-				);
-				expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'sendReport')).toEqual(
-					[]
-				);
-				expect(nativeBridge.reports).toEqual([]);
+				// Preview reports are allowed, but never the persistent-write commit (0x01).
+				expect(nativeBridge.reports.length).toBeGreaterThan(0);
+				expect(nativeBridge.reports.some(isCommit)).toBe(false);
+				// End the editor preview via its real switch before starting a comparison.
+				await liveSwitch.click();
+				await live
+					.getByRole('button', {
+						name: locale === 'pt-BR' ? 'Manter até desconectar' : 'Keep until unplugged',
+						exact: true
+					})
+					.click();
+				await captureComparison(page);
+				expect(nativeBridge.reports.some(isCommit)).toBe(false);
 			});
 		});
 	});
@@ -299,7 +442,7 @@ for (const set of sets) {
 			...(set.name === 'desktop'
 				? { isMobile: false, hasTouch: false, userAgent: devices['Desktop Chrome'].userAgent }
 				: {}),
-			nativeOptions: { enabled: set.name !== 'desktop', devices: [], appVersion: '1.0.0' }
+			nativeOptions: nativeOptionsFor(set)
 		});
 		for (const locale of ['pt-BR', 'en-US'] as const) describeLocale(set, locale);
 	});

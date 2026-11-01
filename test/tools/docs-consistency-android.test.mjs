@@ -83,26 +83,26 @@ test('backticked repository paths in docs/android.md exist on every checkout', (
   }
 });
 
-test('G.5 is verbatim in README, the Play listing and generated release notes', () => {
+test('the retired G.5 notice is absent from README, the Play listing and shipped release notes', () => {
   const g5 = section(plan, '**G.5 Notas da release, README e ficha da Play**');
   const pt = quoted(g5, /^- pt-BR: "([^"]+)"$/gm);
   const en = quoted(g5, /^- en-US: "([^"]+)"$/gm);
-  assert.equal(quoted(read('README.md'), /^> (Aviso: [^\n]+)$/gm), pt);
+  const readme = read('README.md');
   const listing = read('docs/android/play-listing.md');
-  for (const [language, notice] of [
-    ['pt-BR', pt],
-    ['en-US', en],
+  for (const [path, source] of [
+    ['README.md', readme],
+    ['docs/android/play-listing.md', listing],
   ]) {
-    const full = section(listing, `## ${language}`).match(
-      /### Full description\n\n```text\n([^\n]+)/,
-    );
-    assert.ok(full, `${language}: missing full description`);
-    assert.equal(full[1], notice, `${language}: Play notice differs from G.5`);
+    for (const notice of [pt, en]) assert.ok(!source.includes(notice), `${path}: G.5 notice`);
+    assert.doesNotMatch(source, /Galaxy A70|Validação completa pendente|Full validation pending/);
   }
+  assert.doesNotMatch(readme, /^> Aviso: /m, 'README.md: G.5 blockquote');
+  // The rescue path stays documented in the README.
+  assert.match(readme, /grave o Neutro pelo site no computador|se não resolver, pelo site/);
 
   const pkg = JSON.parse(read('apps/android/package.json'));
   const fingerprint = 'ab'.repeat(32);
-  const notes = createArtifacts(
+  const files = createArtifacts(
     {
       apk: Buffer.from('apk'),
       aab: Buffer.from('aab'),
@@ -119,32 +119,91 @@ test('G.5 is verbatim in README, the Play listing and generated release notes', 
       version: pkg.version,
       capacitorVersion: pkg.dependencies['@capacitor/android'],
       minWebViewVersion: MIN_WEBVIEW_VERSION,
-      hardwareValidated: false,
     },
-  )['RELEASE_NOTES.md'];
-  assert.deepEqual(notes.split('\n\n').slice(0, 2), [pt, en]);
+  );
+  const notes = files['RELEASE_NOTES.md'];
+  assert.ok(notes.startsWith(`# Android ${pkg.version}\n\n`), 'release notes open with the title');
+  for (const notice of [pt, en]) assert.ok(!notes.includes(notice), 'release notes: G.5');
+  assert.doesNotMatch(notes, /Galaxy A70|Validação completa|Full validation/i);
 });
 
-test('G.1 matches the Android doc and both site message locales exactly', () => {
+test('the retired G.1 notice is absent from both site message locales and the Android doc', () => {
   for (const language of ['pt-BR', 'en-US']) {
     const g1 = section(plan, `**G.1 Modal e banner (${language})**`);
     const text = quoted(g1, /^- \*\*Texto:\*\* "([^"]+)"$/gm);
-    const messages = JSON.parse(read(`web/messages/${language}.json`));
-    assert.equal(messages.android_untested_body, text, `${language}: site G.1 notice`);
-    if (language === 'pt-BR') {
-      const notice = section(android, '## Estado de validação: teste parcial em hardware');
-      assert.equal(quoted(notice, /^> (O app Android [^\n]+)$/gm), text);
-      const title = quoted(g1, /^- \*\*Título:\*\* "([^"]+)"$/gm);
-      assert.equal(quoted(notice, /^> \*\*([^\n]+)\*\*$/gm), title);
+    const title = quoted(g1, /^- \*\*Título:\*\* "([^"]+)"$/gm);
+    const catalog = read(`web/messages/${language}.json`);
+    const messages = JSON.parse(catalog);
+    assert.ok(!catalog.includes(text), `${language}: site G.1 notice`);
+    assert.ok(!catalog.includes(title), `${language}: site G.1 title`);
+    const retired = Object.keys(messages).filter((key) => key.includes('untested'));
+    assert.deepEqual(retired, [], `${language}: retired notice keys`);
+    assert.ok(!android.includes(text), `docs/android.md: ${language} G.1 text`);
+    assert.ok(!android.includes(title), `docs/android.md: ${language} G.1 title`);
+  }
+  const state = section(android, '## Estado dos testes em hardware');
+  assert.match(state, /Galaxy A70 \(SM-A705MN, Android 11\)/);
+  assert.match(state, /Blackview BV9900 Pro \(Android 10\), com o app 1\.0\.1/);
+  // Both phones are confirmed by sound; nothing in the section is still pending.
+  assert.match(state, /confirmadas pelo som/);
+  assert.match(state, /confirma a gravação pelo som nesse aparelho/);
+  assert.match(state, /app 1\.0\.3[\s\S]*"Ouvir no cabo"[\s\S]*"Comparar no cabo"/);
+  assert.doesNotMatch(state, /pendente/);
+  assert.doesNotMatch(state, /ANDROID_WRITE_VALIDATED|Reabrir o aviso/);
+});
+
+// Regression guard: the "untested / tested on one phone" disclaimer and its reopen machinery are
+// gone for good. The catalogs and every UI source (the generated paraglide output excluded) must
+// never carry those phrases or identifiers again.
+const DISCLAIMER_PHRASES = [
+  'não testad',
+  'teste em um celular',
+  'tested on one phone',
+  'untested',
+  'apenas no Galaxy A70',
+  'only on the Galaxy A70',
+  'validação completa',
+  'full validation',
+  'ANDROID_WRITE_VALIDATED',
+  'ANDROID_DISCLAIMER_VERSION',
+  'androidDisclaimerAck',
+];
+
+function sourceFiles(path) {
+  return readdirSync(join(root, path), { withFileTypes: true }).flatMap((entry) => {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) return entry.name === 'paraglide' ? [] : sourceFiles(child);
+    return /\.(?:svelte|ts|js|json)$/.test(entry.name) ? [child] : [];
+  });
+}
+
+test('message catalogs and UI sources carry no Android disclaimer phrase', () => {
+  const paths = ['web/messages/pt-BR.json', 'web/messages/en-US.json', ...sourceFiles('web/src')];
+  assert.ok(paths.length > 2, 'No UI sources found');
+  for (const path of paths) {
+    const source = read(path).toLowerCase();
+    for (const phrase of DISCLAIMER_PHRASES) {
+      assert.ok(!source.includes(phrase.toLowerCase()), `${path}: "${phrase}"`);
     }
   }
 });
 
-test('partial hardware report records the real setup, acoustic results and outstanding F5 evidence', () => {
+test('hardware report records both phones, the acoustic results and the formal F5 items', () => {
   const report = read('docs/android/validacao-hardware.md');
   for (const detail of [
     '29/10/2026',
-    '1 de 2 fabricantes',
+    '01/11/2026',
+    '2 fabricantes testados (Samsung, Blackview)',
+    'Blackview BV9900 Pro',
+    'Android 10',
+    'versionCode `10001`',
+    'versionCode `10003`',
+    'Conectar pelo USB do Android',
+    'Basshead',
+    '0x932B',
+    'Ouvir no cabo',
+    'Comparar no cabo',
+    'Gravação interrompida',
     'SM-A705MN',
     'Android 11',
     '155.0.8059.43',
@@ -169,8 +228,15 @@ test('partial hardware report records the real setup, acoustic results and outst
   ]) {
     assert.ok(report.includes(detail), `Hardware report missing: ${detail}`);
   }
-  assert.match(report, /não a aprovação completa da F5/);
-  assert.match(report, /não numa captura\s+USB no fio no Android/);
+  // Status line matches the site's G.6 wording; the wire capture and sign-off stay formal F5 items.
+  assert.match(
+    report,
+    /Gravação pelo app validada em cabo real em 1º de novembro de 2026, em 2\s+aparelhos/,
+  );
+  assert.match(report, /confirmada pelo som/);
+  assert.doesNotMatch(report, /1 de 2 fabricantes|não a aprovação completa/);
+  assert.match(report, /nenhuma captura no fio está\s+registrada/);
+  assert.match(report, /não numa captura USB no fio no Android/);
   assert.doesNotMatch(report, /\]\([^)]*_qa[/\\]/);
   assert.ok(android.includes('(android/validacao-hardware.md)'));
 });

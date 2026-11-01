@@ -8,6 +8,8 @@ export interface NativeOptions {
 	bridgeApi?: number;
 	appVersion?: string;
 	usbHost?: boolean;
+	/** `getInfo().liveApply`; omitted (an app before liveApply, not live-capable) when undefined. */
+	liveApply?: boolean;
 	devices?: NativeDeviceInfo[];
 	permission?: 'granted' | 'denied';
 	/** Zero-based send attempt, matching FakeHIDDevice's fault injection. */
@@ -238,7 +240,8 @@ export class FakeAndroidNative {
 				bridgeApi: this.#options.bridgeApi ?? 1,
 				appVersion: this.#options.appVersion ?? '1.0.0',
 				usbHost: this.#options.usbHost ?? true,
-				webViewVersion: '140.0.7339.0'
+				webViewVersion: '140.0.7339.0',
+				...(this.#options.liveApply === undefined ? {} : { liveApply: this.#options.liveApply })
 			};
 		} else if (method === 'requestDevice' || method === 'getDevices') {
 			if (method === 'requestDevice' && this.#options.permission !== 'denied') {
