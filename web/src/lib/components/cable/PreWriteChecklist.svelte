@@ -539,11 +539,7 @@
 			{/if}
 
 			<footer class="foot">
-				<Button
-					variant="plate"
-					disabledReason={closeReason}
-					onclick={() => onclose()}
-				>
+				<Button variant="plate" disabledReason={closeReason} onclick={() => onclose()}>
 					{m.cable_close()}
 				</Button>
 			</footer>
