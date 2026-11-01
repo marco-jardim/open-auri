@@ -31,11 +31,10 @@ class ExternalNavigationTest {
     @Test
     fun internalLinksStayInTheWebViewAndExternalLinksOpenTheBrowser() {
         WebAppScenario.launch().use { app ->
-            app.acceptDisclaimerIfPresent()
             app.awaitJs("document.querySelector('a[href=\"/cabo\"]') != null", "internal cable link")
             app.evaluate("document.querySelector('a[href=\"/cabo\"]').click()")
             app.awaitJs("location.origin === '$E2E_ORIGIN' && location.pathname === '/cabo'", "internal WebView navigation")
-            app.awaitJs("document.querySelector('aside.banner a[href=\"/docs#android-resgate\"]') != null", "cable page hydration")
+            app.awaitJs("document.querySelector('button.connect:not(:disabled):not([aria-disabled=\"true\"])') != null", "cable page hydration")
             assertEquals(0, Intents.getIntents().count { it.action == Intent.ACTION_VIEW })
 
             // A real anchor click exercises shouldOverrideUrlLoading, unlike WebView.loadUrl.
