@@ -60,10 +60,22 @@ async function frameInstrument(page: Page, selector: string) {
 		const bar = document.querySelector('[data-chrome="bar"]');
 		const banner = document.querySelector('.room > .banner');
 		if (!bar) throw new Error('Missing store capture app bar');
+		// `[data-chrome="bar"]` is only a wrapper: its in-flow child is a spacer that scrolls away
+		// (its bottom goes negative once the page is scrolled), the bar itself is `position: fixed`.
+		// Measure the fixed/sticky boxes, as DocsPage's chromeBottom() does; otherwise a page that
+		// Playwright already scrolled (actionability) is scrolled past the instrument by scrollY.
+		let chrome = 0;
+		for (const box of [bar, ...bar.children]) {
+			const { position } = getComputedStyle(box);
+			if (position === 'fixed' || position === 'sticky') {
+				chrome = Math.max(chrome, box.getBoundingClientRect().bottom);
+			}
+		}
+		if (chrome <= 0) chrome = Math.max(0, bar.getBoundingClientRect().bottom);
 		window.scrollBy({
 			top:
 				element.getBoundingClientRect().top -
-				bar.getBoundingClientRect().bottom -
+				chrome -
 				(banner?.getBoundingClientRect().height ?? 0) -
 				12,
 			behavior: 'instant'
@@ -252,7 +264,19 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 			);
 			await expect(comparison.getByRole('radio')).toHaveCount(2);
 			await frameInstrument(page, '[data-cable-ab]');
-			await expect(comparison).toBeInViewport({ ratio: 1 });
+			// The whole section when it fits below the app bar; on a short layout, its framed top:
+			// the title, the A/B choice and the "No cabo" readout.
+			const box = await comparison.boundingBox();
+			const viewport = page.viewportSize();
+			if (!box || !viewport) throw new Error('Missing cable comparison bounds');
+			expect(box.y, 'Cable comparison must be framed below the app bar').toBeGreaterThan(0);
+			if (box.y + box.height <= viewport.height) {
+				await expect(comparison).toBeInViewport({ ratio: 1 });
+			} else {
+				await expect(comparison.getByRole('heading', { level: 3 })).toBeInViewport({ ratio: 1 });
+				await expect(comparison.getByRole('radiogroup')).toBeInViewport({ ratio: 1 });
+				await expect(comparison.locator('[data-cable-ab-status]')).toBeInViewport({ ratio: 1 });
+			}
 			const png = rgbPng(await page.screenshot({ animations: 'disabled', fullPage: false }));
 			validateAsset(png, `${relative}8-cable-compare.png`);
 			await writeFile(`${directory}8-cable-compare.png`, png);
