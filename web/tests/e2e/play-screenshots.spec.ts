@@ -1,6 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { devices, type Page } from '@playwright/test';
+import { PADRAO_AURI } from 'open-auri/catalog';
+import { JOURNAL_STORAGE_KEY, serializeJournal, validateEntry } from 'open-auri/policy';
+import { gateForWrite } from 'open-auri/safety';
 import { test, expect, cableInfo, type NativeOptions } from './fixtures/capacitor-bridge';
 import { settleRendering, waitForApp } from './helpers/a-app';
 import { barNavLink } from './helpers/b-ui';
@@ -52,6 +55,46 @@ const nativeOptionsFor = (set: (typeof sets)[number]): NativeOptions => ({
 const isCommit = ({ bytes }: { bytes: number[] }) =>
 	bytes.slice(0, 5).join(',') === '1,101,0,1,255';
 
+/** Any open modal, as the app itself detects one (a tour panel is `aria-modal="false"`). */
+const MODAL = 'dialog[open], [role="dialog"][aria-modal="true"]';
+
+/**
+ * The fake cable's saved curve: one `ok` journal entry with the official Auri preset, naming the
+ * cable as the service does (its label: the product name, alone on the bus, truncated to 64 code
+ * points). Both the native fake and the WebHID stub report this product name. Without it the
+ * saved curve is unknown: the live footer says so and the comparison cannot revert ("Encerrar").
+ * An `ok` entry (never `interrupted`) and no in-flight marker: no rescue or interruption.
+ */
+const SAVED_DEVICE = 'USB DSP Audio';
+const savedJournal = (() => {
+	const bands = PADRAO_AURI.bands.map((band) => ({ ...band }));
+	const verdict = gateForWrite(bands, PADRAO_AURI.preampDb, { experimental: false });
+	if (!verdict.ok) throw new Error('The Auri preset must pass the write gate');
+	const entry = {
+		schema: 1 as const,
+		at: Date.UTC(2026, 9, 1, 12),
+		name: PADRAO_AURI.label,
+		crc: Number(verdict.metrics.payloadCrc),
+		preampDb: PADRAO_AURI.preampDb,
+		bands,
+		status: 'ok' as const,
+		device: SAVED_DEVICE
+	};
+	const { ok, errors } = validateEntry(entry);
+	if (!ok) throw new Error(`Invalid seeded journal entry: ${errors.join('; ')}`);
+	return serializeJournal([entry]);
+})();
+
+/** Seeds the saved curve before any app script runs (fresh context: no journal yet). */
+async function seedSavedCurve(page: Page) {
+	await page.addInitScript(
+		({ key, journal }) => {
+			if (localStorage.getItem(key) === null) localStorage.setItem(key, journal);
+		},
+		{ key: JOURNAL_STORAGE_KEY, journal: savedJournal }
+	);
+}
+
 /** Frame the actual instruments below fixed chrome, without altering the UI or capture size. */
 async function frameInstrument(page: Page, selector: string) {
 	const instrument = page.locator(selector);
@@ -96,11 +139,6 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 	const directory = fileURLToPath(
 		new URL(`../../../docs/android/play-assets/${relative}`, import.meta.url)
 	);
-	// Retired one-phone notice (ANDROID_WRITE_VALIDATED is true): asserted absent, never captured.
-	const title =
-		locale === 'pt-BR'
-			? 'Gravação pelo app: teste em um celular'
-			: 'Writing from the app: tested on one phone';
 	test.describe(locale, () => {
 		test.use({ locale });
 		test.beforeEach(async ({ context, baseURL }) => {
@@ -130,15 +168,10 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 				expect(response?.status(), `${route} must return HTTP 200`).toBe(200);
 				await waitForApp(page);
 				await expect(page.locator('html')).toHaveAttribute('lang', locale);
-				// No capture shows the retired one-phone modal or Cabo banner.
-				await expect(page.getByRole('dialog', { name: title, exact: true })).toHaveCount(0);
-				if (route === '/cabo') {
-					if (set.name === 'desktop') {
-						await expect(page.getByText('OA-01 · WebHID', { exact: true })).toBeVisible();
-					}
-					await expect(page.getByRole('complementary', { name: title, exact: true })).toHaveCount(
-						0
-					);
+				// No capture shows a modal over the page.
+				await expect(page.locator(MODAL).filter({ visible: true })).toHaveCount(0);
+				if (route === '/cabo' && set.name === 'desktop') {
+					await expect(page.getByText('OA-01 · WebHID', { exact: true })).toBeVisible();
 				}
 				await settleRendering(page);
 				await page.evaluate(async () => {
@@ -221,6 +254,7 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 		if (set.name === 'desktop') {
 			test('capture cable comparison', async ({ page }) => {
 				await installHidStub(page);
+				await seedSavedCurve(page);
 				await page.goto('/cabo');
 				await waitForApp(page);
 				await page.getByRole('switch').click();
@@ -257,12 +291,15 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 			);
 			await comparison.locator('[data-cable-ab-start]').click();
 			await comparison.locator('[data-confirmation="volume"] input').check();
-			await expect(comparison.locator('[data-confirmation="android-untested"]')).toHaveCount(0);
 			await comparison.locator('[data-cable-ab-go]').click();
 			await expect(comparison.locator('[data-cable-ab-status]')).toHaveText(
 				locale === 'pt-BR' ? 'No cabo: A' : 'On the cable: A'
 			);
 			await expect(comparison.getByRole('radio')).toHaveCount(2);
+			// The seeded saved curve is known: the revert ("Encerrar") is available.
+			const end = comparison.locator('[data-cable-ab-end]');
+			await expect(end).toHaveText(locale === 'pt-BR' ? 'Encerrar' : 'End');
+			await expect(end).toBeEnabled();
 			await frameInstrument(page, '[data-cable-ab]');
 			// The whole section when it fits below the app bar; on a short layout, its framed top:
 			// the title, the A/B choice and the "No cabo" readout.
@@ -296,6 +333,7 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 			test('capture connected Android USB', async ({ page, nativeBridge }) => {
 				// Real Capacitor bridge, fake cable. Connecting must never write any reports.
 				await nativeBridge.connect(cableInfo());
+				await seedSavedCurve(page);
 				const response = await page.goto('/cabo');
 				expect(response?.status()).toBe(200);
 				await waitForApp(page);
@@ -332,10 +370,9 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 				await expect(connected).toHaveAttribute('aria-current', 'step');
 				await expect(connected).toHaveClass(/\bon\b/);
 				await settleRendering(page);
-				await expect(usb.locator('.tag-strip')).toContainText('USB DSP Audio');
-				// The one-phone notice was retired: no modal or banner on the connected Cabo panel.
-				await expect(page.getByRole('dialog', { name: title, exact: true })).toHaveCount(0);
-				await expect(page.getByRole('complementary', { name: title, exact: true })).toHaveCount(0);
+				await expect(usb.locator('.tag-strip')).toContainText(SAVED_DEVICE);
+				// Connecting opens no modal over the Cabo panel.
+				await expect(page.locator(MODAL).filter({ visible: true })).toHaveCount(0);
 				await noWriteChecklist('after connecting on Cabo');
 				// The live switch is on Curva, not in U1. Navigate through the real UI to preserve
 				// the selected native cable/session.
@@ -353,12 +390,19 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 				await expect(checklist).toBeVisible();
 				await noWriteChecklist('with the Ouvir no cabo switch');
 				await checklist.locator('[data-confirmation="volume"] input').check();
-				await expect(checklist.locator('[data-confirmation="android-untested"]')).toHaveCount(0);
 				await checklist.locator('[data-live-start]').click();
 				await expect(checklist).not.toBeVisible();
 				await noWriteChecklist('after Começar / Start');
 				await expect(liveSwitch).toHaveAttribute('aria-checked', 'true');
-				await expect(live.locator('[data-live-status]')).toContainText('USB DSP Audio');
+				await expect(live.locator('[data-live-status]')).toContainText(SAVED_DEVICE);
+				// The seeded saved curve is known: the footer never says it is unknown.
+				await expect(
+					page.getByText(
+						locale === 'pt-BR'
+							? 'Sem curva salva conhecida para este cabo'
+							: 'No known saved curve for this cable'
+					)
+				).toHaveCount(0);
 				const save = live.getByRole('button', {
 					name: locale === 'pt-BR' ? 'Salvar no cabo' : 'Save to cable',
 					exact: true
