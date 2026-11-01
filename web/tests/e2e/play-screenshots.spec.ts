@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { devices, type Page } from '@playwright/test';
-import { test, expect, cableInfo } from './fixtures/capacitor-bridge';
+import { test, expect, cableInfo, type NativeOptions } from './fixtures/capacitor-bridge';
 import { settleRendering, waitForApp } from './helpers/a-app';
 import { barNavLink } from './helpers/b-ui';
 import { hidLog, installHidStub } from './helpers/b-hid';
@@ -40,6 +40,13 @@ const sets = [
 	{ name: 'tablet-10', viewport: { width: 900, height: 1600 }, deviceScaleFactor: 1.6 },
 	{ name: 'desktop', viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1.5 }
 ] as const;
+
+/** The set's fake Android app: the real Capacitor bridge on phone/tablet, none on desktop. */
+const nativeOptionsFor = (set: (typeof sets)[number]): NativeOptions => ({
+	enabled: set.name !== 'desktop',
+	devices: [],
+	appVersion: '1.0.0'
+});
 
 // Data report 1 also starts with 0x01; only the full command prefix identifies a flash commit.
 const isCommit = ({ bytes }: { bytes: number[] }) =>
@@ -254,6 +261,10 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 		// Desktop never captures the Android-only scene 7.
 		if (set.name === 'desktop') return;
 		test.describe('native USB', () => {
+			// An app with the liveApply capability (1.0.3+): without it the native cable is not
+			// live-capable, so neither the Ouvir no cabo switch (scene 7) nor the cable comparison
+			// (scene 8) is shown. Only these scenes announce it; the browsing captures keep the default.
+			test.use({ nativeOptions: { ...nativeOptionsFor(set), liveApply: true } });
 			// More CSS room for the live/compare controls, still a 1080x1920 phone PNG.
 			if (set.name === 'phone') {
 				test.use({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 2 });
@@ -366,7 +377,7 @@ for (const set of sets) {
 			...(set.name === 'desktop'
 				? { isMobile: false, hasTouch: false, userAgent: devices['Desktop Chrome'].userAgent }
 				: {}),
-			nativeOptions: { enabled: set.name !== 'desktop', devices: [], appVersion: '1.0.0' }
+			nativeOptions: nativeOptionsFor(set)
 		});
 		for (const locale of ['pt-BR', 'en-US'] as const) describeLocale(set, locale);
 	});
