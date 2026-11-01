@@ -257,7 +257,9 @@ function describeLocale(set: (typeof sets)[number], locale: 'pt-BR' | 'en-US') {
 				await seedSavedCurve(page);
 				await page.goto('/cabo');
 				await waitForApp(page);
-				await page.getByRole('switch').click();
+				const realMode = page.getByRole('switch');
+				if ((await realMode.getAttribute('aria-checked')) !== 'true') await realMode.click();
+				await expect(realMode).toHaveAttribute('aria-checked', 'true');
 				await page
 					.getByRole('button', {
 						name: locale === 'pt-BR' ? 'Conectar via WebHID real' : 'Connect via real WebHID',
