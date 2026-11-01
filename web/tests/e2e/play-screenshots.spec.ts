@@ -101,7 +101,6 @@ async function frameInstrument(page: Page, selector: string) {
 	await expect(instrument).toBeVisible();
 	await instrument.evaluate((element) => {
 		const bar = document.querySelector('[data-chrome="bar"]');
-		const banner = document.querySelector('.room > .banner');
 		if (!bar) throw new Error('Missing store capture app bar');
 		// `[data-chrome="bar"]` is only a wrapper: its in-flow child is a spacer that scrolls away
 		// (its bottom goes negative once the page is scrolled), the bar itself is `position: fixed`.
@@ -116,11 +115,7 @@ async function frameInstrument(page: Page, selector: string) {
 		}
 		if (chrome <= 0) chrome = Math.max(0, bar.getBoundingClientRect().bottom);
 		window.scrollBy({
-			top:
-				element.getBoundingClientRect().top -
-				chrome -
-				(banner?.getBoundingClientRect().height ?? 0) -
-				12,
+			top: element.getBoundingClientRect().top - chrome - 12,
 			behavior: 'instant'
 		});
 	});

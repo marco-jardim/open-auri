@@ -32,7 +32,7 @@ const ANDROID_ANCHORS = [
 	'android-assinatura',
 	'android-privacidade'
 ];
-/** Linked by the cable page (T2.3) as `/docs#android-resgate`. */
+/** Public anchor `/docs#android-resgate`; no UI links to it any more, but it stays stable. */
 const RECOVERY_ANCHOR = 'android-resgate';
 const VALIDATION_ANCHOR = 'android-validacao';
 const REPORT_URL =

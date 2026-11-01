@@ -70,8 +70,13 @@ dia, com o app 1.0.3 instalado pela Play Store como atualização sobre o 1.0.1,
 "Ouvir no cabo" (prévia ao vivo, sem gravar) e o A/B de "Comparar no cabo"
 (Neutro contra Basshead) mudaram o EQ em tempo real, também confirmados pelo
 som. Depois da atualização de 1.0.1 para 1.0.3, o app mostrou uma faixa falsa de
-"Gravação interrompida", embora a gravação tivesse dado certo; esse defeito é
-acompanhado à parte.
+"Gravação interrompida", embora a gravação tivesse dado certo. Esse falso
+positivo foi corrigido no site: o marcador que sobra de uma gravação é
+reconciliado com o diário antes de mostrar a faixa, e dispensar a faixa fica
+salvo. Risco residual: se a WebView perder o armazenamento ainda não gravado em
+disco quando o processo é encerrado, a reconciliação fica sem os dados de que
+precisa e a faixa pode voltar a errar; a causa raiz não foi reproduzida por
+completo.
 
 Se o som ficar estranho depois de gravar, grave o Neutro; se não resolver,
 grave o Neutro pelo site no computador (Chrome ou Edge).

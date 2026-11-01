@@ -188,11 +188,22 @@ test('message catalogs and UI sources carry no Android disclaimer phrase', () =>
   }
 });
 
-test('partial hardware report records the real setup, acoustic results and outstanding F5 evidence', () => {
+test('hardware report records both phones, the acoustic results and the formal F5 items', () => {
   const report = read('docs/android/validacao-hardware.md');
   for (const detail of [
     '29/10/2026',
-    '1 de 2 fabricantes',
+    '01/11/2026',
+    '2 fabricantes testados (Samsung, Blackview)',
+    'Blackview BV9900 Pro',
+    'Android 10',
+    'versionCode `10001`',
+    'versionCode `10003`',
+    'Conectar pelo USB do Android',
+    'Basshead',
+    '0x932B',
+    'Ouvir no cabo',
+    'Comparar no cabo',
+    'Gravação interrompida',
     'SM-A705MN',
     'Android 11',
     '155.0.8059.43',
@@ -217,8 +228,15 @@ test('partial hardware report records the real setup, acoustic results and outst
   ]) {
     assert.ok(report.includes(detail), `Hardware report missing: ${detail}`);
   }
-  assert.match(report, /não a aprovação completa da F5/);
-  assert.match(report, /não numa captura\s+USB no fio no Android/);
+  // Status line matches the site's G.6 wording; the wire capture and sign-off stay formal F5 items.
+  assert.match(
+    report,
+    /Gravação pelo app validada em cabo real em 1º de novembro de 2026, em 2\s+aparelhos/,
+  );
+  assert.match(report, /confirmada pelo som/);
+  assert.doesNotMatch(report, /1 de 2 fabricantes|não a aprovação completa/);
+  assert.match(report, /nenhuma captura no fio está\s+registrada/);
+  assert.match(report, /não numa captura USB no fio no Android/);
   assert.doesNotMatch(report, /\]\([^)]*_qa[/\\]/);
   assert.ok(android.includes('(android/validacao-hardware.md)'));
 });
