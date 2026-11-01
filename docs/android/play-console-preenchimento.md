@@ -8,8 +8,9 @@ rótulos do Console mudam com o tempo: se um nome não bater, use o campo equiva
 Fontes (prevalecem em caso de dúvida): [play-console-passos.md](./play-console-passos.md),
 [play-listing.md](./play-listing.md), [play-conteudo.md](./play-conteudo.md),
 [data-safety.md](./data-safety.md), [play-assinatura.md](./play-assinatura.md),
-[play-conta.md](./play-conta.md), `docs/legal/politica-de-privacidade.md` e o Anexo G.5 de
-`docs/plans/2026-10-18-android-capacitor-plano.md`.
+[play-conta.md](./play-conta.md) e `docs/legal/politica-de-privacidade.md`. Desde 01/11/2026
+(`ANDROID_WRITE_VALIDATED = true`), o aviso do Anexo G.5 de
+`docs/plans/2026-10-18-android-capacitor-plano.md` não entra mais na ficha nem nas notas.
 
 ## Como usar
 
@@ -67,8 +68,7 @@ https://open-auri.com
 ### External marketing
 
 Não coberto: decidir. Sugestão conservadora: **desmarcar** a promoção do app fora da Google Play
-até a validação completa da gravação (F5). Motivo: o teste real se limita ao Galaxy A70,
-sem outro fabricante nem paridade no fio; a opção é reversível e pode ser ligada depois.
+no primeiro envio; a opção é reversível e pode ser ligada depois.
 
 ## 2. Main store listing
 
@@ -87,15 +87,13 @@ open-auri
 **Short description** (até 80 caracteres, conferidos por teste):
 
 ```text
-App não oficial Auri: EQ e USB testados no Galaxy A70, sem validação plena.
+App não oficial para o cabo Auri: EQ, prévia ao vivo e gravação pelo USB.
 ```
 
 **Full description** (até 4.000 caracteres, conferidos por teste):
 
 ```text
-Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
-
-Conecte o cabo Kuba Auri por USB-C/OTG e grave curvas de equalização pela camada USB nativa do Android, que o navegador do celular não oferece. O transporte USB nativo permite selecionar o cabo e pedir permissão ao Android. O teste acústico e a comparação de bytes na ponte nativa se limitam ao Galaxy A70; faltam outro fabricante e paridade USB no fio. A gravação depende de uma ação sua e do checklist, nunca é automática. Há também Diagnóstico USB e exportação de arquivos pelo seletor do sistema.
+Conecte o cabo Kuba Auri por USB-C/OTG e grave curvas de equalização no cabo pela camada USB nativa do Android, que o navegador do celular não oferece. O transporte USB nativo permite selecionar o cabo e pedir permissão ao Android. Em Ouvir no cabo, a curva do editor toca ao vivo, sem gravar na memória flash. Em Comparar no cabo, alterne A/B na memória, também sem gravar. Ao desconectar, o cabo volta à curva salva. Para persistir a curva, use Salvar no cabo e confirme o checklist: a gravação nunca é automática. Há também Diagnóstico USB e exportação de arquivos pelo seletor do sistema.
 
 Projeto independente: open-auri não é oficial nem endossado pela Kuba e não tem afiliação com ela ou qualquer fabricante. Crie, explore e compare curvas de equalização. Acesse a biblioteca de curvas e presets, compare respostas e participe da comunidade.
 
@@ -108,7 +106,7 @@ O protocolo foi estudado para fins de interoperabilidade. Use por sua conta e ri
 
 Requisitos: Android 8 ou mais recente, aparelho com USB host/OTG, cabo compatível e Android System WebView atualizado. É necessária conexão com a internet para carregar o conteúdo e usar os recursos online. Destinado a pessoas com 18 anos ou mais.
 
-Para relatar resultados, use o link do aviso inicial. Informe o aparelho, as versões do Android e do app e o JSON do Diagnóstico USB. Não inclua dados pessoais no relato.
+Som estranho depois de gravar? Grave o Neutro pelo app; se não resolver, pelo site no computador (Chrome ou Edge). Para relatar resultados, use o formulário https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml e informe o aparelho, as versões do Android e do app e o JSON do Diagnóstico USB. Não inclua dados pessoais no relato.
 
 Consulte a seção Segurança dos dados (Data safety) desta ficha e a política de privacidade para conhecer os dados coletados e compartilhados, as finalidades e as opções de exclusão. O arquivo de áudio usado na prévia fica no aparelho.
 
@@ -118,21 +116,21 @@ Privacidade: https://open-auri.com/privacidade
 
 ### 2.2 pt-BR > Graphics
 
-Antes de enviar, regenerar e aprovar os 56 PNGs (play-listing.md, "Capturas e regeneração (P3)")
+Antes de enviar, regenerar e aprovar os 64 PNGs (play-listing.md, "Capturas e regeneração (P3)")
 e rodar `node tools/play-assets.mjs --check`. Caminhos relativos a
 `D:\git\open-auri\docs\android\play-assets\`. Enviar as capturas **nesta ordem**: `1-editor.png`,
 `2-cabo.png`, `3-comparar.png`, `4-soe-como-x.png`, `5-comunidade.png`, `6-teste-cego.png`,
-`7-native-connect.png` (o desktop para no 6). Não misturar conjuntos.
+`7-native-connect.png`, `8-cable-compare.png` (o desktop omite a cena 7). Não misturar conjuntos.
 
 | Campo do Console                         | Arquivos                                                   |
 | ---------------------------------------- | ---------------------------------------------------------- |
 | App icon                                 | `icon-512.png`                                             |
 | Feature graphic                          | `feature-1024x500.png`                                     |
 | Video                                    | `<URL do vídeo no YouTube>` (ver abaixo)                   |
-| Phone screenshots                        | `screenshots\pt-BR\1-editor.png` a `7-native-connect.png` (7) |
-| 7-inch tablet screenshots                | `screenshots\pt-BR\tablet-7\1-editor.png` a `7-native-connect.png` (7) |
-| 10-inch tablet screenshots               | `screenshots\pt-BR\tablet-10\1-editor.png` a `7-native-connect.png` (7) |
-| Chromebook / telas grandes (se existir)  | `screenshots\pt-BR\desktop\1-editor.png` a `6-teste-cego.png` (6) |
+| Phone screenshots                        | `screenshots\pt-BR\1-editor.png` a `8-cable-compare.png` (8) |
+| 7-inch tablet screenshots                | `screenshots\pt-BR\tablet-7\1-editor.png` a `8-cable-compare.png` (8) |
+| 10-inch tablet screenshots               | `screenshots\pt-BR\tablet-10\1-editor.png` a `8-cable-compare.png` (8) |
+| Chromebook / telas grandes (se existir)  | `screenshots\pt-BR\desktop\1-editor.png` a `6-teste-cego.png`, mais `8-cable-compare.png` (7) |
 
 Telas grandes: o nome do campo varia (Chromebook, PC). Ter as imagens não é declaração de
 compatibilidade com Google Play Games no PC; não marcar essa distribuição por causa delas.
@@ -157,18 +155,16 @@ en-US. Depois, trocar o seletor de idioma para en-US e preencher:
 open-auri
 ```
 
-**Short description** (70 de 80):
+**Short description** (até 80 caracteres, conferidos por teste):
 
 ```text
-Unofficial Auri EQ app: USB tested on Galaxy A70, not fully validated.
+Unofficial Auri cable app: EQ, live preview and writing over USB.
 ```
 
-**Full description** (cerca de 2.122 de 4.000):
+**Full description** (até 4.000 caracteres, conferidos por teste):
 
 ```text
-Notice: writing tested on a Kuba Auri with Galaxy A70 (Android 11), not other manufacturers. Preview, writing and Padrão Auri restoration confirmed acoustically; native bridge bytes match the desktop site. Full validation pending. Sound off? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
-
-Connect the Kuba Auri cable through USB-C/OTG and write EQ curves through Android's native USB layer, which the phone browser does not provide. The native USB transport lets you select the cable and request Android permission. Acoustic testing and native bridge byte comparisons are limited to the Galaxy A70; another manufacturer and on-wire USB parity are still pending. Writing requires your action and the checklist, and is never automatic. USB Diagnostics and file exports through the system picker are also available.
+Connect the Kuba Auri cable through USB-C/OTG and write EQ curves to the cable through Android's native USB layer, which the phone browser does not provide. The native USB transport lets you select the cable and request Android permission. Hear on the cable plays the editor curve live, without writing to flash. Compare on the cable switches A/B in memory, also without saving. Unplugging restores the saved curve. To persist a curve, use Save to cable and confirm the checklist: writing is never automatic. USB Diagnostics and file exports through the system picker are also available.
 
 Independent project: open-auri is not official or endorsed by Kuba and is not affiliated with Kuba or any manufacturer. Create, explore and compare EQ curves. Browse the curve and preset library, compare responses and take part in the community.
 
@@ -181,7 +177,7 @@ The protocol was studied for interoperability. Use at your own risk: we are not 
 
 Requirements: Android 8 or newer, a device with USB host/OTG, a compatible cable and an up-to-date Android System WebView. An internet connection is needed to load content and use online features. Intended for people aged 18 or over.
 
-To report results, use the link in the opening notice. Include your device, Android and app versions, and the USB Diagnostics JSON. Do not include personal data in the report.
+Sound off after writing? Write Neutral from the app; if unresolved, use the desktop site (Chrome or Edge). To report results, use the form https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml and include your device, Android and app versions, and the USB Diagnostics JSON. Do not include personal data in the report.
 
 See the Data safety section of this listing and the privacy policy for collected and shared data, purposes and deletion options. The audio file used for previews stays on your device.
 
@@ -194,14 +190,17 @@ e mesmas pastas, trocando `pt-BR` por `en-US`:
 
 | Campo do Console                         | Arquivos                                                   |
 | ---------------------------------------- | ---------------------------------------------------------- |
-| Phone screenshots                        | `screenshots\en-US\1-editor.png` a `7-native-connect.png` (7) |
-| 7-inch tablet screenshots                | `screenshots\en-US\tablet-7\1-editor.png` a `7-native-connect.png` (7) |
-| 10-inch tablet screenshots               | `screenshots\en-US\tablet-10\1-editor.png` a `7-native-connect.png` (7) |
-| Chromebook / telas grandes (se existir)  | `screenshots\en-US\desktop\1-editor.png` a `6-teste-cego.png` (6) |
+| Phone screenshots                        | `screenshots\en-US\1-editor.png` a `8-cable-compare.png` (8) |
+| 7-inch tablet screenshots                | `screenshots\en-US\tablet-7\1-editor.png` a `8-cable-compare.png` (8) |
+| 10-inch tablet screenshots               | `screenshots\en-US\tablet-10\1-editor.png` a `8-cable-compare.png` (8) |
+| Chromebook / telas grandes (se existir)  | `screenshots\en-US\desktop\1-editor.png` a `6-teste-cego.png`, mais `8-cable-compare.png` (7) |
 
-Conferir `7-native-connect` (telefone e tablets): painel USB Android, lâmpada Conectado/Connected e
-aviso de teste limitado a um celular visíveis. No desktop, `2-cabo` mostra **OA-01 · WebHID**. A captura
-USB usa dispositivo falso: não é prova de hardware nem substitui o vídeo.
+Conferir `7-native-connect` (telefone e tablets): Ouvir no cabo / Hear on the cable ligado e
+Salvar no cabo / Save to cable visível na página Curva, após conectar pelo USB Android.
+Nenhuma captura mostra aviso de teste nem item extra de confirmação do Android; a spec confere
+a ausência na página Cabo antes de navegar. Conferir `8-cable-compare` nos quatro conjuntos: comparação
+A/B ativa no cabo, sem gravação. No desktop, `2-cabo` mostra **OA-01 · WebHID**. As capturas
+usam dispositivos falsos: não são prova de hardware nem substituem o vídeo.
 
 ## 3. App content
 
@@ -231,10 +230,10 @@ Add instructions:
 | Name (Instruction name)                       | `Review account (regular verified user)`           |
 | Username, email address or phone number       | `<usuário da conta de revisão>`                    |
 | Password                                      | `<senha da conta de revisão>`                      |
-| Any other information (489 caracteres)        | bloco abaixo                                       |
+| Any other information                        | bloco abaixo                                       |
 
 ```text
-Sign-in is optional: the EQ utility works without an account. This account is only for community features (save, publish, favorite, report). Sign in via Menu > Entrar (Sign in). A Cloudflare Turnstile check may appear and usually passes automatically. No 2-step verification, email code or admin access needed. For adults 18+. Writing needs a Kuba Auri USB-C cable: Menu > Cabo > Conectar pelo USB do Android; without it the app reports no device. The partial-validation notice is intentional: hardware testing is limited to one Galaxy A70.
+EQ works without sign-in. This regular verified account is for community actions (save, publish, favorite, report). Sign in via Menu > Entrar (Sign in). Turnstile may appear. No 2-step verification, email code or admin access needed. Adults 18+. Writing requires a Kuba Auri cable: Menu > Cabo > Conectar pelo USB do Android. Each write asks for the safety checklist; it is not a sign-in failure.
 ```
 
 Requisitos da conta de revisão (fora do Console, antes de salvar): conta comum (não admin), e-mail
@@ -266,8 +265,6 @@ device picker and grant USB permission locally. Without a cable, the app reports
 that no compatible device was found. With a cable connected, the Engineering layer
 on the Cable page shows USB Diagnostics. Without a cable, all non-hardware
 functionality can still be evaluated; the USB write itself cannot.
-The notice that writing has not yet been validated on a real cable is intentional.
-Do not treat that notice as a sign-in failure or a request to bypass a safety check.
 
 An account is optional and is used for community actions and account management.
 Public community content can be viewed without signing in. Account creation may
@@ -523,15 +520,16 @@ Conferir, caractere por caractere:
 (Get-FileHash .\open-auri-<versão>.aab -Algorithm SHA256).Hash.ToLower()
 ```
 
-**Release notes** (iguais nas duas trilhas; aviso G.5 exato, até 500 caracteres por idioma). O
-Console mostra as tags de idioma; manter as tags e colar o texto entre elas:
+**Release notes** (iguais nas duas trilhas; até 500 caracteres por idioma; sem o aviso G.5, que
+saiu com `ANDROID_WRITE_VALIDATED = true`). O Console mostra as tags de idioma; manter as tags e
+colar o texto entre elas:
 
 ```text
 <pt-BR>
-Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+Grave curvas no cabo Kuba Auri pelo USB do Android, com Ouvir no cabo e Comparar no cabo sem gravar na memória. Som estranho depois de gravar? Grave o Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
 </pt-BR>
 <en-US>
-Notice: writing tested on a Kuba Auri with Galaxy A70 (Android 11), not other manufacturers. Preview, writing and Padrão Auri restoration confirmed acoustically; native bridge bytes match the desktop site. Full validation pending. Sound off? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+Write EQ curves to the Kuba Auri cable over Android USB, with Hear on the cable and Compare on the cable without saving to memory. Sound off after writing? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
 </en-US>
 ```
 
@@ -563,7 +561,7 @@ para produção depois do teste interno.
 1. Test and release > Production > **Countries / regions**: a escolha da seção 4.
 2. Promover a versão do teste interno (Internal testing > Promote release > Production) ou, em
    Production > Create new release, usar Add from library e escolher o mesmo AAB.
-3. Release name: o mesmo de 6.1 (`<versão> (<versionCode>)`). Release notes: o mesmo bloco G.5.
+3. Release name: o mesmo de 6.1 (`<versão> (<versionCode>)`). Release notes: o mesmo bloco de 6.
 4. **Rollout percentage: 100%** (se o Console oferecer percentual).
 5. Next > Save > Publishing overview > **Send changes for review**.
 6. **Managed publishing:** não coberto: decidir. Sugestão conservadora: ligar, para publicar à mão
@@ -586,7 +584,7 @@ para produção depois do teste interno.
 - [ ] Conta de revisão entra no app da release, com Turnstile passando, e-mail verificado, sem 2FA
       e sem papel de admin.
 - [ ] Link do vídeo abre numa janela anônima.
-- [ ] 56 PNGs regenerados, validados (`node tools/play-assets.mjs --check`) e aprovados visualmente.
+- [ ] 64 PNGs regenerados, validados (`node tools/play-assets.mjs --check`) e aprovados visualmente.
 - [ ] Data safety: Preview igual às tabelas da seção 3.7; pendências de data-safety.md resolvidas.
 - [ ] Manifesto mesclado do AAB final sem `AD_ID`, sem permissões além das esperadas e sem HTTP em
       produção.
