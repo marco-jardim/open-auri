@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import { gateForWrite } from 'open-auri/safety';
 	import { m } from '#lib/paraglide/messages.js';
 	import { getNativeCableState, isNativeAndroid } from '#lib/app/context.svelte.ts';
@@ -257,6 +258,46 @@
 		});
 		finish(outcome);
 	}
+
+	/** Why "Fechar" is locked (a write is running), or null; the backdrop obeys the same rule. */
+	const closeReason = $derived(cable.writing ? m.cable_fux_close_locked() : null);
+
+	/**
+	 * A press on the backdrop closes like "Fechar" (same `onclose`, so the same cleanup), and
+	 * never while that button is locked. A modal dialog's backdrop hits the dialog element
+	 * itself, so the point must also lie outside its box (its scrollbar is inside). Both the
+	 * press and the click must land there: a selection or drag that starts in the panel and
+	 * ends on the backdrop does not close.
+	 */
+	const backdropClose: Attachment<HTMLDialogElement> = (node) => {
+		let pressedOutside = false;
+		const outside = (event: MouseEvent) => {
+			if (event.target !== node) return false;
+			const box = node.getBoundingClientRect();
+			return (
+				event.clientX < box.left ||
+				event.clientX > box.right ||
+				event.clientY < box.top ||
+				event.clientY > box.bottom
+			);
+		};
+		const press = (event: PointerEvent) => {
+			pressedOutside = outside(event);
+		};
+		const click = (event: MouseEvent) => {
+			const fromOutside = pressedOutside;
+			pressedOutside = false;
+			if (!fromOutside || !outside(event)) return;
+			if (closeReason !== null || service.getState().writing) return;
+			onclose();
+		};
+		node.addEventListener('pointerdown', press);
+		node.addEventListener('click', click);
+		return () => {
+			node.removeEventListener('pointerdown', press);
+			node.removeEventListener('click', click);
+		};
+	};
 </script>
 
 <dialog
@@ -264,6 +305,7 @@
 	closedby={cable.writing ? 'none' : 'closerequest'}
 	class="checklist"
 	use:modalDialog={{ open, onDismiss: onclose, canDismiss: () => !service.getState().writing }}
+	{@attach backdropClose}
 >
 	{#if checklist !== null}
 		<div class="unit">
@@ -499,7 +541,7 @@
 			<footer class="foot">
 				<Button
 					variant="plate"
-					disabledReason={cable.writing ? m.cable_fux_close_locked() : null}
+					disabledReason={closeReason}
 					onclick={() => onclose()}
 				>
 					{m.cable_close()}
@@ -870,6 +912,29 @@
 		justify-content: flex-end;
 		gap: 10px;
 		margin-top: 16px;
+	}
+	/*
+	 * "Fechar" sits on the brushed aluminium, but the plate recipe is drawn for dark surfaces
+	 * (light text over a near-transparent face): there it vanished into the metal. Give it the
+	 * dark hardware face it expects, a dark edge against the metal and a dark focus ring, since
+	 * the page accent can be as light as the panel. Unlayered, so the layered recipe's hover and
+	 * unavailable values are restated here with their own tokens.
+	 */
+	.foot :global(.btn--plate) {
+		--btn-bg: var(--ink-4);
+		--btn-fg: var(--text);
+		--btn-border: var(--ink);
+	}
+	.foot :global(.btn--plate:hover:not([aria-disabled='true'], [aria-busy='true'], :disabled)) {
+		--btn-border: color-mix(in srgb, var(--text) 62%, transparent);
+	}
+	.foot :global(.btn--plate[aria-disabled='true']) {
+		--btn-bg: var(--ink-3);
+		--btn-fg: var(--muted-hi);
+		--btn-border: var(--ink);
+	}
+	.foot :global(.btn--plate:focus-visible) {
+		outline-color: var(--ink);
 	}
 	@container (max-width: 940px) {
 		.cal {
