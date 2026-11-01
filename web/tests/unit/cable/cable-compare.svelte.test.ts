@@ -374,6 +374,71 @@ test('inside /comparar at 360 px the start checklist stacks and every control is
 	}
 });
 
+test("in /comparar the page's lamp, readout and actions rules miss this panel", async () => {
+	const restore = { width: window.innerWidth, height: window.innerHeight };
+	await page.viewport(360, 760);
+	try {
+		const { app, options } = await setup({}, false);
+		const host = document.createElement('div');
+		host.className = 'comparar';
+		// The page's own blend verdict, styled by those same rules: it must keep its look.
+		const verdict = document.createElement('div');
+		verdict.className = 'verdict ok';
+		const verdictLamp = document.createElement('span');
+		verdictLamp.className = 'lamp';
+		const knobReadout = document.createElement('span');
+		knobReadout.className = 'readout';
+		verdict.append(verdictLamp, knobReadout);
+		host.append(verdict);
+		document.body.append(host);
+		const component = mount(CableCompare, { target: host, props: options });
+		disposers.push(async () => {
+			await unmount(component);
+			host.remove();
+		});
+		await tick();
+		expect(getComputedStyle(host).maxWidth).toBe('1380px');
+		// The page keeps its amber 22 px verdict lamp and its black monospace readout.
+		const pageLamp = getComputedStyle(verdictLamp);
+		expect(pageLamp.width).toBe('22px');
+		expect(pageLamp.backgroundImage).toContain('rgb(242, 179, 61)');
+		const pageReadout = getComputedStyle(knobReadout);
+		expect(pageReadout.backgroundColor).toBe('rgb(13, 12, 11)');
+		expect(pageReadout.fontFamily).toContain('JetBrains Mono');
+
+		await openChecklist();
+		const gateLamp = document.querySelector<HTMLElement>('[data-cable-ab-gate] .lamp');
+		if (gateLamp === null) throw new Error('expected the gate lamp');
+		const lamp = getComputedStyle(gateLamp);
+		// Not `.comparar .lamp`: the page's grey 22 px bulb (#6a6560 → #2a2724).
+		expect(lamp.backgroundImage).not.toContain('rgb(106, 101, 96)');
+		expect(lamp.backgroundImage).not.toContain('rgb(42, 39, 36)');
+		expect(lamp.width).not.toBe('22px');
+		const checkActions = document.querySelector<HTMLElement>(
+			'[data-cable-ab-checklist] .ab-actions'
+		);
+		if (checkActions === null) throw new Error('expected the checklist actions');
+		// Not `.comparar .actions` (margin-top 14px, align-items end).
+		expect(getComputedStyle(checkActions).marginTop).toBe('0px');
+		expect(getComputedStyle(checkActions).alignItems).toBe('center');
+
+		await start(app);
+		const readout = document.querySelector<HTMLElement>('[data-cable-ab] .ab-readout');
+		if (readout === null) throw new Error('expected the readout');
+		const shown = getComputedStyle(readout);
+		// Not `.comparar .readout`: a black, bordered, padded box (its own mono face is the panel's
+		// `--face-data`, the same family in the app, so the family proves nothing).
+		expect(shown.backgroundColor).not.toBe('rgb(13, 12, 11)');
+		expect(shown.borderTopWidth).toBe('0px');
+		expect(shown.paddingTop).toBe('0px');
+		expect(document.querySelector('[data-cable-ab] .readout')).toBeNull();
+		expect(document.querySelector('[data-cable-ab] .actions')).toBeNull();
+		expect(document.querySelector('[data-cable-ab] .reasons')).toBeNull();
+	} finally {
+		await page.viewport(restore.width, restore.height);
+	}
+});
+
 test('out-of-envelope curves are refused before any send or commit', async () => {
 	if (!a) throw new Error('expected side A');
 	const { app, fake } = await setup({ a: { ...a, curve: { ...a.curve, preampDb: -100 } } });
