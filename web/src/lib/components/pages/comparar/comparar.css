@@ -582,7 +582,9 @@
 	border-radius: 6px;
 	background: #0e0d0c;
 }
-.comparar .lamp {
+/* The blend verdict's own lamp only: a bare `.comparar .lamp` (unlayered) also restyled the
+   shared `Lamp` primitive (layered `.lamp`, `.lamp--ok`) inside CableCompare on this page. */
+.comparar .verdict .lamp {
 	flex: 0 0 auto;
 	width: 22px;
 	height: 22px;
@@ -592,10 +594,10 @@
 		0 0 0 3px #1a1918,
 		0 0 0 4px #6b6d6c;
 }
-.comparar .ok .lamp {
+.comparar .verdict.ok .lamp {
 	background: radial-gradient(at 35% 30%, #fff2c8, #f2b33d 45%, #8a5a10);
 }
-.comparar .bad .lamp {
+.comparar .verdict.bad .lamp {
 	background: radial-gradient(at 35% 30%, #ffd0d0, #e5484d 45%, #6a1316);
 }
 .comparar .verdict strong {

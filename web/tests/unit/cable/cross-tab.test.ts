@@ -10,6 +10,7 @@ import { JOURNAL_WAIVED_MAX, localDateKey } from 'open-auri/policy';
 import { loadDecision } from '../../../src/lib/components/pages/cabo/load-entry.ts';
 import {
 	CABLE_WRITE_LOCK,
+	INFLIGHT_JOURNAL_MATCH_MS,
 	INFLIGHT_STALE_MS,
 	cableAliveLock,
 	createCableService,
@@ -490,6 +491,58 @@ describe('stale marker on load', () => {
 		}
 	});
 
+	test('the ok entry must follow the marker within INFLIGHT_JOURNAL_MATCH_MS', async () => {
+		const left = marker({ at: T0 - 8 * 60_000 });
+		const committed = (delay: number): JournalEntry => ({
+			...interruptedEntry(left),
+			status: 'ok',
+			at: left.at + delay
+		});
+		// 1 s after the marker, and the bound itself: this write's commit.
+		for (const delay of [1000, INFLIGHT_JOURNAL_MATCH_MS]) {
+			const inflight = memoryInflight(JSON.stringify(left));
+			const h = await tab({ inflight, journal: [committed(delay)], connect: false });
+			expect(h.journal.entries).toEqual([committed(delay)]);
+			expect(h.service.getState().rescue).toBeNull();
+			expect(inflight.value).toBeNull();
+		}
+		// 61 s after it (or older than it): not this write's, so the interruption is recorded.
+		for (const delay of [61_000, INFLIGHT_JOURNAL_MATCH_MS + 1, -1]) {
+			const inflight = memoryInflight(JSON.stringify(left));
+			const h = await tab({ inflight, journal: [committed(delay)], connect: false });
+			expect(h.journal.entries).toHaveLength(2);
+			expect(h.journal.entries.at(-1)).toMatchObject(interruptedEntry(left));
+			expect(h.service.getState().rescue).toMatchObject({ at: left.at, fresh: true });
+			expect(inflight.value).toBeNull();
+		}
+	});
+
+	test('a clock moved backward: an older ok of the same curve does not hide the interruption', async () => {
+		// The same curve was written while the clock ran 5 min ahead (journaled at T0 - 1 min).
+		const earlier: JournalEntry = {
+			...interruptedEntry(marker()),
+			status: 'ok',
+			at: T0 - 60_000
+		};
+		// The clock was then set back; this write started at T0 - 6 min and its tab died mid-way.
+		const left = marker({ at: T0 - 6 * 60_000 });
+		expect(earlier.at).toBeGreaterThan(left.at);
+		const inflight = memoryInflight(JSON.stringify(left));
+		const h = await tab({ inflight, journal: [earlier], connect: false });
+		expect(h.journal.entries).toHaveLength(2);
+		expect(h.journal.entries.at(-1)).toMatchObject(interruptedEntry(left));
+		expect(h.service.getState().rescue).toEqual({
+			at: left.at,
+			deviceLabel: 'USB DSP Audio',
+			reportsSent: null,
+			fresh: true
+		});
+		expect(inflight.value).toBeNull();
+		h.levels.lastWrittenLevelDb = h.service.checklist(request(h.service)).newLevelDb;
+		h.levels.sessionWriteCount = 1;
+		expect(h.service.checklist(request(h.service)).loudness.reasons).toEqual(['unknown-state']);
+	});
+
 	test('holding the lock, a matching ok marker of a closed tab does not refuse the write', async () => {
 		const left = marker({ at: T0 - 100 });
 		const committed: JournalEntry = { ...interruptedEntry(left), status: 'ok', at: T0 - 50 };
@@ -588,6 +641,33 @@ describe('stale marker on load', () => {
 			connect: false
 		});
 		expect(recovered.service.getState().rescue).toMatchObject({ at: later.at, fresh: true });
+	});
+
+	test('a device label over 64 characters: the dismissal survives a reload', async () => {
+		const label = 'USB DSP Audio '.repeat(5);
+		expect(label).toHaveLength(70);
+		const journaled = label.slice(0, 64);
+		const rescueDismissed = memoryInflight();
+		// Interrupted in this page: the notice names the full label, the journal the truncated one.
+		const page = await tab({
+			rescueDismissed,
+			deviceOptions: { productName: label, disconnectAtReport: 2 }
+		});
+		expect((await page.service.write(request(page.service))).status).toBe('interrupted');
+		expect(page.service.getState().rescue).toMatchObject({ at: T0, deviceLabel: label });
+		expect(page.journal.last()).toMatchObject({ status: 'interrupted', device: journaled });
+		page.service.dismissRescue();
+		expect(JSON.parse(rescueDismissed.value ?? 'null')).toEqual({ at: T0, device: journaled });
+		const reload = await tab({ journal: page.journal.entries, rescueDismissed, connect: false });
+		expect(reload.service.getState().rescue).toBeNull();
+		// A dismissal persisted with the full label (before labels were normalized) still matches.
+		const legacy = memoryInflight(JSON.stringify({ at: T0, device: label }));
+		const older = await tab({
+			journal: page.journal.entries,
+			rescueDismissed: legacy,
+			connect: false
+		});
+		expect(older.service.getState().rescue).toBeNull();
 	});
 
 	test('a dismissal that cannot be persisted still hides the notice in this page', async () => {

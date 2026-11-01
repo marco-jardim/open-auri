@@ -917,7 +917,7 @@
 				</div>
 				<span class="status" data-cable-ab-status>{statusText}</span>
 			</div>
-			<ul class="readout">
+			<ul class="ab-readout">
 				{#if levelsText !== null}<li data-cable-ab-levels>{levelsText}</li>{/if}
 				{#if preampsText !== null}<li data-cable-ab-preamps>{preampsText}</li>{/if}
 				{#if residualText !== null}<li data-cable-ab-residual>{residualText}</li>{/if}
@@ -930,7 +930,7 @@
 			{#if hold !== null}
 				<div class="hold" data-cable-ab-hold={hold.reason}>
 					<p data-cable-ab-hold-text>{holdText(hold)}</p>
-					<div class="actions">
+					<div class="ab-actions">
 						{#if hold.reason === 'unknown-state'}
 							<Button
 								variant="primary"
@@ -957,7 +957,7 @@
 				</div>
 			{/if}
 
-			<div class="actions">
+			<div class="ab-actions">
 				<Button size="sm" disabledReason={saveReason} onclick={onSave} data-cable-ab-save
 					>{m.cable_x2_save()}</Button
 				>
@@ -1016,7 +1016,7 @@
 								<Lamp on={true} tone="danger" /><span>{refusalText(shownRefusal)}</span>
 							</p>
 							{#if refusalReasons.length > 0}
-								<ul class="reasons">
+								<ul class="ab-reasons">
 									{#each refusalReasons as reason, index (index)}<li>{reason}</li>{/each}
 								</ul>
 							{/if}
@@ -1027,7 +1027,7 @@
 							<span>{checklist.gateOk ? m.cable_x2_gate_ok() : m.cable_live_gate_fail()}</span>
 						</p>
 						{#if !checklist.gateOk && checklist.reasons.length > 0}
-							<ul class="reasons">
+							<ul class="ab-reasons">
 								{#each checklist.reasons as reason, index (index)}
 									<li>{describeReason(reason)}</li>
 								{/each}
@@ -1052,7 +1052,7 @@
 							/>
 						{/if}
 					</fieldset>
-					<div class="actions">
+					<div class="ab-actions">
 						<Button variant="plate" size="sm" loading={starting} onclick={() => void cancelAsk()}
 							>{m.cable_live_cancel()}</Button
 						>
@@ -1098,9 +1098,12 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 	}
+	/* `ab-` prefixed (like `.ab-check` below): the host page's global, unlayered `.comparar
+	   .readout` (a black monospace box), `.comparar .actions` and `.comparar .reasons` (equal
+	   specificity) restyled this panel's own readout, buttons and gate reasons on /comparar. */
 	.lever-row,
 	.start-row,
-	.actions {
+	.ab-actions {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
@@ -1133,13 +1136,13 @@
 	.notes {
 		color: var(--text-2, #bbb);
 	}
-	.readout,
+	.ab-readout,
 	.notes,
-	.reasons {
+	.ab-reasons {
 		margin: 0;
 		padding-left: 1.2em;
 	}
-	.readout {
+	.ab-readout {
 		font-family: var(--face-data, monospace);
 		font-variant-numeric: tabular-nums;
 	}

@@ -160,6 +160,12 @@ export const CABLE_INFLIGHT_KEY = 'oa.cable.inflight';
  * queried (a write takes about 0.35 s per cable; the marker is refreshed per cable).
  */
 export const INFLIGHT_STALE_MS = 10_000;
+/**
+ * Longest delay between a marker and the `ok` journal entry of the same write for that entry
+ * to clear the marker (`journaledOk`). A write takes about 0.35 s; anything later is another
+ * write's entry, or a clock that moved.
+ */
+export const INFLIGHT_JOURNAL_MATCH_MS = 60_000;
 /** Removals tried by one `unmark` before the marker is kept as left over (retried later). */
 const UNMARK_ATTEMPTS = 2;
 /**
@@ -396,6 +402,11 @@ function truncate(text: string, max: number): string {
 	return points.length > max ? points.slice(0, max).join('') : text;
 }
 
+/** A device label as the journal keeps it (64 code points): the rescue dismissal's key. */
+function dismissalDevice(label: string | null): string | null {
+	return label === null ? null : truncate(label, 64);
+}
+
 function copyBands(snapshot: readonly Readonly<Band>[]): Band[] {
 	return snapshot.map((band): Band => ({ ...band }));
 }
@@ -629,7 +640,12 @@ export function createCableService(
 			? browserInflight(CABLE_RESCUE_DISMISSED_KEY)
 			: deps.rescueDismissed;
 
-	/** Whether the user dismissed the rescue notice of the interruption at `at` on `device`. */
+	/**
+	 * Whether the user dismissed the rescue notice of the interruption at `at` on `device`.
+	 * Labels are compared as the journal keeps them (`dismissalDevice`): a notice dismissed from
+	 * a write in this page names the full label, the journal entry restored on reload its
+	 * truncated one (dismissals persisted with a full label still match).
+	 */
 	function rescueDismissed(at: number, device: string | null): boolean {
 		if (dismissedStore === null) return false;
 		const raw = dismissedStore.read();
@@ -638,7 +654,12 @@ export function createCableService(
 			const value: unknown = JSON.parse(raw);
 			if (typeof value !== 'object' || value === null) return false;
 			const stored = value as { at?: unknown; device?: unknown };
-			return stored.at === at && stored.device === device;
+			if (stored.at !== at) return false;
+			if (stored.device === null) return device === null;
+			return (
+				typeof stored.device === 'string' &&
+				dismissalDevice(stored.device) === dismissalDevice(device)
+			);
 		} catch {
 			return false;
 		}
@@ -1089,10 +1110,12 @@ export function createCableService(
 
 	/**
 	 * Whether the newest journal entry is the `ok` commit of the write `marker` describes: same
-	 * cable, same payload CRC, journaled at or after the marker. The write finished and was
-	 * journaled; only the marker's removal was lost (its tab died in between, or the removal
-	 * failed). Any later write would have replaced the marker, so a newer matching entry can
-	 * only be this write's. An unreadable journal matches nothing.
+	 * cable, same payload CRC, journaled at or after the marker and at most
+	 * `INFLIGHT_JOURNAL_MATCH_MS` later. The write finished and was journaled; only the marker's
+	 * removal was lost (its tab died in between, or the removal failed). Any later write would
+	 * have replaced the marker, so a matching entry inside that window can only be this write's.
+	 * The window keeps an older `ok` entry for the same curve, made to look newer by a clock
+	 * that moved backward, from hiding a real interruption. An unreadable journal matches nothing.
 	 */
 	function journaledOk(marker: InflightMarker): boolean {
 		let last: JournalEntry | null;
@@ -1102,12 +1125,14 @@ export function createCableService(
 			console.warn('cable journal unreadable for the in-flight marker', cause);
 			return false;
 		}
+		if (last === null) return false;
+		const delay = last.at - marker.at;
 		return (
-			last !== null &&
 			last.status === 'ok' &&
 			last.crc === marker.crc &&
 			last.device === truncate(marker.device, 64) &&
-			last.at >= marker.at
+			delay >= 0 &&
+			delay <= INFLIGHT_JOURNAL_MATCH_MS
 		);
 	}
 
@@ -3742,12 +3767,12 @@ export function createCableService(
 		dismissRescue() {
 			const dismissed = rescue;
 			rescue = null;
-			if (
-				dismissed !== null &&
-				dismissedStore !== null &&
-				!dismissedStore.write(JSON.stringify({ at: dismissed.at, device: dismissed.deviceLabel }))
-			) {
-				console.warn('cable rescue dismissal could not be persisted');
+			if (dismissed !== null && dismissedStore !== null) {
+				// Keyed as the journal keeps the label, so the restored notice matches on reload.
+				const device = dismissalDevice(dismissed.deviceLabel);
+				if (!dismissedStore.write(JSON.stringify({ at: dismissed.at, device }))) {
+					console.warn('cable rescue dismissal could not be persisted');
+				}
 			}
 			emit();
 		},
