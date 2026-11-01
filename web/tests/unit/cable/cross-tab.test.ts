@@ -339,6 +339,54 @@ describe('in-flight marker', () => {
 		expect(locked.device.sent).toHaveLength(10);
 	});
 
+	test('a removal that fails is retried until it succeeds (never forgotten)', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		/** Fails the next `count` removals; everything else goes through. */
+		function failRemovals(inflight: MemoryInflight, count: number) {
+			const write = inflight.write.bind(inflight);
+			let left = count;
+			inflight.write = (value) => {
+				if (value === null && left > 0) {
+					left -= 1;
+					return false;
+				}
+				return write(value);
+			};
+		}
+		// One failure: retried at once inside the same unmark.
+		const once = await tab();
+		failRemovals(once.inflight, 1);
+		expect((await once.service.write(request(once.service))).status).toBe('ok');
+		expect(once.inflight.value).toBeNull();
+
+		// Three failures: the write's own unmark gives up, its release tries again.
+		const thrice = await tab();
+		failRemovals(thrice.inflight, 3);
+		expect((await thrice.service.write(request(thrice.service))).status).toBe('ok');
+		expect(thrice.inflight.value).toBeNull();
+
+		// Still failing when the write ends: kept, then removed on dispose once storage works.
+		const disposed = await tab();
+		const working = disposed.inflight.write.bind(disposed.inflight);
+		failRemovals(disposed.inflight, Number.POSITIVE_INFINITY);
+		expect((await disposed.service.write(request(disposed.service))).status).toBe('ok');
+		expect(stored(disposed.inflight.value)).toMatchObject({ crc: 0x1970 });
+		disposed.inflight.write = working;
+		disposed.service.dispose();
+		expect(disposed.inflight.value).toBeNull();
+
+		// Or by the next write, once storage works again.
+		const next = await tab();
+		const write = next.inflight.write.bind(next.inflight);
+		next.inflight.write = (value) => (value === null ? false : write(value));
+		expect((await next.service.write(request(next.service))).status).toBe('ok');
+		expect(next.inflight.value).not.toBeNull();
+		next.inflight.write = write;
+		next.time.value += 5000;
+		expect((await next.service.write(request(next.service))).status).toBe('ok');
+		expect(next.inflight.value).toBeNull();
+	});
+
 	test('simulated writes leave no marker', async () => {
 		const h = await tab({ hid: null });
 		expect((await h.service.write(request(h.service))).status).toBe('simulated');
@@ -393,6 +441,164 @@ describe('stale marker on load', () => {
 		const h = await tab({ inflight: memoryInflight(JSON.stringify(closed)), connect: false });
 		expect(h.journal.last()).toMatchObject(interruptedEntry(closed));
 		expect(h.journal.entries).toHaveLength(1);
+	});
+
+	test('a marker whose write the journal already holds as ok is dropped silently', async () => {
+		// Field 2026-11-01: the write committed and was journaled ok; only the marker survived.
+		const left = marker({ at: T0 - 8 * 60_000 });
+		for (const at of [left.at, left.at + 350]) {
+			const committed: JournalEntry = { ...interruptedEntry(left), status: 'ok', at };
+			const inflight = memoryInflight(JSON.stringify(left));
+			const h = await tab({ inflight, journal: [committed] });
+			expect(h.journal.entries).toEqual([committed]);
+			expect(h.service.getState().rescue).toBeNull();
+			expect(inflight.value).toBeNull();
+			// No unknown-state warning from the journal: with a known level (the journaled write's)
+			// and a write in this session, the loudness check has nothing to report.
+			h.levels.lastWrittenLevelDb = h.service.checklist(request(h.service)).newLevelDb;
+			h.levels.sessionWriteCount = 1;
+			expect(h.service.checklist(request(h.service)).loudness.reasons).toEqual([]);
+			// Nothing blocks the next write (no interrupted-elsewhere refusal).
+			expect((await h.service.write(request(h.service))).status).toBe('ok');
+		}
+	});
+
+	test('an ok entry that is not this write never hides the interruption', async () => {
+		const left = marker({ at: T0 - 60_000 });
+		const base: JournalEntry = { ...interruptedEntry(left), status: 'ok', at: left.at + 350 };
+		const others: JournalEntry[][] = [
+			// The same curve saved earlier, then this write was interrupted.
+			[{ ...base, at: left.at - 1 }],
+			// Another curve, or another cable.
+			[{ ...base, crc: left.crc + 1 }],
+			[{ ...base, device: 'USB DSP Audio #2' }],
+			// The matching ok is not the newest entry.
+			[base, { ...interruptedEntry(left), at: left.at + 400 }],
+			[{ ...base, status: 'interrupted' }]
+		];
+		for (const journal of others) {
+			const inflight = memoryInflight(JSON.stringify(left));
+			const h = await tab({ inflight, journal, connect: false });
+			expect(h.journal.entries).toHaveLength(journal.length + 1);
+			expect(h.journal.entries.at(-1)).toMatchObject(interruptedEntry(left));
+			expect(h.service.getState().rescue).toMatchObject({ at: left.at, fresh: true });
+			expect(inflight.value).toBeNull();
+			// Same preconditions as above: only the recorded interruption raises unknown-state.
+			h.levels.lastWrittenLevelDb = h.service.checklist(request(h.service)).newLevelDb;
+			h.levels.sessionWriteCount = 1;
+			expect(h.service.checklist(request(h.service)).loudness.reasons).toEqual(['unknown-state']);
+		}
+	});
+
+	test('holding the lock, a matching ok marker of a closed tab does not refuse the write', async () => {
+		const left = marker({ at: T0 - 100 });
+		const committed: JournalEntry = { ...interruptedEntry(left), status: 'ok', at: T0 - 50 };
+		const h = await tab({ journal: [committed] });
+		h.inflight.value = JSON.stringify(left);
+		expect((await h.service.write(request(h.service))).status).toBe('ok');
+		expect(h.journal.entries.map((entry) => entry.status)).toEqual(['ok', 'ok']);
+		expect(h.service.getState().rescue).toBeNull();
+		expect(h.inflight.value).toBeNull();
+	});
+
+	test('a removal that kept failing until the app died: the next load raises no rescue', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const inflight = memoryInflight();
+		const write = inflight.write.bind(inflight);
+		inflight.write = (value) => (value === null ? false : write(value));
+		const writer = await tab({ inflight, tabId: 'killed' });
+		expect((await writer.service.write(request(writer.service))).status).toBe('ok');
+		expect(stored(inflight.value)).toMatchObject({ tabId: 'killed' });
+		// Process killed (no dispose); storage works again on the next launch.
+		inflight.write = write;
+		const relaunch = await tab({
+			inflight,
+			journal: writer.journal.entries,
+			locks: memoryLocks(),
+			connect: false
+		});
+		expect(relaunch.journal.entries.map((entry) => entry.status)).toEqual(['ok']);
+		expect(relaunch.service.getState().rescue).toBeNull();
+		expect(inflight.value).toBeNull();
+	});
+
+	test('"Dispensar aviso" is persisted: a reload does not restore that interruption', async () => {
+		const closed = marker();
+		const journal = [interruptedEntry(closed)];
+		const rescueDismissed = memoryInflight();
+		const first = await tab({ journal, rescueDismissed, connect: false });
+		expect(first.service.getState().rescue).toEqual({
+			at: closed.at,
+			deviceLabel: 'USB DSP Audio',
+			reportsSent: null
+		});
+		first.service.dismissRescue();
+		expect(first.service.getState().rescue).toBeNull();
+		expect(JSON.parse(rescueDismissed.value ?? 'null')).toEqual({
+			at: closed.at,
+			device: 'USB DSP Audio'
+		});
+		const reload = await tab({ journal, rescueDismissed, connect: false });
+		expect(reload.service.getState().rescue).toBeNull();
+		// The journal still holds the interruption (the checklist keeps its unknown-state warning).
+		expect(reload.journal.last()?.status).toBe('interrupted');
+		expect(reload.service.checklist(request(reload.service)).loudness.reasons).toContain(
+			'unknown-state'
+		);
+		// Another interruption on another cable, or garbage in the key, is not dismissed.
+		for (const value of [
+			JSON.stringify({ at: closed.at, device: 'USB DSP Audio #2' }),
+			JSON.stringify({ at: closed.at + 1, device: 'USB DSP Audio' }),
+			'{not json',
+			'null'
+		]) {
+			const other = await tab({ journal, rescueDismissed: memoryInflight(value), connect: false });
+			expect(other.service.getState().rescue?.at).toBe(closed.at);
+		}
+	});
+
+	test('a new interruption after a dismissal raises the notice again, and after a reload', async () => {
+		const closed = marker();
+		const rescueDismissed = memoryInflight();
+		const dismissed = await tab({ journal: [interruptedEntry(closed)], rescueDismissed });
+		dismissed.service.dismissRescue();
+
+		// In this page: a write interrupted mid-way.
+		const page = await tab({
+			journal: [interruptedEntry(closed)],
+			rescueDismissed,
+			deviceOptions: { disconnectAtReport: 2 }
+		});
+		expect(page.service.getState().rescue).toBeNull();
+		expect((await page.service.write(request(page.service))).status).toBe('interrupted');
+		expect(page.service.getState().rescue).toMatchObject({ at: T0, fresh: true });
+		const reload = await tab({ journal: page.journal.entries, rescueDismissed, connect: false });
+		expect(reload.service.getState().rescue).toEqual({
+			at: T0,
+			deviceLabel: 'USB DSP Audio',
+			reportsSent: null
+		});
+
+		// A tab closed mid-write, recovered on the next load.
+		const later = marker({ at: T0 - 1000 });
+		const recovered = await tab({
+			journal: [interruptedEntry(closed)],
+			rescueDismissed,
+			inflight: memoryInflight(JSON.stringify(later)),
+			connect: false
+		});
+		expect(recovered.service.getState().rescue).toMatchObject({ at: later.at, fresh: true });
+	});
+
+	test('a dismissal that cannot be persisted still hides the notice in this page', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const rescueDismissed = memoryInflight();
+		rescueDismissed.failWrites = true;
+		const h = await tab({ journal: [interruptedEntry(marker())], rescueDismissed, connect: false });
+		h.service.dismissRescue();
+		expect(h.service.getState().rescue).toBeNull();
+		expect(warn).toHaveBeenCalledWith('cable rescue dismissal could not be persisted');
+		expect(rescueDismissed.value).toBeNull();
 	});
 
 	test('lock held by a live tab: the marker is left alone', async () => {

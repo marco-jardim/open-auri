@@ -127,6 +127,8 @@ export interface SetupOptions {
 	inflight?: MemoryInflight;
 	/** Live preview marker storage (`deps.liveMarker`; default: a fresh one). */
 	liveMarker?: MemoryInflight;
+	/** Dismissed rescue notice storage (`deps.rescueDismissed`; default: a fresh one). */
+	rescueDismissed?: MemoryInflight;
 	tabId?: string;
 	/** Initial epoch ms (default T0). */
 	now?: number;
@@ -147,6 +149,7 @@ export async function setup(options: SetupOptions = {}) {
 	const locks = options.locks === undefined ? memoryLocks() : options.locks;
 	const inflight = options.inflight ?? memoryInflight();
 	const liveMarker = options.liveMarker ?? memoryInflight();
+	const rescueDismissed = options.rescueDismissed ?? memoryInflight();
 	const time = { value: options.now ?? T0 };
 	const levels = {
 		lastWrittenLevelDb: options.lastWrittenLevelDb ?? null,
@@ -164,6 +167,7 @@ export async function setup(options: SetupOptions = {}) {
 		locks,
 		inflight,
 		liveMarker,
+		rescueDismissed,
 		tabId: options.tabId,
 		...(options.yoloSession === undefined
 			? {}
@@ -189,7 +193,8 @@ export async function setup(options: SetupOptions = {}) {
 		written,
 		locks,
 		inflight,
-		liveMarker
+		liveMarker,
+		rescueDismissed
 	};
 }
 

@@ -51,11 +51,16 @@ export function createJournalStore(options: { storage?: ClientStorage } = {}) {
 		get error() {
 			return status.error;
 		},
+		/**
+		 * Appends `entry`. False when it is invalid, or when it could not be persisted: it is
+		 * still kept in this tab (memory), but a reload or another tab would not see it, so the
+		 * caller must treat it as a failed journal write.
+		 */
 		append(entry: unknown) {
 			try {
 				entries = appendEntry(merge(entries, load().entries), entry);
-				storage.write('local', JOURNAL_STORAGE_KEY, serializeJournal(entries));
-				return true;
+				// `write` reports the failure itself and returns false instead of throwing.
+				return storage.write('local', JOURNAL_STORAGE_KEY, serializeJournal(entries));
 			} catch (cause) {
 				storage.report(cause, 'journal:append', true);
 				return false;

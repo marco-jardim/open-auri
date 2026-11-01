@@ -199,6 +199,12 @@ export interface CableServiceDeps {
 	 * browser window (none elsewhere). `null`: no marker (no orphan detection).
 	 */
 	liveMarker?: InflightPort | null;
+	/**
+	 * Dismissed rescue notice storage (`{ at, device }` of the interruption the user dismissed).
+	 * `undefined`: `localStorage` key `oa.cable.rescue.dismissed` in a browser window (none
+	 * elsewhere). `null`: dismissals last for this page only.
+	 */
+	rescueDismissed?: InflightPort | null;
 }
 
 /**
