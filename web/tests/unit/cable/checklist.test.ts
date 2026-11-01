@@ -152,6 +152,16 @@ describe('live preview (S4/S7)', () => {
 		);
 		expect(android.items.map((item) => item.id)).toContain('android-untested');
 		expect(android.canWrite).toBe(false);
+		// The deployed ANDROID_WRITE_VALIDATED (true) adds no Android item to either checklist.
+		const deployed: ChecklistContext = {
+			...ctx,
+			cableMode: 'native',
+			androidWriteValidated: undefined
+		};
+		expect(evaluateLiveChecklist(input({ confirmations }), deployed).items).toEqual(
+			liveResult.items
+		);
+		expect(evaluateChecklist(input({ confirmations }), deployed).items).toEqual(write.items);
 	});
 });
 

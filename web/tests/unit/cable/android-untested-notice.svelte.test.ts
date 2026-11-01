@@ -152,6 +152,17 @@ for (const presentation of ['modal', 'banner'] as const) {
 	);
 }
 
+test.each(kinds)(
+	'the shipped default (ANDROID_WRITE_VALIDATED) renders no modal or banner in the app: %s',
+	async (kind) => {
+		for (const presentation of ['modal', 'banner'] as const) {
+			const screen = await render(AndroidUntestedNotice, { kind, presentation });
+			expect(screen.container.querySelector('dialog, aside')).toBeNull();
+			await cleanup();
+		}
+	}
+);
+
 test('storage read errors show the modal; write errors allow a choice without crashing and reopen next visit', async () => {
 	vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 	vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {

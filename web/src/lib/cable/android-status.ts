@@ -4,8 +4,12 @@
  * docs/operacao/runbooks/android-release.md.
  */
 
-/** Runbook: docs/operacao/runbooks/android-release.md ("Encerrar o aviso"). */
-export const ANDROID_WRITE_VALIDATED: boolean = false;
+/**
+ * Runbook: docs/operacao/runbooks/android-release.md ("Encerrar o aviso"). true since
+ * 2026-11-01 (owner decision): no first-use modal, no Cabo banner and no `android-untested`
+ * checklist item. Setting it back to false (with a new ANDROID_DISCLAIMER_VERSION) reopens them.
+ */
+export const ANDROID_WRITE_VALIDATED: boolean = true;
 
 /** Runbook: docs/operacao/runbooks/android-release.md ("Reabrir o aviso"). */
 export const ANDROID_DISCLAIMER_VERSION = 2;

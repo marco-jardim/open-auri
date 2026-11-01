@@ -5,7 +5,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { MIN_WEBVIEW_VERSION } from '../../apps/android/capacitor.targets.mjs';
-import { createArtifacts, deriveVersionCode } from '../../tools/android-artifacts.mjs';
+import {
+  createArtifacts,
+  deriveVersionCode,
+  parseHardwareValidated,
+} from '../../tools/android-artifacts.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const read = (path) => readFileSync(join(root, path), 'utf8').replaceAll('\r\n', '\n');
@@ -83,61 +87,75 @@ test('backticked repository paths in docs/android.md exist on every checkout', (
   }
 });
 
-test('G.5 is verbatim in README, the Play listing and generated release notes', () => {
+test('the retired G.5 notice is absent from README, the Play listing and shipped release notes', () => {
   const g5 = section(plan, '**G.5 Notas da release, README e ficha da Play**');
   const pt = quoted(g5, /^- pt-BR: "([^"]+)"$/gm);
   const en = quoted(g5, /^- en-US: "([^"]+)"$/gm);
-  assert.equal(quoted(read('README.md'), /^> (Aviso: [^\n]+)$/gm), pt);
+  const readme = read('README.md');
   const listing = read('docs/android/play-listing.md');
-  for (const [language, notice] of [
-    ['pt-BR', pt],
-    ['en-US', en],
+  for (const [path, source] of [
+    ['README.md', readme],
+    ['docs/android/play-listing.md', listing],
   ]) {
-    const full = section(listing, `## ${language}`).match(
-      /### Full description\n\n```text\n([^\n]+)/,
-    );
-    assert.ok(full, `${language}: missing full description`);
-    assert.equal(full[1], notice, `${language}: Play notice differs from G.5`);
+    for (const notice of [pt, en]) assert.ok(!source.includes(notice), `${path}: G.5 notice`);
+    assert.doesNotMatch(source, /Galaxy A70|Validação completa pendente|Full validation pending/);
   }
+  assert.doesNotMatch(readme, /^> Aviso: /m, 'README.md: G.5 blockquote');
+  // The rescue path stays documented in the README.
+  assert.match(readme, /grave o Neutro pelo site no computador|se não resolver, pelo site/);
 
   const pkg = JSON.parse(read('apps/android/package.json'));
   const fingerprint = 'ab'.repeat(32);
-  const notes = createArtifacts(
-    {
-      apk: Buffer.from('apk'),
-      aab: Buffer.from('aab'),
-      apkName: 'open-auri.apk',
-      aabName: 'open-auri.aab',
-      expectedAppCertSha256: fingerprint,
-      actualAppCertSha256: fingerprint,
-      commit: '1234567890abcdef1234567890abcdef12345678',
-      repoUrl: 'https://github.com/marco-jardim/open-auri',
-      version: pkg.version,
-      versionCode: deriveVersionCode(pkg.version),
-    },
-    {
-      version: pkg.version,
-      capacitorVersion: pkg.dependencies['@capacitor/android'],
-      minWebViewVersion: MIN_WEBVIEW_VERSION,
-      hardwareValidated: false,
-    },
-  )['RELEASE_NOTES.md'];
-  assert.deepEqual(notes.split('\n\n').slice(0, 2), [pt, en]);
+  const notesFor = (hardwareValidated) =>
+    createArtifacts(
+      {
+        apk: Buffer.from('apk'),
+        aab: Buffer.from('aab'),
+        apkName: 'open-auri.apk',
+        aabName: 'open-auri.aab',
+        expectedAppCertSha256: fingerprint,
+        actualAppCertSha256: fingerprint,
+        commit: '1234567890abcdef1234567890abcdef12345678',
+        repoUrl: 'https://github.com/marco-jardim/open-auri',
+        version: pkg.version,
+        versionCode: deriveVersionCode(pkg.version),
+      },
+      {
+        version: pkg.version,
+        capacitorVersion: pkg.dependencies['@capacitor/android'],
+        minWebViewVersion: MIN_WEBVIEW_VERSION,
+        hardwareValidated,
+      },
+    )['RELEASE_NOTES.md'];
+  // The shipped flag (true) drops the notice; reopening it (false) restores G.5 verbatim.
+  const shipped = parseHardwareValidated(read('web/src/lib/cable/android-status.ts'));
+  assert.equal(shipped, true);
+  const notes = notesFor(shipped);
+  assert.ok(notes.startsWith(`# Android ${pkg.version}\n\n`), 'release notes open with the title');
+  for (const notice of [pt, en]) assert.ok(!notes.includes(notice), 'shipped notes: G.5');
+  assert.deepEqual(notesFor(false).split('\n\n').slice(0, 2), [pt, en]);
 });
 
-test('G.1 matches the Android doc and both site message locales exactly', () => {
+test('G.1 stays in both site message locales for a reopened notice, not in the Android doc', () => {
   for (const language of ['pt-BR', 'en-US']) {
     const g1 = section(plan, `**G.1 Modal e banner (${language})**`);
     const text = quoted(g1, /^- \*\*Texto:\*\* "([^"]+)"$/gm);
+    const title = quoted(g1, /^- \*\*Título:\*\* "([^"]+)"$/gm);
     const messages = JSON.parse(read(`web/messages/${language}.json`));
     assert.equal(messages.android_untested_body, text, `${language}: site G.1 notice`);
-    if (language === 'pt-BR') {
-      const notice = section(android, '## Estado de validação: teste parcial em hardware');
-      assert.equal(quoted(notice, /^> (O app Android [^\n]+)$/gm), text);
-      const title = quoted(g1, /^- \*\*Título:\*\* "([^"]+)"$/gm);
-      assert.equal(quoted(notice, /^> \*\*([^\n]+)\*\*$/gm), title);
-    }
+    assert.equal(messages.android_untested_title, title, `${language}: site G.1 title`);
+    assert.ok(!android.includes(text), `docs/android.md: ${language} G.1 text`);
+    assert.ok(!android.includes(title), `docs/android.md: ${language} G.1 title`);
   }
+  const state = section(android, '## Estado dos testes em hardware');
+  assert.match(state, /Galaxy A70 \(SM-A705MN, Android 11\)/);
+  assert.match(state, /Blackview BV9900 Pro \(Android 10\), com o app 1\.0\.1/);
+  // Both phones are confirmed by sound; nothing in the section is still pending.
+  assert.match(state, /confirmadas pelo som/);
+  assert.match(state, /confirma a gravação pelo som nesse aparelho/);
+  assert.match(state, /app 1\.0\.3[\s\S]*"Ouvir no cabo"[\s\S]*"Comparar no cabo"/);
+  assert.doesNotMatch(state, /pendente/);
+  assert.match(state, /ANDROID_WRITE_VALIDATED/);
 });
 
 test('partial hardware report records the real setup, acoustic results and outstanding F5 evidence', () => {

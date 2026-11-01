@@ -148,7 +148,6 @@
 	"android_app_callout_body": "Use the Android app to connect your Auri cable over USB.",
 	"android_app_callout_dismiss": "Dismiss",
 	"android_app_callout_title": "Connect with the Android app",
-	"android_app_callout_untested": "Writing tested on a Kuba Auri with a Galaxy A70; other manufacturers remain untested.",
 	"android_diagnostics_copied": "Copied.",
 	"android_diagnostics_copy": "Copy",
 	"android_diagnostics_copy_failed": "Could not copy. Select and copy the JSON manually.",

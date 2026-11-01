@@ -16,8 +16,8 @@ function semver(value: string) {
 }
 
 describe('launch state', () => {
-	test('writing is not fully validated, the disclaimer is v2 and the policy allows every version', () => {
-		expect(ANDROID_WRITE_VALIDATED).toBe(false);
+	test('the Android notice is closed, the disclaimer is v2 and the policy allows every version', () => {
+		expect(ANDROID_WRITE_VALIDATED).toBe(true);
 		expect(ANDROID_DISCLAIMER_VERSION).toBe(2);
 		expect(ANDROID_WRITE_POLICY).toEqual({ enabled: true, blockedAppVersions: [] });
 	});

@@ -54,28 +54,38 @@ não apenas a configuração fonte. Não há cleartext em produção, backup do
 conteúdo da WebView ou depuração da WebView no release. A detecção JS serve
 à UI, não é uma fronteira de segurança: as guardas efetivas são nativas.
 
-## Estado de validação: teste parcial em hardware
+## Estado dos testes em hardware
 
-Em 29/10/2026, **1 de 2 fabricantes** testado: Samsung, com um Galaxy A70
-(SM-A705MN, Android 11). Prévia sem flash, gravação persistente e restauração
-do Padrão Auri confirmadas nesta bancada. Consulte o
+Em 29/10/2026, num Samsung Galaxy A70 (SM-A705MN, Android 11): prévia sem
+flash, gravação persistente e restauração do Padrão Auri confirmadas pelo som
+nesta bancada. Consulte o
 [relatório de validação de hardware](android/validacao-hardware.md) para método,
-resultados e limitações. A validação completa da gravação Android segue pendente.
+resultados e limitações.
 
-Texto exato do Anexo G.1 em pt-BR:
+Em 01/11/2026, num Blackview BV9900 Pro (Android 10), com o app 1.0.1: conexão
+por "Conectar pelo USB do Android" e gravação do preset Basshead com o
+checklist. Depois de reconectar, a curva salva soou idêntica ao Basshead
+aplicado ao vivo, o que confirma a gravação pelo som nesse aparelho. No mesmo
+dia, com o app 1.0.3 instalado pela Play Store como atualização sobre o 1.0.1,
+"Ouvir no cabo" (prévia ao vivo, sem gravar) e o A/B de "Comparar no cabo"
+(Neutro contra Basshead) mudaram o EQ em tempo real, também confirmados pelo
+som. Depois da atualização de 1.0.1 para 1.0.3, o app mostrou uma faixa falsa de
+"Gravação interrompida", embora a gravação tivesse dado certo; esse defeito é
+acompanhado à parte.
 
-> **Gravação pelo app: teste em um celular**
->
-> O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).
->
-> Botões e links: **Entendi** · **Relatar resultado** · **Como resgatar**
+Por decisão do mantenedor, `ANDROID_WRITE_VALIDATED` está `true` em
+`web/src/lib/cable/android-status.ts`: o app não mostra mais o modal de primeiro
+uso nem a faixa de teste num só celular, e o checklist nativo não pede mais o
+item `android-untested`. Para reabrir o aviso, siga
+`docs/operacao/runbooks/android-release.md` ("Reabrir o aviso"). Se o som ficar
+estranho depois de gravar, grave o Neutro; se não resolver, grave o Neutro pelo
+site no computador (Chrome ou Edge).
 
 Os testes comparam os reports de dados dos 11 presets, byte a byte, com a
 referência oficial; também comparam desktop e transporte nativo para esses
 presets e o Neutro. Isso prova a paridade do protocolo e dos dados, não por si
 só o funcionamento físico do USB. O teste no A70 acrescenta evidência acústica
-e paridade na entrada da ponte nativa (logcat), mas não captura Android no fio
-nem evidência em outros fabricantes.
+e paridade na entrada da ponte nativa (logcat), mas não captura Android no fio.
 
 O framing usa a política `WINDOWS_MAX_OUTPUT` do Anexo D.2: prefixo `0xCB`,
 31 bytes de dados e zeros até o maior output report do descritor mais um
@@ -84,13 +94,11 @@ terá 32 bytes, também compatível com o envio de Linux e macOS. Essa política
 ainda precisa ser confirmada pela captura real da F5; uma divergência de
 framing exige correção e nova versão do app, não só deploy do site.
 
-O modal reaparece se a versão do aviso mudar; há banner na página do cabo e
-aceite obrigatório no checklist de cada gravação pelo app. O procedimento
-de referência está em
+O aviso está encerrado (`ANDROID_WRITE_VALIDATED = true`). Se for reaberto
+com uma nova versão, o modal reaparece, a faixa volta à página do cabo e o
+checklist de cada gravação pelo app volta a exigir o aceite. O procedimento
+de captura USB de referência está em
 [`D:\git\open-auri\docs\android\captura-usb.md`](android/captura-usb.md).
-O encerramento do aviso depende da F5, com paridade no fio e validação em
-pelo menos dois celulares de fabricantes diferentes, com relatório assinado.
-Um teste sintético ou um relato isolado não substitui essa validação.
 
 ## Contrato da ponte (Anexo B)
 

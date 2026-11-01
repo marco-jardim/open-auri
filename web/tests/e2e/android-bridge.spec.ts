@@ -8,6 +8,8 @@ import { closeChecklist, confirmBasics, connectCable, openChecklist } from './he
 test.use({ locale: 'pt-BR', reducedMotion: 'reduce' });
 test.setTimeout(60_000);
 
+// ANDROID_WRITE_VALIDATED is true: the retired one-phone notice (modal, Cabo banner and
+// checklist item) must not render. These strings are kept only to assert their absence.
 const TITLE = 'Gravação pelo app: teste em um celular';
 const BANNER =
 	'Gravação testada num Kuba Auri com Galaxy A70 (Android 11). Faltam outros fabricantes e a validação completa.';
@@ -22,19 +24,14 @@ function notice(page: Page): Locator {
 	return page.getByRole('dialog', { name: TITLE, exact: true });
 }
 
-async function acknowledge(page: Page): Promise<void> {
-	await expect(notice(page)).toBeVisible();
-	await notice(page).getByRole('button', { name: 'Entendi', exact: true }).click();
-	await expect(notice(page)).not.toBeVisible();
-}
-
 async function openApp(page: Page, path = '/cabo'): Promise<void> {
 	await page.goto(path);
-	await acknowledge(page);
+	await expect(page.locator('.app-root')).toHaveAttribute('data-runtime', 'ready');
 	if (path === '/cabo')
 		await expect(
 			page.getByRole('button', { name: 'Levantar tampa do checklist', exact: true })
 		).toBeEnabled();
+	await expect(notice(page)).toHaveCount(0);
 }
 
 async function connectAndroid(page: Page): Promise<void> {
@@ -54,9 +51,10 @@ function writeButton(dialog: Locator): Locator {
 	return dialog.getByRole('button', { name: 'Gravar no cabo', exact: true });
 }
 
+/** Basic confirmations of a native write; the retired Android item must be absent. */
 async function confirmAndroid(dialog: Locator): Promise<void> {
+	await expect(androidItem(dialog)).toHaveCount(0);
 	await confirmBasics(dialog);
-	await androidItem(dialog).check();
 }
 
 async function loadPadrao(page: Page): Promise<void> {
@@ -81,28 +79,26 @@ function expectNoNativeIo(native: FakeAndroidNative): void {
 	expect(native.reports).toEqual([]);
 }
 
-test('first use: G.1 consent persists after reload; G.2 banner remains on Cabo', async ({
+test('first use: no one-phone modal or Cabo banner, before or after reload', async ({
 	page,
 	nativeBridge
 }) => {
 	await page.goto('/cabo');
-	await expect(notice(page)).toBeVisible();
-	await expect(notice(page)).toContainText(
-		'Ainda não foi testado em celulares de outros fabricantes'
-	);
-	await acknowledge(page);
-	await expect(page.getByRole('complementary', { name: TITLE, exact: true })).toHaveText(
-		new RegExp(BANNER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-	);
+	await expect(page.getByText('App Android v1.0.0, USB host OK', { exact: true })).toBeVisible();
+	await expect(notice(page)).toHaveCount(0);
+	await expect(page.locator('dialog[open]')).toHaveCount(0);
+	await expect(page.getByRole('complementary', { name: TITLE, exact: true })).toHaveCount(0);
+	await expect(page.getByText(BANNER, { exact: true })).toHaveCount(0);
+	await expect(page.getByText(/Galaxy A70/)).toHaveCount(0);
 	await page.reload();
 	await expect(page.getByText('App Android v1.0.0, USB host OK', { exact: true })).toBeVisible();
-	await expect(notice(page)).not.toBeVisible();
-	await expect(page.getByText(BANNER, { exact: true })).toBeVisible();
+	await expect(notice(page)).toHaveCount(0);
+	await expect(page.getByText(BANNER, { exact: true })).toHaveCount(0);
 	expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'getInfo')).toHaveLength(2);
 	expectNoNativeIo(nativeBridge);
 });
 
-test('real core + native bridge: Android confirmation gates a byte-exact write and labelled journal', async ({
+test('real core + native bridge: the standard checklist gates a byte-exact write and labelled journal', async ({
 	page,
 	nativeBridge
 }) => {
@@ -113,16 +109,12 @@ test('real core + native bridge: Android confirmation gates a byte-exact write a
 		nativeBridge.calls.find(({ methodName }) => methodName === 'requestDevice')?.options
 	).toEqual({ filters: [{ vendorId: 0x3302, productId: 0x8902 }] });
 	const dialog = await openChecklist(page);
-	await expect(dialog.locator('[data-confirmation="android-untested"]')).toHaveCount(1);
-	await expect(androidItem(dialog)).not.toBeChecked();
-	await confirmBasics(dialog);
+	await expect(dialog.locator('[data-confirmation="android-untested"]')).toHaveCount(0);
+	await expect(androidItem(dialog)).toHaveCount(0);
 	await expect(writeButton(dialog)).toBeDisabled();
 	expect(nativeBridge.reports).toEqual([]);
-	await androidItem(dialog).check();
+	await confirmBasics(dialog);
 	await expect(writeButton(dialog)).toBeEnabled();
-	await androidItem(dialog).uncheck();
-	await expect(writeButton(dialog)).toBeDisabled();
-	await androidItem(dialog).check();
 	await writeButton(dialog).click();
 	await expect(dialog.getByRole('status')).toHaveText(/^Gravado no cabo\. CRC /);
 	expect(nativeBridge.reports.map(({ reportId }) => reportId)).toEqual(
@@ -133,7 +125,6 @@ test('real core + native bridge: Android confirmation gates a byte-exact write a
 	expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'sendReport')).toHaveLength(
 		10
 	);
-	await expect(androidItem(dialog)).not.toBeChecked();
 	await closeChecklist(dialog);
 	await expect(page.locator('#main-content li[data-status="ok"]')).toHaveCount(1);
 	await expect(page.locator('#main-content li[data-status="ok"]')).toContainText('USB DSP Audio');
@@ -331,7 +322,7 @@ test.describe('permission denied', () => {
 
 test.describe('two cables', () => {
 	test.use({ nativeOptions: { devices: [cableInfo(0), cableInfo(1)] } });
-	test('one Android acknowledgement covers the reviewed queue, complete sequences stay ordered', async ({
+	test('the reviewed queue needs no Android acknowledgement, complete sequences stay ordered', async ({
 		page,
 		nativeBridge
 	}) => {
@@ -345,10 +336,9 @@ test.describe('two cables', () => {
 		await expect(
 			queue.getByRole('checkbox', { name: 'USB DSP Audio #2', exact: true })
 		).toBeChecked();
-		await expect(androidItem(dialog)).toHaveCount(1);
-		await confirmBasics(dialog);
+		await expect(androidItem(dialog)).toHaveCount(0);
 		await expect(queue.getByRole('button', { name: 'Revisar fila', exact: true })).toBeDisabled();
-		await androidItem(dialog).check();
+		await confirmBasics(dialog);
 		await queue.getByRole('button', { name: 'Revisar fila', exact: true }).click();
 		await expect(queue.getByRole('listitem')).toHaveText(['USB DSP Audio', 'USB DSP Audio #2']);
 		await queue.getByRole('button', { name: 'Confirmar e gravar em 2 cabos', exact: true }).click();

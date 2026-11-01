@@ -16,6 +16,15 @@ import {
 	padrao
 } from './harness.ts';
 
+// The deployed ANDROID_WRITE_VALIDATED is true (the notice is closed). This file keeps covering
+// the reopened state of the runbook ("Reabrir o aviso"): the service must then enforce the
+// `android-untested` item on every write path before any I/O. checklist.test.ts covers the
+// deployed default.
+vi.mock('#lib/cable/android-status.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof import('#lib/cable/android-status.ts')>()),
+	ANDROID_WRITE_VALIDATED: false
+}));
+
 const YOLO_BANDS: Band[] = [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }, ...NEUTRAL_BANDS.slice(1)];
 const SHELF_BANDS: Band[] = [
 	{ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 },
@@ -70,11 +79,11 @@ describe('Android checklist acknowledgement', () => {
 		}
 	});
 
-	test('native unvalidated writes require explicit true, including the deployed default', () => {
+	test('native unvalidated writes require explicit true', () => {
 		for (const androidUntested of [undefined, false, 1 as unknown as boolean]) {
 			const result = evaluateChecklist(
 				input({ confirmations: { ...CONFIRMED, androidUntested } }),
-				context({ androidWriteValidated: undefined })
+				context({ androidWriteValidated: false })
 			);
 			expect(result.items.at(-1)).toEqual({
 				id: 'android-untested',

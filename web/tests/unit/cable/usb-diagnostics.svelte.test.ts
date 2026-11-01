@@ -201,7 +201,8 @@ test.each<NativeCableStatus>([
 							? m.android_native_write_disabled()
 							: m.android_native_no_usb_host();
 			await expect.element(page.getByText(expected, { exact: true })).toBeVisible();
-			await expect.element(page.getByText(m.android_untested_short())).toBeVisible();
+			// ANDROID_WRITE_VALIDATED is true: Cabo no longer shows the one-phone test banner.
+			expect(page.getByText(m.android_untested_short()).elements()).toHaveLength(0);
 			expect(target.querySelector('code.code')).toBeNull();
 			expect(page.getByRole('link', { name: m.android_download_github() }).elements()).toHaveLength(
 				0
