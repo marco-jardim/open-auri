@@ -289,7 +289,9 @@ test('store screenshot spec is opt-in, single-project and distinguishes native f
   assert.match(spec, /project\.name !== 'mobile'/);
   assert.match(spec, /fixtures\/capacitor-bridge/);
   assert.match(spec, /name: 'oa_lang'/);
-  assert.match(spec, /getByRole\('complementary'/);
+  // The Android safety banner is gone; every capture must instead be free of any open modal.
+  assert.match(spec, /const MODAL = 'dialog\[open\], \[role="dialog"\]\[aria-modal="true"\]'/);
+  assert.match(spec, /page\.locator\(MODAL\)\.filter\(\{ visible: true \}\)\)\.toHaveCount\(0\)/);
   for (const set of expectedSets) assert.match(spec, new RegExp(`name: '${set.name}'`));
   assert.match(spec, /enabled: set\.name !== 'desktop'/);
   assert.match(spec, /isMobile: false,\s+hasTouch: false/);

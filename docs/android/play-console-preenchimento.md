@@ -523,10 +523,10 @@ tags de idioma; manter as tags e colar o texto entre elas:
 
 ```text
 <pt-BR>
-Grave curvas no cabo Kuba Auri pelo USB do Android, com Ouvir no cabo e Comparar no cabo sem gravar na memória. Som estranho depois de gravar? Grave o Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+Grave curvas no cabo Kuba Auri pelo USB do Android, com Ouvir no cabo e Comparar no cabo tocando na memória do cabo, sem gravar na memória flash. Som estranho depois de gravar? Grave o Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
 </pt-BR>
 <en-US>
-Write EQ curves to the Kuba Auri cable over Android USB, with Hear on the cable and Compare on the cable without saving to memory. Sound off after writing? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
+Write EQ curves to the Kuba Auri cable over Android USB, with Hear on the cable and Compare on the cable playing in the cable's memory, without writing to flash. Sound off after writing? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml
 </en-US>
 ```
 

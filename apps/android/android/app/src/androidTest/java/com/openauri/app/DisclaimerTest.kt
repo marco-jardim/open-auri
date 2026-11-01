@@ -8,11 +8,12 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class DisclaimerTest {
     @Test
-    fun firstUseBootsStraightToEditorWithoutDisclaimerOrCableBanner() {
+    fun legacyAckBootsStraightToEditorWithoutDisclaimerOrCableBanner() {
         WebAppScenario.launch().use { app ->
-            // Isolate first use from the order in which the other device specs run.
-            app.evaluate("localStorage.removeItem('oa.androidDisclaimerAck')")
-            app.navigate("/?android-disclaimer=fresh")
+            // Backward compatibility: installs from the disclaimer era still carry the version-2
+            // acknowledgement. The page must ignore it and never show a modal or the old notice.
+            app.evaluate("localStorage.setItem('oa.androidDisclaimerAck', '2')")
+            app.navigate("/?android-disclaimer=legacy-ack")
             awaitEditor(app)
             assertNoDisclaimer(app)
 
@@ -33,7 +34,12 @@ class DisclaimerTest {
     }
 
     private fun assertNoDisclaimer(app: WebAppScenario) {
-        assertEquals(null, app.evaluate("document.querySelector('dialog [data-ack]')"))
-        assertEquals(null, app.evaluate("localStorage.getItem('oa.androidDisclaimerAck')"))
+        assertEquals("open <dialog>", false, app.evaluate("document.querySelector('dialog[open]') != null"))
+        assertEquals("modal role=dialog", false, app.evaluate("document.querySelector('[role=\"dialog\"][aria-modal=\"true\"]') != null"))
+        assertEquals(
+            "retired disclaimer text: ${app.evaluate("document.body.innerText.slice(0, 1500)")}",
+            false,
+            app.evaluate("/Galaxy A70|tested on one phone|teste em um celular/.test(document.body.innerText)"),
+        )
     }
 }
