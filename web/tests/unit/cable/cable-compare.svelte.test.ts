@@ -14,6 +14,9 @@ import { initialTracks } from '#lib/components/pages/comparar/comparison.ts';
 import { m } from '#lib/paraglide/messages.js';
 import { setLocale } from '#lib/paraglide/runtime.js';
 import { fakeAppOptions } from '../app/fakes.ts';
+// The /comparar page's global stylesheet (all selectors under `.comparar`), loaded so the
+// 360 px layout test sees the same cascade as the real page.
+import '#lib/components/pages/comparar/comparar.css';
 
 const sides = initialTracks()
 	.slice(0, 2)
@@ -323,6 +326,52 @@ test('exported choose switches only while running', async () => {
 	await tick();
 	await component.choose(0);
 	expect(switchComparison).toHaveBeenCalledOnce();
+});
+
+test('inside /comparar at 360 px the start checklist stacks and every control is reachable', async () => {
+	const restore = { width: window.innerWidth, height: window.innerHeight };
+	await page.viewport(360, 760);
+	try {
+		const { options } = await setup({}, false);
+		// Same ancestor as CompararPage, so its global `.comparar …` rules apply.
+		const host = document.createElement('div');
+		host.className = 'comparar';
+		document.body.append(host);
+		const component = mount(CableCompare, { target: host, props: options });
+		disposers.push(async () => {
+			await unmount(component);
+			host.remove();
+		});
+		await tick();
+		// Guard against a vacuous pass: the page stylesheet is really in the cascade.
+		expect(getComputedStyle(host).maxWidth).toBe('1380px');
+		const group = await openChecklist();
+		await expect.element(group).toBeVisible();
+		const checklist = document.querySelector<HTMLElement>('[data-cable-ab-checklist]');
+		if (checklist === null) throw new Error('expected the checklist');
+		// Regression: `.comparar .check { display: flex }` used to turn it into one unwrapped row.
+		expect(getComputedStyle(checklist).display).toBe('grid');
+		const title = checklist.querySelector('h4');
+		const levers = checklist.querySelector('fieldset');
+		if (title === null || levers === null) throw new Error('expected title and levers');
+		expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+			levers.getBoundingClientRect().top
+		);
+		expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(360);
+		expect(checklist.scrollWidth).toBeLessThanOrEqual(checklist.clientWidth);
+		const controls = [
+			group.getByRole('checkbox', { name: m.cable_confirm_volume() }).element(),
+			group.getByRole('button', { name: m.cable_live_cancel() }).element(),
+			group.getByRole('button', { name: m.cable_live_start() }).element()
+		];
+		for (const control of controls) {
+			const box = control.getBoundingClientRect();
+			expect(box.left).toBeGreaterThanOrEqual(0);
+			expect(box.right).toBeLessThanOrEqual(360);
+		}
+	} finally {
+		await page.viewport(restore.width, restore.height);
+	}
 });
 
 test('out-of-envelope curves are refused before any send or commit', async () => {

@@ -1004,7 +1004,7 @@
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<div
 					id={`${id}-check`}
-					class="check"
+					class="ab-check"
 					role="group"
 					aria-labelledby={`${id}-check-title`}
 					bind:this={checkGroup}
@@ -1154,13 +1154,15 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.hint,
-	.check p,
+	.ab-check p,
 	.hold p,
 	.ended,
 	.message {
 		margin: 0;
 	}
-	.check,
+	/* Not `.check`: the host page's global `.comparar .check { display: flex }` (equal specificity)
+	   turned this stacked checklist into one unwrapped row, wider than a 360 px phone. */
+	.ab-check,
 	.hold,
 	.refusal {
 		display: grid;
@@ -1185,6 +1187,8 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 14px;
+		/* A fieldset defaults to min-inline-size: min-content; let it shrink inside the grid. */
+		min-width: 0;
 		margin: 0;
 		padding: 12px;
 		border: 0;
