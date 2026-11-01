@@ -1524,11 +1524,6 @@ export function createCableService(
 		const volumeLowered = confirmations?.volumeLowered === true;
 		const keepConnected = confirmations?.keepConnected === true;
 		const experimentalConfirmed = confirmations?.experimental === true;
-		// Transport-owned context cannot be overridden by a write request. Capture once, just
-		// like the other confirmations, and leave desktop/simulated requests unchanged.
-		const androidConfirmation = native
-			? { androidUntested: confirmations?.androidUntested === true }
-			: {};
 		// Read once, compared without coercion: only the exact string selects YOLO.
 		const profile: unknown = request.profile;
 		if (profile !== 'yolo') {
@@ -1539,8 +1534,7 @@ export function createCableService(
 				confirmations: {
 					volumeLowered,
 					keepConnected,
-					experimental: experimentalConfirmed,
-					...androidConfirmation
+					experimental: experimentalConfirmed
 				}
 			};
 		}
@@ -1554,8 +1548,7 @@ export function createCableService(
 				volumeLowered,
 				keepConnected,
 				experimental: experimentalConfirmed,
-				yoloWrite,
-				...androidConfirmation
+				yoloWrite
 			}
 		};
 	}
@@ -3141,8 +3134,8 @@ export function createCableService(
 		/**
 		 * Starts a live (no-flash) preview on the selected cable and applies `curve` at once
 		 * (after `LIVE_AFTER_COMMIT_MS` when a save just ended). Needs a fresh gesture and the
-		 * live checklist (gate, volume, experimental when required, the Modo YOLO items, the
-		 * Android acknowledgement on native; no spacing and no "keep connected"). Settles once
+		 * live checklist (gate, volume, experimental when required, the Modo YOLO items; no
+		 * spacing and no "keep connected"). Settles once
 		 * that first apply settled (or was held). The level of `curve` becomes the confirmed one.
 		 */
 		async startLive(request: LiveStartRequest): Promise<LiveOutcome> {
@@ -3169,8 +3162,7 @@ export function createCableService(
 					// Not part of the live checklist (an unplug only reverts the cable).
 					keepConnected: false,
 					experimental: confirmations?.experimental === true,
-					yoloWrite: confirmations?.yoloWrite === true,
-					androidUntested: confirmations?.androidUntested === true
+					yoloWrite: confirmations?.yoloWrite === true
 				}
 			});
 			const verdict = gateForWrite(captured.bands, captured.preampDb, gateOptions(captured));
@@ -3289,8 +3281,7 @@ export function createCableService(
 				confirmations: {
 					volumeLowered: confirmations?.volumeLowered === true,
 					keepConnected: false,
-					experimental: confirmations?.experimental === true,
-					androidUntested: confirmations?.androidUntested === true
+					experimental: confirmations?.experimental === true
 				}
 			});
 			const checklist = comparisonChecklist(captured, loudest.verdict, items);

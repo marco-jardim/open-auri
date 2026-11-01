@@ -2,7 +2,7 @@
 	The live preview checklist ("Ouvir no cabo", issue #69). Opened by the Curva page's switch;
 	its "Começar" button is the only control that calls `service.startLive()`, with a gesture
 	minted in that very click. Items: the gate, "Abaixei o volume", and, as
-	`evaluateLiveChecklist` requires them, the experimental, Modo YOLO and Android confirmations.
+	`evaluateLiveChecklist` requires them, the experimental and Modo YOLO confirmations.
 	No spacing and no "keep connected": nothing is written to flash, and an unplug only sends the
 	cable back to its saved curve. Same levers (ConfirmLever) as the write checklist.
 -->
@@ -109,8 +109,6 @@
 			gate
 		);
 	});
-	const required = (item: ChecklistItemId) =>
-		checklist?.items.some((entry) => entry.id === item && entry.required) ?? false;
 	const yoloText = $derived(
 		checklist === null
 			? ''
@@ -131,7 +129,6 @@
 		if (unmet('experimental')) return m.cable_fux_lock_experimental();
 		if (unmet('yolo-session')) return m.yolo_lock_session();
 		if (unmet('yolo-write')) return m.yolo_lock_write();
-		if (unmet('android-untested')) return m.cable_lock_android_untested();
 		if (!checklist.canWrite) return m.cable_fux_lock_other();
 		return null;
 	});
@@ -224,16 +221,6 @@
 						bind:checked={confirmations.yoloWrite}
 						label={yoloText}
 						confirmation="yolo"
-					/>
-				{/if}
-				{#if required('android-untested')}
-					<ConfirmLever
-						bind:checked={
-							() => confirmations.androidUntested === true,
-							(checked) => (confirmations.androidUntested = checked)
-						}
-						label={m.cable_confirm_android_untested()}
-						confirmation="android-untested"
 					/>
 				{/if}
 			</fieldset>

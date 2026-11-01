@@ -9,11 +9,6 @@ import { crc32, inflateRawSync } from 'node:zlib';
 
 import { MIN_WEBVIEW_VERSION, buildConfig } from '../apps/android/capacitor.targets.mjs';
 
-export const NOTICE_PT_BR =
-  'Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml';
-export const NOTICE_EN_US =
-  'Notice: writing tested on a Kuba Auri with Galaxy A70 (Android 11), not other manufacturers. Preview, writing and Padrão Auri restoration confirmed acoustically; native bridge bytes match the desktop site. Full validation pending. Sound off? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml';
-
 /** @param {string} value */
 export function normalizeFingerprint(value) {
   const fingerprint = value.trim();
@@ -39,17 +34,6 @@ export function verifyUploadCertificate(actual, expected, appCertificate) {
   if (upload === normalizeFingerprint(appCertificate)) {
     throw new Error('AAB upload certificate must be distinct from the app certificate');
   }
-}
-
-/** @param {string} source android-status.ts, not a guessed or environment-controlled flag */
-export function parseHardwareValidated(source) {
-  const matches = [
-    ...source.matchAll(
-      /^export const ANDROID_WRITE_VALIDATED(?:\s*:\s*boolean)?\s*=\s*(true|false)\s*;/gm,
-    ),
-  ];
-  if (matches.length !== 1) throw new Error('Cannot parse ANDROID_WRITE_VALIDATED');
-  return matches[0][1] === 'true';
 }
 
 /** Shape of a release tag. Other android-v* tags (such as android-v1.0.1-rc1) never set the floor. */
@@ -170,8 +154,7 @@ export function sha256(bytes) {
 }
 
 /**
- * @typedef {{ version: string, capacitorVersion: string, minWebViewVersion: number,
- *   hardwareValidated: boolean }} ReleaseMetadata
+ * @typedef {{ version: string, capacitorVersion: string, minWebViewVersion: number }} ReleaseMetadata
  * @typedef {{ apk: Uint8Array, aab: Uint8Array, apkName: string, aabName: string,
  *   expectedAppCertSha256: string, actualAppCertSha256: string, commit: string,
  *   repoUrl: string, version: string, versionCode: number }} ReleaseInputs
@@ -219,7 +202,6 @@ export function createArtifacts(input, metadata) {
     apkCertSha256: actual,
     capacitorVersion: metadata.capacitorVersion,
     minWebViewVersion: metadata.minWebViewVersion,
-    hardwareValidated: metadata.hardwareValidated,
   };
   const sums = [
     [input.apkName, manifest.apkSha256],
@@ -228,9 +210,8 @@ export function createArtifacts(input, metadata) {
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([name, hash]) => `${hash}  ${name}\n`)
     .join('');
-  const notice = metadata.hardwareValidated ? '' : `${NOTICE_PT_BR}\n\n${NOTICE_EN_US}\n\n`;
   const notes =
-    `${notice}# Android ${input.version}\n\n` +
+    `# Android ${input.version}\n\n` +
     `Version code: ${input.versionCode}\n\n` +
     '## Verify / Verificar\n\n' +
     'Download the APK, AAB and SHA256SUMS.txt into the same directory, then run:\n\n' +
@@ -629,9 +610,6 @@ export function main(argv, inspectApk = verifyApk, inspectApkManifest = dumpApkB
         version: pkg.version,
         capacitorVersion: pkg.dependencies['@capacitor/android'],
         minWebViewVersion: MIN_WEBVIEW_VERSION,
-        hardwareValidated: parseHardwareValidated(
-          readFileSync(join(root, 'web/src/lib/cable/android-status.ts'), 'utf8'),
-        ),
       },
     );
     // n5: both artifacts must carry the identity being published; nothing is written otherwise.

@@ -1,6 +1,6 @@
 # Ficha da loja Android (P2)
 
-Textos para copiar no Play Console. Os identificadores dos três campos seguem em inglês nos dois idiomas. Copie somente o conteúdo dos blocos, sem as cercas. Os limites e textos obrigatórios são conferidos por `test/tools/play-listing.test.mjs`, com base em `play-requisitos.md`. Desde 01/11/2026 (`ANDROID_WRITE_VALIDATED = true`), a ficha não traz mais o aviso do Anexo G.5 de teste num só celular; o teste também confere que ele não volta.
+Textos para copiar no Play Console. Os identificadores dos três campos seguem em inglês nos dois idiomas. Copie somente o conteúdo dos blocos, sem as cercas. Os limites e textos obrigatórios são conferidos por `test/tools/play-listing.test.mjs`, com base em `play-requisitos.md`.
 
 ## Campos compartilhados
 

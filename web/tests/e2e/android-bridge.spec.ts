@@ -8,20 +8,16 @@ import { closeChecklist, confirmBasics, connectCable, openChecklist } from './he
 test.use({ locale: 'pt-BR', reducedMotion: 'reduce' });
 test.setTimeout(60_000);
 
-// ANDROID_WRITE_VALIDATED is true: the retired one-phone notice (modal, Cabo banner and
-// checklist item) must not render. These strings are kept only to assert their absence.
-const TITLE = 'Gravação pelo app: teste em um celular';
-const BANNER =
-	'Gravação testada num Kuba Auri com Galaxy A70 (Android 11). Faltam outros fabricantes e a validação completa.';
-const ANDROID_CONFIRM =
-	'Entendo que a gravação pelo app foi testada apenas no Galaxy A70 e ainda não tem validação completa.';
+// The app shows no Android test notice (modal, Cabo banner or checklist item): any text naming
+// the tested phone is asserted absent.
+const TESTED_PHONE = /Galaxy A70/;
 const SIMULATED = 'SIMULADO · nenhum report é enviado ao cabo real';
 const POLICY =
 	'A gravação pelo app está desligada no momento. Use o site no computador (Chrome ou Edge) ou atualize o app.';
 const COMMIT = [0x01, 0x65, 0x00, 0x01, 0xff, ...Array<number>(26).fill(0)];
 
 function notice(page: Page): Locator {
-	return page.getByRole('dialog', { name: TITLE, exact: true });
+	return page.getByRole('dialog').filter({ hasText: TESTED_PHONE });
 }
 
 async function openApp(page: Page, path = '/cabo'): Promise<void> {
@@ -44,7 +40,7 @@ async function connectAndroid(page: Page): Promise<void> {
 }
 
 function androidItem(dialog: Locator): Locator {
-	return dialog.getByRole('checkbox', { name: ANDROID_CONFIRM, exact: true });
+	return dialog.getByRole('checkbox', { name: TESTED_PHONE });
 }
 
 function writeButton(dialog: Locator): Locator {
@@ -79,7 +75,7 @@ function expectNoNativeIo(native: FakeAndroidNative): void {
 	expect(native.reports).toEqual([]);
 }
 
-test('first use: no one-phone modal or Cabo banner, before or after reload', async ({
+test('first use: no Android test modal or Cabo banner, before or after reload', async ({
 	page,
 	nativeBridge
 }) => {
@@ -87,13 +83,11 @@ test('first use: no one-phone modal or Cabo banner, before or after reload', asy
 	await expect(page.getByText('App Android v1.0.0, USB host OK', { exact: true })).toBeVisible();
 	await expect(notice(page)).toHaveCount(0);
 	await expect(page.locator('dialog[open]')).toHaveCount(0);
-	await expect(page.getByRole('complementary', { name: TITLE, exact: true })).toHaveCount(0);
-	await expect(page.getByText(BANNER, { exact: true })).toHaveCount(0);
-	await expect(page.getByText(/Galaxy A70/)).toHaveCount(0);
+	await expect(page.getByText(TESTED_PHONE)).toHaveCount(0);
 	await page.reload();
 	await expect(page.getByText('App Android v1.0.0, USB host OK', { exact: true })).toBeVisible();
 	await expect(notice(page)).toHaveCount(0);
-	await expect(page.getByText(BANNER, { exact: true })).toHaveCount(0);
+	await expect(page.getByText(TESTED_PHONE)).toHaveCount(0);
 	expect(nativeBridge.calls.filter(({ methodName }) => methodName === 'getInfo')).toHaveLength(2);
 	expectNoNativeIo(nativeBridge);
 });
@@ -109,7 +103,6 @@ test('real core + native bridge: the standard checklist gates a byte-exact write
 		nativeBridge.calls.find(({ methodName }) => methodName === 'requestDevice')?.options
 	).toEqual({ filters: [{ vendorId: 0x3302, productId: 0x8902 }] });
 	const dialog = await openChecklist(page);
-	await expect(dialog.locator('[data-confirmation="android-untested"]')).toHaveCount(0);
 	await expect(androidItem(dialog)).toHaveCount(0);
 	await expect(writeButton(dialog)).toBeDisabled();
 	expect(nativeBridge.reports).toEqual([]);
@@ -468,7 +461,7 @@ test.describe('Chrome Android without the bridge', () => {
 			page.getByRole('complementary', { name: 'Conecte pelo app Android', exact: true })
 		).toBeVisible();
 		await expect(notice(page)).not.toBeVisible();
-		await expect(page.getByText(BANNER, { exact: true })).toHaveCount(0);
+		await expect(page.getByText(TESTED_PHONE)).toHaveCount(0);
 		expect(nativeBridge.calls).toEqual([]);
 	});
 });
@@ -492,7 +485,7 @@ test.describe('desktop browser without the bridge', () => {
 			page.getByRole('button', { name: 'Levantar tampa do checklist', exact: true })
 		).toBeEnabled();
 		await expect(notice(page)).not.toBeVisible();
-		await expect(page.getByText(BANNER, { exact: true })).toHaveCount(0);
+		await expect(page.getByText(TESTED_PHONE)).toHaveCount(0);
 		await expect(
 			page.getByRole('complementary', { name: 'Conecte pelo app Android', exact: true })
 		).toHaveCount(0);

@@ -16,15 +16,7 @@ import {
 	padrao
 } from './harness.ts';
 
-// The deployed ANDROID_WRITE_VALIDATED is true (the notice is closed). This file keeps covering
-// the reopened state of the runbook ("Reabrir o aviso"): the service must then enforce the
-// `android-untested` item on every write path before any I/O. checklist.test.ts covers the
-// deployed default.
-vi.mock('#lib/cable/android-status.ts', async (importOriginal) => ({
-	...(await importOriginal<typeof import('#lib/cable/android-status.ts')>()),
-	ANDROID_WRITE_VALIDATED: false
-}));
-
+// The native transport has exactly the desktop checklist: no Android-only item on any write path.
 const YOLO_BANDS: Band[] = [{ kind: 'HP', freqHz: 30, qFactor: 0.71 }, ...NEUTRAL_BANDS.slice(1)];
 const SHELF_BANDS: Band[] = [
 	{ kind: 'HS', freqHz: 8000, gainDb: -3, qFactor: 0.7 },
@@ -44,7 +36,6 @@ function input(overrides: Partial<ChecklistInput> = {}): ChecklistInput {
 function context(overrides: Partial<ChecklistContext> = {}): ChecklistContext {
 	return {
 		cableMode: 'native',
-		androidWriteValidated: false,
 		nowMs: T0,
 		flash: memoryFlash().get(),
 		lastWrittenLevelDb: null,
@@ -54,10 +45,10 @@ function context(overrides: Partial<ChecklistContext> = {}): ChecklistContext {
 	};
 }
 
-describe('Android checklist acknowledgement', () => {
-	test.each(['real', 'simulated'] as const)('%s has exactly the old items and outcomes', (mode) => {
-		const desktop = evaluateChecklist(input(), context({ cableMode: mode }));
-		expect(desktop.items.map(({ id, required }) => ({ id, required }))).toEqual([
+describe('No Android item on any transport', () => {
+	test('native, real and simulated have exactly the same items and outcome', () => {
+		const native = evaluateChecklist(input(), context());
+		expect(native.items.map(({ id, required }) => ({ id, required }))).toEqual([
 			{ id: 'gate', required: true },
 			{ id: 'volume', required: true },
 			{ id: 'connection', required: true },
@@ -66,45 +57,10 @@ describe('Android checklist acknowledgement', () => {
 			{ id: 'yolo-session', required: false },
 			{ id: 'yolo-write', required: false }
 		]);
-		expect(desktop.canWrite).toBe(true);
-		for (const androidWriteValidated of [false, true]) {
-			for (const androidUntested of [false, true]) {
-				expect(
-					evaluateChecklist(
-						input({ confirmations: { ...CONFIRMED, androidUntested } }),
-						context({ cableMode: mode, androidWriteValidated })
-					)
-				).toEqual(desktop);
-			}
+		expect(native.canWrite).toBe(true);
+		for (const mode of ['real', 'simulated', undefined] as const) {
+			expect(evaluateChecklist(input(), context({ cableMode: mode }))).toEqual(native);
 		}
-	});
-
-	test('native unvalidated writes require explicit true', () => {
-		for (const androidUntested of [undefined, false, 1 as unknown as boolean]) {
-			const result = evaluateChecklist(
-				input({ confirmations: { ...CONFIRMED, androidUntested } }),
-				context({ androidWriteValidated: false })
-			);
-			expect(result.items.at(-1)).toEqual({
-				id: 'android-untested',
-				required: true,
-				satisfied: false
-			});
-			expect(result.canWrite).toBe(false);
-		}
-		expect(
-			evaluateChecklist(
-				input({ confirmations: { ...CONFIRMED, androidUntested: true } }),
-				context()
-			).canWrite
-		).toBe(true);
-	});
-
-	test('validated native writes omit the acknowledgement item', () => {
-		const result = evaluateChecklist(input(), context({ androidWriteValidated: true }));
-		expect(result.items.some(({ id }) => id === 'android-untested')).toBe(false);
-		expect(result.items).toEqual(evaluateChecklist(input(), context({ cableMode: 'real' })).items);
-		expect(result.canWrite).toBe(true);
 	});
 
 	test('experimental and YOLO confirmations remain independent, including the YOLO session', () => {
@@ -114,13 +70,13 @@ describe('Android checklist acknowledgement', () => {
 				preampDb: -0.5,
 				experimental: true,
 				profile: yolo ? 'yolo' : 'standard',
-				confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true, androidUntested: true }
+				confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true }
 			});
 			const ctx = context({ yoloSession: true });
 			expect(evaluateChecklist(request, ctx).canWrite).toBe(true);
 			for (const missing of yolo
-				? (['experimental', 'yoloWrite', 'androidUntested'] as const)
-				: (['experimental', 'androidUntested'] as const)) {
+				? (['experimental', 'yoloWrite'] as const)
+				: (['experimental'] as const)) {
 				expect(
 					evaluateChecklist(
 						{ ...request, confirmations: { ...request.confirmations, [missing]: false } },
@@ -216,9 +172,9 @@ async function nativeService(count = 1, interrupted = false, storage = memorySto
 	return { service, open, sendReport, flash, journal, freshnessFetch, clock, storage };
 }
 
-describe('Native service enforces acknowledgement before any write I/O', () => {
+describe('Native service writes with the desktop checklist only', () => {
 	test.each(['single', 'rescue', 'queue', 'yolo'] as const)(
-		'%s cannot bypass the item',
+		'%s needs no Android-only confirmation',
 		async (path) => {
 			const h = await nativeService(path === 'queue' ? 2 : 1, path === 'rescue');
 			if (path === 'rescue') expect(h.service.getState().rescue).not.toBeNull();
@@ -229,33 +185,14 @@ describe('Native service enforces acknowledgement before any write I/O', () => {
 					: {}),
 				confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true }
 			});
-			const write = (confirmed: boolean) => {
-				const captured = {
-					...request,
-					confirmations: { ...request.confirmations, androidUntested: confirmed },
-					gesture: h.service.createGesture(TRUSTED_CLICK),
-					// These untrusted fields must never override the service-owned context.
-					cableMode: 'real',
-					androidWriteValidated: true
-				};
-				return path === 'queue'
-					? h.service.writeQueue({ ...captured, devices: h.service.getState().devices })
-					: h.service.write(captured);
-			};
-			expect(h.service.checklist(request).canWrite).toBe(false);
-			expect(await write(false)).toMatchObject({
-				status: 'refused',
-				reason: 'checklist',
-				checklist: {
-					items: expect.arrayContaining([
-						{ id: 'android-untested', required: true, satisfied: false }
-					])
-				}
-			});
-			expect(h.open).not.toHaveBeenCalled();
-			expect(h.sendReport).not.toHaveBeenCalled();
-			expect(h.flash.records).toEqual([]);
-			const outcome = await write(true);
+			const checklist = h.service.checklist(request);
+			expect(checklist.canWrite).toBe(true);
+			expect(checklist.items.map(({ id }) => id)).not.toContain('android-untested');
+			const captured = { ...request, gesture: h.service.createGesture(TRUSTED_CLICK) };
+			const outcome =
+				path === 'queue'
+					? await h.service.writeQueue({ ...captured, devices: h.service.getState().devices })
+					: await h.service.write(captured);
 			expect(outcome.status).toBe(path === 'queue' ? 'done' : 'ok');
 			expect(h.freshnessFetch).toHaveBeenCalledOnce();
 			expect(h.sendReport).toHaveBeenCalled();
@@ -269,23 +206,6 @@ describe('Native service enforces acknowledgement before any write I/O', () => {
 		}
 	);
 
-	test('the acknowledgement is captured once and reused by in-lock authorization', async () => {
-		const h = await nativeService();
-		let reads = 0;
-		const result = await h.service.write({
-			...input(),
-			confirmations: {
-				...CONFIRMED,
-				get androidUntested() {
-					reads += 1;
-					return reads === 1;
-				}
-			},
-			gesture: h.service.createGesture(TRUSTED_CLICK)
-		});
-		expect(result.status).toBe('ok');
-		expect(reads).toBe(1);
-	});
 });
 
 describe('Native service requires a fresh deployed policy on every write path', () => {
@@ -305,12 +225,7 @@ describe('Native service requires a fresh deployed policy on every write path', 
 						...(path === 'yolo'
 							? { bands: YOLO_BANDS, preampDb: -0.5, experimental: true, profile: 'yolo' as const }
 							: {}),
-						confirmations: {
-							...CONFIRMED,
-							experimental: true,
-							yoloWrite: true,
-							androidUntested: true
-						}
+						confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true }
 					}),
 					gesture: h.service.createGesture(TRUSTED_CLICK)
 				};
@@ -338,7 +253,7 @@ describe('Native service requires a fresh deployed policy on every write path', 
 		const h = await nativeService();
 		const write = () =>
 			h.service.write({
-				...input({ confirmations: { ...CONFIRMED, androidUntested: true } }),
+				...input(),
 				gesture: h.service.createGesture(TRUSTED_CLICK)
 			});
 		expect((await write()).status).toBe('ok');
@@ -369,7 +284,7 @@ describe('Native service offline on the last-good confirmation of this build', (
 				...(path === 'yolo'
 					? { bands: YOLO_BANDS, preampDb: -0.5, experimental: true, profile: 'yolo' as const }
 					: {}),
-				confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true, androidUntested: true }
+				confirmations: { ...CONFIRMED, experimental: true, yoloWrite: true }
 			}),
 			gesture: h.service.createGesture(TRUSTED_CLICK)
 		};

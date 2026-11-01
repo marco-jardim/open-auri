@@ -238,7 +238,7 @@
 	}
 
 	// --- start: the compact checklist ------------------------------------------------------------
-	const UNCONFIRMED = { volumeLowered: false, experimental: false, androidUntested: false };
+	const UNCONFIRMED = { volumeLowered: false, experimental: false };
 	let asking = $state(false);
 	let starting = $state(false);
 	let confirmations = $state({ ...UNCONFIRMED });
@@ -283,8 +283,6 @@
 	const experimentalRequired = $derived(
 		(checklist?.experimentalRequired ?? false) || (plan?.experimentalRequired ?? false)
 	);
-	const required = (item: ChecklistItemId) =>
-		checklist?.items.some((entry) => entry.id === item && entry.required) ?? false;
 	const shownRefusal = $derived(refusal ?? plan?.refusal ?? null);
 	const refusalReasons = $derived(
 		(shownRefusal?.gateReasons ?? []).map((reason) => describeReason(reasonView(reason)))
@@ -311,7 +309,6 @@
 		if (experimentalRequired && !confirmations.experimental) {
 			return m.cable_fux_lock_experimental();
 		}
-		if (unmet('android-untested')) return m.cable_lock_android_untested();
 		const other = checklist.items.some(
 			(entry) => entry.id !== 'experimental' && entry.required && !entry.satisfied
 		);
@@ -1052,13 +1049,6 @@
 								bind:checked={confirmations.experimental}
 								label={m.cable_confirm_experimental()}
 								confirmation="experimental"
-							/>
-						{/if}
-						{#if required('android-untested')}
-							<ConfirmLever
-								bind:checked={confirmations.androidUntested}
-								label={m.cable_confirm_android_untested()}
-								confirmation="android-untested"
 							/>
 						{/if}
 					</fieldset>

@@ -5,11 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { MIN_WEBVIEW_VERSION } from '../../apps/android/capacitor.targets.mjs';
-import {
-  createArtifacts,
-  deriveVersionCode,
-  parseHardwareValidated,
-} from '../../tools/android-artifacts.mjs';
+import { createArtifacts, deriveVersionCode } from '../../tools/android-artifacts.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const read = (path) => readFileSync(join(root, path), 'utf8').replaceAll('\r\n', '\n');
@@ -106,44 +102,42 @@ test('the retired G.5 notice is absent from README, the Play listing and shipped
 
   const pkg = JSON.parse(read('apps/android/package.json'));
   const fingerprint = 'ab'.repeat(32);
-  const notesFor = (hardwareValidated) =>
-    createArtifacts(
-      {
-        apk: Buffer.from('apk'),
-        aab: Buffer.from('aab'),
-        apkName: 'open-auri.apk',
-        aabName: 'open-auri.aab',
-        expectedAppCertSha256: fingerprint,
-        actualAppCertSha256: fingerprint,
-        commit: '1234567890abcdef1234567890abcdef12345678',
-        repoUrl: 'https://github.com/marco-jardim/open-auri',
-        version: pkg.version,
-        versionCode: deriveVersionCode(pkg.version),
-      },
-      {
-        version: pkg.version,
-        capacitorVersion: pkg.dependencies['@capacitor/android'],
-        minWebViewVersion: MIN_WEBVIEW_VERSION,
-        hardwareValidated,
-      },
-    )['RELEASE_NOTES.md'];
-  // The shipped flag (true) drops the notice; reopening it (false) restores G.5 verbatim.
-  const shipped = parseHardwareValidated(read('web/src/lib/cable/android-status.ts'));
-  assert.equal(shipped, true);
-  const notes = notesFor(shipped);
+  const files = createArtifacts(
+    {
+      apk: Buffer.from('apk'),
+      aab: Buffer.from('aab'),
+      apkName: 'open-auri.apk',
+      aabName: 'open-auri.aab',
+      expectedAppCertSha256: fingerprint,
+      actualAppCertSha256: fingerprint,
+      commit: '1234567890abcdef1234567890abcdef12345678',
+      repoUrl: 'https://github.com/marco-jardim/open-auri',
+      version: pkg.version,
+      versionCode: deriveVersionCode(pkg.version),
+    },
+    {
+      version: pkg.version,
+      capacitorVersion: pkg.dependencies['@capacitor/android'],
+      minWebViewVersion: MIN_WEBVIEW_VERSION,
+    },
+  );
+  const notes = files['RELEASE_NOTES.md'];
   assert.ok(notes.startsWith(`# Android ${pkg.version}\n\n`), 'release notes open with the title');
-  for (const notice of [pt, en]) assert.ok(!notes.includes(notice), 'shipped notes: G.5');
-  assert.deepEqual(notesFor(false).split('\n\n').slice(0, 2), [pt, en]);
+  for (const notice of [pt, en]) assert.ok(!notes.includes(notice), 'release notes: G.5');
+  assert.doesNotMatch(notes, /Galaxy A70|Validação completa|Full validation/i);
 });
 
-test('G.1 stays in both site message locales for a reopened notice, not in the Android doc', () => {
+test('the retired G.1 notice is absent from both site message locales and the Android doc', () => {
   for (const language of ['pt-BR', 'en-US']) {
     const g1 = section(plan, `**G.1 Modal e banner (${language})**`);
     const text = quoted(g1, /^- \*\*Texto:\*\* "([^"]+)"$/gm);
     const title = quoted(g1, /^- \*\*Título:\*\* "([^"]+)"$/gm);
-    const messages = JSON.parse(read(`web/messages/${language}.json`));
-    assert.equal(messages.android_untested_body, text, `${language}: site G.1 notice`);
-    assert.equal(messages.android_untested_title, title, `${language}: site G.1 title`);
+    const catalog = read(`web/messages/${language}.json`);
+    const messages = JSON.parse(catalog);
+    assert.ok(!catalog.includes(text), `${language}: site G.1 notice`);
+    assert.ok(!catalog.includes(title), `${language}: site G.1 title`);
+    const retired = Object.keys(messages).filter((key) => key.includes('untested'));
+    assert.deepEqual(retired, [], `${language}: retired notice keys`);
     assert.ok(!android.includes(text), `docs/android.md: ${language} G.1 text`);
     assert.ok(!android.includes(title), `docs/android.md: ${language} G.1 title`);
   }
@@ -155,7 +149,43 @@ test('G.1 stays in both site message locales for a reopened notice, not in the A
   assert.match(state, /confirma a gravação pelo som nesse aparelho/);
   assert.match(state, /app 1\.0\.3[\s\S]*"Ouvir no cabo"[\s\S]*"Comparar no cabo"/);
   assert.doesNotMatch(state, /pendente/);
-  assert.match(state, /ANDROID_WRITE_VALIDATED/);
+  assert.doesNotMatch(state, /ANDROID_WRITE_VALIDATED|Reabrir o aviso/);
+});
+
+// Regression guard: the "untested / tested on one phone" disclaimer and its reopen machinery are
+// gone for good. The catalogs and every UI source (the generated paraglide output excluded) must
+// never carry those phrases or identifiers again.
+const DISCLAIMER_PHRASES = [
+  'não testad',
+  'teste em um celular',
+  'tested on one phone',
+  'untested',
+  'apenas no Galaxy A70',
+  'only on the Galaxy A70',
+  'validação completa',
+  'full validation',
+  'ANDROID_WRITE_VALIDATED',
+  'ANDROID_DISCLAIMER_VERSION',
+  'androidDisclaimerAck',
+];
+
+function sourceFiles(path) {
+  return readdirSync(join(root, path), { withFileTypes: true }).flatMap((entry) => {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) return entry.name === 'paraglide' ? [] : sourceFiles(child);
+    return /\.(?:svelte|ts|js|json)$/.test(entry.name) ? [child] : [];
+  });
+}
+
+test('message catalogs and UI sources carry no Android disclaimer phrase', () => {
+  const paths = ['web/messages/pt-BR.json', 'web/messages/en-US.json', ...sourceFiles('web/src')];
+  assert.ok(paths.length > 2, 'No UI sources found');
+  for (const path of paths) {
+    const source = read(path).toLowerCase();
+    for (const phrase of DISCLAIMER_PHRASES) {
+      assert.ok(!source.includes(phrase.toLowerCase()), `${path}: "${phrase}"`);
+    }
+  }
 });
 
 test('partial hardware report records the real setup, acoustic results and outstanding F5 evidence', () => {

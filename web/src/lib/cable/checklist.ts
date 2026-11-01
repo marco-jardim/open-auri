@@ -11,7 +11,6 @@ import {
 	localDateKey,
 	loudnessWarning
 } from 'open-auri/policy';
-import { ANDROID_WRITE_VALIDATED } from './android-status.ts';
 import type {
 	Band,
 	ChecklistContext,
@@ -270,17 +269,6 @@ export function evaluateChecklist(
 			satisfied: !yolo || confirmations.yoloWrite === true
 		}
 	];
-	// Keep desktop and simulated item lists exactly unchanged, including optional items.
-	if (
-		context.cableMode === 'native' &&
-		!(context.androidWriteValidated ?? ANDROID_WRITE_VALIDATED)
-	) {
-		items.push({
-			id: 'android-untested',
-			required: true,
-			satisfied: confirmations.androidUntested === true
-		});
-	}
 
 	return {
 		profile,
@@ -313,8 +301,8 @@ const LIVE_EXCLUDED_ITEMS: ReadonlySet<ChecklistItemId> = new Set(['connection',
 
 /**
  * Checklist of `startLive`: the write checklist without `connection` and `spacing` (gate,
- * volume, experimental when required, the YOLO items in Modo YOLO and `android-untested` on the
- * native transport keep their exact rules). `canWrite` tells whether the session may start.
+ * volume, experimental when required and the YOLO items in Modo YOLO keep their exact rules).
+ * `canWrite` tells whether the session may start.
  */
 export function evaluateLiveChecklist(
 	input: ChecklistInput,

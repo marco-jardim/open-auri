@@ -3,11 +3,8 @@ import type { DocsContent } from './types.ts';
 
 // BEGIN Android validation state ------------------------------------------------------------
 // The only place in this file that says whether writing from the Android app was validated on
-// a real cable (section `android-validacao`). ANDROID_WRITE_VALIDATED is true
-// (src/lib/cable/android-status.ts), so this block carries the Anexo G.6 text (date, number of
-// devices and report) of docs/plans/2026-10-18-android-capacitor-plano.md instead of the G.1
-// notice. If the notice is reopened, put the G.1 title and text back here. en-US.ts has the
-// twin block.
+// a real cable (section `android-validacao`): the Anexo G.6 text (date, number of devices and
+// report) of docs/plans/2026-10-18-android-capacitor-plano.md. en-US.ts has the twin block.
 const androidValidationState: readonly string[] = [
 	'Gravação pelo app validada em cabo real em 1º de novembro de 2026, em 2 aparelhos: Samsung Galaxy A70 (Android 11) e Blackview BV9900 Pro (Android 10). Relatório: docs/android/validacao-hardware.md',
 	'O que os testes garantem: para cada curva, o app monta os mesmos nove reports de dados e o mesmo commit, byte a byte, que o site no computador e a página oficial enviam. Testes automáticos comparam esses bytes com a referência dos 11 presets oficiais, e antes do commit o app ainda confere cada sequência com uma guarda extra.'

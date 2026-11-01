@@ -8,8 +8,6 @@ import { crc32, deflateRawSync } from 'node:zlib';
 import { MIN_WEBVIEW_VERSION, buildConfig } from '../../apps/android/capacitor.targets.mjs';
 import {
   ANDROID_RELEASE_TAG,
-  NOTICE_EN_US,
-  NOTICE_PT_BR,
   createArtifacts,
   deriveVersionCode,
   getPreviousAndroidVersionCode,
@@ -18,7 +16,6 @@ import {
   normalizeFingerprint,
   parseApkBadging,
   parseApkCertificate,
-  parseHardwareValidated,
   readAabManifest,
   readZipEntry,
   sha256,
@@ -34,7 +31,6 @@ const metadata = {
   version: pkg.version,
   capacitorVersion: pkg.dependencies['@capacitor/android'],
   minWebViewVersion: MIN_WEBVIEW_VERSION,
-  hardwareValidated: false,
 };
 const input = {
   apk: Buffer.from('abc'),
@@ -218,19 +214,20 @@ test('manifest contains every release field and the immutable AGPL source URL', 
     apkCertSha256: fingerprint,
     capacitorVersion: pkg.dependencies['@capacitor/android'],
     minWebViewVersion: MIN_WEBVIEW_VERSION,
-    hardwareValidated: false,
   });
 });
 
-test('G.5 notices match the plan verbatim and start unvalidated release notes', () => {
+test('release notes start at the version heading and carry no G.5 notice', () => {
   const plan = readFileSync(join(root, 'docs/plans/2026-10-18-android-capacitor-plano.md'), 'utf8');
   const section = plan
     .split('**G.5 Notas da release, README e ficha da Play**')[1]
     .split('**G.6')[0];
-  assert.equal(NOTICE_PT_BR, section.match(/- pt-BR: "([^"]+)"/)[1]);
-  assert.equal(NOTICE_EN_US, section.match(/- en-US: "([^"]+)"/)[1]);
   const notes = createArtifacts(input, metadata)['RELEASE_NOTES.md'];
-  assert.ok(notes.startsWith(`${NOTICE_PT_BR}\n\n${NOTICE_EN_US}\n\n`));
+  assert.ok(notes.startsWith(`# Android ${pkg.version}\n`));
+  assert.ok(!notes.includes(section.match(/- pt-BR: "([^"]+)"/)[1]));
+  assert.ok(!notes.includes(section.match(/- en-US: "([^"]+)"/)[1]));
+  const phrases = ['Aviso:', 'Notice:', 'Galaxy A70', 'Validação completa', 'Full validation'];
+  for (const phrase of phrases) assert.ok(!notes.includes(phrase), phrase);
   assert.ok(
     notes.includes(
       'Download the APK, AAB and SHA256SUMS.txt into the same directory, then run:\n\n' +
@@ -258,14 +255,6 @@ test('G.5 notices match the plan verbatim and start unvalidated release notes', 
   );
   assert.ok(notes.includes(`AGPL-3.0-only): ${input.repoUrl}/tree/${input.commit}`));
   assert.ok(!notes.includes('\u2014'));
-});
-
-test('validated release omits both notices and updates the manifest', () => {
-  const files = createArtifacts(input, { ...metadata, hardwareValidated: true });
-  assert.ok(files['RELEASE_NOTES.md'].startsWith(`# Android ${pkg.version}\n`));
-  assert.ok(!files['RELEASE_NOTES.md'].includes(NOTICE_PT_BR));
-  assert.ok(!files['RELEASE_NOTES.md'].includes(NOTICE_EN_US));
-  assert.equal(JSON.parse(files['release-manifest.json']).hardwareValidated, true);
 });
 
 test('version mismatch fails even when the versionCode is otherwise valid', () => {
@@ -326,32 +315,6 @@ test('apksigner output requires one signer and a well-formed certificate digest'
   assert.throws(
     () => parseApkCertificate('Signer #1 certificate SHA-256 digest: bad\n'),
     /Malformed/,
-  );
-});
-
-test('hardware flag is read from the real exported boolean, and fails closed if missing or ambiguous', () => {
-  for (const flag of [true, false]) {
-    assert.equal(
-      parseHardwareValidated(`export const ANDROID_WRITE_VALIDATED: boolean = ${flag};`),
-      flag,
-    );
-  }
-  const status = readFileSync(join(root, 'web/src/lib/cable/android-status.ts'), 'utf8');
-  assert.equal(typeof parseHardwareValidated(status), 'boolean');
-  assert.throws(
-    () => parseHardwareValidated('// ANDROID_WRITE_VALIDATED = false;'),
-    /Cannot parse/,
-  );
-  assert.throws(
-    () => parseHardwareValidated('export const ANDROID_WRITE_VALIDATED = maybe;'),
-    /Cannot parse/,
-  );
-  assert.throws(
-    () =>
-      parseHardwareValidated(
-        'export const ANDROID_WRITE_VALIDATED = false;\nexport const ANDROID_WRITE_VALIDATED = true;',
-      ),
-    /Cannot parse/,
   );
 });
 
@@ -831,11 +794,8 @@ test('CLI writes the three outputs using repository metadata and a verified APK 
   );
   assert.ok(inspected);
   assert.ok(badged);
-  const hardwareValidated = parseHardwareValidated(
-    readFileSync(join(root, 'web/src/lib/cable/android-status.ts'), 'utf8'),
-  );
   for (const [name, content] of Object.entries(
-    createArtifacts({ ...input, aab: aabBytes }, { ...metadata, hardwareValidated }),
+    createArtifacts({ ...input, aab: aabBytes }, metadata),
   )) {
     assert.equal(readFileSync(join(dir, 'out', name), 'utf8'), content);
   }
@@ -1046,9 +1006,8 @@ test('release PR paths cover every release build/config input and tooling regres
     'package.json',
     'package-lock.json',
     'apps/android/android/**',
-    // n4: bundled web assets and the hardwareValidated source of release-manifest.json.
+    // n4: bundled web assets.
     'apps/android/www/**',
-    'web/src/lib/cable/android-status.ts',
     'tools/android-notices.mjs',
     'test/android-release/dryrun.mjs',
   ]) {
