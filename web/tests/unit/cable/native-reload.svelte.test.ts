@@ -68,7 +68,6 @@ async function refuse(surface: Surface, error: Error, reload: () => void) {
 				input,
 				{
 					cableMode: 'native',
-					androidWriteValidated: true,
 					nowMs: 10_000,
 					flash: { day: { date: null, count: 0 }, total: 0, lastWriteAt: 0, session: 0 },
 					lastWrittenLevelDb: null,

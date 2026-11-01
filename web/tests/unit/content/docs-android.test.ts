@@ -1,10 +1,9 @@
 // T2.5 · The "App Android" chapters of /docs (docs/plans/2026-10-18-android-capacitor-plano.md,
 // T2.5 and Anexo G): the same anchors in both languages, including the recovery anchor the cable
-// page links to; the exact Anexo G.1 notice, in one delimited place, while writing from the app
-// is not validated; every topic of the plan; no U+2014; only well-formed https links.
+// page links to; the Anexo G.6 validation state in one delimited place, never the retired G.1
+// notice; every topic of the plan; no U+2014; only well-formed https links.
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { ANDROID_WRITE_VALIDATED } from '#lib/cable/android-status.ts';
 import { ANDROID_PLAY_URL } from '#lib/cable/android-links.ts';
 import { buildSearchIndex, searchSections } from '#lib/components/pages/docs/search.ts';
 import { docsContent as sourceContent } from '#lib/content/docs/index.ts';
@@ -21,18 +20,6 @@ const sources: Record<DocsLocale, string> = {
 };
 const locales = ['pt-BR', 'en-US'] as const;
 const docsContent = (locale: DocsLocale, inApp = false) => sourceContent(locale, inApp);
-
-/** Exact Anexo G.1 title and text. The first test also finds them verbatim in the plan. */
-const G1: Record<DocsLocale, { title: string; text: string }> = {
-	'pt-BR': {
-		title: 'Gravação pelo app: teste em um celular',
-		text: 'O app Android foi testado num cabo Kuba Auri real com um Samsung Galaxy A70 (Android 11). A prévia sem gravar, a gravação e a restauração do Padrão Auri foram confirmadas pelo som, e os pacotes registrados na entrada da ponte nativa batem byte a byte com os do site no computador. Ainda não foi testado em celulares de outros fabricantes; a validação completa da gravação continua pendente. Se o som ficar estranho depois de gravar, grave o Neutro. Se não resolver, grave o Neutro pelo site no computador (Chrome ou Edge).'
-	},
-	'en-US': {
-		title: 'Writing from the app: tested on one phone',
-		text: 'The Android app was tested on a real Kuba Auri cable with one Samsung Galaxy A70 (Android 11). Preview without saving, persistent writing and restoring Padrão Auri were confirmed acoustically, and packets logged at the native bridge input match the desktop site byte for byte. Phones from other manufacturers have not been tested; full write validation is still pending. If the sound seems off after writing, write Neutral. If that does not fix it, write Neutral from the site on a computer (Chrome or Edge).'
-	}
-};
 
 /** Anchors of the Android chapters, in page order, identical in both languages. */
 const ANDROID_ANCHORS = [
@@ -70,11 +57,23 @@ function annex(heading: string) {
 	return plan.slice(start, end === -1 ? undefined : end);
 }
 
-test('the G.1 constants are verbatim in Anexo G of the plan', () => {
+/** The retired Anexo G.1 title and text (historical plan), which the docs must never carry. */
+function g1(locale: DocsLocale): { title: string; text: string } {
+	const block = annex(`G.1 Modal e banner (${locale})`);
+	const title = /^- \*\*Título:\*\* "([^"]+)"$/m.exec(block)?.[1];
+	const text = /^- \*\*Texto:\*\* "([^"]+)"$/m.exec(block)?.[1];
+	if (title === undefined || text === undefined) throw new Error(`Missing G.1 (${locale})`);
+	return { title, text };
+}
+
+test('the retired G.1 notice is absent from the docs content and its sources', () => {
 	for (const locale of locales) {
-		const block = annex(`G.1 Modal e banner (${locale})`);
-		expect(block).toContain(`- **Título:** "${G1[locale].title}"`);
-		expect(block).toContain(`- **Texto:** "${G1[locale].text}"`);
+		const { title, text } = g1(locale);
+		const everything = JSON.stringify(docsContent(locale));
+		for (const value of [title, text]) {
+			expect(everything).not.toContain(value);
+			expect(sources[locale]).not.toContain(value);
+		}
 	}
 	// The report link is the one Anexo G.5 publishes with every release.
 	const g5 = annex('G.5 Notas da release, README e ficha da Play')
@@ -134,30 +133,15 @@ for (const locale of locales) {
 			expect(searchSections(buildSearchIndex(app), 'apksigner')).toEqual([]);
 		});
 
-		test('the validation state is the exact G.1 notice while writing is not validated', () => {
+		test('the validation state is the Anexo G.6 text (date, devices and report)', () => {
 			const validation = section(locale, VALIDATION_ANCHOR);
-			const everything = JSON.stringify(docsContent(locale));
-			if (!ANDROID_WRITE_VALIDATED) {
-				expect(validation.paragraphs[0]).toBe(G1[locale].title);
-				expect(validation.paragraphs[1]).toBe(G1[locale].text);
-				expect(sectionText(validation)).toMatch(
-					en
-						? /What the tests guarantee:.*byte for byte.*desktop site and the official page/
-						: /O que os testes garantem:.*byte a byte.*site no computador e a página oficial/
-				);
-				expect(sectionText(validation)).toMatch(
-					en
-						? /What is still pending: a second manufacturer, on-wire parity and a signed report.*1 of 2 manufacturers \(Samsung\)/
-						: /O que ainda falta: segundo fabricante, paridade no fio e relatório assinado.*1 de 2 fabricantes testados \(Samsung\)/
-				);
-			} else {
-				// F5 swaps the delimited block for Anexo G.6 (date, devices and report).
-				expect(everything).not.toContain(G1[locale].text);
-				expect(sectionText(validation)).toMatch(
-					en ? /validated on a real cable on / : /validada em cabo real em /
-				);
-				expect(sectionText(validation)).toContain('docs/android/validacao-hardware.md');
-			}
+			expect(sectionText(validation)).toMatch(
+				en ? /validated on a real cable on / : /validada em cabo real em /
+			);
+			expect(sectionText(validation)).toContain('docs/android/validacao-hardware.md');
+			expect(sectionText(validation)).not.toMatch(
+				/não testad|teste em um celular|tested on one phone|untested|validação completa|full validation/i
+			);
 			expect(validation.links?.map((link) => link.href)).toEqual([REPORT_URL, HARDWARE_REPORT_URL]);
 		});
 
@@ -169,17 +153,6 @@ for (const locale of locales) {
 			expect(end).toBeGreaterThan(begin);
 			expect(source.indexOf('// BEGIN Android validation state', begin + 1)).toBe(-1);
 			expect(source.slice(end)).toContain('paragraphs: androidValidationState');
-			if (!ANDROID_WRITE_VALIDATED) {
-				const at = source.indexOf(G1[locale].text);
-				expect(at).toBeGreaterThan(begin);
-				expect(at).toBeLessThan(end);
-				expect(source.indexOf(G1[locale].text, at + 1)).toBe(-1);
-				// The notice text appears once on the page, only in its chapter.
-				const hits = docsContent(locale).sections.filter((entry) =>
-					entry.paragraphs.includes(G1[locale].text)
-				);
-				expect(hits.map((entry) => entry.id)).toEqual([VALIDATION_ANCHOR]);
-			}
 		});
 
 		test('the recovery anchor explains Neutral from the app, then from a computer, and reporting', () => {

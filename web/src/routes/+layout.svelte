@@ -95,9 +95,6 @@
 	const policyBannerIsland = new LazyModule(
 		() => import('#lib/components/legal/PolicyBanner.svelte')
 	);
-	const androidNotice = new LazyModule(
-		() => import('#lib/components/cable/AndroidUntestedNotice.svelte')
-	);
 
 	function islandFailed(error: unknown): void {
 		console.error('A page component could not load', error);
@@ -310,9 +307,6 @@
 	const showPolicy = $derived(policyBanner !== null && policyBanner.seen !== POLICY_VERSION);
 	$effect(() => {
 		if (showPolicy) policyBannerIsland.request();
-	});
-	$effect(() => {
-		if (nativeCable.result.kind !== 'none') androidNotice.request(islandFailed);
 	});
 
 	function onChecklistFailed(error: unknown): void {
@@ -683,13 +677,6 @@
 		/>
 	{/if}
 	<Toast store={toasts} />
-	{#if nativeCable.result.kind !== 'none' && androidNotice.current}
-		{@const AndroidNotice = androidNotice.current}
-		<AndroidNotice
-			kind={nativeCable.result.kind}
-			presentation={page.url.pathname.replace(/\/$/, '') === '/docs' ? 'banner' : 'modal'}
-		/>
-	{/if}
 	{#if social && syncReady}
 		{@const SocialSync = social.runtime.SocialSync}
 		<SocialSync

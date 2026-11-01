@@ -8,9 +8,7 @@ rótulos do Console mudam com o tempo: se um nome não bater, use o campo equiva
 Fontes (prevalecem em caso de dúvida): [play-console-passos.md](./play-console-passos.md),
 [play-listing.md](./play-listing.md), [play-conteudo.md](./play-conteudo.md),
 [data-safety.md](./data-safety.md), [play-assinatura.md](./play-assinatura.md),
-[play-conta.md](./play-conta.md) e `docs/legal/politica-de-privacidade.md`. Desde 01/11/2026
-(`ANDROID_WRITE_VALIDATED = true`), o aviso do Anexo G.5 de
-`docs/plans/2026-10-18-android-capacitor-plano.md` não entra mais na ficha nem nas notas.
+[play-conta.md](./play-conta.md) e `docs/legal/politica-de-privacidade.md`.
 
 ## Como usar
 
@@ -520,9 +518,8 @@ Conferir, caractere por caractere:
 (Get-FileHash .\open-auri-<versão>.aab -Algorithm SHA256).Hash.ToLower()
 ```
 
-**Release notes** (iguais nas duas trilhas; até 500 caracteres por idioma; sem o aviso G.5, que
-saiu com `ANDROID_WRITE_VALIDATED = true`). O Console mostra as tags de idioma; manter as tags e
-colar o texto entre elas:
+**Release notes** (iguais nas duas trilhas; até 500 caracteres por idioma). O Console mostra as
+tags de idioma; manter as tags e colar o texto entre elas:
 
 ```text
 <pt-BR>

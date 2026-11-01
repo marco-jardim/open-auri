@@ -10,7 +10,7 @@ O conteúdo oficial é `docs/legal/politica-de-privacidade.md`, importado pela p
 
 ## 2. Acesso ao app
 
-O utilitário funciona sem login. A conta opcional libera funções sociais e exige e-mail verificado (`docs/legal/politica-de-privacidade.md:70-74`). A gravação exige o cabo Kuba Auri via USB-C/OTG. Sem o cabo, o restante do utilitário pode ser avaliado; não confundir indisponibilidade do hardware com exigência de login. Desde 01/11/2026 (`ANDROID_WRITE_VALIDATED = true` em `web/src/lib/cable/android-status.ts`), o app não mostra mais o aviso de teste num só celular nem o item extra do checklist; as instruções do revisor não o mencionam.
+O utilitário funciona sem login. A conta opcional libera funções sociais e exige e-mail verificado (`docs/legal/politica-de-privacidade.md:70-74`). A gravação exige o cabo Kuba Auri via USB-C/OTG. Sem o cabo, o restante do utilitário pode ser avaliado; não confundir indisponibilidade do hardware com exigência de login.
 
 **Seleção no Console:** há partes restritas, porque `/conta`, publicação, favoritos e outras ações sociais exigem autenticação. Não marcar "todas as funcionalidades disponíveis sem restrição" só porque o utilitário principal dispensa conta. A denúncia exige conta verificada no próprio handler (`web/src/routes/api/v1/reports/+server.ts:37-53`).
 

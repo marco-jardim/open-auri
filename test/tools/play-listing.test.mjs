@@ -15,12 +15,14 @@ const requirementLabels = {
   'Short description': 'Descrição curta',
   'Full description': 'Descrição completa',
 };
-const notices = {
-  'pt-BR':
-    'Aviso: testamos a gravação num Kuba Auri com Galaxy A70 (Android 11), não em outros fabricantes. Prévia, gravação e restauração do Padrão Auri confirmadas pelo som; bytes na ponte nativa iguais aos do site no computador. Validação completa pendente. Som estranho? Grave Neutro; se não resolver, pelo site no computador (Chrome ou Edge). Relate: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml',
-  'en-US':
-    'Notice: writing tested on a Kuba Auri with Galaxy A70 (Android 11), not other manufacturers. Preview, writing and Padrão Auri restoration confirmed acoustically; native bridge bytes match the desktop site. Full validation pending. Sound off? Write Neutral; if unresolved, use the desktop site (Chrome or Edge). Report: https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml',
-};
+// The retired G.5 notice, read from the historical plan so it can be asserted absent.
+const g5Section = plan.match(/\*\*G\.5 [^\n]+\n([\s\S]*?)(?=\*\*G\.6 )/)?.[1] ?? '';
+const notices = Object.fromEntries(
+  languages.map((language) => [
+    language,
+    g5Section.match(new RegExp(`^- ${language}: "([^"]+)"$`, 'm'))?.[1] ?? '',
+  ]),
+);
 const requiredPhrases = {
   'pt-BR': [
     'não é oficial nem endossado pela Kuba',
@@ -107,21 +109,16 @@ test('both listing languages have exactly three fields within the documented Pla
   for (const fields of fieldsByLanguage.values()) assert.equal(fields.get('Title'), 'open-auri');
 });
 
-// Retired since ANDROID_WRITE_VALIDATED = true: neither description may carry the one-phone
-// (G.5) notice or any "untested / not fully validated" wording again.
+// Neither description may carry the retired one-phone (G.5) notice or any "untested / not fully
+// validated" wording again.
 const oneTestPhone =
   /Galaxy A70|não testad|not tested|untested|teste em um celular|tested on one phone|validação completa|validação plena|fully validated|full validation|Validação completa pendente/i;
 
 test('descriptions no longer carry the retired G.5 one-phone notice', () => {
-  const section = plan.match(/\*\*G\.5 [^\n]+\n([\s\S]*?)(?=\*\*G\.6 )/);
-  assert.ok(section, 'Missing G.5 section in the plan');
+  assert.ok(g5Section, 'Missing G.5 section in the plan');
   for (const [language, fields] of parseListing(listing)) {
     const notice = notices[language];
-    // The constants still pin the historical plan text, so a renamed notice cannot slip back.
-    assert.ok(
-      section[1].includes(`- ${language}: "${notice}"`),
-      `${language}: plan notice changed`,
-    );
+    assert.ok(notice.length > 100, `${language}: G.5 notice not found in the plan`);
     for (const field of ['Short description', 'Full description']) {
       const value = fields.get(field);
       assert.ok(!value.includes(notice), `${language} ${field}: G.5 notice must be absent`);

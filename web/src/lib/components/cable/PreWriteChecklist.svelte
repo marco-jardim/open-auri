@@ -80,8 +80,6 @@
 	}: Props = $props();
 
 	// Every lever, the YOLO one included, is a plain boolean here (each binds a ConfirmLever).
-	// The Android field starts absent, and is only added by its rendered lever. This keeps
-	// desktop and simulated confirmation payloads unchanged.
 	type LeverConfirmations = Confirmations & { yoloWrite: boolean };
 	const UNCONFIRMED: LeverConfirmations = {
 		volumeLowered: false,
@@ -223,7 +221,6 @@
 		if (unmet('experimental')) return m.cable_fux_lock_experimental();
 		if (unmet('yolo-session')) return m.yolo_lock_session();
 		if (unmet('yolo-write')) return m.yolo_lock_write();
-		if (unmet('android-untested')) return m.cable_lock_android_untested();
 		if (unmet('spacing')) return m.cable_fux_lock_spacing();
 		if (!checklist.canWrite) return m.cable_fux_lock_other();
 		return null;
@@ -361,16 +358,6 @@
 									bind:checked={confirmations.yoloWrite}
 									label={yoloText}
 									confirmation="yolo"
-								/>
-							{/if}
-							{#if checklist.items.some((item) => item.id === 'android-untested' && item.required)}
-								<ConfirmLever
-									bind:checked={
-										() => confirmations.androidUntested === true,
-										(checked) => (confirmations.androidUntested = checked)
-									}
-									label={m.cable_confirm_android_untested()}
-									confirmation="android-untested"
 								/>
 							{/if}
 						</fieldset>

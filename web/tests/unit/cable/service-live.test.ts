@@ -686,7 +686,7 @@ describe('capability', () => {
 		expect(service.getState().liveCapable).toBe(false);
 		const outcome = await service.startLive({
 			curve: curve(-12),
-			confirmations: { volumeLowered: true, androidUntested: true },
+			confirmations: { volumeLowered: true },
 			gesture: service.createGesture(TRUSTED_CLICK)
 		});
 		expect(outcome).toMatchObject({ status: 'refused', reason: 'unavailable' });

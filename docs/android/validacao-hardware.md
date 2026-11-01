@@ -3,8 +3,8 @@
 Data: **29/10/2026**. Estado: **1 de 2 fabricantes testado (Samsung)**.
 Este relatório registra evidência real de prévia, gravação persistente e
 restauração nesta bancada, não a aprovação completa da F5 do plano Android.
-`ANDROID_WRITE_VALIDATED` permanece `false`; modal, banner, checklist e link de
-relato continuam ativos. Não é relatório assinado de encerramento da F5.
+Não é relatório assinado de encerramento da F5. O teste posterior no Blackview
+BV9900 Pro (01/11/2026) está registrado em `docs/android.md`.
 
 ## Ambiente e versões
 
@@ -107,39 +107,15 @@ Valores arredondados a duas casas; os limites abaixo se referem apenas a 2–10 
    [procedimento de captura USB](captura-usb.md), e/ou um `wireLog` íntegro sem
    perder a sessão. Um `wireLog` útil não dispensa a paridade no fio exigida pela F5.
 3. Consolidar as evidências e obter o relatório assinado e as demais aprovações
-   da F5 antes de mudar `ANDROID_WRITE_VALIDATED`. G.6 é o texto de encerramento,
-   ainda não aplicável. A versão do aviso foi incrementada de 1 para 2, conforme
-   o runbook, para que o novo estado seja reconhecido uma vez.
+   da F5.
 
 Se o som ficar estranho, grave o Neutro pelo app. Se não resolver, grave o Neutro
 pelo site no computador, no Chrome ou Edge.
 [Relatar resultado](https://github.com/marco-jardim/open-auri/issues/new?template=android-cable-report.yml).
 
-## Inventário das ocorrências e decisões editoriais
+## Fontes
 
-Busca antes da edição em `web/src`, `web/tests`, `docs`, `tools`, `test` e
-`apps/android`, ampliada para `web/messages` e README. Padrões: `ainda não foi
-testad`, `not been tested`, `não testada`, `untested`, `android-untested`, `G.1`,
-`G.5`, `ANDROID_WRITE_VALIDATED` e `ANDROID_DISCLAIMER_VERSION`. O material
-local consultado foi o resultado consolidado de REPORT.md e PREDICTION.md da
-coleta de prévia 4 kHz, além do registro funcional para a identidade do APK.
-Não se publicam binários nem links para caminhos locais dessa coleta.
-
-| Ocorrências por arquivo/grupo | Decisão |
-| --- | --- |
-| `web/messages/pt-BR.json`, `en-US.json`: modal, banner, callout, aceite e bloqueio | Atualizar nos dois idiomas; manter risco, resgate e relato |
-| `web/src/lib/content/docs/pt-BR.ts`, `en-US.ts`: bloco `android-validacao` | Atualizar teste parcial e pendências; preservar âncoras |
-| `web/src/lib/content/docs/legal-notice.ts` | Substituir a negação geral de teste real por teste limitado, sem retirar isenção de garantia |
-| `web/src/lib/cable/android-status.ts`, `docs/android.md`: versão/estado | Versão 2, estado `false`, relatório e 1 de 2 fabricantes; critérios finais intactos |
-| `docs/plans/2026-10-18-android-capacitor-plano.md`: G.1, G.2, G.3, G.5 | Atualizar fonte normativa dos textos exatos; G.4 e G.6 mantidos; menções anteriores preservadas como estado inicial/histórico |
-| `tools/android-artifacts.mjs`, `README.md`, `docs/android/play-listing.md` | Mesmo G.5 revisado, sem alegar validação plena; atualizar descrições curtas e explicação USB da Play |
-| `docs/android/play-console-preenchimento.md`, `play-console-passos.md` | Atualizar cópias operacionais, notas e instruções de captura para não republicar o aviso obsoleto |
-| `test/tools/play-listing.test.mjs`, `web/tests/unit/content/docs-android.test.ts`, `web/tests/unit/cable/android-status.test.ts`, `checklist-android.svelte.test.ts`, `web/tests/e2e/android-bridge.spec.ts`, `play-screenshots.spec.ts` | Atualizar expectativas textuais/versão, mantendo verificações exatas e limites |
-| `test/tools/docs-consistency-android.test.mjs` | Atualizar título da seção de estado; manter igualdade exata G.1/G.5 |
-| `test/tools/android-artifacts.test.mjs`, `test/android-release/dryrun.mjs`, `web/tests/unit/app/native-mount.test.ts` | Manter comparação dinâmica com o plano revisado |
-| `web/src/lib/paraglide/messages/*` | Gerados a partir dos catálogos pelo pipeline web; não editar manualmente |
-| `web/src/lib/cable/checklist.ts`, `types.ts`; componentes `AndroidUntestedNotice`, `AndroidAppCallout`, `PreWriteChecklist`, `LiveChecklist`, `ConfirmLever`, `CableBlind`, `CableAB` | Manter nomes, IDs e guardas; texto vem dos catálogos |
-| Testes unitários `native-back`, `usb-diagnostics`, `checklist`, `checklist-android`, `android-untested-notice`, `android-callout` | Manter testes comportamentais e IDs, que não afirmam ausência de teste físico |
-| `docs/seguranca.md`, `docs/operacao/runbooks/android-release.md` | Manter risco de gravação antes da validação completa e regra de encerramento/reabertura |
-| `docs/android/smoke-lancamento.md`, planos de progresso/handover e modo sem flash | Manter evidência histórica, referências a etapas ou controles operacionais, não texto vigente do aviso |
-| `apps/android/.../DisclaimerTest.kt`, `BridgeBootTest.kt` | Não alterar Kotlin neste trabalho. Os rótulos internos ainda dizem untested; as expectativas literais de título em DisclaimerTest precisam acompanhar o novo título numa alteração Kotlin autorizada antes de rodar esse teste instrumentado |
+O material local consultado foi o resultado consolidado de REPORT.md e
+PREDICTION.md da coleta de prévia 4 kHz, além do registro funcional para a
+identidade do APK. Não se publicam binários nem links para caminhos locais
+dessa coleta.

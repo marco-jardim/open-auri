@@ -116,7 +116,7 @@ test.each<NativeCableDetection>([
 	expect(state.result).toEqual(result);
 });
 
-test('layout uses the tested mount path and lazy notice; Capacitor remains behind the native dynamic import', () => {
+test('layout uses the tested mount path and no Android notice; Capacitor remains behind the native dynamic import', () => {
 	const layout = source('src/routes/+layout.svelte');
 	const state = source('src/lib/app/context.svelte.ts');
 	const cabo = source('src/lib/components/pages/cabo/CaboPage.svelte');
@@ -125,10 +125,8 @@ test('layout uses the tested mount path and lazy notice; Capacitor remains behin
 	const detect = source('src/lib/cable/native/detect.ts');
 	expect(layout).toContain('mountNativeCable(');
 	expect(layout).toContain('context.mount(options, mountOptions)');
-	expect(layout).toContain("() => import('#lib/components/cable/AndroidUntestedNotice.svelte')");
-	expect(layout).toContain(
-		String.raw`page.url.pathname.replace(/\/$/, '') === '/docs' ? 'banner' : 'modal'`
-	);
+	for (const text of [layout, cabo]) expect(text).not.toMatch(/untested|androidNotice/i);
+	expect(layout).toContain("import('#lib/components/cable/RescueNotice.svelte')");
 	expect(state).toContain('if (!isNative()) return mount({ toasts });');
 	expect(state).toContain("await import('#lib/cable/native/index.ts')");
 	for (const text of [layout, state, cabo, callout]) {
@@ -174,7 +172,7 @@ function catalog(locale: string): Record<string, string> {
 	return JSON.parse(readFileSync(existsSync(staging) ? staging : merged, 'utf8'));
 }
 
-test('staging keys match, sort and contain the exact G.1, G.2 and G.4 copy in both languages', () => {
+test('staging keys match, sort and contain the exact G.4 copy in both languages, without G.1', () => {
 	const pt = catalog('pt-BR');
 	const en = catalog('en-US');
 	const keys = Object.keys(pt).filter((key) => key.startsWith('android_'));
@@ -185,14 +183,8 @@ test('staging keys match, sort and contain the exact G.1, G.2 and G.4 copy in bo
 		'utf8'
 	);
 	for (const messages of [pt, en]) {
-		for (const key of [
-			'android_untested_title',
-			'android_untested_body',
-			'android_untested_short',
-			'android_native_write_disabled'
-		]) {
-			expect(plan).toContain(`"${messages[key]}"`);
-		}
+		expect(plan).toContain(`"${messages.android_native_write_disabled}"`);
+		expect(keys.filter((key) => key.includes('untested'))).toEqual([]);
 		expect(keys.map((key) => messages[key]).join('\n')).not.toContain('\u2014');
 	}
 });

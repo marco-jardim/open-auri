@@ -4,7 +4,7 @@
 
 - Preparar H-KEY/H-ENV e publicar APK no GitHub e AAB para upload manual à Play.
 - Rotacionar credenciais, responder à perda/comprometimento de chave ou retirar uma release.
-- Desligar/restringir gravação pelo app, encerrar ou reabrir o aviso de hardware não validado.
+- Desligar/restringir gravação pelo app.
 - Operar merge e deploy autônomos conforme o plano Android, seção 0.21.
 
 Referências: [plano Android](../../plans/2026-10-18-android-capacitor-plano.md) (0.12, 0.15, 0.19, 0.21, 4.6, F5), [deploy e rollback](../../deploy.md), [modelo de ameaças](../../seguranca.md), [Data safety](../../android/data-safety.md). Este runbook não autoriza agentes a gravar em cabo físico, gerar chaves reais ou aprovar Environments em nome do mantenedor.
@@ -105,14 +105,6 @@ Editar **`web/src/lib/cable/android-status.ts`**, revisar/testar e fazer **deplo
 | Bug restrito a releases conhecidas | Acrescentar a `blockedAppVersions` versões exatas, como `'1.0.0'`, ou limite estrito, como `'<1.0.3'`; versões afetadas pedem atualização e usam simulação. Não usar ranges npm/coringas. Entrada inválida bloqueia todas; versão de app inválida também é recusada |
 | Correção comprovada e pronta para liberar | Manter bloqueadas as versões vulneráveis; reativar `enabled` só após testes/QA, staging e smoke. Não apagar bloqueios só porque saiu uma release nova |
 
-#### Encerrar o aviso
-
-Somente após a validação **humana** da F5: paridade no fio e resultados nos celulares exigidos, Q5/QGH e evidências arquivadas. Alterar `ANDROID_WRITE_VALIDATED = true` e implantar o site. Isso retira aviso/banner e a exigência `android-untested` nos novos checklists nativos. Testes com dispositivos falsos ou emulador não autorizam essa troca. Não há nova release Android obrigatória apenas para retirar o aviso.
-
-#### Reabrir o aviso
-
-Se a validade física voltar a ser incerta ou o texto precisar de novo reconhecimento, definir `ANDROID_WRITE_VALIDATED = false` e incrementar **`ANDROID_DISCLAIMER_VERSION`**. Implantar o site: o modal reabre para quem aceitou a versão anterior, o banner volta e cada gravação nativa exige `android-untested`, inclusive resgate e fila. Só incrementar a versão não reabre aviso enquanto o estado estiver validado. Se houver risco concreto, desligar/bloquear gravação também; reconhecimento do usuário não é mitigação suficiente para um defeito conhecido.
-
 #### Frescor da página e operação offline
 
 `assertNativeWriteFresh` em `web/src/lib/cable/native-freshness.ts`, chamado por `service.ts` em `exclusive`, consulta **`/_app/version.json` antes de iniciar cada escrita/fila nativa**, com `cache: no-store`, cabeçalho `no-cache` e limite de 3 s, comparando com a versão do site carregada. Cada sucesso ao vivo guarda a última confirmação (`oa.cable.nativeLastGood.v1` no `localStorage`: versão do deploy e horário).
@@ -155,7 +147,7 @@ Esperar sucesso de produção e rodar smoke das rotas principais, `/_app/version
 - [ ] `apksigner verify --verbose --print-certs <apk>` confirma v2/v3 e SHA-256 do **app** igual a `ANDROID_APP_CERT_SHA256`; `jarsigner -verify <aab>` e `keytool -printcert -jarfile <aab>` confirmam assinatura de **upload** igual a `ANDROID_UPLOAD_CERT_SHA256` e distinta da do app. Conferir hashes dos arquivos baixados contra `SHA256SUMS.txt`, versão/código/commit no manifesto e maior versionCode na Play/histórico. `aapt2 dump badging <apk>` e o manifesto do AAB devem mostrar `com.openauri.app`, versionCode e versionName iguais aos do `release-manifest.json` (o workflow já falha fechado se divergirem); título da release `open-auri Android <versão>`.
 - [ ] Certificado de assinatura do app no Console coincide com APK GitHub; `PUBLIC_ANDROID_CERT_SHA256` e `/.well-known/assetlinks.json` coincidem. Não confundir certificado do AAB com o APK distribuído pela Play.
 - [ ] Smoke sem cabo físico: app abre site; USB/SAF e permissões/tráfego conferidos no artefato; cancelamento do seletor não salva; arquivos vão só ao destino escolhido. Revisar Data safety/política, sem declarar que fontes provaram o tráfego de scripts remotos.
-- [ ] Em staging com transporte falso, verificar `enabled=false`, blocklist, aviso/checklist não validado e versão do modal. Manter página aberta, implantar versão nova, confirmar recusa até Recarregar; testar offline/timeout/JSON inválido com e sem última confirmação da mesma versão (aviso com a data quando segue), escrita simples, resgate e fila. Testes em `web/tests/unit/cable/native-freshness.test.ts` e testes nativos do serviço complementam o smoke, não validam hardware.
+- [ ] Em staging com transporte falso, verificar `enabled=false` e blocklist. Manter página aberta, implantar versão nova, confirmar recusa até Recarregar; testar offline/timeout/JSON inválido com e sem última confirmação da mesma versão (aviso com a data quando segue), escrita simples, resgate e fila. Testes em `web/tests/unit/cable/native-freshness.test.ts` e testes nativos do serviço complementam o smoke, não validam hardware.
 - [ ] 0.21: CI/QA/varredura, staging, e2e, produção e smoke registrados; aprovação humana não contornada. Registrar release/tag/commit e estado dos controles, sem segredos.
 
 ## Rollback
